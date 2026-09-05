@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ProjectMind 技术架构</title>
+  <style>
+    /* 顧客向け提示資料。外部 CDN(mermaid/html2canvas)依存を排し、offline の客先環境でも欠けなく表示・印刷できる純 HTML/CSS 構成。 */
+    :root {
+      color-scheme: light;
+      --ink: #14232c;
+      --muted: #5b6d7a;
+      --line: #dbe4ea;
+      --surface: #ffffff;
+      --canvas: #f4f7f9;
+      --brand: #0f766e;
+      --brand-deep: #134e4a;
+      --brand-bright: #14b8a6;
+      --brand-soft: #e7f6f3;
+      --brand-soft-2: #f2faf8;
+      --external: #b35c55;
+      --external-soft: #fceeed;
+      --planned: #7c8b98;
+      --planned-soft: #f6f8fa;
+      --radius-panel: 14px;
+      --radius-card: 10px;
+      --shadow-panel: 0 8px 24px rgba(19, 78, 74, 0.07);
+      --font-sans: Inter, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", system-ui, -apple-system, "Segoe UI", sans-serif;
+      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--ink);
+      font-family: var(--font-sans);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ---- Header ---- */
+    header {
+      background:
+        radial-gradient(900px 300px at 12% -40%, rgba(20, 184, 166, 0.14), transparent 70%),
+        linear-gradient(180deg, #ffffff 0%, #fbfdfd 100%);
+      border-bottom: 1px solid var(--line);
+      padding: 26px 28px 22px;
+    }
+
+    .header-inner, .control-inner, main, footer .footer-inner { width: min(1480px, 100%); margin: 0 auto; }
+
+    .title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+
+    .brand-line { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      border-radius: 11px;
+      background: linear-gradient(135deg, #2dd4bf, #0d9488);
+      color: #04231f;
+      font-size: 14px;
+      font-weight: 800;
+      letter-spacing: .04em;
+    }
+    .brand-line strong { display: block; font-size: 16px; letter-spacing: -0.01em; }
+    .brand-line small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
+
+    .eyebrow { margin: 0 0 6px; color: var(--brand); font-size: 12px; font-weight: 800; letter-spacing: 0.16em; }
+    h1 { margin: 0 0 10px; font-size: clamp(24px, 2.8vw, 32px); letter-spacing: -0.02em; }
+    h2 { margin: 0; font-size: 19px; letter-spacing: -0.01em; }
+    h3 { margin: 0 0 8px; font-size: 15px; }
+    p { margin: 0; color: var(--muted); line-height: 1.65; }
+
+    .lede { max-width: 880px; font-size: 15px; line-height: 1.75; }
+    .lede strong { color: var(--ink); }
+
+    .doc-meta { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 14px; color: var(--muted); font-size: 12px; }
+    .doc-meta span::before { content: ""; display: inline-block; width: 5px; height: 5px; margin: 0 7px 2px 0; border-radius: 999px; background: var(--brand-bright); }
+
+    .print-button {
+      flex: 0 0 auto;
+      border: 1px solid #c3d4d1;
+      border-radius: var(--radius-card);
+      padding: 10px 16px;
+      background: #ffffff;
+      color: var(--brand-deep);
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .print-button:hover { border-color: var(--brand); background: var(--brand-soft); }
+
+    /* ---- 导航 ---- */
+    .control-bar {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      padding: 11px 28px;
+      background: rgba(255, 255, 255, 0.94);
+      backdrop-filter: blur(6px);
+      border-bottom: 1px solid var(--line);
+    }
+    .control-inner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .tab-link {
+      display: inline-block;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 15px;
+      background: #ffffff;
+      color: var(--brand-deep);
+      font-size: 13.5px;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .tab-link:hover { border-color: var(--brand); background: var(--brand-soft); }
+
+    main { padding: 22px 24px 8px; }
+    .view-panel { margin-bottom: 22px; scroll-margin-top: 72px; }
+
+    .capture-area {
+      padding: 26px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-panel);
+      box-shadow: var(--shadow-panel);
+    }
+
+    .view-heading { margin-bottom: 20px; }
+    .view-heading p { margin-top: 6px; font-size: 13.5px; }
+
+    /* ---- 架构原则 ---- */
+    .principle-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+    .principle-card {
+      position: relative;
+      overflow: hidden;
+      padding: 16px 18px 15px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-panel);
+      background: var(--surface);
+      box-shadow: var(--shadow-panel);
+    }
+    .principle-card::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 4px;
+      background: linear-gradient(180deg, var(--brand-bright), var(--brand));
+    }
+    .principle-card h3 { margin: 0 0 6px; font-size: 15px; }
+    .principle-card p { font-size: 12.5px; line-height: 1.65; }
+
+    /* ---- 逻辑架构 ---- */
+    .architecture-stack { max-width: 1360px; margin: 0 auto; }
+
+    .layer {
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--brand);
+      border-radius: var(--radius-panel);
+      padding: 18px;
+      background: var(--brand-soft-2);
+    }
+    .layer-external { border-left-color: var(--external); background: var(--external-soft); }
+
+    .layer-title { display: flex; align-items: baseline; gap: 14px; margin-bottom: 14px; }
+    .layer-title span { flex: 1; color: var(--muted); font-size: 13px; }
+
+    .tech-chip {
+      flex: 0 0 auto;
+      padding: 4px 11px;
+      border: 1px solid var(--brand);
+      border-radius: 999px;
+      background: #ffffff;
+      color: #2d4a44;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .layer-external .tech-chip { border-color: var(--external); }
+
+    .component-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 12px; }
+    .component {
+      min-height: 82px;
+      padding: 14px;
+      background: #ffffff;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-card);
+      /* ref.png 風: tinted panel の上で node が浮く soft shadow。hover で更に持ち上げ関連を強調。 */
+      box-shadow: 0 2px 5px rgba(19, 78, 74, 0.05);
+      transition: box-shadow .16s ease, transform .16s ease, border-color .16s ease;
+    }
+    .component:hover {
+      box-shadow: 0 8px 18px rgba(19, 78, 74, 0.11);
+      border-color: #c2e4de;
+      transform: translateY(-1px);
+    }
+    .component strong { display: block; margin-bottom: 6px; font-size: 14px; }
+    .component small { display: block; color: var(--muted); font-size: 12px; line-height: 1.5; }
+
+    .component.planned { border: 1.5px dashed #c1cdd6; background: var(--planned-soft); }
+    .component.planned strong::after,
+    .service-card.planned code::after {
+      content: "规划中";
+      margin-left: 7px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #e8edf1;
+      color: var(--planned);
+      font-size: 10px;
+      font-weight: 800;
+      vertical-align: 1px;
+    }
+
+    /* ref.png 風の連結子: rail 上に載る soft pill + 下向き矢尻。方向は rail が担うので本文の "↓" は外す。 */
+    .flow-arrow, .deployment-arrow {
+      position: relative;
+      width: fit-content;
+      max-width: min(720px, 100%);
+      margin: 20px auto 22px;
+      padding: 6px 16px;
+      border-radius: 999px;
+      background: var(--brand-soft);
+      border: 1px solid #c2e4de;
+      color: var(--brand-deep);
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.45;
+      text-align: center;
+    }
+    .flow-arrow::before, .deployment-arrow::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: -15px;
+      width: 2px;
+      height: 15px;
+      transform: translateX(-50%);
+      background: var(--brand-bright);
+    }
+    .flow-arrow::after, .deployment-arrow::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      bottom: -13px;
+      transform: translateX(-50%);
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 8px solid var(--brand);
+    }
+
+    .engine-chain {
+      display: grid;
+      grid-template-columns: repeat(9, auto);
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin: 4px 0 14px;
+    }
+    .chain-node {
+      padding: 10px 13px;
+      background: #ffffff;
+      border: 1px solid var(--brand);
+      border-radius: var(--radius-card);
+      text-align: center;
+      font-size: 13px;
+      font-weight: 650;
+    }
+    .chain-arrow { color: var(--brand); font-size: 20px; }
+
+    .bottom-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr); gap: 16px; }
+
+    .boundary-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; margin-top: 20px; }
+    .boundary-item {
+      padding: 13px 15px;
+      border-left: 4px solid var(--brand);
+      border-radius: var(--radius-card);
+      background: var(--brand-soft-2);
+      color: #33473f;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    /* ---- 技术时序(纯 HTML,不依赖外部渲染库) ---- */
+    .participants {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 16px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-panel);
+      background: var(--planned-soft);
+    }
+    .participant {
+      padding: 9px 6px;
+      border-radius: var(--radius-card);
+      background: #ffffff;
+      border: 1px solid var(--line);
+      color: #3d5049;
+      text-align: center;
+      font-size: 11.5px;
+      font-weight: 800;
+    }
+
+    .sequence-list { position: relative; margin: 0; padding: 0; list-style: none; }
+    .sequence-list::before {
+      position: absolute;
+      top: 14px;
+      bottom: 14px;
+      left: 20px;
+      width: 2px;
+      background: #c5d6d2;
+      content: "";
+    }
+
+    .sequence-event {
+      display: grid;
+      grid-template-columns: 42px 132px minmax(0, 1fr);
+      gap: 14px;
+      position: relative;
+      padding: 7px 0;
+    }
+    .event-number {
+      display: grid;
+      place-items: center;
+      z-index: 1;
+      width: 30px;
+      height: 30px;
+      margin: 8px 0 0 5px;
+      border-radius: 50%;
+      background: var(--brand-deep);
+      color: #ffffff;
+      font-size: 10.5px;
+      font-weight: 800;
+    }
+    .event-phase { align-self: center; color: var(--muted); font-size: 11px; font-weight: 800; line-height: 1.4; }
+    .event-phase strong { display: block; margin-top: 3px; color: var(--brand); font-family: var(--font-mono); font-size: 10px; }
+
+    .interaction {
+      display: grid;
+      grid-template-columns: 148px minmax(180px, 1fr) 148px;
+      align-items: center;
+      min-height: 46px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-card);
+      background: #ffffff;
+    }
+    .actor {
+      padding: 7px 8px;
+      border-radius: 8px;
+      background: var(--brand-soft);
+      color: var(--brand-deep);
+      text-align: center;
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .actor.target { background: #eef4f3; color: #2d4a44; }
+    .message {
+      position: relative;
+      margin: 0 12px;
+      padding: 0 18px 8px;
+      border-bottom: 2px solid #8fa8a2;
+      color: #33473f;
+      text-align: center;
+      font-size: 12.5px;
+      font-weight: 700;
+      line-height: 1.45;
+    }
+    .message::after {
+      position: absolute;
+      right: -2px;
+      bottom: -6px;
+      color: #8fa8a2;
+      content: "▶";
+      font-size: 10px;
+    }
+    .message code { font-family: var(--font-mono); font-size: 11px; color: var(--brand-deep); }
+    .event-detail { grid-column: 3; margin: -3px 13px 5px; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+
+    /* Agent Loop の反復区間を枠で示す(mermaid の loop 表現の置き換え)。 */
+    .loop-block {
+      margin: 10px 0 10px 52px;
+      border: 1.5px dashed #9db8b2;
+      border-radius: var(--radius-panel);
+      background: #f7fbfa;
+      padding: 12px 14px 14px;
+    }
+    .loop-block > .loop-label {
+      display: inline-block;
+      margin: -24px 0 8px;
+      padding: 4px 12px;
+      border-radius: 999px;
+      background: var(--brand-deep);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .06em;
+    }
+    .loop-block .sequence-list::before { left: 20px; }
+
+    .alt-branches { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 8px 0 0 56px; }
+    .alt-branch {
+      padding: 13px 15px;
+      border-radius: var(--radius-card);
+      border: 1px solid var(--line);
+      background: #ffffff;
+    }
+    .alt-branch.allow { border-left: 4px solid var(--brand-bright); }
+    .alt-branch.deny { border-left: 4px solid var(--external); }
+    .alt-branch strong { display: block; margin-bottom: 5px; font-size: 12.5px; }
+    .alt-branch span { color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+    .alt-branch code { font-family: var(--font-mono); font-size: 10.5px; }
+
+    .resume-block {
+      margin: 14px 0 0 52px;
+      padding: 13px 16px;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--brand);
+      border-radius: var(--radius-card);
+      background: var(--brand-soft-2);
+    }
+    .resume-block strong { display: block; margin-bottom: 5px; font-size: 12.5px; }
+    .resume-block span { color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+
+    /* ---- 部署结构 ---- */
+    .compose-network {
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--brand);
+      border-radius: var(--radius-panel);
+      padding: 20px;
+      background: var(--brand-soft-2);
+    }
+    .compose-network > h3 { color: #2d4a44; }
+
+    .service-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 12px; margin-top: 14px; }
+    .service-card {
+      padding: 15px;
+      border-radius: var(--radius-card);
+      background: #ffffff;
+      border: 1px solid var(--line);
+      box-shadow: 0 2px 5px rgba(19, 78, 74, 0.05);
+      transition: box-shadow .16s ease, transform .16s ease, border-color .16s ease;
+    }
+    .service-card:hover {
+      box-shadow: 0 8px 18px rgba(19, 78, 74, 0.11);
+      border-color: #c2e4de;
+      transform: translateY(-1px);
+    }
+    .service-card.planned { border-style: dashed; background: var(--planned-soft); box-shadow: none; }
+    .service-card code { font-family: var(--font-mono); font-weight: 700; color: var(--brand-deep); }
+    .service-card p { margin-top: 7px; font-size: 12.5px; }
+
+    /* .deployment-arrow は .flow-arrow と同一の連結子スタイルを共有する(上の共通定義)。 */
+
+    .outside-services {
+      margin-top: 18px;
+      padding: 18px;
+      border: 1.5px dashed var(--external);
+      border-radius: var(--radius-panel);
+      background: var(--external-soft);
+    }
+
+    .table-wrap { overflow-x: auto; margin-top: 20px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    th, td { padding: 11px 12px; border: 1px solid var(--line); text-align: left; vertical-align: top; line-height: 1.55; }
+    th { background: #ecf4f2; }
+    td code { font-family: var(--font-mono); font-size: 12px; color: var(--brand-deep); }
+
+    .references {
+      margin-top: 20px;
+      padding: 20px 24px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-panel);
+      box-shadow: var(--shadow-panel);
+    }
+    .references ul { margin: 12px 0 0; padding-left: 20px; }
+    .references li { margin: 7px 0; }
+    a { color: var(--brand); }
+
+    footer { margin-top: 22px; border-top: 1px solid var(--line); background: #fbfdfd; }
+    .footer-inner {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 14px 24px 16px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    @media (max-width: 1120px) {
+      .principle-strip { grid-template-columns: repeat(2, 1fr); }
+      .participants { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 900px) {
+      header { padding: 24px 20px 20px; }
+      .title-row { display: block; }
+      .print-button { margin-top: 15px; }
+      .control-bar { padding: 10px 14px; }
+      main { padding: 14px; }
+      .capture-area { padding: 16px; }
+      .principle-strip { grid-template-columns: 1fr; }
+      .bottom-grid { grid-template-columns: 1fr; }
+      .engine-chain { grid-template-columns: 1fr; }
+      .chain-arrow { transform: rotate(90deg); text-align: center; }
+      .participants { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .sequence-event { grid-template-columns: 44px minmax(0, 1fr); gap: 9px; }
+      .sequence-list::before { left: 17px; }
+      .event-number { margin-left: 2px; }
+      .event-phase { grid-column: 2; }
+      .interaction { grid-column: 2; grid-template-columns: 1fr; gap: 8px; }
+      .message { margin: 0; padding: 4px 5px 8px; }
+      .event-detail { grid-column: 2; margin: 0 4px 4px; }
+      .loop-block, .resume-block { margin-left: 0; }
+      .alt-branches { grid-template-columns: 1fr; margin-left: 0; }
+    }
+
+    @media print {
+      @page { size: A3 landscape; margin: 10mm; }
+      body { background: #ffffff; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      header { padding: 0 0 18px; }
+      .control-bar, .print-button { display: none; }
+      main { width: 100%; padding: 18px 0 0; }
+      .capture-area, .references, .principle-card { box-shadow: none; break-inside: avoid; }
+      footer { background: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="title-row">
+        <div>
+          <div class="brand-line">
+            <span class="brand-mark">PM</span>
+            <span><strong>ProjectMind</strong><small>Agent Workspace</small></span>
+          </div>
+          <p class="eyebrow">技术架构总览</p>
+          <h1>为可审计的 AI 执行而设计的工程架构</h1>
+          <p class="lede">
+            单页依次说明<strong>逻辑架构、AI 任务执行时序与部署结构</strong>。全部图示为自包含 HTML,离线环境同样完整显示与打印。
+            组件职责与运行时契约的权威定义见 <code>docs/04–08</code>,本页为可视化摘要。
+          </p>
+          <div class="doc-meta">
+            <span>文档编号 PJM-DOC-03</span>
+            <span>更新日期 2026-07-18</span>
+          </div>
+        </div>
+        <button class="print-button" type="button" onclick="window.print()">打印 / 保存 PDF</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="control-bar">
+    <nav class="control-inner" aria-label="技术架构视图导航">
+      <a class="tab-link" href="#view-principles">架构原则</a>
+      <a class="tab-link" href="#view-logical">逻辑架构</a>
+      <a class="tab-link" href="#view-sequence">AI 执行时序</a>
+      <a class="tab-link" href="#view-deployment">部署结构</a>
+    </nav>
+  </div>
+
+  <main>
+    <section class="view-panel" id="view-principles" aria-label="架构原则">
+      <div class="principle-strip">
+        <div class="principle-card">
+          <h3>模块化单体 + 引擎抽象</h3>
+          <p>API 与 Worker 共享同一代码库,业务层只依赖 AgentEngine 抽象;Claude Agent SDK 是默认实现,而不是领域模型,可替换、可升级。</p>
+        </div>
+        <div class="principle-card">
+          <h3>不可变快照 + 追加审计</h3>
+          <p>Run 冻结目标与权限上限;用户交互追加 Segment,技术重试追加 Attempt,多个顺序 Session 共享同一审计主线。PostgreSQL 是唯一权威记录。</p>
+        </div>
+        <div class="principle-card">
+          <h3>受控自主 + 硬权限边界</h3>
+          <p>Agent 可在 ExecutionProfile 内自主规划;工具按 capability、参数与资源范围逐次校验,工作区能力分层开放,凭据不进入 Agent 环境。</p>
+        </div>
+        <div class="principle-card">
+          <h3>复用既有入口的最小部署</h3>
+          <p>不自带网关、不发布宿主机端口,以最小动态路由接入部署环境既有的 Traefik;内部服务全部隔离在私有网络。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="view-panel" id="view-logical">
+      <div class="capture-area">
+        <div class="view-heading">
+          <h2>逻辑架构(C4 容器视角)</h2>
+          <p>表达组件归属、主要依赖与安全边界,不展开单次任务的调用时序。虚线卡片为路线图中的规划项。</p>
+        </div>
+
+        <div class="architecture-stack">
+          <section class="layer">
+            <div class="layer-title"><h3>前端层</h3><span>用户交互与受控模块宿主</span><code class="tech-chip">React 19 · TypeScript · Vite</code></div>
+            <div class="component-grid">
+              <div class="component"><strong>ProjectMind Web</strong><small>概览、项目管理、工作空间、项目文档、Skills 解析五画面;会话登录 + 项目上下文导航</small></div>
+              <div class="component"><strong>Workspace Host</strong><small>能力/资源准备、实时对话、交互审批、Session 详情、结果与证据</small></div>
+              <div class="component planned"><strong>FrontendModule</strong><small>Skill 自带界面模块的受控宿主;当前标准版本禁用,只使用标准组件</small></div>
+            </div>
+          </section>
+
+          <div class="flow-arrow">同源 REST + SSE({contextPath}/api) · 会话认证 + CSRF</div>
+
+          <section class="layer">
+            <div class="layer-title"><h3>应用层</h3><span>模块化单体,API 路由不承载业务判断</span><code class="tech-chip">Python 3.12 · FastAPI</code></div>
+            <div class="component-grid">
+              <div class="component"><strong>Auth & Session</strong><small>ADMIN / USER 会话认证、CSRF 防护;越权与不存在统一为不可探测</small></div>
+              <div class="component"><strong>Project & Documents</strong><small>项目边界、成员授权、文档库与受控下载</small></div>
+              <div class="component"><strong>Skill Registry</strong><small>导入、CapabilityBlueprint 解释、人工修订、发布门禁与版本管理</small></div>
+              <div class="component"><strong>Task & Resource Center</strong><small>能力投影、ResourceBinding、readiness 与立即执行;调度为规划项</small></div>
+              <div class="component"><strong>Run & Interaction</strong><small>Segment/Attempt/Session、用户交互、事件、证据、Proposal、结果与评价</small></div>
+              <div class="component"><strong>Integration</strong><small>Redmine / SVN / Git 的版本化能力、SecretReference、精确 scope 与三层 ResourceBinding</small></div>
+            </div>
+          </section>
+
+          <div class="flow-arrow">事务 Outbox → ARQ 队列(Redis)</div>
+
+          <section class="layer">
+            <div class="layer-title"><h3>执行层</h3><span>异步任务、Agent Loop 与安全工具</span><code class="tech-chip">Python 3.12 · ARQ · Claude Agent SDK(版本锁定)</code></div>
+            <div class="engine-chain">
+              <div class="chain-node">Task Queue</div><div class="chain-arrow">→</div>
+              <div class="chain-node">Segment Orchestrator</div><div class="chain-arrow">→</div>
+              <div class="chain-node">AgentEngine 抽象</div><div class="chain-arrow">→</div>
+              <div class="chain-node">Claude Agent SDK</div><div class="chain-arrow">→</div>
+              <div class="chain-node">claude CLI 子进程</div>
+            </div>
+            <div class="component-grid">
+              <div class="component"><strong>AgentTaskBrief + Loop</strong><small>完整 Skill guidance、目标与资源;SUPERVISED 自主规划、流式事件与预算限制</small></div>
+              <div class="component"><strong>Tool & Effect Gateway</strong><small>observe/propose/apply、精确批准、幂等/CAS、read-back Evidence 与审计</small></div>
+              <div class="component"><strong>Session Continuation</strong><small>会话全文与 checkpoint 落库,顺序支持 resume/fork/replace</small></div>
+              <div class="component planned"><strong>Workspace / Sandbox</strong><small>受控 read/search/edit 与 sandbox command 按 capability 分层开放</small></div>
+            </div>
+          </section>
+
+          <div class="flow-arrow">SQL / 队列 / 对象存储 / Session transcript</div>
+
+          <div class="bottom-grid">
+            <section class="layer">
+              <div class="layer-title"><h3>数据与基础设施</h3><span>持久化与异步执行支撑</span><code class="tech-chip">PostgreSQL 17 · Redis 8 · MinIO</code></div>
+              <div class="component-grid">
+                <div class="component"><strong>PostgreSQL</strong><small>业务、审计、证据与 Session 的权威记录</small></div>
+                <div class="component"><strong>Redis</strong><small>任务队列与短期唤醒;不是最终数据源</small></div>
+                <div class="component"><strong>Object Storage</strong><small>Skill 包、文档与报告产物(MinIO)</small></div>
+                <div class="component"><strong>SecretReference Resolver</strong><small>数据库仅存 Environment / /run/secrets locator 元数据;Secret 正文不经 API 或 Agent</small></div>
+              </div>
+            </section>
+
+            <section class="layer layer-external">
+              <div class="layer-title"><h3>外部系统</h3><span>仅经模型适配或 Tool Gateway 出站访问</span><code class="tech-chip">egress only</code></div>
+              <div class="component-grid">
+                <div class="component"><strong>Claude Model</strong><small>Anthropic API / Bedrock / Vertex,可按合规要求选择接入点</small></div>
+                <div class="component"><strong>Issue Sources</strong><small>Redmine / CSV 等票据来源</small></div>
+                <div class="component"><strong>Repositories</strong><small>SVN / Git 代码仓库</small></div>
+                <div class="component"><strong>Documents</strong><small>项目文档与文件</small></div>
+              </div>
+            </section>
+          </div>
+
+          <div class="boundary-list">
+            <div class="boundary-item">业务层只依赖 AgentEngine 抽象;模型 SDK 可替换、可版本锁定,不渗透进领域模型。</div>
+            <div class="boundary-item">外部数据经 ResourceBinding 与版本化 Tool 提供;observe 自动执行,apply 默认审批,Agent 不直接持有凭据或批准权。</div>
+            <div class="boundary-item">每个 Run 使用独立工作目录;工作目录不作为安全边界,权限由工具网关强制。</div>
+            <div class="boundary-item">基础执行闭环工具继续 fail closed;后续只在显式 mount/sandbox/network policy 下分层开放 workspace 能力,任意 host Shell 仍禁止。</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view-panel" id="view-sequence">
+      <div class="capture-area">
+        <div class="view-heading">
+          <h2>AI 任务执行时序</h2>
+          <p>能力提交、可靠入队、Agent 自主 Loop、用户交互、多 Session 延续、Tool/Effect 校验与结果持久化。Run 可在 RUNNING 与 WAITING_FOR_INPUT / WAITING_FOR_APPROVAL 间追加 Segment,最终进入终态。</p>
+        </div>
+
+        <div class="participants" aria-label="技术时序参与者">
+          <div class="participant">Web / 工作空间</div>
+          <div class="participant">FastAPI</div>
+          <div class="participant">队列(Redis)</div>
+          <div class="participant">Worker / 编排器</div>
+          <div class="participant">AgentEngine · SDK</div>
+          <div class="participant">Tool Gateway</div>
+          <div class="participant">PostgreSQL / 存储</div>
+        </div>
+
+        <ol class="sequence-list">
+          <li class="sequence-event">
+            <span class="event-number">01</span>
+            <span class="event-phase">任务提交<strong>QUEUED</strong></span>
+            <div class="interaction">
+              <span class="actor">Web / 工作空间</span>
+              <span class="message">提交目标、资源绑定、参数与幂等键</span>
+              <span class="actor target">FastAPI</span>
+            </div>
+            <p class="event-detail">会话 + CSRF 校验通过后,检查必要 ResourceBinding 与可选参数契约;成员越权与资源不存在返回同一错误形态。</p>
+          </li>
+          <li class="sequence-event">
+            <span class="event-number">02</span>
+            <span class="event-phase">快照冻结<strong>QUEUED</strong></span>
+            <div class="interaction">
+              <span class="actor">FastAPI</span>
+              <span class="message">写入 Run 快照 + 事务 Outbox</span>
+              <span class="actor target">PostgreSQL / 存储</span>
+            </div>
+            <p class="event-detail">目标、精确 Skill/Blueprint、权限上限、资源与限制被冻结;创建 Segment 1 的 AgentTaskBrief,Outbox 保证「落库」与「入队」不脱节。</p>
+          </li>
+          <li class="sequence-event">
+            <span class="event-number">03</span>
+            <span class="event-phase">可靠分发<strong>QUEUED</strong></span>
+            <div class="interaction">
+              <span class="actor">FastAPI</span>
+              <span class="message">Outbox 投递执行消息</span>
+              <span class="actor target">队列(Redis)</span>
+            </div>
+            <p class="event-detail">队列只承担分发;即使消息丢失,数据库中的权威状态也能驱动重新投递。</p>
+          </li>
+          <li class="sequence-event">
+            <span class="event-number">04</span>
+            <span class="event-phase">领取执行<strong>PREPARING</strong></span>
+            <div class="interaction">
+              <span class="actor">Worker / 编排器</span>
+              <span class="message">取得 Segment 租约,创建 RunAttempt 与独立工作目录</span>
+              <span class="actor target">PostgreSQL / 存储</span>
+            </div>
+            <p class="event-detail">租约防止双 Worker 并发接管;用户交互追加 Segment,基础设施重试才在当前 Segment 追加 Attempt。</p>
+          </li>
+          <li class="sequence-event">
+            <span class="event-number">05</span>
+            <span class="event-phase">启动 Agent<strong>RUNNING</strong></span>
+            <div class="interaction">
+              <span class="actor">Worker / 编排器</span>
+              <span class="message"><code>execute(agent_task_brief)</code> → SDK 会话启动</span>
+              <span class="actor target">AgentEngine · SDK</span>
+            </div>
+            <p class="event-detail">业务层只面对 AgentEngine 抽象;Agent 收到完整 Skill guidance、资源、权限与效果策略,活动墙钟超时由编排器强制。</p>
+          </li>
+        </ol>
+
+        <div class="loop-block">
+          <span class="loop-label">AGENT LOOP · 在 required rules 与权限内自主规划</span>
+          <ol class="sequence-list">
+            <li class="sequence-event">
+              <span class="event-number">06</span>
+              <span class="event-phase">过程可见<strong>RUNNING</strong></span>
+              <div class="interaction">
+                <span class="actor">AgentEngine · SDK</span>
+                <span class="message">流式输出、步骤与用量事件</span>
+                <span class="actor target">Web / 工作空间</span>
+              </div>
+              <p class="event-detail">事件先持久化再经 SSE 推送;序号严格单调递增,前端可断线续传、不重不漏。</p>
+            </li>
+            <li class="sequence-event">
+              <span class="event-number">07</span>
+              <span class="event-phase">工具请求<strong>RUNNING</strong></span>
+              <div class="interaction">
+                <span class="actor">AgentEngine · SDK</span>
+                <span class="message">MCP 工具调用请求</span>
+                <span class="actor target">Tool Gateway</span>
+              </div>
+              <p class="event-detail">每次调用都携带 ResourceBinding 与执行上下文;网关据 Run 快照逐次裁决,不存在「模型建议即授权」。</p>
+            </li>
+          </ol>
+          <div class="alt-branches" aria-label="工具裁决分支">
+            <div class="alt-branch allow">
+              <strong>observe/workspace/propose · 参数在范围内</strong>
+              <span>按 ExecutionProfile 自动放行 → 参数级硬校验 → Provider/隔离 workspace 执行 → 返回标准化数据、Artifact、Evidence 或 ChangeProposal,同步写入审计。</span>
+            </div>
+            <div class="alt-branch deny">
+              <strong>apply 或未登记/越界请求</strong>
+              <span>注册 apply 默认创建精确版本/checksum 审批并暂停;命中 LOW exact 预授权才免询问。Redmine 还必须通过 CAS/idempotency discovery,未登记、越界、任意 host Shell 直接 <code>DENY</code>。</span>
+            </div>
+          </div>
+        </div>
+
+        <ol class="sequence-list">
+          <li class="sequence-event">
+            <span class="event-number">08</span>
+            <span class="event-phase">交互暂停<strong>WAITING_*</strong></span>
+            <div class="interaction">
+              <span class="actor">AgentEngine · SDK</span>
+              <span class="message">结构化澄清 / Review / Effect approval</span>
+              <span class="actor target">Web / 工作空间</span>
+            </div>
+            <p class="event-detail">Worker 持久化 Interaction 与 checkpoint 后释放 lease。用户响应经授权与版本校验创建下一 Segment;普通超时不采纳默认回答,审批超时使 Proposal stale,再 resume、fork 或 replace Session。</p>
+          </li>
+          <li class="sequence-event">
+            <span class="event-number">09</span>
+            <span class="event-phase">结果校验<strong>RUNNING</strong></span>
+            <div class="interaction">
+              <span class="actor">AgentEngine · SDK</span>
+              <span class="message">Outcome + Artifact/Evidence/Proposal + <code>session_id</code></span>
+              <span class="actor target">Worker / 编排器</span>
+            </div>
+            <p class="event-detail">平台先校验通用 Outcome、引用所有权与 Skill 质量标准;只有任务声明了可选 output schema 时才追加结构校验。</p>
+          </li>
+          <li class="sequence-event">
+            <span class="event-number">10</span>
+            <span class="event-phase">终态落库<strong>SUCCEEDED</strong></span>
+            <div class="interaction">
+              <span class="actor">Worker / 编排器</span>
+              <span class="message">保存 Result / Evidence / Effect verification / 会话全文</span>
+              <span class="actor target">PostgreSQL / 存储</span>
+            </div>
+            <p class="event-detail">终态快照事件是该 Run 的最后一条事件,SSE 以它作为推送结束的判定;失败路径同样以终态事件收敛。</p>
+          </li>
+          <li class="sequence-event">
+            <span class="event-number">11</span>
+            <span class="event-phase">结果交付<strong>SUCCEEDED</strong></span>
+            <div class="interaction">
+              <span class="actor">Web / 工作空间</span>
+              <span class="message">展示报告、证据定位与评价入口</span>
+              <span class="actor target">Web / 工作空间</span>
+            </div>
+            <p class="event-detail">用户看到结论、报告、证据出处、Segment/Session lineage 与外部效果验证,并可发起人工评价与 child Run。</p>
+          </li>
+        </ol>
+
+        <div class="resume-block">
+          <strong>交互继续与故障恢复使用不同审计对象</strong>
+          <span>用户答复、Review 或批准在同一非终态 Run 追加 RunSegment,可顺序 resume/fork/replace Session;Worker 故障只在当前 Segment 追加 RunAttempt。终态 Run 不重新打开,新目标创建 child Run。</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="view-panel" id="view-deployment">
+      <div class="capture-area">
+        <div class="view-heading">
+          <h2>部署结构(Linux + Docker Compose,复用既有入口)</h2>
+          <p>部署环境已有共享 Traefik 时,ProjectMind 不部署自己的网关、不发布任何宿主机端口。部署契约以 <code>docs/01</code> §2.6 与 <code>compose.yaml</code> 为准。</p>
+        </div>
+
+        <div class="outside-services">
+          <h3>既有共享入口(ProjectMind Compose 外部)</h3>
+          <div class="service-row">
+            <div class="service-card"><code>existing-traefik</code><p>统一监听 80/443 与 TLS 终止;证书、Dashboard、入口策略均由环境运维统一管理</p></div>
+            <div class="service-card"><code>域名 + 上下文路径</code><p><code>/projectmind/api/*</code>(含 SSE)路由到 api;<code>/projectmind/*</code> 路由到 web</p></div>
+            <div class="service-card"><code>external edge network</code><p>由运维预创建并接入既有 Traefik;ProjectMind 仅声明最小动态路由</p></div>
+          </div>
+        </div>
+
+        <div class="deployment-arrow">HTTPS · REST + SSE · 会话认证</div>
+
+        <div class="compose-network">
+          <h3>ProjectMind Compose:external edge + internal backend(共 7 服务)</h3>
+          <div class="service-row">
+            <div class="service-card"><code>web</code><p>React 静态资源与工作空间;仅加入 edge 网络,不发布宿主机端口</p></div>
+            <div class="service-card"><code>api</code><p>FastAPI:认证、任务、执行与 SSE;加入 edge + backend,不发布宿主机端口</p></div>
+          </div>
+          <div class="deployment-arrow">internal backend network</div>
+          <div class="service-row">
+            <div class="service-card"><code>worker</code><p>Segment 编排 + Claude Agent SDK,活动会话使用独立 claude 子进程;等待用户时释放租约与进程</p></div>
+            <div class="service-card"><code>migrate</code><p>一次性数据库迁移任务(<code>alembic upgrade head</code>),完成后退出;仅加入 backend</p></div>
+            <div class="service-card planned"><code>scheduler</code><p>定时与周期触发由 worker tick 提供;不单独部署 scheduler 服务,条件监控不做</p></div>
+            <div class="service-card planned"><code>sandbox</code><p>脚本隔离执行;<code>script.execute</code> 开放时作为独立隔离任务加入</p></div>
+          </div>
+          <div class="deployment-arrow">队列 / 持久化 / 制品</div>
+          <div class="service-row">
+            <div class="service-card"><code>postgres</code><p>PostgreSQL 17:业务、审计、证据与会话的权威记录</p></div>
+            <div class="service-card"><code>redis</code><p>Redis 8:任务队列与短期唤醒;不承担最终数据</p></div>
+            <div class="service-card"><code>object-storage</code><p>MinIO:Skill 包、文档与报告产物;不对外暴露控制台</p></div>
+            <div class="service-card"><code>deployment-secret</code><p>凭据由部署环境或 /run/secrets 提供;ProjectMind 仅解析版本化 locator,不新增公开服务</p></div>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>服务</th><th>网络 / 端口</th><th>说明</th></tr></thead>
+            <tbody>
+              <tr><td><code>existing-traefik</code></td><td>Compose 外部;宿主机 80/443</td><td>ProjectMind 不管理 entryPoint、TLS、证书、Dashboard 或 Docker Socket</td></tr>
+              <tr><td><code>web</code></td><td>external edge;仅容器内部端口</td><td><code>{contextPath}/*</code> 路由;不做 API 反向代理</td></tr>
+              <tr><td><code>api</code></td><td>external edge + internal backend;仅容器内部端口</td><td><code>{contextPath}/api/*</code> 优先路由,包含 SSE 长连接</td></tr>
+              <tr><td><code>worker</code></td><td>internal backend + egress;无入口路由</td><td>每个 Run workspace 隔离;多 Session 顺序执行;禁止直接读取凭据,外部访问只经注册 Provider</td></tr>
+              <tr><td><code>migrate</code></td><td>internal backend;一次性任务</td><td>启动时执行数据库迁移,完成后退出</td></tr>
+              <tr><td><code>postgres / redis</code></td><td>internal backend;不发布 5432/6379</td><td>PostgreSQL 17 为权威记录;Redis 8 不是最终数据源</td></tr>
+              <tr><td><code>object-storage</code></td><td>internal backend;不发布 9000/9001</td><td>制品经 API 受控下载,不直接暴露 MinIO 与 Console</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="boundary-list">
+          <div class="boundary-item">部署前置条件:由环境运维提供公开域名、HTTPS entryPoint、已接入 Traefik 的 external Docker network 与可信转发头范围。</div>
+          <div class="boundary-item">ProjectMind 只在 web/api 上声明最小动态路由;不包含 Traefik 镜像、宿主机端口、静态配置、证书解析器、Dashboard 或 Docker Socket 挂载。</div>
+          <div class="boundary-item">API 优先匹配 <code>{contextPath}/api/*</code>,Web 匹配 <code>{contextPath}/*</code>;入口剥离上下文路径后由 FastAPI 内部 <code>/api</code> 路由处理。</div>
+          <div class="boundary-item">若既有入口不使用 Docker Provider,可由运维在外部配置等价路由;服务边界与「无宿主机端口」规则不变。</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="references">
+      <h2>Claude Agent SDK 设计依据</h2>
+      <ul>
+        <li><a href="https://platform.claude.com/docs/en/agent-sdk/overview" target="_blank" rel="noreferrer">Agent SDK 概览</a></li>
+        <li><a href="https://code.claude.com/docs/en/agent-sdk/permissions" target="_blank" rel="noreferrer">Agent SDK 权限配置</a></li>
+        <li><a href="https://code.claude.com/docs/en/agent-sdk/sessions" target="_blank" rel="noreferrer">Agent SDK Session 管理</a></li>
+        <li><a href="https://code.claude.com/docs/en/agent-sdk/session-storage" target="_blank" rel="noreferrer">Agent SDK 外部 SessionStore</a></li>
+        <li><a href="https://code.claude.com/docs/en/agent-sdk/user-input" target="_blank" rel="noreferrer">Agent SDK 权限等待与用户输入</a></li>
+        <li><a href="https://code.claude.com/docs/en/agent-sdk/hosting" target="_blank" rel="noreferrer">Agent SDK 部署与持久化</a></li>
+        <li><a href="https://github.com/anthropics/claude-agent-sdk-python" target="_blank" rel="noreferrer">Python SDK 官方仓库</a></li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+      <span>ProjectMind · Skill 驱动的项目管理 AI 执行平台</span>
+      <span>本页为技术可视化摘要;权威定义见 docs/04–08 与 compose.yaml</span>
+    </div>
+  </footer>
+</body>
+</html>

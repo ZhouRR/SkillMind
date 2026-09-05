@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ProjectMind 路线图</title>
+  <style>
+    /* 進捗は順序量なので brand teal の順序色階（浅→深）で符号化する。
+       「配備検収の残余」は進捗と別次元のため ⚠ flag に分離し、色階へ混ぜない。
+       状態は必ず 色 + 形 + 文字 の三重で示し、色だけに意味を担わせない。 */
+    :root {
+      color-scheme: light;
+      --ink: #14232c;
+      --muted: #5b6d7a;
+      --line: #dbe4ea;
+      --surface: #ffffff;
+      --canvas: #f4f7f9;
+      --brand: #0f766e;
+      --brand-deep: #134e4a;
+      --brand-bright: #14b8a6;
+      --brand-soft: #e7f6f3;
+      --brand-soft-2: #f2faf8;
+      --planned: #7c8b98;
+      --planned-soft: #f6f8fa;
+      --flag: #92620a;
+      --flag-soft: #fdf4e3;
+      --radius-card: 10px;
+      --font-sans: Inter, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", system-ui, -apple-system, "Segoe UI", sans-serif;
+      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 32px 24px 56px;
+      background: var(--canvas); color: var(--ink);
+      font-family: var(--font-sans); font-size: 14px; line-height: 1.6;
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; }
+    header.page h1 { margin: 0 0 6px; font-size: 27px; }
+    header.page p { margin: 0; color: var(--muted); max-width: 78ch; }
+    .meta { margin-top: 10px; font: 12px/1.5 var(--font-mono); color: var(--muted); }
+
+    section { margin-top: 32px; }
+    h2 { margin: 0 0 4px; font-size: 17px; padding-left: 10px; border-left: 3px solid var(--brand); }
+    .lede { margin: 0 0 14px; color: var(--muted); max-width: 84ch; }
+
+    /* ---- 总进度：19 条能力主线的 part-to-whole（按交付状态分组，不构成阶段顺序）。
+           横向き stacked bar。区切りは border ではなく 2px の surface gap。 ---- */
+    .barwrap { background: var(--surface); border: 1px solid var(--line);
+      border-radius: var(--radius-card); padding: 18px 20px; }
+    .bar { display: flex; gap: 2px; height: 24px; margin: 6px 0 0; }
+    .bar > span {
+      background: var(--seg); display: flex; align-items: center; justify-content: center;
+      color: #fff; font-size: 12px; font-weight: 650;
+    }
+    .bar > span:first-child { border-radius: 4px 0 0 4px; }
+    .bar > span:last-child { border-radius: 0 4px 4px 0; }
+    .barhead { display: flex; justify-content: space-between; align-items: baseline; }
+    .barhead .tot { font-size: 13px; color: var(--muted); }
+    .barhead .tot b { color: var(--ink); font-size: 15px; }
+    .barkey { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; }
+    .barkey .k { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); }
+    .sw { width: 11px; height: 11px; border-radius: 3px; background: var(--seg); flex: none; }
+    .barkey .k b { color: var(--ink); }
+
+    /* ---- 状态看板：状态由所在列、颜色和文字共同表达。 ---- */
+    .board { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; align-items: start; }
+    .col { background: var(--surface); border: 1px solid var(--line);
+      border-radius: var(--radius-card); overflow: hidden; }
+    .col > header {
+      padding: 10px 13px; border-bottom: 1px solid var(--line);
+      border-top: 3px solid var(--seg); background: var(--tint, var(--canvas));
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    }
+    .col > header .t { font-size: 13px; font-weight: 650; display: flex; align-items: center; gap: 6px; }
+    .col > header .c { font: 650 15px/1 var(--font-mono); color: var(--muted); }
+    .col ul { list-style: none; margin: 0; padding: 9px; display: grid; gap: 7px; }
+    .col li {
+      border: 1px solid var(--line); border-left: 3px solid var(--seg);
+      border-radius: 7px; padding: 8px 10px; font-size: 13px; font-weight: 600; line-height: 1.4;
+      /* ref.png 風の node 挙動を全 doc で揃える。密な看板 card は resting 影を避け hover でだけ持ち上げる。 */
+      transition: box-shadow .16s ease, transform .16s ease, border-color .16s ease;
+    }
+    .col li:hover { box-shadow: 0 6px 14px rgba(19, 78, 74, 0.10); transform: translateY(-1px); }
+    .col li .sub { display: block; font-weight: 400; font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+    .col li .flag { margin-top: 5px; }
+    .flag {
+      display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px;
+      border-radius: 999px; font-size: 11px; font-weight: 600;
+      background: var(--flag-soft); color: var(--flag);
+      border: 1px solid color-mix(in srgb, var(--flag) 28%, transparent);
+    }
+
+    /* ---- 状態 badge：色 + 形 + 文字。 ---- */
+    .badge { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px 2px 7px;
+      border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap;
+      background: var(--bg); color: var(--fg);
+      border: 1px solid color-mix(in srgb, var(--fg) 25%, transparent); }
+    .s-done   { --bg: var(--brand-soft);   --fg: var(--brand-deep); }
+    .s-local  { --bg: var(--brand-soft-2); --fg: var(--brand); }
+    .s-verify { --bg: #eefaf8;           --fg: #0f766e; }
+    .s-active { --bg: #e6fbf7;             --fg: #0b6b60; }
+    .s-todo   { --bg: var(--planned-soft); --fg: var(--planned); }
+
+    /* ---- 焦点・残余 card ---- */
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 12px; }
+    .card { background: var(--surface); border: 1px solid var(--line);
+      border-radius: var(--radius-card); padding: 14px 16px; border-top: 3px solid var(--seg, var(--line));
+      box-shadow: 0 2px 5px rgba(19, 78, 74, 0.05);
+      transition: box-shadow .16s ease, transform .16s ease; }
+    .card:hover { box-shadow: 0 8px 18px rgba(19, 78, 74, 0.10); transform: translateY(-1px); }
+    .card h3 { margin: 0 0 6px; font-size: 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .card p { margin: 0; color: var(--muted); font-size: 13px; }
+    .card ul { margin: 8px 0 0; padding-left: 17px; color: var(--muted); font-size: 13px; }
+    .card li { margin-bottom: 3px; }
+    .card li b { color: var(--ink); font-weight: 600; }
+
+    /* ---- 時間軸 ---- */
+    .timeline { list-style: none; margin: 0; padding: 0 0 0 6px; }
+    .timeline li { position: relative; padding: 0 0 15px 22px; border-left: 2px solid var(--line); }
+    .timeline li:last-child { border-left-color: transparent; padding-bottom: 0; }
+    .timeline li::before { content: ""; position: absolute; left: -7px; top: 5px;
+      width: 12px; height: 12px; border-radius: 50%; background: var(--seg);
+      border: 2px solid var(--surface); box-shadow: 0 0 0 1px var(--seg); }
+    .timeline .when { font: 12px/1.4 var(--font-mono); color: var(--muted); }
+    .timeline .what { font-weight: 600; }
+    .timeline .note { color: var(--muted); font-size: 12.5px; }
+
+    /* ---- 明細表：既定は畳む（JS 不要の details）---- */
+    details.detail { background: var(--surface); border: 1px solid var(--line);
+      border-radius: var(--radius-card); padding: 0; overflow: hidden; }
+    details.detail > summary { cursor: pointer; padding: 12px 16px; font-weight: 600; font-size: 13.5px; }
+    details.detail[open] > summary { border-bottom: 1px solid var(--line); }
+    table { width: 100%; border-collapse: collapse; }
+    thead th { text-align: left; font-size: 12px; font-weight: 650; color: var(--muted);
+      background: var(--canvas); padding: 9px 14px; border-bottom: 1px solid var(--line); }
+    tbody td { padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    tbody tr:last-child td { border-bottom: 0; }
+    td.name { font-weight: 600; width: 20%; }
+    td.st { width: 128px; white-space: nowrap; }
+    td.bound { color: var(--muted); font-size: 12.5px; }
+    .tablewrap { overflow-x: auto; }
+
+    footer.page { margin-top: 34px; padding-top: 14px; border-top: 1px solid var(--line);
+      color: var(--muted); font-size: 12.5px; }
+    code { font-family: var(--font-mono); font-size: .92em;
+      background: var(--brand-soft-2); padding: 1px 5px; border-radius: 4px; }
+
+    @media (max-width: 1100px) { .board { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 560px) { .board { grid-template-columns: 1fr; } }
+    @media print {
+      body { background: #fff; padding: 0; }
+      section { break-inside: avoid; }
+      details.detail { break-inside: auto; }
+      details.detail > summary { display: none; }
+      .board { grid-template-columns: repeat(4, 1fr); }
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="page">
+    <h1>ProjectMind 路线图</h1>
+    <p>按「能力主线 × 当前状态」呈现进度。本文件是 <code>docs/01</code> §13 与 <code>docs/12</code> 的<strong>可视化投影</strong>，不维护第二份状态；如有冲突以 <code>docs/01</code> §13 为准。</p>
+    <p class="meta">数据基准 2026-08-04 · 来源 docs/01 §13/§15/§19/§20/§21/§22/§23/§24/§25/§26 与 docs/12</p>
+  </header>
+
+  <section>
+    <h2>总进度</h2>
+    <p class="lede">19 条能力主线的分布。状态只表达交付程度，不表达一条连续的阶段编号；<strong>色越深＝越接近可交付</strong>。</p>
+    <div class="barwrap">
+      <div class="barhead">
+        <span class="tot"><b>19</b> 条能力主线</span>
+        <span class="tot">已交付 <b>11</b> · 已部署待专项验收 <b>6</b> · 规格/方向已定 <b>2</b></span>
+      </div>
+      <div class="bar">
+        <span style="--seg: var(--brand-deep);  flex: 11" title="完成 11">11</span>
+        <span style="--seg: var(--brand);       flex: 6" title="已部署待专项验收 6">6</span>
+        <span style="--seg: var(--brand-bright);flex: 1" title="规格完成 1">1</span>
+        <span style="--seg: var(--planned);     flex: 1" title="方向已定 1">1</span>
+      </div>
+      <div class="barkey">
+        <span class="k"><span class="sw" style="--seg: var(--brand-deep)"></span><b>已交付 11</b> · 已部署验收，作为回归基准</span>
+        <span class="k"><span class="sw" style="--seg: var(--brand)"></span><b>已部署待专项验收 6</b> · 资源物化 · 仓库回写 · 解释器重表达 · 调度 · 并行 Agent · 前端信息架构</span>
+        <span class="k"><span class="sw" style="--seg: var(--brand-bright)"></span><b>规格完成 1</b> · 任务流程视图，下一步实现只读投影</span>
+        <span class="k"><span class="sw" style="--seg: var(--planned)"></span><b>方向已定 1</b> · generated FrontendModule，构建沙箱和首次执行尚未开始</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>状态看板</h2>
+    <p class="lede">每条主线所在的列＝它当前的交付状态。<strong>11 条已完成专项验收</strong>；6 条已部署但仍有外部系统、浏览器或模型专项验收；任务流程视图已完成规格，FrontendModule 方向已定但仍有实现前置。</p>
+    <div class="board">
+
+      <div class="col" style="--seg: var(--brand-deep); --tint: var(--brand-soft)">
+        <header><span class="t">● 完成</span><span class="c">11</span></header>
+        <ul>
+          <li>Task Execution<span class="sub">Run/Attempt · Outbox · lease/recovery · SSE</span></li>
+          <li>Deterministic Skill Import<span class="sub">adapter · 正规化 · 持久化</span></li>
+          <li>SkillVersion 与发布基础<span class="sub">publish gate · 精确版本 · snapshot</span></li>
+          <li>Model Skill Interpreter<span class="sub">静态分析 · 解释 · diff</span></li>
+          <li>Generic Skill Runtime Bridge<span class="sub">published task → 通用 Run</span></li>
+          <li>Skill 库作用域 §16<span class="sub">资产归 Organization · Project 显式启用精确版本</span></li>
+          <li>Dynamic Task Contract<span class="sub">去业务 Schema 预定义化 · 部署 smoke 已过</span></li>
+          <li>Capability Blueprint<span class="sub">唯一来源 · 资源要求一本化 · 部署验收已过</span></li>
+          <li>界面三语化 §17<span class="sub">zh/ja/en 约 300 键 · 母语校对已过</span></li>
+          <li>托管凭据 §18<span class="sub">MANAGED · KEK 信封加密 · 实机迁移已过</span></li>
+          <li>Interactive Agent Runtime §15<span class="sub">能力蓝图 · 资源绑定 · 交互式 Run · Redmine CAS · 模型门禁已过</span></li>
+        </ul>
+      </div>
+
+      <div class="col" style="--seg: var(--brand); --tint: #eef4ff">
+        <header><span class="t">◑ 已部署待专项验收</span><span class="c">6</span></header>
+        <ul>
+          <li>解释器过程重表达 §21<span class="sub">声明与授权分离 · 步骤按能力重表达 · 发布守卫</span><span class="flag">⚠ jaf 实机越门与模型行为待专项验收</span></li>
+          <li>资源快照物化 §19<span class="sub">文档/repository 物化 · workspace 写入 · 索引/历史/文本化 · Brief 落点说明</span><span class="flag">⚠ 真实 HTTPS remote、凭据与模型行为待专项验收</span></li>
+          <li>代码仓库回写 §20<span class="sub">Proposal/Approval · git/svn Provider · read-back · direct/branch · Web 审批展示</span><span class="flag">⚠ 真实 forge 与端到端落地待专项验收</span></li>
+          <li>任务调度 §22<span class="sub">一次性/周期规则 · API · Worker tick · Web 定时面板</span><span class="flag">⚠ migration 已通过，实际发火待观测</span></li>
+          <li>并行 multi-agent §23<span class="sub">只读子 Agent · 预算切分 · 失败隔离 · 结果呈现 · 子 Session 持久化</span><span class="flag">⚠ migration 已通过，模型使用效果待观测</span></li>
+          <li>前端信息架构 §25<span class="sub">Task Center · 待办出口 · 导航徽标 · 概览优先位 · task 关联</span><span class="flag">⚠ 真实浏览器三语/键盘/窄屏验收待执行</span></li>
+        </ul>
+      </div>
+
+      <div class="col" style="--seg: var(--brand-bright); --tint: #e6fbf7">
+        <header><span class="t">◔ 规格完成</span><span class="c">1</span></header>
+        <ul>
+          <li>任务流程视图 §26<span class="sub">Skill → Capability Map → Task Flow → Run Flow；下一步实现只读流程投影</span><span class="flag">⚠ 尚未开始代码实现</span></li>
+        </ul>
+      </div>
+
+      <div class="col" style="--seg: var(--planned); --tint: var(--planned-soft)">
+        <header><span class="t">○ 方向已定</span><span class="c">1</span></header>
+        <ul>
+          <li>generated FrontendModule §24<span class="sub">版本冻结 · 静态拒绝 · 构建前置检查已完成；构建沙箱与运行时投放尚未开始</span><span class="flag">⚠ 威胁模型与内部 npm 镜像地址待提供</span></li>
+        </ul>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <h2>当前焦点</h2>
+    <p class="lede">解释器过程重表达与资源快照物化均已完成服务器部署基线验收；文档与仓库两路物化、真实 git/svn 客户端、索引与提交历史、表格文本化，以及把资源落点告知 Agent 的最后一环均已就位。下一步是按资源类型完成 §19.5 的专项验收。</p>
+    <div class="cards">
+      <div class="card" style="--seg: var(--brand-bright)">
+        <h3>解释器过程重表达（§21） <span class="badge s-verify">◑ 已部署待专项验收</span></h3>
+        <p>让脚本编排型 Skill 能被导入解释：声明 ≠ 授予，过程步骤按能力重表达。这是 jaf 进不到解释器的真正阻塞。</p>
+        <ul>
+          <li><b>静态门与声明解析</b>：声明 bash/write 不再直接硬挡，credential 仍硬挡 — <b>本地完成</b></li>
+          <li><b>过程重表达</b>：<code>svn cat</code>→<code>repository.read</code>（system Skill 3.1.0，三档＋过程/业务分界）— <b>本地完成</b></li>
+          <li><b>步骤能力守卫</b>：步骤所指能力须已注册且被资源要求开示，否则 warning 降档不拒发 — <b>本地完成</b></li>
+          <li><b>能力映射对齐</b>：对齐 §19/§20 已实现能力，补充索引、历史、文本化副本、workspace.write 与仓库提案映射，system Skill 升 3.3.0 — <b>本地完成</b></li>
+          <li><b>剩余</b>：验证 jaf 越门与模型实际行为</li>
+        </ul>
+      </div>
+      <div class="card" style="--seg: var(--brand-bright)">
+        <h3>资源快照物化（§19） <span class="badge s-verify">◑ 已部署待专项验收</span></h3>
+        <p>让 Agent 在绑定 scope 内自主发现文件，而非为每种访问动作各加一个 capability。</p>
+        <ul>
+          <li><b>就绪度与 Provider</b>：按 Provider 维护 <code>installed</code> 标记，svn 未配线不再假报 RUNNABLE — <b>本地完成</b></li>
+          <li><b>workspace.write</b>：写 workspace//output/，排除只读 input/，并同步 catalog、gate 与 system Skill 3.2.0 — <b>本地完成</b></li>
+          <li><b>文档物化</b>：全量物化进 input/documents/，Agent 用 workspace.search/read 自主发现 — <b>本地完成</b></li>
+          <li><b>仓库客户端与物化</b>：真实 git/svn 客户端、凭据不入 argv、绑定再校验、scope/revision 单点化、repository.read 与 hash 校验 reuse — <b>本地完成</b>（本机 <code>file://</code> 真实仓库已验）</li>
+          <li><b>索引、历史与表格文本化</b>：生成 <code>files.txt</code>、<code>history.txt</code>，将 xlsx 转为保留 sheet 和坐标的文本 — <b>本地完成</b></li>
+          <li><b>Agent 工作区说明</b>：把根、清单、索引、历史与冻结 revision 写进 AgentTaskBrief 与 prompt — <b>本地完成</b>；Agent 不再需要猜测去搜 <code>input/</code></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>部署与专项验收残余</h2>
+    <p class="lede">服务器镜像、Compose 服务、migration head、PostgreSQL/Redis preflight 和 Worker tick 基线已经通过；当前剩余项集中在真实资源、外部系统、模型行为、认证 smoke 和浏览器专项验收。残余的四类分法见 <code>docs/12</code> §35.2——「实机+模型」「只差依赖服务」「外部系统互通」「刻意未做」不该混为一谈。</p>
+    <div class="cards">
+      <div class="card" style="--seg: var(--brand-deep)">
+        <h3>● 已通过（服务器）</h3>
+        <ul>
+          <li>应用镜像 archive 与远端 SHA256 一致，Backend/Web image ID 与 archive 配置一致</li>
+          <li>API/Web/Worker/PostgreSQL/Redis/MinIO 服务均已运行；API、Web、数据库健康检查通过</li>
+          <li>migration 容器退出码为 0，当前 migration head 为 <code>0028_skill_source_file_index</code></li>
+          <li>preflight 返回 <code>ready</code>；Worker 的调度 tick 最近检查返回 <code>status=ok</code> 且失败数为 0</li>
+        </ul>
+      </div>
+      <div class="card" style="--seg: var(--flag)">
+        <h3>⚠ 剩余</h3>
+        <ul>
+          <li><b>解释器过程重表达 · jaf 实机越门</b>：服务器基线已通过，仍需验证 jaf 首次进入解释器</li>
+          <li><b>解释器过程重表达 · 模型行为</b>：<code>svn cat</code>→<code>repository.read</code> 的重表达与业务规则保真，只能跑模型观测（本机无 egress）</li>
+          <li><b>资源快照 · 真实 remote</b>：HTTPS + 凭据的 git/svn 疎通（本机只验了 <code>file://</code>；<code>load_bound_run_resource</code> 的实 DB 再校验已在本机补齐的 PostgreSQL 上完成，<code>docs/12</code> §47.1）</li>
+          <li><b>§20 · 端到端</b>：真实 forge 的 PR API 与「提案 → 批准 → 落地」的实机走通</li>
+          <li><b>§22 · 调度</b>：migration <code>0025</code> 已在服务端应用，tick 已正常运行；实际发火、重叠跳过与 <code>missed_count</code> 仍需可控 schedule 观测</li>
+          <li><b>§23 · 扇出</b>：migration <code>0027</code> 已在服务端应用；模型是否善用扇出与汇总质量仍需部署观测</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>交付时间线</h2>
+    <p class="lede">按日期展示已完成工作的结果和决策。完整记录见 <code>docs/12_ProjectMind_Delivery_History.md</code>。</p>
+    <ul class="timeline">
+      <li style="--seg: var(--brand-bright)"><div class="when">2026-07-26</div><div class="what">本地环境补齐 · 子 Session 持久化 · 构建拒绝路径封堵</div>
+        <div class="note"><b>「13 个 skip 来自本容器无 PostgreSQL」被推翻</b>：文档一直把它当外部约束记，实测容器有免密 sudo、apt 源可达，装的只是 client 包。装回 <code>postgresql-14</code> + <code>redis-server</code> 后 skip 归零。真正的收益不在件数——<b>migration <code>0025</code>/<code>0026</code> 至今没在任何真 PostgreSQL 上执行过 DDL</b>，其 CHECK 与部分索引是内存测试和 metadata 断言都验不到的。跑起来立刻暴露一个只有真 FK 库能发现的夹具缺陷：<code>run_segments</code> 与 <code>agent_sessions</code> 互指构成 FK <b>环</b>，SQLAlchemy 无法位相整列，一次 <code>add_all</code> 的插入顺序不定；生产路径不受影响（引用的是已 claim 的 Attempt），改夹具为按依赖逐行 flush。<b>子 Session 持久化工作包</b>：扇出 response 里的 <code>agent_session_id</code> 此前是每次生成的 <code>uuid4()</code>，<b>从不落库</b>——schema 与决策都承诺可查，实际是悬空引用；而子 Session 的 event 已全折叠进主 Session 的一次 ToolCall，这行就是唯一追溯锚点。落地撞上 schema：两个一意约束没限定对象，子 Session 共用父 Attempt 且多本同时 ACTIVE。migration <code>0027</code> 的处理是<b>把约束收窄到 PRIMARY 而非解除</b>（解除会让「一个 Attempt 两个本体 session」也通过，守着的不变条件就此消失）。<code>sdk_session_id</code> 改为 SUBAGENT 可空：分支在 SDK 开会话前失败时，NOT NULL 只能逼人<b>捏造一个 ID</b>，那正是该工作包在消除的缺陷。一组 branch 一个 transaction 写完（部分写入会让「只看了两个面」读成「两个面都看了」）；保存失败时省略字段而非返回查不到的值。时间线按 lineage 分组，<code>sessionsCount</code> 只数主分析，孤儿子分析保留为独立行。<b>生成模块构建拒绝路径</b>：拒绝路径不等镜像地址——它恰以「没有地址」为触发条件。核心判断是<b>只查配置不够</b>：凍结 lockfile 的 <code>resolved</code> 指向公网时，镜像怎么配都从公网取。Compose service 与 settings 字段刻意未加（跑不起来的 service 与没有消费方的旋钮都比不加更糟）。<b>899 passed / 0 skipped</b>、web 248 tests。</div></li>
+      <li style="--seg: var(--brand-bright)"><div class="when">2026-07-26</div><div class="what">扇出结果的 Web 呈现 · 仓库级 RV</div>
+        <div class="note">扇出结果此前只散在两处：工具调用行的原始 JSON，和折叠证据的 excerpt——证据 <code>metadata</code>（分支会话、每路预算）被整个丢掉。但真正的问题不是不好看：扇出<b>一路失败也不阻断整体、摘要照常返回</b>，若 FAILED 与 COMPLETED 长得一样，读者就把「三个面查了两个」当成「三个面都查过」。新增的节因此<b>不放进折叠备查区</b>（完整性会改变结论的读法），有未完成时整节转 warn 并直接写出「以下方面没有查完，结论里不包含它们」，全部完成则不加任何强调（常时强调会让警告失效）。metadata 逐项容错，不因 Provider 写入异常而白屏。<b>RV</b>：三语 574 键完全一致、0 未引用 export / i18n key；backend 扫出的 23 个「从未引用的公开名」里 21 个是装饰器注册的 route（误报），两个是真死代码——<code>is_supported_spreadsheet</code>（自带「旧名，别用」注释却零调用，比普通死代码更该删：会让人以为有两套判定）与 <code>ProposalChange</code>（已被 <code>ChangeProposalDraft.changes</code> 取代）。ResourcesPage 的画面无关草稿逻辑抽到 <code>lib/resourceDrafts.ts</code>（1341→1219 行），收益不是行数而是<b>抽出后立刻能测</b>：钉住「MANAGED 只送明文不送 locator、其余只送 locator 不送明文」与「仓库连接默认只读、默认 resolver 为 MANAGED」。858 passed / 13 skipped、web 245 tests。</div></li>
+      <li style="--seg: var(--brand-bright)"><div class="when">2026-07-26</div><div class="what">扇出子 Agent · 生成模块静态闸门</div>
+        <div class="note"><b>并行 Agent</b>：D1「子 Agent 只读、能力是主 Agent 真子集」不是一条检查而是**让两类冲突不可能存在**的手段——效果只能从主 Session 发起（归属不歧义），workspace 只有主 Agent 能写（并发子路不互相覆盖）。判定做成双保险：明确禁止集合 <b>加上</b>按名字形状的兜底（含 <code>.write/</code> 或 <code>.update/v1</code> 结尾），只有枚举的话将来新增 write 能力忘了加就正好从那漏出去。请求禁止能力时<b>拒绝而非静默删掉</b>——悄悄减能力会让 Agent 按「我拿到了」写分支。预算按 branch 数<b>整除且向下取整</b>，断言 <code>per_branch × branches ≤ 原上限</code>：向上取整会让「并行 4 路」把成本上限乘以 4。engine→registry→Provider→engine 的真实循环用「调用时解析」破（Provider 收取得函数而非实体），组装顺序不再是正确性的一部分。一路失败作为<b>值</b>返回不掀翻整组，且摘要为空串——连异常类型名都不进主 Agent 的 context。<b>生成模块</b>：静态检查用<b>字句而非语法</b>——解析生成的 TS 要引入 parser，那本身是新依赖也是新攻击面；字句会过检出但<b>误判方向是安全的</b>（过检出只是重来一次，漏判是放行危险），两者不对称故取过检出。依赖侧除白名单外还挡非 registry 指向与 lifecycle script。版本冻结把配信 CSP <b>写进版本行</b>：D2 用响应头换掉了独立 Origin，header 落掉隔离就消失，所以它不能只是配信侧配置。DB CHECK 直接禁止「没有 bundle 却是 PUBLISHED」；DISABLED 不可复活（平台判断不了原因是否消除，修好的作为新版本重建）。858 passed / 13 skipped，新增 75 项。</div></li>
+      <li style="--seg: var(--brand-bright)"><div class="when">2026-07-26</div><div class="what">§24 决策定案（generated FrontendModule：方向与 Origin 形态）</div>
+        <div class="note">§24 此前三个阻塞项都只能由用户决定，本次定案，转为「方向已定 / 实装未开始」。<b>走完整代码生成</b>——同时记录被否决的「声明式 ViewSpec 扩展」（模型只产数据、平台用已审组件渲染，可一次消掉独立 Origin/构建沙箱/供应链三个面），否决理由是表达力受限于平台组件库。<b>不新增域名</b>：<code>docs/07</code> §12.1 自己已承认「不启用 <code>allow-same-origin</code> 时 iframe 就是 opaque origin」，因此独立 Origin 真正多买到的只有「直接导航到 bundle URL 时在应用 Origin 上带会话 Cookie 运行」这一条，而 <code>CSP: sandbox allow-scripts</code> 响应头对任何加载方式都强制 opaque origin，等效消掉它——代价是少一层纵深，所以把安全押在两处必须常真的断言上（bundle 路径带该 header、iframe 不含 allow-same-origin），两条都写进 AGENTS 并要求测试钉死。<b>威胁模型保留为首次执行生成代码前的准入条件</b>，责任人待定；版本冻结与静态检查工作不执行生成代码，故不受阻。构建沙箱为独立 Compose service，内部 npm 镜像未提供时构建拒绝、不回退公网。本次无代码改动。</div></li>
+      <li style="--seg: var(--brand-bright)"><div class="when">2026-07-26</div><div class="what">§25 前端信息架构重整（任务中心 · 待办出口 · 概览改造）</div>
+        <div class="note">样式基线本身是成熟的（token · 断点 · reduced-motion · 对比度已验），不到产品级的是<b>新功能被逐个焊在旧画面上</b>：<code>docs/07</code> §8 的 Task Center 早已写在规范里却不存在，任务只是工作空间弹窗里一个 <code>&lt;select&gt;</code> 的选项，就绪度/资源/定时/上次执行散在四处。新增任务中心并定死分界——<b>任务中心「选」、工作空间「观」</b>，不复制第二套 Run lifecycle；定时执行从工作空间左轨迁到任务行内（原先绑定「此刻的草稿」，读不出属于哪个任务）。抽出 <code>lib/taskDraft</code> 与 <code>TaskLaunchFields</code> 让即时执行与定时执行共用一份表单。<b>「上次执行」曾把最近一条 Run 贴给每一行</b>（每个任务显示同一时刻，是错误数据而非缺失）——改为按服务端决定性 <code>task_id</code> 关联，并把该导出收敛为 <code>derive_task_id</code> 单一实现，前端不重新推导 uuid5。<b>待办：筛选必须在服务端</b>——Run 等待回答/批准时不持 lease 也不计 timeout，只取历史首页再前端过滤会漏掉更早的等待项，而漏报待办比不显示更糟；Run 历史加可重复 <code>status</code> 参数（契约外值 422 拒绝）。概览去掉 sidebar 导航的 card 复制品，改为「待你处理 → 最近执行 → 状态」。清理 41 行失效 CSS 与 6 个无引用三语 key；三语各 569 键完全一致，0 个未引用 export。781 passed / 13 skipped、web 237 tests。</div></li>
+      <li style="--seg: var(--brand-bright)"><div class="when">2026-07-26</div><div class="what">任务调度本地完成 · 并行 Agent 与生成模块状态重新分类</div>
+        <div class="note"><b>§22</b>：Task 从「点一次跑一次」扩到按时间自动发起 Run。发火最终调用的是与即时执行<b>完全相同</b>的 <code>create_task_run</code>——另开一条创建路径就等于给每道闸门开一个只在调度上生效的旁路。cron 用<b>标准库自实现</b>（5 段式、POSIX 的日/星期 OR 特例按「原字段是否字面为 <code>*</code>」判定，<code>@daily</code>/<code>L</code> 等扩展保存时即拒绝）；<b>DST 两处歧义显式定死</b>：春季不存在的本地时刻跳过该次（顺延会让「每天 02:30」那天变成不定时刻），秋季重复的本地时刻只触发一次——这类缺陷平时全绿、一年只坏两次。二重发火有两道互不依赖的防线：<code>next_run_at</code> 的 CAS 认领（认领即推进，失败不会掴住同一时刻重试）与决定性 idempotency key（强制归一到 UTC，否则 worker 的 TZ 不同就算出不同 key）。停机错过的触发只计数不补跑；重叠跳过；创建者权限在每次触发时复检（复用 <code>ProjectRepository.get_accessible</code> 单一实现，否则离职者的 schedule 会带着他的权限一直跑）。777 passed / 13 skipped、web 229 tests。<b>§23</b>：决策 D1–D7 已定，关键是子 Agent 一律只读且能力为主 Agent 真子集——把「效果归属」「工作区互相覆盖」两类冲突从存在性上消掉；落点已逐条核对代码（引擎 <code>_active</code> 已支持并发 session、<code>RunContext</code> 可 <code>replace()</code> 派生），唯一契约同步点是新增一个 continuation mode。<b>§24</b>：当时受阻于独立静态 Origin、构建沙箱与内部依赖镜像、威胁模型。（已于同日定案，见上一条。）</div></li>
+      <li style="--seg: var(--brand-deep)"><div class="when">2026-06-24 → 06-30</div><div class="what">产品规划与正式规格</div>
+        <div class="note">产品方针、领域模型、Skill 兼容、Runtime、Workspace 与 JAF 受入 profile 形成正式规格。</div></li>
+      <li style="--seg: var(--brand-deep)"><div class="when">2026-07-01 → 07-07</div><div class="what">基础执行闭环 · 认证 · 回归与运维</div>
+        <div class="note">Run 执行 spine、Identity/Project/认证、回归与运维链路（backup / migration / rollback）。</div></li>
+      <li style="--seg: var(--brand-deep)"><div class="when">2026-07-09 → 07-10</div><div class="what">文件与文档管理工作包</div>
+        <div class="note">object storage、Skill 目录 upload、项目文档管理、<code>document.read/v1</code>。</div></li>
+      <li style="--seg: var(--brand-deep)"><div class="when">2026-07-14 → 07-17</div><div class="what">动态 Task Contract · 能力蓝图收敛</div>
+        <div class="note">去业务 Schema 预定义化；先提供双读兼容，再移除旧兼容投影，蓝图成为唯一来源。</div></li>
+      <li style="--seg: var(--brand-deep)"><div class="when">2026-07-17 → 07-18</div><div class="what">§16 Skill 库作用域与项目启用</div>
+        <div class="note">资产归 Organization，可见性归 Project 显式启用（0017 / 0018）。</div></li>
+      <li style="--seg: var(--brand)"><div class="when">2026-07-18</div><div class="what">§15 能力蓝图、资源绑定与交互式 Agent Runtime</div>
+        <div class="note">readiness、AgentTaskBrief、RunSegment/交互/多 Session、ResourceBinding 与受控外部效果。</div></li>
+      <li style="--seg: var(--brand)"><div class="when">2026-07-19</div><div class="what">§17 界面三语化</div>
+        <div class="note">偏好持久化、i18n 基建、全画面文案资源化与 api/lib 层收尾。</div></li>
+      <li style="--seg: var(--brand)"><div class="when">2026-07-20</div><div class="what">§18 托管凭据自助与信封加密</div>
+        <div class="note"><code>MANAGED</code> resolver、KEK 信封加密、密文分表、轮换命令。</div></li>
+      <li style="--seg: var(--brand)"><div class="when">2026-07-22</div><div class="what">文档体系整备 · §19 立项</div>
+        <div class="note">资源要求一本化到 blueprint（废止 <code>data_sources</code>）、bootstrap seed 清理、docs/plans 合并、AGENTS/README 校准；§19 物化方案立项。</div></li>
+      <li style="--seg: var(--brand-bright)"><div class="when">2026-07-23</div><div class="what">部署验收完成 · 仓库回写与解释器过程重表达立项</div>
+        <div class="note">§15 的迁移验收、契约与蓝图、§17、§18 的真实环境验收（迁移、real-DB、Redmine CAS、托管凭据 e2e、三语与模型门禁）在服务器通过，11 条升入完成；代码仓库回写（§20）与解释器过程重表达（§21，实装 docs/11 §5.4）立项，静态门与声明解析已实现并通过 ruff/mypy/pytest。</div></li>
+      <li style="--seg: var(--brand-bright)"><div class="when">2026-07-24</div><div class="what">解释器过程重表达：规则与能力守卫本地完成</div>
+        <div class="note">system Skill 升到 3.1.0，新增「Procedural re-expression」：直译 / 换 idiom / 降级 guidance 三档，过程可重表达而业务规则保持原文，接续信息与 credential 一律不进入解释；request/response fixture 的 checksum 同步重算，指令在 prompt 中的在场由测试固定。publish gate 增加步骤能力守卫：名指的能力未注册或未被资源要求开示时发 warning 降档，不拒发。ruff/mypy/pytest 通过；服务器部署基线已通过，jaf 实机越门与模型行为待专项验收。</div></li>
+      <li style="--seg: var(--brand-bright)"><div class="when">2026-07-24</div><div class="what">§19 资源快照启动 · Provider 就绪度本地完成</div>
+        <div class="note">就绪度谎报按 Provider 级修复：核验确认谎报粒度是 provider 而非 capability（<code>repository.read/v1</code> 装了 git，但 svn 宣言未配线，运行时在 <code>(capability, provider)</code> 粒度抛 not installed）。<code>ProviderDefinition</code> 增 <code>installed</code> 标记（svn=False，待真实客户端接入后切 True），派生 <code>INSTALLED_PROVIDER_CAPABILITIES</code> 注入就绪度，只有 svn 的 repository 要求判 UNAVAILABLE 而非假 RUNNABLE；未注入时后向兼容。ruff/mypy/pytest 通过（604 passed）。同时核验发现 document 物化一路无绑定身份，后续按全量物化方案处理。</div></li>
+      <li style="--seg: var(--brand-bright)"><div class="when">2026-07-24</div><div class="what">§19 workspace.write 本地完成</div>
+        <div class="note"><code>workspace.write/v1</code>：Agent 写 <code>workspace/</code>/<code>output/</code>，明确排除只读的物化 <code>input/</code>。新增 WorkspaceWriteProvider（1MB 上限 fail-closed、逐段拒 symlink、<code>O_NOFOLLOW</code>+0o600、父目录建后校验 <code>is_relative_to(base)</code>、裸 root 拒写）+ 三 schema/两 example；注册 provider（SUPERVISED）；capability catalog 加该能力并同步 checksum 3 处；<code>_RUN_SCOPED_PLATFORM_CAPABILITIES</code> 豁免；system Skill 升 3.2.0。授权路径与 read/search 同构（manifest 声明+permission+profile），不获任何外部写；写入产出 <code>workspace-write</code> Evidence。611 passed；服务器部署基线已通过，模型使用行为待专项验收。</div></li>
+      <li style="--seg: var(--brand-bright)"><div class="when">2026-07-25</div><div class="what">解释器过程重表达规则对齐到已实现能力</div>
+        <div class="note">三档映射是按当时能力集写的，资源快照增量与仓库回写交付后有三条已经变成错的——而且是<b>会持续造成损失</b>的错：模型会照规则把平台现在能做的事继续降级成 guidance，且降级静默（schema 照过）。<code>svn list | grep</code> → 物化索引 <code>files.txt</code>；commit 历史 → <code>history.txt</code>（原为「无等价能力」）；xlsx/docx → 平台文本化副本（原为「无等价能力」）。补上两条新映射：中间产物写入 → <code>workspace.write/v1</code>（物化 input/ 永不可写）、仓库变更 → <code>change.propose/v1</code> 提案而非直译。system Skill 升 3.3.0，identity 与两个 fixture、测试同步重算。<b>顺带堵上 §20 的一处遗漏</b>：<code>repository.write/v1</code> 没进 publish gate 的 effect-only 集合，Skill 可以把它当 Agent Tool 宣言而门禁不报错。718 passed / 12 skipped。</div></li>
+      <li style="--seg: var(--brand-bright)"><div class="when">2026-07-25</div><div class="what">仓库回写：Web 写入配置与代码变更审批界面</div>
+        <div class="note">§20 的能力此前只有直接调 API 才够得着——资源画面里 git/svn 的 <code>writeCapability</code> 仍是 <code>null</code>。现在连接表单在「读写」下展开写入设置（落地方式 / 分支前缀 / forge 三项），并把 backend 的 fail-closed 规则镜像到提交前（git 的 direct+HEAD、前缀越出 <code>projectmind/</code>、forge 三项不齐），三语文案齐备。更要紧的是审批界面：原本把 <code>changes</code> 原样 <code>JSON.stringify</code>，而 repository 变更的值是整份文件正文，在 direct 默认下等于让人对着满屏 <code>\n</code> 转义按批准；改为逐文件渲染（路径 · 写入/删除徽标 · 行数字节数 · 可折叠等宽正文）并把基线 revision 提到显眼处。web 220 tests（含「正文不是转义形式」的断言），backend 未改动。</div></li>
+      <li style="--seg: var(--brand-bright)"><div class="when">2026-07-25</div><div class="what">仓库回写：svn 写入与批准后直接进主分支</div>
+        <div class="note"><b>D5</b>：svn 分支目标由平台固定为 <code>&lt;仓库根&gt;/branches/projectmind/&lt;名称&gt;</code>——仓库根取自 <code>svn info</code> 的应答而非猜测，因此 <code>repository_uri</code> 指向 trunk 或仓库根都能正确定位，<code>branches/</code> 不存在时由 <code>svn copy --parents</code> 建立。新增 <code>SvnWriteSession</code> 与 <code>SvnRepositoryWriteProvider</code>，与 git 侧同构（replay / 冲突不覆盖 / <code>svn cat</code> 逐文件读回）；能力表的 provider_version 改为按 Provider 映射。<b>D6</b>：新增 <code>write_mode</code>（<b>默认 <code>direct</code></b> / <code>branch</code>）。direct 时承认済み变更直接进既定分支——git 要求远端分支头仍等于冻结 base 并以 fast-forward 推送（绝不 force），svn 由 out-of-date 拒绝承担 CAS；提案与 Provider 各校验一次「只能写既定分支」。默认即 direct（依据：ChangeProposal 的人工批准即闸门，该能力不可预授权）；随之要求 git 的 <code>default_revision</code> 必须是具体分支名（<code>HEAD</code> 在登记时即拒绝），保护分支的仓库应显式设 <code>branch</code>。717 passed / 12 skipped，含本地 svn 仓库的真实 commit 验证。</div></li>
+      <li style="--seg: var(--brand-bright)"><div class="when">2026-07-25</div><div class="what">凭据传递回归约束 · 残余重新分类 · 仓库回写扩展</div>
+        <div class="note">① 「secret 不进 argv」此前只靠读代码保证：新增 stub 可执行文件测试，记录<b>实际启动的 argv/环境变量/stdin</b>，断言 git 经环境变量注入的 Authorization header（base64 解开等于 <code>user:secret</code>）、svn 经 stdin 传密码、两者子进程环境都在最小集合内且不继承 <code>PROJECTMIND_*</code>。② 残余按四类重分（实机+模型 / 只差依赖服务且测试已写好 / 外部系统互通 / 刻意未做的范围）——当前 12 个 skip 全部来自「本机无 PostgreSQL」，不是部署验收项。③ 仓库回写扩展：按 Integration 收窄分支前缀（只能在 <code>projectmind/</code> 内部再收窄）、docx 文本化（段落号 + 表座标 + 标题层级，仍无新依赖；模块更名 <code>binary_text</code>）、PR/MR 开设（GitHub/GitLab，forge 三项配置齐备才开，不从 host 名推测，重放复用既有 PR）。svn 写入仍待仓库分支目标 URL 约定。706 passed / 12 skipped。</div></li>
+      <li style="--seg: var(--brand-bright)"><div class="when">2026-07-25</div><div class="what">代码仓库回写本地完成（提案 → 审批 → 分支 commit）</div>
+        <div class="note">D1–D4 批准并落地。<b>仓库回写契约</b>：<code>repository.write/v1</code> 契约 + catalog 登记 + 提案验证器（<code>projectmind/</code> 预约 namespace、scope 包含判定、UTF-8 全文 SET/REMOVE、单文件 1 MiB 与单次 50 文件/4 MiB 上限），并把 apply chain 四处硬编码 <code>issue.update/v1</code> 的判断收敛成 <code>effects/catalog.py</code> 能力登记表。<b>git effect Provider</b>：复用资源快照的仓库客户端，增加 <code>open_writable</code>，执行 CAS 校验 base → 查 remote 分支 → commit/push → 从 remote 取回逐文件读校验；分支已存在且内容一致判 replay、不一致判 <code>target_branch_conflict</code> 且绝不 force。<b>Worker 与权限</b>：注册 Provider（push 侧 <code>requires_secret=True</code>），事前许可可否改由能力表驱动，<code>repository.write</code> 连 policy 都建不出来。692 passed / 12 skipped，含 bare repository 的真实 push 验证。残余：真实 HTTPS remote、PR 开设、svn 写入、端到端实机验收。</div></li>
+      <li style="--seg: var(--brand-bright)"><div class="when">2026-07-25</div><div class="what">资源快照实现侧收口（把物化落点告知 Agent）</div>
+        <div class="note">整理文档时发现的缺口：资源快照的多项实现把内容物化进了 <code>input/</code>，但 Brief 与 prompt 从未提到它们存在，Agent 需自己想到去搜——这是 §19.5 分层验收最可能的失败方式，且失败时表现为「资源不存在」，与真正缺资源无法区分。<b>已确定把落点写进 Brief</b>（prompt 是其渲染，只改 prompt 会让受审记录与实际告知不一致；实际同步面很小：checksum 未被钉死字面值、Web 只消费 checksum）。<code>materialize()</code> 改为返回 <code>MaterializedResource</code> 记述子，初次与 reuse 都由同一份 manifest 派生；Brief 资源项按种别/key 挂上落点（document 按种别、repository 按 key），prompt 增一节列出根·索引·清单·历史·冻结 revision，并写明「先看索引再检索」与「skipped 是读不了、不是不存在」。未物化的要求不写落点（不案内不存在的目录）。668 passed / 12 skipped。</div></li>
+      <li style="--seg: var(--brand-bright)"><div class="when">2026-07-25</div><div class="what">资源快照增量能力（文件索引 · 提交历史 · xlsx 文本化）</div>
+        <div class="note">三项增量均<b>未新增 capability</b>：① 物化时生成 <code>.projectmind/files.txt</code>（物化路径 + <code># skipped</code> 行），使「按文件名找文件」这一 idiom 档（<code>svn list -R | grep</code>）在 <code>workspace.search</code> 上成立，并让「没找到」与「读不了」可区分；② <code>.projectmind/history.txt</code> 记录触及 scope 路径的最近 200 条提交（git <code>log -- paths</code>；svn 按 scope 路径分别 log 后按 revision 降序并合，不加 <code>-v</code>），作者只取显示名不取邮箱；③ 新增 <code>agent/spreadsheet_text.py</code>，用标准库 <code>zipfile</code>+<code>xml.etree</code> 把 xlsx/xlsm 转成 <code>## Sheet: 名</code> + <code>A1: 值 | B1: 值</code> 的文本（保留单元格坐标以便 Evidence 指认），<b>不引入 openpyxl</b>，展开前按声明尺寸拒绝 ZIP 炸弹；转换失败与超限仍留在 <code>skipped</code>。manifest 增 <code>generated</code> 与 <code>converted_from</code>/<code>source_content_hash</code>；生成物计入预算并参与再访 hash 校验，但不进入 <code>content_digest</code>。662 passed / 12 skipped。</div></li>
+      <li style="--seg: var(--brand-bright)"><div class="when">2026-07-25</div><div class="what">资源快照：真实 git/svn 客户端与 repository 物化</div>
+        <div class="note">新增 <code>agent/repository_client.py</code>（git：临时 <code>--no-checkout</code> clone → <code>rev-parse</code> 定具体 commit → <code>ls-tree</code> 枚举 → <code>cat-file</code> 取正文；svn：<code>info</code> 解析 HEAD → <code>list -R</code> 枚举 → <code>cat</code>，不建工作副本）。凭据不进 argv（<code>/proc</code> 可读）：git 经环境变量注入 Authorization header，svn 经 <code>--password-from-stdin</code>；子进程只拿最小环境，不继承 DB URL 与 KEK。新增 <code>agent/repository_source.py</code>（绑定再校验 + <code>ScopedRepositorySession</code> 在取数前拒 scope 外 path + 冻结 revision 单点规则）与 <code>agent/run_binding.py</code>（binding 再校验与 Secret 解决的单一实现，Redmine 读取一并收敛）。真实 <code>repository.read/v1</code> Provider 上线（历史 fixture 按有无绑定分流保留）；物化 repository 一路落 <code>input/&lt;requirement_key&gt;/</code> + manifest（provider/解析后 revision/binding checksum/scope/统计/files/skipped）。幂等按 docs/06 §6.4 升级为校验 content hash 后 reuse、不一致 fail closed；manifest 文件清单键统一为 <code>files</code>。svn 切 <code>installed=True</code>，backend image 增装 git/subversion，新增命令超时设置三处同步。647 passed / 12 skipped；本机 <code>file://</code> 真实 git/svn 仓库已验证枚举·读取·scope 裁剪·symlink skip·物化→search 发现。残余：真实 HTTPS remote + 凭据、实 DB 绑定再校验（无 PostgreSQL）、模型实际使用行为。</div></li>
+      <li style="--seg: var(--brand-bright)"><div class="when">2026-07-24</div><div class="what">资源快照：document 物化方案确定并本地完成</div>
+        <div class="note">文档物化方案确定为全量物化：核验确认 <code>document.read/v1</code> 本就项目作用域可读任意文档，绑定不携带具体文档身份，故全量物化不改访问边界、只补跨文件检索，且满足文档资源验收。新增 <code>WorkspaceMaterializer</code>：蓝图有 document 要求时把全 Project 文档物化进 <code>input/documents/</code>（新 <code>ProjectDocumentInventory</code> 端口复用 list+fetch）；非 UTF-8/超 1MB/不安全路径记入 <code>manifest.skipped</code>，总量超限 fail-closed 不截断；写后 0o400 只读、<code>O_NOFOLLOW</code>、父目录 <code>is_relative_to</code> 校验；Run 幂等；设置项三处同步；worker 装配。集成测试验证物化→<code>workspace.search</code> 命中→<code>workspace.read</code> 精读。仓库物化随后接入。620 passed。</div></li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>能力主线明细</h2>
+    <p class="lede">看板的展开版，「边界」写明该主线实际到达的位置，而非计划意图。</p>
+    <details class="detail">
+      <summary>展开 19 条主线的当前边界</summary>
+      <div class="tablewrap">
+      <table>
+        <thead><tr><th>能力主线</th><th>状态</th><th>当前边界</th></tr></thead>
+        <tbody>
+          <tr><td class="name">Task Execution</td><td class="st"><span class="badge s-done">● 完成</span></td>
+            <td class="bound">Run/Attempt、Outbox、Worker lease/recovery、AgentEngine、受控 Tool、Evidence、Result、Evaluation、SSE、取消、认证授权与运维链路已打通。</td></tr>
+          <tr><td class="name">Deterministic Skill Import</td><td class="st"><span class="badge s-done">● 完成</span></td>
+            <td class="bound">Directory/Generic adapter、NormalizedSkillPackage、Assisted draft、SkillSource/Interpretation 持久化。</td></tr>
+          <tr><td class="name">SkillVersion 与发布基础</td><td class="st"><span class="badge s-done">● 完成</span></td>
+            <td class="bound">DRAFT、Manifest hard gate、warning acceptance、PUBLISHED 精确版本、RunSkillSnapshot。</td></tr>
+          <tr><td class="name">Model Skill Interpreter</td><td class="st"><span class="badge s-done">● 完成</span></td>
+            <td class="bound">system Skill、静态分析、结构化 interpretation、修订/diff 与质量验证已接通。</td></tr>
+          <tr><td class="name">Generic Skill Runtime Bridge</td><td class="st"><span class="badge s-done">● 完成</span></td>
+            <td class="bound">published task、通用 Run、Runtime 与 Workspace 路径已接通。</td></tr>
+          <tr><td class="name">Skill 库作用域 §16</td><td class="st"><span class="badge s-done">● 完成</span></td>
+            <td class="bound">0017 扩张并播种既有 PUBLISHED 版；0018 把资产 lifecycle 切到 Organization、TaskCatalog/Run 切到 active <code>ProjectSkillVersion</code>；Web 可管理组织库与精确版启用。</td></tr>
+          <tr><td class="name">Dynamic Task Contract</td><td class="st"><span class="badge s-done">● 完成</span></td>
+            <td class="bound">已去除 JAF/repository-review 活动业务 Schema；Interpreter 生成并冻结可选任务契约。真实部署 smoke 已在服务器通过。</td></tr>
+          <tr><td class="name">Capability Blueprint</td><td class="st"><span class="badge s-done">● 完成</span></td>
+            <td class="bound">蓝图是 Interpreter 唯一来源，旧兼容投影已移除；就绪度已接入 TaskCatalog/API/Web。资源要求已一本化到 blueprint，<code>data_sources</code> 废止。部署验收已通过。</td></tr>
+          <tr><td class="name">界面三语化 §17</td><td class="st"><span class="badge s-done">● 完成</span></td>
+            <td class="bound">偏好（0022）、<code>/users/me/ui-language</code>、zh/ja/en 目录（约 300 键）与切换器已交付，全画面经 catalog 取文案。母语者校对与浏览器级验收已通过。</td></tr>
+          <tr><td class="name">托管凭据 §18</td><td class="st"><span class="badge s-done">● 完成</span></td>
+            <td class="bound"><code>MANAGED</code> resolver + KEK 信封加密（0023）；密文与公开读模型分表，明文永不落库/回传/进日志。实机 migration 与端到端 apply 已通过。</td></tr>
+          <tr><td class="name">Interactive Agent Runtime</td><td class="st"><span class="badge s-done">● 完成</span></td>
+            <td class="bound">能力蓝图、资源绑定与交互式 Run 闭环：三级 ResourceBinding、AgentTaskBrief、OutcomeEnvelope、workspace read/search、RunSegment、顺序 Session、ChangeProposal、LOW-only 预授权、Redmine CAS apply 与 read-back。模型反复补测与真实部署 E2E 已在服务器验收通过。</td></tr>
+          <tr><td class="name">任务流程视图 §26</td><td class="st"><span class="badge s-active">◔ 规格完成</span></td>
+            <td class="bound">以 CapabilityBlueprint 和已发布 Task 为语义来源，规划 Skill → Capability Map → Task Flow → Run Flow 的只读投影；流程节点不能扩权，首版不实现严格 DAG 控制器或节点级调度。下一步实现 frozen flow 的只读展示与 Run 观察。</td></tr>
+          <tr><td class="name">资源快照物化 §19</td><td class="st"><span class="badge s-verify">◑ 已部署待专项验收</span></td>
+            <td class="bound">绑定资源物化进 <code>input/</code>，Agent 用既有 <code>workspace.search/read</code> 自主发现。Provider 就绪度、<code>workspace.write/v1</code>、document 全量物化、真实 git/svn 客户端、repository 物化、文件索引、提交历史、表格文本化，以及把物化落点写进 AgentTaskBrief 与 prompt 均已完成。<b>服务器基线已通过</b>；残余为真实 HTTPS remote + 凭据、模型实际使用行为。</td></tr>
+          <tr><td class="name">代码仓库回写 §20</td><td class="st"><span class="badge s-verify">◑ 已部署待专项验收</span></td>
+            <td class="bound">边界决策已定。Agent 只经 <code>change.propose/v1</code> 提案 → 人工批准（<b>不可预授权</b>）→ EffectExecution 使用 §19 的仓库客户端在 <code>projectmind/</code> 预约 namespace 建分支 commit 并 push，再从 remote 读回校验；同名分支内容不同判冲突绝不覆盖，base revision 不符判 STALE。仓库回写实现已完成并部署。<b>残余</b>：真实 forge 与端到端「提案 → 批准 → 落地」验收。</td></tr>
+          <tr><td class="name">解释器过程重表达 §21</td><td class="st"><span class="badge s-verify">◑ 已部署待专项验收</span></td>
+            <td class="bound">静态门与声明解析、system Skill 过程重表达、步骤能力守卫，以及与 §19/§20 能力映射对齐均已完成；声明 bash/write 降为 <code>declared_builtin_tool</code> 警告、credential 仍硬挡，三档过程重表达与 <code>repository.write/v1</code> effect-only 规则已同步。<b>服务器基线已通过</b>；残余为 jaf 实机越门与模型行为验收。</td></tr>
+          <tr><td class="name">任务调度 §22</td><td class="st"><span class="badge s-verify">◑ 已部署待专项验收</span></td>
+            <td class="bound">cron 求值器与 <code>task_schedules</code>（0025，<code>next_run_at</code> CAS 认领）、服务与 Worker 每分钟 tick、Project 作用域 CRUD/预览/状态 API、Web 定时执行面板均已完成。migration 已应用，tick 最近检查返回成功且失败数为 0。<b>残余</b>：实际发火、重叠跳过与错过处理观测。</td></tr>
+          <tr><td class="name">并行 multi-agent §23</td><td class="st"><span class="badge s-verify">◑ 已部署待专项验收</span></td>
+            <td class="bound"><code>subagent.dispatch/v1</code> 契约与 fail-closed 能力投影、扇出 Provider、结果呈现、子 Session 持久化（0027 · <code>SUBAGENT</code>/<code>BRANCH</code> · 时间线系谱）均已完成；migration 已应用，子能力始终是主 Agent 真子集，不含 write/effect/interaction/递归扇出。<b>残余</b>：模型是否善用扇出与汇总质量观测。</td></tr>
+          <tr><td class="name">generated FrontendModule §24</td><td class="st"><span class="badge s-todo">○ 方向已定</span></td>
+            <td class="bound">完整代码生成、不新增域名、<code>CSP: sandbox allow-scripts</code> 强制 opaque origin、威胁模型作为首次执行前置条件，以及构建沙箱拒绝回退公网的边界已确定。版本冻结表（0026，含配信 CSP）、静态拒绝分析器、依赖白名单与拒绝路径已本地完成；构建沙箱等待内部 npm 镜像地址，首次生成代码执行等待威胁模型确认（责任人待定）。</td></tr>
+          <tr><td class="name">前端信息架构 §25</td><td class="st"><span class="badge s-verify">◑ 已部署待专项验收</span></td>
+            <td class="bound">Task Center 成为一等画面（就绪度/资源/定时/上次执行，「选」与「观」分离）；待办出口支持服务端筛选、导航徽标和概览优先位；死代码清理与文档同步均已完成，Web image 已部署。<b>残余</b>：真实浏览器的三语/键盘/窄屏验收。</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </details>
+  </section>
+
+  <footer class="page">
+    状态正本：<code>docs/01_ProjectMind_PLAN.md</code> §13 ｜ 实施记录：<code>docs/12_ProjectMind_Delivery_History.md</code> ｜ 文档索引：<code>docs/README.md</code><br>
+    本文件为可视化投影，随 §13 更新而同步；如与正本不一致，以正本为准。
+  </footer>
+
+</div>
+</body>
+</html>

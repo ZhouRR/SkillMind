@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ProjectMind 业务结构</title>
+  <style>
+    /* 顧客向け提示資料。製品 UI と同系の teal を brand 色に採用し、投影・印刷どちらでも読めるコントラストを保つ。 */
+    :root {
+      color-scheme: light;
+      --ink: #14232c;
+      --muted: #5b6d7a;
+      --line: #dbe4ea;
+      --surface: #ffffff;
+      --canvas: #f4f7f9;
+      --brand: #0f766e;
+      --brand-deep: #134e4a;
+      --brand-bright: #14b8a6;
+      --brand-soft: #e7f6f3;
+      --brand-soft-2: #f2faf8;
+      --external: #b35c55;
+      --external-soft: #fceeed;
+      --planned: #7c8b98;
+      --planned-soft: #f6f8fa;
+      --radius-panel: 14px;
+      --radius-card: 10px;
+      --shadow-panel: 0 8px 24px rgba(19, 78, 74, 0.07);
+      --font-sans: Inter, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", system-ui, -apple-system, "Segoe UI", sans-serif;
+      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--ink);
+      font-family: var(--font-sans);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ---- Header ---- */
+    header {
+      background:
+        radial-gradient(900px 300px at 12% -40%, rgba(20, 184, 166, 0.14), transparent 70%),
+        linear-gradient(180deg, #ffffff 0%, #fbfdfd 100%);
+      border-bottom: 1px solid var(--line);
+      padding: 26px 28px 22px;
+    }
+
+    .header-inner, main, footer .footer-inner { width: min(1480px, 100%); margin: 0 auto; }
+
+    .title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+
+    .brand-line { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      border-radius: 11px;
+      background: linear-gradient(135deg, #2dd4bf, #0d9488);
+      color: #04231f;
+      font-size: 14px;
+      font-weight: 800;
+      letter-spacing: .04em;
+    }
+    .brand-line strong { display: block; font-size: 16px; letter-spacing: -0.01em; }
+    .brand-line small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
+
+    .eyebrow { margin: 0 0 6px; color: var(--brand); font-size: 12px; font-weight: 800; letter-spacing: 0.16em; }
+    h1 { margin: 0 0 10px; font-size: clamp(24px, 2.8vw, 32px); letter-spacing: -0.02em; }
+    .lede { max-width: 880px; margin: 0; color: var(--muted); font-size: 15px; line-height: 1.75; }
+    .lede strong { color: var(--ink); }
+
+    .doc-meta { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 14px; color: var(--muted); font-size: 12px; }
+    .doc-meta span::before { content: ""; display: inline-block; width: 5px; height: 5px; margin: 0 7px 2px 0; border-radius: 999px; background: var(--brand-bright); }
+
+    .print-button {
+      flex: 0 0 auto;
+      border: 1px solid #c3d4d1;
+      border-radius: var(--radius-card);
+      padding: 10px 16px;
+      background: #ffffff;
+      color: var(--brand-deep);
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .print-button:hover { border-color: var(--brand); background: var(--brand-soft); }
+
+    main { padding: 22px 24px 8px; }
+
+    /* ---- 价值主张 ---- */
+    .value-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+    .value-card {
+      position: relative;
+      overflow: hidden;
+      padding: 16px 18px 15px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-panel);
+      background: var(--surface);
+      box-shadow: var(--shadow-panel);
+    }
+    .value-card::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 4px;
+      background: linear-gradient(180deg, var(--brand-bright), var(--brand));
+    }
+    .value-card h3 { margin: 0 0 6px; font-size: 15px; letter-spacing: -0.01em; }
+    .value-card p { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.65; }
+
+    /* ---- Panel 共通 ---- */
+    .panel {
+      overflow: hidden;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-panel);
+      box-shadow: var(--shadow-panel);
+    }
+
+    .panel-heading {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 18px 22px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    .panel-heading h2 { margin: 0 0 4px; font-size: 18px; letter-spacing: -0.01em; }
+    .panel-heading p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+
+    .map-note {
+      flex: 0 0 auto;
+      padding: 7px 12px;
+      border-radius: 999px;
+      background: var(--planned-soft);
+      border: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    /* 已上线 / 规划中の凡例。顧客へ現状と roadmap を正直に区別して見せる。 */
+    .legend { display: inline-flex; gap: 14px; align-items: center; }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 700; }
+    .legend i { width: 10px; height: 10px; border-radius: 3px; }
+    .legend .live i { background: var(--brand-bright); }
+    .legend .plan i { border: 1.5px dashed var(--planned); background: #fff; }
+
+    .business-map { padding: 6px 20px 16px; }
+
+    .layer {
+      display: grid;
+      grid-template-columns: 176px minmax(0, 1fr);
+      gap: 14px;
+      position: relative;
+      padding: 14px 0;
+      border-bottom: 1px dashed var(--line);
+    }
+    .layer:last-child { border-bottom: 0; }
+
+    .layer-label {
+      position: relative;
+      padding: 12px 12px 12px 50px;
+      border-radius: var(--radius-panel);
+      background: linear-gradient(135deg, var(--brand-soft), var(--brand-soft-2));
+      align-self: stretch;
+    }
+    .layer-number {
+      display: grid;
+      place-items: center;
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      width: 27px;
+      height: 27px;
+      border-radius: 9px;
+      background: var(--brand-deep);
+      color: #ffffff;
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .layer:nth-child(2) .layer-number { background: #11554f; }
+    .layer:nth-child(3) .layer-number { background: #0f766e; }
+    .layer:nth-child(4) .layer-number { background: #0d9488; }
+    .layer:nth-child(5) .layer-number { background: #14b8a6; }
+    .layer-label h3 { margin: 0 0 4px; font-size: 14.5px; }
+    .layer-label p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+
+    .capabilities { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .capabilities.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+    .capability {
+      min-height: 0;
+      padding: 12px 13px 11px;
+      border: 1px solid var(--line);
+      border-top: 3px solid var(--brand);
+      border-radius: var(--radius-card);
+      background: #ffffff;
+    }
+    .capability.planned {
+      border: 1.5px dashed #c1cdd6;
+      border-top: 3px dashed #aebbc6;
+      background: var(--planned-soft);
+    }
+    .capability.planned h4::after {
+      content: "规划中";
+      margin-left: 7px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #e8edf1;
+      color: var(--planned);
+      font-size: 10px;
+      font-weight: 800;
+      vertical-align: 1px;
+    }
+
+    .object-name {
+      display: inline-block;
+      margin-bottom: 5px;
+      color: var(--brand);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+    }
+    .capability.planned .object-name { color: var(--planned); }
+    .capability h4 { margin: 0 0 4px; font-size: 14px; }
+    .capability p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+
+    /* ---- 生命周期 ---- */
+    .lifecycles { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 16px; }
+    .lifecycle { padding: 18px 20px 20px; }
+    .lifecycle h2 { margin: 0 0 4px; font-size: 16px; }
+    .lifecycle > p { margin: 0 0 18px; color: var(--muted); font-size: 13px; }
+
+    .steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin: 0; padding: 0; list-style: none; }
+    .step {
+      position: relative;
+      min-width: 0;
+      padding: 13px 10px;
+      border: 1px solid var(--line);
+      border-top: 3px solid var(--brand);
+      border-radius: var(--radius-card);
+      background: linear-gradient(180deg, #fbfdfd, #f6faf9);
+      text-align: center;
+      /* ref.png 風: 段階 node を soft shadow で浮かせ、top accent と併せて「連結された stage」に見せる。 */
+      box-shadow: 0 2px 5px rgba(19, 78, 74, 0.05);
+      transition: box-shadow .16s ease, transform .16s ease;
+    }
+    .step:hover { box-shadow: 0 8px 18px rgba(19, 78, 74, 0.11); transform: translateY(-1px); }
+    .step:not(:last-child)::after {
+      position: absolute;
+      top: 50%;
+      left: calc(100% + 3px);
+      width: 10px;
+      /* 連結子を teal に寄せ、03 の rail 連結子と同じ視覚言語に揃える。 */
+      color: var(--brand-bright);
+      content: "›";
+      font-size: 22px;
+      font-weight: 500;
+      transform: translateY(-54%);
+    }
+    .step strong { display: block; margin-bottom: 3px; font-size: 12.5px; }
+    .step span { display: block; color: var(--muted); font-size: 10.5px; line-height: 1.45; }
+
+    /* ---- 业务时序 ---- */
+    .task-sequence { margin-top: 16px; padding: 18px 20px 22px; }
+    .sequence-heading {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 16px;
+    }
+    .sequence-heading h2 { margin: 0 0 4px; font-size: 18px; }
+    .sequence-heading p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+
+    .scenario-badge {
+      flex: 0 0 auto;
+      padding: 7px 12px;
+      border-radius: 999px;
+      background: var(--brand-soft);
+      color: var(--brand-deep);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .participants {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 6px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-panel);
+      background: var(--planned-soft);
+    }
+    .participant {
+      padding: 9px 6px;
+      border-radius: var(--radius-card);
+      background: #ffffff;
+      border: 1px solid var(--line);
+      color: #3d5049;
+      text-align: center;
+      font-size: 11.5px;
+      font-weight: 800;
+    }
+
+    /* 阶段小見出しで 10 step を「准备 / 执行 / 交付」に束ね、講解時の区切りを作る。 */
+    .phase-divider {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 16px 0 4px;
+      color: var(--brand-deep);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .08em;
+    }
+    .phase-divider::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, var(--line), transparent); }
+    .phase-divider em { font-style: normal; padding: 3px 10px; border-radius: 999px; background: var(--brand-soft); }
+
+    .sequence-list { position: relative; margin: 0; padding: 0; list-style: none; }
+    .sequence-list::before {
+      position: absolute;
+      top: 14px;
+      bottom: 14px;
+      left: 20px;
+      width: 2px;
+      background: #c5d6d2;
+      content: "";
+    }
+
+    .sequence-event {
+      display: grid;
+      grid-template-columns: 42px 128px minmax(0, 1fr);
+      gap: 14px;
+      position: relative;
+      padding: 7px 0;
+    }
+    .event-number {
+      display: grid;
+      place-items: center;
+      z-index: 1;
+      width: 30px;
+      height: 30px;
+      margin: 8px 0 0 5px;
+      border-radius: 50%;
+      background: var(--brand-deep);
+      color: #ffffff;
+      font-size: 10.5px;
+      font-weight: 800;
+    }
+    .event-phase { align-self: center; color: var(--muted); font-size: 11px; font-weight: 800; line-height: 1.4; }
+    .event-phase strong {
+      display: block;
+      margin-top: 3px;
+      color: var(--brand);
+      font-family: var(--font-mono);
+      font-size: 10px;
+    }
+
+    .interaction {
+      display: grid;
+      grid-template-columns: 118px minmax(180px, 1fr) 118px;
+      align-items: center;
+      min-height: 46px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-card);
+      background: #ffffff;
+    }
+    .actor {
+      padding: 7px 8px;
+      border-radius: 8px;
+      background: var(--brand-soft);
+      color: var(--brand-deep);
+      text-align: center;
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .actor.target { background: #eef4f3; color: #2d4a44; }
+    .message {
+      position: relative;
+      margin: 0 12px;
+      padding: 0 18px 8px;
+      border-bottom: 2px solid #8fa8a2;
+      color: #33473f;
+      text-align: center;
+      font-size: 12.5px;
+      font-weight: 700;
+      line-height: 1.45;
+    }
+    .message::after {
+      position: absolute;
+      right: -2px;
+      bottom: -6px;
+      color: #8fa8a2;
+      content: "▶";
+      font-size: 10px;
+    }
+    .event-detail { grid-column: 3; margin: -3px 13px 5px; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+
+    .sequence-branches { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 16px 0 0 66px; }
+    .branch {
+      padding: 13px 15px;
+      border: 1.5px dashed #c4cfd8;
+      border-radius: var(--radius-card);
+      background: #fafcfc;
+    }
+    .branch strong { display: block; margin-bottom: 5px; color: #33473f; font-size: 12.5px; }
+    .branch span { color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+
+    /* ---- 平台承诺 ---- */
+    .boundaries { margin-top: 16px; padding: 18px 20px 20px; }
+    .boundaries h2 { margin: 0 0 4px; font-size: 16px; }
+    .boundaries > p { margin: 0 0 14px; color: var(--muted); font-size: 13px; }
+    .boundary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 13px; }
+    .boundary {
+      padding: 15px 17px;
+      border-left: 4px solid var(--brand);
+      border-radius: var(--radius-card);
+      background: var(--brand-soft-2);
+    }
+    .boundary strong { display: block; margin-bottom: 5px; font-size: 13.5px; }
+    .boundary span { color: var(--muted); font-size: 12px; line-height: 1.65; }
+
+    footer { margin-top: 22px; border-top: 1px solid var(--line); background: #fbfdfd; }
+    .footer-inner {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 14px 24px 16px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    @media (max-width: 1120px) {
+      .value-strip { grid-template-columns: repeat(2, 1fr); }
+      .capabilities { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .capabilities.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .lifecycles { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 760px) {
+      header { padding: 24px 20px 20px; }
+      main { padding: 18px 12px 30px; }
+      .title-row { display: block; }
+      .print-button { margin-top: 15px; }
+      .value-strip { grid-template-columns: 1fr; }
+      .panel-heading { display: block; padding: 19px; }
+      .map-note, .legend { display: inline-flex; margin-top: 10px; }
+      .business-map { padding: 8px 16px 18px; }
+      .layer { grid-template-columns: 1fr; gap: 12px; }
+      .capabilities, .capabilities.three { grid-template-columns: 1fr; }
+      .steps { grid-template-columns: 1fr; gap: 9px; }
+      .step:not(:last-child)::after { display: none; }
+      .sequence-heading { display: block; }
+      .scenario-badge { display: inline-block; margin-top: 10px; }
+      .participants { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .sequence-event { grid-template-columns: 44px minmax(0, 1fr); gap: 9px; }
+      .sequence-list::before { left: 17px; }
+      .event-number { margin-left: 2px; }
+      .event-phase { grid-column: 2; }
+      .interaction { grid-column: 2; grid-template-columns: 1fr; gap: 8px; }
+      .message { margin: 0; padding: 4px 5px 8px; }
+      .event-detail { grid-column: 2; margin: 0 4px 4px; }
+      .sequence-branches { grid-template-columns: 1fr; margin-left: 52px; }
+      .boundary-grid { grid-template-columns: 1fr; }
+    }
+
+    @media print {
+      @page { size: A3 landscape; margin: 10mm; }
+      body { background: #ffffff; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      header { padding: 0 0 18px; }
+      main { width: 100%; padding: 18px 0 0; }
+      .print-button { display: none; }
+      .panel, .value-card { break-inside: avoid; box-shadow: none; }
+      .lifecycles { gap: 12px; }
+      .layer { grid-template-columns: 176px minmax(0, 1fr); }
+      footer { background: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="title-row">
+        <div>
+          <div class="brand-line">
+            <span class="brand-mark">PM</span>
+            <span><strong>ProjectMind</strong><small>Agent Workspace</small></span>
+          </div>
+          <p class="eyebrow">业务能力地图</p>
+          <h1>把项目管理经验变成可复用、可审计的 AI 执行力</h1>
+          <p class="lede">
+            ProjectMind 是 <strong>Skill 驱动的项目管理 AI 执行平台</strong>：把团队沉淀的分析方法导入为平台资产,
+            在项目边界内把目标、资源与指导完整交给 AI Agent 自主执行,每一步都留下证据与审计记录,并通过用户交互与人工评价持续改进。
+            本页说明平台由哪些业务能力组成、Skill 与任务如何流转;字段与状态机的权威定义见 <code>docs/04</code>。
+          </p>
+          <div class="doc-meta">
+            <span>文档编号 PJM-DOC-02</span>
+            <span>更新日期 2026-07-18</span>
+          </div>
+        </div>
+        <button class="print-button" type="button" onclick="window.print()">打印 / 保存 PDF</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="value-strip" aria-label="核心价值">
+      <div class="value-card">
+        <h3>经验资产化</h3>
+        <p>把 Codex、Claude Code 等生态的通用 Skill 与团队自有方法论,统一转换为可审核、可版本化的平台资产,一次沉淀、多项目复用。</p>
+      </div>
+      <div class="value-card">
+        <h3>全程可审计</h3>
+        <p>每次执行冻结不可变快照,过程事件、工具调用、证据与结果全部落库;结论可以追溯到具体票据、代码和文件位置。</p>
+      </div>
+      <div class="value-card">
+        <h3>默认安全边界</h3>
+        <p>AI 只能使用项目授权的资源与登记工具,凭据不进入 Agent 环境;只读能力自动执行,业务选择与外部效果按策略暂停确认。</p>
+      </div>
+      <div class="value-card">
+        <h3>人机协同改进</h3>
+        <p>AI 原始结论永不被覆盖,人工评价与修订以追加方式记录,形成 Skill 持续改进的数据闭环。</p>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="capability-map-title">
+      <div class="panel-heading">
+        <div>
+          <h2 id="capability-map-title">业务能力全景</h2>
+          <p>由上至下阅读职责层级;同一行是一组共同完成该层业务目标的对象。结构关系,非执行顺序。</p>
+        </div>
+        <span class="legend">
+          <span class="live"><i></i>已上线</span>
+          <span class="plan"><i></i>规划中</span>
+        </span>
+      </div>
+
+      <div class="business-map">
+        <article class="layer">
+          <div class="layer-label">
+            <span class="layer-number">01</span>
+            <h3>组织与治理</h3>
+            <p>决定谁能进入平台、管理资产,以及在项目中执行什么操作。</p>
+          </div>
+          <div class="capabilities">
+            <div class="capability">
+              <span class="object-name">ADMIN</span>
+              <h4>平台管理员</h4>
+              <p>管理用户、项目与平台配置,负责 Skill 的审核与发布。</p>
+            </div>
+            <div class="capability">
+              <span class="object-name">USER</span>
+              <h4>项目成员</h4>
+              <p>通过项目成员关系获得任务执行、结果查看和评价权限。</p>
+            </div>
+            <div class="capability">
+              <span class="object-name">Project</span>
+              <h4>项目隔离边界</h4>
+              <p>成员、数据、任务、执行与结果都从属于明确项目,互不可见。</p>
+            </div>
+            <div class="capability">
+              <span class="object-name">Session / CSRF</span>
+              <h4>企业级会话安全</h4>
+              <p>浏览器会话认证与跨站防护,资源不存在与越权同样不可探测。</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="layer">
+          <div class="layer-label">
+            <span class="layer-number">02</span>
+            <h3>Skill 资产</h3>
+            <p>把通用 Skill 转换为经过审核、可发布、可回溯的平台资产。</p>
+          </div>
+          <div class="capabilities">
+            <div class="capability">
+              <span class="object-name">SkillSource</span>
+              <h4>原始 Skill 包</h4>
+              <p>完整保留导入来源与原始文件,后续解释与发布都可回溯到源头。</p>
+            </div>
+            <div class="capability">
+              <span class="object-name">Skill Interpreter</span>
+              <h4>智能解释器</h4>
+              <p>AI 理解 Skill 能做什么、需要哪些资源、目标与规则、交付物和效果意图,并保留来源依据。</p>
+            </div>
+            <div class="capability">
+              <span class="object-name">Draft / Preview</span>
+              <h4>草稿与人工调整</h4>
+              <p>解释结果先进入预览,支持追加式修订与差分对比,不直接进入项目。</p>
+            </div>
+            <div class="capability">
+              <span class="object-name">SkillVersion</span>
+              <h4>发布版本</h4>
+              <p>通过发布门禁后形成不可变版本;项目执行永远锁定到精确版本。</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="layer">
+          <div class="layer-label">
+            <span class="layer-number">03</span>
+            <h3>项目应用</h3>
+            <p>把已发布 Skill 与项目数据、知识组合为可操作的工作空间。</p>
+          </div>
+          <div class="capabilities">
+            <div class="capability">
+              <span class="object-name">ProjectDocument</span>
+              <h4>项目文档库</h4>
+              <p>上传与管理项目文档,经安全校验后作为任务的受控数据源。</p>
+            </div>
+            <div class="capability">
+              <span class="object-name">Integration</span>
+              <h4>外部数据源</h4>
+              <p>以 SecretReference、版本化能力与精确 scope 绑定 Redmine、SVN、Git；写入默认先展示 Proposal。</p>
+            </div>
+            <div class="capability">
+              <span class="object-name">SkillComposition</span>
+              <h4>项目模块</h4>
+              <p>把多个已发布 Skill 组合为业务模块,工作空间按模块组织任务入口。</p>
+            </div>
+            <div class="capability">
+              <span class="object-name">ExecutableTask</span>
+              <h4>可执行任务目录</h4>
+              <p>从已发布能力蓝图投影任务目录:目标、资源前提、指导、交付物、就绪度与效果策略。</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="layer">
+          <div class="layer-label">
+            <span class="layer-number">04</span>
+            <h3>AI 执行</h3>
+            <p>以不可变权限边界持续完成目标,记录用户交互、业务分段、技术尝试与多个 Agent 会话。</p>
+          </div>
+          <div class="capabilities three">
+            <div class="capability">
+              <span class="object-name">Run</span>
+              <h4>持续执行线程</h4>
+              <p>冻结目标、Skill、权限上限、资源与限制,可通过多轮交互持续到明确终态。</p>
+            </div>
+            <div class="capability">
+              <span class="object-name">RunSegment / Attempt</span>
+              <h4>业务分段与技术尝试</h4>
+              <p>用户答复或批准追加 Segment;Worker 重试与故障恢复追加 Attempt,两类历史均不覆盖。</p>
+            </div>
+            <div class="capability">
+              <span class="object-name">AgentSession</span>
+              <h4>Agent 会话</h4>
+              <p>保存 AI 会话与恢复上下文,同一 Run 可顺序 resume、fork 或切换新会话继续。</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="layer">
+          <div class="layer-label">
+            <span class="layer-number">05</span>
+            <h3>结果与改进</h3>
+            <p>把 AI 输出转化为可追溯证据、可阅读报告与可持续评价数据。</p>
+          </div>
+          <div class="capabilities three">
+            <div class="capability">
+              <span class="object-name">Evidence</span>
+              <h4>分析证据</h4>
+              <p>每条结论都关联到票据、代码、文件位置与工具调用来源。</p>
+            </div>
+            <div class="capability">
+              <span class="object-name">Outcome / Proposal</span>
+              <h4>结果、报告与变更提案</h4>
+              <p>保留 AI 原始结果与报告;外部变更独立审查、执行和验证,终态后不被覆盖。</p>
+            </div>
+            <div class="capability">
+              <span class="object-name">Evaluation</span>
+              <h4>人工评价与修订</h4>
+              <p>以追加记录评价准确度、意见与修订,形成 Skill 改进依据。</p>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="lifecycles" aria-label="核心业务生命周期">
+      <article class="panel lifecycle">
+        <h2>Skill 资产生命周期</h2>
+        <p>从通用 Skill 进入平台,到成为项目可使用的受控资产。</p>
+        <ol class="steps">
+          <li class="step"><strong>导入</strong><span>保留原始资产</span></li>
+          <li class="step"><strong>解释</strong><span>生成能力蓝图</span></li>
+          <li class="step"><strong>调整</strong><span>人工修订与预览</span></li>
+          <li class="step"><strong>发布</strong><span>门禁校验并版本化</span></li>
+          <li class="step"><strong>使用</strong><span>项目任务目录可见</span></li>
+        </ol>
+      </article>
+
+      <article class="panel lifecycle">
+        <h2>任务执行闭环</h2>
+        <p>从任务配置,到结果被人工评价并沉淀为改进数据。</p>
+        <ol class="steps">
+          <li class="step"><strong>配置</strong><span>目标与资源绑定</span></li>
+          <li class="step"><strong>执行</strong><span>Agent 自主分析</span></li>
+          <li class="step"><strong>交互</strong><span>澄清、Review、批准</span></li>
+          <li class="step"><strong>结果</strong><span>证据、报告与效果</span></li>
+          <li class="step"><strong>评价</strong><span>人工反馈修订</span></li>
+        </ol>
+      </article>
+    </section>
+
+    <section class="panel task-sequence" aria-labelledby="task-sequence-title">
+      <div class="sequence-heading">
+        <div>
+          <h2 id="task-sequence-title">一次完整任务的业务时序</h2>
+          <p>以单票据品质分析为例,展示资源绑定、Agent 自主分析、用户 Review/批准、多会话继续与结果评价。SDK 级技术时序见 <code>docs/03</code>「AI 执行时序」。</p>
+        </div>
+        <span class="scenario-badge">示例场景:票据品质分析</span>
+      </div>
+
+      <div class="participants" aria-label="任务流程参与者">
+        <div class="participant">用户</div>
+        <div class="participant">工作空间</div>
+        <div class="participant">API / 任务中心</div>
+        <div class="participant">Agent 运行时</div>
+        <div class="participant">工具 / 数据源</div>
+        <div class="participant">数据库 / 存储</div>
+      </div>
+
+      <div class="phase-divider"><em>阶段一 · 任务准备</em></div>
+      <ol class="sequence-list">
+        <li class="sequence-event">
+          <span class="event-number">01</span>
+          <span class="event-phase">任务准备<strong>未创建 Run</strong></span>
+          <div class="interaction">
+            <span class="actor">用户</span>
+            <span class="message">选择能力并补充目标</span>
+            <span class="actor target">工作空间</span>
+          </div>
+          <p class="event-detail">从任务目录选择「票据品质分析」,确认分析目标、期望交付物与本次需要关注的观点。</p>
+        </li>
+        <li class="sequence-event">
+          <span class="event-number">02</span>
+          <span class="event-phase">执行前确认<strong>用户明确触发</strong></span>
+          <div class="interaction">
+            <span class="actor">工作空间</span>
+            <span class="message">展示资源、指导、自主等级与效果策略</span>
+            <span class="actor target">用户</span>
+          </div>
+          <p class="event-detail">平台逐项展示 Ticket、代码、文档等资源要求与候选绑定;用户可覆盖选择,并确认 SUPERVISED 等执行等级。</p>
+        </li>
+      </ol>
+
+      <div class="phase-divider"><em>阶段二 · 受控执行</em></div>
+      <ol class="sequence-list">
+        <li class="sequence-event">
+          <span class="event-number">03</span>
+          <span class="event-phase">创建执行<strong>已入队</strong></span>
+          <div class="interaction">
+            <span class="actor">工作空间</span>
+            <span class="message">提交目标、资源绑定与幂等键</span>
+            <span class="actor target">API / 任务中心</span>
+          </div>
+          <p class="event-detail">API 校验成员权限与必要资源,冻结 Skill、目标、权限上限、资源范围和限制,生成 Segment 1 的 AgentTaskBrief。</p>
+        </li>
+        <li class="sequence-event">
+          <span class="event-number">04</span>
+          <span class="event-phase">持久化<strong>权威记录</strong></span>
+          <div class="interaction">
+            <span class="actor">API / 任务中心</span>
+            <span class="message">写入执行记录与初始事件</span>
+            <span class="actor target">数据库 / 存储</span>
+          </div>
+          <p class="event-detail">Run 成为持续目标的权威记录;事务性投递保证数据库状态与异步分发一致。</p>
+        </li>
+        <li class="sequence-event">
+          <span class="event-number">05</span>
+          <span class="event-phase">领取任务<strong>准备执行</strong></span>
+          <div class="interaction">
+            <span class="actor">API / 任务中心</span>
+            <span class="message">Worker 领取任务并取得执行租约</span>
+            <span class="actor target">Agent 运行时</span>
+          </div>
+          <p class="event-detail">创建 RunSegment、技术 Attempt 与独立工作目录,装载完整 Skill guidance 和资源绑定。</p>
+        </li>
+        <li class="sequence-event">
+          <span class="event-number">06</span>
+          <span class="event-phase">Agent 执行<strong>运行中</strong></span>
+          <div class="interaction">
+            <span class="actor">Agent 运行时</span>
+            <span class="message">自主规划并请求登记工具</span>
+            <span class="actor target">工具 / 数据源</span>
+          </div>
+          <p class="event-detail">Agent 可重排推荐步骤并追加只读验证;工具网关逐次校验能力、参数与项目绑定,不会因模型更强而放宽权限。</p>
+        </li>
+        <li class="sequence-event">
+          <span class="event-number">07</span>
+          <span class="event-phase">分析取证<strong>运行中</strong></span>
+          <div class="interaction">
+            <span class="actor">工具 / 数据源</span>
+            <span class="message">返回标准化数据与证据定位</span>
+            <span class="actor target">Agent 运行时</span>
+          </div>
+          <p class="event-detail">AI 组合票据、代码与 Skill 规则进行分析,持续追加实际步骤、用量与证据事件;证据不足时不会伪造结论。</p>
+        </li>
+        <li class="sequence-event">
+          <span class="event-number">08</span>
+          <span class="event-phase">人机交互<strong>按需等待</strong></span>
+          <div class="interaction">
+            <span class="actor">Agent 运行时</span>
+            <span class="message">请求澄清、观点 Review 或效果批准</span>
+            <span class="actor target">工作空间</span>
+          </div>
+          <p class="event-detail">平台保存 checkpoint 并释放 Worker;用户响应后追加新 RunSegment,按上下文 resume、fork 或启动新 AgentSession 继续。</p>
+        </li>
+      </ol>
+
+      <div class="phase-divider"><em>阶段三 · 交付与改进</em></div>
+      <ol class="sequence-list">
+        <li class="sequence-event">
+          <span class="event-number">09</span>
+          <span class="event-phase">结果落库<strong>执行成功</strong></span>
+          <div class="interaction">
+            <span class="actor">Agent 运行时</span>
+            <span class="message">提交 Outcome、证据、产物与可选变更提案</span>
+            <span class="actor target">数据库 / 存储</span>
+          </div>
+          <p class="event-detail">平台校验通用结果、Skill 质量标准与证据;外部变更先形成可审查 Proposal,批准执行后回读验证,再以终态事件收敛。</p>
+        </li>
+        <li class="sequence-event">
+          <span class="event-number">10</span>
+          <span class="event-phase">结果交付<strong>实时推送</strong></span>
+          <div class="interaction">
+            <span class="actor">API / 任务中心</span>
+            <span class="message">推送完成事件、报告与证据</span>
+            <span class="actor target">工作空间</span>
+          </div>
+          <p class="event-detail">页面支持断线续传与事件去重,最终展示结论、报告、证据、各 Session 历史和外部效果验证。</p>
+        </li>
+        <li class="sequence-event">
+          <span class="event-number">11</span>
+          <span class="event-phase">人工闭环<strong>追加评价</strong></span>
+          <div class="interaction">
+            <span class="actor">用户</span>
+            <span class="message">评价准确度、添加意见或修订</span>
+            <span class="actor target">API / 任务中心</span>
+          </div>
+          <p class="event-detail">评价作为新记录追加,AI 原始结果不被覆盖;评价数据进入后续 Skill 改进分析。</p>
+        </li>
+      </ol>
+
+      <div class="sequence-branches" aria-label="任务异常分支">
+        <div class="branch">
+          <strong>越界或写操作怎么办?</strong>
+          <span>未登记工具、扩大数据范围与任意宿主 Shell 会被硬拒绝;注册的外部效果先生成 Proposal,默认等待批准,只有明确预授权范围可直接执行。</span>
+        </div>
+        <div class="branch">
+          <strong>执行中途故障怎么办?</strong>
+          <span>执行记录保持不变;故障只在当前 Segment 追加新的 Attempt,恢复工作目录与 AI 会话后继续,不会伪造新的用户决定。</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel boundaries" aria-labelledby="boundary-title">
+      <h2 id="boundary-title">平台承诺的三条业务边界</h2>
+      <p>这些边界由系统结构保证,而不是流程约定;任何功能演进都不会破坏它们。</p>
+      <div class="boundary-grid">
+        <div class="boundary">
+          <strong>项目即隔离边界</strong>
+          <span>数据源、文档、任务、执行与结果都从属于明确项目;跨项目不可见,越权访问与资源不存在同样不可探测。</span>
+        </div>
+        <div class="boundary">
+          <strong>定义与执行分离</strong>
+          <span>任务定义可以持续调整;Run 冻结目标与权限上限,用户交互追加 Segment、技术恢复追加 Attempt,审计口径始终一致。</span>
+        </div>
+        <div class="boundary">
+          <strong>AI 原始结果不可篡改</strong>
+          <span>AI 结论保持不可变,人工判断通过评价与修订记录持续追加——既保护审计,也沉淀改进数据。</span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+      <span>ProjectMind · Skill 驱动的项目管理 AI 执行平台</span>
+      <span>本页为业务可视化摘要;权威定义见 docs/04(领域模型)与 docs/07(工作空间规格)</span>
+    </div>
+  </footer>
+</body>
+</html>
