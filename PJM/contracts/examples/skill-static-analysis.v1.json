@@ -1,0 +1,21 @@
+{
+  "analysis_version": "projectmind.skill-static-analysis/v1",
+  "source_hash": "sha256:613de186ec2f208e92c913568333b057ad2b12ead5032f895489f68b78e302b5",
+  "blocked": false,
+  "references": [],
+  "scripts": [],
+  "commands": [],
+  "external_links": [],
+  "declared_tools": ["repository.read/v1"],
+  "unsupported_operations": [],
+  "diagnostics": [
+    {
+      "severity": "warning",
+      "code": "import:declared_tools_not_authorized",
+      "message": "Source Tool declarations were recorded but did not grant permissions",
+      "path": "SKILL.md",
+      "line": null
+    }
+  ],
+  "checksum": "sha256:b64cbfa6092666b808540746035ebffc71737bd9bee903763e97b5d6c352a1bb"
+}

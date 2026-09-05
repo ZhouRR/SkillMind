@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.projectmind.local/skills/interpreter/v1/request.schema.json",
+  "title": "Skill Interpreter request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "request_version", "source", "static_analysis", "capability_catalog", "interpreter",
+    "target_contracts", "previous_interpretation", "adjustment"
+  ],
+  "properties": {
+    "request_version": { "const": "projectmind.skill-interpreter.request/v1" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["content_hash", "detected_adapter", "normalized_package"],
+      "properties": {
+        "content_hash": { "$ref": "#/$defs/sha256" },
+        "detected_adapter": { "type": "string", "minLength": 1 },
+        "normalized_package": { "type": "object" }
+      }
+    },
+    "static_analysis": { "type": "object" },
+    "capability_catalog": { "type": "object" },
+    "interpreter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["skill_key", "version", "source_hash", "prompt_checksum"],
+      "properties": {
+        "skill_key": { "const": "projectmind-skill-interpreter" },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "source_hash": { "$ref": "#/$defs/sha256" },
+        "prompt_checksum": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "target_contracts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runtime_manifest", "task_contract_draft", "view_spec", "response"],
+      "properties": {
+        "runtime_manifest": { "const": "projectmind/v1alpha1" },
+        "task_contract_draft": { "const": "projectmind.task-contract-draft/v1" },
+        "view_spec": { "const": "projectmind.view/v1alpha1" },
+        "response": { "const": "projectmind.skill-interpreter.response/v1" }
+      }
+    },
+    "previous_interpretation": { "type": ["object", "null"] },
+    "adjustment": { "type": ["object", "null"] }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+  }
+}

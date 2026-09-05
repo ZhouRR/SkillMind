@@ -1,0 +1,219 @@
+name: ${COMPOSE_PROJECT_NAME:-projectmind}
+
+x-backend-runtime: &backend-runtime
+  image: projectmind/backend:0.1.0
+  env_file:
+    - .env
+  environment:
+    PROJECTMIND_CONTEXT_PATH: ${PROJECTMIND_CONTEXT_PATH:-/projectmind}
+    TZ: ${PROJECTMIND_TIMEZONE:-Asia/Tokyo}
+  restart: unless-stopped
+  init: true
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  web:
+    build:
+      context: web
+      dockerfile: Dockerfile
+      args:
+        PROJECTMIND_CONTEXT_PATH: ${PROJECTMIND_CONTEXT_PATH:-/projectmind}
+    image: projectmind/web:0.1.0
+    environment:
+      TZ: ${PROJECTMIND_TIMEZONE:-Asia/Tokyo}
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+      - /var/cache/nginx:size=32m,uid=101,gid=101
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - edge
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${TRAEFIK_NETWORK:-traefik-public}
+      traefik.http.routers.projectmind-web.rule: Host(`${PROJECTMIND_HOST}`) && (Path(`${PROJECTMIND_CONTEXT_PATH:-/projectmind}`) || PathPrefix(`${PROJECTMIND_CONTEXT_PATH:-/projectmind}/`))
+      traefik.http.routers.projectmind-web.entrypoints: ${TRAEFIK_ENTRYPOINT:-websecure}
+      traefik.http.routers.projectmind-web.tls: "${TRAEFIK_TLS:-true}"
+      traefik.http.routers.projectmind-web.priority: "10"
+      traefik.http.routers.projectmind-web.middlewares: projectmind-web-context@docker
+      traefik.http.middlewares.projectmind-web-context.stripprefix.prefixes: ${PROJECTMIND_CONTEXT_PATH:-/projectmind}
+      traefik.http.services.projectmind-web.loadbalancer.server.port: "8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  api:
+    <<: *backend-runtime
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command:
+      - python
+      - -m
+      - uvicorn
+      - projectmind.api.main:app
+      - --host=0.0.0.0
+      - --port=8000
+      - --proxy-headers
+      - --forwarded-allow-ips=${PROJECTMIND_TRUSTED_PROXY_CIDRS:-172.16.0.0/12}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      object-storage-init:
+        condition: service_completed_successfully
+    networks:
+      - edge
+      - backend
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${TRAEFIK_NETWORK:-traefik-public}
+      traefik.http.routers.projectmind-api.rule: Host(`${PROJECTMIND_HOST}`) && (Path(`${PROJECTMIND_CONTEXT_PATH:-/projectmind}/api`) || PathPrefix(`${PROJECTMIND_CONTEXT_PATH:-/projectmind}/api/`))
+      traefik.http.routers.projectmind-api.entrypoints: ${TRAEFIK_ENTRYPOINT:-websecure}
+      traefik.http.routers.projectmind-api.tls: "${TRAEFIK_TLS:-true}"
+      traefik.http.routers.projectmind-api.priority: "100"
+      traefik.http.routers.projectmind-api.middlewares: projectmind-api-context@docker
+      traefik.http.middlewares.projectmind-api-context.stripprefix.prefixes: ${PROJECTMIND_CONTEXT_PATH:-/projectmind}
+      traefik.http.services.projectmind-api.loadbalancer.server.port: "8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/internal/health/live', timeout=3)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  worker:
+    <<: *backend-runtime
+    command:
+      - python
+      - -m
+      - arq
+      - projectmind.worker.settings.WorkerSettings
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      object-storage-init:
+        condition: service_completed_successfully
+    networks:
+      - backend
+      - egress
+    volumes:
+      - run-data:/var/lib/projectmind/runs
+
+  migrate:
+    <<: *backend-runtime
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+
+  postgres:
+    image: postgres:17.9-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-projectmind}
+      POSTGRES_USER: ${POSTGRES_USER:-projectmind}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      TZ: ${PROJECTMIND_TIMEZONE:-Asia/Tokyo}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+
+  redis:
+    image: redis:8.2-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    environment:
+      TZ: ${PROJECTMIND_TIMEZONE:-Asia/Tokyo}
+    volumes:
+      - redis-data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+
+  object-storage:
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+      TZ: ${PROJECTMIND_TIMEZONE:-Asia/Tokyo}
+    volumes:
+      - object-storage-data:/data
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+
+  # 空の volume を初回起動した場合でも、API/Worker の upload 前に bucket を用意する。
+  # `mc mb --ignore-existing` は既存 bucket を変更しないため、再作成時にも安全に実行できる。
+  object-storage-init:
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    restart: "no"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - >-
+        until mc alias set projectmind http://object-storage:9000
+        "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"; do sleep 1; done;
+        mc mb --ignore-existing "projectmind/$${PROJECTMIND_OBJECT_STORAGE_BUCKET}"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+      PROJECTMIND_OBJECT_STORAGE_BUCKET: ${PROJECTMIND_OBJECT_STORAGE_BUCKET:?set PROJECTMIND_OBJECT_STORAGE_BUCKET in .env}
+      TZ: ${PROJECTMIND_TIMEZONE:-Asia/Tokyo}
+    depends_on:
+      object-storage:
+        condition: service_started
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  edge:
+    external: true
+    name: ${TRAEFIK_NETWORK:-traefik-public}
+  backend:
+    internal: true
+  egress: {}
+
+volumes:
+  postgres-data: {}
+  redis-data: {}
+  object-storage-data: {}
+  run-data: {}

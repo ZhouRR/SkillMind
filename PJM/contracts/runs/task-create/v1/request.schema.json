@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.projectmind.local/runs/task-create/v1/request.schema.json",
+  "title": "Create published task Run request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["skill_version_id", "task_key", "input", "sources"],
+  "properties": {
+    "skill_version_id": { "type": "string", "format": "uuid" },
+    "task_key": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+    "input": { "type": "object" },
+    "sources": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    }
+  }
+}

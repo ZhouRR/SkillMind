@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.projectmind.local/tools/change.propose/v1/request.schema.json",
+  "title": "change.propose/v1 request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "effect_intent_key",
+    "resource_key",
+    "capability_version",
+    "operation",
+    "target",
+    "changes",
+    "precondition",
+    "summary",
+    "evidence_refs",
+    "risk_level",
+    "reversible",
+    "rollback",
+    "verification",
+    "idempotency_key",
+    "expires_in_seconds",
+    "continuation_mode",
+    "checkpoint"
+  ],
+  "properties": {
+    "effect_intent_key": { "$ref": "#/$defs/key" },
+    "resource_key": { "$ref": "#/$defs/key" },
+    "capability_version": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]*/[vV][0-9][a-zA-Z0-9_.-]*$",
+      "maxLength": 128
+    },
+    "operation": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["locator", "display"],
+      "properties": {
+        "locator": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "display": { "type": "string", "minLength": 1, "maxLength": 500 }
+      }
+    },
+    "changes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "action", "value"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "pattern": "^/[a-zA-Z0-9_.~/-]+$",
+            "maxLength": 512
+          },
+          "action": { "enum": ["SET", "REMOVE", "APPEND"] },
+          "value": {}
+        }
+      }
+    },
+    "precondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision"],
+      "properties": {
+        "revision": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "evidence_refs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 200,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^ev_[a-zA-Z0-9_-]+$" }
+    },
+    "risk_level": { "enum": ["LOW", "MEDIUM", "HIGH"] },
+    "reversible": { "type": "boolean" },
+    "rollback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description"],
+      "properties": {
+        "description": { "type": "string", "minLength": 1, "maxLength": 2000 }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "paths"],
+      "properties": {
+        "method": { "const": "READ_BACK" },
+        "paths": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^/[a-zA-Z0-9_.~/-]+$",
+            "maxLength": 512
+          }
+        }
+      }
+    },
+    "idempotency_key": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{7,127}$"
+    },
+    "expires_in_seconds": { "type": "integer", "minimum": 300, "maximum": 86400 },
+    "continuation_mode": { "enum": ["RESUME", "FORK", "REPLACE"] },
+    "checkpoint": { "$ref": "#/$defs/checkpoint" }
+  },
+  "$defs": {
+    "key": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "maxLength": 128
+    },
+    "checkpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary",
+        "confirmed_facts",
+        "evidence_refs",
+        "artifact_refs",
+        "change_proposal_refs"
+      ],
+      "properties": {
+        "summary": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "confirmed_facts": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "type": "string", "minLength": 1, "maxLength": 1000 }
+        },
+        "evidence_refs": {
+          "type": "array",
+          "maxItems": 200,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^ev_[a-zA-Z0-9_-]+$" }
+        },
+        "artifact_refs": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^art_[a-zA-Z0-9_-]+$" }
+        },
+        "change_proposal_refs": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^cp_[a-zA-Z0-9_-]+$" }
+        }
+      }
+    }
+  }
+}

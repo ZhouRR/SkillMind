@@ -1,0 +1,10 @@
+/* 高さ不足の desktop では sticky を解除し、履歴 pagination が viewport 外で切れないようにする。 */
+@media (min-width: 961px) and (max-height: 899px) {
+  .workspaceRail { position: static; max-height: none; }
+  .workspaceRail .historyPanel { overflow: visible; }
+}
+
+/* 履歴件数が増えても左 rail 全体を伸ばさず、一覧だけを安定して scroll させる。 */
+@media (min-width: 961px) {
+  .historyList { max-height: 420px; }
+}

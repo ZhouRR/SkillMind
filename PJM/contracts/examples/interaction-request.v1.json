@@ -1,0 +1,18 @@
+{
+  "interaction_type": "REVIEW",
+  "prompt": "Please review the current finding before I finalize the report.",
+  "rationale": "The priority depends on the project's accepted operational risk.",
+  "impact": "Your feedback may change the severity and recommended next action.",
+  "options": [],
+  "allow_multiple": false,
+  "required": true,
+  "expires_in_seconds": 86400,
+  "continuation_mode": "REPLACE",
+  "checkpoint": {
+    "summary": "Read-only analysis is complete and one risk classification needs review.",
+    "confirmed_facts": ["The affected path is part of the current project snapshot."],
+    "evidence_refs": ["ev_fixture_001"],
+    "artifact_refs": [],
+    "change_proposal_refs": []
+  }
+}

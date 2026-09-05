@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.projectmind.local/documents/v1/document.schema.json",
+  "title": "ProjectMind Project Document v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["document_id", "project_id", "folder", "name", "size", "mime", "checksum", "uploaded_by", "created_at"],
+  "properties": {
+    "document_id": { "type": "string", "format": "uuid" },
+    "project_id": { "type": "string", "format": "uuid" },
+    "folder": { "type": "string", "maxLength": 200 },
+    "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "size": { "type": "integer", "minimum": 0 },
+    "mime": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "checksum": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "uploaded_by": { "type": "string", "format": "uuid" },
+    "created_at": { "type": "string", "format": "date-time" }
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "path": "output/review-summary.md",
+  "content": "# Review summary\n\n- Authorization boundary looks correct.\n",
+  "purpose": "Persist the review report draft for the user to download"
+}

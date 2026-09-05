@@ -1,0 +1,224 @@
+/* Application shell:常設 sidebar、主内容列、画面共通 header、認証 gate。 */
+.appFrame { display: flex; min-height: 100vh; }
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  width: 240px;
+  height: 100vh;
+  border-right: 1px solid var(--border);
+  /* 主内容よりさらに一段沈めて「枠」を作り、右の内容へ視線を送る。 */
+  background: linear-gradient(180deg, rgba(124, 108, 245, .05), transparent 220px), var(--bg-sidebar);
+}
+.brand { display: flex; align-items: center; gap: 10px; padding: 18px 16px 14px; color: var(--text); }
+.brand:hover { text-decoration: none; }
+/* Brand 印は製品恒等式の aurora gradient を唯一まとまって使う場所。 */
+.brandMark {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  color: #fff;
+  background: var(--grad-brand);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .25), 0 2px 10px -2px rgba(110, 91, 238, .5);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, .2);
+}
+.brandName strong { display: block; color: var(--text-hi); font-size: 14px; letter-spacing: -.01em; }
+.brandName small { display: block; margin-top: 1px; color: var(--text-faint); font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; }
+
+.sideNav { display: grid; gap: 2px; flex: 1; align-content: start; padding: 10px; }
+/* 導航は「平台 / 当前项目」の二分組。当前项目分組の見出しは Project 切替 select の label が兼ねる。 */
+.navGroupLabel {
+  margin: 2px 0 4px;
+  padding: 0 10px;
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+/* ProjectContextSelect（名称で選択、UUID は監査用の補助行）の唯一の利用箇所は sidebar のため、様式もここへ集約する。 */
+.sideNavProject { margin: 14px 0 4px; border-top: 1px solid var(--border); padding: 12px 10px 0; }
+.sideNavProject .projectContext label {
+  gap: 6px;
+  margin-bottom: 4px;
+  color: var(--text-faint);
+  font-size: 10px;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+.sideNavProject .projectContextId {
+  overflow: hidden;
+  margin: 0 0 4px;
+  color: var(--text-faint);
+  font: 10px var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sideNav a {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: var(--radius-small);
+  padding: 8px 10px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  transition: background .15s ease, color .15s ease;
+}
+.sideNav a:hover { color: var(--text-hi); background: rgba(255, 255, 255, .035); text-decoration: none; }
+/* 現在画面は accent 面と左の丸い縦棒で示し、hover と混同させない。 */
+.sideNav a[aria-current="page"] {
+  color: var(--text-hi);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+.sideNav a[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 0;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--grad-brand);
+}
+.sideNav a[aria-current="page"] svg { color: var(--accent); }
+.sideNav svg { flex-shrink: 0; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+
+/* route link と子菜单の組を grid/flex の直接子として透過させ、既存 layout を変えない。 */
+.sideNavEntry { display: contents; }
+/* ---- 任务中心の業務模块子菜单:親 link の下に guide 線付きで入れ子表示する ---- */
+.sideNavSub { display: grid; gap: 1px; margin: 2px 0 4px 17px; border-left: 1px solid var(--border); padding-left: 7px; }
+.sideNavSubItem {
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-tiny);
+  padding: 5px 9px;
+  color: var(--text-faint);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background .15s ease, color .15s ease;
+}
+.sideNavSubItem:hover { color: var(--text-hi); background: rgba(255, 255, 255, .035); }
+.sideNavSubItem[aria-current="true"] { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+
+/* sidebar 内の select(項目切替・言語切替)は同じ寸法で揃える。
+   background は簡写だと base.css の chevron(background-image)まで消して
+   「開けない入力欄」に見えるため、必ず background-color だけを差し替える。 */
+.sidebar select { min-height: 32px; padding: 5px 30px 5px 8px; background-color: var(--surface-input); font-size: 12.5px; }
+
+.sidebarFooter { display: grid; gap: 10px; border-top: 1px solid var(--border); padding: 14px 16px; }
+.serviceStatus { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 12px; }
+.statusDot { width: 7px; height: 7px; border-radius: 999px; }
+.dotReady { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+.dotError { background: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
+.dotPending { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
+.sidebarUser { display: grid; gap: 2px; }
+.sidebarUser span { overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.sidebarUser small { overflow: hidden; color: var(--text-faint); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+/* 言語切替。footer の他要素と同じ低主張の文字寸法で並べる。
+   label の既定 margin-bottom を打ち消し、間隔は sidebarFooter の gap 一本に任せる。 */
+.sidebarLanguage { display: flex; gap: 8px; align-items: center; margin-bottom: 0; color: var(--text-muted); font-size: 12px; }
+.sidebarLanguage select { flex: 1; min-width: 0; }
+.sidebarError { color: var(--danger); font-size: 11px; line-height: 1.4; }
+.sidebarLogout { border: 0; padding: 0; color: var(--text-muted); background: transparent; font-size: 12px; text-align: left; cursor: pointer; transition: color .15s ease; }
+.sidebarLogout:hover { color: var(--accent); }
+.sidebarLink { font-size: 12px; }
+
+/* 超広幅では読み幅を 1320px で止めつつ中央へ寄せ、右側だけが大きく空く不均衡を避ける。 */
+.shell { flex: 1; min-width: 0; max-width: 1320px; margin-inline: auto; padding: 22px 28px 32px; }
+
+/* ---- 画面共通の compact header ---- */
+.pageHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 14px;
+}
+.pageHeader > div:first-child { min-width: 0; }
+.pageHeader h1 { overflow: hidden; margin: 0; color: var(--text-hi); font-size: 21px; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }
+.pageDescription { margin: 6px 0 0; max-width: 640px; color: var(--text-muted); font-size: 13px; line-height: 1.6; }
+.pageActions { display: flex; flex-shrink: 0; align-items: center; gap: 10px; }
+
+/* ---- Authentication gate ---- */
+/* 第一印象を担う画面のため、ここだけ aurora を強め(紫を左上、青緑を右下)、card を glass にする。 */
+.authShell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(640px 460px at 26% 12%, rgba(124, 108, 245, .17), transparent 64%),
+    radial-gradient(700px 520px at 78% 92%, rgba(85, 214, 240, .1), transparent 60%),
+    var(--bg);
+}
+.authCard {
+  display: grid;
+  gap: 22px;
+  width: min(100%, 400px);
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  padding: 28px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .025), transparent 40%), rgba(18, 20, 30, .82);
+  backdrop-filter: blur(18px);
+  box-shadow: var(--inset-hi), var(--shadow-pop);
+}
+.authBrand { display: flex; align-items: center; gap: 10px; }
+.authBrand .brandMark { width: 34px; height: 34px; font-size: 12px; }
+.authBrand strong { display: block; color: var(--text-hi); font-size: 15px; }
+.authBrand small { display: block; margin-top: 1px; color: var(--text-faint); font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; }
+.authCard h1 { margin: 0; color: var(--text-hi); font-size: 20px; }
+.authCard p { margin: 6px 0 0; color: var(--text-muted); font-size: 12.5px; line-height: 1.55; }
+.authFooter { margin: 0; color: var(--text-faint); font-size: 11px; text-align: center; }
+.authLoading { color: var(--text-muted); font-size: 13px; }
+
+@media (max-width: 960px) {
+  .appFrame { flex-direction: column; }
+  .sidebar { position: static; flex-direction: row; align-items: center; width: 100%; height: auto; border-right: 0; border-bottom: 1px solid var(--border); background: var(--bg-sidebar); }
+  .brand { padding: 10px 12px; }
+  .brandName small { display: none; }
+  .sideNav { display: flex; flex: 1; overflow-x: auto; padding: 8px; }
+  .sideNav a { flex: 0 0 auto; }
+  .sideNav a[aria-current="page"]::before { display: none; }
+  .sidebarFooter { border-top: 0; padding: 0 12px; }
+  .sidebarUser, .sidebarLogout, .sidebarLink { display: none; }
+  /* 狭幅では分組見出し・Project 切替・模块子菜单を隠し、横向導航を優先する。 */
+  .navGroupLabel, .sideNavProject, .sideNavSub { display: none; }
+  /* 横向導航の幅を確保するため、状態は点だけ残す。読み上げ名は aria-label が保持する。 */
+  .serviceStatus { white-space: nowrap; }
+  .serviceStatusText { display: none; }
+  .shell { padding: 20px 16px 32px; }
+  .pageHeader { flex-direction: column; gap: 12px; }
+}
+/* 導航の件数徽标。対応待ちが 0 のときは描画しない（常時点灯すると意味が薄れる）。 */
+.navBadge {
+  margin-left: auto;
+  min-width: 18px;
+  border-radius: 999px;
+  padding: 1px 6px;
+  color: var(--warn);
+  background: var(--warn-soft);
+  box-shadow: inset 0 0 0 1px rgba(242, 182, 76, .38);
+  font-size: 10.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}

@@ -1,0 +1,18 @@
+{
+  "evidence_ref": "ev_00000000000040008000000000000020",
+  "run_id": "00000000-0000-4000-8000-000000000010",
+  "tool_call_id": "00000000-0000-4000-8000-000000000019",
+  "evidence_type": "repository_file",
+  "source_uri": "git://integration-fixture/repository/src/example.py",
+  "source_locator": {
+    "revision": "0123456789abcdef",
+    "path": "src/example.py",
+    "line_start": 10,
+    "line_end": 20
+  },
+  "content_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "snapshot_uri": null,
+  "excerpt": "def analyze_ticket(...):",
+  "metadata": { "reproducibility": "content_hash" },
+  "created_at": "2026-07-01T00:00:00Z"
+}

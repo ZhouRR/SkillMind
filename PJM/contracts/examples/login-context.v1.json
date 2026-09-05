@@ -1,0 +1,4 @@
+{
+  "csrf_token": "login-csrf-token-with-at-least-32-characters",
+  "expires_in_seconds": 300
+}

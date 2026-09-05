@@ -1,0 +1,382 @@
+/* ProjectMind design token と全画面共通の基盤 style。色と寸法はここでのみ定義し、component 側では変数を参照する。 */
+/* 視覚言語は「aurora console」: 藍紫(interactive)+青緑(live 信号)の二色 accent を、藍墨の多層 surface に載せる。 */
+/* 中文本文の可読性を守るため、本文系 text の下限は 12.5px とする。10–11px は uppercase micro-label と等幅の補助値専用。 */
+
+/* Latin は self-host の Inter variable(SIL OFL 1.1、assets/fonts/LICENSE.txt)で環境差をなくす。CJK は下の stack で OS 最良 font に委ねる。 */
+@font-face {
+  font-family: Inter;
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('../assets/fonts/InterVariable.woff2') format('woff2');
+}
+
+:root {
+  /* ---- 画布と多層 surface(藍墨、紫へ僅かに傾ける) ---- */
+  --bg: #0a0b11;
+  --bg-sidebar: #07080d;
+  --surface: #12141e;
+  --surface-raised: #1a1d2b;
+  --surface-input: #0c0e16;
+  --border: #212433;
+  --border-strong: #2f3349;
+  /* 入力欄・scrollbar の hover。border-strong の一段上で「触れている」ことだけを示す。 */
+  --border-hover: #3c4260;
+  --text: #e8eaf4;
+  --text-hi: #f8f9fd;
+  --text-muted: #9aa2bc;
+  /* 補助 text も panel 上で WCAG AA(小字 4.5:1)を満たす明度に保つ。これ以上暗くしない。 */
+  --text-faint: #7d85a3;
+
+  /* ---- 主 accent: iris(interactive 全般 = link・active・focus・主 button) ---- */
+  --accent: #8f81f8;
+  --accent-strong: #6e5bee;
+  --accent-deep: #5a47d8;
+  --accent-soft: rgba(139, 124, 246, .12);
+  --accent-border: rgba(139, 124, 246, .34);
+
+  /* ---- 副 accent: aurora cyan(brand 恒等式と streaming/live 信号専用。interactive には使わない) ---- */
+  --live: #55d6f0;
+  --live-soft: rgba(85, 214, 240, .12);
+
+  /* ---- 状態色(涼色画布に合わせて再調律) ---- */
+  --ok: #3fd68f;
+  --ok-soft: rgba(63, 214, 143, .1);
+  --warn: #f2b64c;
+  --warn-soft: rgba(242, 182, 76, .09);
+  --danger: #fb7185;
+  --danger-soft: rgba(251, 113, 133, .09);
+  --info: #62a9f8;
+
+  /* ---- 恒等式 gradient と深度 ---- */
+  --grad-brand: linear-gradient(135deg, #7c6cf5 8%, #55d6f0 100%);
+  --grad-primary: linear-gradient(180deg, #8172f4, #6252e4);
+  /* 破壊確認 button 用。--danger(#fb7185)は白字が 2.7:1 しか出ないため、
+     白字で AA(4.5:1)を満たす暗めの赤を別に持つ。 */
+  --grad-danger: linear-gradient(180deg, #c93a54, #b93048);
+  --shadow-panel: 0 1px 2px rgba(2, 3, 9, .5), 0 14px 36px -20px rgba(2, 3, 9, .7);
+  --shadow-pop: 0 24px 70px rgba(2, 3, 9, .55), 0 2px 6px rgba(2, 3, 9, .4);
+  --inset-hi: inset 0 1px 0 rgba(255, 255, 255, .045);
+  --ring: 0 0 0 3px rgba(139, 124, 246, .22);
+
+  --radius: 12px;
+  --radius-small: 8px;
+  /* 一覧内の chip・入れ子 card など、小 radius をさらに一段落とす場所専用。 */
+  --radius-tiny: 6px;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+
+  /* Native control(select の popup、scrollbar、autofill)も暗色で描画させる。 */
+  color-scheme: dark;
+
+  color: var(--text);
+  background: var(--bg);
+  font-family: Inter, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", "Noto Sans JP", ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  font-synthesis: none;
+  /* 監査値(UUID、時刻、件数)が縦に並ぶ画面が多いため、数字は等幅で桁を揃える。 */
+  font-variant-numeric: tabular-nums;
+  text-rendering: optimizeLegibility;
+}
+
+::selection { color: var(--text-hi); background: rgba(139, 124, 246, .35); }
+
+* { box-sizing: border-box; }
+/* 左上に紫、右上に青緑の極薄 aurora を敷き、純黒の平板さを消す。可読性へ影響しない 10% 未満に抑える。 */
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(900px 520px at 8% -12%, rgba(124, 108, 245, .09), transparent 62%),
+    radial-gradient(1000px 560px at 104% 4%, rgba(85, 214, 240, .05), transparent 58%),
+    var(--bg);
+  background-attachment: fixed;
+}
+button, input, select, textarea { font: inherit; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+h1, h2, h3 { font-weight: 600; letter-spacing: -.012em; }
+
+/* Keyboard 操作の現在位置を全 interactive 要素で統一表示する。入力欄は border/影で示すため除外する。 */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; }
+
+/* 暗色 UI に馴染む細い scrollbar。中身より目立たない太さと色に抑える。 */
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--border-strong); }
+*::-webkit-scrollbar-thumb:hover { background: var(--border-hover); }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* ---- Badge ---- */
+.scopeBadge, .statusBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 4px 10px;
+  color: var(--text-muted);
+  background: var(--surface-raised);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+/* Run 状態 badge は文字と同色の状態点を先頭に置き、色覚に頼らず現在地を掴めるようにする。 */
+.statusBadge::before { content: ""; flex-shrink: 0; width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
+.status-succeeded { border-color: rgba(63, 214, 143, .38); color: var(--ok); background: var(--ok-soft); }
+.status-failed { border-color: rgba(251, 113, 133, .38); color: var(--danger); background: var(--danger-soft); }
+/* 取消は失敗ではなく中立の終態。danger 色を使うと「壊れた」と誤読されるため無彩色で示す。 */
+.status-cancelled { border-color: var(--border-strong); color: var(--text-muted); background: var(--surface-raised); }
+.status-running, .status-preparing { border-color: rgba(85, 214, 240, .38); color: var(--live); background: var(--live-soft); }
+.status-waiting_permission, .status-waiting_for_input, .status-waiting_for_approval, .status-retry_pending { border-color: rgba(242, 182, 76, .38); color: var(--warn); background: var(--warn-soft); }
+.status-running::before, .status-preparing::before { animation: statusPulse 1.4s ease-in-out infinite; }
+@keyframes statusPulse { 50% { opacity: .3; } }
+
+/* ---- Panel ---- */
+.panel {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  /* 上端 1/3 だけ極薄く明るくし、光が上から落ちる立体感を作る(暗色 UI の疑似 elevation)。 */
+  background: linear-gradient(180deg, rgba(255, 255, 255, .016), transparent 34%), var(--surface);
+  box-shadow: var(--inset-hi), var(--shadow-panel);
+}
+.panelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+}
+.panelHeader h2 { margin: 0; color: var(--text-hi); font-size: 13px; letter-spacing: .01em; }
+
+.emptyState {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 2px;
+  min-height: 120px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-small);
+  color: var(--text-faint);
+  background: rgba(255, 255, 255, .008);
+  text-align: center;
+}
+.emptyState p { max-width: 320px; margin: 0; padding: 0 16px 14px; font-size: 13px; line-height: 1.6; }
+/* 空態から次の行動へ直接跳べる任意の操作領域(例:工作空間の「新建执行」)。 */
+.emptyStateAction { margin-bottom: 16px; }
+/* 空白理由の文言より先に目へ入る装飾 glyph。意味は文言が持つため aria-hidden で添える。 */
+.emptyState svg { width: 26px; height: 26px; margin-top: 16px; fill: none; stroke: var(--accent-border); stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---- Skeleton:一覧系の読み込み中 placeholder ---- */
+.skeletonList { display: grid; gap: 8px; }
+.skeletonRow {
+  height: 46px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: linear-gradient(100deg, var(--surface) 42%, var(--surface-raised) 50%, var(--surface) 58%);
+  background-size: 220% 100%;
+  animation: skeletonShimmer 1.3s ease-in-out infinite;
+}
+@keyframes skeletonShimmer { from { background-position: 130% 0; } to { background-position: -30% 0; } }
+
+/* ---- Form ---- */
+label { display: grid; gap: 6px; margin-bottom: 12px; color: var(--text-muted); font-size: 12px; font-weight: 600; }
+/* 来源が自動確定した資源要求。label と同じ縦位置に「使用: 名称」や設定導線を静的に見せる。 */
+.sourceField { display: grid; gap: 4px; margin-bottom: 12px; }
+.sourceFieldLabel { color: var(--text-muted); font-size: 12px; font-weight: 600; }
+.sourceFieldStatic { color: var(--text); font-size: 13px; }
+input, select, textarea {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  padding: 8px 10px;
+  color: var(--text);
+  background: var(--surface-input);
+  outline: none;
+  box-shadow: inset 0 1px 2px rgba(2, 3, 9, .35);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+textarea {
+  min-height: 170px;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+input:focus, select:focus, textarea:focus { border-color: var(--accent-strong); box-shadow: var(--ring); }
+/* background 簡写だと select の chevron(background-image)まで消えて「開けない入力欄」に見えるため、色だけ差し替える。 */
+input:disabled, select:disabled { color: var(--text-faint); cursor: not-allowed; background-color: var(--surface-raised); }
+input:hover:not(:disabled, :focus), select:hover:not(:disabled, :focus), textarea:hover:not(:disabled, :focus) { border-color: var(--border-hover); }
+/* 検証 error は利用者が触れた後だけ枠色で即時に示す(:user-invalid)。初期表示で全欄を赤くしない。 */
+input:user-invalid, select:user-invalid, textarea:user-invalid { border-color: rgba(251, 113, 133, .55); }
+input:user-invalid:focus, select:user-invalid:focus, textarea:user-invalid:focus { box-shadow: 0 0 0 3px rgba(251, 113, 133, .18); }
+/* Browser 差のある native 矢印を消し、全環境で同じ chevron を右端に描く。 */
+select {
+  appearance: none;
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m2.5 4.5 3.5 3.5 3.5-3.5' fill='none' stroke='%239aa2bc' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+.formRow { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+/* Schema 駆動の task 入力。scalar field は幅に応じて 2 列へ流し、
+   長文(textarea)と raw JSON editor だけ全幅を取る(弹窗内で縦に伸び続けないため)。 */
+.schemaInputForm { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0 16px; align-items: start; }
+.schemaInputForm > label:has(textarea), .schemaInputForm > .rawResult { grid-column: 1 / -1; }
+.schemaInputForm small { color: var(--text-faint); font-size: 11.5px; font-weight: 400; line-height: 1.5; }
+.hint { margin: 2px 0 12px; color: var(--text-faint); font-size: 12.5px; line-height: 1.55; }
+.compactTextarea { min-height: 90px; font-family: inherit; }
+
+/* ---- Button ---- */
+.primaryButton, .secondaryButton, .dangerButton, .destructiveButton {
+  min-height: 38px;
+  border: 0;
+  border-radius: var(--radius-small);
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease, color .15s ease, opacity .15s ease, transform .1s ease, box-shadow .15s ease;
+}
+/* Click の手応えを 1px の沈み込みで返す(disabled は除外)。 */
+.primaryButton:active:not(:disabled), .secondaryButton:active:not(:disabled), .dangerButton:active:not(:disabled), .destructiveButton:active:not(:disabled) { transform: translateY(1px); }
+.primaryButton {
+  width: 100%;
+  color: #fff;
+  background: var(--grad-primary);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .18), 0 1px 2px rgba(2, 3, 9, .5);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, .18);
+}
+.primaryButton:hover:not(:disabled) { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .18), 0 4px 18px -4px rgba(110, 91, 238, .55); filter: brightness(1.06); }
+.primaryButton:disabled { cursor: wait; opacity: .55; }
+.secondaryButton { border: 1px solid var(--border-strong); color: var(--text-muted); background: rgba(255, 255, 255, .015); }
+.secondaryButton:hover { border-color: var(--accent-border); color: var(--text-hi); background: var(--accent-soft); }
+/* 一覧行・panel 見出し・弹窗頭など、本文の従属位置に置く小型 button。
+   以前は各画面が 28/30/32px と個別に上書きしていて、同種の button が場所ごとに違う大きさだった。 */
+.compactButton { min-height: 30px; padding: 4px 12px; font-size: 11.5px; }
+/* 確認 dialog の実行 button。一覧行の .dangerButton は低主張の小型なので、
+   「これを押すと戻せない」を伝える場面では primaryButton と同じ存在感を danger 色で持たせる。 */
+.destructiveButton {
+  width: auto;
+  color: #fff;
+  background: var(--grad-danger);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .16), 0 1px 2px rgba(2, 3, 9, .5);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, .22);
+}
+.destructiveButton:hover:not(:disabled) { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .16), 0 4px 18px -4px rgba(201, 58, 84, .6); filter: brightness(1.08); }
+.destructiveButton:disabled { cursor: wait; opacity: .55; }
+/* 破壊操作は常時赤で並べず、通常は静かな中立表示、hover/focus した時だけ danger 色で警告する。 */
+.dangerButton { min-height: 0; border: 1px solid var(--border-strong); border-radius: var(--radius-tiny); padding: 6px 9px; color: var(--text-faint); background: transparent; font-size: 11px; }
+.dangerButton:hover, .dangerButton:focus-visible { border-color: rgba(251, 113, 133, .45); color: var(--danger); background: var(--danger-soft); }
+.dangerButton:disabled { cursor: wait; opacity: .55; }
+/* File 選択は素の input を隠し、button 見た目の label を唯一の入口にする（文書 upload と Skill 目录 upload が共用）。 */
+.fileUploadButton { display: inline-flex; align-items: center; min-height: 34px; padding: 6px 14px; cursor: pointer; }
+.fileUploadButton input { display: none; }
+.error { color: var(--danger); font-size: 13px; line-height: 1.5; }
+
+.mono { font-family: var(--font-mono); }
+
+/* 一覧・tab の件数 badge。複数画面で使うため基盤側に置く。 */
+.eventCount {
+  display: grid;
+  place-items: center;
+  min-width: 26px;
+  height: 24px;
+  border-radius: var(--radius-tiny);
+  padding: 0 6px;
+  color: var(--text-muted);
+  background: var(--surface-raised);
+  font: 600 12px var(--font-mono);
+}
+
+/* ---- 確認 dialog:破壊的操作の直前に理由と影響を読ませる ---- */
+.confirmMessage { margin: 0 0 20px; color: var(--text); font-size: 13px; line-height: 1.7; white-space: pre-line; overflow-wrap: anywhere; }
+.confirmActions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+.confirmActions .primaryButton { width: auto; padding: 8px 20px; }
+.confirmActions .destructiveButton { padding: 8px 20px; }
+
+/* ---- Modal:新規作成/長い form を一覧・観測画面から切り離す共通弹窗 ----
+   常時 mount + hidden 切替(頁面測試の renderToStaticMarkup に中身を残すため、条件描画にしない)。 */
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(4, 5, 11, .66);
+  backdrop-filter: blur(6px);
+}
+/* display:grid が UA の hidden 規則より強いため、非表示は明示で潰す。 */
+.modalOverlay[hidden] { display: none; }
+.modalDialog {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: 88vh;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .02), transparent 30%), var(--surface);
+  box-shadow: var(--shadow-pop);
+  outline: none;
+}
+.modalWide .modalDialog { width: min(860px, 100%); }
+.modalHeader {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  padding: 12px 16px;
+}
+.modalHeader strong { overflow: hidden; color: var(--text-hi); font-size: 13.5px; text-overflow: ellipsis; white-space: nowrap; }
+.modalMeta { flex-shrink: 0; color: var(--text-faint); font-size: 11px; white-space: nowrap; }
+.modalHeaderActions { display: flex; flex-shrink: 0; gap: 8px; margin-left: auto; }
+.modalBody { overflow-y: auto; padding: 16px 18px 18px; scrollbar-gutter: stable; }
+
+/* panelHeader 右側に件数 badge と操作 button を並べる汎用容器。 */
+.panelHeaderActions { display: flex; flex-shrink: 0; align-items: center; gap: 10px; }
+
+/* ---- Tabs:関連する複数区画を同時に一つだけ見せ、縦積みを解消する共通原語 ---- */
+.tabBar { display: flex; flex-wrap: wrap; gap: 4px; margin: -4px 0 16px; border-bottom: 1px solid var(--border); }
+.tabBar .tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: -1px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: var(--radius-small) var(--radius-small) 0 0;
+  padding: 9px 12px;
+  color: var(--text-muted);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color .15s ease, border-color .15s ease, background .15s ease;
+}
+.tabBar .tab:hover { color: var(--text-hi); background: rgba(255, 255, 255, .025); }
+.tabBar .tab[aria-selected="true"] { color: var(--text-hi); border-bottom-color: var(--accent); }
+/* 待ち事項の所在を示す warn 色の点(例:結果 tab の応答待ち)。 */
+.tabAlert { flex-shrink: 0; width: 7px; height: 7px; border-radius: 999px; background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); animation: statusPulse 1.4s ease-in-out infinite; }
+.tabPanel { min-width: 0; }
+/* 作者側の display 指定(例:.projectManagementLayout の grid)は UA の [hidden] 規則より
+   強いため、非活性 panel が消えない。tab 原語側で必ず畳めるようにしておく。 */
+.tabPanel[hidden] { display: none; }
+
+@media (max-width: 480px) {
+  .formRow { grid-template-columns: 1fr; gap: 0; }
+  .panel { padding: 16px; }
+  .modalOverlay { padding: 10px; }
+  .modalDialog { max-height: 94vh; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-running::before, .status-preparing::before, .skeletonRow { animation: none; }
+}

@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.projectmind.local/skills/interpreter/v1/interpretation-report.schema.json",
+  "title": "Skill InterpretationReport v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "report_version", "summary", "compatibility_level", "diagnostics", "source_traces"
+  ],
+  "properties": {
+    "report_version": { "const": "projectmind.skill-interpretation-report/v1" },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "compatibility_level": { "enum": ["native", "adapted", "assisted"] },
+    "confidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": { "$ref": "#/$defs/confidence" },
+        "tasks": { "$ref": "#/$defs/confidence" },
+        "resources": { "$ref": "#/$defs/confidence" },
+        "tools": { "$ref": "#/$defs/confidence" },
+        "workflows": { "$ref": "#/$defs/confidence" },
+        "schemas": { "$ref": "#/$defs/confidence" }
+      }
+    },
+    "assumptions": { "type": "array", "items": { "$ref": "#/$defs/note" } },
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "text", "required"],
+        "properties": {
+          "key": { "$ref": "#/$defs/key" },
+          "text": { "type": "string", "minLength": 1, "maxLength": 1000 },
+          "required": { "type": "boolean" }
+        }
+      }
+    },
+    "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } },
+    "source_traces": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["target", "path", "line", "reason"],
+        "properties": {
+          "target": { "type": "string", "pattern": "^/" },
+          "path": { "type": "string", "minLength": 1 },
+          "line": { "type": ["integer", "null"], "minimum": 1 },
+          "reason": { "type": "string", "minLength": 1, "maxLength": 1000 }
+        }
+      }
+    },
+    "unmapped_references": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "reason"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "reason": { "type": "string", "minLength": 1, "maxLength": 1000 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "key": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "note": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "text"],
+      "properties": {
+        "key": { "$ref": "#/$defs/key" },
+        "text": { "type": "string", "minLength": 1, "maxLength": 1000 }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["severity", "code", "message", "path", "line"],
+      "properties": {
+        "severity": { "enum": ["error", "warning", "info"] },
+        "code": { "type": "string", "pattern": "^[a-z][a-z0-9_.:-]*$" },
+        "message": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "path": { "type": ["string", "null"] },
+        "line": { "type": ["integer", "null"], "minimum": 1 }
+      }
+    }
+  }
+}

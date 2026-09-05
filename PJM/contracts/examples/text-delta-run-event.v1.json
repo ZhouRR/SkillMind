@@ -1,0 +1,10 @@
+{
+  "run_id": "00000000-0000-4000-8000-000000000010",
+  "run_attempt_id": "00000000-0000-4000-8000-000000000011",
+  "agent_session_id": "00000000-0000-4000-8000-000000000012",
+  "sequence": 8,
+  "event_type": "TEXT_DELTA",
+  "occurred_at": "2026-07-02T13:00:00Z",
+  "payload": { "text": "{\"summary\":" },
+  "trace_id": null
+}

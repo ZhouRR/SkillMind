@@ -1,0 +1,7 @@
+{
+  "key": "quality-team",
+  "name": "Quality Team",
+  "description": "JAF ticket quality analysis",
+  "settings": { "timezone": "Asia/Tokyo" },
+  "retention_days": 90
+}

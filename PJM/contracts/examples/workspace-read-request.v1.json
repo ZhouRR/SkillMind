@@ -1,0 +1,6 @@
+{
+  "path": "input/repository/src/example.py",
+  "line_start": 1,
+  "line_end": 80,
+  "purpose": "Review the authorization boundary"
+}

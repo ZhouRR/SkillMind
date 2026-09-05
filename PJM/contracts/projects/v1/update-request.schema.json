@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.projectmind.local/projects/v1/update-request.schema.json",
+  "title": "ProjectMind Update Project Request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "minProperties": 1,
+  "properties": {
+    "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "description": { "type": "string", "maxLength": 4000 },
+    "settings": { "type": "object" },
+    "retention_days": { "type": "integer", "minimum": 1, "maximum": 3650 }
+  }
+}

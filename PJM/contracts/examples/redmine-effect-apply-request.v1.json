@@ -1,0 +1,9 @@
+{
+  "capability_version": "issue.update/v1",
+  "expected_revision": "2026-07-18T12:00:00Z",
+  "idempotency_key": "effect:run-001:proposal-001",
+  "issue": {
+    "status_id": 3,
+    "done_ratio": 100
+  }
+}

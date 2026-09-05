@@ -1,0 +1,6 @@
+/* Style 分割の入口。cascade を守るため、基盤 → shell → 画面別 → workspace → responsive 補正の順を維持する。 */
+@import './styles/base.css';
+@import './styles/shell.css';
+@import './styles/pages.css';
+@import './styles/workspace.css';
+@import './styles/workspace-responsive.css';

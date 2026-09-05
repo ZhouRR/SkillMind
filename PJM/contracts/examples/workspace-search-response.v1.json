@@ -1,0 +1,16 @@
+{
+  "status": "success",
+  "provider": "workspace",
+  "matches": [
+    {
+      "path": "input/repository/src/example.py",
+      "line": 1,
+      "column": 5,
+      "excerpt": "def authorize(actor):"
+    }
+  ],
+  "scanned_files": 12,
+  "evidence_refs": ["ev_workspace_search_001"],
+  "warnings": [],
+  "truncated": false
+}

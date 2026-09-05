@@ -1,0 +1,10 @@
+{
+  "skill_version_id": "00000000-0000-4000-8000-000000000203",
+  "task_key": "review-file",
+  "input": {
+    "target_path": "src/example.py"
+  },
+  "sources": {
+    "repository-source": "git"
+  }
+}

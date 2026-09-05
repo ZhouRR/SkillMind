@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>ProjectMind · 设计文档</title>
+  <style>
+    :root { --ink:#182b40; --muted:#56697e; --line:#dce5ed; --blue:#175b99; --paper:#fff; --wash:#f3f6f9; }
+    * { box-sizing:border-box; }
+    html { scroll-padding-top:32px; }
+    body { margin:0; color:var(--ink); background:var(--paper); font:16px/1.8 system-ui,-apple-system,"Segoe UI","Noto Sans CJK SC","Microsoft YaHei",sans-serif; }
+    a { color:var(--blue); text-decoration:underline; text-underline-offset:3px; overflow-wrap:anywhere; }
+    a:hover { color:#0c3861; }
+    :focus-visible { outline:3px solid #1f6aa7; outline-offset:3px; }
+    button,input { font:inherit; }
+    button { background:white; color:var(--ink); border:1px solid var(--line); border-radius:7px; padding:6px 12px; cursor:pointer; }
+    .skip { position:fixed; top:-80px; left:12px; z-index:10; background:white; padding:10px; }
+    .skip:focus { top:10px; }
+    .sidebar { position:fixed; inset:0 auto 0 0; width:284px; overflow:auto; padding:28px 20px 36px; background:var(--wash); border-right:1px solid var(--line); }
+    .brand { color:var(--ink); font-size:23px; font-weight:750; text-decoration:none; letter-spacing:-.5px; }
+    .subtitle { margin:2px 0 23px; color:var(--muted); font-size:13px; }
+    .search-label { font-size:13px; font-weight:650; }
+    #search { width:100%; border:1px solid #b9c9d8; background:white; color:var(--ink); border-radius:7px; padding:9px 10px; margin:5px 0 8px; }
+    .history-control { font-size:12px; color:var(--muted); display:flex; gap:6px; align-items:center; margin-bottom:20px; }
+    details { margin:14px 0; }
+    summary { color:#405871; font-weight:650; font-size:13px; cursor:pointer; padding:4px 0; }
+    nav a { display:block; padding:7px 9px; margin:2px 0; border-radius:6px; color:#41556a; font-size:13px; line-height:1.55; text-decoration:none; }
+    nav a:hover { background:#e6edf4; }
+    nav a[aria-current="page"] { background:#dce9f5; color:#104b80; box-shadow:inset 3px 0 #24699e; font-weight:650; }
+    .search-hit { border-bottom:1px solid var(--line); padding-bottom:10px; }
+    .search-hit small { display:block; color:var(--muted); font-size:12px; margin:3px 9px; overflow-wrap:anywhere; }
+    #search-status { color:var(--muted); font-size:12px; }
+    .layout { margin-left:284px; padding:30px 42px 80px; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; gap:20px; border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:32px; }
+    .eyebrow { color:var(--blue); font-weight:700; letter-spacing:1px; font-size:12px; }
+    .actions { display:flex; align-items:center; gap:14px; font-size:13px; }
+    .content-layout { display:grid; grid-template-columns:minmax(0,900px) 200px; gap:38px; justify-content:center; }
+    article { min-width:0; overflow-wrap:break-word; }
+    article:focus { outline:none; }
+    h1 { font-size:32px; line-height:1.4; letter-spacing:-.5px; margin:0 0 24px; }
+    h2 { font-size:23px; line-height:1.5; margin:44px 0 18px; padding-top:7px; border-top:1px solid var(--line); }
+    h3 { font-size:18px; margin:28px 0 12px; }
+    h4 { font-size:16px; margin:24px 0 10px; }
+    p { margin:14px 0; }
+    ul,ol { padding-left:26px; }
+    li { margin:7px 0; }
+    blockquote { margin:18px 0 26px; border-left:3px solid #6294bc; border-radius:0 7px 7px 0; padding:3px 18px; background:#f0f6fb; color:#41556b; font-size:14px; }
+    code { font-family:ui-monospace,"Cascadia Code",Consolas,monospace; font-size:.88em; background:#edf2f6; color:#264b6c; padding:2px 5px; border-radius:4px; overflow-wrap:anywhere; }
+    pre { background:#f3f6f9; border:1px solid var(--line); border-radius:8px; padding:20px; overflow:auto; line-height:1.7; font-size:14px; }
+    pre code { background:none; padding:0; border-radius:0; color:#253f57; overflow-wrap:normal; }
+    .table-scroll { overflow:auto; border:1px solid var(--line); border-radius:8px; margin:20px 0; }
+    table { border-collapse:collapse; width:100%; font-size:14px; line-height:1.7; }
+    th { text-align:left; background:#eef4f8; font-weight:650; color:#284861; }
+    th,td { padding:12px 14px; border-bottom:1px solid var(--line); vertical-align:top; min-width:90px; }
+    tr:last-child td { border-bottom:0; }
+    img { max-width:100%; }
+    .toc { position:sticky; top:30px; align-self:start; max-height:calc(100vh - 60px); overflow:auto; font-size:12px; border-left:1px solid var(--line); padding-left:17px; }
+    .toc strong { display:block; color:var(--muted); margin-bottom:8px; }
+    .toc a { display:block; margin:8px 0; color:var(--muted); text-decoration:none; line-height:1.5; }
+    .toc a.sub { padding-left:10px; font-size:11px; }
+    .archive-notice { background:#fff6e5; border:1px solid #e7c88d; border-radius:8px; padding:13px 17px; color:#725419; margin:0 0 22px; font-size:14px; }
+    .page-footer { border-top:1px solid var(--line); margin-top:48px; padding-top:20px; color:var(--muted); font-size:12px; }
+    #menu-button { display:none; }
+    [hidden] { display:none !important; }
+    @media(max-width:1250px) { .content-layout { display:block; max-width:900px; margin:auto; } .toc { display:none; } .layout { padding:26px 30px 60px; } }
+    @media(max-width:760px) { .sidebar { display:none; z-index:3; top:64px; width:min(320px,90vw); box-shadow:6px 0 20px #182b4022; } body.menu-open .sidebar { display:block; } .layout { margin:0; padding:16px 18px 45px; } .topbar { position:sticky; top:0; background:white; z-index:2; margin:-16px -18px 26px; padding:13px 18px; min-height:64px; } .eyebrow { font-size:11px; } #menu-button { display:inline-block; } .actions { gap:8px; } #print-button { display:none; } h1 { font-size:27px; } h2 { font-size:21px; } pre { padding:15px; font-size:12px; } th,td { padding:10px; } }
+    @media print { .sidebar,.topbar,.toc,.skip { display:none !important; } .layout { margin:0; padding:0; } .content-layout { display:block; } body { font-size:11pt; } h1 { font-size:22pt; } h2 { break-after:avoid; font-size:16pt; } pre { white-space:pre-wrap; overflow:visible; } .table-scroll { overflow:visible; } table { font-size:9pt; } tr { break-inside:avoid; } a { color:inherit; } }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#main">跳到正文</a>
+  <aside class="sidebar" id="sidebar" aria-label="文档导航">
+    <a class="brand" href="#docs/overview/product.md::">ProjectMind</a>
+    <p class="subtitle">设计、开发与运行 · 文档中心</p>
+    <label class="search-label" for="search">搜索文档</label>
+    <input id="search" type="search" placeholder="名称、概念、接口或关键词" autocomplete="off">
+    <label class="history-control"><input id="include-history" type="checkbox">搜索包含历史归档</label>
+    <div id="search-status" role="status" aria-live="polite"></div>
+    <nav id="navigation" aria-label="文档列表"></nav>
+  </aside>
+  <div class="layout">
+    <header class="topbar">
+      <span class="eyebrow" id="category">PROJECTMIND / 文档</span>
+      <div class="actions">
+        <a id="source-link" href="README.md">Markdown 源文件</a>
+        <button id="print-button" type="button">打印本页</button>
+        <button id="menu-button" type="button" aria-controls="sidebar" aria-expanded="false">目录</button>
+      </div>
+    </header>
+    <div class="content-layout">
+      <article id="main" tabindex="-1" aria-label="文档正文"></article>
+      <aside class="toc" aria-label="本页目录"><strong>本页内容</strong><div id="toc-links"></div></aside>
+    </div>
+  </div>
+  <noscript>此离线浏览版需要 JavaScript 切换文档。可直接打开 <a href="README.md">Markdown 文档索引</a>。</noscript>
+  <script type="application/json" id="docs-data">__DOCS_PAYLOAD__</script>
+  <script>
+    'use strict';
+    const data = JSON.parse(document.getElementById('docs-data').textContent);
+    const pages = new Map(data.pages.map(page => [page.id, page]));
+    const main = document.getElementById('main');
+    const search = document.getElementById('search');
+    const historyToggle = document.getElementById('include-history');
+    const menuButton = document.getElementById('menu-button');
+    let currentId = '';
+
+    /** 文書と章を browser history に保存する。 */
+    function pageHref(page, anchor = '') {
+      return '#' + encodeURI(page.id) + '::' + encodeURIComponent(anchor);
+    }
+
+    /** 信頼していない検索語を HTML として挿入しない。 */
+    function linkFor(page, title = page.title, anchor = '') {
+      const link = document.createElement('a');
+      link.href = pageHref(page, anchor);
+      link.textContent = title;
+      if (page.id === currentId && !anchor) link.setAttribute('aria-current', 'page');
+      return link;
+    }
+
+    /** 通常時は分類ナビ、検索時は本文を含む候補を表示する。 */
+    function renderNavigation() {
+      const navigation = document.getElementById('navigation');
+      navigation.replaceChildren();
+      const query = search.value.trim().toLocaleLowerCase();
+      const found = data.pages.filter(page => !query || (
+        (historyToggle.checked || page.group !== 'history') &&
+        (page.title + '\n' + page.text).toLocaleLowerCase().includes(query)
+      ));
+      document.getElementById('search-status').textContent = query ? found.length + ' 篇匹配文档' : '';
+      if (query) {
+        for (const page of found) {
+          const row = document.createElement('div');
+          row.className = 'search-hit';
+          row.append(linkFor(page));
+          const excerpt = document.createElement('small');
+          const position = page.text.toLocaleLowerCase().indexOf(query);
+          excerpt.textContent = page.text.slice(Math.max(0, position - 32), Math.max(0, position) + 100).replace(/\s+/g, ' ');
+          row.append(excerpt);
+          navigation.append(row);
+        }
+        return;
+      }
+      for (const [group, title] of Object.entries(data.groups)) {
+        const children = found.filter(page => page.group === group);
+        if (!children.length) continue;
+        const section = document.createElement('details');
+        section.open = group !== 'history' || pages.get(currentId)?.group === 'history';
+        const heading = document.createElement('summary');
+        heading.textContent = title;
+        section.append(heading);
+        for (const page of children) section.append(linkFor(page));
+        navigation.append(section);
+      }
+    }
+
+    /** 直接リンク・戻る・進むを同じ経路で扱う。 */
+    function showPage() {
+      if (location.hash === '#main') { main.focus(); return; }
+      let id, anchor;
+      try { [id, anchor = ''] = location.hash.slice(1).split('::').map(decodeURIComponent); }
+      catch { id = ''; anchor = ''; }
+      id ||= 'docs/overview/product.md';
+      const page = pages.get(id);
+      currentId = id;
+      const toc = document.getElementById('toc-links');
+      toc.replaceChildren();
+      if (!page) {
+        main.replaceChildren();
+        const title = document.createElement('h1');
+        title.textContent = '文档不存在';
+        main.append(title, linkFor(pages.get('docs/overview/product.md'), '返回产品概览'));
+        document.getElementById('category').textContent = 'PROJECTMIND / 未找到';
+        document.getElementById('source-link').hidden = true;
+        renderNavigation();
+        return;
+      }
+      document.title = page.title + ' · ProjectMind';
+      document.getElementById('category').textContent = 'PROJECTMIND / ' + data.groups[page.group];
+      const source = document.getElementById('source-link');
+      source.hidden = false;
+      source.href = page.source;
+      // 本文は build 時に raw HTML 無効の parser で生成済み。検索語や URL は混ぜない。
+      main.innerHTML = page.html;
+      if (page.group === 'history') {
+        const notice = document.createElement('div');
+        notice.className = 'archive-notice';
+        notice.textContent = '历史归档：保留当时的设计和验证记录；当前状态以实施计划为准。';
+        main.prepend(notice);
+      }
+      for (const heading of page.toc) {
+        const link = linkFor(page, heading.title, heading.anchor);
+        if (heading.level === 'h3') link.className = 'sub';
+        toc.append(link);
+      }
+      const footer = document.createElement('footer');
+      footer.className = 'page-footer';
+      footer.textContent = page.id + ' · 从 Markdown 生成；修改源文件后重新构建。';
+      main.append(footer);
+      document.body.classList.remove('menu-open');
+      menuButton.setAttribute('aria-expanded', 'false');
+      renderNavigation();
+      requestAnimationFrame(() => {
+        const target = anchor ? main.querySelector('#' + CSS.escape(anchor)) : null;
+        if (target) target.scrollIntoView(); else window.scrollTo(0, 0);
+        main.focus({preventScroll:true});
+      });
+    }
+
+    search.addEventListener('input', renderNavigation);
+    historyToggle.addEventListener('change', renderNavigation);
+    window.addEventListener('hashchange', showPage);
+    document.getElementById('print-button').addEventListener('click', () => window.print());
+    menuButton.addEventListener('click', () => {
+      const open = document.body.classList.toggle('menu-open');
+      menuButton.setAttribute('aria-expanded', String(open));
+      if (open) search.focus();
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        document.body.classList.remove('menu-open');
+        menuButton.setAttribute('aria-expanded', 'false');
+      }
+    });
+    showPage();
+  </script>
+</body>
+</html>

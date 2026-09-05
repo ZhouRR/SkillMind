@@ -1,0 +1,10 @@
+{
+  "run_id": "00000000-0000-4000-8000-000000000010",
+  "run_attempt_id": "00000000-0000-4000-8000-000000000011",
+  "agent_session_id": null,
+  "sequence": 12,
+  "event_type": "RUN_CANCEL_REQUESTED",
+  "occurred_at": "2026-07-03T12:00:00Z",
+  "payload": { "status": "RUNNING" },
+  "trace_id": "request-cancel-001"
+}

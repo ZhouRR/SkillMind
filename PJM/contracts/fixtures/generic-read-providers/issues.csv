@@ -1,0 +1,2 @@
+id,subject,description,status,updated_at,application,acceptance_criteria
+fixture-001,Synthetic login validation ticket,Validate an intentionally synthetic login flow.,open,2026-06-30T00:00:00Z,sample-app,Reject empty user names without contacting external systems.

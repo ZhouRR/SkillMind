@@ -1,0 +1,41 @@
+{
+  "effect_intent_key": "update_ticket",
+  "resource_key": "ticket_source",
+  "capability_version": "issue.update/v1",
+  "operation": "update ticket status",
+  "target": {
+    "locator": "42",
+    "display": "Issue #42"
+  },
+  "changes": [
+    {
+      "path": "/fields/status_id",
+      "action": "SET",
+      "value": 3
+    }
+  ],
+  "precondition": {
+    "revision": "2026-07-18T10:15:30Z"
+  },
+  "summary": "Move the reviewed issue to the agreed status.",
+  "evidence_refs": ["ev_issue_42_before"],
+  "risk_level": "LOW",
+  "reversible": true,
+  "rollback": {
+    "description": "Restore the previous status after a new review."
+  },
+  "verification": {
+    "method": "READ_BACK",
+    "paths": ["/fields/status_id"]
+  },
+  "idempotency_key": "issue-42-status-3",
+  "expires_in_seconds": 1800,
+  "continuation_mode": "RESUME",
+  "checkpoint": {
+    "summary": "Analysis is complete; the external update is awaiting policy.",
+    "confirmed_facts": ["Issue #42 currently has the reviewed revision."],
+    "evidence_refs": ["ev_issue_42_before"],
+    "artifact_refs": [],
+    "change_proposal_refs": []
+  }
+}

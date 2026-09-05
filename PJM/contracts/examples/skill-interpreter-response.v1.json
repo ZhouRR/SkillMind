@@ -1,0 +1,343 @@
+{
+  "response_version": "projectmind.skill-interpreter.response/v1",
+  "source_hash": "sha256:613de186ec2f208e92c913568333b057ad2b12ead5032f895489f68b78e302b5",
+  "interpreter": {
+    "skill_key": "projectmind-skill-interpreter",
+    "version": "3.4.0",
+    "prompt_checksum": "sha256:918b2cae1794d8c9dde72b09ef8953af2498371712d73553ccdb95aa0ce44b4b"
+  },
+  "report": {
+    "report_version": "projectmind.skill-interpretation-report/v1",
+    "summary": "The source can be adapted to one evidence-backed repository review task.",
+    "compatibility_level": "adapted",
+    "confidence": {
+      "capabilities": 0.94,
+      "tasks": 0.91,
+      "resources": 0.9,
+      "tools": 0.96,
+      "workflows": 0.88,
+      "schemas": 0.85
+    },
+    "assumptions": [
+      {
+        "key": "single-file-review",
+        "text": "The first version reviews one repository file per Run."
+      }
+    ],
+    "questions": [],
+    "diagnostics": [
+      {
+        "severity": "info",
+        "code": "source_tool_mapped_to_registered_capability",
+        "message": "The declared repository Tool was mapped to repository.read/v1 without granting a Project binding.",
+        "path": "SKILL.md",
+        "line": 3
+      }
+    ],
+    "source_traces": [
+      {
+        "target": "/tasks/0",
+        "path": "SKILL.md",
+        "line": 5,
+        "reason": "The Inputs section defines revision, path, and review focus."
+      },
+      {
+        "target": "/tools/0",
+        "path": "SKILL.md",
+        "line": 3,
+        "reason": "The source requests repository.read/v1 and the capability exists in the frozen catalog."
+      }
+    ],
+    "unmapped_references": []
+  },
+  "runtime_manifest_draft": {
+    "manifest_version": "projectmind/v1alpha1",
+    "identity": {
+      "skill_key": "repository-review",
+      "source_hash": "sha256:613de186ec2f208e92c913568333b057ad2b12ead5032f895489f68b78e302b5",
+      "interpretation_id": "00000000-0000-4000-8000-000000000301",
+      "interpreter_version": "projectmind-skill-interpreter/3.4.0"
+    },
+    "compatibility": {
+      "level": "adapted",
+      "confidence": 0.85,
+      "diagnostics": []
+    },
+    "capabilities": [
+      {
+        "key": "repository.review",
+        "title": "Repository Review",
+        "triggers": [
+          "repository-review"
+        ]
+      }
+    ],
+    "capability_blueprint": {
+      "blueprint_version": "projectmind.capability-blueprint/v1",
+      "identity": {
+        "skill_key": "repository-review",
+        "source_hash": "sha256:613de186ec2f208e92c913568333b057ad2b12ead5032f895489f68b78e302b5",
+        "interpretation_id": "00000000-0000-4000-8000-000000000301",
+        "interpreter_version": "projectmind-skill-interpreter/3.4.0"
+      },
+      "compatibility": {
+        "level": "adapted",
+        "confidence": 0.85
+      },
+      "capabilities": [
+        {
+          "key": "repository.review",
+          "title": "Repository Review",
+          "summary": "Review one repository file and report evidence-backed findings.",
+          "intents": [
+            "The user wants a reviewed file with cited evidence."
+          ]
+        }
+      ],
+      "tasks": [
+        {
+          "key": "review-file",
+          "capability": "repository.review",
+          "objective": "Review the selected repository file and report findings with evidence.",
+          "success_criteria": [
+            {
+              "key": "cited-findings",
+              "text": "Every finding cites the reviewed path."
+            }
+          ],
+          "resource_keys": [
+            "repository-source"
+          ],
+          "deliverables": [
+            {
+              "key": "review-report",
+              "kind": "report",
+              "description": "A summary of the review findings for the selected file."
+            }
+          ]
+        }
+      ],
+      "resource_requirements": [
+        {
+          "key": "repository-source",
+          "kind": "repository",
+          "required": true,
+          "access": "read",
+          "capabilities": [
+            "repository.read/v1"
+          ],
+          "accepted_providers": [
+            "git",
+            "svn"
+          ],
+          "selection_guidance": "The user selects the repository revision before the Run starts."
+        }
+      ],
+      "guidance": {
+        "required_rules": [
+          {
+            "key": "read-only-evidence",
+            "text": "Only report findings that are supported by the repository content that was read."
+          }
+        ],
+        "recommended_steps": [
+          {
+            "key": "load-source",
+            "text": "Read the target file before judging it."
+          }
+        ],
+        "quality_criteria": [
+          {
+            "key": "actionable",
+            "text": "Each finding explains what to change and why."
+          }
+        ],
+        "prohibited_actions": []
+      },
+      "interaction_points": [
+        {
+          "key": "path-choice",
+          "type": "CHOICE",
+          "condition": "The user did not name the file to review.",
+          "prompt": "Which file should be reviewed?"
+        }
+      ],
+      "effect_intents": [
+        {
+          "key": "read-repository",
+          "mode": "observe",
+          "resource_key": "repository-source",
+          "operation": "Read the reviewed file from the bound repository.",
+          "risk": "low"
+        }
+      ],
+      "execution_preferences": {
+        "session_split_hints": [],
+        "stop_conditions": [
+          {
+            "key": "unreadable-path",
+            "text": "Stop and ask when the requested path cannot be read."
+          }
+        ]
+      },
+      "source_traces": [
+        {
+          "target": "/capabilities/0",
+          "path": "SKILL.md",
+          "line": 1,
+          "reason": "The Skill title states that it reviews repository files."
+        },
+        {
+          "target": "/tasks/0",
+          "path": "SKILL.md",
+          "line": 5,
+          "reason": "The Inputs section defines the reviewed path."
+        },
+        {
+          "target": "/resource_requirements/0",
+          "path": "SKILL.md",
+          "line": 3,
+          "reason": "The source requests repository.read/v1 for the reviewed content."
+        },
+        {
+          "target": "/guidance/required_rules/0",
+          "path": "SKILL.md",
+          "line": 11,
+          "reason": "The Output section requires findings to be backed by the read content."
+        }
+      ],
+      "assumptions": [],
+      "questions": []
+    },
+    "tasks": [
+      {
+        "key": "review-file",
+        "capability": "repository.review",
+        "type": "immediate",
+        "input_contract": {
+          "contract_version": "projectmind.task-contract-draft/v1",
+          "type": "object",
+          "description": "Repository review request",
+          "fields": [
+            {
+              "key": "target_path",
+              "type": "string",
+              "required": true,
+              "description": "Path to review",
+              "min_length": 1
+            }
+          ]
+        },
+        "output_contract": {
+          "contract_version": "projectmind.task-contract-draft/v1",
+          "type": "object",
+          "description": "Repository review result",
+          "fields": [
+            {
+              "key": "summary",
+              "type": "string",
+              "required": true,
+              "description": "Review summary",
+              "min_length": 1
+            }
+          ]
+        },
+        "input_schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "description": "Repository review request",
+          "properties": {
+            "target_path": {
+              "type": "string",
+              "description": "Path to review",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "target_path"
+          ]
+        },
+        "output_schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "description": "Repository review result",
+          "properties": {
+            "summary": {
+              "type": "string",
+              "description": "Review summary",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "summary"
+          ]
+        },
+        "input_schema_checksum": "sha256:80d83714d6fd98b37626acec9bfe7c9ba8dc749812549f523c01a02e1281f75c",
+        "output_schema_checksum": "sha256:6c93a572141b1a0e467764f88baead1a9975517b1746ba2f27facebd45f4c16c",
+        "contract_source_trace": [
+          {
+            "contract": "input",
+            "field_path": "/target_path",
+            "source_path": "SKILL.md",
+            "source_section": "Inputs",
+            "line": 5
+          },
+          {
+            "contract": "output",
+            "field_path": "/summary",
+            "source_path": "SKILL.md",
+            "source_section": "Output",
+            "line": 11
+          }
+        ],
+        "workflow": "review-file-v1",
+        "view": "standard"
+      }
+    ],
+    "tools": [
+      {
+        "capability": "repository.read/v1",
+        "required": true
+      }
+    ],
+    "workflows": [
+      {
+        "key": "review-file-v1",
+        "steps": [
+          {
+            "key": "load-source",
+            "kind": "tool"
+          },
+          {
+            "key": "review",
+            "kind": "agent"
+          },
+          {
+            "key": "validate",
+            "kind": "validator"
+          },
+          {
+            "key": "report",
+            "kind": "artifact"
+          }
+        ]
+      }
+    ],
+    "permissions": {
+      "default_tool_policy": "auto",
+      "registered_script_policy": "auto",
+      "external_write_policy": "deny",
+      "write_capabilities": [],
+      "network_scope": "project_integrations_only"
+    },
+    "ui": {
+      "default_view": "standard",
+      "views": [],
+      "frontend_module": null
+    },
+    "tests": []
+  },
+  "contract_test_drafts": []
+}

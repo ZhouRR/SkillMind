@@ -1,0 +1,30 @@
+{
+  "status": "success",
+  "provider": "platform",
+  "results": [
+    {
+      "key": "schema-change",
+      "outcome": "COMPLETED",
+      "summary": "migration 0025 与 TaskSchedule model 的列一致；CHECK 约束 task_schedules_kind_fields 在两侧同名同义。",
+      "agent_session_id": "1f0b6e4a-6c1e-4a1d-9a5f-2c7d3e8b9f10"
+    },
+    {
+      "key": "api-surface",
+      "outcome": "COMPLETED",
+      "summary": "新增的 ScheduleResponse 逐项列举字段，未出现 row_version 之外的内部列。",
+      "agent_session_id": "2c3d4e5f-6071-4823-9a4b-5c6d7e8f9012"
+    },
+    {
+      "key": "issue-context",
+      "outcome": "FAILED",
+      "summary": "关联票据读取失败，本路未得出结论；其余两路不受影响。",
+      "agent_session_id": "3d4e5f60-7182-4934-ab5c-6d7e8f901234",
+      "failure_code": "branch_failed"
+    }
+  ],
+  "evidence_refs": ["ev_subagent_dispatch_01"],
+  "budget": {
+    "turns_per_branch": 4,
+    "output_bytes_per_branch": 262144
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "target_branch": "projectmind/run-7a1c/fix-null-guard",
+  "changes": [
+    {
+      "path": "/files/src/app/handler.py",
+      "action": "SET",
+      "value": "def handle(payload):\n    if payload is None:\n        return None\n    return payload\n"
+    },
+    {
+      "path": "/files/src/app/legacy.py",
+      "action": "REMOVE",
+      "value": null
+    }
+  ],
+  "base_revision": "9f2c1d4b8a6e5307c1b2d3e4f5a6b7c8d9e0f1a2",
+  "commit_message": "Guard against a null payload before dispatch",
+  "idempotency_key": "cp-7a1c9d2e-repository-write"
+}

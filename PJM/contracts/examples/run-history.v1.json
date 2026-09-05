@@ -1,0 +1,22 @@
+{
+  "items": [
+    {
+      "run_id": "00000000-0000-4000-8000-000000000010",
+      "project_id": "00000000-0000-4000-8000-000000000020",
+      "task_id": "00000000-0000-4000-8000-000000000030",
+      "status": "SUCCEEDED",
+      "row_version": 4,
+      "created_at": "2026-07-02T13:00:00Z",
+      "started_at": "2026-07-02T13:00:01Z",
+      "finished_at": "2026-07-02T13:01:00Z",
+      "input": { "ticket_id": "fixture-001", "report_language": "ja-JP" },
+      "selected_sources": { "issue_source": "csv", "repository_source": "git" },
+      "result_summary": "Ticket analysis completed",
+      "result_confidence": 0.82,
+      "result_needs_review": false
+    }
+  ],
+  "limit": 20,
+  "offset": 0,
+  "has_more": false
+}

@@ -1,0 +1,7 @@
+{
+  "query": "authorize(",
+  "paths": ["input/repository"],
+  "case_sensitive": true,
+  "max_results": 20,
+  "purpose": "Locate authorization call sites"
+}

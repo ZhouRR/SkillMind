@@ -1,0 +1,11 @@
+{
+  "status": "success",
+  "provider": "redmine",
+  "before_ref": "ev_issue_42_before",
+  "after_ref": "ev_issue_42_after",
+  "verification": {
+    "method": "READ_BACK",
+    "matched_paths": ["/fields/status_id"]
+  },
+  "replayed": false
+}

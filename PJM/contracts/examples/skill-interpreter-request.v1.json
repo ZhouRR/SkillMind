@@ -1,0 +1,159 @@
+{
+  "request_version": "projectmind.skill-interpreter.request/v1",
+  "source": {
+    "content_hash": "sha256:613de186ec2f208e92c913568333b057ad2b12ead5032f895489f68b78e302b5",
+    "detected_adapter": "directory-skill/v1",
+    "normalized_package": {
+      "package_format": "projectmind.normalized/v1",
+      "metadata": {
+        "name": "Repository Review",
+        "description": "固定 revision の repository file を 1 つレビューし、evidence に基づく findings を返す。"
+      }
+    }
+  },
+  "static_analysis": {
+    "analysis_version": "projectmind.skill-static-analysis/v1",
+    "source_hash": "sha256:613de186ec2f208e92c913568333b057ad2b12ead5032f895489f68b78e302b5",
+    "blocked": false,
+    "references": [],
+    "scripts": [],
+    "commands": [],
+    "external_links": [],
+    "declared_tools": [
+      "repository.read/v1"
+    ],
+    "unsupported_operations": [],
+    "diagnostics": [
+      {
+        "severity": "warning",
+        "code": "import:declared_tools_not_authorized",
+        "message": "Source Tool declarations were recorded but did not grant permissions",
+        "path": "SKILL.md",
+        "line": null
+      }
+    ],
+    "checksum": "sha256:b64cbfa6092666b808540746035ebffc71737bd9bee903763e97b5d6c352a1bb"
+  },
+  "capability_catalog": {
+    "catalog_version": "projectmind.tool-catalog/1",
+    "checksum": "sha256:bbfa45eaf29cabe08800abb56e8fc2c2d58c8c10ade202b29562302431ea34d5",
+    "capabilities": [
+      {
+        "capability": "change.propose/v1",
+        "description": "Create an audited ChangeProposal without applying an external effect.",
+        "request_schema": "tools/change.propose/v1/request.schema.json",
+        "response_schema": "tools/change.propose/v1/response.schema.json",
+        "error_schema": "tools/change.propose/v1/error.schema.json",
+        "providers": [
+          "platform"
+        ]
+      },
+      {
+        "capability": "document.read/v1",
+        "description": "Read one project document at a fixed content hash.",
+        "request_schema": "tools/document.read/v1/request.schema.json",
+        "response_schema": "tools/document.read/v1/response.schema.json",
+        "error_schema": "tools/document.read/v1/error.schema.json",
+        "providers": [
+          "project"
+        ]
+      },
+      {
+        "capability": "interaction.request/v1",
+        "description": "Pause a Run and request structured user input through ProjectMind.",
+        "request_schema": "tools/interaction.request/v1/request.schema.json",
+        "response_schema": "tools/interaction.request/v1/response.schema.json",
+        "error_schema": "tools/interaction.request/v1/error.schema.json",
+        "providers": [
+          "platform"
+        ]
+      },
+      {
+        "capability": "issue.read/v1",
+        "description": "Read one issue from a configured provider.",
+        "request_schema": "tools/issue.read/v1/request.schema.json",
+        "response_schema": "tools/issue.read/v1/response.schema.json",
+        "error_schema": "tools/issue.read/v1/error.schema.json",
+        "providers": [
+          "csv",
+          "redmine"
+        ]
+      },
+      {
+        "capability": "issue.update/v1",
+        "description": "Apply an approved Redmine issue field update with optimistic concurrency and read-back.",
+        "request_schema": "tools/issue.update/v1/request.schema.json",
+        "response_schema": "tools/issue.update/v1/response.schema.json",
+        "error_schema": "tools/issue.update/v1/error.schema.json",
+        "providers": [
+          "redmine"
+        ]
+      },
+      {
+        "capability": "repository.read/v1",
+        "description": "Read repository content at a fixed revision.",
+        "request_schema": "tools/repository.read/v1/request.schema.json",
+        "response_schema": "tools/repository.read/v1/response.schema.json",
+        "error_schema": "tools/repository.read/v1/error.schema.json",
+        "providers": [
+          "git",
+          "svn"
+        ]
+      },
+      {
+        "capability": "repository.write/v1",
+        "description": "Land an approved repository change as a platform-owned branch commit; ProjectMind applies it only after approval and never on the default branch.",
+        "request_schema": "tools/repository.write/v1/request.schema.json",
+        "response_schema": "tools/repository.write/v1/response.schema.json",
+        "error_schema": "tools/repository.write/v1/error.schema.json",
+        "providers": [
+          "git"
+        ]
+      },
+      {
+        "capability": "workspace.read/v1",
+        "description": "Read one UTF-8 file from the isolated Run workspace.",
+        "request_schema": "tools/workspace.read/v1/request.schema.json",
+        "response_schema": "tools/workspace.read/v1/response.schema.json",
+        "error_schema": "tools/workspace.read/v1/error.schema.json",
+        "providers": [
+          "workspace"
+        ]
+      },
+      {
+        "capability": "workspace.search/v1",
+        "description": "Search UTF-8 files in the isolated Run workspace.",
+        "request_schema": "tools/workspace.search/v1/request.schema.json",
+        "response_schema": "tools/workspace.search/v1/response.schema.json",
+        "error_schema": "tools/workspace.search/v1/error.schema.json",
+        "providers": [
+          "workspace"
+        ]
+      },
+      {
+        "capability": "workspace.write/v1",
+        "description": "Write one UTF-8 file to the isolated Run workspace or output.",
+        "request_schema": "tools/workspace.write/v1/request.schema.json",
+        "response_schema": "tools/workspace.write/v1/response.schema.json",
+        "error_schema": "tools/workspace.write/v1/error.schema.json",
+        "providers": [
+          "workspace"
+        ]
+      }
+    ]
+  },
+  "interpreter": {
+    "skill_key": "projectmind-skill-interpreter",
+    "version": "3.4.0",
+    "source_hash": "sha256:918b2cae1794d8c9dde72b09ef8953af2498371712d73553ccdb95aa0ce44b4b",
+    "prompt_checksum": "sha256:918b2cae1794d8c9dde72b09ef8953af2498371712d73553ccdb95aa0ce44b4b"
+  },
+  "target_contracts": {
+    "runtime_manifest": "projectmind/v1alpha1",
+    "task_contract_draft": "projectmind.task-contract-draft/v1",
+    "view_spec": "projectmind.view/v1alpha1",
+    "response": "projectmind.skill-interpreter.response/v1"
+  },
+  "previous_interpretation": null,
+  "adjustment": null
+}

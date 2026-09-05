@@ -1,0 +1,9 @@
+{
+  "run_id": "2f6e88f6-b7c4-4da6-8f3e-240994c0eac0",
+  "project_id": "8f126d88-cf2d-4aa8-adf2-50b9504f6bcf",
+  "task_id": "bf348443-fb96-5b16-a4ff-92457cf7ee5a",
+  "status": "QUEUED",
+  "row_version": 1,
+  "created_at": "2026-07-01T12:00:00Z",
+  "idempotent_replay": false
+}

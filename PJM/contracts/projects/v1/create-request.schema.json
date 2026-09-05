@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.projectmind.local/projects/v1/create-request.schema.json",
+  "title": "ProjectMind Create Project Request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["key", "name", "retention_days"],
+  "properties": {
+    "key": { "type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "description": { "type": "string", "maxLength": 4000, "default": "" },
+    "settings": { "type": "object", "default": {} },
+    "retention_days": { "type": "integer", "minimum": 1, "maximum": 3650 }
+  }
+}

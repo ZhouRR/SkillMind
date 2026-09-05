@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.projectmind.local/projects/v1/member.schema.json",
+  "title": "ProjectMind Project Member v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["user_id", "email", "display_name", "status", "joined_at"],
+  "properties": {
+    "user_id": { "type": "string", "format": "uuid" },
+    "email": { "type": "string", "format": "email", "maxLength": 320 },
+    "display_name": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "status": { "enum": ["ACTIVE", "REMOVED"] },
+    "joined_at": { "type": "string", "format": "date-time" }
+  }
+}

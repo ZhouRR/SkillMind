@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.projectmind.local/tools/interaction.request/v1/response.schema.json",
+  "title": "interaction.request/v1 response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "deferred"],
+  "properties": {
+    "status": { "const": "success" },
+    "deferred": { "const": true }
+  }
+}

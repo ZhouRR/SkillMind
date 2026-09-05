@@ -1,0 +1,18 @@
+{
+  "evaluation_id": "00000000-0000-4000-8000-000000000081",
+  "result_id": "00000000-0000-4000-8000-000000000080",
+  "run_id": "00000000-0000-4000-8000-000000000010",
+  "user_id": "00000000-0000-4000-8000-000000000090",
+  "rating": 4,
+  "verdict": "partially_accurate",
+  "comment": "字段判断需要修正。",
+  "revisions": [
+    {
+      "pointer": "/field_assessments/0/proposed_value",
+      "original_value": "agent-value",
+      "suggested_value": "manual-value",
+      "reason": "人工复核 Evidence 后确认。"
+    }
+  ],
+  "created_at": "2026-07-03T12:00:00Z"
+}

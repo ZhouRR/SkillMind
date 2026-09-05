@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.projectmind.local/skills/interpreter/v1/response.schema.json",
+  "title": "Skill Interpreter response v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "response_version", "source_hash", "interpreter", "report", "runtime_manifest_draft"
+  ],
+  "properties": {
+    "response_version": { "const": "projectmind.skill-interpreter.response/v1" },
+    "source_hash": { "$ref": "#/$defs/sha256" },
+    "interpreter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["skill_key", "version", "prompt_checksum"],
+      "properties": {
+        "skill_key": { "const": "projectmind-skill-interpreter" },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "prompt_checksum": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "report": { "type": "object" },
+    "runtime_manifest_draft": { "type": "object" },
+    "contract_test_drafts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "type", "fixture"],
+        "properties": {
+          "key": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+          "type": { "enum": ["schema", "tool_conformance", "workflow"] },
+          "fixture": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "event": "interpret.delta",
+  "execution_key": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "occurred_at": "2026-07-12T07:30:00Z",
+  "data": {
+    "text": "Analyzing the SKILL.md structure and declared tools…"
+  }
+}

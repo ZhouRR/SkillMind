@@ -1,0 +1,6 @@
+{
+  "issue_ref": "fixture-001",
+  "fields": ["subject", "description", "status"],
+  "purpose": "Collect M0 Ticket evidence"
+}
+

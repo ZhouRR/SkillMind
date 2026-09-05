@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.projectmind.local/tools/issue.read/v1/request.schema.json",
+  "title": "issue.read/v1 request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["issue_ref", "purpose"],
+  "properties": {
+    "issue_ref": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "fields": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "maxItems": 200,
+      "uniqueItems": true
+    },
+    "purpose": { "type": "string", "minLength": 1, "maxLength": 500 }
+  }
+}
+

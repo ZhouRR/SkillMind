@@ -1,0 +1,12 @@
+{
+  "run_id": "11111111-1111-4111-8111-111111111111",
+  "project_id": "22222222-2222-4222-8222-222222222222",
+  "status": "QUEUED",
+  "row_version": 5,
+  "interaction_id": "55555555-5555-4555-8555-555555555555",
+  "response_id": "66666666-6666-4666-8666-666666666666",
+  "run_segment_id": "77777777-7777-4777-8777-777777777777",
+  "segment_no": 2,
+  "continuation_mode": "REPLACE",
+  "idempotent_replay": false
+}

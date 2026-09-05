@@ -1,0 +1,17 @@
+{
+  "status": "success",
+  "provider": "project",
+  "document": {
+    "folder": "specs",
+    "name": "overview.md",
+    "mime": "text/markdown",
+    "checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "size": 42
+  },
+  "content": "# Overview\n",
+  "line_start": 1,
+  "line_end": 1,
+  "evidence_refs": ["ev_doc_001"],
+  "warnings": [],
+  "truncated": false
+}

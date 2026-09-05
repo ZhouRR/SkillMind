@@ -1,0 +1,11 @@
+{
+  "run_id": "00000000-0000-4000-8000-000000000010",
+  "run_attempt_id": "00000000-0000-4000-8000-000000000011",
+  "agent_session_id": null,
+  "sequence": 1,
+  "event_type": "RUN_SNAPSHOT",
+  "occurred_at": "2026-06-30T00:00:00Z",
+  "payload": { "status": "QUEUED" },
+  "trace_id": null
+}
+

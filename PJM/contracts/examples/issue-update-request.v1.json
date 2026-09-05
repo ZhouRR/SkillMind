@@ -1,0 +1,12 @@
+{
+  "target_locator": "42",
+  "changes": [
+    {
+      "path": "/fields/status_id",
+      "action": "SET",
+      "value": 3
+    }
+  ],
+  "expected_revision": "2026-07-18T10:15:30Z",
+  "idempotency_key": "issue-42-status-3"
+}

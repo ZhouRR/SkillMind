@@ -1,0 +1,17 @@
+{
+  "status": "success",
+  "provider": "csv",
+  "issue": {
+    "id": "fixture-001",
+    "subject": "脱敏 Fixture Ticket",
+    "description": "Synthetic content only.",
+    "status": "open",
+    "updated_at": "2026-06-30T00:00:00Z",
+    "fields": {},
+    "extensions": {}
+  },
+  "evidence_refs": ["ev_issue_001"],
+  "warnings": [],
+  "truncated": false
+}
+

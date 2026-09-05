@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.projectmind.local/providers/redmine-effect/v1/discovery.schema.json",
+  "title": "Redmine controlled-effect adapter discovery",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "provider",
+    "capabilities",
+    "atomic_precondition",
+    "idempotency"
+  ],
+  "properties": {
+    "protocol": { "const": "projectmind.redmine-effect/v1" },
+    "provider": { "const": "redmine" },
+    "capabilities": {
+      "type": "array",
+      "prefixItems": [{ "const": "issue.update/v1" }],
+      "items": false,
+      "minItems": 1,
+      "maxItems": 1
+    },
+    "atomic_precondition": { "const": "revision" },
+    "idempotency": { "const": "key" }
+  }
+}

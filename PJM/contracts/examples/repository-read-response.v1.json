@@ -1,0 +1,14 @@
+{
+  "status": "success",
+  "provider": "git",
+  "revision": "0000000000000000000000000000000000000000",
+  "path": "src/example.py",
+  "content": "def example():\n    return 'fixture'\n",
+  "content_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "line_start": 1,
+  "line_end": 2,
+  "evidence_refs": ["ev_repo_001"],
+  "warnings": [],
+  "truncated": false
+}
+

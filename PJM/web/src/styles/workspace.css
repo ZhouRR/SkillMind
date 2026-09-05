@@ -1,0 +1,585 @@
+/* 工作空间画面:左 rail(新建分析+执行历史)と右 main(現在 Run の観測)の 2 列構成。
+   業務模块の選択は sidebar の子菜单(shell.css の .sideNavSub)が持つ。 */
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(300px, 340px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.workspaceRail { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.workspaceMain { display: grid; gap: 16px; min-width: 0; align-content: start; }
+/* 実行入口 card は固定高、残り高さは履歴一覧に譲る(入力 form 本体は弹窗へ移動済み)。 */
+.workspaceRail .runLauncher { flex-shrink: 0; }
+.historyShortcut .panelHeader { align-items: center; }
+.historyShortcut .panelHeader h2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.historyShortcut > .hint { margin: 0; }
+
+/* 縦 scroll 中も新建 form と履歴を視界に残す。低い viewport では sticky を諦め自然配置に戻す。 */
+@media (min-height: 720px) {
+  .workspaceRail { position: sticky; top: 20px; max-height: calc(100vh - 40px); }
+  .workspaceRail .historyPanel { overflow: hidden; }
+}
+
+/* ---- Run facts:現在 Run の要点を 1 行 card 群で圧縮表示する ---- */
+.runFacts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0 0 14px; }
+.runFacts div {
+  display: grid;
+  gap: 3px;
+  align-content: start;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  padding: 8px 10px;
+  background: var(--surface-input);
+}
+/* 先頭は Run ID。全幅にして UUID の視認幅を確保する。 */
+.runFacts div:first-child { grid-column: 1 / -1; }
+.runFacts dt { color: var(--text-faint); font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.runFacts dd { overflow: hidden; margin: 0; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+
+/* タブ原語(.tabBar/.tab/.tabPanel/.tabAlert)は複数画面で使うため base.css へ移動した。 */
+
+/* ---- 監査 event timeline ---- */
+/* Scrollbar が右端の「详情」hint に重ならないよう、常に gutter 分の余白を確保する。
+   高さは viewport に追随させ、大画面で固定 440px に切り詰めない。 */
+.timeline { max-height: clamp(360px, 58vh, 720px); overflow: auto; margin: 0; padding: 0 10px 0 0; list-style: none; scrollbar-gutter: stable; }
+.timeline li { border-bottom: 1px solid var(--border); }
+.timeline li:last-child { border-bottom: 0; }
+.sequence { color: var(--text-faint); font: 600 11px var(--font-mono); }
+.eventDetails summary {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 0;
+  cursor: pointer;
+  list-style: none;
+}
+.eventDetails summary::-webkit-details-marker { display: none; }
+.eventDetails summary:hover .eventSummary strong { color: var(--accent); }
+.eventSummary strong { display: block; color: var(--text); font-size: 12px; font-weight: 600; transition: color .15s ease; }
+.eventSummary time { display: block; margin-top: 3px; color: var(--text-faint); font-size: 11px; }
+.detailHint { color: var(--text-faint); font-size: 11px; }
+.eventDetails[open] .detailHint { color: var(--accent); }
+.eventDetailBody { display: grid; gap: 12px; padding: 0 0 14px 54px; }
+.eventIdentity { display: grid; gap: 5px; margin: 0; }
+.eventIdentity div { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 10px; }
+.eventIdentity dt, .payloadBlock > span { color: var(--text-faint); font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.eventIdentity dd { overflow-wrap: anywhere; margin: 0; color: var(--text-muted); font: 11px/1.5 var(--font-mono); }
+.payloadBlock { min-width: 0; }
+.payloadBlock pre {
+  overflow: auto;
+  max-height: 320px;
+  margin: 6px 0 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  padding: 12px;
+  color: var(--text-muted);
+  background: var(--surface-input);
+  font: 11px/1.55 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Agent conversation ---- */
+/* 会話は観測の主役のため、viewport に応じて縦幅を広げ、大画面での固定 560px 打ち切りをやめる。 */
+.conversation { display: grid; gap: 10px; max-height: clamp(420px, 62vh, 780px); overflow-y: auto; padding-right: 8px; scrollbar-gutter: stable; }
+.message { border: 1px solid var(--border); border-radius: var(--radius); padding: 13px 14px; background: var(--surface-input); }
+/* User と Agent は同じ幅で左右を揃え、役割は背景と左縁の色で区別する。 */
+.messageUser { border-color: var(--accent-border); border-left: 3px solid var(--accent-strong); background: var(--accent-soft); }
+.messageAgent { border-left: 3px solid var(--border-strong); }
+.messageMeta { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.messageMeta strong { color: var(--text-hi); font-size: 12px; }
+.messageMeta span { color: var(--text-faint); font: 10px var(--font-mono); text-transform: uppercase; }
+.message p { margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.65; }
+.message code { color: var(--accent); font-size: 11px; }
+.message dl { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 14px; margin: 12px 0 0; }
+.message dl div { display: flex; justify-content: space-between; gap: 10px; border-top: 1px solid var(--border); padding-top: 6px; }
+.message dt, .message dd { margin: 0; font-size: 12px; }
+.message dt { color: var(--text-faint); }
+.message dd { color: var(--text-muted); }
+.message pre { overflow: auto; max-height: 280px; margin: 0; color: var(--text); font: 12px/1.65 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Streaming 中の枠と cursor は live cyan で「進行中」を伝える。 */
+.messageStreaming { border-color: rgba(85, 214, 240, .4); }
+.streamCursor { display: inline-block; width: 6px; height: 13px; margin-left: 3px; background: var(--live); vertical-align: -2px; animation: streamBlink .9s step-end infinite; }
+.streamWaiting { margin: 0; border: 1px dashed var(--border-strong); border-radius: var(--radius-small); padding: 14px; color: var(--text-faint); font-size: 12.5px; line-height: 1.6; }
+.message .structuredStreaming { color: var(--text-muted); font-size: 13px; }
+.structuredDigest { display: grid; gap: 8px; }
+.structuredDigest strong { color: var(--text-hi); }
+.digestFacts { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.digestFacts li { border: 1px solid var(--border-strong); border-radius: 999px; padding: 2px 10px; color: var(--text-muted); background: var(--surface-raised); font-size: 11px; }
+.message .digestHint { color: var(--text-faint); font-size: 11px; }
+@keyframes streamBlink { 50% { opacity: 0; } }
+
+/* ---- Result と Evidence ---- */
+.resultView { display: grid; gap: 14px; }
+.technicalToggleRow { display: flex; justify-content: flex-end; }
+.technicalToggleRow .secondaryButton { color: var(--text-faint); }
+/* 結果には Skill 次第で任意長の識別子・URI・JSON が載る。grid/flex item の既定 min-width:auto は
+   track を min-content まで広げ、長い一続きの文字列があると画面外まで押し出す。
+   結果区画の入れ子はすべて 0 まで縮められるようにして、溢れを内容側の折り返しで解決させる。
+   :where() で特異度 0 にし、個別規則の上書きを妨げない。 */
+.resultView :where(section, div, dl, ol, ul, li, article, p, pre, details, summary, span, strong, code) { min-width: 0; }
+
+/* ---- 備査情報の折り畳み区画(工具・証拠・会話監査・変更・原始 JSON・評価) ---- */
+.resultCollapse { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-small); background: var(--surface-input); }
+.resultCollapse > summary {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 11px 13px;
+  cursor: pointer;
+  list-style: none;
+  transition: background .15s ease;
+}
+.resultCollapse > summary::-webkit-details-marker { display: none; }
+.resultCollapse > summary:hover { background: rgba(255, 255, 255, .025); }
+.resultCollapse > summary::before { content: "▸"; flex-shrink: 0; color: var(--text-faint); font-size: 11px; }
+.resultCollapse[open] > summary::before { content: "▾"; }
+.resultCollapseTitle { overflow: hidden; color: var(--text-hi); font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.resultCollapse > summary .eventCount { flex-shrink: 0; margin-left: auto; }
+.resultCollapseBody { display: grid; gap: 10px; border-top: 1px solid var(--border); padding: 13px; }
+.rawResultBody {
+  overflow: auto;
+  max-height: 320px;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-tiny);
+  padding: 10px;
+  color: var(--text-muted);
+  background: var(--surface-raised);
+  font: 11px/1.6 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ---- 対応が必要:回答待ち・承認待ちを結果より上で目立たせる ---- */
+.pendingActions {
+  border: 1px solid rgba(242, 182, 76, .38);
+  border-radius: var(--radius-small);
+  padding: 13px;
+  background: var(--warn-soft);
+}
+.pendingActions > .hint { margin: 0 0 4px; color: var(--warn); }
+/* 結論(要約・信頼度・要レビュー)は結果区画の先頭に固定する。本文は数十件へ伸びるため、
+   下まで読み進めた位置から「で、結論は何だったか」を確かめに戻る往復が起きる。
+   固定する以上は高さが命なので、縦積みをやめて 1 行へ寄せる。 */
+.resultSummary {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 11px 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .02), transparent 45%), var(--surface-raised);
+  box-shadow: var(--inset-hi), var(--shadow-panel);
+}
+.resultSummary > div { display: flex; flex: 1 1 260px; gap: 10px; align-items: baseline; }
+.resultSummary > div > span { flex-shrink: 0; color: var(--text-faint); font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+/* 要約は結論そのものなので消さない。3 行を超える分だけ畳み、全文は title で読める。 */
+.resultSummary h3 {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  color: var(--text-hi);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.resultSummary dl { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0; }
+.resultSummary dl div { display: flex; gap: 6px; align-items: baseline; }
+.resultSummary dt, .resultSummary dd { margin: 0; font-size: 12px; }
+.resultSummary dt { color: var(--text-faint); }
+.resultSummary dd { overflow: hidden; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; }
+
+/* 一覧の尾部を畳む行。備査区画(.resultCollapse)ほど重くせず、行 1 本で総量だけ示す。 */
+.resultOverflow > summary {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  padding: 6px 2px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  list-style: none;
+}
+.resultOverflow > summary::-webkit-details-marker { display: none; }
+.resultOverflow > summary::before { content: "▸"; color: var(--text-faint); font-size: 10px; }
+.resultOverflow[open] > summary::before { content: "▾"; }
+.resultOverflow > summary:hover { color: var(--accent); }
+.resultOverflowBody { display: grid; gap: 8px; padding-top: 2px; }
+.resultSection { display: grid; gap: 10px; }
+.segmentTimeline { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.segmentTimeline > li { display: grid; gap: 7px; border: 1px solid var(--border); border-radius: var(--radius-small); padding: 11px 12px; background: var(--surface-input); }
+.segmentHeading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.segmentHeading strong { overflow: hidden; color: var(--text-hi); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.segmentHeading span { color: var(--info); font: 600 10px var(--font-mono); text-transform: uppercase; }
+/* 交互カードは利用者が読んで回答する本文のため、監査行より一段大きい 12.5px を確保する。 */
+.segmentTimeline p { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.55; }
+.interactionCard p { margin: 0; color: var(--text-muted); font-size: 12.5px; line-height: 1.55; }
+.segmentRelations { display: flex; flex-wrap: wrap; gap: 6px; }
+.segmentRelations span { border: 1px solid var(--border-strong); border-radius: 999px; padding: 2px 8px; color: var(--text-faint); font: 10px var(--font-mono); }
+.segmentTimeline .sessionLine { color: var(--text-faint); font-family: var(--font-mono); }
+/* 扇出の子分析は主分析の下へ字下げして併走を示す。完走しなかった一路だけ警告色にするのは、
+   同じ見た目で並べると「その面も見た」と読まれるため (計画 §23 P3a と同じ理由)。 */
+.segmentTimeline .sessionBranchLine { padding-left: 14px; border-left: 2px solid var(--border-strong); }
+.segmentTimeline .sessionBranchIncomplete { border-left-color: rgba(242, 182, 76, .38); color: var(--warn); }
+.interactionList { display: grid; gap: 10px; }
+.interactionCard { display: grid; gap: 9px; border: 1px solid var(--accent-border); border-radius: var(--radius-small); padding: 13px; background: var(--accent-soft); }
+.interactionCard h4 { margin: 0; color: var(--text-hi); font-size: 13.5px; line-height: 1.5; }
+.interaction-responded, .interaction-expired, .interaction-cancelled { border-color: var(--border); background: var(--surface-input); }
+.interactionAnswer { border-left: 2px solid var(--ok); padding-left: 9px; }
+.interactionForm { display: grid; gap: 9px; border-top: 1px solid var(--accent-border); padding-top: 10px; }
+.interactionForm label { display: grid; gap: 5px; color: var(--text-muted); font-size: 12px; }
+.interactionForm textarea { min-height: 74px; }
+.interactionOption { grid-template-columns: auto minmax(0, 1fr) !important; align-items: start; border: 1px solid var(--border); border-radius: var(--radius-tiny); padding: 9px 10px; background: var(--surface-input); cursor: pointer; transition: border-color .15s ease, background .15s ease; }
+.interactionOption:hover { border-color: var(--border-strong); }
+/* 選択済みの選択肢は native radio だけに頼らず、カード全体を accent で確定表示する。 */
+.interactionOption:has(input:checked) { border-color: var(--accent-border); background: var(--accent-soft); }
+.interactionOption:has(input:checked) strong { color: var(--text-hi); }
+.interactionOption input { margin-top: 2px; accent-color: var(--accent-strong); }
+.interactionOption span { display: grid; gap: 3px; color: var(--text-faint); font-size: 12px; line-height: 1.45; }
+.interactionOption strong { color: var(--text); font-size: 12.5px; }
+.proposalList, .effectTimeline { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.proposalCard, .effectTimeline > li { display: grid; gap: 9px; border: 1px solid rgba(242, 182, 76, .38); border-radius: var(--radius-small); padding: 13px; background: var(--warn-soft); }
+.proposalCard h4, .proposalCard p, .effectTimeline p { margin: 0; }
+.proposalCard h4 { color: var(--text-hi); font-size: 13px; line-height: 1.5; }
+.proposalCard pre { overflow: auto; max-height: 280px; margin: 0; border: 1px solid var(--border); border-radius: var(--radius-tiny); padding: 9px; color: var(--text-muted); background: var(--surface-input); font-size: 11px; }
+/* 代码変更の審査面。承認は唯一の闸門なので、path・操作・本文が一目で読める密度を保つ。 */
+.proposalChanges { display: grid; gap: 7px; }
+.proposalFile { border: 1px solid var(--border); border-radius: var(--radius-tiny); background: var(--surface-input); }
+.proposalFile > summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 7px 9px; cursor: pointer; font-size: 12px; }
+.proposalFile > summary code { color: var(--text-hi); font-size: 12px; }
+.proposalFile .changeAction { border-radius: 999px; padding: 1px 8px; font-size: 11px; }
+.proposalFile .change-set { color: var(--text-hi); background: var(--surface-raised); }
+.proposalFile .change-remove { color: var(--danger); background: var(--danger-soft, rgba(214, 96, 96, .16)); }
+.proposalFileBody { max-height: 320px; border: 0; border-top: 1px solid var(--border); border-radius: 0; color: var(--text-hi); font-size: 11px; line-height: 1.55; white-space: pre; }
+.proposalFacts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px 16px; margin: 0; }
+.proposalFacts div { display: flex; justify-content: space-between; gap: 8px; }
+.proposalFacts dt, .proposalFacts dd { margin: 0; font-size: 11px; }
+.proposalFacts dt { color: var(--text-faint); }
+.proposalFacts dd { overflow: hidden; color: var(--text-muted); text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.proposalDecision { display: grid; gap: 9px; border-top: 1px solid rgba(242, 182, 76, .38); padding-top: 10px; }
+.proposalDecision label { display: grid; gap: 5px; color: var(--text-muted); font-size: 12px; }
+.proposalDecision textarea { min-height: 68px; }
+.proposal-applied, .proposal-rejected, .proposal-stale, .proposal-failed { border-color: var(--border); background: var(--surface-input); }
+.effectTimeline code { display: block; overflow-wrap: anywhere; color: var(--danger); font-size: 10px; }
+.outcomeEnvelope { display: grid; gap: 12px; }
+.outcomeStatus { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--accent-border); border-radius: var(--radius-small); padding: 8px 10px; background: var(--accent-soft); }
+.outcomeStatus strong { color: var(--accent); font-size: 11px; letter-spacing: .04em; }
+.outcomeStatus span { color: var(--text-faint); font: 10px var(--font-mono); }
+.outcomeGroup { display: grid; gap: 8px; }
+/* 件数 badge は既定で block(grid)なので、見出しを flex にしないと行が割れる。 */
+.outcomeGroup h4 { display: flex; gap: 8px; align-items: center; margin: 0; color: var(--text-muted); font-size: 12px; }
+/* 畳んだ一覧の総数は補助情報。tab や折り畳み見出しの badge より一段小さく置く。 */
+.outcomeGroup h4 .eventCount { min-width: 22px; height: 18px; font-size: 10.5px; }
+.outcomeGroup > p { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.55; }
+.outcomeCard { display: grid; gap: 7px; border: 1px solid var(--border); border-radius: var(--radius-small); padding: 11px 12px; background: var(--surface-input); }
+.outcomeCard > div:first-child { display: flex; justify-content: space-between; gap: 12px; }
+.outcomeCard strong { color: var(--text); font-size: 12.5px; }
+.outcomeCard span { color: var(--info); font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.outcomeCard p, .outcomeCard pre { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.55; }
+.outcomeCard pre { overflow: auto; max-height: 260px; white-space: pre-wrap; }
+.outcomeColumns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.outcomeRefs { display: flex; flex-wrap: wrap; gap: 6px; }
+.outcomeRefs code, .outcomeCard > code { border: 1px solid var(--accent-border); border-radius: var(--radius-tiny); padding: 3px 6px; overflow-wrap: anywhere; color: var(--accent); background: var(--accent-soft); font-size: 10px; }
+.outcomeRefSummary { color: var(--text-faint); font-size: 10.5px; }
+.technicalResultDetails { border: 1px dashed var(--border-strong); border-radius: var(--radius-small); padding: 9px 10px; }
+.technicalResultDetails > summary { color: var(--text-muted); cursor: pointer; font-size: 12px; list-style: none; }
+.technicalResultDetails > summary::-webkit-details-marker { display: none; }
+.technicalResultDetails > summary::before { content: "▸"; display: inline-block; margin-right: 6px; color: var(--text-faint); }
+.technicalResultDetails[open] > summary::before { content: "▾"; }
+.technicalResultDetails > .schemaFacts,
+.technicalResultDetails > .runFacts { margin-top: 10px; }
+.subsectionHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.subsectionHeader h3 { margin: 0; color: var(--text-hi); font-size: 13px; }
+.subsectionHeader span {
+  display: grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  border-radius: var(--radius-tiny);
+  color: var(--text-muted);
+  background: var(--surface-raised);
+  font: 600 10px var(--font-mono);
+}
+.evidenceList { display: grid; gap: 8px; }
+.toolSummaryList { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.toolSummaryList li { border: 1px solid var(--border); border-radius: var(--radius-small); padding: 10px 11px; background: var(--surface-input); }
+.toolSummaryList strong { color: var(--text); font-size: 12px; }
+.toolSummaryList p { margin: 5px 0 0; color: var(--text-faint); font-size: 11.5px; line-height: 1.5; }
+
+/* ---- 業務データ明細:frozen output Schema に沿った任意構造の描画 ---- */
+/* 列数も値の長さも Skill 次第で決まるため、Run 事実行(.runFacts)の固定 3 列・省略表示は
+   使えない。scalar だけ並列に置き、配列と object は全幅を取って折り返す。 */
+.schemaFacts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+.schemaFacts > div {
+  display: grid;
+  gap: 5px;
+  align-content: start;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  padding: 9px 10px;
+  background: var(--surface-input);
+}
+.schemaFacts > .schemaFactWide { grid-column: 1 / -1; }
+.schemaFacts dt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-faint);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  line-height: 1.45;
+}
+/* 契約 key は追跡用の副表示。ラベルと同じ強さで出すと英語 key が主役に見える。 */
+.schemaFacts dt code { color: var(--text-faint); font: 400 9.5px var(--font-mono); opacity: .7; }
+.schemaFacts dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.55;
+}
+/* 入れ子は 1 列へ畳む。深い階層で列を割ると 1 field あたりの幅が読めない幅まで落ちる。 */
+.schemaFacts .schemaFacts { grid-template-columns: minmax(0, 1fr); }
+.schemaItemList { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.schemaItemList > li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  padding: 10px 11px;
+  background: var(--surface-raised);
+}
+/* 序号は値と地続きに見せない。以前は inline の strong で、次の値と繋がって読めていた。 */
+.schemaItemIndex {
+  display: grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-tiny);
+  padding: 0 5px;
+  color: var(--text-faint);
+  background: var(--surface-input);
+  font: 600 10px var(--font-mono);
+}
+.schemaItemBody { min-width: 0; }
+.schemaScalarList { display: flex; flex-wrap: wrap; gap: 6px; }
+.schemaScalarList code {
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-tiny);
+  padding: 3px 6px;
+  overflow-wrap: anywhere;
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-size: 10px;
+}
+.toolSummaryList > li > div { display: flex; justify-content: space-between; gap: 12px; }
+.toolSummaryList > li > div span { color: var(--ok); font-size: 10px; font-weight: 700; }
+.toolSummaryList code { display: block; overflow: hidden; margin-top: 6px; color: var(--text-faint); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+.compactEmpty { margin: 0; border: 1px dashed var(--border-strong); border-radius: var(--radius-small); padding: 12px; color: var(--text-faint); font-size: 12px; }
+.evidenceCard { border: 1px solid var(--border); border-radius: var(--radius-small); padding: 0 12px; background: var(--surface-input); }
+.evidenceCard summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; cursor: pointer; list-style: none; }
+.evidenceCard summary::-webkit-details-marker { display: none; }
+.evidenceCard summary > span:first-child { display: grid; gap: 3px; }
+.evidenceCard summary strong { overflow: hidden; color: var(--accent); font: 600 10px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.evidenceCard summary small, .evidenceCard summary > span:last-child { color: var(--text-faint); font-size: 10px; }
+.evidenceCard dl { display: grid; gap: 5px; margin: 0 0 10px; }
+.evidenceCard dl div { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 8px; }
+.evidenceCard dt { color: var(--text-faint); font-size: 10px; }
+.evidenceCard dd { overflow-wrap: anywhere; margin: 0; color: var(--text-muted); font: 10px/1.5 var(--font-mono); }
+.evidenceCard pre, .rawResult pre {
+  overflow: auto;
+  max-height: 300px;
+  margin: 0 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-tiny);
+  padding: 10px;
+  color: var(--text-muted);
+  background: var(--surface-raised);
+  font: 11px/1.6 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.rawResult { border-top: 1px solid var(--border); padding-top: 12px; }
+.rawResult summary { color: var(--text-muted); cursor: pointer; font-size: 12px; }
+.rawResult pre { margin-top: 10px; }
+.evaluationList { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.evaluationItem { display: grid; gap: 8px; border: 1px solid var(--border); border-radius: var(--radius-small); padding: 11px; background: var(--surface-input); }
+.evaluationItem > div:first-child { display: flex; justify-content: space-between; gap: 12px; }
+.evaluationItem strong { color: var(--text); font-size: 12px; }
+.evaluationItem time, .evaluationItem small { color: var(--text-faint); font-size: 10.5px; }
+.evaluationItem > p { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.55; }
+.evaluationRevision { display: grid; gap: 7px; border-radius: var(--radius-tiny); padding: 9px; background: var(--surface-raised); }
+.evaluationRevision code { overflow-wrap: anywhere; color: var(--accent); font-size: 10px; }
+.evaluationRevision > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.evaluationRevision p { margin: 0; border: 1px solid var(--border); border-radius: var(--radius-tiny); padding: 7px; color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
+.evaluationRevision p span { display: block; margin-bottom: 3px; color: var(--text-faint); font-size: 10px; }
+.evaluationForm { display: grid; gap: 10px; border: 1px solid var(--border); border-radius: var(--radius-small); padding: 12px; background: var(--surface-raised); }
+.evaluationForm label, .revisionEditor label { display: grid; gap: 5px; color: var(--text-muted); font-size: 12px; }
+.evaluationForm textarea { min-height: 72px; }
+.evaluationForm .secondaryButton { justify-self: start; }
+.revisionEditor { border-top: 1px solid var(--border); padding-top: 9px; }
+.revisionEditor summary { margin-bottom: 9px; color: var(--text-muted); cursor: pointer; font-size: 12px; }
+.revisionEditor label + label { margin-top: 8px; }
+
+/* ---- Run history:左 rail 内で内部 scroll する ---- */
+.historyPanel { display: flex; flex-direction: column; min-height: 0; }
+.historyPanel .panelHeader { flex-shrink: 0; }
+/* 作用域 badge は見出しの直後に置き、右端の更新 button と混ざらないようにする。 */
+.historyPanel .panelHeader h2 { display: flex; align-items: center; gap: 8px; }
+/* 模块選択中の注記。scroll する一覧に潰されないよう縮小を止める。 */
+.historyPanel .hint { flex-shrink: 0; margin: 0 0 10px; }
+.historyList {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 8px;
+  align-content: start;
+  min-height: 120px;
+  overflow-y: auto;
+  padding-right: 6px;
+  scrollbar-gutter: stable;
+}
+.historyItem { overflow: hidden; flex-shrink: 0; border: 1px solid var(--border); border-radius: var(--radius-small); background: var(--surface-input); transition: border-color .15s ease, background .15s ease, box-shadow .15s ease; }
+.historyItem:hover { border-color: var(--border-strong); background: var(--surface-raised); }
+/* 現在開いている Run は sidebar の現在地表示と同じ「accent 面+左縦棒」で示し、hover と明確に区別する。 */
+.historySelected { border-color: var(--accent-border); background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent-strong); }
+.historySelected:hover { border-color: var(--accent-border); background: var(--accent-soft); }
+.historyItem > button { width: 100%; border: 0; padding: 11px 12px; color: inherit; background: transparent; cursor: pointer; text-align: left; }
+.historyPrimary { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.historyPrimary > span:first-child { display: grid; gap: 3px; min-width: 0; }
+.historyPrimary strong { overflow: hidden; color: var(--text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.historyPrimary small { color: var(--text-faint); font-size: 11px; }
+.historyItem p { overflow: hidden; margin: 8px 0; color: var(--text-muted); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.historyMeta { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; color: var(--text-faint); font-size: 11px; }
+.historyMeta code { grid-column: 1 / -1; overflow: hidden; color: var(--text-faint); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.historyPagination { display: flex; flex-shrink: 0; align-items: center; justify-content: center; gap: 14px; margin-top: 12px; }
+.historyPagination .secondaryButton:disabled { cursor: not-allowed; opacity: .4; }
+.historyPagination span { color: var(--text-faint); font: 11px var(--font-mono); }
+.historyPage { display: grid; gap: 14px; }
+.historyPage .panelHeader { align-items: flex-start; }
+.historyPage .panelHeader > div:first-child { min-width: 0; }
+.historyPage .panelHeader .hint { margin: 5px 0 0; }
+.historyPage .historyList { max-height: none; }
+
+/* ---- 项目文档管理器:project 文書を一覧・upload・download・削除する(upload button の見た目は base.css の .fileUploadButton) ---- */
+.documentUpload { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.documentList { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.documentItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  padding: 10px 12px;
+  background: var(--surface-input);
+  transition: border-color .15s ease;
+}
+.documentItem:hover { border-color: var(--border-strong); }
+.documentInfo { display: grid; gap: 3px; min-width: 0; }
+.documentInfo strong { overflow: hidden; color: var(--text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.documentInfo span { overflow: hidden; color: var(--text-faint); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.documentActions { display: flex; flex-shrink: 0; gap: 8px; }
+/* 寸法は .compactButton が持つ。ここは download 用の <a> を button と同じ行に揃える分だけ。 */
+.documentActions .secondaryButton { display: inline-flex; align-items: center; text-decoration: none; }
+.documentActions .secondaryButton:disabled { cursor: wait; opacity: .5; }
+/* Preview 上限超過は待機ではなく不可の合図。 */
+.documentActions .secondaryButton[title]:disabled { cursor: not-allowed; }
+
+/* ---- 文書 tree:folder path を実階層として開閉表示する ---- */
+.documentTree { display: grid; gap: 8px; }
+.docFolder { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-small); background: var(--surface-input); }
+.docFolder summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+  list-style: none;
+  transition: background .15s ease;
+}
+.docFolder summary:hover { background: rgba(255, 255, 255, .025); }
+.docFolder summary::-webkit-details-marker { display: none; }
+.docFolder summary::before { content: "▸"; color: var(--text-faint); font-size: 11px; }
+.docFolder[open] > summary::before { content: "▾"; }
+.docFolder summary svg { flex-shrink: 0; width: 15px; height: 15px; fill: none; stroke: var(--accent); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.docFolder summary strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.docFolderCount { margin-left: auto; color: var(--text-faint); font: 600 11px var(--font-mono); }
+.docFolderBody { display: grid; gap: 8px; border-top: 1px solid var(--border); padding: 10px 10px 10px 24px; }
+
+/* ---- 文書 preview:枠は共通 modal(base.css)に委ね、本文の見せ方だけをここで持つ ---- */
+.previewText { margin: 0; color: var(--text-muted); font: 12px/1.65 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* HTML 文書は書き手の想定(明色)で表示するため、frame 背景だけ白へ固定する。 */
+.previewFrame { width: 100%; height: min(62vh, 640px); border: 1px solid var(--border); border-radius: var(--radius-small); background: #ffffff; }
+
+/* ---- 応答式 layout ---- */
+@media (max-width: 960px) {
+  .workspace { grid-template-columns: 1fr; }
+  .workspaceRail { position: static; max-height: none; }
+  .workspaceRail .historyPanel { overflow: visible; }
+  .historyList { min-height: 0; overflow-y: visible; }
+}
+
+@media (max-width: 480px) {
+  .runFacts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .schemaFacts { grid-template-columns: minmax(0, 1fr); }
+  .eventDetailBody { padding-left: 0; }
+  .eventIdentity div { grid-template-columns: 68px minmax(0, 1fr); }
+  .message dl { grid-template-columns: 1fr; }
+  .resultSummary { grid-template-columns: 1fr; }
+  .outcomeColumns { grid-template-columns: 1fr; }
+  .documentItem { flex-direction: column; align-items: stretch; }
+  .documentActions { justify-content: flex-end; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .streamCursor { animation: none; }
+}
+/* ---- 并行分析（扇出）:結論の根拠がどこまで揃っているかを読ませる ---- */
+.subagentSection { display: grid; gap: 10px; min-width: 0; }
+/* 未完了の面があるときだけ枠を warn 色へ。常時強調すると「いつも何かある」に見えて麻痺する。 */
+.subagentIncomplete { border-color: rgba(242, 182, 76, .38); background: var(--warn-soft); }
+.subagentDispatch { display: grid; gap: 8px; min-width: 0; }
+.subagentDispatch > * { min-width: 0; overflow-wrap: anywhere; }
+.subagentBranches { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; min-width: 0; }
+.subagentBranches li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  padding: 8px 10px;
+  background: var(--surface-input);
+}
+.subagentBranches strong { min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
+.subagentBranches code { margin-left: auto; color: var(--text-faint); font-size: 11.5px; }
+
+/* 完了と未完了を一目で分ける。同じ見た目だと部分的な網羅を全面的な確認と読む。 */
+.branch-completed { border-color: rgba(63, 214, 143, .38); color: var(--ok); background: var(--ok-soft); }
+.branch-failed,
+.branch-timed_out { border-color: rgba(251, 113, 133, .38); color: var(--danger); background: var(--danger-soft); }
+.branch-cancelled { border-color: var(--border-strong); color: var(--text-muted); background: var(--surface-raised); }

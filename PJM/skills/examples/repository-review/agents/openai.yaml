@@ -1,0 +1,4 @@
+interface:
+  display_name: "リポジトリレビュー"
+  short_description: "repository file 1 つを evidence 付きでレビューする"
+  default_prompt: "$repository-review で、固定 revision の repository file を 1 つ調査し、evidence に基づく findings を報告する。"

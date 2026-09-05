@@ -1,0 +1,12 @@
+{
+  "status": "success",
+  "provider": "workspace",
+  "path": "input/repository/src/example.py",
+  "content": "def authorize(actor):\n    return actor.is_member\n",
+  "content_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "line_start": 1,
+  "line_end": 2,
+  "evidence_refs": ["ev_workspace_001"],
+  "warnings": [],
+  "truncated": false
+}

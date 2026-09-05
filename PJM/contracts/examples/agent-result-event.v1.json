@@ -1,0 +1,14 @@
+{
+  "run_id": "00000000-0000-4000-8000-000000000010",
+  "run_attempt_id": "00000000-0000-4000-8000-000000000011",
+  "agent_session_id": "00000000-0000-4000-8000-000000000012",
+  "sequence": 9,
+  "event_type": "RESULT_COMPLETED",
+  "occurred_at": "2026-07-01T00:00:00Z",
+  "payload": {
+    "subtype": "success",
+    "num_turns": 3,
+    "structured_output": { "summary": "Ticket analysis completed" }
+  },
+  "trace_id": "trace-example-001"
+}

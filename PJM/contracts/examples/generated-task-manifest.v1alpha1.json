@@ -1,0 +1,138 @@
+{
+  "manifest_version": "projectmind/v1alpha1",
+  "identity": {
+    "skill_key": "repository-review",
+    "source_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "interpretation_id": "00000000-0000-4000-8000-000000000123",
+    "interpreter_version": "projectmind-skill-interpreter/2.3.0"
+  },
+  "compatibility": {
+    "level": "adapted",
+    "confidence": 0.8,
+    "diagnostics": []
+  },
+  "tasks": [
+    {
+      "key": "review-file",
+      "type": "immediate",
+      "input_contract": {
+        "contract_version": "projectmind.task-contract-draft/v1",
+        "type": "object",
+        "description": "Repository review request",
+        "fields": [
+          {
+            "key": "target_path",
+            "type": "string",
+            "required": true,
+            "description": "Path to review",
+            "min_length": 1
+          }
+        ]
+      },
+      "output_contract": {
+        "contract_version": "projectmind.task-contract-draft/v1",
+        "type": "object",
+        "description": "Repository review result",
+        "fields": [
+          {
+            "key": "summary",
+            "type": "string",
+            "required": true,
+            "description": "Review summary",
+            "min_length": 1
+          }
+        ]
+      },
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "Repository review request",
+        "properties": {
+          "target_path": {
+            "type": "string",
+            "description": "Path to review",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "target_path"
+        ]
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "Repository review result",
+        "properties": {
+          "summary": {
+            "type": "string",
+            "description": "Review summary",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "summary"
+        ]
+      },
+      "input_schema_checksum": "sha256:80d83714d6fd98b37626acec9bfe7c9ba8dc749812549f523c01a02e1281f75c",
+      "output_schema_checksum": "sha256:6c93a572141b1a0e467764f88baead1a9975517b1746ba2f27facebd45f4c16c",
+      "contract_source_trace": [
+        {
+          "contract": "input",
+          "field_path": "/target_path",
+          "source_path": "SKILL.md",
+          "source_section": "Inputs",
+          "line": 8
+        },
+        {
+          "contract": "output",
+          "field_path": "/summary",
+          "source_path": "SKILL.md",
+          "source_section": "Output",
+          "line": 15
+        }
+      ]
+    }
+  ],
+  "capability_blueprint": {
+    "blueprint_version": "projectmind.capability-blueprint/v1",
+    "identity": {
+      "skill_key": "repository-review",
+      "source_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "interpretation_id": "00000000-0000-4000-8000-000000000123",
+      "interpreter_version": "projectmind-skill-interpreter/2.3.0"
+    },
+    "compatibility": {
+      "level": "adapted"
+    },
+    "capabilities": [
+      {
+        "key": "repository-review.review-file",
+        "title": "Review File"
+      }
+    ],
+    "tasks": [
+      {
+        "key": "review-file",
+        "capability": "repository-review.review-file",
+        "objective": "Review the requested target path and report findings."
+      }
+    ],
+    "resource_requirements": [],
+    "guidance": {
+      "required_rules": [],
+      "recommended_steps": [],
+      "quality_criteria": [],
+      "prohibited_actions": []
+    },
+    "source_traces": [
+      {
+        "target": "/tasks/0",
+        "path": "SKILL.md",
+        "line": 3,
+        "reason": "The Goal section defines the review objective."
+      }
+    ]
+  }
+}

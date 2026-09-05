@@ -1,0 +1,20 @@
+{
+  "objective": "同一个提交里有三个互不相关的改动面，需要分别核对后再汇总结论。",
+  "branches": [
+    {
+      "key": "schema-change",
+      "objective": "核对 migration 与 model 是否一致，列出不一致的列与约束。",
+      "capabilities": ["workspace.read/v1", "workspace.search/v1"]
+    },
+    {
+      "key": "api-surface",
+      "objective": "核对新增 endpoint 的 response model 是否只暴露许可字段。",
+      "capabilities": ["workspace.read/v1", "workspace.search/v1"]
+    },
+    {
+      "key": "issue-context",
+      "objective": "读取关联票据，确认改动范围与票据描述相符。",
+      "capabilities": ["issue.read/v1"]
+    }
+  ]
+}

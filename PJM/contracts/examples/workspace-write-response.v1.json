@@ -1,0 +1,10 @@
+{
+  "status": "success",
+  "provider": "workspace",
+  "path": "output/review-summary.md",
+  "content_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "bytes_written": 63,
+  "created": true,
+  "evidence_refs": ["ev_workspace_write_001"],
+  "warnings": []
+}

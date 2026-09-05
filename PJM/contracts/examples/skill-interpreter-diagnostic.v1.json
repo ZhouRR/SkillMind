@@ -1,0 +1,7 @@
+{
+  "severity": "warning",
+  "code": "tool_mapping_requires_review",
+  "message": "The proposed Tool requirement must pass the platform capability gate.",
+  "path": "SKILL.md",
+  "line": 3
+}
