@@ -4,6 +4,17 @@
 
 ProjectMind 把目录式 Skill 中的工作方法，转化为项目成员可以选择、配置和执行的任务。平台统一提供资源访问、持续执行、人工参与、证据和审计。
 
+## 从这里继续阅读
+
+| 你的目的 | 建议阅读顺序 |
+| --- | --- |
+| 第一次了解项目 | 本页 → [系统结构与设计分工](architecture.md) → [核心术语](glossary.md) |
+| 准备接续开发 | [当前状态与下一步](../planning/roadmap.md#13-当前执行状态) → [变更指南](../development/change-guide.md) → 对应领域设计 |
+| 想看清楚界面与运行过程 | [Workspace](../design/workspace.md) → [Task Flow 目标设计](../design/task-flow.md) |
+| 需要启动或排障 | [Quickstart](../operations/quickstart.md) → [按问题找 Runbook](../operations/runbook.md#按问题找入口) |
+
+正文标注“后续设计”的内容不能作为当前操作说明；历史归档只用于追溯。完整目录见[文档导航](../README.md)。
+
 例如，用户导入一份“故障票分析”Skill，管理员发布解释后的能力版本，并在项目中启用。成员绑定票据、代码库和设计文档后启动任务；Agent 分析时可以提问、生成报告或提出更新建议。需要修改外部系统时，平台展示具体变更、取得批准并回读验证。
 
 ## 一次使用过程
@@ -38,10 +49,10 @@ ProjectMind 把目录式 Skill 中的工作方法，转化为项目成员可以�
 | 已有产品能力 | 边界 |
 | --- | --- |
 | 通用 Skill 解释 | 业务规则来自 Skill；平台固定通用协议，业务输入/输出 Schema 可选 |
-| 项目资源访问 | Integration 与 ResourceBinding 固定资源、版本和范围；Agent 不接触凭据 |
+| 项目资源访问 | Integration 与 ResourceBinding 管授权范围，内容冻结时点因资源而异；Agent 不接触凭据 |
 | 持续执行与人工参与 | 一个 Run 可包含多个 Segment/Session；技术恢复记为 Attempt |
 | 外部变更 | observe → propose → apply；repository 写入始终需要人工批准 |
-| 时刻启动与只读子分析 | 调度复用 Run 创建服务；子 Agent 在主 Run 的有限预算和只读能力内执行 |
+| 时刻启动与只读子分析 | 调度复用 Run 创建服务；子 Agent 只读且单次分配有界，全 Run 共享预算仍待补齐 |
 | 结果与评价 | Result 保留 AI 原始输出；人工修订追加为 Evaluation |
 
 Task Flow 是下一阶段的展示设计；generated FrontendModule 只有版本与静态检查等前置实现，尚不能构建和运行。不能把设计章节中的目标能力当作已经可用的页面或 API。

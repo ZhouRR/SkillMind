@@ -503,11 +503,12 @@
           <p class="lede">
             ProjectMind 是 <strong>Skill 驱动的项目管理 AI 执行平台</strong>：把团队沉淀的分析方法导入为平台资产,
             在项目边界内把目标、资源与指导完整交给 AI Agent 自主执行,每一步都留下证据与审计记录,并通过用户交互与人工评价持续改进。
-            本页说明平台由哪些业务能力组成、Skill 与任务如何流转;字段与状态机的权威定义见 <code>docs/04</code>。
+            本页说明平台由哪些业务能力组成、Skill 与任务如何流转；字段与状态机见 <a href="../index.html#docs/design/domain-model.md::">领域模型</a>，实现与验收差距见 <a href="../index.html#docs/planning/roadmap.md::">实施计划</a>。
           </p>
           <div class="doc-meta">
             <span>文档编号 PJM-DOC-02</span>
-            <span>更新日期 2026-07-18</span>
+            <span>文档核对 2026-09-05 · 非部署验收日期</span>
+            <a href="../index.html">返回文档中心</a>
           </div>
         </div>
         <button class="print-button" type="button" onclick="window.print()">打印 / 保存 PDF</button>
@@ -523,7 +524,7 @@
       </div>
       <div class="value-card">
         <h3>全程可审计</h3>
-        <p>每次执行冻结不可变快照,过程事件、工具调用、证据与结果全部落库;结论可以追溯到具体票据、代码和文件位置。</p>
+        <p>执行保存精确版本、输入与权限；持久事件、工具调用、证据与结果可追溯。流式文字增量不全部持久化；资源授权与内容快照是不同边界，文档冻结链路仍在联调。</p>
       </div>
       <div class="value-card">
         <h3>默认安全边界</h3>
@@ -542,7 +543,7 @@
           <p>由上至下阅读职责层级;同一行是一组共同完成该层业务目标的对象。结构关系,非执行顺序。</p>
         </div>
         <span class="legend">
-          <span class="live"><i></i>已上线</span>
+          <span class="live"><i></i>已有实现，验收见计划</span>
           <span class="plan"><i></i>规划中</span>
         </span>
       </div>
@@ -673,7 +674,7 @@
             <div class="capability">
               <span class="object-name">Evidence</span>
               <h4>分析证据</h4>
-              <p>每条结论都关联到票据、代码、文件位置与工具调用来源。</p>
+              <p>保存票据、代码、文件位置与工具调用来源；结论是否被证据充分支持仍需模型质量与人工验收。</p>
             </div>
             <div class="capability">
               <span class="object-name">Outcome / Proposal</span>
@@ -699,7 +700,7 @@
           <li class="step"><strong>解释</strong><span>生成能力蓝图</span></li>
           <li class="step"><strong>调整</strong><span>人工修订与预览</span></li>
           <li class="step"><strong>发布</strong><span>门禁校验并版本化</span></li>
-          <li class="step"><strong>使用</strong><span>项目任务目录可见</span></li>
+          <li class="step"><strong>启用</strong><span>Project 显式启用精确版本</span></li>
         </ol>
       </article>
 
@@ -768,7 +769,7 @@
             <span class="message">提交目标、资源绑定与幂等键</span>
             <span class="actor target">API / 任务中心</span>
           </div>
-          <p class="event-detail">API 校验成员权限与必要资源,冻结 Skill、目标、权限上限、资源范围和限制,生成 Segment 1 的 AgentTaskBrief。</p>
+          <p class="event-detail">API 校验成员权限与必要资源，冻结 Skill、目标、权限、资源选择和限制。资源选择不自动等于外部内容已取得。</p>
         </li>
         <li class="sequence-event">
           <span class="event-number">04</span>
@@ -778,7 +779,7 @@
             <span class="message">写入执行记录与初始事件</span>
             <span class="actor target">数据库 / 存储</span>
           </div>
-          <p class="event-detail">Run 成为持续目标的权威记录;事务性投递保证数据库状态与异步分发一致。</p>
+          <p class="event-detail">Run、Segment 1 与待投递 Outbox 在同一事务保存；数据库是正本，异步消费者按幂等规则处理重发。</p>
         </li>
         <li class="sequence-event">
           <span class="event-number">05</span>
@@ -788,7 +789,7 @@
             <span class="message">Worker 领取任务并取得执行租约</span>
             <span class="actor target">Agent 运行时</span>
           </div>
-          <p class="event-detail">创建 RunSegment、技术 Attempt 与独立工作目录,装载完整 Skill guidance 和资源绑定。</p>
+          <p class="event-detail">领取已有 Segment，创建技术 Attempt 与工作目录；准备资源并冻结本段 AgentTaskBrief，装载完整 Skill guidance 和授权边界。</p>
         </li>
         <li class="sequence-event">
           <span class="event-number">06</span>
@@ -808,7 +809,7 @@
             <span class="message">返回标准化数据与证据定位</span>
             <span class="actor target">Agent 运行时</span>
           </div>
-          <p class="event-detail">AI 组合票据、代码与 Skill 规则进行分析,持续追加实际步骤、用量与证据事件;证据不足时不会伪造结论。</p>
+          <p class="event-detail">AI 组合票据、代码与 Skill 规则进行分析，记录工具调用、用量与证据。证据不足时应明确保留未知；平台结构校验不能保证模型不产生错误结论。</p>
         </li>
         <li class="sequence-event">
           <span class="event-number">08</span>
@@ -832,7 +833,7 @@
             <span class="message">提交 Outcome、证据、产物与可选变更提案</span>
             <span class="actor target">数据库 / 存储</span>
           </div>
-          <p class="event-detail">平台校验通用结果、Skill 质量标准与证据;外部变更先形成可审查 Proposal,批准执行后回读验证,再以终态事件收敛。</p>
+          <p class="event-detail">平台校验结果结构与引用归属；Skill 业务规则的语义正确性另行验收。外部变更先形成 Proposal，经批准或精确预授权执行后回读验证。</p>
         </li>
         <li class="sequence-event">
           <span class="event-number">10</span>
@@ -870,7 +871,7 @@
 
     <section class="panel boundaries" aria-labelledby="boundary-title">
       <h2 id="boundary-title">平台承诺的三条业务边界</h2>
-      <p>这些边界由系统结构保证,而不是流程约定;任何功能演进都不会破坏它们。</p>
+      <p>这些约束需要实现、负向测试和部署验收共同证明。授权、内容与物化副本的冻结时点，以及文档联调差距，见<a href="../design/resource-snapshots.md">资源快照设计</a>。</p>
       <div class="boundary-grid">
         <div class="boundary">
           <strong>项目即隔离边界</strong>
@@ -891,7 +892,7 @@
   <footer>
     <div class="footer-inner">
       <span>ProjectMind · Skill 驱动的项目管理 AI 执行平台</span>
-      <span>本页为业务可视化摘要;权威定义见 docs/04(领域模型)与 docs/07(工作空间规格)</span>
+      <span>可视化摘要 · <a href="../index.html#docs/design/workspace.md::">工作空间</a> · <a href="../index.html#docs/design/resource-snapshots.md::">资源快照边界</a></span>
     </div>
   </footer>
 </body>

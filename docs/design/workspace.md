@@ -133,7 +133,7 @@ Conversation、Run history、事件/会话时间线、Interaction 和 Proposal �
 
 ### 6.3 资源调整
 
-Run 已冻结的 Integration/revision/权限不能在中途替换。需要变更时创建新 Run。document 当前实际全集物化的限制见[资源快照](resource-snapshots.md)，界面不应承诺尚未实现的单文档隔离。
+Run 已冻结的资源选择与权限不能在中途替换。需要变更时创建新 Run；补充已有 scope 内的事实不等于换绑。document 的选择/快照链路处于联调阶段，界面不应承诺已经验收的单文档隔离。具体集合语义与仓库 revision 边界见[资源快照](resource-snapshots.md)。
 
 ## 7. 结果与人工评价
 
@@ -163,6 +163,8 @@ Run 已冻结的 Integration/revision/权限不能在中途替换。需要变更
 
 ONCE/CRON、timezone、触发预览、错过/重叠/失效行为以 [TaskSchedule](task-scheduling.md) 为准。创建前的重叠查询不能保证并发创建绝不重叠，不在 UI 承诺严格串行或精确一次。
 
+保存前展示服务端计算的下次触发时间和 timezone：CRON 至少提供三次预览供用户确认，ONCE 只显示单次。页面不独立实现另一套 cron/DST 求值。
+
 ## 9. 对话与调整
 
 当前支持运行中的 CLARIFICATION/CHOICE/REVIEW 响应、Proposal 审查与批准，以及 Skill 解释的显式追加调整。三者使用各自版本/幂等/权限协议。
@@ -181,7 +183,7 @@ ONCE/CRON、timezone、触发预览、错过/重叠/失效行为以 [TaskSchedul
 
 ### 11.2 静态检查
 
-现有拒绝项不能代替完整网络与运行时隔离。详见[生成模块构建网络](generated-modules.md#构建网络)。
+现有六组拒绝项、依赖白名单与字面扫描的局限见[静态拒绝与依赖](generated-modules.md#静态拒绝与依赖)。增加检查项时同步 static_analysis.py 与回归；这些检查不能代替完整网络与运行时隔离。
 
 ## 12. Runtime Sandbox 与 Host API
 

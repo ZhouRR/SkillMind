@@ -39,6 +39,23 @@ iframe 固定 `sandbox="allow-scripts"`，不加入 `allow-same-origin`、弹窗
 
 目标 CSP 还须约束 `base-uri`、`form-action`、`frame-src`、`object-src` 与嵌入方。connect-src 不负责所有导航/资源渠道；不能把它等同于完整网络隔离。原文依据见 [CSP sandbox](https://www.w3.org/TR/CSP3/#directive-sandbox) 与 [default-src](https://www.w3.org/TR/CSP3/#directive-default-src)。
 
+### 静态拒绝与依赖
+
+[static_analysis.py](../../PJM/backend/src/projectmind/modules/static_analysis.py) 目前按字面模式产生拒绝报告，包含文件、行号与摘录。以下是现有检查分组，不是完整 JavaScript 安全分析：
+
+| 拒绝码 | 匹配对象 |
+| --- | --- |
+| `dynamic_code_evaluation` | eval、new Function、innerHTML 赋值、document.write、dangerouslySetInnerHTML |
+| `direct_network_access` | fetch、WebSocket、EventSource、XMLHttpRequest、sendBeacon |
+| `host_context_access` | document.cookie、window.parent/top/opener、location 赋值、直接 parent/top.postMessage |
+| `external_resource_url` | 字符串中的 HTTP(S) 或协议相对外部 URL |
+| `dynamic_import` | import()、require() |
+| `persistent_storage_write` | localStorage、sessionStorage、indexedDB、caches.open |
+
+声明依赖白名单为 react、react-dom、@projectmind/module-sdk 与 @projectmind/ui；白名单本身不意味着内部包已经发布可用。拒绝非 registry 来源和 install/prepare 等 lifecycle script。依赖的实际固定版本由 lockfile 与构建流程证明。
+
+字面扫描会误报，也可能漏过混淆/间接调用，不能因检查通过就允许运行。模块与父窗口的通信应经受信任 SDK；生成业务源码不能借 Host 通信名义直接访问父窗口。测试入口为[静态分析回归](../../PJM/backend/tests/modules/test_module_static_analysis.py)。
+
 ### 构建网络
 
 [build_plan.py](../../PJM/backend/src/projectmind/modules/build_plan.py) 当前拒绝缺少 registry、已知公共 registry 与部分 lockfile 外部来源；这是前置检查，**不是完整 egress allowlist**。未列出的外部 host 仍不能被当作“已证明为内部”。

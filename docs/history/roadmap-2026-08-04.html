@@ -160,8 +160,9 @@
 <div class="wrap">
 
   <header class="page">
-    <h1>ProjectMind 路线图</h1>
-    <p>按「能力主线 × 当前状态」呈现进度。本文件是 <code>docs/01</code> §13 与 <code>docs/12</code> 的<strong>可视化投影</strong>，不维护第二份状态；如有冲突以 <code>docs/01</code> §13 为准。</p>
+    <h1>ProjectMind 路线图 · 历史快照</h1>
+    <p style="padding:16px;border:1px solid #b78532;border-radius:8px;background:#fff6e5;color:#684611"><strong>归档，不再维护进度。</strong>本页保留 2026-08-04 当时的汇总；“交付/验收”口径与现行状态分级不同，不能据此认定专项验收通过。请从 <a href="../index.html#docs/planning/roadmap.md::13-%E5%BD%93%E5%89%8D%E6%89%A7%E8%A1%8C%E7%8A%B6%E6%80%81">当前实施计划</a>继续阅读，或返回 <a href="../index.html">文档中心</a>。</p>
+    <p>以下按当时「能力主线 × 状态」呈现进度，来源是再编前的 <code>docs/01</code> §13 与 <code>docs/12</code>，仅供追溯。</p>
     <p class="meta">数据基准 2026-08-04 · 来源 docs/01 §13/§15/§19/§20/§21/§22/§23/§24/§25/§26 与 docs/12</p>
   </header>
 
@@ -298,7 +299,7 @@
 
   <section>
     <h2>交付时间线</h2>
-    <p class="lede">按日期展示已完成工作的结果和决策。完整记录见 <code>docs/12_ProjectMind_Delivery_History.md</code>。</p>
+    <p class="lede">按日期展示已完成工作的结果和决策。完整记录见 <code>docs/history/delivery-history.md</code>。</p>
     <ul class="timeline">
       <li style="--seg: var(--brand-bright)"><div class="when">2026-07-26</div><div class="what">本地环境补齐 · 子 Session 持久化 · 构建拒绝路径封堵</div>
         <div class="note"><b>「13 个 skip 来自本容器无 PostgreSQL」被推翻</b>：文档一直把它当外部约束记，实测容器有免密 sudo、apt 源可达，装的只是 client 包。装回 <code>postgresql-14</code> + <code>redis-server</code> 后 skip 归零。真正的收益不在件数——<b>migration <code>0025</code>/<code>0026</code> 至今没在任何真 PostgreSQL 上执行过 DDL</b>，其 CHECK 与部分索引是内存测试和 metadata 断言都验不到的。跑起来立刻暴露一个只有真 FK 库能发现的夹具缺陷：<code>run_segments</code> 与 <code>agent_sessions</code> 互指构成 FK <b>环</b>，SQLAlchemy 无法位相整列，一次 <code>add_all</code> 的插入顺序不定；生产路径不受影响（引用的是已 claim 的 Attempt），改夹具为按依赖逐行 flush。<b>子 Session 持久化工作包</b>：扇出 response 里的 <code>agent_session_id</code> 此前是每次生成的 <code>uuid4()</code>，<b>从不落库</b>——schema 与决策都承诺可查，实际是悬空引用；而子 Session 的 event 已全折叠进主 Session 的一次 ToolCall，这行就是唯一追溯锚点。落地撞上 schema：两个一意约束没限定对象，子 Session 共用父 Attempt 且多本同时 ACTIVE。migration <code>0027</code> 的处理是<b>把约束收窄到 PRIMARY 而非解除</b>（解除会让「一个 Attempt 两个本体 session」也通过，守着的不变条件就此消失）。<code>sdk_session_id</code> 改为 SUBAGENT 可空：分支在 SDK 开会话前失败时，NOT NULL 只能逼人<b>捏造一个 ID</b>，那正是该工作包在消除的缺陷。一组 branch 一个 transaction 写完（部分写入会让「只看了两个面」读成「两个面都看了」）；保存失败时省略字段而非返回查不到的值。时间线按 lineage 分组，<code>sessionsCount</code> 只数主分析，孤儿子分析保留为独立行。<b>生成模块构建拒绝路径</b>：拒绝路径不等镜像地址——它恰以「没有地址」为触发条件。核心判断是<b>只查配置不够</b>：凍结 lockfile 的 <code>resolved</code> 指向公网时，镜像怎么配都从公网取。Compose service 与 settings 字段刻意未加（跑不起来的 service 与没有消费方的旋钮都比不加更糟）。<b>899 passed / 0 skipped</b>、web 248 tests。</div></li>
@@ -413,7 +414,7 @@
   </section>
 
   <footer class="page">
-    状态正本：<code>docs/01_ProjectMind_PLAN.md</code> §13 ｜ 实施记录：<code>docs/12_ProjectMind_Delivery_History.md</code> ｜ 文档索引：<code>docs/README.md</code><br>
+    状态正本：<code>docs/planning/roadmap.md</code> §13 ｜ 实施记录：<code>docs/history/delivery-history.md</code> ｜ 文档索引：<code>docs/README.md</code><br>
     本文件为可视化投影，随 §13 更新而同步；如与正本不一致，以正本为准。
   </footer>
 

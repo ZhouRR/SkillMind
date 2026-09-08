@@ -13,9 +13,11 @@
 | 次に何を実装するか | [現在の計画と受入残項目](planning/roadmap.md) |
 | Skill をどう実行可能にするか | [Skill 契約](design/skill-contract.md)、[解釈・公開の実装](design/skill-interpretation.md) |
 | Run・資源・権限を変更する | [領域モデル](design/domain-model.md)、[Agent Runtime](design/agent-runtime.md)、[認証](design/authentication.md) |
+| 何がいつ凍結されるか | [資源快照と Run workspace](design/resource-snapshots.md)：文書集合、repository revision、再試行、幂等 |
 | 外部書き込み・時刻起動・子 Agent | [受控書き込み](design/repository-effects.md)、[調度](design/task-scheduling.md)、[並行子分析](design/subagents.md) |
 | 画面を変更する | [Workspace](design/workspace.md)、[Task Flow 設計](design/task-flow.md)、[生成モジュール設計](design/generated-modules.md) |
 | 開発環境・API・変更手順 | [ローカル開発](development/local-development.md)、[API 利用](development/api-usage.md)、[設計からコードへの対応](development/change-guide.md) |
+| 検証・生成 script を使う | [script の案内](../PJM/scripts/README.md)：読取検査、生成、実モデル利用を区別 |
 | 配備・復旧する | [起動と初期管理者](operations/quickstart.md)、[運用 Runbook](operations/runbook.md) |
 | JAF の品質を評価する | [JAF 受入 profile](acceptance/jaf-quality.md) |
 | 過去の判断を追う | [交付履歴](history/delivery-history.md)、[再編前の計画](history/unified-plan-2026-08-04.md) |
@@ -41,7 +43,7 @@ docs/
 
 ## 旧番号の対応
 
-コード注釈の `docs/06 §6.2` のような略記は文書 ID であり、ファイル path ではない。番号を維持した章へこの表から移動できる。旧 PLAN の各章は新計画の同番号から現在の設計へ案内する。
+コード注釈の `docs/06 §6.2` のような略記は文書 ID であり、ファイル path ではない。番号を維持した章へこの表から移動できる。旧 PLAN の各章は[計画末尾の引用索引](planning/roadmap.md#旧章节引用索引)から現在の設計へ案内する。現在状態の §13 は計画の先頭に置き、古い章を順番に読む必要はない。
 
 | 旧 ID | 現在の正本 |
 | --- | --- |

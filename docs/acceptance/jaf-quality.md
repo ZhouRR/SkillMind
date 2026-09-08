@@ -2,7 +2,7 @@
 
 本文定义现有 `Jaf 品質分析` Skill 如何迁移到 ProjectMind，并规定首版历史 Ticket 评价集、人工评价、准确度报告和端到端验收流程。
 
-> 2026-07-07 状态：`jaf.ticket.analyze` 的基础执行闭环已完成。本文件从“当前实施主线”调整为 JAF migration / regression / benchmark profile；平台后续以通用 Skills interpretation 和去 JAF 化为主，见 [docs/11](11_ProjectMind_Skills_Interpretation_Implementation_Spec.md)。
+> 定位：业务迁移与质量验收要求，不是平台实施进度表。先读[Skill 解释与发布](../design/skill-interpretation.md)；当前实现、部署和 benchmark 状态见[计划](../planning/roadmap.md#13-当前执行状态)。
 
 基础执行闭环使用手工冻结的 Native RuntimeManifest、标准 ViewSpec 和固定 fixture 验证平台纵向链路。其历史
 产物只用于审计读取；新的 JAF 验收与普通 Skill 一样，由 Interpreter 从说明生成 CapabilityBlueprint，
@@ -12,7 +12,7 @@
 
 ## 1. 现状结论
 
-现有 Skill 提供 6 类任务，但基础执行闭环只实现第一类：
+迁移调研的上游 Skill 分为 6 类任务；本验收首先覆盖单 Ticket，其余五类仅保留业务背景，不因此进入当前实现范围：
 
 | 任务 | 现有模式 | 主要输出 |
 | --- | --- | --- |
@@ -31,7 +31,7 @@
 
 ## 2. 安全前提（导入前必须完成）
 
-现有 Skill 文本包含直接连接信息和凭据。迁移前必须完成：
+迁移调研曾发现来源中包含直接连接信息和凭据。这是历史风险记录，不表示当前同梱包已被本次重新扫描，也不能据此认定已完成轮换。每次导入前必须确认：
 
 1. 轮换已经出现在 Skill 文本中的全部凭据。
 2. 从新 SkillSource、脚本、配置和测试 fixture 中删除明文凭据。
@@ -44,34 +44,30 @@
 
 ## 3. 迁移目标目录
 
-下列是后续业务包的建议组织，不是现存目录。当前回归输入见 [skills/examples](../../PJM/skills/examples/)；迁移素材见 [skills README](../../PJM/skills/README.md)。原始业务规则与完整历史保留，不能为目录美观改写 versioned 输入。
+下列是后续迁移的逻辑分区，不是现存目录。当前回归输入见 [skills/examples](../../PJM/skills/examples/)；迁移素材见 [skills README](../../PJM/skills/README.md)。原始业务规则与完整历史保留，不能为目录美观改写 versioned 输入。
 
 ```text
-jaf-quality-analysis/
-├── SKILL.md
-├── references/
-│   ├── ticket-analysis-rules.md
-│   ├── function-analysis-rules.md
-│   ├── application-analysis-rules.md
-│   ├── person-analysis-rules.md
-│   ├── aggregation-rules.md
-│   └── field-consistency-rules.md
-├── scripts/
-│   ├── ticket/
-│   ├── function/
-│   ├── application/
-│   ├── person/
-│   └── aggregate/
-├── tests/
-│   └── fixtures/
+可导入的 Skill package
+└── jaf-quality-analysis/
+    ├── SKILL.md
+    ├── references/                 业务定义、规则、字段解释
+    └── scripts/                    理解素材；存在不代表可执行
+
+Project 执行资源（由该次 Run 合法选择）
+├── Ticket/CSV 快照
+├── repository revision
+└── 字段映射、规模、设计文档          不含 case 答案
+
+独立评价存储（不导入、不挂载给 Agent）
 └── evaluation/
     ├── benchmark-v1.yaml
     ├── rubric-v1.yaml
     └── expected/
 ```
 
-CapabilityBlueprint、RuntimeManifest、可选 TaskContractDraft/ViewSpec 由 Interpreter 生成并调整后发布。上述目录只保留
-业务说明、受控脚本和验收素材；通用 Adapter 不依赖 `schemas/`、`views/` 或 ProjectMind 专用 metadata。
+CapabilityBlueprint、RuntimeManifest、可选 TaskContractDraft/ViewSpec 由 Interpreter 生成并调整后发布。通用 Adapter 不依赖 `schemas/`、`views/` 或 ProjectMind 专用 metadata。
+
+不能把 `evaluation/` 放进 Skill 的 references/tests 附件后再期望 Interpreter 自动忽略；它必须在导入包和执行资源之外。目录分开也不等于权限隔离：评价存储不得成为该 Run 可访问的 Integration、Project 文档或 workspace mount。无 Gold 的开发 fixture 可以单独用于回归，但不得混入正式评价答案。
 
 ## 4. 迁移改造规则
 
@@ -123,7 +119,7 @@ issue.search、issue.export_snapshot、repository.search/history/export、tabula
 | 工程质量目标 | 原因工程 × 检出工程基准 | 标准变更时更新 |
 | Knowledge base | 历史问题模式 | 默认只读，明确操作后更新 |
 
-每个 Run 保存实际使用的 Knowledge ID、版本、content hash 和行/字段定位。Evaluation Gold、Rubric 和 expected 文件不得挂载到普通 Run workspace，也不得被 document/workspace Tool 或未来知识检索能力读取。
+验收需记录实际使用文档的 ID、content hash 和行/字段定位；现行 `ProjectDocument` 不等于另有独立 Knowledge 版本服务。Run 创建时清单冻结与公开展示仍须通过[资源验收](../design/resource-snapshots.md)。Evaluation Gold、Rubric 和 expected 文件不得挂载到普通 Run workspace，也不得被 document/workspace Tool 或未来知识检索能力读取。
 
 ## 5. 现有脚本迁移映射
 
@@ -132,7 +128,7 @@ issue.search、issue.export_snapshot、repository.search/history/export、tabula
 | 任务 | 现有脚本 | 迁移模块 |
 | --- | --- | --- |
 | Ticket | `parse_issue.py` | `ticket.parse_issue` |
-| Ticket | `export_issues_from_api.py` | 移除网络逻辑，改由 issue Tool 导出 |
+| Ticket | `export_issues_from_api.py` | 单票读取使用 issue.read；批量导出目前无注册能力，另记缺口 |
 | 功能 | `f_review_detail.py`, `f_review_mfg.py`, `f_tante_defect.py`, `f_app_position.py` | `function.*` 结构化统计 |
 | 应用 | `a_app_info.py`, `a_review_detail.py`, `a_review_mfg.py`, `a_tante_defect.py`, `a_func_breakdown.py` | `application.*` 结构化统计 |
 | 担当者 | `p_person_scale.py`, `p_review_detect.py`, `p_design_inject.py`, `p_mfg_inject.py`, `p_bypass.py` | `person.*` 结构化统计 |
@@ -171,7 +167,7 @@ Agent guidance：
 | `jaf.ticket.aggregate` | 应用范围或全量 | 应用交叉、原因工程交叉、排名和横向展开 |
 | `jaf.review_test.aggregate` | 应用范围 | 评审/单测分布、密度、逃逸率和功能排名 |
 
-担当者分析属于敏感人员分析，默认仅 Project 成员可见，并记录查看审计。
+担当者分析是未启用的后续范围。若启动该工作包，必须先定义成员访问范围、查看审计和人工解释要求；不能把 Project 鉴权当作专门的人员分析审计已经存在。
 
 ## 7. 数据源与 Tool 绑定
 
@@ -183,7 +179,7 @@ Agent guidance：
 | 报告 | Outcome/Artifact 与 workspace.write | 原始结果不变、证据可追溯 |
 | 外部写入 | ChangeProposal + issue.update/repository.write | 精确批准、前置版本、幂等与 read-back |
 
-Provider 来自平台注册与 Project 配置，不由 Skill 任意创建。document 当前是项目全集物化，专项环境应只放本次合法输入，Gold/Rubric/expected 放在独立评价存储；后续绑定收窄见[资源快照](../design/resource-snapshots.md)。
+Provider 来自平台注册与 Project 配置，不由 Skill 任意创建。document 冻结正处于联调阶段，旧部署还可能读取 Project 全集；无论使用哪一版本，专项 Project 都只放合法执行输入，Gold/Rubric/expected 保持独立隔离。实际范围必须依据[资源快照验收](../design/resource-snapshots.md#验收条件)验证，不能仅靠 UI 已勾选一份文档判断隔离成立。
 
 ## 8. JAF 结果期待（非平台业务 Schema）
 
@@ -210,13 +206,13 @@ Schema；无 Schema 时仍以通用 OutcomeEnvelope、Artifact、Evidence 和 Pr
 - 密度、目标值、热点、排名和逃逸图表。
 - RunSegment/Session、用户 Review、原始 Outcome、报告 Artifact、ChangeProposal 和 Evaluation。
 
-JAF 准确度评价必须先通过 standard ViewSpec，避免把分析准确度与生成前端质量混在一起。
+JAF 准确度评价使用平台标准视图，避免把分析准确度与生成前端质量混在一起。ViewSpec 是可选契约；不要求为了验收单独生成一份 ViewSpec，更不要求尚未实现的专用图表 renderer。
 
 ## 10. Benchmark v1
 
 ### 10.1 样本数量
 
-`evaluation/benchmark-v1.yaml` 固定定义 30 个历史 Ticket。该规模用于 MVP 人工复核和回归，不代表统计学上的生产质量证明。
+在独立评价存储的 `evaluation/benchmark-v1.yaml` 固定定义 30 个历史 Ticket。这里规定目标文件格式和规模，不表示仓库已经提供真实 case 或平台已实现 EvaluationSuite API。该规模用于 MVP 人工复核和回归，不代表统计学上的生产质量证明。
 
 | 分层 | 数量 | 目的 |
 | --- | ---: | --- |
@@ -240,6 +236,8 @@ JAF 准确度评价必须先通过 standard ViewSpec，避免把分析准确度�
 评价集不能每次随机抽样，否则版本间不可比较。可以另建探索集，但不计入正式准确度。
 
 ### 10.3 Case 定义
+
+以下为评价侧文件的语义示例，不是 Run 创建请求或已发布 JSON Schema；省略号须换成真实冻结值。只将执行所需 input/source 投影给 Run，不发送 expected_ref 或 Gold 正文。
 
 ```yaml
 case_id: jaf-ticket-001
@@ -297,13 +295,21 @@ benchmark 不保存凭据。Ticket 内容保存为受控 fixture/Artifact，并�
 
 同时记录完成率、Schema 通过率、Tool 成功率、自动允许/硬拒绝次数、耗时、Token、成本、Provider 配对一致率和恢复成功率。
 
+计分口径必须在运行前随 benchmark/rubric 版本冻结：关键字段集合、权重、适用 case、允许值、正类和未知值处理均不可按模型输出临时改变。报告同时给出分子/分母，不只给百分比。
+
+- 30 个 case 全部进入运行完成率和失败统计。缺失答案在适用字段准确率中不算正确；不得删除失败 Run 后只报告成功子集。
+- 不适用字段由 Gold 预先标记，排除数量和理由单列。模型自己说“不适用”不能改变分母。
+- Evidence ID 有效只证明引用可访问，不证明证据支持结论；coverage 还须人工或受控规则判定支撑关系。
+- Macro F1 的类别集合、加权准确率的字段权重在 rubric 中固定；样本为零或分母为零时报告 N/A 及原因，不能写成 100%。
+- `hallucination=true` 的 case 数除以完整 30 case 得到 hallucination rate，并同时展示失败/未完成数量。按 ≤5% 的目标，30 case 中最多允许 1 个此类 case；不能用四舍五入掩盖 2/30 超标。
+
 ### 12.2 硬性技术门禁
 
 - Secret 扫描问题为 0。
-- Schema 通过率 100%。
+- 已产生结果的通用 Outcome 及已声明的可选 Schema 通过率 100%；失败/无 Result 的 case 另列，不能被算作 Schema 已通过。
 - 越权 Tool 实际执行数为 0。
 - Evidence ID 有效率 100%。
-- 原始 Result 被人工覆盖数为 0。
+- 原始 Result 被人工覆盖数为 0，Gold/Rubric/expected 被 Agent 读取数为 0。
 - 30 个 case 均产生可审计终态；失败 case 也有完整错误记录。
 
 ### 12.3 首版质量目标
@@ -355,7 +361,7 @@ JAF_Accuracy_Report_<skill-version>_<benchmark-version>_<YYYYMMDD>.md
 1. 使用一个非 benchmark Ticket 执行 Redmine + SVN smoke。
 2. 验证只读 Tool 自动执行、硬拒绝、AgentTaskBrief、用户 Review、多 Session、ChangeProposal、Result、Evidence、Artifact、Evaluation 和导出；真实 effect apply 仅在 CAS adapter 受入环境验证。
 3. 使用同一 Ticket 的 CSV 快照执行并比较。
-4. Smoke 通过后创建 EvaluationRun，固定全部版本和配置。
+4. Smoke 通过后在独立评价存储创建 EvaluationRun 记录，固定全部版本和配置；当前没有对应平台管理 API。
 5. 30 case 每个创建独立 Run，不共享 Agent Session。
 6. 自动计算结构化指标，两名评价者完成人工 Rubric 和 revision。
 7. 分歧裁定后冻结 EvaluationRun，生成准确度报告。
@@ -367,22 +373,22 @@ JAF_Accuracy_Report_<skill-version>_<benchmark-version>_<YYYYMMDD>.md
 | Security | 无明文凭据，旧凭据已轮换，Integration 最小只读权限 |
 | Capability | 能力、目标、资源、guidance、deliverable、effect intent 和 source trace 可自动校验 |
 | 基础执行闭环 | CSV/Git fixture、自动执行、硬拒绝、Evidence、Result 和 Evaluation 成功 |
-| Import | 在基础闭环上导入完整原文快照、hash、20 个脚本和引用，保持可追溯 |
+| Import | 导入选定来源版本的完整、安全文件清单与 hash；附件数量按该版本记录，不把调研时的 20 个脚本当成永远固定的门槛 |
 | Interpret | 在基础闭环上识别等价 Ticket 任务，无 JAF 平台硬编码，diagnostic 可解释 |
 | Contract | 通用 Blueprint/Outcome/Tool 协议与可选动态 Schema/ViewSpec 通过 |
 | Runtime | Redmine/CSV、SVN、自动执行/硬拒绝、Evidence 和报告成功 |
-| Workspace | standard ViewSpec 完成全流程，Evaluation 不覆盖 Result |
+| Workspace | 平台标准视图完成全流程，Evaluation 不覆盖 Result；声明 ViewSpec 时另验契约 |
 | Benchmark | 30 case 全部有终态和审计，指标及人工评价完整 |
 | Release | 技术硬门禁全部通过，质量负责人记录发布结论 |
 
-FrontendModule、调度和其余 5 类任务不属于本 JAF benchmark 的准确度比较范围。Git Provider 使用通用 repository Tool fixture 做契约测试；除非 JAF Project 提供 SVN 等价 Git 镜像，否则不纳入 30 Ticket 准确度比较。SVN 的真实客户端已在 `docs/01` §19 落地，仓库资源验收改由 §19.5 承载。
+FrontendModule、调度和其余 5 类任务不属于本 JAF benchmark 的准确度比较范围。Git Provider 使用通用 repository Tool fixture 做契约测试；除非 JAF Project 提供 SVN 等价 Git 镜像，否则不纳入 30 Ticket 准确度比较。仓库访问与内容冻结独立按[资源验收](../design/resource-snapshots.md#验收条件)检查，客户端存在不等于真实连接验收通过。
 
 ## 16. 失败处理
 
 - 数据缺失：标记 unavailable/insufficient，不从未授权来源补齐。
 - Redmine 失败：不覆盖已有 CSV；用户选择是否用冻结快照创建新 Run。
 - SVN/设计书不可访问：输出两案和未验证状态。
-- 脚本错误：保存输入 hash、stderr Artifact 和 exit code，不让 Agent 编造统计值。
+- 未来注册的受控计算失败：保存输入 hash、脱敏诊断和 exit code，不让 Agent 编造统计值。当前无通用来源脚本 runner，不把它作为可直接调用的失败恢复路径。
 - 通用 Outcome 或已声明的可选 Schema 失败：Run FAILED，保留脱敏诊断和最后 Artifact 引用。
 - 人工分歧：保留两份 Evaluation，裁定另追加。
 - Skill 调整：发布新版本，用同一 benchmark 新建 EvaluationRun，不修改旧报告。
@@ -403,9 +409,9 @@ Evaluation 已实现；EvaluationSuite/Case/Run/RunCase 是 benchmark 管理的�
 
 ## 18. 实现顺序
 
-当前状态统一维护在 [`docs/01` §13–§15](01_ProjectMind_PLAN.md#15-能力蓝图与交互式-agent-runtime)，本节不再维护进度副本。以下为本规范定义的验收顺序：
+当前状态统一维护在[计划 §13](../planning/roadmap.md#13-当前执行状态)，本节只定义验收依赖顺序，不维护完成清单：
 
-1. **已完成**：建立不含 Gold 的 CSV/Git 基础闭环 fixture，冻结 Ticket contract、Native SkillVersion 和执行/证据 Walking Skeleton。
+1. **通用基础回归**：使用不含 Gold 的 CSV/Git 输入验证执行、证据和评价；旧 Native seed 只解释历史，不重建 Ticket 平台业务契约。
 2. **能力蓝图回归项**：通过通用 Interpreter 导入 JAF 目录 Skill，对比能力、资源、guidance、交付物、效果、Tool 和 source trace；差异必须显式记录，内置 seed 已退役。
 3. **交互式 Runtime 门禁**：同一流程还必须通过 repository-review、development-readiness、用户 Review 与外部效果 fixture，JAF 不能是唯一测试输入。
 4. **发布验收/后续独立工作包**：在真实 PostgreSQL/Compose 联调 Redmine CAS adapter；Git/SVN 与 workspace.write 已有实现，需要真实系统专项验证；sandbox command 仍未开放。建立 benchmark-v1、rubric-v1 和 30 个隔离 Gold case。首个 write Provider 的本地实现不等于真实系统验收。

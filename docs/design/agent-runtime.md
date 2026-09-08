@@ -57,7 +57,7 @@ class AgentEngine(Protocol):
 
 实现可以使用 Claude Agent SDK 的 query/resume/fork/session storage，但必须把 SDK message 映射为平台 `AgentEvent`。新增其他模型时通过 adapter 实现相同接口，不向 Run service 泄漏 provider-specific message。
 
-一个 Run 同时只允许一个活动的**主** AgentSession（`session_kind = PRIMARY`）。多 Session 的顺序延续（`RESUME`/`FORK`/`REPLACE`）与并行子 Agent 是两件事，后者的资源、冲突与审计设计见[实施计划](01_ProjectMind_PLAN.md) §23：
+一个 Run 同时只允许一个活动的**主** AgentSession（`session_kind = PRIMARY`）。多 Session 的顺序延续（`RESUME`/`FORK`/`REPLACE`）与并行子 Agent 是两件事，后者的资源、冲突与审计设计见[并行子分析](subagents.md)：
 
 - 子 Session 记 `session_kind = SUBAGENT`、`continuation_mode = BRANCH`，与父**共用同一个 RunAttempt** 且可多本同时活动。`agent_sessions` 的两个一意约束因此按 `session_kind = 'PRIMARY'` 限定（migration `0027`）——限定而非解除，否则「一个 Attempt 有两个主 Session」也会通过。
 - 子 Session **不各自写 RunEvent**。它们的活动收敛为主 Session 上的一次 ToolCall + Evidence，因此「Run 内 sequence 严格单调增」不需要改成分层序号，SSE 契约不变。子 Session 行是这一路唯一的追溯锚点。
@@ -108,11 +108,13 @@ Profile 只能收窄或使用平台已批准的能力，不能覆盖硬拒绝规
 
 ### 5.2 必须暂停的情况
 
-- 必要 ResourceRequirement 未绑定或候选之间存在会改变结论的歧义。
+- 已绑定范围内缺少会影响结论的事实、对象 locator 或业务选择。必需 ResourceRequirement 未绑定时应在创建阶段拒绝，不能靠一次澄清扩大原 Run 权限。
 - 用户业务观点、取舍或风险接受度是继续工作的前提。
 - 即将执行 Project policy 要求批准的外部效果。
 - 目标、权限、数据源或预算需要突破当前 Run 快照。
 - Evidence 相互冲突，Skill required rule 无法同时满足。
+
+暂停不意味着随后一定能在原 Run 内解决：补充已有 scope 内的 Ticket ID、说明判断偏好可以继续；增加 Integration、改换 Project、扩展文档集合或权限上限则必须创建新 Run。可选资源在创建时未选，也不能由模型在后续对话中隐式启用。
 
 ## 6. Tool 与工作区边界
 
@@ -158,7 +160,7 @@ SDK 内置 Read/Glob/Grep/Bash/Write/Edit/Web 仍由 hard deny 列表拒绝；�
 
 完整范围、文件结构、skipped/超限策略与验收见[资源快照与工作区](resource-snapshots.md)。
 
-repository 按冻结 Run binding 的 scope/revision 物化到 `input/<requirement_key>/`。document 当前按 Project 全集物化到 `input/documents/`，首次准备时取得文件清单；不能据此宣称它已按每个 Run binding 冻结。统一文档清单与内容 hash 的修正设计也在该规范中。
+repository 按冻结 Run binding 的授权范围物化到 `input/<requirement_key>/`，具体内容 revision 在打开资源时解析；分支名并非不可变 commit。document 落在 `input/documents/`，工作副本正在从旧全集枚举切换为显式 ID/hash 清单，尚未完成跨层联调。两条路径的冻结时点、缓存和已知差距以资源规范为准。
 
 每个物化根保存 manifest、内容 hash 与跳过原因，Brief 只描述实际生成的路径。输入对 Agent 只读；写入只到 workspace/output。重复 Attempt 验证并复用既有文件，不静默重建。
 
@@ -300,7 +302,7 @@ Run 状态使用 `WAITING_FOR_INPUT` 和 `WAITING_FOR_APPROVAL` 表达非终态�
 
 1. Skill 指导完整进入 AgentTaskBrief，且来源内容不能扩大权限。
 2. Agent 可以在 SUPERVISED 下自主调整只读分析步骤，不依赖固定 workflow。
-3. 缺少 Ticket/repository 资源时进入 WAITING_FOR_INPUT，并在答复后新增 Segment。
+3. 必需资源未绑定时拒绝创建；已有绑定范围内缺少 Ticket ID 等事实时进入 WAITING_FOR_INPUT，答复后新增 Segment，但不能借回答换绑或扩大 scope。
 4. 用户业务观点通过 REVIEW 进入 checkpoint，旧 transcript 和响应均可审计。
 5. 同一 Run 顺序使用两个 Session，权限/Skill/资源快照不漂移。
 6. Worker 丢失只新增 Attempt，不重复 Segment 或用户交互。

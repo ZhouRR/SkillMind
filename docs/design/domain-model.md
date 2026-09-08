@@ -24,7 +24,7 @@
 
 Skill 资产（SkillSource、SkillInterpretation、Skill、SkillVersion、RuntimeManifest）归 Organization，
 不归单个 Project：同一份 Skill 只导入、解释和发布一次，多个 Project 复用同一个 SkillVersion。这是
-就绪度模型的前提——`docs/05` §7.2 要求同一 SkillVersion 在一个项目为 RUNNABLE、在另一个项目仍需
+就绪度模型的前提——[Skill 就绪度](skill-contract.md#72-运行就绪度)要求同一 SkillVersion 在一个项目为 RUNNABLE、在另一个项目仍需
 配置，若 SkillVersion 归属单个 Project 则该语义无法成立。
 
 Project 通过 `ProjectSkillVersion` 显式启用精确的 PUBLISHED SkillVersion 才能发现和执行它：
@@ -85,7 +85,7 @@ SkillVersion 的“可发布”与任务的“当前可运行”是两个判断�
 - `ExecutableTask`：从已发布 CapabilityBlueprint 投影出的项目任务。
 - `ResourceBinding`：把 ResourceRequirement 绑定到具体 Integration、ProjectKnowledge 或用户输入。
 - `AgentTaskBriefSnapshot`（早期称 AgentInstructionSnapshot）：Run/Segment 传给 Agent 的不可变执行说明，包括原始 Skill 引用、目标、资源、指导、权限和效果策略。
-- `TaskSchedule`：任务的预约与周期规则。已启用（`docs/01` §22）：`ONCE`（指定时刻一次）与 `CRON`（周期）两种，必带 IANA 时区，冻结精确 SkillVersion、任务输入与资源选择。监控条件触发不做。
+- `TaskSchedule`：任务的预约与周期规则。[调度规范](task-scheduling.md)定义 `ONCE`（指定时刻一次）与 `CRON`（周期），必带 IANA 时区，保存精确 SkillVersion、任务输入与资源选择规则；每次触发再创建独立 Run 快照。监控条件触发不做。
 
 ExecutableTask 以目标和资源前提为中心。动态 input/output Schema 可以帮助生成表单或验证稳定结构，但属于可选派生产物，不是所有 Skill 的业务能力本体。
 
@@ -95,7 +95,7 @@ ExecutableTask 以目标和资源前提为中心。动态 input/output Schema �
 - `RunSkillSnapshot`：Run 使用的 SkillVersion、Manifest checksum 和配置快照。
 - `RunSegment`：Run 中由“初次启动、用户答复、批准、审查反馈”等业务事件触发的一段连续工作。
 - `RunAttempt`：同一 Segment 的一次 Worker 领取、故障恢复或技术重试。
-- `AgentSession`：AgentEngine 会话。一个 Run 可以顺序使用多个主会话，并记录 resume/fork/replace 关系；并行扇出的只读子会话以 `session_kind = SUBAGENT`、`continuation_mode = BRANCH` 记录（`docs/01` §23）。
+- `AgentSession`：AgentEngine 会话。一个 Run 可以顺序使用多个主会话，并记录 resume/fork/replace 关系；[并行子分析](subagents.md)的只读子会话以 `session_kind = SUBAGENT`、`continuation_mode = BRANCH` 记录。
 - `AgentSessionTranscript` / `AgentSessionEntry`：SDK opaque transcript 的追加式镜像。
 - `RunStep`：由 STEP_* 事件投影的概念，不是独立持久化表；不要求机械复现 Skill 建议顺序。
 - `RunEvent`：SSE 重连和审计使用的追加式事件。
@@ -124,7 +124,7 @@ Agent 可以建议写入、生成补丁和解释风险，但不能把建议直�
 - ResourceRequirement 通过项目级或 Run 级 ResourceBinding 指向具体资源。
 - Run 包含一个或多个顺序 RunSegment；首个 Segment 由用户启动创建。
 - RunSegment 包含一个或多个追加式 RunAttempt；技术重试不创建新的业务 Segment。
-- Run 可以包含多个 AgentSession；同一 Run 同时最多一个活动的主（PRIMARY）Session，只读 SUBAGENT 子会话可在 `docs/01` §23 的上限内并行。
+- Run 可以包含多个 AgentSession；同一 Run 同时最多一个活动的主（PRIMARY）Session，只读 SUBAGENT 子会话可在[子分析边界](subagents.md#能力与故障边界)内并行。
 - 用户答复或批准使等待中的 Run 创建新 Segment，并根据兼容性 resume、fork 或启动新 Session。
 - Run 包含多个 RunStep、RunEvent、ToolCall、Evidence、Artifact、UserInteraction 和 ChangeProposal。
 - 一个 Run 最多有一个终态 Result；终态后的新目标创建新 Run。child/fork 关系是后续产品关联设计，当前创建请求不承诺 parent Run 字段。
@@ -138,7 +138,7 @@ Agent 可以建议写入、生成补丁和解释风险，但不能把建议直�
 | 概念 | 当前持久化载体 | 契约 |
 | --- | --- | --- |
 | SkillSource | `skill_sources` 的 source metadata、content_hash、file index | 组织资产，不含 Project 选择 |
-| SkillInterpretation | `skill_interpretations` 的 report_json、manifest_draft_json、execution_json、lineage | [Interpreter 协议目录](../../PJM/contracts/skill-interpreter/) |
+| SkillInterpretation | `skill_interpretations` 的 report_json、manifest_draft_json、execution_json、lineage | [Interpreter 协议目录](../../PJM/contracts/skills/interpreter/v1/) |
 | CapabilityBlueprint | 解释结果与 `manifest_json.capability_blueprint` 内嵌数据 | [Blueprint v1](../../PJM/contracts/capability-blueprint/v1.schema.json) |
 | Skill / SkillVersion | `skills` / `skill_versions` | 版本身份与发布状态 |
 | RuntimeManifest | `runtime_manifests.manifest_json` 和 checksum | [Manifest v1alpha1](../../PJM/contracts/runtime-manifest/v1alpha1.schema.json) |
@@ -151,7 +151,7 @@ Agent 可以建议写入、生成补丁和解释风险，但不能把建议直�
 | ExecutableTask | TaskCatalog descriptor，由版本投影 | 无独立 task 业务表；task_id 由服务端生成 |
 | SecretReference | `secret_references`；MANAGED 密文另存 `managed_secret_material` | locator/明文不公开 |
 | Integration / ResourceBinding | `integrations` / `resource_bindings` | Project/Task 配置和 Run 冻结分层 |
-| ProjectDocument | `project_documents` 与 object-storage blob | 当前全集物化的差距见[资源快照](resource-snapshots.md) |
+| ProjectDocument | `project_documents` 与 object-storage blob | 文档身份与内容冻结的设计及联调差距见[资源快照](resource-snapshots.md) |
 | AgentTaskBriefSnapshot | `agent_task_brief_snapshots.brief_json` / checksum | 每个 Segment 唯一、不可变 |
 | TaskSchedule | `task_schedules` | [调度](task-scheduling.md)复用普通 Run 创建 |
 

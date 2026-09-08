@@ -1,5 +1,7 @@
 # ProjectMind 交付历史
 
+> 这里保留各日期的交付证据和当时边界，不代表所有内容仍适用。旧 seed、能力限制、测试数量和部署结果应按记录日期理解；当前状态见[实施计划 §13](../planning/roadmap.md#13-当前执行状态)，现行规则见[设计目录](../README.md)。新记录追加到文末，不覆盖历史结论。
+
 归档日期：2026-07-07（§9 于 2026-07-11、§21–25 于 2026-07-18、§26–28 于 2026-07-19、§30–§39 于 2026-07-25 追加；其中 §30/§31 为按 `docs/01` 与 `docs/13` 回填的既往工作包记录）
 
 本文合并原 `projectmind-mvp`、Identity/Project/认证计划、回归与运维计划、文档重整计划及其重复执行报告，并归档已完成的「文件与文档管理」工作包计划。这里只保留交付结论、关键产物和后续必须守护的边界；逐步骤状态文件与已完成的计划文件已删除。
@@ -19,12 +21,12 @@
 
 | 主题 | 完成内容 | 正本 |
 | --- | --- | --- |
-| 产品与初始范围 | 产品定位、MVP 范围、不做事项和边界 | `docs/01_ProjectMind_PLAN.md` |
-| Domain 与权限 | Organization/User/Project、Skill、Run、Evidence、Result、Evaluation 不变条件 | `docs/04_ProjectMind_Domain_Model.md` |
-| Skill compatibility | Adapter、NormalizedSkillPackage、Interpreter、Manifest、发布门禁和版本规则 | `docs/05_ProjectMind_Skill_Compatibility_Spec.md` |
-| Runtime | AgentEngine、Session、Tool、permission、Evidence、恢复与资源边界 | `docs/06_ProjectMind_Agent_Runtime_Spec.md` |
-| Workspace | standard ViewSpec、执行交互、Result/Evaluation 和后续 generated UI 边界 | `docs/07_ProjectMind_Workspace_Spec.md` |
-| JAF acceptance | 单 Ticket contract、fixture、benchmark 目标和迁移约束 | `docs/08_ProjectMind_JAF_Migration_E2E_Spec.md` |
+| 产品与初始范围 | 产品定位、MVP 范围、不做事项和边界 | `docs/planning/roadmap.md` |
+| Domain 与权限 | Organization/User/Project、Skill、Run、Evidence、Result、Evaluation 不变条件 | `docs/design/domain-model.md` |
+| Skill compatibility | Adapter、NormalizedSkillPackage、Interpreter、Manifest、发布门禁和版本规则 | `docs/design/skill-contract.md` |
+| Runtime | AgentEngine、Session、Tool、permission、Evidence、恢复与资源边界 | `docs/design/agent-runtime.md` |
+| Workspace | standard ViewSpec、执行交互、Result/Evaluation 和后续 generated UI 边界 | `docs/design/workspace.md` |
+| JAF acceptance | 单 Ticket contract、fixture、benchmark 目标和迁移约束 | `docs/acceptance/jaf-quality.md` |
 
 本轮规划的关键取舍是先完成单 Ticket execution spine，暂缓通用模型 Interpreter、调度、generated FrontendModule、外部 write 和 JAF 其余 5 类任务。
 
@@ -64,20 +66,20 @@
 4. **Project preference**：用户选择持久化到账号，hash URL 携带 Project context；无效或越权 Project 不暗中回退。
 5. **审计 identity**：Run permission snapshot、Evaluation 和 Skill publish 使用真实 actor，不再使用旧固定用户。
 
-关键实现保留在 `api/auth_dependencies.py`、资源别 route、identity/project service、Web `src/api/` 和 `docs/09_ProjectMind_Authentication_Decision.md`。
+关键实现保留在 `api/auth_dependencies.py`、资源别 route、identity/project service、Web `src/api/` 和 `docs/design/authentication.md`。
 
 ## 5. 回归与可运维化（2026-07-05 至 2026-07-07）
 
 - smoke client 支持 login cookie、CSRF、幂等 replay、SSE cursor、Evaluation 不变性和 active Run 取消。
 - 回归矩阵覆盖非法 structured Result、Tool hard deny、Worker1 lease 过期到 Worker2 Attempt 接管。
 - API/Worker/Executor 使用 allowlist JSON logging，关联 trace/run/attempt/session。
-- `docs/10_ProjectMind_Operations_Runbook.md` 固化 backup、migration、恢复、接管和 image rollback。
+- `docs/operations/runbook.md` 固化 backup、migration、恢复、接管和 image rollback。
 - 本地全量门禁与部署环境任务执行完成；后续 Compose smoke 和接管演练作为每次发布的运维门禁。
 
 ## 6. 文档与方向收口（2026-07-07）
 
 - 正式标记基础执行闭环完成。
-- 新增 `docs/README.md` 文档索引和 `docs/11_ProjectMind_Skills_Interpretation_Implementation_Spec.md`。
+- 新增 `docs/README.md` 文档索引和 `docs/design/skill-interpretation.md`。
 - `docs/08` 从当前实施主线调整为 JAF migration/regression/benchmark profile。
 - 下一组工作重点调整为 Skills Interpretation；i18n、真实 Provider、调度和 JAF 扩展后移。
 - 下一组工作重点必须使用 Generic Native、Generic Adapted、Unsafe Assisted、JAF Regression 四类 fixture，不能只用 JAF 证明通用性。
@@ -101,7 +103,7 @@
 - JAF 固有内容只能存在于普通 Skill source、fixture、acceptance/evaluation 和历史 snapshot，不得进入通用 contract 或形成 generic service 分支。
 - 任意 host Shell、未受控外部 write、generated FrontendModule、调度和 JAF 其余任务需要单独更新产品与安全计划。
 
-后续实施顺序只从 `docs/01_ProjectMind_PLAN.md` 的当前 active section（现为 §15）恢复；历史状态文件不再作为规划正本。
+后续实施顺序只从 `docs/planning/roadmap.md` 的当前 active section（现为 §15）恢复；历史状态文件不再作为规划正本。
 
 ### 8.1 通用 Skills Interpretation 交付摘要（2026-07-07 至 2026-07-13）
 
@@ -2119,3 +2121,77 @@ run-history、两个 event example、generic-native-manifest）——其中
   `preflight` 只能作为数据库连通和迁移基线证据。
 - 真实 HTTPS Git/SVN、Redmine/forge 端到端落地、模型行为与质量、多 Agent 实际模型效果、真实 schedule
   发火，以及浏览器三语/键盘/窄屏验收仍需专项环境和业务数据。
+
+## 50. 文档体系重整与设计核对（2026-09-05）
+
+### 50.1 阅读与维护入口
+
+- 文档按 overview、design、planning、development、operations、acceptance、history 分类。workspace 与
+  PJM 的 README 负责入口，Backend/Web/Contracts/Skills/Images 的 README 负责各自代码导航。
+- 原统一 PLAN 正文与手工 Roadmap 图保留为有日期的历史快照。现行计划只维护范围、顺序和验收缺口，
+  §13 为状态正本；旧文档编号继续通过索引定位，不批量修改代码中的编号注释。
+- Runtime 的资源快照、仓库受控写入、子 Agent、TaskSchedule，以及后续 Task Flow/生成模块各有独立规范；
+  增加产品概览、术语、设计到代码映射、开发与运维操作入口。
+- 新增可离线打开的 [文档浏览版](../index.html)：分类导航、正文搜索、历史筛选、页内目录、深链接、
+  返回/前进、打印和窄屏菜单。Markdown 是来源，HTML 由脚本生成，不手工维护第二套正文。
+
+### 50.2 设计纠偏与未完成边界
+
+- 按实际契约修正领域载体、SkillVersion/readiness enum、AgentEngine 签名、ViewSpec 示例、项目显式启用、
+  交互权限、来源导入能力及已有 Git/SVN/调度/workspace/子分析能力的过时描述。
+- 明确 document 当前为 Project 全集、首次准备时物化，不是创建 Run 时按绑定冻结；提出文档集合与内容
+  hash 的冻结设计。子 Agent 仅单次 dispatch 分配预算，没有 Run 共享扣减账本；修正要求进入优先计划。
+- 说明 Schedule 认领推进与 Run 创建的事务间隙、重叠查询的并发局限，以及 commit 与 PR 不跨系统原子完成。
+- 生成模块保留同主机专用路径与 opaque-origin 决策，补充 Cookie/CSP/Host 消息与构建网络约束；
+  静态拒绝不证明代码可安全执行，首次执行前仍需威胁模型和跨层验收。
+- 运维入口区分不清库的 ADMIN CLI 与清除全部 volume 的 make target；backup/restore 补充 blob、workspace
+  一致性及历史备份所需旧 KEK 的保留要求。
+- 本次未修改应用业务代码、API、Schema、migration 或已发布 Skill 的 SKILL.md/references；上述运行缺口
+  只是完成定位和修正设计，不能视为代码问题已解决。
+
+### 50.3 本次验证与未覆盖项
+
+- 文档 build/check：34 份 Markdown 的标题、代码块、本地文件/章节/浏览版链接，以及 1 份 ViewSpec 示例通过。
+- 文档工具 10 项 unittest 通过；工具与测试的 Ruff 检查/格式检查通过。覆盖无效引用、代码块闭合、
+  中文/重复标题、原始 HTML 不执行、嵌入范围与可复现构建。
+- 契约验证：76 份 Schema、63 份 example 通过；没有改写契约来适配文档。
+- 独立 Chromium 离线验证：34 页桌面/手机浏览、搜索、历史筛选、深链接、返回、菜单/Escape、打印样式、
+  无效页面回退及 3 份独立 HTML 正常；无 JavaScript 错误、无 HTTP(S) 请求。
+  入口与结构图另在 320/375/768/1024 宽度检查页面溢出，修复技术图长标签撑破窄屏的问题。
+- 未重跑 Backend/Web 全量测试、真实 DB、Compose 部署、SDK 模型调用和业务 UI 验收：本次影响范围为
+  文档与独立文档工具，未改变应用逻辑；环境无 Docker。这里的浏览器验证仅针对文档，不能抵消 §49.3 的专项残项。
+
+## 51. 文档设计边界与阅读体验续整（2026-09-08）
+
+### 51.1 内容与导航
+
+- 实施计划的当前状态、下一步和全项目登记前置，旧章节降为引用索引，保留既有锚点与代码编号入口。
+- 产品页增加按目的的阅读路径，架构页增加规则归属表；变更指南补上冻结时点、失败/幂等、兼容和验收问题清单。
+- Backend/Web README 增加具体调用链和页面入口；Contracts 区分内部 field 与公开协议。新增 Scripts README，按只读验证、生成覆盖、模型调用与配备副作用分类。
+- 文档维护约定加入设计骨架与更新顺序。Task Flow 改用独立、连续的章节层级，实施阶段不再复制状态表。
+- 浏览版增加窄屏/中等宽度的“本页内容”、键盘章节跳转，以及按实际溢出显示的表格滚动提示。Markdown 仍是唯一正文来源。
+
+### 51.2 设计核对与保留的差距
+
+- 资源规范分开授权快照、内容快照、物化副本，明确文档单份/集合/显式全集、槽位并集、创建/准备/读取时序、缺失与篡改、缓存复用和旧 Run 兼容。
+- 工作副本已有 document ID/hash 清单改动，但集合选择 UI、公开快照、创建重放与既有回归尚未贯通；没有标记为完成或部署通过。
+- 仓库分支名/HEAD 不等于创建时固定 commit；首次物化与额外 live Evidence 的版本分别解释。物化器的逐根额度不再描述成所有资源共用的 Run 总量保证。
+- Runtime 区分“必需资源未绑定时拒绝创建”与“已有 scope 内缺少事实时澄清”，避免通过对话扩展冻结权限。两张架构图同步修正 Segment/Attempt/Brief 的创建时点。
+- Task Flow 新增节点事实来源：批准不等于执行、动态 STEP 不自动证明质量规则完成、无关联不补造进度，旧 Run 不拼接最新计划。
+- JAF 建议目录将可导入 Skill、执行资源、独立评价存储分开，Gold/Rubric/expected 不进入 Agent 可见面。删除固定 20 脚本/Native seed 等历史门槛，补充计分分母、失败 case 和实际 Evidence 支撑的判定规则。
+- Runbook 修正旧“禁止 SVN write”“所有 ACTIVE Session 同时唯一”说法，补充按症状导航和资源排障。API 指南不再示范把真实 password 放到 command 行。
+- 按项目规范保留可执行 Skill 的 SKILL.md/references，不改变 version/hash。没有修改应用业务代码、Schema、OpenAPI、DB migration、部署配置或正在进行的 R01 代码。
+
+### 51.3 验证范围
+
+| 检查 | 本次结果 |
+| --- | --- |
+| 文档 build/check | 35 份 Markdown，1 份 ViewSpec 示例，本地文件/章节/浏览版链接通过 |
+| 文档工具回归 | 12 项 unittest 通过；新增现行标题跳级拒绝与历史结构保留测试 |
+| 文档工具 Ruff | check 与 format check 通过，使用 Backend 的现行配置 |
+| 契约 | 76 Schema / 63 example 通过；Backend contracts 测试 7 passed，含 OpenAPI 一致性 |
+| Compose 静态检查 | 8 service 与共享 Traefik 边界通过；没有启动容器 |
+| 文档浏览器 | 离线 Chromium：35 页桌面/390px 手机、搜索/历史过滤、深链接/刷新/返回、键盘目录、打印、无效页回退；3 份独立 HTML 通过 |
+| 额外窄屏检查 | 产品、计划、资源、Task Flow、Runbook 在 320/375/768/1024px 无整页溢出；表格滚动提示与实际溢出一致 |
+
+浏览检查没有 JavaScript 错误或 HTTP(S) 请求。本轮未执行应用全量 Backend/Web 测试、真实 DB、模型、服务器部署或业务页面验收；不能用本表替代计划中的实现/专项验收。原有 Web build/cache 未因文档工作被删除。

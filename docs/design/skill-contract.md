@@ -157,6 +157,8 @@ Task-specific JSON Schema 是可选派生产物：
 
 模型没有返回完整结构化响应时，本次解释失败或进入可调整 Preview，不能把自由文本偷偷包装成已验证 Manifest。用户追加调整必须生成新的 Interpretation，并保留 parent lineage 和结构化 diff。
 
+默认只接受 SDK 的结构化响应。现有兼容开关 `PROJECTMIND_SKILL_INTERPRETER_ACCEPT_PROMPT_JSON=true` 可显式接收文本中的完整 JSON；它不补造字段，也不绕过 Schema、identity、source hash 与发布门禁。该降级路径应单独记录验收，不能用它宣称 SDK structured-output 已通过。设置说明见[本地开发](../development/local-development.md)。
+
 ### 6.3 防提示注入
 
 来源 Skill、references、Ticket、代码和文档都属于不可信内容。Interpreter 与 Worker 必须明确区分：

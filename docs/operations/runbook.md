@@ -1,6 +1,21 @@
 # ProjectMind 基础版本运维与恢复 Runbook
 
-本书用于按同一套手册执行基础版本的配备、migration、backup、故障恢复和 version rollback。产品与 Runtime 规格以 `docs/01`、`docs/06` 为准，认证边界以 `docs/09` 为准。
+本书用于配备、migration、backup、故障恢复和 version rollback。首次起动见[Quickstart](quickstart.md)，运行语义见[Runtime](../design/agent-runtime.md)，身份与凭据边界见[认证](../design/authentication.md)。
+
+## 按问题找入口
+
+| 需要处理的情况 | 先做什么 | 手册位置 |
+| --- | --- | --- |
+| 准备更新镜像或迁移 | 确认维护窗口，保存同一恢复点的 DB/blob/workspace 与镜像 | [备份](#2-配備前-backup)、[配备](#3-migration-と配備) |
+| 新环境没有管理员 | 使用普通 bootstrap CLI，不执行清空 volume 的初始化目标 | [首次 ADMIN](quickstart.md#最初の-admin-を作成する) |
+| Run 卡在运行中或不断重试 | 核对 Run/Segment/Attempt、lease 与 Worker，不改 SQL 状态 | [接管验证](#42-worker-喪失と接管)、[日志](#7-log-確認と-incident-記録) |
+| 正在等待回答/批准 | 核对待办版本、身份与独立期限，不当成 Worker 卡死 | [WAITING](#81-waiting-状態) |
+| 外部写入结果不明 | 先查原幂等身份的结果/read-back，保留已发生的变更 | [Effect 排障](#87-incident-と-recovery) |
+| 输入文档缺失或内容不一致 | 保留 manifest/现场，确认运行版本与冻结清单 | [资源排障](#9-资源快照排障) |
+| 定时任务没有生成 Run | 分开看 created/skipped/failed/missed，不手动补造触发 | [调度监视](#10-schedule-と-recovery-の監視) |
+| 必须恢复旧版本或数据 | 先确认完整恢复点及新旧兼容性；这是有数据损失风险的操作 | [DB restore](#5-database-restore)、[版本回退](#6-application-version-rollback) |
+
+以下命令不会因为写在手册里就获得执行授权。尤其 restore、镜像替换、停止 Worker 和 smoke 写入，应在已确认的专用环境或获批维护窗口执行。
 
 ## 1. 運用原則
 
@@ -200,9 +215,9 @@ Incident 記録には UTC 時刻、image ID、migration revision、Run/Attempt/S
 ## 8. 対話型 Run と外部 Effect の運用契約
 
 本節は 0020/0021 以降に適用する。外部 write は、登録済み capability、固定 ResourceBinding、Proposal、
-承認/明示的な事前許可、原子 Provider、idempotency と read-back がすべて揃う場合だけ許可する。現在の唯一の
-apply できるのは Redmine `issue.update/v1` CAS adapter と git `repository.write/v1` (§20) であり、stock endpoint、svn commit と任意 write は
-引き続き禁止する。
+承認/明示的な事前許可、原子 Provider、idempotency と read-back がすべて揃う場合だけ許可する。登録済みの
+apply は Redmine `issue.update/v1` CAS adapter と Git/SVN `repository.write/v1` である。stock Redmine endpoint
+や任意 command による write は許可しない。repository は常に人手承認が必要であり、[受控 write 設計](../design/repository-effects.md)の direct/branch 条件を守る。
 
 ### 8.1 WAITING 状態
 
@@ -215,7 +230,7 @@ apply できるのは Redmine `issue.update/v1` CAS adapter と git `repository.
   Provider を呼ばない。取消、Project membership 失効、対象 resource の scope 変更でも旧応答/批准を
   再利用せず、安定した公開 error code を残す。
 
-運用確認では Run ID に加えて `run_segment_id`、`run_attempt_id`、`agent_session_id`、`interaction_id` を追跡する。同一 Run で複数 Session が存在すること自体は異常ではないが、初期実装では同時に複数の ACTIVE Session が存在してはならない。
+運用確認では Run ID に加えて `run_segment_id`、`run_attempt_id`、`agent_session_id`、`interaction_id` を追跡する。同時に活動できる主 Session（PRIMARY）は一つ。SUBAGENT/BRANCH の並行は[子分析設計](../design/subagents.md)の範囲で正常であり、複数 ACTIVE の件数だけで重複実行と判定しない。
 
 ### 8.2 Session resume / fork / replace
 
@@ -237,9 +252,9 @@ apply できるのは Redmine `issue.update/v1` CAS adapter と git `repository.
 ### 8.4 Redmine CAS adapter と Secret
 
 Integration の `base_url` は接続先 origin だけを保持し、credential は Project の SecretReference が
-`ENVIRONMENT` または `/run/secrets` file locator を指す。API/Web は locator、config 本文、Secret 値を
+`ENVIRONMENT`、`FILE` または `MANAGED` resolver を指す。API/Web は locator、config 本文、Secret 値を
 返さない。rotation は新 locator/key version の SecretReference と新 Integration revision/binding を
-作成し、既存 Run snapshot を書き換えない。
+作成し、既存 Run snapshot を書き換えない。MANAGED の暗号鍵再封入は別操作であり、§8.8 の手順に従う。
 
 Effect Worker は書き込み前に `${base_url}/.well-known/projectmind-effect-provider.json` を読み、次を
 すべて確認する。
@@ -318,7 +333,7 @@ Project の SecretReference が指す。運用時の要点は次のとおり。
 ### 8.8 MANAGED Secret の KEK 運用
 
 `MANAGED` resolver の SecretReference は、明文を API へ一度だけ渡し、`PROJECTMIND_MANAGED_SECRET_KEK`
-の主鍵(KEK)で AES-256-GCM 封入した密文だけを `managed_secret_material` に保存する(`docs/09` §7.2)。
+の主鍵(KEK)で AES-256-GCM 封入した密文だけを `managed_secret_material` に保存する([認証設計](../design/authentication.md#72-平台托管managed应用层信封加密))。
 運用上の必須事項は次のとおり。
 
 - **KEK の保管**:KEK は環境変数だけに置き、DB backup・log・Agent 環境へ複製しない。KEK と DB backup を
@@ -334,6 +349,19 @@ Project の SecretReference が指す。運用時の要点は次のとおり。
   防がない(KEK と密文を同時に取得され得る)。より強い保証が要る場合は外部 KMS/HSM を検討する(現行スコープ外)。
 - **fail closed**:KEK 未設定・version 不明・改竄・AAD 不一致では復号せず、既存の credential-unavailable 経路で
   Effect を FAILED に閉じる。KEK 未設定の環境では MANAGED の新規作成も拒否される。
+
+## 9. 资源快照排障
+
+先记录 image/代码版本、Project/Run/Segment/Attempt ID 与公开错误，区分旧 document 全集路径和正在联调的清单冻结路径。[资源设计](../design/resource-snapshots.md)是范围、冻结时点和失败策略的正本。
+
+- 选择范围有疑问时核对 Run sources、manifest 的来源与 skipped，不以当前 Project 文档列表代替历史输入。
+- 缺失原 ID、hash 不一致或副本混入文件时保留现场；不要重新上传同名文件、删 manifest 或改 snapshot 来让原 Run“恢复成功”。
+- `HEAD`/分支名和实际 commit 是两个值。对比输入与 live Evidence 时查看各自的具体 revision，不只比较分支名。
+- 同一 Run 的合法只读副本可按校验规则复用，但 hash 存在不代表所有权、来源身份和额外文件检查已经通过。
+- 必须换资源或重建可信输入时创建新 Run，旧 Run/Result 保持可读。取消旧非终态 Run 仍通过正常取消流程。
+- 对外报告只记录脱敏 ID/hash 和失败类型；不把 manifest 中的业务文件名、正文或内部路径直接复制到公共日志。
+
+工作区中的 R01 改动尚未完成 API/Web/回归联调，不能凭单一 helper 测试或文档更新宣布资源隔离已上线。
 
 ## 10. Schedule と Recovery の監視
 

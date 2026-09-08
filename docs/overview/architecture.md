@@ -38,6 +38,21 @@ Backend 是模块化单体。API 与 Worker 共享一个 `projectmind` package�
 
 模型得到目标、Skill 指导和有限资源上下文，提出工具调用；平台验证 capability、绑定、参数、额度和批准后才调用 Provider。模型判断不替代权限检查。
 
+## 设计问题由谁负责
+
+后续开发先找负责该规则的正本，再看契约与实现；不要从历史日志或一个示意图推导新的执行行为。
+
+| 想确认的规则 | 唯一详细设计 | 关联而不替代它的内容 |
+| --- | --- | --- |
+| Skill 能做什么、发布与就绪如何区分 | [Skill 契约](../design/skill-contract.md) | Interpreter 页面是预览，Project 启用是可见性 |
+| 谁可以查看、回答或批准 | [权限模型](../design/domain-model.md#6-权限模型)、[认证](../design/authentication.md) | 虚拟角色与 Skill 文本不授予系统角色 |
+| Run 的输入到底固定在哪个时点 | [资源快照](../design/resource-snapshots.md) | binding、物化文件、live Evidence 是不同层次 |
+| 等待、技术重试、主/子 Session 的关系 | [Runtime](../design/agent-runtime.md)、[子分析](../design/subagents.md) | Schedule 只发起 Run，Flow 只投影事实 |
+| 什么时候真的发生外部写入 | [受控写入](../design/repository-effects.md) | 提案、批准、执行、回读分别保存 |
+| 页面上展示计划还是实际执行 | [Task Flow](../design/task-flow.md)、[Workspace](../design/workspace.md) | 图形布局和模块不能成为第二个执行控制器 |
+
+设计要求与已实现保证不是同义词。优先核对[当前差距与门禁](../planning/roadmap.md#132-下一步与当前决策)，特别是资源冻结、共享预算和 generated 模块首次执行条件。
+
 ## 变更应放在哪一层
 
 | 层 | 实现入口 | 责任 |

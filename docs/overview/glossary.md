@@ -22,6 +22,7 @@
 | ResourceRequirement | Skill 提出的抽象资源前提 |
 | Integration | 项目中实际配置的资源实例、Provider 和范围 |
 | ResourceBinding | requirement 到资源的选择；Project/Task 层配置在 Run 创建时冻结 |
+| 内容快照 / 物化副本 | 具体 ID、hash、revision 与实际文件；不能从授权 binding 自动推导创建时的全部内容 |
 | SecretReference | 凭据定位或托管密文的引用；公开响应不包含 Secret |
 | Readiness | 根据已安装 Provider 和项目配置计算的任务就绪度；不替代最终权限校验 |
 

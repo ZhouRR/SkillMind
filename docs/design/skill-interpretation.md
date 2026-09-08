@@ -26,6 +26,8 @@ Directory/Generic Markdown 导入、不可变来源、结构化模型解释、�
 
 ZIP/TAR 自动解包、远程 Git URL 导入、TaskFlowProjection 与生成前端模块执行不是当前已提供的解释链路。真实模型反复、业务规则保真和外部系统验收不由静态验证代替。
 
+模型输出默认走 SDK structured-output；显式开启 prompt JSON 兼容时仍执行完整契约验证，二者需要分别验收。详见[响应边界](skill-contract.md#62-结构化响应)。
+
 ## 3. 信任边界
 
 - 来源 Skill、附件、票据、代码、文档都是待解释数据，不能覆盖平台指令。
@@ -48,6 +50,8 @@ ZIP/TAR 自动解包、远程 Git URL 导入、TaskFlowProjection 与生成前�
 | [service.py](../../PJM/backend/src/projectmind/skills/service.py) | 解释、版本 lifecycle 与 Project 可见性协调 |
 
 系统解释 Skill 的正文是[版本化执行资产](../../PJM/skills/projectmind-skill-interpreter/SKILL.md)。修改它及 references 会改变 package hash 和 prompt identity，需要同步版本、example 和回归；不当作普通说明文档搬迁。
+
+这些入口共同守护“蓝图只由 Interpreter 生成”的边界；没有全局 bypass，parse 期的空蓝图不由 importer 补造。发布约束详见 §5.3。
 
 ## 5. CapabilityBlueprint
 
@@ -115,13 +119,15 @@ Manifest Schema 为保留导入 Draft 形态，不在 JSON required 中强制 bl
 
 `GUIDANCE_ONLY / CONFIGURATION_REQUIRED / RUNNABLE / ACTIONABLE` 是任务投影。requirement 另有 `AVAILABLE / UNAVAILABLE / UNSUPPORTED`。实现见 [resource_binding.py](../../PJM/backend/src/projectmind/skills/resource_binding.py)。
 
-ACTIONABLE 不是有效批准，也不是对真实连接可达性的证明。创建 Run 与 Provider 调用仍重新校验配置、绑定和策略。document 全集物化的现状与修正要求见[资源快照](resource-snapshots.md)。
+ACTIONABLE 不是有效批准，也不是对真实连接可达性的证明。创建 Run 与 Provider 调用仍重新校验配置、绑定和策略。资源授权、内容快照与 document 联调差距见[资源快照](resource-snapshots.md)。
 
 ## 7. AgentTaskBrief 与 ExecutionProfile
 
 ### 7.1 Brief 生成
 
 蓝图 guidance、目标、资源、允许工具、checkpoint、deliverables 与 limits 投影到 [AgentTaskBrief v1](../../PJM/contracts/agent-task-brief/v1.schema.json)。每个 Segment 保存 brief_json/checksum；物化路径只取物化器返回值。
+
+required rules 和质量标准必须完整进入 Brief，不能只传摘要。日志只写 identity、checksum 和执行 profile 等审计元数据，不记录包含业务输入的 Brief 正文；必要的受控快照保存在平台记录内。
 
 ### 7.2 自主等级
 

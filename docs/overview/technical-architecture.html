@@ -509,6 +509,9 @@
       .capture-area { padding: 16px; }
       .principle-strip { grid-template-columns: 1fr; }
       .bottom-grid { grid-template-columns: 1fr; }
+      .layer-title { flex-wrap: wrap; }
+      .tech-chip { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+      .boundary-list { grid-template-columns: minmax(0, 1fr); }
       .engine-chain { grid-template-columns: 1fr; }
       .chain-arrow { transform: rotate(90deg); text-align: center; }
       .participants { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -547,11 +550,12 @@
           <h1>为可审计的 AI 执行而设计的工程架构</h1>
           <p class="lede">
             单页依次说明<strong>逻辑架构、AI 任务执行时序与部署结构</strong>。全部图示为自包含 HTML,离线环境同样完整显示与打印。
-            组件职责与运行时契约的权威定义见 <code>docs/04–08</code>,本页为可视化摘要。
+            组件职责见 <a href="../index.html#docs/overview/architecture.md::">系统结构</a>，运行契约见 <a href="../index.html#docs/design/agent-runtime.md::">Agent Runtime</a>；本页不替代实现状态和专项验收记录。
           </p>
           <div class="doc-meta">
             <span>文档编号 PJM-DOC-03</span>
-            <span>更新日期 2026-07-18</span>
+            <span>文档核对 2026-09-05 · 非部署验收日期</span>
+            <a href="../index.html">返回文档中心</a>
           </div>
         </div>
         <button class="print-button" type="button" onclick="window.print()">打印 / 保存 PDF</button>
@@ -601,8 +605,8 @@
           <section class="layer">
             <div class="layer-title"><h3>前端层</h3><span>用户交互与受控模块宿主</span><code class="tech-chip">React 19 · TypeScript · Vite</code></div>
             <div class="component-grid">
-              <div class="component"><strong>ProjectMind Web</strong><small>概览、项目管理、工作空间、项目文档、Skills 解析五画面;会话登录 + 项目上下文导航</small></div>
-              <div class="component"><strong>Workspace Host</strong><small>能力/资源准备、实时对话、交互审批、Session 详情、结果与证据</small></div>
+              <div class="component"><strong>ProjectMind Web</strong><small>概览、项目、任务中心、工作空间、文档、Skills 与历史；会话登录 + 项目上下文导航</small></div>
+              <div class="component"><strong>Workspace Host</strong><small>观察一个 Run：执行动态、交互审批、Session、结果与证据；任务选择归任务中心</small></div>
               <div class="component planned"><strong>FrontendModule</strong><small>Skill 自带界面模块的受控宿主;当前标准版本禁用,只使用标准组件</small></div>
             </div>
           </section>
@@ -615,7 +619,7 @@
               <div class="component"><strong>Auth & Session</strong><small>ADMIN / USER 会话认证、CSRF 防护;越权与不存在统一为不可探测</small></div>
               <div class="component"><strong>Project & Documents</strong><small>项目边界、成员授权、文档库与受控下载</small></div>
               <div class="component"><strong>Skill Registry</strong><small>导入、CapabilityBlueprint 解释、人工修订、发布门禁与版本管理</small></div>
-              <div class="component"><strong>Task & Resource Center</strong><small>能力投影、ResourceBinding、readiness 与立即执行;调度为规划项</small></div>
+              <div class="component"><strong>Task & Resource Center</strong><small>能力投影、ResourceBinding、readiness、立即执行与 ONCE/CRON 调度；调度经 Worker tick 启动普通 Run</small></div>
               <div class="component"><strong>Run & Interaction</strong><small>Segment/Attempt/Session、用户交互、事件、证据、Proposal、结果与评价</small></div>
               <div class="component"><strong>Integration</strong><small>Redmine / SVN / Git 的版本化能力、SecretReference、精确 scope 与三层 ResourceBinding</small></div>
             </div>
@@ -636,7 +640,9 @@
               <div class="component"><strong>AgentTaskBrief + Loop</strong><small>完整 Skill guidance、目标与资源;SUPERVISED 自主规划、流式事件与预算限制</small></div>
               <div class="component"><strong>Tool & Effect Gateway</strong><small>observe/propose/apply、精确批准、幂等/CAS、read-back Evidence 与审计</small></div>
               <div class="component"><strong>Session Continuation</strong><small>会话全文与 checkpoint 落库,顺序支持 resume/fork/replace</small></div>
-              <div class="component planned"><strong>Workspace / Sandbox</strong><small>受控 read/search/edit 与 sandbox command 按 capability 分层开放</small></div>
+              <div class="component"><strong>Workspace</strong><small>资源物化、read/search/write 已实现；input 只读，写入限 workspace/output</small></div>
+              <div class="component"><strong>Read-only Subagents</strong><small>有界子分析与能力收窄已实现；Run 共享预算扣减尚待修正</small></div>
+              <div class="component planned"><strong>Sandbox / Network</strong><small>任意 Shell、来源脚本与通用网络工具未开放；需独立能力与隔离验收</small></div>
             </div>
           </section>
 
@@ -649,7 +655,7 @@
                 <div class="component"><strong>PostgreSQL</strong><small>业务、审计、证据与 Session 的权威记录</small></div>
                 <div class="component"><strong>Redis</strong><small>任务队列与短期唤醒;不是最终数据源</small></div>
                 <div class="component"><strong>Object Storage</strong><small>Skill 包、文档与报告产物(MinIO)</small></div>
-                <div class="component"><strong>SecretReference Resolver</strong><small>数据库仅存 Environment / /run/secrets locator 元数据;Secret 正文不经 API 或 Agent</small></div>
+                <div class="component"><strong>SecretReference Resolver</strong><small>ENV/FILE locator 与 MANAGED 加密凭据；管理写入后不回传明文，业务 Provider 解析，Agent 不持有凭据</small></div>
               </div>
             </section>
 
@@ -668,7 +674,7 @@
             <div class="boundary-item">业务层只依赖 AgentEngine 抽象;模型 SDK 可替换、可版本锁定,不渗透进领域模型。</div>
             <div class="boundary-item">外部数据经 ResourceBinding 与版本化 Tool 提供;observe 自动执行,apply 默认审批,Agent 不直接持有凭据或批准权。</div>
             <div class="boundary-item">每个 Run 使用独立工作目录;工作目录不作为安全边界,权限由工具网关强制。</div>
-            <div class="boundary-item">基础执行闭环工具继续 fail closed;后续只在显式 mount/sandbox/network policy 下分层开放 workspace 能力,任意 host Shell 仍禁止。</div>
+            <div class="boundary-item">受控 workspace 读写已开放，SDK 内置工具仍 fail closed；任意 host Shell 和通用 network 未开放。文档物化范围与多次 dispatch 总预算的差距见实施计划，不作已通过保证。</div>
           </div>
         </div>
       </div>
@@ -710,7 +716,7 @@
               <span class="message">写入 Run 快照 + 事务 Outbox</span>
               <span class="actor target">PostgreSQL / 存储</span>
             </div>
-            <p class="event-detail">目标、精确 Skill/Blueprint、权限上限、资源与限制被冻结;创建 Segment 1 的 AgentTaskBrief,Outbox 保证「落库」与「入队」不脱节。</p>
+            <p class="event-detail">保存目标、精确 Skill/Blueprint、权限、资源选择与限制，创建 Segment 1；状态与待投递 Outbox 同事务写入。内容冻结时点按资源种类区分。</p>
           </li>
           <li class="sequence-event">
             <span class="event-number">03</span>
@@ -727,7 +733,7 @@
             <span class="event-phase">领取执行<strong>PREPARING</strong></span>
             <div class="interaction">
               <span class="actor">Worker / 编排器</span>
-              <span class="message">取得 Segment 租约,创建 RunAttempt 与独立工作目录</span>
+              <span class="message">领取当前 Segment，创建带租约的 RunAttempt 与工作目录</span>
               <span class="actor target">PostgreSQL / 存储</span>
             </div>
             <p class="event-detail">租约防止双 Worker 并发接管;用户交互追加 Segment,基础设施重试才在当前 Segment 追加 Attempt。</p>
@@ -737,10 +743,10 @@
             <span class="event-phase">启动 Agent<strong>RUNNING</strong></span>
             <div class="interaction">
               <span class="actor">Worker / 编排器</span>
-              <span class="message"><code>execute(agent_task_brief)</code> → SDK 会话启动</span>
+              <span class="message"><code>execute(context)</code> → SDK 会话启动</span>
               <span class="actor target">AgentEngine · SDK</span>
             </div>
-            <p class="event-detail">业务层只面对 AgentEngine 抽象;Agent 收到完整 Skill guidance、资源、权限与效果策略,活动墙钟超时由编排器强制。</p>
+            <p class="event-detail">Worker 准备资源并冻结本 Segment 的 AgentTaskBrief，再构造 RunContext。业务层只依赖 AgentEngine；Agent 收到完整 guidance 与权限边界，活动超时由 Worker 强制。</p>
           </li>
         </ol>
 
@@ -755,7 +761,7 @@
                 <span class="message">流式输出、步骤与用量事件</span>
                 <span class="actor target">Web / 工作空间</span>
               </div>
-              <p class="event-detail">事件先持久化再经 SSE 推送;序号严格单调递增,前端可断线续传、不重不漏。</p>
+              <p class="event-detail">持久事件可按 sequence 重放并由前端去重；TEXT_DELTA 消耗序号但不持久化，缺号正常。断线重连不能保证恢复每一段流式文字。</p>
             </li>
             <li class="sequence-event">
               <span class="event-number">07</span>
@@ -799,7 +805,7 @@
               <span class="message">Outcome + Artifact/Evidence/Proposal + <code>session_id</code></span>
               <span class="actor target">Worker / 编排器</span>
             </div>
-            <p class="event-detail">平台先校验通用 Outcome、引用所有权与 Skill 质量标准;只有任务声明了可选 output schema 时才追加结构校验。</p>
+            <p class="event-detail">平台校验通用 Outcome 与引用所有权，声明了 output schema 时追加结构校验；业务规则和结论语义是否正确需单独验收。</p>
           </li>
           <li class="sequence-event">
             <span class="event-number">10</span>
@@ -819,13 +825,13 @@
               <span class="message">展示报告、证据定位与评价入口</span>
               <span class="actor target">Web / 工作空间</span>
             </div>
-            <p class="event-detail">用户看到结论、报告、证据出处、Segment/Session lineage 与外部效果验证,并可发起人工评价与 child Run。</p>
+            <p class="event-detail">用户看到结论、报告、证据出处、Segment/Session lineage 与外部效果验证，并可追加评价。新目标重新创建 Run；当前没有 child Run 创建接口。</p>
           </li>
         </ol>
 
         <div class="resume-block">
           <strong>交互继续与故障恢复使用不同审计对象</strong>
-          <span>用户答复、Review 或批准在同一非终态 Run 追加 RunSegment,可顺序 resume/fork/replace Session;Worker 故障只在当前 Segment 追加 RunAttempt。终态 Run 不重新打开,新目标创建 child Run。</span>
+          <span>用户答复、Review 或批准在同一非终态 Run 追加 RunSegment，可顺序 resume/fork/replace Session；Worker 故障只在当前 Segment 追加 RunAttempt。终态 Run 不重新打开，新目标创建新的 Run。</span>
         </div>
       </div>
     </section>
@@ -858,7 +864,7 @@
           <div class="service-row">
             <div class="service-card"><code>worker</code><p>Segment 编排 + Claude Agent SDK,活动会话使用独立 claude 子进程;等待用户时释放租约与进程</p></div>
             <div class="service-card"><code>migrate</code><p>一次性数据库迁移任务(<code>alembic upgrade head</code>),完成后退出;仅加入 backend</p></div>
-            <div class="service-card planned"><code>scheduler</code><p>定时与周期触发由 worker tick 提供;不单独部署 scheduler 服务,条件监控不做</p></div>
+            <div class="service-card"><code>worker tick</code><p>定时与周期触发已内置于 worker，不额外部署 scheduler；不承诺停机补跑或全局精确一次</p></div>
             <div class="service-card planned"><code>sandbox</code><p>脚本隔离执行;<code>script.execute</code> 开放时作为独立隔离任务加入</p></div>
           </div>
           <div class="deployment-arrow">队列 / 持久化 / 制品</div>
@@ -877,7 +883,7 @@
               <tr><td><code>existing-traefik</code></td><td>Compose 外部;宿主机 80/443</td><td>ProjectMind 不管理 entryPoint、TLS、证书、Dashboard 或 Docker Socket</td></tr>
               <tr><td><code>web</code></td><td>external edge;仅容器内部端口</td><td><code>{contextPath}/*</code> 路由;不做 API 反向代理</td></tr>
               <tr><td><code>api</code></td><td>external edge + internal backend;仅容器内部端口</td><td><code>{contextPath}/api/*</code> 优先路由,包含 SSE 长连接</td></tr>
-              <tr><td><code>worker</code></td><td>internal backend + egress;无入口路由</td><td>每个 Run workspace 隔离;多 Session 顺序执行;禁止直接读取凭据,外部访问只经注册 Provider</td></tr>
+              <tr><td><code>worker</code></td><td>internal backend + egress;无入口路由</td><td>每个 Run workspace 隔离；主 Session 顺序执行，受控子 Session 可并行；Provider 解析凭据，不交给 Agent</td></tr>
               <tr><td><code>migrate</code></td><td>internal backend;一次性任务</td><td>启动时执行数据库迁移,完成后退出</td></tr>
               <tr><td><code>postgres / redis</code></td><td>internal backend;不发布 5432/6379</td><td>PostgreSQL 17 为权威记录;Redis 8 不是最终数据源</td></tr>
               <tr><td><code>object-storage</code></td><td>internal backend;不发布 9000/9001</td><td>制品经 API 受控下载,不直接暴露 MinIO 与 Console</td></tr>
@@ -911,7 +917,7 @@
   <footer>
     <div class="footer-inner">
       <span>ProjectMind · Skill 驱动的项目管理 AI 执行平台</span>
-      <span>本页为技术可视化摘要;权威定义见 docs/04–08 与 compose.yaml</span>
+      <span>可视化摘要 · <a href="../index.html#docs/planning/roadmap.md::">实施计划</a> · <a href="../index.html#docs/overview/architecture.md::">设计与代码映射</a></span>
     </div>
   </footer>
 </body>

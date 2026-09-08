@@ -1,7 +1,9 @@
 # 01 ProjectMind 统一规划
 
+> **历史快照（2026-08-04）**：以下保留再编前的设计和状态，包含已被现行规格修正的表述，不再是开发依据。当前范围见[实施计划](../planning/roadmap.md)，规则见[文档目录](../README.md)。下文“正本”“当前”等均指当时。
+
 > 本文件是 ProjectMind 产品方向、架构原则、工作包规划和实施顺序的唯一规划正本。
-> 已完成工作包的实施记录追加到 `12_ProjectMind_Delivery_History.md`。本文是计划正本，不复制历史正文。
+> 已完成工作包的实施记录追加到 `delivery-history.md`。本文是计划正本，不复制历史正文。
 >
 > 2026-08-04 状态摘要：基础执行闭环、通用 Skill 解释与能力蓝图、资源绑定、交互式 Run、受控外部效果、
 > Skill 库作用域、界面三语化和托管凭据已经交付。资源物化、代码仓库回写、解释器过程重表达、任务调度、
@@ -171,15 +173,15 @@ MVP 的组织结构为：
 
 ### 3.1 业务结构图
 
-[查看独立业务结构图](02_ProjectMind_Business_Structure.html)
+[查看独立业务结构图](../overview/business-structure.html)
 
 ### 3.2 领域模型、字段与权限
 
-[查看领域模型与权限设计](04_ProjectMind_Domain_Model.md)
+[查看领域模型与权限设计](../design/domain-model.md)
 
 ## 4. 通用 Skill 兼容机制
 
-[查看通用 Skill 兼容与发布规范](05_ProjectMind_Skill_Compatibility_Spec.md)
+[查看通用 Skill 兼容与发布规范](../design/skill-contract.md)
 
 ### 4.1 导入和解释流程
 
@@ -320,7 +322,7 @@ workspace.write/v1     interaction.request/v1 change.propose/v1
 
 ## 6. Agent Runtime 与默认执行引擎
 
-[查看 Agent Runtime 与证据执行链路规范](06_ProjectMind_Agent_Runtime_Spec.md)
+[查看 Agent Runtime 与证据执行链路规范](../design/agent-runtime.md)
 
 ### 6.1 运行流程
 
@@ -428,7 +430,7 @@ Run
 
 ## 7. 动态 Workspace
 
-[查看动态 Workspace 与前端模块规范](07_ProjectMind_Workspace_Spec.md)
+[查看动态 Workspace 与前端模块规范](../design/workspace.md)
 
 当前 Workspace 使用标准组件；Interpreter 生成的受控前端模块属于后续增强：
 
@@ -519,7 +521,7 @@ ProjectMind 建立独立任务中心。初始版本先实现立即执行和 Run 
 
 ## 9. JAF 首个验证场景
 
-[查看 JAF Skill 迁移与端到端验收规范](08_ProjectMind_JAF_Migration_E2E_Spec.md)
+[查看 JAF Skill 迁移与端到端验收规范](../acceptance/jaf-quality.md)
 
 ### 9.1 目标流程
 
@@ -646,7 +648,7 @@ JAF 输出字段不在平台规划中固定。Interpreter 根据当前 JAF Skill
 
 ## 11. 技术架构图与部署结构
 
-[查看独立技术架构图](03_ProjectMind_Technical_Architecture.html)
+[查看独立技术架构图](../overview/technical-architecture.html)
 
 ## 12. 已确认决策和剩余设计项
 
@@ -678,7 +680,7 @@ JAF 输出字段不在平台规划中固定。Interpreter 根据当前 JAF Skill
 剩余设计项将在后续工作重点中确定：
 
 - 项目数据默认保存期限。
-- 认证会话、首个 ADMIN 初始化和 Secret Storage 已按 [认证、会话与 Secret Storage 决策](09_ProjectMind_Authentication_Decision.md) 冻结；认证实现按该决策执行。
+- 认证会话、首个 ADMIN 初始化和 Secret Storage 已按 [认证、会话与 Secret Storage 决策](../design/authentication.md) 冻结；认证实现按该决策执行。
 
 ## 13. 当前执行状态
 
@@ -716,7 +718,7 @@ JAF 输出字段不在平台规划中固定。Interpreter 根据当前 JAF Skill
 - PostgreSQL 是正本，Redis 只承载 queue、短期通知和 lock；SSE 可持久化 replay；
 - Docker Compose、共享 Traefik、migration、backup/restore 和 smoke 路径已经建立。
 
-后续变更不得把基础执行闭环从“已交付”改回功能开发状态。未完成的 Compose 环境复验属于发布操作检查，不改变功能完成判断；实际执行记录继续维护在 [运维 Runbook](10_ProjectMind_Operations_Runbook.md) 和实施计划中。
+后续变更不得把基础执行闭环从“已交付”改回功能开发状态。未完成的 Compose 环境复验属于发布操作检查，不改变功能完成判断；实际执行记录继续维护在 [运维 Runbook](../operations/runbook.md) 和实施计划中。
 
 ### 13.2 下一步与当前决策
 
@@ -735,14 +737,14 @@ JAF 输出字段不在平台规划中固定。Interpreter 根据当前 JAF Skill
 - 用户澄清、观点 Review 和外部效果批准在同一非终态 Run 中追加 RunSegment；Worker 故障才追加 RunAttempt。
 - 外部写入按 observe/propose/apply 分层，默认批准后执行；受控预授权可配置，但任意 Shell、未知 Tool 和 scope 外写入继续硬拒绝。
 - 详细实现边界以
-  [Skills 能力蓝图与交互式 Runtime 实施规范](11_ProjectMind_Skills_Interpretation_Implementation_Spec.md)
+  [Skills 能力蓝图与交互式 Runtime 实施规范](../design/skill-interpretation.md)
   为准；唯一实施顺序维护在本文件 §15。
 
 ## 14. 动态 Task Contract 与业务 Schema 去预定义化（已交付）
 
 已完成。Interpreter 生成并冻结可选任务契约，JAF/repository-review 的活动业务 Schema 已从新执行路径移除。
 
-计划正文与实施记录见 [`12_ProjectMind_Delivery_History.md`](12_ProjectMind_Delivery_History.md) §10、§29.1。
+计划正文与实施记录见 [`delivery-history.md`](delivery-history.md) §10、§29.1。
 
 ## 15. 能力蓝图与交互式 Agent Runtime
 
@@ -890,7 +892,7 @@ version/checksum 批准、diff、Approval/Effect/read-back 展示。Contract、O
 - 在真实 PostgreSQL 和部署 Compose 中验证 import→interpret→bind→run→interaction→result/effect。
 - 固定样例各重复至少三次，评价能力识别、规则保真、证据充分、交付质量和人工调整量。
 - 比较固定 workflow 与 SUPERVISED profile，确认放宽执行策略没有降低安全和可审计性。
-- 回写 `docs/12_ProjectMind_Delivery_History.md`，不创建新的 active state 文档。
+- 回写 `docs/history/delivery-history.md`，不创建新的 active state 文档。
 
 完成门禁：新增通用 Skill 无需平台业务代码/Schema 即可形成能力，并能安全完成资源绑定、交互式多会话
 执行和受控效果。
@@ -941,19 +943,19 @@ version/checksum 批准、diff、Approval/Effect/read-back 展示。Contract、O
 
 Skill 库作用域已完成。Skill 资产 lifecycle 归 Organization；TaskCatalog 与新 Run 的可见性以 Project 显式启用的精确 PUBLISHED SkillVersion 为准（migration 0017/0018）。
 
-计划正文与实施记录见 [`12_ProjectMind_Delivery_History.md`](12_ProjectMind_Delivery_History.md) §18–§20、§29.2。
+计划正文与实施记录见 [`delivery-history.md`](delivery-history.md) §18–§20、§29.2。
 
 ## 17. 界面中/日/英三语资源化与语言切换（已交付）
 
 界面三语化已完成。`users.ui_language` 偏好（0022）、`/users/me/ui-language`、`web/src/lib/i18n/` 三语目录与 sidebar 切换器已交付，全部画面经 catalog 取文案。
 
-残余：母语者人工校对与浏览器级三语/键盘验收（随部署验收执行）。计划正文与实施记录见 [`12_ProjectMind_Delivery_History.md`](12_ProjectMind_Delivery_History.md) §26–§28、§29.3。
+残余：母语者人工校对与浏览器级三语/键盘验收（随部署验收执行）。计划正文与实施记录见 [`delivery-history.md`](delivery-history.md) §26–§28、§29.3。
 
 ## 18. 托管凭据自助与应用层信封加密（已交付）
 
 托管凭据能力已完成。新增 `MANAGED` resolver：明文经创建端点一次即由部署级 KEK 做 AES-256-GCM 信封加密并只存密文，`ENVIRONMENT`/`FILE` 零改动。决策与威胁模型见 `docs/09` §7.2。
 
-服务器 migration 已通过；残余为三语目视验收与应用级浏览器验证。计划正文与实施记录见 [`12_ProjectMind_Delivery_History.md`](12_ProjectMind_Delivery_History.md) §29.4。
+服务器 migration 已通过；残余为三语目视验收与应用级浏览器验证。计划正文与实施记录见 [`delivery-history.md`](delivery-history.md) §29.4。
 
 ## 19. 资源快照物化与 Agent 工作区能力扩充
 
@@ -985,7 +987,7 @@ Skill 库作用域已完成。Skill 资产 lifecycle 归 Organization；TaskCata
 
 ### 19.3 实施工作包
 
-本工作包已在本地完成，**实施记录（含决定与验证）见** [`12_ProjectMind_Delivery_History.md`](12_ProjectMind_Delivery_History.md) **§31–§33**；本节只保留边界与状态。
+本工作包已在本地完成，**实施记录（含决定与验证）见** [`delivery-history.md`](delivery-history.md) **§31–§33**；本节只保留边界与状态。
 
 | 工作包 | 边界 | 状态 |
 |---|---|---|
@@ -1051,7 +1053,7 @@ Agent 侧不新增直接写能力：仍只调用既有 `change.propose/v1` 产�
 - **产出即 Evidence 且可回滚**。落地的 base/commit SHA 与分支名记为 before/after Evidence；回滚经删除分支或 revert。
 - **复用 §19 的仓库客户端**。资源物化工作包交付的真实 git 客户端同时服务读物化与写落地，避免两套 subprocess 与凭据实现。
 
-**已定（2026-07-25 批准。实施记录见 [`12_ProjectMind_Delivery_History.md`](12_ProjectMind_Delivery_History.md) §34）**
+**已定（2026-07-25 批准。实施记录见 [`delivery-history.md`](delivery-history.md) §34）**
 
 - **D1｜单一 `repository.write/v1`**：携带变更集 + `base_revision` + `target_branch`。拆成 commit 与
   pull-request 两个能力会让「提交了但没开 PR」成为可达的中间态——既无人评审，也不在提案的审批范围内。
@@ -1149,7 +1151,7 @@ Integration 的既定分支（git 为 `default_revision` 指向的分支并要�
 
 ### 21.3 实施工作包
 
-解释器过程重表达已在本地完成，**实施记录见** [`12_ProjectMind_Delivery_History.md`](12_ProjectMind_Delivery_History.md) **§30**；本节只保留工作包边界与状态。
+解释器过程重表达已在本地完成，**实施记录见** [`delivery-history.md`](delivery-history.md) **§30**；本节只保留工作包边界与状态。
 
 | 工作包 | 边界 | 状态 |
 |---|---|---|
