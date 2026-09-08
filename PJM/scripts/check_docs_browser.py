@@ -40,6 +40,24 @@ SECTION_TARGETS = (
     ("docs/design/skill-contract.md", "111-版本内容与可见性"),
     ("docs/design/skill-contract.md", "112-可审计的重新启用与回滚"),
     ("docs/design/skill-interpretation.md", "从候选到项目任务的接线"),
+    ("docs/design/repository-effects.md", "先分清四种事实"),
+    ("docs/design/repository-effects.md", "调用与批准链路"),
+    ("docs/design/repository-effects.md", "阶段回执与不确定结果"),
+    ("docs/design/repository-effects.md", "执行权与取消"),
+    ("docs/design/workspace.md", "审批请求与执行结果"),
+    ("PJM/backend/README.md", "承認から外部変更まで追う"),
+    ("PJM/contracts/README.md", "外部変更の契約を読む"),
+    ("docs/design/task-scheduling.md", "一个例子规则触发与执行分别看"),
+    ("docs/design/task-scheduling.md", "生命周期与发火"),
+    ("docs/design/task-scheduling.md", "重叠检查到底看谁"),
+    ("docs/design/task-scheduling.md", "保存后的管理入口"),
+    ("docs/design/task-scheduling.md", "认领记录与恢复权限"),
+    ("docs/design/task-scheduling.md", "配置并发与暂停"),
+    ("docs/design/task-scheduling.md", "结算计数与未知结果"),
+    ("docs/design/task-scheduling.md", "历史兼容与实施顺序"),
+    ("PJM/backend/README.md", "schedule-の認領と回写を追う"),
+    ("PJM/contracts/README.md", "schedule-の公開契約を読む"),
+    ("PJM/web/README.md", "調度の保存と管理を引き継ぐ"),
 )
 
 
@@ -302,6 +320,84 @@ async def check_search_and_navigation(page: Page, book: Path, output: Path | Non
     await page.goto(page_url(book, "docs/design/skill-interpretation.md", "从候选到项目任务的接线"))
     await check_heading(page)
     await screenshot(page, output, "skill-lifecycle-desktop")
+
+    # 批准と外部結果を混同しない読書経路を、実装案内から狭幅の復旧設計まで辿る。
+    await page.goto(page_url(book, "PJM/backend/README.md", "承認から外部変更まで追う"))
+    await page.locator("#main a", has_text="批准と外部結果の違い").click()
+    await check_heading(page)
+    await expect(page.locator("#main h2:focus")).to_have_text("先分清四种事实")
+    await screenshot(page, output, "effects-facts-desktop")
+    await page.set_viewport_size({"width": 390, "height": 844})
+    await page.reload()
+    await check_heading(page)
+    await check_layout(page, "effects facts mobile")
+    assert await page.locator("#main .table-scroll").first.evaluate(
+        "region => region.scrollWidth <= region.clientWidth"
+    ), "The first effect-state table must be readable without horizontal scrolling"
+    await screenshot(page, output, "effects-facts-mobile")
+    await page.goto(page_url(book, "docs/design/repository-effects.md", "调用与批准链路"))
+    await check_heading(page)
+    await check_layout(page, "effects transactions mobile")
+    await screenshot(page, output, "effects-transactions-mobile")
+    await page.locator("#main a", has_text="阶段回执要求").click()
+    await check_heading(page)
+    await expect(page.locator("#main h3:focus")).to_have_text("阶段回执与不确定结果")
+    await check_layout(page, "effects recovery mobile")
+    await screenshot(page, output, "effects-recovery-mobile")
+    await page.set_viewport_size({"width": 1440, "height": 1000})
+    await page.locator("#main a", has_text="审批界面").click()
+    await check_heading(page)
+    await expect(page.locator("#main h3:focus")).to_have_text("审批请求与执行结果")
+    await screenshot(page, output, "effects-decision-desktop")
+
+    # Schedule の摘要を Run 履歴と誤読しないよう、実装入口から例・重複・認領を辿る。
+    await page.goto(page_url(book, "PJM/backend/README.md", "schedule-の認領と回写を追う"))
+    await page.locator("#main a", has_text="規則・発火・Run の具体例").click()
+    await check_heading(page)
+    await expect(page.locator("#main h2:focus")).to_have_text(
+        "一个例子：规则、触发与执行分别看"  # noqa: RUF001
+    )
+    await screenshot(page, output, "schedule-facts-desktop")
+    await page.set_viewport_size({"width": 390, "height": 844})
+    await page.reload()
+    await check_heading(page)
+    await check_layout(page, "schedule facts mobile")
+    await screenshot(page, output, "schedule-facts-mobile")
+    summary = page.locator("#main .table-scroll").filter(
+        has=page.get_by_role("columnheader", name="它实际说明什么", exact=True)
+    )
+    await expect(summary).to_have_count(1)
+    assert await summary.evaluate("region => region.scrollWidth <= region.clientWidth"), (
+        "Schedule summary meanings must be readable without horizontal scrolling"
+    )
+    # 例の下にある表も全行を抽看できる位置へ送り、固定 header の裏へ隠さない。
+    await summary.evaluate("""region => window.scrollBy(0,
+      region.getBoundingClientRect().top
+      - document.querySelector('.topbar').getBoundingClientRect().bottom - 16)""")
+    await check_layout(page, "schedule summary mobile")
+    await screenshot(page, output, "schedule-summary-mobile")
+    await page.locator("#main a", has_text="重叠范围").click()
+    await check_heading(page)
+    await expect(page.locator("#main h3:focus")).to_have_text("重叠检查到底看谁")
+    await screenshot(page, output, "schedule-overlap-mobile")
+    await page.locator("#main a", has_text="认领记录与执行权").click()
+    await check_heading(page)
+    await expect(page.locator("#main h3:focus")).to_have_text("认领记录与恢复权限")
+    await check_layout(page, "schedule recovery mobile")
+    await screenshot(page, output, "schedule-recovery-mobile")
+
+    # Web の page 結合と公開 paging の責任を、文書だけのクリックで確認する。
+    await page.goto(page_url(book, "PJM/web/README.md", "調度の保存と管理を引き継ぐ"))
+    await page.locator("#main a", has_text="保存後の入口").click()
+    await check_heading(page)
+    await expect(page.locator("#main h3:focus")).to_have_text("保存后的管理入口")
+    await check_layout(page, "schedule management mobile")
+    await screenshot(page, output, "schedule-management-mobile")
+    await page.locator("#main a", has_text="契约入口").click()
+    await check_heading(page)
+    await expect(page.locator("#main h2:focus")).to_have_text("Schedule の公開契約を読む")
+    await check_layout(page, "schedule contract mobile")
+    await screenshot(page, output, "schedule-contract-mobile")
 
 
 async def check(book: Path, output: Path | None) -> None:

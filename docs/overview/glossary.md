@@ -63,5 +63,6 @@ Run（一个目标、固定权限与输入）
 | Idempotency-Key / 请求身份 | 键定位一次创建，身份判断请求内容是否相同；不是持有键就获得授权 |
 | 创建重放 | 确认首次成功创建的 Run，不再冻结资源或追加执行；[创建设计](../design/run-creation.md)区分后端入口、客户端待确认提交与剩余验收 |
 | occurrence | Schedule 算出的计划时刻，不是 Worker 实际开始时刻，也不是 Run 的终态结果 |
-| missed / overlap | 错过计划时刻 / 观察到同任务非终态执行；不能合并成一个失败计数 |
+| missed / overlap | 错过计划时刻 / 重叠而跳过。当前只查本 Schedule 的 last_run_id，不扫描同 Task 全部执行；[实际范围](../design/task-scheduling.md#重叠检查到底看谁)不能扩大成全局串行保证 |
+| Schedule 摘要 / 触发账本 | last_*、run_count 是可覆盖的摘要；[示例](../design/task-scheduling.md#一个例子规则触发与执行分别看)说明时间、原因和 Run ID 未必属于同次触发。持久 occurrence 记录仍待实现 |
 | 在途触发恢复 / 历史补跑 | 处理已经认领但未结算的一次 / 为过去未处理时刻新造执行；[调度修正](../design/task-scheduling.md#可靠性修正要求待实现)不自动授权后者 |

@@ -26,7 +26,7 @@ FastAPI API と ARQ Worker が同じ `projectmind` package を共有するモジ
 | --- | --- | --- |
 | Run の作成と要求再送 | [意図の正規化](src/projectmind/runs/creation_request.py) / [保存記録の検証](src/projectmind/runs/creation_replay.py) → [route](src/projectmind/api/routes/runs.py) → [service](src/projectmind/runs/service.py) → [repository](src/projectmind/runs/repository.py) | [作成と幂等](../../docs/design/run-creation.md)。初回 snapshot と要求の同一性を分ける |
 | Worker の復旧・ユーザー応答 | [Executor](src/projectmind/worker/executor.py) → [runs](src/projectmind/runs/) → 対応する repository | [状態速查](../../docs/design/domain-model.md#run-状态速查)、[Runtime](../../docs/design/agent-runtime.md)。Attempt と Segment を混同しない |
-| 時刻起動・停止後の挙動 | [Schedule service](src/projectmind/schedules/service.py) → [repository](src/projectmind/schedules/repository.py) → RunService | [調度設計](../../docs/design/task-scheduling.md)。認領・作成・回写は現在別 transaction |
+| 時刻起動・停止後の挙動 | [Schedule の接続案内](#schedule-の認領と回写を追う) → service / repository / RunService | [調度設計](../../docs/design/task-scheduling.md)。認領・作成・回写は現在別 transaction |
 | Agent が何を読めるか | [context_builder](src/projectmind/agent/context_builder.py) → [Gateway](src/projectmind/agent/tool_gateway.py) → 対象 Provider | [資源快照](../../docs/design/resource-snapshots.md)、[認証](../../docs/design/authentication.md) |
 | Run 資源を何まで公開するか | [resource_projection](src/projectmind/runs/resource_projection.py) → [response model](src/projectmind/api/routes/runs.py) → Schema / Web validator | [公開投影の設計](../../docs/design/resource-snapshots.md#公开选择与读取投影的实施契约)。内部 JSON は応答へ直接流さない |
 | 上限・timeout・子分析 | [SDK options](src/projectmind/agent/claude.py) → [Executor](src/projectmind/worker/executor.py) / [dispatch](src/projectmind/agent/subagent_provider.py) | [Run 予算](../../docs/design/run-budgets.md) |
@@ -72,6 +72,7 @@ Worker startup は必須 store と総量設定を物化器へ渡し、Tool は `
 | --- | --- |
 | 準備中の heartbeat・取消・timeout・開始前拒否 | [preparation supervision](tests/worker/test_preparation_supervision.py)、[Executor](tests/worker/test_agent_run_executor.py)。fake service/engine の制御順序であり、実モデル停止の保証ではない |
 | DB gate と設定の消費 | [execution gates](tests/runs/test_execution_gates.py)、[Settings](tests/core/test_settings.py)、[startup](tests/worker/test_worker_startup.py)。SQL 構築/lock 順序は mock、constructor は実装を通す；実 PostgreSQL の競合は別検証 |
+| 回执の所有者・完成確認 | [repository inputs](tests/runs/test_repository_inputs.py)。同世代の一度だけの commit 確認、古い lease/取消の拒否を mock DB/transaction で確認する。実 driver の応答喪失とは別 |
 | 実 byte・探索・安全な書き込み | [workspace Provider](tests/agent/test_workspace_provider.py)、[storage](tests/agent/test_materialization_storage.py)。一時 file の検証であり、回执 commit の crash/recovery は含まない |
 
 `materialize` 呼出しでは claim、Project/Run と workspace の identity を揃え、凍結來源を明示する。戻り値の `PreparedInput.workspace / resources` を両方引き継ぐ。旧 fixture の引数不足や旧戻り値の参照を、production 側の optional 化で吸収しない。
@@ -79,6 +80,31 @@ Worker startup は必須 store と総量設定を物化器へ渡し、Tool は `
 `input_files=None` は未検証、空 tuple は合法な空入力になり得るため、互換 default で同一視しない。`input/` は Tool の論理 path、`.projectmind-inputs/<snapshot_id>/` は平台の物理配置であり、model や公開 API に任意の世代選択を開放しない。
 
 [文書物化 test](tests/agent/test_document_materialization.py)、[全物化 test](tests/agent/test_workspace_materializer.py)、[Tool test](tests/agent/test_workspace_provider.py)、[Runtime context test](tests/agent/test_runtime_context.py)を消費側として確認する。旧 fixture の不足を理由に本番回执を optional に戻さず、明示的な test store と実 DB 検証を分ける。migration head、構造検査や以前の回帰だけで機能が有効とは判断しない。
+
+## 承認から外部変更まで追う
+
+まず[批准と外部結果の違い](../../docs/design/repository-effects.md#先分清四种事实)を読む。DB の transaction と外部 I/O を一つの成功にまとめず、[段階回执の修正要求](../../docs/design/repository-effects.md#阶段回执与不确定结果)へ接続する。
+
+| 変更する境界 | コードと回帰 |
+| --- | --- |
+| 提案の内容と許可される操作 | [catalog](src/projectmind/effects/catalog.py) → [proposal](src/projectmind/effects/proposal.py) / [repository validator](src/projectmind/effects/repository_write.py) → [tests/effects](tests/effects/)。登録と事前許可の判断を複製しない |
+| 精確批准と保存 | [effects route](src/projectmind/api/routes/effects.py) → [RunService](src/projectmind/runs/service.py) → [repository_effects](src/projectmind/runs/repository_effects.py) の decide → [decision test](tests/runs/test_effect_decision_service.py) |
+| claim・実行・finalize・再派発 | [EffectService](src/projectmind/effects/service.py) → 同 repository の claim/finalize/recover → [Effect Executor](src/projectmind/worker/effects.py) → [executor test](tests/worker/test_effect_executor.py)。Run の Executor とは別の監督境界 |
+| 遠端の競合・replay・PR | [repository Provider](src/projectmind/effects/repository_effect.py) → [command client](src/projectmind/agent/repository_client.py) / [forge](src/projectmind/effects/forge.py)、[Redmine](src/projectmind/effects/redmine.py) → Provider 回帰。file 内容の一致と原実行の証明を分ける |
+
+現在の Provider test はローカル Git/SVN と fake transport、repository test は mock の範囲を含む。実 DB の lease 競合、遠端応答喪失、部分成功回执を証明したとは扱わない。Provider の旧「branch のみ」注釈と repository.write request Schema は現行 direct/SVN と未同期であり、後続変更では[契約の接続先](../contracts/README.md#外部変更の契約を読む)も確認する。
+
+## Schedule の認領と回写を追う
+
+まず[規則・発火・Run の具体例](../../docs/design/task-scheduling.md#一个例子规则触发与执行分别看)で last_* と Run 状態を分ける。同 Task 全体を走査するコードや、公開 row_version による原子的 CAS が実装済みとは仮定しない。
+
+| 変更する境界 | コードと検証の入口 |
+| --- | --- |
+| 候補時刻と認領 | [Worker tick](src/projectmind/worker/settings.py) の trigger_due_schedules → [service](src/projectmind/schedules/service.py) の plan_occurrence / _claim → [repository](src/projectmind/schedules/repository.py) の claim。認領後 crash の回復は別に確認する |
+| 原 Run の確認と重複 | 同 service の _create_scheduled_run / _overlapping_run → [RunService](src/projectmind/runs/service.py) → [replay test](tests/schedules/test_schedule_replay.py)。現行の重複確認は本 Schedule の last_run_id のみ |
+| 定義・状態・結果の更新 | repository の update_definition / set_status / record_outcome → [モデル](src/projectmind/db/models.py)。[API test](tests/api/test_schedule_api.py) の fake conflict と実 DB の競争を分ける |
+
+後続は[認領記録と実行権](../../docs/design/task-scheduling.md#认领记录与恢复权限)、[原子的更新](../../docs/design/task-scheduling.md#配置并发与暂停)、[一度だけの計数](../../docs/design/task-scheduling.md#结算计数与未知结果)を満たす。[cron test](tests/schedules/test_cron.py)、[planning test](tests/schedules/test_schedule_planning.py)、[tick test](tests/worker/test_schedule_tick_job.py) の成功は、DB transaction 間の中断・lease 接管・履歴移行の証拠にはしない。公開形状は[Schedule 契約](../contracts/README.md#schedule-の公開契約を読む)へ進む。
 
 ## 起動と検証
 

@@ -26,6 +26,7 @@ from projectmind.agent.repository_client import (
 )
 from projectmind.agent.repository_source import (
     RepositoryBindingRef,
+    RepositorySnapshotBinding,
     ScopedRepositorySession,
 )
 from projectmind.agent.workspace import WorkspaceManager
@@ -33,6 +34,7 @@ from projectmind.agent.workspace_materializer import WorkspaceMaterializer
 from projectmind.agent.workspace_provider import WorkspaceSearchProvider
 from projectmind.documents.snapshot import FrozenDocument
 from projectmind.documents.source import ProjectDocumentContent
+from tests.agent.input_fakes import TEST_BINDING_CHECKSUM, MemoryInputSnapshots, input_claim
 from tests.agent.test_workspace_materializer import _read_context
 
 requires_git = pytest.mark.skipif(
@@ -67,6 +69,16 @@ class _DirectRepositorySource:
         self._revision = revision
         self._scope_paths = scope_paths
 
+    async def inspect(
+        self, *, project_id: UUID, run_id: UUID, binding: RepositoryBindingRef
+    ) -> RepositorySnapshotBinding:
+        """DB の代役となる固定 metadata を、実 remote open と別の境界で返す。"""
+
+        del project_id, run_id, binding
+        return RepositorySnapshotBinding(
+            checksum=TEST_BINDING_CHECKSUM, scope_paths=self._scope_paths
+        )
+
     @asynccontextmanager
     async def open(
         self,
@@ -85,7 +97,11 @@ class _DirectRepositorySource:
             revision=requested_revision or self._revision,
             credential=None,
         ) as session:
-            yield ScopedRepositorySession(session=session, scope_paths=self._scope_paths)
+            yield ScopedRepositorySession(
+                session=session,
+                scope_paths=self._scope_paths,
+                binding_checksum=TEST_BINDING_CHECKSUM,
+            )
 
 
 def _run(arguments: list[str], *, home: Path) -> str:
@@ -264,8 +280,17 @@ async def test_real_git_tree_is_materialized_and_discoverable(tmp_path: Path) ->
 
     uri, commit = _git_repository(tmp_path)
     workspace = WorkspaceManager((tmp_path / "runs").resolve()).initialize(uuid4())
+    bindings = {
+        "source_repository": RepositoryBindingRef(
+            provider="git", integration_id=uuid4(), binding_id=uuid4()
+        )
+    }
+    claim = input_claim(
+        project_id=uuid4(), run_id=UUID(workspace.root.name), repository_bindings=bindings
+    )
     materializer = WorkspaceMaterializer(
         document_inventory=_EmptyInventory(),
+        input_snapshots=MemoryInputSnapshots(claim),
         max_bytes=10_485_760,
         max_files=500,
         repository_source=_DirectRepositorySource(
@@ -273,21 +298,19 @@ async def test_real_git_tree_is_materialized_and_discoverable(tmp_path: Path) ->
         ),
     )
 
-    await materializer.materialize(
+    prepared = await materializer.materialize(
+        claimed_run=claim,
         workspace=workspace,
-        project_id=uuid4(),
-        run_id=uuid4(),
+        project_id=claim.project_id,
+        run_id=claim.run_id,
         blueprint={
             "resource_requirements": [
                 {"key": "source_repository", "kind": "repository", "required": True}
             ]
         },
-        repository_bindings={
-            "source_repository": RepositoryBindingRef(
-                provider="git", integration_id=uuid4(), binding_id=uuid4()
-            )
-        },
+        repository_bindings=bindings,
     )
+    workspace = prepared.workspace
 
     base = workspace.input_dir / "source_repository"
     manifest = json.loads((base / ".projectmind" / "manifest.json").read_text(encoding="utf-8"))
@@ -297,7 +320,7 @@ async def test_real_git_tree_is_materialized_and_discoverable(tmp_path: Path) ->
     assert {item["reason"] for item in manifest["skipped"]} == {"binary", "symlink"}
 
     found = await WorkspaceSearchProvider().execute(
-        _read_context(workspace, "workspace.search/v1"),
+        _read_context(workspace, "workspace.search/v1", project_id=claim.project_id),
         {"query": "ticket-42", "purpose": "Find the ticket reference in source"},
     )
     assert [item["path"] for item in found.response["matches"]] == [

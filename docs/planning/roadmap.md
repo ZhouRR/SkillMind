@@ -1,6 +1,6 @@
 # ProjectMind 实施计划
 
-> 状态正本。2026-09-08 最新核对见 [§13.16](#1316-skill-生命周期与开发文档核对2026-09-08)：Skill 发布/启停与回滚边界已明确，重新启用仍待实现；Backend 全量基线存在物化消费者和迁移 head 断言失败。部署证据仍为 2026-08-04 的[交付记录 §49](../history/delivery-history.md#49-服务器部署基线验收2026-08-04)，不据文档或局部回归宣称全项目完成。
+> 状态正本。2026-09-08 最新核对见 [§13.18](#1318-调度事实并发与管理文档核对2026-09-08)：纠正重叠范围与原子版本保护的描述，明确摘要、持久恢复和分页管理的差距。此前物化/效果局部回归见 §13.17，全量基线未重新执行。部署证据仍为 2026-08-04 的[交付记录 §49](../history/delivery-history.md#49-服务器部署基线验收2026-08-04)，不据文档或局部回归宣称全项目完成。
 
 先看[当前状态](#13-当前执行状态)、[下一步](#132-下一步与当前决策)和[全项目工作登记](#133-全项目重构与缺失功能实施2026-09-05-启动)。设计归属见[设计责任索引](../design/README.md)，核对证据按[历史索引](../history/README.md)查找。本页只管理范围、状态和门禁。
 
@@ -15,10 +15,10 @@
 | Skill 导入/解释/发布/组织资产/项目启用 | 现有 skills/compositions 模块与契约；发布/启停边界已核对 | 停用后同版重新启用与审计未实现；完整模型反复及人工质量报告待补 |
 | Blueprint/Task Contract/Brief/交互与效果 | 现有通用契约、Segment 与 effect 链路 | 真实模型与 CAS adapter 专项验收待补 |
 | 三语界面与托管凭据 | 现有 i18n、用户偏好和 MANAGED resolver；文档选择/清单三语已接入 | 原请求、显式范围与调度输入有局部 mock 浏览器证据；全页面与托管凭据端到端仍需复验 |
-| 资源物化与 workspace.write（§19） | 回执/0029、物化/ContextBuilder、Worker/Tool、准备监督与启动 gate 已接线；监督、配置和局部读写回归通过 | 旧物化 fixture 仍失败；提交结果未知、整链/真实迁移恢复、首事件前取消、HTTPS remote 与模型使用待验 |
-| repository.write（§20） | Git/SVN、direct/branch、Proposal 与 read-back | 真实 forge/并发/失败恢复端到端待验 |
+| 资源物化与 workspace.write（§19） | 回执/0029、Worker/Tool、准备监督、启动 gate 与一次性完成确认已有代码；物化消费者及相关回归通过 | 跨根故障、整链/真实提交与迁移恢复、首事件前取消、HTTPS remote 与模型使用待验 |
+| repository.write（§20） | Git/SVN、direct/branch、Proposal 与 read-back；本地临时仓库和部分审批/Provider 回归通过 | 原执行身份证明、精确 CAS、阶段回执、Effect 监督和审批重发待补齐；真实 forge/并发/失败恢复端到端待验 |
 | 过程重表达（§21） | 静态信号、system Skill、能力引用守卫 | 模型语义保真和 JAF 实机执行待验 |
-| TaskSchedule（§22） | ONCE/CRON、Worker tick、API/Web、migration 0025；原键先行、共享输入表单及相关局部回归 | 持久在途、配置/计数/迟到修正未完成；现有配置编辑 UI 与时间输入/显示边界也待补 |
+| TaskSchedule（§22） | ONCE/CRON、Worker tick、API/Web、migration 0025；重放/时间/API 与 Web 投影有局部回归 | 重叠只查本 Schedule 的摘要指针；原子编辑、持久在途/计数/迟到、分页/失效可见性、编辑与时区修正待补 |
 | 并行子分析（§23） | dispatch、能力收窄、单次预算分配、子 Session 记录 | Run 总预算尚无共享扣减；模型汇总效果待验 |
 | 前端信息架构（§25） | Task Center、服务端待办、历史与任务关联 | 浏览器专项待验 |
 | Task Flow（§26） | 设计完成 | 无 Flow Schema、持久化或页面实现 |
@@ -47,7 +47,7 @@
 
 ### 13.3 全项目重构与缺失功能实施（2026-09-05 启动）
 
-此登记保留既有全项目实施范围；本次文档整理只核对现有代码、修正规则表达和接续入口，不执行全项目代码重构。R01 后续从物化消费者、回执提交结果未知、真实事务与历史续行继续，不重做已有选择、store、准备监督或启动 gate。一次文档整理或局部实现不代替整体完成。
+此登记保留既有全项目实施范围；本次文档整理只核对现有代码、修正规则表达和接续入口，不执行全项目代码重构。R01 从跨根故障、真实提交确认/事务与历史续行继续，不重做已有选择、消费者、store、准备监督或启动 gate。一次文档整理或局部实现不代替整体完成。
 
 范围覆盖 Backend、Web、contracts、Skill 执行资产、脚本、构建/部署配置及对应测试。以下是全量工作入口，
 不是把目标缩减为第一批缺口；每一领域仍需逐条核对设计中的字段、行为、不变量、失败路径和验收条件。
@@ -55,19 +55,19 @@
 
 | 工作 | 规范与代码范围 | 完成证据要求 | 当前状态 |
 | --- | --- | --- | --- |
-| R01 资源冻结 | 资源快照与创建；documents / integrations / runs / agent、Preflight 与 Run 详情 | 显式单份/集合/全集、创建时冻结、不可越权/漂移、重放与历史兼容 | 实施中：回执/Tool、准备监督、timeout/启动 gate 与配置已有接线和局部回归；旧物化 fixture 缺必需参数仍失败。提交结果未知、整链/真实事务与历史续行待验 |
+| R01 资源冻结 | 资源快照与创建；documents / integrations / runs / agent、Preflight 与 Run 详情 | 显式单份/集合/全集、创建时冻结、不可越权/漂移、重放与历史兼容 | 实施中：回执/Tool、监督/启动 gate、配置、消费者及一次性完成确认已有接线和局部回归；跨根故障、整链/真实提交与历史续行待验 |
 | R02 Run 统一预算 | [预算设计](../design/run-budgets.md)、子分析与 Runtime；agent / runs / worker / DB | 主子共同计费、原子预留、幂等结算、跨 Segment/Attempt 恢复与并发测试 | 待实现；已细化计量口径、预留和不确定用量恢复要求 |
 | R03 Task Flow 完整链路 | Task Flow、Workspace、Interpreter；contracts / skills / runs / Web | 预览、契约/Draft/diff/发布、不可变 Run 流程、事件关联、待办/证据联动、三语与历史回退 | 待实现全部工作包 |
 | R04 生成模块 | generated FrontendModule；modules / API / Web / builder / Compose | 威胁模型、依赖与网络隔离、构建测试、安全投放、Host 协议、发布与回退；禁止仅静态通过即执行 | 前置代码待重新核对，其余待实现 |
 | R05 领域与身份安全 | 领域模型、认证；auth / projects / documents / integrations / core / DB | 所有权、CSRF/Origin、角色、Secret、并发与不变数据约束的正负向回归 | 待逐模块核对与重构 |
 | R06 Skill 生命周期 | Skill 契约与解释实现；skills / compositions / contracts / Web / system Skill | 导入到解释、版本发布与项目启用、来源/identity、动态契约、兼容与错误恢复 | 发布/启停已只读核对；同版重新启用/审计与回滚待实现，组合尚无跨 Skill 规则求解；其余仍需逐条核对 |
 | R07 Run 与审计 | Runtime；runs / worker / agent / events / evidence / evaluations / storage | Segment/Attempt/Session、Outbox/lease、恢复/取消/等待期限、结果与 SSE 重放的有状态验证 | 准备监督与启动校验有局部回归；首事件前取消、实际进程停止、异常收尾及其余生命周期待逐条核对与验收 |
-| R08 外部效果 | 受控写入；effects / integrations / repository / Redmine / Web | 提案、精确批准/预授权、CAS/幂等、read-back、Git/SVN 模式与部分失败恢复 | 待重新验收与补齐 |
-| R09 调度 | [TaskSchedule](../design/task-scheduling.md)；schedules / worker / API / Web | 时间/预览、失效、迟到/重叠、持久在途恢复、配置版本、幂等计数与同一创建路径 | 重放与实际输入表单有局部检查；持久在途、配置/计数/迟到、编辑入口、无时区时间拒绝与显示修正待补齐 |
-| R10 全部 Web 页面 | Workspace 与产品概览；pages / components / API / hooks / lib / styles / i18n | 页面职责、服务端筛选、并发请求清理、三语/键盘/窄屏、真实用户流程 | 原请求、文档选择/详情与调度输入有局部 mock 浏览器证据；仍待全部页面逐项核对与重构 |
+| R08 外部效果 | [受控写入](../design/repository-effects.md#可靠性修正要求)；effects / integrations / repository / Redmine / Web | 提案、精确批准/预授权、CAS/原执行身份、阶段回执、Effect lease、read-back、Git/SVN/PR 部分失败恢复 | 已核对内容比较不能证明原执行、SVN 基线/回读未固定、无独立阶段回执/贯穿监督；审批卡片换键与旧 branch-only Schema 待同步。局部通过不替代修正/真实验收 |
+| R09 调度 | [TaskSchedule](../design/task-scheduling.md)；schedules / worker / API / Web | 时间/预览、同 Schedule 重叠、原子配置更新、持久在途/执行权、幂等计数与历史兼容 | 已核对摘要/先读后写/首 100 条的限度；恢复协议、并发/计数/迟到、管理/编辑入口和时区修正待实现，局部通过不证明真实事务 |
+| R10 全部 Web 页面 | Workspace 与产品概览；pages / components / API / hooks / lib / styles / i18n | 页面职责、服务端筛选、并发请求清理、三语/键盘/窄屏、真实用户流程 | 原请求、文档选择/详情与调度输入有局部 mock 浏览器证据；已定位 Schedule 首批与 TaskCatalog 结合的漏显风险，其余页面仍待逐项核对与重构 |
 | R11 运维与工程工具 | 开发/运维规范；ops / migrations / scripts / images / Compose / Dockerfile | 锁定依赖、静态检查、启动/迁移、backup/restore/rollback、KEK 保留、清理策略与 smoke | 已定位 ENV_FILE/容器 .env 来源不统一、deploy 不分阶段放行、0027 downgrade 删除审计会话的风险；配置修正/真实恢复演练仍待完成；既有业务浏览器 Ruff 问题见 §13.11 |
 | R12 业务质量验收 | JAF acceptance；通用运行链与业务 Skill/评价数据 | 文档定义的 case/指标/人工评价、Gold 隔离、规则保真；不把 fixture 结果冒充真实模型质量 | 待构建/执行可获得的验收，其余保留外部条件 |
-| R13 全量契约与最终审计 | 全部现行设计、AGENTS、contracts 和工程入口 | 逐需求证据、Schema/example/OpenAPI 同步、Backend/Web/DB/浏览器/部署范围匹配的测试 | Backend 全量基线未通过，见 §13.16；其余仍待全量复验，不能用局部绿色结果判定总目标完成 |
+| R13 全量契约与最终审计 | 全部现行设计、AGENTS、contracts 和工程入口 | 逐需求证据、Schema/example/OpenAPI 同步、Backend/Web/DB/浏览器/部署范围匹配的测试 | §13.16 的失败在对应局部回归中不再复现；全量未再执行，其他领域仍待完整核对与复验，不能用局部绿色判定总目标完成 |
 
 本表保留 R01–R13 全项目实施任务与既有进展。接续开发不重做已存在的选择/清单入口，从剩余不变量和未覆盖环境继续验收。资源准备回执需要同步 DB/migration、物化器、Worker heartbeat/fencing、workspace Provider、测试与恢复说明；不运行部署或未知生产数据操作。下面的有日期章节只保留证据入口，历史细节不在计划页重复维护，后续代码结果单独记录。
 环境、账号、内部依赖镜像或真实业务数据不足时先完成可独立推进的代码与测试，不擅自采用公网依赖或放宽安全门禁。
@@ -122,11 +122,17 @@ Run 级输入协议、物化器/ContextBuilder 接线和当时的构造器失败
 
 ### 13.16 Skill 生命周期与开发文档核对（2026-09-08）
 
-本轮只整理设计、代码目录 README 与离线文档检查。修正 native/Interpreter、运行中资源选择和 Manifest 版本标识，区分 gate、发布、启用与 readiness；同版重新启用拆为现有限制和[可审计恢复设计](../design/skill-contract.md#112-可审计的重新启用与回滚)。未改业务代码、应用测试、公开契约或执行 Skill。
+Skill 阶段、Manifest 标识、重新启用目标与当时 Backend 全量基线的 46 项失败见[交付记录 §63](../history/delivery-history.md#63-skill-生命周期与开发文档续整2026-09-08)。之后工作副本已有消费者/完成确认改动，按 §13.17 接续；旧成功/失败记录保留，不从旧 fixture 失败推导当前范围校验或迁移失败。
 
-接续的 Backend 全量基线结果为 **1018 passed、46 failed、20 skipped**：45 项在旧 fixture 构造物化器时缺少必需 input_snapshots，1 项仍断言 migration head 为 0028、而代码已是 0029。这些失败先于业务范围断言或真实迁移，不能当作越权成功、DB 迁移失败或 R01 已完成的证明。保留全部失败，不放宽生产接口或修改测试获得绿色结论。
+### 13.17 外部效果与恢复文档核对（2026-09-08）
 
-R01 继续同步物化消费者/迁移断言并完成整链与真实恢复；R06 按生命周期设计补启停审计与回滚，旧代码中运行中 CHOICE 重绑的注释也需对齐。验证范围与阅读检查记录见[交付记录 §63](../history/delivery-history.md#63-skill-生命周期与开发文档续整2026-09-08)，R01–R13 仍未完成。
+受控写入的事实/事务/身份/阶段恢复核对、既有 Backend 174 项与 Web 25 项局部通过见[交付记录 §64](../history/delivery-history.md#64-外部效果与恢复文档续整2026-09-08)。该轮没有修复业务代码；物化消费者及迁移 head 的旧断言失败在相应回归中不再复现，input commit 确认仍只是 mock transaction 证据，不替代真实 PostgreSQL 恢复或全量验收。
+
+### 13.18 调度事实、并发与管理文档核对（2026-09-08）
+
+本轮继续整理文档，没有修改应用代码/测试、Schema、migration、配置或执行 Skill。调度设计改为具体例子、实际范围、故障边界与分项修正：重叠只检查本 Schedule 的 last_run_id；expected_row_version 尚非原子 CAS；last_* 不是完整账本；首 100 条与当前任务卡结合可能隐藏失效规则。认领执行权、原子编辑、未知提交的名额保留、幂等结算、历史迁移和管理可见性均保留为待实现要求。
+
+当前调度相关 Backend **65 项通过**，Web API/Task Center 投影 **10 项通过**；前者含纯时间逻辑与 fake service/Worker，后者含 client 与静态投影，不覆盖真实锁竞争、持久恢复、100 条以上分页或失效任务管理。阅读检查与证据见[交付记录 §65](../history/delivery-history.md#65-调度事实并发与管理文档续整2026-09-08)。全量 Backend/Web、真实 DB、业务浏览器、模型、远端与部署未重跑，R01–R13 继续按 §13.3 执行。
 
 ## 旧章节引用索引
 

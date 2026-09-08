@@ -175,11 +175,13 @@ TasksPage 选定精确任务后才打开 ScheduleDialog，使用与立即执行�
 
 修改现有 Schedule 的 API/client 已有，但 Task Center 没有编辑表单入口；不能把 API 能力列作当前页面操作。补齐时须载入原配置、提交 expected_row_version，显式处理冲突并保留用户草稿；暂停/恢复/归档不等于编辑配置。
 
+当前还只把 Project 前 100 条 Schedule 挂到可见 TaskCatalog 的卡片上，失效任务的规则可能找不到入口。后续管理列表应独立于“任务可启动”，支持服务端筛选和分页，保留精确旧任务身份及失效原因；不能因卡片消失就重建规则或切换 latest。现状与同步范围只在[保存后的管理入口](task-scheduling.md#保存后的管理入口)维护。
+
 ### 8.3 调度规则
 
-ONCE/CRON、timezone、触发预览、错过/重叠/失效行为以 [TaskSchedule](task-scheduling.md) 为准。创建前的重叠查询不能保证并发创建绝不重叠，不在 UI 承诺严格串行或精确一次。
+ONCE/CRON、timezone、触发预览、错过/重叠/失效行为以 [TaskSchedule](task-scheduling.md) 为准。当前[重叠查询](task-scheduling.md#重叠检查到底看谁)只看本 Schedule 上次关联的 Run，不扫描同 Task 手动执行或其他 Schedule；UI 不承诺全局串行或精确一次。
 
-预览应呈现真实可发生的次数，end_at/max_runs 使候选不足三次时说明原因，不补造时间。Schedule 暂停不代表已认领触发被撤销；run_count 也不代表 Run 成功数。错误/迟到/漏记风险及未来在途展示按调度规范同步，不在页面单独定义恢复规则。
+预览应呈现真实可发生的次数，end_at/max_runs 使候选不足三次时说明原因，不补造时间。Schedule 暂停不代表已认领触发被撤销；run_count 也不代表 Run 成功数。last_run_at 是最近回写的计划时刻，last_run_id 可能仍指向较早 Run，不能把摘要拼成同次执行事实；用[具体例子](task-scheduling.md#一个例子规则触发与执行分别看)核对显示。错误/迟到/漏记风险及未来在途展示按调度规范同步，不在页面单独定义恢复规则。
 
 预览由用户主动请求，当前保存不强制先预览；服务端仍验证定义。[保存前的候选时刻确认](task-scheduling.md#保存表单与触发预览)仍需补齐。页面不独立实现另一套 cron/DST 求值，也不要求服务端补足已经不可能发生的三次。当前预览按浏览器本地时间显示，不保证与规则 timezone 相同；ONCE 输入和显示的时区歧义及修正要求见[时间输入与展示](task-scheduling.md#时间输入与展示的边界)。
 
@@ -188,6 +190,21 @@ ONCE/CRON、timezone、触发预览、错过/重叠/失效行为以 [TaskSchedul
 当前支持运行中的 CLARIFICATION/CHOICE/REVIEW 响应、Proposal 审查与批准，以及 Skill 解释的显式追加调整。三者使用各自版本/幂等/权限协议。
 
 终态后的继续分析创建新 Run。对话任意创建/编辑任务、自动建立 child Run 关联与自然语言任意执行管理操作属于后续设计，不作为现有功能说明。
+
+### 审批请求与执行结果
+
+当前审批卡片在 [RunResultPanel](../../PJM/web/src/components/RunResultPanel.tsx)；[PendingActionsPanel](../../PJM/web/src/components/PendingActionsPanel.tsx)只是待处理 Run 的发现入口，不负责提交批准。卡片发送正在显示的 Proposal version/checksum、decision 和 reason，服务端还独立限制 Run 发起人或 system ADMIN 的决策权。
+
+当前每次点击都会生成新的幂等键。如果决策已提交但响应丢失，再点同一按钮会与原决策冲突；仅禁用请求期间的按钮没有解决恢复。后续按[受控写入的身份规则](repository-effects.md#契约与幂等身份)区分可编辑内容与已发送内容/键，结果未知时先确认原决策，不将它套用为“再创建一个 Run”，也不允许新 reason 或相反 decision 偷用原 key。
+
+| 用户看到的情况 | 界面责任 |
+| --- | --- |
+| 尚未发送 | 显示目标、版本/checksum、前置 revision、逐文件变更与风险；提交前确认实际内容 |
+| 发送中或结果未知 | 防重复提交，保留原 payload/key；超时、abort 或离页不显示“批准已撤销” |
+| 决策已确认 | 从服务端刷新 Proposal/Approval/Effect；APPROVED 不显示为“外部写入已成功” |
+| 执行失败、部分成功或待确认 | 显示服务器已有状态、错误和证据；before/after 缺失不等于外部没有变化 |
+
+上表包含待补齐的恢复要求，不是现行卡片的完整能力。暂不把敏感变更正文或 token 写入浏览器持久存储；刷新、actor/Project/Proposal 切换后的行为必须显式验证。新的阶段回执尚未形成公开契约，UI 不根据错误码或时间自行生成“commit 已完成/PR 未创建”。改动需同步 effects API validator、组件测试、三语、键盘/窄屏及响应丢失的浏览器验收。
 
 ## 10. FrontendModule 生命周期
 
@@ -237,7 +254,7 @@ ONCE/CRON、timezone、触发预览、错过/重叠/失效行为以 [TaskSchedul
 | --- | --- |
 | 输入/任务选择 | 无业务 Schema 可启动；有 Schema 正确校验；精确 task/version |
 | 文档范围与清单 | 单份/集合/全集显式确认，可选未选不授权；详情使用冻结事实，历史缺失/损坏不补造 |
-| 调度配置 | 即时/调度共用实际输入；预览不创建 Run；编辑入口、规则时区与本地时区分别验收 |
+| 调度配置 | 即时/调度共用实际输入，预览不创建 Run；编辑冲突、100 条以上分页、失效任务可见性、时区差分别验收 |
 | 提交确认 | 丢响应/超时/异常返回仍保留原请求；编辑不换原键，账号/Project 切换不接收旧结果；新建需明确确认 |
 | SSE/历史 | 断线重连不重复，terminal snapshot 后结束，旧结果可读 |
 | 等待/批准 | 关闭弹窗后仍有待办；版本/期限/授权失败清晰 |

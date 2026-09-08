@@ -12,8 +12,8 @@
 | 准备超时、取消与启动门禁 | [Runtime 启动边界](../design/agent-runtime.md#74-从领取到模型启动的边界)、[计时器口径](../design/run-budgets.md#现有计时器的覆盖范围) | Executor → RunService/Repository → Settings/startup；分别验证慢准备、失效 lease、终态提交与首事件前取消，不混用 Provider timeout 和准备 deadline |
 | 创建请求、幂等与重复提交 | [Run 创建](../design/run-creation.md) | [意图规范化](../../PJM/backend/src/projectmind/runs/creation_request.py)、[保存记录兼容](../../PJM/backend/src/projectmind/runs/creation_replay.py)、[Web 原请求状态](../../PJM/web/src/hooks/useRunSubmission.ts)、route/service/repository 与契约；真实 DB 的唯一约束与回滚 |
 | Run 状态、等待、恢复 | [领域模型](../design/domain-model.md)、[Runtime](../design/agent-runtime.md) | [runs](../../PJM/backend/src/projectmind/runs/)、[worker](../../PJM/backend/src/projectmind/worker/)、[有状态回归](../../PJM/backend/tests/runs/)；DB/事件/Web 同步 |
-| 外部效果 | [受控写入](../design/repository-effects.md) | effects/catalog 与 Provider；Proposal/API/Web；冲突与幂等测试 |
-| 调度 | [TaskSchedule](../design/task-scheduling.md) | schedules、worker tick、API、ScheduleDialog；时间/恢复测试 |
+| 外部效果与审批恢复 | [身份与前置条件](../design/repository-effects.md#执行身份与远端前置条件)、[阶段回执](../design/repository-effects.md#阶段回执与不确定结果) | [Backend 接线](../../PJM/backend/README.md#承認から外部変更まで追う)、[审批界面](../design/workspace.md#审批请求与执行结果)；决定事务、远端竞争/中断、lease 与回读测试 |
+| 调度 | [实际重叠范围](../design/task-scheduling.md#重叠检查到底看谁)、[认领与恢复](../design/task-scheduling.md#认领记录与恢复权限) | [Backend 接线](../../PJM/backend/README.md#schedule-の認領と回写を追う) → [公开契约](../../PJM/contracts/README.md#schedule-の公開契約を読む) / [Web 管理](../../PJM/web/README.md#調度の保存と管理を引き継ぐ)；并发/计数/分页与历史恢复分别测试 |
 | 多 Agent | [并行子分析](../design/subagents.md) | subagent Provider、Session、预算；并发与取消测试 |
 | 限额、模型预算与用量 | [Run 预算](../design/run-budgets.md) | Run 快照与持久账户、SDK adapter、主/子执行；计量/预留/晚到结算回归 |
 | Web 页面与流程图 | [Workspace](../design/workspace.md)、[Task Flow](../design/task-flow.md) | pages/components、api/lib、i18n；Web 与浏览器检查 |
@@ -71,10 +71,11 @@
 - document 选择、创建、读取/物化和公开清单已各有实现；按[契约联调](contract-workflow.md)维持跨层一致，继续真实事务、可信缓存及历史续行验收，不以可见清单证明缓存真实性。
 - repository 冻结授权不等于创建时固定 commit；逐根、全输入存量和单次 search 的额度各自独立。总量累计与配置注入已有代码和局部回归，仍需跨根失败/恢复验收，不从设置项通过推导完整策略已通过。
 - SDK/Tool 限额与子 Agent 单次分配不是 Run 共享预算；[预算设计](../design/run-budgets.md)明确计量、并发预留与不确定用量处理，不能把 lease 过期视为全额退款依据。
-- Schedule 当前有认领、创建、回写三个事务；原键查询已先于重叠检查，但持久在途、配置版本、计数与迟到策略仍按[调度修正要求](../design/task-scheduling.md#可靠性修正要求待实现)补齐，不能仅凭稳定键或重放函数宣称可靠恢复。
-- 有更新 API 不等于有编辑页面；时间格式化使用的浏览器时区也不等于 CRON 规则时区。调度表单的[现状与验收](../design/task-scheduling.md#保存表单与触发预览)应逐入口核对。
+- Schedule 当前有认领、创建、回写三个事务；原键先行不补足持久恢复，重叠只查本 Schedule 的 last_run_id。row_version 在 Python 比较不构成原子 CAS；按[修正要求](../design/task-scheduling.md#可靠性修正要求待实现)一起验证配置竞争、执行权和计数，不能只补正常路径。
+- 有更新 API 不等于有编辑页面，有分页 response 不等于页面读取了全部规则。当前前 100 条与 TaskCatalog 的卡片结合会隐藏部分/失效 Schedule；[管理入口](../design/task-scheduling.md#保存后的管理入口)与时区输入/显示分别验收，不能通过重建来处理未知保存结果。
 - generated 模块的静态检查尚不能证明完整供应链与浏览器隔离；需要独立验证。
-- 输入回执与准备监督已有接线和局部回归；继续物化 fixture/消费者同步、提交结果未知、真实锁竞争与历史续行。按[接续入口](../../PJM/backend/README.md#入力準備の接続を引き継ぐ)核对 `claimed_run` 和 `PreparedInput`，不重新造回执、不把必需依赖改成可选；局部测试和未通过项以计划记录为准。
+- Effect 重试目前重新进入整个 Provider；相同文件/字段不证明原执行身份，普通 push/当前 revision checkout 也不构成完整 CAS。[写入修正要求](../design/repository-effects.md#可靠性修正要求)需要同步旧 request Schema、部分结果持久化、执行权监督和批准卡片的原请求确认，不只增加正常路径测试。
+- 输入回执、准备监督与消费者已有接线和局部回归，一次性提交结果确认也已有实现；继续跨根故障、真实提交/锁竞争与历史续行。按[接续入口](../../PJM/backend/README.md#入力準備の接続を引き継ぐ)核对 `claimed_run` 和 `PreparedInput`，不重新造回执、不把必需依赖改成可选；局部测试和未通过项以计划记录为准。
 - 最终启动校验不等于模型启动的原子锁，取消接受也不等于外部进程已结束。[Runtime 取消边界](../design/agent-runtime.md#75-取消超时与失去执行权)明确首事件前窗口和异常清理的后续验收，不能仅测试准备取消就标记整个 Run 取消完整。
 - `ENV_FILE` 目前只切换 Compose 插值，Backend 仍固定读取 `.env`；[配置修正](../operations/runbook.md#环境文件与配置边界)必须验证三个 Backend service 的实际注入，不能只更新使用手册或静态 YAML 检查。
 

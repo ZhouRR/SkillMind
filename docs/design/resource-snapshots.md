@@ -158,7 +158,7 @@ Tool 路径空间
 
 ### 可信缓存的修正设计（待实现）
 
-本标题保留旧锚点；工作副本已有回执、物化、Worker/Tool 接线与准备监督，尚未完成消费者联调和真实恢复验收。目标威胁模型是 workspace 文件可被改写，而数据库与受控 Worker 身份仍可信；不声称抵抗同时控制数据库和 Worker 的攻击者。只读 Tool、路径隔离和授权检查继续保留，数据库摘要不替代这些边界。
+本标题保留旧锚点；工作副本已有回执、物化、Worker/Tool 接线与准备监督，消费者已同步且有局部回归，真实恢复验收尚未完成。目标威胁模型是 workspace 文件可被改写，而数据库与受控 Worker 身份仍可信；不声称抵抗同时控制数据库和 Worker 的攻击者。只读 Tool、路径隔离和授权检查继续保留，数据库摘要不替代这些边界。
 
 设计单位明确为**一个 Run 一份覆盖全部资源根的回执**，而不是各根分别发布成功。这样最后一个仓库失败或总量超限时，不会把前面生成的文档当作完整输入交给 Agent。每个资源根仍保留自身的 manifest；其摘要和文件摘要一同进入 Run 级完成事实。
 
@@ -216,7 +216,9 @@ Agent / Tool 使用逻辑 input，实际读取仍校验字节
 
 历史终态 Run 保持原记录可读；旧非终态 Run 缺可信输入时不能自动授权全集或重建。确实需要新输入时显式创建新 Run。恢复必须把数据库、对应世代文件及 transcript 作为同一[恢复点](../operations/runbook.md#一致恢复点包含什么)核对，不能用较晚的 workspace 为较早的 DB 补签。`PREPARING` 接管、提交结果未知和孤立目录均需故障注入与独立运维处置，不能据表推导已有自动恢复器。
 
-特别是“提交结果未知”：当前 store 以事务成功退出作为返回完成回执的条件，但没有独立的结果未知重读/恢复流程。上表的重读是待补齐的协议，不是已有自动重试。恢复开发应以原 Run、原世代与原文件摘要确认一次提交的结果，不能通过第二次 `begin` 自行发放新输入。
+特别是“提交结果未知”：当前 [store](../../PJM/backend/src/projectmind/runs/repository_inputs.py)已有一次性确认路径。只有 repository.complete 已返回、随后事务退出遇到 DBAPIError、TimeoutError 或 ConnectionError 时，才另开 session 确认原 Run/准备者/世代、来源和文件摘要均匹配的 READY；重读仍校验当前 lease 与取消。不再 begin、不再次 complete，找不到匹配记录就失败。complete 返回前的验证/flush 错误和 CancelledError 不触发这次确认。
+
+上述分支已有 mock repository/transaction 回归；不是数据库驱动断连、真实 commit 成败与接管竞争的故障注入证明，也不自动修复 PREPARING 或孤立目录。后续从这些真实恢复条件继续，不重新设计第二份输入来规避不确定结果。
 
 ### 读取时的完整性边界
 
@@ -248,12 +250,12 @@ search 选择 `input/` 时先验证所选世代的完整树，再按可信清单
 | --- | --- |
 | 创建重放与真实事务验收 | 已有[冻结解析](../../PJM/backend/src/projectmind/documents/binding.py)、[Run 创建](../../PJM/backend/src/projectmind/runs/service.py)、[意图](../../PJM/backend/src/projectmind/runs/creation_request.py)/[兼容](../../PJM/backend/src/projectmind/runs/creation_replay.py)；仍需真实 DB 验证并发胜者、首次快照与完整事务回滚 |
 | 历史续行与版本升级 | 新 API 已区分合法清单、历史缺失与损坏；旧非终态 Run、旧 API/Web/Worker 混合版本和回退安全仍需专项处置，不能把历史可读当成可继续执行 |
-| 回执与准备交接 | [物化器](../../PJM/backend/src/projectmind/agent/workspace_materializer.py)调用 begin/complete、返回 PreparedInput，[ContextBuilder](../../PJM/backend/src/projectmind/agent/context_builder.py)消费 workspace/resources，[Worker startup](../../PJM/backend/src/projectmind/worker/settings.py)注入必需 store；现有物化测试调用仍待同步，不能把构造器依赖改为可选来绕过 |
+| 回执与准备交接 | [物化器](../../PJM/backend/src/projectmind/agent/workspace_materializer.py)调用 begin/complete、返回 PreparedInput，[ContextBuilder](../../PJM/backend/src/projectmind/agent/context_builder.py)消费 workspace/resources，[Worker startup](../../PJM/backend/src/projectmind/worker/settings.py)注入必需 store；物化消费者已同步为显式 test store，不把生产构造器依赖改为可选 |
 | 仓库缓存授权与运行期字节 | [repository source](../../PJM/backend/src/projectmind/agent/repository_source.py)的 inspect 与 open 分别验证授权/取得内容；[workspace Provider](../../PJM/backend/src/projectmind/agent/workspace_provider.py)已调用[input_workspace](../../PJM/backend/src/projectmind/agent/input_workspace.py)与[安全 I/O](../../PJM/backend/src/projectmind/agent/materialization_storage.py)。局部读写回归之外，继续真实世代、仓库 fake、准备复用和故障场景验收 |
-| 准备期监督与提交失败 | [Executor](../../PJM/backend/src/projectmind/worker/executor.py)已有准备期 heartbeat/取消、独立 timeout 与启动校验；继续验证回执提交结果未知、真实锁竞争、旧 Attempt 与首事件前取消，不能以监督 fake 代替真实 store |
+| 准备期监督与提交失败 | [Executor](../../PJM/backend/src/projectmind/worker/executor.py)已有准备期 heartbeat/取消、独立 timeout 与启动校验；[回执测试](../../PJM/backend/tests/runs/test_repository_inputs.py)覆盖授权与一次重读。继续真实提交结果未知、锁竞争、旧 Attempt 与首事件前取消，不能以 fake/mock 代替真实 store |
 | 所有物化根的共同总量限制 | [Settings](../../PJM/backend/src/projectmind/core/settings.py)、.env.example、Worker 与物化器已有字段/累计/注入；保留已有配置回归，继续按[计量口径](#跨根总量的修正口径待实现)验证 manifest、共享文档并集、不同仓库副本及最后一根超限 |
 
-上表为工作副本接续入口，不是验收通过清单。局部 Tool 测试通过与旧物化 fixture 构造失败可以同时成立；后者尚未进入文件范围断言，不能据此判断范围校验正确与否。日期、实际结果和剩余验收统一见[计划](../planning/roadmap.md#13-当前执行状态)，文档整理不修补应用实现或测试来替代联调。
+上表为工作副本接续入口，不是验收通过清单。旧物化 fixture 与 migration head 断言失败已在后续针对性回归中不再复现，历史失败仍保留；这不证明整条准备链、跨根故障或真实迁移恢复均已通过。日期、实际结果和剩余验收统一见[计划](../planning/roadmap.md#13-当前执行状态)，文档整理不修补应用实现或测试来替代联调。
 
 现有公开链路按[选择组件](../../PJM/web/src/components/DocumentSourceField.tsx) → [安全投影](../../PJM/backend/src/projectmind/runs/resource_projection.py) → [Web validator](../../PJM/web/src/api/runResources.ts) → [清单展示](../../PJM/web/src/components/RunDocumentSnapshots.tsx)定位；不再把已有入口重复登记为待开发。上述剩余责任及各轮验证统一见[计划 R01](../planning/roadmap.md#133-全项目重构与缺失功能实施2026-09-05-启动)。
 

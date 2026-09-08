@@ -50,6 +50,29 @@ Schema は field/type/required を、[設計](../../docs/README.md)は権限・�
 
 業務テストは [test_run_documents.py](../backend/tests/contracts/test_run_documents.py) と[実 API 応答](../backend/tests/api/test_run_api.py)、消費側は [runResources.test.ts](../web/tests/api/runResources.test.ts)へ進む。example は固定データであり、その UUID が配備先に存在する保証ではない。
 
+## 外部変更の契約を読む
+
+| 境界 | 現行の契約と消費側 |
+| --- | --- |
+| Agent の提案 | [change.propose request](tools/change.propose/v1/request.schema.json) → [Proposal validator](../backend/src/projectmind/effects/proposal.py)。通用 action があっても capability 別 validator の許可を超えない |
+| 人工の approve/reject | [OpenAPI](openapi/projectmind-api.v1.json) の DecideProposalRequest / ProposalDecisionResponse → [effects route](../backend/src/projectmind/api/routes/effects.py) → [Web client](../web/src/api/effects.ts)。原決定の key・本文と CSRF を渡す |
+| 読取結果 | [Run detail](runs/detail/v1.schema.json) の change_proposals / approvals / effect_executions → [RunResultPanel](../web/src/components/RunResultPanel.tsx) |
+| Redmine adapter | [discovery](providers/redmine-effect/v1/discovery.schema.json)、[apply request](providers/redmine-effect/v1/apply-request.schema.json) / [response](providers/redmine-effect/v1/apply-response.schema.json) → Provider/transport。通常 REST update へ fallback しない |
+
+[repository.write request](tools/repository.write/v1/request.schema.json) は branch 限定の旧定義が残り、現行 Effect Worker の入力ではない。これを direct/SVN の完全な契約や Agent が直接呼べる Tool として案内しない。[契約と実行 identity](../../docs/design/repository-effects.md#契约与幂等身份)に差距を集約し、版互換と消費側を審査して同期する。未定義の段階回执や結果不明 enum を説明用に現行応答へ足さない。
+
+## Schedule の公開契約を読む
+
+現行の形状は [OpenAPI](openapi/projectmind-api.v1.json) の Schedule 系 component と [route DTO](../backend/src/projectmind/api/routes/schedules.py)で確認する。専用 occurrence Schema/table は未実装であり、設計上の記録を既存 response へ仮に追加しない。
+
+| 境界 | 現行の形状と消費側 |
+| --- | --- |
+| 保存・更新・状態操作 | CreateScheduleRequest / UpdateScheduleRequest / ScheduleStatusRequest → [Web client](../web/src/api/schedules.ts)。expected_row_version は更新だけにあり、状態操作には無い。field の存在だけで原子的 CAS は証明できない |
+| 時間プレビュー | SchedulePreviewRequest / SchedulePreviewResponse → [ScheduleDialog](../web/src/components/ScheduleDialog.tsx)。definition の候補であり、input/sources の検証結果や将来 Run の保証ではない |
+| 一覧と取得 | ScheduleListResponse は schedules / total / limit / offset、ScheduleResponse は last_* 等の摘要 → [TasksPage](../web/src/pages/TasksPage.tsx)。現行 client は先頭 100 件の配列だけを返す |
+
+後続変更は[並行更新・履歴互換](../../docs/design/task-scheduling.md#配置并发与暂停)と[管理の可視性](../../docs/design/task-scheduling.md#保存后的管理入口)を先に確認する。API で paging が可能なことと Web が全件を発見できること、409 の投影と実 transaction の排他は別の証拠として扱う。
+
 ## 同期義務
 
 - Schema・example の追加/変更時は `scripts/validate_contracts.py` と

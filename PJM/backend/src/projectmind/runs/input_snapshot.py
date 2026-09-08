@@ -37,9 +37,13 @@ class InputFileSeal:
         """DB に保存する値も相対 path と厳密な hash/byte 数に制限する。"""
 
         if (
-            not self.path or "\\" in self.path or not self.path.isprintable()
+            not self.path
+            or "\\" in self.path
+            or not self.path.isprintable()
             or any(part in {"", ".", ".."} for part in self.path.split("/"))
-            or isinstance(self.size, bool) or not isinstance(self.size, int) or self.size < 0
+            or isinstance(self.size, bool)
+            or not isinstance(self.size, int)
+            or self.size < 0
             or re.fullmatch(r"sha256:[a-f0-9]{64}", self.checksum) is None
         ):
             raise InputSnapshotError("Input file receipt is invalid")
@@ -58,8 +62,10 @@ def parse_input_files(value: Any) -> tuple[InputFileSeal, ...]:
     files: list[InputFileSeal] = []
     for item in value:
         if (
-            not isinstance(item, dict) or set(item) != {"path", "size", "checksum"}
-            or not isinstance(item["path"], str) or not isinstance(item["checksum"], str)
+            not isinstance(item, dict)
+            or set(item) != {"path", "size", "checksum"}
+            or not isinstance(item["path"], str)
+            or not isinstance(item["checksum"], str)
         ):
             raise InputSnapshotError("Input file receipt is invalid")
         files.append(InputFileSeal(item["path"], item["size"], item["checksum"]))
@@ -69,7 +75,8 @@ def parse_input_files(value: Any) -> tuple[InputFileSeal, ...]:
     seen = set(paths)
     if any(
         "/".join(path.split("/")[:index]) in seen
-        for path in paths for index in range(1, len(path.split("/")))
+        for path in paths
+        for index in range(1, len(path.split("/")))
     ):
         raise InputSnapshotError("Input file receipts have conflicting paths")
     return tuple(files)
@@ -81,14 +88,21 @@ def input_tree_checksum(files: Sequence[InputFileSeal]) -> str:
     return f"sha256:{sha256_hex(canonical_json([item.to_json() for item in files]))}"
 
 
-def input_source_checksum(
-    *, project_id: UUID, run_id: UUID, sources: Mapping[str, Any]
-) -> str:
+def input_source_checksum(*, project_id: UUID, run_id: UUID, sources: Mapping[str, Any]) -> str:
     """作成時の凍結来源へ回执を結び、live directory から由来を再推論しない。"""
 
-    return f"sha256:{sha256_hex(canonical_json({
-        'version': 'v1', 'project_id': str(project_id), 'run_id': str(run_id), 'sources': sources,
-    }))}"
+    return f"sha256:{
+        sha256_hex(
+            canonical_json(
+                {
+                    'version': 'v1',
+                    'project_id': str(project_id),
+                    'run_id': str(run_id),
+                    'sources': sources,
+                }
+            )
+        )
+    }"
 
 
 @dataclass(frozen=True, slots=True)

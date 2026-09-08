@@ -56,6 +56,8 @@ Cookie 和会话生命周期依据 OWASP [Session Management Cheat Sheet](https:
 - Project-scoped resource 使用 `project_id + resource_id` 复合查询；越权与不存在统一返回 404，避免泄露资源存在性。
 - Run 创建时把 actor、项目成员资格以及有效 Skill/Tool 权限固化到不可变 permission snapshot。之后用户权限变化不改写历史 Run。
 
+资源访问权不等于操作批准权。外部变更 decision 先经过 ProjectWriteActor 的认证/CSRF/项目边界，再检查 Run 发起人或 system ADMIN 身份与精确 Proposal；当前没有独立的“Project ADMIN”角色。预授权仅由 system ADMIN 创建，且不覆盖 repository.write。具体批准、重放与执行权要求统一见[受控写入](repository-effects.md#调用与批准链路)，不以 Skill guidance 或历史 permission snapshot 代替当前入口授权。
+
 ## 7. Secret Storage
 
 ProjectMind 支持三种 SecretReference resolver。`ENVIRONMENT` 与 `FILE` 是部署方管理的既有方式（零 at-rest），`MANAGED` 是 `docs/01` §18 引入的应用层信封加密方式，供 UI 自助录入凭据。

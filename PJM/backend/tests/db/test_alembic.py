@@ -73,7 +73,7 @@ def test_migration_chain_has_a_single_expected_head() -> None:
     config.set_main_option("script_location", str(backend_dir / "migrations"))
     scripts = ScriptDirectory.from_config(config)
 
-    assert scripts.get_heads() == ["0028_skill_source_file_index"]
+    assert scripts.get_heads() == ["0029_run_input_snapshots"]
 
 
 def test_revision_ids_fit_default_alembic_version_column() -> None:
@@ -85,9 +85,7 @@ def test_revision_ids_fit_default_alembic_version_column() -> None:
     scripts = ScriptDirectory.from_config(config)
 
     oversized_revisions = [
-        revision.revision
-        for revision in scripts.walk_revisions()
-        if len(revision.revision) > 32
+        revision.revision for revision in scripts.walk_revisions() if len(revision.revision) > 32
     ]
 
     assert oversized_revisions == []
@@ -191,9 +189,7 @@ def test_evaluation_model_is_registered_in_metadata() -> None:
     """Evaluation table と Result foreign key が application metadata に登録される。"""
 
     table = Base.metadata.tables["evaluations"]
-    assert {foreign_key.target_fullname for foreign_key in table.foreign_keys} == {
-        "run_results.id"
-    }
+    assert {foreign_key.target_fullname for foreign_key in table.foreign_keys} == {"run_results.id"}
 
 
 def test_skill_version_models_are_registered_in_metadata() -> None:
@@ -244,6 +240,8 @@ def test_identity_and_project_models_are_registered_in_metadata() -> None:
         Base.metadata.tables
     )
     assert "preferred_project_id" in Base.metadata.tables["users"].columns
+
+
 def test_frontend_module_version_model_is_registered_in_metadata() -> None:
     """生成 module 版の凍結列が metadata に登録される (計画 §24 M1)。
 

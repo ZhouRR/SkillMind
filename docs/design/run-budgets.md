@@ -45,6 +45,8 @@
 
 lease 失效、用户取消、准备 deadline、Provider timeout 和 job 关停的处理分别见 [Runtime §7.5](agent-runtime.md#75-取消超时与失去执行权)。计时器存在不证明进程已停止或账单已结清，也不完成下面的共享账户设计。
 
+独立的 Effect Worker 当前复用 run_lease_seconds / run_max_attempts 配置，但没有 Run Executor 的贯穿心跳监督。人工等待释放的是主执行 lease；获准 apply 后另有 Effect lease，即使 Run 仍显示 WAITING_FOR_APPROVAL。其慢调用、接管与取消的[独立修正要求](repository-effects.md#执行权与取消)不能由本表的 Attempt 心跳推导为已满足。
+
 ## 2. 目标与非目标
 
 目标是让同一个 Run 的所有收费执行使用同一持久预算，技术重试、业务续行和并行分支都不能重新获得完整额度。冻结授权不变，余额可以随可审计的预留和结算变化。

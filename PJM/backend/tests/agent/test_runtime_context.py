@@ -27,6 +27,7 @@ from projectmind.agent.workspace_materializer import WorkspaceMaterializer
 from projectmind.core.hashing import canonical_json, sha256_hex
 from projectmind.documents.source import ProjectDocumentContent
 from projectmind.runs.domain import ClaimedRun
+from tests.agent.input_fakes import MemoryInputSnapshots
 from tests.agent.test_workspace_materializer import _FakeInventory
 from tests.documents.fakes import document_content, document_snapshot
 
@@ -684,6 +685,7 @@ async def test_context_builder_materializes_document_union_and_registers_one_too
         tmp_path,
         materializer=WorkspaceMaterializer(
             document_inventory=inventory,
+            input_snapshots=MemoryInputSnapshots(claimed),
             max_bytes=10_485_760,
             max_files=500,
         ),

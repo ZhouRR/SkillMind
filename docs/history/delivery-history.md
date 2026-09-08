@@ -2709,3 +2709,100 @@ python3 -m pytest -p no:cacheprovider -o addopts= -q --tb=short \
 | 编辑范围审计 | 对照 679 份备份文件，保留 894 个旧锚点；历史 §1–§62 的 234033 字节原前缀不变；业务源码/测试、契约、migration、执行 Skill、部署配置未改变 |
 
 本轮更新 15 份 Markdown、文档浏览回归脚本与派生 index.html，未移动或删除文件。生成二十张截图，人工抽看阶段表桌面/手机、回滚限制手机和生命周期接线桌面；窄屏两列表格可直接阅读，章节标题、工具栏与导航完整。浏览验证仅覆盖文档，不证明同版恢复、组合规则求解或业务 UI 已实现。
+
+## 64. 外部效果与恢复文档续整（2026-09-08）
+
+### 64.1 整理范围与设计判断
+
+按“继续整理文档”更新受控写入、相邻设计、Backend/Web/Contracts README、状态与离线阅读检查；没有修改业务源码/测试、Schema、migration、执行 Skill 或部署配置。文档开始前已有输入回执和消费者改动，保留并只做相关验证。
+
+- 把批准、外部写入、回读、PR 与平台保存分开，以 commit 后 PR 超时的例子解释未知和部分成功；补齐三个 DB 阶段与事务外 I/O 的短流程。
+- 核对重试实际重进整个 Provider，不再写成现成的“仅恢复 PR”。文件/字段相同只证明期望状态相同，不能证明原 Proposal/Effect 已执行；严格前置条件、原身份回执和历史未知处理写为后续要求。
+- SVN checkout 与 read-back 未固定批准/提交 revision、copy 与 commit 分离；Git 预读与普通 push、forge 查询与创建也存在独立竞争边界。以上来自源码推导，未冒充生产故障注入结果。
+- Effect Executor 没有贯穿 Provider 的 heartbeat/取消监督，不能从 Run Executor 的准备监督推导它已有相同保证。取消或 lease 过期也不表示远端操作未发生。
+- 批准卡片每次点击换键与后端原决策幂等不一致，Workspace 单列原请求确认要求。修正旧文档把 PendingActionsPanel 当作审批提交入口、把 ProjectMember 与 system ADMIN 混写的问题。
+- 现有 repository.write request Schema 仍只表达 branch，当前调用却经 change.propose 和内部 ClaimedEffectExecution；标出消费者和版本同步要求，没有扩大 Agent write 权限或悄悄改动契约。
+
+### 64.2 应用核对的范围
+
+使用工作区外已有依赖、PYTHONDONTWRITEBYTECODE=1 和无 pytest cache 设置，在 PJM/backend 执行：
+
+```bash
+python3 -m pytest -p no:cacheprovider -o addopts= -q --tb=short \
+  tests/effects tests/worker/test_effect_executor.py \
+  tests/worker/test_effect_recovery_job.py tests/runs/test_effect_decision_service.py \
+  tests/api/test_effect_api.py tests/agent/test_workspace_materializer.py \
+  tests/agent/test_document_materialization.py tests/agent/test_repository_client.py \
+  tests/agent/test_runtime_context.py tests/db/test_alembic.py \
+  tests/runs/test_repository_inputs.py
+```
+
+174 项通过，无失败/skip。此前物化消费者和 migration head 断言已在这组回归中通过；未重跑全量 Backend，不改写 §63 的旧基线。输入完成确认新分支使用 mock DB/transaction，物化使用独立 test store；不等于真实 commit 响应丢失、数据库锁竞争或完整历史恢复已验收。
+
+在 PJM/web 执行 `node_modules/.bin/vitest run tests/api/controlledEffects.test.ts tests/components/RunResultPanel.test.tsx --no-file-parallelism`，2 个文件、25 项通过。组件/client 的现有测试不覆盖批准响应丢失或真实页面操作；没有据此声称新的恢复设计已完成。
+
+Provider 用例包含临时本地 Git/SVN 与 fake forge/Redmine，Worker/审批仓储包含 mock。未访问真实外部仓库或业务数据，不创建远端 PR、不运行模型、部署或数据库恢复。外部执行的差距仍保留在 R08，其余全项目范围没有缩减。
+
+### 64.3 文档与阅读验证
+
+文档与浏览验证单独记录，不能替代上节未覆盖的运行环境。备份、JUnit 与截图使用新的工作区外目录，不创建 venv、不清理用户原有缓存或构建产物。
+
+| 检查 | 结果与限度 |
+| --- | --- |
+| build/check | 40 份 Markdown、1 份 ViewSpec 示例，标题、代码块、本地链接/锚点与生成物一致 |
+| 文档工具 | 17 项单元测试通过；三份 Python 文档工具 Ruff check / format --check 通过 |
+| 现有契约 | 76 份 Schema、67 份 example 通过；旧 branch-only request 的语义差距仍保留，不以形状校验通过代替消费者一致 |
+| 离线 Chromium | 80 次页面布局；34 个关键章节 × 4 宽度 × 2 字号，共 272 次章节布局、272 次原生刷新、272 次恢复字号布局通过 |
+| 导航与网络隔离 | Backend 入口到事实区分、阶段恢复和审批界面的真实点击，以及搜索/历史分离/键盘/前进后退通过；JavaScript 错误与 HTTP(S) 请求为 0 |
+| 范围与历史审计 | 对照 681 份备份文件，保留 908 个旧锚点；历史 §1–§63 的 238872 字节前缀不变，业务代码/测试、契约、执行 Skill 与配置未改 |
+
+共更新 16 份 Markdown、文档浏览回归脚本和派生 index.html，未移动或删除文件。人工抽看事实表、阶段恢复、审批界面的桌面/手机截图；将首屏三列状态表合并为两列，并把恢复长段落拆成按 Git/SVN/forge 区分的短项。浏览检查增加手机上首表无需横向拖动的约束与短事务流程截图；不能只让“整页不溢出”代替关键信息易读。
+
+本轮按照项目技能约定维持 README 日文、设计正文中文、领域设计单一正本与验证范围分开。既有实现缺口写为接续要求，没有弱化批准/scope 或把文档成功标为 R08/全项目完成。
+
+## 65. 调度事实、并发与管理文档续整（2026-09-08）
+
+本轮按“继续整理文档”执行，只修改设计/导航、代码 README、文档浏览检查及派生页面。应用源码/测试、公开 Schema、migration、配置和执行 Skill 保持原样；工作前以工作区外 snapshot 保留现场，不初始化或修改 Git，不创建 venv。
+
+### 65.1 事实与设计修正
+
+- Schedule 先用一条按小时触发的例子区分规则状态、occurrence、关联 Run 与回写摘要。last_run_at 是计划时刻，跳过/失败时 last_run_id 保留旧值，两者不一定属于同次触发；run_count 也不是成功次数。
+- 纠正此前当前设计/术语中的“查询同 Task 非终态 Run”：实际 _overlapping_run 仅按本 Schedule 的 last_run_id 查 Run。手动/其他 Schedule 不在检查范围，创建后漏回写时本 Schedule 也可能漏判；修正保留同 Schedule 作用域，不擅自加入全局串行或排队。
+- update_definition 先读 row_version 再在 Python 比较，没有条件 UPDATE、行锁或 ORM version mapper。状态更新也先读后写。API fake 的 409 测试不证明原子并发保护；文档单列配置版本、锁内判断与晚到回写要求。
+- Web 只加载 Project 前 100 条 Schedule，再按当前 TaskCatalog 挂卡片；条数超出或精确任务失效时可能漏显。设计补充分页管理、失效/归档可见性与原配置编辑要求，不能用重建或 latest 掩盖未知保存结果。
+- 持久在途设计拆成认领记录/执行权、配置/暂停、结算/名额、历史/上线。未知 Run 提交先保留名额并查询原键；不虚构旧账本，不让旧 tick 绕过新协议。这些是修正目标，不是已存在的公开字段或运维恢复命令。
+
+以上并发、漏显和中断风险来自当轮源码/契约的只读核对，不冒充真实数据库或业务浏览器故障复现。Backend/Web/契约 README 提供职责与测试入口；Workspace、术语、变更指南和 Runbook 只引用正本，不另建一套恢复规则。
+
+### 65.2 既有应用回归的范围
+
+复用工作区外已有依赖，设置 PYTHONDONTWRITEBYTECODE=1，在 PJM/backend 执行：
+
+```bash
+python3 -m pytest -p no:cacheprovider -o addopts= -q \
+  tests/schedules tests/api/test_schedule_api.py \
+  tests/worker/test_schedule_tick_job.py
+```
+
+65 项通过，无失败/skip。包括纯时间/DST/状态逻辑、原键重放、API fake 与 tick fake，不包括真实 PostgreSQL 的并发编辑、认领 crash、执行权接管或历史迁移。
+
+在 PJM/web 执行 `node_modules/.bin/vitest run tests/api/schedules.test.ts tests/pages/TasksPage.test.tsx --no-file-parallelism`：2 个文件、10 项通过。覆盖 client、任务卡结合与静态渲染，不是实际调度编辑、分页或跨时区浏览器受入。没有为得到绿色结果修改这些测试或业务实现。
+
+没有重跑全量 Backend/Web、真实数据库、业务浏览器、模型、远端仓库或部署；不沿用之前的局部数字宣称当前全项目通过。R09 及其余 R01–R13 的范围保持在计划中。
+
+### 65.3 文档与阅读验证
+
+文档 build/check、离线浏览与范围审计在本节单独记录，不替代上述未覆盖的应用行为。
+
+| 检查 | 结果与范围 |
+| --- | --- |
+| build/check | 40 份 Markdown、1 份 ViewSpec 示例；本地链接、旧锚点、标题层级与派生页面一致 |
+| 文档工具 | 17 项单元测试通过；build/browser/unit test 三份 Python 文件的 Ruff check 与 format --check 通过 |
+| 既有契约 | 76 份 Schema、67 份 example 通过；不据此声称原子 CAS、Schedule 持久记录或分页消费者已实现 |
+| 离线 Chromium | 80 次页面布局；45 个关键章节 × 4 宽度 × 2 字号，共 360 次章节布局、360 次原生刷新、360 次恢复字号布局通过 |
+| 阅读与网络隔离 | Backend → 示例 → 重叠 → 认领恢复，以及 Web → 管理 → 契约的真实文档点击通过；JavaScript 错误和 HTTP(S) 请求为 0 |
+| 范围与历史 | 对照 681 份原文件，保留 922 个旧锚点；历史 §1–§64 的 244055 字节前缀不变；没有新增、移动或删除项目文件 |
+
+共更新 13 份 Markdown、文档浏览回归脚本和派生 index.html。32 份截图存于工作区外本轮验证目录；人工抽看调度例子、摘要表、重叠范围、恢复步骤、管理和契约入口的桌面/手机视图。把管理长段落拆成“当前边界/后续交付”，恢复改成有序步骤；摘要两列表在 390px 下无需横向滚动，并另取全表截图，避免只检查首屏流程而漏掉字段含义。
+
+遵循项目技能约定保留 README 日文、设计正文中文和执行 Skill 的版本/hash 边界；只追加历史记录，不覆盖旧回归结论。所有应用缺口仍是后续实现任务，文档通过不是 R09 或全项目交付完成。

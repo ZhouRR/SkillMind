@@ -27,10 +27,12 @@ Session token を Web storage に置かない。Project/Run/Task ID はサーバ
 | 文書の選択と凍結範囲の表示 | [DocumentSourceField](src/components/DocumentSourceField.tsx) / [documentSelection](src/lib/documentSelection.ts) → [runs API](src/api/runs.ts) / [runResources validator](src/api/runResources.ts) → [RunDocumentSnapshots](src/components/RunDocumentSnapshots.tsx) |
 | 一つの Run の観察・再接続 | [WorkspacePage](src/pages/WorkspacePage.tsx)、[agentStream](src/lib/agentStream.ts)、[runReplay](src/lib/runReplay.ts)、[events API](src/api/events.ts) |
 | 作成応答が失われた後の原要求確認 | [runSubmission](src/lib/runSubmission.ts) → [useRunSubmission](src/hooks/useRunSubmission.ts) → [RunSubmissionPanel](src/components/RunSubmissionPanel.tsx) → 確認後は Workspace の既存 lifecycle |
-| 回答・承認の持続待ち受け | [PendingActionsPanel](src/components/PendingActionsPanel.tsx)、[runs API](src/api/runs.ts)、[effects API](src/api/effects.ts) |
+| 待処理 Run の発見と回答・承認 | [PendingActionsPanel](src/components/PendingActionsPanel.tsx) は発見、[RunResultPanel](src/components/RunResultPanel.tsx) は回答/承認と結果表示 → [runs API](src/api/runs.ts) / [effects API](src/api/effects.ts) |
 | 画面横断の用語・三語表示 | [messages catalog](src/lib/i18n/messages.ts)、[zh](src/lib/i18n/zh.ts) / [ja](src/lib/i18n/ja.ts) / [en](src/lib/i18n/en.ts) |
 
 表示は server の事実を投影する。送信開始を回答受理、APPROVED を外部変更完了、子分析への予算分配を実消費と読み替えない。判定の正本は [Workspace](../../docs/design/workspace.md)、[Effect](../../docs/design/repository-effects.md)、[予算](../../docs/design/run-budgets.md)を参照する。
+
+批准要求の応答喪失は[専用の状態設計](../../docs/design/workspace.md#审批请求与执行结果)を確認する。現行 ChangeProposalCard はクリックごとに新 key を生成するため、原決定の安全な再確認は未完成。Run 作成の再送実装があることを、このカードにも実装済みという根拠にしない。[controlledEffects API test](tests/api/controlledEffects.test.ts)と[RunResultPanel test](tests/components/RunResultPanel.test.tsx)から接続し、三語・actor/Project 切替と browser 上の応答喪失まで検証する。
 
 Skill の compatibility、gate_passed、version status、Project enablement、task readiness は[別の判断](../../docs/design/skill-contract.md#发布与就绪的判断顺序)として表示する。公開しても全 Project へ自動で有効化せず、組合の編集を版の公開と見なさない。現行の同版再有効化は拒否されるため、成功する toggle として案内しない。[回退設計](../../docs/design/skill-contract.md#112-可审计的重新启用与回滚)を実装する際は精確版の確認・競合・監査と三語を同期する。
 
@@ -42,7 +44,15 @@ Skill の compatibility、gate_passed、version status、Project enablement、ta
 
 原要求の確認 UI は [Run 作成と幂等](../../docs/design/run-creation.md#提交结果未知时的界面责任)を正本とする。現行 Workspace は編集可能な草稿と送信済み payload/key を分け、結果不明時に原要求を再送する。新規実行は明示確認後に別 key を発行する。状態はページ内の memory-only であり、refresh・離頁・actor/Project 切替後の自動復元はしない。
 
-HTTP 待機 timeout と Run 取消は別操作である。Schedule の run_count を成功数として表示せず、停止操作を在途 Run の取消と見なさない。既存 Schedule の編集は API/client のみで画面入口が無く、時区を変えた ONCE の入力/表示にも別途修正が必要である。責任と受入条件は[調度設計](../../docs/design/task-scheduling.md#保存表单与触发预览)を参照する。
+HTTP 待機 timeout と Run 取消は別操作である。受信できなかったことだけを理由に、サーバー側の作成や実行が取り消されたと表示しない。
+
+## 調度の保存と管理を引き継ぐ
+
+[規則・発火・Run の具体例](../../docs/design/task-scheduling.md#一个例子规则触发与执行分别看)を表示の基準にする。run_count は成功数ではなく、last_run_at と last_run_id も同一 occurrence を指すとは限らない。停止操作は在途 Run の取消ではない。
+
+接続は [ScheduleDialog](src/components/ScheduleDialog.tsx) → [API client](src/api/schedules.ts) → [TasksPage.buildRows](src/pages/TasksPage.tsx) の順で読む。現在は先頭 100 件を取得して TaskCatalog の card に結合しているため、件数超過や精確 Task の失効で Schedule が見えなくなり得る。管理要件は[保存後の入口](../../docs/design/task-scheduling.md#保存后的管理入口)を正本とし、「見つからないので新規作成」と案内しない。
+
+編集は API/client のみで画面入口が無い。後続は Project 単位の paging、失効した task の表示、原設定を保持する編集/競合 UI、[時間入力と表示](../../docs/design/task-scheduling.md#时间输入与展示的边界)を接続する。[TasksPage test](tests/pages/TasksPage.test.tsx) の純粋な結合/静的描画と [API test](tests/api/schedules.test.ts) の成功を、100 件超・時区差・実保存競争のブラウザ受入とは扱わない。
 
 ## 開発と検証
 

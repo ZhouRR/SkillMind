@@ -324,7 +324,7 @@ docker compose --env-file .env logs --no-log-prefix api worker \
 
 ### 8.1 WAITING 状態
 
-- `WAITING_FOR_INPUT` / `WAITING_FOR_APPROVAL` 不是终态，也不是需要强制重启 Worker 的故障。等待应释放执行 lease，不继续占用模型进程；Interaction 的期限与 active wall timeout 分开。
+- `WAITING_FOR_INPUT` / `WAITING_FOR_APPROVAL` 不是终态，也不是需要强制重启 Worker 的故障。人工等待应释放主执行 lease，不继续占用模型进程；Interaction 的期限与 active wall timeout 分开。批准后的 Effect 可持有独立 lease，Run 仍可能显示 WAITING_FOR_APPROVAL，须查 Effect 状态而不是再次批准。
 - 核对持久的 Interaction、Brief/checkpoint、Session 和事件。接收有效回答后追加 Segment；技术故障重试才在原 Segment 追加 Attempt。
 - 普通 Interaction 超期记录 `INTERACTION_EXPIRED`，通过 `INTERACTION_TIMEOUT` Segment 继续，不代选推荐答案。Effect 批准超期则使 Proposal 失效，不调用写入 Provider。
 - 取消、成员资格失效或 scope 改变不能靠复用旧答案/批准继续执行。等待期限不等于数据保留期限；自动清理仍属独立设计。
@@ -374,16 +374,18 @@ Integration 必须声明 `repository.write/v1` 并提供写入凭据；匿名读
 
 | write_mode | 落点与排障要点 |
 | --- | --- |
-| direct（默认） | 批准后写默认 branch；Git 只允许 fast-forward、不 force，SVN 拒绝过期基线 |
-| branch | 只写 projectmind/ 预留命名空间的新 branch，可再收窄 prefix；同名不同内容报 target_branch_conflict，不覆盖 |
+| direct（默认） | 批准后写默认 branch/绑定 URL；Git 使用 fast-forward、不 force。SVN 当前 checkout 未固定批准 revision，不能保证拒绝之前已变化的基线 |
+| branch | projectmind/ 预留命名空间；同名不同内容报 target_branch_conflict。内容相同也不足以证明它属于本次提案，须查原身份 |
 
 Git 写入的 default_revision 必须是具体 branch，不能用 HEAD。需要分支评审或默认分支受保护时，显式配置 branch 模式；缺少 write_mode 的旧 Integration 会采用 direct，不会自动猜测保护策略。SVN 分支位于平台约定的 `<仓库根>/branches/projectmind/`。
 
-自动开 PR/MR 需要完整的 `forge_kind / forge_api_base_url / forge_project` 配置；部分配置拒绝，未配置则只保留 branch/commit。PR 不是 apply 前批准的替代。`target_stale` 需要重新观察和提案；PR 开设失败不撤销已提交且回读的 commit，按部分成功对账。
+自动开 PR/MR 当前只接在 Git branch 模式，需要完整的 `forge_kind / forge_api_base_url / forge_project` 配置；部分配置拒绝，未配置则只保留 branch/commit。SVN 与 direct 不调用 forge。PR 不是 apply 前批准的替代。`target_stale` 需要重新观察和提案；PR 开设失败不撤销已提交且回读的 commit，按部分成功对账。
 
 ### 8.7 Incident と recovery
 
 记录关联对象 ID、image/migration、Provider/capability 版本、Proposal checksum、请求指纹、幂等键 hash、批准人/时间及 apply/read-back 状态，不记录 Secret 或原始业务参数。
+
+先区分审批决定是否保存、远端是否写入、回读是否完成、PR 是否创建、平台 finalize 是否完成；[四类事实](../design/repository-effects.md#先分清四种事实)不能用一个 FAILED 代替。当前可重试异常会重新运行整个 Provider，没有“仅补 PR”的通用操作；Effect lease 过期也不证明旧远端请求停止。[阶段与执行权差距](../design/repository-effects.md#可靠性修正要求)未补齐前，结果未知应隔离自动执行并按原身份对账，不能仅重启 Worker 促使恢复。
 
 | 能确认的外部事实 | 处理原则 |
 | --- | --- |
@@ -439,18 +441,21 @@ keyring 使用逗号分隔的 `version:base64key`，每个 key 为 32 字节随�
 
 ## 10. Schedule と Recovery の監視
 
-Schedule tick 的 `schedule.tick.completed` 分别记录 `created / skipped / failed`，不要合成一个“成功率”：重叠而跳过与权限/版本/资源失效是不同原因。失败后 Schedule 进入 ERROR，不自动换版本或来源；通过正常配置/恢复入口修正，不能改数据库的计数或 next_run_at。
+Schedule tick 的 `schedule.tick.completed` 分别记录 `created / skipped / failed`，不要合成一个“成功率”：重叠而跳过与权限/版本/资源失效是不同原因。FAILED_PRECONDITION 结果回写成功后 Schedule 进入 ERROR；数据库等基础设施异常可能中断 tick，不保证留下这个状态。不要因此自动换版本、来源或补造触发；通过正常配置/恢复入口修正，不能改数据库的计数或 next_run_at。
 
 当前可能处理一个已经迟到的 occurrence，然后跳过后续过期时刻；`missed_count` 单次最多计 1000，并非永远精确的漏跑数。例如整点规则的 03:00 未处理，到 09:30 恢复时可能处理 03:00、跳过 04:00–09:00、下一次为 10:00。不要把“不补跑”理解成完全拒绝迟到执行，详见[调度恢复设计](../design/task-scheduling.md#停机恢复的实际行为)。
 
 | 要查的事实 | 注意 |
 | --- | --- |
 | tick 正常结束 | 不等于 Run 创建、模型开始或业务成功 |
-| last_run_id / run_count | 创建后回写失败可能漏记；run_count 不是成功 Run 数 |
+| last_run_at / last_outcome / last_run_id | 时刻与原因属于最近回写的 occurrence，Run ID 在跳过/失败时保留旧值；不能拼成同次 Run 的开始与结果 |
+| run_count / missed_count | 都不是业务成功数；前者可能漏记/重复回写，后者可能截顶，不用它们反推完整历史 |
 | next_run_at 已推进但没有 Run | 认领后、创建前存在崩溃窗口；持久在途台账尚未实现 |
 | 停止/编辑与触发同时发生 | 旧触发回写可能影响新配置；核对操作时间、occurrence 和关联 Run |
+| 同 Task 出现多个 Run | 当前仅查本 Schedule 的 last_run_id；手动/其他 Schedule 不在互斥范围，不先判定为原键重复创建 |
+| Task Center 找不到原 Schedule | 核对 Project 授权与分页 API；前 100 条或当前 TaskCatalog 卡片可能漏显，不能当成保存失败后重建 |
 | UI 时间与预期不同 | 同时记录带 offset 的时刻、规则时区与浏览器时区，不仅截取无时区的时间文本 |
 
-恢复时核对 Schedule ID、UTC occurrence、原键关联 Run 和脱敏日志；[在途恢复与幂等计数](../design/task-scheduling.md#可靠性修正要求待实现)是待完成设计，不是已有运维补跑命令。既有 Schedule 编辑目前有 API/client、没有页面入口；不要引导用户点击不存在的编辑按钮。
+恢复时先做只读核对：Schedule ID、带 offset 的 UTC occurrence、原键关联 Run 和脱敏日志；分页查询使用现有 Project 授权 API 的 limit/offset，不扫描其他 Project。仅靠 last_* 无法确认时保留未知，不更新配置或伪造已结算记录来“对齐”。[在途恢复与幂等计数](../design/task-scheduling.md#可靠性修正要求待实现)是待完成设计，不是已有运维补跑命令。既有 Schedule 编辑目前有 API/client、没有页面入口；不要引导用户点击不存在的编辑按钮。
 
 Recovery cron 分开汇总 RunAttempt lease、EffectExecution lease、普通 Interaction 超期与批准超期。`recovered_runs / recovered_effects / recovered_interactions / recovered_proposals` 持续增长时，应调查 Worker、adapter 和通知路径。技术性 Effect 重试保持原 Proposal/EffectExecution/幂等键，在次数上限内回到 REQUESTED；未知外部状态仍遵守 §8.7，不视为新批准。

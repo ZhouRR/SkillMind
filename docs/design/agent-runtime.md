@@ -99,7 +99,7 @@ ExecutionProfile 是策略合成模型；当前按冻结 Manifest/Brief 执行�
 | `SUPERVISED` | 默认；自主选择读取顺序、检查方法和报告结构，在业务选择或效果前询问 | Ticket 分析、代码 Review |
 | `DELEGATED` | 在预授权资源和低风险效果范围内自主完成更多循环，关键变更仍按策略批准 | 成熟且重复的内部流程 |
 
-Profile 只能收窄或使用平台已批准的能力，不能覆盖硬拒绝规则。Skill 可推荐 Profile，Project ADMIN 决定上限，Run 发起人可在上限内选择更保守等级。
+Profile 只能收窄或使用平台已批准的能力，不能覆盖硬拒绝规则。Skill 可推荐 Profile，system ADMIN 管理项目策略上限，Run 发起人可在上限内选择更保守等级；不引入独立的 Project ADMIN 角色。
 
 ### 5.1 Agent 可自主决定
 
@@ -286,10 +286,10 @@ Agent 不以任意自由文本“卡住”Run，而是产生结构化 UserIntera
 ### 9.1 外部效果处理流程（observe → propose → apply）
 
 1. `observe`：读取 Redmine、Git/SVN、文档或文件并生成 Evidence。
-2. `propose`：生成 ChangeProposal，例如 Ticket 字段 patch、评论草稿、代码 diff 或提交计划。
-3. `apply`：平台调用注册 write Tool 执行已批准 Proposal，并回读验证。
+2. `propose`：生成 ChangeProposal。当前可执行载体为受限 Ticket 字段 SET、仓库逐文件 SET/REMOVE；评论草稿、diff 或提交计划不自动成为可执行操作。
+3. `apply`：独立 Effect Worker 调用注册 Provider 执行已批准 Proposal，并回读验证；不向 Agent 开放直接 write Tool。
 
-默认策略是 `apply` 前提示用户。Project ADMIN 可以为明确 capability、Integration scope、风险等级和参数范围配置无需询问的预授权；用户也可选择更保守策略。任意 Shell、未知 Tool 或无 scope 的写入不能通过配置变成自动执行。
+默认策略是 `apply` 前提示用户。本组织 system ADMIN 可为允许预授权的 capability 配置 LOW 风险、精确 Integration/operation/scope 策略；repository.write 不可预授权。项目成员身份不等于 ADMIN。任意 Shell、未知 Tool 或无 scope 的写入不能通过配置变成自动执行。
 
 ### 9.2 ChangeProposal 必需内容
 
@@ -309,7 +309,7 @@ Agent 不以任意自由文本“卡住”Run，而是产生结构化 UserIntera
 - 执行后必须 read-back，保存 before/after Evidence 和验证结果。
 - 写入成功但验证失败时标记需要人工处理，不把 Run 静默判为成功。
 
-已实现 Redmine `issue.update/v1` 与 Git/SVN `repository.write/v1`。Redmine 要求版本化 CAS discovery；Git/SVN 默认 direct，也可配置 branch，始终经人工批准。模式、幂等与跨系统失败边界以[受控写入](repository-effects.md)为准。
+已有 Redmine `issue.update/v1` 与 Git/SVN `repository.write/v1` Provider。上列为不变量，不是完整恢复已验收的声明；模式、事务、状态归属与[可靠性差距](repository-effects.md#可靠性修正要求)只在受控写入正本维护。尤其 Effect lease 与 RunAttempt lease 分开，不能把 Run Executor 已有的 heartbeat/取消监督推导为 Effect Provider 已有同样能力。
 
 ## 10. 结果与输出验证
 

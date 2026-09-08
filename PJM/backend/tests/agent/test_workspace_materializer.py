@@ -23,7 +23,11 @@ from projectmind.agent.repository_client import (
     RepositoryListing,
     RepositorySkippedEntry,
 )
-from projectmind.agent.repository_source import RepositoryBindingRef, ScopedRepositorySession
+from projectmind.agent.repository_source import (
+    RepositoryBindingRef,
+    RepositorySnapshotBinding,
+    ScopedRepositorySession,
+)
 from projectmind.agent.tool_gateway import RunToolContext
 from projectmind.agent.workspace import WorkspaceManager
 from projectmind.agent.workspace_materializer import (
@@ -34,6 +38,9 @@ from projectmind.agent.workspace_provider import WorkspaceReadProvider, Workspac
 from projectmind.core.hashing import sha256_hex
 from projectmind.documents.snapshot import FrozenDocument
 from projectmind.documents.source import ProjectDocumentContent
+from projectmind.runs.domain import ClaimedRun
+from projectmind.runs.input_snapshot import InputSnapshotStatus
+from tests.agent.input_fakes import TEST_BINDING_CHECKSUM, MemoryInputSnapshots, input_claim
 from tests.agent.test_binary_text import _workbook
 from tests.documents.fakes import document_content, document_snapshot
 
@@ -80,6 +87,7 @@ class _FakeRepositorySession:
         self.provider = provider
         self.revision = revision
         self.history_limit: int | None = None
+        self.reads: list[str] = []
 
     async def list_files(self, paths: Sequence[str]) -> RepositoryListing:
         """scope 内の固定 entry を列挙する。"""
@@ -94,6 +102,7 @@ class _FakeRepositorySession:
     async def read_file(self, path: str, *, max_bytes: int) -> bytes:
         """固定内容を返し、上限超過は too_large を送出する。"""
 
+        self.reads.append(path)
         data = self._files.get(path)
         if data is None:
             raise RepositoryClientError("not_found", "missing", retryable=False)
@@ -120,6 +129,17 @@ class _FakeRepositorySource:
         self._session = session
         self._scope_paths = scope_paths
         self.calls = 0
+        self.inspections = 0
+        self.checksum = TEST_BINDING_CHECKSUM
+
+    async def inspect(
+        self, *, project_id: UUID, run_id: UUID, binding: RepositoryBindingRef
+    ) -> RepositorySnapshotBinding:
+        """remote を開かない metadata 検査を、内容取得と別に数える。"""
+
+        del project_id, run_id, binding
+        self.inspections += 1
+        return RepositorySnapshotBinding(checksum=self.checksum, scope_paths=self._scope_paths)
 
     @asynccontextmanager
     async def open(
@@ -134,7 +154,11 @@ class _FakeRepositorySource:
 
         del project_id, run_id, binding, requested_revision
         self.calls += 1
-        yield ScopedRepositorySession(session=self._session, scope_paths=self._scope_paths)
+        yield ScopedRepositorySession(
+            session=self._session,
+            scope_paths=self._scope_paths,
+            binding_checksum=self.checksum,
+        )
 
 
 def _doc(
@@ -161,8 +185,10 @@ _BINDING = RepositoryBindingRef(provider="git", integration_id=uuid4(), binding_
 
 
 def _materializer(
+    claimed_run: ClaimedRun,
     contents: Sequence[ProjectDocumentContent],
     *,
+    input_snapshots: MemoryInputSnapshots | None = None,
     repository_source: _FakeRepositorySource | None = None,
     **limits: int,
 ) -> WorkspaceMaterializer:
@@ -170,8 +196,11 @@ def _materializer(
 
     return WorkspaceMaterializer(
         document_inventory=_FakeInventory(contents),
+        input_snapshots=input_snapshots or MemoryInputSnapshots(claimed_run),
         max_bytes=limits.get("max_bytes", 10_485_760),
         max_files=limits.get("max_files", 500),
+        max_total_bytes=limits.get("max_total_bytes", 104_857_600),
+        max_total_files=limits.get("max_total_files", 5_000),
         repository_source=repository_source,
     )
 
@@ -192,13 +221,20 @@ async def test_materializes_explicit_frozen_documents_under_input_documents(tmp_
         _doc("", "JAF-list.csv", b"key,owner\n1,alice\n"),
     ]
 
-    await _materializer(contents).materialize(
+    claim = input_claim(
+        project_id=_PROJECT_ID,
+        run_id=UUID(workspace.root.name),
+        snapshots=(document_snapshot(_PROJECT_ID, contents),),
+    )
+    prepared = await _materializer(claim, contents).materialize(
+        claimed_run=claim,
         workspace=workspace,
         project_id=_PROJECT_ID,
         run_id=UUID(workspace.root.name),
         blueprint=_DOC_BLUEPRINT,
         document_snapshots=(document_snapshot(_PROJECT_ID, contents),),
     )
+    workspace = prepared.workspace
 
     base = workspace.input_dir / "documents"
     assert (base / "specs" / "design.md").read_text(encoding="utf-8") == "# Design\n"
@@ -227,13 +263,20 @@ async def test_materialized_files_are_read_only(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
 
     contents = [_doc("", "a.md", b"x")]
-    await _materializer(contents).materialize(
+    claim = input_claim(
+        project_id=_PROJECT_ID,
+        run_id=UUID(workspace.root.name),
+        snapshots=(document_snapshot(_PROJECT_ID, contents),),
+    )
+    prepared = await _materializer(claim, contents).materialize(
+        claimed_run=claim,
         workspace=workspace,
         project_id=_PROJECT_ID,
         run_id=UUID(workspace.root.name),
         blueprint=_DOC_BLUEPRINT,
         document_snapshots=(document_snapshot(_PROJECT_ID, contents),),
     )
+    workspace = prepared.workspace
 
     target = workspace.input_dir / "documents" / "a.md"
     assert (target.stat().st_mode & 0o777) == 0o400
@@ -250,13 +293,20 @@ async def test_binary_and_oversize_documents_are_skipped_not_materialized(tmp_pa
         _doc("", "huge.txt", b"x" * 1_048_577),
     ]
 
-    await _materializer(contents).materialize(
+    claim = input_claim(
+        project_id=_PROJECT_ID,
+        run_id=UUID(workspace.root.name),
+        snapshots=(document_snapshot(_PROJECT_ID, contents),),
+    )
+    prepared = await _materializer(claim, contents).materialize(
+        claimed_run=claim,
         workspace=workspace,
         project_id=_PROJECT_ID,
         run_id=UUID(workspace.root.name),
         blueprint=_DOC_BLUEPRINT,
         document_snapshots=(document_snapshot(_PROJECT_ID, contents),),
     )
+    workspace = prepared.workspace
 
     base = workspace.input_dir / "documents"
     assert (base / "ok.md").exists()
@@ -271,14 +321,21 @@ async def test_binary_and_oversize_documents_are_skipped_not_materialized(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_total_budget_overflow_fails_closed_without_partial_tree(tmp_path: Path) -> None:
-    """体积上限超は 1 byte も書かずに fail closed し、截断した部分木を残さない。"""
+async def test_root_budget_overflow_never_publishes_partial_input(tmp_path: Path) -> None:
+    """根ごとの上限超過は完成回执を作らず、候補を調査可能なまま保存する。"""
 
     workspace = _workspace(tmp_path)
     contents = [_doc("", f"{i}.md", b"x" * 400) for i in range(5)]
 
-    with pytest.raises(MaterializationError):
-        await _materializer(contents, max_bytes=1_000).materialize(
+    claim = input_claim(
+        project_id=_PROJECT_ID,
+        run_id=UUID(workspace.root.name),
+        snapshots=(document_snapshot(_PROJECT_ID, contents),),
+    )
+    store = MemoryInputSnapshots(claim)
+    with pytest.raises(MaterializationError, match="workspace budget"):
+        await _materializer(claim, contents, input_snapshots=store, max_bytes=1_000).materialize(
+            claimed_run=claim,
             workspace=workspace,
             project_id=_PROJECT_ID,
             run_id=UUID(workspace.root.name),
@@ -287,6 +344,9 @@ async def test_total_budget_overflow_fails_closed_without_partial_tree(tmp_path:
         )
 
     assert not (workspace.input_dir / "documents").exists()
+    assert store.record is not None and store.record.status is InputSnapshotStatus.PREPARING
+    assert store.complete_calls == 0
+    assert (workspace.root / ".projectmind-inputs" / str(store.record.snapshot_id)).is_dir()
 
 
 @pytest.mark.asyncio
@@ -296,35 +356,52 @@ async def test_file_count_budget_overflow_fails_closed(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     contents = [_doc("", f"{i}.md", b"x") for i in range(4)]
 
+    claim = input_claim(
+        project_id=_PROJECT_ID,
+        run_id=UUID(workspace.root.name),
+        snapshots=(document_snapshot(_PROJECT_ID, contents),),
+    )
     with pytest.raises(MaterializationError):
-        await _materializer(contents, max_files=3).materialize(
+        prepared = await _materializer(claim, contents, max_files=3).materialize(
+            claimed_run=claim,
             workspace=workspace,
             project_id=_PROJECT_ID,
             run_id=UUID(workspace.root.name),
             blueprint=_DOC_BLUEPRINT,
             document_snapshots=(document_snapshot(_PROJECT_ID, contents),),
         )
+        workspace = prepared.workspace
 
 
 @pytest.mark.asyncio
-async def test_no_document_requirement_skips_materialization(tmp_path: Path) -> None:
-    """document 要求の無い Skill は物化しない (不要な副本を作らない)。"""
+async def test_no_resource_requirement_returns_receipted_empty_input(tmp_path: Path) -> None:
+    """無入力も明示的な空回执で渡し、未検証 None と混同しない。"""
 
     workspace = _workspace(tmp_path)
     inventory = _FakeInventory([_doc("", "a.md", b"x")])
+    claim = input_claim(
+        project_id=_PROJECT_ID,
+        run_id=UUID(workspace.root.name),
+    )
     materializer = WorkspaceMaterializer(
-        document_inventory=inventory, max_bytes=10_485_760, max_files=500
+        input_snapshots=MemoryInputSnapshots(claim),
+        document_inventory=inventory,
+        max_bytes=10_485_760,
+        max_files=500,
     )
 
-    await materializer.materialize(
+    prepared = await materializer.materialize(
+        claimed_run=claim,
         workspace=workspace,
         project_id=_PROJECT_ID,
         run_id=UUID(workspace.root.name),
-        blueprint=_REPOSITORY_BLUEPRINT,
+        blueprint={"resource_requirements": []},
     )
+    workspace = prepared.workspace
 
     assert not (workspace.input_dir / "documents").exists()
     assert inventory.calls == 0
+    assert prepared.resources == () and workspace.input_files == ()
 
 
 @pytest.mark.asyncio
@@ -334,26 +411,38 @@ async def test_materialization_is_idempotent_per_run(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     contents = [_doc("", "a.md", b"first")]
     inventory = _FakeInventory(contents)
+    claim = input_claim(
+        project_id=_PROJECT_ID,
+        run_id=UUID(workspace.root.name),
+        snapshots=(document_snapshot(_PROJECT_ID, contents),),
+    )
     materializer = WorkspaceMaterializer(
-        document_inventory=inventory, max_bytes=10_485_760, max_files=500
+        input_snapshots=MemoryInputSnapshots(claim),
+        document_inventory=inventory,
+        max_bytes=10_485_760,
+        max_files=500,
     )
     project_id = _PROJECT_ID
     run_id = UUID(workspace.root.name)
 
-    await materializer.materialize(
+    prepared = await materializer.materialize(
+        claimed_run=claim,
         workspace=workspace,
         project_id=project_id,
         run_id=run_id,
         blueprint=_DOC_BLUEPRINT,
         document_snapshots=(document_snapshot(_PROJECT_ID, contents),),
     )
-    await materializer.materialize(
+    workspace = prepared.workspace
+    prepared = await materializer.materialize(
+        claimed_run=claim,
         workspace=workspace,
         project_id=project_id,
         run_id=run_id,
         blueprint=_DOC_BLUEPRINT,
         document_snapshots=(document_snapshot(_PROJECT_ID, contents),),
     )
+    workspace = prepared.workspace
 
     assert inventory.calls == 1
 
@@ -364,38 +453,49 @@ async def test_tampered_materialization_fails_closed_on_reuse(tmp_path: Path) ->
 
     workspace = _workspace(tmp_path)
     contents = [_doc("", "a.md", b"first")]
-    materializer = _materializer(contents)
+    claim = input_claim(
+        project_id=_PROJECT_ID,
+        run_id=UUID(workspace.root.name),
+        snapshots=(document_snapshot(_PROJECT_ID, contents),),
+    )
+    materializer = _materializer(claim, contents)
     project_id = _PROJECT_ID
     run_id = UUID(workspace.root.name)
-    await materializer.materialize(
+    prepared = await materializer.materialize(
+        claimed_run=claim,
         workspace=workspace,
         project_id=project_id,
         run_id=run_id,
         blueprint=_DOC_BLUEPRINT,
         document_snapshots=(document_snapshot(_PROJECT_ID, contents),),
     )
+    workspace = prepared.workspace
 
     target = workspace.input_dir / "documents" / "a.md"
     target.chmod(0o600)
     target.write_bytes(b"tampered")
 
     with pytest.raises(MaterializationError):
-        await materializer.materialize(
+        prepared = await materializer.materialize(
+            claimed_run=claim,
             workspace=workspace,
             project_id=project_id,
             run_id=run_id,
             blueprint=_DOC_BLUEPRINT,
             document_snapshots=(document_snapshot(_PROJECT_ID, contents),),
         )
+        workspace = prepared.workspace
 
 
-def _read_context(workspace: RunWorkspace, capability: str) -> RunToolContext:
+def _read_context(
+    workspace: RunWorkspace, capability: str, *, project_id: UUID = _PROJECT_ID
+) -> RunToolContext:
     """物化した workspace を読む read/search Tool snapshot を組む。"""
 
     return RunToolContext(
         run_id=UUID(workspace.root.name),
         run_attempt_id=uuid4(),
-        project_id=_PROJECT_ID,
+        project_id=project_id,
         user_id=uuid4(),
         tool=RegisteredTool(
             capability=capability,
@@ -417,13 +517,20 @@ async def test_materialized_documents_are_discoverable_via_workspace_tools(tmp_p
         _doc("specs", "design.md", b"# Design\n\nThe authorization boundary is here.\n"),
         _doc("", "notes.md", b"unrelated\n"),
     ]
-    await _materializer(contents).materialize(
+    claim = input_claim(
+        project_id=_PROJECT_ID,
+        run_id=UUID(workspace.root.name),
+        snapshots=(document_snapshot(_PROJECT_ID, contents),),
+    )
+    prepared = await _materializer(claim, contents).materialize(
+        claimed_run=claim,
         workspace=workspace,
         project_id=_PROJECT_ID,
         run_id=UUID(workspace.root.name),
         blueprint=_DOC_BLUEPRINT,
         document_snapshots=(document_snapshot(_PROJECT_ID, contents),),
     )
+    workspace = prepared.workspace
 
     found = await WorkspaceSearchProvider().execute(
         _read_context(workspace, "workspace.search/v1"),
@@ -446,17 +553,27 @@ async def test_unsafe_frozen_document_path_is_rejected_before_reading(tmp_path: 
     workspace = _workspace(tmp_path)
     contents = [_doc("../escape", "x.md", b"nope"), _doc("", "ok.md", b"fine")]
     inventory = _FakeInventory(contents)
+    claim = input_claim(
+        project_id=_PROJECT_ID,
+        run_id=UUID(workspace.root.name),
+        snapshots=(document_snapshot(_PROJECT_ID, contents),),
+    )
     materializer = WorkspaceMaterializer(
-        document_inventory=inventory, max_bytes=10_485_760, max_files=500
+        input_snapshots=MemoryInputSnapshots(claim),
+        document_inventory=inventory,
+        max_bytes=10_485_760,
+        max_files=500,
     )
     with pytest.raises(MaterializationError, match="path is invalid"):
-        await materializer.materialize(
+        prepared = await materializer.materialize(
+            claimed_run=claim,
             workspace=workspace,
             project_id=_PROJECT_ID,
             run_id=UUID(workspace.root.name),
             blueprint=_DOC_BLUEPRINT,
             document_snapshots=(document_snapshot(_PROJECT_ID, contents),),
         )
+        workspace = prepared.workspace
     assert inventory.calls == 0
     assert not list(workspace.input_dir.iterdir())
 
@@ -472,13 +589,20 @@ async def test_repository_tree_is_materialized_under_requirement_key(tmp_path: P
     )
     source = _FakeRepositorySource(session, scope_paths=("src",))
 
-    await _materializer([], repository_source=source).materialize(
+    claim = input_claim(
+        project_id=_PROJECT_ID,
+        run_id=UUID(workspace.root.name),
+        repository_bindings={"source_repository": _BINDING},
+    )
+    prepared = await _materializer(claim, [], repository_source=source).materialize(
+        claimed_run=claim,
         workspace=workspace,
         project_id=_PROJECT_ID,
         run_id=UUID(workspace.root.name),
         blueprint=_REPOSITORY_BLUEPRINT,
         repository_bindings={"source_repository": _BINDING},
     )
+    workspace = prepared.workspace
 
     base = workspace.input_dir / "source_repository"
     assert (base / "src" / "app.py").read_text(encoding="utf-8") == "print('hi')\n"
@@ -516,13 +640,20 @@ async def test_repository_symlink_binary_and_oversize_are_skipped(tmp_path: Path
     )
     source = _FakeRepositorySource(session, scope_paths=("src",))
 
-    await _materializer([], repository_source=source).materialize(
+    claim = input_claim(
+        project_id=_PROJECT_ID,
+        run_id=UUID(workspace.root.name),
+        repository_bindings={"source_repository": _BINDING},
+    )
+    prepared = await _materializer(claim, [], repository_source=source).materialize(
+        claimed_run=claim,
         workspace=workspace,
         project_id=_PROJECT_ID,
         run_id=UUID(workspace.root.name),
         blueprint=_REPOSITORY_BLUEPRINT,
         repository_bindings={"source_repository": _BINDING},
     )
+    workspace = prepared.workspace
 
     base = workspace.input_dir / "source_repository"
     manifest = json.loads((base / ".projectmind" / "manifest.json").read_text(encoding="utf-8"))
@@ -539,22 +670,32 @@ async def test_repository_symlink_binary_and_oversize_are_skipped(tmp_path: Path
 
 @pytest.mark.asyncio
 async def test_repository_budget_overflow_fails_closed_before_reading(tmp_path: Path) -> None:
-    """予算超過は取得前に fail closed し、部分木を残さない。"""
+    """列挙時に分かる上限超過なら本文を取らず、候補を完成扱いにしない。"""
 
     workspace = _workspace(tmp_path)
     session = _FakeRepositorySession({f"src/{i}.py": b"x" * 400 for i in range(5)})
     source = _FakeRepositorySource(session, scope_paths=("src",))
 
+    claim = input_claim(
+        project_id=_PROJECT_ID,
+        run_id=UUID(workspace.root.name),
+        repository_bindings={"source_repository": _BINDING},
+    )
     with pytest.raises(MaterializationError):
-        await _materializer([], repository_source=source, max_bytes=1_000).materialize(
+        prepared = await _materializer(
+            claim, [], repository_source=source, max_bytes=1_000
+        ).materialize(
+            claimed_run=claim,
             workspace=workspace,
             project_id=_PROJECT_ID,
             run_id=UUID(workspace.root.name),
             blueprint=_REPOSITORY_BLUEPRINT,
             repository_bindings={"source_repository": _BINDING},
         )
+        workspace = prepared.workspace
 
     assert not (workspace.input_dir / "source_repository").exists()
+    assert session.reads == []
 
 
 @pytest.mark.asyncio
@@ -563,14 +704,21 @@ async def test_repository_materialization_without_source_fails_closed(tmp_path: 
 
     workspace = _workspace(tmp_path)
 
+    claim = input_claim(
+        project_id=_PROJECT_ID,
+        run_id=UUID(workspace.root.name),
+        repository_bindings={"source_repository": _BINDING},
+    )
     with pytest.raises(MaterializationError):
-        await _materializer([]).materialize(
+        prepared = await _materializer(claim, []).materialize(
+            claimed_run=claim,
             workspace=workspace,
             project_id=_PROJECT_ID,
             run_id=UUID(workspace.root.name),
             blueprint=_REPOSITORY_BLUEPRINT,
             repository_bindings={"source_repository": _BINDING},
         )
+        workspace = prepared.workspace
 
 
 @pytest.mark.asyncio
@@ -582,17 +730,24 @@ async def test_repository_requirement_key_cannot_escape_or_shadow_documents(
     workspace = _workspace(tmp_path)
     session = _FakeRepositorySession({"src/app.py": b"ok\n"})
     source = _FakeRepositorySource(session, scope_paths=("src",))
-    materializer = _materializer([], repository_source=source)
+    claim = input_claim(
+        project_id=_PROJECT_ID,
+        run_id=UUID(workspace.root.name),
+        repository_bindings={"source_repository": _BINDING},
+    )
+    materializer = _materializer(claim, [], repository_source=source)
 
     for key in ("../escape", "documents", "."):
         with pytest.raises(MaterializationError):
-            await materializer.materialize(
+            prepared = await materializer.materialize(
+                claimed_run=claim,
                 workspace=workspace,
                 project_id=_PROJECT_ID,
                 run_id=UUID(workspace.root.name),
                 blueprint=_REPOSITORY_BLUEPRINT,
                 repository_bindings={key: _BINDING},
             )
+            workspace = prepared.workspace
     assert not (workspace.input_dir.parent / "escape").exists()
 
 
@@ -603,20 +758,28 @@ async def test_repository_materialization_is_idempotent_per_run(tmp_path: Path) 
     workspace = _workspace(tmp_path)
     session = _FakeRepositorySession({"src/app.py": b"ok\n"})
     source = _FakeRepositorySource(session, scope_paths=("src",))
-    materializer = _materializer([], repository_source=source)
+    claim = input_claim(
+        project_id=_PROJECT_ID,
+        run_id=UUID(workspace.root.name),
+        repository_bindings={"source_repository": _BINDING},
+    )
+    materializer = _materializer(claim, [], repository_source=source)
     project_id = _PROJECT_ID
     run_id = UUID(workspace.root.name)
 
     for _ in range(2):
-        await materializer.materialize(
+        prepared = await materializer.materialize(
+            claimed_run=claim,
             workspace=workspace,
             project_id=project_id,
             run_id=run_id,
             blueprint=_REPOSITORY_BLUEPRINT,
             repository_bindings={"source_repository": _BINDING},
         )
+        workspace = prepared.workspace
 
     assert source.calls == 1
+    assert source.inspections == 2
 
 
 @pytest.mark.asyncio
@@ -629,13 +792,20 @@ async def test_file_index_lists_materialized_and_skipped_entries(tmp_path: Path)
         _doc("", "image.bin", b"\xff\xfe\x00", mime="application/octet-stream"),
     ]
 
-    await _materializer(contents).materialize(
+    claim = input_claim(
+        project_id=_PROJECT_ID,
+        run_id=UUID(workspace.root.name),
+        snapshots=(document_snapshot(_PROJECT_ID, contents),),
+    )
+    prepared = await _materializer(claim, contents).materialize(
+        claimed_run=claim,
         workspace=workspace,
         project_id=_PROJECT_ID,
         run_id=UUID(workspace.root.name),
         blueprint=_DOC_BLUEPRINT,
         document_snapshots=(document_snapshot(_PROJECT_ID, contents),),
     )
+    workspace = prepared.workspace
 
     index = (workspace.input_dir / "documents" / ".projectmind" / "files.txt").read_text(
         encoding="utf-8"
@@ -660,13 +830,20 @@ async def test_spreadsheet_documents_are_textualized_and_traceable(tmp_path: Pat
     workbook = _workbook([("設計", body)])
     contents = [_doc("specs", "design.xlsx", workbook, mime="application/vnd.ms-excel")]
 
-    await _materializer(contents).materialize(
+    claim = input_claim(
+        project_id=_PROJECT_ID,
+        run_id=UUID(workspace.root.name),
+        snapshots=(document_snapshot(_PROJECT_ID, contents),),
+    )
+    prepared = await _materializer(claim, contents).materialize(
+        claimed_run=claim,
         workspace=workspace,
         project_id=_PROJECT_ID,
         run_id=UUID(workspace.root.name),
         blueprint=_DOC_BLUEPRINT,
         document_snapshots=(document_snapshot(_PROJECT_ID, contents),),
     )
+    workspace = prepared.workspace
 
     base = workspace.input_dir / "documents"
     rendered = (base / "specs" / "design.xlsx.txt").read_text(encoding="utf-8")
@@ -696,13 +873,20 @@ async def test_unconvertible_spreadsheet_is_skipped_with_reason(tmp_path: Path) 
     workspace = _workspace(tmp_path)
     contents = [_doc("specs", "broken.xlsx", b"\xff\xfe\x00not a workbook")]
 
-    await _materializer(contents).materialize(
+    claim = input_claim(
+        project_id=_PROJECT_ID,
+        run_id=UUID(workspace.root.name),
+        snapshots=(document_snapshot(_PROJECT_ID, contents),),
+    )
+    prepared = await _materializer(claim, contents).materialize(
+        claimed_run=claim,
         workspace=workspace,
         project_id=_PROJECT_ID,
         run_id=UUID(workspace.root.name),
         blueprint=_DOC_BLUEPRINT,
         document_snapshots=(document_snapshot(_PROJECT_ID, contents),),
     )
+    workspace = prepared.workspace
 
     manifest = json.loads(
         (workspace.input_dir / "documents" / ".projectmind" / "manifest.json").read_text(
@@ -732,13 +916,20 @@ async def test_repository_history_is_materialized_with_its_limit(tmp_path: Path)
     )
     source = _FakeRepositorySource(session, scope_paths=("src",))
 
-    await _materializer([], repository_source=source).materialize(
+    claim = input_claim(
+        project_id=_PROJECT_ID,
+        run_id=UUID(workspace.root.name),
+        repository_bindings={"source_repository": _BINDING},
+    )
+    prepared = await _materializer(claim, [], repository_source=source).materialize(
+        claimed_run=claim,
         workspace=workspace,
         project_id=_PROJECT_ID,
         run_id=UUID(workspace.root.name),
         blueprint=_REPOSITORY_BLUEPRINT,
         repository_bindings={"source_repository": _BINDING},
     )
+    workspace = prepared.workspace
 
     history = (
         workspace.input_dir / "source_repository" / ".projectmind" / "history.txt"
@@ -763,29 +954,38 @@ async def test_generated_artifacts_are_verified_on_reuse(tmp_path: Path) -> None
 
     workspace = _workspace(tmp_path)
     contents = [_doc("", "a.md", b"first")]
-    materializer = _materializer(contents)
+    claim = input_claim(
+        project_id=_PROJECT_ID,
+        run_id=UUID(workspace.root.name),
+        snapshots=(document_snapshot(_PROJECT_ID, contents),),
+    )
+    materializer = _materializer(claim, contents)
     project_id = _PROJECT_ID
     run_id = UUID(workspace.root.name)
-    await materializer.materialize(
+    prepared = await materializer.materialize(
+        claimed_run=claim,
         workspace=workspace,
         project_id=project_id,
         run_id=run_id,
         blueprint=_DOC_BLUEPRINT,
         document_snapshots=(document_snapshot(_PROJECT_ID, contents),),
     )
+    workspace = prepared.workspace
 
     index = workspace.input_dir / "documents" / ".projectmind" / "files.txt"
     index.chmod(0o600)
     index.write_text("b.md\n", encoding="utf-8")
 
     with pytest.raises(MaterializationError):
-        await materializer.materialize(
+        prepared = await materializer.materialize(
+            claimed_run=claim,
             workspace=workspace,
             project_id=project_id,
             run_id=run_id,
             blueprint=_DOC_BLUEPRINT,
             document_snapshots=(document_snapshot(_PROJECT_ID, contents),),
         )
+        workspace = prepared.workspace
 
 
 @pytest.mark.asyncio
@@ -814,10 +1014,18 @@ async def test_materialize_returns_descriptors_for_brief_and_prompt(tmp_path: Pa
     }
 
     contents = [_doc("", "a.md", b"x"), _doc("", "image.bin", b"\xff\xfe\x00")]
+    claim = input_claim(
+        project_id=_PROJECT_ID,
+        run_id=UUID(workspace.root.name),
+        snapshots=(document_snapshot(_PROJECT_ID, contents),),
+        repository_bindings={"source_repository": _BINDING},
+    )
     materialized = await _materializer(
+        claim,
         contents,
         repository_source=source,
     ).materialize(
+        claimed_run=claim,
         workspace=workspace,
         project_id=_PROJECT_ID,
         run_id=UUID(workspace.root.name),
@@ -826,7 +1034,8 @@ async def test_materialize_returns_descriptors_for_brief_and_prompt(tmp_path: Pa
         repository_bindings={"source_repository": _BINDING},
     )
 
-    documents, repository = materialized
+    workspace = materialized.workspace
+    documents, repository = materialized.resources
     assert (documents.kind, documents.root) == ("document", "input/documents")
     assert documents.index_path == "input/documents/.projectmind/files.txt"
     assert documents.manifest_path == "input/documents/.projectmind/manifest.json"
@@ -837,10 +1046,16 @@ async def test_materialize_returns_descriptors_for_brief_and_prompt(tmp_path: Pa
     assert repository.revision == "c" * 40
     assert repository.history_path == "input/source_repository/.projectmind/history.txt"
     assert repository.files == 1
-    # 案内した path は実在する。
-    for descriptor in materialized:
+    # 論理 path の案内は受け取った世代へ解決でき、実 Tool から読める。
+    for descriptor in materialized.resources:
         for relative in (descriptor.manifest_path, descriptor.index_path):
-            assert (workspace.root / relative).is_file()
+            target = workspace.input_dir / relative.removeprefix("input/")
+            assert target.is_file()
+            read = await WorkspaceReadProvider().execute(
+                _read_context(workspace, "workspace.read/v1"),
+                {"path": relative, "purpose": "Read the prepared input guide"},
+            )
+            assert read.response["content"] == target.read_text()
 
 
 @pytest.mark.asyncio
@@ -850,11 +1065,17 @@ async def test_reused_materialization_returns_the_same_descriptors(tmp_path: Pat
     workspace = _workspace(tmp_path)
     session = _FakeRepositorySession({"src/app.py": b"ok\n"}, revision="d" * 40)
     source = _FakeRepositorySource(session, scope_paths=("src",))
-    materializer = _materializer([], repository_source=source)
+    claim = input_claim(
+        project_id=_PROJECT_ID,
+        run_id=UUID(workspace.root.name),
+        repository_bindings={"source_repository": _BINDING},
+    )
+    materializer = _materializer(claim, [], repository_source=source)
     project_id = _PROJECT_ID
     run_id = UUID(workspace.root.name)
 
     first = await materializer.materialize(
+        claimed_run=claim,
         workspace=workspace,
         project_id=project_id,
         run_id=run_id,
@@ -862,6 +1083,7 @@ async def test_reused_materialization_returns_the_same_descriptors(tmp_path: Pat
         repository_bindings={"source_repository": _BINDING},
     )
     second = await materializer.materialize(
+        claimed_run=claim,
         workspace=workspace,
         project_id=project_id,
         run_id=run_id,
