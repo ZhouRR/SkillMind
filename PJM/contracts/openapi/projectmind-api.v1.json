@@ -1028,6 +1028,59 @@
         "title": "DocumentResponse",
         "type": "object"
       },
+      "DocumentSnapshotResponse": {
+        "additionalProperties": false,
+        "description": "Project と requirement を固定した v1 清単。checksum の検証は共通 domain が担う。",
+        "properties": {
+          "checksum": {
+            "pattern": "^sha256:[a-f0-9]{64}$",
+            "title": "Checksum",
+            "type": "string"
+          },
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/FrozenDocumentResponse"
+            },
+            "maxItems": 5000,
+            "minItems": 1,
+            "title": "Documents",
+            "type": "array"
+          },
+          "project_id": {
+            "format": "uuid",
+            "title": "Project Id",
+            "type": "string"
+          },
+          "requirement_key": {
+            "title": "Requirement Key",
+            "type": "string"
+          },
+          "selection_mode": {
+            "enum": [
+              "SINGLE",
+              "SET",
+              "ALL"
+            ],
+            "title": "Selection Mode",
+            "type": "string"
+          },
+          "snapshot_version": {
+            "const": "v1",
+            "title": "Snapshot Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "snapshot_version",
+          "project_id",
+          "requirement_key",
+          "selection_mode",
+          "documents",
+          "checksum"
+        ],
+        "title": "DocumentSnapshotResponse",
+        "type": "object"
+      },
       "EffectExecutionResponse": {
         "description": "Lease/credential を除外した EffectExecution response。",
         "properties": {
@@ -1405,6 +1458,49 @@
           "created_at"
         ],
         "title": "EvidenceResponse",
+        "type": "object"
+      },
+      "FrozenDocumentResponse": {
+        "additionalProperties": false,
+        "description": "Run 作成時の文書 identity と metadata の公開許可リスト。",
+        "properties": {
+          "content_hash": {
+            "pattern": "^sha256:[a-f0-9]{64}$",
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "document_id": {
+            "format": "uuid",
+            "title": "Document Id",
+            "type": "string"
+          },
+          "folder": {
+            "title": "Folder",
+            "type": "string"
+          },
+          "mime": {
+            "title": "Mime",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "size": {
+            "minimum": 0.0,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "document_id",
+          "folder",
+          "name",
+          "mime",
+          "size",
+          "content_hash"
+        ],
+        "title": "FrozenDocumentResponse",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -3267,6 +3363,13 @@
             "title": "Created At",
             "type": "string"
           },
+          "document_snapshots": {
+            "items": {
+              "$ref": "#/components/schemas/RunDocumentSnapshotResponse"
+            },
+            "title": "Document Snapshots",
+            "type": "array"
+          },
           "effect_executions": {
             "items": {
               "$ref": "#/components/schemas/EffectExecutionResponse"
@@ -3348,7 +3451,16 @@
             "type": "array"
           },
           "selected_sources": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/components/schemas/RunSourceSummaryResponse"
+                }
+              ]
+            },
             "title": "Selected Sources",
             "type": "object"
           },
@@ -3391,6 +3503,7 @@
           "created_at",
           "input",
           "selected_sources",
+          "document_snapshots",
           "output_schema",
           "output_schema_checksum",
           "result",
@@ -3406,6 +3519,42 @@
           "effect_executions"
         ],
         "title": "RunDetailResponse",
+        "type": "object"
+      },
+      "RunDocumentSnapshotResponse": {
+        "additionalProperties": false,
+        "description": "清単を安全に公開できない旧記録/不正記録を、空集合と混同させない。",
+        "properties": {
+          "requirement_key": {
+            "title": "Requirement Key",
+            "type": "string"
+          },
+          "snapshot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentSnapshotResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "FROZEN",
+              "LEGACY_UNAVAILABLE",
+              "INVALID"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requirement_key",
+          "status",
+          "snapshot"
+        ],
+        "title": "RunDocumentSnapshotResponse",
         "type": "object"
       },
       "RunHistoryItemResponse": {
@@ -3481,7 +3630,16 @@
             "type": "string"
           },
           "selected_sources": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/components/schemas/RunSourceSummaryResponse"
+                }
+              ]
+            },
             "title": "Selected Sources",
             "type": "object"
           },
@@ -3862,6 +4020,58 @@
           "config_snapshot"
         ],
         "title": "RunSkillSnapshotResponse",
+        "type": "object"
+      },
+      "RunSourceSummaryResponse": {
+        "additionalProperties": false,
+        "description": "一覧と詳細で共有する資源摘要。内部 binding と文書正文は公開しない。",
+        "properties": {
+          "access": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access"
+          },
+          "capability": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capability"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "resource_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Kind"
+          }
+        },
+        "title": "RunSourceSummaryResponse",
         "type": "object"
       },
       "RunStatus": {

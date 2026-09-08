@@ -410,6 +410,19 @@ export interface UiMessages {
   }
   /** Run 結果・監査 panel(RunResultPanel)。 */
   runResult: {
+    /** 凍結文書の検証状態。実行成功や現在の blob 可達性と混同しない。 */
+    documents: {
+      title: string
+      hint: string
+      status: Record<'FROZEN' | 'LEGACY_UNAVAILABLE' | 'INVALID', string>
+      legacy: string
+      invalid: string
+      checksum: string
+      members: (count: number) => string
+      documentId: string
+      contentHash: string
+      size: (bytes: number) => string
+    }
     /** 未応答の質問・未決の変更提案を結果より上へ集約する区画。 */
     pendingTitle: string
     pendingHint: string
@@ -538,14 +551,44 @@ export interface UiMessages {
     optionalSuffix: string
     selectConfiguredResource: string
     notUsed: string
-    /** 資源要求を技術 key ではなく種別の友好名で見せ、単一候補は選択させない。 */
+    /** 資源種別の友好名。文書は候補が一件でも明示選択を要求する。 */
     resourceKind: Record<string, string>
     willUseSource: (label: string) => string
     sourceNotConfigured: string
     freezeHint: string
+    /** 即時実行・調度が共用する文書範囲の選択と失効案内。 */
+    documentSelection: {
+      mode: string
+      choose: string
+      single: string
+      set: string
+      all: string
+      invalid: string
+      search: string
+      count: (count: number) => string
+      setHint: string
+      noMatches: string
+      allHint: string
+      freezeHint: string
+      incompleteDraft: string
+    }
     inputValidatedHint: string
     creating: string
     startRun: string
+    /** 未確認作成と新しい草稿を混同させない、三語の案内と明示確認。 */
+    submission: {
+      title: string
+      open: string
+      originalTask: (title: string) => string
+      phase: Record<'sending' | 'unknown' | 'rejected' | 'conflict', string>
+      mayHaveCreated: string
+      memoryOnly: string
+      retry: string
+      history: string
+      acknowledgeNew: string
+      startNew: string
+      unavailable: string
+    }
     selectTaskFirst: string
     inputMustBeJson: string
     history: string

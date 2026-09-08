@@ -454,8 +454,7 @@ class FakeIntegrationService:
         index = next(
             index
             for index, item in enumerate(self.secrets)
-            if item.project_id == project_id
-            and item.secret_reference_id == secret_reference_id
+            if item.project_id == project_id and item.secret_reference_id == secret_reference_id
         )
         now = datetime(2026, 7, 18, 12, 5, tzinfo=UTC)
         stored = replace(
@@ -467,9 +466,7 @@ class FakeIntegrationService:
         self.secrets[index] = stored
         return stored
 
-    async def create_integration(
-        self, command: CreateIntegrationCommand
-    ) -> StoredIntegration:
+    async def create_integration(self, command: CreateIntegrationCommand) -> StoredIntegration:
         """Connection config key だけを公開 model へ投影する。"""
 
         now = datetime(2026, 7, 18, 12, 10, tzinfo=UTC)
@@ -494,9 +491,7 @@ class FakeIntegrationService:
         self.integrations.append(stored)
         return stored
 
-    async def list_integrations(
-        self, *, project_id: UUID
-    ) -> tuple[StoredIntegration, ...]:
+    async def list_integrations(self, *, project_id: UUID) -> tuple[StoredIntegration, ...]:
         """Project 内の接続本文を除いた Integration を返す。"""
 
         return tuple(item for item in self.integrations if item.project_id == project_id)
@@ -619,8 +614,7 @@ class FakeEffectService:
         index = next(
             index
             for index, item in enumerate(self.policies)
-            if item.project_id == project_id
-            and item.preauthorization_id == preauthorization_id
+            if item.project_id == project_id and item.preauthorization_id == preauthorization_id
         )
         current = self.policies[index]
         assert current.policy_version == expected_policy_version
@@ -728,6 +722,40 @@ class FakeRunService:
         self.created_run: CreatedRun | None = None
         self.received_interaction_response: dict[str, object] | None = None
         self.history_statuses: tuple[RunStatus, ...] = ()
+        self.replay_lookups = 0
+
+    async def find_task_run_replay(
+        self,
+        *,
+        project_id: UUID,
+        skill_version_id: UUID,
+        task_key: str,
+        input_json: dict[str, object],
+        sources: dict[str, str],
+        actor_id: UUID,
+        idempotency_key: str,
+    ) -> CreatedRun | None:
+        """初回要求を先に確認し、再送では現在の task 解決を必要としない。"""
+
+        self.replay_lookups += 1
+        assert skill_version_id and task_key and idempotency_key
+        if self.conflict:
+            raise IdempotencyConflictError("different request")
+        if not self.replay:
+            return None
+        self.received_input = input_json
+        self.received_sources = sources
+        self.received_actor_id = actor_id
+        self.created_run = CreatedRun(
+            run_id=uuid4(),
+            project_id=project_id,
+            task_id=uuid4(),
+            status=RunStatus.QUEUED,
+            row_version=1,
+            created_at=datetime(2026, 7, 9, 12, 0, tzinfo=UTC),
+            idempotent_replay=True,
+        )
+        return self.created_run
 
     async def create_task_run(
         self,
@@ -847,9 +875,8 @@ class FakeRunService:
         return RunDetail(
             run=run,
             input=self.received_input or {"target": "main"},
-            selected_sources=self.received_sources or {
-                "repository-source": {"capability": "repository.read/v1", "provider": "git"}
-            },
+            selected_sources=self.received_sources
+            or {"repository-source": {"capability": "repository.read/v1", "provider": "git"}},
             segments=(
                 StoredRunSegment(
                     run_segment_id=uuid4(),
@@ -947,7 +974,8 @@ class FakeRunService:
                 RunHistoryItem(
                     run=self.created_run,
                     input=self.received_input or {"target": "main"},
-                    selected_sources=self.received_sources or {
+                    selected_sources=self.received_sources
+                    or {
                         "repository-source": {
                             "capability": "repository.read/v1",
                             "provider": "git",
@@ -1143,9 +1171,7 @@ class FakeSkillService:
             ),
         )
 
-    async def list_skill_versions(
-        self, *, organization_id: UUID
-    ) -> tuple[StoredSkillVersion, ...]:
+    async def list_skill_versions(self, *, organization_id: UUID) -> tuple[StoredSkillVersion, ...]:
         """Organization library の固定一件を返す。"""
 
         return (self._skill_version(organization_id=organization_id),)
@@ -1177,9 +1203,7 @@ class FakeSkillService:
             status=SkillVersionStatus.DEPRECATED,
         )
 
-    async def delete_skill_version(
-        self, *, organization_id: UUID, skill_version_id: UUID
-    ) -> None:
+    async def delete_skill_version(self, *, organization_id: UUID, skill_version_id: UUID) -> None:
         """削除要求を記録し、参照ありを模す version だけ 409 経路へ落とす。"""
 
         del organization_id
@@ -1233,12 +1257,14 @@ class FakeSkillService:
         """Project の active enablement 一件を返す。"""
 
         del include_disabled
-        return (self._project_skill_version(
-            organization_id=organization_id,
-            project_id=project_id,
-            skill_version_id=uuid4(),
-            enabled_by=uuid4(),
-        ),)
+        return (
+            self._project_skill_version(
+                organization_id=organization_id,
+                project_id=project_id,
+                skill_version_id=uuid4(),
+                enabled_by=uuid4(),
+            ),
+        )
 
     def _project_skill_version(
         self,
@@ -1280,9 +1306,7 @@ class FakeSkillService:
                 skill_name="Repository Review",
                 version="1.0.0",
                 task_key="review-change",
-                task_id=derive_task_id(
-                    skill_version_id=skill_version_id, task_key="review-change"
-                ),
+                task_id=derive_task_id(skill_version_id=skill_version_id, task_key="review-change"),
                 capability="repository.review",
                 title="Repository Review",
                 task_type="immediate",
@@ -1302,9 +1326,7 @@ class FakeSkillService:
                 published_at=datetime(2026, 7, 9, tzinfo=UTC),
                 capability_blueprint={
                     "blueprint_version": "projectmind.capability-blueprint/v1",
-                    "capabilities": [
-                        {"key": "repository.review", "title": "Repository Review"}
-                    ],
+                    "capabilities": [{"key": "repository.review", "title": "Repository Review"}],
                     "tasks": [
                         {
                             "key": "review-change",
@@ -1556,9 +1578,7 @@ class FakeEvaluationService:
         self.items.append(evaluation)
         return evaluation
 
-    async def list_for_run(
-        self, *, project_id: UUID, run_id: UUID
-    ) -> tuple[StoredEvaluation, ...]:
+    async def list_for_run(self, *, project_id: UUID, run_id: UUID) -> tuple[StoredEvaluation, ...]:
         """指定 Run に追加済みの評価だけを作成順で返す。"""
 
         assert project_id
@@ -1772,6 +1792,8 @@ class FakeArqPool:
         """Lifespan teardown の close 契約を満たす no-op。"""
 
         return None
+
+
 class FakeScheduleService:
     """TaskSchedule API contract を DB なしで検証する fake (計画 §22)。"""
 
@@ -1799,9 +1821,7 @@ class FakeScheduleService:
             datetime(2026, 7, 29, 0, 0, tzinfo=UTC),
         ]
 
-    async def list_schedules(
-        self, *, project_id: UUID, limit: int, offset: int
-    ) -> SchedulePage:
+    async def list_schedules(self, *, project_id: UUID, limit: int, offset: int) -> SchedulePage:
         """固定の一件を Project 反映で返す。"""
 
         return SchedulePage(

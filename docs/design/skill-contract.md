@@ -1,6 +1,8 @@
 # ProjectMind 通用 Skill 兼容、解释与发布规范
 
-本文定义 ProjectMind 如何兼容 Codex、Claude Code 及其他目录式 Skill，如何把自然语言能力转化为平台可配置、可执行和可审计的 CapabilityBlueprint，以及如何验证、发布、绑定资源和升级 SkillVersion。
+> 定位：Skill 的语义契约与生命周期规则。代码接线见[解释与发布实现](skill-interpretation.md)，当前完成度见[计划](../planning/roadmap.md#13-当前执行状态)。本页不把兼容标签、发布状态和执行权限合成一种“可用”状态。
+
+本文定义目录式 Skill 如何成为可配置、可执行、可审计的任务。先看[发布与就绪的判断顺序](#发布与就绪的判断顺序)理解各阶段，再按需要阅读导入、蓝图和[升级回滚](#11-版本回滚与评价)。
 
 ## 1. 设计目标
 
@@ -95,7 +97,7 @@ Interpreter 的主要产物是 `CapabilityBlueprint`，而不是业务 input/out
 
 Project 或 Run 再把它绑定到具体 Integration。`accepted_providers` 是兼容提示，不应强制平台只支持已列举产品；满足 capability 和 scope 的新 Provider 可以参与绑定。
 
-若 Skill 同时需要 Redmine Ticket 与代码，Interpreter 应产生两个独立 requirement。Agent 可以依据 Skill 规则推荐绑定，但用户可以在运行前或交互点覆盖选择。
+若 Skill 同时需要 Redmine Ticket 与代码，Interpreter 应产生两个独立 requirement。Agent 可以推荐绑定，用户在创建 Run 前确认或修改选择。创建后，交互只能在已经冻结的资源和权限内补充业务信息，不能更换 Integration、增添文档或扩大 scope；需要改变这些边界时创建新 Run。具体冻结时点由[资源快照](resource-snapshots.md)负责。
 
 ### 4.3 Guidance 与约束
 
@@ -172,13 +174,28 @@ Task-specific JSON Schema 是可选派生产物：
 
 ## 7. 兼容级别与运行就绪度
 
+### 发布与就绪的判断顺序
+
+| 已观察到的事实 | 能说明什么，下一步检查什么 |
+| --- | --- |
+| 导入或 parse 成功 | 来源可读取并已归一化；初始 Draft 可无蓝图，还需 Interpreter 解释 |
+| 有 Preview | 可以审查一次解释；不能据此跳过来源、蓝图和发布 gate |
+| `gate_passed = true` | DRAFT 没有 hard error；仍需检查 warning 并由 ADMIN 显式接受后发布 |
+| 版本为 `PUBLISHED` | 该精确版本已发布；Project 尚须显式启用，不自动替换旧版 |
+| Project 已启用 | 允许该项目发现版本；资源和已安装 Provider 决定任务 readiness |
+| `RUNNABLE / ACTIONABLE` | 当前配置可达到的能力投影；新 Run 仍验证输入/资源，外部 apply 仍检查具体批准 |
+
+例如同一版本已发布、A 项目已启用且有仓库、B 项目已启用但缺仓库：版本身份相同，两个项目的就绪度可以不同。另一个未启用的项目不应看到该版本的任务。这不是按项目复制三份 Skill，也不是在发布时访问三个项目的 Secret。
+
 ### 7.1 兼容级别
 
-- `Native`：确定性 Adapter 可完整提取能力蓝图，不需要模型补全核心语义。
-- `Adapted`：Interpreter 从自然语言和资产中生成可验证蓝图。
-- `Assisted`：能够提供指导或对话能力，但仍有较多假设、未决资源或人工步骤。
+- `native`：为原有结构已符合平台协议的资产保留的兼容标签；不是一条绕过 Interpreter 的新导入/发布入口。
+- `adapted`：Interpreter 从自然语言和资产中生成可验证蓝图。
+- `assisted`：仍有较多假设、未决资源或人工步骤，需要额外审查。
 
-兼容级别说明包装方式，不直接决定能否发布。
+以上是 Schema 中的实际小写值，展示名可本地化。兼容级别不直接决定能否发布；`assisted` 会产生待接受的 warning，不因此免除其它 gate。
+
+当前可信 Adapter 只归一化来源，确定性 Draft builder 不生成业务蓝图。新发布版本的蓝图仍只能由 Interpreter 产生；手工 `native` fixture 只用于离线契约/历史回归，不证明存在“原生直接发布”产品通道，也不能恢复旧业务 seed。实现边界见[蓝图唯一来源](skill-interpretation.md#53-蓝图是唯一来源)。
 
 ### 7.2 运行就绪度
 
@@ -214,7 +231,7 @@ PUBLISHED 版本来复用同一份资产，就绪度再按各自的资源独立�
 - 推荐步骤无法完全确定，或存在可在运行时询问的问题。
 - Assisted compatibility 本身。
 
-这些情况降低就绪度或产生 warning，并在 Workspace 中要求配置/交互；只有无法形成安全、可理解的能力蓝图时才拒绝发布。
+这些情况降低就绪度或产生 warning，不可仅凭标签拒绝发布。所有 hard error 仍须解决，warning code 须由 ADMIN 显式接受；`gate_passed` 不等于 warning 已接受。运行前缺少的必需资源在创建前补齐，不能靠 Run 内交互扩大冻结范围。
 
 ### 8.3 发布流程
 
@@ -237,7 +254,7 @@ SkillSource
 
 ## 9. RuntimeManifest v1alpha1
 
-以下是语义内容，实际顶层字段见 [RuntimeManifest Schema](../../PJM/contracts/runtime-manifest/v1alpha1.schema.json)。当前版本为 `projectmind.runtime/v1alpha1`，不使用未发布的 vNext 字段名。RuntimeManifest 冻结：
+以下是语义内容，不是可直接提交的字段清单。实际顶层字段见 [RuntimeManifest Schema](../../PJM/contracts/runtime-manifest/v1alpha1.schema.json)，`manifest_version` 的精确值为 `projectmind/v1alpha1`。RuntimeManifest 冻结：
 
 - `manifest_version`、Skill/Interpretation identity 和 checksum。
 - CapabilityBlueprint。
@@ -247,7 +264,9 @@ SkillSource
 - 推荐 ExecutionProfile 与交互点。
 - effect intents 和默认 `observe/propose/apply` 策略。
 - 可选的动态参数/输出 Schema 及 checksum。
-- 解释 source trace、assumptions 和 accepted warnings。
+- 解释 source trace 和 assumptions。
+
+Manifest 内容与 checksum 从创建 SkillVersion DRAFT 起固定；发布者、发布时间、状态与已接受 warning 保存在版本记录/门禁报告，不为发布操作重写 Manifest。不要把这些元数据添加成 Manifest 的顶层字段。
 
 资源要求只放在 `capability_blueprint.resource_requirements`，不存在顶层 `data_sources`；Task 与 Tool 投影不得重复定义不一致的资源 key。
 
@@ -255,7 +274,9 @@ RuntimeManifest 不包含 Project Secret、具体 credential 或运行时选中�
 
 ## 10. Skill 组合
 
-SkillComposition 可以组合多个 CapabilityBlueprint，并配置名称、展示形态、行为提示、默认任务和资源偏好。组合冲突按以下顺序处理：
+当前 SkillComposition（页面中称 Module）保存名称、说明与精确 SkillVersion 集合，ProjectComposition 控制项目展示；它将已有任务归组，不把多个蓝图合成一个新的可执行 Skill。当前 service 没有跨 Skill 业务规则冲突求解器，组合存在也不授予成员版本额外权限。
+
+若后续增加组合级行为提示、默认任务或资源偏好，须先定义契约、版本/快照和以下冲突处理，不将其写成现行字段或自动编排能力：
 
 1. 平台安全与权限规则始终最高。
 2. Project 策略限制可用 Integration 和效果范围。
@@ -266,12 +287,46 @@ SkillComposition 可以组合多个 CapabilityBlueprint，并配置名称、展�
 
 ## 11. 版本、回滚与评价
 
-- 已发布 SkillVersion、CapabilityBlueprint 和 RuntimeManifest 不可修改。
-- 来源、Interpreter、模型、用户调整或规则变化都生成新版本。
-- 既有 Run 始终引用精确版本，不自动跟随 latest。
-- 回滚通过显式调整 Project 启用/组合引用精确版本完成，不切换到隐含 latest，不改写历史 Run。
-- Interpreter 质量报告至少评价：能力识别、资源前提、目标/交付物、规则保真、Tool 映射、效果识别、source trace 和人工调整量。
-- 固定样例应覆盖 JAF Ticket 分析、repository review、资源不足、带写入意图和恶意指令等情况；不依赖业务 Schema exact match 作为唯一准确度。
+### 11.1 版本内容与可见性
+
+来源或解释规则变化先产生新的 Interpretation；需要交付时，从其候选创建新的 SkillVersion DRAFT，再审查发布。不是每次模型尝试都自动增加发布版本，也不通过编辑既有 Manifest 完成调整。
+
+| 操作 | 当前边界 |
+| --- | --- |
+| 发布 / 废弃版本 | `DRAFT → PUBLISHED → DEPRECATED`。重复发布已发布版可读回原记录；废弃版不能重新发布 |
+| 为 Project 启用 | 只接受本组织的精确 PUBLISHED 版本；重复启用仍活动的关系返回原记录 |
+| 在 Project 停用 | 保留停用记录，关闭该项目的新任务发现/创建；不改写既有 Run 快照，也不等于取消 Run |
+| 同版重新启用 | 当前拒绝恢复已经停用的关系；不是清空 disabled_at 的普通开关 |
+| 删除废弃版本 | 有独立受限入口，检查 Run/Proposal/Composition 引用；删除不是升级或回滚步骤，不因从列表隐藏就删除审计资产 |
+
+**当前限制**：若 v1 已在项目停用，即便 v1 仍是 PUBLISHED，也不能通过现有启用 API 将它恢复。旧文档笼统的“调整启用关系即可回滚”不成立。只能选择仍可用的精确版本，或把来源重新解释、审查发布为新版本；后者不等于恢复原版本身份。不要删启用记录或直接改数据库来绕过这个限制。
+
+组合也只引用精确版本；改组合不复活已停用/废弃版本。已有 Run 和 Schedule 不跟随新版本，后续 Schedule 的版本失效处理由[调度设计](task-scheduling.md#保存和执行边界)负责。
+
+### 11.2 可审计的重新启用与回滚
+
+这是后续修正设计，当前没有完整 API/审计载体。目标是恢复合法旧版本的项目可见性，同时保留每次停用的事实；既不让“不可变版本”阻止正常配置回滚，也不抹掉停用审计。
+
+1. 重新启用仍是 ADMIN 对“Project + 精确版本”的显式操作，重新检查组织、项目和 PUBLISHED 状态；不允许复活 DEPRECATED 版本或自动采用 latest。
+2. 启用/停用/重新启用形成追加式历史，记录操作者、时点、原因与所依据状态。当前可见性可以是投影，但历史不可被覆盖；仅清空现有 disabled_at 不满足要求。
+3. 重复请求不追加重复事实；并发启停以受版本约束的状态转换处理，冲突后要求重新读取，不能由晚到响应悄悄覆盖新决定。载体、请求身份和公开字段在实施时与 Schema/migration 一起确定。
+4. 重新启用只改变新任务的可发现范围。它不授予资源权限、不重写 Run、Schedule 或组合引用，不自动取消在途执行，也不自动恢复 ERROR Schedule。
+5. UI 先显示精确版本差异与影响，再确认启停计划。若需要“一键切换新旧版本”，另行定义原子切换协议；两个独立启停请求不宣称是一个事务。
+
+选择追加历史是为了同时满足日常回滚与审计，不引入可变发布内容。实施需同步 repository/DB、API/契约、Web 启停与冲突提示、历史读取及真实并发回归；接续范围登记在[计划 R06](../planning/roadmap.md#133-全项目重构与缺失功能实施2026-09-05-启动)。
+
+### 11.3 生命周期验收与质量评价
+
+| 验收场景 | 应观察到的结果 |
+| --- | --- |
+| parse 成功但无蓝图 | 可以审查来源，不可绕过解释门禁发布 |
+| hard error / 未接受 warning | 前者拒绝发布，后者需显式接受；不把 gate_passed 当作发布状态 |
+| 发布但未启用 / 启用但缺资源 | 分别不可发现 / 显示配置不足，不自动创建或扩权 |
+| 停用、废弃、删除 | 分别验证作用域和引用限制，既有 Run 快照不变 |
+| 重新启用与并发启停（目标） | 原停用历史保留；重复不增记，冲突不覆盖；不得复活废弃版 |
+| 升级后回读旧 Run | 原版本、Manifest checksum 与结果不漂移，不用新版解释旧输出 |
+
+Interpreter 质量报告独立评价能力识别、资源前提、目标/交付物、规则保真、Tool 映射、效果识别、source trace 和人工调整量。样例覆盖 JAF、repository review、资源不足、写入意图和恶意指令；Schema exact match 与上述生命周期回归都不能替代模型质量评审。
 
 ## 12. 当前迁移边界
 

@@ -32,11 +32,11 @@ from projectmind.db.resources import (
     create_redis_client,
     create_session_factory,
 )
-from projectmind.documents import DocumentService
-from projectmind.documents.resource_catalog import (
+from projectmind.documents.resource_catalog import DocumentResourceCatalog
+from projectmind.documents.service import DocumentService
+from projectmind.documents.snapshot import (
     DOCUMENT_PROVIDER,
     DOCUMENT_READ_CAPABILITY,
-    DocumentResourceCatalog,
 )
 from projectmind.effects.service import EffectService
 from projectmind.evaluations import EvaluationService

@@ -7,8 +7,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Protocol
 from uuid import UUID
+
+from projectmind.runs.input_snapshot import InputFileSeal
 
 
 class AgentEventType(StrEnum):
@@ -104,6 +107,8 @@ class RunWorkspace:
     input_dir: Path
     output_dir: Path
     temp_dir: Path
+    input_files: tuple[InputFileSeal, ...] | None = None
+    input_file_index: Mapping[str, InputFileSeal] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         """相対 path や root 外 path を拒否して workspace 境界を固定する。"""
@@ -114,6 +119,10 @@ class RunWorkspace:
         root = self.root.resolve(strict=False)
         if any(not path.resolve(strict=False).is_relative_to(root) for path in paths[1:]):
             raise ValueError("Run workspace paths must stay under the run root")
+        index = {item.path: item for item in self.input_files or ()}
+        if len(index) != len(self.input_files or ()):
+            raise ValueError("Run input receipt contains duplicate files")
+        object.__setattr__(self, "input_file_index", MappingProxyType(index))
 
 
 @dataclass(frozen=True, slots=True)

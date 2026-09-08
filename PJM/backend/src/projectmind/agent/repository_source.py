@@ -24,6 +24,7 @@ from projectmind.agent.repository_client import (
     RepositorySession,
 )
 from projectmind.agent.run_binding import (
+    BoundRunResource,
     RunBindingError,
     load_bound_run_resource,
     resolve_binding_secret,
@@ -49,6 +50,14 @@ class RepositoryBindingRef:
     provider: str
     integration_id: UUID
     binding_id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class RepositorySnapshotBinding:
+    """cache 再利用時にも Secret/remote なしで照合する binding の公開されない摘要。"""
+
+    checksum: str
+    scope_paths: tuple[str, ...]
 
 
 class ScopedRepositorySession:
@@ -132,6 +141,13 @@ class ScopedRepositorySession:
 class RepositorySnapshotSource(Protocol):
     """Run binding から認証済み repository session を開く port。"""
 
+    async def inspect(
+        self, *, project_id: UUID, run_id: UUID, binding: RepositoryBindingRef
+    ) -> RepositorySnapshotBinding:
+        """Run binding と現在の Integration を再検証し、remote は読み直さない。"""
+
+        ...
+
     def open(
         self,
         *,
@@ -161,6 +177,53 @@ class IntegrationRepositorySnapshotSource:
         self._clients = dict(clients)
         self._secret_resolver = secret_resolver
 
+    async def inspect(
+        self, *, project_id: UUID, run_id: UUID, binding: RepositoryBindingRef
+    ) -> RepositorySnapshotBinding:
+        """cache があっても binding の失効や scope 漂移を見逃さない。"""
+
+        async with self._session_factory() as session:
+            bound = await self._load_binding(
+                session, project_id=project_id, run_id=run_id, binding=binding
+            )
+        return RepositorySnapshotBinding(
+            checksum=bound.checksum, scope_paths=_scope_strings(bound.scope, key="paths")
+        )
+
+    async def _load_binding(
+        self,
+        session: AsyncSession,
+        *,
+        project_id: UUID,
+        run_id: UUID,
+        binding: RepositoryBindingRef,
+    ) -> BoundRunResource:
+        """取得と cache 再利用の双方を既存の単一 binding gate へ通す。"""
+
+        definition = PROVIDER_DEFINITIONS.get(binding.provider)
+        if (
+            definition is None
+            or definition.kind != "repository"
+            or binding.provider not in self._clients
+        ):
+            raise RepositoryClientError(
+                "unavailable", "Repository Provider is not installed", retryable=False
+            )
+        try:
+            return await load_bound_run_resource(
+                session,
+                project_id=project_id,
+                run_id=run_id,
+                binding_id=binding.binding_id,
+                integration_id=binding.integration_id,
+                provider=binding.provider,
+                capability=REPOSITORY_READ_CAPABILITY,
+            )
+        except RunBindingError as error:
+            raise RepositoryClientError(
+                error.code, error.message, retryable=error.retryable
+            ) from error
+
     @asynccontextmanager
     async def open(
         self,
@@ -179,9 +242,7 @@ class IntegrationRepositorySnapshotSource:
                 "Repository Provider is not installed",
                 retryable=False,
             )
-        access = await self._resolve_access(
-            project_id=project_id, run_id=run_id, binding=binding
-        )
+        access = await self._resolve_access(project_id=project_id, run_id=run_id, binding=binding)
         expression = _open_revision(access, requested_revision=requested_revision)
         async with client.open(
             uri=access.uri, revision=expression, credential=access.credential
@@ -216,14 +277,11 @@ class IntegrationRepositorySnapshotSource:
             )
         try:
             async with self._session_factory() as session:
-                bound = await load_bound_run_resource(
+                bound = await self._load_binding(
                     session,
                     project_id=project_id,
                     run_id=run_id,
-                    binding_id=binding.binding_id,
-                    integration_id=binding.integration_id,
-                    provider=binding.provider,
-                    capability=REPOSITORY_READ_CAPABILITY,
+                    binding=binding,
                 )
                 material = await resolve_binding_secret(
                     session,

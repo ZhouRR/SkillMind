@@ -57,6 +57,7 @@ export type {
   UserInteractionDetail,
 } from './runs'
 export { loadProjectTasks } from './tasks'
+export type { DocumentSnapshotRecord, FrozenDocumentRecord, RunDocumentSnapshotRecord, RunSourceSummaries, RunSourceSummary } from './runResources'
 export type {
   PublishedTaskRecord,
   TaskLastRunRecord,

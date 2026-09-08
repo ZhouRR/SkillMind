@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
 
@@ -17,6 +19,8 @@ from projectmind.agent.workspace_provider import (
     WorkspaceSearchProvider,
     WorkspaceWriteProvider,
 )
+from projectmind.core.hashing import sha256_hex
+from projectmind.runs.input_snapshot import InputFileSeal
 
 ROOT = Path(__file__).resolve().parents[3]
 CONTRACTS = ROOT / "contracts"
@@ -52,6 +56,15 @@ def _validate_response(path: str, response: dict[str, object]) -> None:
     Draft202012Validator(schema, format_checker=FormatChecker()).validate(payload)
 
 
+def _sealed_input(context: RunToolContext, files: Mapping[str, bytes]) -> RunToolContext:
+    """file system から補签せず、fixture の信頼する元 byte から独立回执を渡す。"""
+
+    return replace(context, workspace=replace(context.workspace, input_files=tuple(
+        InputFileSeal(path, len(data), f"sha256:{sha256_hex(data)}")
+        for path, data in sorted(files.items())
+    )))
+
+
 @pytest.mark.asyncio
 async def test_read_returns_bounded_utf8_content_and_evidence(tmp_path: Path) -> None:
     """input 内 file の行範囲、全体 hash、locator を契約適合形で返す。"""
@@ -60,6 +73,9 @@ async def test_read_returns_bounded_utf8_content_and_evidence(tmp_path: Path) ->
     target = context.workspace.input_dir / "repository" / "src" / "example.py"
     target.parent.mkdir(parents=True)
     target.write_text("first\nauthorize(actor)\nthird\n", encoding="utf-8")
+    context = _sealed_input(
+        context, {"repository/src/example.py": b"first\nauthorize(actor)\nthird\n"}
+    )
 
     result = await WorkspaceReadProvider().execute(
         context,
@@ -90,10 +106,13 @@ async def test_read_rejects_traversal_symlink_binary_and_large_file(tmp_path: Pa
     binary.write_bytes(b"\xff\xfe")
     large = context.workspace.input_dir / "large.txt"
     large.write_bytes(b"x" * 1_048_577)
+    context = _sealed_input(context, {
+        "link.txt": b"outside", "binary.dat": b"\xff\xfe", "large.txt": b"x" * 1_048_577,
+    })
 
     cases = (
         ("input/../outside.txt", "invalid_request"),
-        ("input/link.txt", "invalid_request"),
+        ("input/link.txt", "unavailable"),
         ("input/binary.dat", "invalid_request"),
         ("input/large.txt", "too_large"),
     )
@@ -148,6 +167,7 @@ async def test_search_without_matches_still_returns_redacted_audit_evidence(
 
     context = _context(tmp_path, "workspace.search/v1")
     (context.workspace.input_dir / "empty.txt").write_text("nothing", encoding="utf-8")
+    context = _sealed_input(context, {"empty.txt": b"nothing"})
 
     result = await WorkspaceSearchProvider().execute(
         context,
@@ -271,3 +291,108 @@ async def test_write_rejects_content_over_limit(tmp_path: Path) -> None:
         )
     assert failure.value.code == "too_large"
     assert not (context.workspace.output_dir / "big.txt").exists()
+
+
+@pytest.mark.parametrize("operation", ["read", "search"])
+async def test_input_without_a_receipt_is_unavailable(tmp_path: Path, operation: str) -> None:
+    """古い input に file が在っても、独立回执無しで署名・読取しない。"""
+
+    context = _context(tmp_path, f"workspace.{operation}/v1")
+    (context.workspace.input_dir / "old.txt").write_bytes(b"untrusted")
+    with pytest.raises(ToolProviderError) as error:
+        if operation == "read":
+            await WorkspaceReadProvider().execute(context, {"path": "input/old.txt"})
+        else:
+            await WorkspaceSearchProvider().execute(context, {"query": "untrusted"})
+    assert error.value.code == "unavailable"
+
+
+@pytest.mark.parametrize("operation", ["read", "search"])
+async def test_changed_input_is_not_a_binary_skip_or_read_limit(
+    tmp_path: Path, operation: str
+) -> None:
+    """凍結後の改変は文字コードや file size にかかわらず完全性失敗になる。"""
+
+    context = _sealed_input(_context(tmp_path, f"workspace.{operation}/v1"), {"one.txt": b"one"})
+    path = context.workspace.input_dir / "one.txt"
+    for changed in (b"two", b"\xff\xfe\xfd", b"x" * 1_048_577):
+        path.write_bytes(changed)
+        with pytest.raises(ToolProviderError) as error:
+            if operation == "read":
+                await WorkspaceReadProvider().execute(context, {"path": "input/one.txt"})
+            else:
+                await WorkspaceSearchProvider().execute(context, {"query": "missing"})
+        assert error.value.code == "unavailable"
+
+
+async def test_search_rejects_extra_input_even_when_it_has_no_match(tmp_path: Path) -> None:
+    """未知 file を無視したゼロ件応答で、壊れた入力を正常扱いしない。"""
+
+    context = _sealed_input(_context(tmp_path, "workspace.search/v1"), {"one.txt": b"one"})
+    (context.workspace.input_dir / "one.txt").write_bytes(b"one")
+    (context.workspace.input_dir / "injected.txt").write_bytes(b"injected")
+    with pytest.raises(ToolProviderError) as error:
+        await WorkspaceSearchProvider().execute(context, {"query": "missing"})
+    assert error.value.code == "unavailable"
+
+
+async def test_read_response_and_evidence_use_the_same_verified_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """読取直後に path が改変されても、検証後に再読取した内容を混入させない。"""
+
+    from projectmind.agent import materialization_storage
+
+    original = b"trusted\n"
+    context = _sealed_input(_context(tmp_path, "workspace.read/v1"), {"one.txt": original})
+    target = context.workspace.input_dir / "one.txt"
+    target.write_bytes(original)
+    read = materialization_storage.read_file
+
+    def change_after_read(root: Path, path: str, *, max_bytes: int) -> bytes:
+        """開いた descriptor の読取後に、同じ論理 path の内容だけを改変する。"""
+
+        data = read(root, path, max_bytes=max_bytes)
+        target.write_bytes(b"tampered\n")
+        return data
+
+    monkeypatch.setattr(materialization_storage, "read_file", change_after_read)
+    result = await WorkspaceReadProvider().execute(context, {"path": "input/one.txt"})
+    assert result.response["content"] == "trusted\n"
+    assert result.response["content_hash"] == f"sha256:{sha256_hex(original)}"
+    assert result.evidence[0].content_hash == result.response["content_hash"]
+    assert target.read_bytes() == b"tampered\n"
+
+
+async def test_write_rejects_hardlink_to_frozen_input(tmp_path: Path) -> None:
+    """可書 root に input の hardlink が混入しても凍結 inode を truncate しない。"""
+
+    context = _context(tmp_path, "workspace.write/v1")
+    original = context.workspace.input_dir / "original.txt"
+    original.write_bytes(b"frozen")
+    (context.workspace.cwd / "alias.txt").hardlink_to(original)
+    with pytest.raises(ToolProviderError) as error:
+        await WorkspaceWriteProvider().execute(
+            context, {"path": "workspace/alias.txt", "content": "changed"}
+        )
+    assert error.value.code == "invalid_request"
+    assert original.read_bytes() == b"frozen"
+
+
+async def test_search_counts_binary_bytes_against_the_shared_scan_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """非 UTF-8 file を読み捨てても、同じ byte 予算を後続 file へ与え直さない。"""
+
+    from projectmind.agent import workspace_provider
+
+    context = _context(tmp_path, "workspace.search/v1")
+    (context.workspace.cwd / "a.bin").write_bytes(b"\xff\xff")
+    (context.workspace.cwd / "b.txt").write_bytes(b"b")
+    monkeypatch.setattr(workspace_provider, "_MAX_SEARCH_BYTES", 2)
+    result = await WorkspaceSearchProvider().execute(
+        context, {"paths": ["workspace"], "query": "b"}
+    )
+    assert result.response["matches"] == []
+    assert result.response["scanned_files"] == 1
+    assert result.response["truncated"] is True

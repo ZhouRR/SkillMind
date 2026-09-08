@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
-import os
+import asyncio
 from collections.abc import Iterable, Mapping
 from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import quote
 
 from projectmind.agent.evidence import EvidenceDraft
+from projectmind.agent.input_workspace import read_input_file, verify_input
+from projectmind.agent.materialization_storage import (
+    FileReadLimitError,
+    MaterializationError,
+    UnsafeWorkspaceFileError,
+    list_workspace_files,
+    read_file,
+)
+from projectmind.agent.materialization_storage import (
+    write_workspace_file as write_safe_workspace_file,
+)
 from projectmind.agent.text_window import select_line_window
 from projectmind.agent.tool_gateway import (
     ProviderToolResult,
@@ -20,6 +31,7 @@ from projectmind.core.hashing import sha256_hex
 _MAX_FILE_BYTES = 1_048_576
 _MAX_SEARCH_FILES = 500
 _MAX_SEARCH_BYTES = 10_485_760
+_MAX_SEARCH_ENTRIES = 5_000
 _MAX_EXCERPT_CHARACTERS = 1_000
 _ALLOWED_ROOT_NAMES = frozenset({"input", "workspace"})
 # 書き込み面は Agent 自身の中間産物と成果物に限る。物化済み input/ は冻结证据であり書き込み対象
@@ -35,12 +47,16 @@ class WorkspaceReadProvider:
     ) -> ProviderToolResult:
         """Path と symlink 境界を検証し、行 window と再現可能 Evidence を返す。"""
 
-        relative, path = _resolve_workspace_path(
+        relative, path = await asyncio.to_thread(
+            _resolve_workspace_path,
             context,
             arguments.get("path"),
             require_file=True,
         )
-        content = _read_utf8_file(path)
+        data = await asyncio.to_thread(
+            _read_workspace_bytes, context, relative, path, max_bytes=_MAX_FILE_BYTES
+        )
+        content = _decode_content(data)
         window = select_line_window(
             content.text,
             arguments,
@@ -91,14 +107,14 @@ class WorkspaceSearchProvider:
             )
         case_sensitive = arguments.get("case_sensitive") is True
         max_results = _max_results(arguments.get("max_results"))
-        targets = _search_targets(context, arguments.get("paths"))
-        files = _bounded_files(targets)
+        targets = await asyncio.to_thread(_search_targets, context, arguments.get("paths"))
+        files, discovery_truncated = await asyncio.to_thread(_bounded_files, context, targets)
         matches: list[dict[str, Any]] = []
         evidence: list[EvidenceDraft] = []
-        warnings: list[str] = []
+        warnings: list[str] = ["Search discovery limit was reached"] if discovery_truncated else []
         scanned_files = 0
         scanned_bytes = 0
-        truncated = False
+        truncated = discovery_truncated
         needle = query if case_sensitive else query.casefold()
 
         for relative, path in files:
@@ -106,23 +122,37 @@ class WorkspaceSearchProvider:
                 warnings.append("Search file limit was reached")
                 truncated = True
                 break
-            size = path.stat().st_size
-            if size > _MAX_FILE_BYTES:
-                warnings.append("One or more files exceeded the per-file limit")
-                continue
-            if scanned_bytes + size > _MAX_SEARCH_BYTES:
+            remaining = _MAX_SEARCH_BYTES - scanned_bytes
+            if remaining <= 0:
                 warnings.append("Search byte limit was reached")
                 truncated = True
                 break
             try:
-                content = _read_utf8_file(path)
+                data = await asyncio.to_thread(
+                    _read_workspace_bytes,
+                    context,
+                    relative,
+                    path,
+                    max_bytes=min(_MAX_FILE_BYTES, remaining),
+                )
             except ToolProviderError as error:
-                if error.code != "invalid_request":
+                if error.code != "too_large":
                     raise
+                if remaining < _MAX_FILE_BYTES:
+                    warnings.append("Search byte limit was reached")
+                    truncated = True
+                    break
+                warnings.append("One or more files exceeded the per-file limit")
+                truncated = True
+                continue
+            # 検証・decode した実 byte を計上し、binary skip でも読取予算を返却しない。
+            scanned_files += 1
+            scanned_bytes += len(data)
+            try:
+                content = _decode_content(data)
+            except ToolProviderError:
                 warnings.append("One or more non-UTF-8 files were skipped")
                 continue
-            scanned_files += 1
-            scanned_bytes += size
             file_match_lines: list[int] = []
             for line_no, line in enumerate(content.text.splitlines(), start=1):
                 haystack = line if case_sensitive else line.casefold()
@@ -154,9 +184,7 @@ class WorkspaceSearchProvider:
                         },
                         content_hash=content.checksum,
                         excerpt=next(
-                            item["excerpt"]
-                            for item in matches
-                            if item["path"] == relative
+                            item["excerpt"] for item in matches if item["path"] == relative
                         ),
                         metadata={"scope": "run-workspace", "read_only": True},
                     )
@@ -215,9 +243,12 @@ class WorkspaceWriteProvider:
             raise ToolProviderError(
                 "too_large", "Workspace content exceeds the write limit", retryable=False
             )
-        relative, base, target = _resolve_writable_path(context, arguments.get("path"))
-        created = not target.exists()
-        _write_workspace_file(base, target, data)
+        relative, _, target = await asyncio.to_thread(
+            _resolve_writable_path, context, arguments.get("path")
+        )
+        created = await asyncio.to_thread(
+            _write_workspace_file, context.workspace.root, target, data
+        )
         checksum = f"sha256:{sha256_hex(data)}"
         return ProviderToolResult(
             response={
@@ -260,25 +291,17 @@ def _validated_relative(value: Any) -> PurePosixPath:
     """
 
     if not isinstance(value, str) or not value or "\\" in value:
-        raise ToolProviderError(
-            "invalid_request", "Workspace path is invalid", retryable=False
-        )
+        raise ToolProviderError("invalid_request", "Workspace path is invalid", retryable=False)
     raw_parts = value.split("/")
     if any(part in {"", ".", ".."} or not part.isprintable() for part in raw_parts):
-        raise ToolProviderError(
-            "invalid_request", "Workspace path is invalid", retryable=False
-        )
+        raise ToolProviderError("invalid_request", "Workspace path is invalid", retryable=False)
     relative = PurePosixPath(value)
     if relative.is_absolute():
-        raise ToolProviderError(
-            "invalid_request", "Workspace path is invalid", retryable=False
-        )
+        raise ToolProviderError("invalid_request", "Workspace path is invalid", retryable=False)
     return relative
 
 
-def _resolve_writable_path(
-    context: RunToolContext, value: Any
-) -> tuple[str, Path, Path]:
+def _resolve_writable_path(context: RunToolContext, value: Any) -> tuple[str, Path, Path]:
     """書き込み対象を workspace//output/ の実体へ閉じ込める。対象 file は未存在でよい。
 
     read と違い最終要素は存在しないことがあるため strict resolve せず、各既存要素で symlink を
@@ -310,34 +333,16 @@ def _resolve_writable_path(
     return relative.as_posix(), base, candidate
 
 
-def _write_workspace_file(base: Path, target: Path, data: bytes) -> None:
-    """親 directory を base 配下に作成し、symlink を追わず 0o600 で内容を書き込む。"""
+def _write_workspace_file(root: Path, target: Path, data: bytes) -> bool:
+    """固定 Run root を使う安全 I/O の失敗を、公開 error へ変換する。"""
 
-    parent = target.parent
     try:
-        parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        # 既存 symlink 追従や race による base 逃逸を、実体解決後の包含で最終確認する。
-        resolved_parent = parent.resolve(strict=True)
-        if not resolved_parent.is_dir() or not resolved_parent.is_relative_to(base):
-            raise ToolProviderError(
-                "invalid_request", "Workspace path escapes the writable root", retryable=False
-            )
-        if target.is_symlink():
-            raise ToolProviderError(
-                "invalid_request",
-                "Workspace symbolic links are not allowed",
-                retryable=False,
-            )
-        descriptor = os.open(
-            target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600
-        )
-        try:
-            os.write(descriptor, data)
-        finally:
-            os.close(descriptor)
-    except ToolProviderError:
-        raise
-    except OSError as error:
+        return write_safe_workspace_file(root, target.relative_to(root).as_posix(), data)
+    except (ValueError, UnsafeWorkspaceFileError) as error:
+        raise ToolProviderError(
+            "invalid_request", "Workspace target is not a safe file", retryable=False
+        ) from error
+    except MaterializationError as error:
         raise ToolProviderError(
             "unavailable", "Workspace file could not be written", retryable=False
         ) from error
@@ -356,8 +361,21 @@ def _resolve_workspace_path(
         raise ToolProviderError(
             "invalid_request", "Workspace path is outside the allowed roots", retryable=False
         )
-    roots = _verified_roots(context)
+    roots = _verified_roots(context, (relative.parts[0],))
     base = roots[relative.parts[0]]
+    if relative.parts[0] == "input":
+        if context.workspace.input_files is None:
+            raise ToolProviderError(
+                "unavailable", "Run input has no trusted receipt", retryable=False
+            )
+        inner = "/".join(relative.parts[1:])
+        index = context.workspace.input_file_index
+        known = inner in index or (
+            not require_file and (not inner or any(path.startswith(f"{inner}/") for path in index))
+        )
+        if not known:
+            raise ToolProviderError("not_found", "Input path is not in this Run", retryable=False)
+        return relative.as_posix(), base.joinpath(*relative.parts[1:])
     candidate = base
     for part in relative.parts[1:]:
         candidate /= part
@@ -376,13 +394,9 @@ def _resolve_workspace_path(
             "invalid_request", "Workspace path escapes the allowed root", retryable=False
         )
     if require_file and not resolved.is_file():
-        raise ToolProviderError(
-            "not_found", "Workspace file was not found", retryable=False
-        )
+        raise ToolProviderError("not_found", "Workspace file was not found", retryable=False)
     if not require_file and not (resolved.is_file() or resolved.is_dir()):
-        raise ToolProviderError(
-            "not_found", "Workspace path was not found", retryable=False
-        )
+        raise ToolProviderError("not_found", "Workspace path was not found", retryable=False)
     return relative.as_posix(), resolved
 
 
@@ -401,10 +415,8 @@ def _verified_roots(
         raise ToolProviderError(
             "unavailable", "Run workspace is unavailable", retryable=False
         ) from error
-    if context.workspace.root.is_symlink():
-        raise ToolProviderError(
-            "unavailable", "Run workspace boundary is invalid", retryable=False
-        )
+    if context.workspace.root.is_symlink() or run_root != context.workspace.root:
+        raise ToolProviderError("unavailable", "Run workspace boundary is invalid", retryable=False)
     available = {
         "input": context.workspace.input_dir,
         "workspace": context.workspace.cwd,
@@ -423,7 +435,7 @@ def _verified_roots(
             raise ToolProviderError(
                 "unavailable", "Run workspace is unavailable", retryable=False
             ) from error
-        if not resolved.is_dir() or not resolved.is_relative_to(run_root):
+        if raw != resolved or not resolved.is_dir() or not resolved.is_relative_to(run_root):
             raise ToolProviderError(
                 "unavailable", "Run workspace boundary is invalid", retryable=False
             )
@@ -431,33 +443,51 @@ def _verified_roots(
     return roots
 
 
-def _read_utf8_file(path: Path) -> _TextContent:
-    """Per-file 上限内の regular file を UTF-8 として読み取る。"""
+def _read_workspace_bytes(
+    context: RunToolContext, relative: str, path: Path, *, max_bytes: int
+) -> bytes:
+    """input は回执と同じ byte、可変 workspace は安全な有界読取だけを返す。"""
+
+    is_input = relative.startswith("input/")
+    if is_input:
+        seal = context.workspace.input_file_index.get(relative.removeprefix("input/"))
+        if seal is not None and seal.size > max_bytes:
+            raise ToolProviderError("too_large", "Input exceeds the read limit", retryable=False)
+    try:
+        if is_input:
+            return read_input_file(
+                context.workspace, relative.removeprefix("input/"), max_bytes=max_bytes
+            )
+        return read_file(
+            context.workspace.root,
+            path.relative_to(context.workspace.root).as_posix(),
+            max_bytes=max_bytes,
+        )
+    except FileReadLimitError as error:
+        # input の期待 size は上で確認済み。この超過は凍結後の改変であり普通の skip にしない。
+        code = "unavailable" if is_input else "too_large"
+        raise ToolProviderError(
+            code, "Workspace file exceeds its verified limit", retryable=False
+        ) from error
+    except (MaterializationError, ValueError) as error:
+        raise ToolProviderError(
+            "unavailable", "Workspace file could not be read safely", retryable=False
+        ) from error
+
+
+def _decode_content(data: bytes) -> _TextContent:
+    """応答と Evidence の元になる同一 byte を decode し、hash を計算する。"""
 
     try:
-        size = path.stat().st_size
-        if size > _MAX_FILE_BYTES:
-            raise ToolProviderError(
-                "too_large", "Workspace file exceeds the read limit", retryable=False
-            )
-        data = path.read_bytes()
         text = data.decode("utf-8")
     except UnicodeDecodeError as error:
         raise ToolProviderError(
             "invalid_request", "Workspace file is not UTF-8 text", retryable=False
         ) from error
-    except ToolProviderError:
-        raise
-    except OSError as error:
-        raise ToolProviderError(
-            "unavailable", "Workspace file could not be read", retryable=False
-        ) from error
     return _TextContent(text, f"sha256:{sha256_hex(data)}")
 
 
-def _search_targets(
-    context: RunToolContext, value: Any
-) -> tuple[tuple[str, Path], ...]:
+def _search_targets(context: RunToolContext, value: Any) -> tuple[tuple[str, Path], ...]:
     """任意 path list または既定二 root を検索対象へ解決する。"""
 
     if value is None:
@@ -467,28 +497,44 @@ def _search_targets(
         raise ToolProviderError(
             "invalid_request", "Workspace search paths are invalid", retryable=False
         )
-    return tuple(
-        _resolve_workspace_path(context, item, require_file=False) for item in value
-    )
+    return tuple(_resolve_workspace_path(context, item, require_file=False) for item in value)
 
 
-def _bounded_files(targets: Iterable[tuple[str, Path]]) -> tuple[tuple[str, Path], ...]:
-    """Symlink を追わず重複を除いた安定順の file 一覧を作る。"""
+def _bounded_files(
+    context: RunToolContext, targets: tuple[tuple[str, Path], ...]
+) -> tuple[tuple[tuple[str, Path], ...], bool]:
+    """input は完全性確認後の可信清単、workspace は descriptor 内の有界探索を使う。"""
 
-    found: dict[Path, str] = {}
-    for relative, target in targets:
-        if target.is_file():
-            found.setdefault(target, relative)
-            continue
-        for candidate in target.rglob("*"):
-            if candidate.is_symlink() or not candidate.is_file():
+    found: dict[str, Path] = {}
+    truncated = False
+    try:
+        if any(relative == "input" or relative.startswith("input/") for relative, _ in targets):
+            verify_input(context.workspace, content=False)
+        for relative, target in targets:
+            if relative == "input" or relative.startswith("input/"):
+                for sealed in context.workspace.input_file_index:
+                    logical = f"input/{sealed}"
+                    if logical == relative or logical.startswith(f"{relative}/"):
+                        found.setdefault(logical, context.workspace.input_dir / sealed)
                 continue
-            child = candidate.relative_to(target).as_posix()
-            found.setdefault(candidate, f"{relative}/{child}")
-    return tuple(
-        (relative, path)
-        for path, relative in sorted(found.items(), key=lambda item: item[1])
-    )
+            if target.is_file():
+                found.setdefault(relative, target)
+                continue
+            children, limited = list_workspace_files(
+                context.workspace.root,
+                target.relative_to(context.workspace.root).as_posix(),
+                max_files=_MAX_SEARCH_FILES + 1,
+                max_entries=_MAX_SEARCH_ENTRIES,
+            )
+            truncated |= limited
+            for child in children:
+                found.setdefault(f"{relative}/{child}", target / child)
+    except (MaterializationError, ValueError) as error:
+        raise ToolProviderError(
+            "unavailable", "Workspace search input could not be verified", retryable=False
+        ) from error
+    files = tuple(sorted(found.items()))
+    return files[: _MAX_SEARCH_FILES + 1], truncated or len(files) > _MAX_SEARCH_FILES + 1
 
 
 def _max_results(value: Any) -> int:

@@ -83,6 +83,12 @@
 /* ---- Agent conversation ---- */
 /* 会話は観測の主役のため、viewport に応じて縦幅を広げ、大画面での固定 560px 打ち切りをやめる。 */
 .conversation { display: grid; gap: 10px; max-height: clamp(420px, 62vh, 780px); overflow-y: auto; padding-right: 8px; scrollbar-gutter: stable; }
+/* 未確認の送信を草稿から視覚的に分離し、checkbox を通常の全幅入力にしない。 */
+.submissionNotice { display: grid; gap: 10px; min-width: 0; margin-bottom: 16px; padding: 14px; border: 1px solid var(--accent-border); border-radius: var(--radius-small); background: var(--surface-raised); overflow-wrap: anywhere; }
+.submissionNotice h3 { margin: 0 0 8px; font-size: 14px; }
+.submissionNotice p { margin: 4px 0; line-height: 1.6; }
+.submissionAcknowledgement { display: flex; align-items: flex-start; gap: 9px; margin: 0; font-size: 12.5px; line-height: 1.6; }
+.submissionAcknowledgement input { flex: 0 0 auto; width: 16px; height: 16px; min-height: 0; margin-top: 3px; padding: 0; accent-color: var(--accent-strong); }
 .message { border: 1px solid var(--border); border-radius: var(--radius); padding: 13px 14px; background: var(--surface-input); }
 /* User と Agent は同じ幅で左右を揃え、役割は背景と左縁の色で区別する。 */
 .messageUser { border-color: var(--accent-border); border-left: 3px solid var(--accent-strong); background: var(--accent-soft); }
@@ -214,6 +220,19 @@
 .resultOverflow > summary:hover { color: var(--accent); }
 .resultOverflowBody { display: grid; gap: 8px; padding-top: 2px; }
 .resultSection { display: grid; gap: 10px; }
+.documentSourceField { min-width: 0; margin: 0; border: 1px solid var(--border); border-radius: var(--radius-small); padding: 12px; }
+.documentSourceField legend { padding: 0 5px; color: var(--text-muted); font-size: 13px; overflow-wrap: anywhere; }
+.documentChoices { display: grid; gap: 6px; max-height: 280px; overflow: auto; padding: 4px; }
+.documentChoices label { display: flex; align-items: start; gap: 9px; margin: 0; padding: 7px; border: 1px solid var(--border); border-radius: var(--radius-tiny); overflow-wrap: anywhere; }
+.documentChoices input[type="checkbox"] { flex: 0 0 auto; width: 16px; height: 16px; min-height: 0; margin-top: 2px; padding: 0; accent-color: var(--accent-strong); }
+.scheduleConfiguration { display: grid; gap: 12px; min-width: 0; border: 0; padding: 0; margin: 0; }
+.frozenDocumentSlot { min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-small); overflow-wrap: anywhere; }
+.frozenDocumentSlot summary { cursor: pointer; color: var(--accent-strong); }
+.frozenDocumentFacts { display: grid; gap: 6px; margin: 8px 0; }
+.frozenDocumentFacts dt { color: var(--text-muted); font-size: 12px; }
+.frozenDocumentFacts dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.frozenDocumentMembers { display: grid; gap: 12px; max-height: 420px; overflow: auto; padding: 4px; list-style: none; }
+.frozenDocumentMembers > li { padding: 9px; border: 1px solid var(--border); border-radius: var(--radius-tiny); }
 .segmentTimeline { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .segmentTimeline > li { display: grid; gap: 7px; border: 1px solid var(--border); border-radius: var(--radius-small); padding: 11px 12px; background: var(--surface-input); }
 .segmentHeading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

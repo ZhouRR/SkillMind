@@ -6,20 +6,25 @@
 
 Linux、Docker Engine/Compose v2、既存の共有 Traefik と external edge network を用意する。ProjectMind は Traefik を配備せず、host port を公開しない。
 
+以下の copy は `.env` がまだ無い初回だけ実行する。既存の設定は上書きせず、対象環境を先に確認する。設定 file は所有者だけが読める場所で管理する。
+
 ```bash
+umask 077
 cp .env.example .env
 ```
 
 `.env` の host/context path/Traefik network・entryPoint、DB/object-storage password、model 設定を環境に合わせる。production は HTTPS、development の HTTP は開発専用とする。Worker dispatch は既定 false なので、業務実行する環境では `PROJECTMIND_WORKER_DISPATCH_ENABLED=true` を明示する。
 
 ```bash
-docker compose --env-file .env config
+docker compose --env-file .env config --quiet
 docker compose --env-file .env build
 make run
 make
 ```
 
 `make run` は配置済み image を使い、build しない。image を事前移送した server では build 行は不要。初回は migrate/object-storage-init の正常終了と API/Worker/Web の状態を確認する。
+
+`config --quiet` は構成検査だけを行い、展開した Secret を端末へ表示しない。通常の `config` 出力をログや共有資料へ貼らない。[設定 file の境界](runbook.md#环境文件与配置边界)も確認する。現在の `ENV_FILE` は Compose の補間用で、Backend service の固定 `.env` を切り替える機能ではない。
 
 ```bash
 docker compose --env-file .env exec -T api python -m projectmind.ops.preflight
@@ -65,7 +70,9 @@ archive の既定位置は `images/projectmind-images.tar`。第三者 image が
 make deploy
 ```
 
-make deploy は停止・旧 app image 削除・archive load・再起動を行い、無停止更新ではない。別設定は `ENV_FILE=.env.production`、archive 指定は `IMAGE_ARCHIVE=images/projectmind-production.tar`。context path を変える場合は Web image も再 build する。
+make deploy は停止・旧 app image 削除・archive load・全 service 再起動を行い、無停止更新や段階的な復旧確認は行わない。archive は `IMAGE_ARCHIVE=images/projectmind-production.tar` で指定できる。設定はその配備 directory の確認済み `.env` を使い、`ENV_FILE` だけで別環境へ切り替えない。context path を変える場合は Web image も再 build する。
+
+互換性と移行対象は[迁移・回退审查](runbook.md#迁移与回退审查)、DB/blob/workspace と外部 Effect の確認は[恢复后验证](runbook.md#恢复后验证)を参照する。停止・検証・Worker 再開を分ける必要がある現場では `make deploy` を直接使わない。
 
 ## 操作の区別
 

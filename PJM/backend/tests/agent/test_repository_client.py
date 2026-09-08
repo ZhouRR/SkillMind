@@ -11,7 +11,7 @@ import json
 import os
 import shutil
 import subprocess
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -31,6 +31,7 @@ from projectmind.agent.repository_source import (
 from projectmind.agent.workspace import WorkspaceManager
 from projectmind.agent.workspace_materializer import WorkspaceMaterializer
 from projectmind.agent.workspace_provider import WorkspaceSearchProvider
+from projectmind.documents.snapshot import FrozenDocument
 from projectmind.documents.source import ProjectDocumentContent
 from tests.agent.test_workspace_materializer import _read_context
 
@@ -46,10 +47,12 @@ requires_svn = pytest.mark.skipif(
 class _EmptyInventory:
     """文書を持たない Project を表す inventory の fake。"""
 
-    async def list_contents(self, *, project_id: UUID) -> list[ProjectDocumentContent]:
+    async def list_contents(
+        self, *, project_id: UUID, documents: Sequence[FrozenDocument]
+    ) -> list[ProjectDocumentContent]:
         """文書の無い Project を返す。"""
 
-        del project_id
+        del project_id, documents
         return []
 
 

@@ -78,9 +78,19 @@ EXAMPLES = {
     "examples/repository-write-response.v1.json": "tools/repository.write/v1/response.schema.json",
     "examples/run-event.v1.json": "events/run-event/v1.schema.json",
     "examples/run-detail.v1.json": "runs/detail/v1.schema.json",
+    "examples/run-detail-documents.v1.json": "runs/detail/v1.schema.json",
     "examples/run-history.v1.json": "runs/history/v1.schema.json",
     "examples/text-delta-run-event.v1.json": "events/run-event/v1.schema.json",
     "examples/create-task-run-request.v1.json": "runs/task-create/v1/request.schema.json",
+    "examples/create-task-run-documents-single.v1.json": (
+        "runs/task-create/v1/request.schema.json"
+    ),
+    "examples/create-task-run-documents-set.v1.json": (
+        "runs/task-create/v1/request.schema.json"
+    ),
+    "examples/create-task-run-documents-all.v1.json": (
+        "runs/task-create/v1/request.schema.json"
+    ),
     "examples/create-run-response.v1.json": "runs/create/v1/response.schema.json",
     "examples/create-evaluation-request.v1.json": "evaluations/v1/create-request.schema.json",
     "examples/evaluation.v1.json": "evaluations/v1/evaluation.schema.json",

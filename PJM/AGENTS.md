@@ -11,7 +11,7 @@
 
 ## 正式な仕様
 
-- `../docs/`：製品仕様と設計判断の正本。本 repository（`PJM/`）はコードだけを保持し、文書一式は親ディレクトリ側に置く。文書の分類・読み順・旧番号と新 path の対応は [文書ガイド](../docs/README.md) に集約する。本ファイルへ一覧を複製しない。
+- `../docs/`：製品仕様と設計判断の正本。`PJM/` には正式コード、契約、実行 Skill、実装案内の README と本規約を保持し、設計本文は sibling の `docs/` に置く。文書の分類・読み順・旧番号と新 path の対応は [文書ガイド](../docs/README.md) に集約する。本ファイルへ一覧を複製しない。
 - `contracts/`：実行可能なインターフェース契約。Schema、example、テストを常に同期する。
 
 本ファイルとコード注釈に現れる `docs/01`・`docs/06` 等は文書番号を指す従来どおりの略記であり、実体は `../docs/` 配下にある。注釈側の略記は書き換えない（数百箇所へ `../` を撒くと、参照している章番号より path の方が目立ち、かえって読みにくくなる）。
@@ -24,7 +24,15 @@
 
 以下は変更時に守る規約であり、全項目が実装済みという保証ではない。既知の document 物化範囲・Run 共通予算の差距は実施計画と対応設計に明記し、規約を弱めずに収束させる。
 
-完成済み機能の不変条件は、どの slice を実装していても継続して適用する：Run / RunAttempt / RunSegment、Evidence、Result、Evaluation、session 認証、Project 授権、CapabilityBlueprint、Integration と三層 ResourceBinding、AgentTaskBrief、UserInteraction、順次 multi-session、ChangeProposal と controlled effect、Skill library の作用域（Organization 資産 + Project 明示有効化）、資源快照の物化（凍結 binding の scope 内だけを `input/` へ只読で落とし、上限超過は截断せず fail closed、読めなかった file は必ず manifest の `skipped` に残す）、TaskSchedule（発火は必ず `RunService.create_task_run` を通す。調度専用の作成経路を作らない——闸门が調度でだけ緩む穴になる。保存時に凍結した SkillVersion／入力／資源選択が失効しても黙って別の来源へ切り替えず ERROR で止める。停止中に過ぎた発火は追いかけない）。
+完成済み機能の不変条件は、どの slice を実装していても継続して適用する。特に次の境界を保持する。
+
+- Run / RunAttempt / RunSegment、Evidence、Result、Evaluation、session 認証、Project 授権、CapabilityBlueprint、Integration と三層 ResourceBinding、AgentTaskBrief、UserInteraction、順次 multi-session、ChangeProposal と controlled effect。
+- Skill library の作用域は Organization 資産 + Project 明示有効化とする。
+- 資源快照は凍結 scope 内だけを `input/` へ只読で物化する。上限超過は截断せず fail closed、読めない file は manifest の `skipped` に記録する。ただし凍結 ID/hash の不一致は通常の skipped ではなく失敗とする（[資源快照](../docs/design/resource-snapshots.md)）。
+- TaskSchedule は必ず `RunService.create_task_run` を通す。調度専用の作成経路は作らない。保存した精確 SkillVersion／入力／資源選択が失効しても、別の来源へ黙って切り替えず ERROR で止める。
+- 停止中に過ぎた発火は追いかけない。現在は一つの遅延 occurrence を処理し、残りを見送る実装であり、遅延の全面拒否を保証していない。現行差距と在途復旧・計数の修正は[調度設計](../docs/design/task-scheduling.md)に従い、文書だけで修正済みと扱わない。
+
+Run 作成の再送、既存 Run の Attempt 復旧、ユーザーの新規実行は別の操作である。要求 identity と実行 snapshot を混同せず、[作成と幂等](../docs/design/run-creation.md)の同期点・歴史互換を満たす。幂等改善を理由に actor/Project/精確版の検証を省略しない。
 
 CapabilityBlueprint は Interpreter だけが生成する。RuntimeManifest から blueprint を逆算する互換
 投影は Release I で撤去済みであり、再導入しない（`docs/11` §5.3）。blueprint を宣言しない manifest
@@ -43,7 +51,7 @@ CapabilityBlueprint は Interpreter だけが生成する。RuntimeManifest か�
   足したとき、忘れた分がそのまま子へ漏れる）。禁止能力の要求は拒否する——黙って削ると Agent は
   渡った前提で分岐を書く。予算は `split_budget` の整除で切分し、branch ごとに与え直さない
   （合計が Run 上限を超える）。現行 Provider は各 dispatch に凍結上限を再投入しており、Run 共通の
-  消費/予約/残額管理は未実装である。[子 Agent 設計](../docs/design/subagents.md)の修正要件を先に満たす。子 Session は RunEvent を書かず、主 Session 上の一つの
+  消費/予約/残額管理は未実装である。[Run 予算設計](../docs/design/run-budgets.md)の修正要件を先に満たす。子 Session は RunEvent を書かず、主 Session 上の一つの
   ToolCall + Evidence へ収斂させる（`Run 内 sequence は厳密単調増` を階層番号へ作り変えない）。
 - JAF の残り 5 タスク群。
 - 任意の host Shell、無制限 network、source script の直接実行。
@@ -158,7 +166,7 @@ Run lifecycle に触れる変更は、以下を壊していないか必ず確認
   「実行はできるのに履歴が紐づかない」静かな不整合になる。
 - 一覧の絞り込みは server 側で行う。先頭 page を client で filter する実装は、対象が古い page に
   あるときに取りこぼす（「待你处理」の漏報は、表示しないことより悪い）。
-- User-facing 文言は `src/lib/i18n/messages.ts` の言語別 catalog（`Record<UiLanguage, ShellMessages>`）へ置き、画面は `src/i18n.tsx` の `useMessages()` で取得する。key の追加は zh/ja/en 三言語を同時に補い、画面へ文字列を直接 hard code しない。
+- User-facing 文言は `src/lib/i18n/{zh,ja,en}.ts` に置き、共通の型と公開 catalog は `src/lib/i18n/messages.ts` の `UiMessages` / `MESSAGES`（`Record<UiLanguage, UiMessages>`）で管理する。画面は `src/i18n.tsx` の `useMessages()` で取得する。key の追加は型と三言語を同時に補い、画面へ文字列を直接 hard code しない。
 
 ## テストと検証
 

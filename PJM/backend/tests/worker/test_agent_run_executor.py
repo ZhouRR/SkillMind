@@ -65,8 +65,8 @@ def _context(
     return RunContext(
         run_id=claimed.run_id,
         run_attempt_id=claimed.run_attempt_id,
-        project_id=uuid4(),
-        user_id=uuid4(),
+        project_id=claimed.project_id,
+        user_id=claimed.actor_id,
         prompt="analyze",
         task_snapshot=claimed.task_snapshot_json,
         skill_snapshots=(),
@@ -230,6 +230,7 @@ def _service() -> MagicMock:
     service = MagicMock()
     service.prepare_execution = AsyncMock(return_value=PreparedExecution(3, 10))
     service.freeze_agent_task_brief = AsyncMock()
+    service.verify_execution_start = AsyncMock(return_value=True)
     service.suspend_for_interaction = AsyncMock(return_value=uuid4())
     service.append_agent_event = AsyncMock()
     service.finalize_execution = AsyncMock()
@@ -437,15 +438,12 @@ async def test_durable_cancel_intent_interrupts_active_session(tmp_path: Path) -
     claimed = _claimed()
     session_id = str(uuid4())
     service = _service()
-    checks = 0
 
     async def cancellation_requested(run_id: object) -> bool:
-        """Context 構築後、監視 loop の最初の poll で取消 intent を見せる。"""
+        """実際に最初の Session event が保存された後だけ取消 intent を見せる。"""
 
-        nonlocal checks
         assert run_id == claimed.run_id
-        checks += 1
-        return checks >= 3
+        return service.append_agent_event.await_count > 0
 
     service.is_cancellation_requested = AsyncMock(side_effect=cancellation_requested)
     engine = InterruptibleEngine(

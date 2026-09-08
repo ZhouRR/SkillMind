@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Any
+from functools import partial
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Header, Query, Request, Response, status
@@ -26,6 +27,7 @@ from projectmind.api.routes.effects import (
     proposal_response,
 )
 from projectmind.auth.service import AuthenticatedActor
+from projectmind.documents.snapshot import DocumentSelectionMode
 from projectmind.runs.domain import (
     AgentSessionKind,
     CancelledRun,
@@ -44,6 +46,12 @@ from projectmind.runs.domain import (
     RunStatus,
     SessionContinuationMode,
     TaskSourceSelectionError,
+)
+from projectmind.runs.resource_projection import (
+    DocumentSnapshotStatus,
+    RunDocumentSnapshot,
+    document_snapshots,
+    source_summaries,
 )
 from projectmind.runs.service import RunService
 from projectmind.skills import (
@@ -266,6 +274,53 @@ class RespondInteractionResponse(BaseModel):
     idempotent_replay: bool
 
 
+class RunSourceSummaryResponse(BaseModel):
+    """一覧と詳細で共有する資源摘要。内部 binding と文書正文は公開しない。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str | None = None
+    capability: str | None = None
+    resource_kind: str | None = None
+    access: str | None = None
+
+
+class FrozenDocumentResponse(BaseModel):
+    """Run 作成時の文書 identity と metadata の公開許可リスト。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    document_id: UUID
+    folder: str
+    name: str
+    mime: str
+    size: int = Field(ge=0)
+    content_hash: str = Field(pattern=r"^sha256:[a-f0-9]{64}$")
+
+
+class DocumentSnapshotResponse(BaseModel):
+    """Project と requirement を固定した v1 清単。checksum の検証は共通 domain が担う。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    snapshot_version: Literal["v1"]
+    project_id: UUID
+    requirement_key: str
+    selection_mode: DocumentSelectionMode
+    documents: list[FrozenDocumentResponse] = Field(min_length=1, max_length=5000)
+    checksum: str = Field(pattern=r"^sha256:[a-f0-9]{64}$")
+
+
+class RunDocumentSnapshotResponse(BaseModel):
+    """清単を安全に公開できない旧記録/不正記録を、空集合と混同させない。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    requirement_key: str
+    status: DocumentSnapshotStatus
+    snapshot: DocumentSnapshotResponse | None
+
+
 class RunDetailResponse(BaseModel):
     """Project-scoped Run、Result、ToolCall、Evidence の read response。"""
 
@@ -276,7 +331,8 @@ class RunDetailResponse(BaseModel):
     row_version: int
     created_at: datetime
     input: dict[str, Any]
-    selected_sources: dict[str, Any]
+    selected_sources: dict[str, str | RunSourceSummaryResponse]
+    document_snapshots: list[RunDocumentSnapshotResponse]
     output_schema: dict[str, Any] | None
     output_schema_checksum: str | None
     result: RunResultResponse | None
@@ -304,7 +360,7 @@ class RunHistoryItemResponse(BaseModel):
     started_at: datetime | None
     finished_at: datetime | None
     input: dict[str, Any]
-    selected_sources: dict[str, Any]
+    selected_sources: dict[str, str | RunSourceSummaryResponse]
     result_summary: str | None
     result_confidence: float | None
     result_needs_review: bool | None
@@ -343,13 +399,45 @@ async def create_task_run(
 
     skill_service: SkillService = request.app.state.skill_service
     run_service: RunService = request.app.state.run_service
+    find_replay = partial(
+        run_service.find_task_run_replay,
+        project_id=project_id,
+        skill_version_id=body.skill_version_id,
+        task_key=body.task_key,
+        input_json=body.input,
+        sources=body.sources,
+        actor_id=actor.user_id,
+        idempotency_key=idempotency_key,
+    )
     try:
-        resolved = await skill_service.resolve_task_run(
-            project_id=project_id,
-            skill_version_id=body.skill_version_id,
-            task_key=body.task_key,
-            input_json=body.input,
-        )
+        run = await find_replay()
+        if run is None:
+            try:
+                resolved = await skill_service.resolve_task_run(
+                    project_id=project_id,
+                    skill_version_id=body.skill_version_id,
+                    task_key=body.task_key,
+                    input_json=body.input,
+                )
+            except (PublishedTaskNotFoundError, TaskInputInvalidError):
+                # 初回照会の後で別要求が commit し、公開状態が失効した競争も同じ原要求へ戻す。
+                run = await find_replay()
+                if run is None:
+                    raise
+            else:
+                run = await run_service.create_task_run(
+                    project_id=project_id,
+                    resolved=resolved,
+                    input_json=body.input,
+                    sources=body.sources,
+                    idempotency_key=idempotency_key,
+                    trace_id=request.state.request_id,
+                    actor_id=actor.user_id,
+                    actor_system_role=actor.system_role,
+                    project_membership=(
+                        "ADMIN_BYPASS" if actor.system_role == "ADMIN" else "ACTIVE"
+                    ),
+                )
     except PublishedTaskNotFoundError as error:
         raise ProblemException(
             status=404,
@@ -364,18 +452,6 @@ async def create_task_run(
             detail=str(error),
             code="task_input_invalid",
         ) from error
-    try:
-        run = await run_service.create_task_run(
-            project_id=project_id,
-            resolved=resolved,
-            input_json=body.input,
-            sources=body.sources,
-            idempotency_key=idempotency_key,
-            trace_id=request.state.request_id,
-            actor_id=actor.user_id,
-            actor_system_role=actor.system_role,
-            project_membership=("ADMIN_BYPASS" if actor.system_role == "ADMIN" else "ACTIVE"),
-        )
     except TaskSourceSelectionError as error:
         raise ProblemException(
             status=422,
@@ -634,7 +710,13 @@ def _run_detail_response(detail: RunDetail) -> RunDetailResponse:
         row_version=detail.run.row_version,
         created_at=detail.run.created_at,
         input=detail.input,
-        selected_sources=detail.selected_sources,
+        selected_sources=_source_summary_response(detail.selected_sources),
+        document_snapshots=[
+            _document_snapshot_response(item)
+            for item in document_snapshots(
+                detail.selected_sources, project_id=detail.run.project_id
+            )
+        ],
         output_schema=detail.output_schema,
         output_schema_checksum=detail.output_schema_checksum,
         result=None
@@ -783,9 +865,7 @@ def _run_detail_response(detail: RunDetail) -> RunDetailResponse:
         ],
         change_proposals=[proposal_response(item) for item in detail.change_proposals],
         approvals=[approval_response(item) for item in detail.approvals],
-        effect_executions=[
-            effect_execution_response(item) for item in detail.effect_executions
-        ],
+        effect_executions=[effect_execution_response(item) for item in detail.effect_executions],
     )
 
 
@@ -808,6 +888,27 @@ def _responded_interaction_response(
     )
 
 
+def _document_snapshot_response(item: RunDocumentSnapshot) -> RunDocumentSnapshotResponse:
+    """domain が検証した metadata のみを、明示 field の response model へ渡す。"""
+
+    return RunDocumentSnapshotResponse(
+        requirement_key=item.requirement_key,
+        status=item.status,
+        snapshot=None
+        if item.snapshot is None
+        else DocumentSnapshotResponse.model_validate(item.snapshot.to_json()),
+    )
+
+
+def _source_summary_response(sources: dict[str, Any]) -> dict[str, str | RunSourceSummaryResponse]:
+    """一覧と詳細の両方で同じ公開許可リストを通す。"""
+
+    return {
+        key: value if isinstance(value, str) else RunSourceSummaryResponse.model_validate(value)
+        for key, value in source_summaries(sources).items()
+    }
+
+
 def _run_history_response(page: RunHistoryPage) -> RunHistoryResponse:
     """Run history read model を公開 pagination response へ変換する。"""
 
@@ -823,7 +924,7 @@ def _run_history_response(page: RunHistoryPage) -> RunHistoryResponse:
                 started_at=item.started_at,
                 finished_at=item.finished_at,
                 input=item.input,
-                selected_sources=item.selected_sources,
+                selected_sources=_source_summary_response(item.selected_sources),
                 result_summary=item.result_summary,
                 result_confidence=item.result_confidence,
                 result_needs_review=item.result_needs_review,

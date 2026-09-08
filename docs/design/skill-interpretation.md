@@ -26,6 +26,8 @@ Directory/Generic Markdown 导入、不可变来源、结构化模型解释、�
 
 ZIP/TAR 自动解包、远程 Git URL 导入、TaskFlowProjection 与生成前端模块执行不是当前已提供的解释链路。真实模型反复、业务规则保真和外部系统验收不由静态验证代替。
 
+发布状态、warning 接受、Project 启用与 readiness 按[判断顺序](skill-contract.md#发布与就绪的判断顺序)分别读取。当前还不能重新启用已停用的同版关系；[回滚设计](skill-contract.md#112-可审计的重新启用与回滚)是后续工作，不是现行操作指引。
+
 模型输出默认走 SDK structured-output；显式开启 prompt JSON 兼容时仍执行完整契约验证，二者需要分别验收。详见[响应边界](skill-contract.md#62-结构化响应)。
 
 ## 3. 信任边界
@@ -48,10 +50,31 @@ ZIP/TAR 自动解包、远程 Git URL 导入、TaskFlowProjection 与生成前�
 | [task_contract.py](../../PJM/backend/src/projectmind/skills/task_contract.py) | 受限动态契约编译 |
 | [manifest_gate.py](../../PJM/backend/src/projectmind/skills/manifest_gate.py) | 发布前结构、来源、能力和 warning gate |
 | [service.py](../../PJM/backend/src/projectmind/skills/service.py) | 解释、版本 lifecycle 与 Project 可见性协调 |
+| [repository.py](../../PJM/backend/src/projectmind/skills/repository.py) | DRAFT/发布/废弃、启停记录、引用删除门禁和 TaskCatalog 查询 |
 
 系统解释 Skill 的正文是[版本化执行资产](../../PJM/skills/projectmind-skill-interpreter/SKILL.md)。修改它及 references 会改变 package hash 和 prompt identity，需要同步版本、example 和回归；不当作普通说明文档搬迁。
 
 这些入口共同守护“蓝图只由 Interpreter 生成”的边界；没有全局 bypass，parse 期的空蓝图不由 importer 补造。发布约束详见 §5.3。
+
+### 从候选到项目任务的接线
+
+```text
+一次 PREVIEW_READY Interpretation
+    ↓ create_version_draft
+绑定真实 Interpretation identity（Manifest 与 Blueprint 同步）
+    ↓ 来源/契约校验，冻结 Manifest + checksum + gate findings
+SkillVersion DRAFT
+    ↓ publish_skill_version：无 hard error，所有 warning 已接受
+PUBLISHED（仍是 Organization 资产）
+    ↓ enable_project_skill_version：Project 显式启用精确版本
+TaskCatalog 查询 → 按项目资源计算 readiness
+    ↓ 用户提供实际输入与资源选择
+普通 Run 创建服务再次校验并冻结
+```
+
+`create_version_draft` 可以保存带 gate 错误的 DRAFT 供审查，不能因此从“DRAFT 行已存在”推断可发布。`publish_skill_version` 读取该版本的门禁报告；发布不再次调用模型，也不修改冻结 Manifest。源文、蓝图或解释发生变化时，回到追加式解释/新 DRAFT，不编辑旧版本来消除错误。
+
+`list_published_tasks` 先读取项目启用的版本，再调用 resource catalog 和 readiness 计算。候选查询不是一次真实外部读取，不能据此承诺网络可达；Run 创建与 Provider 继续执行各自校验。来源重建、模型执行恢复与发布版本复用是不同的幂等边界，不共用一个“重试解释”按钮语义。
 
 ## 5. CapabilityBlueprint
 
@@ -66,7 +89,7 @@ ZIP/TAR 自动解包、远程 Git URL 导入、TaskFlowProjection 与生成前�
 | 校验 | 失败或不足的处理 |
 | --- | --- |
 | identity、source hash、来源 trace | 不一致时拒绝，不引用不存在的文件 |
-| schema、业务目标、必需规则 | 无法形成安全目标时拒绝 |
+| Schema、目标字段、必需规则的来源引用 | 结构或引用不合法时拒绝；自然语言规则是否完整保真另做人工质量评审 |
 | 领域 capability 名 | 新业务概念允许，不要求进入 Tool catalog |
 | Tool capability | 真实调用必须注册；不支持的 requirement 降低 readiness |
 | 缺少业务 Schema/ViewSpec/fixture | 不能单独作为硬错误；相关 warning 须显式接受 |
@@ -81,6 +104,8 @@ ZIP/TAR 自动解包、远程 Git URL 导入、TaskFlowProjection 与生成前�
 CapabilityBlueprint 只能由 Interpreter 生成。parse 期没有蓝图时返回 null；发布 gate 对缺失蓝图报 `capability_blueprint_missing`。Worker 读取冻结 Manifest 中的蓝图，不从旧 workflows/data_sources 反向编造。
 
 Manifest Schema 为保留导入 Draft 形态，不在 JSON required 中强制 blueprint；**发布门禁**进一步要求 blueprint。不能将“Schema 可通过”理解为“已经允许发布”。
+
+`native` 仍是协议允许的兼容值，但现有 Adapter 不负责生成蓝图。测试中手工构造完整 Manifest 是隔离门禁与投影的 fixture，不是绕过 Interpreter 的产品路径。
 
 ### 5.4 过程重表达
 
@@ -99,13 +124,15 @@ Manifest Schema 为保留导入 Draft 形态，不在 JSON required 中强制 bl
 
 ### 5.5 TaskFlowProjection
 
-可选流程投影属于[后续 Task Flow 设计](task-flow.md)。当前不向 Blueprint/Brief 自由添加未经 Schema 校验的节点字段。
+可选流程投影属于[后续 Task Flow 设计](task-flow.md)。当前不向 Blueprint/Brief 自由添加未经 Schema 校验的节点字段。后续解释出的 required 必须能引用已有规则与来源；无关联的动态活动不属于发布计划。计划语义、纯布局与历史冻结按[Flow 契约边界](task-flow.md#3-taskflowprojection-目标契约)分别校验，不在 Interpreter 内另建流程权限或节点状态机。
 
 ## 6. ResourceBinding 与 readiness
 
 ### 6.0 与项目启用的区别
 
 先检查精确 SkillVersion 是否已在 Project 启用，再计算资源就绪度。未启用版本不可发现；已启用但缺资源的版本显示缺失原因。启用不授予数据访问或写入权限。
+
+当前 repository 对活动启用关系的重复请求返回原记录，对已停用关系拒绝重新启用；废弃版本也不能用 publish 复活。状态操作的影响范围与后续审计恢复统一见[版本与可见性](skill-contract.md#111-版本内容与可见性)，本页不维护第二套生命周期规则。
 
 ### 6.0.1 唯一资源声明
 
@@ -120,6 +147,8 @@ Manifest Schema 为保留导入 Draft 形态，不在 JSON required 中强制 bl
 `GUIDANCE_ONLY / CONFIGURATION_REQUIRED / RUNNABLE / ACTIONABLE` 是任务投影。requirement 另有 `AVAILABLE / UNAVAILABLE / UNSUPPORTED`。实现见 [resource_binding.py](../../PJM/backend/src/projectmind/skills/resource_binding.py)。
 
 ACTIONABLE 不是有效批准，也不是对真实连接可达性的证明。创建 Run 与 Provider 调用仍重新校验配置、绑定和策略。资源授权、内容快照与 document 联调差距见[资源快照](resource-snapshots.md)。
+
+readiness 只说明有可服务的候选，不选择具体实例。选择在新 Run 创建前完成，运行中的 CHOICE 不能重新绑定冻结资源；现有 resource_binding.py 的旧注释仍提到运行中选择，后续代码整理应按[冻结边界](skill-contract.md#42-resourcerequirement)对齐，不据注释添加扩权入口。
 
 ## 7. AgentTaskBrief 与 ExecutionProfile
 
@@ -176,11 +205,14 @@ Redmine CAS issue.update 与 Git/SVN repository.write。完整契约与失败语
 | Parser | 不执行来源、路径/大小/引用、来源 hash |
 | Interpreter | frozen identity、结构响应、修复失败、追加式调整/diff |
 | 发布 | Blueprint 必需、warning acceptance、精确版本与不可变性 |
+| 项目生命周期 | 未发布/跨组织拒绝、启用/停用作用域、废弃/删除引用保护；重新启用与并发审计是目标验收 |
 | 泛化 | JAF、repository-review、开放式文档任务，不增加平台业务分支 |
 | 安全 | 敏感来源阻断、能力不扩权、scope/跨 Project 拒绝 |
 | 模型质量 | 固定输入各重复至少三次，人工评估规则保真、证据和调整量 |
 
 测试入口：[skills tests](../../PJM/backend/tests/skills/) 与[契约测试](../../PJM/backend/tests/contracts/)。固定模型测量命令见[本地开发](../development/local-development.md)。
+
+[importer 回归](../../PJM/backend/tests/skills/test_skill_importer.py)、[gate 回归](../../PJM/backend/tests/skills/test_manifest_gate.py)、[repository 回归](../../PJM/backend/tests/skills/test_skill_repository.py)和[readiness 回归](../../PJM/backend/tests/skills/test_resource_binding.py)分别负责来源、候选、版本操作和配置投影。repository mock 的通过不证明真实事务竞争；尚不存在的重新启用路径不能借其它状态用例算作已覆盖。
 
 ## 13. 后续工作依赖
 

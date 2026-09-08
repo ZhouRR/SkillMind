@@ -106,13 +106,17 @@ export function ModalDialog({ open, title, meta, actions, wide = false, onClose,
   const messages = useMessages()
   const dialogRef = useRef<HTMLDivElement>(null)
   const restoreFocusTo = useRef<HTMLElement | null>(null)
+  const closeRef = useRef(onClose)
+  useEffect(() => { closeRef.current = onClose }, [onClose])
   useEffect(() => {
     if (!open) return
+    // 入力・言語・送信状態で onClose の参照が変わっても、編集中の焦点を奪わない。
+    // callback だけを最新化し、focus/scroll の lifecycle は開閉に限定する。
     // 開く直前の焦点を控え、dialog 自体へ移す(Escape と scroll を直ちに効かせる)。
     restoreFocusTo.current = window.document.activeElement as HTMLElement | null
     dialogRef.current?.focus()
     const handleKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') closeRef.current()
     }
     window.addEventListener('keydown', handleKey)
     // 背面の scroll を止める。閉じたら元の値へ戻し、他所の overflow 指定を壊さない。
@@ -124,7 +128,7 @@ export function ModalDialog({ open, title, meta, actions, wide = false, onClose,
       body.style.overflow = previousOverflow
       restoreFocusTo.current?.focus()
     }
-  }, [open, onClose])
+  }, [open])
   return (
     <div
       className={wide ? 'modalOverlay modalWide' : 'modalOverlay'}

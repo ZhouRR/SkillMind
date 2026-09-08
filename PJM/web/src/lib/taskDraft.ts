@@ -1,4 +1,5 @@
 import type { ProjectModuleRecord, PublishedTaskRecord } from '../api'
+import { validDocumentSelection } from './documentSelection'
 
 /** 一つの Run 下書き。「どの task を、どの入力と来源で走らせるか」だけを持つ。
  *
@@ -39,9 +40,19 @@ export function sourceRequirements(task: PublishedTaskRecord): SourceRequirement
     required: requirement.required,
     options: requirement.candidates.map((candidate) => ({
       value: candidate.key,
-      label: `${candidate.label} · ${candidate.provider}`,
+      label: requirement.kind === 'document' ? candidate.label : `${candidate.label} · ${candidate.provider}`,
     })),
   }))
+}
+
+/** 文書は候補が一件でも同意を省略しない。従来の必須 Integration 既定だけを維持する。 */
+export function defaultSourceProviders(task: PublishedTaskRecord): Record<string, string> {
+  const sources: Record<string, string> = {}
+  for (const requirement of sourceRequirements(task)) {
+    const preferred = requirement.options[0]
+    if (requirement.kind !== 'document' && requirement.required && preferred) sources[requirement.key] = preferred.value
+  }
+  return sources
 }
 
 /** 未選択(空文字)の資源要求を落とし、実際に凍結する来源だけを残す。
@@ -69,7 +80,7 @@ export function parseInputObject(value: string): Record<string, unknown> | null 
   }
 }
 
-/** 選択済み task と入力から Run 下書きを組み立てる。入力が JSON として読めない間は null。
+/** 選択済み task と入力から Run 下書きを組み立てる。不正 JSON や未確認/失効文書は null。
  *
  * 読めない入力のまま凍結させないのが要点。時刻起動では「保存できたのに最初の発火で必ず落ちる」
  * schedule がそれで生まれる。
@@ -82,6 +93,8 @@ export function buildTaskDraft(
   if (!task) return null
   const input = parseInputObject(inputText)
   if (input === null) return null
+  if (sourceRequirements(task).some((requirement) => requirement.kind === 'document'
+    && !validDocumentSelection(sourceProviders[requirement.key] ?? '', requirement))) return null
   return {
     skillVersionId: task.skill_version_id,
     taskKey: task.task_key,

@@ -7,10 +7,12 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from projectmind.documents.repository import DocumentRepository
+from projectmind.documents.snapshot import (
+    ALL_DOCUMENTS_SELECTION,
+    DOCUMENT_PROVIDER,
+    DOCUMENT_READ_CAPABILITY,
+)
 from projectmind.skills.resource_binding import ProjectResourceCandidate
-
-DOCUMENT_PROVIDER = "project-documents"
-DOCUMENT_READ_CAPABILITY = "document.read/v1"
 
 
 class DocumentResourceCatalog:
@@ -30,13 +32,27 @@ class DocumentResourceCatalog:
 
         async with self._session_factory() as session:
             documents = await DocumentRepository(session).list_for_project(project_id)
-        return tuple(
+        individual = tuple(
             ProjectResourceCandidate(
-                key=f"{document.folder}/{document.name}",
+                key=f"document:{document.document_id}",
                 kind="document",
                 provider=DOCUMENT_PROVIDER,
-                label=f"{document.folder}/{document.name}",
+                label="/".join(part for part in (document.folder, document.name) if part),
                 capabilities=(DOCUMENT_READ_CAPABILITY,),
+                scope={"selection_mode": "SINGLE", "document_ids": [str(document.document_id)]},
             )
             for document in documents
+        )
+        if not individual:
+            return ()
+        return (
+            *individual,
+            ProjectResourceCandidate(
+                key=ALL_DOCUMENTS_SELECTION,
+                kind="document",
+                provider=DOCUMENT_PROVIDER,
+                label="All project documents (membership frozen at Run creation)",
+                capabilities=(DOCUMENT_READ_CAPABILITY,),
+                scope={"selection_mode": "ALL"},
+            ),
         )

@@ -2,7 +2,7 @@
 
 Agent は物化済みの input/ を既存の workspace.search/read で自走発見する。凭据は物化段階の
 Provider 境界内でのみ解決され、Agent 上下文・日志・manifest には決して現れない。物化対象は
-二路: document 一路 (計画 §19.3 D-W3=a) は Project の全文書を input/documents/ へ、repository
+二路: document 一路は Run の凍結文書集合だけを input/documents/ へ、repository
 一路 (§19 W4) は Run に凍結された binding の scope 配下を revision 固定で
 input/<requirement_key>/ へ落とす。いずれも上限超過は截断せず fail closed とし、読めなかった
 file は manifest.skipped に必ず残す (「読めない」を「存在しない」と誤認させないため)。
@@ -15,10 +15,11 @@ history.txt` (repository の commit 履歴。新 capability を足さずに「�
 
 from __future__ import annotations
 
+import asyncio
 import json
-import os
+import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
 from uuid import UUID
@@ -29,6 +30,17 @@ from projectmind.agent.binary_text import (
     render_text,
 )
 from projectmind.agent.domain import MaterializedResource, RunWorkspace
+from projectmind.agent.input_workspace import input_relative, read_input_file, verify_input
+from projectmind.agent.materialization_storage import (
+    MaterializationError as MaterializationError,
+)
+from projectmind.agent.materialization_storage import (
+    create_generation,
+    relative_parts,
+    seal_generation,
+    verify_tree,
+    write_new_file,
+)
 from projectmind.agent.repository_client import (
     RepositoryClientError,
     RepositoryCommit,
@@ -36,18 +48,39 @@ from projectmind.agent.repository_client import (
 )
 from projectmind.agent.repository_source import (
     RepositoryBindingRef,
+    RepositorySnapshotBinding,
     RepositorySnapshotSource,
     ScopedRepositorySession,
 )
 from projectmind.core.hashing import sha256_hex
-from projectmind.documents.source import ProjectDocumentContent, ProjectDocumentInventory
+from projectmind.documents.snapshot import (
+    DOCUMENT_PROVIDER,
+    DocumentSnapshot,
+    DocumentSnapshotError,
+    FrozenDocument,
+    parse_document_snapshot,
+    selected_document_snapshots,
+    snapshot_documents,
+)
+from projectmind.documents.source import (
+    ProjectDocumentContent,
+    ProjectDocumentInventory,
+    verify_frozen_content,
+)
+from projectmind.runs.domain import ClaimedRun
+from projectmind.runs.input_snapshot import (
+    InputFileSeal,
+    InputSnapshotError,
+    InputSnapshotStatus,
+    InputSnapshotStore,
+    input_source_checksum,
+)
 
 # 物化した個別 file の上限。search の per-file 予算 (workspace_provider._MAX_FILE_BYTES) と揃え、
 # 「物化したのに search が飛ばす」死角を作らない。超過 file は skip し manifest に理由を残す。
 _MAX_FILE_BYTES = 1_048_576
 
-# document 一路の固定物化先。option (a) は全 Project 文書を一箇所へ集約するため、requirement_key
-# ごとに分けない (document 要求の key は本 option では区別に使わない)。
+# 文書は Run 内の選択集合を共用する。各 slot の所属は manifest に残す。
 _DOCUMENTS_KEY = "documents"
 _PLATFORM_DIRECTORY = ".projectmind"
 _MANIFEST_RELATIVE = f"{_PLATFORM_DIRECTORY}/manifest.json"
@@ -57,14 +90,6 @@ _HISTORY_RELATIVE = f"{_PLATFORM_DIRECTORY}/history.txt"
 # 履歴の件数上限。全履歴ではなく「直近 N 件」という定義の明確な部分集合にする (件数は
 # history.txt の見出しに書き、Agent が「これで全部」と誤解しないようにする)。
 _MAX_HISTORY_ENTRIES = 200
-
-
-class MaterializationError(RuntimeError):
-    """物化が安全に完了できないことを表す fail-closed 信号。
-
-    体积上限超過や書き込み失敗など、部分木を残すと Agent が「不完全なのに完全に見える」樹から
-    誤結論を導く状況で送出する。呼出側は Run を明確な理由で失敗させ、截断はしない。
-    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +107,22 @@ class _AcceptedFile:
     source_content_hash: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedInput:
+    """全資源の完成回执と一致した workspace だけを Brief/Tool へ渡す。"""
+
+    workspace: RunWorkspace
+    resources: tuple[MaterializedResource, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _PreparedRoot:
+    """一 root の案内と、生成時の byte から取得した file receipt。"""
+
+    resource: MaterializedResource
+    files: tuple[InputFileSeal, ...]
+
+
 class WorkspaceMaterializer:
     """冻结した資源を Run 準備段階で input/ へ只読物化する単一実装。"""
 
@@ -89,8 +130,11 @@ class WorkspaceMaterializer:
         self,
         *,
         document_inventory: ProjectDocumentInventory,
+        input_snapshots: InputSnapshotStore,
         max_bytes: int,
         max_files: int,
+        max_total_bytes: int = 104_857_600,
+        max_total_files: int = 5_000,
         repository_source: RepositorySnapshotSource | None = None,
     ) -> None:
         """文書列挙 port、repository session source と体积/件数上限を保持する。
@@ -100,71 +144,247 @@ class WorkspaceMaterializer:
         「対象 file が存在しない」と誤結論する。
         """
 
-        if max_bytes < 1 or max_files < 1:
+        if min(max_bytes, max_files, max_total_bytes, max_total_files) < 1:
             raise ValueError("Materialization limits must be positive")
         self._document_inventory = document_inventory
         self._repository_source = repository_source
+        self._input_snapshots = input_snapshots
         self._max_bytes = max_bytes
         self._max_files = max_files
+        self._max_total_bytes = max_total_bytes
+        self._max_total_files = max_total_files
 
     async def materialize(
         self,
         *,
+        claimed_run: ClaimedRun,
         workspace: RunWorkspace,
         project_id: UUID,
         run_id: UUID,
         blueprint: Mapping[str, Any],
         repository_bindings: Mapping[str, RepositoryBindingRef] | None = None,
-    ) -> tuple[MaterializedResource, ...]:
-        """Blueprint が宣言した資源種別ごとに物化し、その落点を返す。
+        document_snapshots: Sequence[DocumentSnapshot] = (),
+    ) -> PreparedInput:
+        """lease 認領した新世代を封じ、DB の READY が確定してから Agent へ渡す。"""
 
-        Run 単位で冪等: manifest が既に在れば再取得せず、内容 hash の一致だけを検証して reuse
-        する (docs/06 §6.4)。不一致は静かに作り直さず fail closed とし、Attempt 間で内容が
-        入れ替わっていないことを保証する。
-
-        戻り値は Brief と prompt が Agent へ「どこに何を置いたか」を伝えるための唯一の材料
-        (計画 §19 W6)。reuse 経路でも同じ記述子を返し、初回と再試行で案内が食い違わないようにする。
-        """
-
-        materialized: list[MaterializedResource] = []
-        if _declares_document_requirement(blueprint):
-            materialized.append(
-                await self._materialize_documents(workspace=workspace, project_id=project_id)
+        if (
+            claimed_run.project_id != project_id
+            or claimed_run.run_id != run_id
+            or workspace.root.name != str(run_id)
+        ):
+            raise MaterializationError("Input preparation does not belong to the claimed Run")
+        snapshots = _validated_document_snapshots(blueprint, project_id, document_snapshots)
+        if [item.to_json() for item in snapshots] != [
+            item.to_json()
+            for item in selected_document_snapshots(
+                claimed_run.selected_sources_json, project_id=project_id
             )
-        for requirement_key, binding in sorted((repository_bindings or {}).items()):
-            materialized.append(
-                await self._materialize_repository(
-                    workspace=workspace,
-                    project_id=project_id,
-                    run_id=run_id,
-                    requirement_key=requirement_key,
-                    binding=binding,
+        ]:
+            raise MaterializationError("Prepared documents do not match the frozen Run sources")
+        bindings = repository_bindings or {}
+        repository_metadata = await self._inspect_bindings(claimed_run, blueprint, bindings)
+        # 旧 input には独立回执がない。現在の内容へ補签せず、現場を保存して拒否する。
+        await asyncio.to_thread(verify_tree, workspace.root, relative="input", expected_files=set())
+        try:
+            receipt, created = await self._input_snapshots.begin(claimed_run)
+        except InputSnapshotError as error:
+            raise MaterializationError(str(error)) from error
+        if (
+            receipt.project_id != project_id
+            or receipt.run_id != run_id
+            or receipt.source_checksum
+            != input_source_checksum(
+                project_id=project_id, run_id=run_id, sources=claimed_run.selected_sources_json
+            )
+        ):
+            raise MaterializationError("Input receipt does not match the frozen Run")
+        relative = f".projectmind-inputs/{receipt.snapshot_id}"
+        candidate = replace(workspace, input_dir=workspace.root / relative, input_files=None)
+        if not created:
+            if receipt.status is not InputSnapshotStatus.READY:
+                raise MaterializationError(
+                    "Input preparation is incomplete; preserve its generation"
+                )
+            verified = replace(candidate, input_files=receipt.files)
+            self._ensure_total_budget(receipt.files)
+            await asyncio.to_thread(verify_input, verified)
+            resources = await asyncio.to_thread(
+                self._reuse, verified, project_id, run_id, snapshots, bindings, repository_metadata
+            )
+            return PreparedInput(verified, resources)
+        if (
+            receipt.status is not InputSnapshotStatus.PREPARING
+            or receipt.prepared_by_attempt_id != claimed_run.run_attempt_id
+            or receipt.files
+        ):
+            raise MaterializationError(
+                "Input preparation receipt cannot authorize a new generation"
+            )
+        await asyncio.to_thread(create_generation, workspace.root, relative)
+        materialized: list[MaterializedResource] = []
+        files: list[InputFileSeal] = []
+        if snapshots:
+            prepared = await self._materialize_documents(
+                workspace=candidate,
+                project_id=project_id,
+                run_id=run_id,
+                snapshots=snapshots,
+                previous_files=files,
+            )
+            materialized.append(prepared.resource)
+            files.extend(prepared.files)
+        for requirement_key, binding in sorted(bindings.items()):
+            prepared = await self._materialize_repository(
+                workspace=candidate,
+                project_id=project_id,
+                run_id=run_id,
+                requirement_key=requirement_key,
+                binding=binding,
+                metadata=repository_metadata[requirement_key],
+                previous_files=files,
+            )
+            materialized.append(prepared.resource)
+            files.extend(prepared.files)
+        sealed = tuple(sorted(files, key=lambda item: item.path))
+        await asyncio.to_thread(seal_generation, workspace.root, relative=relative, files=sealed)
+        try:
+            completed = await self._input_snapshots.complete(
+                claimed_run, snapshot_id=receipt.snapshot_id, files=sealed
+            )
+        except InputSnapshotError as error:
+            raise MaterializationError(str(error)) from error
+        if (
+            completed.snapshot_id != receipt.snapshot_id
+            or completed.status is not InputSnapshotStatus.READY
+            or completed.files != sealed
+            or completed.source_checksum != receipt.source_checksum
+        ):
+            raise MaterializationError("Input publication did not confirm this generation")
+        return PreparedInput(replace(candidate, input_files=sealed), tuple(materialized))
+
+    async def _inspect_bindings(
+        self,
+        claimed: ClaimedRun,
+        blueprint: Mapping[str, Any],
+        bindings: Mapping[str, RepositoryBindingRef],
+    ) -> dict[str, RepositorySnapshotBinding]:
+        """凍結來源と現行 binding を突き合わせ、cache 再訪でも権限検査を省略しない。"""
+
+        declared = {
+            item["key"]: item
+            for item in blueprint.get("resource_requirements", [])
+            if isinstance(item, Mapping)
+            and item.get("kind") == "repository"
+            and isinstance(item.get("key"), str)
+        }
+        if set(bindings) - set(declared) or any(
+            item.get("required") and key not in bindings for key, item in declared.items()
+        ):
+            raise MaterializationError("Repository bindings do not match the declared requirements")
+        result: dict[str, RepositorySnapshotBinding] = {}
+        for key, binding in sorted(bindings.items()):
+            _materialization_root(key)
+            if self._repository_source is None:
+                raise MaterializationError("Repository materialization is not configured")
+            source = claimed.selected_sources_json.get(key)
+            if not isinstance(source, Mapping) or any(
+                source.get(name) != value
+                for name, value in {
+                    "provider": binding.provider,
+                    "binding_id": str(binding.binding_id),
+                    "integration_id": str(binding.integration_id),
+                }.items()
+            ):
+                raise MaterializationError("Repository source does not match its frozen binding")
+            try:
+                metadata = await self._repository_source.inspect(
+                    project_id=claimed.project_id, run_id=claimed.run_id, binding=binding
+                )
+            except RepositoryClientError as error:
+                raise MaterializationError(
+                    f"Repository binding is unavailable: {error.code}"
+                ) from error
+            if source.get("binding_checksum") != metadata.checksum:
+                raise MaterializationError("Repository binding checksum changed after Run creation")
+            result[key] = metadata
+        return result
+
+    def _reuse(
+        self,
+        workspace: RunWorkspace,
+        project_id: UUID,
+        run_id: UUID,
+        snapshots: Sequence[DocumentSnapshot],
+        bindings: Mapping[str, RepositoryBindingRef],
+        metadata: Mapping[str, RepositorySnapshotBinding],
+    ) -> tuple[MaterializedResource, ...]:
+        """READY の実 byte からだけ案内を再構成し、Project や remote を再取得しない。"""
+
+        resources: list[MaterializedResource] = []
+        expected_roots = set(bindings)
+        if snapshots:
+            expected_roots.add(_DOCUMENTS_KEY)
+            documents = snapshot_documents(snapshots)
+            resources.append(
+                _describe(
+                    _verify_materialized(
+                        workspace,
+                        _DOCUMENTS_KEY,
+                        expected=_document_identity(project_id, run_id, snapshots, documents),
+                        documents=documents,
+                    )
                 )
             )
-        return tuple(materialized)
+        for key, binding in sorted(bindings.items()):
+            resources.append(
+                _describe(
+                    _verify_materialized(
+                        workspace,
+                        key,
+                        expected={
+                            **_repository_identity(project_id, run_id, key, binding),
+                            "binding_checksum": metadata[key].checksum,
+                            "scope": {"paths": list(metadata[key].scope_paths)},
+                        },
+                    )
+                )
+            )
+        if {item.path.split("/", 1)[0] for item in workspace.input_files or ()} != expected_roots:
+            raise MaterializationError("Input receipt has unexpected resource roots")
+        return tuple(resources)
 
     async def _materialize_documents(
-        self, *, workspace: RunWorkspace, project_id: UUID
-    ) -> MaterializedResource:
-        """Project の全文書を input/documents/ へ物化する。"""
+        self,
+        *,
+        workspace: RunWorkspace,
+        project_id: UUID,
+        run_id: UUID,
+        snapshots: Sequence[DocumentSnapshot],
+        previous_files: Sequence[InputFileSeal],
+    ) -> _PreparedRoot:
+        """各 slot の凍結集合の和だけを物化し、未選択文書は取得しない。"""
 
-        destination = workspace.input_dir / _DOCUMENTS_KEY
-        if _manifest_path(destination).exists():
-            return _describe(_verify_materialized(workspace.input_dir, destination))
-        contents = await self._document_inventory.list_contents(project_id=project_id)
-        accepted, skipped = self._classify_documents(contents)
+        try:
+            documents = snapshot_documents(snapshots)
+        except DocumentSnapshotError as error:
+            raise MaterializationError(str(error)) from error
+        identity = _document_identity(project_id, run_id, snapshots, documents)
+        try:
+            contents = await self._document_inventory.list_contents(
+                project_id=project_id, documents=documents
+            )
+            _verify_document_contents(documents, contents)
+        except DocumentSnapshotError as error:
+            raise MaterializationError(str(error)) from error
+        accepted, skipped = await asyncio.to_thread(self._classify_documents, contents)
         generated = [_file_index(_DOCUMENTS_KEY, accepted, skipped)]
-        self._ensure_generated_budget(accepted, generated)
-        self._write_tree(workspace.input_dir, [*accepted, *generated])
         manifest = {
-            "requirement_key": _DOCUMENTS_KEY,
-            "provider": "project-documents",
-            "kind": "document",
-            "scope": {"all_project_documents": True},
+            **identity,
             **_materialization_summary(accepted, skipped, generated),
         }
-        self._write_manifest(workspace.input_dir, destination, manifest=manifest)
-        return _describe(manifest)
+        return await asyncio.to_thread(
+            self._write_root, workspace, accepted, generated, manifest, previous_files
+        )
 
     async def _materialize_repository(
         self,
@@ -174,13 +394,13 @@ class WorkspaceMaterializer:
         run_id: UUID,
         requirement_key: str,
         binding: RepositoryBindingRef,
-    ) -> MaterializedResource:
+        metadata: RepositorySnapshotBinding,
+        previous_files: Sequence[InputFileSeal],
+    ) -> _PreparedRoot:
         """凍結 binding の scope 配下を input/<requirement_key>/ へ revision 固定で物化する。"""
 
         root_name = _materialization_root(requirement_key)
-        destination = workspace.input_dir / root_name
-        if _manifest_path(destination).exists():
-            return _describe(_verify_materialized(workspace.input_dir, destination))
+        identity = _repository_identity(project_id, run_id, requirement_key, binding)
         if self._repository_source is None:
             raise MaterializationError(
                 "Repository materialization is not configured for this deployment"
@@ -189,6 +409,12 @@ class WorkspaceMaterializer:
             async with self._repository_source.open(
                 project_id=project_id, run_id=run_id, binding=binding
             ) as session:
+                if (
+                    session.provider != binding.provider
+                    or session.binding_checksum != metadata.checksum
+                    or session.scope_paths != metadata.scope_paths
+                ):
+                    raise MaterializationError("Repository binding changed during preparation")
                 listing = await session.list_files()
                 planned, skipped = self._plan_repository_files(root_name, listing)
                 accepted = await self._read_repository_files(session, planned, skipped)
@@ -206,9 +432,8 @@ class WorkspaceMaterializer:
             _file_index(root_name, accepted, skipped),
             _history_file(root_name, commits, limit=_MAX_HISTORY_ENTRIES),
         ]
-        self._ensure_generated_budget(accepted, generated)
-        self._write_tree(workspace.input_dir, [*accepted, *generated])
         manifest = {
+            **identity,
             "requirement_key": requirement_key,
             "provider": provider,
             "kind": "repository",
@@ -219,8 +444,9 @@ class WorkspaceMaterializer:
             "scope": {"paths": scope_paths},
             **_materialization_summary(accepted, skipped, generated),
         }
-        self._write_manifest(workspace.input_dir, destination, manifest=manifest)
-        return _describe(manifest)
+        return await asyncio.to_thread(
+            self._write_root, workspace, accepted, generated, manifest, previous_files
+        )
 
     def _classify_documents(
         self, contents: Sequence[ProjectDocumentContent]
@@ -265,16 +491,13 @@ class WorkspaceMaterializer:
 
         planned: list[tuple[str, str]] = []
         skipped: list[dict[str, str]] = [
-            {"path": f"{root_name}/{item.path}", "reason": item.reason}
-            for item in listing.skipped
+            {"path": f"{root_name}/{item.path}", "reason": item.reason} for item in listing.skipped
         ]
         total_bytes = 0
         for entry in sorted(listing.entries, key=lambda item: item.path):
             relative = _repository_relative(root_name, entry.path)
             if relative is None:
-                skipped.append(
-                    {"path": f"{root_name}/{entry.path}", "reason": "invalid_path"}
-                )
+                skipped.append({"path": f"{root_name}/{entry.path}", "reason": "invalid_path"})
                 continue
             if entry.size > _MAX_FILE_BYTES:
                 skipped.append({"path": relative, "reason": "exceeds_file_limit"})
@@ -302,7 +525,7 @@ class WorkspaceMaterializer:
                 # 列挙 size が実体と食い違う場合 (server 側の申告誤り) も截断せず skip する。
                 skipped.append({"path": relative, "reason": "exceeds_file_limit"})
                 continue
-            usable = _usable_file(relative, data)
+            usable = await asyncio.to_thread(_usable_file, relative, data)
             if isinstance(usable, dict):
                 skipped.append(usable)
                 continue
@@ -314,6 +537,8 @@ class WorkspaceMaterializer:
     ) -> None:
         """索引・履歴も input/ に落ちる以上、予算 (search の走査予算と同値) に数える。"""
 
+        if any(len(item.data) > _MAX_FILE_BYTES for item in (*accepted, *generated)):
+            raise MaterializationError("Generated resource file exceeds the per-file limit")
         self._ensure_budget(
             files=len(accepted) + len(generated),
             total_bytes=sum(len(item.data) for item in (*accepted, *generated)),
@@ -331,44 +556,101 @@ class WorkspaceMaterializer:
     def _write_tree(self, input_dir: Path, accepted: Sequence[_AcceptedFile]) -> None:
         """受理 file を input/ 配下へ書き、書込後に只読 (0o400) へ固める。"""
 
-        base = input_dir.resolve(strict=True)
+        paths = {item.path for item in accepted}
+        if len(paths) != len(accepted) or any(
+            parent.as_posix() in paths for path in paths for parent in PurePosixPath(path).parents
+        ):
+            raise MaterializationError("Materialized file paths conflict")
         for item in accepted:
-            target = base / item.path
-            parent = target.parent
-            parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            resolved_parent = parent.resolve(strict=True)
-            if not resolved_parent.is_dir() or not resolved_parent.is_relative_to(base):
-                raise MaterializationError("Materialized path escapes the input root")
-            if target.is_symlink():
-                raise MaterializationError("Materialized path must not be a symbolic link")
-            descriptor = os.open(
-                target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600
-            )
-            try:
-                os.write(descriptor, item.data)
-            finally:
-                os.close(descriptor)
-            # 物化内容は冻结证据。書込後に只読化し、内容が binding 時点に対応する不変式を守る。
-            os.chmod(target, 0o400)
+            write_new_file(input_dir, item.path, item.data)
 
-    def _write_manifest(
-        self, input_dir: Path, destination: Path, *, manifest: Mapping[str, Any]
-    ) -> None:
-        """物化清单を書く。skipped は「読めない != 存在しない」を Agent に伝える鍵。"""
+    def _write_root(
+        self,
+        workspace: RunWorkspace,
+        accepted: Sequence[_AcceptedFile],
+        generated: Sequence[_AcceptedFile],
+        manifest: Mapping[str, Any],
+        previous_files: Sequence[InputFileSeal],
+    ) -> _PreparedRoot:
+        """生成時の byte を基準に全予算と回执を作り、disk から補签しない。"""
 
-        manifest_dir = destination / PurePosixPath(_MANIFEST_RELATIVE).parent
-        manifest_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         body = json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
-        manifest_path = _manifest_path(destination)
-        if not manifest_path.resolve().is_relative_to(input_dir.resolve(strict=True)):
-            raise MaterializationError("Materialized manifest escapes the input root")
-        descriptor = os.open(
-            manifest_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o400
+        manifest_file = _AcceptedFile(
+            path=f"{manifest['requirement_key']}/{_MANIFEST_RELATIVE}",
+            data=body,
+            content_hash=f"sha256:{sha256_hex(body)}",
         )
-        try:
-            os.write(descriptor, body)
-        finally:
-            os.close(descriptor)
+        all_generated = (*generated, manifest_file)
+        self._ensure_generated_budget(accepted, all_generated)
+        contents = (*accepted, *all_generated)
+        files = tuple(
+            InputFileSeal(item.path, len(item.data), item.content_hash) for item in contents
+        )
+        self._ensure_total_budget((*previous_files, *files))
+        prefix = input_relative(workspace)
+        self._write_tree(
+            workspace.root, [replace(item, path=f"{prefix}/{item.path}") for item in contents]
+        )
+        return _PreparedRoot(_describe(manifest), files)
+
+    def _ensure_total_budget(self, files: Sequence[InputFileSeal]) -> None:
+        """生成 manifest を含む全 root の存量を、再利用時にも同じ口径で制限する。"""
+
+        if (
+            len(files) > self._max_total_files
+            or sum(item.size for item in files) > self._max_total_bytes
+        ):
+            raise MaterializationError("Run input exceeds the total materialization budget")
+        roots: dict[str, list[InputFileSeal]] = {}
+        for item in files:
+            if item.size > _MAX_FILE_BYTES:
+                raise MaterializationError("Input file exceeds the per-file limit")
+            roots.setdefault(item.path.split("/", 1)[0], []).append(item)
+        for items in roots.values():
+            self._ensure_budget(files=len(items), total_bytes=sum(item.size for item in items))
+
+
+def _document_identity(
+    project_id: UUID,
+    run_id: UUID,
+    snapshots: Sequence[DocumentSnapshot],
+    documents: Sequence[FrozenDocument],
+) -> dict[str, Any]:
+    """新規生成と再利用で同じ凍結選択・変換形式を要求する。"""
+
+    return {
+        "manifest_version": "v1",
+        "preparation_version": "v2",
+        "text_converter_version": "v1",
+        "project_id": str(project_id),
+        "run_id": str(run_id),
+        "requirement_key": _DOCUMENTS_KEY,
+        "provider": DOCUMENT_PROVIDER,
+        "kind": "document",
+        "scope": {
+            "document_ids": [str(item.document_id) for item in documents],
+            "requirements": {item.requirement_key: item.to_json() for item in snapshots},
+        },
+    }
+
+
+def _repository_identity(
+    project_id: UUID, run_id: UUID, key: str, binding: RepositoryBindingRef
+) -> dict[str, Any]:
+    """DB の binding 再検証と結び付く、物化 root の不変な由来を返す。"""
+
+    return {
+        "manifest_version": "v1",
+        "preparation_version": "v2",
+        "text_converter_version": "v1",
+        "project_id": str(project_id),
+        "run_id": str(run_id),
+        "requirement_key": key,
+        "kind": "repository",
+        "provider": binding.provider,
+        "binding_id": str(binding.binding_id),
+        "integration_id": str(binding.integration_id),
+    }
 
 
 def _usable_file(
@@ -549,55 +831,107 @@ def _describe(manifest: Mapping[str, Any]) -> MaterializedResource:
     )
 
 
-def _verify_materialized(input_dir: Path, destination: Path) -> Mapping[str, Any]:
+def _verify_materialized(
+    workspace: RunWorkspace,
+    root_name: str,
+    *,
+    expected: Mapping[str, Any],
+    documents: Sequence[FrozenDocument] | None = None,
+) -> Mapping[str, Any]:
     """既存物化物が manifest どおりかを検証し、その manifest を返す (docs/06 §6.4 の幂等要件)。
 
     RunAttempt の再試行では取得し直さず reuse するが、内容が入れ替わっていれば結論の根拠が
     変わる。欠落・改変は静かに作り直さず fail closed とする。
     """
 
-    manifest_path = _manifest_path(destination)
+    manifest_relative = f"{root_name}/{_MANIFEST_RELATIVE}"
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as error:
+        manifest = json.loads(
+            read_input_file(workspace, manifest_relative, max_bytes=_MAX_FILE_BYTES)
+        )
+    except ValueError as error:
         raise MaterializationError("Materialized manifest could not be read") from error
-    files = manifest.get("files") if isinstance(manifest, dict) else None
-    generated = manifest.get("generated", []) if isinstance(manifest, dict) else None
-    if not isinstance(files, list) or not isinstance(generated, list):
+    if not isinstance(manifest, dict) or any(
+        manifest.get(key) != value for key, value in expected.items()
+    ):
+        raise MaterializationError("Materialized manifest does not belong to this Run selection")
+    files, generated, skipped = (manifest.get(key) for key in ("files", "generated", "skipped"))
+    if (
+        not isinstance(files, list)
+        or not isinstance(generated, list)
+        or not isinstance(skipped, list)
+    ):
         raise MaterializationError("Materialized manifest is invalid")
-    base = input_dir.resolve(strict=True)
+    if not all(
+        isinstance(item, dict)
+        and set(item) == {"path", "reason"}
+        and all(isinstance(value, str) for value in item.values())
+        for item in skipped
+    ):
+        raise MaterializationError("Materialized skipped entries are invalid")
+    if documents is not None:
+        _verify_document_members(manifest, documents)
     # 資源内容と生成物はどちらも個別 hash で確認するが、digest は資源内容だけから作る
     # (索引や履歴は資源の同一性ではない)。
-    verified = [_verified_entry(base, item) for item in files]
-    for item in generated:
-        _verified_entry(base, item)
-    if manifest.get("content_digest") != _content_digest(verified):
+    verified = [_verified_entry(workspace, root_name, item) for item in files]
+    artifacts = [_verified_entry(workspace, root_name, item) for item in generated]
+    paths = [item.path for item in (*verified, *artifacts)]
+    generated_paths = {f"{root_name}/{_FILE_INDEX_RELATIVE}"}
+    if expected["kind"] == "repository":
+        generated_paths.add(f"{root_name}/{_HISTORY_RELATIVE}")
+    if len(set(paths)) != len(paths) or {item.path for item in artifacts} != generated_paths:
+        raise MaterializationError("Materialized manifest has unexpected or duplicate files")
+    verify_tree(
+        workspace.root,
+        relative=f"{input_relative(workspace)}/{root_name}",
+        expected_files={
+            _MANIFEST_RELATIVE,
+            *("/".join(relative_parts(path)[1:]) for path in paths),
+        },
+    )
+    index = _file_index(root_name, verified, skipped)
+    if next(item for item in artifacts if item.path == index.path).data != index.data:
+        raise MaterializationError("Materialized index does not describe its files")
+    if manifest.get("materialized") != {
+        "files": len(verified),
+        "bytes": sum(len(item.data) for item in verified),
+    } or manifest.get("content_digest") != _content_digest(
+        [_manifest_entry(item) for item in verified]
+    ):
         raise MaterializationError("Materialized content digest does not match its manifest")
     return cast(Mapping[str, Any], manifest)
 
 
-def _verified_entry(base: Path, item: Any) -> dict[str, str]:
+def _verified_entry(workspace: RunWorkspace, root_name: str, item: Any) -> _AcceptedFile:
     """manifest の 1 entry を実 file と突き合わせ、path/hash を返す。"""
 
-    if not isinstance(item, dict):
+    if not isinstance(item, dict) or set(item) not in (
+        {"path", "content_hash"},
+        {"path", "content_hash", "converted_from", "source_content_hash"},
+    ):
         raise MaterializationError("Materialized manifest is invalid")
     path = item.get("path")
     content_hash = item.get("content_hash")
-    if not isinstance(path, str) or not isinstance(content_hash, str):
+    if (
+        not isinstance(path, str)
+        or not isinstance(content_hash, str)
+        or (re.fullmatch(r"sha256:[a-f0-9]{64}", content_hash) is None)
+    ):
         raise MaterializationError("Materialized manifest is invalid")
-    try:
-        data = (base / path).read_bytes()
-    except OSError as error:
-        raise MaterializationError("Materialized file is missing") from error
+    parts = relative_parts(path)
+    if len(parts) < 2 or parts[0] != root_name:
+        raise MaterializationError("Materialized path escapes its resource root")
+    if "converted_from" in item and (
+        not isinstance(item["converted_from"], str)
+        or not isinstance(item["source_content_hash"], str)
+    ):
+        raise MaterializationError("Materialized conversion metadata is invalid")
+    data = read_input_file(workspace, path, max_bytes=_MAX_FILE_BYTES)
     if f"sha256:{sha256_hex(data)}" != content_hash:
         raise MaterializationError("Materialized file does not match its manifest")
-    return {"path": path, "content_hash": content_hash}
-
-
-def _manifest_path(destination: Path) -> Path:
-    """物化先 directory の manifest path を返す。"""
-
-    return destination / _MANIFEST_RELATIVE
+    return _AcceptedFile(
+        path, data, content_hash, item.get("converted_from"), item.get("source_content_hash")
+    )
 
 
 def _materialization_root(requirement_key: str) -> str:
@@ -612,22 +946,101 @@ def _materialization_root(requirement_key: str) -> str:
         or requirement_key == _DOCUMENTS_KEY
         or "/" in requirement_key
         or "\\" in requirement_key
-        or requirement_key in {".", ".."}
+        or requirement_key in {".", "..", _PLATFORM_DIRECTORY}
         or not requirement_key.isprintable()
     ):
         raise MaterializationError("Resource requirement key is not a valid materialization root")
     return requirement_key
 
 
-def _declares_document_requirement(blueprint: Mapping[str, Any]) -> bool:
-    """Blueprint の resource_requirements に document 種別が在るかを判定する。"""
+def _validated_document_snapshots(
+    blueprint: Mapping[str, Any], project_id: UUID, snapshots: Sequence[DocumentSnapshot]
+) -> tuple[DocumentSnapshot, ...]:
+    """必須 slot の欠落、未宣言 slot、別 Project と不正 metadata を取得前に拒否する。"""
 
-    requirements = blueprint.get("resource_requirements")
+    requirements = blueprint.get("resource_requirements", [])
     if not isinstance(requirements, list):
-        return False
-    return any(
-        isinstance(item, Mapping) and item.get("kind") == "document" for item in requirements
-    )
+        raise MaterializationError("Resource requirements are invalid")
+    declared = {
+        item["key"]: item
+        for item in requirements
+        if isinstance(item, Mapping)
+        and item.get("kind") == "document"
+        and isinstance(item.get("key"), str)
+    }
+    keys = {item.requirement_key for item in snapshots}
+    if (
+        len(keys) != len(snapshots)
+        or keys - declared.keys()
+        or any(value.get("required") and key not in keys for key, value in declared.items())
+    ):
+        raise MaterializationError("Run document selections do not match its requirements")
+    try:
+        return tuple(
+            parse_document_snapshot(
+                item.to_json(), project_id=project_id, requirement_key=item.requirement_key
+            )
+            for item in sorted(snapshots, key=lambda item: item.requirement_key)
+        )
+    except DocumentSnapshotError as error:
+        raise MaterializationError(str(error)) from error
+
+
+def _verify_document_contents(
+    documents: Sequence[FrozenDocument], contents: Sequence[ProjectDocumentContent]
+) -> None:
+    """不正 inventory による追加・欠落・同名別 ID・byte 改変を二次検証する。"""
+
+    by_id = {item.document_id: item for item in contents}
+    if len(by_id) != len(contents) or set(by_id) != {item.document_id for item in documents}:
+        raise DocumentSnapshotError("Document inventory does not match the frozen selection")
+    for document in documents:
+        verify_frozen_content(document, by_id[document.document_id])
+
+
+def _verify_document_members(
+    manifest: Mapping[str, Any], documents: Sequence[FrozenDocument]
+) -> None:
+    """manifest が凍結集合を過不足なく説明し、原文 hash と変換元が一致するか確認する。"""
+
+    expected = {f"{_DOCUMENTS_KEY}/{item.path}": item for item in documents}
+    seen: set[str] = set()
+    for item in manifest["files"]:
+        if not isinstance(item, dict):
+            raise MaterializationError("Materialized document entry is invalid")
+        origin = item.get("converted_from", item.get("path"))
+        if not isinstance(origin, str) or origin not in expected or origin in seen:
+            raise MaterializationError("Materialized document is not a frozen member")
+        seen.add(origin)
+        if "converted_from" in item:
+            valid = (
+                item.get("path") == f"{origin}.txt"
+                and is_textualizable(origin)
+                and (item.get("source_content_hash") == expected[origin].content_hash)
+            )
+        else:
+            valid = item.get("content_hash") == expected[origin].content_hash
+        if not valid:
+            raise MaterializationError("Materialized document source does not match its snapshot")
+    for item in manifest["skipped"]:
+        path = item["path"]
+        if (
+            path not in expected
+            or path in seen
+            or item["reason"]
+            not in {
+                "binary",
+                "exceeds_file_limit",
+                "unconvertible_document",
+                "conversion_exceeds_file_limit",
+            }
+        ):
+            raise MaterializationError("Materialized skipped document is not a frozen member")
+        if (item["reason"] == "exceeds_file_limit") != (expected[path].size > _MAX_FILE_BYTES):
+            raise MaterializationError("Materialized document skip reason is inconsistent")
+        seen.add(path)
+    if seen != expected.keys():
+        raise MaterializationError("Materialized document selection is incomplete")
 
 
 def _document_relative(content: ProjectDocumentContent) -> str | None:

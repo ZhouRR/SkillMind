@@ -53,4 +53,16 @@ curl -b "$COOKIE_JAR" -i -X POST "$BASE/api/v1/projects/${PROJECT_ID}/task-runs"
 - `POST /skills/parse` と Organization 作用域の `/skill-imports` は ADMIN 専用。deterministic parser はモデル呼び出しも script 実行も行わない。
 - Skill 管理は ADMIN、Run/Evaluation は該当 Project の ACTIVE member（ADMIN は組織内 bypass）が実行できる。
 
-文書 sources の新しい選択/快照は工作副本で联调中であり、現状の公開型だけで全挙動を保証できない。とくに全集の変更・削除後の idempotent replay は[資源設計の未完了事項](../design/resource-snapshots.md#创建重放与调度)を確認する。同じ依頼の再送には同じ key、入力を変えた新規実行には新しい key を使用し、異常回避のために監査 snapshot を変更しない。
+上記は現在の response 規約であり、配備先での動作確認とは分ける。工作副本は現在の認証/Project 授権後、task の公開状態や資源を再解決する前に元の作成要求を照会する。版の無効化や文書変更後も、原 actor と同じ意図なら既存記録の確認へ進めるが、未知形式や証明できない旧要求は `409 idempotency_conflict` になる。新規作成と runtime の資源検証は緩めない。詳細と未検証範囲は[Run 作成](../design/run-creation.md)を参照する。
+
+応答が失われたときは同じ内容と key を保持する。上例の `example-request-001` は説明用であり、新しい実行へ使い回さない。復旧のためだけに自動で新しい key を生成すると、実際には作成済みの Run と重複する可能性がある。
+
+現行 Web はページ内の原要求確認で同じ内容/key を再送し、新規実行は明示確認後に別 key を発行する。refresh・離頁・actor/Project 切替で原要求の memory は失われるため、権限内の Run 履歴/detail で確認する。CSRF 更新と actor 変更を同一視しない。HTTP timeout は Run 取消ではない。詳細は[界面の責任](../design/run-creation.md#提交结果未知时的界面责任)を参照する。
+
+## 文書を選び、元の範囲を確認する
+
+TaskCatalog の候補に基づき、sources に単一文書、集合、明示的な全集のいずれかを渡す。候補の先頭や Provider 名を同意の代わりに使わず、任意文書を使わない場合はその slot を省略する。必須未選択、無効 ID、2 件未満の集合、空または上限超過の全集は拒否される。正確な token と制約は[資源設計](../design/resource-snapshots.md#公开选择与读取投影的实施契约)、JSON は[契約と example の対応表](../../PJM/contracts/README.md#run-文書契約を読む)を参照する。
+
+作成済み Run の detail.document_snapshots は作成時の文書一覧を返す。FROZEN のみ検証済みメンバーを含み、歴史欠損と検証失敗は別状態で snapshot:null になる。履歴一覧の selected_sources は摘要のみで、内部 binding や全メンバーを含まない。文書一覧の存在は現在の download 可否や実行成功を保証しない。
+
+現在の Web は document_snapshots を必須として検証する。新 API が旧 Run を明示的な歴史状態で返す場合と、旧 API が field 自体を返せない場合を分ける。後者は契約エラーになり、空集合とは扱わない。配備側の版を確認し、片側だけの更新・回退は[版互換の手順](contract-workflow.md#历史数据兼容不等于前后端版本兼容)に従う。

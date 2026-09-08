@@ -1,9 +1,10 @@
-import { useCallback, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 
 import {
   changeScheduleStatus,
   createSchedule,
   previewSchedule,
+  type PublishedTaskRecord,
   type ScheduleDefinitionInput,
   type ScheduleKind,
   type ScheduleRecord,
@@ -11,10 +12,11 @@ import {
 } from '../api'
 import { useMessages } from '../i18n'
 import { formatLocalTimestamp } from '../lib/presentation'
-import type { TaskDraft } from '../lib/taskDraft'
+import { buildTaskDraft, defaultSourceProviders } from '../lib/taskDraft'
 import { ModalDialog } from './PageElements'
+import { TaskLaunchFields } from './TaskLaunchFields'
 
-/** 弹窗 form の下書き。時刻に関する部分だけを持ち、task 側の設定は Run 下書きから凍結する。 */
+/** 時間規則の草稿。タスク入力と資源選択は共通 TaskDraft に分離する。 */
 interface ScheduleDraft {
   name: string
   kind: ScheduleKind
@@ -34,6 +36,7 @@ function defaultTimezone(): string {
   }
 }
 
+/** 保存対象のない新しい時間草稿を作る。 */
 function emptyDraft(): ScheduleDraft {
   return {
     name: '',
@@ -46,19 +49,12 @@ function emptyDraft(): ScheduleDraft {
   }
 }
 
-/** 一つの task に定时执行を追加する弹窗。
- *
- * 凍結するのは呼び出し元が渡した Run 下書きそのもの。この弹窗が独自の task 設定 form を
- * 持たないのは、同じ意味の設定が二つの form に並存すると片方だけ直された状態が生まれ、
- * 実際に何が走るのか読めなくなるため（計画 §22 D4 は失効時に黙って別の来源へ切り替えない
- * ことを要求している）。
- */
-export function ScheduleDialog({ open, projectId, csrfToken, taskDraft, onClose, onSaved }: {
+/** 即時実行と同じ入力欄で配置を確認し、時間規則と一緒に保存する。内容凍結は各 Run 作成時。 */
+export function ScheduleDialog({ open, projectId, csrfToken, task, onClose, onSaved }: {
   open: boolean
   projectId: string
   csrfToken: string
-  /** 凍結対象。入力が JSON として読めない間は null で、その場合は保存させない。 */
-  taskDraft: TaskDraft | null
+  task: PublishedTaskRecord
   onClose: () => void
   onSaved: (schedule: ScheduleRecord) => void
 }) {
@@ -67,6 +63,11 @@ export function ScheduleDialog({ open, projectId, csrfToken, taskDraft, onClose,
   const [occurrences, setOccurrences] = useState<string[]>([])
   const [formError, setFormError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [inputText, setInputText] = useState('{}')
+  const [sourceProviders, setSourceProviders] = useState(() => defaultSourceProviders(task))
+  const saveController = useRef<AbortController | null>(null)
+  const previewController = useRef<AbortController | null>(null)
+  const taskDraft = buildTaskDraft(task, inputText, sourceProviders)
 
   const definition = useCallback((): ScheduleDefinitionInput => ({
     kind: draft.kind,
@@ -77,20 +78,44 @@ export function ScheduleDialog({ open, projectId, csrfToken, taskDraft, onClose,
     max_runs: draft.maxRuns ? Number(draft.maxRuns) : null,
   }), [draft])
 
+  useEffect(() => () => {
+    saveController.current?.abort()
+    previewController.current?.abort()
+  }, [])
+
+  // 編集前の時間候補を現在の配置の確認結果として見せない。
+  useEffect(() => {
+    previewController.current?.abort()
+    setOccurrences([])
+  }, [definition])
+
   /** 保存前に次回発火時刻を確認する。不正な定義はここで Problem として返る。 */
   async function handlePreview(): Promise<void> {
+    previewController.current?.abort()
+    const controller = new AbortController()
+    previewController.current = controller
     setFormError(null)
     try {
-      setOccurrences(await previewSchedule(projectId, definition(), csrfToken))
+      const preview = await previewSchedule(projectId, definition(), csrfToken, controller.signal)
+      if (!controller.signal.aborted) setOccurrences(preview)
     } catch (error: unknown) {
-      setOccurrences([])
-      setFormError(errorMessage(error))
+      if (!controller.signal.aborted) {
+        setOccurrences([])
+        setFormError(errorMessage(error))
+      }
     }
   }
 
+  /** 送信内容を一度固定し、二重クリックと画面破棄後の応答を無効にする。 */
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
-    if (!taskDraft) return
+    if (saveController.current) return
+    if (!taskDraft) {
+      setFormError(messages.workspace.documentSelection.incompleteDraft)
+      return
+    }
+    const controller = new AbortController()
+    saveController.current = controller
     setFormError(null)
     setSubmitting(true)
     try {
@@ -105,29 +130,39 @@ export function ScheduleDialog({ open, projectId, csrfToken, taskDraft, onClose,
           sources: taskDraft.sources,
         },
         csrfToken,
+        controller.signal,
       )
-      setDraft(emptyDraft())
-      setOccurrences([])
-      onSaved(saved)
+      if (!controller.signal.aborted) onSaved(saved)
     } catch (error: unknown) {
-      setFormError(errorMessage(error))
+      if (!controller.signal.aborted) setFormError(errorMessage(error))
     } finally {
-      setSubmitting(false)
+      if (!controller.signal.aborted) {
+        saveController.current = null
+        setSubmitting(false)
+      }
     }
   }
 
   return (
-    <ModalDialog open={open} title={messages.schedules.create} onClose={onClose}>
+    <ModalDialog open={open} title={messages.schedules.create} wide onClose={onClose}>
       <form className="runForm" onSubmit={(event) => void handleSubmit(event)}>
-        {/* 何を凍結するのかを先に見せる。調度は保存時点の設定を固定し、後から差し替えない。 */}
+        {/* 保存するのは精確版・入力・選択規則。全集の内容は各 occurrence の Run 作成で固定する。 */}
         <p className="hint">
-          {taskDraft ? messages.schedules.frozenTask(taskDraft.taskTitle) : messages.schedules.noTaskDraft}
+          {messages.schedules.frozenTask(task.title)}
         </p>
+        <fieldset disabled={submitting} className="scheduleConfiguration">
+        <TaskLaunchFields
+          task={task}
+          inputText={inputText}
+          sourceProviders={sourceProviders}
+          onInputTextChange={setInputText}
+          onSourceChange={(key, value) => setSourceProviders((current) => ({ ...current, [key]: value }))}
+        />
         <label>{messages.schedules.nameLabel}
           <input
             maxLength={200}
             onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-            placeholder={taskDraft?.taskTitle ?? ''}
+            placeholder={task.title}
             type="text"
             value={draft.name}
           />
@@ -197,6 +232,7 @@ export function ScheduleDialog({ open, projectId, csrfToken, taskDraft, onClose,
           </>
         )}
         <p className="hint">{messages.schedules.overlapHint}</p>
+        </fieldset>
         {formError && <p className="error" role="alert">{formError}</p>}
         <button className="primaryButton" disabled={submitting || !taskDraft} type="submit">
           {submitting ? messages.schedules.saving : messages.schedules.save}

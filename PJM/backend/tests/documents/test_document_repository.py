@@ -8,7 +8,8 @@ from uuid import uuid4
 import pytest
 
 from projectmind.db.models import ProjectDocument
-from projectmind.documents import DocumentNotFoundError, DocumentRepository
+from projectmind.documents.domain import DocumentNotFoundError
+from projectmind.documents.repository import DocumentRepository
 
 
 class _GetSession:

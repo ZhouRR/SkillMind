@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from typing import Any
 from uuid import UUID
 
@@ -21,6 +22,7 @@ from projectmind.projects.domain import ProjectNotFoundError, ProjectStatus
 from projectmind.projects.repository import ProjectRepository
 from projectmind.runs.domain import (
     TERMINAL_RUN_STATUSES,
+    CreatedRun,
     IdempotencyConflictError,
     RunNotFoundError,
     TaskSourceSelectionError,
@@ -84,9 +86,7 @@ class ScheduleService:
 
     # ------------------------------------------------------------------ 読み取り
 
-    async def list_schedules(
-        self, *, project_id: UUID, limit: int, offset: int
-    ) -> SchedulePage:
+    async def list_schedules(self, *, project_id: UUID, limit: int, offset: int) -> SchedulePage:
         """Project 内 schedule を列挙する。"""
 
         async with self._session_factory() as session:
@@ -241,9 +241,7 @@ class ScheduleService:
             results.append(await self._fire(claimed))
         return ScheduleTickReport(results=tuple(results))
 
-    async def _claim(
-        self, record: ScheduleRecord, *, now: datetime
-    ) -> ClaimedSchedule | None:
+    async def _claim(self, record: ScheduleRecord, *, now: datetime) -> ClaimedSchedule | None:
         """`next_run_at` の CAS で一件を獲得し、同時に次回候補へ進める (§22 D6/D7)。"""
 
         occurrence = record.next_run_at
@@ -311,8 +309,35 @@ class ScheduleService:
         actor = await self._authorize_creator(claimed)
         if actor is None:
             return _failed(claimed, "Schedule owner no longer has access to this project")
+        idempotency_key = schedule_idempotency_key(
+            schedule_id=claimed.schedule_id, occurrence_at=claimed.occurrence_at
+        )
+        find_replay = partial(
+            self._run_service.find_task_run_replay,
+            project_id=claimed.project_id,
+            skill_version_id=claimed.skill_version_id,
+            task_key=claimed.task_key,
+            input_json=claimed.input_json,
+            sources=claimed.sources,
+            actor_id=actor.user_id,
+            idempotency_key=idempotency_key,
+        )
+        try:
+            replay = await find_replay()
+        except (TaskSourceSelectionError, IdempotencyConflictError) as error:
+            return _failed(claimed, str(error))
+        if replay is not None:
+            # 自分が既に作った Run は「他の実行との重複」ではない。現在の version や
+            # resource を再解決せず元の occurrence の結果へ収斂させる。
+            return _created_run_result(claimed, replay)
         overlap = await self._overlapping_run(claimed)
         if overlap is not None:
+            try:
+                replay = await find_replay()
+            except (TaskSourceSelectionError, IdempotencyConflictError) as error:
+                return _failed(claimed, str(error))
+            if replay is not None:
+                return _created_run_result(claimed, replay)
             return ScheduleTriggerResult(
                 schedule_id=claimed.schedule_id,
                 occurrence_at=claimed.occurrence_at,
@@ -327,36 +352,32 @@ class ScheduleService:
                 input_json=claimed.input_json,
             )
         except (PublishedTaskNotFoundError, TaskInputInvalidError) as error:
-            return _failed(claimed, str(error))
+            try:
+                replay = await find_replay()
+            except (TaskSourceSelectionError, IdempotencyConflictError) as replay_error:
+                return _failed(claimed, str(replay_error))
+            return (
+                _created_run_result(claimed, replay)
+                if replay is not None
+                else _failed(claimed, str(error))
+            )
         try:
             run = await self._run_service.create_task_run(
                 project_id=claimed.project_id,
                 resolved=resolved,
                 input_json=claimed.input_json,
                 sources=claimed.sources,
-                idempotency_key=schedule_idempotency_key(
-                    schedule_id=claimed.schedule_id,
-                    occurrence_at=claimed.occurrence_at,
-                ),
+                idempotency_key=idempotency_key,
                 trace_id=None,
                 actor_id=actor.user_id,
                 actor_system_role=actor.system_role,
-                project_membership=(
-                    "ADMIN_BYPASS" if actor.system_role == "ADMIN" else "ACTIVE"
-                ),
+                project_membership=("ADMIN_BYPASS" if actor.system_role == "ADMIN" else "ACTIVE"),
             )
         except (TaskSourceSelectionError, IdempotencyConflictError) as error:
             return _failed(claimed, str(error))
-        return ScheduleTriggerResult(
-            schedule_id=claimed.schedule_id,
-            occurrence_at=claimed.occurrence_at,
-            outcome=ScheduleOutcome.RUN_CREATED,
-            run_id=run.run_id,
-        )
+        return _created_run_result(claimed, run)
 
-    async def _authorize_creator(
-        self, claimed: ClaimedSchedule
-    ) -> AuthenticatedActor | None:
+    async def _authorize_creator(self, claimed: ClaimedSchedule) -> AuthenticatedActor | None:
         """作成者が今も ACTIVE で、その Project へ到達できるかを再判定する (§22 D8)。"""
 
         async with self._session_factory() as session:
@@ -511,9 +532,7 @@ def plan_occurrence(
     return OccurrencePlan(next_run_at=following, missed=missed, exhausted=exhausted)
 
 
-def _occurrences(
-    definition: ScheduleDefinition, *, after: datetime, count: int
-) -> list[datetime]:
+def _occurrences(definition: ScheduleDefinition, *, after: datetime, count: int) -> list[datetime]:
     """定義が生む発火時刻を最大 `count` 件、`end_at` で打ち切って返す。"""
 
     if definition.kind is ScheduleKind.ONCE:
@@ -544,18 +563,14 @@ def _first_occurrence(definition: ScheduleDefinition) -> datetime:
     return occurrences[0]
 
 
-def _next_from_definition(
-    definition: ScheduleDefinition, *, after: datetime
-) -> datetime | None:
+def _next_from_definition(definition: ScheduleDefinition, *, after: datetime) -> datetime | None:
     """次の発火時刻。尽きていれば None。"""
 
     occurrences = _occurrences(definition, after=after, count=1)
     return occurrences[0] if occurrences else None
 
 
-def _count_missed(
-    definition: ScheduleDefinition, *, start: datetime, until: datetime
-) -> int:
+def _count_missed(definition: ScheduleDefinition, *, start: datetime, until: datetime) -> int:
     """`start` の次から `until` までに過ぎた発火回数を数える (§22 D6 の記録用)。
 
     追いかけないと決めた回数そのものなので、監査のために残す。数え上げも有界にする。
@@ -567,9 +582,7 @@ def _count_missed(
     missed = 0
     cursor = start
     while missed < 1000:
-        upcoming = next_occurrence(
-            expression, after=cursor, timezone=definition.timezone
-        )
+        upcoming = next_occurrence(expression, after=cursor, timezone=definition.timezone)
         if upcoming is None or upcoming > until:
             return missed
         missed += 1
@@ -590,9 +603,7 @@ def _definition_of(record: ScheduleRecord) -> ScheduleDefinition:
     )
 
 
-def _status_after(
-    result: ScheduleTriggerResult, *, exhausted: bool
-) -> ScheduleStatus | None:
+def _status_after(result: ScheduleTriggerResult, *, exhausted: bool) -> ScheduleStatus | None:
     """発火結果から次の status を決める。変えるべきでないときは None。"""
 
     if result.outcome is ScheduleOutcome.FAILED_PRECONDITION:
@@ -600,6 +611,17 @@ def _status_after(
     if exhausted:
         return ScheduleStatus.COMPLETED
     return None
+
+
+def _created_run_result(claimed: ClaimedSchedule, run: CreatedRun) -> ScheduleTriggerResult:
+    """初回作成と再送を同じ occurrence/Run 関連へ投影する。"""
+
+    return ScheduleTriggerResult(
+        schedule_id=claimed.schedule_id,
+        occurrence_at=claimed.occurrence_at,
+        outcome=ScheduleOutcome.RUN_CREATED,
+        run_id=run.run_id,
+    )
 
 
 def _failed(claimed: ClaimedSchedule, detail: str) -> ScheduleTriggerResult:

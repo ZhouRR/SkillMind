@@ -384,9 +384,11 @@ function renderPage(
     case 'resources':
       return <ResourcesPage csrfToken={session.csrf_token} projectId={projectId} />
     case 'tasks':
-      return <TasksPage csrfToken={session.csrf_token} moduleId={activeModuleId} projectId={projectId} />
+      return <TasksPage key={`${session.user.user_id}:${projectId}`} csrfToken={session.csrf_token} moduleId={activeModuleId} projectId={projectId} />
     case 'workspace':
       return <WorkspacePage
+        key={`${session.user.user_id}:${projectId}`}
+        actorId={session.user.user_id}
         csrfToken={session.csrf_token}
         initialRunId={initialRunId}
         initialTaskId={initialTaskId}

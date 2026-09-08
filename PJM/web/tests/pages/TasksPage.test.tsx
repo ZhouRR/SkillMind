@@ -130,13 +130,13 @@ describe('TasksPage', () => {
     expect(html).toContain('请先在左侧选择一个项目')
   })
 
-  it('keeps the schedule dialog mounted so its content stays in the markup', () => {
-    // 弹窗は常挂載 + hidden。条件描画にすると静的 markup から消え、文言の回帰を検出できない。
+  it('does not retain task configuration before a target is selected', () => {
+    // task/Project の切替に草稿を持ち越さない。表面の三語は DocumentSources で実 task を渡して守る。
     const html = renderToStaticMarkup(
       <TasksPage csrfToken={'s'.repeat(32)} moduleId="" projectId="00000000-0000-4000-8000-000000000020" />,
     )
 
-    expect(html).toContain('hidden')
-    expect(html).toContain('周期规则')
+    expect(html).not.toContain('modalOverlay')
+    expect(html).not.toContain('scheduleConfiguration')
   })
 })

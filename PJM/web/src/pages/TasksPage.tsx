@@ -13,7 +13,7 @@ import { ScheduleDialog, ScheduleStatusActions, summarizeTiming } from '../compo
 import { useMessages } from '../i18n'
 import { formatLocalTimestamp } from '../lib/presentation'
 import { routeHref } from '../lib/routing'
-import { buildTaskDraft, filterTasksByModule, sourceRequirements, taskCatalogId, type TaskDraft } from '../lib/taskDraft'
+import { filterTasksByModule, sourceRequirements, taskCatalogId } from '../lib/taskDraft'
 
 /** 一覧に要る取得結果。上次执行は task descriptor に同梱されて返る。 */
 interface TaskCenterState {
@@ -41,7 +41,7 @@ export function TasksPage({ projectId, csrfToken, moduleId }: {
   const [state, setState] = useState<LoadState>({ status: 'loading' })
   const [modules, setModules] = useState<ProjectModuleRecord[]>([])
   const [revision, setRevision] = useState(0)
-  const [scheduleFor, setScheduleFor] = useState<TaskDraft | null>(null)
+  const [scheduleFor, setScheduleFor] = useState<PublishedTaskRecord | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const controller = useRef<AbortController | null>(null)
 
@@ -119,7 +119,7 @@ export function TasksPage({ projectId, csrfToken, moduleId }: {
               <TaskCard
                 csrfToken={csrfToken}
                 key={taskCatalogId(row.task)}
-                onSchedule={() => setScheduleFor(defaultDraft(row.task))}
+                onSchedule={() => setScheduleFor(row.task)}
                 onScheduleChanged={() => setRevision((current) => current + 1)}
                 onScheduleError={setActionError}
                 projectId={projectId}
@@ -131,14 +131,15 @@ export function TasksPage({ projectId, csrfToken, moduleId }: {
       </section>
       {/* 定时执行は task に属する設定なので、設定入口も一覧の行に置く。工作空间の左 rail に
           置いていたときは「今の下書き」に紐づいていて、どの task の予定なのかが読めなかった。 */}
-      <ScheduleDialog
+      {scheduleFor !== null && <ScheduleDialog
+        key={`${projectId}:${taskCatalogId(scheduleFor)}`}
         csrfToken={csrfToken}
         onClose={() => setScheduleFor(null)}
         onSaved={() => { setScheduleFor(null); setRevision((current) => current + 1) }}
-        open={scheduleFor !== null}
+        open
         projectId={projectId}
-        taskDraft={scheduleFor}
-      />
+        task={scheduleFor}
+      />}
     </>
   )
 }
@@ -264,14 +265,4 @@ function TaskCard({ row, projectId, csrfToken, onSchedule, onScheduleChanged, on
       )}
     </li>
   )
-}
-
-/** 定时を組む前の既定下書き。必須資源は候補が一つだけなら自動で選ぶ。 */
-function defaultDraft(task: PublishedTaskRecord): TaskDraft | null {
-  const sources: Record<string, string> = {}
-  for (const requirement of sourceRequirements(task)) {
-    const preferred = requirement.options[0]
-    if (requirement.required && preferred) sources[requirement.key] = preferred.value
-  }
-  return buildTaskDraft(task, '{}', sources)
 }

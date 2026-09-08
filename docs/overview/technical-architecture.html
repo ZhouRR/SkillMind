@@ -637,7 +637,7 @@
               <div class="chain-node">claude CLI 子进程</div>
             </div>
             <div class="component-grid">
-              <div class="component"><strong>AgentTaskBrief + Loop</strong><small>完整 Skill guidance、目标与资源;SUPERVISED 自主规划、流式事件与预算限制</small></div>
+              <div class="component"><strong>AgentTaskBrief + Loop</strong><small>完整 Skill guidance、目标与资源；自主规划、流式事件与局部限额；共享预算见设计</small></div>
               <div class="component"><strong>Tool & Effect Gateway</strong><small>observe/propose/apply、精确批准、幂等/CAS、read-back Evidence 与审计</small></div>
               <div class="component"><strong>Session Continuation</strong><small>会话全文与 checkpoint 落库,顺序支持 resume/fork/replace</small></div>
               <div class="component"><strong>Workspace</strong><small>资源物化、read/search/write 已实现；input 只读，写入限 workspace/output</small></div>
@@ -746,7 +746,7 @@
               <span class="message"><code>execute(context)</code> → SDK 会话启动</span>
               <span class="actor target">AgentEngine · SDK</span>
             </div>
-            <p class="event-detail">Worker 准备资源并冻结本 Segment 的 AgentTaskBrief，再构造 RunContext。业务层只依赖 AgentEngine；Agent 收到完整 guidance 与权限边界，活动超时由 Worker 强制。</p>
+            <p class="event-detail">Worker 构建含资源与 Brief 的 RunContext，冻结本 Segment 的 Brief 后启动模型流。业务层只依赖 AgentEngine；当前 engine deadline 从准备完成后开始，共享预算见 <a href="../design/run-budgets.md">预算设计</a>。</p>
           </li>
         </ol>
 

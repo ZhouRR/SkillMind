@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Self
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
 
+from projectmind.documents.repository import DocumentRepository
+from projectmind.documents.snapshot import ALL_DOCUMENTS_SELECTION, DOCUMENT_READ_CAPABILITY
 from projectmind.integrations.repository import IntegrationRepository
+from projectmind.runs.creation_request import TaskRunIntent
 from projectmind.runs.domain import (
     CreatedRun,
     CreateRunCommand,
@@ -19,6 +24,8 @@ from projectmind.runs.domain import (
 from projectmind.runs.repository import RunRepository
 from projectmind.runs.service import M0_DENIED_BUILTIN_TOOLS, RunService, _resolve_selected_sources
 from projectmind.skills import ResolvedTaskRun
+from tests.documents.fakes import document_content, stored_document
+from tests.runs.creation_fakes import creation_command, creation_intent, stored_creation
 
 
 def _resolved(
@@ -88,9 +95,7 @@ class _NoConfiguredBindings:
         return None
 
 
-async def _no_configured_binding(
-    self: IntegrationRepository, **kwargs: object
-) -> None:
+async def _no_configured_binding(self: IntegrationRepository, **kwargs: object) -> None:
     """Legacy test では持続 ResourceBinding を解決しない。"""
 
     del self, kwargs
@@ -225,6 +230,7 @@ async def test_create_task_run_freezes_generic_snapshot() -> None:
     project_id = uuid4()
     actor_id = uuid4()
     with (
+        patch.object(RunRepository, "find_task_run_replay", new=AsyncMock(return_value=None)),
         patch.object(RunRepository, "create_idempotent", new=_fake_create),
         patch.object(
             IntegrationRepository,
@@ -285,6 +291,7 @@ async def test_create_task_run_rejects_invalid_source_before_persistence() -> No
     """Source 選択が不正なら永続化前に拒否する。"""
 
     with (
+        patch.object(RunRepository, "find_task_run_replay", new=AsyncMock(return_value=None)),
         patch.object(RunRepository, "create_idempotent") as create,
         patch.object(
             IntegrationRepository,
@@ -303,3 +310,157 @@ async def test_create_task_run_rejects_invalid_source_before_persistence() -> No
             actor_id=uuid4(),
         )
     create.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["ALL", "SINGLE", "SET"])
+async def test_document_create_replay_keeps_original_members_without_reading_live_sources(
+    mode: str,
+) -> None:
+    """初回は実 resolver で凍結し、変更/削除後の再送では現在の文書に到達しない。"""
+
+    resolved = _resolved(
+        (
+            {
+                "key": "docs",
+                "kind": "document",
+                "required": True,
+                "access": "read",
+                "capabilities": [DOCUMENT_READ_CAPABILITY],
+            },
+        )
+    )
+    project_id, actor_id = uuid4(), uuid4()
+    documents = [
+        stored_document(project_id, document_content(name="first.md")),
+        stored_document(project_id, document_content(name="second.md")),
+    ]
+    first_id, second_id = (item.document_id for item in documents)
+    token = (
+        ALL_DOCUMENTS_SELECTION
+        if mode == "ALL"
+        else f"document:{first_id}"
+        if mode == "SINGLE"
+        else f"documents:{second_id},{first_id}"
+    )
+    captured: list[CreateRunCommand] = []
+
+    async def create(self: RunRepository, command: CreateRunCommand) -> CreatedRun:
+        """実 resolver が生成した command を初回 commit の事実として保存する。"""
+
+        captured.append(command)
+        return self._to_created_run(stored_creation(command), idempotent_replay=False)
+
+    async def get_document(self: DocumentRepository, *, project_id: object, document_id: object):
+        """選ばれた ID の metadata だけを fixture から返す。"""
+
+        del self
+        return next(
+            item
+            for item in documents
+            if item.project_id == project_id and item.document_id == document_id
+        )
+
+    service = RunService(_Session)  # type: ignore[arg-type]
+    with (
+        patch.object(RunRepository, "_load_by_idempotency", new=AsyncMock(return_value=None)),
+        patch.object(RunRepository, "create_idempotent", new=create),
+        patch.object(DocumentRepository, "list_for_project", new=AsyncMock(return_value=documents)),
+        patch.object(DocumentRepository, "get", new=get_document),
+    ):
+        first = await service.create_task_run(
+            project_id=project_id,
+            resolved=resolved,
+            input_json={},
+            sources={"docs": token},
+            actor_id=actor_id,
+            idempotency_key="one-request",
+            trace_id="first",
+        )
+    row = stored_creation(captured[0])
+    row.id = first.run_id
+    row.status = RunStatus.SUCCEEDED.value
+    row.row_version = 7
+    before = deepcopy(row.selected_sources_json)
+    if mode == "SET":
+        token = f"documents:{first_id},{second_id}"
+    with (
+        patch.object(RunRepository, "_load_by_idempotency", new=AsyncMock(return_value=row)),
+        patch(
+            "projectmind.runs.service._resolve_selected_sources",
+            new=AsyncMock(side_effect=AssertionError("live resources must not be read")),
+        ) as resolve,
+        patch.object(RunRepository, "create_idempotent", new=AsyncMock()) as insert,
+    ):
+        replay = await service.create_task_run(
+            project_id=project_id,
+            resolved=resolved,
+            input_json={},
+            sources={"docs": token},
+            actor_id=actor_id,
+            idempotency_key="one-request",
+            trace_id="retry",
+        )
+    assert replay.run_id == first.run_id
+    assert replay.status is RunStatus.SUCCEEDED
+    assert replay.row_version == 7
+    assert replay.idempotent_replay is True
+    assert row.selected_sources_json == before
+    snapshot = before["docs"]["document_snapshot"]
+    assert snapshot["selection_mode"] == mode
+    assert len(snapshot["documents"]) == (1 if mode == "SINGLE" else 2)
+    resolve.assert_not_awaited()
+    insert.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resource_resolution_failure_rechecks_a_concurrent_committed_winner() -> None:
+    """解析中の資源失効だけを見て、既に commit した同一要求を失敗扱いしない。"""
+
+    resolved = _resolved()
+    intent = replace(
+        creation_intent(), skill_version_id=resolved.skill_version_id, task_key=resolved.task_key
+    )
+    row = stored_creation(creation_command(intent))
+    with (
+        patch.object(
+            RunRepository, "_load_by_idempotency", new=AsyncMock(side_effect=[None, row])
+        ) as lookup,
+        patch(
+            "projectmind.runs.service._resolve_selected_sources",
+            new=AsyncMock(side_effect=TaskSourceSelectionError("Document was removed")),
+        ),
+        patch.object(RunRepository, "create_idempotent", new=AsyncMock()) as insert,
+    ):
+        replay = await RunService(_Session).create_task_run(  # type: ignore[arg-type]
+            project_id=intent.project_id,
+            resolved=resolved,
+            input_json=intent.input_json,
+            sources=intent.sources,
+            actor_id=intent.actor_id,
+            idempotency_key=row.idempotency_key,
+            trace_id=None,
+        )
+    assert replay.run_id == row.id
+    assert replay.idempotent_replay is True
+    assert lookup.await_count == 2
+    insert.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_public_replay_entry_uses_the_same_repository_identity_check() -> None:
+    """API/調度の事前照会と create 内照会で別の同一性規則を作らない。"""
+
+    intent: TaskRunIntent = creation_intent()
+    row = stored_creation(creation_command(intent))
+    with patch.object(RunRepository, "_load_by_idempotency", new=AsyncMock(return_value=row)):
+        replay = await RunService(_Session).find_task_run_replay(  # type: ignore[arg-type]
+            project_id=intent.project_id,
+            skill_version_id=intent.skill_version_id,
+            task_key=intent.task_key,
+            input_json=intent.input_json,
+            sources=intent.sources,
+            actor_id=intent.actor_id,
+            idempotency_key=row.idempotency_key,
+        )
+    assert replay is not None and replay.run_id == row.id

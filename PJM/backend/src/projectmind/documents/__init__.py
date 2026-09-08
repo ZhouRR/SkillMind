@@ -1,4 +1,6 @@
-"""Project 文書の metadata 永続化と object storage 連携を提供する。"""
+"""Project 文書の純粋な型を公開し、規則の import で DB/service を初期化しない。"""
+
+from __future__ import annotations
 
 from projectmind.documents.domain import (
     DocumentConflictError,
@@ -6,26 +8,10 @@ from projectmind.documents.domain import (
     StoredDocument,
     UploadDocumentCommand,
 )
-from projectmind.documents.repository import DocumentRepository
-from projectmind.documents.service import DocumentService
-from projectmind.documents.source import (
-    DatabaseProjectDocumentInventory,
-    DatabaseProjectDocumentSource,
-    ProjectDocumentContent,
-    ProjectDocumentInventory,
-    ProjectDocumentSource,
-)
 
 __all__ = [
-    "DatabaseProjectDocumentInventory",
-    "DatabaseProjectDocumentSource",
     "DocumentConflictError",
     "DocumentNotFoundError",
-    "DocumentRepository",
-    "DocumentService",
-    "ProjectDocumentContent",
-    "ProjectDocumentInventory",
-    "ProjectDocumentSource",
     "StoredDocument",
     "UploadDocumentCommand",
 ]

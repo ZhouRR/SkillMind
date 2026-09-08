@@ -48,14 +48,20 @@ class DocumentParsingTests(unittest.TestCase):
         """見出しの無い文書と複数の主題を黙って索引化しない。"""
 
         for source in ("## No title\n", "# One\n\n# Two\n"):
-            with self.subTest(source=source), self.assertRaisesRegex(ValueError, "one H1"):
+            with (
+                self.subTest(source=source),
+                self.assertRaisesRegex(ValueError, "one H1"),
+            ):
                 self.document(source)
 
     def test_unclosed_fence_is_rejected_even_when_empty(self) -> None:
         """末尾の閉じ忘れによる本文のコード化を検知する。"""
 
         for source in ("# Page\n\n```", "# Page\n\n```json\n{}\n"):
-            with self.subTest(source=source), self.assertRaisesRegex(ValueError, "unclosed fence"):
+            with (
+                self.subTest(source=source),
+                self.assertRaisesRegex(ValueError, "unclosed fence"),
+            ):
                 self.document(source)
 
     def test_skipped_heading_level_is_rejected(self) -> None:
@@ -77,14 +83,39 @@ class DocumentParsingTests(unittest.TestCase):
     def test_closed_fence_in_blockquote_is_supported(self) -> None:
         """引用内の正しいコードブロックを閉じ忘れと誤判定しない。"""
 
-        self.document("# Page\n\n> ```json\n> {}\n> ```\n")
+        for source in (
+            "# Page\n\n> ```json\n> {}\n> ```\n",
+            "# Page\n\n- ```text\n  example\n  ```\n",
+            "# Page\n\n> > ~~~text\n> > example\n> > ~~~~\n",
+            "# Page\n\n```\n```\n",
+        ):
+            with self.subTest(source=source):
+                self.document(source)
+
+    def test_implicit_fence_closure_is_rejected(self) -> None:
+        """EOF、引用の終端、不正 indent による暗黙の閉じを許可しない。"""
+
+        for source in (
+            "# Page\n\n> ```\n> content\n\noutside\n",
+            "# Page\n\n```\n    ```\n",
+            "# Page\n\n~~~~\ncontent\n~~~\n",
+            "# Page\n\n- ```\n  content\n\noutside\n",
+        ):
+            with (
+                self.subTest(source=source),
+                self.assertRaisesRegex(ValueError, "unclosed fence"),
+            ):
+                self.document(source)
 
     def test_missing_file_and_anchor_are_rejected(self) -> None:
         """存在する文書へリンクしても、無い章を見逃さない。"""
 
         document = self.document("# Page\n")
         anchors = {self.page: document.anchors}
-        for href, message in (("missing.md", "missing link"), ("#missing", "missing anchor")):
+        for href, message in (
+            ("missing.md", "missing link"),
+            ("#missing", "missing anchor"),
+        ):
             with self.subTest(href=href), self.assertRaisesRegex(ValueError, message):
                 build_docs.validate_link(self.page, href, anchors)
 
@@ -127,9 +158,62 @@ class DocumentParsingTests(unittest.TestCase):
         self.assertNotIn("<script>", html)
         self.assertIn("&lt;script&gt;", html)
 
+    def test_search_sections_target_the_actual_heading(self) -> None:
+        """長文の本文語とコード例を、その内容が属する章へ結び付ける。"""
+
+        document = self.document(
+            "# 文档\n\n前言\n\n## 冻结\n\n清单\n\n### 验证\n\n"
+            '```json\n{"document_snapshots": []}\n```\n\n#### 深层\n\n独立回执\n'
+        )
+        sections = build_docs.search_sections(document)
+        self.assertEqual([item["anchor"] for item in sections], ["文档", "冻结", "验证", "深层"])
+        self.assertIn("前言", sections[0]["text"])
+        self.assertNotIn("清单", sections[0]["text"])
+        self.assertEqual(sections[2]["title"], "验证")
+        self.assertIn('"document_snapshots"', sections[2]["text"])
+        self.assertNotIn("独立回执", sections[2]["text"])
+        self.assertTrue(sections[3]["text"].endswith("独立回执"))
+
+    def test_search_sections_preserve_duplicate_ids_and_empty_sections(self) -> None:
+        """重複見出しを再採番せず、本文が空でもタイトルから到達できる。"""
+
+        document = self.document("# Page\n\n## Result\n\n## Result\n\nsecond\n")
+        sections = build_docs.search_sections(document)
+        self.assertEqual([item["anchor"] for item in sections], ["page", "result", "result-1"])
+        self.assertEqual(sections[1]["text"], "## Result")
+        self.assertIn("second", sections[2]["text"])
+
+    def test_search_keeps_text_before_the_title(self) -> None:
+        """H1 より前の説明も本文検索から落とさず、主題へのリンクに含める。"""
+
+        document = self.document("前置说明\n\n# Page\n\n## Section\n\ncontent\n")
+        sections = build_docs.search_sections(document)
+        self.assertIn("前置说明", sections[0]["text"])
+        self.assertEqual(sections[0]["anchor"], "page")
+
 
 class DocumentationBuildTests(unittest.TestCase):
     """実文書からの build が安定し、公開範囲を広げないことを確認する。"""
+
+    def test_reading_order_contains_only_unique_existing_documents(self) -> None:
+        """文書の追加・移動で案内順に重複や存在しない入口を残さない。"""
+
+        priority = build_docs.FIRST_PAGES
+        paths = [path.relative_to(build_docs.ROOT).as_posix() for path in build_docs.source_paths()]
+        self.assertEqual(len(priority), len(set(priority)))
+        self.assertEqual(paths[: len(priority)], priority)
+        self.assertEqual(
+            priority[:4],
+            [
+                "docs/README.md",
+                "docs/overview/product.md",
+                "docs/overview/architecture.md",
+                "docs/overview/glossary.md",
+            ],
+        )
+        for relative in priority:
+            with self.subTest(document=relative):
+                self.assertTrue((build_docs.ROOT / relative).is_file())
 
     def test_build_is_deterministic_and_excludes_skill_source(self) -> None:
         """同じ文書から同じ成果物を作り、実行 Skill や設定を埋め込まない。"""
@@ -148,6 +232,9 @@ class DocumentationBuildTests(unittest.TestCase):
                 page["id"].startswith("docs/")
                 or Path(page["id"]).name in {"README.md", "AGENTS.md"}
             )
+            self.assertTrue(page["sections"])
+            for section in page["sections"]:
+                self.assertIn(f'id="{section["anchor"]}"', page["html"])
 
 
 if __name__ == "__main__":

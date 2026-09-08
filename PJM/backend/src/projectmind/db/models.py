@@ -674,6 +674,40 @@ class RunAttempt(IdentityMixin, TimestampMixin, Base):
     run: Mapped[Run] = relationship(back_populates="attempts")
 
 
+class RunInputSnapshot(IdentityMixin, Base):
+    """全 input の準備世代と、workspace から独立した file 検証回执を保持する。"""
+
+    __tablename__ = "run_input_snapshots"
+    __table_args__ = (
+        UniqueConstraint("run_id", name="uq_run_input_snapshots_run"),
+        CheckConstraint("status IN ('PREPARING', 'READY')", name="ck_run_input_snapshot_status"),
+        CheckConstraint(
+            "total_files >= 0 AND total_bytes >= 0", name="ck_run_input_snapshot_totals"
+        ),
+        CheckConstraint(
+            "(status = 'PREPARING' AND completed_at IS NULL AND tree_checksum IS NULL) OR "
+            "(status = 'READY' AND completed_at IS NOT NULL AND tree_checksum IS NOT NULL)",
+            name="ck_run_input_snapshot_completion",
+        ),
+    )
+
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="RESTRICT"), nullable=False)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False
+    )
+    prepared_by_attempt_id: Mapped[UUID] = mapped_column(
+        ForeignKey("run_attempts.id", ondelete="RESTRICT"), nullable=False
+    )
+    source_checksum: Mapped[str] = mapped_column(String(71), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    files_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    tree_checksum: Mapped[str | None] = mapped_column(String(71), nullable=True)
+    total_files: Mapped[int] = mapped_column(Integer, nullable=False)
+    total_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class RunEvent(IdentityMixin, Base):
     """SSE replay と監査に利用する Run 内で順序付けられた event。"""
 

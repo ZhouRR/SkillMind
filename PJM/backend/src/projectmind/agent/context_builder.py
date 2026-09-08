@@ -48,6 +48,11 @@ from projectmind.agent.workspace_provider import (
     WorkspaceWriteProvider,
 )
 from projectmind.core.hashing import canonical_json, sha256_hex
+from projectmind.documents.snapshot import (
+    DOCUMENT_PROVIDER,
+    DOCUMENT_READ_CAPABILITY,
+    selected_document_snapshots,
+)
 from projectmind.documents.source import ProjectDocumentSource
 from projectmind.effects.proposal import CHANGE_PROPOSE_CAPABILITY
 from projectmind.integrations.domain import ResourceBindingLevel, binding_checksum
@@ -159,7 +164,7 @@ def document_read_tool_definition(
         request_schema=contracts.load("tools/document.read/v1/request.schema.json"),
         response_schema=contracts.load("tools/document.read/v1/response.schema.json"),
         error_schema=contracts.load("tools/document.read/v1/error.schema.json"),
-        providers={"project": DocumentProvider(source)},
+        providers={DOCUMENT_PROVIDER: DocumentProvider(source)},
     )
 
 
@@ -408,6 +413,9 @@ class ProductionRunContextBuilder:
             allowed,
             execution_profile=execution_profile,
         )
+        document_snapshots = selected_document_snapshots(
+            claimed_run.selected_sources_json, project_id=claimed_run.project_id
+        )
 
         snapshot = claimed_run.limits_snapshot_json
         limits = RunLimits(
@@ -421,13 +429,17 @@ class ProductionRunContextBuilder:
         workspace = self._workspace_manager.initialize(claimed_run.run_id)
         materialized: tuple[MaterializedResource, ...] = ()
         if self._materializer is not None:
-            materialized = await self._materializer.materialize(
+            prepared_input = await self._materializer.materialize(
+                claimed_run=claimed_run,
                 workspace=workspace,
                 project_id=claimed_run.project_id,
                 run_id=claimed_run.run_id,
                 blueprint=blueprint,
                 repository_bindings=repository_bindings,
+                document_snapshots=document_snapshots,
             )
+            workspace = prepared_input.workspace
+            materialized = prepared_input.resources
         # Skill guidance は Brief を経由してのみ Agent へ届く。permission と Tool 解決を先に
         # 確定させてから組み立て、Brief が許可されていない能力を語らないようにする。
         brief = build_agent_task_brief(
@@ -548,9 +560,7 @@ def _resolve_source_tools(
     repository_bindings: dict[str, RepositoryBindingRef] = {}
     blueprint = manifest.get("capability_blueprint")
     requirements = (
-        _sequence(blueprint.get("resource_requirements"))
-        if isinstance(blueprint, Mapping)
-        else []
+        _sequence(blueprint.get("resource_requirements")) if isinstance(blueprint, Mapping) else []
     )
     for requirement in requirements:
         if not isinstance(requirement, Mapping):
@@ -575,15 +585,19 @@ def _resolve_source_tools(
                 integration_id=integration_id,
                 binding_id=binding_id,
             )
-        tools.append(
-            registry.resolve(
-                capability,
-                provider=provider,
-                integration_id=integration_id,
-                binding_id=binding_id,
-                execution_profile=execution_profile,
-            )
+        resolved = registry.resolve(
+            capability,
+            provider=provider,
+            integration_id=integration_id,
+            binding_id=binding_id,
+            execution_profile=execution_profile,
         )
+        if capability == DOCUMENT_READ_CAPABILITY and any(
+            tool.capability == capability for tool in tools
+        ):
+            # 複数の文書 slot は同じ Run 集合を読む。SDK 名を重複登録しない。
+            continue
+        tools.append(resolved)
     resolved_capabilities = {tool.capability for tool in tools}
     for tool_requirement in _sequence(manifest.get("tools")):
         if not isinstance(tool_requirement, Mapping):
@@ -657,6 +671,15 @@ def _selected_source(
     provider = value.get("provider")
     if not isinstance(provider, str):
         raise ValueError("Selected data source provider is invalid")
+    if requirement.get("kind") == "document":
+        if (
+            capability != DOCUMENT_READ_CAPABILITY
+            or provider != DOCUMENT_PROVIDER
+            or requirement.get("access", "read") != "read"
+        ):
+            raise ValueError("Selected document source is invalid")
+        selected_document_snapshots({requirement_key: value}, project_id=claimed_run.project_id)
+        return capability, provider, None, None
     raw_integration_id = value.get("integration_id")
     if raw_integration_id is None:
         accepted = frozenset(

@@ -14,6 +14,7 @@ from projectmind.effects.domain import (
     StoredChangeProposal,
     StoredEffectExecution,
 )
+from projectmind.runs.creation_request import CREATION_REQUEST_FIELD, TaskRunIntent
 
 
 class RunStatus(StrEnum):
@@ -179,6 +180,10 @@ class TaskSourceSelectionError(ValueError):
 
 class LeaseValidationError(RuntimeError):
     """RunAttempt lease が不正、期限切れ、または更新不能であることを表す。"""
+
+
+class RunCancellationRequestedError(RuntimeError):
+    """有効な Worker も、取消要求後は新しい実行内容を凍結できないことを表す。"""
 
 
 class InteractionConflictError(ValueError):
@@ -586,7 +591,21 @@ class RunTransition:
 
 
 def request_hash(command: CreateRunCommand) -> str:
-    """Security snapshot を含む command を正規化して SHA-256 hash を返す。"""
+    """新版の作成意図、または旧版の security snapshot 全体を識別する。"""
+
+    if CREATION_REQUEST_FIELD in command.task_snapshot_json:
+        intent = TaskRunIntent.from_json(command.task_snapshot_json[CREATION_REQUEST_FIELD])
+        if (
+            intent.project_id != command.project_id
+            or derive_task_id(skill_version_id=intent.skill_version_id, task_key=intent.task_key)
+            != command.task_id
+            or command.task_snapshot_json.get("skill_version_id") != str(intent.skill_version_id)
+            or command.task_snapshot_json.get("task_key") != intent.task_key
+            or command.permission_snapshot_json.get("actor_id") != str(intent.actor_id)
+            or canonical_json(command.input_json) != canonical_json(intent.input_json)
+        ):
+            raise ValueError("Creation request does not match its execution snapshot identity")
+        return intent.fingerprint()
 
     payload = {
         "project_id": str(command.project_id),

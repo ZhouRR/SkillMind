@@ -14,6 +14,9 @@ from projectmind.agent.domain import AgentEvent
 from projectmind.agent.subagent import SUBAGENT_DISPATCH_CAPABILITY
 from projectmind.agent.task_brief import resolve_execution_profile
 from projectmind.agent.tool_policy import DENIED_BUILTIN_TOOLS
+from projectmind.documents.binding import resolve_document_binding
+from projectmind.documents.repository import DocumentRepository
+from projectmind.documents.snapshot import DOCUMENT_READ_CAPABILITY, DocumentSnapshotError
 from projectmind.effects.domain import (
     ChangeProposalDraft,
     ChangeProposalExpiredError,
@@ -26,6 +29,7 @@ from projectmind.integrations.domain import (
     ResolvedRunBinding,
 )
 from projectmind.integrations.repository import IntegrationRepository
+from projectmind.runs.creation_request import CREATION_REQUEST_FIELD, TaskRunIntent
 from projectmind.runs.domain import (
     AgentSessionMetadata,
     CancelledRun,
@@ -98,35 +102,60 @@ class RunService:
         task_id = derive_task_id(
             skill_version_id=resolved.skill_version_id, task_key=resolved.task_key
         )
-        input_schema_json = deepcopy(resolved.input_schema)
-        output_schema_json = deepcopy(resolved.output_schema)
-        manifest = resolved.skill_snapshot.get("manifest")
-        if not isinstance(manifest, dict):
-            raise ValueError("Resolved task is missing its frozen RuntimeManifest")
-        blueprint = resolve_capability_blueprint(manifest)
-        if blueprint is None:
-            raise ValueError("Resolved task is missing its CapabilityBlueprint")
-        execution_profile = resolve_execution_profile(blueprint).profile.value
-        has_apply_intent = any(
-            isinstance(intent, dict) and intent.get("mode") == "apply"
-            for intent in blueprint.get("effect_intents", [])
+        intent = _task_run_intent(
+            project_id=project_id,
+            skill_version_id=resolved.skill_version_id,
+            task_key=resolved.task_key,
+            input_json=input_json,
+            sources=sources,
+            actor_id=actor_id,
         )
         async with self._session_factory() as session, session.begin():
             repository = RunRepository(session)
-            integration_repository = IntegrationRepository(session)
-            selected_sources, run_bindings = await _resolve_selected_sources(
-                resolved,
-                sources,
-                blueprint=blueprint,
-                project_id=project_id,
-                integration_repository=integration_repository,
+            replay = await repository.find_task_run_replay(
+                intent=intent, idempotency_key=idempotency_key
             )
+            if replay is not None:
+                return replay
+            input_schema_json = deepcopy(resolved.input_schema)
+            output_schema_json = deepcopy(resolved.output_schema)
+            manifest = resolved.skill_snapshot.get("manifest")
+            if not isinstance(manifest, dict):
+                raise ValueError("Resolved task is missing its frozen RuntimeManifest")
+            blueprint = resolve_capability_blueprint(manifest)
+            if blueprint is None:
+                raise ValueError("Resolved task is missing its CapabilityBlueprint")
+            execution_profile = resolve_execution_profile(blueprint).profile.value
+            has_apply_intent = any(
+                isinstance(effect, dict) and effect.get("mode") == "apply"
+                for effect in blueprint.get("effect_intents", [])
+            )
+            integration_repository = IntegrationRepository(session)
+            try:
+                selected_sources, run_bindings = await _resolve_selected_sources(
+                    resolved,
+                    intent.sources,
+                    blueprint=blueprint,
+                    project_id=project_id,
+                    integration_repository=integration_repository,
+                    document_repository=DocumentRepository(session),
+                )
+            except TaskSourceSelectionError:
+                # 解析中に同一要求の勝者が commit した場合、その凍結事実を返す。不存在なら
+                # 元の前提失効を保持し、現在の資源を代用して新しい Run を作らない。
+                replay = await repository.find_task_run_replay(
+                    intent=intent, idempotency_key=idempotency_key
+                )
+                if replay is not None:
+                    return replay
+                raise
             command = CreateRunCommand(
                 project_id=project_id,
                 task_id=task_id,
                 idempotency_key=idempotency_key,
-                input_json=input_json,
+                input_json=intent.input_json,
                 task_snapshot_json={
+                    CREATION_REQUEST_FIELD: intent.to_json(),
                     "task_id": str(task_id),
                     "task_key": resolved.task_key,
                     "capability": resolved.capability,
@@ -197,6 +226,32 @@ class RunService:
                 )
             return created
 
+    async def find_task_run_replay(
+        self,
+        *,
+        project_id: UUID,
+        skill_version_id: UUID,
+        task_key: str,
+        input_json: dict[str, Any],
+        sources: dict[str, str],
+        actor_id: UUID,
+        idempotency_key: str,
+    ) -> CreatedRun | None:
+        """API と調度が現在の Project 授権後に、元の要求を先に確認する共通入口。"""
+
+        intent = _task_run_intent(
+            project_id=project_id,
+            skill_version_id=skill_version_id,
+            task_key=task_key,
+            input_json=input_json,
+            sources=sources,
+            actor_id=actor_id,
+        )
+        async with self._session_factory() as session:
+            return await RunRepository(session).find_task_run_replay(
+                intent=intent, idempotency_key=idempotency_key
+            )
+
     async def validate_task_sources(
         self,
         *,
@@ -224,6 +279,7 @@ class RunService:
                 blueprint=blueprint,
                 project_id=project_id,
                 integration_repository=IntegrationRepository(session),
+                document_repository=DocumentRepository(session),
             )
 
     async def get_run(self, run_id: UUID) -> CreatedRun:
@@ -368,6 +424,12 @@ class RunService:
                 event,
                 session_metadata=session_metadata,
             )
+
+    async def verify_execution_start(self, claimed: ClaimedRun) -> bool:
+        """外部 I/O を含めず、現在の実行権と durable cancel の開始 gate を commit する。"""
+
+        async with self._session_factory() as session, session.begin():
+            return await RunRepository(session).verify_execution_start(claimed)
 
     async def freeze_agent_task_brief(
         self,
@@ -521,6 +583,30 @@ class RunService:
             )
 
 
+def _task_run_intent(
+    *,
+    project_id: UUID,
+    skill_version_id: UUID,
+    task_key: str,
+    input_json: dict[str, Any],
+    sources: dict[str, str],
+    actor_id: UUID,
+) -> TaskRunIntent:
+    """選択構文の失敗を公開 Problem へ変換できる domain error に統一する。"""
+
+    try:
+        return TaskRunIntent(
+            project_id=project_id,
+            skill_version_id=skill_version_id,
+            task_key=task_key,
+            input_json=input_json,
+            sources=sources,
+            actor_id=actor_id,
+        )
+    except ValueError as error:
+        raise TaskSourceSelectionError(str(error)) from error
+
+
 async def _resolve_selected_sources(
     resolved: ResolvedTaskRun,
     sources: dict[str, str],
@@ -528,6 +614,7 @@ async def _resolve_selected_sources(
     blueprint: dict[str, Any],
     project_id: UUID,
     integration_repository: IntegrationRepository,
+    document_repository: DocumentRepository | None = None,
 ) -> tuple[dict[str, Any], tuple[ResolvedRunBinding, ...]]:
     """三層 binding と Run override を解決し、provider/revision/scope を凍結準備する。
 
@@ -561,16 +648,29 @@ async def _resolve_selected_sources(
                 selected_token = f"integration:{configured.integration_id}"
         if selected_token is None:
             if required:
-                raise TaskSourceSelectionError(
-                    f"Required data source has no binding: {key}"
-                )
+                raise TaskSourceSelectionError(f"Required data source has no binding: {key}")
             continue
         declared = tuple(
-            item
-            for item in blueprint_requirement.get("capabilities", [])
-            if isinstance(item, str)
+            item for item in blueprint_requirement.get("capabilities", []) if isinstance(item, str)
         )
         access = str(blueprint_requirement.get("access") or "read")
+        if blueprint_requirement.get("kind") == "document":
+            if (
+                document_repository is None
+                or access != "read"
+                or DOCUMENT_READ_CAPABILITY not in declared
+            ):
+                raise TaskSourceSelectionError(f"Document read binding is not supported: {key}")
+            try:
+                selected[key] = await resolve_document_binding(
+                    document_repository,
+                    project_id=project_id,
+                    requirement_key=key,
+                    token=selected_token,
+                )
+            except DocumentSnapshotError as error:
+                raise TaskSourceSelectionError(str(error)) from error
+            continue
         # 要求が宣言した capability のうち access に対応するものが、この要求の観測 capability。
         observe_capability = _declared_capability(declared, access=access)
         if not selected_token.startswith("integration:"):
@@ -605,9 +705,7 @@ async def _resolve_selected_sources(
                 integration_id=integration_id,
             )
         except LookupError as error:
-            raise TaskSourceSelectionError(
-                f"Integration is not available for {key}"
-            ) from error
+            raise TaskSourceSelectionError(f"Integration is not available for {key}") from error
         if integration.status is not IntegrationStatus.ACTIVE:
             raise TaskSourceSelectionError(f"Integration is disabled for {key}")
         kind = str(blueprint_requirement.get("kind") or "")
@@ -622,18 +720,14 @@ async def _resolve_selected_sources(
             observe_capability=observe_capability,
         )
         if observe_capability is not None and observe_capability not in integration.capabilities:
-            raise TaskSourceSelectionError(
-                f"Integration lacks the observe capability for {key}"
-            )
+            raise TaskSourceSelectionError(f"Integration lacks the observe capability for {key}")
         scope = dict(configured.scope) if configured is not None else dict(integration.scope)
         if configured is not None and (
             configured.integration_id != integration.integration_id
             or configured.revision != str(integration.revision)
             or configured.capability_version != binding_capability
         ):
-            raise TaskSourceSelectionError(
-                f"Configured ResourceBinding is stale for {key}"
-            )
+            raise TaskSourceSelectionError(f"Configured ResourceBinding is stale for {key}")
         bindings.append(
             ResolvedRunBinding(
                 requirement_key=key,
@@ -653,9 +747,7 @@ async def _resolve_selected_sources(
             "scope": scope,
             "resource_kind": kind,
             "access": access,
-            "source_binding_id": (
-                str(configured.binding_id) if configured is not None else None
-            ),
+            "source_binding_id": (str(configured.binding_id) if configured is not None else None),
         }
     if provided:
         raise TaskSourceSelectionError(f"Unknown data source keys: {sorted(provided)}")
@@ -680,11 +772,7 @@ def _select_binding_capability(
         return sorted(candidates)[0]
     if observe_capability is not None and observe_capability in capabilities and access != "write":
         return observe_capability
-    fallback = [
-        item
-        for item in capabilities
-        if is_write_capability(item) == (access == "write")
-    ]
+    fallback = [item for item in capabilities if is_write_capability(item) == (access == "write")]
     if not fallback:
         raise TaskSourceSelectionError("Integration has no capability for required access")
     return sorted(fallback)[0]
@@ -700,9 +788,7 @@ def _declared_capability(capabilities: tuple[str, ...], *, access: str) -> str |
 
     wants_write = access == "write"
     matching = sorted(
-        capability
-        for capability in capabilities
-        if is_write_capability(capability) == wants_write
+        capability for capability in capabilities if is_write_capability(capability) == wants_write
     )
     return matching[0] if matching else None
 

@@ -21,6 +21,7 @@ function detail(result: RunDetailRecord['result']): RunDetailRecord {
     created_at: '2026-07-02T13:00:00Z',
     input: { ticket_id: 'fixture-001' },
     selected_sources: { issue_source: 'csv' },
+    document_snapshots: [],
     output_schema: {
       type: 'object',
       properties: {

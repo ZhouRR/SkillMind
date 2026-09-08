@@ -1,4 +1,5 @@
 import { API_BASE, hasStrings, isRecord, isStringArray, requestApiJson } from './http'
+import { isRunDocumentSnapshots, isRunSourceSummaries, type RunDocumentSnapshotRecord, type RunSourceSummaries } from './runResources'
 import {
   isChangeApproval,
   isChangeProposal,
@@ -218,7 +219,8 @@ export interface RunDetailRecord {
   row_version: number
   created_at: string
   input: Record<string, unknown>
-  selected_sources: Record<string, unknown>
+  selected_sources: RunSourceSummaries
+  document_snapshots: RunDocumentSnapshotRecord[]
   output_schema: Record<string, unknown> | null
   output_schema_checksum: string | null
   result: RunResultDetail | null
@@ -250,7 +252,7 @@ export interface RunHistoryItemRecord {
   started_at: string | null
   finished_at: string | null
   input: Record<string, unknown>
-  selected_sources: Record<string, unknown>
+  selected_sources: RunSourceSummaries
   result_summary: string | null
   result_confidence: number | null
   result_needs_review: boolean | null
@@ -431,7 +433,8 @@ function parseRunDetail(value: unknown): RunDetailRecord {
     || !RUN_STATUSES.has(value.status as string)
     || !Number.isInteger(value.row_version)
     || !isRecord(value.input)
-    || !isRecord(value.selected_sources)
+    || !isRunSourceSummaries(value.selected_sources)
+    || !isRunDocumentSnapshots(value.document_snapshots, value.project_id as string, value.selected_sources)
     || !(isRecord(value.output_schema) || value.output_schema === null)
     || !(typeof value.output_schema_checksum === 'string' || value.output_schema_checksum === null)
     || !Array.isArray(value.segments)
@@ -607,7 +610,7 @@ function isRunHistoryItem(value: unknown): value is RunHistoryItemRecord {
     && (typeof value.started_at === 'string' || value.started_at === null)
     && (typeof value.finished_at === 'string' || value.finished_at === null)
     && isRecord(value.input)
-    && isRecord(value.selected_sources)
+    && isRunSourceSummaries(value.selected_sources)
     && (typeof value.result_summary === 'string' || value.result_summary === null)
     && (typeof value.result_confidence === 'number' || value.result_confidence === null)
     && (typeof value.result_needs_review === 'boolean' || value.result_needs_review === null)

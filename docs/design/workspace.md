@@ -117,6 +117,10 @@ JSON Pointer 只读取当前任务或已授权结果。缺字段显示空状态�
 
 Conversation、Run history、事件/会话时间线、Interaction 和 Proposal 详情由平台组件负责。Task Center 不启动第二套 SSE、取消和终态处理。
 
+`RUNNING` 不代表输入准备完毕，取消请求被接受也不代表进程已停止。显示已有 Session/Event 与终态事实；没有公开准备进度时不根据等待秒数、文档清单的 FROZEN 或已冻结 Brief 合成 READY/完成百分比。准备与模型的边界见[Runtime 启动顺序](agent-runtime.md#74-从领取到模型启动的边界)。
+
+后续 Flow 观察区复用上述事实，不按推荐节点数计算百分比，也不从 Run SUCCEEDED 或 Proposal APPROVED 推导所有节点已完成。[Flow 的事实来源与例子](task-flow.md#9-节点状态的事实来源)负责这些判定；本页只约束页面位置、导航和可访问性。
+
 ### 5.3 结果
 
 [RunResultPanel](../../PJM/web/src/components/RunResultPanel.tsx) 呈现 Outcome、结构化数据、Evidence 和 Evaluation。ViewSpec 当前枚举包含 schema-form、text-field、enum-select、source-picker、summary、metric-grid、finding-list、data-table、evidence-panel、artifact-list、evaluation-form、raw-result。新增 capability-summary/run-flow 等声明名必须先扩契约。
@@ -127,19 +131,27 @@ Conversation、Run history、事件/会话时间线、Interaction 和 Proposal �
 
 显示精确 SkillVersion/task、输入、已选资源和就绪度。用户从合法候选选择，服务端创建时再次验证，不把 readiness 当作永久授权。
 
+文档范围不默认确认，即时执行与调度配置共用 [DocumentSourceField](../../PJM/web/src/components/DocumentSourceField.tsx) 和同一份[选择与失效规则](resource-snapshots.md#公开选择与读取投影的实施契约)。单份、集合、全集都须确认；可选不选会省略该槽位。Workspace 只在切换实际任务/Project 时初始化默认选择，候选更新不静默替换草稿；服务端仍独立拒绝失效选择。
+
+现有提交恢复已把“可编辑草稿”与“已发送的请求内容/幂等键”分开：结果未知时原请求确认；显式确认后才允许当前草稿另开 Run。关闭启动弹窗保留待确认请求，离页/刷新不承诺恢复；状态、超时和隐私要求统一见[Run 创建：提交结果未知](run-creation.md#提交结果未知时的界面责任)。本页不维护另一套请求身份规则。
+
 ### 6.2 实时执行
 
 创建后以 Run ID 获取 detail 并订阅 SSE。持久事件使用 sequence 恢复；TEXT_DELTA 不推进持久 replay cursor。刷新从服务端重建状态，不把浏览器存储当审计正本。
 
 ### 6.3 资源调整
 
-Run 已冻结的资源选择与权限不能在中途替换。需要变更时创建新 Run；补充已有 scope 内的事实不等于换绑。document 的选择/快照链路处于联调阶段，界面不应承诺已经验收的单文档隔离。具体集合语义与仓库 revision 边界见[资源快照](resource-snapshots.md)。
+Run 已冻结的资源选择与权限不能在中途替换。需要变更时创建新 Run；补充已有 scope 内的事实不等于换绑。多个 document 槽位在 workspace 形成 Run 级并集，不是互相隔离的私有目录。具体集合语义、缓存可信性与仓库 revision 边界见[资源快照](resource-snapshots.md)。
 
 ## 7. 结果与人工评价
 
 ### 7.1 固定区域
 
 摘要、交付物、Findings、Evidence、限制/待确认、Proposal/Effect 与 Evaluation 分开显示。Outcome PARTIAL/BLOCKED 与 Run 的技术终态不是同一个枚举。
+
+冻结文档范围属于 Run 输入事实，不能塞进结果摘要冒充分析结论。[RunDocumentSnapshots](../../PJM/web/src/components/RunDocumentSnapshots.tsx) 在 RunResultPanel 内独立显示槽位、验证状态、选择模式和可展开成员；结果尚未生成时也可读取清单。路径、ID、hash 等长内容应换行或局部滚动。
+
+详情区分已验证清单、历史不可用和校验失败，不查询今天的文档库填补旧记录，也不把 `FROZEN` 显示成“文件已物化/仍可下载”。合法空数组不渲染清单区；必需字段缺失则是响应契约错误，不能据此宣称“未使用文档”。投影语义见[资源快照](resource-snapshots.md#读取清单和资源摘要)。
 
 ### 7.2 Finding
 
@@ -157,13 +169,19 @@ Run 已冻结的资源选择与权限不能在中途替换。需要变更时创�
 
 ### 8.2 操作
 
-当前支持选择任务进入工作空间、配置立即执行、创建/修改 Schedule、暂停/恢复/归档 Schedule、查看关联历史。暂停的是调度，不是 Agent；任务复制、任意任务编辑、对话创建 Task Draft、流程编辑与结果比较不是已实现操作。
+当前支持选择任务进入工作空间、配置立即执行、创建 Schedule、暂停/恢复/归档 Schedule、查看关联历史。暂停的是调度，不是 Agent；任务复制、任意任务编辑、对话创建 Task Draft、流程编辑与结果比较不是已实现操作。
+
+TasksPage 选定精确任务后才打开 ScheduleDialog，使用与立即执行相同的 TaskLaunchFields/taskDraft 配置实际输入和文档范围，再保存时间规则。关闭弹窗会销毁未保存草稿；切换 actor/Project 不继承旧表单或接收其晚到响应。表单和预览的责任见[调度表单边界](task-scheduling.md#保存表单与触发预览)。
+
+修改现有 Schedule 的 API/client 已有，但 Task Center 没有编辑表单入口；不能把 API 能力列作当前页面操作。补齐时须载入原配置、提交 expected_row_version，显式处理冲突并保留用户草稿；暂停/恢复/归档不等于编辑配置。
 
 ### 8.3 调度规则
 
 ONCE/CRON、timezone、触发预览、错过/重叠/失效行为以 [TaskSchedule](task-scheduling.md) 为准。创建前的重叠查询不能保证并发创建绝不重叠，不在 UI 承诺严格串行或精确一次。
 
-保存前展示服务端计算的下次触发时间和 timezone：CRON 至少提供三次预览供用户确认，ONCE 只显示单次。页面不独立实现另一套 cron/DST 求值。
+预览应呈现真实可发生的次数，end_at/max_runs 使候选不足三次时说明原因，不补造时间。Schedule 暂停不代表已认领触发被撤销；run_count 也不代表 Run 成功数。错误/迟到/漏记风险及未来在途展示按调度规范同步，不在页面单独定义恢复规则。
+
+预览由用户主动请求，当前保存不强制先预览；服务端仍验证定义。[保存前的候选时刻确认](task-scheduling.md#保存表单与触发预览)仍需补齐。页面不独立实现另一套 cron/DST 求值，也不要求服务端补足已经不可能发生的三次。当前预览按浏览器本地时间显示，不保证与规则 timezone 相同；ONCE 输入和显示的时区歧义及修正要求见[时间输入与展示](task-scheduling.md#时间输入与展示的边界)。
 
 ## 9. 对话与调整
 
@@ -218,6 +236,9 @@ ONCE/CRON、timezone、触发预览、错过/重叠/失效行为以 [TaskSchedul
 | 变化 | 验证 |
 | --- | --- |
 | 输入/任务选择 | 无业务 Schema 可启动；有 Schema 正确校验；精确 task/version |
+| 文档范围与清单 | 单份/集合/全集显式确认，可选未选不授权；详情使用冻结事实，历史缺失/损坏不补造 |
+| 调度配置 | 即时/调度共用实际输入；预览不创建 Run；编辑入口、规则时区与本地时区分别验收 |
+| 提交确认 | 丢响应/超时/异常返回仍保留原请求；编辑不换原键，账号/Project 切换不接收旧结果；新建需明确确认 |
 | SSE/历史 | 断线重连不重复，terminal snapshot 后结束，旧结果可读 |
 | 等待/批准 | 关闭弹窗后仍有待办；版本/期限/授权失败清晰 |
 | Result/Evaluation | 原始结果不变，修订追加，Evidence 不跨 Run |

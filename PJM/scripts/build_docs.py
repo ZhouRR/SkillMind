@@ -14,6 +14,8 @@ from urllib.parse import quote, unquote, urlsplit
 
 from jsonschema import Draft202012Validator
 from markdown_it import MarkdownIt
+from markdown_it.rules_block.fence import fence
+from markdown_it.rules_block.state_block import StateBlock
 from markdown_it.token import Token
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -31,15 +33,19 @@ GROUPS = {
     "code": "工程入口",
 }
 FIRST_PAGES = [
+    "docs/README.md",
     "docs/overview/product.md",
     "docs/overview/architecture.md",
     "docs/overview/glossary.md",
     "docs/planning/roadmap.md",
+    "docs/design/README.md",
     "docs/design/domain-model.md",
     "docs/design/skill-contract.md",
     "docs/design/skill-interpretation.md",
-    "docs/design/agent-runtime.md",
+    "docs/design/run-creation.md",
     "docs/design/resource-snapshots.md",
+    "docs/design/agent-runtime.md",
+    "docs/design/run-budgets.md",
     "docs/design/repository-effects.md",
     "docs/design/task-scheduling.md",
     "docs/design/subagents.md",
@@ -47,6 +53,11 @@ FIRST_PAGES = [
     "docs/design/task-flow.md",
     "docs/design/generated-modules.md",
     "docs/design/authentication.md",
+    "docs/development/local-development.md",
+    "docs/development/change-guide.md",
+    "docs/development/contract-workflow.md",
+    "docs/development/api-usage.md",
+    "docs/development/documentation.md",
 ]
 
 
@@ -90,30 +101,57 @@ def source_paths() -> list[Path]:
     paths += [ROOT / "README.md", ROOT / "PJM/README.md", ROOT / "PJM/AGENTS.md"]
     paths += sorted((ROOT / "PJM").glob("*/README.md"))
     order = {name: index for index, name in enumerate(FIRST_PAGES)}
-    return sorted(set(paths), key=lambda path: (
-        order.get(path.relative_to(ROOT).as_posix(), len(order)),
-        path.relative_to(ROOT).as_posix(),
-    ))
+    return sorted(
+        set(paths),
+        key=lambda path: (
+            order.get(path.relative_to(ROOT).as_posix(), len(order)),
+            path.relative_to(ROOT).as_posix(),
+        ),
+    )
 
 
 def inline_text(token: Token) -> str:
     """書式記号を含まない見出し文字列を生成する。"""
 
-    return "".join(child.content for child in token.children or []
-                   if child.type in {"text", "code_inline"})
+    return "".join(
+        child.content for child in token.children or [] if child.type in {"text", "code_inline"}
+    )
+
+
+def checked_fence(state: StateBlock, start: int, end: int, silent: bool) -> bool:
+    """引用や list の indent を保持した parser 状態で閉じ fence を確認する。"""
+
+    matched = fence(state, start, end, silent)
+    if matched and not silent:
+        token = state.tokens[-1]
+        last = state.line - 1
+        # 原文の行だけを見ると引用の「>」が残り、正しい閉じ fence を拒絶してしまう。
+        closing = state.src[state.bMarks[last] + state.tShift[last] : state.eMarks[last]]
+        token.meta["closed"] = bool(
+            last > start
+            and not state.is_code_block(last)
+            and state.sCount[last] >= state.blkIndent
+            and re.fullmatch(
+                re.escape(token.markup[0]) + "{" + str(len(token.markup)) + r",}[ \t]*",
+                closing,
+            )
+        )
+    return matched
 
 
 def parse_document(path: Path, parser: MarkdownIt) -> Document:
     """GitHub 形式の heading ID とコードブロックの閉じを検証する。"""
 
     source = path.read_text(encoding="utf-8-sig")
+    parser.block.ruler.at("fence", checked_fence)
     tokens = parser.parse(source)
     anchors: set[str] = set()
     headings: list[dict[str, str]] = []
     titles: list[str] = []
-    lines = source.splitlines()
+    levels: list[tuple[int, int]] = []
     for index, token in enumerate(tokens):
         if token.type == "heading_open":
+            levels.append((int(token.tag[1:]), token.map[0] + 1 if token.map else 1))
             title = inline_text(tokens[index + 1])
             base = re.sub(r"[^\w\s-]", "", title.lower()).replace(" ", "-")
             slug, suffix = base, 0
@@ -126,12 +164,19 @@ def parse_document(path: Path, parser: MarkdownIt) -> Document:
                 titles.append(title)
             if token.tag in {"h2", "h3"}:
                 headings.append({"title": title, "anchor": slug, "level": token.tag})
-        if token.type == "fence" and token.map:
-            last = lines[token.map[1] - 1].strip()
-            if not re.fullmatch(re.escape(token.markup[0]) + "{" + str(len(token.markup)) + r",}", last):
-                raise ValueError(f"{path.relative_to(ROOT)}:{token.map[0] + 1}: unclosed fence")
+        if token.type == "fence" and token.map and not token.meta.get("closed"):
+            raise ValueError(f"{path.relative_to(ROOT)}:{token.map[0] + 1}: unclosed fence")
     if len(titles) != 1:
         raise ValueError(f"{path.relative_to(ROOT)}: expected one H1, got {len(titles)}")
+    if not path.is_relative_to(DOCS / "history"):
+        previous = 0
+        for level, line in levels:
+            if level > previous + 1:
+                raise ValueError(
+                    f"{path.relative_to(ROOT)}:{line}: "
+                    f"heading level jumps from H{previous} to H{level}"
+                )
+            previous = level
     return Document(path, source, tokens, titles[0], headings, anchors)
 
 
@@ -153,7 +198,16 @@ def validate_link(origin: Path, href: str, anchors: dict[Path, set[str]]) -> Non
         return
     path, anchor = target
     if path == OUTPUT:
-        return  # 初回 build では生成物がまだ存在しない。
+        # 初回 build でも、自己完結版への deep link は元 Markdown の索引で検査する。
+        if not anchor or anchor == "main":
+            return
+        page, separator, section = anchor.partition("::")
+        viewer_target = (ROOT / page).resolve()
+        if not separator or viewer_target not in anchors or viewer_target.suffix != ".md":
+            raise ValueError(f"{origin.relative_to(ROOT)}: missing viewer page {href}")
+        if section and section not in anchors[viewer_target]:
+            raise ValueError(f"{origin.relative_to(ROOT)}: missing viewer anchor {href}")
+        return
     if not path.exists():
         raise ValueError(f"{origin.relative_to(ROOT)}: missing link {href}")
     if anchor and path in anchors and anchor not in anchors[path]:
@@ -166,13 +220,14 @@ def page_url(path: Path, anchor: str = "") -> str:
     return "#" + quote(path.relative_to(ROOT).as_posix(), safe="/") + "::" + quote(anchor)
 
 
-def prepare_links(document: Document, anchors: dict[Path, set[str]],
-                  pages: set[Path]) -> None:
+def prepare_links(document: Document, anchors: dict[Path, set[str]], pages: set[Path]) -> None:
     """元 Markdown の参照を検証後、閲覧版専用の参照へ変換する。"""
 
     for token in document.tokens:
         for child in token.children or []:
-            attribute = "href" if child.type == "link_open" else "src" if child.type == "image" else ""
+            attribute = (
+                "href" if child.type == "link_open" else "src" if child.type == "image" else ""
+            )
             href = child.attrGet(attribute) if attribute else None
             if not href:
                 continue
@@ -197,13 +252,37 @@ def validate_examples(documents: list[Document]) -> int:
     validator = Draft202012Validator(schema)
     count = 0
     for document in documents:
-        if "history" in document.path.relative_to(DOCS).parts if document.path.is_relative_to(DOCS) else False:
+        if document.path.is_relative_to(DOCS / "history"):
             continue  # 当時の例は現行契約に書き換えない。
         for token in document.tokens:
             if token.type == "fence" and token.info == "json" and '"view_version"' in token.content:
                 validator.validate(json.loads(token.content))
                 count += 1
     return count
+
+
+def search_sections(document: Document) -> list[dict[str, str]]:
+    """本文を見出し単位で索引化し、検索語のある章へ直接案内する。"""
+
+    lines = document.source.splitlines(keepends=True)
+    headings = [
+        (token, inline_text(document.tokens[index + 1]))
+        for index, token in enumerate(document.tokens)
+        if token.type == "heading_open" and token.map
+    ]
+    sections = []
+    for index, (token, title) in enumerate(headings):
+        start = token.map[0] if index else 0
+        end = headings[index + 1][0].map[0] if index + 1 < len(headings) else len(lines)
+        # H4 以下も同じ parser の ID を使い、目次の省略や重複見出しで着地点を失わない。
+        sections.append(
+            {
+                "title": title,
+                "anchor": token.attrGet("id") or "",
+                "text": "".join(lines[start:end]).strip(),
+            }
+        )
+    return sections
 
 
 def build() -> tuple[str, int, int]:
@@ -235,12 +314,18 @@ def build() -> tuple[str, int, int]:
         body = parser.renderer.render(document.tokens, parser.options, {})
         body = body.replace("<table>", '<div class="table-scroll" tabindex="0"><table>')
         body = body.replace("</table>", "</table></div>")
-        rendered.append({
-            "id": relative, "title": document.title, "group": group,
-            "html": body, "text": document.source, "toc": document.headings,
-            "source": Path(os.path.relpath(document.path, DOCS)).as_posix(),
-            "checksum": hashlib.sha256(document.source.encode()).hexdigest(),
-        })
+        rendered.append(
+            {
+                "id": relative,
+                "title": document.title,
+                "group": group,
+                "html": body,
+                "sections": search_sections(document),
+                "toc": document.headings,
+                "source": Path(os.path.relpath(document.path, DOCS)).as_posix(),
+                "checksum": hashlib.sha256(document.source.encode()).hexdigest(),
+            }
+        )
     payload = json.dumps({"groups": GROUPS, "pages": rendered}, ensure_ascii=False)
     # Markdown 中の </script> を JSON script element の終端として解釈させない。
     payload = payload.replace("<", "\\u003c").replace("&", "\\u0026")
@@ -266,8 +351,10 @@ def main() -> int:
     except (ValueError, OSError) as error:
         print(f"Documentation check failed: {error}")
         return 1
-    print(f"Documentation {'check' if args.check else 'build'} passed: "
-          f"{count} Markdown files, {examples} ViewSpec example(s), local links and anchors")
+    print(
+        f"Documentation {'check' if args.check else 'build'} passed: "
+        f"{count} Markdown files, {examples} ViewSpec example(s), local links and anchors"
+    )
     return 0
 
 

@@ -74,7 +74,7 @@ describe('WorkspacePage layout', () => {
   it('keeps the rail as launcher plus a history shortcut and hosts the run form in a modal', () => {
     // 履歴の検索とページングは専用画面へ分離し、Workspace には入口だけを残して観測領域を圧迫しない。
     const html = renderToStaticMarkup(
-      <WorkspacePage csrfToken={'c'.repeat(32)} moduleId="" projectId="" />,
+      <WorkspacePage actorId="actor" csrfToken={'c'.repeat(32)} moduleId="" projectId="" />,
     )
 
     expect(html).toContain('新建执行')
@@ -88,7 +88,7 @@ describe('WorkspacePage layout', () => {
   it('explains that the full history lives at project scope', () => {
     // 履歴画面は module filter の対象外なので、Workspace の入口でも作用域を明示する。
     const html = renderToStaticMarkup(
-      <WorkspacePage csrfToken={'c'.repeat(32)} moduleId="" projectId="" />,
+      <WorkspacePage actorId="actor" csrfToken={'c'.repeat(32)} moduleId="" projectId="" />,
     )
 
     expect(html).toContain('全项目')

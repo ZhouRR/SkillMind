@@ -14,6 +14,8 @@ from uuid import UUID
 from arq import cron
 from arq.connections import ArqRedis, RedisSettings
 from arq.cron import CronJob
+from arq.worker import Function
+from arq.worker import func as arq_function
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from projectmind.agent.claude import ClaudeRuntimeConfiguration
@@ -44,7 +46,7 @@ from projectmind.core.logging import configure_logging, log_event
 from projectmind.core.secret_crypto import load_secret_cipher
 from projectmind.core.settings import get_settings
 from projectmind.db.resources import create_database_engine, create_session_factory
-from projectmind.documents import (
+from projectmind.documents.source import (
     DatabaseProjectDocumentInventory,
     DatabaseProjectDocumentSource,
 )
@@ -75,6 +77,7 @@ from projectmind.integrations.secrets import DeploymentSecretResolver
 from projectmind.runs.domain import PendingOutboxMessage
 from projectmind.runs.outbox import OutboxRelay
 from projectmind.runs.realtime import RedisPublisher, RedisRunRealtimePublisher
+from projectmind.runs.repository_inputs import PostgresInputSnapshotStore
 from projectmind.runs.service import RunService
 from projectmind.schedules import ScheduleService
 from projectmind.skills import (
@@ -144,11 +147,12 @@ async def startup(ctx: dict[str, Any]) -> None:
         secret_resolver=DeploymentSecretResolver(cipher=secret_cipher),
     )
     materializer = WorkspaceMaterializer(
-        document_inventory=DatabaseProjectDocumentInventory(
-            ctx["database_session_factory"], source=document_source
-        ),
+        document_inventory=DatabaseProjectDocumentInventory(source=document_source),
+        input_snapshots=PostgresInputSnapshotStore(ctx["database_session_factory"]),
         max_bytes=settings.workspace_materialize_max_bytes,
         max_files=settings.workspace_materialize_max_files,
+        max_total_bytes=settings.workspace_materialize_total_max_bytes,
+        max_total_files=settings.workspace_materialize_total_max_files,
         repository_source=repository_source,
     )
     # engine → registry → 扇出 Provider → engine と参照が循環する。Provider には engine 実体では
@@ -194,6 +198,7 @@ async def startup(ctx: dict[str, Any]) -> None:
             PostgresProposalLookup(ctx["database_session_factory"]),
         ),
         lease_seconds=settings.run_lease_seconds,
+        preparation_timeout_seconds=settings.run_preparation_timeout_seconds,
         realtime_publisher=RedisRunRealtimePublisher(cast(RedisPublisher, ctx["redis"])),
     )
     ctx["effect_executor"] = ApprovedEffectExecutor(
@@ -246,9 +251,7 @@ async def startup(ctx: dict[str, Any]) -> None:
         file_storage=create_file_storage(settings),
         storage_bucket=settings.object_storage_bucket,
     )
-    ctx["interpret_publisher"] = RedisInterpretEventPublisher(
-        cast(RedisPublisher, ctx["redis"])
-    )
+    ctx["interpret_publisher"] = RedisInterpretEventPublisher(cast(RedisPublisher, ctx["redis"]))
     # 調度の発火は即時実行と同じ RunService/SkillService を通す。別経路を作らないことが、
     # 承認・事前許可・binding 再検証が調度でだけ緩む事故を防ぐ唯一の方法 (計画 §22)。
     ctx["schedule_service"] = ScheduleService(
@@ -401,9 +404,7 @@ async def execute_run(ctx: dict[str, Any], run_id: str) -> dict[str, str | int]:
     }
 
 
-async def execute_effect(
-    ctx: dict[str, Any], effect_execution_id: str
-) -> dict[str, str]:
+async def execute_effect(ctx: dict[str, Any], effect_execution_id: str) -> dict[str, str]:
     """Queue job を effect 専用 executor へ引き渡し、Agent Tool path と混在させない。"""
 
     executor = cast(ApprovedEffectExecutor | None, ctx.get("effect_executor"))
@@ -413,9 +414,7 @@ async def execute_effect(
     return {"status": status_value, "effect_execution_id": effect_execution_id}
 
 
-def _interpret_progress(
-    ctx: dict[str, Any], execution_key: str
-) -> InterpretProgressCallback:
+def _interpret_progress(ctx: dict[str, Any], execution_key: str) -> InterpretProgressCallback:
     """Interpret 進行 event を execution key の channel へ配送する callback を作る。"""
 
     publisher: RedisInterpretEventPublisher = ctx["interpret_publisher"]
@@ -526,9 +525,7 @@ async def recover_expired_leases(ctx: dict[str, Any]) -> dict[str, str | int]:
     service: RunService = ctx["run_service"]
     effect_service: EffectService = ctx["effect_service"]
     settings = ctx["settings"]
-    recovered_runs = await service.recover_expired_attempts(
-        limit=settings.outbox_batch_size
-    )
+    recovered_runs = await service.recover_expired_attempts(limit=settings.outbox_batch_size)
     recovered_interactions = await service.recover_expired_interactions(
         limit=settings.outbox_batch_size
     )
@@ -539,12 +536,7 @@ async def recover_expired_leases(ctx: dict[str, Any]) -> dict[str, str | int]:
     recovered_proposals = await effect_service.recover_expired_proposals(
         limit=settings.outbox_batch_size,
     )
-    recovered = (
-        recovered_runs
-        + recovered_interactions
-        + recovered_effects
-        + recovered_proposals
-    )
+    recovered = recovered_runs + recovered_interactions + recovered_effects + recovered_proposals
     log_event(
         logger,
         logging.WARNING if recovered else logging.INFO,
@@ -600,9 +592,10 @@ _settings = get_settings()
 class WorkerSettings:
     """M0 Worker を単一同時 job に制限する ARQ 設定。"""
 
-    functions: ClassVar[tuple[Callable[..., Awaitable[Any]], ...]] = (
+    functions: ClassVar[tuple[Callable[..., Awaitable[Any]] | Function, ...]] = (
         worker_probe,
-        execute_run,
+        # 資源準備を追加しても従来のモデル実行/終態化の余白を削らない。別 job は延長しない。
+        arq_function(execute_run, timeout=1200 + _settings.run_preparation_timeout_seconds),
         execute_effect,
         interpret_skill_source_job,
         adjust_skill_interpretation_job,

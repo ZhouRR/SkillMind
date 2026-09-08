@@ -22,7 +22,46 @@
           "started_at": { "type": ["string", "null"], "format": "date-time" },
           "finished_at": { "type": ["string", "null"], "format": "date-time" },
           "input": { "type": "object" },
-          "selected_sources": { "type": "object" },
+          "selected_sources": {
+            "type": "object",
+            "additionalProperties": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "provider": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "capability": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "resource_kind": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "access": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          },
           "result_summary": { "type": ["string", "null"] },
           "result_confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
           "result_needs_review": { "type": ["boolean", "null"] }

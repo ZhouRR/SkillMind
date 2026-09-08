@@ -35,6 +35,43 @@ npx -y pnpm@11.7.0 dev
 
 Vite は既定で `http://localhost:5173/projectmind/` を提供し、context path 下の API を `http://127.0.0.1:8000` へ proxy する。異なる context path は Web と API の設定を揃える。Cookie/session は同じ browser Origin で利用する。
 
+### 原要求確認のブラウザ回帰
+
+この検証は実 Workspace を描画し、全業務 API を mock に置き換える。応答喪失、異常応答、timeout、同じ key/body の再送、明示的な新規実行、actor/Project 切替、refresh、三語とキーボードを確認する。Backend・DB・モデル・実 credential は使わず、通常の `vitest run` には含まれない。
+
+`PJM/web/` でブラウザ検証専用の依存を導入し、専用 Vite を起動する。初回の依存/browser 導入は download を伴う。
+
+```bash
+python3 -m pip install --user -r tests/browser/requirements.txt
+python3 -m playwright install chromium
+node_modules/.bin/vite --host 127.0.0.1 --port 5189 --strictPort
+```
+
+別 terminal の `PJM/web/` で実行する。
+
+```bash
+python3 tests/browser/check_run_submission.py \
+  --url http://127.0.0.1:5189/projectmind/tests/browser/run-submission.html
+```
+
+`--case translations` で単独の表示/キーボード確認、`--output` に工作区外の明示 path を渡すと screenshot を保存できる。custom context path を使う場合は URL も揃える。user site が書けない環境では外部依存 directory を PYTHONPATH、browser 保存先を PLAYWRIGHT_BROWSERS_PATH で指定し、venv やアプリ依存への追加で回避しない。
+
+古い dev server は工作副本と異なる transform を返すことがある。port が使用中なら既存 process を無断で止めず、別 port で新規起動して URL を合わせる。検証後は自分が起動した Vite だけを終了する。fixture はローカル専用であり、mock の成功を実 DB の唯一制約・transaction・認証や全画面の受入証拠としない。
+
+### 文書範囲と調度入力のブラウザ回帰
+
+同じ専用 Vite と browser 依存を使い、`PJM/web/` で実行する。Backend の依存導入も必要だが、使うのは凍結文書の純 parser だけであり、Backend server/DB/モデルは起動しない。
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=../backend/src \
+  python3 tests/browser/check_document_sources.py \
+  --url http://127.0.0.1:5189/projectmind/tests/browser/run-submission.html
+```
+
+外部に置いた Python 依存を使う場合は、既存の依存 directory も PYTHONPATH に追加する。単一/集合/全集/任意未選択を即時実行・Schedule 作成の双方で送り、実際の input/sources、CSRF、三語、keyboard、390px 幅、Run detail の再読込を検証する。現在の catalog から候補を消しても凍結表示が変わらないことを確認するが、mock であるため実 blob の削除や Worker の物化は検証していない。
+
+`--output` は明示した directory に screenshot を保存する。5000 件の表示性能、調度編集、異なる時区の入力/表示、認領後 crash は別の検証であり、この script の成功へ含めない。残る実装と受入は[計画](../planning/roadmap.md#13-当前执行状态)を確認する。
+
 ## 変更に応じた検証
 
 | 対象 | 実行位置 | コマンド |
@@ -44,10 +81,12 @@ Vite は既定で `http://localhost:5173/projectmind/` を提供し、context pa
 | 契約 | `PJM/` | `python3 scripts/validate_contracts.py` |
 | Compose 静的規約 | `PJM/` | `python3 scripts/validate_compose.py` |
 | SDK offline probe | `PJM/` | `PYTHONPATH=backend/src python3 scripts/probe_claude_agent_sdk.py` |
-| Compose 実設定 | `PJM/` | `docker compose --env-file .env config` |
+| Compose 実設定 | `PJM/` | `docker compose --env-file .env config --quiet` |
 | 文書 | `PJM/` | [文書更新手順](documentation.md)の build/check |
 
 API 契約テストの in-memory fake と、実 PostgreSQL invariant は別の検証である。PostgreSQL 未到達時の skip を成功に数えない。Docker がない環境で Compose の実起動/復旧を確認したとは報告しない。変更に無関係な全テストを繰り返す必要はない。
+
+Compose の通常 `config` 出力には展開した Secret が含まれ得るため、構成検査は `--quiet` を使う。現行 `ENV_FILE` と Backend の `env_file` は同一の切替ではない。[設定境界](../operations/runbook.md#环境文件与配置边界)を確認し、二つの環境 file を混在させない。
 
 ## Skill Interpreter の検証
 

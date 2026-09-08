@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 
 from projectmind.db.models import ProjectDocument
-from projectmind.documents import DocumentService
+from projectmind.documents.service import DocumentService
 from projectmind.storage import InMemoryFileStorage, UploadLimits, UploadRejectedError
 
 _LIMITS = UploadLimits(

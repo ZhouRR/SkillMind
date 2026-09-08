@@ -33,23 +33,16 @@ Backend 是模块化单体。API 与 Worker 共享一个 `projectmind` package�
 | 链路 | 起点 → 关键处理 → 落点 | 设计入口 |
 | --- | --- | --- |
 | Skill 成为任务 | Source → Interpreter → Blueprint → DRAFT/发布 → Project 启用 → TaskCatalog | [Skill 契约](../design/skill-contract.md)、[实现](../design/skill-interpretation.md) |
-| 一次 Run | 创建并冻结输入/绑定 → Outbox → Worker claim → Agent/Tool → 交互或终态 | [Runtime](../design/agent-runtime.md) |
+| 一次 Run | 冻结选择/绑定 → Outbox → claim → 受监督准备 → Brief/启动校验 → Agent/Tool → 等待或终态 | [创建与重放](../design/run-creation.md)、[准备与启动](../design/agent-runtime.md#74-从领取到模型启动的边界) |
 | 外部变更 | ChangeProposal → 精确版本批准 → EffectExecution → 前置版本检查 → 写入与 read-back | [受控写入](../design/repository-effects.md) |
 
 模型得到目标、Skill 指导和有限资源上下文，提出工具调用；平台验证 capability、绑定、参数、额度和批准后才调用 Provider。模型判断不替代权限检查。
 
+创建时固定的是输入选择与授权，不是已经取得全部文件。输入准备回执属于 Run，Brief 属于 Segment，执行 lease 属于 Attempt；它们依次衔接但不互相证明完成。整体组件图不表示 Worker claim 后可以直接跳过这些检查调用模型。
+
 ## 设计问题由谁负责
 
-后续开发先找负责该规则的正本，再看契约与实现；不要从历史日志或一个示意图推导新的执行行为。
-
-| 想确认的规则 | 唯一详细设计 | 关联而不替代它的内容 |
-| --- | --- | --- |
-| Skill 能做什么、发布与就绪如何区分 | [Skill 契约](../design/skill-contract.md) | Interpreter 页面是预览，Project 启用是可见性 |
-| 谁可以查看、回答或批准 | [权限模型](../design/domain-model.md#6-权限模型)、[认证](../design/authentication.md) | 虚拟角色与 Skill 文本不授予系统角色 |
-| Run 的输入到底固定在哪个时点 | [资源快照](../design/resource-snapshots.md) | binding、物化文件、live Evidence 是不同层次 |
-| 等待、技术重试、主/子 Session 的关系 | [Runtime](../design/agent-runtime.md)、[子分析](../design/subagents.md) | Schedule 只发起 Run，Flow 只投影事实 |
-| 什么时候真的发生外部写入 | [受控写入](../design/repository-effects.md) | 提案、批准、执行、回读分别保存 |
-| 页面上展示计划还是实际执行 | [Task Flow](../design/task-flow.md)、[Workspace](../design/workspace.md) | 图形布局和模块不能成为第二个执行控制器 |
+后续开发先从[设计阅读顺序与责任表](../design/README.md#どの設計を変更するか)选择负责该规则的正本，再看契约与实现；不要从历史日志或一个示意图推导新的执行行为。本页只解释组件关系，不重复维护每个领域的规则索引。
 
 设计要求与已实现保证不是同义词。优先核对[当前差距与门禁](../planning/roadmap.md#132-下一步与当前决策)，特别是资源冻结、共享预算和 generated 模块首次执行条件。
 

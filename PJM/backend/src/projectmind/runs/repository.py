@@ -37,6 +37,8 @@ from projectmind.effects.domain import (
     ChangeProposalStatus,
     EffectExecutionStatus,
 )
+from projectmind.runs.creation_replay import validate_creation_replay
+from projectmind.runs.creation_request import CREATION_REQUEST_FIELD, TaskRunIntent
 from projectmind.runs.domain import (
     AgentSessionKind,
     AgentSessionMetadata,
@@ -50,6 +52,7 @@ from projectmind.runs.domain import (
     PendingOutboxMessage,
     PreparedExecution,
     RunAttemptStatus,
+    RunCancellationRequestedError,
     RunCancellationState,
     RunDetail,
     RunHistoryItem,
@@ -74,6 +77,7 @@ from projectmind.runs.domain import (
     TaskLastRun,
     UserInteractionStatus,
     UserInteractionType,
+    derive_task_id,
     plan_run_transition,
     request_hash,
 )
@@ -83,7 +87,6 @@ from projectmind.runs.repository_interactions import InteractionOperationsMixin
 
 class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
     """一つの database transaction 内で Run aggregate を操作する。"""
-
 
     async def get_published_skill_binding(self, skill_version_id: UUID) -> dict[str, Any]:
         """Run snapshot 用に明示 version の frozen Manifest と checksum を取得する。"""
@@ -140,7 +143,12 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
 
         if inserted_id is None:
             existing = await self._find_by_idempotency(command)
-            if existing.request_hash != fingerprint:
+            if CREATION_REQUEST_FIELD in command.task_snapshot_json:
+                validate_creation_replay(
+                    existing,
+                    TaskRunIntent.from_json(command.task_snapshot_json[CREATION_REQUEST_FIELD]),
+                )
+            elif existing.request_hash != fingerprint:
                 raise IdempotencyConflictError(
                     "Idempotency-Key is already associated with a different request."
                 )
@@ -215,6 +223,23 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
             created_at=now,
             idempotent_replay=False,
         )
+
+    async def find_task_run_replay(
+        self, *, intent: TaskRunIntent, idempotency_key: str
+    ) -> CreatedRun | None:
+        """現在の資源や公開状態を調べる前に、初回 commit 済みの同一要求を確認する。"""
+
+        existing = await self._load_by_idempotency(
+            project_id=intent.project_id,
+            task_id=derive_task_id(
+                skill_version_id=intent.skill_version_id, task_key=intent.task_key
+            ),
+            idempotency_key=idempotency_key,
+        )
+        if existing is None:
+            return None
+        validate_creation_replay(existing, intent)
+        return self._to_created_run(existing, idempotent_replay=True)
 
     async def get(self, run_id: UUID) -> CreatedRun:
         """指定 ID の Run を取得し、存在しなければ domain error を返す。"""
@@ -462,9 +487,7 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
                 )
                 for item in interactions
             ),
-            change_proposals=tuple(
-                self._stored_change_proposal(item) for item in proposals
-            ),
+            change_proposals=tuple(self._stored_change_proposal(item) for item in proposals),
             approvals=tuple(self._stored_change_approval(item) for item in approvals),
             effect_executions=tuple(
                 self._stored_effect_execution(item) for item in effect_executions
@@ -535,9 +558,7 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
             .limit(limit + 1)
         )
         if statuses:
-            statement = statement.where(
-                Run.status.in_([status.value for status in statuses])
-            )
+            statement = statement.where(Run.status.in_([status.value for status in statuses]))
         rows = (await self._session.execute(statement)).all()
         has_more = len(rows) > limit
         return RunHistoryPage(
@@ -699,9 +720,7 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
                     .limit(1)
                 )
                 if active_attempt_id is None and active_effect is not None:
-                    proposal = await self._session.get(
-                        ChangeProposal, active_effect.proposal_id
-                    )
+                    proposal = await self._session.get(ChangeProposal, active_effect.proposal_id)
                     active_attempt_id = proposal.run_attempt_id if proposal is not None else None
                 event = RunEvent(
                     id=uuid4(),
@@ -754,11 +773,7 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
                 select(RunAttempt)
                 .where(
                     RunAttempt.run_id == run_id,
-                    *(
-                        (RunAttempt.run_segment_id == segment.id,)
-                        if segment is not None
-                        else ()
-                    ),
+                    *((RunAttempt.run_segment_id == segment.id,) if segment is not None else ()),
                     RunAttempt.status == RunAttemptStatus.DEFERRED.value,
                 )
                 .order_by(RunAttempt.attempt_no.desc())
@@ -896,9 +911,9 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
         if (await self._session.scalar(active_statement)) is not None:
             return None
 
-        attempt_no_statement = select(
-            func.coalesce(func.max(RunAttempt.attempt_no), 0) + 1
-        ).where(RunAttempt.run_segment_id == segment.id)
+        attempt_no_statement = select(func.coalesce(func.max(RunAttempt.attempt_no), 0) + 1).where(
+            RunAttempt.run_segment_id == segment.id
+        )
         attempt_no = int((await self._session.scalar(attempt_no_statement)) or 1)
         now = datetime.now(UTC)
         if attempt_no > max_attempts:
@@ -997,16 +1012,12 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
         self._session.add_all(stored)
         parent_session = None
         if segment.parent_agent_session_id is not None:
-            parent_session = await self._session.get(
-                AgentSession, segment.parent_agent_session_id
-            )
+            parent_session = await self._session.get(AgentSession, segment.parent_agent_session_id)
             if parent_session is None or parent_session.run_id != run_id:
                 raise LeaseValidationError("RunSegment parent AgentSession is invalid")
         checkpoint = dict(segment.checkpoint_json)
         checkpoint_checksum = (
-            f"sha256:{sha256_hex(canonical_json(checkpoint))}"
-            if segment.segment_no > 1
-            else None
+            f"sha256:{sha256_hex(canonical_json(checkpoint))}" if segment.segment_no > 1 else None
         )
         return ClaimedRun(
             run_id=run_id,
@@ -1217,6 +1228,19 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
         stored = self._stored_agent_event(event)
         self._session.add_all([stored, self._event_outbox(stored, status=run.status)])
 
+    async def verify_execution_start(self, claimed: ClaimedRun) -> bool:
+        """モデルを起動する直前に、現行 lease と取消を同じ Run lock 下で確認する。"""
+
+        run, segment, attempt = await self._lock_claimed_execution(claimed)
+        self._validate_claimed_lease(attempt, claimed, now=datetime.now(UTC))
+        if (
+            run.project_id != claimed.project_id
+            or run.status != RunStatus.RUNNING.value
+            or (segment is not None and segment.status != RunSegmentStatus.RUNNING.value)
+        ):
+            raise LeaseValidationError("Run is not available for model execution")
+        return not await self.is_cancellation_requested(run.id)
+
     async def freeze_agent_task_brief(
         self,
         claimed: ClaimedRun,
@@ -1233,6 +1257,8 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
         self._validate_claimed_lease(attempt, claimed, now=now)
         if RunStatus(run.status) is not RunStatus.RUNNING:
             raise LeaseValidationError("AgentTaskBrief can only be frozen while running")
+        if await self.is_cancellation_requested(run.id):
+            raise RunCancellationRequestedError("AgentTaskBrief preparation was cancelled")
         expected = f"sha256:{sha256_hex(canonical_json(brief))}"
         identity = brief.get("identity")
         if (
@@ -1267,7 +1293,6 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
         segment.instruction_snapshot_id = snapshot_id
         segment.updated_at = now
         self._session.add(snapshot)
-
 
     async def finalize_execution(
         self,
@@ -1456,13 +1481,19 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
                 candidate.run_segment_id, run_id=candidate.run_id
             )
             if segment is None:
-                raise LeaseValidationError(
-                    f"RunSegment not found: {candidate.run_segment_id}"
-                )
-        statement = select(RunAttempt).where(RunAttempt.id == attempt_id).with_for_update()
+                raise LeaseValidationError(f"RunSegment not found: {candidate.run_segment_id}")
+        statement = (
+            select(RunAttempt)
+            .where(RunAttempt.id == attempt_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
         attempt = (await self._session.scalars(statement)).one_or_none()
         if attempt is None:
             raise LeaseValidationError(f"RunAttempt not found: {attempt_id}")
+        # 候補読取から lock 取得までの接管・期限切れを、古い identity map/時刻で通さない。
+        extension = lease_expires_at - now
+        now = datetime.now(UTC)
         if not hmac.compare_digest(attempt.lease_token_hash or "", lease_token_hash):
             raise LeaseValidationError("RunAttempt lease token does not match")
         if attempt.status not in {
@@ -1474,9 +1505,8 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
             raise LeaseValidationError("RunAttempt lease has expired")
 
         attempt.heartbeat_at = now
-        attempt.lease_expires_at = lease_expires_at
+        attempt.lease_expires_at = now + extension
         attempt.updated_at = now
-
 
     async def recover_expired_attempts(self, *, now: datetime, limit: int) -> int:
         """期限切れ Attempt を失効させ、Run を retry queue へ戻す。"""
@@ -1507,9 +1537,7 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
                     candidate.run_segment_id, run_id=candidate.run_id
                 )
                 if segment is None:
-                    raise LeaseValidationError(
-                        f"RunSegment not found: {candidate.run_segment_id}"
-                    )
+                    raise LeaseValidationError(f"RunSegment not found: {candidate.run_segment_id}")
             attempt_statement = (
                 select(RunAttempt).where(RunAttempt.id == candidate.id).with_for_update()
             )
@@ -1640,17 +1668,27 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
     async def _find_by_idempotency(self, command: CreateRunCommand) -> Run:
         """Command の三元 key に一致する既存 Run を取得する。"""
 
-        statement = select(Run).where(
-            Run.project_id == command.project_id,
-            Run.task_id == command.task_id,
-            Run.idempotency_key == command.idempotency_key,
+        existing = await self._load_by_idempotency(
+            project_id=command.project_id,
+            task_id=command.task_id,
+            idempotency_key=command.idempotency_key,
         )
-        existing = (await self._session.scalars(statement)).one_or_none()
         if existing is None:
             # INSERT conflict 後に対象が見えない場合は transaction isolation 異常として扱う。
             raise ConcurrentRunUpdateError("Conflicting Run was not visible in the transaction.")
         return existing
 
+    async def _load_by_idempotency(
+        self, *, project_id: UUID, task_id: UUID, idempotency_key: str
+    ) -> Run | None:
+        """事前照会と INSERT conflict が同じ三元 scope だけを参照する。"""
+
+        statement = select(Run).where(
+            Run.project_id == project_id,
+            Run.task_id == task_id,
+            Run.idempotency_key == idempotency_key,
+        )
+        return (await self._session.scalars(statement)).one_or_none()
 
     @staticmethod
     def _to_stored_result(result: RunResult) -> StoredRunResult:

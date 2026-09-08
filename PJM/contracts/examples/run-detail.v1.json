@@ -6,6 +6,7 @@
   "row_version": 4,
   "created_at": "2026-07-02T13:00:00Z",
   "input": { "target_path": "src/example.py" },
+  "document_snapshots": [],
   "selected_sources": { "repository-source": { "capability": "repository.read/v1", "provider": "git" } },
   "output_schema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",

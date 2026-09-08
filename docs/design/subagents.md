@@ -29,20 +29,11 @@ PRIMARY Session ── subagent.dispatch/v1
 
 ## 预算现状与修正设计
 
-当前 `SubagentDispatchProvider.execute` 把 `parent.limits.max_turns/max_output_bytes` 传给 `split_budget`。一次 dispatch 内采用整除分配，所有分支的分配总和不超过这次传入的上限。
+预算由主/子执行共同拥有，不应仅在子 Agent 规范内定义。计量口径、持久账户、原子预留、结算和恢复统一见[Run 预算与执行限额](run-budgets.md)；本节保留旧链接入口。
 
-但这些值是冻结上限，不是扣除主 Agent 与之前 dispatch 消耗后的实时余额。实现中没有 Run 共享账本，也没有主 Session 扣减。因此“全 Run 总预算已经严格切分”是未实现的保证；多次 dispatch 和主子混合执行会绕过这种文档层面的总额假设。
+当前 `split_budget` 只把每次传入的父快照上限整除分配。dispatch 返回的 turns/output 是分配值，不是实际消耗；美元上限也没有按分支拆分。连续 dispatch、主子混合执行和跨 Attempt/Segment 均不能由此得到累计保证。
 
-后续修正必须形成统一预算协议：
-
-1. Run 级预算服务维护 consumed/reserved/remaining，并把主 Session 与所有子分支记入同一账户。
-2. dispatch 先原子预留，再分配各分支；并发 dispatch 不得读到同一份可重复使用的余额。
-3. 结束、超时和取消按实际用量结算，未消耗额度可释放；同一结算不能重复扣减或重复返还。
-4. Segment/Attempt 重试不能恢复成完整 Run 上限。恢复使用持久账本或可验证的审计累计值。
-5. SDK 允许的单会话上限只是局部防线。跨会话的成本、turn 和输出额度语义需分别定义，不能用输出字节代表模型成本。
-6. 扩展前补上“连续两次 dispatch”“主子共同消耗”“并发预留竞争”“取消/重试结算”的有状态测试。
-
-该修正是[计划 §13.2](../planning/roadmap.md#132-下一步与当前决策)的优先项，不能以文档描述或一次 dispatch 的局部测试宣称全 Run 预算已落实。
+子分析接入共享预算时，须在启动每支前取得有效预留，并在完成、超时、取消后结算。Session 记录失败可以省略不可查询的 ID，但预算持久化失败不能沿用这种“保留结果后忽略”的处理方式继续收费执行。具体失败规则和验收只在预算规范维护。
 
 ## 验收
 

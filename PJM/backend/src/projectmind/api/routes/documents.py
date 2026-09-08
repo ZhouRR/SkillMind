@@ -15,12 +15,12 @@ from projectmind.api.auth_dependencies import (
     authorize_project_access,
 )
 from projectmind.api.problems import ProblemException
-from projectmind.documents import (
+from projectmind.documents.domain import (
     DocumentConflictError,
     DocumentNotFoundError,
-    DocumentService,
     StoredDocument,
 )
+from projectmind.documents.service import DocumentService
 from projectmind.storage import UploadRejectedError
 
 router = APIRouter()

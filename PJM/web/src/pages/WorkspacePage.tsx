@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 
 import {
   cancelRun,
-  createTaskRun,
   loadProjectModules,
   loadProjectTasks,
   loadRun,
@@ -18,24 +17,26 @@ import {
 import { EmptyState, EventTimelineItem, ModalDialog, PageHeader, StatusBadge } from '../components/PageElements'
 import { AgentConversation } from '../components/AgentConversation'
 import { RunResultPanel, type RunDetailState } from '../components/RunResultPanel'
+import { RunSubmissionPanel } from '../components/RunSubmissionPanel'
 import { TaskLaunchFields } from '../components/TaskLaunchFields'
+import { useRunSubmission } from '../hooks/useRunSubmission'
 import { useMessages } from '../i18n'
 import type { UiMessages } from '../lib/i18n/messages'
 import { type AgentPromptSummary } from '../lib/agentStream'
-import { createIdempotencyKey } from '../lib/idempotency'
 import { routeHref } from '../lib/routing'
 import { applicableRunSnapshot } from '../lib/runReplay'
+import { submissionPayload, type FrozenRunSubmission } from '../lib/runSubmission'
 import {
+  buildTaskDraft,
+  defaultSourceProviders,
   filterTasksByModule,
-  selectedSourceMap,
-  sourceRequirements,
   taskCatalogId,
 } from '../lib/taskDraft'
 
 const TERMINAL_STATUSES: ReadonlySet<RunStatus> = new Set(['SUCCEEDED', 'FAILED', 'CANCELLED'])
 
 /** Run 操作と SSE 接続の利用者向け state。 */
-type RunUiState = 'idle' | 'creating' | 'cancelling' | 'streaming' | 'reconnecting' | 'error'
+type RunUiState = 'idle' | 'cancelling' | 'streaming' | 'reconnecting' | 'error'
 
 /** 現在 Run の観測タブ (会話・結果・監査)。同時に一つだけ表示する。 */
 type ObservationTab = 'conversation' | 'result' | 'events'
@@ -44,7 +45,8 @@ type ObservationTab = 'conversation' | 'result' | 'events'
  *
  * Project 切替と業務模块の選択はどちらも sidebar が持つ(moduleId 空は模块を持たない Project)。
  */
-export function WorkspacePage({ projectId, moduleId, csrfToken, initialRunId = null, initialTaskId = null }: {
+export function WorkspacePage({ actorId, projectId, moduleId, csrfToken, initialRunId = null, initialTaskId = null }: {
+  actorId: string
   projectId: string
   moduleId: string
   csrfToken: string
@@ -68,7 +70,8 @@ export function WorkspacePage({ projectId, moduleId, csrfToken, initialRunId = n
   const [observationTab, setObservationTab] = useState<ObservationTab>('conversation')
   const [selectionRevision, setSelectionRevision] = useState(0)
   const [runDialogOpen, setRunDialogOpen] = useState(false)
-  const createController = useRef<AbortController | null>(null)
+  const [acknowledgePrevious, setAcknowledgePrevious] = useState(false)
+  const submission = useRunSubmission({ actorId, projectId, csrfToken, onConfirmed: handleRunConfirmed })
   const tasksController = useRef<AbortController | null>(null)
   const modulesController = useRef<AbortController | null>(null)
   const refreshController = useRef<AbortController | null>(null)
@@ -77,6 +80,7 @@ export function WorkspacePage({ projectId, moduleId, csrfToken, initialRunId = n
   const initialRunController = useRef<AbortController | null>(null)
   const appliedInitialRunId = useRef<string | null>(null)
   const appliedInitialTaskId = useRef<string | null>(null)
+  const initializedSourceTask = useRef<string | null>(null)
   const auditEvents = useMemo(
     () => events.filter((event) => event.event_type !== 'TEXT_DELTA'),
     [events],
@@ -92,8 +96,9 @@ export function WorkspacePage({ projectId, moduleId, csrfToken, initialRunId = n
   // sidebar で選択された業務模块に task 一覧を絞る。module を持たない Project(null)は catalog 全件。
   const visibleTasks = useMemo(() => filterTasksByModule(tasks, activeModule), [tasks, activeModule])
 
+  useEffect(() => setAcknowledgePrevious(false), [submission.pending?.request.idempotencyKey, submission.pending?.phase])
+
   useEffect(() => () => {
-    createController.current?.abort()
     tasksController.current?.abort()
     modulesController.current?.abort()
     refreshController.current?.abort()
@@ -115,7 +120,7 @@ export function WorkspacePage({ projectId, moduleId, csrfToken, initialRunId = n
     tasksController.current = controller
     setTasksError(null)
     void loadProjectTasks(projectId, controller.signal)
-      .then((catalog) => setTasks(catalog.tasks))
+      .then((catalog) => { if (!controller.signal.aborted) setTasks(catalog.tasks) })
       .catch((caught: unknown) => {
         if (!controller.signal.aborted) {
           setTasks([])
@@ -135,7 +140,7 @@ export function WorkspacePage({ projectId, moduleId, csrfToken, initialRunId = n
     const controller = new AbortController()
     modulesController.current = controller
     void loadProjectModules(projectId, controller.signal)
-      .then(setModules)
+      .then((loaded) => { if (!controller.signal.aborted) setModules(loaded) })
       .catch(() => {
         if (!controller.signal.aborted) setModules([])
       })
@@ -164,21 +169,19 @@ export function WorkspacePage({ projectId, moduleId, csrfToken, initialRunId = n
     setRunDialogOpen(true)
   }, [initialTaskId, visibleTasks])
 
-  // readiness の Integration identity を選び、Run 作成時に exact revision/scope を凍結する。
-  // readiness 未配線の旧 descriptor だけは accepted provider を互換利用する。
+  // 文書は必ず明示選択する。同じ task の候補更新では草稿を保持し、失効を選択欄で説明する。
   useEffect(() => {
     const task = tasks.find((item) => taskCatalogId(item) === selectedTaskId)
     if (!task) {
+      initializedSourceTask.current = null
       setSourceProviders({})
       return
     }
-    const defaults: Record<string, string> = {}
-    for (const requirement of sourceRequirements(task)) {
-      const preferred = requirement.options[0]
-      if (requirement.required && preferred) defaults[requirement.key] = preferred.value
-    }
-    setSourceProviders(defaults)
-  }, [selectedTaskId, tasks])
+    const context = `${projectId}:${selectedTaskId}`
+    if (initializedSourceTask.current === context) return
+    initializedSourceTask.current = context
+    setSourceProviders(defaultSourceProviders(task))
+  }, [projectId, selectedTaskId, tasks])
 
   useEffect(() => {
     if (!run || (TERMINAL_STATUSES.has(run.status) && events.length > 0)) return
@@ -244,7 +247,7 @@ export function WorkspacePage({ projectId, moduleId, csrfToken, initialRunId = n
     detailController.current = controller
     setDetailState({ status: 'loading' })
     void loadRunDetail(run.project_id, run.run_id, controller.signal)
-      .then((detail) => setDetailState({ status: 'ready', detail }))
+      .then((detail) => { if (!controller.signal.aborted) setDetailState({ status: 'ready', detail }) })
       .catch((caught: unknown) => {
         if (!controller.signal.aborted) {
           setDetailState({
@@ -266,65 +269,47 @@ export function WorkspacePage({ projectId, moduleId, csrfToken, initialRunId = n
     ) setObservationTab('result')
   }, [detailState])
 
-  /** 選択 task と JSON 入力から一意な通用 Run を作成する。入力の schema 検証は backend が行う。 */
-  async function handleCreate(event: FormEvent<HTMLFormElement>): Promise<void> {
+  /** 新しい意図を固定する。未確認要求の再送はここを通らず、元の本文を使う。 */
+  function handleCreate(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault()
+    if (submission.pending !== null && (!acknowledgePrevious || submission.pending.phase === 'sending')) return
     if (!selectedTask) {
       setError(messages.workspace.selectTaskFirst)
-      setUiState('error')
       return
     }
-    let parsedInput: Record<string, unknown>
-    try {
-      const raw: unknown = JSON.parse(inputText || '{}')
-      if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-        throw new Error('input is not an object')
-      }
-      parsedInput = raw as Record<string, unknown>
-    } catch {
-      setError(messages.workspace.inputMustBeJson)
-      setUiState('error')
+    const draft = buildTaskDraft(selectedTask, inputText, sourceProviders)
+    if (draft === null) {
+      setError(messages.workspace.documentSelection.incompleteDraft)
       return
     }
-    const sources = selectedSourceMap(sourceProviders)
-    createController.current?.abort()
-    const controller = new AbortController()
-    createController.current = controller
-    setUiState('creating')
     setError(null)
-    setRun(null)
+    try {
+      submission.start(draft, selectedTask.capability, acknowledgePrevious)
+    } catch {
+      setError(messages.workspace.submission.unavailable)
+    }
+  }
+
+  /** 初回/再送で確認した Run を既存の観測経路に載せる。未確認中は前の Run を消さない。 */
+  function handleRunConfirmed(request: FrozenRunSubmission, created: RunRecord): void {
+    refreshController.current?.abort()
+    cancelController.current?.abort()
+    detailController.current?.abort()
+    initialRunController.current?.abort()
+    const payload = submissionPayload(request)
     setEvents([])
     setDetailState({ status: 'idle' })
     setObservationTab('conversation')
     setPromptSummary({
-      taskTitle: selectedTask.title,
-      capability: selectedTask.capability,
-      input: parsedInput,
-      sources,
+      taskTitle: request.taskTitle,
+      capability: request.capability,
+      input: payload.input,
+      sources: payload.sources,
     })
-    try {
-      const created = await createTaskRun(
-        projectId,
-        {
-          skill_version_id: selectedTask.skill_version_id,
-          task_key: selectedTask.task_key,
-          input: parsedInput,
-          sources,
-        },
-        createIdempotencyKey(),
-        csrfToken,
-        controller.signal,
-      )
-      setRun(created)
-      setUiState(TERMINAL_STATUSES.has(created.status) ? 'idle' : 'streaming')
-      // 受理された時点で観測(右 main)が主役になるため、入力弹窗は閉じる。失敗時は開いたまま error を見せる。
-      setRunDialogOpen(false)
-    } catch (caught: unknown) {
-      if (!controller.signal.aborted) {
-        setError(caught instanceof Error ? caught.message : 'Unknown API error')
-        setUiState('error')
-      }
-    }
+    setRun(created)
+    setUiState(TERMINAL_STATUSES.has(created.status) ? 'idle' : 'streaming')
+    setError(null)
+    setRunDialogOpen(false)
   }
 
   /** 入力弹窗を開く。前回の失敗 error を持ち越さない。 */
@@ -342,6 +327,7 @@ export function WorkspacePage({ projectId, moduleId, csrfToken, initialRunId = n
     refreshController.current = controller
     try {
       const refreshed = await loadRun(run.run_id, controller.signal)
+      if (controller.signal.aborted) return
       setRun(refreshed)
     } catch (caught: unknown) {
       if (!controller.signal.aborted) {
@@ -361,6 +347,7 @@ export function WorkspacePage({ projectId, moduleId, csrfToken, initialRunId = n
     setError(null)
     try {
       const cancelled = await cancelRun(run.run_id, csrfToken, controller.signal)
+      if (controller.signal.aborted) return
       setRun((current) => current && current.run_id === cancelled.run_id
         ? { ...current, status: cancelled.status, row_version: cancelled.row_version }
         : current)
@@ -422,12 +409,13 @@ export function WorkspacePage({ projectId, moduleId, csrfToken, initialRunId = n
             )}
             <button
               className="primaryButton"
-              disabled={visibleTasks.length === 0}
+              disabled={visibleTasks.length === 0 && submission.pending === null}
               type="button"
               onClick={openRunDialog}
             >
-              {messages.workspace.openNewRun}
+              {submission.pending ? messages.workspace.submission.open : messages.workspace.openNewRun}
             </button>
+            {submission.pending && <p className="hint" role="status">{messages.workspace.submission.phase[submission.pending.phase]}</p>}
           </section>
 
           <section className="panel historyShortcut">
@@ -446,7 +434,7 @@ export function WorkspacePage({ projectId, moduleId, csrfToken, initialRunId = n
             <div className="panelHeader"><h2>{messages.workspace.runStatus}</h2>{run && <StatusBadge status={run.status} />}</div>
             {!run && (
               <EmptyState
-                text={messages.workspace.emptyBeforeRun}
+                text={submission.pending ? messages.workspace.submission.phase[submission.pending.phase] : messages.workspace.emptyBeforeRun}
                 action={visibleTasks.length > 0 && (
                   <button className="secondaryButton compactButton" type="button" onClick={openRunDialog}>
                     {messages.workspace.openNewRun}
@@ -494,7 +482,15 @@ export function WorkspacePage({ projectId, moduleId, csrfToken, initialRunId = n
       </section>
       {/* 新規実行の入力(任務・就緒度・来源・入力)は幅の広い弹窗で行い、rail の圧縮表示をやめる。 */}
       <ModalDialog open={runDialogOpen} title={messages.workspace.newRun} wide onClose={() => setRunDialogOpen(false)}>
-        <form className="runForm" onSubmit={(event) => void handleCreate(event)}>
+        <form className="runForm" onSubmit={handleCreate}>
+          {submission.pending && (
+            <RunSubmissionPanel
+              pending={submission.pending}
+              acknowledgePrevious={acknowledgePrevious}
+              onAcknowledge={setAcknowledgePrevious}
+              onRetry={submission.retry}
+            />
+          )}
           {visibleTasks.length === 0 && <p className="hint">{messages.workspace.noModuleTasks}</p>}
           {visibleTasks.length > 0 && (
             <>
@@ -512,7 +508,15 @@ export function WorkspacePage({ projectId, moduleId, csrfToken, initialRunId = n
                 sourceProviders={sourceProviders}
                 task={selectedTask}
               />
-              <button className="primaryButton" disabled={uiState === 'creating' || !selectedTask} type="submit">{uiState === 'creating' ? messages.workspace.creating : messages.workspace.startRun}</button>
+              <button
+                className="primaryButton"
+                disabled={!selectedTask || (submission.pending !== null && (submission.pending.phase === 'sending' || !acknowledgePrevious))}
+                type="submit"
+              >
+                {submission.pending?.phase === 'sending'
+                  ? messages.workspace.creating
+                  : submission.pending ? messages.workspace.submission.startNew : messages.workspace.startRun}
+              </button>
             </>
           )}
           {error && <p className="error" role="alert">{error}</p>}

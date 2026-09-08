@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
+import json
+from copy import deepcopy
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import pytest
 from fakes import FakeAuthService, FakeRunService, FakeSkillService
 from fastapi.testclient import TestClient
+from jsonschema import Draft202012Validator, FormatChecker
 
 from projectmind.auth.service import AuthenticatedActor
+from projectmind.runs.domain import CreatedRun, RunStatus
+from tests.documents.fakes import document_content, document_snapshot
 
 
 def test_create_task_run_returns_server_snapshot_identity(client: TestClient) -> None:
@@ -188,6 +197,68 @@ def test_create_task_run_rejects_idempotency_conflict(client: TestClient) -> Non
     assert response.json()["code"] == "idempotency_conflict"
 
 
+def test_replay_does_not_require_task_to_still_be_published(client: TestClient) -> None:
+    """有権限の原要求再送は公開停止後も旧 Run を確認でき、新しい実行は作らない。"""
+
+    client.app.state.skill_service = FakeSkillService(published_task_missing=True)
+    fake = FakeRunService(replay=True)
+    client.app.state.run_service = fake
+    response = client.post(
+        f"/api/v1/projects/{uuid4()}/task-runs",
+        headers={"Idempotency-Key": "original-request"},
+        json=_task_run_body(),
+    )
+
+    assert response.status_code == 200
+    assert response.headers["Idempotent-Replay"] == "true"
+    assert fake.replay_lookups == 1
+
+
+def test_replay_keeps_csrf_and_current_actor_checks(client: TestClient) -> None:
+    """既存 Run を返すだけでも unsafe endpoint の認証境界は通過する。"""
+
+    fake = FakeRunService(replay=True)
+    client.app.state.run_service = fake
+    response = client.post(
+        f"/api/v1/projects/{uuid4()}/task-runs",
+        headers={"Idempotency-Key": "original-request", "X-CSRF-Token": "invalid"},
+        json=_task_run_body(),
+    )
+    assert response.status_code == 403
+    assert fake.replay_lookups == 0
+
+
+def test_task_resolution_failure_rechecks_a_just_committed_request(client: TestClient) -> None:
+    """事前照会と公開版解決の間に初回が commit した場合も、その Run を確認する。"""
+
+    project_id = uuid4()
+    expected = CreatedRun(
+        run_id=uuid4(),
+        project_id=project_id,
+        task_id=uuid4(),
+        status=RunStatus.RUNNING,
+        row_version=3,
+        created_at=datetime.now(UTC),
+        idempotent_replay=True,
+    )
+    fake = FakeRunService()
+    fake.find_task_run_replay = AsyncMock(side_effect=[None, expected])
+    client.app.state.run_service = fake
+    client.app.state.skill_service = FakeSkillService(published_task_missing=True)
+    response = client.post(
+        f"/api/v1/projects/{project_id}/task-runs",
+        headers={"Idempotency-Key": "original-request"},
+        json=_task_run_body(),
+    )
+    assert response.status_code == 200
+    assert response.json()["run_id"] == str(expected.run_id)
+    assert fake.find_task_run_replay.await_count == 2
+    assert (
+        fake.find_task_run_replay.call_args_list[0] == fake.find_task_run_replay.call_args_list[1]
+    )
+    assert fake.received_input is None
+
+
 def test_cancel_run_returns_terminal_snapshot_and_is_idempotent(client: TestClient) -> None:
     """取消 API が明示 field だけを返し、反復要求でも CANCELLED を維持する。"""
 
@@ -212,9 +283,7 @@ def test_get_run_detail_returns_project_scoped_result_and_evidence(client: TestC
     project_id = uuid4()
     created = _create_task_run(client, project_id).json()
 
-    response = client.get(
-        f"/api/v1/projects/{project_id}/runs/{created['run_id']}/detail"
-    )
+    response = client.get(f"/api/v1/projects/{project_id}/runs/{created['run_id']}/detail")
 
     assert response.status_code == 200
     payload = response.json()
@@ -225,9 +294,7 @@ def test_get_run_detail_returns_project_scoped_result_and_evidence(client: TestC
     assert payload["segments"][0]["segment_no"] == 1
     assert payload["segments"][0]["continuation_mode"] == "INITIAL"
 
-    cross_project = client.get(
-        f"/api/v1/projects/{uuid4()}/runs/{created['run_id']}/detail"
-    )
+    cross_project = client.get(f"/api/v1/projects/{uuid4()}/runs/{created['run_id']}/detail")
     assert cross_project.status_code == 404
 
 
@@ -257,6 +324,67 @@ def test_respond_to_interaction_creates_next_segment(client: TestClient) -> None
     assert fake.received_interaction_response == {"text": "Proceed with the review."}
 
 
+@pytest.mark.parametrize(
+    ("change", "status"),
+    [("none", "FROZEN"), ("legacy", "LEGACY_UNAVAILABLE"),
+     ("checksum", "INVALID"), ("project", "INVALID"), ("slot", "INVALID")],
+)
+def test_document_detail_projects_original_snapshot_without_private_fields(
+    client: TestClient, change: str, status: str
+) -> None:
+    """公開 detail/history は同じ許可リストを使い、歴史欠損や破損を結果の欠落にしない。"""
+
+    fake = FakeRunService()
+    client.app.state.run_service = fake
+    project_id = uuid4()
+    created = _create_task_run(client, project_id).json()
+    frozen = document_snapshot(
+        project_id, [document_content(name="frozen-only.md")], key="documents"
+    ).to_json()
+    source: dict[str, Any] = {
+        "provider": "project-documents", "capability": "document.read/v1",
+        "resource_kind": "document", "access": "read", "document_snapshot": frozen,
+        "scope": {"unpublished": "fixture-private"}, "secret_locator": "fixture-private",
+    }
+    if change == "legacy":
+        source.pop("document_snapshot")
+    elif change == "checksum":
+        frozen["checksum"] = "sha256:" + "0" * 64
+    elif change == "project":
+        frozen["project_id"] = str(uuid4())
+    elif change == "slot":
+        frozen["requirement_key"] = "another-slot"
+    sources: dict[str, Any] = {"documents": source}
+    original = deepcopy(sources)
+    fake.received_sources = sources
+    response = client.get(f"/api/v1/projects/{project_id}/runs/{created['run_id']}/detail")
+    assert response.status_code == 200
+    payload = response.json()
+    entry = payload["document_snapshots"][0]
+    assert entry["status"] == status
+    assert entry["snapshot"] == (frozen if status == "FROZEN" else None)
+    assert payload["result"]["summary"] == "completed"
+    assert sources == original
+    assert "fixture-private" not in response.text
+    if status != "FROZEN":
+        assert "frozen-only.md" not in response.text
+    assert set(payload["selected_sources"]["documents"]) == {
+        "provider", "capability", "resource_kind", "access"
+    }
+
+    history = client.get(f"/api/v1/projects/{project_id}/runs").json()
+    assert history["items"][0]["selected_sources"] == payload["selected_sources"]
+    assert "document_snapshots" not in history["items"][0]
+    assert "fixture-private" not in json.dumps(history)
+    contracts = Path(__file__).resolve().parents[3] / "contracts"
+    for name, value in (("detail", payload), ("history", history)):
+        schema = json.loads((contracts / "runs" / name / "v1.schema.json").read_text())
+        Draft202012Validator(schema, format_checker=FormatChecker()).validate(value)
+    assert client.get(
+        f"/api/v1/projects/{uuid4()}/runs/{created['run_id']}/detail"
+    ).status_code == 404
+
+
 def test_list_run_history_returns_paginated_project_items(client: TestClient) -> None:
     """Project Run history が pagination metadata と再表示用 input を返す。"""
 
@@ -273,6 +401,8 @@ def test_list_run_history_returns_paginated_project_items(client: TestClient) ->
     assert payload["offset"] == 0
     assert payload["has_more"] is False
     assert payload["items"][0]["input"]["target"] == "main"
+
+
 def test_run_history_filters_by_status_on_the_server(client: TestClient) -> None:
     """待機中だけを出す一覧が SQL 側の絞り込みを使うことを確認する。
 

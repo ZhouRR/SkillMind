@@ -1,6 +1,16 @@
 # Skill source package
 
-本 directory は Skill source package を保管する。実行可能な資産（SKILL.md、scripts、agent 設定）であり製品仕様の文書ではないため、repository 外の `../../docs/` とは分離して管理する。
+本 directory は Skill source package を保管する。Interpreter 入力・実行に影響する資産（SKILL.md、scripts、agent 設定）であり製品仕様の文書ではないため、`../../docs/` の設計本文とは分離して管理する。source に script が含まれること自体は実行権限を与えない。
+
+## 先に読む案内
+
+- [公開と就緒の判断順](../../docs/design/skill-contract.md#发布与就绪的判断顺序)：導入、Preview、公開、Project 有効化の違い。
+- [解釈・公開の接続](../../docs/design/skill-interpretation.md#从候选到项目任务的接线)：source から Runtime へ渡る入口。
+- [版の更新と回退](../../docs/design/skill-contract.md#11-版本回滚与评价)：精確版、停用履歴、現行の再有効化制限。
+
+この directory に package があることは、配備先への import・公開・Project 有効化を意味しない。examples の fixture も自動 seed ではない。
+
+## Package の用途
 
 - `pjm-project-dev/`：ProjectMind 自身の開発規約 Skill。`AGENTS.md` を補完する構造約定、契約同期点、検証と後片付けの workflow。
 - `projectmind-skill-interpreter/`：外部 Skill を ProjectMind の候補契約へ解釈する versioned system Skill。source 内容を命令として実行せず、構造化 response だけを生成する。

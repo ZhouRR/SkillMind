@@ -16,6 +16,7 @@ import subprocess
 import sys
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
@@ -46,12 +47,14 @@ from projectmind.db.models import (
     InteractionResponse,
     ManagedSecretMaterial,
     Organization,
+    OutboxMessage,
     Project,
     ProjectMember,
     ProjectSkillVersion,
     ResourceBinding,
     Run,
     RunAttempt,
+    RunEvent,
     RunSegment,
     RuntimeManifest,
     Skill,
@@ -73,6 +76,9 @@ from projectmind.integrations.domain import (
 )
 from projectmind.integrations.repository import IntegrationRepository
 from projectmind.integrations.secrets import DeploymentSecretResolver
+from projectmind.runs.creation_request import TaskRunIntent
+from projectmind.runs.domain import CreatedRun
+from projectmind.runs.repository import RunRepository
 from projectmind.schedules.domain import ScheduleNotFoundError
 from projectmind.schedules.repository import ScheduleRepository
 from projectmind.skills.domain import (
@@ -85,6 +91,7 @@ from projectmind.skills.domain import (
 )
 from projectmind.skills.repository import SkillRepository
 from projectmind.skills.service import save_execution_idempotently
+from tests.runs.creation_fakes import creation_command, creation_intent
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 SCRATCH_DATABASE = f"projectmind_dbverify_{os.getpid()}"
@@ -1201,13 +1208,15 @@ async def test_module_composition_round_trip_with_project_isolation(
 
         creator = uuid4()
         async with factory() as session, session.begin():
-            created = await CompositionRepository(session).create(CreateModuleCommand(
-                project_id=project.id,
-                created_by=creator,
-                name="品质分析",
-                description="round trip module",
-                skill_version_ids=(published.id,),
-            ))
+            created = await CompositionRepository(session).create(
+                CreateModuleCommand(
+                    project_id=project.id,
+                    created_by=creator,
+                    name="品质分析",
+                    description="round trip module",
+                    skill_version_ids=(published.id,),
+                )
+            )
         assert created.skills[0].skill_name == "DB Verify Skill"
 
         # 一覧は自 Project にだけ見え、他 Project は空になる(有効化 join の隔離)。
@@ -1220,22 +1229,26 @@ async def test_module_composition_round_trip_with_project_isolation(
         # 未発行 SkillVersion への束縛は実機 join 検証で拒否される。
         async with factory() as session, session.begin():
             with pytest.raises(ModuleSkillInvalidError):
-                await CompositionRepository(session).update(UpdateModuleCommand(
-                    project_id=project.id,
-                    module_id=created.module_id,
-                    name="更名",
-                    description="",
-                    skill_version_ids=(uuid4(),),
-                ))
+                await CompositionRepository(session).update(
+                    UpdateModuleCommand(
+                        project_id=project.id,
+                        module_id=created.module_id,
+                        name="更名",
+                        description="",
+                        skill_version_ids=(uuid4(),),
+                    )
+                )
 
         async with factory() as session, session.begin():
-            updated = await CompositionRepository(session).update(UpdateModuleCommand(
-                project_id=project.id,
-                module_id=created.module_id,
-                name="更名后的模块",
-                description="renamed",
-                skill_version_ids=(published.id,),
-            ))
+            updated = await CompositionRepository(session).update(
+                UpdateModuleCommand(
+                    project_id=project.id,
+                    module_id=created.module_id,
+                    name="更名后的模块",
+                    description="renamed",
+                    skill_version_ids=(published.id,),
+                )
+            )
         assert updated.name == "更名后的模块"
 
         # 他 Project からの削除は不存在と同型で失敗し、自 Project の削除で消える。
@@ -1271,9 +1284,7 @@ async def test_unreferenced_jaf_seed_is_removed_by_full_migration_chain(
             manifest = await session.get(RuntimeManifest, LEGACY_JAF_RUNTIME_MANIFEST_ID)
             seed_projects = (
                 await session.scalars(
-                    select(Project.key).where(
-                        Project.key.in_(("jaf-m0", "system-skills"))
-                    )
+                    select(Project.key).where(Project.key.in_(("jaf-m0", "system-skills")))
                 )
             ).all()
 
@@ -1306,9 +1317,7 @@ async def test_referenced_bootstrap_seed_survives_removal_migration() -> None:
             session.begin(),
         ):
             now = datetime.now(UTC)
-            organization_id = (
-                await session.scalars(select(Organization.id).limit(1))
-            ).one()
+            organization_id = (await session.scalars(select(Organization.id).limit(1))).one()
             # seed 版本を composition item から参照させる(0024 の skill 保持 guard)。
             composition_id = uuid4()
             session.add(
@@ -1638,6 +1647,8 @@ async def test_run_binding_revalidation_rejects_post_creation_changes(
         async with factory() as session:
             with pytest.raises(RunBindingError):
                 await _load(session)
+
+
 @pytest.mark.asyncio
 async def test_schedule_claim_lets_only_one_worker_win_the_same_occurrence(
     migrated_database_url: str,
@@ -1759,6 +1770,118 @@ async def test_schedule_claim_lets_only_one_worker_win_the_same_occurrence(
         # 別 Project から同じ schedule は読めない (越境は不存在と同じ扱い)。
         async with factory() as session:
             with pytest.raises(ScheduleNotFoundError):
-                await ScheduleRepository(session).get(
-                    project_id=uuid4(), schedule_id=schedule.id
+                await ScheduleRepository(session).get(project_id=uuid4(), schedule_id=schedule.id)
+
+
+async def _creation_project(factory: async_sessionmaker[AsyncSession]) -> TaskRunIntent:
+    """作成競合の試験だけが所有する独立 Project を用意する。"""
+
+    intent = creation_intent(sources={"docs": "project-documents:all"})
+    organization = _organization()
+    now = datetime.now(UTC)
+    project = Project(
+        id=intent.project_id,
+        organization_id=organization.id,
+        key=f"db-create-{uuid4().hex[:8]}",
+        name="Creation Replay",
+        description="",
+        status="ACTIVE",
+        settings_json={},
+        retention_days=90,
+        created_at=now,
+        updated_at=now,
+    )
+    async with factory() as session, session.begin():
+        await _insert_in_order(session, organization, project)
+    return intent
+
+
+@pytest.mark.asyncio
+async def test_concurrent_run_creation_commits_only_the_winners_snapshot(
+    migrated_database_url: str,
+) -> None:
+    """二接続の事前照会が同時に空でも、Run/Segment/Event/Outbox は一組だけ commit する。"""
+
+    async with _session_factory(migrated_database_url) as factory:
+        intent = await _creation_project(factory)
+        command = creation_command(intent)
+        barrier = asyncio.Barrier(2)
+        members = [str(uuid4()), str(uuid4())]
+
+        async def create(member: str) -> CreatedRun:
+            """資源集合が違う二つの解決結果を、同じ作成意図で競合させる。"""
+
+            async with factory() as session, session.begin():
+                repository = RunRepository(session)
+                assert (
+                    await repository.find_task_run_replay(
+                        intent=intent, idempotency_key=command.idempotency_key
+                    )
+                    is None
                 )
+                await barrier.wait()
+                return await repository.create_idempotent(
+                    replace(command, selected_sources_json={"docs": {"member": member}})
+                )
+
+        first, second = await asyncio.wait_for(
+            asyncio.gather(*(create(member) for member in members)), timeout=30
+        )
+        assert first.run_id == second.run_id
+        assert sorted([first.idempotent_replay, second.idempotent_replay]) == [False, True]
+        async with factory() as session:
+            rows = list(
+                await session.scalars(select(Run).where(Run.project_id == intent.project_id))
+            )
+            assert len(rows) == 1
+            assert rows[0].selected_sources_json in [
+                {"docs": {"member": member}} for member in members
+            ]
+            for model, column in (
+                (RunSegment, RunSegment.run_id),
+                (RunEvent, RunEvent.run_id),
+                (OutboxMessage, OutboxMessage.aggregate_id),
+            ):
+                assert (
+                    await session.scalar(
+                        select(func.count()).select_from(model).where(column == first.run_id)
+                    )
+                    == 1
+                )
+            replay = await RunRepository(session).find_task_run_replay(
+                intent=intent, idempotency_key=command.idempotency_key
+            )
+            assert replay is not None and replay.run_id == first.run_id
+
+
+@pytest.mark.asyncio
+async def test_aborted_run_creation_does_not_reserve_key_or_leave_dispatch(
+    migrated_database_url: str,
+) -> None:
+    """初期化 transaction の失敗は Run と子行を残さず、同じ要求を再び作成できる。"""
+
+    async with _session_factory(migrated_database_url) as factory:
+        intent = await _creation_project(factory)
+        command = creation_command(intent)
+        with pytest.raises(RuntimeError, match="creation initialization failed"):
+            async with factory() as session, session.begin():
+                aborted = await RunRepository(session).create_idempotent(command)
+                await session.flush()
+                raise RuntimeError("creation initialization failed")
+        async with factory() as session:
+            assert await session.get(Run, aborted.run_id) is None
+            for model, column in (
+                (RunSegment, RunSegment.run_id),
+                (RunEvent, RunEvent.run_id),
+                (OutboxMessage, OutboxMessage.aggregate_id),
+            ):
+                assert (
+                    await session.scalar(
+                        select(func.count()).select_from(model).where(column == aborted.run_id)
+                    )
+                    == 0
+                )
+        async with factory() as session, session.begin():
+            created = await RunRepository(session).create_idempotent(command)
+            assert created.idempotent_replay is False
+            assert created.run_id != aborted.run_id

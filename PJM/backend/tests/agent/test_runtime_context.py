@@ -23,9 +23,12 @@ from projectmind.agent.fixture_providers import (
 )
 from projectmind.agent.tool_gateway import RunToolContext, ToolProviderError
 from projectmind.agent.workspace import WorkspaceManager
+from projectmind.agent.workspace_materializer import WorkspaceMaterializer
 from projectmind.core.hashing import canonical_json, sha256_hex
 from projectmind.documents.source import ProjectDocumentContent
 from projectmind.runs.domain import ClaimedRun
+from tests.agent.test_workspace_materializer import _FakeInventory
+from tests.documents.fakes import document_content, document_snapshot
 
 ROOT = Path(__file__).resolve().parents[3]
 CONTRACTS = ROOT / "contracts"
@@ -146,9 +149,7 @@ async def test_context_builder_resolves_fixture_tools_and_workspace(tmp_path: Pa
         model="claude-test",
     )
     claimed = _generic_claimed(
-        selected_sources={
-            "primary-issues": {"capability": "issue.read/v1", "provider": "csv"}
-        }
+        selected_sources={"primary-issues": {"capability": "issue.read/v1", "provider": "csv"}}
     )
     context = await builder.build(claimed, sequence_start=7)
 
@@ -173,9 +174,10 @@ async def test_context_builder_rejects_uninstalled_production_source(tmp_path: P
         model="claude-test",
     )
     manifest = _generic_manifest()
-    manifest["capability_blueprint"]["resource_requirements"][0][
-        "accepted_providers"
-    ] = ["csv", "redmine"]
+    manifest["capability_blueprint"]["resource_requirements"][0]["accepted_providers"] = [
+        "csv",
+        "redmine",
+    ]
     with pytest.raises(LookupError, match="Provider is not installed"):
         await builder.build(
             _generic_claimed(
@@ -480,9 +482,7 @@ async def test_context_builder_denies_workspace_search_below_profile_or_without_
 
     manifest = _generic_manifest(required=False)
     manifest["tools"] = [{"capability": "workspace.search/v1", "required": True}]
-    manifest["capability_blueprint"]["execution_preferences"] = {
-        "recommended_profile": "GUIDED"
-    }
+    manifest["capability_blueprint"]["execution_preferences"] = {"recommended_profile": "GUIDED"}
     contracts = ContractStore(CONTRACTS)
     builder = ProductionRunContextBuilder(
         workspace_manager=WorkspaceManager((tmp_path / "runs").resolve()),
@@ -526,12 +526,10 @@ async def test_context_builder_rejects_legacy_run_without_frozen_schema(tmp_path
 class _NoopDocumentSource:
     """Resolution 検証用の、内容を返さない ProjectDocumentSource。"""
 
-    async def fetch(
-        self, *, project_id: Any, folder: str, name: str
-    ) -> ProjectDocumentContent | None:
+    async def fetch(self, *, project_id: Any, document_id: Any) -> ProjectDocumentContent | None:
         """解決段階では呼ばれないため常に None を返す。"""
 
-        del project_id, folder, name
+        del project_id, document_id
         return None
 
 
@@ -610,7 +608,9 @@ def _document_manifest() -> dict[str, Any]:
     }
 
 
-def _document_builder(tmp_path: Path) -> ProductionRunContextBuilder:
+def _document_builder(
+    tmp_path: Path, *, materializer: WorkspaceMaterializer | None = None
+) -> ProductionRunContextBuilder:
     """document.read/v1 を含む registry で通用 context builder を組み立てる。"""
 
     contracts = ContractStore(CONTRACTS)
@@ -618,6 +618,7 @@ def _document_builder(tmp_path: Path) -> ProductionRunContextBuilder:
         workspace_manager=WorkspaceManager((tmp_path / "runs").resolve()),
         tool_registry=create_run_tool_registry(contracts, document_source=_NoopDocumentSource()),
         model="claude-test",
+        materializer=materializer,
     )
 
 
@@ -629,14 +630,74 @@ async def test_context_builder_resolves_project_document_source(tmp_path: Path) 
     claimed = _generic_claimed(
         manifest=_document_manifest(),
         allowed=("document.read/v1",),
-        selected_sources={
-            "project-doc": {"capability": "document.read/v1", "provider": "project"}
-        },
+        selected_sources={},
     )
+    claimed.selected_sources_json["project-doc"] = {
+        "capability": "document.read/v1",
+        "provider": "project-documents",
+        "document_snapshot": document_snapshot(
+            claimed.project_id, [document_content()], key="project-doc"
+        ).to_json(),
+    }
     context = await builder.build(claimed, sequence_start=1)
 
     assert [tool.capability for tool in context.tools] == ["document.read/v1"]
-    assert context.tools[0].provider == "project"
+    assert context.tools[0].provider == "project-documents"
+
+
+async def test_legacy_document_context_cannot_implicitly_authorize_all(tmp_path: Path) -> None:
+    """旧 provider 名だけの Run を Project 全文書の認可へ昇格させない。"""
+
+    claimed = _generic_claimed(
+        manifest=_document_manifest(),
+        allowed=("document.read/v1",),
+        selected_sources={"project-doc": {"capability": "document.read/v1", "provider": "project"}},
+    )
+    with pytest.raises(ValueError):
+        await _document_builder(tmp_path).build(claimed, sequence_start=1)
+
+
+async def test_context_builder_materializes_document_union_and_registers_one_tool(
+    tmp_path: Path,
+) -> None:
+    """実 builder と物化器を通し、複数 slot の集合が一つの Tool と Brief に接続する。"""
+
+    first = document_content(name="selected.md")
+    second = document_content(name="reference.md")
+    hidden = document_content(name="not-selected.md")
+    manifest = _document_manifest()
+    requirement = manifest["capability_blueprint"]["resource_requirements"][0]
+    manifest["capability_blueprint"]["resource_requirements"].append(
+        {**requirement, "key": "reference-doc"}
+    )
+    claimed = _generic_claimed(
+        manifest=manifest, allowed=("document.read/v1",), selected_sources={}
+    )
+    for key, contents in (("project-doc", [first]), ("reference-doc", [first, second])):
+        claimed.selected_sources_json[key] = {
+            "capability": "document.read/v1",
+            "provider": "project-documents",
+            "document_snapshot": document_snapshot(claimed.project_id, contents, key=key).to_json(),
+        }
+    inventory = _FakeInventory([first, second, hidden])
+    builder = _document_builder(
+        tmp_path,
+        materializer=WorkspaceMaterializer(
+            document_inventory=inventory,
+            max_bytes=10_485_760,
+            max_files=500,
+        ),
+    )
+    context = await builder.build(claimed, sequence_start=1)
+    assert len(context.tools) == 1
+    assert context.tools[0].capability == "document.read/v1"
+    assert (context.workspace.input_dir / "documents/specs/selected.md").is_file()
+    assert (context.workspace.input_dir / "documents/specs/reference.md").is_file()
+    assert not (context.workspace.input_dir / "documents/specs/not-selected.md").exists()
+    assert "input/documents/.projectmind/files.txt" in context.prompt
+    retry = await builder.build(claimed, sequence_start=10)
+    assert retry.workspace == context.workspace
+    assert inventory.calls == 1
 
 
 @pytest.mark.asyncio
@@ -680,9 +741,7 @@ async def test_context_builder_rejects_structured_provider_not_accepted(tmp_path
 
     builder = _generic_builder(tmp_path)
     claimed = _generic_claimed(
-        selected_sources={
-            "primary-issues": {"capability": "issue.read/v1", "provider": "redmine"}
-        }
+        selected_sources={"primary-issues": {"capability": "issue.read/v1", "provider": "redmine"}}
     )
     with pytest.raises(ValueError, match="not accepted"):
         await builder.build(claimed, sequence_start=1)

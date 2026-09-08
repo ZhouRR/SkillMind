@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from collections.abc import AsyncIterator, Mapping
 from contextlib import suppress
 from dataclasses import replace
@@ -29,6 +30,7 @@ from projectmind.runs.domain import (
     ClaimedRun,
     LeaseValidationError,
     RunAttemptStatus,
+    RunCancellationRequestedError,
     RunResultRecord,
     RunStatus,
     SessionContinuationMode,
@@ -69,26 +71,86 @@ class AgentRunExecutor:
         engine: AgentEngine,
         result_validator: ResultValidator,
         lease_seconds: int,
+        preparation_timeout_seconds: float = 300,
         heartbeat_interval_seconds: float | None = None,
         realtime_publisher: RunRealtimePublisher | None = None,
     ) -> None:
         """実行依存と heartbeat 間隔を固定する。"""
 
-        interval = heartbeat_interval_seconds or lease_seconds / 3
+        interval = (
+            lease_seconds / 3 if heartbeat_interval_seconds is None else heartbeat_interval_seconds
+        )
         if lease_seconds <= 0 or interval <= 0 or interval >= lease_seconds:
             raise ValueError("Heartbeat interval must be positive and shorter than the lease")
+        if not math.isfinite(preparation_timeout_seconds) or preparation_timeout_seconds <= 0:
+            raise ValueError("Preparation timeout must be finite and positive")
         self._run_service = run_service
         self._context_builder = context_builder
         self._engine = engine
         self._result_validator = result_validator
         self._lease_seconds = lease_seconds
         self._heartbeat_interval_seconds = interval
+        self._preparation_timeout_seconds = preparation_timeout_seconds
         self._realtime_publisher = realtime_publisher
 
     async def execute(self, claimed_run: ClaimedRun) -> None:
-        """PREPARING から heartbeat 付き Agent 実行を開始し、必ず終態化する。"""
+        """準備から実行終了まで監督し、実行権を失った Worker は書き込まず退く。"""
 
-        prepared = await self._run_service.prepare_execution(claimed_run)
+        done = asyncio.Event()
+        cancellation = asyncio.Event()
+        session_ref: asyncio.Future[AgentSessionRef] = asyncio.get_running_loop().create_future()
+        try:
+            async with asyncio.TaskGroup() as tasks:
+                tasks.create_task(
+                    self._execute_claimed(claimed_run, done, cancellation, session_ref)
+                )
+                tasks.create_task(self._heartbeat(claimed_run, done))
+                tasks.create_task(
+                    self._monitor_cancellation(claimed_run, done, session_ref, cancellation)
+                )
+        except ExceptionGroup as group:
+            supervisor_error = _supervisor_exception(group)
+            if isinstance(supervisor_error, LeaseValidationError):
+                raise supervisor_error from group
+            if await self._run_service.is_cancellation_requested(claimed_run.run_id):
+                await self._finalize_cancelled(claimed_run)
+                return
+            await self._finalize_without_event(
+                claimed_run,
+                code="execution_supervisor_failed",
+                error_type=type(supervisor_error).__name__,
+            )
+
+    async def _execute_claimed(
+        self,
+        claimed: ClaimedRun,
+        done: asyncio.Event,
+        cancellation: asyncio.Event,
+        session_ref: asyncio.Future[AgentSessionRef],
+    ) -> None:
+        """準備・Brief・開始 gate と engine を同じ heartbeat の寿命に収める。"""
+
+        try:
+            prepared = await self._run_service.prepare_execution(claimed)
+            context = await self._prepare_context(
+                claimed, sequence_start=prepared.next_sequence, cancellation=cancellation
+            )
+            if context is None:
+                return
+            # 準備後に現在の lease と取消を一つの短 transaction で再検証する。
+            # Context 内の古い期限だけでは、準備中の延長や接管を判断できない。
+            if not await self._run_service.verify_execution_start(claimed):
+                await self._finalize_cancelled(claimed)
+                return
+            await self._consume_engine(claimed, context, done, session_ref)
+        finally:
+            done.set()
+
+    async def _prepare_context(
+        self, claimed_run: ClaimedRun, *, sequence_start: int, cancellation: asyncio.Event
+    ) -> RunContext | None:
+        """取消可能な資源準備を制限時間内に終え、成功時だけ Brief を凍結する。"""
+
         log_event(
             logger,
             logging.INFO,
@@ -100,28 +162,45 @@ class AgentRunExecutor:
         )
         if await self._run_service.is_cancellation_requested(claimed_run.run_id):
             await self._finalize_cancelled(claimed_run)
-            return
+            return None
+        deadline = asyncio.timeout(self._preparation_timeout_seconds)
         try:
-            context = await self._context_builder.build(
-                claimed_run,
-                sequence_start=prepared.next_sequence,
-            )
-            _validate_context_identity(context, claimed_run, prepared.next_sequence)
+            async with deadline:
+                context = await self._build_until_cancelled(
+                    claimed_run, sequence_start=sequence_start, cancellation=cancellation
+                )
+            if context is None or await self._run_service.is_cancellation_requested(
+                claimed_run.run_id
+            ):
+                await self._finalize_cancelled(claimed_run)
+                return None
+            _validate_context_identity(context, claimed_run, sequence_start)
             await self._run_service.freeze_agent_task_brief(
                 claimed_run,
                 brief=dict(context.task_brief),
                 checksum=context.task_brief_checksum,
             )
-        except Exception as builder_error:
-            if await self._run_service.is_cancellation_requested(claimed_run.run_id):
+        except Exception as error:
+            # 監督側の取消中に子の cleanup 例外が出ても、新たな終態 transaction を始めない。
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                raise
+            builder_error = _supervisor_exception(error)
+            if isinstance(builder_error, LeaseValidationError):
+                if builder_error is error:
+                    raise
+                raise builder_error from error
+            if isinstance(builder_error, RunCancellationRequestedError) or (
+                await self._run_service.is_cancellation_requested(claimed_run.run_id)
+            ):
                 await self._finalize_cancelled(claimed_run)
-                return
+                return None
             await self._finalize_without_event(
                 claimed_run,
-                code="context_build_failed",
+                code="preparation_timeout" if deadline.expired() else "context_build_failed",
                 error_type=type(builder_error).__name__,
             )
-            return
+            return None
 
         # Agent へ渡した指示の監査点。Brief 正文は Skill guidance と業務入力を含むため、
         # docs/11 §7.1 のとおり log には identity と checksum だけを残す。
@@ -135,29 +214,24 @@ class AgentRunExecutor:
             execution_profile=_brief_execution_profile(context),
         )
 
-        if await self._run_service.is_cancellation_requested(claimed_run.run_id):
-            await self._finalize_cancelled(claimed_run)
-            return
+        return context
 
-        done = asyncio.Event()
-        session_ref: asyncio.Future[AgentSessionRef] = asyncio.get_running_loop().create_future()
-        try:
-            async with asyncio.TaskGroup() as tasks:
-                tasks.create_task(self._consume_engine(claimed_run, context, done, session_ref))
-                tasks.create_task(self._heartbeat(claimed_run, done))
-                tasks.create_task(self._monitor_cancellation(claimed_run, done, session_ref))
-        except ExceptionGroup as group:
-            supervisor_error = _first_exception(group)
-            if isinstance(supervisor_error, LeaseValidationError):
-                raise supervisor_error from group
-            if await self._run_service.is_cancellation_requested(claimed_run.run_id):
-                await self._finalize_cancelled(claimed_run)
-                return
-            await self._finalize_without_event(
-                claimed_run,
-                code="execution_supervisor_failed",
-                error_type=type(supervisor_error).__name__,
+    async def _build_until_cancelled(
+        self, claimed: ClaimedRun, *, sequence_start: int, cancellation: asyncio.Event
+    ) -> RunContext | None:
+        """準備子 task だけを中断し、親 task の取消と user intent を混同しない。"""
+
+        async with asyncio.TaskGroup() as tasks:
+            build = tasks.create_task(
+                self._context_builder.build(claimed, sequence_start=sequence_start)
             )
+            cancelled = tasks.create_task(cancellation.wait())
+            await asyncio.wait((build, cancelled), return_when=asyncio.FIRST_COMPLETED)
+            if cancellation.is_set():
+                build.cancel()
+            cancelled.cancel()
+        # thread 内の I/O が遅れて完了しても、取消済み coroutine は READY/Brief を公開しない。
+        return None if cancellation.is_set() else build.result()
 
     async def _consume_engine(
         self,
@@ -428,6 +502,7 @@ class AgentRunExecutor:
             )
         finally:
             done.set()
+            await _close_stream(stream)
 
     def _execution_stream(
         self, claimed: ClaimedRun, context: RunContext
@@ -439,10 +514,7 @@ class AgentRunExecutor:
             SessionContinuationMode.REPLACE,
         }:
             return self._engine.execute(context)
-        if (
-            claimed.parent_sdk_session_id is None
-            or claimed.parent_run_attempt_id is None
-        ):
+        if claimed.parent_sdk_session_id is None or claimed.parent_run_attempt_id is None:
             raise ValueError("Session continuation requires an audited parent session")
         parent = AgentSessionRef(
             run_id=claimed.run_id,
@@ -680,11 +752,13 @@ class AgentRunExecutor:
         claimed: ClaimedRun,
         done: asyncio.Event,
         session_ref: asyncio.Future[AgentSessionRef],
+        cancellation: asyncio.Event,
     ) -> None:
-        """Durable cancel intent を監視し、session 確立後に Engine interrupt を一度だけ呼ぶ。"""
+        """準備中は子 task を止め、Session 確立後は Engine interrupt を一度だけ呼ぶ。"""
 
         while not done.is_set():
             if await self._run_service.is_cancellation_requested(claimed.run_id):
+                cancellation.set()
                 while not session_ref.done() and not done.is_set():
                     try:
                         await asyncio.wait_for(done.wait(), timeout=0.1)
@@ -746,6 +820,8 @@ def _validate_context_identity(
 
     if context.run_id != claimed.run_id or context.run_attempt_id != claimed.run_attempt_id:
         raise ValueError("RunContext identity does not match ClaimedRun")
+    if context.project_id != claimed.project_id or context.user_id != claimed.actor_id:
+        raise ValueError("RunContext authority does not match ClaimedRun")
     if context.sequence_start != sequence_start:
         raise ValueError("RunContext sequence start does not match repository")
 
@@ -761,9 +837,7 @@ def _brief_execution_profile(context: RunContext) -> str | None:
     return None
 
 
-def _lineage_event(
-    event: AgentEvent, continuation_mode: SessionContinuationMode
-) -> AgentEvent:
+def _lineage_event(event: AgentEvent, continuation_mode: SessionContinuationMode) -> AgentEvent:
     """新 Segment の最初の Session event を lineage 固有 event へ写す。"""
 
     if event.event_type is not AgentEventType.SESSION_STARTED:
@@ -820,10 +894,10 @@ def _terminal_mapping(
     return None
 
 
-def _first_exception(group: BaseExceptionGroup[BaseException]) -> BaseException:
-    """Nested ExceptionGroup から診断用の最初の例外型を取得する。"""
+def _supervisor_exception(error: BaseException) -> BaseException:
+    """準備の後片付けが同時に失敗しても、lease 喪失を他の原因で覆い隠さない。"""
 
-    current: BaseException = group.exceptions[0]
-    while isinstance(current, BaseExceptionGroup):
-        current = current.exceptions[0]
-    return current
+    if not isinstance(error, BaseExceptionGroup):
+        return error
+    causes = [_supervisor_exception(item) for item in error.exceptions]
+    return next((item for item in causes if isinstance(item, LeaseValidationError)), causes[0])

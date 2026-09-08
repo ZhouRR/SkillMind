@@ -1,6 +1,10 @@
 # ProjectMind Agent Runtime 与交互式执行规范
 
-本文定义 ProjectMind 如何使用 Claude Agent SDK 作为默认执行引擎，同时通过 `AgentEngine` 保持模型/引擎可替换性；也定义 Agent 自主边界、持续多会话 Run、用户交互、Tool 权限、外部效果、证据和故障恢复。
+> 定位：执行边界与持续 Run 协议。前置阅读：[领域对象与状态速查](domain-model.md#run-状态速查)。创建请求的重放由[创建与幂等](run-creation.md)负责，内容一致性由[资源快照](resource-snapshots.md)负责，限额与共享账户由[预算设计](run-budgets.md)负责；本页聚焦已有 Run 如何执行和续行。
+
+ProjectMind 使用 Claude Agent SDK 作为默认执行引擎，通过 `AgentEngine` 保持模型/引擎可替换性；平台负责用户交互、Tool 权限、外部效果、证据和故障恢复。
+
+按问题定位：[谁负责什么](#2-责任边界)、[Agent 可以调用什么](#6-tool-与工作区边界)、[一次执行如何续行](#7-持续-run-与多会话)、[模型启动前检查什么](#74-从领取到模型启动的边界)、[取消和超时如何区分](#75-取消超时与失去执行权)、[失败与恢复](#11-事件状态与可靠性)。章节号保留供代码中的旧引用使用。
 
 ## 1. 设计结论
 
@@ -145,24 +149,24 @@ SDK 内置 Read/Glob/Grep/Bash/Write/Edit/Web 仍由 hard deny 列表拒绝；�
 
 ### 6.3 PreToolUse 判定
 
-每次 ToolCall 按以下顺序校验：
+以下是逻辑检查清单，分别由 SDK hook、Gateway、binding/Provider 与 Effect Worker 执行，不表示单个 hook 已实现全部检查：
 
 1. capability 是否在平台 registry。
 2. 是否在 SkillVersion requirement、Project policy 和 Run permission snapshot 中。
 3. ResourceBinding、Integration、路径、对象 ID、revision 和网络范围是否匹配。
 4. 参数是否通过通用 Tool contract，并已移除 credential-like 字段。
-5. 是否命中调用次数、成本、数据量和时间上限。
+5. 执行路径所支持的局部限额是否满足；Run 累计调用/成本/输出检查需接入[共享预算](run-budgets.md)，当前不能承诺已经强制。
 6. 若为 `apply`，是否存在有效批准或匹配的显式预授权。
 
-任何失败都在 Provider 调用前拒绝，并保存脱敏审计。禁止全局 `bypassPermissions`。
+身份、权限、binding 与已知请求限制在 Provider 调用前拒绝；返回内容的 Schema、敏感字段和大小只能在取得内容后检查，失败时不得交给 Agent。相关错误保存脱敏审计。禁止全局 `bypassPermissions`。
 
 ### 6.4 资源快照的物化
 
 完整范围、文件结构、skipped/超限策略与验收见[资源快照与工作区](resource-snapshots.md)。
 
-repository 按冻结 Run binding 的授权范围物化到 `input/<requirement_key>/`，具体内容 revision 在打开资源时解析；分支名并非不可变 commit。document 落在 `input/documents/`，工作副本正在从旧全集枚举切换为显式 ID/hash 清单，尚未完成跨层联调。两条路径的冻结时点、缓存和已知差距以资源规范为准。
+repository 按冻结 Run binding 的授权范围物化到 `input/<requirement_key>/`，具体内容 revision 在打开资源时解析；分支名并非不可变 commit。document 落在 `input/documents/`，读取和物化使用显式 ID/hash 清单，创建重放沿用首次快照。选择 UI 和公开 detail 负责确认/展示，不成为 Provider 的新授权输入。两条路径的冻结时点、可信缓存回执与跨根总量设计以资源规范为准；完整验收范围见计划 R01。
 
-每个物化根保存 manifest、内容 hash 与跳过原因，Brief 只描述实际生成的路径。输入对 Agent 只读；写入只到 workspace/output。重复 Attempt 验证并复用既有文件，不静默重建。
+每个物化根保存 manifest、内容 hash 与跳过原因，Brief 描述经完整准备验证的逻辑路径。`input/` 是 Tool 路径空间，物理世代由平台映射，不能让 Agent 选择或切换准备目录。输入只读；写入只到 workspace/output。重复 Attempt 仅复用通过[Run 级回执验证](resource-snapshots.md#输入准备与可信缓存)的完整输入，不静默重建。工作副本已有实际 Tool 的回执读取接线；启动前校验、每次读取与准备恢复仍须分别验证，不能从其中一项推导其余都已安全。
 
 ## 7. 持续 Run 与多会话
 
@@ -170,18 +174,22 @@ repository 按冻结 Run binding 的授权范围物化到 `input/<requirement_ke
 
 ```text
 用户启动
-  → Run + Segment 1 + AgentTaskBrief
+  → Run + Segment 1 + dispatch Outbox
+  → Worker 准备并冻结 AgentTaskBrief
   → AgentSession A 执行
   → 需要用户观点/资源/批准
   → 持久化 checkpoint，Run 进入 WAITING_FOR_INPUT/APPROVAL
   → 用户响应
-  → Segment 2 + 新 AgentTaskBrief
+  → Segment 2 + dispatch Outbox
+  → Worker 准备并冻结新 AgentTaskBrief
   → resume A / fork A / 启动 Session B
   → 继续执行和验证
   → Result + terminal RUN_SNAPSHOT
 ```
 
 一个 Run 可以包含多个 Segment 和多个顺序 Session。Session 的切分由上下文窗口、引擎兼容性、用户分支选择、模型切换或恢复策略决定，不改变 Run 的权限上限。
+
+这是业务续行示意，不是完整状态机，也不表示 Brief 在收到回答的同一事务中已生成。当前创建/答复先持久化 Segment 与 dispatch Outbox，Worker 准备时构建并冻结该段 Brief。精确状态路径、等待 Attempt 的 DEFERRED 和技术重试见[领域状态速查](domain-model.md#run-状态速查)。
 
 ### 7.2 Segment、Attempt 与 Session 的区别
 
@@ -198,6 +206,65 @@ repository 按冻结 Run binding 的授权范围物化到 `input/<requirement_ke
 - `replace`：上下文损坏、引擎不兼容或需重新压缩；新 Session 接收可审计 checkpoint。
 
 平台必须记录 continuation mode、parent session、模型和 checkpoint checksum。AgentSession transcript 用于恢复，RunEvent/ToolCall/Evidence/Interaction 才是平台审计事实。
+
+### 7.4 从领取到模型启动的边界
+
+Worker claim 获得 Attempt lease，不表示输入已经准备好。当前 `prepare_execution` 先把执行推进为 `RUNNING`，之后 ContextBuilder 才准备资源和 Brief；因此 Run 的 `RUNNING` 不能作为“可信输入已 READY”或“模型已开始”的证据。
+
+2026-09-08 核对的 [Executor](../../PJM/backend/src/projectmind/worker/executor.py)已在 `prepare_execution` 前启动同一组执行、heartbeat 和取消监督任务，最终启动校验由 `verify_execution_start` 执行。下面是当前调用顺序；输入内部事务由[资源协议](resource-snapshots.md#一次准备的提交边界)负责，不在本页再定义一份回执。
+
+```text
+有效 claim → heartbeat / 取消监督
+  ↓
+Run → RUNNING
+  ↓
+ContextBuilder → PreparedInput
+  本阶段使用独立准备 timeout
+  ↓
+校验 context 身份 / sequence
+  ↓
+短事务：冻结 Brief
+  重验 lease / 取消
+  ↓
+短事务：启动校验
+  重验状态 / lease / 取消
+  ↓ 事务结束
+execute / resume / fork
+  ↓
+记录事件 → 等待 / 终态
+```
+
+context 身份必须匹配 claim 的 Run / Attempt / Project / actor，事件序号沿用 repository 的分配。准备可能慢于一个 lease，所以需要 heartbeat；心跳成功之后仍可能被取消或失去执行权，所以每个提交/启动边界还需独立校验。
+
+相关 repository 按 Run → Segment → Attempt 加锁，拿到锁后再用当前时间和数据库 lease 校验；不能使用 claim 时的旧到期值判断后续延长，也不能用等锁之前的时间放行已过期执行。资源网络/转换和模型调用都在事务外，不持锁等待它们完成。
+
+| 已观察到的事实 | 能说明什么 | 还不能说明什么 |
+| --- | --- | --- |
+| `RUNNING` / `run.execution.prepared` 日志 | 已推进执行状态，准备即将进行 | 输入完整、Brief 已冻结、模型已启动 |
+| 输入回执 `READY` | 原世代的完整输入记录已提交 | 文件永不变化、仍有执行权 |
+| Brief 已冻结 / `run.execution.brief` 日志 | 本 Segment 的指导与路径已固定 | 启动校验已通过或 Session 已建立 |
+| Session 与对应模型活动事件 | 已记录该 Session 的活动 | 全部输入都被读过、任务已成功 |
+
+这四类事实不合并成“准备成功”的推测，也不新增一套 Run 状态机。准备、模型、job 与人工等待的计时边界集中见[计时器说明](run-budgets.md#现有计时器的覆盖范围)。本地监督测试不能替代真实事务、物化接口联调和旧 Run 续行验收；当前证据见[计划](../planning/roadmap.md#13-当前执行状态)。
+
+### 7.5 取消、超时与失去执行权
+
+同时观察到多个条件时，先确认当前执行权与持久取消意图，再分类普通准备失败；不能用兜底异常把旧 Worker 的失效 lease 转成一次新的终态写入。
+
+| 发生的事情 | 当前处理与不能越过的边界 |
+| --- | --- |
+| 准备中观察到已持久化的用户取消 | 停止 builder 子任务；仍有有效 lease 时按正常流程写 `CANCELLED`，不冻结新 Brief 或启动模型 |
+| ContextBuilder 的准备 deadline 到期 | 在 deadline 之外按 `preparation_timeout` 收尾；已提交的回执不会因此自动回滚 |
+| Provider 自己报 `TimeoutError` 等准备异常 | 记 `context_build_failed`，不冒充整段准备 deadline 到期；实际取消/lease 失效另行处理 |
+| heartbeat 或提交/启动校验发现失效 lease | 旧 Worker 停止执行并退出，不再以自己的身份写 FAILED/CANCELLED；由合法恢复流程决定后续 Attempt |
+| Worker job 被取消或进程关停 | 不把进程级取消伪造成用户取消；是否续行由持久状态与 lease 恢复判断 |
+| 模型事件等待超过 deadline | 按 `wall_timeout` 收尾；该等待计时器不包住终态事务 |
+
+线程中的文件 I/O 可能在取消后才返回。晚到结果不能重新推动已取消的 coroutine 提交 READY、冻结 Brief 或调用模型；遗留世代按[中断协议](resource-snapshots.md#准备中断与再次使用)保留，不能删掉现场后重建。终态化也必须满足当前 lease，不能为了“补一个失败结果”绕过 fencing。
+
+启动前的短事务不是数据库与外部模型之间的原子启动。若取消在最后一次校验之后发生，仍要靠运行期监督收束。当前取消监视器需要取得 `session_ref` 才调用 engine interrupt；模型已开始但尚未产生首个事件时，不能承诺立即中断。此窗口、真实进程停止和异常收尾应单独故障注入，不以准备取消测试代替。
+
+Executor 会尝试关闭提前结束的 engine stream，但关闭请求或 coroutine 结束不证明外部进程已退出，也不证明收费已经停止。正常执行路径的 heartbeat、异常组退出后的兜底终态化与 stream 清理有不同寿命；应分别验证关停、取消与接管，不能笼统写成“所有收尾始终续租”。Run 用量核对仍依赖[预算恢复设计](run-budgets.md#4-结束取消与故障恢复)。
 
 ## 8. 用户交互协议
 
@@ -280,8 +347,8 @@ Run 状态使用 `WAITING_FOR_INPUT` 和 `WAITING_FOR_APPROVAL` 表达非终态�
 - Worker 通过数据库 lease 领取 Attempt，heartbeat 失效后 Recovery Worker 才能接管。
 - row lock 顺序固定为 Run → Segment → Attempt。
 - 技术重试受 `PROJECTMIND_RUN_MAX_ATTEMPTS` 限制，并且只针对当前 Segment。
-- wall timeout 只覆盖活动执行，不覆盖用户等待时间；Interaction 使用独立 expiry。
-- Outbox 与状态变更同事务写入，Queue 消费和 Tool/Effect 调用均幂等。
+- 当前 wall timeout 从 context/Brief 准备完成后的 engine stream 开始，不覆盖排队和用户等待，也不累计全部 Attempt。超时按 `wall_timeout` 失败收尾；准备阶段与 Run 总时长的边界见[预算设计](run-budgets.md#当前实现的实际口径)。Interaction 使用独立 expiry。
+- Outbox 与状态变更同事务写入，Queue 消费以领取状态抑制重复；Tool 审计重放与外部 Effect 幂等各有独立键和协议，不因此承诺模型执行或外部副作用“全局精确一次”。
 - 终态 RUN_SNAPSHOT 是最后一个持久化事件；SSE 根据它结束。
 - 如果 transcript/workspace 不完整，不无声从头执行；按策略 replace Session 或 FAILED，并显示风险。
 
@@ -312,12 +379,14 @@ Run 状态使用 `WAITING_FOR_INPUT` 和 `WAITING_FOR_APPROVAL` 表达非终态�
 10. Run 终态后不能恢复；新问题创建新 Run，父子关联尚非公开创建契约。
 11. workspace 文件能力不能通过 path/symlink 逃逸；sandbox command 尚未开放，相关威胁模型属于后续门禁。
 12. OutcomeEnvelope 不含 Secret，Evidence/Artifact/Proposal 引用均属于同一 Project。
+13. 准备持续超过一个 lease、准备 deadline 到期、Brief/启动前取消、锁等待期间过期分别验证；慢准备持续续租，超时/已成立取消/失效 lease 不启动模型，失效 Worker 不写终态。
+14. 最终启动校验后、首事件前取消，持久化期间失去 lease，以及 stream 关闭失败分别验证；取消请求、持久终态与真实进程停止不混为同一个断言。
 
 ## 14. 当前实现边界
 
 实现、部署基线与专项验收的状态统一见[计划 §13](../planning/roadmap.md#13-当前执行状态)。目前 Runtime 包括完整 Brief、交互式 Run、顺序主会话、只读子分析、workspace read/search/write 与受控外部效果。
 
-两项未兑现的保证必须在扩展前处理：document 的创建时冻结与范围选择、主子 Session 的 Run 共享预算。详见[资源快照](resource-snapshots.md)与[并行子分析](subagents.md)。来源脚本的登记/checksum 校验不等于已有通用脚本执行器。
+document 的显式选择、创建时冻结和公开清单，以及准备监督、独立 timeout、Brief/启动校验已有工作副本代码；这些入口不重复登记为整项待开发。物化消费者联调、真实事务/历史续行、首事件前取消与实际进程清理仍须验收；主子 Session 的 Run 共享预算仍未实现。已有模块或局部回归不证明整条执行链可用，精确缺口见[计划](../planning/roadmap.md#13-当前执行状态)。来源脚本的登记/checksum 校验也不等于已有通用脚本执行器。
 
 ## 15. 官方参考
 

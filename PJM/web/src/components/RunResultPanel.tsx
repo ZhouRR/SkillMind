@@ -19,6 +19,7 @@ import { createIdempotencyKey } from '../lib/idempotency'
 import { formatLocalTimestamp } from '../lib/presentation'
 import { splitOverflow } from '../lib/resultOverflow'
 import { EmptyState } from './PageElements'
+import { RunDocumentSnapshots } from './RunDocumentSnapshots'
 
 /** Run detail 非同期読み込みの排他的 UI state。 */
 export type RunDetailState =
@@ -103,6 +104,8 @@ export function RunResultPanel({ state, csrfToken, onInteractionResponded, onPro
       {/* 扇出は「結論の根拠がどこまで揃っているか」を左右するので備査へ畳まない。
           一路が失敗していても要約は普通に返るため、畳むと部分的な網羅を全面的な確認と読む。 */}
       {dispatches.length > 0 && <SubagentDispatchSection dispatches={dispatches} />}
+
+      <RunDocumentSnapshots snapshots={detail.document_snapshots} />
 
       {/* 以下は備査情報。既定で畳み、件数だけ見出しに残す。 */}
       <CollapsibleSection count={detail.tool_calls.length} title={messages.runResult.toolCalls}>

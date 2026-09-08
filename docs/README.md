@@ -8,26 +8,23 @@
 
 | 読みたいこと | 入口 |
 | --- | --- |
-| 何を作る製品か | [製品概要](overview/product.md)、[用語](overview/glossary.md) |
-| 全体の仕組みと責務 | [システム構成](overview/architecture.md)、[業務構造図](overview/business-structure.html)、[技術構成図](overview/technical-architecture.html) |
-| 次に何を実装するか | [現在の計画と受入残項目](planning/roadmap.md) |
-| Skill をどう実行可能にするか | [Skill 契約](design/skill-contract.md)、[解釈・公開の実装](design/skill-interpretation.md) |
-| Run・資源・権限を変更する | [領域モデル](design/domain-model.md)、[Agent Runtime](design/agent-runtime.md)、[認証](design/authentication.md) |
-| 何がいつ凍結されるか | [資源快照と Run workspace](design/resource-snapshots.md)：文書集合、repository revision、再試行、幂等 |
-| 外部書き込み・時刻起動・子 Agent | [受控書き込み](design/repository-effects.md)、[調度](design/task-scheduling.md)、[並行子分析](design/subagents.md) |
-| 画面を変更する | [Workspace](design/workspace.md)、[Task Flow 設計](design/task-flow.md)、[生成モジュール設計](design/generated-modules.md) |
-| 開発環境・API・変更手順 | [ローカル開発](development/local-development.md)、[API 利用](development/api-usage.md)、[設計からコードへの対応](development/change-guide.md) |
-| 検証・生成 script を使う | [script の案内](../PJM/scripts/README.md)：読取検査、生成、実モデル利用を区別 |
-| 配備・復旧する | [起動と初期管理者](operations/quickstart.md)、[運用 Runbook](operations/runbook.md) |
-| JAF の品質を評価する | [JAF 受入 profile](acceptance/jaf-quality.md) |
-| 過去の判断を追う | [交付履歴](history/delivery-history.md)、[再編前の計画](history/unified-plan-2026-08-04.md) |
+| 初めて製品を理解する | [製品概要](overview/product.md) → [システム構成](overview/architecture.md) → [用語](overview/glossary.md) |
+| 担当する機能の設計を読む | [設計ガイド](design/README.md)：Skill、Run、資源、画面、調度の読み順と責任分担 |
+| 次の開発・未完了の変更を引き継ぐ | [現在の計画](planning/roadmap.md#13-当前执行状态) → [変更ガイド](development/change-guide.md) → [コードの入口](../PJM/README.md#コード構成) |
+| 開発環境を用意・API を変更する | [ローカル開発](development/local-development.md)、[契約変更](development/contract-workflow.md)、[API 利用](development/api-usage.md) |
+| 配備・障害対応・復旧する | [起動案内](operations/quickstart.md) → [問題別 Runbook](operations/runbook.md#按问题找入口) |
+| 業務品質を評価する | [JAF 受入 profile](acceptance/jaf-quality.md)：sample、Gold 隔離、指標、人工判定 |
+| 文書を直す・閲覧を確認する | [文書管理とブラウザ検証](development/documentation.md)、[script の案内](../PJM/scripts/README.md) |
+| 過去の判断や検証を確認する | [履歴の索引](history/README.md)。当時の証拠だけを読み、現在状態は計画へ戻る |
+
+この表は最初の入口だけを示す。個別の失敗条件や実装箇所は設計ガイド・変更ガイド・Runbook に任せ、総索引へ重複させない。具体的な用語や file 名が分かる場合は、[ブラウザ版](index.html)の全文検索から該当章へ進める。
 
 ## 配置と責任
 
 ```text
 docs/
 ├── overview/      製品・用語・全体構成
-├── design/        領域ごとの現行契約と、明示された後続設計
+├── design/        README で責任を選ぶ → 領域別の現行規則と後続設計
 ├── planning/      状態・優先順・受入残項目
 ├── development/   環境構築・API 利用・変更時の参照先
 ├── operations/    配備・backup・復旧
@@ -40,6 +37,17 @@ docs/
 正式コードは同階層の `../PJM/` に置く。本文中の `backend/`、`web/`、`contracts/`、`skills/` は、明記がなければ `PJM/` 起点である。クリックできるリンクは各文書からの相対 path を使う。
 
 仕様は「何を保証するか」、`PJM/contracts/` は「交換するデータの形」、実装とテストは「現在実行できること」を示す。矛盾は影響範囲と根拠を確認して解消し、一方を無条件で正しいと扱わない。現在の進捗は [計画](planning/roadmap.md) §13 に集約する。
+
+## 本文の状態を読み分ける
+
+| 表現 | 読み方 |
+| --- | --- |
+| 現行 / 現在のコード | 指定時点の工作副本。未完了の編集や失敗中のテストもあり得る。配備先と同じとは限らない |
+| 修正要求 / 目標 / 待実装 | 後続開発の判断基準。現行 API の操作説明ではない |
+| 本地回帰 / 専項受入 | 記録した条件だけの検証結果。skip や未実施は成功に数えない |
+| 歴史 | 当時の証拠。現在の状態は計画、現在の判断は対象設計で確認する |
+
+初めて実装を引き継ぐ場合は、[システム構成](overview/architecture.md)で責任を把握し、[計画 §13.3](planning/roadmap.md#133-全项目重构与缺失功能实施2026-09-05-启动)で担当領域を選び、[変更ガイド](development/change-guide.md)からコードと検証へ進む。全履歴を読み通す必要はない。
 
 ## 旧番号の対応
 

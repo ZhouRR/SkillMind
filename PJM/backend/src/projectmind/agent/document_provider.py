@@ -13,7 +13,12 @@ from projectmind.agent.tool_gateway import (
     RunToolContext,
     ToolProviderError,
 )
-from projectmind.documents.source import ProjectDocumentSource
+from projectmind.documents.snapshot import (
+    DocumentSnapshotError,
+    selected_document_snapshots,
+    snapshot_documents,
+)
+from projectmind.documents.source import ProjectDocumentSource, read_frozen_document
 
 
 class DocumentProvider:
@@ -30,12 +35,34 @@ class DocumentProvider:
         """Run の project 内で path に一致する文書を、行範囲と content hash 付きで返す。"""
 
         folder, name = _split_document_path(arguments.get("path"))
-        # source は Run snapshot の project_id に閉じており、越権/不存在は同じ not_found へ畳む。
-        content = await self._source.fetch(
-            project_id=context.project_id, folder=folder, name=name
+        if context.run is None or (
+            context.run.run_id != context.run_id
+            or context.run.project_id != context.project_id
+            or context.run.run_attempt_id != context.run_attempt_id
+            or context.run.user_id != context.user_id
+        ):
+            raise ToolProviderError(
+                "scope_denied", "Frozen Run context is required", retryable=False
+            )
+        try:
+            snapshots = selected_document_snapshots(
+                context.run.resolved_sources, project_id=context.project_id
+            )
+            documents = snapshot_documents(snapshots)
+        except DocumentSnapshotError as error:
+            raise ToolProviderError("scope_denied", str(error), retryable=False) from error
+        document = next(
+            (item for item in documents if item.folder == folder and item.name == name), None
         )
-        if content is None:
+        if document is None:
+            # 未選択 path の有無を問い合わせない。Project 全体の探索へ広げないための境界。
             raise ToolProviderError("not_found", "Document was not found", retryable=False)
+        try:
+            content = await read_frozen_document(
+                self._source, project_id=context.project_id, document=document
+            )
+        except DocumentSnapshotError as error:
+            raise ToolProviderError("unavailable", str(error), retryable=False) from error
         try:
             text = content.data.decode("utf-8")
         except UnicodeDecodeError as error:
@@ -67,6 +94,7 @@ class DocumentProvider:
                     evidence_type="document",
                     source_uri=f"document://projects/{context.project_id}/{content.checksum}",
                     source_locator={
+                        "document_id": str(document.document_id),
                         "folder": content.folder,
                         "name": content.name,
                         "line_start": window.line_start,
@@ -90,8 +118,6 @@ def _split_document_path(value: Any) -> tuple[str, str]:
         raise ToolProviderError("invalid_request", "Document path is invalid", retryable=False)
     for part in relative.parts:
         if part in {"", ".", ".."} or not part.isprintable():
-            raise ToolProviderError(
-                "invalid_request", "Document path is invalid", retryable=False
-            )
+            raise ToolProviderError("invalid_request", "Document path is invalid", retryable=False)
     *folder_parts, name = relative.parts
     return "/".join(folder_parts), name

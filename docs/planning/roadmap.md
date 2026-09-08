@@ -1,8 +1,8 @@
 # ProjectMind 实施计划
 
-> 状态正本。最近核对：2026-09-08（工作副本文档/代码的只读核对）。最近部署证据仍为 2026-08-04 的[交付记录 §49](../history/delivery-history.md#49-服务器部署基线验收2026-08-04)；没有重新验收服务器或模型。
+> 状态正本。2026-09-08 最新核对见 [§13.16](#1316-skill-生命周期与开发文档核对2026-09-08)：Skill 发布/启停与回滚边界已明确，重新启用仍待实现；Backend 全量基线存在物化消费者和迁移 head 断言失败。部署证据仍为 2026-08-04 的[交付记录 §49](../history/delivery-history.md#49-服务器部署基线验收2026-08-04)，不据文档或局部回归宣称全项目完成。
 
-先看[当前状态](#13-当前执行状态)、[下一步](#132-下一步与当前决策)和[全项目工作登记](#133-全项目重构与缺失功能实施2026-09-05-启动)。设计正文见[文档导航](../README.md)，本页只管理范围、状态和门禁。
+先看[当前状态](#13-当前执行状态)、[下一步](#132-下一步与当前决策)和[全项目工作登记](#133-全项目重构与缺失功能实施2026-09-05-启动)。设计归属见[设计责任索引](../design/README.md)，核对证据按[历史索引](../history/README.md)查找。本页只管理范围、状态和门禁。
 
 章节 13 保留原编号以兼容已有链接，但已移到最前。其余旧章节收在文末的[引用索引](#旧章节引用索引)，用于定位代码中的 docs/01 略记，不是第二套当前设计或进度表。
 
@@ -11,13 +11,14 @@
 | 能力 | 实现证据 | 验收与限制 |
 | --- | --- | --- |
 | Run/认证/证据/评价/SSE | 现有模块、契约和回归测试；历史已交付 | 新部署仍需 authenticated smoke |
-| Skill 导入/解释/发布/组织资产/项目启用 | 现有 skills/compositions 模块与契约 | 完整模型反复及人工质量报告待补 |
+| Run 创建与原请求确认 | Backend 意图/重放、Web 原内容/键、文档选择/详情；契约与消费者局部回归通过 | 真实 DB 并发/回滚、版本混合与历史续行仍需验收 |
+| Skill 导入/解释/发布/组织资产/项目启用 | 现有 skills/compositions 模块与契约；发布/启停边界已核对 | 停用后同版重新启用与审计未实现；完整模型反复及人工质量报告待补 |
 | Blueprint/Task Contract/Brief/交互与效果 | 现有通用契约、Segment 与 effect 链路 | 真实模型与 CAS adapter 专项验收待补 |
-| 三语界面与托管凭据 | 现有 i18n、用户偏好和 MANAGED resolver | 浏览器三语/键盘与托管凭据端到端需复验 |
-| 资源物化与 workspace.write（§19） | repository/document 物化、索引、历史、xlsx/xlsm/docx 文本化 | document 冻结处于工作副本联调阶段；仓库分支名不等于固定 commit；HTTPS remote 和模型使用待验 |
+| 三语界面与托管凭据 | 现有 i18n、用户偏好和 MANAGED resolver；文档选择/清单三语已接入 | 原请求、显式范围与调度输入有局部 mock 浏览器证据；全页面与托管凭据端到端仍需复验 |
+| 资源物化与 workspace.write（§19） | 回执/0029、物化/ContextBuilder、Worker/Tool、准备监督与启动 gate 已接线；监督、配置和局部读写回归通过 | 旧物化 fixture 仍失败；提交结果未知、整链/真实迁移恢复、首事件前取消、HTTPS remote 与模型使用待验 |
 | repository.write（§20） | Git/SVN、direct/branch、Proposal 与 read-back | 真实 forge/并发/失败恢复端到端待验 |
 | 过程重表达（§21） | 静态信号、system Skill、能力引用守卫 | 模型语义保真和 JAF 实机执行待验 |
-| TaskSchedule（§22） | ONCE/CRON、Worker tick、API/Web、migration 0025 | 实际触发、重叠与漏发观测待验；不承诺精确一次 |
+| TaskSchedule（§22） | ONCE/CRON、Worker tick、API/Web、migration 0025；原键先行、共享输入表单及相关局部回归 | 持久在途、配置/计数/迟到修正未完成；现有配置编辑 UI 与时间输入/显示边界也待补 |
 | 并行子分析（§23） | dispatch、能力收窄、单次预算分配、子 Session 记录 | Run 总预算尚无共享扣减；模型汇总效果待验 |
 | 前端信息架构（§25） | Task Center、服务端待办、历史与任务关联 | 浏览器专项待验 |
 | Task Flow（§26） | 设计完成 | 无 Flow Schema、持久化或页面实现 |
@@ -30,13 +31,13 @@
 - **专项验收通过**：具体场景有环境、输入版本、命令/操作、结果与未覆盖项的可追溯记录。
 - **设计完成**：边界与验收条件可评审，不能据此宣称 API 或功能可用。
 
-2026-07-27 历史记录为本地 Backend 900 passed、Web 248 tests；这是当时的结果，本次不重复声称通过。2026-08-04 记录只证明部署基线，明确未覆盖应用认证 smoke、真实资源/效果、模型、调度触发和浏览器。
+历史回归只证明对应版本和所列条件，不自动覆盖工作副本。2026-08-04 记录只证明部署基线，明确未覆盖应用认证 smoke、真实资源/效果、模型、调度触发和浏览器。最新局部检查也不能替代一次全量验收。
 
 ### 13.2 下一步与当前决策
 
 | 顺序 | 工作 | 交付和门禁 |
 | --- | --- | --- |
-| 1 | 补齐运行约束差距 | [子 Agent 共享预算](../design/subagents.md#预算现状与修正设计)、[文档资源冻结](../design/resource-snapshots.md#已知差距与后续设计)；代码修改需同步契约与有状态回归 |
+| 1 | 补齐运行约束差距 | 保持原请求确认与公开文档链路的回归，继续真实事务验收、[可信缓存与跨根总量](../design/resource-snapshots.md#已知差距与后续设计)、[Run 共享预算](../design/run-budgets.md)和[调度可靠性](../design/task-scheduling.md#可靠性修正要求待实现)，同步契约与有状态回归 |
 | 2 | Task Flow 只读投影 | 先复用现有数据，不增加执行控制器或假造节点完成；见 §26 |
 | 并行准备 | 真实资源与模型专项验收 | 有合法测试项目/账号后跑 smoke、HTTPS Git/SVN、CAS/forge、调度与浏览器；测试写入使用专用目标 |
 | 后续 | Flow 契约与 Run 快照 | 版本化 Draft、冻结内容、事件关联和旧 Run 回退 |
@@ -46,7 +47,7 @@
 
 ### 13.3 全项目重构与缺失功能实施（2026-09-05 启动）
 
-用户目标：基于文档重构整个项目内的所有代码，并实现文档中已经定义但尚未实现的功能。
+此登记保留既有全项目实施范围；本次文档整理只核对现有代码、修正规则表达和接续入口，不执行全项目代码重构。R01 后续从物化消费者、回执提交结果未知、真实事务与历史续行继续，不重做已有选择、store、准备监督或启动 gate。一次文档整理或局部实现不代替整体完成。
 
 范围覆盖 Backend、Web、contracts、Skill 执行资产、脚本、构建/部署配置及对应测试。以下是全量工作入口，
 不是把目标缩减为第一批缺口；每一领域仍需逐条核对设计中的字段、行为、不变量、失败路径和验收条件。
@@ -54,35 +55,78 @@
 
 | 工作 | 规范与代码范围 | 完成证据要求 | 当前状态 |
 | --- | --- | --- | --- |
-| R01 资源冻结 | 资源快照；documents / integrations / runs / agent、Preflight 与 Run 详情 | 显式单份/集合/全集、创建时冻结、不可越权/漂移、重试与历史兼容 | 实施中：后端清单/ID/hash 改动存在；选择 UI、公开快照、幂等与既有回归未贯通 |
-| R02 Run 统一预算 | 子分析与 Runtime；agent / runs / worker / DB | 主子共同计费、原子预留、幂等结算、跨 Segment/Attempt 恢复与并发测试 | 待实现 |
+| R01 资源冻结 | 资源快照与创建；documents / integrations / runs / agent、Preflight 与 Run 详情 | 显式单份/集合/全集、创建时冻结、不可越权/漂移、重放与历史兼容 | 实施中：回执/Tool、准备监督、timeout/启动 gate 与配置已有接线和局部回归；旧物化 fixture 缺必需参数仍失败。提交结果未知、整链/真实事务与历史续行待验 |
+| R02 Run 统一预算 | [预算设计](../design/run-budgets.md)、子分析与 Runtime；agent / runs / worker / DB | 主子共同计费、原子预留、幂等结算、跨 Segment/Attempt 恢复与并发测试 | 待实现；已细化计量口径、预留和不确定用量恢复要求 |
 | R03 Task Flow 完整链路 | Task Flow、Workspace、Interpreter；contracts / skills / runs / Web | 预览、契约/Draft/diff/发布、不可变 Run 流程、事件关联、待办/证据联动、三语与历史回退 | 待实现全部工作包 |
 | R04 生成模块 | generated FrontendModule；modules / API / Web / builder / Compose | 威胁模型、依赖与网络隔离、构建测试、安全投放、Host 协议、发布与回退；禁止仅静态通过即执行 | 前置代码待重新核对，其余待实现 |
 | R05 领域与身份安全 | 领域模型、认证；auth / projects / documents / integrations / core / DB | 所有权、CSRF/Origin、角色、Secret、并发与不变数据约束的正负向回归 | 待逐模块核对与重构 |
-| R06 Skill 生命周期 | Skill 契约与解释实现；skills / compositions / contracts / Web / system Skill | 导入到解释、版本发布与项目启用、来源/identity、动态契约、兼容与错误恢复 | 待逐条核对与补齐 |
-| R07 Run 与审计 | Runtime；runs / worker / agent / events / evidence / evaluations / storage | Segment/Attempt/Session、Outbox/lease、恢复/取消/等待期限、结果与 SSE 重放的有状态验证 | 待逐条核对与重构 |
+| R06 Skill 生命周期 | Skill 契约与解释实现；skills / compositions / contracts / Web / system Skill | 导入到解释、版本发布与项目启用、来源/identity、动态契约、兼容与错误恢复 | 发布/启停已只读核对；同版重新启用/审计与回滚待实现，组合尚无跨 Skill 规则求解；其余仍需逐条核对 |
+| R07 Run 与审计 | Runtime；runs / worker / agent / events / evidence / evaluations / storage | Segment/Attempt/Session、Outbox/lease、恢复/取消/等待期限、结果与 SSE 重放的有状态验证 | 准备监督与启动校验有局部回归；首事件前取消、实际进程停止、异常收尾及其余生命周期待逐条核对与验收 |
 | R08 外部效果 | 受控写入；effects / integrations / repository / Redmine / Web | 提案、精确批准/预授权、CAS/幂等、read-back、Git/SVN 模式与部分失败恢复 | 待重新验收与补齐 |
-| R09 调度 | TaskSchedule；schedules / worker / API / Web | ONCE/CRON/timezone/DST、预览、失效、错过/重叠、同一创建路径及已声明保证 | 待重新验收与补齐 |
-| R10 全部 Web 页面 | Workspace 与产品概览；pages / components / API / lib / styles / i18n | 页面职责、服务端筛选、并发请求清理、三语/键盘/窄屏、真实用户流程 | 待逐页核对与重构 |
-| R11 运维与工程工具 | 开发/运维规范；ops / migrations / scripts / images / Compose / Dockerfile | 锁定依赖、静态检查、启动/迁移、backup/restore/rollback、KEK 保留、清理策略与 smoke | 待核对；不得操作未知生产数据 |
+| R09 调度 | [TaskSchedule](../design/task-scheduling.md)；schedules / worker / API / Web | 时间/预览、失效、迟到/重叠、持久在途恢复、配置版本、幂等计数与同一创建路径 | 重放与实际输入表单有局部检查；持久在途、配置/计数/迟到、编辑入口、无时区时间拒绝与显示修正待补齐 |
+| R10 全部 Web 页面 | Workspace 与产品概览；pages / components / API / hooks / lib / styles / i18n | 页面职责、服务端筛选、并发请求清理、三语/键盘/窄屏、真实用户流程 | 原请求、文档选择/详情与调度输入有局部 mock 浏览器证据；仍待全部页面逐项核对与重构 |
+| R11 运维与工程工具 | 开发/运维规范；ops / migrations / scripts / images / Compose / Dockerfile | 锁定依赖、静态检查、启动/迁移、backup/restore/rollback、KEK 保留、清理策略与 smoke | 已定位 ENV_FILE/容器 .env 来源不统一、deploy 不分阶段放行、0027 downgrade 删除审计会话的风险；配置修正/真实恢复演练仍待完成；既有业务浏览器 Ruff 问题见 §13.11 |
 | R12 业务质量验收 | JAF acceptance；通用运行链与业务 Skill/评价数据 | 文档定义的 case/指标/人工评价、Gold 隔离、规则保真；不把 fixture 结果冒充真实模型质量 | 待构建/执行可获得的验收，其余保留外部条件 |
-| R13 全量契约与最终审计 | 全部现行设计、AGENTS、contracts 和工程入口 | 逐需求证据、Schema/example/OpenAPI 同步、Backend/Web/DB/浏览器/部署范围匹配的测试 | 待全量复验；不能用局部绿色结果判定总目标完成 |
+| R13 全量契约与最终审计 | 全部现行设计、AGENTS、contracts 和工程入口 | 逐需求证据、Schema/example/OpenAPI 同步、Backend/Web/DB/浏览器/部署范围匹配的测试 | Backend 全量基线未通过，见 §13.16；其余仍待全量复验，不能用局部绿色结果判定总目标完成 |
 
-本表保留既有全项目实施任务登记；本次继续整理文档并不新增代码实施或部署授权。所有状态与未验收项继续保留在本节/§13；完成的实现细节回写对应设计和有日期的交付记录。
+本表保留 R01–R13 全项目实施任务与既有进展。接续开发不重做已存在的选择/清单入口，从剩余不变量和未覆盖环境继续验收。资源准备回执需要同步 DB/migration、物化器、Worker heartbeat/fencing、workspace Provider、测试与恢复说明；不运行部署或未知生产数据操作。下面的有日期章节只保留证据入口，历史细节不在计划页重复维护，后续代码结果单独记录。
 环境、账号、内部依赖镜像或真实业务数据不足时先完成可独立推进的代码与测试，不擅自采用公网依赖或放宽安全门禁。
 
 ### 13.4 最近文档核对（2026-09-08）
 
-本轮采用代码/契约只读核对来修正文档，没有修改业务代码，也没有重新执行全量应用或部署验收。文档、契约与文档浏览器的实际检查结果见[交付记录 §51](../history/delivery-history.md#51-文档设计边界与阅读体验续整2026-09-08)。
+资源范围、仓库基线、JAF 数据隔离与运维旧描述的核对见[交付记录 §51](../history/delivery-history.md#51-文档设计边界与阅读体验续整2026-09-08)。本锚点保留供旧链接使用；当前差距由 §13.3 与领域设计维护。
 
-| 发现 | 已整理的设计依据 | 后续实施/验收责任 |
-| --- | --- | --- |
-| document 旧全集说明与工作副本冻结改动不同步 | [范围、时序、幂等与历史](../design/resource-snapshots.md) | R01 完成端到端同步后才能标记已交付 |
-| 冻结 repository 分支名被误解为固定内容 | [授权与内容版本](../design/resource-snapshots.md#仓库授权与内容版本) | R01 区分首次物化基线、live Evidence 与缓存来源检查 |
-| 每个物化根的额度被表述成 Run 总额度 | [产物与访问](../design/resource-snapshots.md#产物与访问) | R01 的跨根总量与 R02 的模型预算分别实现和验证 |
-| 资源缺失时澄清被误解为可在原 Run 中新增权限 | [Runtime 暂停边界](../design/agent-runtime.md#52-必须暂停的情况) | R07 保持创建校验与续行边界一致 |
-| JAF 建议目录混放导入资产与 Gold | [隔离目录](../acceptance/jaf-quality.md#3-迁移目标目录) | R12 实际验收时检查导入包、Project 资源与模型可见面 |
-| Runbook 残留禁止 SVN write、所有 Session 同时唯一等旧规则 | [运行排障](../operations/runbook.md#8-対話型-run-と外部-effect-の運用契約) | R08/R11 按当前 Provider 和 PRIMARY/SUBAGENT 边界验收 |
+### 13.5 预算、生命周期与文档工具续整（2026-09-08）
+
+预算设计、Run 状态速查和文档工具的当轮验证见[交付记录 §52](../history/delivery-history.md#52-预算生命周期与文档工具续整2026-09-08)。当时未修改业务逻辑，不把文档回归作为 R02 实现证据。
+
+### 13.6 R01 后端读取与物化接入（2026-09-08）
+
+冻结清单进入读取/物化的当轮实现与 Backend 回归见[交付记录 §53](../history/delivery-history.md#53-r01-冻结文档读取与物化接入2026-09-08)。不覆盖之后的回执接口重构；当前未完成范围以 §13.3 为准。
+
+### 13.7 创建与调度设计续整（2026-09-08）
+
+Run 创建/幂等独立设计、调度事务与恢复要求的来源见[交付记录 §54](../history/delivery-history.md#54-创建调度与开发入口续整2026-09-08)。该轮是文档整理，不是运行时修复。
+
+### 13.8 工作副本与交接核对（2026-09-08）
+
+当时的客户端缺口与调度测试 NameError 见[交付记录 §55](../history/delivery-history.md#55-工作副本对齐与开发交接文档续整2026-09-08)。后续已有修正，不从此历史记录判断当前 UI 或测试。
+
+### 13.9 设计导航与提交状态核对（2026-09-08）
+
+设计责任索引、原请求确认与当轮局部回归见[交付记录 §56](../history/delivery-history.md#56-设计导航与提交状态文档续整2026-09-08)。mock API 浏览器证据不证明真实 DB 并发。
+
+### 13.10 公开契约交接与章节检索（2026-09-08）
+
+契约 example/OpenAPI/typecheck 的当时失败、交接指南与章节搜索见[交付记录 §57](../history/delivery-history.md#57-公开契约交接与章节检索文档续整2026-09-08)。这些失败在 §13.11 的后续核对中已不再复现；原证据不倒改，也不在本页保留一张易被误读为当前缺口的重复表。
+
+### 13.11 资源公开链路与调度边界核对（2026-09-08）
+
+公开选择/投影/三语的局部通过证据、调度时间与编辑缺口、业务浏览器脚本静态检查问题见[交付记录 §58](../history/delivery-history.md#58-资源公开链路与调度边界文档续整2026-09-08)。当轮收录的文档浏览工具只验证离线文档，不是业务 UI 或 R01 全部完成的证明。
+
+### 13.12 运维恢复与工作副本边界核对（2026-09-08）
+
+环境文件来源、完整恢复点、migration/回退风险和当时尚未接入的回执草稿见[交付记录 §59](../history/delivery-history.md#59-运维恢复与工作副本文档续整2026-09-08)。物化器/ContextBuilder 在之后已有新改动，以 §13.13 接续，不修改过去记录。
+
+### 13.13 输入准备协议与文档交接核对（2026-09-08）
+
+Run 级输入协议、物化器/ContextBuilder 接线和当时的构造器失败见[交付记录 §60](../history/delivery-history.md#60-输入准备协议与开发交接文档续整2026-09-08)。之后 Worker/Tool 已有进一步改动，按 §13.14 接续；不从当时的未接线说明推导当前代码，也不倒改原验证记录。
+
+### 13.14 阅读导航、流程语义与现状核对（2026-09-08）
+
+目的导航、Flow 语义和当时的 Worker/Tool 核对见[交付记录 §61](../history/delivery-history.md#61-阅读导航流程语义与现状文档续整2026-09-08)。当时的“准备之后才启动监督”已被后续工作副本修改，以 §13.15 接续，不倒改历史证据。
+
+### 13.15 执行边界、计时器与交接文档核对（2026-09-08）
+
+执行监督、计时器、原生刷新修正与当轮 78 项针对性通过见[交付记录 §62](../history/delivery-history.md#62-执行边界计时器与交接文档续整2026-09-08)。当时只复现一个旧物化调用失败；§13.16 的全量基线进一步明确了失败范围，不倒改原结果。
+
+### 13.16 Skill 生命周期与开发文档核对（2026-09-08）
+
+本轮只整理设计、代码目录 README 与离线文档检查。修正 native/Interpreter、运行中资源选择和 Manifest 版本标识，区分 gate、发布、启用与 readiness；同版重新启用拆为现有限制和[可审计恢复设计](../design/skill-contract.md#112-可审计的重新启用与回滚)。未改业务代码、应用测试、公开契约或执行 Skill。
+
+接续的 Backend 全量基线结果为 **1018 passed、46 failed、20 skipped**：45 项在旧 fixture 构造物化器时缺少必需 input_snapshots，1 项仍断言 migration head 为 0028、而代码已是 0029。这些失败先于业务范围断言或真实迁移，不能当作越权成功、DB 迁移失败或 R01 已完成的证明。保留全部失败，不放宽生产接口或修改测试获得绿色结论。
+
+R01 继续同步物化消费者/迁移断言并完成整链与真实恢复；R06 按生命周期设计补启停审计与回滚，旧代码中运行中 CHOICE 重绑的注释也需对齐。验证范围与阅读检查记录见[交付记录 §63](../history/delivery-history.md#63-skill-生命周期与开发文档续整2026-09-08)，R01–R13 仍未完成。
 
 ## 旧章节引用索引
 

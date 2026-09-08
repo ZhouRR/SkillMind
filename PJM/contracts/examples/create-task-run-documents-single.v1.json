@@ -1,0 +1,10 @@
+{
+  "skill_version_id": "00000000-0000-4000-8000-000000000061",
+  "task_key": "analyze",
+  "input": {
+    "objective": "Summarize the selected documents"
+  },
+  "sources": {
+    "documents": "document:00000000-0000-4000-8000-000000000071"
+  }
+}

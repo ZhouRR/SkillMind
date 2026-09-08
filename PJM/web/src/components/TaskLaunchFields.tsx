@@ -1,12 +1,14 @@
 import type { PublishedTaskRecord, TaskReadinessRecord } from '../api'
 import { useMessages } from '../i18n'
 import { parseInputObject, sourceRequirements, type SourceRequirementChoice } from '../lib/taskDraft'
+import { ALL_DOCUMENTS_SELECTION } from '../lib/documentSelection'
+import { DocumentSourceField } from './DocumentSourceField'
 import { SchemaTaskInput } from './SchemaTaskInput'
 
 /** 一つの資源要求の来源選択を、利用者が理解できる語彙で提示する。
  *
  * 技術 key(例: issue_provider)ではなく資源種別の友好名を主表示にし、原 key は
- * 追跡用に title へ退避する。必須で候補が一つだけなら選択させず「使用: 名称」を静的に示し、
+ * 追跡用に title へ退避する。文書以外は必須で候補が一つなら「使用: 名称」を静的に示し、
  * 候補が無い必須要求は空 select ではなく設定導線を出す。複数候補のみ従来の select を残す。
  */
 export function SourceRequirementField({ requirement, value, onChange }: {
@@ -15,6 +17,7 @@ export function SourceRequirementField({ requirement, value, onChange }: {
   onChange: (value: string) => void
 }) {
   const messages = useMessages()
+  if (requirement.kind === 'document') return <DocumentSourceField requirement={requirement} value={value} onChange={onChange} />
   const label = messages.workspace.resourceKind[requirement.kind] ?? requirement.key
   const soleOption = requirement.options[0]
   if (requirement.required && requirement.options.length === 1 && soleOption !== undefined) {
@@ -79,7 +82,7 @@ export function TaskReadinessPanel({ readiness }: { readiness: TaskReadinessReco
                 {' — '}
                 {messages.workspace.requirementReason[requirement.status] ?? ''}
                 {requirement.candidates.length > 0
-                  ? messages.workspace.candidatesLine(requirement.candidates.map((item) => item.label))
+                  ? messages.workspace.candidatesLine(requirement.candidates.map((item) => item.key === ALL_DOCUMENTS_SELECTION ? messages.workspace.documentSelection.all : item.label))
                   : ''}
               </span>
               {/* 選択指針は Skill 原文由来でレポート言語に従うため、平台文言とは行を分ける。 */}

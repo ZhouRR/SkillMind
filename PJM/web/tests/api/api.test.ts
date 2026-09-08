@@ -110,6 +110,7 @@ const RUN_DETAIL_RESPONSE = {
   row_version: 4,
   input: { ticket_id: 'fixture-001' },
   selected_sources: { issue_source: 'csv', repository_source: 'git' },
+  document_snapshots: [],
   output_schema: { type: 'object', properties: { issue: { type: 'object' } } },
   output_schema_checksum: `sha256:${'4'.repeat(64)}`,
   result: {

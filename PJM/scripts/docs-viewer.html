@@ -5,10 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>ProjectMind · 设计文档</title>
+  <script>
+    // 文書と章を自前で復元するため、旧 layout の座標で browser に上書きさせない。
+    if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+  </script>
   <style>
     :root { --ink:#182b40; --muted:#56697e; --line:#dce5ed; --blue:#175b99; --paper:#fff; --wash:#f3f6f9; }
     * { box-sizing:border-box; }
-    html { scroll-padding-top:32px; }
+    html { scroll-padding-top:var(--docs-scroll-offset,32px); }
     body { margin:0; color:var(--ink); background:var(--paper); font:16px/1.8 system-ui,-apple-system,"Segoe UI","Noto Sans CJK SC","Microsoft YaHei",sans-serif; }
     a { color:var(--blue); text-decoration:underline; text-underline-offset:3px; overflow-wrap:anywhere; }
     a:hover { color:#0c3861; }
@@ -30,11 +34,15 @@
     nav a[aria-current="page"] { background:#dce9f5; color:#104b80; box-shadow:inset 3px 0 #24699e; font-weight:650; }
     .search-hit { border-bottom:1px solid var(--line); padding-bottom:10px; }
     .search-hit small { display:block; color:var(--muted); font-size:12px; margin:3px 9px; overflow-wrap:anywhere; }
+    .search-hit > a { font-weight:650; }
+    .search-section { border-left:2px solid var(--line); margin:8px 0 8px 9px; }
+    .search-section a { font-size:12px; }
+    .search-hit mark { background:#ffedb1; color:var(--ink); border-radius:2px; }
     #search-status { color:var(--muted); font-size:12px; }
     .layout { margin-left:284px; padding:30px 42px 80px; }
-    .topbar { display:flex; align-items:center; justify-content:space-between; gap:20px; border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:32px; }
+    .topbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 20px; border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:32px; }
     .eyebrow { color:var(--blue); font-weight:700; letter-spacing:1px; font-size:12px; }
-    .actions { display:flex; align-items:center; gap:14px; font-size:13px; }
+    .actions { display:flex; flex-shrink:0; align-items:center; gap:14px; margin-left:auto; font-size:13px; white-space:nowrap; }
     .content-layout { display:grid; grid-template-columns:minmax(0,900px) 200px; gap:38px; justify-content:center; }
     article { min-width:0; overflow-wrap:break-word; }
     article:focus { outline:none; }
@@ -50,9 +58,15 @@
     pre { background:#f3f6f9; border:1px solid var(--line); border-radius:8px; padding:20px; overflow:auto; line-height:1.7; font-size:14px; }
     pre code { background:none; padding:0; border-radius:0; color:#253f57; overflow-wrap:normal; }
     .table-scroll { overflow:auto; border:1px solid var(--line); border-radius:8px; margin:20px 0; }
+    .scroll-hint { color:var(--muted); font-size:12px; margin:0 12px 8px; }
+    .inline-toc { display:none; border:1px solid var(--line); border-radius:8px; padding:9px 14px; margin:20px 0; }
+    .inline-toc summary { font-size:14px; }
+    .inline-toc a { display:block; font-size:13px; line-height:1.6; padding:5px 0; }
+    .inline-toc a.sub { padding-left:12px; }
     table { border-collapse:collapse; width:100%; font-size:14px; line-height:1.7; }
     th { text-align:left; background:#eef4f8; font-weight:650; color:#284861; }
-    th,td { padding:12px 14px; border-bottom:1px solid var(--line); vertical-align:top; min-width:90px; }
+    th,td { padding:12px 14px; border-bottom:1px solid var(--line); vertical-align:top; min-width:140px; }
+    td:first-child code { overflow-wrap:normal; }
     tr:last-child td { border-bottom:0; }
     img { max-width:100%; }
     .toc { position:sticky; top:30px; align-self:start; max-height:calc(100vh - 60px); overflow:auto; font-size:12px; border-left:1px solid var(--line); padding-left:17px; }
@@ -63,15 +77,15 @@
     .page-footer { border-top:1px solid var(--line); margin-top:48px; padding-top:20px; color:var(--muted); font-size:12px; }
     #menu-button { display:none; }
     [hidden] { display:none !important; }
-    @media(max-width:1250px) { .content-layout { display:block; max-width:900px; margin:auto; } .toc { display:none; } .layout { padding:26px 30px 60px; } }
-    @media(max-width:760px) { .sidebar { display:none; z-index:3; top:64px; width:min(320px,90vw); box-shadow:6px 0 20px #182b4022; } body.menu-open .sidebar { display:block; } .layout { margin:0; padding:16px 18px 45px; } .topbar { position:sticky; top:0; background:white; z-index:2; margin:-16px -18px 26px; padding:13px 18px; min-height:64px; } .eyebrow { font-size:11px; } #menu-button { display:inline-block; } .actions { gap:8px; } #print-button { display:none; } h1 { font-size:27px; } h2 { font-size:21px; } pre { padding:15px; font-size:12px; } th,td { padding:10px; } }
-    @media print { .sidebar,.topbar,.toc,.skip { display:none !important; } .layout { margin:0; padding:0; } .content-layout { display:block; } body { font-size:11pt; } h1 { font-size:22pt; } h2 { break-after:avoid; font-size:16pt; } pre { white-space:pre-wrap; overflow:visible; } .table-scroll { overflow:visible; } table { font-size:9pt; } tr { break-inside:avoid; } a { color:inherit; } }
+    @media(max-width:1250px) { .content-layout { display:block; max-width:900px; margin:auto; } .toc { display:none; } .inline-toc { display:block; } .layout { padding:26px 30px 60px; } }
+    @media(max-width:760px) { .sidebar { display:none; z-index:3; top:var(--docs-header-height,64px); width:min(320px,90vw); box-shadow:6px 0 20px #182b4022; } body.menu-open .sidebar { display:block; } .layout { margin:0; padding:16px 18px 45px; } .topbar { position:sticky; top:0; background:white; z-index:2; margin:-16px -18px 26px; padding:13px 18px; min-height:64px; } .eyebrow { font-size:11px; } #menu-button { display:inline-block; } .actions { gap:8px; } #print-button { display:none; } h1 { font-size:27px; } h2 { font-size:21px; } pre { padding:15px; font-size:12px; } th,td { padding:10px; } }
+    @media print { .sidebar,.topbar,.toc,.skip,.inline-toc,.scroll-hint { display:none !important; } .layout { margin:0; padding:0; } .content-layout { display:block; } body { font-size:11pt; } h1 { font-size:22pt; } h2 { break-after:avoid; font-size:16pt; } pre { white-space:pre-wrap; overflow:visible; } .table-scroll { overflow:visible; } table { font-size:9pt; } tr { break-inside:avoid; } a { color:inherit; } }
   </style>
 </head>
 <body>
   <a class="skip" href="#main">跳到正文</a>
   <aside class="sidebar" id="sidebar" aria-label="文档导航">
-    <a class="brand" href="#docs/overview/product.md::">ProjectMind</a>
+    <a class="brand" href="#docs/README.md::">ProjectMind</a>
     <p class="subtitle">设计、开发与运行 · 文档中心</p>
     <label class="search-label" for="search">搜索文档</label>
     <input id="search" type="search" placeholder="名称、概念、接口或关键词" autocomplete="off">
@@ -103,6 +117,7 @@
     const search = document.getElementById('search');
     const historyToggle = document.getElementById('include-history');
     const menuButton = document.getElementById('menu-button');
+    const topbar = document.querySelector('.topbar');
     let currentId = '';
 
     /** 文書と章を browser history に保存する。 */
@@ -119,31 +134,68 @@
       return link;
     }
 
+    /** 検索語を escape 済み HTML に再解釈せず、text node と mark だけで強調する。 */
+    function searchExcerpt(section, query) {
+      const excerpt = document.createElement('small');
+      const position = section.text.toLocaleLowerCase().indexOf(query);
+      const start = Math.max(0, position - 32);
+      const end = Math.min(section.text.length, Math.max(0, position) + query.length + 80);
+      const snippet = section.text.slice(start, end).replace(/\s+/g, ' ');
+      const match = snippet.toLocaleLowerCase().indexOf(query);
+      if (start) excerpt.append('…');
+      if (match < 0) {
+        excerpt.append(snippet);
+      } else {
+        const mark = document.createElement('mark');
+        mark.textContent = snippet.slice(match, match + query.length);
+        excerpt.append(snippet.slice(0, match), mark, snippet.slice(match + query.length));
+      }
+      if (end < section.text.length) excerpt.append('…');
+      return excerpt;
+    }
+
     /** 通常時は分類ナビ、検索時は本文を含む候補を表示する。 */
     function renderNavigation() {
       const navigation = document.getElementById('navigation');
       navigation.replaceChildren();
       const query = search.value.trim().toLocaleLowerCase();
-      const found = data.pages.filter(page => !query || (
-        (historyToggle.checked || page.group !== 'history') &&
-        (page.title + '\n' + page.text).toLocaleLowerCase().includes(query)
-      ));
-      document.getElementById('search-status').textContent = query ? found.length + ' 篇匹配文档' : '';
       if (query) {
-        for (const page of found) {
+        const found = data.pages.flatMap(page => {
+          if (!historyToggle.checked && page.group === 'history') return [];
+          const sections = page.sections.filter(section => section.text.toLocaleLowerCase().includes(query));
+          const id = page.id.toLocaleLowerCase();
+          const title = page.title.toLocaleLowerCase();
+          // file 名を探すとき、他文書の相互参照より対象文書を先に案内する。
+          const rank = id === query || id.split('/').at(-1) === query ? 0
+            : title.includes(query) ? 1 : id.includes(query) ? 2 : 3;
+          return rank < 3 || sections.length ? [{page, sections, rank}] : [];
+        }).sort((left, right) => left.rank - right.rank);
+        document.getElementById('search-status').textContent = found.length + ' 篇匹配文档';
+        for (const {page, sections} of found) {
           const row = document.createElement('div');
           row.className = 'search-hit';
-          row.append(linkFor(page));
-          const excerpt = document.createElement('small');
-          const position = page.text.toLocaleLowerCase().indexOf(query);
-          excerpt.textContent = page.text.slice(Math.max(0, position - 32), Math.max(0, position) + 100).replace(/\s+/g, ' ');
-          row.append(excerpt);
+          row.append(linkFor(page, page.title, sections[0]?.anchor || ''));
+          const location = document.createElement('small');
+          location.textContent = data.groups[page.group] + ' · ' + page.id;
+          row.append(location);
+          for (const section of sections.slice(0, 3)) {
+            const result = document.createElement('div');
+            result.className = 'search-section';
+            result.append(linkFor(page, section.title, section.anchor), searchExcerpt(section, query));
+            row.append(result);
+          }
+          if (sections.length > 3) {
+            const more = document.createElement('small');
+            more.textContent = '本页另有 ' + (sections.length - 3) + ' 个匹配章节，可用浏览器查找继续定位。';
+            row.append(more);
+          }
           navigation.append(row);
         }
         return;
       }
+      document.getElementById('search-status').textContent = '';
       for (const [group, title] of Object.entries(data.groups)) {
-        const children = found.filter(page => page.group === group);
+        const children = data.pages.filter(page => page.group === group);
         if (!children.length) continue;
         const section = document.createElement('details');
         section.open = group !== 'history' || pages.get(currentId)?.group === 'history';
@@ -155,13 +207,41 @@
       }
     }
 
+    /** 表が本当に溢れた場合だけ keyboard 操作とスクロール案内を表示する。 */
+    function updateScrollableTables() {
+      for (const [index, region] of [...main.querySelectorAll('.table-scroll')].entries()) {
+        const table = region.querySelector('table');
+        const overflow = table.getBoundingClientRect().width > region.clientWidth + 1;
+        const hint = region.previousElementSibling;
+        hint.hidden = !overflow;
+        region.tabIndex = overflow ? 0 : -1;
+        if (overflow) {
+          region.setAttribute('role', 'region');
+          region.setAttribute('aria-label', '表格 ' + (index + 1) + '，可横向滚动');
+          region.setAttribute('aria-describedby', hint.id);
+        } else {
+          region.removeAttribute('role');
+          region.removeAttribute('aria-label');
+          region.removeAttribute('aria-describedby');
+        }
+      }
+    }
+
+    /** 改行や文字拡大後も固定 header が章の見出しと menu を覆わないようにする。 */
+    function updateScrollOffset() {
+      const sticky = getComputedStyle(topbar).position === 'sticky';
+      const height = sticky ? Math.ceil(topbar.getBoundingClientRect().height) : 0;
+      document.documentElement.style.setProperty('--docs-header-height', height + 'px');
+      document.documentElement.style.setProperty('--docs-scroll-offset', (sticky ? height + 16 : 32) + 'px');
+    }
+
     /** 直接リンク・戻る・進むを同じ経路で扱う。 */
     function showPage() {
       if (location.hash === '#main') { main.focus(); return; }
       let id, anchor;
       try { [id, anchor = ''] = location.hash.slice(1).split('::').map(decodeURIComponent); }
       catch { id = ''; anchor = ''; }
-      id ||= 'docs/overview/product.md';
+      id ||= 'docs/README.md';
       const page = pages.get(id);
       currentId = id;
       const toc = document.getElementById('toc-links');
@@ -170,10 +250,14 @@
         main.replaceChildren();
         const title = document.createElement('h1');
         title.textContent = '文档不存在';
-        main.append(title, linkFor(pages.get('docs/overview/product.md'), '返回产品概览'));
+        main.append(title, linkFor(pages.get('docs/README.md'), '返回文档导航'));
         document.getElementById('category').textContent = 'PROJECTMIND / 未找到';
         document.getElementById('source-link').hidden = true;
+        document.title = '文档不存在 · ProjectMind';
+        document.body.classList.remove('menu-open');
+        menuButton.setAttribute('aria-expanded', 'false');
         renderNavigation();
+        main.focus();
         return;
       }
       document.title = page.title + ' · ProjectMind';
@@ -189,10 +273,27 @@
         notice.textContent = '历史归档：保留当时的设计和验证记录；当前状态以实施计划为准。';
         main.prepend(notice);
       }
+      const inlineToc = document.createElement('details');
+      inlineToc.className = 'inline-toc';
+      const inlineSummary = document.createElement('summary');
+      inlineSummary.textContent = '本页内容';
+      const inlineLinks = document.createElement('nav');
+      inlineLinks.setAttribute('aria-label', '本页章节');
+      inlineToc.append(inlineSummary, inlineLinks);
       for (const heading of page.toc) {
         const link = linkFor(page, heading.title, heading.anchor);
         if (heading.level === 'h3') link.className = 'sub';
+        inlineLinks.append(link.cloneNode(true));
         toc.append(link);
+      }
+      if (page.toc.length) main.querySelector('h1').after(inlineToc);
+      for (const [index, region] of [...main.querySelectorAll('.table-scroll')].entries()) {
+        const hint = document.createElement('p');
+        hint.className = 'scroll-hint';
+        hint.id = 'docs-table-hint-' + index;
+        hint.hidden = true;
+        hint.textContent = '表格可横向滚动；聚焦表格后可用方向键查看。';
+        region.before(hint);
       }
       const footer = document.createElement('footer');
       footer.className = 'page-footer';
@@ -202,15 +303,33 @@
       menuButton.setAttribute('aria-expanded', 'false');
       renderNavigation();
       requestAnimationFrame(() => {
+        updateScrollOffset();
+        updateScrollableTables();
         const target = anchor ? main.querySelector('#' + CSS.escape(anchor)) : null;
         if (target) target.scrollIntoView(); else window.scrollTo(0, 0);
-        main.focus({preventScroll:true});
+        const focusTarget = target || main;
+        focusTarget.setAttribute('tabindex', '-1');
+        focusTarget.focus({preventScroll:true});
       });
     }
 
     search.addEventListener('input', renderNavigation);
     historyToggle.addEventListener('change', renderNavigation);
     window.addEventListener('hashchange', showPage);
+    document.addEventListener('click', event => {
+      // 同じ章への再クリックでは hashchange が発生しない。検索や目次から再び焦点を戻す。
+      const link = event.target instanceof Element ? event.target.closest('a') : null;
+      if (link?.getAttribute('href') === location.hash && location.hash.includes('::') &&
+          event.button === 0 && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+        event.preventDefault();
+        showPage();
+      }
+    });
+    window.addEventListener('resize', () => requestAnimationFrame(() => {
+      updateScrollOffset();
+      updateScrollableTables();
+    }));
+    new ResizeObserver(updateScrollOffset).observe(topbar);
     document.getElementById('print-button').addEventListener('click', () => window.print());
     menuButton.addEventListener('click', () => {
       const open = document.body.classList.toggle('menu-open');
@@ -218,9 +337,10 @@
       if (open) search.focus();
     });
     document.addEventListener('keydown', event => {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && document.body.classList.contains('menu-open')) {
         document.body.classList.remove('menu-open');
         menuButton.setAttribute('aria-expanded', 'false');
+        menuButton.focus();
       }
     });
     showPage();

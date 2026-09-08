@@ -2,6 +2,8 @@
 
 > 定位：后续展示设计，不是 Workflow Controller。前置阅读：[Workspace](workspace.md)、[Skill 契约](skill-contract.md)。当前没有 TaskFlowProjection Schema、持久化字段或运行画布，进度见[计划 R03](../planning/roadmap.md#133-全项目重构与缺失功能实施2026-09-05-启动)。本页使用独立章节编号，旧 PLAN §26 引用仍由计划索引承接。
 
+理解体验先读[目标](#1-目标)和[事实示例](#一个例子计划不等于执行事实)；设计数据结构时读[契约](#3-taskflowprojection-目标契约)；准备开发时对照[工作包](#5-实施工作包)与[阶段边界](#8-阶段验收与事实边界)。本页所有新增 Flow 字段均为目标，不是可直接调用的现行接口。
+
 ## 1. 目标
 
 把 Skill 解析结果从面向实现的字段列表，转换为普通用户可以理解和持续观察的任务流程视图。用户至少应能在一次查看内回答：
@@ -11,14 +13,13 @@
 3. 系统会自动完成哪些工作，哪些节点需要我确认或批准？
 4. 最终会产出报告、文档、代码变更、计划更新或其他什么结果？
 
-当前产品对象关系固定为：
+先区分三个阅读层次，下面不是数据库所有权树：
 
-```text
-Skill
-  └─ Capability Map：说明能做什么
-       └─ Task Flow：说明一个任务如何完成
-            └─ Run Flow：说明本次实际执行发生了什么
-```
+| 视图 | 读者的问题 | 依据 |
+| --- | --- | --- |
+| Capability Map | 这个 Skill 能做什么？ | 已发布精确 SkillVersion 的 Blueprint |
+| Task Flow | 选中的任务建议怎样完成？ | 该版本的一个 Task；当前 readiness 单独显示 |
+| Run Flow | 这一次实际发生了什么？ | 本 Run 冻结的计划及实际事件；不能读取最新 Task 替换 |
 
 Task Flow 是对 CapabilityBlueprint 和已发布 Task 的可视化投影，不是新的权限来源，也不是首版工作流执行引擎。现有 Skill 没有明确流程依赖时，平台必须显示“建议/自适应流程”，不能把模型或平台推测伪装成 Skill 的强制顺序。
 
@@ -34,12 +35,11 @@ Skill 页面展示能力概览和多个 Task 入口；Task Center/Task detail �
 
 **D3｜首版是 Projection，不是严格 Workflow Controller。**
 
-Agent 默认使用 `SUPERVISED` profile，可以重排 recommended steps、追加只读验证和使用 Subagent。流程图必须同时表达“计划”和“实际”：
+Agent 默认使用 `SUPERVISED` profile；在已授权能力和预算内，可以重排 recommended steps、追加只读验证和使用 Subagent。流程图必须把“计划约束”与“实际活动”作为两个维度：
 
-- `required` 节点表示必须遵守的目标、规则、质量门禁或安全节点；
-- `recommended` 节点表示 Skill 建议的过程，允许 Agent 在目标不变时调整；
-- `dynamic` 节点表示运行时新增的只读活动或 Subagent 分支；
-- 未匹配到计划节点的 Agent 活动进入“动态步骤”区域，不强行归类。
+- 冻结计划的 `strength` 只取 `required / recommended`。前者引用必须遵守的目标、规则或门禁，后者是允许调整的建议过程；不能仅凭模型建议把节点提升为 required。
+- `dynamic` 描述未关联计划的实际活动，不是第三种 strength，也不追加进 frozen flow。只读验证、子分析等无关联活动进入“动态步骤”，按原事件展示。
+- required 说明必须满足的约束，不证明平台已有逐节点强制调度或完成检测。质量通过、交互已受理和外部写入成功仍分别依赖各自事实来源，见[节点状态](#9-节点状态的事实来源)。
 
 严格 DAG、循环、自动分支和节点级调度不属于首版；未来若需要，将作为独立 Execution Profile/Controller 设计。
 
@@ -97,9 +97,38 @@ TaskFlowProjection
   layout
 ```
 
-`nodes` 和 `edges` 保存语义引用；`layout` 只保存画布位置、分组和折叠状态，不能承载权限或执行规则。首版条件只用于人类可读的 `condition_label`，不执行任意表达式或 JavaScript。
+`nodes` 和 `edges` 保存语义引用；`layout` 只保存画布位置、分组和折叠状态，不能承载权限或执行规则。边表示推荐关系，不是 Worker 的调度依赖；`condition_label` 只供人阅读，不执行表达式或 JavaScript，也不能从连线自动推导前置节点已完成。
+
+### 计划身份与显示布局
+
+目标契约须把“计划改了”和“看图方式改了”分开，否则拖动画布或切换窄屏布局会让历史事件失去关联。
+
+| 内容 | 变化时的处理 |
+| --- | --- |
+| 计划语义 | 版本、task_key、nodes、edges 及其引用/约束参与语义 checksum；变更走 Draft、校验和发布，不覆盖已有 Run |
+| 显示布局 | 位置、折叠、缩放不参与语义 checksum，不改变节点身份或批准要求。若随版本保存，仍校验结构并保护完整文件，不能把“无需重算计划”当作“不校验内容” |
+| 节点身份 | id 在一份计划内唯一；事件通过本 Run 的 frozen flow 校验引用，不靠节点标题、数组位置或 SDK step_id 匹配，也不跨版本套用同名节点状态 |
+| 实际状态 | 来自持久事件和关联对象，不写进计划 checksum；没有事件时保留“尚无执行证据” |
+
+上面的 `checksum` 对应后续 Run 的 `flow_checksum`，不是来源 package 的 content_hash 或完整发布文件的 hash。字段集合、规范化方式与版本兼容须在 Schema/example、Backend validator 和 Web consumer 一起冻结；复用[共享 hash 实现](../../PJM/backend/src/projectmind/core/hashing.py)，不让前后端各算一套身份。
+
+### 从发布到历史重放
+
+```text
+精确 SkillVersion 的 Task / Blueprint
+    ↓ 投影、来源校验、Draft 与发布
+Task Flow（版本化计划）
+    ↓ 创建 Run 时冻结语义内容和 checksum
+本 Run 的 frozen flow
+    ↓ 与实际事件、交互、Proposal 等关联
+Run Flow（可重建的观察视图）
+```
+
+这是引入 Flow 契约后的目标链路。只读预览阶段只使用现有数据，不提前伪造 frozen 字段。后续 Segment/Attempt 沿用同一 Run 计划；最新 Task 的布局、规则或 readiness 不覆盖历史事实。
 
 现有没有流程契约的 PUBLISHED Skill 必须继续可以运行，并回退到“能力摘要 + 资源清单 + Agent 动态步骤”的标准视图。新增契约时必须同步 Schema、example、Backend projector、AgentTaskBrief frozen checksum、Run detail、SSE/Web view 和测试。
+
+兼容必须区分“旧版本没有声明”和“新版本声明却损坏”：前者走标准回退；后者在发布/创建时拒绝，历史读取显示不可用原因并保留原事件，不能用最新 Blueprint 重建成看似合法的旧计划。
 
 ## 4. 目标用户体验
 
@@ -131,12 +160,18 @@ TaskFlowProjection
 
 ## 7. 完成标准
 
-- 新增普通 Skill 没有完整流程声明时，仍能显示能力摘要、资源前提和动态执行过程，不虚构固定顺序。
-- 用户可以从流程图判断资源是否就绪、何时需要自己处理、最终会产生什么结果。
-- 手动节点经过 Draft/publish 校验，不能删除 required rule、绕过批准或增加权限。
-- Run 的流程 checksum、节点引用和实际事件可以重放；SSE 重连不重复或伪造节点完成状态。
-- 等待中的 Interaction/Approval 在流程图、Workspace、概览和导航中状态一致。
-- 所有流程契约、API、Web 类型、三语文案、Backend/Web 测试和历史版本兼容性检查同步完成。
+这些是完整链路的验收，不把一张可显示的预览图当作全部完成：
+
+| 场景 | 可观察结果 |
+| --- | --- |
+| 普通 Skill 没有声明 Flow | 能力、资源与动态活动仍可读；不虚构强制顺序或历史计划 |
+| 拖动布局、再发布计划、打开旧 Run | 布局不改变语义身份；新版本不覆盖旧 Run，历史节点仍只关联原 frozen flow |
+| 手动删 required rule 或增加能力 | 发布/创建校验拒绝，不把图形编辑当授权入口 |
+| SSE 断线、重复事件、缺失节点关联 | 重放去重，不重复计数；无关联保留动态活动，不把相似标题合并成已完成 |
+| 关闭等待弹窗、批准后回读失败 | 待办不因关窗丢失；批准与 apply/read-back 分开，不显示虚假的成功 |
+| 窄屏、键盘与三语查看 | 无需拖拽和颜色也能理解状态、来源与待办；长标题、错误和未知状态可读 |
+
+Schema/example、公开投影、Web validator、三语、Backend/Web 回归与历史兼容需同时具备证据。阶段交付按下一节分别判断。
 
 ## 8. 阶段验收与事实边界
 
@@ -168,3 +203,17 @@ TaskFlowProjection
 推荐步骤、required 约束、运行时新增活动是不同维度：`dynamic` 不是与 required/recommended 并列的冻结强度值。等待、失败、未观察和无关联都要有文字说明；不按节点数量虚构百分比进度，节点没有事件时默认“尚无执行证据”。
 
 历史 Run 没有 flow snapshot 时只显示当时可还原的活动。若另展示最新 Task 预览，必须清楚标注它不是该历史 Run 的原计划，不能与历史完成状态拼接。
+
+### 一个例子：计划不等于执行事实
+
+假设任务建议“读文档 → 分析 → 生成报告”，并声明“若需要修改外部内容，须提交提案并批准”。下面是目标展示语义，不是新增固定工作流：
+
+| 这次实际发生的事 | 应怎样显示 |
+| --- | --- |
+| Project 有可选文档，尚无本 Run 准备记录 | 任务资源可能就绪；不能显示该 Run 已读完文档 |
+| Agent 追加一次子分析，没有 flow_node_ref | 展示动态只读活动；不往历史计划补节点或改变 required |
+| 已有分析完成事件，缺少质量检查依据 | 活动已结束；质量门禁仍“尚无证据”，不一并打勾 |
+| 提案获批，apply/read-back 尚未成功 | 显示批准已受理和实际效果状态；不标成外部内容已更新 |
+| 没有提出外部变更 | 不伪造一次批准。条件性动作是否适用须有明确依据；不能仅因缺少事件写成“已跳过/已通过” |
+
+这个例子解释为什么不显示“完成了四个节点，所以进度 80%”：建议数量、实际活动、质量结论与外部效果不是同一计量单位。

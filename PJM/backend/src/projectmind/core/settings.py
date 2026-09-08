@@ -48,16 +48,18 @@ class Settings(BaseSettings):
     outbox_batch_size: int = Field(default=20, ge=1, le=100)
     run_lease_seconds: int = Field(default=60, ge=30, le=300)
     run_max_attempts: int = Field(default=3, ge=1, le=10)
+    # モデル待機の wall timeout と分け、heartbeat があっても資源準備を無期限にしない。
+    run_preparation_timeout_seconds: int = Field(default=300, ge=1, le=3600)
     run_workspace_root: Path = Path("/var/lib/projectmind/runs")
 
-    # 冻结資源を input/ へ物化する際の体积/件数上限 (計画 §19 W3)。search の走査予算
-    # (workspace_provider の _MAX_SEARCH_BYTES / _MAX_SEARCH_FILES) と揃え、「物化したのに
-    # 一回の search で全部走れない」死角を避ける。超過は截断せず fail closed。
+    # 凍結入力の存量と単一 search の走査量は別の制限。各 root と全 root の双方を守り、
+    # manifest 等を含む最終量の超過は、部分入力を渡さず fail closed とする。
     workspace_materialize_max_bytes: int = Field(default=10_485_760, ge=1, le=104_857_600)
     workspace_materialize_max_files: int = Field(default=500, ge=1, le=5_000)
+    workspace_materialize_total_max_bytes: int = Field(default=104_857_600, ge=1, le=536_870_912)
+    workspace_materialize_total_max_files: int = Field(default=5_000, ge=1, le=50_000)
 
-    # git/svn command 1 回あたりの上限秒数 (計画 §19 W4)。応答しない remote が Run の
-    # wall timeout (900 秒) を丸ごと食い潰さないよう、個別 command 側でも打ち切る。
+    # git/svn command 1 回あたりの上限。準備全体・モデル実行の期限とは別に remote を打ち切る。
     repository_command_timeout_seconds: int = Field(default=120, ge=5, le=600)
     # 扇出子 Agent 一 branch あたりの打ち切り時間。Run の wall timeout(900 秒)より必ず短くし、
     # 一路の停滞が Run 全体の期限を食い潰さないようにする (計画 §23 D6)。
