@@ -1,3 +1,5 @@
+import { isUuid } from './validation'
+
 /** 公開 sources 契約の文書範囲。ID の生成や server fingerprint の再導出は行わない。 */
 export type DocumentSelectionMode = 'SINGLE' | 'SET' | 'ALL'
 
@@ -13,8 +15,7 @@ export const ALL_DOCUMENTS_SELECTION = 'project-documents:all'
 
 /** API の文書 UUID を shape として確認するだけで、所有権は server が検証する。 */
 export function isDocumentId(value: unknown): value is string {
-  return typeof value === 'string'
-    && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(value)
+  return isUuid(value)
 }
 
 /** 同一 request の本文はこの処理で変更しない。草稿の選択 token を UI に読み取る。 */

@@ -50,6 +50,37 @@ def validate_contract(name: str, value: object) -> None:
     Draft202012Validator(schema, format_checker=FormatChecker()).validate(value)
 
 
+def test_admin_reads_exact_user_without_searching_a_list_page(
+    client: TestClient, account_api: tuple[FakeAuthService, FakeUserService]
+) -> None:
+    """編集の再読込は精確 ID と原会話を渡し、追加 field や cache を許さない。"""
+
+    auth, service = account_api
+    target = uuid4()
+    response = client.get(BASE + f"/{target}")
+    assert response.status_code == 200
+    validate_contract("account", response.json())
+    assert response.json()["user_id"] == str(target)
+    assert response.headers["cache-control"] == "no-store"
+    operation, arguments = service.calls[0]
+    assert operation == "get_user" and arguments["user_id"] == target
+    assert arguments["access"].session_token == auth.session_token
+    assert arguments["access"].request_id == UUID(response.headers["x-request-id"])
+
+
+def test_admin_user_read_hides_missing_target_and_internal_detail(
+    client: TestClient, account_api: tuple[FakeAuthService, FakeUserService]
+) -> None:
+    """不存在と別組織の target を同じ no-store Problem として扱う。"""
+
+    _, service = account_api
+    service.failure = UserNotFoundError("internal target detail")
+    response = client.get(BASE + f"/{uuid4()}")
+    assert response.status_code == 404 and response.json()["code"] == "user_not_found"
+    assert "internal target detail" not in response.text
+    assert response.headers["cache-control"] == "no-store"
+
+
 def test_account_lists_and_audit_use_explicit_projection(
     client: TestClient, account_api: tuple[FakeAuthService, FakeUserService]
 ) -> None:
@@ -276,6 +307,8 @@ def test_user_cannot_administer_others_and_origin_is_required(
     auth.actor = replace(auth.actor, system_role="USER")
     for method, path in (
         ("GET", ""),
+        ("GET", f"/{uuid4()}"),
+        ("GET", f"/{auth.actor.user_id}"),
         ("GET", f"/{uuid4()}/security-events"),
         ("POST", f"/{uuid4()}/sessions/revoke"),
     ):

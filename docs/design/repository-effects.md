@@ -17,6 +17,8 @@
 
 `VERIFICATION_FAILED` 属于 EffectExecution，不是 Proposal 或 Run 的新状态；Effect 的 `attempt_no` 也不是 RunAttempt。`before_ref / after_ref` 可能为空，仓库的 before Evidence 当前记录基线定位，不是自动生成的完整逆向补丁。原始 enum 见 [domain](../../PJM/backend/src/projectmind/effects/domain.py)，公开形状见[契约入口](../../PJM/contracts/README.md#外部変更の契約を読む)。
 
+Result 中模型填写的 effects 摘要不替代上述平台记录。摘要的引用与状态目前尚未逐项核验，收口规则见[结果引用的可信性](results-evaluation.md#引用可信性的修正要求)；不从一段 APPLIED 文本推导已有批准、真实写入或 read-back。
+
 ## 调用与批准链路
 
 ```text

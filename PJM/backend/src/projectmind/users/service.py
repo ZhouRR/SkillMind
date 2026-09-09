@@ -126,6 +126,15 @@ class UserService:
             self._authorize(access, locked, admin=True, write=False)
             return result
 
+    async def get_user(self, *, access: UserAccess, user_id: UUID) -> StoredUser:
+        """編集と競合確認で正確な user を読み、一覧の先頭 page に依存させない。"""
+
+        async with self._transaction(access, target_id=user_id, admin=True, write=False) as (
+            repository,
+            locked,
+        ):
+            return repository.to_stored(self._target(locked))
+
     async def list_security_events(
         self, *, access: UserAccess, user_id: UUID, limit: int = 25, offset: int = 0
     ) -> tuple[tuple[StoredUserSecurityEvent, ...], int]:

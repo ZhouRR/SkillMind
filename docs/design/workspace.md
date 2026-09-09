@@ -31,7 +31,7 @@ SkillComposition 的 module/role/task_group 是展示方式，不是系统角色
 
 登录是进入这些业务页面前的 App 状态，不是另一个 Project 页面或独立 hash route。配额拒绝与提示见[登录客户端责任](login-protection.md#公开响应与客户端责任)，在途提交、离页和结果未知见[请求生命周期](login-protection.md#提交离页与结果未知)。业务页复用当前 Session，不把登录等待当成 Run 取消，也不在此复制一套错误与重试规则。
 
-后续[账户安全入口](user-lifecycle.md#生效与界面)也属于平台层，不依赖 Project；本人操作与 ADMIN 组织管理分开。Backend 的管理路由与 Schema 已存在，但 Web client、页面与 hash route 尚未接入，所以下面的现行导航树和路由表不提前加入可点击的账户项。UI language / Project preference 是已有偏好，不代表账户界面已实现。
+后续[账户安全入口](user-lifecycle.md#生效与界面)也属于平台层，不依赖 Project；本人操作与 ADMIN 组织管理分开。Backend 的管理路由、Schema 和 Web client 已有工作副本，账户页面与 hash route 尚未接入，所以下面的现行导航树和路由表不提前加入可点击的账户项。UI language / Project preference 是已有偏好，不代表账户界面已实现。
 
 ### 2.2 路由
 
@@ -48,7 +48,9 @@ SkillComposition 的 module/role/task_group 是展示方式，不是系统角色
 | `#/skills` | 组织技能库 |
 | `#/projects` | 项目管理 |
 
-Run、Interaction、Result 在工作空间内展示，没有独立 path 路由。URL 明确指定了无效/无权 Project 时显示问题，不悄悄换项目。API 每次重新鉴权，前端路由不构成授权。
+Run、Interaction、Result 在工作空间内展示，没有独立 path 路由。设计要求 URL 明确指定了无效/无权 Project 时显示问题，不悄悄换项目；当前 resolveProjectSelection/App 仍会回退并改写 hash，这一差距按[项目选择](project-lifecycle.md#项目选择与失效链接)修正。API 每次重新鉴权，前端路由不构成授权。
+
+项目管理中的创建/编辑、归档/恢复、物理删除各有不同结果；成员 API/client 存在不等于页面可操作。实现入口与验收见[项目生命周期](project-lifecycle.md#开发接续与验收)，归档成功不显示成全部执行已停止，删除成功不显示成附件字节与备份已清除。
 
 ### 2.3 工作空间布局
 
@@ -151,7 +153,7 @@ Run 已冻结的资源选择与权限不能在中途替换。需要变更时创�
 
 ### 7.1 固定区域
 
-摘要、交付物、Findings、Evidence、限制/待确认、Proposal/Effect 与 Evaluation 分开显示。Outcome PARTIAL/BLOCKED 与 Run 的技术终态不是同一个枚举。
+摘要、交付物、Findings、Evidence、限制/待确认、Proposal/Effect 与 Evaluation 分开显示。[四种结果事实](results-evaluation.md#先分清四种事实)区分技术终态、交付完整性、引用和人工判断；不把模型 confidence 当作正确率，不把 Artifact 引用当作已验证下载入口。
 
 冻结文档范围属于 Run 输入事实，不能塞进结果摘要冒充分析结论。[RunDocumentSnapshots](../../PJM/web/src/components/RunDocumentSnapshots.tsx) 在 RunResultPanel 内独立显示槽位、验证状态、选择模式和可展开成员；结果尚未生成时也可读取清单。路径、ID、hash 等长内容应换行或局部滚动。
 
@@ -163,7 +165,9 @@ Run 已冻结的资源选择与权限不能在中途替换。需要变更时创�
 
 ### 7.3 Evaluation
 
-人工评分、comment 和 JSON Pointer revision 追加保存；original_value 由服务端从不可变 Result 取得，不能覆盖 AI 原值。
+本节保留原入口，协议与字段定位集中到[评价请求](results-evaluation.md#评价请求与历史)和[原值指针](results-evaluation.md#修订指向哪份原值)。画面并列展示 AI 原值、建议、理由及评价历史，不自动合并修订或续行。
+
+当前表单一次只提供一条修订，历史接口无分页，POST 无原请求幂等。状态禁用与 abort 尚未闭合晚到响应/读写竞争；按[评价界面责任](results-evaluation.md#提交未知与界面责任)补齐，不照搬普通答复或 Run 创建的重放保证。
 
 ## 8. Task Center
 
@@ -194,6 +198,14 @@ ONCE/CRON、timezone、触发预览、错过/重叠/失效行为以 [TaskSchedul
 当前支持运行中的 CLARIFICATION/CHOICE/REVIEW 响应、Proposal 审查与批准，以及 Skill 解释的显式追加调整。三者使用各自版本/幂等/权限协议。
 
 终态后的继续分析创建新 Run。对话任意创建/编辑任务、自动建立 child Run 关联与自然语言任意执行管理操作属于后续设计，不作为现有功能说明。
+
+### 普通答复与续行状态
+
+[用户交互设计](user-interactions.md)负责问题、版本、原答复身份和期限。当前 InteractionCard 提供文本或已知选项，不是资源换绑表单；普通答复可以由有 Project 写权限的成员提交，外部批准的额外身份限制不能反向套用到所有问题。
+
+界面要分开“发送中、已确认、冲突、已过期、结果未知”。当前卡片每次发送换 key，只有 state 禁用和 unmount abort，尚无完整原答复确认与晚到成功保护。按[界面责任](user-interactions.md#答复界面与结果未知)补齐，不因 Run 创建已有恢复功能而宣称所有写操作都安全重放。
+
+收到 410 后读取过期事实与可能的新 Segment，不显示“服务器未更改”；原答复重放返回的是原续行 ID 与当前 Run 状态，不把时间线切回旧 Segment。推荐不自动勾选/提交，required=false 不显示不存在的跳过动作。期限显示须带可理解的时间信息，最终是否受理由服务端判定。
 
 ### 审批请求与执行结果
 
@@ -242,6 +254,12 @@ ONCE/CRON、timezone、触发预览、错过/重叠/失效行为以 [TaskSchedul
 
 尚未实现。目标是错误时关闭本页 iframe 回到 standard，保留草稿与焦点，展示失败原因，业务记录不变；见[版本与回退](generated-modules.md#版本与回退)。本页异常不自动全局停版，也不切换 SkillComposition 的业务版本；[图表失败的例子](generated-modules.md#一个例子图表坏了任务没有失败)说明用户应看到的区别。
 
+## 项目文档管理的职责
+
+项目文档页管理当前文档资产，Task 输入选择和 Run 详情分别管理授权草稿与冻结事实。[文档删除示例](document-lifecycle.md#一个例子列表消失不等于清理完成)说明这三种视图为什么不能互相替代。
+
+上传目录是逐文件请求，不是整批事务；预览受扩展名与大小限制，HTML 禁脚本不等于禁止外部资源。准确的[上传/读取边界](document-lifecycle.md#上传的三个边界)与[未知结果处理](document-lifecycle.md#页面与结果未知)由文档正本负责。现行管理组件没有完整的同步防重、当前 actor/Project 判定和提交核对，不能从 Run 创建已有恢复功能推断此页也已完成。
+
 ## 14. 可访问性、国际化与隐私
 
 当前界面文案通过 zh/ja/en catalog，用户偏好由服务端保存；不再描述为“认证完成前中文单语”。report_language 是任务输出配置，独立于界面语言。
@@ -258,10 +276,11 @@ ONCE/CRON、timezone、触发预览、错过/重叠/失效行为以 [TaskSchedul
 | --- | --- |
 | 输入/任务选择 | 无业务 Schema 可启动；有 Schema 正确校验；精确 task/version |
 | 文档范围与清单 | 单份/集合/全集显式确认，可选未选不授权；详情使用冻结事实，历史缺失/损坏不补造 |
+| 文档资产管理 | 目录部分成功、未知上传/删除、原 ID 与新 ID、权限/Project 切换、真实预览/下载；metadata 消失不显示为字节彻底清除 |
 | 调度配置 | 即时/调度共用实际输入，预览不创建 Run；编辑冲突、100 条以上分页、失效任务可见性、时区差分别验收 |
 | 提交确认 | 丢响应/超时/异常返回仍保留原请求；编辑不换原键，账号/Project 切换不接收旧结果；新建需明确确认 |
 | SSE/历史 | 断线重连不重复，terminal snapshot 后结束，旧结果可读 |
-| 等待/批准 | 关闭弹窗后仍有待办；版本/期限/授权失败清晰 |
+| 等待/批准 | 关闭弹窗后仍有待办；普通答复与精确批准分开，版本/期限/授权失败清晰；410 已提交过期、原答复重放和晚到完成分别验收 |
 | Result/Evaluation | 原始结果不变，修订追加，Evidence 不跨 Run |
 | 子分析 | 失败范围可见，不能表现为全部完成 |
 | 语言/布局 | 三语、键盘、窄屏与长内容 |

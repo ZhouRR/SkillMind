@@ -1,5 +1,5 @@
 import { isDocumentId, MAX_SELECTED_DOCUMENTS, type DocumentSelectionMode } from '../lib/documentSelection'
-import { isRecord } from './http'
+import { exactFields, isRecord } from './http'
 
 /** 内部 binding JSON ではなく、履歴にも公開できる四項目の資源摘要。 */
 export interface RunSourceSummary {
@@ -117,9 +117,4 @@ function isFrozenDocument(value: unknown): value is FrozenDocumentRecord {
 /** 検証値の形のみを確認し、ブラウザで server identity を再計算しない。 */
 function isChecksum(value: unknown): value is string {
   return typeof value === 'string' && /^sha256:[a-f0-9]{64}$/.test(value)
-}
-
-/** required と追加 field 拒否を一つの判定に揃える。 */
-function exactFields(value: Record<string, unknown>, fields: readonly string[]): boolean {
-  return Object.keys(value).length === fields.length && fields.every((field) => Object.hasOwn(value, field))
 }

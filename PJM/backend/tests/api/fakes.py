@@ -274,6 +274,12 @@ class FakeUserService:
         self._record("account", kwargs)
         return self.account
 
+    async def get_user(self, **kwargs: object) -> StoredUser:
+        """精確 ID の読取が共通の管理 service へ到達した事実を残す。"""
+
+        self._record("get_user", kwargs)
+        return replace(self.account, user_id=cast(UUID, kwargs["user_id"]))
+
     async def list_users(self, **kwargs: object) -> tuple[tuple[StoredUser, ...], int]:
         """先頭 page だけではない総件数を返す。"""
 

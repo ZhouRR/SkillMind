@@ -39,6 +39,8 @@
 
 ## 一次 Run 内部
 
+人工参与先分清[普通答复、外部批准、结果评价](../design/user-interactions.md#先分清三种人工参与)。问题的 REVIEW、Proposal decision 与 Result 的 Evaluation 不是同一种提交；批准不保证远端完成，评价不恢复终态 Run。
+
 ```text
 Run（一个目标、固定权限与输入）
 └── Segment（一次连续工作；回答/批准后追加）
@@ -60,8 +62,8 @@ Run（一个目标、固定权限与输入）
 | EffectExecution | 平台实际执行已批准变更及回读验证的记录 |
 | Evidence | 对取得的事实、内容版本和位置的引用 |
 | Artifact | 报告、补丁等文件产物 |
-| Result / OutcomeEnvelope | 不可变原始结果 / 通用结果包络 |
-| Evaluation | 对 Result 的追加式人工评分与修订 |
+| Result / OutcomeEnvelope | 不可变原始结果 / 通用结果包络；[执行成功不等于业务全对](../design/results-evaluation.md#先分清四种事实) |
+| Evaluation | 对 Result 的追加式人工评分与修订；[原值始终来自原结果](../design/results-evaluation.md#修订指向哪份原值)，不是前一条建议 |
 | Task Flow / Run Flow | 待实现的版本化计划 / 本 Run 的实际观察投影；[示例](../design/task-flow.md#一个例子计划不等于执行事实)区分建议、required 与无关联动态活动，不引入第二个执行控制器 |
 
 ## 创建与调度恢复

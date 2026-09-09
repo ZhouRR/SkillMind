@@ -17,6 +17,61 @@ export type UiLanguage = (typeof UI_LANGUAGES)[number]
 export interface UiMessages {
   /** Route ごとの表示名と概要。導航、browser title、概览 card が共有する。 */
   routes: Record<AppRoute, { label: string; description: string }>
+  /** Project 非依存の本人操作・組織ユーザー管理。Server error 本文は表示しない。 */
+  account: {
+    myAccount: string
+    manageUsers: string
+    create: string
+    edit: string
+    search: string
+    searchPlaceholder: string
+    refresh: string
+    save: string
+    busy: string
+    emptyUsers: string
+    emptyEvents: string
+    close: string
+    rolePlaceholder: string
+    fields: Record<'email' | 'name' | 'role' | 'status' | 'userId' | 'version' | 'created' | 'updated', string>
+    roles: Record<'ADMIN' | 'USER', string>
+    statuses: Record<'ACTIVE' | 'DISABLED', string>
+    currentPassword: string
+    newPassword: string
+    confirmPassword: string
+    initialPassword: string
+    passwordPolicy: string
+    passwordMismatch: string
+    changePassword: string
+    passwordHint: string
+    revoke: string
+    revokeHint: string
+    confirmRevoke: string
+    confirmChange: string
+    securityEvents: string
+    auditHint: string
+    eventActor: string
+    eventRequest: string
+    eventPrevious: string
+    eventResult: string
+    eventActions: Record<'CREATED' | 'UPDATED' | 'PASSWORD_CHANGED' | 'SESSIONS_REVOKED', string>
+    revokedCount: (count: number) => string
+    previous: string
+    next: string
+    page: (offset: number, count: number, total: number) => string
+    versionUsed: (version: number) => string
+    latestVersion: (version: number) => string
+    reviewTitle: string
+    reviewHint: string
+    adoptLatest: string
+    unknownHint: string
+    checkCreation: string
+    beginNewCreate: string
+    createdSuccess: string
+    mutationSuccess: string
+    sessionEnded: string
+    retryAfter: (seconds: number) => string
+    failures: Record<'sessionExpired' | 'passwordRejected' | 'csrfRejected' | 'adminRequired' | 'notFound' | 'versionConflict' | 'lastAdmin' | 'emailConflict' | 'invalidRequest' | 'rateLimited' | 'unavailable' | 'unknown' | 'loadFailed', string>
+  }
   nav: {
     brandAriaHome: string
     mainNavAria: string

@@ -9,7 +9,7 @@
 | 読みたいこと | 入口 |
 | --- | --- |
 | 初めて製品を理解する | [製品概要](overview/product.md) → [システム構成](overview/architecture.md) → [用語](overview/glossary.md) |
-| 担当する機能の設計を読む | [設計ガイド](design/README.md)：認証/アカウント、Skill、Run、資源、画面、調度の読み順と責任分担 |
+| 担当する機能の設計を読む | [設計ガイド](design/README.md)：Project/メンバー、文書資産、認証/アカウント、Skill、Run、資源、画面、調度の読み順と責任分担 |
 | 次の開発・未完了の変更を引き継ぐ | [現在の計画](planning/roadmap.md#13-当前执行状态) → [変更ガイド](development/change-guide.md) → [コードの入口](../PJM/README.md#コード構成) |
 | 開発環境を用意・API を変更する | [ローカル開発](development/local-development.md)、[契約変更](development/contract-workflow.md)、[API 利用](development/api-usage.md)。資料が食い違う場合は[交付の接線確認](development/contract-workflow.md#遇到未接齐的交付链) |
 | 配備・障害対応・復旧する | [起動案内](operations/quickstart.md)、[公開・移行](operations/deployment.md)、[backup・復元](operations/backup-recovery.md)。障害時は [Runbook](operations/runbook.md#按问题找入口) |

@@ -3598,3 +3598,175 @@ Backend 的 Redis 场景使用独立 Unix socket process 与既有受控 executa
 这些是全书页面、选定章节矩阵和全部交接的组合，不是所有既有章节的全量矩阵，更不是业务 Web 的验收。补录后重新生成并检查浏览版，复查补录入口；不会因此刷新应用全量或部署基线。
 
 本轮更新 21 份 Markdown、两份文档工具/测试及派生 index.html。对照开始时 archive，原 1,182 个章节锚点全部保留，没有删除文件；历史 §1–§80 的 334660 字节前缀保持不变。此次没有目录搬迁，也不移动或改写 SKILL.md/references 等执行资产。遵循 pjm-project-dev 的语言、正本分工和验证边界，保留既有应用改动和失败，不清理其他轮次的进程与产物。
+
+## 82. 用户交互与续行文档续整（2026-09-09）
+
+本轮继续整理文档，不延续全项目业务代码实现。保留开始时已有的源码、测试与契约；没有调用真实登录/改密/回答/批准/评价，也没有运行 DB migration、模型、部署或外部写入。
+
+### 82.1 设计与阅读结构
+
+新增用户答复、等待与续行正本，保留 Runtime §8 和原有章节锚点。按“一个例子 → 提问/回答形状 → 三个提交边界 → 未知结果 → 兼容与验收”组织，普通 REVIEW、Proposal decision 和 Result Evaluation 分开；Backend / Web / Contracts README 与设计索引、变更指南、API 使用和 Runbook 提供对应入口。
+
+修正原文把默认/推荐混用、CLARIFICATION 暗示已有资源选择器、批准后必然立即续行、等待记录保证进程停止等容易误解的描述。说明 required=false 不等于 skip、410 可能在过期 commit 后返回、原答复重放的 ID 与当前 Run 状态属于不同时间点。
+
+源码追踪发现普通 interaction.request 可接受 EFFECT_APPROVAL 并保存等待，但没有同时创建 Proposal，且通用答复和普通过期恢复均排除它。将这一悬空等待风险、原 actor 重放边界及 Web 逐次换 key/缺晚到成功保护登记为待修正，不以放开通用批准解除等待。没有改动 Tool Schema、应用 validator 或 component。
+
+### 82.2 只读核对与局部回归
+
+复用工作区外依赖，不创建 venv。Backend 工作目录 PJM/backend，使用 `pytest -p no:cacheprovider -o addopts= -q --tb=short`；下列用例不启动真实 DB/Redis/模型。Web 使用既有 node_modules 与 `vitest run --no-cache`。
+
+| 检查 | 实际结果与证据范围 |
+| --- | --- |
+| runs/test_interaction.py、test_run_repository.py、test_effect_decision_service.py、evaluations、API test_run_api.py / test_evaluation_api.py | 71 项通过。实 validator、mock repository/session/transaction 与 ASGI fake services；不证明真实 commit、并发锁竞争或模型暂停 |
+| Web tests/api/api.test.ts、tests/components/RunResultPanel.test.tsx、tests/api/mutationCsrf.test.ts | 41 项通过。mock HTTP 与静态 React 展示，不验证真实表单的连续 submit、abort、actor 切换或双页面 |
+| users、API test_users_api.py / test_auth_api.py / test_login_protection_api.py、contracts/test_contracts.py 合跑 | 81 项通过、1 项失败，无跳过。已有独立 user_harness 使原收集问题不再出现；唯一失败仍为 test_exported_openapi_is_current。未执行 exporter，也未修改应用测试 |
+| scripts/validate_contracts.py | 85 份 Schema、78 份 example 通过；不能抵消 OpenAPI 一致性失败 |
+
+§81 的收集失败保留为当时事实。当前设计/代码入口与 R05 已移除“先修裸 conftest”的旧步骤，继续保留未同步快照、未接 Web 和真实环境残项。上述数字互有重叠，不相加为全量基线；新识别的入口/页面风险来自代码核对，不伪称已完成故障注入。
+
+### 82.3 文档验证与保留范围
+
+文档 build/check、工具回归和离线浏览与应用局部检查分开执行。浏览只打开生成的 file 页面，阻断 HTTP(S)，不执行正文中的业务命令。R01–R13 的原范围不缩减，Skill 执行资产不移动或改写。
+
+首轮 build/check 覆盖 48 份 Markdown 和 1 份 ViewSpec，文档 unittest 21 项通过；三份文档 Python 工具/测试的 Ruff check 与 format --check 通过。新增回归固定 Runtime §8 到交互正本的入口、关键责任章节及既有契约链接，阅读顺序同步到 Runtime → 普通答复 → 停止 → 预算。
+
+首轮新交接检查发现 Backend 两列表中的长函数名撑宽 390px 页面。已将识别符改为可换行代码，并进一步移到表后，保持动作和限制同时可见，不修改 viewer 样式或隐藏列。新交接路径重跑通过后人工检查手机的三类人工参与、答复失败表、Backend/Contracts 入口，以及桌面提交示意。
+
+随后全书 48 页 × 桌面/手机、26 个选定章节 × 4 宽度 × 2 字号的布局/原生刷新/恢复字号检查完成；既有用户交接检查因新增同名“计划 R05”链接出现歧义而失败。已将新增链接命名为“合跑复核与剩余工作”，保留原入口和检查，不以任选第一个链接绕过失败。
+
+修正后重新生成浏览版并重跑，结果如下：
+
+| 最终检查 | 实际结果 |
+| --- | --- |
+| 全书页面 | 48 页 × 390/1440px，共 96 次布局检查通过 |
+| 本轮章节 | 26 章 × 320/390/768/1440px × 16/24px；208 次章节布局、208 次原生刷新、208 次恢复字号布局通过 |
+| 搜索与阅读路径 | 导航、全部既有交接和新增普通答复交接通过；0 JS 错误、0 HTTP(S) 请求 |
+| 文档工具 | unittest 再次 21 项通过，Ruff check / format --check 通过 |
+| 兼容与保留 | 开始时 1,187 个章节锚点全部保留，无删除文件；历史 §1–§81 的 340806 字节前缀不变 |
+
+这是全书页面、选定章节矩阵与全部交接的组合，不是全部既有章节的全量矩阵，也不是业务 Web 的验收。补录后再次 build/check，并复查新交接和当前状态/本章的深链接原生刷新；该补录不刷新应用回归或部署基线。
+
+本轮整理 17 份 Markdown（16 份更新、1 份新增），同步三份文档工具/测试及派生 index.html。遵循 pjm-project-dev 的语言、设计正本和最小影响约束：应用逻辑、应用测试、公开契约与执行型 Skill 保持不变；没有新增依赖、执行真实恢复或清理其他轮次产物。R01–R13 的待实现与真实环境验收范围继续保留。
+
+## 83. 结果、证据与人工评价文档续整（2026-09-09）
+
+本轮响应“继续帮我整理文档”，不扩大为应用实现或生产操作。以本轮开始时的工作副本为基线保留应用改动；全项目 R01–R13 仍在计划中接续，不以文档整理代替实施完成。
+
+### 83.1 设计与阅读结构
+
+新增[结果、证据与人工评价](../design/results-evaluation.md)正本，从一个 SUCCEEDED / PARTIAL / 人工修订可以同时成立的例子开始，分开技术终态、交付完整性、引用与评价。Runtime §10 和 Workspace §7.3 保留旧标题/链接，详细协议移到单一来源；领域模型、普通交互、外部效果、设计索引和代码 README 指向新入口。
+
+核对 ResultValidator 的实际引用位置，明确 Artifact 当前只收集/计数、effects 内的 Proposal 与 before/after Evidence 未完整核验，不把 Schema、APPLIED 文本或 validation 的计数当成外部事实。补充后续可信引用要求、终态与评价的独立事务、JSON Pointer 相对原 Result 内容的定位、任意 JSON 建议不自动应用、历史格式与追加兼容。
+
+评价 POST 没有原请求幂等，GET 无分页；现有 Web 只提供一条可选修订，读取/写入晚到响应与旧上下文保护未闭合。文档明确未知提交不能自动重发、历史同文不能充当请求回执，并补开发接线、症状分诊和可观察验收。
+
+另校正用户管理工作副本计数：本轮开始时已存在精确 ID 读取的第 10 个路由；本轮不修改其实现或专属测试，也不把 §82 针对当时 9 个操作的通过记录沿用为新增入口的证据。
+
+### 83.2 只读核对与验证范围
+
+复用既有外置依赖，不创建 venv、安装新依赖或连接真实数据库、Redis、模型及外部资源。
+
+| 检查 | 实际结果与限制 |
+| --- | --- |
+| Backend 局部合跑 | result_validation、evaluations、execution_finalization、evaluation API 与 contracts：44 通过、1 失败。失败仍为 OpenAPI 工作副本/保存快照不一致；未重导出或修补应用以获取绿色结果 |
+| 三个引用探针 | 实际 ResultValidator + 空的 mock Evidence/Proposal lookup，未存储任何结果。顶层虚构 Artifact 被接受并计为 1；嵌套 Artifact 被接受但计为 0；虚构 APPLIED 摘要与 before/after 引用被接受且未查询 Proposal。只证明该 validator 的边界，不证明端到端外部执行 |
+| Web 局部回归 | controlledEffects、RunResultPanel、resultOverflow：3 文件 / 30 项通过；API mock、静态 markup 与纯逻辑，不验证实际表单时序/多页面/真实 HTTP |
+| 契约文件 | 85 份 Schema、78 份 example 通过；不抹掉上面的 OpenAPI 失败 |
+
+Backend 命令从 backend/ 执行：`python3 -m pytest -p no:cacheprovider -o addopts= -q --tb=short tests/agent/test_result_validation.py tests/evaluations tests/runs/test_execution_finalization.py tests/api/test_evaluation_api.py tests/contracts/test_contracts.py`。Web 从 web/ 执行：`node_modules/.bin/vitest run tests/api/controlledEffects.test.ts tests/components/RunResultPanel.test.tsx tests/lib/resultOverflow.test.ts`。二者均使用工作区已有依赖，Python 设置 PYTHONDONTWRITEBYTECODE 与外置 PYTHONPATH。
+
+真实 commit/rollback、并发撤权、blob 可读性、完整效果链、浏览器业务操作和模型业务正确性未验；既有 fake/mock 通过不能覆盖这些范围。当前工作登记由 [R07](../planning/roadmap.md#r07-run-与审计)、[R10](../planning/roadmap.md#r10-全部-web-页面)接续。
+
+### 83.3 文档验证与保留范围
+
+新增文档工具回归固定旧 Runtime/Workspace 入口、关键责任章节和评价 JSON 示例的公开 Schema 校验；浏览顺序为 Runtime → 普通答复 → 结果与评价 → 停止 → 预算。浏览器检查增加结果/原值/失败表、提交示意、代码入口到正本的实际点击、文件名搜索及深链接刷新。
+
+| 检查 | 已完成的实际范围 |
+| --- | --- |
+| 文档构建与工具 | build/check 覆盖 49 份 Markdown、1 份 ViewSpec；文档 unittest 23 项通过，包括新增评价 JSON 示例；三份文档 Python 文件的 Ruff check / format --check 通过 |
+| 全书布局 | 49 页 × 390/1440px，共 98 次通过 |
+| 相关章节 | 36 章 × 320/390/768/1440px × 16/24px；288 次章节布局、288 次原生刷新、288 次恢复字号检查通过 |
+| 搜索与阅读交接 | 全部既有交接、新增结果交接及导航通过；0 JS 错误、0 HTTP(S) 请求。组合检查产生 193 张截图，并抽看结果分类、原值、校验边界、未知提交、Backend 与提交示意 |
+| 保留范围 | 本轮快照覆盖的 1,201 个既有锚点保留；历史 §1–§82 的 346552 字节前缀不变；没有删除文件 |
+
+以上是全书页面、选定章节矩阵与全部交接，不是全部旧章节的全量矩阵。矩阵完成后在术语与 Benchmark 补充指向结果正本的链接，并缩短评价示例文案以减少手机横向阅读；重新生成并复查新交接、补录章节和这两个入口，不把早先截图冒充最终新增文字的证据。
+
+本轮更新 19 份 Markdown、新增 1 份结果设计，同步三份文档工具/测试及派生 index.html。遵循 pjm-project-dev 的设计正本、语言和最小影响约束：应用逻辑、应用测试、契约 JSON 与执行型 Skill 未修改；未创建 venv、安装依赖、部署或运行真实环境验收。既有 OpenAPI 失败与 R01–R13 的完整范围保留，文档验证不构成全项目交付完成。
+
+## 84. 项目生命周期与开发导航文档续整（2026-09-09）
+
+本轮按“继续整理文档”执行，只修改文档、文档工具/测试和离线派生浏览版；开始时已有的应用改动保留，不将原全项目目标解释为本轮业务改写授权。
+
+### 84.1 只读核对与设计纠偏
+
+新增[项目生命周期](../design/project-lifecycle.md)，从一个归档场景分清项目身份、系统角色/成员资格、当前项目、归档/取消/删除和元数据/附件。领域模型、Workspace、认证、运维及 Backend/Web/contracts README 指向同一正本，不在工程入口复制完整设计。
+
+明确四项修正要求：显式失效 Project 不静默回退；行锁之外需项目版本与冲突比较；成员状态行不代表完整加入/移除审计；删除前核对 Schedule 等全部引用及在途创建。当前归档不自动停止 Run，Run 取消也未要求 Project ACTIVE；不把所有归档写请求一概写成禁止。retention_days 与删除 204 均不能证明字节清理完成。
+
+同时核对已有 users client/barrel 与精确用户读取测试，修正“专属 client 尚无”的过时说明。账户页面/hash route、成员页面和保存 OpenAPI 仍未接齐，原失败证据不倒改。
+
+| 检查 | 本轮实际结果与限制 |
+| --- | --- |
+| 项目/用户与相关 API | 71 项通过；真实 service/repository 的 mock session 与 API fake，不验证实际数据库并发、成员禁用竞争或删除回滚 |
+| Web 局部回归 | 6 文件 / 89 项通过；API mock、校验/选择纯逻辑与 ProjectsPage 静态描画，不是账户页面、Project 切换或双提交的真实组件验收 |
+| 契约回归 | 21 通过 / 1 失败，仍为 test_exported_openapi_is_current；本轮没有导出快照或修补应用来消除失败 |
+| Schema/example | 85 份 Schema、78 份 example 通过，与 OpenAPI 一致性是两项独立检查 |
+| 删除引用探针 | 实际 ProjectRepository.delete + mock AsyncSession：ARCHIVED / Run 零件时发起所列配置删除与 Project 删除，未查询/删除 TaskSchedule；实际 model 的 schedule project_id 为 RESTRICT。只证明调用与定义的遗漏，没有连接 DB 或删除任何数据 |
+
+Backend 从 backend/ 执行 `python3 -m pytest -p no:cacheprovider -o addopts= -q --tb=short tests/projects tests/api/test_project_api.py tests/api/test_project_preference_api.py tests/users tests/api/test_users_api.py`；另跑 `tests/contracts`。Web 从 web/ 执行 `node_modules/.bin/vitest run tests/api/authProjects.test.ts tests/api/users.test.ts tests/lib/validation.test.ts tests/lib/projectContext.test.ts tests/pages/ProjectsPage.test.tsx tests/lib/routing.test.ts`。复用外置 Python/既有 Web 依赖，设置 PYTHONDONTWRITEBYTECODE，不创建 venv 或新装依赖。
+
+### 84.2 文档验证与保留范围
+
+浏览顺序在领域模型后加入项目生命周期；文档工具回归固定旧领域/认证/Workspace 与代码入口能到正本，浏览器场景覆盖身份、失效链接、归档、删除的同屏比较、代码来回跳转、搜索和深链接刷新。
+
+| 检查 | 已完成的实际范围 |
+| --- | --- |
+| 文档结构与工具 | build/check 覆盖 50 份 Markdown、1 份 ViewSpec；24 项文档 unittest 通过，三份文档 Python 工具/测试的 Ruff check 与 format --check 通过 |
+| 全书布局 | 50 页 × 390/1440px，共 100 次通过 |
+| 相关章节 | 22 章 × 320/390/768/1440px × 16/24px；176 次章节布局、176 次原生刷新、176 次恢复字号检查通过 |
+| 阅读路径与人工抽查 | 全部既有交接、新增项目交接、搜索/导航通过；0 JS 错误、0 HTTP(S) 请求。定点检查保存 10 张截图，抽看窄屏归档示例、删除限制和桌面项目切换说明 |
+| 保留范围 | 开始时快照的 704 份文件无删除，1,227 个既有 Markdown 锚点保留；历史 §1–§83 的 352167 字节前缀不变，应用代码、应用测试和契约 JSON 保持原字节 |
+
+这是全书页面、选定章节矩阵与全部阅读交接，不是所有旧章节的全量字号矩阵，也不是业务页面验收。检查后的账户接续措辞和本节验证补录重新 build/check，并复查项目/账户交接及新增状态/历史文字；不把早先截图当作最终补录文字的证据。
+
+本轮更新 17 份既有 Markdown、新增 1 份项目设计，同步三份文档工具/测试和派生 index.html。遵循 pjm-project-dev 的正本、语言和最小影响约束，执行型 Skill 不移动、不改写；复用已有依赖，不创建 venv。没有删除项目、文件或数据库，也没有实施模型、部署、真实事务或业务浏览器验收。既有 OpenAPI 失败和 R01–R13 全范围保留，文档整理不代表完整项目实施完成。
+
+## 85. 文档资产生命周期与工程导航续整（2026-09-09）
+
+本轮继续整理文档，只修改设计、阅读入口、文档工具/测试及派生浏览版。已有账户组件、请求 hook 和三语草稿保留为未接入 App 的工作副本，没有继续实现或宣称已经验证；全项目 R01–R13 范围不变。
+
+### 85.1 只读核对与设计修正
+
+新增[项目文档生命周期](../design/document-lifecycle.md)，把保存/目录/下载/删除与 Run 的选择/冻结/物化分开。先用删除再上传的例子说明 ID 与路径、元数据与 blob 的区别，再定义上传意图/配额预留、引用保护、持久清理、下载和页面未知结果的修正要求；不把目标字段或清理 CLI 写成已经存在。
+
+| 检查 | 本轮实际结果与限制 |
+| --- | --- |
+| Backend 局部回归 | documents、storage、Document API 共 50 项通过；实际 service/repository + fake session/in-memory storage、API fake，不是实 PostgreSQL/MinIO 验收 |
+| Web 局部回归 | 文档 client、管理组件、选择逻辑和来源组件，4 文件 / 41 项通过；mock API、纯逻辑/静态描画，不覆盖实际上传/删除的交互时序 |
+| 同名上传探针 | 实际 DocumentService + in-memory storage + repository 拒绝替身：返回冲突后 put 的 blob 仍存在；没有创建真实对象 |
+| 配额与下载探针 | 两请求的 repository 都返回旧用量 80，实际 service 分别接受 20，合计 120 超过上限 100；只证明先读后写缺口，不是实 DB 并发。普通下载返回了与元数据长度不同的替身正文，未走冻结校验 |
+| S3 与 header 探针 | 实际 S3 adapter + mock client 的 AccessDenied 被吞掉；当前 Response header 拼接非 Latin-1 文件名触发 UnicodeEncodeError。未连接 bucket，也不是完整 HTTP 下载验收 |
+| 名称上限探针 | 文档层接受的 133 字符名称被实际 in-memory storage 的 128 字符单段规则拒绝。应对齐前置拒绝与错误映射，不把 Schema 的 200 上限当作完整上传能力 |
+| 公开契约 | 85 份 Schema、78 份 example 通过；契约回归 21 通过 / 1 失败，仍为 test_exported_openapi_is_current。只读比较确认 3 个 documents path 和 DocumentResponse/DocumentListResponse 与保存快照一致；没有重新导出全局快照来消除既有的用户管理接线失败 |
+
+Backend 从 backend/ 执行 `python3 -m pytest -p no:cacheprovider -o addopts= -q --tb=short tests/documents tests/storage tests/api/test_document_api.py`；Web 从 web/ 执行 `node_modules/.bin/vitest run tests/api/documents.test.ts tests/components/DocumentManagerPanel.test.tsx tests/lib/documentSelection.test.ts tests/components/DocumentSources.test.tsx`。复用既有依赖，Python 设置 PYTHONDONTWRITEBYTECODE 与外置 PYTHONPATH。
+
+这些局部通过不消除正文中已确认的缺口。MIME allowlist 不等于内容格式/病毒检查，完整 file.read 之后的 size 校验不是读取上限，禁脚本 iframe 不是网络隔离；后续应按[验收矩阵](../design/document-lifecycle.md#开发接续与验收)分别举证。
+
+### 85.2 文档验证与保留范围
+
+阅读顺序在项目生命周期之后加入文档资产；领域模型、资源快照、Workspace、Runbook 和 Backend/Web/contracts README 分别连接到同一正本。既有 Run 资源与旧章节保留，Skill Markdown 仍为执行资产，不移动或纳入浏览版。
+
+| 检查 | 已完成的实际范围 |
+| --- | --- |
+| 文档结构与工具 | build/check 覆盖 51 份 Markdown、1 份 ViewSpec；25 项文档 unittest 通过，三份文档 Python 文件的 Ruff check / format --check 通过 |
+| 全书布局 | 51 页 × 390/1440px，共 102 次通过 |
+| 相关章节 | 22 章 × 320/390/768/1440px × 16/24px，176 次布局、176 次原生刷新、176 次恢复字号检查通过 |
+| 阅读路径与人工抽查 | 全部既有交接、新增文档资产交接、搜索/导航通过；0 JS 错误、0 HTTP(S) 请求。定点初检保存 10 张截图，抽看手机删除示例/引用表和桌面上传边界 |
+| 保留范围 | 开始时快照的 745 份文件无删除，1,241 个既有 Markdown 锚点保留；历史 §1–§84 的 356971 字节前缀不变。应用代码/测试、契约 JSON 和执行型 Skill 保持原字节 |
+
+初次新增交接检查遇到同页两个同名链接，明确第二处标签后重跑通过；不是通过隐藏链接或弱化目标来回避。上述是全书页面、选定章节矩阵和全部交接，不是所有旧章节的全量矩阵，也不是业务 UI、真实数据库或存储验收。
+
+矩阵后细化上传检查的先后顺序与 200/128 名称上限差异，并润色工程入口文字。重新生成后，上传章另通过四宽度/两字号的 8 组布局、原生刷新与恢复字号检查；文档/账户交接、设计/变更指南和补录章节完成复查，保存 20 张定点截图，并抽看最终手机上传说明与桌面验证记录。最后的记录补录再次 build/check 并复查，不把早先截图当作最终文字的证据。
+
+本轮更新 17 份既有 Markdown、新增 1 份文档资产设计，同步三份文档工具/测试与派生 index.html。按 pjm-project-dev 维护唯一设计来源、README 语言与最小影响：没有修改业务代码、应用测试或契约，没有创建 venv、新装依赖、启动真实 DB/Redis/MinIO、部署或调用模型；本轮没有删除文件或业务数据。原 OpenAPI 失败与 R01–R13 残项保留，文档整理不等于全项目实施完成。

@@ -138,6 +138,8 @@ AuthSession 的 credential_version 和 system_role_at_login 是内部保存字�
 - Project-scoped resource 必须核对 `project_id + resource_id` 的所有权；查询可直接带条件，或在内部取得记录后立即核对并隐藏差异。公开越权与不存在统一返回 404，不能在核对前返回资源正文。
 - Run 创建时把 actor、项目成员资格以及有效 Skill/Tool 权限固化到不可变 permission snapshot。之后用户权限变化不改写历史 Run。
 
+成员关系和项目状态的变化见[项目生命周期](project-lifecycle.md)。ADMIN 不依赖项目成员关系，因此移除其 membership 不构成撤权；归档后的业务写入、维护、历史读取和 Run 取消也有不同入口，不能把所有操作简化为“归档后全部禁止”。
+
 资源访问权不等于操作批准权。外部变更 decision 先经过 ProjectWriteActor 的认证/CSRF/项目边界，再检查 Run 发起人或 system ADMIN 身份与精确 Proposal；当前没有独立的“Project ADMIN”角色。预授权仅由 system ADMIN 创建，且不覆盖 repository.write。具体批准、重放与执行权要求统一见[受控写入](repository-effects.md#调用与批准链路)，不以 Skill guidance 或历史 permission snapshot 代替当前入口授权。
 
 ### 从请求到项目内操作

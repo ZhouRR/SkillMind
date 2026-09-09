@@ -3,9 +3,9 @@
 本 directory は ProjectMind の公開契約を JSON Schema と代表 example で管理する。仕様の本文は
 [文書ガイド](../../docs/README.md)から辿る `../../docs/design/` に置き、ここには機械検証可能な Schema、example、OpenAPI snapshot だけを置く。
 
-[配置](#配置) · [認証](#認証と-secret-の契約を読む) · [ユーザー管理](#ユーザー管理の公開面を準備する) · [Run 文書](#run-文書契約を読む) · [取消](#run-の取消と終態を読む) · [Skill](#skill-の公開と-project-有効化を読む)
+[配置](#配置) · [認証](#認証と-secret-の契約を読む) · [ユーザー管理](#ユーザー管理の公開面を準備する) · [文書資産](#project-文書の保存と読取を読む) · [Run 文書](#run-文書契約を読む) · [取消](#run-の取消と終態を読む) · [Skill](#skill-の公開と-project-有効化を読む)
 
-[子分析と用量](#子分析と用量の契約を読む) · [外部変更](#外部変更の契約を読む) · [調度](#schedule-の公開契約を読む) · [生成 module](#生成-module-と既存-module-api-を分ける) · [同期と検証](#同期義務)
+[回答と評価](#通常回答と評価の契約を読む) · [結果と修訂](#結果と人工修訂の契約を読む) · [子分析と用量](#子分析と用量の契約を読む) · [外部変更](#外部変更の契約を読む) · [調度](#schedule-の公開契約を読む) · [生成 module](#生成-module-と既存-module-api-を分ける) · [同期と検証](#同期義務)
 
 ## 配置
 
@@ -33,6 +33,39 @@ Schema は field/type/required を、[設計](../../docs/README.md)は権限・�
 [TaskFlowProjection](../../docs/design/task-flow.md#3-taskflowprojection-目标契约) は目標構造であり、この directory に同名 Schema はまだ無い。後続の導入では計画の意味を識別する checksum、純粋な表示 layout、実 event の関連を分け、旧版の未宣言と新版の破損を同じ空値へ畳まない。現行 Blueprint/Brief の追加禁止を仮 field で迂回しない。
 
 公開 field の追加・削除・required 化は[契約変更と結合確認](../../docs/development/contract-workflow.md)に従い、既存 consumer と版互換を確認する。Schema、example、OpenAPI、Web が一致しても、混合版の配備や実 transaction まで検証済みとは扱わない。検証の範囲と残項目は[計画](../../docs/planning/roadmap.md#13-当前执行状态)に記録する。
+
+## Project と membership の契約を読む
+
+[Project lifecycle](../../docs/design/project-lifecycle.md)が意味と削除門禁を担当する。公開 field は [projects/v1](projects/v1/) と [projects route](../backend/src/projectmind/api/routes/projects.py)、preference は [users route](../backend/src/projectmind/api/routes/users.py)へ進む。ProjectResponse には row_version が無く、ProjectMemberResponse の status は関係の ACTIVE / REMOVED であって User の状態ではない。
+
+Project / member 一覧は items のみで paging 契約は無い。Web は [projects client](../web/src/api/projects.ts)から読む。新しい版/阻止理由/一覧契約を導入するときは Schema、example の両表、OpenAPI、client/画面と実 response の検証を同期する。204 は削除用例の成功であり、blob/backup の消去証明に拡張しない。
+
+## 通常回答と評価の契約を読む
+
+[ユーザー交互の正本](../../docs/design/user-interactions.md)から質問、答え、期限と継続を読む。以下は別の protocol であり、同名 field や同じ 201 応答だけで統合しない。
+
+| 用途 | Schema・example と意味 |
+| --- | --- |
+| Agent の質問 | [Tool request](tools/interaction.request/v1/request.schema.json) / [example](examples/interaction-request.v1.json)。runtime 内の同じ Schema と一致させる。通常経路の批准型受理には未修正の差距がある |
+| 人の回答 | [request](runs/interaction-response/v1/request.schema.json) / [example](examples/interaction-response-request.v1.json)。interaction_version は質問の版。CSRF / Idempotency-Key は HTTP header であり、この body Schema だけでは検証できない |
+| 回答の確認 | [response](runs/interaction-response/v1/response.schema.json) / [example](examples/interaction-response.v1.json)。初回は QUEUED、重放は現在 Run status と原 response/segment ID を返し得る |
+| Result の評価 | [結果と修訂の契約](#結果と人工修訂の契約を読む)。original_value は server が導出し、回答の重放保証を流用しない |
+
+runtime の複製は `runs/interaction.py` の `INTERACTION_REQUEST_SCHEMA`。外部批准は[Effect 契約](#外部変更の契約を読む)へ進む。EFFECT_APPROVAL の入口を制限する際も、合法な Proposal から作った交互と歴史の表示 enum を消さない。[三つの transaction](../../docs/design/user-interactions.md#三个提交边界)に従い、410 が expiry commit 後に返ること、重放時の status/identity、拒否 response の media type/header を route / Web / test で確認する。Schema/example の成功は並行回答や実 DB commit の証拠ではない。
+
+## 結果と人工修訂の契約を読む
+
+[結果と評価の正本](../../docs/design/results-evaluation.md)が所有権・原値・提出結果の意味を決める。Schema の prefix/enum と保存済みの事実を混同しない。
+
+| 用途 | Schema・example と意味 |
+| --- | --- |
+| モデルの交付 | [OutcomeEnvelope](outcomes/envelope/v1.schema.json) / [example](examples/outcome-envelope.v1.json)。status は Run 終態ではない。可選の業務データには凍結 Schema が必要 |
+| Result と参照の公開 | [Run detail](runs/detail/v1.schema.json) / [example](examples/run-detail.v1.json)。Result の外層 metadata と data 本文を分ける |
+| 人工修訂の入力 | [create](evaluations/v1/create-request.schema.json) / [example](examples/create-evaluation-request.v1.json)。original_value と user_id を入力させず、pointer の実在は service で確認する |
+| 一件の保存結果 | [evaluation](evaluations/v1/evaluation.schema.json) / [example](examples/evaluation.v1.json)。AI 原値と提案を共に含む。原 Result を置換しない |
+| 評価履歴 | [history](evaluations/v1/history.schema.json) / [example](examples/evaluation-history.v1.json)。現行は items のみ、paging や原要求確認を仮定しない |
+
+[引用の修正要求](../../docs/design/results-evaluation.md#引用可信性的修正要求)を validator / 保存 / 公開投影 / Web へ同期する。Artifact の件数や Proposal の一部照会を全参照の検証証明にしない。評価 POST の 409、Problem media type と CSRF/認証応答も route / OpenAPI と別途突き合わせる。重放の導入には HTTP・原要求 identity・DB 制約・歴史互換が必要で、header を付けるだけでは契約にならない。
 
 ## 生成 module と既存 module API を分ける
 
@@ -64,7 +97,7 @@ token の寿命、安定 CSRF と role/失効は[セッション設計](../../do
 
 ## ユーザー管理の公開面を準備する
 
-[管理 API の操作境界](../../docs/design/user-lifecycle.md#用户操作与目标公开面)に対応する route、以下の Schema/example は工作副本に存在する。保存 OpenAPI には管理操作が未収録で、専用 Web client/page も未接続。これは交付途中の契約であり、配備先の利用可能性を保証しない。見出しは旧リンクの互換のため保持する。
+[管理 API の操作境界](../../docs/design/user-lifecycle.md#用户操作与目标公开面)に対応する route、以下の Schema/example と [Web client](../web/src/api/users.ts)は工作副本に存在する。保存 OpenAPI には管理操作が未収録で、アカウント page/route も未接続。これは交付途中の契約であり、配備先の利用可能性を保証しない。見出しは旧リンクの互換のため保持する。
 
 | データの用途 | Schema と代表 example |
 | --- | --- |
@@ -80,7 +113,7 @@ token の寿命、安定 CSRF と role/失効は[セッション設計](../../do
 
 example は架空の値であり、配備先に存在する account や初期 password ではない。writeOnly の指定も入力を log から自動除去する機構ではない。既存 /users/me の Project preference と UI language は別資源のまま保持する。
 
-[users route](../backend/src/projectmind/api/routes/users.py)の response allowlist と Schema/example（両検証表）を照合し、OpenAPI exporter / [一致性 test](../backend/tests/contracts/test_contracts.py)と [Web API](../web/src/api/)の資源別 validator・index.ts を接続する。失敗中の test を残したまま snapshot だけ生成して交付済みとは扱わない。[Backend の接続入口](../backend/README.md#ユーザー管理の接続を引き継ぐ)と[契約変更](../../docs/development/contract-workflow.md)から継続する。
+[users route](../backend/src/projectmind/api/routes/users.py)の response allowlist と Schema/example（両検証表）を照合し、OpenAPI exporter / [一致性 test](../backend/tests/contracts/test_contracts.py)を同期する。既存 [Web API](../web/src/api/users.ts)の validator・index.ts と局部回帰を保持し、画面へ接続する。失敗中の test を残したまま snapshot だけ生成して交付済みとは扱わない。[Backend の接続入口](../backend/README.md#ユーザー管理の接続を引き継ぐ)と[契約変更](../../docs/development/contract-workflow.md)から継続する。
 
 特に[版と公開データ](../../docs/design/user-lifecycle.md#版本查询与公开数据)、[結果不明と拒否](../../docs/design/user-lifecycle.md#生效与界面)、[監査相関](../../docs/design/user-lifecycle.md#审计与请求关联)を同時に確認する。会話無効の 401 と現 password の誤り、版競合と最後の活動 ADMIN、失効行数と online 人数を分ける。HTTP cache/header と middleware の request ID は JSON Schema の通過だけでは検証できない。
 
@@ -105,6 +138,14 @@ cancel の成功や terminal snapshot は process 退出回执ではない。停
 | Project の可視性 | [enablement](skills/project-enablement/v1.schema.json) → repository / 同 Web validator。現行 response に有効化/無効化の全履歴や再有効化 token があると仮定しない |
 
 状態の意味と[再有効化の目標](../../docs/design/skill-contract.md#112-可审计的重新启用与回滚)は Skill 設計に集約する。追加時は DB の履歴と現在投影、公開 DTO/Schema、Web の確認/競合表示を同時に設計し、既存 disabled_at を消すだけで監査要件を満たしたと扱わない。
+
+## Project 文書の保存と読取を読む
+
+[文書 lifecycle](../../docs/design/document-lifecycle.md)が upload/配額/読取/削除の意味を決める。公開 metadata は [document Schema](documents/v1/document.schema.json) / [example](examples/document.v1.json)、multipart・一覧 wrapper・binary content・204 は [documents route](../backend/src/projectmind/api/routes/documents.py)と [OpenAPI snapshot](openapi/projectmind-api.v1.json)で照合する。現行 documents/v1 に別の paging/list request Schema があると仮定しない。
+
+一覧 wrapper は documents で items/total ではない。checksum は保存時の値であり、通常 content 応答に実 byte の再検証保証を追加しない。公開 Schema の ID/日時/hash/整数制約と [Web validator](../web/src/api/documents.ts)の基礎型判定は同等ではない。storage_key や内部清理状態を単純に response へ追加しない。
+
+[Document API test](../backend/tests/api/test_document_api.py)は route + fake service の検証。[document client test](../web/tests/api/documents.test.ts)と三語の管理 UI、download の MIME/header と Unicode 名、409/422/404/保存結果不明を別々に接続する。保存/削除の回执や幂等性を導入するときは [変更手順](../../docs/development/contract-workflow.md)に従い、DB・error 分類・Schema/example の両表・OpenAPI・validator/画面を同期する。
 
 ## Run 文書契約を読む
 

@@ -4,7 +4,7 @@
 
 ProjectMind 使用 Claude Agent SDK 作为默认执行引擎，通过 `AgentEngine` 保持模型/引擎可替换性；平台负责用户交互、Tool 权限、外部效果、证据和故障恢复。
 
-按问题定位：[谁负责什么](#2-责任边界)、[Agent 可以调用什么](#6-tool-与工作区边界)、[一次执行如何续行](#7-持续-run-与多会话)、[模型启动前检查什么](#74-从领取到模型启动的边界)、[取消和超时如何区分](#75-取消超时与失去执行权)、[失败与恢复](#11-事件状态与可靠性)。章节号保留供代码中的旧引用使用。
+按问题定位：[谁负责什么](#2-责任边界)、[Agent 可以调用什么](#6-tool-与工作区边界)、[一次执行如何续行](#7-持续-run-与多会话)、[模型启动前检查什么](#74-从领取到模型启动的边界)、[回答与过期](user-interactions.md)、[取消和超时如何区分](#75-取消超时与失去执行权)、[失败与恢复](#11-事件状态与可靠性)。章节号保留供代码中的旧引用使用。
 
 ## 1. 设计结论
 
@@ -179,7 +179,7 @@ repository 按冻结 Run binding 的授权范围物化到 `input/<requirement_ke
   → AgentSession A 执行
   → 需要用户观点/资源/批准
   → 持久化 checkpoint，Run 进入 WAITING_FOR_INPUT/APPROVAL
-  → 用户响应
+  → 普通答复 / 外部效果链确认续行
   → Segment 2 + dispatch Outbox
   → Worker 准备并冻结新 AgentTaskBrief
   → resume A / fork A / 启动 Session B
@@ -257,18 +257,11 @@ context 身份必须匹配 claim 的 Run / Attempt / Project / actor，事件序
 
 ## 8. 用户交互协议
 
-Agent 不以任意自由文本“卡住”Run，而是产生结构化 UserInteraction：
+详细协议集中到[用户答复、等待与续行](user-interactions.md)，本节保留旧 docs/06 §8 引用。先分清[普通答复、外部批准和结果评价](user-interactions.md#先分清三种人工参与)，再读[三个提交边界](user-interactions.md#三个提交边界)；普通 REVIEW 不等于 Evaluation，通用回答不能替代 Proposal decision。
 
-| 类型 | 用途 | UI |
-| --- | --- | --- |
-| `CLARIFICATION` | 缺少必要事实或资源 locator | 文本/资源选择器 |
-| `CHOICE` | 多种合法方案会影响范围或结论 | 单选/多选 + 推荐理由 |
-| `REVIEW` | 请求用户反馈分析观点、报告或补丁 | 对话 + 预览/差异 |
-| `EFFECT_APPROVAL` | 请求执行明确的外部变更 | Proposal 详情 + 批准/拒绝 |
+普通交互只在原 Run 的冻结范围内补充事实。推荐不是默认回答，required=false 不代表自动跳过；[期限例子](user-interactions.md#一个例子回答超时不等于什么都没发生)说明为何 410 也可能伴随已提交的过期续行。等待释放 lease 与实际进程停止分别证明，不能从数据库等待状态保证费用已结清。
 
-交互必须包含：公开问题、为什么需要、候选项、默认/推荐项、影响、是否必答和期限。不得暴露 hidden reasoning、Secret、系统 prompt 或 Tool 原始敏感参数。
-
-进入等待状态时 Worker 完成当前持久化事务、释放 lease 并停止计费型执行。用户响应经授权和版本检查后追加 InteractionResponse，创建新 Segment 并重新入队。普通 Interaction 过期时平台追加 `INTERACTION_EXPIRED` 和 `INTERACTION_TIMEOUT` Segment，不把推荐项推断为默认回答；Agent 只能把缺失输入列为限制或重新提问。效果批准过期时 Proposal 进入 `STALE`，不得沿用旧批准或调用 Provider。
+当前[普通批准入口的差距](user-interactions.md#普通提问不能代替外部批准)与[Web 原答复确认](user-interactions.md#答复界面与结果未知)均有待修正。模型应通过 change.propose 形成可验证 Proposal；不能为解除悬空等待而放开通用答复的批准权限。
 
 ## 9. 外部效果协议
 
@@ -302,24 +295,9 @@ Agent 不以任意自由文本“卡住”Run，而是产生结构化 UserIntera
 
 ## 10. 结果与输出验证
 
-成功产出新格式 Result 的 Run 使用 [OutcomeEnvelope](../../PJM/contracts/outcomes/envelope/v1.schema.json)；失败或取消的 Run 可以没有 Result。以下为内容摘要，完整必填字段（包括 outcome_version、needs_review、effects）与枚举以 Schema 为准：
+本节保留旧编号入口，完整规则集中到[结果、证据与人工评价](results-evaluation.md)。先用[执行结束但仍需修订的例子](results-evaluation.md#一个例子执行结束结论仍需修订)分清技术终态、Outcome 与人工判断，再读[校验的实际保证](results-evaluation.md#结果校验的实际保证)和[保存边界](results-evaluation.md#保存与显示不是同一个提交)。
 
-- `summary`、`status`、`deliverables`。
-- `findings` 或开放式内容引用。
-- `evidence_refs`、`artifact_refs`。
-- `open_questions`、`limitations`、`confidence`。
-- `change_proposal_refs` 和已执行效果摘要。
-
-任务特定 JSON Schema 是可选附加约束，不是成功的唯一形式。验证分为：
-
-1. 通用包络、引用所有权和敏感信息校验。
-2. Skill required rules 与 success criteria 由 Agent 执行并接受质量评审；确定性 validator 不能证明业务推理正确。
-3. 若声明了 task-specific Schema，再执行结构校验。
-4. 对外部效果校验 Proposal/Approval/EffectExecution 链路。
-
-自由文本报告可以作为 Artifact/Markdown 交付，但关键 Evidence、限制和 Proposal 必须进入通用包络。原始 Result 不被人工修改，反馈追加为 Evaluation。
-
-工作副本由 [ResultValidator.validate_context](../../PJM/backend/src/projectmind/agent/result_validation.py)解析冻结输出要求，主 Executor 与子收集器共用校验入口。主执行成功、结构错误和 Review/fork 的测试已使用真实 validator；最新范围见[计划](../planning/roadmap.md#13-当前执行状态)，旧失败记录不作为当前状态。共用安全校验不意味着子分析应产出完整的主任务结果；子指令/Schema 的派生与最终汇总责任见[子分析设计](subagents.md#子任务指令与结果的边界)。
+Runtime 负责把校验后的候选交给终态事务，并在锁后处理 lease/取消；失败或取消可以没有 Result。ResultValidator 的结构和部分引用检查不证明业务正确、附件可读或所有效果声明已核验。主/子共用校验也不改变[子任务输出的派生责任](subagents.md#子任务指令与结果的边界)。
 
 ## 11. 事件、状态与可靠性
 

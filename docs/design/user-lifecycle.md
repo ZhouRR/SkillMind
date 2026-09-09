@@ -34,7 +34,7 @@ U 重新登录 → 新会话 S3
 以下是 2026-09-09 续整时核对到的调用关系。先辨认断点，再进入目标规则；测试、发布和部署状态统一在计划登记。
 
 ```text
-已接入的 Backend（9 个操作）：
+工作副本 Backend（10 个路由操作）：
   HTTP 路由 → UserService
                  ↓
              repository
@@ -43,7 +43,8 @@ U 重新登录 → 新会话 S3
 
 交付面：响应模型 + Schema/example
   ├─ OpenAPI 快照：待同步
-  └─ Web client / 页面：待接入
+  ├─ Web client / validator：已有工作副本
+  └─ 账户页面 / route / 三语交互：待接入
 ```
 
 | 层次 | 已找到的载体与限制 |
@@ -51,15 +52,19 @@ U 重新登录 → 新会话 S3
 | 内部用例 | [users/domain.py](../../PJM/backend/src/projectmind/users/domain.py)、[service](../../PJM/backend/src/projectmind/users/service.py)、[repository](../../PJM/backend/src/projectmind/users/repository.py)提供 DTO、锁后认证、版本检查、末位 ADMIN 保护与撤销/审计写入；[专属测试](../../PJM/backend/tests/users/test_user_service.py)使用 mock transaction，不证明真实回滚/竞争 |
 | 持久化 | [models](../../PJM/backend/src/projectmind/db/models.py)与[0032 migration](../../PJM/backend/migrations/versions/0032_user_lifecycle.py)定义用户版本和安全事件；未据此执行迁移或声称已部署 |
 | 密码入口 | [API middleware](../../PJM/backend/src/projectmind/api/main.py)已把本人改密路径纳入正文前的来源检查；route 再调用 `AuthService.admit_password_change` 检查 actor 的账号/组合配额。登录 challenge 不用于改密 |
-| HTTP 与契约 | API startup 已装配 UserService；[users route](../../PJM/backend/src/projectmind/api/routes/users.py)保留 preference / UI language，并增加下表的 9 个操作。[管理 Schema/example](../../PJM/contracts/README.md#ユーザー管理の公開面を準備する)与专属 HTTP 测试已有文件，保存的 OpenAPI 尚未同步 |
-| Web 消费 | 尚无专属 client、账户 route/page 与三语交互；已有登录页和偏好功能不提供管理入口。接续位置见 [Web README](../../PJM/web/README.md#アカウント管理を接続する) |
+| HTTP 与契约 | API startup 已装配 UserService；[users route](../../PJM/backend/src/projectmind/api/routes/users.py)保留 preference / UI language，工作副本有下表的 10 个操作。[管理 Schema/example](../../PJM/contracts/README.md#ユーザー管理の公開面を準備する)与专属 HTTP 测试已有文件，保存的 OpenAPI 尚未同步 |
+| Web 消费 | [users client](../../PJM/web/src/api/users.ts)与 barrel 已覆盖下表 10 个操作，含响应校验、目标 ID、分页、CSRF/no-store 和 await 前后 abort 检查；[专属测试](../../PJM/web/tests/api/users.test.ts)使用 mock fetch。账户 route/page 与三语交互尚未接入；画面仍须验证当前 actor/请求及本人响应的目标。接续位置见 [Web README](../../PJM/web/README.md#アカウント管理を接続する) |
 | 初始化与追踪 | [bootstrap](../../PJM/backend/src/projectmind/auth/bootstrap.py)已写入首个 ADMIN 的 CREATED 事件；middleware 每次生成新的 UUID，不沿用客户端 X-Request-ID。调用已存在，不据此宣称 CLI、真实数据库或代理已验收 |
+
+工作区另有未接入 App 的 UserAccountPanel / UserSecurityEvents、useUserRequest 与 account 文案草稿，入口见上表 Web README；本轮文档整理保留这些文件，没有验证或继续实现它们。组件存在不等于账户页面已可访问，也不应被当作完全不存在而重复创建。
+
+按精确 ID 读取单个用户及专属测试现已存在，旧 API fake 的调用也已修正；[§84 的局部核对](../history/delivery-history.md#841-只读核对与设计纠偏)记录了当时复跑结果，不把客户端验证或 HTTP 替身延伸为账户页面、真实数据库或部署已验收。
 
 实现者应接续这些部件，不新造平行用户服务。不能因快照缺失而称为“没有路由”，也不能因路由可生成 OpenAPI 而称为“契约已交付”。完整的接续顺序见[开发与验收](#开发接续与验收)，当前失败与证据见[工作登记](../planning/roadmap.md#r05-领域与身份安全)。
 
 ## 场景与非目标
 
-所有用户可以查看本人账户与安全事件、验证当前密码后改密、撤销本人全部会话；ADMIN 另可管理本组织用户。创建用户不自动创建 ProjectMember，也不因为前端选中了某个 Project 而改变组织范围。
+所有用户可以查看本人账户与安全事件、验证当前密码后改密、撤销本人全部会话；ADMIN 另可管理本组织用户。创建用户不自动创建 ProjectMember，也不因为前端选中了某个 Project 而改变组织范围。[成员关系](project-lifecycle.md#项目身份与成员资格)的移除/恢复是独立操作；移除 ADMIN 的 membership 不会撤销其组织权限。
 
 本链路不增加第三种系统角色、匿名注册、密码找回、邮件验证、MFA、账号硬删除或 ADMIN 代用户改密。初始密码由获准 ADMIN 在受控表单中提交，只写入 hash；这不是邀请/强制首次改密流程，也不能当作公网账号恢复方案。更强的身份恢复与交付方式须另行设计。
 
@@ -73,6 +78,7 @@ U 重新登录 → 新会话 S3
 | 本人改密 | POST /users/me/password。当前密码 + 新密码策略；撤销本人全部旧会话，包括当前会话 |
 | 本人撤销全部会话 | POST /users/me/sessions/revoke。成功后重新登录，不自动补发密码 |
 | ADMIN 查询与创建 | GET /users；POST /users。组织内搜索、分页；新用户为 ACTIVE，明确选择 ADMIN 或 USER |
+| ADMIN 读取单个账户 | GET /users/{user_id}。在同一组织/锁后认证边界读取精确 ID，供编辑前和冲突后确认；复用 account 响应，不从列表首页猜测目标已不存在 |
 | ADMIN 修改资料/状态/角色 | PUT /users/{user_id}。仅 display_name、status、system_role；本链路不更改登录 email |
 | ADMIN 撤销与审计 | POST /users/{user_id}/sessions/revoke；GET /users/{user_id}/security-events。不存在与跨组织目标同为 404 |
 
@@ -84,6 +90,8 @@ U 重新登录 → 新会话 S3
 - 用户列表按组织在服务端搜索 email/display_name。现有 route 接受 q（最多 200 字符）、limit（1–100，默认 25）、非负 offset；repository 按 email、ID 排序，并将查询中的通配符视为普通字符。响应为 items、total、limit、offset。审计按目标用户分页，不能用第一页前端过滤冒充完整历史。
 
 稳定排序不等于跨请求的数据库快照。翻页之间可能有新增账户或审计事件，Web 应保留查询条件并允许显式刷新；不能把 total 当作“整个浏览期间不变的总数”，也不承诺 offset 分页绝不重复或遗漏。需要一致性导出时另定义游标/快照协议，不复用管理列表作审计导出证明。
+
+单账户读取是管理列表的精确查询，不授予额外权限。编辑页保留用户非敏感草稿与原版本，显式读取最新账户后并列比较；用户确认采用新版本才可再次提交，不因刷新成功自动覆盖草稿或重放旧动作。本人仍使用 /users/me/account，普通 USER 不能借管理读取访问其他账户。
 
 公开账户只允许 user ID、email、display name、role、status、row_version 和创建/更新时间。变更结果另说明本次新标记的 revoked_sessions 数量及调用者当前会话是否失效。该数量包含尚未标记撤销的过期行，不是“在线人数”或“已关闭浏览器数”。
 
@@ -173,8 +181,8 @@ bootstrap 是唯一无需已有 actor 的首 ADMIN 创建路径。现有用例�
 
 先从[Backend 接线入口](../../PJM/backend/README.md#ユーザー管理の接続を引き継ぐ)核对内部逻辑与 migration，再同步[公开契约入口](../../PJM/contracts/README.md#ユーザー管理の公開面を準備する)和[Web 账户入口](../../PJM/web/README.md#アカウント管理を接続する)。接续分四步，不重做已存在的服务或 Schema：
 
-1. 恢复可信的合跑基线：处理 tests/users 对裸 conftest 的导入冲突；单独运行通过不能代替合跑收集。
-2. 核对路由、Schema/example 与错误声明，再由 exporter 同步 OpenAPI；补齐专属 Web client/validator/barrel，不手改快照或放宽校验取得通过。
+1. 保持可信的合跑基线：工作副本已使用独立 user_harness，原裸 conftest 冲突见[合跑复核与剩余工作](../planning/roadmap.md#r05-领域与身份安全)。继续合跑 users / API / contracts，不将单独通过或收集成功当作整条交付完成。
+2. 核对路由、Schema/example 与错误声明，再由 exporter 同步 OpenAPI；保持已有专属 Web client/validator/barrel 的回归，不重新搭建同一客户端，不手改快照或放宽校验取得通过。
 3. 接账户入口、服务端分页、版本化表单与三语反馈；用真实 component 验成功、拒绝、未知以及换 actor 的晚到响应。
 4. 在获准专用环境验证真实锁竞争、审计回滚、bootstrap、迁移和双浏览器会话，再决定发布。离线通过不跨过此门禁。
 

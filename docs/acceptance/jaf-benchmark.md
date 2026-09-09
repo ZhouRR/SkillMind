@@ -162,7 +162,7 @@ Redmine/CSV 配对比较的是**同一事实快照经两种读取路径后的结
 
 ### 记录对象与当前载体
 
-Evaluation 已实现；其余对象是评价管理的目标概念，当前没有对应平台表/API。正式 benchmark 可先用受控的隔离文件与人工记录组织，不因此要求先开发一套管理服务。
+平台 Evaluation 已有 API、持久化和表单基础；[结果未知与界面边界](../design/results-evaluation.md#提交未知与界面责任)尚待补齐，不据此宣称整条链已验收。其余对象是评价管理的目标概念，当前没有对应平台表/API。正式 benchmark 可先用受控的隔离文件与人工记录组织，不因此要求先开发一套管理服务。
 
 | 对象 | 责任 |
 | --- | --- |
@@ -177,6 +177,8 @@ Evaluation 已实现；其余对象是评价管理的目标概念，当前没有
 ### 平台 Evaluation 与发布结论
 
 [现有 Evaluation 请求](../../PJM/contracts/evaluations/v1/create-request.schema.json)只接受一个 rating、verdict、comment 和 revisions；[route](../../PJM/backend/src/projectmind/api/routes/evaluations.py)与 [service](../../PJM/backend/src/projectmind/evaluations/service.py)把评价追加到该 Project/Run 的 Result。它不是五维 Rubric 的专用录入表，也没有自动汇总整轮评分的接口。
+
+原值定位、重复评价与提交恢复由[结果设计](../design/results-evaluation.md#评价请求与历史)统一负责；本页不另定义一套平台写入协议。尤其不能把重发产生的两条 Evaluation 当作两个独立 case，或因此扩大评分分母。
 
 | 要记录什么 | 使用哪里 |
 | --- | --- |

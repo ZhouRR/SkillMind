@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
+from user_harness import NOW, PASSWORD, Clock, UserHarness
 
 from projectmind.auth.domain import generate_session_credentials, hash_password
 from projectmind.auth.service import AuthenticatedActor
@@ -15,37 +15,6 @@ from projectmind.db.models import AuthSession, User
 from projectmind.users.domain import UserAccess
 from projectmind.users.repository import LockedUsers, UserRepository
 from projectmind.users.service import UserService
-
-NOW = datetime(2026, 9, 9, 12, tzinfo=UTC)
-PASSWORD = "test-only original password"
-
-
-class Clock(datetime):
-    """実 clock を待たず、lock/計算の前後で時刻が変わることを再現する。"""
-
-    @classmethod
-    def now(cls, tz: object = None) -> datetime:
-        """Fixture が指定した現在時刻を返す。"""
-
-        return cls.current
-
-
-@dataclass
-class UserHarness:
-    """実 password/model と fake query を分け、実 DB の証拠と誤認させない。"""
-
-    service: UserService
-    repository: Mock
-    session: Mock
-    transaction: AsyncMock
-    factory: Mock
-    actor: User
-    target: User
-    current: AuthSession
-    other_sessions: tuple[AuthSession, ...]
-    access: UserAccess
-    added: list[object]
-    order: list[str]
 
 
 @pytest.fixture

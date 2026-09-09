@@ -11,9 +11,12 @@
 | 变更 | 设计 → 实现与验证 |
 | --- | --- |
 | 资源种类、Provider、scope | [资源快照](../design/resource-snapshots.md) → [Backend 变更入口](../../PJM/backend/README.md#一つの変更を追う)，核对绑定与 Provider 回归 |
+| 文档上传、下载、目录与清理 | [文档生命周期](../design/document-lifecycle.md) → [保存接线](../../PJM/backend/README.md#project-文書の保存と清理を追う) / [管理界面](../../PJM/web/README.md#project-文書の管理を追う)，核对跨存储提交、并发配额、引用和未知结果；不与 Run 冻结混为一层 |
 | 输入准备与可信缓存 | [准备协议](../design/resource-snapshots.md#输入准备与可信缓存) → [输入接线](../../PJM/backend/README.md#入力準備の接続を引き継ぐ)，追踪 DB/store、物化、Worker 与实际读取 |
 | 创建、幂等与重复提交 | [Run 创建](../design/run-creation.md) → [Backend 入口](../../PJM/backend/README.md#一つの変更を追う) / [Web 原请求状态](../../PJM/web/src/hooks/useRunSubmission.ts)，区分原要求与新执行 |
 | Run 状态、等待与恢复 | [领域模型](../design/domain-model.md) / [Runtime](../design/agent-runtime.md) → [runs](../../PJM/backend/src/projectmind/runs/) 与[有状态回归](../../PJM/backend/tests/runs/)，同步 DB、事件和 Web |
+| 用户回答、过期与原答复确认 | [普通交互](../design/user-interactions.md) → [Backend 接线](../../PJM/backend/README.md#通常回答と期限処理を追う) / [Web 状态](../design/workspace.md#普通答复与续行状态)，区分普通答复、批准和评价；410 不等于无提交 |
+| 结果校验、证据与人工修订 | [结果设计](../design/results-evaluation.md) → [Backend 接线](../../PJM/backend/README.md#結果検証と人工評価を追う) / [Web 接线](../../PJM/web/README.md#結果と人工評価を接続する)，检查全部引用位置、原值根与评价的独立提交 |
 | timeout、取消与启动 | [监督与停止](../design/run-supervision.md) → [监督接线](../../PJM/backend/README.md#実行の取消と停止を追う)，按矩阵分开原因、终态、清理与未知消费 |
 | 预算与多 Agent | [预算](../design/run-budgets.md) / [子分析](../design/subagents.md) → [主子接线](../../PJM/backend/README.md#予算と子分析の接続を追う)，先核对计量与账本，再验证输出/审计 |
 | 外部效果与审批恢复 | [受控写入](../design/repository-effects.md) → [Effect 接线](../../PJM/backend/README.md#承認から外部変更まで追う) / [审批界面](../design/workspace.md#审批请求与执行结果)，分别验决定、远端与回执 |
@@ -34,7 +37,8 @@
 | --- | --- |
 | 登录入口防护 | [配额、公开响应与离页](../design/login-protection.md) → [Backend](../../PJM/backend/README.md#ログイン入口の防護を追う) / [Web](../../PJM/web/README.md#ログインと書込失敗を切り分ける)，分别验 API、真实 component 与真实环境 |
 | 认证与 Secret | [会话](../design/authentication.md) / [外部凭据](../design/secret-storage.md) → [认证接线](../../PJM/backend/README.md#認証と-secret-の境界を追う)，不把用户生命周期与 ProjectMember 混用 |
-| 用户创建、改密、停用与安全审计 | [已有调用与断点](../design/user-lifecycle.md#工作副本与公开入口) → [Backend 接线](../../PJM/backend/README.md#ユーザー管理の接続を引き継ぐ) → [管理验收](../design/user-lifecycle.md#开发接续与验收)；先修复合跑/契约同步，再接 Web 与真实事务验收，不重造已有服务 |
+| 用户创建、改密、停用与安全审计 | [已有调用与断点](../design/user-lifecycle.md#工作副本与公开入口) → [Backend 接线](../../PJM/backend/README.md#ユーザー管理の接続を引き継ぐ) → [管理验收](../design/user-lifecycle.md#开发接续与验收)；保持合跑，补契约同步，再接 Web 与真实事务验收，不重造已有服务 |
+| 项目选择、成员、归档与删除 | [项目生命周期](../design/project-lifecycle.md) → [Backend 接线](../../PJM/backend/README.md#project-とメンバーの管理を追う) / [Web 接线](../../PJM/web/README.md#project-の切替と管理を追う)；核对实际引用、并发与删除失败，不把无 Run、行锁或归档当作充分保证 |
 | 配置、部署与迁移 | [环境来源](../operations/deployment.md#环境文件与配置边界) / [迁移审查](../operations/deployment.md#迁移与回退审查) → [Backend CLI/Worker 边界](../../PJM/backend/README.md#運用-cli-と停止境界を確認する)、Settings、.env.example、Compose/Make；按[发布验收](../operations/deployment.md#后续开发约束与验收)核对所有写入者 |
 | 备份、恢复与保留 | [一致恢复点](../operations/backup-recovery.md#一致恢复点包含什么) → [恢复验收](../operations/backup-recovery.md#恢复后验证)，核对 ops、存储、Outbox/Effect 与权限；preflight 不是恢复证明 |
 

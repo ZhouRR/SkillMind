@@ -1,6 +1,6 @@
 # ProjectMind 实施计划
 
-> 状态正本。2026-09-09 本轮继续文档整理：核对用户管理已经接入的 API/Schema，与未同步的 OpenAPI、未接入的 Web 分开；记录合跑收集失败，整理代码/契约入口和失败处理。没有修改应用实现、应用测试或公开契约；R01–R13 的完整范围、已有代码和真实环境残项保留。
+> 状态正本。2026-09-09 本轮继续文档整理：分开文档资产管理与 Run 资源快照，明确上传/配额、下载/预览、引用保护和跨存储清理的实际边界。没有修改应用实现、应用测试或公开契约；保留未接入的账户组件及 R01–R13 完整范围。具体证据见[§85](../history/delivery-history.md#85-文档资产生命周期与工程导航续整2026-09-09)。
 
 工作副本、全量本地基线和部署不是同一个版本。先用[证据范围表](#当前证据怎么用)确定所读结论适用的范围，不从最近一次绿色数字推导全项目完成。
 
@@ -43,7 +43,11 @@
 
 | 要判断什么 | 证据与适用范围 |
 | --- | --- |
-| 用户生命周期接到哪一层 | [本轮核对 §81](../history/delivery-history.md#811-工作副本与失败证据)：已有 9 个管理 HTTP 操作、9 组 Schema/example、改密防护与 bootstrap 审计；快照缺少新操作、Web 未接。users 单跑通过，但与 API 合跑在 conftest 导入处失败；不是整条链路验收 |
+| 文档保存、读取与清理 | [本轮 §85](../history/delivery-history.md#851-只读核对与设计修正)：Backend 50 项、Web 41 项局部回归通过；实际 service/storage 边界的替身探针确认跨存储与校验缺口，不证明真实 DB/bucket 或管理页面时序 |
+| 项目与此前账户接线 | [此前核对 §84](../history/delivery-history.md#841-只读核对与设计纠偏)：项目/用户/相关 API 71 项、Web 89 项通过；契约回归 21 通过 / 1 个既有 OpenAPI 失败。删除探针只用实际 repository + mock session，不证明真实外键/回滚；Project 选择与账户页面差距仍保留 |
+| 结果校验与人工评价 | [此前核对 §83](../history/delivery-history.md#832-只读核对与验证范围)：Backend 44 通过 / 1 个 OpenAPI 一致性失败，Web 30 通过。3 个实际 validator + 空 lookup 的离线探针确认未完整核验 Artifact/效果摘要；不证明真实存储、事务或页面时序 |
+| 普通回答、期限与评价 | [此前核对 §82](../history/delivery-history.md#822-只读核对与局部回归)：Backend 71 项、Web 41 项局部回归通过；真实事务/模型与答复卡片的故障时序未验。无 Proposal 的批准入口、原 actor 重放约束和页面确认仍待修正 |
+| 用户生命周期接到哪一层 | [此前 §84](../history/delivery-history.md#841-只读核对与设计纠偏)覆盖精确 ID 读取和 users client；现另有未接入 App 的账户组件/请求 hook/文案草稿，本轮未验证。账户页面/route 与 OpenAPI 快照仍未接齐；[§82](../history/delivery-history.md#822-只读核对与局部回归)和[§81](../history/delivery-history.md#811-工作副本与失败证据)保留当时收集/快照失败与后续通过，不倒改 |
 | 登录防护与客户端的此前证据 | [此前核对 §78](../history/delivery-history.md#782-工作副本核对与验证范围)：当时 Backend/契约 123 项、Web 430 项、62 个 LoginPage mock API 场景通过，OpenAPI 与 exporter 一致。该快照结论不覆盖本轮已有的新管理路由；实 DB、App 多页面会话与代理仍未验 |
 | 会话协议与此前公开同步 | [此前核对 §75](../history/delivery-history.md#75-会话现状对齐与文档维护指南续整2026-09-09)：当时只同步 GET session 的描述并通过；不能覆盖后续新增的登录防护响应，不证明实 DB/浏览器会话/部署 |
 | 生成界面的前置基础 | [此前核对 §74](../history/delivery-history.md#74-生成模块边界与开发阅读路径续整2026-09-09)：局部函数/模型结构、Manifest gate 与业务 module API 的离线回归；不证明 builder、CSP、Host 或回退可运行 |
@@ -53,7 +57,7 @@
 | 公开边界与 Web 投影 | [此前核对 §70](../history/delivery-history.md#70-提交边界与开发阅读入口文档续整2026-09-09)：Backend 37 项公开边界、Web 13 项投影。当时 157 项执行回归不覆盖后续等待取消改动 |
 | 最近一次完整本地基线 | [2026-09-08 §66](../history/delivery-history.md#66-r01-输入世代隔离与多根不变量收口2026-09-08)：Backend 1121 通过 / 20 跳过，Web 335 通过。不覆盖后续源码；实 DB skip 不是通过 |
 | 最近记录的部署 | [2026-08-04 §49](../history/delivery-history.md#49-服务器部署基线验收2026-08-04)。不能把当前工作副本当成已部署版本 |
-| 文档是否可维护、可浏览 | 本轮 [§81 接线与阅读检查](../history/delivery-history.md#813-文档验证与保留范围)，此前 [§80 账户设计](../history/delivery-history.md#802-文档验证与保留范围)、[§79 运维分层](../history/delivery-history.md#792-核对与验证范围)等记录分别保留。按各自范围阅读，不刷新应用全量或部署基线 |
+| 文档是否可维护、可浏览 | 本轮 [§85 文档资产与阅读检查](../history/delivery-history.md#852-文档验证与保留范围)，此前 [§84 项目设计](../history/delivery-history.md#842-文档验证与保留范围)、[§83 结果分工](../history/delivery-history.md#833-文档验证与保留范围)等分别保留。按各自范围阅读，不刷新应用全量或部署基线 |
 
 回归清单和具体命令放在链接到的历史记录中；本表只帮助选择证据。后续发现旧结论变化时追加记录，不倒改当时的失败或跳过。
 
@@ -88,8 +92,10 @@
 #### R01 资源冻结
 
 - 状态：实施中。命名空间独占、多根/篡改/失效提交/接管复用已有回归；已有回执与监督接线保持通过。真实事务、迁移/历史恢复、完整执行链与外部资源仍待验。
-- 范围：[资源快照](../design/resource-snapshots.md)与[创建](../design/run-creation.md)；documents / integrations / runs / agent、Preflight 与 Run 详情。不重做已有选择/清单入口；回执修改同步 DB/migration、物化器、Worker heartbeat/fencing、workspace Provider、测试与恢复说明。
+- 范围：[文档资产](../design/document-lifecycle.md)、[资源快照](../design/resource-snapshots.md)与[创建](../design/run-creation.md)；documents / integrations / runs / agent、Preflight 与 Run 详情。不重做已有选择/清单入口；回执修改同步 DB/migration、物化器、Worker heartbeat/fencing、workspace Provider、测试与恢复说明。
 - 验收：显式单份/集合/全集、创建时冻结、不可越权/漂移、重放与历史兼容。
+
+文档资产按[保存与清理验收](../design/document-lifecycle.md#开发接续与验收)补齐：跨存储提交/孤立对象、并发配额、Run/Schedule 引用保护、下载完整性与 header。当前局部回归通过不消除这些缺口，归档/撤权竞争也需与 R05 协同验证。
 
 #### R02 Run 统一预算
 
@@ -111,11 +117,13 @@
 
 #### R05 领域与身份安全
 
-- 状态：会话 v2/0031、三维防护与 LoginPage 的既有证据见 §78。[用户生命周期](../design/user-lifecycle.md#工作副本与公开入口)已有 API 装配、9 个 HTTP 操作、9 组 Schema/example、改密来源/账号防护、服务器 UUID 与 bootstrap 审计。users 单跑 24 项通过；API/auth/契约组合为 57 通过、1 个 OpenAPI 一致性失败。users 与 API 合跑另在裸 conftest 导入处中断；Web client/page 尚缺，不能记为完整交付。本轮只读核对，保留既有业务改动。
-- 范围：[领域模型](../design/domain-model.md)、[认证](../design/authentication.md)、[用户管理](../design/user-lifecycle.md)、[登录防护](../design/login-protection.md)、[Secret 保存与轮换](../design/secret-storage.md)；auth / users / projects / documents / integrations / core / DB 与 Web。沿[认证接续入口](../../PJM/backend/README.md#認証と-secret-の境界を追う)和[用户管理接线](../../PJM/backend/README.md#ユーザー管理の接続を引き継ぐ)复用已有组件，不以 ProjectMember 管理替代账户管理。
+- 状态：会话 v2/0031、三维防护与 LoginPage 的既有证据见 §78。[用户生命周期](../design/user-lifecycle.md#工作副本与公开入口)的 10 个 API 操作、9 组 Schema/example、users client/barrel 已存在；§84 精确读取与客户端局部回归通过。工作区另有未验证的账户组件/hook/文案草稿，page/route 和 OpenAPI 快照仍未接齐。项目/成员 CRUD 已有代码；项目变更版本/完整审计、删除引用门禁与成员页面仍待补。
+- 范围：[领域模型](../design/domain-model.md)、[项目生命周期](../design/project-lifecycle.md)、[认证](../design/authentication.md)、[用户管理](../design/user-lifecycle.md)、[登录防护](../design/login-protection.md)、[Secret 保存与轮换](../design/secret-storage.md)；auth / users / projects / documents / integrations / core / DB 与 Web。沿[认证接续入口](../../PJM/backend/README.md#認証と-secret-の境界を追う)和[用户管理接线](../../PJM/backend/README.md#ユーザー管理の接続を引き継ぐ)复用已有组件，不以 ProjectMember 管理替代账户管理。
 - 验收：保留[登录防护](../design/login-protection.md#开发接续与验收)的拒绝停止点、成功不清零、HTTP/三语，以及真实表单重复 submit、卸载/晚到结果、语言/键盘/窄屏回归。用户管理按[事务/公开链路验收](../design/user-lifecycle.md#开发接续与验收)补齐最后 ADMIN、并发登录/撤销、0032 与请求未知；接续 App 初次会话错误、多 tab、代理与 Redis 恢复。[会话场景](../design/authentication.md#验收从场景出发)的实 DB 双行锁、0031 与认证/业务提交边界、Secret 的[恢复场景](../design/secret-storage.md#开发接续与验收)另验。
 
-实施按[用户管理接续步骤](../design/user-lifecycle.md#开发接续与验收)，先恢复合跑基线，再接齐契约/Web 与真实环境验收，不重建已有 API/Schema。
+实施按[用户管理接续步骤](../design/user-lifecycle.md#开发接续与验收)，保留合跑覆盖，先接齐契约/Web，再完成真实环境验收，不重建已有 API/Schema。
+
+项目管理按[项目验收](../design/project-lifecycle.md#开发接续与验收)补齐：ADMIN 与成员资格分离、关系审计、过时表单冲突、归档/创建竞争与删除的完整引用检查。TaskSchedule 的 RESTRICT 引用未进入删除清单，不能仅凭 Run 数为零宣称可删除；元数据删除也不证明 blob 清理完成。
 
 #### R06 Skill 生命周期
 
@@ -126,8 +134,10 @@
 #### R07 Run 与审计
 
 - 状态：主/子结果、首事件前停止、无意图 interrupted、终态取消复查与 PRIMARY 查询有局部通过。等待/普通事件现已在序号分配与新增记录前拒绝持久取消；§71 的 93 项回归包含 service 异常传播、旧轮询和终态前失去 lease，不再把这条检查列为待开发。
-- 范围：[Runtime](../design/agent-runtime.md)与[执行监督](../design/run-supervision.md)；runs / worker / agent / events / evidence / evaluations / storage。等待拒绝和终态保存是两个事务，不能视为原子停止。
-- 验收：继续真实 DB 锁竞争、回滚后崩溃/接管、commit 结果不明、持久停止核对、子审计恢复与进程退出；Segment/Attempt/Session、Outbox/lease、恢复/取消/等待期限、结果与 SSE 重放须有状态联验。局部 mock/fake 通过不覆盖这些条件。
+- 范围：[Runtime](../design/agent-runtime.md)、[普通答复](../design/user-interactions.md)、[结果与评价](../design/results-evaluation.md)及[执行监督](../design/run-supervision.md)；runs / worker / agent / events / evidence / evaluations / storage。等待拒绝和终态保存是两个事务；答复、过期与评价也有独立提交/恢复边界，不能视为原子停止。
+- 验收：关闭无 Proposal 的普通批准入口，明确原 actor 重放及历史兼容，覆盖[回答与期限竞争](../design/user-interactions.md#验收条件)；继续真实 DB 锁竞争、回滚后崩溃/接管、commit 结果不明、持久停止核对、子审计恢复与进程退出。Segment/Attempt/Session、Outbox/lease、结果与 SSE 重放须有状态联验，局部 mock/fake 不替代。
+
+普通交互的此前核对见 §82；已有过期 commit 后抛错的 service 处理，不再要求重新实现。原 actor 重放约束、孤立批准与 Web 原答复确认仍待补。本轮 §83 另确认 Artifact 只计数、效果摘要引用/状态未完整检查，以及评价没有原请求幂等/分页；按[结果验收](../design/results-evaluation.md#验收条件)收口，不因既有回归通过而忽略。
 
 #### R08 外部效果
 
@@ -143,15 +153,19 @@
 
 #### R10 全部 Web 页面
 
-- 状态：原请求、文档选择/详情与调度输入有局部 mock 浏览器证据；§78 已核对真实 LoginPage + mock API 的 62 个场景与 430 项 Web 回归，本轮不重记这些应用结果。Schedule 首批与 TaskCatalog 的漏显风险、App 跨页面会话及其余完整流程仍待逐项核对与重构。
+- 状态：原请求、文档选择/详情与调度输入有局部 mock 浏览器证据；§78 的 LoginPage 证据保留。普通答复仍缺原请求确认、同步防重与晚到成功保护；评价还缺读写竞争/上下文隔离与未知提交处理。§82、§83 与本轮 §84 的局部 API mock/静态展示不是这些时序的验收。显式失效 Project 仍会回退并改写 hash；账户/成员管理入口、Schedule 漏显风险、App 跨页面会话及其余完整流程仍待接续。
 - 范围：[Workspace](../design/workspace.md)与[产品概览](../overview/product.md)；pages / components / API / hooks / lib / styles / i18n。
 - 验收：页面职责、服务端筛选、并发请求清理、三语/键盘/窄屏、真实用户流程。
+
+文档管理的[未知结果与页面责任](../design/document-lifecycle.md#页面与结果未知)另需接齐：目录部分成功、原身份核对、晚到响应、严格 validator、预览限制和下载名称。文档选择的 browser 证据不是 DocumentManagerPanel 上传/删除时序的验收。
 
 #### R11 运维与工程工具
 
 - 状态：已定位 ENV_FILE/容器 .env 来源不统一、deploy 不分阶段放行、0027 downgrade 删除审计会话的风险。本轮进一步核对 dispatch=false 只限制新 Outbox 投递，不能阻止既有 job、Schedule、recovery 或解释任务；操作说明已分层，统一停写/发布控制、配置修正与真实恢复仍待完成。既有业务浏览器 Ruff 问题见 §13.11。
 - 范围：[本地开发](../development/local-development.md)、[发布迁移](../operations/deployment.md)、[备份恢复](../operations/backup-recovery.md)和[症状排障](../operations/runbook.md)；ops / migrations / scripts / images / Compose / Dockerfile。
 - 验收：锁定依赖、静态检查、启动/迁移、backup/restore/rollback、KEK 保留、清理策略与 smoke；按[发布门禁](../operations/deployment.md#后续开发约束与验收)覆盖多实例、旧队列、cron 和失败不放行，不能只验关闭 dispatch 后不 enqueue。
+
+附件清理还需与 R01 共用[引用保护与持久清理协议](../design/document-lifecycle.md#引用保护与清理的修正要求)，区分 storage 不存在、权限拒绝和结果未知；当前没有通用清理回执/CLI，不能用元数据总量或 204 证明 bucket/backup 已处理。
 
 #### R12 业务质量验收
 

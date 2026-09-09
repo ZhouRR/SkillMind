@@ -21,7 +21,9 @@
 - `ProjectMember`：User 与 Project 的成员关系，不引入额外系统角色。
 - `Integration`：项目中配置的 Provider 资源实例，例如 Redmine、Git、SVN。不是所有资源都需要 Integration 行；内置 Project 文档走文档目录与[Run 文档快照](resource-snapshots.md)。
 - `SecretReference`：凭据定位信息，不保存明文 Secret。
-- `ProjectKnowledge`：概念名称；当前持久化实体是 `ProjectDocument`，保存上传文档及 blob 元数据。自动知识同步/独立索引不是已实现服务。
+- `ProjectKnowledge`：概念名称；当前持久化实体是 `ProjectDocument`，保存上传文档及 blob 元数据。[文档生命周期](document-lifecycle.md)区分身份、目录、数据库保存和附件清理；自动知识同步/独立索引不是已实现服务。
+
+项目身份、成员加入/移除、当前项目选择与归档/删除统一见[项目生命周期](project-lifecycle.md)。归档不等于停止执行，移除成员不等于停用账户；ADMIN 的组织访问不依赖该项目的成员关系。物理删除须核对完整引用，不能只从“没有 Run”推断项目为空。
 
 Skill 资产（SkillSource、SkillInterpretation、Skill、SkillVersion、RuntimeManifest）归 Organization，
 不归单个 Project：同一份 Skill 只导入、解释和发布一次，多个 Project 复用同一个 SkillVersion。这是
@@ -107,13 +109,13 @@ ExecutableTask 以目标和资源前提为中心。动态 input/output Schema �
 - `ToolCall`：一次版本化 Tool capability 调用。
 - `Evidence`：Ticket、文件、代码位置、Diff 或快照等证据引用。
 - `Artifact`：报告、补丁、导出文件等产物。
-- `Result`：Run 终态时冻结的原始结果或通用结果包络。
-- `Evaluation`：人工评分、结论和修订建议，不覆盖 Result。
+- `Result`：保存并冻结的原始结果或通用结果包络；失败/取消可以没有 Result，技术成功也不证明业务结论全对。
+- `Evaluation`：人工评分、结论和修订建议，不覆盖 Result。多条建议都相对于同一[原结果内容](results-evaluation.md#修订指向哪份原值)，不是依次应用的补丁。
 
 ### 4.3 用户交互与外部效果
 
-- `UserInteraction`：Agent 请求的结构化交互，类型包括 `CLARIFICATION`、`CHOICE`、`REVIEW` 和 `EFFECT_APPROVAL`。
-- `InteractionResponse`：用户对交互的追加式答复；必须记录 actor、时间和所依据的版本。
+- `UserInteraction`：结构化问题与等待事实。CLARIFICATION / CHOICE / REVIEW 是普通交互；EFFECT_APPROVAL 应关联 ChangeProposal，不能走通用答复。现有入口差距见[用户交互设计](user-interactions.md#普通提问不能代替外部批准)。
+- `InteractionResponse`：对一个交互的追加式答复，记录 actor、时间和问题版本；同一次原答复确认不应追加第二个业务 Segment。[回答重放](user-interactions.md#首次答复与原答复重放)与新 Run 创建使用不同身份作用域。
 - `ChangeProposal`：准备对外部系统实施的结构化变更提案，包含目标、预览、理由、前置版本、风险和幂等键。
 - `EffectExecution`：经批准或命中项目预授权策略后的一次实际写入与回读验证记录。
 
@@ -130,7 +132,7 @@ Agent 可以建议写入、生成补丁和解释风险，但不能把建议直�
 - Run 包含一个或多个顺序 RunSegment；首个 Segment 由用户启动创建。
 - RunSegment 包含一个或多个追加式 RunAttempt；技术重试不创建新的业务 Segment。
 - Run 可以包含多个 AgentSession；同一 Run 同时最多一个活动的主（PRIMARY）Session，只读 SUBAGENT 子会话可在[子分析边界](subagents.md#能力与故障边界)内并行。
-- 用户答复或批准使等待中的 Run 创建新 Segment，并根据兼容性 resume、fork 或启动新 Session。
+- 普通答复或过期处理使等待中的 Run 追加新 Segment；外部批准需按独立 Effect 链决定何时续行，不能从 APPROVED 推导已恢复模型。Session 再按兼容性 resume、fork 或 replace。
 - Run 包含多个 RunStep、RunEvent、ToolCall、Evidence、Artifact、UserInteraction 和 ChangeProposal。
 - 一个 Run 最多有一个终态 Result；终态后的新目标创建新 Run。child/fork 关系是后续产品关联设计，当前创建请求不承诺 parent Run 字段。
 
@@ -177,10 +179,11 @@ Run：固定目标、权限与资源选择
 
 | 概念 | 当前载体 | 关键边界 |
 | --- | --- | --- |
+| Project / ProjectMember | `projects` / `project_members` | 归档占用原 key；成员状态可重新启用，但单行状态不提供完整的历次变更审计，见[项目边界](project-lifecycle.md) |
 | ExecutableTask | TaskCatalog descriptor，由版本投影 | 无独立 task 业务表；task_id 由服务端生成 |
 | SecretReference | `secret_references`；MANAGED 密文另存 `managed_secret_material` | locator/明文不公开 |
 | Integration / ResourceBinding | `integrations` / `resource_bindings` | Project/Task 配置和 Run 冻结分层 |
-| ProjectDocument | `project_documents` 与 object-storage blob | 文档身份与内容冻结的设计及联调差距见[资源快照](resource-snapshots.md) |
+| ProjectDocument | `project_documents` 与 object-storage blob | 保存/读取/清理由[文档资产规则](document-lifecycle.md)负责；Run 选择与内容冻结见[资源快照](resource-snapshots.md)，二者不共用一次提交 |
 | AgentTaskBriefSnapshot | `agent_task_brief_snapshots.brief_json` / checksum | 每个 Segment 唯一、不可变 |
 | TaskSchedule | `task_schedules` | [调度](task-scheduling.md)复用普通 Run 创建 |
 
@@ -199,6 +202,8 @@ Run：固定目标、权限与资源选择
 | Result / Evaluation | `run_results` / `evaluations` | 原始结果不可变，人工修订追加 |
 | Evidence / Artifact | `evidence`、结果中的 Artifact refs、blob | Artifact 是产物概念，不假设存在独立 artifact 表 |
 | RunEvent / Outbox | `run_events` / `outbox_messages` | 状态与 Outbox 同事务，消费幂等 |
+
+Result 的形状、实际引用校验与人工评价统一见[结果设计](results-evaluation.md)。唯一 RunResult 行与追加式 Evaluation 服务，不自动证明数据库任意更新都受阻；Artifact ref 也不自动指向已验证存储对象。
 
 `TEXT_DELTA` 可以消耗 sequence 但不持久化；sequence 欠号不等于事件丢失。完整协议见 [RunEvent](../../PJM/contracts/events/run-event/v1.schema.json)。
 
@@ -269,7 +274,7 @@ SecretReference 的 key_version 与 ManagedSecretMaterial 的 kek_version 是不
 ### 7.2 执行不变量
 
 - 等待用户时不占用 Worker lease，不继续计算 wall timeout；交互自身使用独立期限。普通交互过期时不推断推荐项为默认回答，而以 `INTERACTION_TIMEOUT` 新 Segment 显式携带缺失事实；批准过期时 Proposal 变为 STALE，Provider 不执行。
-- 用户答复/批准创建新 RunSegment；允许恢复的 Worker lease 丢失才在同 Segment 追加 Attempt。不能把所有 timeout 都当作可重试：当前 engine wall timeout 按 FAILED 收尾，具体策略见 [Runtime](agent-runtime.md#11-事件状态与可靠性)。
+- 业务答复/效果处理的续行追加 RunSegment；允许恢复的 Worker lease 丢失才在同 Segment 追加 Attempt。普通过期续行没有用户答复，且 [410 可能发生在提交之后](user-interactions.md#过期与拒绝响应)。不能把所有 timeout 都当作可重试：engine wall timeout 按 FAILED 收尾，具体策略见 [Runtime](agent-runtime.md#11-事件状态与可靠性)。
 - 执行与恢复按 aggregate 固定锁顺序：Run → Segment → Attempt，或 Run → Segment → Proposal/Interaction/Effect；不得先锁子对象再锁 Run。
 - 终态 `RUN_SNAPSHOT` 必须是 Run 的最后一个持久化事件，SSE 据此结束。
 - 改变目标、SkillVersion、Project、权限上限或已使用的数据源必须创建新 Run；同一 Run 的用户补充只能在冻结边界内收敛目标。

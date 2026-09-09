@@ -82,6 +82,11 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/** required と追加 field 拒否を一つの判定に揃える。 */
+export function exactFields(value: Record<string, unknown>, fields: readonly string[]): boolean {
+  return Object.keys(value).length === fields.length && fields.every((field) => Object.hasOwn(value, field))
+}
+
 /** Unknown JSON が string array であることを検証する。 */
 export function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string')

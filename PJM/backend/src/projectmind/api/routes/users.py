@@ -1,4 +1,4 @@
-"""認証 User 自身の /users/me preference 資源 endpoint を提供する。"""
+"""本人の安全操作、ADMIN のユーザー管理と既存 preference 資源を提供する。"""
 
 from __future__ import annotations
 
@@ -290,6 +290,17 @@ async def create_user(
             ),
         )
         return _mutation(request, response, result)
+
+
+@account_router.get("/{user_id}", response_model=UserAccountResponse, responses={404: _NOT_FOUND})
+async def get_user_account(
+    user_id: UUID, request: Request, actor: AdminReadActor
+) -> UserAccountResponse:
+    """組織内の精確 ID を読み、編集競合を一覧の再検索なしで確認する。"""
+
+    service: UserService = request.app.state.user_service
+    with _user_errors():
+        return _account(await service.get_user(access=_user_access(request, actor), user_id=user_id))
 
 
 @account_router.put(

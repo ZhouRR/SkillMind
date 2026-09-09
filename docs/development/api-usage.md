@@ -30,7 +30,7 @@ password POST の送信後に通信が切れた場合は、上記の明確な拒
 
 Project 選択は `GET/PUT /api/v1/users/me/project-preference` で User account に保存する。Web の hash URL は `?project=<uuid>` を含められ、URL で指定した Project が無効または権限外の場合は別 Project へ暗黙に fallback しない。
 
-`/users/me` の preference / UI language と、[アカウント管理 API](../design/user-lifecycle.md#用户操作与目标公开面)は別資源である。管理 route と Schema/example は工作副本に存在するが、保存 OpenAPI、専用 Web client/page と全体回帰は未完了。[管理契約の対応表](../../PJM/contracts/README.md#ユーザー管理の公開面を準備する)から接続を確認し、本ガイドでは改密・停用・一括失効を配備済みの操作例にしない。
+`/users/me` の preference / UI language と、[アカウント管理 API](../design/user-lifecycle.md#用户操作与目标公开面)は別資源である。管理 route、Schema/example と専用 Web client は工作副本に存在するが、保存 OpenAPI、アカウント page/route と全体回帰は未完了。[管理契約の対応表](../../PJM/contracts/README.md#ユーザー管理の公開面を準備する)から接続を確認し、本ガイドでは改密・停用・一括失効を配備済みの操作例にしない。
 
 ## Task を選び、一回の Run を作る
 
@@ -47,6 +47,14 @@ curl -b "$COOKIE_JAR" -i -X POST "$BASE/api/v1/projects/${PROJECT_ID}/task-runs"
 ```
 
 成功時に返った Run ID を使って detail/SSE を取得する。作成成功は実行成功ではない。待機中は既存 Interaction/Proposal の版に対して回答し、終態後の別目標は新 Run とする。
+
+## 待機中の回答と結果評価
+
+普通の CLARIFICATION / CHOICE / REVIEW は、Run detail の interaction ID / version と[回答契約](../../PJM/contracts/README.md#通常回答と評価の契約を読む)を使用する。endpoint は `/api/v1/projects/{id}/runs/{run_id}/interactions/{interaction_id}/responses`。Session / Origin / CSRF に加え、原回答の Idempotency-Key を送る。Proposal decision と Evaluation は別 endpoint である。
+
+初回回答は 201、原内容/版/key の重放は 200。重放には原 response/segment ID と現在の Run status が含まれるため、必ず QUEUED に戻ると考えない。409 は状態/版/回答の競合、410 は期限切れであり、後者は過期 continuation の commit 後に返る場合がある。[回答が届かなかった例](../design/user-interactions.md#一个例子回答超时不等于什么都没发生)に従い、通信失敗を rollback と扱わず、元の actor と内容を保って確認する。
+
+現在の Web 回答カードには完全な原要求確認が無い。結果不明時はまず許可された Run detail と保存済み回答を調べ、別 key/新 version で自動再送しない。Evaluation POST にも回答と同じ幂等契約は無い。[評価の原値と提出](../design/results-evaluation.md#评价请求与历史)を確認し、pointer は detail.result.data の根から指定する。履歴の内容一致は原要求の成功証明にならず、自動で追加 POST しない。本文・回答・credential を URL、共有 log やコマンド履歴へ残さない。
 
 ## 再送・継続・権限の規則
 

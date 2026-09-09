@@ -9,17 +9,47 @@
 | 需要处理的情况 | 先做什么 | 手册位置 |
 | --- | --- | --- |
 | 登录正常却不能提交，或认证突然失败 | 只核对原响应、凭据类型与环境，不重放业务动作 | [认证分诊](#认证故障的只读分诊) |
+| 项目消失、归档后仍在运行、删除失败 | 核对原项目 ID、成员、状态及引用，不删除配置或重建同 key 项目 | [项目分诊](#项目与归档的只读分诊) |
 | 准备更新镜像或迁移 | 确认维护窗口，保存同一恢复点的 DB/blob/workspace 与镜像 | [备份](backup-recovery.md#配备前备份)、[配备](deployment.md#迁移前置与执行) |
 | 更换环境配置文件 | 区分 Compose 插值与容器配置，不能只改 ENV_FILE | [配置边界](deployment.md#环境文件与配置边界) |
 | 新环境没有管理员 | 使用普通 bootstrap CLI，不执行清空 volume 的初始化目标 | [首次 ADMIN](quickstart.md#最初の-admin-を作成する) |
 | Run 卡在运行中或不断重试 | 先区分输入准备、模型等待、执行权失效，不改 SQL 状态 | [准备分诊](#准备故障的只读分诊)、[接管验证](#42-worker-喪失と接管)、[日志](#7-log-確認と-incident-記録) |
 | 正在等待回答/批准 | 核对待办版本、身份与独立期限，不当成 Worker 卡死 | [WAITING](#81-waiting-状態) |
 | 外部写入结果不明 | 先查原幂等身份的结果/read-back，保留已发生的变更 | [Effect 排障](#87-incident-と-recovery) |
+| 已结束但结果可疑、评价是否保存不明 | 区分原结果、平台效果记录与评价历史；不重放评价或改写原值 | [结果与评价分诊](#结果与评价的只读分诊) |
 | 输入文档缺失或内容不一致 | 保留 manifest/现场，确认运行版本与冻结清单 | [资源排障](#9-资源快照排障) |
+| 上传部分失败、列表消失但附件仍在 | 区分元数据、存储和原请求结果，不重传整批或清 bucket | [文档分诊](#文档保存与删除的只读分诊) |
 | 定时任务没有生成 Run | 分开看 created/skipped/failed/missed，不手动补造触发 | [调度监视](#10-schedule-と-recovery-の監視) |
 | 必须恢复旧版本或数据 | 先确认完整恢复点及新旧兼容性；这是有数据损失风险的操作 | [DB restore](backup-recovery.md#数据库恢复)、[版本回退](backup-recovery.md#应用版本回退) |
 
 以下命令不会因为写在手册里就获得执行授权。尤其 restore、镜像替换、停止 Worker 和 smoke 写入，应在已确认的专用环境或获批维护窗口执行。
+
+## 项目与归档的只读分诊
+
+先确认原 project_id 与调用者身份，再看服务端状态；当前页面可能在失效深链接后回退到另一个项目，不能从导航选中项推断原项目仍可访问。404 不区分不存在和越权，不用其他账号探测资源是否存在。
+
+| 症状 | 只读核对与停止条件 |
+| --- | --- |
+| 被移出项目后仍能访问 | 检查当前系统角色；ADMIN 不依赖成员关系，不能用移除 membership 代替降权。账户变更走独立用户管理 |
+| 归档后仍有 Run 或外部动作 | 归档不是取消或维护停写；核对原 Run / Effect 事实，按独立停止协议处理，不把状态改成终态 |
+| 无 Run 但删除失败 | 当前删除清单遗漏 TaskSchedule 的 RESTRICT 引用；核对是否保存过调度及原错误，不能拆外键、清调度历史或循环 DELETE |
+| 已返回 204，却仍有附件或备份 | 项目删除只处理所列元数据，不证明 blob/backup 已消除；按独立清理与恢复策略核对，不手动递归删存储目录 |
+
+具体[归档入口](../design/project-lifecycle.md#归档的实际边界)与[删除限制](../design/project-lifecycle.md#删除与数据保留)由设计维护。此处不提供实际删除或恢复命令；需要写操作时先确认目标、权限、维护窗口和可恢复性。
+
+## 文档保存与删除的只读分诊
+
+先记录原 Project/document ID、请求时点、HTTP status/Problem code 和部署版本；上传未取得 ID 时保留原路径等受控本地信息，不复制正文、存储凭据或内部 key 到共享报告。使用当前有权访问的元数据/内容确认事实，不以管理员换号探测。
+
+| 症状 | 核对与停止条件 |
+| --- | --- |
+| 同名 409，但存储占用增加 | blob 写入先于元数据约束；可能留下失败上传对象，不把 409 当作零副作用，不重复上传来验证 |
+| 目录只成功一部分 | 按文件分清已确认与未知，done 不是成功数；不重新发送整个目录，也不从同名项推断原请求已成功 |
+| 删除报错后列表已无原 ID | 元数据可能已提交；404 不能让当前 DELETE 恢复 blob 清理，不循环重试或改删同路径新 ID |
+| 204 后对象仍在 | 当前 S3 适配器可能吞掉权限等错误；由存储负责人在授权范围核对原对象，不递归删除 Project 前缀 |
+| 上传可用，下载失败或内容不符 | 区分非 Latin-1 文件名 header、元数据/实际字节差异与存储可用性；不要修改 checksum 来掩盖损坏 |
+
+规则正本是[保存与清理](../design/document-lifecycle.md#删除与历史引用)。目前没有持久清理回执和通用修复 CLI；需要删除孤立对象、调整配额或恢复数据时先取得明确目标和维护授权。Run 已冻结输入的问题转[资源排障](#9-资源快照排障)，不以重传同名文件修复原 Run。
 
 ## 1. 運用原則
 
@@ -84,6 +114,17 @@ docker compose --env-file .env logs --no-log-prefix --tail=200 worker
 
 这些是回归入口，不是本环境已通过的证据。真实 DB 锁竞争、准备期崩溃、跨存储恢复和外部副作用不由纯 fake 测试覆盖。
 
+### 结果与评价的只读分诊
+
+先保留发生时间、环境版本、Run / Result / Evaluation ID 和原 HTTP status/Problem code，不把完整结果、评价正文或凭据复制到共享日志。仅用当前有权访问的 detail/评价历史核对：
+
+- SUCCEEDED 与 PARTIAL/BLOCKED 可以并存；[执行成功与业务判断](../design/results-evaluation.md#先分清四种事实)分开看。不为修摘要改 SQL、重开终态 Run 或重新执行外部写入。
+- 模型摘要写 APPLIED 时，仍以平台 Proposal/Effect/read-back 为准；引用字符串与 Artifact 计数不是内容可读的证明。缺口按[结果校验边界](../design/results-evaluation.md#结果校验的实际保证)登记，不按自由 URL 下载来“补证据”。
+- 评价 400 先核对 pointer 相对的[原结果内容](../design/results-evaluation.md#修订指向哪份原值)，409 核对 Result 是否存在；401/403 返回认证分诊。没有评价与没有 Result 是不同情况。
+- 响应丢失后按[评价结果未知](../design/results-evaluation.md#提交未知与界面责任)处理。刷新历史只辅助判断，不能按同文/时间推断是哪次提交；不自动重发或删除疑似重复评价来修复界面。
+
+这些是只读排障入口，不会执行模型、评价追加、外部修改或数据库修复；真实故障注入另走专用环境验收。
+
 ### 认证故障的只读分诊
 
 先记录发生时间、公开 path（不含业务参数）、HTTP status、Problem code、request_id 与环境/image 版本。只看已发生请求中 header 是否存在、cookie 属性和页面刷新顺序，不复制密码、Cookie / Set-Cookie 原值、CSRF、HAR 全量导出或凭据表单截图。
@@ -96,7 +137,7 @@ docker compose --env-file .env logs --no-log-prefix --tail=200 worker
 | 403 写凭据拒绝 | `csrf_rejected`：核对 Origin 的 scheme/host/port、header 类型及是否换过登录 cookie。同一 v2 会话的正常读取不使另一页 CSRF 失效；不关闭 CSRF，不改成不安全 cookie |
 | 403 管理权限不足 | `administrator_required`：需要 system ADMIN；ProjectMember 不等于 ADMIN，不修改角色数据绕过 |
 | 404 资源不存在 | 也可能是越权的隐藏结果；只核对已有授权的 Project/资源上下文，不自动切换项目或枚举其他 ID |
-| 409 项目已归档 | `project_archived`：当前项目写入被拒绝；可读不等于可写，不为诊断擅自恢复项目 |
+| 409 项目已归档 | `project_archived`：要求 ACTIVE 的业务写入被拒绝；不代表所有管理/取消入口均关闭，见[归档边界](../design/project-lifecycle.md#归档的实际边界)。不为诊断擅自恢复项目 |
 | 429 暂时限流 | `login_rate_limited`：工作副本含来源/账号/组合和有限退避；读取 Retry-After 后停止快速重试，不判断是哪个维度或账号状态。按[登录防护分诊](#登录防护的排查与恢复)核对版本和来源 |
 | 503 防护不可用 | `login_protection_unavailable`：登录短期防护无法确认；不当成密码错误。检查指定实例的 Redis 可用性/权限/超时与版本，不重跑 bootstrap 或删除配额 |
 | 422 请求校验错误 | `validation_error` 或账户用例的 `invalid_user_request`：缺失必需 header、结构或业务输入不合法；先按契约修正，不展示可能带密码的原输入 |
@@ -147,6 +188,10 @@ docker compose --env-file .env logs --no-log-prefix api worker \
 - 取消、成员资格失效或 scope 改变不能靠复用旧答案/批准继续执行。等待期限不等于数据保留期限；自动清理仍属独立设计。
 
 排障关联 Run/Segment/Attempt/Session/Interaction ID。PRIMARY 同时最多一个 ACTIVE；符合[子分析设计](../design/subagents.md)的 SUBAGENT/BRANCH 可以并行，不能只凭 ACTIVE 总数判定重复执行。
+
+普通答复的[410 与过期提交](../design/user-interactions.md#过期与拒绝响应)不同于事务回滚。先读取已保存的交互状态、答复、Segment 和事件，再判断是回答成功、过期续行还是仍在等待；不凭页面报错补造答案或更换 key。外部批准继续按 Proposal / Effect 核对，Evaluation 不负责恢复 Run。
+
+若只有 EFFECT_APPROVAL Interaction 而没有对应 Proposal，可能落入已识别的[悬空批准入口](../design/user-interactions.md#普通提问不能代替外部批准)。保留脱敏 ID 与已有事件，核对创建路径；不要调用通用答复、手写审批记录或把它当成普通超期恢复。该风险的源码核对不是现成修复工具，处理需按获准的代码修正或取消流程进行。
 
 ### 8.2 Session resume / fork / replace
 

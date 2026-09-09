@@ -2,7 +2,7 @@
 
 React + TypeScript の application shell。ページの責務と現在の hash route は [Workspace 設計](../../docs/design/workspace.md)、次期の流れ表示は [Task Flow 設計](../../docs/design/task-flow.md)を参照する。
 
-[画面から選ぶ](#画面から実装へ進む) · [ログイン](#ログインと書込失敗を切り分ける) · [アカウント管理の準備](#アカウント管理を接続する) · [生成表示](#生成表示と業務-module-を分ける) · [用量](#子分析と用量を読む) · [調度](#調度の保存と管理を引き継ぐ) · [開発と検証](#開発と検証)
+[画面から選ぶ](#画面から実装へ進む) · [ログイン](#ログインと書込失敗を切り分ける) · [アカウント管理の準備](#アカウント管理を接続する) · [結果と評価](#結果と人工評価を接続する) · [生成表示](#生成表示と業務-module-を分ける) · [用量](#子分析と用量を読む) · [調度](#調度の保存と管理を引き継ぐ) · [開発と検証](#開発と検証)
 
 ## 構成と境界
 
@@ -25,15 +25,36 @@ Session token を Web storage に置かない。Project/Run/Task ID はサーバ
 | 変更したい体験 | 入口と共有 logic |
 | --- | --- |
 | ログイン・現在の Session・登出 | [App](src/App.tsx) → [LoginPage](src/pages/LoginPage.tsx) / [auth client](src/api/auth.ts)。Server の token を memory に保持し、Project 選択や Run の retry と分ける |
+| Project の選択・編集・アーカイブ・削除 | [Project 管理の接続案内](#project-の切替と管理を追う) → ProjectsPage / projectContext。メンバー API の存在を画面入口と読み替えない |
 | Skill の Preview・公開・Project 有効化 | [SkillsPage](src/pages/SkillsPage.tsx) → [skills API / validator](src/api/skills.ts)。組合の表示設定は [ProjectsPage](src/pages/ProjectsPage.tsx)と分ける |
 | タスク選択・即時実行・時刻起動 | [TasksPage](src/pages/TasksPage.tsx)、[TaskLaunchFields](src/components/TaskLaunchFields.tsx)、[taskDraft](src/lib/taskDraft.ts)、[ScheduleDialog](src/components/ScheduleDialog.tsx) |
+| 文書の upload・tree・preview・削除 | [文書管理の接続案内](#project-文書の管理を追う) → DocumentManagerPanel / documents client。現在の資産一覧と Run の凍結一覧を分ける |
 | 文書の選択と凍結範囲の表示 | [DocumentSourceField](src/components/DocumentSourceField.tsx) / [documentSelection](src/lib/documentSelection.ts) → [runs API](src/api/runs.ts) / [runResources validator](src/api/runResources.ts) → [RunDocumentSnapshots](src/components/RunDocumentSnapshots.tsx) |
 | 一つの Run の観察・再接続 | [WorkspacePage](src/pages/WorkspacePage.tsx)、[agentStream](src/lib/agentStream.ts)、[runReplay](src/lib/runReplay.ts)、[events API](src/api/events.ts) |
 | 作成応答が失われた後の原要求確認 | [runSubmission](src/lib/runSubmission.ts) → [useRunSubmission](src/hooks/useRunSubmission.ts) → [RunSubmissionPanel](src/components/RunSubmissionPanel.tsx) → 確認後は Workspace の既存 lifecycle |
 | 待処理 Run の発見と回答・承認 | [PendingActionsPanel](src/components/PendingActionsPanel.tsx) は発見、[RunResultPanel](src/components/RunResultPanel.tsx) は回答/承認と結果表示 → [runs API](src/api/runs.ts) / [effects API](src/api/effects.ts) |
+| 原結果と人工修訂 | [結果・評価の接続案内](#結果と人工評価を接続する) → RunResultPanel / evaluations client。通常回答や批准とは別の提出 protocol |
 | 画面横断の用語・三語表示 | [messages catalog](src/lib/i18n/messages.ts)、[zh](src/lib/i18n/zh.ts) / [ja](src/lib/i18n/ja.ts) / [en](src/lib/i18n/en.ts) |
 
 表示は server の事実を投影する。送信開始を回答受理、APPROVED を外部変更完了、子分析への予算分配を実消費と読み替えない。判定の正本は [Workspace](../../docs/design/workspace.md)、[Effect](../../docs/design/repository-effects.md)、[予算](../../docs/design/run-budgets.md)を参照する。
+
+### Project の切替と管理を追う
+
+[ProjectsPage](src/pages/ProjectsPage.tsx) → [projects client](src/api/projects.ts) / [App](src/App.tsx) / [projectContext](src/lib/projectContext.ts)が入口。[失効リンクの設計](../../docs/design/project-lifecycle.md#项目选择与失效链接)と現行 fallback を照合する。明示された無効 Project を別の Project に置き換えても安全とは限らず、旧草稿・Run・遅延応答を新 context へ引き継がない。
+
+現行ページは作成/編集、アーカイブ/復元/削除と業務 module を扱う。メンバーの list/add/remove は client まで存在するが、画面から未使用。[アーカイブと削除](../../docs/design/project-lifecycle.md#归档的实际边界)の結果を区別し、404 を別 Project への自動移動、削除 timeout を自動再送に変換しない。
+
+[projectContext test](tests/lib/projectContext.test.ts)は現行 fallback、[ProjectsPage test](tests/pages/ProjectsPage.test.tsx)は純粋 logic と静的描画、[API test](tests/api/authProjects.test.ts)は mock 応答の検査である。実 component の二重 submit、actor/Project 切替、StrictMode と遅延応答は別途検証する。後続の metadata 競合 UI は[版と並行性](../../docs/design/project-lifecycle.md#并发修改不能只看有无行锁)から契約と同時に接続し、User の row_version を流用しない。
+
+### Project 文書の管理を追う
+
+[削除と再アップロードの例](../../docs/design/document-lifecycle.md#一个例子列表消失不等于清理完成)を読み、[DocumentsPage](src/pages/DocumentsPage.tsx) → [DocumentManagerPanel](src/components/DocumentManagerPanel.tsx) → [documents client](src/api/documents.ts)へ進む。現在の API は全件 documents 配列であり、directory は folder の投影である。Run の選択/履歴を現在の tree から再構築しない。
+
+目録 upload は一件ずつ実行し、失敗後も次へ進む。進捗は処理件数で成功数ではない。[未知結果の設計](../../docs/design/document-lifecycle.md#页面与结果未知)に従い、原 file と context、二重 submit、確認待ちの切替、古い一覧/preview/成功応答を検証する。既存の controller abort は server rollback や現在 request の一致を保証しない。
+
+[読取と preview](../../docs/design/document-lifecycle.md#读取下载与预览)の上限・MIME・外部資源の境界を守る。HTML の空 sandbox を生成 Host やネットワーク隔離として流用しない。API validator は基礎型の確認に留まるため、[公開契約](../contracts/README.md#project-文書の保存と読取を読む)と対象 Project/ID、数値/日時/hash の検査を接続する。
+
+[API test](tests/api/documents.test.ts)と [component test](tests/components/DocumentManagerPanel.test.tsx)は mock/純粋 logic/静的描画を確認する。実 component の部分成功・未知・actor/Project 切替・三語/keyboard/狭い画面は別途検証し、input 選択の browser 回帰で文書管理全体を検証済みと扱わない。
 
 ### ログインと書込失敗を切り分ける
 
@@ -58,7 +79,23 @@ Resources の MANAGED 入力は ADMIN が新しい原値を一時的に扱う画
 
 ### 待処理と外部結果を表示する
 
+まず[普通回答・批准・結果評価](../../docs/design/user-interactions.md#先分清三种人工参与)を区別する。InteractionCard は [runs client](src/api/runs.ts)へ question version と回答を送り、Evaluation は別の [evaluations client](src/api/evaluations.ts)を使う。REVIEW の回答と Result の修訂を同じ保存操作にしない。
+
+現在の InteractionCard は submit ごとに新 key を作り、state による button 無効化と unmount abort のみを持つ。[結果不明と現在要求の確認](../../docs/design/user-interactions.md#答复界面与结果未知)は未完成であり、同じ DOM tick の二重 submit、abort を無視して届く成功、actor/Run 切替後の callback を別途防ぐ。原 payload/key の確認を Run 作成の retry と混同しない。
+
+410 は回答を採用しなかったことを示すが、過期と次 Segment が既に commit されている場合がある。重放 response の Run status も QUEUED 固定ではない。[普通回答の状態表示](../../docs/design/workspace.md#普通答复与续行状态)から対応し、[RunResultPanel test](tests/components/RunResultPanel.test.tsx)の静的描画だけで実時序や多画面を検証済みと扱わない。
+
 批准要求の応答喪失は[専用の状態設計](../../docs/design/workspace.md#审批请求与执行结果)を確認する。現行 ChangeProposalCard はクリックごとに新 key を生成するため、原決定の安全な再確認は未完成。Run 作成の再送実装があることを、このカードにも実装済みという根拠にしない。[controlledEffects API test](tests/api/controlledEffects.test.ts)と[RunResultPanel test](tests/components/RunResultPanel.test.tsx)から接続し、三語・actor/Project 切替と browser 上の応答喪失まで検証する。
+
+### 結果と人工評価を接続する
+
+[結果の四つの事実](../../docs/design/results-evaluation.md#先分清四种事实)を [RunResultPanel](src/components/RunResultPanel.tsx) と [evaluations client](src/api/evaluations.ts)へ投影する。AI の原値・人工提案・理由は並列表示し、confidence を正解率へ変換しない。現行はモデルの効果摘要と平台の Proposal/Effect を別々に表示しており、項目ごとの照合は無い。後続では出所を明示して平台の記録を優先し、未検証 Artifact を download link にしない。
+
+[原値の指針](../../docs/design/results-evaluation.md#修订指向哪份原值)は detail.result.data が根であり、API 全体ではない。現行 form は一つの修訂、API は複数を受理する。JSON として読める提案入力は型付き値、読めない入力は文字列になるが、保存しても元 Result の Schema へ自動適用されない。
+
+[評価の結果不明と切替](../../docs/design/results-evaluation.md#提交未知与界面责任)に従って、同時 submit、一覧の遅延上書き、旧 actor/Project/Run/Result の応答を守る。現在の state 無効化と unmount abort は十分な保証ではなく、POST に幂等契約も無い。履歴に同じ文字があっても原要求の成功確認と断定しない。
+
+回帰は [controlledEffects](tests/api/controlledEffects.test.ts)の評価 API case と [RunResultPanel](tests/components/RunResultPanel.test.tsx)の静的描画から始める。unknown/401/403/409 の表示、正常・歴史・異常形状、三語と実ブラウザの操作時序は別途確認し、静的 markup の通過だけで完了としない。
 
 ### Skill と計画を表示する
 
@@ -86,9 +123,9 @@ HTTP 待機 timeout と Run 取消は別操作である。受信できなかっ�
 
 ## アカウント管理を接続する
 
-Backend の管理 route と Schema/example は存在するが、アカウント画面・hash route・専用 client は未接続。[アカウント画面の責務](../../docs/design/user-lifecycle.md#生效与界面)は Project に依存しない本人操作と ADMIN の組織管理を分ける。UI language / Project preference の画面や ProjectMember 管理を改密・失効の入口に見立てない。
+Backend の管理 route、Schema/example と [users client](src/api/users.ts)は存在するが、アカウント画面・hash route は未接続。工作副本には [UserAccountPanel](src/components/UserAccountPanel.tsx)、[UserSecurityEvents](src/components/UserSecurityEvents.tsx)と [useUserRequest](src/hooks/useUserRequest.ts)もあるが、App から使用されておらず本輪は検証していない。既存部品を無いものとして再作成せず、利用可能な画面とも扱わない。[アカウント画面の責務](../../docs/design/user-lifecycle.md#生效与界面)は Project に依存しない本人操作と ADMIN の組織管理を分ける。UI language / Project preference の画面や ProjectMember 管理を改密・失効の入口に見立てない。
 
-[管理契約の対応表](../contracts/README.md#ユーザー管理の公開面を準備する)から既存 Schema と route を照合し、未同期の OpenAPI を解消する。次に [HTTP 共通処理](src/api/http.ts)を使う資源別 client/validator と [API barrel](src/api/index.ts)、[App](src/App.tsx) / [routing](src/lib/routing.ts)、[messages](src/lib/i18n/messages.ts)と三語 catalog へ進む。型だけ作ってページを接続済みと扱わない。
+[管理契約の対応表](../contracts/README.md#ユーザー管理の公開面を準備する)から既存 Schema と route を照合し、未同期の OpenAPI を解消する。専用 client は [HTTP 共通処理](src/api/http.ts)、response validator、[API barrel](src/api/index.ts)へ接続済みで、[client test](tests/api/users.test.ts)もある。再実装せず、[App](src/App.tsx) / [routing](src/lib/routing.ts)、[messages](src/lib/i18n/messages.ts)と三語 catalog へ進む。client の abort/対象 ID 検査を、画面の現在 request/actor 判定や本人 response の照合まで完了した証拠と扱わない。
 
 検索結果は server の items/total/limit/offset を保持し、先頭 page の client filter で全件管理を代用しない。offset paging は一覧全体の固定 snapshot ではなく、更新中の件数変化も表示上考慮する。詳しい意味は[版と問い合わせ](../../docs/design/user-lifecycle.md#版本查询与公开数据)へ集約する。
 

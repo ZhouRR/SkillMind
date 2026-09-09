@@ -2,9 +2,9 @@
 
 FastAPI API と ARQ Worker が同じ `projectmind` package を共有するモジュラーモノリス。API は認証/入出力、service は業務調整と transaction の境界、repository は query/lock/永続化、AgentEngine/Provider は実行境界を担当する。
 
-[変更から選ぶ](#一つの変更を追う) · [認証](#認証と-secret-の境界を追う) · [入力準備](#入力準備の接続を引き継ぐ) · [停止](#実行の取消と停止を追う) · [予算](#予算と子分析の接続を追う) · [起動と検証](#起動と検証) · [運用 CLI](#運用-cli-と停止境界を確認する)
+[変更から選ぶ](#一つの変更を追う) · [認証](#認証と-secret-の境界を追う) · [文書資産](#project-文書の保存と清理を追う) · [入力準備](#入力準備の接続を引き継ぐ) · [停止](#実行の取消と停止を追う) · [予算](#予算と子分析の接続を追う) · [起動と検証](#起動と検証) · [運用 CLI](#運用-cli-と停止境界を確認する)
 
-[ユーザー管理](#ユーザー管理の接続を引き継ぐ) · [Skill 公開](#skill-の公開と-project-可視性を追う) · [外部変更](#承認から外部変更まで追う) · [調度](#schedule-の認領と回写を追う) · [生成 module](#生成-module-の前置実装を読む)
+[ユーザー管理](#ユーザー管理の接続を引き継ぐ) · [Skill 公開](#skill-の公開と-project-可視性を追う) · [回答と期限](#通常回答と期限処理を追う) · [結果と評価](#結果検証と人工評価を追う) · [外部変更](#承認から外部変更まで追う) · [調度](#schedule-の認領と回写を追う) · [生成 module](#生成-module-の前置実装を読む)
 
 [システム構成](../../docs/overview/architecture.md) · [ローカル開発](../../docs/development/local-development.md) · [変更規約](../AGENTS.md)
 
@@ -16,6 +16,7 @@ FastAPI API と ARQ Worker が同じ `projectmind` package を共有するモジ
 | [skills](src/projectmind/skills/) / [compositions](src/projectmind/compositions/) | 導入・解釈・公開・組織資産・Project 有効化 |
 | [runs](src/projectmind/runs/) / [worker](src/projectmind/worker/) | Segment/Attempt、Outbox、lease、待機・復旧・終態 |
 | [agent](src/projectmind/agent/) | SDK adapter、Tool Gateway、workspace、物化、Evidence、子 Agent |
+| [evaluations](src/projectmind/evaluations/) | 不変 Result に対する人工評価と修訂の追加・履歴。結果の生成や外部 apply は行わない |
 | [integrations](src/projectmind/integrations/) / [documents](src/projectmind/documents/) | 資源・Secret・binding・Project 文書 |
 | [effects](src/projectmind/effects/) / [schedules](src/projectmind/schedules/) | 受控 write・時刻起動 |
 | [auth](src/projectmind/auth/) / [users](src/projectmind/users/) / [projects](src/projectmind/projects/) | 会話・初期化 / アカウント管理 / Project とメンバー。users の API と未接続の消費側は下記参照 |
@@ -30,8 +31,11 @@ FastAPI API と ARQ Worker が同じ `projectmind` package を共有するモジ
 | --- | --- |
 | ログイン・Project 認可・Secret | [認証](../../docs/design/authentication.md) / [Secret](../../docs/design/secret-storage.md) → [接続案内](#認証と-secret-の境界を追う)。現在の利用者、凍結権限、外部 credential を分ける |
 | アカウントの作成・変更・会話失効 | [ユーザー lifecycle](../../docs/design/user-lifecycle.md) → [管理の接続案内](#ユーザー管理の接続を引き継ぐ)。ProjectMember 管理とは別の用例 |
+| Project の選択・メンバー・アーカイブ・削除 | [Project lifecycle](../../docs/design/project-lifecycle.md) → [管理の接続案内](#project-とメンバーの管理を追う)。Run 零件と参照不存在は別の判断 |
+| 文書の upload・download・削除 | [文書 lifecycle](../../docs/design/document-lifecycle.md) → [保存と清理の接続案内](#project-文書の保存と清理を追う)。DB metadata、blob、Run の参照は別々に確認する |
 | Run の作成と要求再送 | [作成と幂等](../../docs/design/run-creation.md) → [意図](src/projectmind/runs/creation_request.py) / [再確認](src/projectmind/runs/creation_replay.py) → [route](src/projectmind/api/routes/runs.py) / [service](src/projectmind/runs/service.py) / [repository](src/projectmind/runs/repository.py) |
 | Worker の復旧・ユーザー応答 | [状態速查](../../docs/design/domain-model.md#run-状态速查) / [Runtime](../../docs/design/agent-runtime.md) → [Executor](src/projectmind/worker/executor.py) / [runs](src/projectmind/runs/)。Attempt と Segment を分ける |
+| 結果の検証・原値・人工評価 | [結果の正本](../../docs/design/results-evaluation.md) → [結果と評価の接続案内](#結果検証と人工評価を追う)。構造、引用の信頼性、業務品質を分ける |
 | 取消・Worker 終了・後処理 | [監督と停止](../../docs/design/run-supervision.md) → [接続案内](#実行の取消と停止を追う)。Run 終態と process 停止を分ける |
 | 時刻起動・停止後の挙動 | [調度](../../docs/design/task-scheduling.md) → [認領と回写](#schedule-の認領と回写を追う)。認領・作成・回写は別 transaction |
 | Agent が何を読めるか | [資源快照](../../docs/design/resource-snapshots.md) → [context_builder](src/projectmind/agent/context_builder.py) / [Gateway](src/projectmind/agent/tool_gateway.py) → 対象 Provider |
@@ -46,6 +50,24 @@ FastAPI API と ARQ Worker が同じ `projectmind` package を共有するモジ
 新旧の作成 hash は同一ではない。互換処理を省いて過去 Run の snapshot/hash を書き換えたり、API/調度ごとに別の比較実装を追加したりしない。現在の未完了箇所と検証範囲は[計画](../../docs/planning/roadmap.md#13-当前执行状态)を参照する。
 
 資源投影の変更では[文書契約の対応表](../contracts/README.md#run-文書契約を読む)から、example、実 API 応答のテストと Web validator まで辿る。[契約変更の手順](../../docs/development/contract-workflow.md)で OpenAPI、歴史データと版互換も確認する。投影のために保存済み snapshot を更新しない。
+
+## Project とメンバーの管理を追う
+
+[Project lifecycle](../../docs/design/project-lifecycle.md)を読み、[projects route](src/projectmind/api/routes/projects.py) → [service](src/projectmind/projects/service.py) → [repository](src/projectmind/projects/repository.py)へ進む。通常業務の ProjectWriteActor と管理用例の WriteActor + ADMIN 判定は同じ制約ではない。アーカイブ後の読取・取消・管理の違いを設計で確認する。
+
+削除の `_PROJECT_OWNED_MODELS` は完全な参照台帳ではない。[削除門禁](../../docs/design/project-lifecycle.md#删除门禁的修正要求)に従い、TaskSchedule の RESTRICT、Run 作成との競争、ProjectDocument の blob を [models](src/projectmind/db/models.py) / [migration](migrations/versions/) / 保存側と照合する。未知の DB エラーを既存の「Run 履歴あり」へ畳まず、清理範囲を明示する。
+
+既存回帰は [repository](tests/projects/test_project_repository.py)、[service](tests/projects/test_project_service.py)、[Project API](tests/api/test_project_api.py)、[preference API](tests/api/test_project_preference_api.py)。mock SQL/サービスは実 DB の外部キー・競争・rollback を検証しない。公開変更は[契約入口](../contracts/README.md#project-と-membership-の契約を読む)、消費側は[Web 入口](../web/README.md#project-の切替と管理を追う)へ渡す。
+
+## Project 文書の保存と清理を追う
+
+[文書の保存境界](../../docs/design/document-lifecycle.md#上传的三个边界)から [documents route](src/projectmind/api/routes/documents.py) → [service](src/projectmind/documents/service.py) → [repository](src/projectmind/documents/repository.py) / [storage](src/projectmind/storage/)へ進む。upload は blob が先、delete は metadata commit が先であり、storage を跨ぐ原子 transaction は無い。
+
+上限は [UploadLimits](src/projectmind/storage/validation.py) / [Settings](src/projectmind/core/settings.py) / API startup を確認する。読み済み size の検査と body の読み取り上限、metadata 使用量と bucket 全占用、MIME 申告と実形式を分ける。[保存の信頼性](../../docs/design/document-lifecycle.md#保存可靠性的修正要求)を実装するときは quota の予約、原要求の確認、commit 不明と補償の競争を同時に扱う。
+
+通常 download は [document source](src/projectmind/documents/source.py) の read_frozen_document を通らない。実 byte の検証と [S3 adapter](src/projectmind/storage/s3.py) の error 分類、download header を[読取設計](../../docs/design/document-lifecycle.md#读取下载与预览)と照合する。[削除と引用](../../docs/design/document-lifecycle.md#删除与历史引用)は単文書と Project 全体の両経路に適用し、JSON 内の Run/Schedule 参照も確認する。
+
+既存回帰は [documents](tests/documents/)、[storage](tests/storage/test_file_storage.py)、[Document API](tests/api/test_document_api.py)。主に fake session/in-memory storage/API fake であり、実 DB の競争や MinIO の削除失敗まで証明しない。公開面は[契約](../contracts/README.md#project-文書の保存と読取を読む)、UI は[Web](../web/README.md#project-文書の管理を追う)、実運用の只読確認は[文書分診](../../docs/operations/runbook.md#文档保存与删除的只读分诊)へ渡す。
 
 ## 認証と Secret の境界を追う
 
@@ -63,7 +85,7 @@ FastAPI API と ARQ Worker が同じ `projectmind` package を共有するモジ
 
 現在の v2 は GET session で同じ CSRF を返し、User → AuthSession の lock 後に期限・role snapshot・失効を確認する。[会話 protocol](../../docs/design/authentication.md#会话凭据-v2-与切换要求)と[切替条件](../../docs/operations/deployment.md#会话协议切换检查)を先に読み、DB の version default 1 を不用意に変更しない。旧 cookie の自動移行や旧 API との混在は扱わない。
 
-ユーザー管理は API まで接続された工作副本があり、OpenAPI/Web と全体回帰は未完了。[専用の接続案内](#ユーザー管理の接続を引き継ぐ)から継続し、ProjectMember 管理で代用しない。role snapshot は撤権履歴の代わりにならず、[認証 transaction の範囲](../../docs/design/authentication.md#认证与业务提交不是同一个事务)を全業務の提交まで拡張した保証と扱わない。
+ユーザー管理は管理 API と専用 Web client の工作副本があり、OpenAPI snapshot / 画面と全体回帰は未完了。[専用の接続案内](#ユーザー管理の接続を引き継ぐ)から継続し、ProjectMember 管理で代用しない。role snapshot は撤権履歴の代わりにならず、[認証 transaction の範囲](../../docs/design/authentication.md#认证与业务提交不是同一个事务)を全業務の提交まで拡張した保証と扱わない。
 
 既存の KEK 名は互換上保持するが、実装はマスター鍵による直接 AES-256-GCM であり DEK/KEK 二層ではない。[鍵更新と復元条件](../../docs/design/secret-storage.md#切换与恢复的顺序)を読み、同じ version label の key 差替えや skipped 件数を復号の検証として扱わない。公開契約は[認証と Secret の索引](../contracts/README.md#認証と-secret-の契約を読む)、画面側は[Web の案内](../web/README.md#ログインと書込失敗を切り分ける)へ進む。
 
@@ -92,11 +114,11 @@ FastAPI API と ARQ Worker が同じ `projectmind` package を共有するモジ
 | 管理 transaction | [domain](src/projectmind/users/domain.py) → [service](src/projectmind/users/service.py) → [repository](src/projectmind/users/repository.py) → [service test](tests/users/test_user_service.py)。認証は [sessions validator](src/projectmind/auth/sessions.py)を共有し、平行実装を作らない |
 | 保存と初期化 | [models](src/projectmind/db/models.py) / [0032](migrations/versions/0032_user_lifecycle.py) → [bootstrap](src/projectmind/auth/bootstrap.py)。初 ADMIN と CREATED の追加呼出しは接続済み。実 DB の親子 INSERT・rollback・並行 bootstrap は別の検証 |
 | 公開入口と防護 | [users route](src/projectmind/api/routes/users.py) / [API startup・middleware](src/projectmind/api/main.py) → [users API test](tests/api/test_users_api.py)。本人改密は来源 gate と AuthService.admit_password_change、各 mutation は actor alias を通る |
-| 消費側への引渡し | [公開同期の案内](../contracts/README.md#ユーザー管理の公開面を準備する) → [Web 接続](../web/README.md#アカウント管理を接続する)。Schema/example は存在するが、OpenAPI snapshot と専用 Web client/page は未完了 |
+| 消費側への引渡し | [公開同期の案内](../contracts/README.md#ユーザー管理の公開面を準備する) → [Web 接続](../web/README.md#アカウント管理を接続する)。Schema/example と client は存在するが、OpenAPI snapshot とアカウント page/route は未完了 |
 
 管理 lock の順序、授権の判定点、最後の活動 ADMIN、持久失効と監査の正本は[管理 transaction](../../docs/design/user-lifecycle.md#事务与并发)。middleware が生成した[相関 ID](../../docs/design/user-lifecycle.md#审计与请求关联)を route から渡すが、ID を幂等 key として再利用しない。UserSecurityEvent の存在を全 DB 書込への UPDATE/DELETE 防止機構と読まない。
 
-専用回帰は二層ある。users test は実 service と mock repository/transaction、API test は実 middleware/route と [fake services](tests/api/fakes.py)を使う。同時実行では tests/users の裸 conftest import が API 側と衝突するため、まず収集を修復する。別々の通過を全体成功として報告せず、失敗命令と現在の実施範囲は[計画 R05](../../docs/planning/roadmap.md#r05-领域与身份安全)から確認する。
+専用回帰は二層ある。users test は実 service と mock repository/transaction、API test は実 middleware/route と [fake services](tests/api/fakes.py)を使う。工作副本は [user_harness](tests/users/user_harness.py)を分離済みで、旧 conftest 衝突は現在の合跑では再現しない。OpenAPI 一致性の失敗は別に残るため、収集成功を全体通過と扱わず、証拠と実施範囲は[計画 R05](../../docs/planning/roadmap.md#r05-领域与身份安全)から確認する。
 
 次に [OpenAPI 一致性 test](tests/contracts/test_contracts.py)、Web と[管理の受入表](../../docs/design/user-lifecycle.md#开发接续与验收)へ進む。今回の文書整理では既存の実装・test・公開契約を変更していない。
 
@@ -143,6 +165,33 @@ Worker startup は必須 store と総量設定を物化器へ渡し、Tool は `
 
 初回は UUID 子 directory だけでなく namespace 全体を独占作成する。既存の空 namespace も中断の痕跡として拒否し、別 UUID で再取得しない。READY の再訪は新規作成を通さない。[準備中断の規則](../../docs/design/resource-snapshots.md#准备中断与再次使用)に従い、孤立現場を消して再実行する手順を追加しない。
 [文書物化 test](tests/agent/test_document_materialization.py)、[全物化 test](tests/agent/test_workspace_materializer.py)、[Tool test](tests/agent/test_workspace_provider.py)、[Runtime context test](tests/agent/test_runtime_context.py)を消費側として確認する。旧 fixture の不足を理由に本番回执を optional に戻さず、明示的な test store と実 DB 検証を分ける。migration head、構造検査や以前の回帰だけで機能が有効とは判断しない。
+
+## 通常回答と期限処理を追う
+
+[普通の回答・外部批准・結果評価](../../docs/design/user-interactions.md#先分清三种人工参与)を区別する。質問/回答/期限/Worker の再開は別 transaction であり、API の失敗を一律 rollback と扱わない。
+
+| 接続点 | コードと検証の入口 |
+| --- | --- |
+| 質問の許可と形状 | [interaction validator](src/projectmind/runs/interaction.py) → [Executor](src/projectmind/worker/executor.py)。Schema に EFFECT_APPROVAL が残り、通常経路で Proposal の無い待機を作り得る点は[修正要求](../../docs/design/user-interactions.md#普通提问不能代替外部批准)を参照 |
+| 一回の回答と重放 | [runs route](src/projectmind/api/routes/runs.py) → [RunService](src/projectmind/runs/service.py) → [interaction repository](src/projectmind/runs/repository_interactions.py)。Run → Segment → Interaction lock、原 version/key/hash、Response と次 Segment/Outbox を追う |
+| 期限の確定 | 同 repository の回答時判定と期限回復。service は期限処理を commit してから例外を返すため、410 を「変更なし」に読み替えない |
+| 結果評価 | [独立した結果・評価の接線](#結果検証と人工評価を追う)。Result の原値から修訂を追加し、Run の継続や回答の幂等処理には入らない |
+| 局部回帰 | [interaction](tests/runs/test_interaction.py)、[repository](tests/runs/test_run_repository.py)、[期限 commit](tests/runs/test_effect_decision_service.py)、[Run API](tests/api/test_run_api.py)、[評価](tests/evaluations/) / [評価 API](tests/api/test_evaluation_api.py) |
+
+期限回復の入口は `recover_expired_interactions`。回帰の mock transaction は実 DB の commit/rollback や回答と期限処理の競争を証明しない。古い test の docstring にある HTTP 番号より、現在の route と実 response を確認する。原 actor の重放制約、無提案の批准拒否、Web の応答喪失は[受入条件](../../docs/design/user-interactions.md#验收条件)に従って別々に接続する。
+
+## 結果検証と人工評価を追う
+
+[結果検証の実際の保証](../../docs/design/results-evaluation.md#结果校验的实际保证)を最初に確認する。Schema 通過、参照件数、モデルの APPLIED 宣言を、証拠の内容・添付の保存・外部実行の証明へ読み替えない。
+
+| 接続点 | コードと検証の入口 |
+| --- | --- |
+| 凍結出力の検証 | [result_validation](src/projectmind/agent/result_validation.py) / [outcome](src/projectmind/agent/outcome.py) → [validator test](tests/agent/test_result_validation.py)。Artifact と効果摘要の未検査位置を含めて読む |
+| 終態保存 | [Executor](src/projectmind/worker/executor.py) → [service](src/projectmind/runs/service.py) / [repository](src/projectmind/runs/repository.py) → [finalization test](tests/runs/test_execution_finalization.py)。候補の検証と lock 後の取消判定を分ける |
+| 人工修訂の原値 | [evaluation domain](src/projectmind/evaluations/domain.py) / [repository](src/projectmind/evaluations/repository.py) → [domain・repository test](tests/evaluations/)。Pointer は保存した内容の根から解決する |
+| 公開と履歴 | [evaluations route](src/projectmind/api/routes/evaluations.py) / [service](src/projectmind/evaluations/service.py) → [API test](tests/api/test_evaluation_api.py)。CSRF、Project 所有、Result 無しの 409、追加後の応答を確認する |
+
+評価 transaction は Result 生成と別で、現在は原要求の重複排除も履歴のページングも無い。[修訂と提出の境界](../../docs/design/results-evaluation.md#提交未知与界面责任)に従い、Backend / Schema / Web を同期する。mock session の並行追加 test は UUID と原値の検証であり、実 DB の commit/rollback や撤権競争を証明しない。
 
 ## 実行の取消と停止を追う
 

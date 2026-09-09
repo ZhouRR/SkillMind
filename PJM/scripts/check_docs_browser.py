@@ -28,6 +28,60 @@ TASK_TARGETS = (
     ("R13 全量审计", "r13-全量契约与最终审计"),
 )
 SECTION_TARGETS = (
+    ("docs/design/document-lifecycle.md", "一个例子列表消失不等于清理完成"),
+    ("docs/design/document-lifecycle.md", "身份目录与公开面"),
+    ("docs/design/document-lifecycle.md", "上传的三个边界"),
+    ("docs/design/document-lifecycle.md", "保存可靠性的修正要求"),
+    ("docs/design/document-lifecycle.md", "读取下载与预览"),
+    ("docs/design/document-lifecycle.md", "删除与历史引用"),
+    ("docs/design/document-lifecycle.md", "引用保护与清理的修正要求"),
+    ("docs/design/document-lifecycle.md", "页面与结果未知"),
+    ("docs/design/document-lifecycle.md", "开发接续与验收"),
+    ("docs/operations/runbook.md", "文档保存与删除的只读分诊"),
+    ("PJM/backend/README.md", "project-文書の保存と清理を追う"),
+    ("PJM/contracts/README.md", "project-文書の保存と読取を読む"),
+    ("PJM/web/README.md", "project-文書の管理を追う"),
+    ("docs/design/project-lifecycle.md", "一个例子归档不是停止或删除"),
+    ("docs/design/project-lifecycle.md", "项目身份与成员资格"),
+    ("docs/design/project-lifecycle.md", "成员管理的现状与目标"),
+    ("docs/design/project-lifecycle.md", "项目选择与失效链接"),
+    ("docs/design/project-lifecycle.md", "归档的实际边界"),
+    ("docs/design/project-lifecycle.md", "并发修改不能只看有无行锁"),
+    ("docs/design/project-lifecycle.md", "删除与数据保留"),
+    ("docs/design/project-lifecycle.md", "删除门禁的修正要求"),
+    ("docs/design/project-lifecycle.md", "开发接续与验收"),
+    ("docs/operations/runbook.md", "项目与归档的只读分诊"),
+    ("PJM/backend/README.md", "project-とメンバーの管理を追う"),
+    ("PJM/contracts/README.md", "project-と-membership-の契約を読む"),
+    ("PJM/web/README.md", "project-の切替と管理を追う"),
+    ("docs/design/results-evaluation.md", "先分清四种事实"),
+    ("docs/design/results-evaluation.md", "一个例子执行结束结论仍需修订"),
+    ("docs/design/results-evaluation.md", "结果的形状与读取来源"),
+    ("docs/design/results-evaluation.md", "结果校验的实际保证"),
+    ("docs/design/results-evaluation.md", "引用可信性的修正要求"),
+    ("docs/design/results-evaluation.md", "保存与显示不是同一个提交"),
+    ("docs/design/results-evaluation.md", "评价请求与历史"),
+    ("docs/design/results-evaluation.md", "修订指向哪份原值"),
+    ("docs/design/results-evaluation.md", "提交未知与界面责任"),
+    ("docs/design/results-evaluation.md", "兼容与开发接续"),
+    ("docs/design/results-evaluation.md", "验收条件"),
+    ("docs/operations/runbook.md", "结果与评价的只读分诊"),
+    ("PJM/backend/README.md", "結果検証と人工評価を追う"),
+    ("PJM/contracts/README.md", "結果と人工修訂の契約を読む"),
+    ("PJM/web/README.md", "結果と人工評価を接続する"),
+    ("docs/design/user-interactions.md", "先分清三种人工参与"),
+    ("docs/design/user-interactions.md", "一个例子回答超时不等于什么都没发生"),
+    ("docs/design/user-interactions.md", "提问与答复的实际形状"),
+    ("docs/design/user-interactions.md", "普通提问不能代替外部批准"),
+    ("docs/design/user-interactions.md", "三个提交边界"),
+    ("docs/design/user-interactions.md", "首次答复与原答复重放"),
+    ("docs/design/user-interactions.md", "过期与拒绝响应"),
+    ("docs/design/user-interactions.md", "答复界面与结果未知"),
+    ("docs/design/user-interactions.md", "验收条件"),
+    ("docs/design/agent-runtime.md", "8-用户交互协议"),
+    ("docs/design/workspace.md", "普通答复与续行状态"),
+    ("PJM/backend/README.md", "通常回答と期限処理を追う"),
+    ("PJM/contracts/README.md", "通常回答と評価の契約を読む"),
     ("docs/design/resource-snapshots.md", "用一个例子理解冻结边界"),
     ("docs/design/resource-snapshots.md", "读取清单和资源摘要"),
     ("docs/design/task-scheduling.md", "时间输入与展示的边界"),
@@ -853,6 +907,155 @@ async def check_auth_secret_handoff(page: Page, book: Path, output: Path | None)
         await screenshot(page, output, f"secret-runbook-{width}")
 
 
+async def check_project_lifecycle_handoff(page: Page, book: Path, output: Path | None) -> None:
+    """Project の選択・アーカイブ・削除を正本へ案内し、DB や業務 API は操作しない。"""
+
+    target = "docs/design/project-lifecycle.md"
+    for width in (390, 1440):
+        await page.set_viewport_size({"width": width, "height": 1000})
+        for document, label, anchor in (
+            ("docs/design/domain-model.md", "项目生命周期", ""),
+            ("docs/design/README.md", "アーカイブの具体例", "一个例子归档不是停止或删除"),
+            ("docs/design/workspace.md", "项目选择", "项目选择与失效链接"),
+            ("PJM/backend/README.md", "削除門禁", "删除门禁的修正要求"),
+            ("PJM/contracts/README.md", "Project lifecycle", ""),
+            ("PJM/web/README.md", "失効リンクの設計", "项目选择与失效链接"),
+            ("docs/operations/runbook.md", "删除限制", "删除与数据保留"),
+        ):
+            await page.goto(page_url(book, document))
+            await page.locator("#main").get_by_role("link", name=label, exact=True).click()
+            await expect(page).to_have_url(page_url(book, target, anchor))
+            if anchor:
+                await check_heading(page)
+                await page.reload()
+                await check_heading(page)
+            else:
+                await expect(page.locator("#main")).to_be_focused()
+            await check_layout(page, ("project lifecycle entry", width, document))
+
+        for anchor, header in (
+            ("项目身份与成员资格", "对象"),
+            ("项目选择与失效链接", "场景"),
+            ("归档的实际边界", "入口"),
+            ("删除与数据保留", "现状"),
+        ):
+            await page.goto(page_url(book, target, anchor))
+            table = page.locator("#main .table-scroll").filter(
+                has=page.get_by_role("columnheader", name=header, exact=True)
+            )
+            await expect(table).to_have_count(1)
+            assert await table.evaluate("region => region.scrollWidth <= region.clientWidth"), (
+                "Project behavior and its limit must be readable together",
+                width,
+                anchor,
+            )
+            await check_heading(page)
+            await screenshot(page, output, f"projects-{anchor}-{width}")
+
+        for label, document, anchor in (
+            ("Backend", "PJM/backend/README.md", "project-とメンバーの管理を追う"),
+            ("Web", "PJM/web/README.md", "project-の切替と管理を追う"),
+            ("契约", "PJM/contracts/README.md", "project-と-membership-の契約を読む"),
+        ):
+            await page.goto(page_url(book, target, "开发接续与验收"))
+            await page.locator("#main").get_by_role("link", name=label, exact=True).click()
+            await expect(page).to_have_url(page_url(book, document, anchor))
+            await check_heading(page)
+
+        await page.goto(page_url(book, target, "一个例子归档不是停止或删除"))
+        flow = page.locator("#main pre").filter(has_text="Project P")
+        await expect(flow).to_have_count(1)
+        assert await flow.evaluate("region => region.scrollWidth <= region.clientWidth")
+        await screenshot(page, output, f"projects-example-{width}")
+
+        if not await page.locator("#search").is_visible():
+            await page.get_by_role("button", name="目录", exact=True).click()
+        await page.locator("#search").fill("project-lifecycle.md")
+        first = page.locator("#navigation .search-hit > a").first
+        assert (await first.get_attribute("href") or "").startswith(f"#{target}::")
+        await first.click()
+        await expect(page).to_have_url(page_url(book, target))
+        await expect(page.locator("#main")).to_be_focused()
+        if not await page.locator("#search").is_visible():
+            await page.get_by_role("button", name="目录", exact=True).click()
+        await page.locator("#search").fill("")
+
+
+async def check_document_lifecycle_handoff(page: Page, book: Path, output: Path | None) -> None:
+    """文書の保存と清理を実クリックで読み分け、upload や bucket 操作は行わない。"""
+
+    target = "docs/design/document-lifecycle.md"
+    for width in (390, 1440):
+        await page.set_viewport_size({"width": width, "height": 1000})
+        for document, label, anchor in (
+            ("docs/design/domain-model.md", "文档生命周期", ""),
+            ("docs/design/README.md", "削除と再アップロードの例", "一个例子列表消失不等于清理完成"),
+            ("docs/design/resource-snapshots.md", "项目文档生命周期", ""),
+            ("docs/design/workspace.md", "文档删除示例", "一个例子列表消失不等于清理完成"),
+            ("PJM/backend/README.md", "文書の保存境界", "上传的三个边界"),
+            ("PJM/contracts/README.md", "文書 lifecycle", ""),
+            ("PJM/web/README.md", "未知結果の設計", "页面与结果未知"),
+            ("docs/operations/runbook.md", "保存与清理", "删除与历史引用"),
+        ):
+            await page.goto(page_url(book, document))
+            await page.locator("#main").get_by_role("link", name=label, exact=True).click()
+            await expect(page).to_have_url(page_url(book, target, anchor))
+            if anchor:
+                await check_heading(page)
+                await page.reload()
+                await check_heading(page)
+            else:
+                await expect(page.locator("#main")).to_be_focused()
+            await check_layout(page, ("document asset entry", width, document))
+
+        for anchor, header in (
+            ("一个例子列表消失不等于清理完成", "观察"),
+            ("身份目录与公开面", "公开操作"),
+            ("上传的三个边界", "当前检查"),
+            ("删除与历史引用", "失败或变化"),
+        ):
+            await page.goto(page_url(book, target, anchor))
+            table = page.locator("#main .table-scroll").filter(
+                has=page.get_by_role("columnheader", name=header, exact=True)
+            )
+            await expect(table).to_have_count(1)
+            assert await table.evaluate("region => region.scrollWidth <= region.clientWidth"), (
+                "Document action and its guarantee must be readable together",
+                width,
+                anchor,
+            )
+            await check_heading(page)
+            await screenshot(page, output, f"document-assets-{anchor}-{width}")
+
+        for label, document, anchor in (
+            ("Backend", "PJM/backend/README.md", "project-文書の保存と清理を追う"),
+            ("契约", "PJM/contracts/README.md", "project-文書の保存と読取を読む"),
+            ("Web", "PJM/web/README.md", "project-文書の管理を追う"),
+        ):
+            await page.goto(page_url(book, target, "开发接续与验收"))
+            await page.locator("#main").get_by_role("link", name=label, exact=True).click()
+            await expect(page).to_have_url(page_url(book, document, anchor))
+            await check_heading(page)
+            await check_layout(page, ("document asset code", width, document))
+
+        await page.goto(page_url(book, target, "一个例子列表消失不等于清理完成"))
+        flow = page.locator("#main pre").filter(has_text="上传 A")
+        await expect(flow).to_have_count(1)
+        assert await flow.evaluate("region => region.scrollWidth <= region.clientWidth")
+        await screenshot(page, output, f"document-assets-example-{width}")
+        if not await page.locator("#search").is_visible():
+            await page.get_by_role("button", name="目录", exact=True).click()
+        await page.locator("#search").fill("document-lifecycle.md")
+        first = page.locator("#navigation .search-hit > a").first
+        assert (await first.get_attribute("href") or "").startswith(f"#{target}::")
+        await first.click()
+        await expect(page).to_have_url(page_url(book, target))
+        await expect(page.locator("#main")).to_be_focused()
+        if not await page.locator("#search").is_visible():
+            await page.get_by_role("button", name="目录", exact=True).click()
+        await page.locator("#search").fill("")
+
+
 async def check_user_lifecycle_handoff(page: Page, book: Path, output: Path | None) -> None:
     """接続済み API・未接続の消費側・失敗の読書経路を確認し、ユーザー操作はしない。"""
 
@@ -990,6 +1193,140 @@ async def check_contract_handoff(page: Page, book: Path, output: Path | None) ->
             await check_heading(page)
             await check_layout(page, ("contract index", width, target))
             await screenshot(page, output, f"{filename}-{width}")
+
+
+async def check_interaction_handoff(page: Page, book: Path, output: Path | None) -> None:
+    """回答・批准・評価の区別を実際のリンクで辿り、通常回答の本文を窄屏でも読める。"""
+
+    target = "docs/design/user-interactions.md"
+    for width in (390, 1440):
+        await page.set_viewport_size({"width": width, "height": 1000})
+        for entry, label, anchor in (
+            ("docs/design/agent-runtime.md", "用户答复、等待与续行", ""),
+            ("PJM/backend/README.md", "普通の回答・外部批准・結果評価", "先分清三种人工参与"),
+            ("PJM/web/README.md", "結果不明と現在要求の確認", "答复界面与结果未知"),
+            ("PJM/contracts/README.md", "ユーザー交互の正本", ""),
+            ("docs/operations/runbook.md", "410 与过期提交", "过期与拒绝响应"),
+        ):
+            await page.goto(page_url(book, entry))
+            await page.locator("#main").get_by_role("link", name=label, exact=True).click()
+            await expect(page).to_have_url(page_url(book, target, anchor))
+            if anchor:
+                await check_heading(page)
+                await page.reload()
+                await check_heading(page)
+            else:
+                await expect(page.locator("#main")).to_be_focused()
+            await check_layout(page, ("interaction handoff", width, entry))
+
+        for document, anchor, header in (
+            (target, "先分清三种人工参与", "操作"),
+            (target, "提问与答复的实际形状", "内容"),
+            (target, "首次答复与原答复重放", "容易误读的值"),
+            (target, "答复界面与结果未知", "用户看到的情况"),
+            ("PJM/backend/README.md", "通常回答と期限処理を追う", "接続点"),
+            ("PJM/contracts/README.md", "通常回答と評価の契約を読む", "用途"),
+        ):
+            await page.goto(page_url(book, document, anchor))
+            # README の同名 header を持つ他表ではなく、対象章に続く最初の表を検査する。
+            heading = page.locator(f'[id="{anchor}"]')
+            table = heading.locator('xpath=following-sibling::div[@class="table-scroll"][1]')
+            await expect(table.get_by_role("columnheader", name=header, exact=True)).to_have_count(
+                1
+            )
+            assert await table.evaluate("region => region.scrollWidth <= region.clientWidth"), (
+                "The interaction fact and its boundary must remain readable together",
+                width,
+                anchor,
+            )
+            await check_heading(page)
+            await screenshot(page, output, f"interaction-{anchor}-{width}")
+
+        await page.goto(page_url(book, target, "三个提交边界"))
+        flow = page.locator("#main pre").filter(has_text="提问事务")
+        await expect(flow).to_have_count(1)
+        assert await flow.evaluate("region => region.scrollWidth <= region.clientWidth")
+        await check_heading(page)
+        await screenshot(page, output, f"interaction-flow-{width}")
+
+        if not await page.locator("#search").is_visible():
+            await page.get_by_role("button", name="目录", exact=True).click()
+        await page.locator("#search").fill("user-interactions.md")
+        first = page.locator("#navigation .search-hit > a").first
+        assert (await first.get_attribute("href") or "").startswith(f"#{target}::")
+        await first.click()
+        await expect(page).to_have_url(page_url(book, target))
+        await expect(page.locator("#main")).to_be_focused()
+        if not await page.locator("#search").is_visible():
+            await page.get_by_role("button", name="目录", exact=True).click()
+        await page.locator("#search").fill("")
+
+
+async def check_result_handoff(page: Page, book: Path, output: Path | None) -> None:
+    """結果・原値・提出不明の正本へ旧章と実装案内から移動し、窄屏で比較する。"""
+
+    target = "docs/design/results-evaluation.md"
+    for width in (390, 1440):
+        await page.set_viewport_size({"width": width, "height": 1000})
+        for entry, label, anchor in (
+            ("docs/design/agent-runtime.md", "结果、证据与人工评价", ""),
+            ("docs/design/workspace.md", "原值指针", "修订指向哪份原值"),
+            ("PJM/backend/README.md", "結果検証の実際の保証", "结果校验的实际保证"),
+            ("PJM/contracts/README.md", "結果と評価の正本", ""),
+            ("PJM/web/README.md", "評価の結果不明と切替", "提交未知与界面责任"),
+            ("docs/operations/runbook.md", "评价结果未知", "提交未知与界面责任"),
+        ):
+            await page.goto(page_url(book, entry))
+            await page.locator("#main").get_by_role("link", name=label, exact=True).click()
+            await expect(page).to_have_url(page_url(book, target, anchor))
+            if anchor:
+                await check_heading(page)
+                await page.reload()
+                await check_heading(page)
+            else:
+                await expect(page.locator("#main")).to_be_focused()
+            await check_layout(page, ("result handoff", width, entry))
+
+        for document, anchor, header in (
+            (target, "先分清四种事实", "看见的内容"),
+            (target, "结果校验的实际保证", "检查对象"),
+            (target, "修订指向哪份原值", "结果形状与指针"),
+            (target, "提交未知与界面责任", "用户看到的情况"),
+            ("PJM/backend/README.md", "結果検証と人工評価を追う", "接続点"),
+            ("PJM/contracts/README.md", "結果と人工修訂の契約を読む", "用途"),
+        ):
+            await page.goto(page_url(book, document, anchor))
+            heading = page.locator(f'[id="{anchor}"]')
+            table = heading.locator('xpath=following-sibling::div[@class="table-scroll"][1]')
+            await expect(table.get_by_role("columnheader", name=header, exact=True)).to_have_count(
+                1
+            )
+            assert await table.evaluate("region => region.scrollWidth <= region.clientWidth"), (
+                "The result fact and its verification limit must remain readable together",
+                width,
+                anchor,
+            )
+            await check_heading(page)
+            await screenshot(page, output, f"result-{anchor}-{width}")
+
+        await page.goto(page_url(book, target, "保存与显示不是同一个提交"))
+        flow = page.locator("#main pre").filter(has_text="终态事务")
+        await expect(flow).to_have_count(1)
+        assert await flow.evaluate("region => region.scrollWidth <= region.clientWidth")
+        await check_heading(page)
+        await screenshot(page, output, f"result-commit-{width}")
+
+        if not await page.locator("#search").is_visible():
+            await page.get_by_role("button", name="目录", exact=True).click()
+        await page.locator("#search").fill("results-evaluation.md")
+        first = page.locator("#navigation .search-hit > a").first
+        assert (await first.get_attribute("href") or "").startswith(f"#{target}::")
+        await first.click()
+        await expect(page).to_have_url(page_url(book, target))
+        await expect(page.locator("#main")).to_be_focused()
+        if not await page.locator("#search").is_visible():
+            await page.get_by_role("button", name="目录", exact=True).click()
+        await page.locator("#search").fill("")
 
 
 async def check_generated_module_handoff(page: Page, book: Path, output: Path | None) -> None:
@@ -1480,8 +1817,12 @@ async def check(book: Path, output: Path | None) -> None:
             await check_budget_ledger_handoff(page, book, output)
             await check_auth_secret_handoff(page, book, output)
             await check_login_protection_handoff(page, book, output)
+            await check_project_lifecycle_handoff(page, book, output)
+            await check_document_lifecycle_handoff(page, book, output)
             await check_user_lifecycle_handoff(page, book, output)
             await check_contract_handoff(page, book, output)
+            await check_interaction_handoff(page, book, output)
+            await check_result_handoff(page, book, output)
             await check_generated_module_handoff(page, book, output)
             await check_subagent_handoff(page, book, output)
             await check_stop_handoff(page, book, output)

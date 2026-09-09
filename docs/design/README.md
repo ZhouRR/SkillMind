@@ -10,11 +10,14 @@
 
 | 理解したい流れ | 最短の読み順 |
 | --- | --- |
+| Project の選択・メンバー・アーカイブを扱う | [アーカイブの具体例](project-lifecycle.md#一个例子归档不是停止或删除) → [識別とメンバー](project-lifecycle.md#项目身份与成员资格) → [失効リンク](project-lifecycle.md#项目选择与失效链接) → [削除の前提](project-lifecycle.md#删除门禁的修正要求)。アカウント停止、Run 停止、物理削除を分ける |
+| Project 文書を保存・表示・削除する | [削除と再アップロードの例](document-lifecycle.md#一个例子列表消失不等于清理完成) → [保存の境界](document-lifecycle.md#上传的三个边界) → [読取と preview](document-lifecycle.md#读取下载与预览) → [引用と清理](document-lifecycle.md#删除与历史引用)。Run の選択/凍結は資源快照へ渡す |
 | ログイン・権限・外部の認証情報を扱う | [四種類の credential](authentication.md#先分清四类凭据)から、ログイン前は[入口防護の例](login-protection.md#一个例子一次登录两次入口请求)と[提出・離頁](login-protection.md#提交离页与结果未知)、ログイン後は[二つのページの例](authentication.md#一个例子同一账号打开两个页面) → [v2 と切替](authentication.md#会话凭据-v2-与切换要求) → [認証と業務提交](authentication.md#认证与业务提交不是同一个事务)へ。外部 key は別の [Secret 設計](secret-storage.md)へ進む |
 | アカウントの作成・停止・改密を接続する | [停止と再有効化の例](user-lifecycle.md#一个例子停用再启用不恢复旧登录) → [内部実装と公開入口](user-lifecycle.md#工作副本与公开入口) → [管理 transaction](user-lifecycle.md#事务与并发) → [失敗と画面](user-lifecycle.md#生效与界面)。ProjectMember、ログイン配額、永続失効を分ける |
 | Skill が実行可能な Task になるまで | [領域モデル](domain-model.md) → [公開と就緒の判断順](skill-contract.md#发布与就绪的判断顺序) → [解釈・公開の接続](skill-interpretation.md#从候选到项目任务的接线)。版の切替は[回退と再有効化](skill-contract.md#11-版本回滚与评价)を別に確認する |
 | ユーザーが一回実行し、結果を見るまで | [領域モデル](domain-model.md) → [Run 作成](run-creation.md) → [資源快照](resource-snapshots.md) → [Runtime](agent-runtime.md) → [Workspace](workspace.md) |
-| 既存 Run の回答・批准・故障復旧 | [Runtime の開始境界](agent-runtime.md#74-从领取到模型启动的边界) → [取消後の具体例](run-supervision.md#一个例子点击取消之后)と[提交の判断点](run-supervision.md#提交时谁决定最终状态) → [受控書き込み](repository-effects.md)または[子分析](subagents.md)の受入条件 |
+| 既存 Run の回答・批准・故障復旧 | [三種類の人工参加](user-interactions.md#先分清三种人工参与) → [回答と期限の例](user-interactions.md#一个例子回答超时不等于什么都没发生) → [Runtime の開始境界](agent-runtime.md#74-从领取到模型启动的边界)。取消は[実行監督](run-supervision.md)、批准は[受控書き込み](repository-effects.md)へ進む |
+| 結果を読み、人工修訂を加える | [実行終了と業務判断の例](results-evaluation.md#一个例子执行结束结论仍需修订) → [引用検証の範囲](results-evaluation.md#结果校验的实际保证) → [修訂の原値](results-evaluation.md#修订指向哪份原值) → [提出結果が不明な場合](results-evaluation.md#提交未知与界面责任)。Benchmark は別の品質判断 |
 | 主/子の予算を制限し、結果と用量を読む | [結果の具体例](subagents.md#一个例子完成的是哪一层) → [子指令/出力](subagents.md#子任务指令与结果的边界) → [数値例](run-budgets.md#一个例子已用占用与可用)と[用量経路](run-budgets.md#用量现在流向哪里) → [起動/結算](run-budgets.md#启动与结算的提交边界)。分配・消費・成功を分ける |
 | 外部変更を批准し、失敗後の事実を確認する | [四種類の事実](repository-effects.md#先分清四种事实) → [批准要求と結果の UI](workspace.md#审批请求与执行结果) → [不確定結果の回执](repository-effects.md#阶段回执与不确定结果)。批准・commit・PR・DB 保存を分ける |
 | 時刻を指定して起動し、保存後の変更を扱う | [規則・発火・Run の具体例](task-scheduling.md#一个例子规则触发与执行分别看) → [管理入口](task-scheduling.md#保存后的管理入口) → [認領・復旧](task-scheduling.md#认领记录与恢复权限)。入力は Workspace、原要求は Run 作成へ渡す |
@@ -28,6 +31,8 @@
 | 正本 | この文書が決めること | 別の正本へ渡すこと |
 | --- | --- | --- |
 | [領域モデル](domain-model.md) | 所有者、オブジェクト関係、不変条件、実際の永続載体 | API の field は契約、実行遷移の詳細は Runtime |
+| [Project lifecycle](project-lifecycle.md) | Project の identity/選択、メンバーの再加入、アーカイブ/復元、削除前の参照と並行性 | アカウントはユーザー管理、停止は実行監督、保持/復旧は運用。アーカイブを全停止、Run 零件を削除可能証明と扱わない |
+| [Project 文書 lifecycle](document-lifecycle.md) | 文書 ID と表示 path、upload/配額/保存順序、download/preview、参照保護と blob の後処理 | Run の固定範囲・複製は資源快照、Project 全体の削除は Project lifecycle、backup は運用。metadata と実 byte を同一 transaction と扱わない |
 | [認証と Session](authentication.md) | 密碼、Session、CSRF/Origin、現在の actor/Project 授権、失効と多ページ | ログイン前の配額は入口防護、外部 credential は Secret、実行の停止は実行監督 |
 | [ユーザー lifecycle](user-lifecycle.md) | アカウント版、最後の活動 ADMIN、原会話の再認証、管理/失効/監査の原子性、結果不明の扱い | password/Session protocol は認証、共用配額は入口防護、公開 field は契約。API と画面の接線を別々に確認する |
 | [ログイン入口防護](login-protection.md) | 来源・account・組合の計数、有限退避、Redis 故障、429/503 と client の責任 | Session の失効は認証、配備環境の分診は Runbook。配額の消失を撤権や復元完了と扱わない |
@@ -37,6 +42,8 @@
 | [Run 作成・幂等](run-creation.md) | 要求 identity、初回 transaction、再送、原要求の確認 UI | 同一 Run の Attempt 復旧は Runtime、資源内容は快照 |
 | [資源快照](resource-snapshots.md) | 選択と凍結、論理/物理 path、Run 全体の準備回执、実 byte の信頼性、ファイル総量 | 準備中の実行監督は Runtime、モデル消費は予算、外部更新は受控書き込み |
 | [Agent Runtime](agent-runtime.md) | Segment/Attempt/Session、モデル開始、Tool、待機、Event/Outbox | 新規要求は Run 作成、入力の完成条件は資源快照、停止の詳細は実行監督 |
+| [ユーザー応答と続行](user-interactions.md) | 普通の質問/回答、原要求の確認、期限、回答/過期 transaction と画面の結果不明 | 外部批准は受控書き込み、結果評価は Result 上の追加記録、プロセス停止は実行監督 |
+| [結果・証拠・人工評価](results-evaluation.md) | 終態と交付の区別、引用の検査範囲、原値指針、評価の追加/結果不明、歴史互換 | 実行制御は Runtime、外部実行の正本は受控書き込み、品質の分母/Gold は Benchmark |
 | [実行監督と停止](run-supervision.md) | 取消・timeout・失効 lease の分類、task/client の清理、終態と停止確認の分離 | Run 状態は領域モデル、秒数と用量結算は予算、独立 Effect は受控書き込み |
 | [Run 予算](run-budgets.md) | 局部 limit と共通勘定、計量の正規化、主/子の予約・起動・結算・復旧 | ファイル存量は資源快照、子結果の成否は子分析、組織課金は対象外 |
 | [受控書き込み](repository-effects.md) | Proposal/Approval/Effect の区別、決定と実行の identity、CAS、read-back、部分失敗と回执 | ユーザーへの表示は Workspace、配備復旧は Runbook。現行の内容比較を完全な幂等証明と扱わない |

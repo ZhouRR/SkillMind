@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from jsonschema import Draft202012Validator
 from markdown_it import MarkdownIt
 
 from scripts import build_docs
@@ -213,9 +214,11 @@ class DocumentationBuildTests(unittest.TestCase):
         )
         identity = priority.index("docs/design/domain-model.md")
         self.assertEqual(
-            priority[identity : identity + 5],
+            priority[identity : identity + 7],
             [
                 "docs/design/domain-model.md",
+                "docs/design/project-lifecycle.md",
+                "docs/design/document-lifecycle.md",
                 "docs/design/authentication.md",
                 "docs/design/login-protection.md",
                 "docs/design/user-lifecycle.md",
@@ -224,9 +227,11 @@ class DocumentationBuildTests(unittest.TestCase):
         )
         runtime = priority.index("docs/design/agent-runtime.md")
         self.assertEqual(
-            priority[runtime : runtime + 3],
+            priority[runtime : runtime + 5],
             [
                 "docs/design/agent-runtime.md",
+                "docs/design/user-interactions.md",
+                "docs/design/results-evaluation.md",
                 "docs/design/run-supervision.md",
                 "docs/design/run-budgets.md",
             ],
@@ -279,6 +284,92 @@ class DocumentationBuildTests(unittest.TestCase):
         self.assertNotIn("pg_dump --username", document.source)
         self.assertNotIn("alembic current", document.source)
 
+    def test_project_lifecycle_has_one_source_and_code_handoffs(self) -> None:
+        """Project の旧入口と実装案内を同じ正本へつなぎ、削除コマンドを複製しない。"""
+
+        parser = MarkdownIt("commonmark", {"html": False}).enable(["table", "strikethrough"])
+        target = build_docs.DOCS / "design/project-lifecycle.md"
+        document = build_docs.parse_document(target, parser)
+        for anchor in (
+            "一个例子归档不是停止或删除",
+            "项目身份与成员资格",
+            "项目选择与失效链接",
+            "归档的实际边界",
+            "并发修改不能只看有无行锁",
+            "删除与数据保留",
+            "删除门禁的修正要求",
+            "开发接续与验收",
+        ):
+            with self.subTest(anchor=anchor):
+                self.assertIn(anchor, document.anchors)
+        for relative in (
+            "docs/design/domain-model.md",
+            "docs/design/authentication.md",
+            "docs/design/workspace.md",
+            "docs/operations/runbook.md",
+            "PJM/backend/README.md",
+            "PJM/contracts/README.md",
+            "PJM/web/README.md",
+        ):
+            entry = build_docs.parse_document(build_docs.ROOT / relative, parser)
+            with self.subTest(entry=relative):
+                self.assertIn("project-lifecycle.md", entry.source)
+        self.assertFalse(
+            any(token.type == "fence" and token.info == "bash" for token in document.tokens)
+        )
+        for relative in (
+            "../../PJM/backend/README.md#project-とメンバーの管理を追う",
+            "../../PJM/web/README.md#project-の切替と管理を追う",
+            "../../PJM/contracts/README.md#project-と-membership-の契約を読む",
+        ):
+            self.assertIn(f"({relative})", document.source)
+
+    def test_document_assets_have_a_separate_source_and_code_handoffs(self) -> None:
+        """資産保存と Run 快照を別の正本へ案内し、清理コマンドを導入しない。"""
+
+        parser = MarkdownIt("commonmark", {"html": False}).enable(["table", "strikethrough"])
+        document = build_docs.parse_document(
+            build_docs.DOCS / "design/document-lifecycle.md", parser
+        )
+        for anchor in (
+            "一个例子列表消失不等于清理完成",
+            "身份目录与公开面",
+            "上传的三个边界",
+            "保存可靠性的修正要求",
+            "读取下载与预览",
+            "删除与历史引用",
+            "引用保护与清理的修正要求",
+            "页面与结果未知",
+            "开发接续与验收",
+        ):
+            with self.subTest(anchor=anchor):
+                self.assertIn(anchor, document.anchors)
+        for relative in (
+            "docs/design/README.md",
+            "docs/design/domain-model.md",
+            "docs/design/project-lifecycle.md",
+            "docs/design/resource-snapshots.md",
+            "docs/design/workspace.md",
+            "docs/development/change-guide.md",
+            "docs/operations/runbook.md",
+            "docs/operations/backup-recovery.md",
+            "PJM/backend/README.md",
+            "PJM/contracts/README.md",
+            "PJM/web/README.md",
+        ):
+            entry = build_docs.parse_document(build_docs.ROOT / relative, parser)
+            with self.subTest(entry=relative):
+                self.assertIn("document-lifecycle.md", entry.source)
+        for target in (
+            "../../PJM/backend/README.md#project-文書の保存と清理を追う",
+            "../../PJM/contracts/README.md#project-文書の保存と読取を読む",
+            "../../PJM/web/README.md#project-文書の管理を追う",
+        ):
+            self.assertIn(f"({target})", document.source)
+        self.assertFalse(
+            any(token.type == "fence" and token.info == "bash" for token in document.tokens)
+        )
+
     def test_user_lifecycle_legacy_sections_link_to_design_source(self) -> None:
         """会話の旧章を保ち、管理 API の説明を二箇所へ複製しない。"""
 
@@ -297,6 +388,92 @@ class DocumentationBuildTests(unittest.TestCase):
                 self.assertIn(f"({target})", sections[anchor])
         self.assertNotIn("POST /users/", document.source)
         self.assertNotIn("GET /users/", document.source)
+
+    def test_runtime_interaction_anchor_leads_to_its_single_source(self) -> None:
+        """旧 Runtime の引用を保ち、質問・回答・評価の正本と契約へ接続する。"""
+
+        parser = MarkdownIt("commonmark", {"html": False}).enable(["table", "strikethrough"])
+        runtime = build_docs.parse_document(build_docs.DOCS / "design/agent-runtime.md", parser)
+        sections = {item["anchor"]: item["text"] for item in build_docs.search_sections(runtime)}
+        self.assertIn("8-用户交互协议", runtime.anchors)
+        self.assertIn("(user-interactions.md)", sections["8-用户交互协议"])
+        self.assertNotIn("交互必须包含", sections["8-用户交互协议"])
+
+        interactions = build_docs.parse_document(
+            build_docs.DOCS / "design/user-interactions.md", parser
+        )
+        for boundary in (
+            "先分清三种人工参与",
+            "三个提交边界",
+            "普通提问不能代替外部批准",
+            "答复界面与结果未知",
+            "验收条件",
+        ):
+            with self.subTest(boundary=boundary):
+                self.assertIn(boundary, interactions.anchors)
+        for contract in (
+            "tools/interaction.request/v1/request.schema.json",
+            "runs/interaction-response/v1/request.schema.json",
+            "runs/interaction-response/v1/response.schema.json",
+        ):
+            with self.subTest(contract=contract):
+                self.assertIn(f"(../../PJM/contracts/{contract})", interactions.source)
+
+    def test_result_legacy_sections_lead_to_the_same_design(self) -> None:
+        """旧 Runtime/Workspace の章を保持し、原結果と修訂の規則を一つに集約する。"""
+
+        parser = MarkdownIt("commonmark", {"html": False}).enable(["table", "strikethrough"])
+        for relative, anchor, target in (
+            ("design/agent-runtime.md", "10-结果与输出验证", "results-evaluation.md"),
+            (
+                "design/workspace.md",
+                "73-evaluation",
+                "results-evaluation.md#修订指向哪份原值",
+            ),
+        ):
+            with self.subTest(document=relative):
+                document = build_docs.parse_document(build_docs.DOCS / relative, parser)
+                sections = {
+                    item["anchor"]: item["text"] for item in build_docs.search_sections(document)
+                }
+                self.assertIn(f"({target})", sections[anchor])
+
+        result = build_docs.parse_document(build_docs.DOCS / "design/results-evaluation.md", parser)
+        for anchor in (
+            "先分清四种事实",
+            "结果校验的实际保证",
+            "引用可信性的修正要求",
+            "修订指向哪份原值",
+            "提交未知与界面责任",
+            "验收条件",
+        ):
+            with self.subTest(anchor=anchor):
+                self.assertIn(anchor, result.anchors)
+
+    def test_evaluation_design_example_matches_the_request_schema(self) -> None:
+        """文書の修訂例にも公開契約を適用し、原値や actor を入力へ混入させない。"""
+
+        parser = MarkdownIt("commonmark", {"html": False}).enable(["table", "strikethrough"])
+        document = build_docs.parse_document(
+            build_docs.DOCS / "design/results-evaluation.md", parser
+        )
+        schema = json.loads(
+            (build_docs.ROOT / "PJM/contracts/evaluations/v1/create-request.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        Draft202012Validator.check_schema(schema)
+        validator = Draft202012Validator(schema)
+        examples = [
+            json.loads(token.content)
+            for token in document.tokens
+            if token.type == "fence" and token.info == "json"
+        ]
+        self.assertTrue(examples)
+        for example in examples:
+            with self.subTest(example=example):
+                validator.validate(example)
+                self.assertEqual(example["revisions"][0]["pointer"], "/summary")
 
     def test_user_contract_index_covers_existing_schemas(self) -> None:
         """機械用の管理 Schema と人が読む入口を対応させ、追加時の案内漏れを防ぐ。"""

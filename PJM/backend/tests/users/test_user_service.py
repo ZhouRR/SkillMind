@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
-from conftest import NOW, PASSWORD, Clock, UserHarness
+from user_harness import NOW, PASSWORD, Clock, UserHarness
 
 from projectmind.auth.domain import verify_password
 from projectmind.auth.sessions import CsrfRejectedError, UnauthorizedSessionError
@@ -25,6 +25,32 @@ from projectmind.users.domain import (
     UserStatus,
     UserVersionConflictError,
 )
+
+
+@pytest.mark.asyncio
+async def test_exact_user_read_uses_the_locked_target_without_mutation(users: UserHarness) -> None:
+    """ADMIN の再確認で一覧を検索せず、対象版/会話/監査を変えない。"""
+
+    result = await users.service.get_user(access=users.access, user_id=users.target.id)
+    assert result.user_id == users.target.id and result.row_version == 1
+    users.repository.lock_users.assert_awaited_once_with(
+        access=users.access, target_id=users.target.id, include_target_sessions=False
+    )
+    users.repository.list_users.assert_not_called()
+    assert not users.added and all(item.revoked_at is None for item in users.other_sessions)
+
+
+@pytest.mark.asyncio
+async def test_exact_user_read_revalidates_role_and_missing_target(users: UserHarness) -> None:
+    """入口の ADMIN snapshot では足りず、原会話と lock 後の役割で拒否する。"""
+
+    with pytest.raises(UserNotFoundError):
+        await users.service.get_user(access=users.access, user_id=uuid4())
+    users.actor.system_role = "USER"
+    users.current.system_role_at_login = "USER"
+    with pytest.raises(UserAdministrationDeniedError):
+        await users.service.get_user(access=users.access, user_id=users.target.id)
+    assert not users.added
 
 
 def command(users: UserHarness, **changes: object) -> UpdateUserCommand:
