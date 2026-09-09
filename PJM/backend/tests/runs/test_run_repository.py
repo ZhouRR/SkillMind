@@ -317,7 +317,7 @@ async def test_get_detail_projects_result_tool_calls_and_evidence() -> None:
             scalar_result(all_items=[]),
             scalar_result(all_items=[]),
         ]
-        )
+    )
 
     detail = await RunRepository(session).get_detail(project_id=run.project_id, run_id=run.id)
 
@@ -553,9 +553,7 @@ async def test_expired_interaction_creates_timeout_segment_without_default_respo
     next_segment = next(item for item in added if isinstance(item, RunSegment))
     assert next_segment.trigger_type == RunSegmentTrigger.INTERACTION_TIMEOUT.value
     assert next_segment.parent_agent_session_id == interaction.agent_session_id
-    assert "no default response was assumed" in next_segment.checkpoint_json[
-        "confirmed_facts"
-    ][-1]
+    assert "no default response was assumed" in next_segment.checkpoint_json["confirmed_facts"][-1]
     events = [item for item in added if isinstance(item, RunEvent)]
     assert [(item.sequence, item.event_type) for item in events] == [
         (30, AgentEventType.SEGMENT_COMPLETED.value),
@@ -648,9 +646,7 @@ def create_queued_run() -> Run:
     )
 
 
-def create_segment(
-    run: Run, *, status: RunSegmentStatus = RunSegmentStatus.CREATED
-) -> RunSegment:
+def create_segment(run: Run, *, status: RunSegmentStatus = RunSegmentStatus.CREATED) -> RunSegment:
     """Release G claim/recovery test 用の明示 Segment 1 を生成する。"""
 
     now = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
@@ -780,7 +776,7 @@ async def test_interaction_suspension_releases_lease_and_persists_checkpoint() -
             scalar_result(None),
         ]
     )
-    session.scalar = AsyncMock(side_effect=[10, None])
+    session.scalar = AsyncMock(side_effect=[None, 10, None])
 
     interaction_id = await RunRepository(session).suspend_for_interaction(
         claimed,
@@ -953,7 +949,7 @@ async def test_append_agent_event_creates_session_and_strips_structured_result()
     agent_result = MagicMock()
     agent_result.one_or_none.return_value = None
     session.scalars = AsyncMock(side_effect=[run_result, attempt_result, agent_result])
-    session.scalar = AsyncMock(return_value=5)
+    session.scalar = AsyncMock(side_effect=[None, 5])
     sdk_session_id = uuid4()
     event = AgentEvent(
         run_id=run.id,
@@ -996,7 +992,8 @@ async def test_finalize_success_persists_result_and_terminal_snapshot_atomically
     agent_query = MagicMock()
     agent_query.one_or_none.return_value = None
     session.scalars = AsyncMock(side_effect=[run_query, attempt_query, agent_query])
-    session.scalar = AsyncMock(return_value=5)
+    # 取消意図は無く、その確認後の次 sequence が 5 である。
+    session.scalar = AsyncMock(side_effect=[None, 5])
     sdk_session_id = uuid4()
     event = AgentEvent(
         run_id=run.id,
@@ -1208,9 +1205,7 @@ async def test_worker_loss_recovery_creates_second_attempt_without_snapshot_drif
         run.permission_snapshot_json,
     ) == original_snapshots
     second_attempt = next(
-        item
-        for item in claim_session.add_all.call_args.args[0]
-        if isinstance(item, RunAttempt)
+        item for item in claim_session.add_all.call_args.args[0] if isinstance(item, RunAttempt)
     )
     assert second_attempt.reason == "RETRY"
 

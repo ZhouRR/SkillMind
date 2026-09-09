@@ -11,6 +11,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from projectmind.agent.domain import RunContext
 from projectmind.agent.outcome import OUTCOME_ENVELOPE_SCHEMA
 from projectmind.core.redaction import find_sensitive_key
 from projectmind.db.models import ChangeProposal, Evidence
@@ -100,9 +101,7 @@ class PostgresProposalLookup:
             statement = select(ChangeProposal.proposal_ref).where(
                 ChangeProposal.run_id == run_id,
                 ChangeProposal.proposal_ref.in_(refs),
-                ChangeProposal.status.in_(
-                    {"PENDING_APPROVAL", "APPROVED", "APPLYING"}
-                ),
+                ChangeProposal.status.in_({"PENDING_APPROVAL", "APPROVED", "APPLYING"}),
             )
             return frozenset(await session.scalars(statement))
 
@@ -185,6 +184,32 @@ class ResultValidator:
         self._evidence_lookup = evidence_lookup
         self._proposal_lookup = proposal_lookup
         self._generic = GenericResultInterpreter()
+
+    async def validate_context(
+        self, context: RunContext, *, structured_output: Any
+    ) -> ValidatedResult:
+        """凍結 context の出力契約を主/子で同じ規則により解決して検証する。"""
+
+        schema_ref = context.task_snapshot.get("output_schema_checksum")
+        if not isinstance(schema_ref, str):
+            schema_ref = context.task_snapshot.get("output_schema")
+        if not isinstance(schema_ref, str):
+            schema_ref = "inline://run-result-schema"
+        task_schema = context.task_snapshot.get("task_output_schema_json")
+        task_schema_ref = context.task_snapshot.get("task_output_schema_checksum")
+        return await self.validate(
+            run_id=context.run_id,
+            schema=context.result_schema,
+            schema_ref=schema_ref,
+            structured_output=structured_output,
+            result_kind=(
+                "OUTCOME_ENVELOPE"
+                if context.task_snapshot.get("result_kind") == "OUTCOME_ENVELOPE"
+                else "STRUCTURED_OUTPUT"
+            ),
+            task_schema=task_schema if isinstance(task_schema, dict) else None,
+            task_schema_ref=task_schema_ref if isinstance(task_schema_ref, str) else None,
+        )
 
     async def validate(
         self,
@@ -275,9 +300,7 @@ class ResultValidator:
                     "Agent result referenced "
                     f"{len(missing_proposals)} unavailable ChangeProposal item(s)",
                 )
-            incomplete = await self._proposal_lookup.incomplete_refs(
-                run_id, change_proposal_refs
-            )
+            incomplete = await self._proposal_lookup.incomplete_refs(run_id, change_proposal_refs)
             if incomplete:
                 raise ResultValidationError(
                     "change_proposal_incomplete",

@@ -51,8 +51,8 @@ class SubagentCapabilityError(ValueError):
 class SubagentBudget:
     """一つの branch へ配分する実行予算 (計画 §23 D4)。
 
-    Run 全体の上限を**切り分ける**のであって、branch ごとに与え直すのではない。後者だと
-    「並行 4 路」がそのまま費用上限の 4 倍を意味してしまう。
+    一回の dispatch に渡された上限を整除した値であり、実消費や持続した Run 残額ではない。
+    主/子共通の予約・結算は docs/design/run-budgets.md の別の責任として実装する。
     """
 
     turns_per_branch: int

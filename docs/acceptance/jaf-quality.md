@@ -1,6 +1,6 @@
 # ProjectMind JAF 品质分析 Skill 迁移与端到端验收规范
 
-本文定义现有 `Jaf 品質分析` Skill 如何迁移到 ProjectMind，并规定首版历史 Ticket 评价集、人工评价、准确度报告和端到端验收流程。
+本文负责 `Jaf 品質分析` Skill 的迁移、安全输入与端到端运行验收。样本、Gold、指标和发布判断集中在 [JAF Benchmark](jaf-benchmark.md)，避免把运行步骤与评分规则混在一起。
 
 > 定位：业务迁移与质量验收要求，不是平台实施进度表。先读[Skill 解释与发布](../design/skill-interpretation.md)；当前实现、部署和 benchmark 状态见[计划](../planning/roadmap.md#13-当前执行状态)。
 
@@ -9,6 +9,17 @@
 其中 Ticket/代码是资源前提，分析规则是 Agent guidance，报告和可选 Redmine 更新是交付物/效果意图。
 平台不预定义 Ticket 业务 Schema。通用 Redmine read 与首个 CAS `issue.update/v1` Provider 已实现，
 但真实 deployment adapter/SVN 联调、正式 benchmark 和其余 5 类任务不会因平台能力存在而自动完成。
+
+## 按目的阅读
+
+| 要做什么 | 入口与边界 |
+| --- | --- |
+| 准备安全的导入包 | [安全前提](#2-安全前提导入前必须完成) → [目录](#3-迁移目标目录) → [改造规则](#4-迁移改造规则)。源脚本不会因导入而获得执行权 |
+| 明确单 Ticket 要交付什么 | [预期能力](#6-capabilityblueprint-预期能力) → [结果期待](#8-jaf-结果期待非平台业务-schema)。不建立平台硬编码的 JAF Schema |
+| 运行一次功能验收 | [执行顺序](#14-端到端执行顺序) → [门禁](#15-验收门禁) → [失败处理](#16-失败处理)。真实写入使用专用受入目标 |
+| 判断分析质量 | [Benchmark 的执行/评价边界](jaf-benchmark.md#先看一次评价的边界) → [样本](jaf-benchmark.md#固定样本与版本) → [评分](jaf-benchmark.md#指标与通过条件) |
+
+旧编号 10–13、17 保留为跳转入口；对应规则只维护在 Benchmark，不需要来回比较两份评分标准。
 
 ## 1. 现状结论
 
@@ -78,7 +89,7 @@ CapabilityBlueprint、RuntimeManifest、可选 TaskContractDraft/ViewSpec 由 In
 - 删除连接地址、凭据、机器用户目录和固定安装路径。
 - 数据源改为 capability requirement，不直接写 curl、svn 命令和认证参数。
 - 保留“CSV 不回写”“知识库不自动更新”“设计书无法确认时输出两案”等约束。
-- 明确 benchmark 版本、样本数量和人工评价规则。
+- Skill 只保留业务质量标准；正式 benchmark 版本、case 清单、样本数量与人工评分规则放在[评价侧](jaf-benchmark.md#哪些数据交给谁)，不作为导入附件送入 Interpreter。
 
 ### 4.2 Python 脚本
 
@@ -203,138 +214,54 @@ Schema；无 Schema 时仍以通用 OutcomeEnvelope、Artifact、Evidence 和 Pr
 - 字段级原值、建议值、判定、置信度和 Evidence。
 - 10 项整合性检查和 12 项妥当性检查表。
 - 设计书确认失败时的两案比较卡片。
-- 密度、目标值、热点、排名和逃逸图表。
+- 密度、目标值、热点、排名和逃逸图表属于后续五类任务，不作为单 Ticket 的页面或准确率门禁。
 - RunSegment/Session、用户 Review、原始 Outcome、报告 Artifact、ChangeProposal 和 Evaluation。
 
 JAF 准确度评价使用平台标准视图，避免把分析准确度与生成前端质量混在一起。ViewSpec 是可选契约；不要求为了验收单独生成一份 ViewSpec，更不要求尚未实现的专用图表 renderer。
 
 ## 10. Benchmark v1
 
+样本与版本的正本已拆到 [JAF Benchmark](jaf-benchmark.md#固定样本与版本)。本节保留原引用入口。
+
 ### 10.1 样本数量
 
-在独立评价存储的 `evaluation/benchmark-v1.yaml` 固定定义 30 个历史 Ticket。这里规定目标文件格式和规模，不表示仓库已经提供真实 case 或平台已实现 EvaluationSuite API。该规模用于 MVP 人工复核和回归，不代表统计学上的生产质量证明。
-
-| 分层 | 数量 | 目的 |
-| --- | ---: | --- |
-| 已确认的设计工程 Bug | 8 | 验证设计书、原因工程和设计类原因 |
-| 已确认的制造工程 Bug | 8 | 验证代码 Diff、实现类原因和修正程序 |
-| 跨工程、环境或复杂 Bug | 4 | 验证逃逸和复合原因 |
-| 仕变、非 Bug、重复或其他分类 | 4 | 避免把所有问题判为 Bug |
-| 信息不完整、模板空值或证据不足 | 6 | 验证 unknown、两案和追问 |
-| 合计 | 30 | 固定回归集 |
-
-覆盖要求可以跨分层重叠：至少 5 个应用、10 个代码 Evidence、8 个设计书 Evidence、10 个未填写/模板空字段、8 个已填写但事实不一致字段，以及 10 个 Redmine/CSV 配对 case。
+[30 个 case 的分层与覆盖条件](jaf-benchmark.md#样本数量)。配对 Run 不扩大主准确率分母。
 
 ### 10.2 选取和冻结
 
-1. Skill 声明来源截止时间、允许状态和 tracker。
-2. 按分层和覆盖条件选取候选，不向模型提供 Gold。
-3. 固定 Ticket ID、Redmine updated_on、CSV hash、仓库 revision/commit 和 Knowledge hash。
-4. 两名 JAF 质量人员独立标注，分歧由第三人或负责人裁定。
-5. 冻结为 benchmark v1；替换 case 必须说明原因并提升 benchmark 版本。
-
-评价集不能每次随机抽样，否则版本间不可比较。可以另建探索集，但不计入正式准确度。
+[评价负责人选取与冻结](jaf-benchmark.md#选取与冻结)，再核对[Provider 配对与重跑](jaf-benchmark.md#配对与重跑)。由评价侧控制样本，不能让 Skill/模型选择自己的评分条件。
 
 ### 10.3 Case 定义
 
-以下为评价侧文件的语义示例，不是 Run 创建请求或已发布 JSON Schema；省略号须换成真实冻结值。只将执行所需 input/source 投影给 Run，不发送 expected_ref 或 Gold 正文。
-
-```yaml
-case_id: jaf-ticket-001
-ticket_ref: internal-reference
-tags: [design, missing-fields, has-source, has-design-doc]
-source_snapshot:
-  issue_hash: sha256:...
-  repository_revision: "..."
-  knowledge_hashes: {}
-input:
-  task: jaf.ticket.analyze
-  repository_required: true
-expected_ref: expected/jaf-ticket-001.json
-```
-
-benchmark 不保存凭据。Ticket 内容保存为受控 fixture/Artifact，并遵循 Project retention policy。
+[评价侧 case 示例](jaf-benchmark.md#case-定义)；只投影合法执行输入，不将整个 case 文件发送给 Run。
 
 ## 11. Gold 与人工 Rubric
 
 ### 11.1 结构化 Gold
 
-每个 case 标注：关键质量字段的原值判定、建议值和允许集合；10 项整合性检查；12 项妥当性检查；必须引用的证据类型；应进入两案、证据不足或人工确认的条件。
-
-允许多种合理文本的字段使用结构化要点和人工 Rubric，不做单一字符串 exact match。
+[结构化答案、允许集合与不适用项](jaf-benchmark.md#结构化-gold)。答案始终留在独立评价存储。
 
 ### 11.2 文本 Rubric
 
-原因内容、根本原因、对应内容和改善建议按 1–5 分评价：
-
-| 维度 | 5 分要求 |
-| --- | --- |
-| 事实一致性 | 与 Ticket、设计书、代码和 Diff 无矛盾 |
-| 完整性 | 覆盖直接原因、工程见落和根本原因 |
-| 证据性 | 关键断言均引用有效 Evidence |
-| 分类一致性 | 文本与原因工程、Bug 原因和原因区分 AI 一致 |
-| 可执行性 | 建议具体且不越权 |
-
-捏造文件、代码、设计书或 Evidence 时，该 case 标记 `hallucination=true`，不能被其他高分抵消。
+[五维评分与独立复核](jaf-benchmark.md#文本-rubric)。原始结果、人工修订与裁定分别保留。
 
 ## 12. 准确度指标与目标
 
 ### 12.1 指标
 
-| 指标 | 算法 |
-| --- | --- |
-| 分类字段准确率 | 与 Gold 值或允许集合 exact match |
-| 分类字段 Macro F1 | 各类别 F1 的平均 |
-| 担当者 Set F1 | 设计/制造担当者集合与 Gold 对比 |
-| 不整合检出 Precision/Recall | 检出矛盾与 Gold 矛盾集合对比 |
-| Evidence coverage | 有效 Evidence 支撑的关键字段数 / 关键字段数 |
-| Unknown correctness | 应证据不足时正确 abstain 的比例 |
-| 文本 Rubric | 两名评价者平均分和分歧 |
-| Hallucination rate | 存在无来源事实或伪造 Evidence 的 case 比例 |
-| 人工修订率 | 含 revision_json 的 Result 比例 |
-
-同时记录完成率、Schema 通过率、Tool 成功率、自动允许/硬拒绝次数、耗时、Token、成本、Provider 配对一致率和恢复成功率。
-
-计分口径必须在运行前随 benchmark/rubric 版本冻结：关键字段集合、权重、适用 case、允许值、正类和未知值处理均不可按模型输出临时改变。报告同时给出分子/分母，不只给百分比。
-
-- 30 个 case 全部进入运行完成率和失败统计。缺失答案在适用字段准确率中不算正确；不得删除失败 Run 后只报告成功子集。
-- 不适用字段由 Gold 预先标记，排除数量和理由单列。模型自己说“不适用”不能改变分母。
-- Evidence ID 有效只证明引用可访问，不证明证据支持结论；coverage 还须人工或受控规则判定支撑关系。
-- Macro F1 的类别集合、加权准确率的字段权重在 rubric 中固定；样本为零或分母为零时报告 N/A 及原因，不能写成 100%。
-- `hallucination=true` 的 case 数除以完整 30 case 得到 hallucination rate，并同时展示失败/未完成数量。按 ≤5% 的目标，30 case 中最多允许 1 个此类 case；不能用四舍五入掩盖 2/30 超标。
+[指标口径](jaf-benchmark.md#指标口径)与[失败分母示例](jaf-benchmark.md#一个例子失败也留在分母中)。完整失败统计不能被“成功子集准确率”替代。
 
 ### 12.2 硬性技术门禁
 
-- Secret 扫描问题为 0。
-- 已产生结果的通用 Outcome 及已声明的可选 Schema 通过率 100%；失败/无 Result 的 case 另列，不能被算作 Schema 已通过。
-- 越权 Tool 实际执行数为 0。
-- Evidence ID 有效率 100%。
-- 原始 Result 被人工覆盖数为 0，Gold/Rubric/expected 被 Agent 读取数为 0。
-- 30 个 case 均产生可审计终态；失败 case 也有完整错误记录。
+[安全、契约与审计门禁](jaf-benchmark.md#硬性技术门禁)。技术通过与业务质量通过分别判断。
 
 ### 12.3 首版质量目标
 
-- 原因工程准确率 ≥ 80%。
-- 关键分类字段加权准确率 ≥ 80%。
-- 不整合检出 Precision ≥ 85%，Recall ≥ 75%。
-- 关键字段 Evidence coverage ≥ 90%。
-- 事实一致性人工平均分 ≥ 4.0/5。
-- Hallucination rate ≤ 5%。
-- 应证据不足的 case 中正确 abstain ≥ 80%。
-
-质量目标用于报告和人工发布判断。未达到时不修改历史结果，应调整 Skill/Interpreter、发布新版本并重跑。
+[首版阈值与发布判断](jaf-benchmark.md#首版质量目标)。拆分没有调整质量目标，也不代表已运行真实 benchmark。
 
 ## 13. 准确度报告
 
-每个正式 EvaluationRun 生成：
-
-```text
-JAF_Accuracy_Report_<skill-version>_<benchmark-version>_<YYYYMMDD>.md
-```
-
-报告包含版本与配置、30 case 分层、技术门禁、字段 Accuracy/Macro F1、矛盾检出、Evidence、人工 Rubric、Provider 差异、失败和 Hallucination、版本变化，以及人工“通过/条件通过/不通过”结论。
-
-报告只显示脱敏 case ID；Ticket 详情通过权限控制的 Evidence 页面查看。
+[报告命名与阅读顺序](jaf-benchmark.md#报告内容)。先给判断、限制与技术门禁，再给版本、完整运行事实和评分依据。
 
 ## 14. 端到端执行顺序
 
@@ -360,10 +287,10 @@ JAF_Accuracy_Report_<skill-version>_<benchmark-version>_<YYYYMMDD>.md
 
 1. 使用一个非 benchmark Ticket 执行 Redmine + SVN smoke。
 2. 验证只读 Tool 自动执行、硬拒绝、AgentTaskBrief、用户 Review、多 Session、ChangeProposal、Result、Evidence、Artifact、Evaluation 和导出；真实 effect apply 仅在 CAS adapter 受入环境验证。
-3. 使用同一 Ticket 的 CSV 快照执行并比较。
-4. Smoke 通过后在独立评价存储创建 EvaluationRun 记录，固定全部版本和配置；当前没有对应平台管理 API。
+3. 使用同一事实快照的 CSV 执行并比较，不以相同 Ticket ID 代替输入等价证明。
+4. Smoke 通过后按 [Benchmark](jaf-benchmark.md#固定样本与版本)在独立评价存储创建 EvaluationRun 记录，固定版本、输入、评分和主 Provider；当前没有对应平台管理 API。
 5. 30 case 每个创建独立 Run，不共享 Agent Session。
-6. 自动计算结构化指标，两名评价者完成人工 Rubric 和 revision。
+6. 评价侧以受控工具计算结构化指标，两名评价者完成人工 Rubric 和 revision。评分工具尚需准备，[平台 Evaluation 与整轮评价](jaf-benchmark.md#平台-evaluation-与发布结论)分开保存；配对与重跑按[独立口径](jaf-benchmark.md#配对与重跑)记录。
 7. 分歧裁定后冻结 EvaluationRun，生成准确度报告。
 
 ## 15. 验收门禁
@@ -395,17 +322,7 @@ FrontendModule、调度和其余 5 类任务不属于本 JAF benchmark 的准确
 
 ## 17. 评价数据模型（目标）
 
-Evaluation 已实现；EvaluationSuite/Case/Run/RunCase 是 benchmark 管理的目标对象，当前没有对应平台表/API。正式 benchmark 先以隔离文件和评价记录组织，不把本节当作已发布数据库设计。
-
-| 对象 | 作用 |
-| --- | --- |
-| `EvaluationSuite` | benchmark 名称、版本、选择策略、Rubric、来源截止和 checksum |
-| `EvaluationCase` | case 输入、标签、来源快照和 Gold 引用 |
-| `EvaluationRun` | 固定 Skill/Interpreter/Engine/Model 版本并汇总一次评价 |
-| `EvaluationRunCase` | 关联 EvaluationCase、实际 Run、自动指标和 case 结论 |
-| `Evaluation` | 评价者对实际 Result 的评分、comment 和 revision |
-
-已发布 Suite、Case 和完成后的 EvaluationRun 不可原地修改。
+[评价对象与当前载体](jaf-benchmark.md#记录对象与当前载体)区分平台已有 Evaluation 与目标 Suite/Case/Run/RunCase。目标概念不直接变成数据库表或公开字段。
 
 ## 18. 实现顺序
 

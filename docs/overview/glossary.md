@@ -13,6 +13,8 @@
 | Task / ExecutableTask | 用户可以启动哪项工作？ | 从版本投影的任务描述，不必是一张独立业务表 |
 | SkillComposition | 哪些 SkillVersion 组合展示？ | 虚拟角色不是 ADMIN/USER 权限角色 |
 
+“模块”也可能指生成界面。现有 module API 管理 SkillComposition；FrontendModuleVersion 则是尚无投放链路的生成展示版本。另有禁脚本的文档预览和平台 ViewSpec，详见[概念区分](../design/generated-modules.md#先分清三种模块与预览)。它们不能按同名复用安全边界或回退操作。
+
 “可用”不是一个通用状态：[兼容级别](../design/skill-contract.md#71-兼容级别)说明如何适配来源，发布状态属于版本，启用关系属于项目，readiness 属于任务投影。具体[判断顺序](../design/skill-contract.md#发布与就绪的判断顺序)不能省略，`native` 或 `gate_passed` 都不是执行许可。
 
 ## 资源与权限
@@ -27,7 +29,12 @@
 | 内容快照 / 物化副本 | 具体 ID、hash、revision 与实际文件；不能从授权 binding 自动推导创建时的全部内容 |
 | 输入回执 / RunInputSnapshot | 数据库保存的 Run 级准备记录；READY 绑定完整文件集合，PREPARING 尚不能使用。不是 manifest 的自证或公开文档清单，验收状态见[计划](../planning/roadmap.md#13-当前执行状态) |
 | 逻辑 input / 物理世代 | Agent 使用的 `input/...` 路径 / 平台保存的隔离副本目录；由平台映射，不由 Agent 选目录 |
-| SecretReference | 凭据定位或托管密文的引用；公开响应不包含 Secret |
+| User / ProjectMember | 平台账户 / 某项目的成员关系；创建账户不自动加入项目，项目偏好也不授予成员资格 |
+| AuthSession / CSRF | 浏览器会话 / 与该会话绑定的写请求校验值；[两页面例子](../design/authentication.md#一个例子同一账号打开两个页面)说明 v2 正常读取返回稳定值，换会话或失效仍会拒绝。不是 AgentSession，也不单独授予业务权限 |
+| 账户版本 / 安全事件 | 用户管理的并发版本 / 一次接受的安全操作事实；[停用再启用的例子](../design/user-lifecycle.md#一个例子停用再启用不恢复旧登录)说明旧会话为何仍须失效。内部载体不等于公开管理功能，事件不是全部字段差异或登录日志 |
+| 登录配额 / 退避 | 进入密码验证前的短期请求计数 / 超限后的有限等待；[一次登录的例子](../design/login-protection.md#一个例子一次登录两次入口请求)区分来源请求数和账号尝试数。不是账号停用、会话失效或 Run 预算 |
+| SecretReference | 外部 Provider 凭据定位或托管密文的引用；不是登录会话，公开响应不含 locator 或原值 |
+| key_version / kek_version | 引用 metadata / 密文使用的部署密钥版本；[存储轮换](../design/secret-storage.md#轮换不是更换外部凭据)不等于更换外部凭据 |
 | Readiness | 根据已安装 Provider 和项目配置计算的任务就绪度；不替代最终权限校验 |
 
 ## 一次 Run 内部
@@ -46,7 +53,8 @@ Run（一个目标、固定权限与输入）
 | AgentTaskBrief | 每段传给 Agent 的目标、规则、资源与策略快照 |
 | lease / fencing | 当前 Attempt 的限时执行权 / 提交时拒绝已失效持有者；有 heartbeat 不代表可以省略提交校验 |
 | 准备 timeout / wall timeout / job timeout | 分别约束 ContextBuilder、模型事件等待、整个 Worker job；[覆盖范围](../design/run-budgets.md#现有计时器的覆盖范围)不同，不相加成 Run 累计预算 |
-| 限额 / 预留 / 消耗 | 冻结上限 / 已承诺额度 / 已使用额度；[Run 共享预算](../design/run-budgets.md)仍是待实现设计 |
+| 限额 / 预留 / 消耗 | 冻结上限 / 尚未转成确认消耗或可靠释放的占用 / 已确认消耗；[数字例子](../design/run-budgets.md#一个例子已用占用与可用)把待核对量留在预留中。[内部账本与执行接入](../design/run-budgets.md#持久账本的当前载体)分开判断，不把已有组件当作运行保证 |
+| usage / cost / 分支 outcome | 当前用量报告 / 费用摘要 / 执行结论是不同事实；[计量入口](../design/run-budgets.md#用量现在流向哪里)不等于累计账本，[子结果](../design/subagents.md#当前返回值的可信边界)也不证明用量结清 |
 | UserInteraction | 澄清、选择、Review 或外部变更批准请求 |
 | ChangeProposal | 可审查的具体变更；它本身不是批准 |
 | EffectExecution | 平台实际执行已批准变更及回读验证的记录 |

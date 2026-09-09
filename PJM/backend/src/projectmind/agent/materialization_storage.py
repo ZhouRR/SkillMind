@@ -7,7 +7,7 @@ import stat
 from collections.abc import Generator, Iterator, Sequence, Set
 from contextlib import closing, contextmanager, suppress
 from pathlib import Path, PurePosixPath
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from projectmind.core.hashing import sha256_hex
 from projectmind.runs.input_snapshot import InputFileSeal
@@ -64,13 +64,33 @@ def _parent_descriptor(root: Path, path: str, *, create: bool) -> Iterator[tuple
         yield descriptor, parts[-1]
 
 
-def create_generation(root: Path, relative: str) -> None:
-    """他の Worker や未完成世代を上書きせず、新規世代を独占作成する。"""
+def input_generation_relative(snapshot_id: UUID) -> str:
+    """DB が発行した世代だけを、固定の非公開 namespace へ対応させる。"""
 
+    if not isinstance(snapshot_id, UUID):
+        raise MaterializationError("Input generation identity is invalid")
+    return f".projectmind-inputs/{snapshot_id}"
+
+
+def create_generation(root: Path, snapshot_id: UUID) -> None:
+    """namespace ごと独占作成し、失われた回执の候補へ二份目を追加しない。"""
+
+    namespace, generation = relative_parts(input_generation_relative(snapshot_id))
     try:
-        with _parent_descriptor(root, relative, create=True) as (parent, name):
-            os.mkdir(name, mode=0o700, dir_fd=parent)
-            os.fsync(parent)
+        with _directory_descriptor(root, ()) as run:
+            # 同じ UUID だけの排他では、DB を失った後の別 UUID を許してしまう。
+            # 空 directory も中断の証拠として残し、再試行で存在を無視しない。
+            os.mkdir(namespace, mode=0o700, dir_fd=run)
+            os.fsync(run)
+            parent = os.open(namespace, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=run)
+            try:
+                with os.scandir(parent) as entries:
+                    if next(entries, None) is not None:
+                        raise MaterializationError("Input namespace changed during creation")
+                os.mkdir(generation, mode=0o700, dir_fd=parent)
+                os.fsync(parent)
+            finally:
+                os.close(parent)
     except OSError as error:
         raise MaterializationError("Input generation could not be created safely") from error
 

@@ -22,6 +22,7 @@ from projectmind.agent.domain import (
     RunContext,
 )
 from projectmind.agent.result_validation import ResultValidationError, ResultValidator
+from projectmind.agent.stream_lifecycle import close_async_stream
 from projectmind.core.hashing import canonical_json, sha256_hex
 from projectmind.core.logging import log_event
 from projectmind.effects.proposal import parse_change_proposal_request
@@ -35,6 +36,7 @@ from projectmind.runs.domain import (
     RunStatus,
     SessionContinuationMode,
 )
+from projectmind.runs.execution_outcome import user_cancellation_event
 from projectmind.runs.interaction import parse_interaction_request
 from projectmind.runs.realtime import RunRealtimePublisher
 from projectmind.runs.service import RunService
@@ -142,7 +144,7 @@ class AgentRunExecutor:
             if not await self._run_service.verify_execution_start(claimed):
                 await self._finalize_cancelled(claimed)
                 return
-            await self._consume_engine(claimed, context, done, session_ref)
+            await self._consume_engine(claimed, context, done, session_ref, cancellation)
         finally:
             done.set()
 
@@ -239,6 +241,7 @@ class AgentRunExecutor:
         context: RunContext,
         done: asyncio.Event,
         session_ref: asyncio.Future[AgentSessionRef],
+        cancellation: asyncio.Event,
     ) -> None:
         """Engine stream を一度だけ消費し、最初の terminal event で Run を閉じる。"""
 
@@ -255,6 +258,7 @@ class AgentRunExecutor:
         )
         last_sequence = context.sequence_start - 1
         last_session_id: str | None = None
+        last_event: AgentEvent | None = None
         usage: dict[str, Any] = {}
         cost: dict[str, Any] = {}
         stream = aiter(self._execution_stream(claimed, context))
@@ -267,7 +271,12 @@ class AgentRunExecutor:
                 try:
                     if remaining <= 0:
                         raise TimeoutError
-                    event = await asyncio.wait_for(anext(stream), timeout=remaining)
+                    if session_ref.done():
+                        event = await asyncio.wait_for(anext(stream), timeout=remaining)
+                    else:
+                        event = await _first_engine_event(
+                            stream, cancellation=cancellation, timeout=remaining
+                        )
                 except StopAsyncIteration:
                     if await self._run_service.is_cancellation_requested(claimed.run_id):
                         await self._finalize_cancelled(
@@ -302,6 +311,7 @@ class AgentRunExecutor:
                 if event.sequence <= last_sequence:
                     raise ValueError("Agent event sequence is not strictly increasing")
                 event = _lineage_event(event, claimed.continuation_mode)
+                last_event = event
                 last_sequence = event.sequence
                 last_session_id = event.agent_session_id
                 if not session_ref.done():
@@ -328,7 +338,6 @@ class AgentRunExecutor:
                 )
                 cancellation_wins = (
                     terminal_event
-                    and event.event_type is not AgentEventType.SESSION_INTERRUPTED
                     and await self._run_service.is_cancellation_requested(claimed.run_id)
                 )
                 if cancellation_wins:
@@ -338,6 +347,7 @@ class AgentRunExecutor:
                         metadata=metadata,
                         sequence=event.sequence,
                         session_id=event.agent_session_id,
+                        source_event=event,
                     )
                     return
                 if event.event_type is AgentEventType.TEXT_DELTA:
@@ -463,7 +473,7 @@ class AgentRunExecutor:
                 terminal = _terminal_mapping(event.event_type)
                 if terminal is not None:
                     target, attempt_status, code = terminal
-                    await self._run_service.finalize_execution(
+                    stored_status = await self._run_service.finalize_execution(
                         claimed,
                         target=target,
                         attempt_status=attempt_status,
@@ -482,8 +492,8 @@ class AgentRunExecutor:
                         run_attempt_id=claimed.run_attempt_id,
                         agent_session_id=event.agent_session_id,
                         attempt_no=claimed.attempt_no,
-                        status=target.value,
-                        error_code=code if target is RunStatus.FAILED else None,
+                        status=stored_status.value,
+                        error_code=code if stored_status is RunStatus.FAILED else None,
                     )
                     return
                 await self._run_service.append_agent_event(
@@ -499,6 +509,17 @@ class AgentRunExecutor:
                 sequence=last_sequence + 1,
                 session_id=last_session_id,
                 code="terminal_event_missing",
+            )
+        except RunCancellationRequestedError:
+            # 待機/通常 event の transaction が取消を確認して rollback した。
+            # heartbeat を終態 commit まで保ち、同じ観測 identity/用量で再検証する。
+            await self._finalize_cancelled(
+                claimed,
+                context=context,
+                metadata=metadata,
+                sequence=last_sequence + 1,
+                session_id=last_session_id,
+                source_event=last_event,
             )
         finally:
             done.set()
@@ -543,27 +564,10 @@ class AgentRunExecutor:
     ) -> None:
         """Structured output を再検証し、成功または検証失敗を原子的に確定する。"""
 
-        schema_ref = context.task_snapshot.get("output_schema_checksum")
-        if not isinstance(schema_ref, str):
-            schema_ref = context.task_snapshot.get("output_schema")
-        if not isinstance(schema_ref, str):
-            schema_ref = "inline://run-result-schema"
         try:
-            task_schema = context.task_snapshot.get("task_output_schema_json")
-            task_schema_mapping = task_schema if isinstance(task_schema, dict) else None
-            task_schema_ref = context.task_snapshot.get("task_output_schema_checksum")
-            validated = await self._result_validator.validate(
-                run_id=context.run_id,
-                schema=context.result_schema,
-                schema_ref=schema_ref,
+            validated = await self._result_validator.validate_context(
+                context,
                 structured_output=event.payload.get("structured_output"),
-                result_kind=(
-                    str(context.task_snapshot.get("result_kind"))
-                    if context.task_snapshot.get("result_kind") == "OUTCOME_ENVELOPE"
-                    else "STRUCTURED_OUTPUT"
-                ),
-                task_schema=task_schema_mapping,
-                task_schema_ref=task_schema_ref if isinstance(task_schema_ref, str) else None,
             )
         except ResultValidationError as error:
             failure = AgentEvent(
@@ -575,7 +579,7 @@ class AgentRunExecutor:
                 event_type=AgentEventType.ENGINE_FAILED,
                 payload={"reason": "result_validation_failed", "code": error.code},
             )
-            await self._run_service.finalize_execution(
+            stored_status = await self._run_service.finalize_execution(
                 claimed,
                 target=RunStatus.FAILED,
                 attempt_status=RunAttemptStatus.FAILED,
@@ -587,18 +591,20 @@ class AgentRunExecutor:
             log_event(
                 logger,
                 logging.WARNING,
-                "run.result.rejected",
+                "run.execution.cancelled"
+                if stored_status is RunStatus.CANCELLED
+                else "run.result.rejected",
                 run_id=claimed.run_id,
                 run_attempt_id=claimed.run_attempt_id,
                 agent_session_id=event.agent_session_id,
                 attempt_no=claimed.attempt_no,
-                status=RunStatus.FAILED.value,
-                error_code=error.code,
+                status=stored_status.value,
+                error_code=error.code if stored_status is RunStatus.FAILED else None,
             )
             return
 
         record = RunResultRecord(
-            output_schema=schema_ref,
+            output_schema=validated.validation["schema_ref"],
             result_kind=validated.result_kind,
             data=validated.data,
             evidence_refs=tuple(sorted(validated.evidence_refs)),
@@ -616,7 +622,7 @@ class AgentRunExecutor:
             cost=dict(cost),
             validation=validated.validation,
         )
-        await self._run_service.finalize_execution(
+        stored_status = await self._run_service.finalize_execution(
             claimed,
             target=RunStatus.SUCCEEDED,
             attempt_status=RunAttemptStatus.SUCCEEDED,
@@ -628,12 +634,14 @@ class AgentRunExecutor:
         log_event(
             logger,
             logging.INFO,
-            "run.result.persisted",
+            "run.execution.cancelled"
+            if stored_status is RunStatus.CANCELLED
+            else "run.result.persisted",
             run_id=claimed.run_id,
             run_attempt_id=claimed.run_attempt_id,
             agent_session_id=event.agent_session_id,
             attempt_no=claimed.attempt_no,
-            status=RunStatus.SUCCEEDED.value,
+            status=stored_status.value,
         )
 
     async def _finalize_stream_failure(
@@ -659,7 +667,7 @@ class AgentRunExecutor:
                 event_type=AgentEventType.ENGINE_FAILED,
                 payload={"reason": code},
             )
-        await self._run_service.finalize_execution(
+        stored_status = await self._run_service.finalize_execution(
             claimed,
             target=RunStatus.FAILED,
             attempt_status=RunAttemptStatus.FAILED,
@@ -671,13 +679,15 @@ class AgentRunExecutor:
         log_event(
             logger,
             logging.ERROR,
-            "run.execution.stream_failed",
+            "run.execution.cancelled"
+            if stored_status is RunStatus.CANCELLED
+            else "run.execution.stream_failed",
             run_id=claimed.run_id,
             run_attempt_id=claimed.run_attempt_id,
             agent_session_id=session_id,
             attempt_no=claimed.attempt_no,
-            status=RunStatus.FAILED.value,
-            error_code=code,
+            status=stored_status.value,
+            error_code=code if stored_status is RunStatus.FAILED else None,
         )
 
     async def _finalize_without_event(
@@ -685,7 +695,7 @@ class AgentRunExecutor:
     ) -> None:
         """Session 作成前の infrastructure failure を秘密なしで終態化する。"""
 
-        await self._run_service.finalize_execution(
+        stored_status = await self._run_service.finalize_execution(
             claimed,
             target=RunStatus.FAILED,
             attempt_status=RunAttemptStatus.FAILED,
@@ -697,12 +707,14 @@ class AgentRunExecutor:
         log_event(
             logger,
             logging.ERROR,
-            "run.execution.setup_failed",
+            "run.execution.cancelled"
+            if stored_status is RunStatus.CANCELLED
+            else "run.execution.setup_failed",
             run_id=claimed.run_id,
             run_attempt_id=claimed.run_attempt_id,
             attempt_no=claimed.attempt_no,
-            status=RunStatus.FAILED.value,
-            error_code=code,
+            status=stored_status.value,
+            error_code=code if stored_status is RunStatus.FAILED else None,
         )
 
     async def _finalize_cancelled(
@@ -713,11 +725,14 @@ class AgentRunExecutor:
         metadata: AgentSessionMetadata | None = None,
         sequence: int | None = None,
         session_id: str | None = None,
+        source_event: AgentEvent | None = None,
     ) -> None:
         """取消 intent を terminal snapshot が最後になる CANCELLED transaction へ閉じる。"""
 
         event = None
-        if context is not None and sequence is not None and session_id is not None:
+        if source_event is not None:
+            event = user_cancellation_event(source_event)
+        elif context is not None and sequence is not None and session_id is not None:
             event = AgentEvent(
                 run_id=context.run_id,
                 run_attempt_id=context.run_attempt_id,
@@ -754,7 +769,7 @@ class AgentRunExecutor:
         session_ref: asyncio.Future[AgentSessionRef],
         cancellation: asyncio.Event,
     ) -> None:
-        """準備中は子 task を止め、Session 確立後は Engine interrupt を一度だけ呼ぶ。"""
+        """準備/首 event 待機には取消を通知し、Session 確立後は一度だけ interrupt する。"""
 
         while not done.is_set():
             if await self._run_service.is_cancellation_requested(claimed.run_id):
@@ -800,14 +815,50 @@ class AgentRunExecutor:
                     raise
 
 
+async def _first_engine_event(
+    stream: AsyncIterator[AgentEvent], *, cancellation: asyncio.Event, timeout: float
+) -> AgentEvent:
+    """Session ID が無い間も owned await を取り消し、SDK の清理完了を待って戻る。"""
+
+    if cancellation.is_set():
+        raise StopAsyncIteration
+
+    async def advance() -> AgentEvent | None:
+        """自然な EOF だけを値へ写し、timeout と実行例外は元の分類で親へ返す。"""
+
+        try:
+            return await asyncio.wait_for(anext(stream), timeout=timeout)
+        except StopAsyncIteration:
+            return None
+
+    try:
+        async with asyncio.TaskGroup() as tasks:
+            advancing = tasks.create_task(advance())
+            cancelled = tasks.create_task(cancellation.wait())
+            try:
+                await asyncio.wait((advancing, cancelled), return_when=asyncio.FIRST_COMPLETED)
+                if not advancing.done():
+                    # Session がまだ分からなくても、anext の所有者を通じて connect/receive の
+                    # finally まで取消が届く。ここで清理を待ち、DB 終態化は中断対象にしない。
+                    advancing.cancel()
+            finally:
+                cancelled.cancel()
+    except ExceptionGroup as group:
+        error = _supervisor_exception(group)
+        raise error from group
+    if advancing.cancelled():
+        raise StopAsyncIteration
+    event = advancing.result()
+    if event is None:
+        raise StopAsyncIteration
+    return event
+
+
 async def _close_stream(stream: AsyncIterator[AgentEvent]) -> None:
     """打ち切った engine stream を閉じ、CLI subprocess の解放を待つ。"""
 
-    aclose = getattr(stream, "aclose", None)
-    if aclose is None:
-        return
     try:
-        await asyncio.wait_for(aclose(), timeout=30)
+        await close_async_stream(stream)
     except Exception:
         # Subprocess 解放の失敗が wall timeout の終態化を妨げてはならない。
         return
@@ -888,7 +939,8 @@ def _terminal_mapping(
     if event_type is AgentEventType.ENGINE_FAILED:
         return RunStatus.FAILED, RunAttemptStatus.FAILED, "agent_engine_failed"
     if event_type is AgentEventType.SESSION_INTERRUPTED:
-        return RunStatus.CANCELLED, RunAttemptStatus.CANCELLED, "user_interrupted"
+        # SDK 通知自体は user intent ではない。取消は持久意図を確認する別経路だけで行う。
+        return RunStatus.FAILED, RunAttemptStatus.FAILED, "agent_session_interrupted"
     if event_type is AgentEventType.SESSION_DEFERRED:
         return RunStatus.WAITING_PERMISSION, RunAttemptStatus.DEFERRED, "permission_deferred"
     return None

@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     auth_session_absolute_hours: int = Field(default=12, ge=1, le=168)
     auth_admin_session_absolute_hours: int = Field(default=8, ge=1, le=24)
     auth_login_attempts_per_minute: int = Field(default=5, ge=1, le=30)
+    # 来源は challenge 取得も含む HTTP request 数、account/組合は login 試行数である。
+    auth_login_account_attempts_per_minute: int = Field(default=15, ge=1, le=100)
+    auth_login_source_requests_per_minute: int = Field(default=100, ge=2, le=10000)
+    auth_login_protection_timeout_seconds: float = Field(default=2, gt=0, le=10)
 
     database_url: str = "postgresql+asyncpg://projectmind:projectmind@localhost:5432/projectmind"
     redis_url: str = "redis://localhost:6379/0"

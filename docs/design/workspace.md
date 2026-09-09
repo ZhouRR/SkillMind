@@ -29,6 +29,10 @@
 
 SkillComposition 的 module/role/task_group 是展示方式，不是系统角色或权限来源。Project 选择、模块过滤与 Run 选择分别保存上下文。
 
+登录是进入这些业务页面前的 App 状态，不是另一个 Project 页面或独立 hash route。配额拒绝与提示见[登录客户端责任](login-protection.md#公开响应与客户端责任)，在途提交、离页和结果未知见[请求生命周期](login-protection.md#提交离页与结果未知)。业务页复用当前 Session，不把登录等待当成 Run 取消，也不在此复制一套错误与重试规则。
+
+后续[账户安全入口](user-lifecycle.md#生效与界面)也属于平台层，不依赖 Project；本人操作与 ADMIN 组织管理分开。Backend 的管理路由与 Schema 已存在，但 Web client、页面与 hash route 尚未接入，所以下面的现行导航树和路由表不提前加入可点击的账户项。UI language / Project preference 是已有偏好，不代表账户界面已实现。
+
 ### 2.2 路由
 
 当前使用 hash 路由，定义在 [routing.ts](../../PJM/web/src/lib/routing.ts)。
@@ -117,7 +121,7 @@ JSON Pointer 只读取当前任务或已授权结果。缺字段显示空状态�
 
 Conversation、Run history、事件/会话时间线、Interaction 和 Proposal 详情由平台组件负责。Task Center 不启动第二套 SSE、取消和终态处理。
 
-`RUNNING` 不代表输入准备完毕，取消请求被接受也不代表进程已停止。显示已有 Session/Event 与终态事实；没有公开准备进度时不根据等待秒数、文档清单的 FROZEN 或已冻结 Brief 合成 READY/完成百分比。准备与模型的边界见[Runtime 启动顺序](agent-runtime.md#74-从领取到模型启动的边界)。
+`RUNNING` 不代表输入准备完毕，取消请求被接受也不代表进程已停止。显示已有 Session/Event 与终态事实；没有公开准备进度时不根据等待秒数、文档清单的 FROZEN 或已冻结 Brief 合成 READY/完成百分比。准备与模型的边界见[Runtime 启动顺序](agent-runtime.md#74-从领取到模型启动的边界)。终态快照只确认业务状态，不据此显示“进程全部退出”或“用量已结清”；[取消后的具体例子](run-supervision.md#一个例子点击取消之后)说明 UI 可表达的事实及尚缺的公开信息。
 
 后续 Flow 观察区复用上述事实，不按推荐节点数计算百分比，也不从 Run SUCCEEDED 或 Proposal APPROVED 推导所有节点已完成。[Flow 的事实来源与例子](task-flow.md#9-节点状态的事实来源)负责这些判定；本页只约束页面位置、导航和可访问性。
 
@@ -208,7 +212,7 @@ ONCE/CRON、timezone、触发预览、错过/重叠/失效行为以 [TaskSchedul
 
 ## 10. FrontendModule 生命周期
 
-后续目标与当前前置实现见[生成模块设计](generated-modules.md#目标与流水线)。不在本页重复维护第二套设计。
+后续目标与当前前置实现见[生成模块设计](generated-modules.md#目标与流水线)。先区分[业务模块、生成界面与文档预览](generated-modules.md#先分清三种模块与预览)；现有 modules API 和禁脚本文档 iframe 都不是生成界面的发布入口。不在本页重复维护第二套设计。
 
 ## 11. Build Sandbox
 
@@ -232,11 +236,11 @@ ONCE/CRON、timezone、触发预览、错过/重叠/失效行为以 [TaskSchedul
 
 ### 12.3 消息校验
 
-来源窗口、channel nonce、精确模块版本、Project/Run 与 Schema 共同校验；opaque origin 的 null 不能用作可信身份。
+来源窗口、channel nonce、精确模块版本、Project/Run 与 Schema 共同校验；opaque origin 的 null 不能用作可信身份。账号/上下文切换、重载或回退都使旧实例失效；[晚到消息与通道](generated-modules.md#挂载切换与晚到消息)不得覆盖新草稿或取得新的业务权限。
 
 ## 13. 生成模块回退
 
-尚未实现。目标是错误时关闭 iframe 回到 standard，业务记录不变；见[版本与回退](generated-modules.md#版本与回退)。
+尚未实现。目标是错误时关闭本页 iframe 回到 standard，保留草稿与焦点，展示失败原因，业务记录不变；见[版本与回退](generated-modules.md#版本与回退)。本页异常不自动全局停版，也不切换 SkillComposition 的业务版本；[图表失败的例子](generated-modules.md#一个例子图表坏了任务没有失败)说明用户应看到的区别。
 
 ## 14. 可访问性、国际化与隐私
 

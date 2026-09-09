@@ -12,6 +12,7 @@ from projectmind.auth import (
     normalize_email,
     verify_password,
 )
+from projectmind.auth.domain import derive_session_csrf
 
 
 def test_password_hash_uses_argon2id_and_verifies_unicode_password() -> None:
@@ -34,8 +35,8 @@ def test_password_policy_rejects_short_and_oversized_values() -> None:
         hash_password("密" * 400)
 
 
-def test_session_credentials_store_only_independent_hashes() -> None:
-    """Session と CSRF secret が独立し、永続値から平文を復元できない形式であることを確認する。"""
+def test_session_credentials_store_only_separate_hashes() -> None:
+    """Session と用途分離した CSRF の原値を、いずれも DB hash に含めない。"""
 
     credentials = generate_session_credentials()
 
@@ -43,6 +44,41 @@ def test_session_credentials_store_only_independent_hashes() -> None:
     assert credentials.session_token_hash == hash_session_secret(credentials.session_token)
     assert credentials.csrf_token_hash == hash_session_secret(credentials.csrf_token)
     assert credentials.session_token not in credentials.session_token_hash
+    assert credentials.session_token.startswith("pm2.")
+    assert credentials.csrf_token.startswith("csrf2.")
+    assert len(credentials.session_token) == 47
+    assert len(credentials.csrf_token) == 49
+
+
+def test_session_csrf_is_stable_and_bound_to_each_random_session() -> None:
+    """会話を再取得しても値は変わらず、別の会話へは転用できない。"""
+
+    first, second = generate_session_credentials(), generate_session_credentials()
+
+    assert derive_session_csrf(first.session_token) == first.csrf_token
+    assert derive_session_csrf(first.session_token) == derive_session_csrf(first.session_token)
+    assert first.csrf_token != second.csrf_token
+    assert first.session_token not in first.csrf_token
+    with pytest.raises(ValueError):
+        derive_session_csrf(first.session_token_hash)
+
+
+def test_v2_csrf_profile_matches_an_independent_openssl_vector() -> None:
+    """公開の合成入力を OpenSSL HKDF と照合した値で info/長さ/encoding を固定する。"""
+
+    assert derive_session_csrf("pm2." + "A" * 43) == (
+        "csrf2.L95oe_E3yMwDoYSbbNGy2Ldk29FNqF8agvdVG5hYP5s"
+    )
+
+
+@pytest.mark.parametrize(
+    "value", ["", "a" * 43, "pm1." + "a" * 43, "pm2." + "a" * 42, "pm2." + "密" * 43]
+)
+def test_legacy_and_malformed_session_credentials_are_not_derived(value: str) -> None:
+    """旧版・不正長・非 ASCII の値を新 protocol として解釈しない。"""
+
+    with pytest.raises(ValueError, match="Unsupported"):
+        derive_session_csrf(value)
 
 
 def test_email_normalization_is_stable_for_login_lookup() -> None:

@@ -33,7 +33,7 @@
       "items": { "type": "string", "pattern": "^ev_[a-zA-Z0-9_-]+$" }
     },
     "budget": {
-      "description": "How much of the Run budget the fan-out consumed. Split across branches, never multiplied.",
+      "description": "Per-branch limits allocated for this dispatch. These are not measured consumption or a shared Run balance.",
       "type": "object",
       "additionalProperties": false,
       "required": ["turns_per_branch", "output_bytes_per_branch"],

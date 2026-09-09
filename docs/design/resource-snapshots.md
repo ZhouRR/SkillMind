@@ -207,14 +207,18 @@ Agent / Tool 使用逻辑 input，实际读取仍校验字节
 | 观察到的状态 | 处置与放行条件 |
 | --- | --- |
 | 没有回执，也没有旧输入或候选目录 | 当前有效 Attempt 可以认领首次准备；此刻还不能交给 Agent |
-| 没有回执，却有旧输入或同名候选 | 不使用，保留现场；拒绝覆盖、移动复用或自行补签 |
+| 没有回执，却有旧输入或输入命名空间 | 不使用，保留现场；包含空命名空间、不同 UUID 的旧候选、文件或 symlink，不能通过换世代名重新取数 |
 | `PREPARING`，文件缺失、部分存在或看似完整 | 不使用；仅原有效准备继续正常流程，接管不接着“签完”别的 Attempt；当前无自动修复入口 |
 | `READY`，来源、完整树、总量和实际字节均匹配 | 在当前执行授权下可交给 Agent 复用；不再次下载或枚举 Project |
 | `READY`，缺文件、出现额外目录/文件或任何 hash 不符 | 不使用，保留回执与文件现场；明确失败，不降级到 live 新内容 |
 | 完成提交返回超时/断连，结果未知 | 暂不使用，重读原 Run 的回执确认；只接受已提交的相同世代，不创建第二份输入 |
 | lease 已失效或取消已成立 | 阻断完成写入和 Agent 启动，按 Runtime 正常恢复/取消流程处理 |
 
-历史终态 Run 保持原记录可读；旧非终态 Run 缺可信输入时不能自动授权全集或重建。确实需要新输入时显式创建新 Run。恢复必须把数据库、对应世代文件及 transcript 作为同一[恢复点](../operations/runbook.md#一致恢复点包含什么)核对，不能用较晚的 workspace 为较早的 DB 补签。`PREPARING` 接管、提交结果未知和孤立目录均需故障注入与独立运维处置，不能据表推导已有自动恢复器。
+历史终态 Run 保持原记录可读；旧非终态 Run 缺可信输入时不能自动授权全集或重建。确实需要新输入时显式创建新 Run。恢复必须把数据库、对应世代文件及 transcript 作为同一[恢复点](../operations/backup-recovery.md#一致恢复点包含什么)核对，不能用较晚的 workspace 为较早的 DB 补签。`PREPARING` 接管、提交结果未知和孤立目录均需故障注入与独立运维处置，不能据表推导已有自动恢复器。
+
+首次文件准备现在通过[安全 I/O](../../PJM/backend/src/projectmind/agent/materialization_storage.py)原子独占 `.projectmind-inputs` 命名空间，再创建回执指定的 UUID 子目录。只对 UUID 子目录做排他不足以发现丢失回执的另一份输入；命名空间已存在时拒绝，无论它是否为空。创建中断不删除痕迹，`READY` 的正常复用不再调用首次创建；symlink/路径错误统一作为准备失败。
+
+[输入准备协议回归](../../PJM/backend/tests/agent/test_input_preparation_protocol.py)使用真实临时文件、受控 repository/inventory 和独立 memory store，覆盖孤立目录、跨根总量、双重篡改、取消/lease 失效、接管和同世代复用；[存储回归](../../PJM/backend/tests/agent/test_materialization_storage.py)覆盖不同 UUID 的线程竞争与创建中断。它们不等于 PostgreSQL 与文件系统的共同恢复演练，也没有增加自动修复 PREPARING 的入口。
 
 特别是“提交结果未知”：当前 [store](../../PJM/backend/src/projectmind/runs/repository_inputs.py)已有一次性确认路径。只有 repository.complete 已返回、随后事务退出遇到 DBAPIError、TimeoutError 或 ConnectionError 时，才另开 session 确认原 Run/准备者/世代、来源和文件摘要均匹配的 READY；重读仍校验当前 lease 与取消。不再 begin、不再次 complete，找不到匹配记录就失败。complete 返回前的验证/flush 错误和 CancelledError 不触发这次确认。
 
@@ -230,7 +234,7 @@ search 选择 `input/` 时先验证所选世代的完整树，再按可信清单
 
 ### 跨根总量的修正口径（待实现）
 
-总量累计、Settings、.env.example 与 Worker 注入已有工作副本代码；默认/边界/自定义配置和 startup 注入已有局部测试，整条准备链与跨根故障验收仍待完成。保留本标题供旧引用使用；本地注入测试不证明部署已采用正确配置，实际证据见[计划](../planning/roadmap.md#13-当前执行状态)。
+总量累计、Settings、.env.example 与 Worker 注入已有代码；默认/自定义配置与 startup 注入、首次/复用的逐根和跨根边界已有本地回归。保留本标题供旧引用使用；整条准备链、真实 DB/部署和历史恢复仍需验收，不据本地测试声明部署已采用正确配置，实际证据见[计划](../planning/roadmap.md#13-当前执行状态)。
 
 总量按最终可见文件的实际落盘字节累计，不按文本字符数计算；包含转换物、manifest、索引与 history，原文若也保留则另计一次。多个文档槽位共享的物理文件只计一次，不同 repository 根各自落盘的副本分别计量。skipped 的未落盘原文不计文件字节，描述它的 manifest 仍计。
 
@@ -252,10 +256,10 @@ search 选择 `input/` 时先验证所选世代的完整树，再按可信清单
 | 历史续行与版本升级 | 新 API 已区分合法清单、历史缺失与损坏；旧非终态 Run、旧 API/Web/Worker 混合版本和回退安全仍需专项处置，不能把历史可读当成可继续执行 |
 | 回执与准备交接 | [物化器](../../PJM/backend/src/projectmind/agent/workspace_materializer.py)调用 begin/complete、返回 PreparedInput，[ContextBuilder](../../PJM/backend/src/projectmind/agent/context_builder.py)消费 workspace/resources，[Worker startup](../../PJM/backend/src/projectmind/worker/settings.py)注入必需 store；物化消费者已同步为显式 test store，不把生产构造器依赖改为可选 |
 | 仓库缓存授权与运行期字节 | [repository source](../../PJM/backend/src/projectmind/agent/repository_source.py)的 inspect 与 open 分别验证授权/取得内容；[workspace Provider](../../PJM/backend/src/projectmind/agent/workspace_provider.py)已调用[input_workspace](../../PJM/backend/src/projectmind/agent/input_workspace.py)与[安全 I/O](../../PJM/backend/src/projectmind/agent/materialization_storage.py)。局部读写回归之外，继续真实世代、仓库 fake、准备复用和故障场景验收 |
-| 准备期监督与提交失败 | [Executor](../../PJM/backend/src/projectmind/worker/executor.py)已有准备期 heartbeat/取消、独立 timeout 与启动校验；[回执测试](../../PJM/backend/tests/runs/test_repository_inputs.py)覆盖授权与一次重读。继续真实提交结果未知、锁竞争、旧 Attempt 与首事件前取消，不能以 fake/mock 代替真实 store |
-| 所有物化根的共同总量限制 | [Settings](../../PJM/backend/src/projectmind/core/settings.py)、.env.example、Worker 与物化器已有字段/累计/注入；保留已有配置回归，继续按[计量口径](#跨根总量的修正口径待实现)验证 manifest、共享文档并集、不同仓库副本及最后一根超限 |
+| 准备期监督与提交失败 | [Executor](../../PJM/backend/src/projectmind/worker/executor.py)已有准备期 heartbeat/取消、独立 timeout、启动校验与首事件前停止接线；[回执测试](../../PJM/backend/tests/runs/test_repository_inputs.py)覆盖授权与一次重读。继续真实提交结果未知、锁竞争、旧 Attempt 与[进程停止核对](run-supervision.md)，不能以 fake/mock 代替真实 store |
+| 所有物化根的共同总量限制 | 字段/累计/注入及[真实临时文件的多根回归](../../PJM/backend/tests/agent/test_input_preparation_protocol.py)已有：包含 manifest、共享文档并集、两份 repository 副本、最后一根超限与复用配置限制；剩余真实 DB、部署和完整恢复不由这些测试替代 |
 
-上表为工作副本接续入口，不是验收通过清单。旧物化 fixture 与 migration head 断言失败已在后续针对性回归中不再复现，历史失败仍保留；这不证明整条准备链、跨根故障或真实迁移恢复均已通过。日期、实际结果和剩余验收统一见[计划](../planning/roadmap.md#13-当前执行状态)，文档整理不修补应用实现或测试来替代联调。
+上表为工作副本接续入口，不是整链验收通过清单。本地多根边界和文件级故障已有回归；[0029 约束检查](../../PJM/backend/tests/db/test_input_snapshot_migration.py)也已比对 model/DDL 的 Run 唯一、RESTRICT 和完成条件，并检查回退保护先于 drop 的调用顺序，但没有连接真实数据库。日期、实际结果和剩余验收统一见[计划](../planning/roadmap.md#13-当前执行状态)，不能把结构/mock 检查当作真实迁移恢复。
 
 现有公开链路按[选择组件](../../PJM/web/src/components/DocumentSourceField.tsx) → [安全投影](../../PJM/backend/src/projectmind/runs/resource_projection.py) → [Web validator](../../PJM/web/src/api/runResources.ts) → [清单展示](../../PJM/web/src/components/RunDocumentSnapshots.tsx)定位；不再把已有入口重复登记为待开发。上述剩余责任及各轮验证统一见[计划 R01](../planning/roadmap.md#133-全项目重构与缺失功能实施2026-09-05-启动)。
 

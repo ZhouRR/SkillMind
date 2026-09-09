@@ -722,8 +722,12 @@ async def test_repository_materialization_without_source_fails_closed(tmp_path: 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "key", ["../escape", "documents", ".", ".projectmind", "bad/key", "bad\\key"]
+)
 async def test_repository_requirement_key_cannot_escape_or_shadow_documents(
     tmp_path: Path,
+    key: str,
 ) -> None:
     """外部 Skill 由来の key で input/ を逃げたり documents/ を上書きしたりできない。"""
 
@@ -733,21 +737,22 @@ async def test_repository_requirement_key_cannot_escape_or_shadow_documents(
     claim = input_claim(
         project_id=_PROJECT_ID,
         run_id=UUID(workspace.root.name),
-        repository_bindings={"source_repository": _BINDING},
+        repository_bindings={key: _BINDING},
     )
-    materializer = _materializer(claim, [], repository_source=source)
-
-    for key in ("../escape", "documents", "."):
-        with pytest.raises(MaterializationError):
-            prepared = await materializer.materialize(
-                claimed_run=claim,
-                workspace=workspace,
-                project_id=_PROJECT_ID,
-                run_id=UUID(workspace.root.name),
-                blueprint=_REPOSITORY_BLUEPRINT,
-                repository_bindings={key: _BINDING},
-            )
-            workspace = prepared.workspace
+    store = MemoryInputSnapshots(claim)
+    materializer = _materializer(claim, [], input_snapshots=store, repository_source=source)
+    with pytest.raises(MaterializationError, match="valid materialization root"):
+        await materializer.materialize(
+            claimed_run=claim,
+            workspace=workspace,
+            project_id=_PROJECT_ID,
+            run_id=UUID(workspace.root.name),
+            blueprint={
+                "resource_requirements": [{"key": key, "kind": "repository", "required": True}]
+            },
+            repository_bindings={key: _BINDING},
+        )
+    assert source.inspections == source.calls == store.begin_calls == 0
     assert not (workspace.input_dir.parent / "escape").exists()
 
 

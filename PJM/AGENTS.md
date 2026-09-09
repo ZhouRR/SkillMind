@@ -51,7 +51,7 @@ CapabilityBlueprint は Interpreter だけが生成する。RuntimeManifest か�
   足したとき、忘れた分がそのまま子へ漏れる）。禁止能力の要求は拒否する——黙って削ると Agent は
   渡った前提で分岐を書く。予算は `split_budget` の整除で切分し、branch ごとに与え直さない
   （合計が Run 上限を超える）。現行 Provider は各 dispatch に凍結上限を再投入しており、Run 共通の
-  消費/予約/残額管理は未実装である。[Run 予算設計](../docs/design/run-budgets.md)の修正要件を先に満たす。子 Session は RunEvent を書かず、主 Session 上の一つの
+  消費/予約/残額管理への接続は未完了である。内部台帳の存在を実行への適用済みと扱わず、[Run 予算設計](../docs/design/run-budgets.md)の門禁を先に満たす。子 Session は RunEvent を書かず、主 Session 上の一つの
   ToolCall + Evidence へ収斂させる（`Run 内 sequence は厳密単調増` を階層番号へ作り変えない）。
 - JAF の残り 5 タスク群。
 - 任意の host Shell、無制限 network、source script の直接実行。

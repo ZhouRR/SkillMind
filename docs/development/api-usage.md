@@ -2,6 +2,10 @@
 
 > コマンドは `PJM/` 起点。例の ID・host・token は placeholder。初回の疎通確認は [運用 smoke](../operations/runbook.md#41-通常-smoke) が対話ログインを扱うが、専用 Project に Run/Evaluation を作る検証であり読取専用ではない。
 
+[認証](#認証してから呼び出す) · [Run 作成](#task-を選び一回の-run-を作る) · [再送と権限](#再送継続権限の規則) · [凍結文書](#文書を選び元の範囲を確認する)
+
+このガイドは利用手順、[資源別の契約索引](../../PJM/contracts/README.md)は Schema/example、[現在の計画](../planning/roadmap.md#当前证据怎么用)は未完了の接線を担当する。保存 OpenAPI と工作副本が一致しない場合は[只読の確認手順](contract-workflow.md#遇到未接齐的交付链)へ進み、snapshot の存在だけで配備先の能力を判断しない。
+
 ## 認証してから呼び出す
 
 全業務 API（Project、Skills、Run、Result、Evidence、Evaluation、SSE）は認証必須である。まず login して session cookie と CSRF token を取得する。
@@ -16,7 +20,17 @@
 
 以降の unsafe request（POST/PATCH/PUT/DELETE）は session cookie に加えて `Origin` と `X-CSRF-Token`（login/session response の値）を送る。Session token を Web storage に保存してはならない。
 
+login-context と login はどちらも[来源配額](../design/login-protection.md#一个例子一次登录两次入口请求)を消費する。429 login_rate_limited は Retry-After の秒数を確認して操作を止め、503 login_protection_unavailable は password 誤りと解釈しない。再試行は利用者が明示し、新しい challenge から開始する。challenge の polling、password 自動再送、限流を避けるための account/來源切替は行わない。公開応答と現在の Web の差は[client 責任](../design/login-protection.md#公开响应与客户端责任)を参照する。
+
+password POST の送信後に通信が切れた場合は、上記の明確な拒否とは区別する。client の abort は Server の Session 作成を取り消さず、Login に原要求を返す Idempotency-Key 契約もない。[結果不明の扱い](../design/login-protection.md#提交离页与结果未知)に従い、原結果の確認を password 再送や自動 logout で代用しない。
+
+現在の v2 では `GET /api/v1/auth/session` が同じ会話に同じ CSRF を返す。client は値をそのまま扱い、prefix の解析や派生を行わない。認証 route の token 応答には no-store を設定するが、会話の認証は idle 記録を更新し得るため、完全な読取専用ヘルスチェックではない。
+
+別ログインで cookie が変わった場合や、期限/role/失効の不一致では古い値を使い続けられない。[多ページの設計](../design/authentication.md#会话读取与多页面)と[認証分診](../operations/runbook.md#认证故障的只读分诊)を参照し、403 や通信失敗から業務 mutation を自動再送しない。0031 の旧会話切替は[運用の前提条件](../operations/deployment.md#会话协议切换检查)を確認する。公開 JSON の版が変わらないことは、旧 API と混在可能という意味ではない。
+
 Project 選択は `GET/PUT /api/v1/users/me/project-preference` で User account に保存する。Web の hash URL は `?project=<uuid>` を含められ、URL で指定した Project が無効または権限外の場合は別 Project へ暗黙に fallback しない。
+
+`/users/me` の preference / UI language と、[アカウント管理 API](../design/user-lifecycle.md#用户操作与目标公开面)は別資源である。管理 route と Schema/example は工作副本に存在するが、保存 OpenAPI、専用 Web client/page と全体回帰は未完了。[管理契約の対応表](../../PJM/contracts/README.md#ユーザー管理の公開面を準備する)から接続を確認し、本ガイドでは改密・停用・一括失効を配備済みの操作例にしない。
 
 ## Task を選び、一回の Run を作る
 
@@ -47,7 +61,7 @@ curl -b "$COOKIE_JAR" -i -X POST "$BASE/api/v1/projects/${PROJECT_ID}/task-runs"
   policy を管理する。Response に Secret locator、connection config 本文、credential は含まれない。
 - `POST /projects/{id}/runs/{run_id}/proposals/{proposal_id}/decision` は表示中の Proposal version、
   checksum、`Idempotency-Key` を必須とする。初版は Run 起動者または system ADMIN だけが承認できる。
-- `POST /runs/{run_id}/cancel` は取消 intent を永続化する。実行前 Run は即時 `CANCELLED`、実行中は Worker が SDK session を interrupt してから終態化する。
+- `POST /runs/{run_id}/cancel` は現状に応じて取消 intent または取消終態を保存する。実行中などは `cancellation:REQUESTED`、即時に取消可能または既に取消済みなら `cancellation:CANCELLED` を返す。SUCCEEDED / FAILED が先に確定していれば `409 run_not_cancellable`。応答の status と後続 snapshot を確認し、HTTP 成功や CANCELLED を実 process の退出証明としない（[提交順序](../design/run-supervision.md#提交时谁决定最终状态)）。
 - `GET /runs/{run_id}/events` は SSE。`Last-Event-ID` と `after` query で永続 event から再開でき、一時 `TEXT_DELTA` は event ID を進めない。
 - Evaluation は追加式で、revision の `original_value` は server が不変 Result から補完する。
 - `POST /skills/parse` と Organization 作用域の `/skill-imports` は ADMIN 専用。deterministic parser はモデル呼び出しも script 実行も行わない。

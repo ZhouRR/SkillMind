@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -15,6 +16,7 @@ from sqlalchemy import (
     Index,
     Integer,
     LargeBinary,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -52,6 +54,7 @@ class User(IdentityMixin, TimestampMixin, Base):
         UniqueConstraint("organization_id", "email", name="uq_users_organization_email"),
         CheckConstraint("system_role IN ('ADMIN', 'USER')", name="users_system_role"),
         CheckConstraint("status IN ('ACTIVE', 'DISABLED')", name="users_status"),
+        CheckConstraint("row_version >= 1", name="users_row_version_positive"),
         # NULL は「未設定=browser 言語へ追従」を表すため許可する。
         CheckConstraint("ui_language IN ('zh', 'ja', 'en')", name="users_ui_language"),
     )
@@ -69,6 +72,54 @@ class User(IdentityMixin, TimestampMixin, Base):
         ForeignKey("projects.id", ondelete="RESTRICT"), nullable=True, index=True
     )
     ui_language: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    # 言語/Project preference と login 時刻では増やさず、管理・安全変更だけを競合検出する。
+    row_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
+
+
+class UserSecurityEvent(IdentityMixin, Base):
+    """User 変更と同じ transaction に追加し、credential を含めない管理監査。"""
+
+    __tablename__ = "user_security_events"
+    __table_args__ = (
+        UniqueConstraint("user_id", "row_version", name="uq_user_security_events_version"),
+        CheckConstraint(
+            "action IN ('CREATED', 'UPDATED', 'PASSWORD_CHANGED', 'SESSIONS_REVOKED')",
+            name="user_security_events_action",
+        ),
+        CheckConstraint("row_version >= 1", name="user_security_events_version_positive"),
+        CheckConstraint("revoked_sessions >= 0", name="user_security_events_revoked_nonnegative"),
+        CheckConstraint(
+            "previous_role IS NULL OR previous_role IN ('ADMIN', 'USER')",
+            name="user_security_events_previous_role",
+        ),
+        CheckConstraint(
+            "previous_status IS NULL OR previous_status IN ('ACTIVE', 'DISABLED')",
+            name="user_security_events_previous_status",
+        ),
+        CheckConstraint("system_role IN ('ADMIN', 'USER')", name="user_security_events_role"),
+        CheckConstraint("status IN ('ACTIVE', 'DISABLED')", name="user_security_events_status"),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    actor_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_role: Mapped[str | None] = mapped_column(String(16))
+    previous_status: Mapped[str | None] = mapped_column(String(16))
+    system_role: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    revoked_sessions: Mapped[int] = mapped_column(Integer, nullable=False)
+    request_id: Mapped[UUID] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class Project(IdentityMixin, TimestampMixin, Base):
@@ -258,12 +309,28 @@ class AuthSession(IdentityMixin, Base):
     """Opaque browser session の hash と失効・期限監査を保持する。"""
 
     __tablename__ = "auth_sessions"
+    __table_args__ = (
+        CheckConstraint("credential_version IN (1, 2)", name="auth_sessions_credential_version"),
+        CheckConstraint(
+            "system_role_at_login IS NULL OR system_role_at_login IN ('ADMIN', 'USER')",
+            name="auth_sessions_login_role",
+        ),
+        CheckConstraint(
+            "credential_version = 1 OR system_role_at_login IS NOT NULL",
+            name="auth_sessions_v2_role_required",
+        ),
+    )
 
     user_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     token_hash: Mapped[str] = mapped_column(String(71), nullable=False, unique=True, index=True)
     csrf_token_hash: Mapped[str] = mapped_column(String(71), nullable=False)
+    # 旧 writer の default は 1 のまま残し、v2 と誤認して受け入れない。
+    credential_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1")
+    )
+    system_role_at_login: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     idle_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -706,6 +773,135 @@ class RunInputSnapshot(IdentityMixin, Base):
     total_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class RunBudgetAccount(IdentityMixin, TimestampMixin, Base):
+    """Run 全体の凍結 policy と共通勘定。古い Run へゼロ残高を補填しない。"""
+
+    __tablename__ = "run_budget_accounts"
+    __table_args__ = (
+        UniqueConstraint("run_id", name="uq_run_budget_accounts_run"),
+        CheckConstraint("consumed_turns >= 0 AND reserved_turns >= 0", name="budget_account_turns"),
+        CheckConstraint(
+            "(consumed_cost_nanos IS NULL AND reserved_cost_nanos IS NULL) OR "
+            "(consumed_cost_nanos IS NOT NULL AND reserved_cost_nanos IS NOT NULL "
+            "AND consumed_cost_nanos >= 0 AND reserved_cost_nanos >= 0)",
+            name="budget_account_cost",
+        ),
+        CheckConstraint("row_version >= 1", name="budget_account_version"),
+    )
+
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="RESTRICT"), nullable=False)
+    policy_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    policy_checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    limits_checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    consumed_turns: Mapped[Decimal] = mapped_column(Numeric(38, 0), nullable=False)
+    reserved_turns: Mapped[Decimal] = mapped_column(Numeric(38, 0), nullable=False)
+    consumed_cost_nanos: Mapped[Decimal | None] = mapped_column(Numeric(38, 0))
+    reserved_cost_nanos: Mapped[Decimal | None] = mapped_column(Numeric(38, 0))
+    block_code: Mapped[str | None] = mapped_column(String(64))
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class RunBudgetReservation(IdentityMixin, TimestampMixin, Base):
+    """一回の主/子実行に与えた上界と未決占用を、元の実行世代に結び付ける。"""
+
+    __tablename__ = "run_budget_reservations"
+    __table_args__ = (
+        UniqueConstraint("run_id", "execution_key", name="uq_run_budget_execution"),
+        Index("ix_run_budget_group", "run_id", "group_key"),
+        CheckConstraint(
+            "status IN ('RESERVED', 'START_INTENT', 'SETTLED', 'RELEASED')",
+            name="budget_reservation_status",
+        ),
+        CheckConstraint(
+            "granted_turns > 0 AND reserved_turns >= 0 AND consumed_turns >= 0 "
+            "AND reserved_turns <= granted_turns", name="budget_reservation_turns",
+        ),
+        CheckConstraint(
+            "(granted_cost_nanos IS NULL AND reserved_cost_nanos IS NULL "
+            "AND consumed_cost_nanos IS NULL) OR "
+            "(granted_cost_nanos IS NOT NULL AND reserved_cost_nanos IS NOT NULL "
+            "AND consumed_cost_nanos IS NOT NULL AND granted_cost_nanos > 0 "
+            "AND reserved_cost_nanos >= 0 AND consumed_cost_nanos >= 0 "
+            "AND reserved_cost_nanos <= granted_cost_nanos)", name="budget_reservation_cost",
+        ),
+        CheckConstraint(
+            "(status IN ('RESERVED', 'RELEASED') AND start_intent_at IS NULL) OR "
+            "(status IN ('START_INTENT', 'SETTLED') AND start_intent_at IS NOT NULL)",
+            name="budget_reservation_start",
+        ),
+        CheckConstraint(
+            "status NOT IN ('SETTLED', 'RELEASED') OR "
+            "(reserved_turns = 0 AND (reserved_cost_nanos IS NULL OR reserved_cost_nanos = 0))",
+            name="budget_reservation_closed",
+        ),
+        CheckConstraint(
+            "status != 'SETTLED' OR (stop_confirmed_at IS NOT NULL AND final_usage_at IS NOT NULL)",
+            name="budget_reservation_settlement",
+        ),
+        CheckConstraint(
+            "status != 'RELEASED' OR (consumed_turns = 0 AND "
+            "(consumed_cost_nanos IS NULL OR consumed_cost_nanos = 0))",
+            name="budget_reservation_unstarted",
+        ),
+    )
+
+    run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("run_budget_accounts.run_id", ondelete="RESTRICT"), nullable=False
+    )
+    run_segment_id: Mapped[UUID] = mapped_column(
+        ForeignKey("run_segments.id", ondelete="RESTRICT"), nullable=False
+    )
+    run_attempt_id: Mapped[UUID] = mapped_column(
+        ForeignKey("run_attempts.id", ondelete="RESTRICT"), nullable=False
+    )
+    execution_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    group_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    group_checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    parent_reservation_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("run_budget_reservations.id", ondelete="RESTRICT")
+    )
+    execution_lease_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    granted_turns: Mapped[Decimal] = mapped_column(Numeric(38, 0), nullable=False)
+    reserved_turns: Mapped[Decimal] = mapped_column(Numeric(38, 0), nullable=False)
+    consumed_turns: Mapped[Decimal] = mapped_column(Numeric(38, 0), nullable=False)
+    granted_cost_nanos: Mapped[Decimal | None] = mapped_column(Numeric(38, 0))
+    reserved_cost_nanos: Mapped[Decimal | None] = mapped_column(Numeric(38, 0))
+    consumed_cost_nanos: Mapped[Decimal | None] = mapped_column(Numeric(38, 0))
+    turns_watermark: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    cost_watermark: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    start_intent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    stop_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    final_usage_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reconcile_worker_id: Mapped[str | None] = mapped_column(String(128))
+    reconcile_token_hash: Mapped[str | None] = mapped_column(String(64))
+    reconcile_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class RunBudgetReceipt(IdentityMixin, Base):
+    """正規化用量・停止根拠・異常を追記保存する。終態 RunEvent を再び開かない。"""
+
+    __tablename__ = "run_budget_receipts"
+    __table_args__ = (
+        UniqueConstraint("reservation_id", "receipt_key", name="uq_run_budget_receipt_key"),
+        CheckConstraint(
+            "kind IN ('USAGE', 'STOP', 'UNSTARTED', 'UNVERIFIABLE')", name="budget_receipt_kind"
+        ),
+    )
+
+    reservation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("run_budget_reservations.id", ondelete="RESTRICT"), nullable=False
+    )
+    receipt_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    payload_checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    reconcile_worker_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    disposition: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class RunEvent(IdentityMixin, Base):

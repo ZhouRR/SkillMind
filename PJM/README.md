@@ -13,11 +13,12 @@ Skill をプロジェクトのタスクとして実行し、根拠・結果・�
 | Compose で起動する | [起動と初期管理者](../docs/operations/quickstart.md) |
 | API を利用する | [API 利用ガイド](../docs/development/api-usage.md) |
 | 公開 API を変更する | [契約変更と結合確認](../docs/development/contract-workflow.md)：内部 snapshot、公開投影、消費側と版互換を分ける |
-| 既存環境を更新・復旧する | [運用 Runbook](../docs/operations/runbook.md) |
+| 既存環境を更新・復旧する | [公開・移行](../docs/operations/deployment.md) / [backup・復元](../docs/operations/backup-recovery.md)。症状から調べる場合は [Runbook](../docs/operations/runbook.md#按问题找入口) |
 | 設計からコードへ進む | [設計の責任分担](../docs/design/README.md) → [変更ガイド](../docs/development/change-guide.md) → [AGENTS.md](AGENTS.md) |
 | 未完了の変更を引き継ぐ | [現在の状態](../docs/planning/roadmap.md#13-当前执行状态) → [引継ぎの書き方](../docs/development/change-guide.md#留下一条可接手的开发任务) → 対象設計/回帰 |
 | 再送・復旧・時刻起動を区別する | [Run 作成](../docs/design/run-creation.md)、[実行 lifecycle](../docs/design/agent-runtime.md#71-生命周期)、[調度](../docs/design/task-scheduling.md) |
 | 文書を更新・検証する | [文書の管理方法](../docs/development/documentation.md) |
+| JAF の業務品質を評価する | [移行・運行受入](../docs/acceptance/jaf-quality.md) → [Benchmark](../docs/acceptance/jaf-benchmark.md)。実行入力と評価の正解を分離する |
 
 ## コード構成
 
@@ -41,9 +42,9 @@ PJM/
 
 Backend は Python 3.12、Web は Node.js 26 / pnpm 11.7.0 を使う。Compose は既存の共有 Traefik が前提で、ProjectMind 自身の host port は公開しない。
 
-`make run` は配置済み image を起動し、build しない。Worker の業務 dispatch は既定 false。新規 Project は SkillVersion を明示有効化し、資源を設定してから実行する。
+`make run` は配置済み image を起動し、build しない。Run/Effect の Outbox dispatch は既定 false だが、既存 job・cron を止める保守 mode ではない（[適用範囲](../docs/operations/deployment.md#一个例子关闭-dispatch-后仍有工作)）。新規 Project は SkillVersion を明示有効化し、資源を設定してから実行する。
 
-配備設定は[環境 file の境界](../docs/operations/runbook.md#环境文件与配置边界)を先に確認する。現行 Make の ENV_FILE 指定は Backend service の設定を全面的に切り替えない。復旧では[同一復元点の対象](../docs/operations/runbook.md#一致恢复点包含什么)を揃え、旧 DB の復元を外部 write の取消と扱わない。
+配備設定は[環境 file の境界](../docs/operations/deployment.md#环境文件与配置边界)を先に確認する。現行 Make の ENV_FILE 指定は Backend service の設定を全面的に切り替えない。復旧では[同一復元点の対象](../docs/operations/backup-recovery.md#一致恢复点包含什么)を揃え、旧 DB の復元を外部 write の取消と扱わない。
 
 初期 ADMIN を作る通常手順は `python -m projectmind.ops.bootstrap_admin`。`make bootstrap-admin` は全 volume データを消す再初期化操作なので、単なる管理者作成には使わない。正確な実行位置と手順は[起動案内](../docs/operations/quickstart.md#最初の-admin-を作成する)を参照する。
 

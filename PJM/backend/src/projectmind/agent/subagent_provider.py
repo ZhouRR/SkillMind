@@ -17,8 +17,9 @@ from dataclasses import dataclass, replace
 from typing import Any, Protocol
 from uuid import UUID
 
-from projectmind.agent.domain import AgentEvent, AgentEventType, RunContext
+from projectmind.agent.domain import AgentEvent, RunContext
 from projectmind.agent.evidence import EvidenceDraft
+from projectmind.agent.result_validation import ResultValidator
 from projectmind.agent.subagent import (
     MAX_SUBAGENT_BRANCHES,
     SubagentBudget,
@@ -26,6 +27,7 @@ from projectmind.agent.subagent import (
     resolve_subagent_capabilities,
     split_budget,
 )
+from projectmind.agent.subagent_result import BranchOutcome, SubagentTranscript
 from projectmind.agent.subagent_sessions import (
     SubagentSessionDraft,
     SubagentSessionRecorder,
@@ -37,10 +39,6 @@ from projectmind.agent.tool_gateway import (
 )
 from projectmind.core.hashing import sha256_hex
 
-# 一 branch が生成してよい要約の上限。主 Agent の context を埋め尽くさないための実務的な上限で、
-# contract 側の maxLength と一致させる。
-_MAX_BRANCH_SUMMARY = 20_000
-
 
 class SubagentEngine(Protocol):
     """子 Session を一本走らせる engine port。主経路と同じ `execute` 契約だけを使う。"""
@@ -51,20 +49,6 @@ class SubagentEngine(Protocol):
         ...
 
 
-@dataclass(frozen=True, slots=True)
-class BranchOutcome:
-    """一 branch の結末。失敗も値として返し、例外で全体を巻き戻さない。"""
-
-    key: str
-    outcome: str
-    summary: str
-    # engine が実際に開いた SDK session。SDK が起動する前に落ちた branch では None になる。
-    sdk_session_id: UUID | None = None
-    # 永続化後に採番される `agent_sessions.id`。保存前は None。
-    agent_session_id: UUID | None = None
-    failure_code: str | None = None
-
-
 class SubagentDispatchProvider:
     """`subagent.dispatch/v1` を実装し、受限の子 Session を並行実行する。"""
 
@@ -72,8 +56,9 @@ class SubagentDispatchProvider:
         self,
         *,
         engine: Callable[[], SubagentEngine],
+        session_recorder: SubagentSessionRecorder,
+        result_validator: ResultValidator,
         branch_timeout_seconds: float = 300.0,
-        session_recorder: SubagentSessionRecorder | None = None,
     ) -> None:
         """engine の**遅延解決**と、一 branch あたりの打ち切り時間を保持する。
 
@@ -81,15 +66,18 @@ class SubagentDispatchProvider:
         取得関数を受ける。解決は構築時ではなく**呼び出し時**に行うので、worker の組み立て順に
         依存しない。
 
-        `session_recorder` を渡さない構成では子 Session を残さない。その場合 response の
-        `agent_session_id` は**省略**する——引けない ID を返すくらいなら、無いと言う方がよい。
+        v1 は保存済み Session ID を必須とする。監査/出力検証の依存が無い構成は
+        料金が発生する前に拒否し、契約に合わない省略応答や捏造 ID を作らない。
         """
 
         if branch_timeout_seconds <= 0:
             raise ValueError("Sub-agent branch timeout must be positive")
+        if session_recorder is None or result_validator is None:
+            raise ValueError("Sub-agent execution requires audit and result validation")
         self._engine = engine
         self._branch_timeout_seconds = branch_timeout_seconds
         self._session_recorder = session_recorder
+        self._result_validator = result_validator
 
     async def execute(
         self, context: RunToolContext, arguments: Mapping[str, Any]
@@ -111,9 +99,7 @@ class SubagentDispatchProvider:
         )
         try:
             granted = [
-                resolve_subagent_capabilities(
-                    branch.capabilities, parent_allowed=parent_allowed
-                )
+                resolve_subagent_capabilities(branch.capabilities, parent_allowed=parent_allowed)
                 for branch in branches
             ]
             budget = split_budget(
@@ -124,12 +110,14 @@ class SubagentDispatchProvider:
         except SubagentCapabilityError as error:
             raise ToolProviderError(error.code, str(error), retryable=False) from error
 
-        completed = await asyncio.gather(
-            *(
-                self._run_branch(parent, branch, capabilities, budget)
+        # 一支が先に CancelledError で閉じても、残りの finally を再取消しない。
+        # 同じ TaskGroup が全支の所有者となり、全 cleanup が終わるまで親取消を返さない。
+        async with asyncio.TaskGroup() as group:
+            tasks = [
+                group.create_task(self._run_branch(parent, branch, capabilities, budget))
                 for branch, capabilities in zip(branches, granted, strict=True)
-            )
-        )
+            ]
+        completed = [task.result() for task in tasks]
         outcomes = await self._persist_sessions(context, completed)
         excerpt = _evidence_excerpt(objective, outcomes)
         evidence = EvidenceDraft(
@@ -144,7 +132,7 @@ class SubagentDispatchProvider:
                     {
                         "key": item.key,
                         "outcome": item.outcome,
-                        # 引ける ID だけを載せる。保存できなかった路は session を出さない。
+                        # _persist_sessions が全件の保存を確認した後だけ ID を返す。
                         **(
                             {"session": str(item.agent_session_id)}
                             if item.agent_session_id is not None
@@ -182,41 +170,36 @@ class SubagentDispatchProvider:
         child = _derive_child_context(parent, branch, capabilities, budget)
         # engine が開いた SDK session を event から拾う。失敗した路でも、既に session が
         # 開いていたならその ID は本物なので残す——監査はそこから transcript を辿れる。
-        collected = _BranchTranscript()
+        collected = SubagentTranscript(child)
+        deadline = asyncio.timeout(self._branch_timeout_seconds)
         try:
-            await asyncio.wait_for(
-                collected.consume(self._engine().execute(child)),
-                timeout=self._branch_timeout_seconds,
-            )
+            async with deadline:
+                await collected.consume(self._engine().execute(child))
+                return await collected.completed(branch.key, self._result_validator)
         except TimeoutError:
-            return collected.failed(branch.key, "TIMED_OUT", "branch_timed_out")
+            if deadline.expired():
+                return collected.failed(branch.key, "TIMED_OUT", "branch_timed_out")
+            return collected.failed(branch.key, "FAILED", "branch_failed")
         except asyncio.CancelledError:
-            # 取消は group 全体へ効く (D6)。branch の結末として記録してから再送出はしない——
-            # 呼び出し側の gather が他 branch も畳むため、ここでは値として返す。
-            return collected.failed(branch.key, "CANCELLED", "branch_cancelled")
+            task = asyncio.current_task()
+            if task is not None and task.cancelling():
+                raise
+            # engine が理由なく CancelledError を投げても、user の取消とは断定しない。
+            return collected.failed(branch.key, "FAILED", "branch_failed")
         except Exception:
             # 一路の失敗で全体を巻き戻さない。型名すら要約へ出さないのは、Provider 由来の
             # 内部情報を主 Agent の context へ流さないため。
             return collected.failed(branch.key, "FAILED", "branch_failed")
-        return BranchOutcome(
-            key=branch.key,
-            outcome="COMPLETED",
-            summary=collected.text()[:_MAX_BRANCH_SUMMARY],
-            sdk_session_id=collected.sdk_session_id,
-        )
 
     async def _persist_sessions(
         self, context: RunToolContext, outcomes: Sequence[BranchOutcome]
     ) -> tuple[BranchOutcome, ...]:
         """一組の branch を一 transaction で保存し、採番 ID を結末へ結び直す。
 
-        保存に失敗しても dispatch そのものは失敗させない。子の結論は既に得られており、
-        それを捨てる方が高くつく——ただし引けない ID を返すことは避け、`agent_session_id` を
-        省いたまま返す。
+        v1 の保存済み ID 要求を満たせなければ失敗に閉じる。結論の再生成は行わない。
+        将来の監査降級は互換性を決めた別契約で扱い、ここで required を無視しない。
         """
 
-        if self._session_recorder is None:
-            return tuple(outcomes)
         drafts = [
             SubagentSessionDraft(
                 branch_key=item.key,
@@ -231,8 +214,17 @@ class SubagentDispatchProvider:
                 run_attempt_id=context.run_attempt_id,
                 drafts=drafts,
             )
+            if (
+                len(session_ids) != len(outcomes)
+                or any(not isinstance(item, UUID) for item in session_ids)
+                or len(set(session_ids)) != len(session_ids)
+            ):
+                raise ValueError("Sub-agent recorder returned invalid identities")
         except Exception:
-            return tuple(outcomes)
+            # DB の内部例外や不完全な結果を model へ渡さず、再実行も自動要求しない。
+            raise ToolProviderError(
+                "unavailable", "Sub-agent session audit could not be confirmed", retryable=False
+            ) from None
         return tuple(
             replace(item, agent_session_id=session_id)
             for item, session_id in zip(outcomes, session_ids, strict=True)
@@ -333,59 +325,6 @@ def _branch_prompt(branch: _BranchRequest) -> str:
         "support with what you read. You cannot write, ask the user, propose changes, or start "
         "further sub-analyses."
     )
-
-
-class _BranchTranscript:
-    """子 Session の stream から要約と SDK session ID を拾う。
-
-    打ち切り・取消・失敗のどれで抜けても、その時点までに判明した SDK session ID を保持したい。
-    生成関数の戻り値だと例外で失われるため、外側の可変状態として持つ。
-    """
-
-    def __init__(self) -> None:
-        """未受信の状態で開始する。"""
-
-        self._parts: list[str] = []
-        self.sdk_session_id: UUID | None = None
-
-    async def consume(self, stream: AsyncIterator[AgentEvent]) -> None:
-        """stream を最後まで読み、text と session identity を蓄える。"""
-
-        async for event in stream:
-            if self.sdk_session_id is None:
-                try:
-                    self.sdk_session_id = UUID(event.agent_session_id)
-                except ValueError:
-                    # AgentEvent は生成時に UUID を検証済み。ここへ来るのは fake engine だけで、
-                    # 実在しない ID を保存するくらいなら未取得のままにする。
-                    self.sdk_session_id = None
-            # TEXT_DELTA は逐次断片、TEXT_COMPLETED は確定文。両方拾うと二重になるため、
-            # 確定文が来た時点でそれまでの断片を捨てて置き換える。
-            if event.event_type is AgentEventType.TEXT_COMPLETED:
-                text = event.payload.get("text")
-                if isinstance(text, str):
-                    self._parts = [text]
-                continue
-            if event.event_type is AgentEventType.TEXT_DELTA:
-                payload = event.payload.get("text")
-                if isinstance(payload, str):
-                    self._parts.append(payload)
-
-    def text(self) -> str:
-        """蓄えた断片を連結する。"""
-
-        return "".join(self._parts).strip()
-
-    def failed(self, key: str, outcome: str, failure_code: str) -> BranchOutcome:
-        """失敗した結末を作る。要約は返さないが session identity は残す。"""
-
-        return BranchOutcome(
-            key=key,
-            outcome=outcome,
-            summary="",
-            sdk_session_id=self.sdk_session_id,
-            failure_code=failure_code,
-        )
 
 
 def _result_entry(outcome: BranchOutcome) -> dict[str, Any]:

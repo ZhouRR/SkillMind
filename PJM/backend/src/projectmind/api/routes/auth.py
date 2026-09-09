@@ -13,13 +13,18 @@ from projectmind.api.auth_dependencies import (
     csrf_rejected_problem,
     require_same_origin,
 )
-from projectmind.api.problems import ProblemException
+from projectmind.api.login_protection import LOGIN_PROTECTION_RESPONSES, login_protection_problem
+from projectmind.api.problems import (
+    NO_STORE_PROBLEM_HEADERS,
+    ProblemException,
+    problem_openapi_response,
+)
+from projectmind.auth.login_protection import LoginProtectionUnavailableError, LoginRateLimitedError
 from projectmind.auth.service import (
     AuthService,
     CsrfRejectedError,
     InvalidCredentialsError,
     LoginCsrfError,
-    LoginRateLimitedError,
     LoginResult,
     SessionResult,
     UnauthorizedSessionError,
@@ -28,6 +33,17 @@ from projectmind.core.settings import Settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 LOGIN_CSRF_COOKIE = "projectmind_login_csrf"
+
+# Framework 既定の validation JSON ではなく、実際の Problem handler と同期する。
+_CSRF_RESPONSE = problem_openapi_response(
+    "Origin or CSRF verification was rejected.", headers=NO_STORE_PROBLEM_HEADERS
+)
+_VALIDATION_RESPONSE = problem_openapi_response(
+    "The body or required request headers are invalid.", headers=NO_STORE_PROBLEM_HEADERS
+)
+_AUTHENTICATION_RESPONSE = problem_openapi_response(
+    "A valid session is required.", headers=NO_STORE_PROBLEM_HEADERS
+)
 
 
 class LoginContextResponse(BaseModel):
@@ -64,13 +80,18 @@ class SessionResponse(BaseModel):
     absolute_expires_at: datetime
 
 
-@router.get("/login-context", response_model=LoginContextResponse)
+@router.get(
+    "/login-context", response_model=LoginContextResponse, responses=LOGIN_PROTECTION_RESPONSES
+)
 async def login_context(request: Request, response: Response) -> LoginContextResponse:
     """一回限りの login CSRF challenge を発行する。"""
 
     service: AuthService = request.app.state.auth_service
     settings: Settings = request.app.state.settings
-    token = await service.issue_login_csrf()
+    try:
+        token = await service.issue_login_csrf(request.state.login_admission)
+    except LoginProtectionUnavailableError as error:
+        raise login_protection_problem(error) from error
     response.set_cookie(
         LOGIN_CSRF_COOKIE,
         token,
@@ -86,7 +107,19 @@ async def login_context(request: Request, response: Response) -> LoginContextRes
     )
 
 
-@router.post("/login", response_model=SessionResponse)
+@router.post(
+    "/login",
+    response_model=SessionResponse,
+    responses={
+        **LOGIN_PROTECTION_RESPONSES,
+        401: problem_openapi_response(
+            "Invalid credentials; account existence is not disclosed.",
+            headers=NO_STORE_PROBLEM_HEADERS,
+        ),
+        403: _CSRF_RESPONSE,
+        422: _VALIDATION_RESPONSE,
+    },
+)
 async def login(
     request: Request,
     response: Response,
@@ -105,6 +138,7 @@ async def login(
             login_csrf_header=x_csrf_token,
             login_csrf_cookie=request.cookies.get(LOGIN_CSRF_COOKIE, ""),
             client_address=request.client.host if request.client is not None else "unknown",
+            admission=request.state.login_admission,
         )
     except LoginCsrfError as error:
         raise csrf_rejected_problem() from error
@@ -115,13 +149,8 @@ async def login(
             detail="Invalid email or password.",
             code="invalid_credentials",
         ) from error
-    except LoginRateLimitedError as error:
-        raise ProblemException(
-            status=status.HTTP_429_TOO_MANY_REQUESTS,
-            title="Login temporarily limited",
-            detail="Too many login attempts. Try again later.",
-            code="login_rate_limited",
-        ) from error
+    except (LoginRateLimitedError, LoginProtectionUnavailableError) as error:
+        raise login_protection_problem(error) from error
 
     response.set_cookie(
         settings.auth_session_cookie_name,
@@ -135,9 +164,9 @@ async def login(
     return _session_response(result)
 
 
-@router.get("/session", response_model=SessionResponse)
+@router.get("/session", response_model=SessionResponse, responses={401: _AUTHENTICATION_RESPONSE})
 async def current_session(request: Request) -> SessionResponse:
-    """有効 session actor を返し、Web reload 用 CSRF token を rotation する。"""
+    """有効 session actor と安定 CSRF token を返し、他ページを失効させない。"""
 
     service: AuthService = request.app.state.auth_service
     settings: Settings = request.app.state.settings
@@ -149,7 +178,11 @@ async def current_session(request: Request) -> SessionResponse:
     return _session_response(result)
 
 
-@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={401: _AUTHENTICATION_RESPONSE, 403: _CSRF_RESPONSE, 422: _VALIDATION_RESPONSE},
+)
 async def logout(
     request: Request,
     response: Response,

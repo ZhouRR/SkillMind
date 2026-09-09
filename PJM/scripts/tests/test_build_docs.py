@@ -211,9 +211,104 @@ class DocumentationBuildTests(unittest.TestCase):
                 "docs/overview/glossary.md",
             ],
         )
+        identity = priority.index("docs/design/domain-model.md")
+        self.assertEqual(
+            priority[identity : identity + 5],
+            [
+                "docs/design/domain-model.md",
+                "docs/design/authentication.md",
+                "docs/design/login-protection.md",
+                "docs/design/user-lifecycle.md",
+                "docs/design/secret-storage.md",
+            ],
+        )
+        runtime = priority.index("docs/design/agent-runtime.md")
+        self.assertEqual(
+            priority[runtime : runtime + 3],
+            [
+                "docs/design/agent-runtime.md",
+                "docs/design/run-supervision.md",
+                "docs/design/run-budgets.md",
+            ],
+        )
+        acceptance = priority.index("docs/acceptance/jaf-quality.md")
+        self.assertEqual(
+            priority[acceptance : acceptance + 2],
+            ["docs/acceptance/jaf-quality.md", "docs/acceptance/jaf-benchmark.md"],
+        )
+        operations = priority.index("docs/operations/quickstart.md")
+        self.assertEqual(
+            priority[operations : operations + 4],
+            [
+                "docs/operations/quickstart.md",
+                "docs/operations/deployment.md",
+                "docs/operations/backup-recovery.md",
+                "docs/operations/runbook.md",
+            ],
+        )
         for relative in priority:
             with self.subTest(document=relative):
                 self.assertTrue((build_docs.ROOT / relative).is_file())
+
+    def test_operations_legacy_sections_link_to_single_command_source(self) -> None:
+        """旧章から正本へ到達でき、破壊的手順を旧手冊へ重複させない。"""
+
+        path = build_docs.DOCS / "operations/runbook.md"
+        parser = MarkdownIt("commonmark", {"html": False}).enable(["table", "strikethrough"])
+        document = build_docs.parse_document(path, parser)
+        sections = {item["anchor"]: item["text"] for item in build_docs.search_sections(document)}
+        for anchor, target in (
+            ("环境文件与配置边界", "deployment.md#环境文件与配置边界"),
+            ("2-配備前-backup", "backup-recovery.md#配备前备份"),
+            ("一致恢复点包含什么", "backup-recovery.md#一致恢复点包含什么"),
+            ("取得并检查数据库备份", "backup-recovery.md#取得并检查数据库备份"),
+            ("3-migration-と配備", "deployment.md"),
+            ("迁移与回退审查", "deployment.md#迁移与回退审查"),
+            ("会话协议切换检查", "deployment.md#会话协议切换检查"),
+            ("启动与放行", "deployment.md#启动与放行"),
+            ("5-database-restore", "backup-recovery.md#数据库恢复"),
+            ("恢复前的停止条件", "backup-recovery.md#恢复前的停止条件"),
+            ("替换数据库", "backup-recovery.md#替换数据库"),
+            ("恢复后验证", "backup-recovery.md#恢复后验证"),
+            ("6-application-version-rollback", "backup-recovery.md#应用版本回退"),
+        ):
+            with self.subTest(anchor=anchor):
+                self.assertIn(anchor, document.anchors)
+                self.assertIn(f"({target})", sections[anchor])
+        self.assertNotIn("dropdb --force", document.source)
+        self.assertNotIn("pg_dump --username", document.source)
+        self.assertNotIn("alembic current", document.source)
+
+    def test_user_lifecycle_legacy_sections_link_to_design_source(self) -> None:
+        """会話の旧章を保ち、管理 API の説明を二箇所へ複製しない。"""
+
+        path = build_docs.DOCS / "design/authentication.md"
+        parser = MarkdownIt("commonmark", {"html": False}).enable(["table", "strikethrough"])
+        document = build_docs.parse_document(path, parser)
+        sections = {item["anchor"]: item["text"] for item in build_docs.search_sections(document)}
+        for anchor, target in (
+            ("用户生命周期与管理事务", "user-lifecycle.md"),
+            ("用户操作与公开面", "user-lifecycle.md#用户操作与目标公开面"),
+            ("事务与并发", "user-lifecycle.md#事务与并发"),
+            ("生效与界面", "user-lifecycle.md#生效与界面"),
+        ):
+            with self.subTest(anchor=anchor):
+                self.assertIn(anchor, document.anchors)
+                self.assertIn(f"({target})", sections[anchor])
+        self.assertNotIn("POST /users/", document.source)
+        self.assertNotIn("GET /users/", document.source)
+
+    def test_user_contract_index_covers_existing_schemas(self) -> None:
+        """機械用の管理 Schema と人が読む入口を対応させ、追加時の案内漏れを防ぐ。"""
+
+        contracts = build_docs.ROOT / "PJM/contracts"
+        source = (contracts / "README.md").read_text(encoding="utf-8")
+        schemas = sorted((contracts / "users/v1").glob("*.schema.json"))
+        self.assertTrue(schemas)
+        for schema in schemas:
+            with self.subTest(schema=schema.name):
+                self.assertIn(f"({schema.relative_to(contracts).as_posix()})", source)
+        self.assertIn("(../../docs/development/contract-workflow.md#遇到未接齐的交付链)", source)
 
     def test_build_is_deterministic_and_excludes_skill_source(self) -> None:
         """同じ文書から同じ成果物を作り、実行 Skill や設定を埋め込まない。"""

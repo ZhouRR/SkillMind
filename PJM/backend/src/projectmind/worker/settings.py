@@ -158,12 +158,17 @@ async def startup(ctx: dict[str, Any]) -> None:
     # engine → registry → 扇出 Provider → engine と参照が循環する。Provider には engine 実体では
     # なく取得関数を渡し、解決を呼び出し時まで遅らせて組み立て順への依存を切る (計画 §23 P2)。
     engine_holder: dict[str, ClaudeAgentSdkEngine] = {}
+    result_validator = ResultValidator(
+        PostgresEvidenceLookup(ctx["database_session_factory"]),
+        PostgresProposalLookup(ctx["database_session_factory"]),
+    )
     registry = create_run_tool_registry(
         contracts,
         subagent_provider=SubagentDispatchProvider(
             engine=lambda: engine_holder["engine"],
             branch_timeout_seconds=settings.subagent_branch_timeout_seconds,
             session_recorder=PostgresSubagentSessionRecorder(ctx["database_session_factory"]),
+            result_validator=result_validator,
         ),
         document_source=document_source,
         redmine_issue_provider=RedmineIssueReadProvider(
@@ -193,10 +198,7 @@ async def startup(ctx: dict[str, Any]) -> None:
         run_service=ctx["run_service"],
         context_builder=context_builder,
         engine=engine,
-        result_validator=ResultValidator(
-            PostgresEvidenceLookup(ctx["database_session_factory"]),
-            PostgresProposalLookup(ctx["database_session_factory"]),
-        ),
+        result_validator=result_validator,
         lease_seconds=settings.run_lease_seconds,
         preparation_timeout_seconds=settings.run_preparation_timeout_seconds,
         realtime_publisher=RedisRunRealtimePublisher(cast(RedisPublisher, ctx["redis"])),

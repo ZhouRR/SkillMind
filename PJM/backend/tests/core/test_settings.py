@@ -44,6 +44,44 @@ def test_auth_cookie_uses_host_prefix_only_in_production() -> None:
     assert testing.auth_cookie_secure is False
 
 
+def test_login_protection_settings_are_bounded_and_independent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """来源 request と account/組合試行の上限を独立して設定できる。"""
+
+    for name, value in (
+        ("AUTH_LOGIN_ATTEMPTS_PER_MINUTE", "4"),
+        ("AUTH_LOGIN_ACCOUNT_ATTEMPTS_PER_MINUTE", "12"),
+        ("AUTH_LOGIN_SOURCE_REQUESTS_PER_MINUTE", "80"),
+        ("AUTH_LOGIN_PROTECTION_TIMEOUT_SECONDS", "1.5"),
+    ):
+        monkeypatch.setenv(f"PROJECTMIND_{name}", value)
+    settings = Settings(_env_file=None)
+    assert settings.auth_login_attempts_per_minute == 4
+    assert settings.auth_login_account_attempts_per_minute == 12
+    assert settings.auth_login_source_requests_per_minute == 80
+    assert settings.auth_login_protection_timeout_seconds == 1.5
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("auth_login_account_attempts_per_minute", 0),
+        ("auth_login_account_attempts_per_minute", 101),
+        ("auth_login_source_requests_per_minute", 1),
+        ("auth_login_source_requests_per_minute", 10001),
+        ("auth_login_protection_timeout_seconds", 0),
+        ("auth_login_protection_timeout_seconds", float("nan")),
+        ("auth_login_protection_timeout_seconds", 11),
+    ],
+)
+def test_login_protection_settings_cannot_disable_guards(name: str, value: float) -> None:
+    """無効な上限や store の無期限待機を起動時に拒否する。"""
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **{name: value})
+
+
 def test_preparation_settings_keep_independent_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     """準備の期限・逐根・総量を、互いの代用品にせず独立設定として保持する。"""
 

@@ -9,11 +9,11 @@
 | 読みたいこと | 入口 |
 | --- | --- |
 | 初めて製品を理解する | [製品概要](overview/product.md) → [システム構成](overview/architecture.md) → [用語](overview/glossary.md) |
-| 担当する機能の設計を読む | [設計ガイド](design/README.md)：Skill、Run、資源、画面、調度の読み順と責任分担 |
+| 担当する機能の設計を読む | [設計ガイド](design/README.md)：認証/アカウント、Skill、Run、資源、画面、調度の読み順と責任分担 |
 | 次の開発・未完了の変更を引き継ぐ | [現在の計画](planning/roadmap.md#13-当前执行状态) → [変更ガイド](development/change-guide.md) → [コードの入口](../PJM/README.md#コード構成) |
-| 開発環境を用意・API を変更する | [ローカル開発](development/local-development.md)、[契約変更](development/contract-workflow.md)、[API 利用](development/api-usage.md) |
-| 配備・障害対応・復旧する | [起動案内](operations/quickstart.md) → [問題別 Runbook](operations/runbook.md#按问题找入口) |
-| 業務品質を評価する | [JAF 受入 profile](acceptance/jaf-quality.md)：sample、Gold 隔離、指標、人工判定 |
+| 開発環境を用意・API を変更する | [ローカル開発](development/local-development.md)、[契約変更](development/contract-workflow.md)、[API 利用](development/api-usage.md)。資料が食い違う場合は[交付の接線確認](development/contract-workflow.md#遇到未接齐的交付链) |
+| 配備・障害対応・復旧する | [起動案内](operations/quickstart.md)、[公開・移行](operations/deployment.md)、[backup・復元](operations/backup-recovery.md)。障害時は [Runbook](operations/runbook.md#按问题找入口) |
+| 業務品質を評価する | [JAF 移行・運行受入](acceptance/jaf-quality.md) → [Benchmark](acceptance/jaf-benchmark.md)：実行入力、Gold 隔離、指標と人工判定を分ける |
 | 文書を直す・閲覧を確認する | [文書管理とブラウザ検証](development/documentation.md)、[script の案内](../PJM/scripts/README.md) |
 | 過去の判断や検証を確認する | [履歴の索引](history/README.md)。当時の証拠だけを読み、現在状態は計画へ戻る |
 
@@ -27,7 +27,7 @@ docs/
 ├── design/        README で責任を選ぶ → 領域別の現行規則と後続設計
 ├── planning/      状態・優先順・受入残項目
 ├── development/   環境構築・API 利用・変更時の参照先
-├── operations/    配備・backup・復旧
+├── operations/    初回起動 / 公開・移行 / backup・復元 / 症状別 Runbook
 ├── acceptance/    業務別の品質評価条件
 ├── history/       当時の記録。現在の仕様や状態を上書きしない
 ├── README.md      人が探すための索引

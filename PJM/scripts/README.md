@@ -15,7 +15,7 @@
 | 実 browser で文書を検査 | `python3 scripts/check_docs_browser.py` | 生成 HTML を file として読む。HTTP(S) は阻断して失敗にする。既定は保存なし、`--output` 指定時のみ固定名の screenshot を上書き保存 |
 | 公開 API snapshot を更新 | `python3 scripts/export_openapi.py` | 現在の app から OpenAPI を上書きする。公開 API の変更時だけ実行 |
 | Interpreter の反復品質を測定 | [measure_skill_interpretations.py](measure_skill_interpretations.py) | 実モデル呼出し・課金を伴う。安全な入力と設定が必要 |
-| 配備用 image を書き出す | [export-images.ps1](export-images.ps1) | Docker image build/export を伴う。[移送手順](../../docs/operations/quickstart.md#image-移送と更新)に従う |
+| 配備用 image を書き出す | [export-images.ps1](export-images.ps1) | 既存 local image を export する。build/pull は行わず、application image 不足時は拒否する。[移送手順](../../docs/operations/quickstart.md#image-移送と更新)に従う |
 
 ## 文書の生成元
 
@@ -31,8 +31,10 @@
 
 検索は見出しと本文/path を対象にするが、取り込む file の範囲は増やさない。文書検証の成功は、アプリの typecheck・公開 API・モデル品質・配備復旧の成功とは別に報告する。
 
+OpenAPI を調べるだけなら exporter を実行せず、[保存快照の只読確認](../../docs/development/contract-workflow.md#遇到未接齐的交付链)を使う。Schema/example の検査と snapshot の一致は別の結果であり、どちらかの成功で未接続の Web や失敗中の回帰を隠さない。
+
 ## アプリケーションを操作する場合
 
-初期 ADMIN、preflight、smoke、Secret rotation は [backend/src/projectmind/ops](../backend/src/projectmind/ops/) の CLI である。smoke は専用 Project に Run/Evaluation を作り、rotation は暗号文を更新するため、読取検査と混同しない。
+初期 ADMIN、preflight、smoke、Secret rotation は [Backend の CLI 案内](../backend/README.md#運用-cli-と停止境界を確認する)から辿る。smoke は専用 Project に Run/Evaluation を作り、rotation は暗号文を更新するため、読取検査と混同しない。
 
 [Makefile](../Makefile) の `make deploy` は container/旧 image を置換し、`make bootstrap-admin` は全 volume データを消す。通常の ADMIN 作成に後者を使わず、必ず[起動案内](../../docs/operations/quickstart.md)と[Runbook](../../docs/operations/runbook.md)で対象・backup・成功条件を確認する。

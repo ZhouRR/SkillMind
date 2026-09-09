@@ -552,11 +552,11 @@ class RunService:
         session_metadata: AgentSessionMetadata | None,
         result: RunResultRecord | None,
         error_json: dict[str, Any] | None,
-    ) -> None:
+    ) -> RunStatus:
         """Agent terminal outcome と Result を Run aggregate へ原子的に反映する。"""
 
         async with self._session_factory() as session, session.begin():
-            await RunRepository(session).finalize_execution(
+            return await RunRepository(session).finalize_execution(
                 claimed,
                 target=target,
                 attempt_status=attempt_status,

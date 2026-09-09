@@ -7,7 +7,7 @@ engine は fake で置く。ここで確かめたいのは model の振る舞い
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -22,11 +22,30 @@ from projectmind.agent.domain import (
     RunLimits,
     RunWorkspace,
 )
-from projectmind.agent.subagent_provider import SubagentDispatchProvider
-from projectmind.agent.subagent_sessions import SubagentSessionDraft
+from projectmind.agent.result_validation import ResultValidator
+from projectmind.agent.subagent_provider import SubagentDispatchProvider, SubagentEngine
+from projectmind.agent.subagent_sessions import SubagentSessionDraft, SubagentSessionRecorder
 from projectmind.agent.tool_gateway import RunToolContext, ToolProviderError
+from tests.agent.test_result_validation import MemoryEvidenceLookup
 
 _RUN_ID = uuid4()
+
+
+def _provider(
+    *,
+    engine: Callable[[], SubagentEngine],
+    session_recorder: SubagentSessionRecorder | None = None,
+    result_validator: ResultValidator | None = None,
+    branch_timeout_seconds: float = 300.0,
+) -> SubagentDispatchProvider:
+    """本番の必須依存を、明示した memory recorder と実 ResultValidator で組み立てる。"""
+
+    return SubagentDispatchProvider(
+        engine=engine,
+        session_recorder=session_recorder or _RecordingRecorder(),
+        result_validator=result_validator or ResultValidator(MemoryEvidenceLookup(frozenset())),
+        branch_timeout_seconds=branch_timeout_seconds,
+    )
 
 
 def _tool(capability: str) -> RegisteredTool:
@@ -111,12 +130,12 @@ class RecordingEngine:
         self._delay = delay
 
     def execute(self, context: RunContext) -> AsyncIterator[AgentEvent]:
-        """子 context を記録して text event を一つ流す。"""
+        """子 context を記録して構造化された成功終端を一つ流す。"""
 
         self.contexts.append(context)
 
         async def stream() -> AsyncIterator[AgentEvent]:
-            """並行数を数えながら text event を一つ流す。"""
+            """並行数を数えながら実際の成功終端契約を満たす event を流す。"""
 
             self.concurrent += 1
             self.max_concurrent = max(self.max_concurrent, self.concurrent)
@@ -129,8 +148,12 @@ class RecordingEngine:
                     agent_session_id=str(uuid4()),
                     sequence=1,
                     occurred_at=datetime.now(UTC),
-                    event_type=AgentEventType.TEXT_COMPLETED,
-                    payload={"text": f"result {context.permission_snapshot['subagent_branch']}"},
+                    event_type=AgentEventType.RESULT_COMPLETED,
+                    payload={
+                        "structured_output": {
+                            "summary": f"result {context.permission_snapshot['subagent_branch']}"
+                        }
+                    },
                 )
             finally:
                 self.concurrent -= 1
@@ -162,8 +185,8 @@ class FailingEngine:
                 agent_session_id=str(uuid4()),
                 sequence=1,
                 occurred_at=datetime.now(UTC),
-                event_type=AgentEventType.TEXT_COMPLETED,
-                payload={"text": f"ok {key}"},
+                event_type=AgentEventType.RESULT_COMPLETED,
+                payload={"structured_output": {"summary": f"ok {key}"}},
             )
 
         return stream()
@@ -190,7 +213,7 @@ async def test_branches_run_concurrently(tmp_path: Path) -> None:
     """扇出の要件そのもの——branch が並行に走ることを確認する。"""
 
     engine = RecordingEngine(delay=0.05)
-    provider = SubagentDispatchProvider(engine=lambda: engine)
+    provider = _provider(engine=lambda: engine)
     parent = _parent_context(tmp_path)
 
     await provider.execute(_tool_context(parent), _request("a", "b", "c"))
@@ -208,7 +231,7 @@ async def test_child_never_receives_write_effect_or_interaction_capabilities(
     """
 
     engine = RecordingEngine()
-    provider = SubagentDispatchProvider(engine=lambda: engine)
+    provider = _provider(engine=lambda: engine)
     parent = _parent_context(tmp_path)
 
     await provider.execute(_tool_context(parent), _request("a"))
@@ -224,13 +247,13 @@ async def test_child_cannot_fan_out_again(tmp_path: Path) -> None:
     """子は扇出能力を持たない (§23 D5)。入れ子は予算計算を破綻させる。"""
 
     engine = RecordingEngine()
-    provider = SubagentDispatchProvider(engine=lambda: engine)
+    provider = _provider(engine=lambda: engine)
 
     await provider.execute(_tool_context(_parent_context(tmp_path)), _request("a"))
 
-    assert "subagent.dispatch/v1" not in engine.contexts[0].permission_snapshot[
-        "allowed_capabilities"
-    ]
+    assert (
+        "subagent.dispatch/v1" not in engine.contexts[0].permission_snapshot["allowed_capabilities"]
+    )
 
 
 @pytest.mark.asyncio
@@ -238,7 +261,7 @@ async def test_budget_is_split_not_multiplied(tmp_path: Path) -> None:
     """子の合計予算が Run 上限を超えないことを確認する (§23 D4)。"""
 
     engine = RecordingEngine()
-    provider = SubagentDispatchProvider(engine=lambda: engine)
+    provider = _provider(engine=lambda: engine)
     parent = _parent_context(tmp_path, max_turns=20)
 
     result = await provider.execute(_tool_context(parent), _request("a", "b", "c", "d"))
@@ -253,7 +276,7 @@ async def test_budget_is_split_not_multiplied(tmp_path: Path) -> None:
 async def test_one_failing_branch_does_not_abort_the_group(tmp_path: Path) -> None:
     """一路の失敗を値として返し、他路の結論は保つ (§23 D6)。"""
 
-    provider = SubagentDispatchProvider(engine=lambda: FailingEngine("b"))
+    provider = _provider(engine=lambda: FailingEngine("b"))
 
     result = await provider.execute(
         _tool_context(_parent_context(tmp_path)), _request("a", "b", "c")
@@ -295,9 +318,7 @@ async def test_a_stalled_branch_is_cut_off_without_blocking_the_others(
 
             return stream()
 
-    provider = SubagentDispatchProvider(
-        engine=lambda: StallingEngine(), branch_timeout_seconds=0.05
-    )
+    provider = _provider(engine=lambda: StallingEngine(), branch_timeout_seconds=0.05)
 
     result = await provider.execute(_tool_context(_parent_context(tmp_path)), _request("a"))
 
@@ -309,7 +330,7 @@ async def test_a_stalled_branch_is_cut_off_without_blocking_the_others(
 async def test_requesting_a_forbidden_capability_is_refused(tmp_path: Path) -> None:
     """禁止能力の明示要求は Provider error になる。黙って削らない。"""
 
-    provider = SubagentDispatchProvider(engine=lambda: RecordingEngine())
+    provider = _provider(engine=lambda: RecordingEngine())
 
     with pytest.raises(ToolProviderError) as error:
         await provider.execute(
@@ -324,7 +345,7 @@ async def test_requesting_a_forbidden_capability_is_refused(tmp_path: Path) -> N
 async def test_duplicate_branch_keys_are_refused(tmp_path: Path) -> None:
     """同じ key が二つあると主 Agent が結果を取り違える。"""
 
-    provider = SubagentDispatchProvider(engine=lambda: RecordingEngine())
+    provider = _provider(engine=lambda: RecordingEngine())
 
     with pytest.raises(ToolProviderError) as error:
         await provider.execute(_tool_context(_parent_context(tmp_path)), _request("a", "a"))
@@ -336,7 +357,7 @@ async def test_duplicate_branch_keys_are_refused(tmp_path: Path) -> None:
 async def test_dispatch_without_a_frozen_run_context_is_refused(tmp_path: Path) -> None:
     """主 context 無しでは広い権限で走らせず閉じる。"""
 
-    provider = SubagentDispatchProvider(engine=lambda: RecordingEngine())
+    provider = _provider(engine=lambda: RecordingEngine())
     parent = _parent_context(tmp_path)
     context = RunToolContext(
         run_id=parent.run_id,
@@ -357,11 +378,9 @@ async def test_dispatch_without_a_frozen_run_context_is_refused(tmp_path: Path) 
 async def test_dispatch_produces_evidence_naming_every_branch(tmp_path: Path) -> None:
     """扇出は主 Session 上の一つの Evidence へ収斂する (§23 D3)。"""
 
-    provider = SubagentDispatchProvider(engine=lambda: RecordingEngine())
+    provider = _provider(engine=lambda: RecordingEngine())
 
-    result = await provider.execute(
-        _tool_context(_parent_context(tmp_path)), _request("a", "b")
-    )
+    result = await provider.execute(_tool_context(_parent_context(tmp_path)), _request("a", "b"))
 
     assert len(result.evidence) == 1
     excerpt = result.evidence[0].excerpt or ""
@@ -376,6 +395,7 @@ class _RecordingRecorder:
         """観測した draft と、保存失敗を再現するかどうかを保持する。"""
 
         self.drafts: list[SubagentSessionDraft] = []
+        self.session_ids: tuple[UUID, ...] = ()
         self.calls = 0
         self._fail = fail
 
@@ -392,25 +412,25 @@ class _RecordingRecorder:
         if self._fail:
             raise RuntimeError("recorder is down")
         self.drafts.extend(drafts)
-        return tuple(uuid4() for _ in drafts)
+        self.session_ids = tuple(uuid4() for _ in drafts)
+        return self.session_ids
 
 
 @pytest.mark.asyncio
 async def test_result_reports_a_persisted_session_id(tmp_path: Path) -> None:
-    """response の agent_session_id が実際に保存された行を指すことを確認する (§23 P3b)。
+    """response が recorder の保存応答 ID をそのまま参照することを確認する (§23 P3b)。
 
     以前は branch ごとに uuid4 を生成して返しており、監査でどこからも引けない参照だった。
     引けない ID は「追跡できる」と誤読させるぶん、無い方がまだ良い。
     """
 
     recorder = _RecordingRecorder()
-    provider = SubagentDispatchProvider(engine=lambda: RecordingEngine(), session_recorder=recorder)
+    provider = _provider(engine=lambda: RecordingEngine(), session_recorder=recorder)
 
-    result = await provider.execute(
-        _tool_context(_parent_context(tmp_path)), _request("a", "b")
-    )
+    result = await provider.execute(_tool_context(_parent_context(tmp_path)), _request("a", "b"))
 
     returned = [item["agent_session_id"] for item in result.response["results"]]
+    assert returned == [str(item) for item in recorder.session_ids]
     assert len(set(returned)) == 2
     assert [draft.branch_key for draft in recorder.drafts] == ["a", "b"]
 
@@ -424,9 +444,7 @@ async def test_all_branches_are_persisted_in_one_call(tmp_path: Path) -> None:
     """
 
     recorder = _RecordingRecorder()
-    provider = SubagentDispatchProvider(
-        engine=lambda: FailingEngine("b"), session_recorder=recorder
-    )
+    provider = _provider(engine=lambda: FailingEngine("b"), session_recorder=recorder)
 
     await provider.execute(_tool_context(_parent_context(tmp_path)), _request("a", "b", "c"))
 
@@ -439,9 +457,7 @@ async def test_a_failed_branch_keeps_the_sdk_session_it_had_opened(tmp_path: Pat
     """SDK session が開いた後に落ちた branch は、その本物の ID を保存する。"""
 
     recorder = _RecordingRecorder()
-    provider = SubagentDispatchProvider(
-        engine=lambda: _LateFailureEngine("b"), session_recorder=recorder
-    )
+    provider = _provider(engine=lambda: _LateFailureEngine("b"), session_recorder=recorder)
 
     await provider.execute(_tool_context(_parent_context(tmp_path)), _request("a", "b"))
 
@@ -455,9 +471,7 @@ async def test_a_branch_that_never_started_records_no_sdk_session(tmp_path: Path
     """SDK が起動する前に落ちた branch は捏造 ID ではなく None を残す。"""
 
     recorder = _RecordingRecorder()
-    provider = SubagentDispatchProvider(
-        engine=lambda: FailingEngine("a"), session_recorder=recorder
-    )
+    provider = _provider(engine=lambda: FailingEngine("a"), session_recorder=recorder)
 
     await provider.execute(_tool_context(_parent_context(tmp_path)), _request("a"))
 
@@ -465,22 +479,18 @@ async def test_a_branch_that_never_started_records_no_sdk_session(tmp_path: Path
 
 
 @pytest.mark.asyncio
-async def test_omits_the_session_id_when_persistence_fails(tmp_path: Path) -> None:
-    """保存に失敗しても結論は返すが、引けない ID は載せない。
+async def test_v1_refuses_unconfirmed_session_audit_without_reexecuting(tmp_path: Path) -> None:
+    """v1 の必須 ID を省略/捏造せず、料金の発生した engine も再実行しない。"""
 
-    子の結論は既に得られており、それを捨てる方が高くつく。ただし「引ける」と誤読させる値を
-    返すくらいなら、項目ごと落とす。
-    """
+    engine = RecordingEngine()
+    provider = _provider(engine=lambda: engine, session_recorder=_RecordingRecorder(fail=True))
 
-    provider = SubagentDispatchProvider(
-        engine=lambda: RecordingEngine(), session_recorder=_RecordingRecorder(fail=True)
-    )
+    with pytest.raises(ToolProviderError) as error:
+        await provider.execute(_tool_context(_parent_context(tmp_path)), _request("a"))
 
-    result = await provider.execute(_tool_context(_parent_context(tmp_path)), _request("a"))
-
-    assert result.response["results"][0]["outcome"] == "COMPLETED"
-    assert "agent_session_id" not in result.response["results"][0]
-    assert "session" not in result.evidence[0].metadata["branches"][0]
+    assert error.value.code == "unavailable"
+    assert error.value.retryable is False
+    assert len(engine.contexts) == 1
 
 
 class _LateFailureEngine:
@@ -499,10 +509,11 @@ class _LateFailureEngine:
         async def stream() -> AsyncIterator[AgentEvent]:
             """event を一つ流した後、該当 branch で例外を送出する。"""
 
+            session_id = str(uuid4())
             yield AgentEvent(
                 run_id=context.run_id,
                 run_attempt_id=context.run_attempt_id,
-                agent_session_id=str(uuid4()),
+                agent_session_id=session_id,
                 sequence=1,
                 occurred_at=datetime.now(UTC),
                 event_type=AgentEventType.TEXT_DELTA,
@@ -510,5 +521,14 @@ class _LateFailureEngine:
             )
             if key == self.failing_key:
                 raise RuntimeError("branch blew up mid-stream")
+            yield AgentEvent(
+                run_id=context.run_id,
+                run_attempt_id=context.run_attempt_id,
+                agent_session_id=session_id,
+                sequence=2,
+                occurred_at=datetime.now(UTC),
+                event_type=AgentEventType.RESULT_COMPLETED,
+                payload={"structured_output": {"summary": f"ok {key}"}},
+            )
 
         return stream()

@@ -148,6 +148,11 @@ export const EN: UiMessages = {
     submit: 'Sign in',
     submitting: 'Signing in…',
     failed: 'Sign-in failed.',
+    rateLimited: 'Too many sign-in requests. Wait before trying again manually.',
+    retryAfter: (seconds) => `Too many sign-in requests. Wait at least ${seconds} seconds before trying again manually.`,
+    unavailable: 'Sign-in is temporarily unavailable. Please try again manually later.',
+    invalidCredentials: 'The email or password is incorrect.',
+    csrfRejected: 'The sign-in check failed. Submit again. If this continues, contact an administrator.',
     footer: 'AI-powered project management platform · fully auditable',
   },
   home: {

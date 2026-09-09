@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.projectmind.local/users/v1/mutation.schema.json",
+  "title": "ProjectMind User mutation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "user",
+    "revoked_sessions",
+    "session_revoked"
+  ],
+  "properties": {
+    "user": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "user_id",
+        "email",
+        "display_name",
+        "system_role",
+        "status",
+        "row_version",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "user_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "email": {
+          "type": "string"
+        },
+        "display_name": {
+          "type": "string"
+        },
+        "system_role": {
+          "type": "string",
+          "enum": [
+            "ADMIN",
+            "USER"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ACTIVE",
+            "DISABLED"
+          ]
+        },
+        "row_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "revoked_sessions": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "session_revoked": {
+      "type": "boolean"
+    }
+  }
+}

@@ -25,7 +25,7 @@ export interface LoginInput {
 /** Cookie に対応する current session を取得し、未認証は null として返す。 */
 export async function loadAuthSession(signal?: AbortSignal): Promise<AuthSessionRecord | null> {
   try {
-    return parseSession(await requestApiJson(`${API_BASE}/auth/session`, { signal }))
+    return parseSession(await requestApiJson(`${API_BASE}/auth/session`, { signal, cache: 'no-store' }))
   } catch (error) {
     if (error instanceof ApiProblemError && error.status === 401) return null
     throw error
@@ -34,25 +34,32 @@ export async function loadAuthSession(signal?: AbortSignal): Promise<AuthSession
 
 /** Login CSRF challenge を取得して password login を実行する。 */
 export async function login(input: LoginInput, signal?: AbortSignal): Promise<AuthSessionRecord> {
+  signal?.throwIfAborted()
   const context = parseLoginContext(await requestApiJson(
     `${API_BASE}/auth/login-context`,
-    { signal },
+    { signal, cache: 'no-store' },
   ))
-  return parseSession(await requestApiJson(`${API_BASE}/auth/login`, {
+  // Transport が abort に遅れて応答しても、離頁後に password POST を開始しない。
+  signal?.throwIfAborted()
+  const response = await requestApiJson(`${API_BASE}/auth/login`, {
     method: 'POST',
+    cache: 'no-store',
     headers: {
       'Content-Type': 'application/json',
       'X-CSRF-Token': context.csrf_token,
     },
     body: JSON.stringify(input),
     signal,
-  }))
+  })
+  signal?.throwIfAborted()
+  return parseSession(response)
 }
 
 /** Current session を server 側で失効させる。 */
 export async function logout(csrfToken: string, signal?: AbortSignal): Promise<void> {
   await requestApiEmpty(`${API_BASE}/auth/logout`, {
     method: 'POST',
+    cache: 'no-store',
     headers: { 'X-CSRF-Token': csrfToken },
     signal,
   })

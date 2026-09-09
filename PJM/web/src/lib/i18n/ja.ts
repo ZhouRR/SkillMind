@@ -147,6 +147,11 @@ export const JA: UiMessages = {
     submit: 'ログイン',
     submitting: 'ログイン中…',
     failed: 'ログインに失敗しました。',
+    rateLimited: 'ログイン要求が多すぎます。しばらく待ってから手動で再試行してください。',
+    retryAfter: (seconds) => `ログイン要求が多すぎます。少なくとも ${seconds} 秒待ってから手動で再試行してください。`,
+    unavailable: 'ログインサービスを一時的に利用できません。しばらく待ってから手動で再試行してください。',
+    invalidCredentials: 'メールアドレスまたはパスワードが正しくありません。',
+    csrfRejected: 'ログインの検証に失敗しました。再送信してください。続く場合は管理者に連絡してください。',
     footer: 'AI 駆動のプロジェクト管理実行プラットフォーム · 全過程監査可能',
   },
   home: {

@@ -168,6 +168,11 @@ export const ZH: UiMessages = {
     submit: '登录',
     submitting: '正在登录…',
     failed: '登录失败。',
+    rateLimited: '登录请求过于频繁，请稍后手动重试。',
+    retryAfter: (seconds) => `登录请求过于频繁，请至少等待 ${seconds} 秒后手动重试。`,
+    unavailable: '登录服务暂时不可用，请稍后手动重试。',
+    invalidCredentials: '邮箱或密码不正确。',
+    csrfRejected: '登录校验未通过，请重新提交。若持续失败，请联系管理员。',
     footer: 'AI 驱动的项目管理执行平台 · 全程可审计',
   },
   home: {

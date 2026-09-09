@@ -1,6 +1,8 @@
 # ProjectMind 实施计划
 
-> 状态正本。2026-09-08 最新核对见 [§13.18](#1318-调度事实并发与管理文档核对2026-09-08)：纠正重叠范围与原子版本保护的描述，明确摘要、持久恢复和分页管理的差距。此前物化/效果局部回归见 §13.17，全量基线未重新执行。部署证据仍为 2026-08-04 的[交付记录 §49](../history/delivery-history.md#49-服务器部署基线验收2026-08-04)，不据文档或局部回归宣称全项目完成。
+> 状态正本。2026-09-09 本轮继续文档整理：核对用户管理已经接入的 API/Schema，与未同步的 OpenAPI、未接入的 Web 分开；记录合跑收集失败，整理代码/契约入口和失败处理。没有修改应用实现、应用测试或公开契约；R01–R13 的完整范围、已有代码和真实环境残项保留。
+
+工作副本、全量本地基线和部署不是同一个版本。先用[证据范围表](#当前证据怎么用)确定所读结论适用的范围，不从最近一次绿色数字推导全项目完成。
 
 先看[当前状态](#13-当前执行状态)、[下一步](#132-下一步与当前决策)和[全项目工作登记](#133-全项目重构与缺失功能实施2026-09-05-启动)。设计归属见[设计责任索引](../design/README.md)，核对证据按[历史索引](../history/README.md)查找。本页只管理范围、状态和门禁。
 
@@ -8,21 +10,25 @@
 
 ## 13. 当前执行状态
 
-| 能力 | 实现证据 | 验收与限制 |
-| --- | --- | --- |
-| Run/认证/证据/评价/SSE | 现有模块、契约和回归测试；历史已交付 | 新部署仍需 authenticated smoke |
-| Run 创建与原请求确认 | Backend 意图/重放、Web 原内容/键、文档选择/详情；契约与消费者局部回归通过 | 真实 DB 并发/回滚、版本混合与历史续行仍需验收 |
-| Skill 导入/解释/发布/组织资产/项目启用 | 现有 skills/compositions 模块与契约；发布/启停边界已核对 | 停用后同版重新启用与审计未实现；完整模型反复及人工质量报告待补 |
-| Blueprint/Task Contract/Brief/交互与效果 | 现有通用契约、Segment 与 effect 链路 | 真实模型与 CAS adapter 专项验收待补 |
-| 三语界面与托管凭据 | 现有 i18n、用户偏好和 MANAGED resolver；文档选择/清单三语已接入 | 原请求、显式范围与调度输入有局部 mock 浏览器证据；全页面与托管凭据端到端仍需复验 |
-| 资源物化与 workspace.write（§19） | 回执/0029、Worker/Tool、准备监督、启动 gate 与一次性完成确认已有代码；物化消费者及相关回归通过 | 跨根故障、整链/真实提交与迁移恢复、首事件前取消、HTTPS remote 与模型使用待验 |
-| repository.write（§20） | Git/SVN、direct/branch、Proposal 与 read-back；本地临时仓库和部分审批/Provider 回归通过 | 原执行身份证明、精确 CAS、阶段回执、Effect 监督和审批重发待补齐；真实 forge/并发/失败恢复端到端待验 |
-| 过程重表达（§21） | 静态信号、system Skill、能力引用守卫 | 模型语义保真和 JAF 实机执行待验 |
-| TaskSchedule（§22） | ONCE/CRON、Worker tick、API/Web、migration 0025；重放/时间/API 与 Web 投影有局部回归 | 重叠只查本 Schedule 的摘要指针；原子编辑、持久在途/计数/迟到、分页/失效可见性、编辑与时区修正待补 |
-| 并行子分析（§23） | dispatch、能力收窄、单次预算分配、子 Session 记录 | Run 总预算尚无共享扣减；模型汇总效果待验 |
-| 前端信息架构（§25） | Task Center、服务端待办、历史与任务关联 | 浏览器专项待验 |
-| Task Flow（§26） | 设计完成 | 无 Flow Schema、持久化或页面实现 |
-| generated FrontendModule（§24） | 版本模型、静态拒绝和构建前置检查 | 构建 service、投放、Host API 与回退未实现 |
+| 能力 | 当前基础与接续 |
+| --- | --- |
+| Run 与审计 | 模块、契约、SSE 与评价已有历史交付；新部署仍需 authenticated smoke，当前停止与事务残项见 [R07](#r07-run-与审计) |
+| 身份与授权 | 会话 v2/0031、三维防护、认证错误声明与登录表单有局部回归；用户生命周期、跨页面会话及实 DB/代理待验，见 [R05](#r05-领域与身份安全) |
+| 创建与确认 | 原意图重放、Web 原内容/键、文档选择/详情有局部回归；实 DB 并发/回滚、混合版本与历史续行仍待验，见 [R01](#r01-资源冻结) |
+| Skill 生命周期 | 导入/解释/发布、组织资产、项目启用已有模块；同版重新启用/审计与完整模型质量未完成，见 [R06](#r06-skill-生命周期) |
+| 通用契约与交互 | Blueprint、Task Contract、Brief、Segment 与 effect 链已有代码；真实模型与 CAS 专项验收待补，见 [R07](#r07-run-与审计) / [R08](#r08-外部效果) |
+| 三语与凭据 | i18n/偏好、文档清单与 MANAGED resolver 已有代码；局部 mock browser 不覆盖全页面或 Secret 端到端，见 [R10](#r10-全部-web-页面) / [R05](#r05-领域与身份安全) |
+| 输入物化 | 回执/0029、监督/启动 gate、完成确认与命名空间独占有本地回归；实事务/迁移恢复、进程/HTTPS/模型仍待验，见 [R01](#r01-资源冻结) |
+| 仓库回写 | Git/SVN direct/branch、Proposal/read-back 有局部回归；原执行 identity、精确 CAS、阶段回执/监督与审批重发待补，见 [R08](#r08-外部效果) |
+| 过程重表达 | 静态信号、system Skill、能力引用守卫已有代码；模型语义保真和 JAF 实机仍待验，见 [R06](#r06-skill-生命周期) / [R12](#r12-业务质量验收) |
+| 时刻起动 | ONCE/CRON、tick、API/Web/0025 有局部回归；重叠限于本 Schedule 摘要，原子编辑/恢复/计数/迟到/分页与时区待补，见 [R09](#r09-调度) |
+| 并行子分析 | dispatch、终端校验、v1 Session 记录与清理有局部回归；子指令/输出、审计恢复/降级、完整停止与共享预算待补，见 [R07](#r07-run-与审计) / [R02](#r02-run-统一预算) |
+| 共享预算 | DTO、三表/0030、repository/store 有离线回归，但创建/主子执行未调用；计量、核对方与实 DB/历史/公开投影待补，见 [R02](#r02-run-统一预算) |
+| 页面组织 | Task Center、服务端待办、历史关联已有代码；完整浏览器专项待验，见 [R10](#r10-全部-web-页面) |
+| Task Flow | 设计已定义；尚无 Flow Schema、持久化与页面，见 [R03](#r03-task-flow-完整链路) |
+| 生成界面 | 模型/0026、状态与前置检查有局部回归；CSP/构建身份/发布证明和完整运行链未完成，Manifest 只允许 null，见 [R04](#r04-生成模块) |
+
+概览把基础与限制放在同一格，详细范围和验收集中到对应 R 项；“有局部回归”不是该能力整体可交付的标签。
 
 ### 13.1 完成状态的判定
 
@@ -33,11 +39,29 @@
 
 历史回归只证明对应版本和所列条件，不自动覆盖工作副本。2026-08-04 记录只证明部署基线，明确未覆盖应用认证 smoke、真实资源/效果、模型、调度触发和浏览器。最新局部检查也不能替代一次全量验收。
 
+### 当前证据怎么用
+
+| 要判断什么 | 证据与适用范围 |
+| --- | --- |
+| 用户生命周期接到哪一层 | [本轮核对 §81](../history/delivery-history.md#811-工作副本与失败证据)：已有 9 个管理 HTTP 操作、9 组 Schema/example、改密防护与 bootstrap 审计；快照缺少新操作、Web 未接。users 单跑通过，但与 API 合跑在 conftest 导入处失败；不是整条链路验收 |
+| 登录防护与客户端的此前证据 | [此前核对 §78](../history/delivery-history.md#782-工作副本核对与验证范围)：当时 Backend/契约 123 项、Web 430 项、62 个 LoginPage mock API 场景通过，OpenAPI 与 exporter 一致。该快照结论不覆盖本轮已有的新管理路由；实 DB、App 多页面会话与代理仍未验 |
+| 会话协议与此前公开同步 | [此前核对 §75](../history/delivery-history.md#75-会话现状对齐与文档维护指南续整2026-09-09)：当时只同步 GET session 的描述并通过；不能覆盖后续新增的登录防护响应，不证明实 DB/浏览器会话/部署 |
+| 生成界面的前置基础 | [此前核对 §74](../history/delivery-history.md#74-生成模块边界与开发阅读路径续整2026-09-09)：局部函数/模型结构、Manifest gate 与业务 module API 的离线回归；不证明 builder、CSP、Host 或回退可运行 |
+| 旧认证行为与 Secret 边界 | [此前核对 §73](../history/delivery-history.md#73-认证凭据与安全开发入口文档续整2026-09-09)：当时的 GET 轮换已被后续源码替代，Secret 轮换恢复的验收限制仍保留；不将当时的 78 项回归套用到新版认证 |
+| 当前预算内部协议 | [此前核对 §72](../history/delivery-history.md#72-预算账本边界与开发入口文档续整2026-09-09)：Backend 66 项离线回归。覆盖 DTO、repository/store 模拟与迁移结构，不证明真实 DB、计量来源或 Worker 接入 |
+| 等待拒绝与终态接续 | [此前核对 §71](../history/delivery-history.md#71-等待事务对齐与任务导航文档续整2026-09-09)：Backend 93 项执行回归。mock transaction/client 不证明实 DB 阻塞、回滚、接管或进程停止；不覆盖后续源码和全量应用 |
+| 公开边界与 Web 投影 | [此前核对 §70](../history/delivery-history.md#70-提交边界与开发阅读入口文档续整2026-09-09)：Backend 37 项公开边界、Web 13 项投影。当时 157 项执行回归不覆盖后续等待取消改动 |
+| 最近一次完整本地基线 | [2026-09-08 §66](../history/delivery-history.md#66-r01-输入世代隔离与多根不变量收口2026-09-08)：Backend 1121 通过 / 20 跳过，Web 335 通过。不覆盖后续源码；实 DB skip 不是通过 |
+| 最近记录的部署 | [2026-08-04 §49](../history/delivery-history.md#49-服务器部署基线验收2026-08-04)。不能把当前工作副本当成已部署版本 |
+| 文档是否可维护、可浏览 | 本轮 [§81 接线与阅读检查](../history/delivery-history.md#813-文档验证与保留范围)，此前 [§80 账户设计](../history/delivery-history.md#802-文档验证与保留范围)、[§79 运维分层](../history/delivery-history.md#792-核对与验证范围)等记录分别保留。按各自范围阅读，不刷新应用全量或部署基线 |
+
+回归清单和具体命令放在链接到的历史记录中；本表只帮助选择证据。后续发现旧结论变化时追加记录，不倒改当时的失败或跳过。
+
 ### 13.2 下一步与当前决策
 
 | 顺序 | 工作 | 交付和门禁 |
 | --- | --- | --- |
-| 1 | 补齐运行约束差距 | 保持原请求确认与公开文档链路的回归，继续真实事务验收、[可信缓存与跨根总量](../design/resource-snapshots.md#已知差距与后续设计)、[Run 共享预算](../design/run-budgets.md)和[调度可靠性](../design/task-scheduling.md#可靠性修正要求待实现)，同步契约与有状态回归 |
+| 1 | 补齐运行约束差距 | 保持原请求确认、公开文档和主/子结果回归；继续[身份与凭据](#r05-领域与身份安全)、[停止分类与核对](../design/run-supervision.md#兼容与开发接续)、真实事务、[可信缓存与跨根总量](../design/resource-snapshots.md#已知差距与后续设计)、[Run 共享预算](../design/run-budgets.md)和[调度可靠性](../design/task-scheduling.md#可靠性修正要求待实现) |
 | 2 | Task Flow 只读投影 | 先复用现有数据，不增加执行控制器或假造节点完成；见 §26 |
 | 并行准备 | 真实资源与模型专项验收 | 有合法测试项目/账号后跑 smoke、HTTPS Git/SVN、CAS/forge、调度与浏览器；测试写入使用专用目标 |
 | 后续 | Flow 契约与 Run 快照 | 版本化 Draft、冻结内容、事件关联和旧 Run 回退 |
@@ -47,30 +71,101 @@
 
 ### 13.3 全项目重构与缺失功能实施（2026-09-05 启动）
 
-此登记保留既有全项目实施范围；本次文档整理只核对现有代码、修正规则表达和接续入口，不执行全项目代码重构。R01 从跨根故障、真实提交确认/事务与历史续行继续，不重做已有选择、消费者、store、准备监督或启动 gate。一次文档整理或局部实现不代替整体完成。
+此登记保留全项目代码重构与缺失功能的既有范围，不表示本轮文档整理同时实施这些任务。R01 已补本地多根/文件故障与世代隔离，R02 已有未接入执行的内部账本，R07 已有停止分类、终态复查与等待/普通事件取消检查；接续从剩余不变量和真实环境验收开始，不重做已有组件。R01–R13 不因既有回归绿色就记为完成。子指令/输出与审计降级的新协议必须先满足共享预算和版本门禁，不以修正 v1 的异常路径为由直接扩展自主能力。
 
 范围覆盖 Backend、Web、contracts、Skill 执行资产、脚本、构建/部署配置及对应测试。以下是全量工作入口，
 不是把目标缩减为第一批缺口；每一领域仍需逐条核对设计中的字段、行为、不变量、失败路径和验收条件。
 现行规范是依据，history 中已被替代的设计不重新引入；文档明确禁止或列为非目标的能力不被解释为待实现功能。
 
-| 工作 | 规范与代码范围 | 完成证据要求 | 当前状态 |
-| --- | --- | --- | --- |
-| R01 资源冻结 | 资源快照与创建；documents / integrations / runs / agent、Preflight 与 Run 详情 | 显式单份/集合/全集、创建时冻结、不可越权/漂移、重放与历史兼容 | 实施中：回执/Tool、监督/启动 gate、配置、消费者及一次性完成确认已有接线和局部回归；跨根故障、整链/真实提交与历史续行待验 |
-| R02 Run 统一预算 | [预算设计](../design/run-budgets.md)、子分析与 Runtime；agent / runs / worker / DB | 主子共同计费、原子预留、幂等结算、跨 Segment/Attempt 恢复与并发测试 | 待实现；已细化计量口径、预留和不确定用量恢复要求 |
-| R03 Task Flow 完整链路 | Task Flow、Workspace、Interpreter；contracts / skills / runs / Web | 预览、契约/Draft/diff/发布、不可变 Run 流程、事件关联、待办/证据联动、三语与历史回退 | 待实现全部工作包 |
-| R04 生成模块 | generated FrontendModule；modules / API / Web / builder / Compose | 威胁模型、依赖与网络隔离、构建测试、安全投放、Host 协议、发布与回退；禁止仅静态通过即执行 | 前置代码待重新核对，其余待实现 |
-| R05 领域与身份安全 | 领域模型、认证；auth / projects / documents / integrations / core / DB | 所有权、CSRF/Origin、角色、Secret、并发与不变数据约束的正负向回归 | 待逐模块核对与重构 |
-| R06 Skill 生命周期 | Skill 契约与解释实现；skills / compositions / contracts / Web / system Skill | 导入到解释、版本发布与项目启用、来源/identity、动态契约、兼容与错误恢复 | 发布/启停已只读核对；同版重新启用/审计与回滚待实现，组合尚无跨 Skill 规则求解；其余仍需逐条核对 |
-| R07 Run 与审计 | Runtime；runs / worker / agent / events / evidence / evaluations / storage | Segment/Attempt/Session、Outbox/lease、恢复/取消/等待期限、结果与 SSE 重放的有状态验证 | 准备监督与启动校验有局部回归；首事件前取消、实际进程停止、异常收尾及其余生命周期待逐条核对与验收 |
-| R08 外部效果 | [受控写入](../design/repository-effects.md#可靠性修正要求)；effects / integrations / repository / Redmine / Web | 提案、精确批准/预授权、CAS/原执行身份、阶段回执、Effect lease、read-back、Git/SVN/PR 部分失败恢复 | 已核对内容比较不能证明原执行、SVN 基线/回读未固定、无独立阶段回执/贯穿监督；审批卡片换键与旧 branch-only Schema 待同步。局部通过不替代修正/真实验收 |
-| R09 调度 | [TaskSchedule](../design/task-scheduling.md)；schedules / worker / API / Web | 时间/预览、同 Schedule 重叠、原子配置更新、持久在途/执行权、幂等计数与历史兼容 | 已核对摘要/先读后写/首 100 条的限度；恢复协议、并发/计数/迟到、管理/编辑入口和时区修正待实现，局部通过不证明真实事务 |
-| R10 全部 Web 页面 | Workspace 与产品概览；pages / components / API / hooks / lib / styles / i18n | 页面职责、服务端筛选、并发请求清理、三语/键盘/窄屏、真实用户流程 | 原请求、文档选择/详情与调度输入有局部 mock 浏览器证据；已定位 Schedule 首批与 TaskCatalog 结合的漏显风险，其余页面仍待逐项核对与重构 |
-| R11 运维与工程工具 | 开发/运维规范；ops / migrations / scripts / images / Compose / Dockerfile | 锁定依赖、静态检查、启动/迁移、backup/restore/rollback、KEK 保留、清理策略与 smoke | 已定位 ENV_FILE/容器 .env 来源不统一、deploy 不分阶段放行、0027 downgrade 删除审计会话的风险；配置修正/真实恢复演练仍待完成；既有业务浏览器 Ruff 问题见 §13.11 |
-| R12 业务质量验收 | JAF acceptance；通用运行链与业务 Skill/评价数据 | 文档定义的 case/指标/人工评价、Gold 隔离、规则保真；不把 fixture 结果冒充真实模型质量 | 待构建/执行可获得的验收，其余保留外部条件 |
-| R13 全量契约与最终审计 | 全部现行设计、AGENTS、contracts 和工程入口 | 逐需求证据、Schema/example/OpenAPI 同步、Backend/Web/DB/浏览器/部署范围匹配的测试 | §13.16 的失败在对应局部回归中不再复现；全量未再执行，其他领域仍待完整核对与复验，不能用局部绿色判定总目标完成 |
+按职责跳转，不必横向阅读四列表格；每项依次列出状态、范围和验收。下列分组是导航，不改变 §13.2 的优先顺序。
 
-本表保留 R01–R13 全项目实施任务与既有进展。接续开发不重做已存在的选择/清单入口，从剩余不变量和未覆盖环境继续验收。资源准备回执需要同步 DB/migration、物化器、Worker heartbeat/fencing、workspace Provider、测试与恢复说明；不运行部署或未知生产数据操作。下面的有日期章节只保留证据入口，历史细节不在计划页重复维护，后续代码结果单独记录。
-环境、账号、内部依赖镜像或真实业务数据不足时先完成可独立推进的代码与测试，不擅自采用公网依赖或放宽安全门禁。
+- 运行基础：[R01 资源](#r01-资源冻结) · [R02 预算](#r02-run-统一预算) · [R05 身份](#r05-领域与身份安全) · [R07 Run](#r07-run-与审计) · [R08 效果](#r08-外部效果) · [R09 调度](#r09-调度)
+- 产品能力：[R03 Flow](#r03-task-flow-完整链路) · [R04 生成模块](#r04-生成模块) · [R06 Skill](#r06-skill-生命周期) · [R10 Web](#r10-全部-web-页面)
+- 交付验收：[R11 工程与运维](#r11-运维与工程工具) · [R12 业务质量](#r12-业务质量验收) · [R13 全量审计](#r13-全量契约与最终审计)
+
+环境、账号、内部依赖镜像或真实业务数据不足时，在获准的代码实施中先推进独立可验证部分，不擅自采用公网依赖或放宽安全门禁。文档整理不运行部署或未知生产数据操作。
+
+#### R01 资源冻结
+
+- 状态：实施中。命名空间独占、多根/篡改/失效提交/接管复用已有回归；已有回执与监督接线保持通过。真实事务、迁移/历史恢复、完整执行链与外部资源仍待验。
+- 范围：[资源快照](../design/resource-snapshots.md)与[创建](../design/run-creation.md)；documents / integrations / runs / agent、Preflight 与 Run 详情。不重做已有选择/清单入口；回执修改同步 DB/migration、物化器、Worker heartbeat/fencing、workspace Provider、测试与恢复说明。
+- 验收：显式单份/集合/全集、创建时冻结、不可越权/漂移、重放与历史兼容。
+
+#### R02 Run 统一预算
+
+- 状态：实施中，尚未启用。内部 DTO、三表/0030、repository/store 已有代码；§72 的 66 项离线回归通过。普通创建、主 Executor、子 Provider、Worker startup 与受信计量/停止核对方尚未接入，原执行仍使用局部上限。
+- 范围：[预算设计](../design/run-budgets.md#持久账本的当前载体)、子分析与 Runtime；agent / runs / worker / DB。复用[账本接续入口](../../PJM/backend/README.md#台帳の実装を引き継ぐ)，不重复建表，也不把内部保存版当作公开协议。
+- 验收：计量来源/完整性与核对方授权、真实并发/提交未知恢复、创建重放、主子共同计费及跨 Segment/Attempt 接入；旧 Run、混合 Worker、回退与公开投影另行验收。停止键与内部 lease 不是外部证据或服务认证，fake 提交回归不是实 DB 证明。
+
+#### R03 Task Flow 完整链路
+
+- 状态：全部工作包待实现。
+- 范围：[Task Flow](../design/task-flow.md)、Workspace、Interpreter；contracts / skills / runs / Web。
+- 验收：预览、契约/Draft/diff/发布、不可变 Run 流程、事件关联、待办/证据联动、三语与历史回退。
+
+#### R04 生成模块
+
+- 状态：前置代码已只读核对，101 项 Backend 局部离线回归通过；仍无构建/投放/Host/回退。CSP 常量与目标不符，source 唯一约束不能表达仅依赖/工具链/策略更新，现有发布 helper 不检查产物和报告。没有实施本轮业务代码修正。
+- 范围：[generated FrontendModule](../design/generated-modules.md)；modules / API / Web / builder / Compose。按[Backend 接续](../../PJM/backend/README.md#生成-module-の前置実装を読む)复用已有基础，补完整构建身份、提交/授权、Manifest/Host 契约与独立展示选择，不借业务 modules API 或 composition 切版处理界面。
+- 验收：[场景矩阵](../design/generated-modules.md#从场景验收)覆盖威胁模型、实际依赖/网络隔离、构建与提交恢复、安全投放、Host 实例切换、历史/缓存/停用和回退。Preview 也执行生成代码；静态通过、CSP 字符串断言或文档浏览器通过均不能授权首次运行。
+
+#### R05 领域与身份安全
+
+- 状态：会话 v2/0031、三维防护与 LoginPage 的既有证据见 §78。[用户生命周期](../design/user-lifecycle.md#工作副本与公开入口)已有 API 装配、9 个 HTTP 操作、9 组 Schema/example、改密来源/账号防护、服务器 UUID 与 bootstrap 审计。users 单跑 24 项通过；API/auth/契约组合为 57 通过、1 个 OpenAPI 一致性失败。users 与 API 合跑另在裸 conftest 导入处中断；Web client/page 尚缺，不能记为完整交付。本轮只读核对，保留既有业务改动。
+- 范围：[领域模型](../design/domain-model.md)、[认证](../design/authentication.md)、[用户管理](../design/user-lifecycle.md)、[登录防护](../design/login-protection.md)、[Secret 保存与轮换](../design/secret-storage.md)；auth / users / projects / documents / integrations / core / DB 与 Web。沿[认证接续入口](../../PJM/backend/README.md#認証と-secret-の境界を追う)和[用户管理接线](../../PJM/backend/README.md#ユーザー管理の接続を引き継ぐ)复用已有组件，不以 ProjectMember 管理替代账户管理。
+- 验收：保留[登录防护](../design/login-protection.md#开发接续与验收)的拒绝停止点、成功不清零、HTTP/三语，以及真实表单重复 submit、卸载/晚到结果、语言/键盘/窄屏回归。用户管理按[事务/公开链路验收](../design/user-lifecycle.md#开发接续与验收)补齐最后 ADMIN、并发登录/撤销、0032 与请求未知；接续 App 初次会话错误、多 tab、代理与 Redis 恢复。[会话场景](../design/authentication.md#验收从场景出发)的实 DB 双行锁、0031 与认证/业务提交边界、Secret 的[恢复场景](../design/secret-storage.md#开发接续与验收)另验。
+
+实施按[用户管理接续步骤](../design/user-lifecycle.md#开发接续与验收)，先恢复合跑基线，再接齐契约/Web 与真实环境验收，不重建已有 API/Schema。
+
+#### R06 Skill 生命周期
+
+- 状态：发布/启停已只读核对；同版重新启用/审计与回滚待实现，组合尚无跨 Skill 规则求解；其余仍需逐条核对。
+- 范围：[Skill 契约](../design/skill-contract.md)与[解释实现](../design/skill-interpretation.md)；skills / compositions / contracts / Web / system Skill。
+- 验收：导入到解释、版本发布与项目启用、来源/identity、动态契约、兼容与错误恢复。
+
+#### R07 Run 与审计
+
+- 状态：主/子结果、首事件前停止、无意图 interrupted、终态取消复查与 PRIMARY 查询有局部通过。等待/普通事件现已在序号分配与新增记录前拒绝持久取消；§71 的 93 项回归包含 service 异常传播、旧轮询和终态前失去 lease，不再把这条检查列为待开发。
+- 范围：[Runtime](../design/agent-runtime.md)与[执行监督](../design/run-supervision.md)；runs / worker / agent / events / evidence / evaluations / storage。等待拒绝和终态保存是两个事务，不能视为原子停止。
+- 验收：继续真实 DB 锁竞争、回滚后崩溃/接管、commit 结果不明、持久停止核对、子审计恢复与进程退出；Segment/Attempt/Session、Outbox/lease、恢复/取消/等待期限、结果与 SSE 重放须有状态联验。局部 mock/fake 通过不覆盖这些条件。
+
+#### R08 外部效果
+
+- 状态：已核对内容比较不能证明原执行、SVN 基线/回读未固定、无独立阶段回执/贯穿监督；审批卡片换键与旧 branch-only Schema 待同步。
+- 范围：[受控写入](../design/repository-effects.md#可靠性修正要求)；effects / integrations / repository / Redmine / Web。
+- 验收：提案、精确批准/预授权、CAS/原执行身份、阶段回执、Effect lease、read-back、Git/SVN/PR 部分失败恢复。局部通过不替代修正或真实验收。
+
+#### R09 调度
+
+- 状态：已核对摘要/先读后写/首 100 条的限度；恢复协议、并发/计数/迟到、管理/编辑入口和时区修正待实现。
+- 范围：[TaskSchedule](../design/task-scheduling.md)；schedules / worker / API / Web。
+- 验收：时间/预览、同 Schedule 重叠、原子配置更新、持久在途/执行权、幂等计数与历史兼容。局部通过不证明真实事务。
+
+#### R10 全部 Web 页面
+
+- 状态：原请求、文档选择/详情与调度输入有局部 mock 浏览器证据；§78 已核对真实 LoginPage + mock API 的 62 个场景与 430 项 Web 回归，本轮不重记这些应用结果。Schedule 首批与 TaskCatalog 的漏显风险、App 跨页面会话及其余完整流程仍待逐项核对与重构。
+- 范围：[Workspace](../design/workspace.md)与[产品概览](../overview/product.md)；pages / components / API / hooks / lib / styles / i18n。
+- 验收：页面职责、服务端筛选、并发请求清理、三语/键盘/窄屏、真实用户流程。
+
+#### R11 运维与工程工具
+
+- 状态：已定位 ENV_FILE/容器 .env 来源不统一、deploy 不分阶段放行、0027 downgrade 删除审计会话的风险。本轮进一步核对 dispatch=false 只限制新 Outbox 投递，不能阻止既有 job、Schedule、recovery 或解释任务；操作说明已分层，统一停写/发布控制、配置修正与真实恢复仍待完成。既有业务浏览器 Ruff 问题见 §13.11。
+- 范围：[本地开发](../development/local-development.md)、[发布迁移](../operations/deployment.md)、[备份恢复](../operations/backup-recovery.md)和[症状排障](../operations/runbook.md)；ops / migrations / scripts / images / Compose / Dockerfile。
+- 验收：锁定依赖、静态检查、启动/迁移、backup/restore/rollback、KEK 保留、清理策略与 smoke；按[发布门禁](../operations/deployment.md#后续开发约束与验收)覆盖多实例、旧队列、cron 和失败不放行，不能只验关闭 dispatch 后不 enqueue。
+
+#### R12 业务质量验收
+
+- 状态：待构建/执行可获得的验收，其余保留外部条件。
+- 范围：[JAF 迁移与运行](../acceptance/jaf-quality.md)、[Benchmark 样本与评分](../acceptance/jaf-benchmark.md)；通用运行链与业务 Skill/评价数据。§78 分清了执行/评价责任；本轮未运行模型或准备真实 Gold。
+- 验收：文档定义的 case/指标/人工评价、Gold 隔离、规则保真。不把 fixture 结果冒充真实模型质量。
+
+#### R13 全量契约与最终审计
+
+- 状态：按[证据范围表](#当前证据怎么用)区分局部、全量和部署；实 DB 历史 skip、业务浏览器/外部/部署与其他领域缺口仍在。
+- 范围：全部现行设计、[AGENTS](../../PJM/AGENTS.md)、[contracts](../../PJM/contracts/README.md)和工程入口。
+- 验收：逐需求证据、Schema/example/OpenAPI 同步、Backend/Web/DB/浏览器/部署范围匹配的测试。测试数字不能证明全需求完成。
+
+下面的有日期章节只保留证据入口，历史细节不在计划页重复维护，后续代码结果单独记录。
 
 ### 13.4 最近文档核对（2026-09-08）
 
@@ -130,9 +225,39 @@ Skill 阶段、Manifest 标识、重新启用目标与当时 Backend 全量基�
 
 ### 13.18 调度事实、并发与管理文档核对（2026-09-08）
 
-本轮继续整理文档，没有修改应用代码/测试、Schema、migration、配置或执行 Skill。调度设计改为具体例子、实际范围、故障边界与分项修正：重叠只检查本 Schedule 的 last_run_id；expected_row_version 尚非原子 CAS；last_* 不是完整账本；首 100 条与当前任务卡结合可能隐藏失效规则。认领执行权、原子编辑、未知提交的名额保留、幂等结算、历史迁移和管理可见性均保留为待实现要求。
+调度的实际重叠范围、先读后写、摘要/账本和前 100 条管理可见性核对，以及当轮 65 项 Backend / 10 项 Web 局部通过见[交付记录 §65](../history/delivery-history.md#65-调度事实并发与管理文档续整2026-09-08)。该轮只整理文档，R09 的原子更新、持久恢复和管理界面仍未实现；不倒改其当时的验证范围。
 
-当前调度相关 Backend **65 项通过**，Web API/Task Center 投影 **10 项通过**；前者含纯时间逻辑与 fake service/Worker，后者含 client 与静态投影，不覆盖真实锁竞争、持久恢复、100 条以上分页或失效任务管理。阅读检查与证据见[交付记录 §65](../history/delivery-history.md#65-调度事实并发与管理文档续整2026-09-08)。全量 Backend/Web、真实 DB、业务浏览器、模型、远端与部署未重跑，R01–R13 继续按 §13.3 执行。
+### 13.19 R01 输入世代隔离与全量本地回归（2026-09-08）
+
+输入命名空间独占、多根计量/篡改/接管回归和当时的全量本地验证见[交付记录 §66](../history/delivery-history.md#66-r01-输入世代隔离与多根不变量收口2026-09-08)。本锚点保留；与当前工作副本的关系只在[证据范围表](#当前证据怎么用)维护，不继续复制实施日志。
+
+### 13.20 预算计量与子分析文档核对（2026-09-08）
+
+预算的计量/预留/结算设计、当时复现的子失败误报完成与 ID 省略冲突，以及文档阅读验证见[交付记录 §67](../history/delivery-history.md#67-预算计量子分析与开发文档续整2026-09-08)。该轮只整理文档；后续工作副本已有代码变化，以 §13.21 接续，不倒改历史记录，也不把当时问题继续列为原样未修复。
+
+### 13.21 子分析交接与验证状态文档核对（2026-09-08）
+
+子分析指令/结果、Session 与 Tool 独立提交的设计整理，以及当时 **79 项通过、3 项失败**的证据见[交付记录 §68](../history/delivery-history.md#68-子分析交接与验证状态文档续整2026-09-08)。旧 validator fixture 失败已在 §13.22 的核对中不再复现；保留原证据，不从旧记录判断当前代码。
+
+### 13.22 执行监督与停止文档核对（2026-09-09）
+
+监督设计独立成页、当时主 interrupted 映射的差距、124 项局部通过与阅读检查见[交付记录 §69](../history/delivery-history.md#69-执行监督与停止文档续整2026-09-09)。之后已有停止分类和终态事务改动，以 §13.23 接续，不把旧原因映射继续列为原样未修复。
+
+### 13.23 提交边界与开发阅读入口核对（2026-09-09）
+
+当时取消分类、终态复查、PRIMARY 查询的只读回归，以及等待提交的独立风险见[交付记录 §70](../history/delivery-history.md#70-提交边界与开发阅读入口文档续整2026-09-09)。该轮只同步文档，没有修复等待竞争或新增协议；后续工作副本的等待检查见 §13.24，不倒改 §70 的历史事实。
+
+### 13.24 等待事务与任务导航核对（2026-09-09）
+
+等待/普通事件取消检查、回滚后终态接续、用量投影的只读核对，以及 R01–R13 独立入口的整理见[交付记录 §71](../history/delivery-history.md#71-等待事务对齐与任务导航文档续整2026-09-09)。该轮未修改业务代码；真实事务和停止验收继续按 [R07](#r07-run-与审计)接续。
+
+### 13.25 预算账本与执行接入核对（2026-09-09）
+
+已有内部账本、尚未接入的执行/可信核对边界，以及设计到代码、迁移与验收的阅读检查见[交付记录 §72](../history/delivery-history.md#72-预算账本边界与开发入口文档续整2026-09-09)。该轮只整理文档并做离线验证；R02 的状态不由方法或迁移文件存在推导为完成。
+
+### 13.26 认证、凭据与安全开发入口核对（2026-09-09）
+
+当时的登录/Secret 分离、旧 CSRF/时效差距与直接加密/恢复边界见[交付记录 §73](../history/delivery-history.md#73-认证凭据与安全开发入口文档续整2026-09-09)。后续源码已有 v2，当前核对见[§75](../history/delivery-history.md#75-会话现状对齐与文档维护指南续整2026-09-09)与 R05；保留旧证据，不再从本历史入口推导当前仍会轮换。
 
 ## 旧章节引用索引
 
@@ -278,7 +403,7 @@ Run → Segment → Attempt；Session 是执行载体，Evidence/Result/Evaluati
 
 ### 18. 托管凭据（已实现）
 
-见[认证 §7](../design/authentication.md#7-secret-storage)与[Runbook](../operations/runbook.md)。
+见[Secret 保存与轮换](../design/secret-storage.md)与[Runbook](../operations/runbook.md#88-managed-secret-の-kek-運用)。旧认证 §7 保留兼容入口，当前加密层级与版本含义以新正本为准。
 
 ### 19. 资源快照物化与工作区
 
@@ -358,7 +483,7 @@ Run → Segment → Attempt；Session 是执行载体，Evidence/Result/Evaluati
 
 #### 23.3 工作包
 
-dispatch、能力收窄、结果呈现与 Session 持久化已实现；共享总预算账本未实现。
+本节保留旧入口，不另存实现进度。dispatch、终端/Session/Gateway 的现状见[子分析当前边界](../design/subagents.md#当前返回值的可信边界)；接续范围与证据分别查 [R02 预算](#r02-run-统一预算)、[R07 执行与审计](#r07-run-与审计)。
 
 #### 23.4 非目标
 

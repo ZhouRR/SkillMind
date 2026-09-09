@@ -67,4 +67,4 @@ Task Flow 是下一阶段的展示设计；generated FrontendModule 只有版本
 - 网络或 Worker 可能中断，因此业务记录保存在 PostgreSQL，重试和恢复可审计。
 - AI 建议可能需要修订，因此结果、反馈、批准和实际写入分别保存。
 
-JAF 单票分析是业务验收场景，repository-review 是通用回归输入。两者都不成为平台内置业务规则。JAF benchmark 的指标与样本管理见[验收规范](../acceptance/jaf-quality.md)。
+JAF 单票分析是业务验收场景，repository-review 是通用回归输入。两者都不成为平台内置业务规则。迁移与运行见[JAF 验收](../acceptance/jaf-quality.md)，样本、评分与人工发布判断见[Benchmark](../acceptance/jaf-benchmark.md)；工程回归不能替代业务质量。

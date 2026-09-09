@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import asyncio
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from projectmind.auth.domain import hash_password, normalize_email
+from projectmind.auth.domain import hash_password
 from projectmind.db.models import Organization, User
+from projectmind.users.domain import CreateUserCommand, UserRole, UserSecurityAction
+from projectmind.users.repository import UserRepository
 
 SYSTEM_ORGANIZATION_ID = UUID("00000000-0000-4000-8000-000000000100")
 
@@ -28,7 +32,7 @@ class BootstrapAdminCommand:
 
     email: str
     display_name: str
-    password: str
+    password: str = field(repr=False)
 
 
 class BootstrapAdminService:
@@ -42,11 +46,10 @@ class BootstrapAdminService:
     async def bootstrap(self, command: BootstrapAdminCommand) -> UUID:
         """既存 ADMIN がいない場合だけ ACTIVE ADMIN を追加する。"""
 
-        email = normalize_email(command.email)
-        display_name = command.display_name.strip()
-        if not display_name:
-            raise ValueError("Display name is required")
-        password_hash = hash_password(command.password)
+        validated = CreateUserCommand(
+            command.email, command.display_name, UserRole.ADMIN, command.password
+        ).validated()
+        password_hash = await asyncio.to_thread(hash_password, validated.password)
 
         async with self._session_factory() as session, session.begin():
             # 単一 Organization row を排他 lock し、並行 CLI が二人の初期 ADMIN を作るのを防ぐ。
@@ -75,16 +78,32 @@ class BootstrapAdminService:
                 raise AdminAlreadyExistsError("An administrator already exists")
 
             user_id = uuid4()
-            session.add(
-                User(
-                    id=user_id,
-                    organization_id=SYSTEM_ORGANIZATION_ID,
-                    email=email,
-                    password_hash=password_hash,
-                    display_name=display_name,
-                    system_role="ADMIN",
-                    status="ACTIVE",
-                    last_login_at=None,
-                )
+            now = datetime.now(UTC)
+            user = User(
+                id=user_id,
+                organization_id=SYSTEM_ORGANIZATION_ID,
+                email=validated.email,
+                password_hash=password_hash,
+                display_name=validated.display_name,
+                system_role="ADMIN",
+                status="ACTIVE",
+                last_login_at=None,
+                row_version=1,
+                created_at=now,
+                updated_at=now,
             )
+            repository = UserRepository(session)
+            # CLI は HTTP request を捏造せず、操作 UUID と新 ADMIN 自身を監査主体にする。
+            await repository.insert_user(user)
+            repository.append_event(
+                user=user,
+                actor_id=user_id,
+                request_id=uuid4(),
+                action=UserSecurityAction.CREATED,
+                previous_role=None,
+                previous_status=None,
+                revoked_sessions=0,
+                now=now,
+            )
+            await session.flush()
             return user_id

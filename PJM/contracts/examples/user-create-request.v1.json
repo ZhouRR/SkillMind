@@ -1,0 +1,6 @@
+{
+  "email": "reader@example.test",
+  "display_name": "Example reader",
+  "system_role": "USER",
+  "password": "example-only initial passphrase"
+}

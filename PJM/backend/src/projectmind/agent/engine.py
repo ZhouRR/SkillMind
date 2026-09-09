@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
+from contextlib import aclosing
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -420,8 +421,9 @@ class ClaudeAgentSdkEngine:
 
         session_id = str(uuid4())
         options = replace(self._base_options(context), session_id=session_id)
-        async for event in self._run(context, session_id, context.prompt, options):
-            yield event
+        async with aclosing(self._run(context, session_id, context.prompt, options)) as stream:
+            async for event in stream:
+                yield event
 
     async def resume(self, context: ResumeContext) -> AsyncIterator[AgentEvent]:
         """同一 Run の保存済み session を新しい Attempt で再開する。"""
@@ -429,8 +431,11 @@ class ClaudeAgentSdkEngine:
         _validate_parent_session(context.run, context.session)
         options = replace(self._base_options(context.run), resume=context.session.session_id)
         prompt = context.input_text or _DEFAULT_RESUME_PROMPT
-        async for event in self._run(context.run, context.session.session_id, prompt, options):
-            yield event
+        async with aclosing(
+            self._run(context.run, context.session.session_id, prompt, options)
+        ) as stream:
+            async for event in stream:
+                yield event
 
     async def fork(self, context: ForkContext) -> AsyncIterator[AgentEvent]:
         """読み取り専用 session から事前採番した候補 session を作成する。"""
@@ -444,8 +449,9 @@ class ClaudeAgentSdkEngine:
             fork_session=True,
         )
         prompt = context.input_text or _DEFAULT_FORK_PROMPT
-        async for event in self._run(context.run, session_id, prompt, options):
-            yield event
+        async with aclosing(self._run(context.run, session_id, prompt, options)) as stream:
+            async for event in stream:
+                yield event
 
     async def interrupt(self, session_ref: AgentSessionRef) -> None:
         """Interrupt を送り、receive loop が Result を drain して close するまで待つ。"""
@@ -517,7 +523,7 @@ class ClaudeAgentSdkEngine:
         session_id: str,
         prompt: str,
         options: ClaudeAgentOptions,
-    ) -> AsyncIterator[AgentEvent]:
+    ) -> AsyncGenerator[AgentEvent, None]:
         """Connect、message drain、disconnect を一つの所有範囲で完結させる。"""
 
         mapper = ClaudeMessageMapper(context, session_id)

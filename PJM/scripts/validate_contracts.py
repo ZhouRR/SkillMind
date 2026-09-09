@@ -21,7 +21,18 @@ EXAMPLE_CONTRACTS = {
     "examples/document-read-response.v1.json": "tools/document.read/v1/response.schema.json",
     "examples/login-context.v1.json": "auth/v1/login-context.schema.json",
     "examples/login-request.v1.json": "auth/v1/login-request.schema.json",
+    "examples/login-rate-limited.v1.json": "errors/problem/v1.schema.json",
+    "examples/login-protection-unavailable.v1.json": "errors/problem/v1.schema.json",
     "examples/auth-session.v1.json": "auth/v1/session.schema.json",
+    "examples/user-account.v1.json": "users/v1/account.schema.json",
+    "examples/user-list.v1.json": "users/v1/list.schema.json",
+    "examples/user-security-event.v1.json": "users/v1/security-event.schema.json",
+    "examples/user-security-events.v1.json": "users/v1/security-events.schema.json",
+    "examples/user-mutation.v1.json": "users/v1/mutation.schema.json",
+    "examples/user-create-request.v1.json": "users/v1/create-request.schema.json",
+    "examples/user-update-request.v1.json": "users/v1/update-request.schema.json",
+    "examples/user-password-request.v1.json": "users/v1/password-request.schema.json",
+    "examples/user-version-request.v1.json": "users/v1/version-request.schema.json",
     "examples/agent-result-event.v1.json": "events/run-event/v1.schema.json",
     "examples/skill-interpret-delta-event.v1.json": (
         "events/skill-interpret-event/v1.schema.json"

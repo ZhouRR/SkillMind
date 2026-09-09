@@ -7,6 +7,7 @@
 - [公開と就緒の判断順](../../docs/design/skill-contract.md#发布与就绪的判断顺序)：導入、Preview、公開、Project 有効化の違い。
 - [解釈・公開の接続](../../docs/design/skill-interpretation.md#从候选到项目任务的接线)：source から Runtime へ渡る入口。
 - [版の更新と回退](../../docs/design/skill-contract.md#11-版本回滚与评价)：精確版、停用履歴、現行の再有効化制限。
+- [JAF の移行・運行受入](../../docs/acceptance/jaf-quality.md#按目的阅读)と[評価データの境界](../../docs/acceptance/jaf-benchmark.md#哪些数据交给谁)：Skill source、実行入力と Gold を分離する。評価用 case/Rubric を package に同梱しない。
 
 この directory に package があることは、配備先への import・公開・Project 有効化を意味しない。examples の fixture も自動 seed ではない。
 

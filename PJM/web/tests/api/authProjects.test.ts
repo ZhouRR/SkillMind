@@ -26,6 +26,7 @@ describe('auth API client', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(loadAuthSession()).resolves.toBeNull()
+    expect(fetchMock.mock.calls[0]?.[1]?.cache).toBe('no-store')
   })
 
   it('uses the one-time login challenge and retains the returned session CSRF', async () => {
@@ -40,6 +41,8 @@ describe('auth API client', () => {
     const loginRequest = fetchMock.mock.calls[1]?.[1]
     expect(new Headers(loginRequest?.headers).get('X-CSRF-Token')).toBe(loginCsrf)
     expect(loginRequest?.credentials).toBe('same-origin')
+    expect(fetchMock.mock.calls[0]?.[1]?.cache).toBe('no-store')
+    expect(loginRequest?.cache).toBe('no-store')
   })
 
   it('sends the in-memory session CSRF when logging out', async () => {
@@ -51,6 +54,65 @@ describe('auth API client', () => {
     const request = fetchMock.mock.calls[0]?.[1]
     expect(new Headers(request?.headers).get('X-CSRF-Token')).toBe(SESSION.csrf_token)
     expect(request?.method).toBe('POST')
+    expect(request?.cache).toBe('no-store')
+
+  })
+
+  it.each([429, 503])('stops before sending a password when the context returns %d', async (status) => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ detail: 'Unavailable' }, status))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(login({ email: 'reader@example.com', password: 'test-only password' }))
+      .rejects.toMatchObject({ status })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBeUndefined()
+  })
+
+  it.each([429, 503])('does not retry a password rejected with %d', async (status) => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ csrf_token: 'c'.repeat(32), expires_in_seconds: 300 }))
+      .mockResolvedValueOnce(jsonResponse({ detail: 'Unavailable' }, status))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(login({ email: 'reader@example.com', password: 'test-only password' }))
+      .rejects.toMatchObject({ status })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not begin an already aborted login', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const fetchMock = vi.fn<typeof fetch>()
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(login({ email: 'reader@example.com', password: 'test-only password' }, controller.signal))
+      .rejects.toMatchObject({ name: 'AbortError' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it.each(['context', 'password'])('rejects a late %s response even if transport ignores abort', async (stage) => {
+    const controller = new AbortController()
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
+      const password = init?.method === 'POST'
+      if (password === (stage === 'password')) controller.abort()
+      return jsonResponse(password ? SESSION : { csrf_token: 'c'.repeat(32), expires_in_seconds: 300 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(login({ email: 'reader@example.com', password: 'test-only password' }, controller.signal))
+      .rejects.toMatchObject({ name: 'AbortError' })
+    expect(fetchMock).toHaveBeenCalledTimes(stage === 'context' ? 1 : 2)
+  })
+
+  it('keeps the server token opaque across multiple session reads', async () => {
+    // 版文字列を Web で導出せず、同じ会話の各ページが server の値をそのまま使う。
+    const session = { ...SESSION, csrf_token: `csrf2.${'s'.repeat(43)}` }
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(session))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const first = await loadAuthSession()
+    fetchMock.mockResolvedValueOnce(jsonResponse(session))
+    const second = await loadAuthSession()
+
+    expect(first?.csrf_token).toBe(session.csrf_token)
+    expect(second?.csrf_token).toBe(first?.csrf_token)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })
 

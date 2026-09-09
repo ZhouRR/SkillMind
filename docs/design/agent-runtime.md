@@ -249,22 +249,11 @@ context 身份必须匹配 claim 的 Run / Attempt / Project / actor，事件序
 
 ### 7.5 取消、超时与失去执行权
 
-同时观察到多个条件时，先确认当前执行权与持久取消意图，再分类普通准备失败；不能用兜底异常把旧 Worker 的失效 lease 转成一次新的终态写入。
+取消请求、Run 终态、client 清理与用量确认是不同事实。完整规则已集中到[执行监督与停止](run-supervision.md)，本节保留旧引用入口；本页继续负责整体 Run、Session 和事件协议。
 
-| 发生的事情 | 当前处理与不能越过的边界 |
-| --- | --- |
-| 准备中观察到已持久化的用户取消 | 停止 builder 子任务；仍有有效 lease 时按正常流程写 `CANCELLED`，不冻结新 Brief 或启动模型 |
-| ContextBuilder 的准备 deadline 到期 | 在 deadline 之外按 `preparation_timeout` 收尾；已提交的回执不会因此自动回滚 |
-| Provider 自己报 `TimeoutError` 等准备异常 | 记 `context_build_failed`，不冒充整段准备 deadline 到期；实际取消/lease 失效另行处理 |
-| heartbeat 或提交/启动校验发现失效 lease | 旧 Worker 停止执行并退出，不再以自己的身份写 FAILED/CANCELLED；由合法恢复流程决定后续 Attempt |
-| Worker job 被取消或进程关停 | 不把进程级取消伪造成用户取消；是否续行由持久状态与 lease 恢复判断 |
-| 模型事件等待超过 deadline | 按 `wall_timeout` 收尾；该等待计时器不包住终态事务 |
+先用[点击取消的例子](run-supervision.md#一个例子点击取消之后)理解状态，再看[阶段与首事件前路径](run-supervision.md#不同阶段如何收束)、[提交的判断点](run-supervision.md#提交时谁决定最终状态)、[收尾与晚到信息](run-supervision.md#收尾终态与晚到信息)。准备/模型/job 的秒数只在[预算计时器](run-budgets.md#现有计时器的覆盖范围)维护。
 
-线程中的文件 I/O 可能在取消后才返回。晚到结果不能重新推动已取消的 coroutine 提交 READY、冻结 Brief 或调用模型；遗留世代按[中断协议](resource-snapshots.md#准备中断与再次使用)保留，不能删掉现场后重建。终态化也必须满足当前 lease，不能为了“补一个失败结果”绕过 fencing。
-
-启动前的短事务不是数据库与外部模型之间的原子启动。若取消在最后一次校验之后发生，仍要靠运行期监督收束。当前取消监视器需要取得 `session_ref` 才调用 engine interrupt；模型已开始但尚未产生首个事件时，不能承诺立即中断。此窗口、真实进程停止和异常收尾应单独故障注入，不以准备取消测试代替。
-
-Executor 会尝试关闭提前结束的 engine stream，但关闭请求或 coroutine 结束不证明外部进程已退出，也不证明收费已经停止。正常执行路径的 heartbeat、异常组退出后的兜底终态化与 stream 清理有不同寿命；应分别验证关停、取消与接管，不能笼统写成“所有收尾始终续租”。Run 用量核对仍依赖[预算恢复设计](run-budgets.md#4-结束取消与故障恢复)。
+首事件前取消、无意图 interrupted 的失败分类、终态复查，以及等待/普通事件写入前的取消检查已有工作副本接线与局部回归。[等待拒绝与终态保存](run-supervision.md#等待提交仍是独立边界)使用两个事务，第二次仍需验证 lease；真实锁竞争、提交不明与进程停止继续分别验收。不得因此放宽 lease fencing、终态最后事件和未知用量占用规则。
 
 ## 8. 用户交互协议
 
@@ -330,6 +319,8 @@ Agent 不以任意自由文本“卡住”Run，而是产生结构化 UserIntera
 
 自由文本报告可以作为 Artifact/Markdown 交付，但关键 Evidence、限制和 Proposal 必须进入通用包络。原始 Result 不被人工修改，反馈追加为 Evaluation。
 
+工作副本由 [ResultValidator.validate_context](../../PJM/backend/src/projectmind/agent/result_validation.py)解析冻结输出要求，主 Executor 与子收集器共用校验入口。主执行成功、结构错误和 Review/fork 的测试已使用真实 validator；最新范围见[计划](../planning/roadmap.md#13-当前执行状态)，旧失败记录不作为当前状态。共用安全校验不意味着子分析应产出完整的主任务结果；子指令/Schema 的派生与最终汇总责任见[子分析设计](subagents.md#子任务指令与结果的边界)。
+
 ## 11. 事件、状态与可靠性
 
 当前已定义的事件组包括（完整枚举见 [RunEvent](../../PJM/contracts/events/run-event/v1.schema.json)）：
@@ -351,6 +342,8 @@ Run 状态使用 `WAITING_FOR_INPUT` 和 `WAITING_FOR_APPROVAL` 表达非终态�
 - Outbox 与状态变更同事务写入，Queue 消费以领取状态抑制重复；Tool 审计重放与外部 Effect 幂等各有独立键和协议，不因此承诺模型执行或外部副作用“全局精确一次”。
 - 终态 RUN_SNAPSHOT 是最后一个持久化事件；SSE 根据它结束。
 - 如果 transcript/workspace 不完整，不无声从头执行；按策略 replace Session 或 FAILED，并显示风险。
+
+运维停写不由 Run 状态机或 dispatch 设置自动完成。当前开关只限制 Run/Effect 的新 Outbox 配送，job 与 cron 的具体边界见[发布手册](../operations/deployment.md#一个例子关闭-dispatch-后仍有工作)。恢复中不能仅关闭 dispatch 就启动 Worker，也不把 Worker 停止当作远端请求已停止的证据。
 
 ## 12. Claude Agent SDK 实现要求
 
@@ -386,7 +379,7 @@ Run 状态使用 `WAITING_FOR_INPUT` 和 `WAITING_FOR_APPROVAL` 表达非终态�
 
 实现、部署基线与专项验收的状态统一见[计划 §13](../planning/roadmap.md#13-当前执行状态)。目前 Runtime 包括完整 Brief、交互式 Run、顺序主会话、只读子分析、workspace read/search/write 与受控外部效果。
 
-document 的显式选择、创建时冻结和公开清单，以及准备监督、独立 timeout、Brief/启动校验已有工作副本代码；这些入口不重复登记为整项待开发。物化消费者联调、真实事务/历史续行、首事件前取消与实际进程清理仍须验收；主子 Session 的 Run 共享预算仍未实现。已有模块或局部回归不证明整条执行链可用，精确缺口见[计划](../planning/roadmap.md#13-当前执行状态)。来源脚本的登记/checksum 校验也不等于已有通用脚本执行器。
+document 的显式选择、创建时冻结和公开清单，以及准备监督、独立 timeout、Brief/启动校验、首事件前取消已有工作副本代码；这些入口不重复登记为整项待开发。完整物化链路、真实事务/历史续行和实际进程清理仍须验收；Run 预算已有[内部账本](run-budgets.md#持久账本的当前载体)，但创建、主子执行和核对方尚未接入。已有模块或局部回归不证明整条执行链可用，精确缺口见[计划](../planning/roadmap.md#13-当前执行状态)，停止专项见[验收矩阵](run-supervision.md#验收矩阵)。来源脚本的登记/checksum 校验也不等于已有通用脚本执行器。
 
 ## 15. 官方参考
 

@@ -207,11 +207,12 @@ async def test_preparation_timeout_does_not_interrupt_terminal_transaction(tmp_p
         if finalizing.is_set():
             renewed.set()
 
-    async def finalize(*args: object, **kwargs: object) -> None:
+    async def finalize(*args: object, target: RunStatus, **kwargs: object) -> RunStatus:
         """新しい heartbeat を受けるまで終態 transaction の応答を保留する。"""
 
         finalizing.set()
         await renewed.wait()
+        return target
 
     service.heartbeat_run_attempt.side_effect = heartbeat
     service.finalize_execution.side_effect = finalize

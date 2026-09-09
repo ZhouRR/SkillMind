@@ -139,6 +139,8 @@ document 的显式“全集”在每个新 Run 创建时固定成员；单份/�
 
 ### 停机恢复的实际行为
 
+这里的停机是调度执行者实际停止，不是设置 `PROJECTMIND_WORKER_DISPATCH_ENABLED=false`。当前 Schedule tick 不检查该开关，仍可能创建 Run 和更新配置摘要；停写/恢复须按[Worker 入口边界](../operations/deployment.md#一个例子关闭-dispatch-后仍有工作)确认所有执行者。
+
 例如每小时一次的规则，保存的 next_run_at 为 03:00，Worker 到 09:30 才恢复：当前会认领 03:00 并尝试创建一次 Run，把 04:00–09:00 六次记为 missed，下一候选设为 10:00。ONCE 也没有最大迟到拒绝逻辑。因此“停止中不追赶”的约束不能被理解为代码已保证“任何过期时刻都不执行”。
 
 [_count_missed / plan_occurrence](../../PJM/backend/src/projectmind/schedules/service.py)单次最多计 1000 个错过时刻，长期停机后的数值可能是截顶值，不是精确漏发账本。若产品要求过期全部跳过，应先确定 ONCE/CRON 的迟到容忍与截止规则，再同步实现、预览、UI 和验收；不能在运维恢复中临时补跑或临时改写 occurrence。
@@ -202,7 +204,7 @@ max_runs 是该 Schedule 的累计创建额度，不是触发机会或业务成�
 
 先同步领域/持久记录、普通 Run 创建接线、原子编辑/认领/结算和故障测试，再接入 API 投影、分页管理、编辑表单与三语显示。数据库迁移存在不等于恢复器已经可启用。
 
-已有 Schedule 仅保有当前配置和摘要，不能从 last_* 或当前 input 伪造全部历史 occurrence、旧配置或精确累计数。迁移保留原 Run、键与快照；可验证的关联和无法证明的历史分别标识，不为补账自动创建 Run。旧 tick 不写新在途记录，不能与要求新协议的 Worker 混跑；上线按[停写与恢复审查](../operations/runbook.md#恢复前的停止条件)隔离旧执行者，另行验证混合版本拒绝和回退的数据保留。
+已有 Schedule 仅保有当前配置和摘要，不能从 last_* 或当前 input 伪造全部历史 occurrence、旧配置或精确累计数。迁移保留原 Run、键与快照；可验证的关联和无法证明的历史分别标识，不为补账自动创建 Run。旧 tick 不写新在途记录，不能与要求新协议的 Worker 混跑；上线按[停写与恢复审查](../operations/backup-recovery.md#恢复前的停止条件)隔离旧执行者，另行验证混合版本拒绝和回退的数据保留。
 
 仍不自动加入全局 task mutex、条件监控、跨 Project 调度或任意补跑。
 

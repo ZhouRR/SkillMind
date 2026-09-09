@@ -2,6 +2,10 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 
 import { login, type AuthSessionRecord } from '../api'
 import { useMessages } from '../i18n'
+import { loginFeedback } from '../lib/loginFeedback'
+
+/** 初期表示の案内と request 失敗を分け、言語切替時には失敗を再翻訳する。 */
+type LoginError = { message: string } | { reason: unknown }
 
 /** Opaque session を開始し、password を component 外へ保持しない login 画面。 */
 export function LoginPage({ onAuthenticated, initialError }: {
@@ -10,19 +14,23 @@ export function LoginPage({ onAuthenticated, initialError }: {
 }) {
   const messages = useMessages()
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(initialError ?? null)
-  const controllers = useRef<Set<AbortController>>(new Set())
+  const [error, setError] = useState<LoginError | null>(initialError ? { message: initialError } : null)
+  const activeRequest = useRef<AbortController | null>(null)
+  const errorMessage = error === null ? null
+    : 'reason' in error ? loginFeedback(error.reason, messages.login) : error.message
 
   useEffect(() => () => {
-    for (const controller of controllers.current) controller.abort()
-    controllers.current.clear()
+    activeRequest.current?.abort()
+    activeRequest.current = null
   }, [])
 
+  /** 同じ描画内の連続 submit も拒否し、離頁後の遅い結果を UI へ反映しない。 */
   const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault()
+    if (activeRequest.current !== null) return
     const form = new FormData(event.currentTarget)
     const controller = new AbortController()
-    controllers.current.add(controller)
+    activeRequest.current = controller
     setBusy(true)
     setError(null)
     try {
@@ -30,14 +38,16 @@ export function LoginPage({ onAuthenticated, initialError }: {
         email: String(form.get('email') ?? ''),
         password: String(form.get('password') ?? ''),
       }, controller.signal)
-      onAuthenticated(session)
+      if (!controller.signal.aborted && activeRequest.current === controller) onAuthenticated(session)
     } catch (reason) {
       if (!controller.signal.aborted) {
-        setError(reason instanceof Error ? reason.message : messages.login.failed)
+        setError({ reason })
       }
     } finally {
-      controllers.current.delete(controller)
-      if (!controller.signal.aborted) setBusy(false)
+      if (activeRequest.current === controller) {
+        activeRequest.current = null
+        if (!controller.signal.aborted) setBusy(false)
+      }
     }
   }
 
@@ -49,7 +59,7 @@ export function LoginPage({ onAuthenticated, initialError }: {
           <span><strong>ProjectMind</strong><small>{messages.nav.brandTagline}</small></span>
         </div>
         <div><h1>{messages.login.title}</h1><p>{messages.login.subtitle}</p></div>
-        <form onSubmit={(event) => void submit(event)}>
+        <form aria-busy={busy} onSubmit={(event) => void submit(event)}>
           <label>
             {messages.login.email}
             <input autoComplete="username" autoFocus name="email" required type="email" />
@@ -58,7 +68,7 @@ export function LoginPage({ onAuthenticated, initialError }: {
             {messages.login.password}
             <input autoComplete="current-password" name="password" required type="password" />
           </label>
-          {error && <p className="error" role="alert">{error}</p>}
+          {errorMessage && <p className="error" role="alert">{errorMessage}</p>}
           <button className="primaryButton" disabled={busy} type="submit">
             {busy ? messages.login.submitting : messages.login.submit}
           </button>

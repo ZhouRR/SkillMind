@@ -115,8 +115,8 @@ class PostgresSubagentSessionRecorder:
                     cli_version=parent.cli_version,
                     model=parent.model,
                     status=_BRANCH_SESSION_STATUS.get(draft.outcome, "FAILED"),
-                    # 子の usage は主 Session の予算から切り出した分であり、Run 合計へ二重計上
-                    # しない (D4)。branch key だけを残して照合できるようにする。
+                    # branch の対応だけを保持する。子の用量が主に含まれる保証はなく、空 cost
+                    # から零消費や Run 共通残額を導出してはならない (予算設計 R02)。
                     usage_json={"branch_key": draft.branch_key},
                     cost_json={},
                     created_at=now,

@@ -326,7 +326,7 @@ def test_message_mapper_does_not_promote_markdown_result(tmp_path: Path) -> None
         # fence の中身が JSON でない場合は昇格しない。
         "```python\nprint('hello')\n```",
         # 前後に本文が付く fence は「単一 fence が全体を包む」条件を満たさない。
-        "結果は以下です。\n```json\n{\"issue\": {}}\n```",
+        '結果は以下です。\n```json\n{"issue": {}}\n```',
     ):
         message = _result(session_id)
         message.structured_output = None
@@ -440,6 +440,31 @@ async def test_missing_result_becomes_sanitized_engine_failure(tmp_path: Path) -
 
     assert events[-1].event_type is AgentEventType.ENGINE_FAILED
     assert events[-1].payload == {"reason": "result_message_missing"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["execute", "resume", "fork"])
+async def test_closing_outer_stream_awaits_client_disconnect(tmp_path: Path, mode: str) -> None:
+    """最初の event で消費を止めても、外側 aclose の完了前に内部 client を解放する。"""
+
+    context = _run_context(tmp_path)
+    parent = AgentSessionRef(context.run_id, uuid4(), str(uuid4()))
+    factory = ClientFactory(_successful_messages)
+    engine = _engine(factory)
+    if mode == "execute":
+        stream = engine.execute(context)
+    elif mode == "resume":
+        stream = engine.resume(ResumeContext(run=context, session=parent))
+    else:
+        stream = engine.fork(ForkContext(run=context, parent_session=parent))
+    event = await anext(stream)
+    await stream.aclose()
+
+    assert factory.clients[0].disconnected
+    with pytest.raises(LookupError, match="not active"):
+        await engine.interrupt(
+            AgentSessionRef(context.run_id, context.run_attempt_id, event.agent_session_id)
+        )
 
 
 async def _collect(iterator: AsyncIterator[Any]) -> list[Any]:

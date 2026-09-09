@@ -36,6 +36,7 @@ from projectmind.agent.materialization_storage import (
 )
 from projectmind.agent.materialization_storage import (
     create_generation,
+    input_generation_relative,
     relative_parts,
     seal_generation,
     verify_tree,
@@ -198,8 +199,22 @@ class WorkspaceMaterializer:
             )
         ):
             raise MaterializationError("Input receipt does not match the frozen Run")
-        relative = f".projectmind-inputs/{receipt.snapshot_id}"
-        candidate = replace(workspace, input_dir=workspace.root / relative, input_files=None)
+        relative = input_generation_relative(receipt.snapshot_id)
+        if created:
+            if (
+                receipt.status is not InputSnapshotStatus.PREPARING
+                or receipt.prepared_by_attempt_id != claimed_run.run_attempt_id
+                or receipt.files
+            ):
+                raise MaterializationError(
+                    "Input preparation receipt cannot authorize a new generation"
+                )
+            await asyncio.to_thread(create_generation, workspace.root, receipt.snapshot_id)
+        try:
+            candidate = replace(workspace, input_dir=workspace.root / relative, input_files=None)
+        except (ValueError, OSError, RuntimeError) as error:
+            # RunWorkspace の境界検査も再訪時の link 置換を検出する。準備失敗として揃える。
+            raise MaterializationError("Input generation path is not safe") from error
         if not created:
             if receipt.status is not InputSnapshotStatus.READY:
                 raise MaterializationError(
@@ -212,15 +227,6 @@ class WorkspaceMaterializer:
                 self._reuse, verified, project_id, run_id, snapshots, bindings, repository_metadata
             )
             return PreparedInput(verified, resources)
-        if (
-            receipt.status is not InputSnapshotStatus.PREPARING
-            or receipt.prepared_by_attempt_id != claimed_run.run_attempt_id
-            or receipt.files
-        ):
-            raise MaterializationError(
-                "Input preparation receipt cannot authorize a new generation"
-            )
-        await asyncio.to_thread(create_generation, workspace.root, relative)
         materialized: list[MaterializedResource] = []
         files: list[InputFileSeal] = []
         if snapshots:

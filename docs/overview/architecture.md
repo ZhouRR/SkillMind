@@ -26,7 +26,9 @@
                                       Evidence / Artifact
 ```
 
-Backend 是模块化单体。API 与 Worker 共享一个 `projectmind` package，分进程运行；业务层依赖 AgentEngine 抽象。PostgreSQL 保存业务和审计事实，Redis 负责队列、短期锁与通知，object storage 保存 blob，Run workspace 保存执行文件。恢复必须覆盖数据库引用到的 blob 和需要恢复的 workspace。
+Backend 是模块化单体。API 与 Worker 共享一个 `projectmind` package，分进程运行；业务层依赖 AgentEngine 抽象。PostgreSQL 保存业务和审计事实，Redis 负责队列、短期锁、通知及登录 challenge/配额，object storage 保存 blob，Run workspace 保存执行文件。恢复必须覆盖数据库引用到的 blob 和需要恢复的 workspace。
+
+[登录入口防护](../design/login-protection.md)在进入密码验证前使用 Redis 短期状态；登录后的 AuthSession 与撤销事实仍在 PostgreSQL。Redis 配额丢失不代表会话撤销，防护不可用也不等于所有已登录请求都被拒绝。上图是主要执行链路，不把这些认证阶段画成一个跨存储事务。
 
 ## 三条关键链路
 
@@ -55,7 +57,7 @@ Backend 是模块化单体。API 与 Worker 共享一个 `projectmind` package�
 | 持久化 | [db](../../PJM/backend/src/projectmind/db/)、各模块 repository | 事务、锁、不可变快照和迁移 |
 | Agent 与 Provider | [agent](../../PJM/backend/src/projectmind/agent/)、[worker](../../PJM/backend/src/projectmind/worker/) | SDK 适配、工具边界、执行和恢复 |
 | Web | [api](../../PJM/web/src/api/)、[lib](../../PJM/web/src/lib/)、[pages](../../PJM/web/src/pages/) | 数据校验、纯投影、页面和交互 |
-| 契约 | [contracts](../../PJM/contracts/README.md) | 跨组件数据形状、example、OpenAPI |
+| 契约 | [contracts](../../PJM/contracts/README.md) | 跨组件数据形状与 HTTP 语义、example、OpenAPI |
 
 ## 部署边界
 

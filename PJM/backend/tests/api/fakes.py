@@ -131,6 +131,15 @@ from projectmind.skills.resource_binding import (
     TaskReadinessLevel,
 )
 from projectmind.storage import UploadRejectedError
+from projectmind.users.domain import (
+    StoredUser,
+    StoredUserSecurityEvent,
+    UserAccess,
+    UserMutationResult,
+    UserRole,
+    UserSecurityAction,
+    UserStatus,
+)
 
 
 class FakeAuthService:
@@ -145,6 +154,8 @@ class FakeAuthService:
         self.session_token = "session-token"
         self.csrf_token = "session-csrf-token"
         self.logged_out = False
+        self.login_sources: list[str] = []
+        self.password_change_actors: list[UUID] = []
         self.actor = AuthenticatedActor(
             user_id=uuid4(),
             organization_id=uuid4(),
@@ -154,12 +165,23 @@ class FakeAuthService:
         )
         self.expires_at = datetime(2026, 7, 4, 12, 0, tzinfo=UTC)
 
-    async def issue_login_csrf(self) -> str:
+    async def begin_login(self, client_address: str) -> object:
+        """Body 検証前の来源確認を記録する。Redis の実 rate 判断は模倣しない。"""
+
+        self.login_sources.append(client_address)
+        return object()
+
+    async def issue_login_csrf(self, admission: object) -> str:
         """固定 login challenge を返す。"""
 
         return self.login_csrf
 
-    async def login(self, **kwargs: str) -> LoginResult:
+    async def admit_password_change(self, *, actor: AuthenticatedActor, admission: object) -> None:
+        """改密が現在 actor で配額へ接続することを記録し、実 Redis と区別する。"""
+
+        self.password_change_actors.append(actor.user_id)
+
+    async def login(self, **kwargs: object) -> LoginResult:
         """受信 CSRF と credential を検証し、固定 session を返す。"""
 
         assert kwargs["login_csrf_header"] == self.login_csrf
@@ -213,6 +235,101 @@ class FakeAuthService:
         if csrf_token != self.csrf_token:
             raise CsrfRejectedError("hidden")
         return self.actor
+
+
+class FakeUserService:
+    """API の授権・明示投影だけを検査する。DB transaction を模倣しない。"""
+
+    def __init__(self, actor: AuthenticatedActor) -> None:
+        """本番ユーザーを使わず、固定の公開可能 DTO を用意する。"""
+
+        now = datetime(2026, 9, 9, 12, tzinfo=UTC)
+        self.account = StoredUser(
+            actor.user_id,
+            actor.email,
+            actor.display_name,
+            UserRole(actor.system_role),
+            UserStatus.ACTIVE,
+            1,
+            now,
+            now,
+        )
+        self.calls: list[tuple[str, dict[str, object]]] = []
+        self.failure: Exception | None = None
+        self.revoked = False
+
+    def _record(self, operation: str, kwargs: dict[str, object]) -> UserAccess:
+        """原 credential と server 相関 ID を use case へ渡したことを確認する。"""
+
+        self.calls.append((operation, kwargs))
+        if self.failure:
+            raise self.failure
+        access = kwargs["access"]
+        assert isinstance(access, UserAccess)
+        return access
+
+    async def get_account(self, **kwargs: object) -> StoredUser:
+        """本人 account の固定投影を返す。"""
+
+        self._record("account", kwargs)
+        return self.account
+
+    async def list_users(self, **kwargs: object) -> tuple[tuple[StoredUser, ...], int]:
+        """先頭 page だけではない総件数を返す。"""
+
+        self._record("list", kwargs)
+        return (self.account,), 151
+
+    async def list_security_events(
+        self, **kwargs: object
+    ) -> tuple[tuple[StoredUserSecurityEvent, ...], int]:
+        """架空の操作事実を、request ID とともに公開する。"""
+
+        access = self._record("events", kwargs)
+        return (
+            StoredUserSecurityEvent(
+                uuid4(),
+                cast(UUID, kwargs["user_id"]),
+                access.actor.user_id,
+                UserSecurityAction.SESSIONS_REVOKED,
+                2,
+                UserRole.USER,
+                UserStatus.ACTIVE,
+                UserRole.USER,
+                UserStatus.ACTIVE,
+                1,
+                access.request_id,
+                self.account.created_at,
+            ),
+        ), 1
+
+    def _result(self, operation: str, kwargs: dict[str, object]) -> UserMutationResult:
+        """HTTP は原入力を転送するだけであることを記録する。"""
+
+        self._record(operation, kwargs)
+        return UserMutationResult(
+            replace(self.account, row_version=2), 1 if self.revoked else 0, self.revoked
+        )
+
+    async def create_user(self, **kwargs: object) -> UserMutationResult:
+        """新規作成の use case 呼出しを記録する。"""
+
+        return self._result("create", kwargs)
+
+    async def update_user(self, **kwargs: object) -> UserMutationResult:
+        """版付き更新の use case 呼出しを記録する。"""
+
+        return self._result("update", kwargs)
+
+    async def revoke_sessions(self, **kwargs: object) -> UserMutationResult:
+        """失効要求の対象 ID と版を記録する。"""
+
+        return self._result("revoke", kwargs)
+
+    async def change_password(self, **kwargs: object) -> UserMutationResult:
+        """改密の use case 呼出しを記録する。"""
+
+        return self._result("password", kwargs)
 
 
 class FakeProjectService:

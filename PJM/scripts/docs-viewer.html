@@ -66,6 +66,8 @@
     table { border-collapse:collapse; width:100%; font-size:14px; line-height:1.7; }
     th { text-align:left; background:#eef4f8; font-weight:650; color:#284861; }
     th,td { padding:12px 14px; border-bottom:1px solid var(--line); vertical-align:top; min-width:140px; }
+    /* 数値比較の右寄せ列は本文列の幅を予約せず、窄幅でも行全体を比較できるようにする。 */
+    th[style*="text-align:right"],td[style*="text-align:right"] { min-width:0; white-space:nowrap; }
     td:first-child code { overflow-wrap:normal; }
     tr:last-child td { border-bottom:0; }
     img { max-width:100%; }

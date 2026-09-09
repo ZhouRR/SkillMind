@@ -1,0 +1,6 @@
+{
+  "display_name": "Example reader",
+  "system_role": "USER",
+  "status": "ACTIVE",
+  "expected_row_version": 1
+}

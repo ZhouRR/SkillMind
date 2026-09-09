@@ -99,6 +99,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
         self._validate_agent_event(event, claimed)
         if event.event_type is not AgentEventType.CHANGE_PROPOSED:
             raise ValueError("Proposal suspension requires CHANGE_PROPOSED")
+        await self._reject_cancelled_execution(run.id)
         next_sequence = await self._next_sequence(run.id)
         if event.sequence < next_sequence:
             raise ConcurrentRunUpdateError("ChangeProposal event sequence is not monotonic")

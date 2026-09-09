@@ -1,0 +1,14 @@
+{
+  "event_id": "00000000-0000-4000-8000-000000000202",
+  "user_id": "00000000-0000-4000-8000-000000000201",
+  "actor_id": "00000000-0000-4000-8000-000000000203",
+  "action": "UPDATED",
+  "row_version": 2,
+  "previous_role": "USER",
+  "previous_status": "DISABLED",
+  "system_role": "USER",
+  "status": "ACTIVE",
+  "revoked_sessions": 0,
+  "request_id": "00000000-0000-4000-8000-000000000204",
+  "created_at": "2026-09-09T12:10:00Z"
+}

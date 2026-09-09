@@ -23,11 +23,13 @@ from projectmind.db.models import (
     RunSegment,
 )
 from projectmind.runs.domain import (
+    AgentSessionKind,
     AgentSessionMetadata,
     ClaimedRun,
     CreatedRun,
     LeaseValidationError,
     RunAttemptStatus,
+    RunCancellationRequestedError,
     RunNotFoundError,
     RunStatus,
     lease_token_hash,
@@ -57,9 +59,7 @@ class _RunRepositoryBase:
         )
         return event_id is not None
 
-    async def _validate_checkpoint_refs(
-        self, run_id: UUID, checkpoint: dict[str, Any]
-    ) -> None:
+    async def _validate_checkpoint_refs(self, run_id: UUID, checkpoint: dict[str, Any]) -> None:
         """Checkpoint の参照が現在 Run の監査資産だけを指すことを保証する。"""
 
         evidence_refs = checkpoint.get("evidence_refs", [])
@@ -85,6 +85,16 @@ class _RunRepositoryBase:
         # Artifact の正本は未導入なので所有権を検証不能な参照は引き続き拒否する。
         if checkpoint.get("artifact_refs"):
             raise ValueError("Interaction checkpoint references an unavailable Artifact")
+
+    async def _reject_cancelled_execution(self, run_id: UUID) -> None:
+        """Run lock/lease/identity 検証後、取消済み実行の追加書込を採番より前に拒否する。
+
+        呼出し側の transaction は rollback し、Worker は別の終態 transaction で
+        lease と持久意図を再検証する。ここで待機や Effect を作成せず、外部 I/O もしない。
+        """
+
+        if await self.is_cancellation_requested(run_id):
+            raise RunCancellationRequestedError("Run cancellation was requested")
 
     async def _lock_run_row(self, run_id: UUID, *, project_id: UUID | None = None) -> Run | None:
         """Aggregate lock 順の先頭として Run 行を FOR UPDATE で取得する。
@@ -121,13 +131,9 @@ class _RunRepositoryBase:
             raise RunNotFoundError(f"Run not found: {claimed.run_id}")
         segment = None
         if claimed.run_segment_id is not None:
-            segment = await self._lock_segment_row(
-                claimed.run_segment_id, run_id=claimed.run_id
-            )
+            segment = await self._lock_segment_row(claimed.run_segment_id, run_id=claimed.run_id)
             if segment is None:
-                raise LeaseValidationError(
-                    f"RunSegment not found: {claimed.run_segment_id}"
-                )
+                raise LeaseValidationError(f"RunSegment not found: {claimed.run_segment_id}")
         attempt_statement = (
             select(RunAttempt)
             .where(
@@ -168,6 +174,20 @@ class _RunRepositoryBase:
         if event.run_id != claimed.run_id or event.run_attempt_id != claimed.run_attempt_id:
             raise ValueError("Agent event belongs to a different RunAttempt")
 
+    async def _find_primary_agent_session(self, claimed: ClaimedRun) -> AgentSession | None:
+        """同じ Attempt の子 Session を主実行の終態/待機更新へ混入させない。"""
+
+        statement = (
+            select(AgentSession)
+            .where(
+                AgentSession.run_id == claimed.run_id,
+                AgentSession.run_attempt_id == claimed.run_attempt_id,
+                AgentSession.session_kind == AgentSessionKind.PRIMARY.value,
+            )
+            .with_for_update()
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
     async def _ensure_agent_session(
         self,
         claimed: ClaimedRun,
@@ -176,14 +196,11 @@ class _RunRepositoryBase:
         metadata: AgentSessionMetadata,
         now: datetime,
     ) -> AgentSession:
-        """Attempt ごとに一つの AgentSession を作成または同一性検証する。"""
+        """Attempt ごとに一つの PRIMARY を作成または同一性検証する。"""
 
-        statement = (
-            select(AgentSession)
-            .where(AgentSession.run_attempt_id == claimed.run_attempt_id)
-            .with_for_update()
-        )
-        existing = (await self._session.scalars(statement)).one_or_none()
+        if metadata.session_kind is not AgentSessionKind.PRIMARY:
+            raise ValueError("Only PRIMARY sessions can write Run execution events")
+        existing = await self._find_primary_agent_session(claimed)
         if existing is not None:
             if existing.sdk_session_id != sdk_session_id:
                 raise ValueError("RunAttempt Agent session ID changed")

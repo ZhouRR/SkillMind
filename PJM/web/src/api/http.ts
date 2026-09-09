@@ -8,6 +8,7 @@ export class ApiProblemError extends Error {
     message: string,
     readonly status: number,
     readonly code?: string,
+    readonly retryAfterSeconds?: number,
   ) {
     super(message)
     this.name = 'ApiProblemError'
@@ -50,22 +51,30 @@ export async function requestApiText(url: string, init: RequestInit = {}): Promi
 
 /** 失敗 response の body を一度だけ解析し、常に型付き ApiProblemError を送出する。 */
 async function throwProblemFromBody(response: Response): Promise<never> {
+  const retryAfterSeconds = parseRetryAfterSeconds(response.headers.get('Retry-After'))
   let value: unknown
   try {
     value = (await response.json()) as unknown
   } catch {
-    throw new ApiProblemError(`API returned ${response.status}`, response.status)
+    throw new ApiProblemError(`API returned ${response.status}`, response.status, undefined, retryAfterSeconds)
   }
-  throw problemFromResponse(response.status, value)
+  throw problemFromResponse(response.status, value, retryAfterSeconds)
+}
+
+/** 秒形式だけを損失なく読み、日時・不正値を推測した待機時間へ置き換えない。 */
+function parseRetryAfterSeconds(value: string | null): number | undefined {
+  if (value === null || !/^\d+$/.test(value)) return undefined
+  const seconds = Number(value)
+  return Number.isSafeInteger(seconds) ? seconds : undefined
 }
 
 /** Unknown Problem body から存在情報を追加しない client error を生成する。 */
-function problemFromResponse(status: number, value: unknown): ApiProblemError {
+function problemFromResponse(status: number, value: unknown, retryAfterSeconds?: number): ApiProblemError {
   const detail = isRecord(value) && typeof value.detail === 'string'
     ? value.detail
     : `API returned ${status}`
   const code = isRecord(value) && typeof value.code === 'string' ? value.code : undefined
-  return new ApiProblemError(detail, status, code)
+  return new ApiProblemError(detail, status, code, retryAfterSeconds)
 }
 
 /** JSON object かどうかを prototype に依存せず判定する。 */

@@ -12,9 +12,12 @@ from arq.connections import RedisSettings, create_pool
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import Response
+from fastapi.routing import APIRoute
+from starlette._utils import get_route_path
 
 from projectmind import __version__
 from projectmind.api.health import router as health_router
+from projectmind.api.login_protection import login_protection_problem
 from projectmind.api.problems import (
     ProblemException,
     http_exception_handler,
@@ -22,6 +25,7 @@ from projectmind.api.problems import (
     validation_exception_handler,
 )
 from projectmind.api.routes import router as api_router
+from projectmind.auth.login_protection import LoginProtectionUnavailableError, LoginRateLimitedError
 from projectmind.auth.service import AuthService
 from projectmind.compositions import CompositionService
 from projectmind.core.logging import configure_logging, log_event
@@ -55,6 +59,7 @@ from projectmind.schedules import ScheduleService
 from projectmind.skills import SkillService
 from projectmind.skills.wiring import build_skill_interpreter
 from projectmind.storage.factory import create_document_upload_limits, create_file_storage
+from projectmind.users.service import UserService
 
 logger = logging.getLogger(__name__)
 
@@ -77,8 +82,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         session_absolute_hours=settings.auth_session_absolute_hours,
         admin_session_absolute_hours=settings.auth_admin_session_absolute_hours,
         login_attempts_per_minute=settings.auth_login_attempts_per_minute,
+        login_account_attempts_per_minute=settings.auth_login_account_attempts_per_minute,
+        login_source_requests_per_minute=settings.auth_login_source_requests_per_minute,
+        login_protection_timeout_seconds=settings.auth_login_protection_timeout_seconds,
     )
     app.state.project_service = ProjectService(app.state.database_session_factory)
+    app.state.user_service = UserService(app.state.database_session_factory)
     # MANAGED SecretReference 封入用の KEK cipher。未設定なら MANAGED 作成は fail closed。
     app.state.integration_service = IntegrationService(
         app.state.database_session_factory,
@@ -156,13 +165,25 @@ def create_app() -> FastAPI:
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
-        """Request ID を引き継ぐか生成し、response と監査処理で共有する。"""
+        """信頼しない header を監査 identity にせず、Server の UUID を全応答で共有する。"""
 
-        request_id = request.headers.get("X-Request-ID") or str(uuid4())
+        request_id = str(uuid4())
         request.state.request_id = request_id
         started = monotonic()
+        is_login_entry = get_route_path(request.scope).rstrip("/") in login_entry_paths
+        response: Response
         try:
-            response = await call_next(request)
+            try:
+                if is_login_entry:
+                    # Body/Origin の検証前に数える。任意の forwarded header は読まない。
+                    service: AuthService = request.app.state.auth_service
+                    request.state.login_admission = await service.begin_login(
+                        request.client.host if request.client is not None else "unknown",
+                    )
+            except (LoginRateLimitedError, LoginProtectionUnavailableError) as error:
+                response = await problem_exception_handler(request, login_protection_problem(error))
+            else:
+                response = await call_next(request)
         except Exception:
             log_event(
                 logger,
@@ -177,6 +198,10 @@ def create_app() -> FastAPI:
             )
             raise
         response.headers["X-Request-ID"] = request_id
+        matched_route = request.scope.get("route")
+        if is_login_entry or (isinstance(matched_route, APIRoute) and "auth" in matched_route.tags):
+            # 成功だけでなく、validation/認証拒否も例外処理後の同じ境界で cache を禁じる。
+            response.headers["Cache-Control"] = "no-store"
         log_event(
             logger,
             logging.INFO,
@@ -195,6 +220,11 @@ def create_app() -> FastAPI:
     app.add_exception_handler(ProblemException, problem_exception_handler)
     app.include_router(health_router)
     app.include_router(api_router)
+    # include_router の内部表現に依存せず、公開の逆引きから内部 path を取得する。
+    # 名前が失われたら起動を失敗させ、保護対象が空のまま受付を始めない。
+    login_entry_paths = frozenset(
+        str(app.url_path_for(name)) for name in ("login", "login_context", "change_own_password")
+    )
     return app
 
 

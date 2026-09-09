@@ -90,6 +90,11 @@ export interface UiMessages {
     submit: string
     submitting: string
     failed: string
+    rateLimited: string
+    retryAfter: (seconds: number) => string
+    unavailable: string
+    invalidCredentials: string
+    csrfRejected: string
     footer: string
   }
   home: {

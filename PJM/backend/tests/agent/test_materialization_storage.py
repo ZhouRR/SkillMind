@@ -4,11 +4,60 @@ from __future__ import annotations
 
 import os
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from uuid import UUID, uuid4
 
 import pytest
 
 from projectmind.agent import materialization_storage as storage
+
+
+def test_concurrent_generation_creation_has_one_namespace_winner(tmp_path: Path) -> None:
+    """別 UUID の競争でも同じ Run に二つの候補を作らない。"""
+
+    identities = (uuid4(), uuid4())
+
+    def prepare(snapshot_id: UUID) -> UUID | None:
+        """独占作成に勝った識別子だけを返す。"""
+
+        try:
+            storage.create_generation(tmp_path, snapshot_id)
+        except storage.MaterializationError:
+            return None
+        return snapshot_id
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        winners = [identity for identity in executor.map(prepare, identities) if identity]
+    assert len(winners) == 1
+    namespace = tmp_path / ".projectmind-inputs"
+    assert list(namespace.iterdir()) == [namespace / str(winners[0])]
+
+
+def test_failed_generation_creation_preserves_namespace_and_cannot_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """namespace 作成後の I/O 失敗でも痕跡を消さず、別 UUID で再開しない。"""
+
+    identity = uuid4()
+    original = storage.os.mkdir
+
+    def fail_generation(path: str, mode: int = 0o777, *, dir_fd: int | None = None) -> None:
+        """namespace の同期後に子 directory の作成だけを失敗させる。"""
+
+        if path == str(identity):
+            raise OSError("generation creation failed")
+        original(path, mode=mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(storage.os, "mkdir", fail_generation)
+    with pytest.raises(storage.MaterializationError):
+        storage.create_generation(tmp_path, identity)
+    namespace = tmp_path / ".projectmind-inputs"
+    assert namespace.is_dir() and list(namespace.iterdir()) == []
+    monkeypatch.setattr(storage.os, "mkdir", original)
+    with pytest.raises(storage.MaterializationError):
+        storage.create_generation(tmp_path, uuid4())
+    assert list(namespace.iterdir()) == []
 
 
 @pytest.mark.parametrize("limit", ["files", "entries"])

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock
@@ -48,22 +48,26 @@ def _database(*, ready: bool = True, exists: bool = True) -> _Database:
 
     claimed, run, segment, attempt = execution_rows()
     run.selected_sources_json = deepcopy(claimed.selected_sources_json)
-    receipt = RunInputSnapshot(
-        id=uuid4(),
-        run_id=run.id,
-        project_id=run.project_id,
-        prepared_by_attempt_id=claimed.run_attempt_id,
-        source_checksum=input_source_checksum(
-            project_id=run.project_id, run_id=run.id, sources=run.selected_sources_json
-        ),
-        status="READY" if ready else "PREPARING",
-        files_json=[item.to_json() for item in FILES] if ready else [],
-        tree_checksum=input_tree_checksum(FILES) if ready else None,
-        total_files=len(FILES) if ready else 0,
-        total_bytes=sum(item.size for item in FILES) if ready else 0,
-        created_at=datetime.now(UTC),
-        completed_at=datetime.now(UTC) if ready else None,
-    ) if exists else None
+    receipt = (
+        RunInputSnapshot(
+            id=uuid4(),
+            run_id=run.id,
+            project_id=run.project_id,
+            prepared_by_attempt_id=claimed.run_attempt_id,
+            source_checksum=input_source_checksum(
+                project_id=run.project_id, run_id=run.id, sources=run.selected_sources_json
+            ),
+            status="READY" if ready else "PREPARING",
+            files_json=[item.to_json() for item in FILES] if ready else [],
+            tree_checksum=input_tree_checksum(FILES) if ready else None,
+            total_files=len(FILES) if ready else 0,
+            total_bytes=sum(item.size for item in FILES) if ready else 0,
+            created_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC) if ready else None,
+        )
+        if exists
+        else None
+    )
     session = MagicMock(spec=AsyncSession)
     database = _Database(claimed, run, segment, attempt, receipt, session)
 
@@ -71,10 +75,14 @@ def _database(*, ready: bool = True, exists: bool = True) -> _Database:
         """SQL が求めた table の行だけを返し、lock 順序を assertion 可能にする。"""
 
         table = statement.get_final_froms()[0].name
-        return row_result({
-            "runs": run, "run_segments": segment, "run_attempts": attempt,
-            "run_input_snapshots": database.receipt,
-        }[table])
+        return row_result(
+            {
+                "runs": run,
+                "run_segments": segment,
+                "run_attempts": attempt,
+                "run_input_snapshots": database.receipt,
+            }[table]
+        )
 
     def save(row: RunInputSnapshot) -> None:
         """新規認領行を保存し、同じ Run の次回 begin から観測可能にする。"""
@@ -101,9 +109,10 @@ async def test_begin_creates_only_one_generation_and_complete_is_immutable() -> 
     )
     assert completed.status is InputSnapshotStatus.READY
     assert completed.tree_checksum == input_tree_checksum(FILES)
-    assert await repository.complete(
-        database.claimed, snapshot_id=pending.snapshot_id, files=FILES
-    ) == completed
+    assert (
+        await repository.complete(database.claimed, snapshot_id=pending.snapshot_id, files=FILES)
+        == completed
+    )
     with pytest.raises(InputSnapshotError, match="cannot be replaced"):
         await repository.complete(database.claimed, snapshot_id=pending.snapshot_id, files=())
     assert database.session.add.call_count == 1
@@ -121,17 +130,33 @@ async def test_confirmation_is_read_only_and_locks_the_execution_before_the_rece
     assert result.status is InputSnapshotStatus.READY and result.files == FILES
     statements = [call.args[0] for call in database.session.scalars.await_args_list]
     assert [item.get_final_froms()[0].name for item in statements] == [
-        "runs", "run_segments", "run_attempts", "run_input_snapshots"
+        "runs",
+        "run_segments",
+        "run_attempts",
+        "run_input_snapshots",
     ]
     assert all("FOR UPDATE" in str(item) for item in statements[:3])
     database.session.add.assert_not_called()
     database.session.flush.assert_not_awaited()
 
 
-@pytest.mark.parametrize("invalid", [
-    "cancel", "lease", "project", "run_state", "source", "missing", "preparing",
-    "generation", "preparer", "files", "tree", "totals",
-])
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        "cancel",
+        "lease",
+        "project",
+        "run_state",
+        "source",
+        "missing",
+        "preparing",
+        "generation",
+        "preparer",
+        "files",
+        "tree",
+        "totals",
+    ],
+)
 async def test_confirmation_rejects_any_unproven_completion(invalid: str) -> None:
     """完成の推測や補签をせず、原世代と現在実行権の両方が証明された場合だけ返す。"""
 
@@ -161,7 +186,9 @@ async def test_confirmation_rejects_any_unproven_completion(invalid: str) -> Non
         database.receipt.tree_checksum = "sha256:" + "b" * 64
     elif invalid == "totals":
         database.receipt.total_bytes += 1
-    error = LeaseValidationError if invalid in {"lease", "project", "run_state"} else InputSnapshotError
+    error = (
+        LeaseValidationError if invalid in {"lease", "project", "run_state"} else InputSnapshotError
+    )
     with pytest.raises(error):
         await RunInputRepository(database.session).confirm_completed(
             database.claimed, snapshot_id=snapshot_id, files=files
@@ -227,7 +254,9 @@ async def test_lost_commit_response_confirms_once_in_a_new_session(
     error = {
         "connection": ConnectionError("commit response lost"),
         "timeout": TimeoutError("commit response timed out"),
-        "driver": DBAPIError(None, None, ConnectionError("connection lost"), connection_invalidated=True),
+        "driver": DBAPIError(
+            None, None, ConnectionError("connection lost"), connection_invalidated=True
+        ),
     }[failure]
     first, second = _session(commit_error=error), _session()
     factory = Mock(side_effect=[first, second])
@@ -260,7 +289,9 @@ async def test_unknown_completion_does_not_retry_writes_or_suppress_cancellation
     database = _database()
     assert database.receipt is not None
     record = RunInputRepository._record(database.receipt, database.run)
-    error: BaseException = asyncio.CancelledError() if phase == "cancellation" else ConnectionError()
+    error: BaseException = (
+        asyncio.CancelledError() if phase == "cancellation" else ConnectionError()
+    )
     first = _session(commit_error=None if phase == "before_commit" else error)
     factory = Mock(side_effect=[first, _session()])
     writing, reading = Mock(), Mock()

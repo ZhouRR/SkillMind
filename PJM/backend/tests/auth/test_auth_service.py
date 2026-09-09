@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import cast
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from redis.asyncio import Redis
+from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from projectmind.auth.login_protection import LoginProtectionUnavailableError, LoginRateLimitedError
 from projectmind.auth.service import AuthService, InvalidCredentialsError, LoginCsrfError
 
 
@@ -31,27 +35,13 @@ class FakeRedis:
 
         return self.values.pop(key, None)
 
-    async def incr(self, key: str) -> int:
-        """Login attempt counter を増加させる。"""
+    async def eval(self, *args: object) -> list[int]:
+        """本 test では admission を許可する。Lua の原子性は実 Redis test が検証する。"""
 
-        value = int(self.values.get(key, 0)) + 1
-        self.values[key] = value
-        return value
-
-    async def expire(self, key: str, seconds: int) -> bool:
-        """Rate counter に一分の有効期限が指定されることを確認する。"""
-
-        assert key in self.values
-        assert seconds == 60
-        return True
-
-    async def delete(self, key: str) -> int:
-        """成功時 counter cleanup と同じ delete を提供する。"""
-
-        return int(self.values.pop(key, None) is not None)
+        return [1, 0]
 
 
-def _service(redis: FakeRedis) -> AuthService:
+def _service(redis: FakeRedis, *, timeout: float = 2) -> AuthService:
     """Database path に到達しない test 用 AuthService を構築する。"""
 
     return AuthService(
@@ -62,6 +52,9 @@ def _service(redis: FakeRedis) -> AuthService:
         session_absolute_hours=12,
         admin_session_absolute_hours=8,
         login_attempts_per_minute=5,
+        login_account_attempts_per_minute=15,
+        login_source_requests_per_minute=100,
+        login_protection_timeout_seconds=timeout,
     )
 
 
@@ -71,7 +64,7 @@ async def test_login_csrf_is_single_use_and_redis_key_hides_plaintext() -> None:
 
     redis = FakeRedis()
     service = _service(redis)
-    token = await service.issue_login_csrf()
+    token = await service.issue_login_csrf(await service.begin_login("192.0.2.10"))
 
     assert all(token not in key for key in redis.values)
     with pytest.raises(InvalidCredentialsError):
@@ -81,6 +74,7 @@ async def test_login_csrf_is_single_use_and_redis_key_hides_plaintext() -> None:
             login_csrf_header=token,
             login_csrf_cookie=token,
             client_address="192.0.2.10",
+            admission=await service.begin_login("192.0.2.10"),
         )
     with pytest.raises(LoginCsrfError):
         await service.login(
@@ -89,4 +83,103 @@ async def test_login_csrf_is_single_use_and_redis_key_hides_plaintext() -> None:
             login_csrf_header=token,
             login_csrf_cookie=token,
             client_address="192.0.2.10",
+            admission=await service.begin_login("192.0.2.10"),
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocked", [True, False])
+async def test_account_rejection_stops_before_challenge_password_and_database(
+    monkeypatch: pytest.MonkeyPatch,
+    blocked: bool,
+) -> None:
+    """Account 配額の拒否・不明状態では challenge 消費も password/DB 呼出しも行わない。"""
+
+    redis = FakeRedis()
+    service = _service(redis)
+    admission = await service.begin_login("192.0.2.10")
+    redis.eval = AsyncMock(return_value=[0, 120] if blocked else ["invalid", 0])
+    redis.getdel = AsyncMock()
+    verify = Mock(side_effect=AssertionError("Password verification must not run"))
+    monkeypatch.setattr("projectmind.auth.service.verify_password", verify)
+    with pytest.raises(LoginRateLimitedError if blocked else LoginProtectionUnavailableError):
+        await service.login(
+            email="reader@example.com",
+            password="test-only long passphrase",
+            login_csrf_header="c" * 32,
+            login_csrf_cookie="c" * 32,
+            client_address="192.0.2.10",
+            admission=admission,
+        )
+    redis.getdel.assert_not_awaited()
+    verify.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["set", "getdel"])
+@pytest.mark.parametrize("failure", ["disconnect", "timeout"])
+async def test_challenge_store_failure_never_reaches_password(
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+    failure: str,
+) -> None:
+    """Challenge の保存・消費が確認できない時、短い deadline で停止して再試行しない。"""
+
+    redis = FakeRedis()
+    service = _service(redis, timeout=0.01)
+
+    async def unavailable(*args: object, **kwargs: object) -> None:
+        """外部 store に接続せず、timeout または明示的な切断を作る。"""
+
+        if failure == "disconnect":
+            raise RedisConnectionError("test-only store failure")
+        await asyncio.Event().wait()
+
+    stub = AsyncMock(side_effect=unavailable)
+    setattr(redis, command, stub)
+    verify = Mock(side_effect=AssertionError("Password verification must not run"))
+    monkeypatch.setattr("projectmind.auth.service.verify_password", verify)
+    with pytest.raises(LoginProtectionUnavailableError):
+        admission = await service.begin_login("192.0.2.10")
+        if command == "set":
+            await service.issue_login_csrf(admission)
+        else:
+            await service.login(
+                email="reader@example.com",
+                password="test-only long passphrase",
+                login_csrf_header="c" * 32,
+                login_csrf_cookie="c" * 32,
+                client_address="192.0.2.10",
+                admission=admission,
+            )
+    stub.assert_awaited_once()
+    verify.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["set", "getdel"])
+async def test_unconfirmed_challenge_state_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+) -> None:
+    """SET 確認欠落や GETDEL の破損 marker を発行/検証成功へ変換しない。"""
+
+    redis = FakeRedis()
+    service = _service(redis)
+    setattr(redis, command, AsyncMock(return_value=False if command == "set" else "corrupt"))
+    verify = Mock(side_effect=AssertionError("Password verification must not run"))
+    monkeypatch.setattr("projectmind.auth.service.verify_password", verify)
+    admission = await service.begin_login("192.0.2.10")
+    with pytest.raises(LoginProtectionUnavailableError):
+        if command == "set":
+            await service.issue_login_csrf(admission)
+        else:
+            await service.login(
+                email="reader@example.com",
+                password="test-only long passphrase",
+                login_csrf_header="c" * 32,
+                login_csrf_cookie="c" * 32,
+                client_address="192.0.2.10",
+                admission=admission,
+            )
+    verify.assert_not_called()

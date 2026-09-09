@@ -81,6 +81,7 @@ from projectmind.runs.domain import (
     plan_run_transition,
     request_hash,
 )
+from projectmind.runs.execution_outcome import user_cancellation_event
 from projectmind.runs.repository_effects import EffectOperationsMixin
 from projectmind.runs.repository_interactions import InteractionOperationsMixin
 
@@ -1215,6 +1216,7 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
         if RunStatus(run.status) is not RunStatus.RUNNING:
             raise LeaseValidationError(f"Run is not running: {run.status}")
         self._validate_agent_event(event, claimed)
+        await self._reject_cancelled_execution(run.id)
         next_sequence = await self._next_sequence(run.id)
         if event.sequence < next_sequence:
             raise ConcurrentRunUpdateError("Agent event sequence is not monotonic")
@@ -1304,7 +1306,7 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
         session_metadata: AgentSessionMetadata | None,
         result: RunResultRecord | None,
         error_json: dict[str, Any] | None,
-    ) -> None:
+    ) -> RunStatus:
         """Result/Event/Session/Attempt/Run/Outbox を一つの終態 transaction で確定する。"""
 
         run, segment, attempt = await self._lock_claimed_execution(claimed)
@@ -1313,12 +1315,25 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
         current = RunStatus(run.status)
         if current is not RunStatus.RUNNING:
             if current is target and attempt.status == attempt_status.value:
-                return
+                return current
             raise LeaseValidationError(f"Run cannot be finalized from {current.value}")
         if target is RunStatus.SUCCEEDED and result is None:
             raise ValueError("Successful Run requires a validated Result")
         if target is not RunStatus.SUCCEEDED and result is not None:
             raise ValueError("Only a successful Run may persist a Result")
+        if event is not None:
+            self._validate_agent_event(event, claimed)
+
+        # poll と終態化の間に取消が commit されても、同じ Run lock 下の intent が勝つ。
+        # 失効 lease は上で拒否済みなので、この上書きは古い Worker の権限を復活させない。
+        cancellation_requested = await self.is_cancellation_requested(run.id)
+        if cancellation_requested:
+            target = RunStatus.CANCELLED
+            attempt_status = RunAttemptStatus.CANCELLED
+            result = None
+            error_json = None
+        elif target is RunStatus.CANCELLED:
+            raise ValueError("Run cancellation requires a durable cancellation intent")
 
         transition = plan_run_transition(
             current=current,
@@ -1364,7 +1379,10 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
         stored_events: list[RunEvent] = []
         sdk_session_id: UUID | None = None
         if event is not None:
-            self._validate_agent_event(event, claimed)
+            if cancellation_requested:
+                # 取消 request 自身が sequence を消費する。platform の終態 event だけは
+                # 現在水位で採番し直し、SDK の観測用量と既存 event の一意性を両方保つ。
+                event = user_cancellation_event(event, sequence=max(next_sequence, event.sequence))
             if event.sequence < next_sequence:
                 raise ConcurrentRunUpdateError("Terminal Agent event sequence is not monotonic")
             sdk_session_id = UUID(event.agent_session_id)
@@ -1383,12 +1401,7 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
             stored_events.append(terminal_event)
             next_sequence = event.sequence + 1
         else:
-            session_statement = (
-                select(AgentSession)
-                .where(AgentSession.run_attempt_id == claimed.run_attempt_id)
-                .with_for_update()
-            )
-            existing_session = (await self._session.scalars(session_statement)).one_or_none()
+            existing_session = await self._find_primary_agent_session(claimed)
             if existing_session is not None:
                 sdk_session_id = existing_session.sdk_session_id
                 existing_session.status = _session_status_for(target)
@@ -1459,6 +1472,7 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
                 for item in (stored, self._event_outbox(stored, status=target.value))
             ]
         )
+        return target
 
     async def heartbeat_attempt(
         self,

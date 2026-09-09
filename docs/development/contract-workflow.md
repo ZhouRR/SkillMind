@@ -33,6 +33,7 @@ Backend 生产 → Web / Worker 消费
 | 检查面 | 实际入口 | 要回答的问题 |
 | --- | --- | --- |
 | 请求与响应 | [资源 Schema](../../PJM/contracts/README.md)、[examples](../../PJM/contracts/examples/)、[routes](../../PJM/backend/src/projectmind/api/routes/) | required / nullable / enum / 额外字段是否一致？请求和响应是否被混用？ |
+| HTTP 语义 | route / middleware、Problem factory、共享 HTTP client | status、header、缓存与拒绝顺序是否一致？同样的 JSON 形状是否产生了新的客户端行为？ |
 | 业务与授权 | 对应 service / domain / projection、[actor dependencies](../../PJM/backend/src/projectmind/api/auth_dependencies.py) | 形状合法后，归属、权限、hash、幂等与历史格式由谁验证？ |
 | 持久与执行 | [DB](../../PJM/backend/src/projectmind/db/)、repository、[Worker](../../PJM/backend/src/projectmind/worker/) | 是否改持久格式？旧记录及旧 Worker 能否继续读取？是否真的需要 migration？ |
 | Web 消费 | [api](../../PJM/web/src/api/)、index.ts barrel、组件、[三语 catalog](../../PJM/web/src/lib/i18n/) | 类型与运行时 validator 都同步了吗？缺失、拒绝、历史和正常状态如何呈现？ |
@@ -40,6 +41,39 @@ Backend 生产 → Web / Worker 消费
 | 派生契约 | [OpenAPI snapshot](../../PJM/contracts/openapi/projectmind-api.v1.json) | 是否由当前 app 生成并逐项一致，而不是手工补一个字段？ |
 
 每条新 example 必须同时进入 [validator 注册表](../../PJM/scripts/validate_contracts.py)和 [Backend 契约测试](../../PJM/backend/tests/contracts/test_contracts.py)。JSON Schema 通过不会执行资源授权、计算内容 hash 或模拟数据库竞争；这些仍需业务测试。精确的强制同步规则见 [AGENTS.md](../../PJM/AGENTS.md#よくある変更の同期点)。
+
+例如[登录防护](../design/login-protection.md#公开响应与客户端责任)复用既有 Problem JSON，却新增需要客户端区分的 429/503 和 Retry-After；只跑 Schema/example 不会发现 header 被 Web 丢弃。必须分别确认实际 HTTP 响应、OpenAPI、共享错误类型和界面反馈，不能为了展示等待时间而把内部配额 key 加入公开字段。
+
+生成一致性只回答“保存的 OpenAPI 是否等于 route 声明”，不判断声明是否完整。还要对照实际响应确认 media type、错误 body 的 Schema 和 header；缺少的声明不会被 exporter 自动补齐。客户端也分两层：共享 HTTP client 保留合法元数据，领域反馈决定何时可显示具体秒数或只能给通用提示，不用页面文案倒推服务端根因。
+
+## 遇到未接齐的交付链
+
+先说明“哪一层已有、下一层缺什么”，不要把工作副本整体标成“无实现”或“已交付”。例如[用户生命周期的调用图](../design/user-lifecycle.md#工作副本与公开入口)中，路由与 Schema 已存在，但保存快照和 Web 尚未接齐；接续点不是再造一套服务。
+
+| 看到的现象 | 判断与接续动作 |
+| --- | --- |
+| 内部 DTO/model 已有，route 没调用 | 内部基础；先找装配与用例入口，不把数据库字段直接当公开响应 |
+| route 与 Schema 已有，OpenAPI 缺少操作 | 契约交付未齐；对照字段、错误和 header 后由 exporter 生成，不能认定“没有 API”或手补快照 |
+| Schema/example 通过，一致性 test 失败 | 分开记录两种结果；静态 example 合法不证明当前 app 与保存契约一致 |
+| API/Schema 已齐，Web 缺 client 或页面 | 服务端入口与用户流程分开；先同步 validator/barrel，再接交互，不凭按钮或类型定义验收 |
+| 分模块通过，合跑在收集阶段失败 | 测试基线尚不可信；保留原失败，修复共享 fixture/import，再重跑相同组合。未收集到的测试不算通过 |
+
+下面两项只读核对，不启动 application lifespan、不连接数据库，也不回写 OpenAPI。需先按[本地开发](local-development.md#backend)安装 Backend 开发依赖。
+
+在 `PJM/` 验证已注册的数据形状：
+
+```bash
+python3 scripts/validate_contracts.py
+```
+
+在 `PJM/backend/` 比较保存快照与当前声明：
+
+```bash
+python3 -m pytest -p no:cacheprovider -o addopts= -q \
+  tests/contracts/test_contracts.py::test_exported_openapi_is_current
+```
+
+两个命令都通过后仍要检查实际 HTTP 和业务链路。文档整理中遇到失败，只修正说明和导航、登记证据；获准修改 API 时才运行 [exporter](../../PJM/scripts/export_openapi.py)并完成消费者同步。当前缺口只在[计划](../planning/roadmap.md#当前证据怎么用)维护，不在本页再放一份状态表。
 
 ## 历史数据兼容不等于前后端版本兼容
 

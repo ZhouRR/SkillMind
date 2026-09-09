@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import secrets
 from dataclasses import dataclass
@@ -9,16 +10,35 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from projectmind.auth.domain import (
+    SESSION_CREDENTIAL_VERSION,
     UI_LANGUAGES,
+    derive_session_csrf,
     generate_session_credentials,
     hash_password,
     hash_session_secret,
     normalize_email,
     verify_password,
+)
+from projectmind.auth.login_protection import (
+    LoginAdmission,
+    LoginProtection,
+    LoginProtectionPolicy,
+    LoginProtectionUnavailableError,
+)
+from projectmind.auth.sessions import (
+    CsrfRejectedError as CsrfRejectedError,
+)
+from projectmind.auth.sessions import (
+    UnauthorizedSessionError as UnauthorizedSessionError,
+)
+from projectmind.auth.sessions import (
+    validate_session_credentials,
+    validate_session_csrf,
 )
 from projectmind.db.models import AuthSession, User
 
@@ -31,18 +51,6 @@ class InvalidCredentialsError(RuntimeError):
 
 class LoginCsrfError(RuntimeError):
     """Login CSRF challenge が欠落、期限切れ、再利用されたことを示す。"""
-
-
-class LoginRateLimitedError(RuntimeError):
-    """短期間の login 試行上限を超えたことを示す。"""
-
-
-class UnauthorizedSessionError(RuntimeError):
-    """Session が存在しない、失効済み、または期限切れであることを示す。"""
-
-
-class CsrfRejectedError(RuntimeError):
-    """認証済み Session の CSRF token が一致しないことを示す。"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +76,7 @@ class LoginResult:
 
 @dataclass(frozen=True, slots=True)
 class SessionResult:
-    """有効 Session の actor と新しく rotation した CSRF token。"""
+    """有効 Session の actor と、他ページを失効させない会話単位の CSRF token。"""
 
     actor: AuthenticatedActor
     csrf_token: str
@@ -88,6 +96,9 @@ class AuthService:
         session_absolute_hours: int,
         admin_session_absolute_hours: int,
         login_attempts_per_minute: int,
+        login_account_attempts_per_minute: int,
+        login_source_requests_per_minute: int,
+        login_protection_timeout_seconds: float,
     ) -> None:
         """永続 resource と明示的な timeout/rate policy を保持する。"""
 
@@ -97,18 +108,46 @@ class AuthService:
         self._session_idle_minutes = session_idle_minutes
         self._session_absolute_hours = session_absolute_hours
         self._admin_session_absolute_hours = admin_session_absolute_hours
-        self._login_attempts_per_minute = login_attempts_per_minute
+        self._login_protection = LoginProtection(
+            redis,
+            LoginProtectionPolicy(
+                pair_attempts=login_attempts_per_minute,
+                account_attempts=login_account_attempts_per_minute,
+                source_requests=login_source_requests_per_minute,
+                timeout_seconds=login_protection_timeout_seconds,
+            ),
+        )
 
-    async def issue_login_csrf(self) -> str:
+    async def begin_login(self, client_address: str) -> LoginAdmission:
+        """HTTP body を読む前の来源 admission を一回だけ発行する。"""
+
+        return await self._login_protection.begin(client_address)
+
+    async def issue_login_csrf(self, admission: LoginAdmission) -> str:
         """一回だけ消費できる短期 login CSRF challenge を Redis に保存する。"""
 
+        self._login_protection.consume(admission)
         token = secrets.token_urlsafe(32)
-        await self._redis.set(
-            self._login_csrf_key(token),
-            "1",
-            ex=self._login_csrf_ttl_seconds,
-        )
+        try:
+            async with asyncio.timeout(self._login_protection.policy.timeout_seconds):
+                saved = await self._redis.set(
+                    self._login_csrf_key(token),
+                    "1",
+                    ex=self._login_csrf_ttl_seconds,
+                )
+        except (RedisError, TimeoutError) as error:
+            raise LoginProtectionUnavailableError("Login protection is unavailable") from error
+        if saved is not True:
+            raise LoginProtectionUnavailableError("Login protection is unavailable")
         return token
+
+    async def admit_password_change(
+        self, *, actor: AuthenticatedActor, admission: LoginAdmission
+    ) -> None:
+        """本人改密にも同じ account/source 配額を適用し、別入口による推測を防ぐ。"""
+
+        source_hash = self._login_protection.consume(admission)
+        await self._login_protection.check_account(normalize_email(actor.email), source_hash)
 
     async def login(
         self,
@@ -118,26 +157,26 @@ class AuthService:
         login_csrf_header: str,
         login_csrf_cookie: str,
         client_address: str,
+        admission: LoginAdmission,
     ) -> LoginResult:
         """CSRF と rate limit 後に credential を検証し、新規 Session を作成する。"""
 
-        await self._consume_login_csrf(login_csrf_header, login_csrf_cookie)
+        source_hash = self._login_protection.consume(admission)
         try:
             normalized_email = normalize_email(email)
         except ValueError as error:
+            await self._consume_login_csrf(login_csrf_header, login_csrf_cookie)
             # Email syntax failure も account 不在と同じ公開結果に畳み込み、列挙を防ぐ。
             verify_password(_DUMMY_PASSWORD_HASH, password)
             raise InvalidCredentialsError("Invalid email or password") from error
-        rate_key = self._login_rate_key(normalized_email, client_address)
-        attempts = await self._redis.incr(rate_key)
-        if attempts == 1:
-            await self._redis.expire(rate_key, 60)
-        if attempts > self._login_attempts_per_minute:
-            raise LoginRateLimitedError("Too many login attempts")
+        await self._login_protection.check_account(normalized_email, source_hash)
+        await self._consume_login_csrf(login_csrf_header, login_csrf_cookie)
 
         async with self._session_factory() as session, session.begin():
             user = (
-                await session.scalars(select(User).where(User.email == normalized_email))
+                await session.scalars(
+                    select(User).where(User.email == normalized_email).with_for_update()
+                )
             ).one_or_none()
             password_hash = user.password_hash if user is not None else _DUMMY_PASSWORD_HASH
             verified, needs_rehash = verify_password(password_hash, password)
@@ -158,9 +197,14 @@ class AuthService:
                     user_id=user.id,
                     token_hash=credentials.session_token_hash,
                     csrf_token_hash=credentials.csrf_token_hash,
+                    credential_version=SESSION_CREDENTIAL_VERSION,
+                    system_role_at_login=user.system_role,
                     created_at=now,
                     last_seen_at=now,
-                    idle_expires_at=now + timedelta(minutes=self._session_idle_minutes),
+                    idle_expires_at=min(
+                        now + timedelta(minutes=self._session_idle_minutes),
+                        absolute_expires_at,
+                    ),
                     absolute_expires_at=absolute_expires_at,
                     revoked_at=None,
                     client_ip_hash=hash_session_secret(client_address),
@@ -172,7 +216,8 @@ class AuthService:
                 user.password_hash = hash_password(password)
             actor = self._actor(user)
 
-        await self._redis.delete(rate_key)
+        # 成功で共有 quota を消すと、別の在途試行や攻撃の履歴まで消してしまう。
+        # 正しい password の試行も admission に含め、時間経過だけで減衰させる。
         return LoginResult(
             actor=actor,
             session_token=credentials.session_token,
@@ -181,20 +226,18 @@ class AuthService:
         )
 
     async def get_session(self, session_token: str) -> SessionResult:
-        """有効 Session を取得し、page reload 用に CSRF token を rotation する。"""
+        """有効 Session と安定 CSRF を返し、他ページの書込資格を変更しない。"""
 
         async with self._session_factory() as session, session.begin():
             auth_session, user = await self._load_active_session(session, session_token)
-            credentials = generate_session_credentials()
-            auth_session.csrf_token_hash = credentials.csrf_token_hash
             return SessionResult(
                 actor=self._actor(user),
-                csrf_token=credentials.csrf_token,
+                csrf_token=derive_session_csrf(session_token),
                 absolute_expires_at=auth_session.absolute_expires_at,
             )
 
     async def authenticate_session(self, session_token: str) -> AuthenticatedActor:
-        """CSRF rotation なしで通常の read request に actor を解決する。"""
+        """通常の read request でも会話版・role・失効を確認し actor を解決する。"""
 
         async with self._session_factory() as session, session.begin():
             _, user = await self._load_active_session(session, session_token)
@@ -210,11 +253,7 @@ class AuthService:
 
         async with self._session_factory() as session, session.begin():
             auth_session, user = await self._load_active_session(session, session_token)
-            if not hmac.compare_digest(
-                auth_session.csrf_token_hash,
-                hash_session_secret(csrf_token),
-            ):
-                raise CsrfRejectedError("CSRF token was rejected")
+            validate_session_csrf(auth_session, csrf_token)
             return self._actor(user)
 
     async def get_ui_language(self, *, actor: AuthenticatedActor) -> str | None:
@@ -253,11 +292,7 @@ class AuthService:
 
         async with self._session_factory() as session, session.begin():
             auth_session, _ = await self._load_active_session(session, session_token)
-            if not hmac.compare_digest(
-                auth_session.csrf_token_hash,
-                hash_session_secret(csrf_token),
-            ):
-                raise CsrfRejectedError("CSRF token was rejected")
+            validate_session_csrf(auth_session, csrf_token)
             auth_session.revoked_at = datetime.now(UTC)
 
     async def _consume_login_csrf(self, header: str, cookie: str) -> None:
@@ -265,36 +300,54 @@ class AuthService:
 
         if not header or not cookie or not hmac.compare_digest(header, cookie):
             raise LoginCsrfError("Login CSRF challenge was rejected")
-        consumed = await self._redis.getdel(self._login_csrf_key(header))
+        try:
+            async with asyncio.timeout(self._login_protection.policy.timeout_seconds):
+                consumed = await self._redis.getdel(self._login_csrf_key(header))
+        except (RedisError, TimeoutError) as error:
+            raise LoginProtectionUnavailableError("Login protection is unavailable") from error
         if consumed is None:
             raise LoginCsrfError("Login CSRF challenge was rejected")
+        if consumed not in ("1", b"1"):
+            # 存在するだけでは発行済みを証明できない。破損値を認証成功へ進めない。
+            raise LoginProtectionUnavailableError("Login protection is unavailable")
 
     async def _load_active_session(
         self,
         session: AsyncSession,
         session_token: str,
     ) -> tuple[AuthSession, User]:
-        """Token hash と user status/期限をまとめて fail closed で検証する。"""
+        """User → Session の順で lock し、新しい時間とログイン時の権限を検証する。"""
 
-        now = datetime.now(UTC)
-        row = (
-            await session.execute(
-                select(AuthSession, User)
-                .join(User, User.id == AuthSession.user_id)
+        try:
+            derive_session_csrf(session_token)
+        except ValueError as error:
+            raise UnauthorizedSessionError("Authentication is required") from error
+        # 認証と後続の user 管理が逆順に lock して deadlock しないよう、親を先に取る。
+        user = (
+            await session.scalars(
+                select(User)
+                .join(AuthSession, AuthSession.user_id == User.id)
                 .where(AuthSession.token_hash == hash_session_secret(session_token))
+                .with_for_update(of=User)
+            )
+        ).one_or_none()
+        if user is None:
+            raise UnauthorizedSessionError("Authentication is required")
+        auth_session = (
+            await session.scalars(
+                select(AuthSession)
+                .where(
+                    AuthSession.token_hash == hash_session_secret(session_token),
+                    AuthSession.user_id == user.id,
+                )
                 .with_for_update()
             )
         ).one_or_none()
-        if row is None:
+        if auth_session is None:
             raise UnauthorizedSessionError("Authentication is required")
-        auth_session, user = row
-        if (
-            auth_session.revoked_at is not None
-            or auth_session.idle_expires_at <= now
-            or auth_session.absolute_expires_at <= now
-            or user.status != "ACTIVE"
-        ):
-            raise UnauthorizedSessionError("Authentication is required")
+        # 両方の lock 待ちを終えてから判定する。待機前の now で期限を延ばさない。
+        now = datetime.now(UTC)
+        validate_session_credentials(auth_session, user, session_token=session_token, now=now)
         # 5 分単位で更新し、通常 request ごとの DB write amplification を避ける。
         if auth_session.last_seen_at <= now - timedelta(minutes=5):
             auth_session.last_seen_at = now
@@ -321,9 +374,3 @@ class AuthService:
         """Redis key に challenge 平文を含めない固定 namespace を返す。"""
 
         return f"projectmind:auth:login-csrf:{hash_session_secret(token)}"
-
-    @staticmethod
-    def _login_rate_key(email: str, client_address: str) -> str:
-        """Email/IP を Redis key や運用画面へ露出しない rate-limit key を返す。"""
-
-        return f"projectmind:auth:login-rate:{hash_session_secret(email + '|' + client_address)}"

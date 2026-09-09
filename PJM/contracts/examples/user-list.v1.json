@@ -1,0 +1,17 @@
+{
+  "items": [
+    {
+      "user_id": "00000000-0000-4000-8000-000000000201",
+      "email": "reader@example.test",
+      "display_name": "Example reader",
+      "system_role": "USER",
+      "status": "ACTIVE",
+      "row_version": 2,
+      "created_at": "2026-09-09T12:00:00Z",
+      "updated_at": "2026-09-09T12:10:00Z"
+    }
+  ],
+  "total": 101,
+  "limit": 25,
+  "offset": 100
+}

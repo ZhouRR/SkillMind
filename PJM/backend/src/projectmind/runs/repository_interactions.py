@@ -66,6 +66,7 @@ class InteractionOperationsMixin(_RunRepositoryBase):
         self._validate_agent_event(event, claimed)
         if event.event_type is not AgentEventType.INTERACTION_REQUESTED:
             raise ValueError("Interaction suspension requires INTERACTION_REQUESTED")
+        await self._reject_cancelled_execution(run.id)
         next_sequence = await self._next_sequence(run.id)
         if event.sequence < next_sequence:
             raise ConcurrentRunUpdateError("Interaction event sequence is not monotonic")

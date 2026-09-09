@@ -21,7 +21,7 @@ from projectmind.agent.domain import (
     RunLimits,
     RunWorkspace,
 )
-from projectmind.agent.result_validation import ResultValidationError, ValidatedResult
+from projectmind.agent.result_validation import ResultValidator
 from projectmind.runs.domain import (
     ClaimedRun,
     PreparedExecution,
@@ -30,6 +30,7 @@ from projectmind.runs.domain import (
     SessionContinuationMode,
 )
 from projectmind.worker.executor import AgentRunExecutor
+from tests.agent.test_result_validation import MemoryEvidenceLookup
 
 
 def _claimed() -> ClaimedRun:
@@ -84,7 +85,11 @@ def _context(
             wall_timeout_seconds=wall_timeout_seconds,
             max_output_bytes=4096,
         ),
-        result_schema={"type": "object"},
+        result_schema={
+            "type": "object",
+            "required": ["summary"],
+            "properties": {"summary": {"type": "string"}},
+        },
         tools=(),
         model="claude-test",
         sequence_start=sequence_start,
@@ -227,13 +232,19 @@ def _event(
 def _service() -> MagicMock:
     """Executor が利用する RunService methods を AsyncMock 化する。"""
 
+    async def finalize(*args: object, target: RunStatus, **kwargs: object) -> RunStatus:
+        """競争の無い stub は指定した終態を commit 後の実際の状態として返す。"""
+
+        del args, kwargs
+        return target
+
     service = MagicMock()
     service.prepare_execution = AsyncMock(return_value=PreparedExecution(3, 10))
     service.freeze_agent_task_brief = AsyncMock()
     service.verify_execution_start = AsyncMock(return_value=True)
     service.suspend_for_interaction = AsyncMock(return_value=uuid4())
     service.append_agent_event = AsyncMock()
-    service.finalize_execution = AsyncMock()
+    service.finalize_execution = AsyncMock(side_effect=finalize)
     service.heartbeat_run_attempt = AsyncMock()
     service.is_cancellation_requested = AsyncMock(return_value=False)
     return service
@@ -259,24 +270,11 @@ async def test_validated_result_reaches_success_terminal(tmp_path: Path) -> None
             12,
             AgentEventType.RESULT_COMPLETED,
             session_id=session_id,
-            payload={"structured_output": {"issue": {}}, "total_cost_usd": 0.02},
+            payload={"structured_output": {"summary": "completed"}, "total_cost_usd": 0.02},
         ),
     ]
     service = _service()
-    validator = MagicMock()
-    validator.validate = AsyncMock(
-        return_value=ValidatedResult(
-            data={"issue": {}},
-            result_kind="STRUCTURED_OUTPUT",
-            evidence_refs=frozenset(),
-            artifact_refs=frozenset(),
-            change_proposal_refs=frozenset(),
-            summary="completed",
-            confidence=0.8,
-            needs_review=False,
-            validation={"schema_valid": True},
-        )
-    )
+    validator = ResultValidator(MemoryEvidenceLookup(frozenset()))
     executor = AgentRunExecutor(
         run_service=service,
         context_builder=ContextBuilder(tmp_path),
@@ -291,6 +289,9 @@ async def test_validated_result_reaches_success_terminal(tmp_path: Path) -> None
     terminal = service.finalize_execution.await_args.kwargs
     assert terminal["target"] is RunStatus.SUCCEEDED
     assert terminal["attempt_status"] is RunAttemptStatus.SUCCEEDED
+    assert terminal["result"].summary == "completed"
+    assert terminal["result"].output_schema == claimed.task_snapshot_json["output_schema"]
+    assert terminal["result"].validation["schema_valid"] is True
     assert terminal["result"].usage == {"input_tokens": 10}
     assert terminal["result"].cost == {"total_cost_usd": 0.02}
 
@@ -308,10 +309,7 @@ async def test_invalid_result_is_finalized_as_failed(tmp_path: Path) -> None:
         payload={"structured_output": {}},
     )
     service = _service()
-    validator = MagicMock()
-    validator.validate = AsyncMock(
-        side_effect=ResultValidationError("result_schema_invalid", "invalid")
-    )
+    validator = ResultValidator(MemoryEvidenceLookup(frozenset()))
     executor = AgentRunExecutor(
         run_service=service,
         context_builder=ContextBuilder(tmp_path),
@@ -325,7 +323,9 @@ async def test_invalid_result_is_finalized_as_failed(tmp_path: Path) -> None:
     terminal = service.finalize_execution.await_args.kwargs
     assert terminal["target"] is RunStatus.FAILED
     assert terminal["event"].event_type is AgentEventType.ENGINE_FAILED
+    assert terminal["event"].payload["reason"] == "result_validation_failed"
     assert terminal["error_json"]["code"] == "result_schema_invalid"
+    assert terminal["result"] is None
 
 
 @pytest.mark.asyncio
@@ -333,7 +333,7 @@ async def test_invalid_result_is_finalized_as_failed(tmp_path: Path) -> None:
     ("event_type", "run_status", "attempt_status"),
     [
         (AgentEventType.ENGINE_FAILED, RunStatus.FAILED, RunAttemptStatus.FAILED),
-        (AgentEventType.SESSION_INTERRUPTED, RunStatus.CANCELLED, RunAttemptStatus.CANCELLED),
+        (AgentEventType.SESSION_INTERRUPTED, RunStatus.FAILED, RunAttemptStatus.FAILED),
         (
             AgentEventType.SESSION_DEFERRED,
             RunStatus.WAITING_PERMISSION,
@@ -573,20 +573,7 @@ async def test_review_suspends_session_a_and_forks_session_b_to_result(
         payload={"structured_output": {"summary": "Reviewed result"}},
     )
     second_service = _service()
-    validator = MagicMock()
-    validator.validate = AsyncMock(
-        return_value=ValidatedResult(
-            data={"summary": "Reviewed result"},
-            result_kind="STRUCTURED_OUTPUT",
-            evidence_refs=frozenset(),
-            artifact_refs=frozenset(),
-            change_proposal_refs=frozenset(),
-            summary="Reviewed result",
-            confidence=0.9,
-            needs_review=False,
-            validation={"schema_valid": True},
-        )
-    )
+    validator = ResultValidator(MemoryEvidenceLookup(frozenset()))
     fork_engine = ForkingEngine([result_event])
     second_executor = AgentRunExecutor(
         run_service=second_service,
@@ -605,3 +592,6 @@ async def test_review_suspends_session_a_and_forks_session_b_to_result(
         session_id=str(session_a),
     )
     assert second_service.finalize_execution.await_args.kwargs["target"] is RunStatus.SUCCEEDED
+    result = second_service.finalize_execution.await_args.kwargs["result"]
+    assert result.summary == "Reviewed result"
+    assert result.output_schema == second.task_snapshot_json["output_schema"]
