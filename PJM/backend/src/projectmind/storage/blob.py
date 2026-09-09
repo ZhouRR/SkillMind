@@ -18,6 +18,10 @@ class BlobNotFoundError(FileStorageError):
     """指定 key の blob が存在しないことを表す。"""
 
 
+class BlobReadLimitExceededError(FileStorageError):
+    """実際の正文が呼出元の読取上限を超えたことを表す。"""
+
+
 @dataclass(frozen=True, slots=True)
 class StoredBlob:
     """保存済み blob の識別子と metadata。正文そのものは保持しない。"""
@@ -36,8 +40,11 @@ class FileStorage(Protocol):
 
         ...
 
-    async def get(self, key: str) -> bytes:
-        """Blob 正文を返す。存在しなければ BlobNotFoundError を送出する。"""
+    async def get(self, key: str, *, max_bytes: int | None = None) -> bytes:
+        """欠落は BlobNotFoundError、上限 + 1 byte の検出は BlobReadLimitExceededError。
+
+        max_bytes=None は既存呼出元の無制限読取を維持する。超過は切り詰めて返さない。
+        """
 
         ...
 
@@ -55,6 +62,13 @@ class FileStorage(Protocol):
         """Blob metadata を返す。存在しなければ BlobNotFoundError を送出する。"""
 
         ...
+
+
+def validate_read_limit(max_bytes: int | None) -> None:
+    """負数や bool によって有界読取が無制限へ変化することを防ぐ。"""
+
+    if max_bytes is not None and (type(max_bytes) is not int or max_bytes < 0):
+        raise FileStorageError("Blob read limit must be a non-negative integer")
 
 
 def sanitize_object_key(key: str) -> str:

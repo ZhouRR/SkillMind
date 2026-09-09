@@ -32,6 +32,7 @@ interface QueryState<T, F extends ResourceFailure> {
 export function useResourceQuery<T, F extends ResourceFailure>(
   key: string, loader: (signal: AbortSignal) => Promise<T>, onSessionEnded: SessionEnded,
   policy: ResourceRequestPolicy<F>, enabled = true,
+  onFailure?: (error: unknown) => void,
 ) {
   const [revision, setRevision] = useState(0)
   const context = useMemo(() => ({ key }), [key])
@@ -42,6 +43,8 @@ export function useResourceQuery<T, F extends ResourceFailure>(
   currentRequest.current = request
   const ended = useRef(onSessionEnded)
   ended.current = onSessionEnded
+  const failed = useRef(onFailure)
+  failed.current = onFailure
   /** 手動再読取を要求した瞬間に旧世代を閉じ、再描画前の古い 401 も捨てる。 */
   const refresh = useCallback(() => {
     active.current?.abort()
@@ -98,6 +101,8 @@ export function useResourceQuery<T, F extends ResourceFailure>(
       // 並行した事実読取の片方が失敗した場合も、残った transport を閉じる。
       controller.abort()
       setState((old) => ({ ...old, completed: revision, failure }))
+      // 資格を閉じる等の副作用も、current と絶対期限を確認した後だけ通知する。
+      failed.current?.(error)
       if (failure.key === 'sessionExpired') sessionEnded()
     })
     return () => {

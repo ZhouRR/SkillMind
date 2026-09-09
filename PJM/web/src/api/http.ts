@@ -69,20 +69,78 @@ export async function requestApiEmpty(url: string, init: RequestInit, expectedSt
   return throwProblemFromBody(response)
 }
 
-/** Raw text content を返す API request を実行し、失敗時だけ Problem Details を解析する。 */
-export async function requestApiText(url: string, init: RequestInit = {}): Promise<string> {
+/** 文書 preview など、成功 status と実 byte 上限が固定された text 契約。 */
+export interface ApiTextResponseContract {
+  status: number
+  maxBytes: number
+}
+
+/** Raw text も共通 HTTP 境界で扱い、有界 consumer は error body も全量読みしない。 */
+export async function requestApiText(
+  url: string, init: RequestInit = {}, contract?: ApiTextResponseContract,
+): Promise<string> {
+  if (contract && (!Number.isSafeInteger(contract.maxBytes) || contract.maxBytes < 0)) {
+    throw new TypeError('Text response byte limit must be a nonnegative safe integer')
+  }
+  init.signal?.throwIfAborted()
   const response = await fetch(url, { ...init, credentials: 'same-origin' })
-  if (response.ok) return response.text()
-  return throwProblemFromBody(response)
+  if (contract && (response.status === 401 || response.status === 403)) {
+    // 資格拒否は headers だけで確定する。遅い本文を待ち、期限で status を失ってはならない。
+    void response.body?.cancel().catch(() => undefined)
+    throw new ApiProblemError(`API returned ${response.status}`, response.status, undefined,
+      parseRetryAfterSeconds(response.headers.get('Retry-After')))
+  }
+  if (!response.ok) return throwProblemFromBody(response, contract?.maxBytes, init.signal)
+  if (contract && response.status !== contract.status) {
+    void response.body?.cancel().catch(() => undefined)
+    throw new ApiProblemError('API returned an unexpected success status', response.status)
+  }
+  return contract ? readBoundedText(response, contract.maxBytes, init.signal) : response.text()
+}
+
+/** Content-Length は早期拒否だけに使い、展開後の stream を数えて超過時に破棄する。 */
+async function readBoundedText(response: Response, maxBytes: number, signal?: AbortSignal | null): Promise<string> {
+  const reader = response.body?.getReader()
+  const cancel = (): void => { void reader?.cancel().catch(() => undefined) }
+  signal?.addEventListener('abort', cancel, { once: true })
+  try {
+    signal?.throwIfAborted()
+    const declared = response.headers.get('Content-Length')
+    if (declared !== null && /^\d+$/.test(declared) && Number(declared) > maxBytes) {
+      throw new ApiProblemError('Text response exceeds its byte limit', response.status, 'response_too_large')
+    }
+    const decoder = new TextDecoder('utf-8', { fatal: true })
+    const parts: string[] = []
+    let size = 0
+    while (reader) {
+      const { done, value } = await reader.read()
+      signal?.throwIfAborted()
+      if (done) break
+      size += value.byteLength
+      if (size > maxBytes) {
+        throw new ApiProblemError('Text response exceeds its byte limit', response.status, 'response_too_large')
+      }
+      parts.push(decoder.decode(value, { stream: true }))
+    }
+    parts.push(decoder.decode())
+    return parts.join('')
+  } finally {
+    signal?.removeEventListener('abort', cancel)
+    // cancel の完了待ちで UI の期限や元の失敗を上書きしない。
+    cancel()
+    reader?.releaseLock()
+  }
 }
 
 /** 失敗 response の body を一度だけ解析し、常に型付き ApiProblemError を送出する。 */
-async function throwProblemFromBody(response: Response): Promise<never> {
+async function throwProblemFromBody(response: Response, maxBytes?: number, signal?: AbortSignal | null): Promise<never> {
   const retryAfterSeconds = parseRetryAfterSeconds(response.headers.get('Retry-After'))
   let value: unknown
   try {
-    value = (await response.json()) as unknown
+    value = maxBytes === undefined ? await response.json()
+      : JSON.parse(await readBoundedText(response, maxBytes, signal)) as unknown
   } catch {
+    signal?.throwIfAborted()
     throw new ApiProblemError(`API returned ${response.status}`, response.status, undefined, retryAfterSeconds)
   }
   throw problemFromResponse(response.status, value, retryAfterSeconds)

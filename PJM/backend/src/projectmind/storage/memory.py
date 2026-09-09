@@ -5,8 +5,10 @@ from __future__ import annotations
 from projectmind.core.hashing import sha256_hex
 from projectmind.storage.blob import (
     BlobNotFoundError,
+    BlobReadLimitExceededError,
     StoredBlob,
     sanitize_object_key,
+    validate_read_limit,
 )
 
 
@@ -26,12 +28,15 @@ class InMemoryFileStorage:
         self._blobs[safe] = (payload, content_type)
         return _blob(safe, payload, content_type)
 
-    async def get(self, key: str) -> bytes:
-        """保存済み正文を返し、無ければ BlobNotFoundError を送出する。"""
+    async def get(self, key: str, *, max_bytes: int | None = None) -> bytes:
+        """欠落と超過を区別し、上限を満たす保存済み正文だけを返す。"""
 
+        validate_read_limit(max_bytes)
         entry = self._blobs.get(sanitize_object_key(key))
         if entry is None:
             raise BlobNotFoundError(f"Blob not found: {key}")
+        if max_bytes is not None and len(entry[0]) > max_bytes:
+            raise BlobReadLimitExceededError("Blob content exceeds the read limit")
         return entry[0]
 
     async def delete(self, key: str) -> None:

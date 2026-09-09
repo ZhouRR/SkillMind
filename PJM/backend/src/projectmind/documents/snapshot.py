@@ -83,6 +83,21 @@ class DocumentSnapshot:
         return {**payload, "checksum": f"sha256:{sha256_hex(canonical_json(payload))}"}
 
 
+def is_document_source(source: object) -> bool:
+    """表示・保存・削除で同じ文書識別規則を使い、旧表記も未確認のまま見落とさない。"""
+
+    if isinstance(source, str):
+        return source in {"project", DOCUMENT_PROVIDER} or source.startswith(
+            ("document:", "documents:", "project-documents:")
+        )
+    return isinstance(source, Mapping) and (
+        source.get("capability") == DOCUMENT_READ_CAPABILITY
+        or source.get("resource_kind") == "document"
+        or source.get("provider") == DOCUMENT_PROVIDER
+        or "document_snapshot" in source
+    )
+
+
 def parse_document_selection(token: str) -> DocumentSelection:
     """既存 sources の文字列契約内で単一・集合・明示的全集を一意に解釈する。"""
 

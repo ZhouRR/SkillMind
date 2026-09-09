@@ -6,6 +6,7 @@ MinIO/S3 具象 `s3.py` と composition 用 factory `factory.py` は barrel か�
 
 from projectmind.storage.blob import (
     BlobNotFoundError,
+    BlobReadLimitExceededError,
     FileStorage,
     FileStorageError,
     StoredBlob,
@@ -20,6 +21,7 @@ from projectmind.storage.validation import (
 
 __all__ = [
     "BlobNotFoundError",
+    "BlobReadLimitExceededError",
     "FileStorage",
     "FileStorageError",
     "InMemoryFileStorage",

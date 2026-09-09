@@ -71,7 +71,7 @@ detail/history 的 selected_sources 只公开 provider / capability / resource_k
 | live Tool 无法取原 ID | 返回不可用；已存副本与 live 可达性分别判断 |
 | 旧 Run 无清单/回执 | 终态只读且标未知；非终态不自动授权全集，需新输入则新建 Run |
 
-当前文档删除尚无 Run/Schedule 引用门禁，可能破坏首次准备；[引用保护与清理](document-lifecycle.md)需补齐。缓存保留不由恢复流程任意删除。
+单文档删除已按原 Run 快照、调度及保留 occurrence 接入[引用门禁](document-lifecycle.md#删除事务与引用判定)，未知历史拒绝删除；真实并发和持久 blob 清理仍待补齐。缓存保留不由恢复流程任意删除。
 
 ### 创建重放与调度
 

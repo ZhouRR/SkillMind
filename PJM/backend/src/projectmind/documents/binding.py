@@ -12,6 +12,7 @@ from projectmind.documents.snapshot import (
     DOCUMENT_READ_CAPABILITY,
     DocumentSnapshotError,
     freeze_document_snapshot,
+    is_document_source,
     parse_document_selection,
 )
 
@@ -47,3 +48,16 @@ async def resolve_document_binding(
         "access": "read",
         "document_snapshot": snapshot.to_json(),
     }
+
+
+async def revalidate_document_choices(
+    repository: DocumentRepository, *, project_id: UUID, sources: dict[str, str]
+) -> None:
+    """锁外検証済みの選択を保存門禁内で再確認し、削除後に旧 ID を保存させない。"""
+
+    for key, token in sources.items():
+        if is_document_source(token):
+            # blob/Skill/Provider は読まない。ALL も現在の空集合や上限を同じ codec で検証する。
+            await resolve_document_binding(
+                repository, project_id=project_id, requirement_key=key, token=token
+            )

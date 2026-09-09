@@ -535,6 +535,17 @@ export interface UiMessages {
   }
   /** 項目文書 panel(DocumentManagerPanel)。 */
   documentsPanel: {
+    unknownTitle: string
+    factsOnly: string
+    checkOriginal: string
+    checking: string
+    present: string
+    absent: string
+    release: string
+    refresh: string
+    failures: Record<'sessionExpired' | 'denied' | 'archived' | 'notFound' | 'inUse'
+      | 'referencesUnavailable' | 'invalid' | 'unknown' | 'loadFailed'
+      | 'previewTooLarge' | 'contentMissing' | 'contentInvalid' | 'storageUnavailable', string>
     selectProjectFirst: string
     listTitle: string
     hint: string
@@ -555,6 +566,7 @@ export interface UiMessages {
     remove: string
     close: string
     loadingPreview: string
+    previewNotice: string
     /** 文書 panel の aria-label。 */
     panelAria: string
   }

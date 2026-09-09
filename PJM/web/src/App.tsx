@@ -465,7 +465,8 @@ function renderPage(
         setProjectId={setProjectId}
       />
     case 'documents':
-      return <DocumentsPage csrfToken={session.csrf_token} projectId={projectId} />
+      return <DocumentsPage csrfToken={session.csrf_token} projectId={projectId}
+        actorId={session.user.user_id} readOnly={currentProject?.status !== 'ACTIVE'} onSessionEnded={onSessionEnded} />
     case 'resources':
       return <ResourcesPage csrfToken={session.csrf_token} projectId={projectId} />
     case 'tasks':

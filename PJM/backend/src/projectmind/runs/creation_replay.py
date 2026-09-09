@@ -20,6 +20,16 @@ from projectmind.runs.domain import (
 def validate_creation_replay(run: Run, requested: TaskRunIntent) -> None:
     """要求と初回の保存事実の両方を照合し、不明な歴史を現在値で補わない。"""
 
+    original = stored_creation_intent(run)
+    if original.fingerprint() != requested.fingerprint():
+        raise IdempotencyConflictError(
+            "Idempotency-Key is already associated with a different request."
+        )
+
+
+def stored_creation_intent(run: Run) -> TaskRunIntent:
+    """原要求を歴史形式と hash の共通規則で検証し、読取と削除保護にも再利用する。"""
+
     try:
         command = _stored_command(run)
         if CREATION_REQUEST_FIELD in command.task_snapshot_json:
@@ -41,10 +51,7 @@ def validate_creation_replay(run: Run, requested: TaskRunIntent) -> None:
             "The stored request cannot be safely replayed; "
             "confirm the existing Run before starting another."
         ) from error
-    if original.fingerprint() != requested.fingerprint():
-        raise IdempotencyConflictError(
-            "Idempotency-Key is already associated with a different request."
-        )
+    return original
 
 
 def _stored_command(run: Run) -> CreateRunCommand:

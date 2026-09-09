@@ -9,8 +9,12 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from projectmind.core.hashing import sha256_hex
-from projectmind.documents.domain import DocumentNotFoundError
+from projectmind.documents.content import read_document_bytes, verify_document_bytes
+from projectmind.documents.domain import (
+    DocumentContentError,
+    DocumentContentInvalidError,
+    DocumentNotFoundError,
+)
 from projectmind.documents.repository import DocumentRepository
 from projectmind.documents.snapshot import DocumentSnapshotError, FrozenDocument
 from projectmind.storage import FileStorage, FileStorageError
@@ -96,7 +100,9 @@ class DatabaseProjectDocumentSource:
                 )
             except DocumentNotFoundError:
                 return None
-        data = await self._file_storage.get(storage_key)
+        data = await read_document_bytes(
+            self._file_storage, storage_key=storage_key, document=document
+        )
         return ProjectDocumentContent(
             document_id=document.document_id,
             folder=document.folder,
@@ -115,7 +121,7 @@ async def read_frozen_document(
 
     try:
         content = await source.fetch(project_id=project_id, document_id=document.document_id)
-    except FileStorageError as error:
+    except (FileStorageError, DocumentContentError) as error:
         raise DocumentSnapshotError("Frozen document content is unavailable") from error
     if content is None:
         raise DocumentSnapshotError("Frozen document is no longer available")
@@ -132,8 +138,12 @@ def verify_frozen_content(document: FrozenDocument, content: ProjectDocumentCont
         or content.name != document.name
         or content.mime != document.mime
         or content.size != document.size
-        or len(content.data) != document.size
         or content.checksum != document.content_hash
-        or f"sha256:{sha256_hex(content.data)}" != document.content_hash
     ):
         raise DocumentSnapshotError("Frozen document content no longer matches its snapshot")
+    try:
+        verify_document_bytes(content.data, size=document.size, checksum=document.content_hash)
+    except DocumentContentInvalidError as error:
+        raise DocumentSnapshotError(
+            "Frozen document content no longer matches its snapshot"
+        ) from error

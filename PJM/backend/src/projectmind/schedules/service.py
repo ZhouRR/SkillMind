@@ -11,6 +11,7 @@ import logging
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from copy import deepcopy
 from datetime import UTC, datetime
 from functools import partial
 from typing import Any
@@ -23,6 +24,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from projectmind.auth.service import AuthenticatedActor
 from projectmind.core.cancellation import check_pending_cancellation
 from projectmind.core.logging import log_event
+from projectmind.documents.binding import revalidate_document_choices
+from projectmind.documents.repository import DocumentRepository
+from projectmind.documents.snapshot import DocumentSnapshotError
 from projectmind.projects.domain import ProjectNotFoundError, ProjectStatus
 from projectmind.projects.repository import ProjectRepository
 from projectmind.runs.domain import (
@@ -172,6 +176,7 @@ class ScheduleService:
 
         validated_name = _validate_name(name)
         first = _first_occurrence(definition)
+        input_json, sources = deepcopy(input_json), deepcopy(sources)
         await self._validate_task_configuration(
             project_id=project_id,
             skill_version_id=skill_version_id,
@@ -179,7 +184,11 @@ class ScheduleService:
             input_json=input_json,
             sources=sources,
         )
-        async with self._write_transaction(access, project_id=project_id) as (repository, users, _):
+        async with self._write_transaction(access, project_id=project_id, sources=sources) as (
+            repository,
+            users,
+            _,
+        ):
             result = await repository.create(
                 CreateScheduleCommand(
                     project_id=project_id,
@@ -211,6 +220,7 @@ class ScheduleService:
 
         validated_name = _validate_name(name)
         first = _first_occurrence(definition)
+        input_json, sources = deepcopy(input_json), deepcopy(sources)
         async with self._session_factory() as session:
             current = await ScheduleRepository(session).get(
                 project_id=project_id, schedule_id=schedule_id
@@ -229,7 +239,11 @@ class ScheduleService:
             sources=sources,
         )
         async with self._write_transaction(
-            access, project_id=project_id, schedule_id=schedule_id
+            access,
+            project_id=project_id,
+            schedule_id=schedule_id,
+            sources=sources,
+            expected_row_version=expected_row_version,
         ) as (repository, _, _):
             result = await repository.update_definition(
                 UpdateScheduleCommand(
@@ -290,7 +304,13 @@ class ScheduleService:
 
     @asynccontextmanager
     async def _write_transaction(
-        self, access: UserAccess, *, project_id: UUID, schedule_id: UUID | None = None
+        self,
+        access: UserAccess,
+        *,
+        project_id: UUID,
+        schedule_id: UUID | None = None,
+        sources: dict[str, str] | None = None,
+        expected_row_version: int | None = None,
     ) -> AsyncIterator[tuple[ScheduleRepository, LockedUsers, ScheduleRecord | None]]:
         """原会話と現在の Project 資格を短期 lock で固定し、全管理書込に同じ門禁を適用する。"""
 
@@ -314,6 +334,23 @@ class ScheduleService:
                     project_id=project_id, schedule_id=schedule_id
                 )
                 # Schedule の待機中に失効しても、状態/CAS 判断や書き込みへ進めない。
+                authorize_user_access(access, users, now=datetime.now(UTC), admin=False, write=True)
+                projects.require_active_write_access(project)
+                if expected_row_version is not None and current.row_version != expected_row_version:
+                    raise ScheduleConflictError("Schedule was modified by another request")
+            if sources is not None:
+                try:
+                    await revalidate_document_choices(
+                        DocumentRepository(session), project_id=project_id, sources=sources
+                    )
+                except DocumentSnapshotError as error:
+                    authorize_user_access(
+                        access, users, now=datetime.now(UTC), admin=False, write=True
+                    )
+                    projects.require_active_write_access(project)
+                    raise ScheduleInvalidError(
+                        "Selected documents are no longer available"
+                    ) from error
                 authorize_user_access(access, users, now=datetime.now(UTC), admin=False, write=True)
                 projects.require_active_write_access(project)
             yield repository, users, current

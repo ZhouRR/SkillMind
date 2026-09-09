@@ -1,8 +1,9 @@
+import { isApiTimestamp, isUuid, sameUuid } from '../lib/validation'
+import { DOCUMENT_PREVIEW_MAX_BYTES } from '../lib/documentPreview'
 import {
   API_BASE,
   hasStrings,
   isRecord,
-  parseItemList,
   requestApiEmpty,
   requestApiJson,
   requestApiText,
@@ -33,8 +34,18 @@ export async function loadProjectDocuments(
 ): Promise<ProjectDocumentRecord[]> {
   return parseDocumentList(await requestApiJson(
     `${API_BASE}/projects/${encodeURIComponent(projectId)}/documents`,
-    { signal },
-  )).documents
+    { signal, cache: 'no-store' }, 200,
+  ), projectId).documents
+}
+
+/** 元の document ID の現在の metadata だけを取得する。原 DELETE の回执ではない。 */
+export async function loadProjectDocument(
+  projectId: string, documentId: string, signal?: AbortSignal,
+): Promise<ProjectDocumentRecord> {
+  return parseDocument(await requestApiJson(
+    `${API_BASE}/projects/${encodeURIComponent(projectId)}/documents/${encodeURIComponent(documentId)}`,
+    { signal, cache: 'no-store' }, 200,
+  ), projectId, documentId)
 }
 
 /** OS が MIME を登録しない拡張子(.md 等)の補完表。server allowlist と同じ語彙に限る。 */
@@ -88,10 +99,11 @@ export async function uploadProjectDocument(
       body: form,
       signal,
     },
-  ))
+    201,
+  ), projectId)
 }
 
-/** ProjectWriteActor の CSRF token 付きで文書 metadata と blob を削除する。 */
+/** 原 ID の metadata 削除 204 のみを受け入れ、blob の完全清理とは解釈しない。 */
 export async function deleteProjectDocument(
   projectId: string,
   documentId: string,
@@ -101,7 +113,7 @@ export async function deleteProjectDocument(
   await requestApiEmpty(
     `${API_BASE}/projects/${encodeURIComponent(projectId)}`
     + `/documents/${encodeURIComponent(documentId)}`,
-    { method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken }, signal },
+    { method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken }, signal, cache: 'no-store' }, 204,
   )
 }
 
@@ -111,30 +123,34 @@ export function projectDocumentContentHref(projectId: string, documentId: string
     + `/documents/${encodeURIComponent(documentId)}/content`
 }
 
-/** 画面内 preview 用に文書 content を text として取得する。 */
+/** Preview は metadata の size を信用せず、実 stream の byte を共通 HTTP 境界で制限する。 */
 export async function loadProjectDocumentText(
   projectId: string,
   documentId: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  return requestApiText(projectDocumentContentHref(projectId, documentId), { signal })
+  return requestApiText(projectDocumentContentHref(projectId, documentId), { signal, cache: 'no-store' },
+    { status: 200, maxBytes: DOCUMENT_PREVIEW_MAX_BYTES })
 }
 
 /** Unknown JSON を文書一覧の公開 contract へ制限する。 */
-function parseDocumentList(value: unknown): DocumentListRecord {
-  return {
-    documents: parseItemList(
-      value,
-      'documents',
-      isDocument,
-      'Document list response did not match its contract',
-    ),
+function parseDocumentList(value: unknown, projectId: string): DocumentListRecord {
+  if (!isRecord(value) || Object.keys(value).length !== 1 || !Array.isArray(value.documents)) {
+    throw new Error('Document list response did not match its contract')
   }
+  const documents = value.documents.map((item) => parseDocument(item, projectId))
+  if (new Set(documents.map((item) => item.document_id.toLowerCase())).size !== documents.length) {
+    throw new Error('Document list contains duplicate identities')
+  }
+  return { documents }
 }
 
 /** Unknown JSON を単一文書 record の公開 contract へ制限する。 */
-function parseDocument(value: unknown): ProjectDocumentRecord {
-  if (!isDocument(value)) throw new Error('Document response did not match its contract')
+function parseDocument(value: unknown, projectId: string, documentId?: string): ProjectDocumentRecord {
+  if (!isDocument(value) || !sameUuid(value.project_id, projectId)
+    || documentId !== undefined && !sameUuid(value.document_id, documentId)) {
+    throw new Error('Document response did not match its contract')
+  }
   return value
 }
 
@@ -146,4 +162,12 @@ function isDocument(value: unknown): value is ProjectDocumentRecord {
       'uploaded_by', 'created_at',
     ])
     && typeof value.size === 'number'
+    && Number.isSafeInteger(value.size) && value.size >= 0
+    && Object.keys(value).length === 9
+    && isUuid(value.document_id) && isUuid(value.project_id) && isUuid(value.uploaded_by)
+    && isApiTimestamp(value.created_at)
+    && /^sha256:[0-9a-f]{64}$/.test(value.checksum as string)
+    && Array.from(value.folder as string).length <= 200
+    && Array.from(value.name as string).length >= 1 && Array.from(value.name as string).length <= 200
+    && Array.from(value.mime as string).length >= 1 && Array.from(value.mime as string).length <= 128
 }

@@ -90,12 +90,25 @@ class DocumentRepository:
         return _to_stored(document), document.storage_key
 
     async def delete(self, *, project_id: UUID, document_id: UUID) -> str:
-        """文書 metadata 行を削除し、blob 削除用の storage_key を返す。"""
+        """service の原会話・文書 lock と無参照確認後に、同一 transaction で行を除く。"""
 
         document = await self._require(project_id=project_id, document_id=document_id)
         storage_key = document.storage_key
         await self._session.delete(document)
         return storage_key
+
+    async def lock_for_deletion(self, *, project_id: UUID, document_id: UUID) -> StoredDocument:
+        """組織・認証・Project の後で原 ID を锁定し、待機前の ORM 値を再利用しない。"""
+
+        document = await self._session.scalar(
+            select(ProjectDocument)
+            .where(ProjectDocument.project_id == project_id, ProjectDocument.id == document_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if document is None:
+            raise DocumentNotFoundError("Document is not available in this project")
+        return _to_stored(document)
 
     async def _require(self, *, project_id: UUID, document_id: UUID) -> ProjectDocument:
         """Project 所有を確認して文書行を返す。越権と不存在は同じ error へ畳む。"""

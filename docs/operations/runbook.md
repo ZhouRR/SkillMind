@@ -71,8 +71,11 @@ v2 同 session 的 GET 不轮换 CSRF，但可能更新 idle；login-context 占
 | 同名 409 且占用增加 | blob 先于 metadata 约束写入，可能有孤立对象；不重复上传验证 |
 | 目录仅部分完成 | 逐文件分清确认与未知；done 不是成功数，不重传整批 |
 | DELETE 报错后 ID 消失 | metadata 可能已提交；404 不恢复清理，不循环删或改删同路径新 ID |
+| 删除 409 引用冲突 | document_in_use 保留原引用；document_references_unavailable 表示历史无法核实。核对原 Run/调度/保留 occurrence，不删审计、改 hash 或换同名 ID 绕过 |
 | 204 后对象仍在 | S3 适配器可能吞权限等错误，授权存储负责人核对原对象，不清 Project 前缀 |
-| 下载失败/内容不符 | 查非 Latin-1 文件名 header、元数据/实际字节及存储，不改 checksum 掩盖损坏 |
+| 下载 409 document_content_missing / document_content_invalid | 分别表示原 blob 缺失或内容不符；保留原 ID/hash，按获准恢复点核对，不改 checksum 或用同名文件掩盖损坏 |
+| 下载 503 document_storage_unavailable | 核对获准存储的可达性与权限，不当作文件缺失或删除成功；不导出内部 key/SDK 正文 |
+| 预览超限或样式/图片消失 | 实际 byte 超限会停止读取；HTML 只保留静态结构，主动内容/资源不展示。可下载原文件，但下载后打开的安全性另行判断 |
 
 没有通用孤立对象清理/配额修复 CLI；[文档生命周期](../design/document-lifecycle.md)定义修正边界。冻结输入不能靠同名重传修复。
 

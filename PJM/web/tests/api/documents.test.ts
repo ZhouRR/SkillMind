@@ -4,6 +4,7 @@ import {
   API_BASE,
   deleteProjectDocument,
   loadProjectDocuments,
+  loadProjectDocument,
   loadProjectDocumentText,
   projectDocumentContentHref,
   uploadProjectDocument,
@@ -40,6 +41,36 @@ function jsonFetch(body: unknown, status: number) {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Project document API contract', () => {
+  it('reads only exact metadata with no cache and no mutation', async () => {
+    const mock = jsonFetch(DOCUMENT, 200)
+    vi.stubGlobal('fetch', mock)
+    expect(await loadProjectDocument(PROJECT_ID, DOCUMENT_ID)).toEqual(DOCUMENT)
+    expect(mock.mock.calls[0]?.[0]).toBe(`${API_BASE}/projects/${PROJECT_ID}/documents/${DOCUMENT_ID}`)
+    expect(mock.mock.calls[0]?.[1]?.cache).toBe('no-store')
+    expect(mock.mock.calls[0]?.[1]?.method).toBeUndefined()
+  })
+
+  it.each([200, 201, 202, 205, 206])('rejects DELETE success status %s as unconfirmed', async (status) => {
+    vi.stubGlobal('fetch', jsonFetch({}, status))
+    await expect(deleteProjectDocument(PROJECT_ID, DOCUMENT_ID, CSRF)).rejects.toThrow()
+  })
+
+  it.each([
+    { size: -1 }, { size: 1.5 }, { size: Number.MAX_SAFE_INTEGER + 1 },
+    { document_id: 'wrong' }, { project_id: DOCUMENT_ID }, { document_id: PROJECT_ID },
+    { uploaded_by: 'wrong' }, { created_at: '2026-01-01T00:00:00' },
+    { checksum: 'sha256:wrong' }, { name: '' }, { name: 'x'.repeat(201) },
+    { mime: '' }, { folder: 'x'.repeat(201) }, { storage_key: 'must-not-be-public' },
+  ])('rejects corrupt or cross-target metadata %j', async (changes) => {
+    vi.stubGlobal('fetch', jsonFetch({ ...DOCUMENT, ...changes }, 200))
+    await expect(loadProjectDocument(PROJECT_ID, DOCUMENT_ID)).rejects.toThrow()
+  })
+
+  it('does not accept duplicate identities in the current list', async () => {
+    vi.stubGlobal('fetch', jsonFetch({ documents: [DOCUMENT, DOCUMENT] }, 200))
+    await expect(loadProjectDocuments(PROJECT_ID)).rejects.toThrow('duplicate')
+  })
+
   it('lists project documents and enforces the record contract', async () => {
     const fetchMock = jsonFetch({ documents: [DOCUMENT] }, 200)
     vi.stubGlobal('fetch', fetchMock)
@@ -60,7 +91,7 @@ describe('Project document API contract', () => {
     vi.stubGlobal('fetch', jsonFetch({ documents: [withoutSize] }, 200))
 
     await expect(loadProjectDocuments(PROJECT_ID))
-      .rejects.toThrow('Document list response did not match its contract')
+      .rejects.toThrow('Document response did not match its contract')
   })
 
   it('uploads a directory file by splitting webkitRelativePath into folder and name', async () => {

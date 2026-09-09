@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import {
-  deleteProjectDocument,
   loadProjectDocuments,
   loadProjectDocumentText,
   projectDocumentContentHref,
@@ -9,14 +8,12 @@ import {
   type ProjectDocumentRecord,
 } from '../api'
 import { useMessages } from '../i18n'
+import { useDocumentDeletion } from '../hooks/useDocumentDeletion'
+import { useResourceQuery, type SessionEnded } from '../hooks/useResourceRequest'
+import { DOCUMENT_REQUEST_POLICY, documentFailure } from '../lib/documentFeedback'
+import { DOCUMENT_PREVIEW_MAX_BYTES as PREVIEW_MAX_BYTES, documentPreviewHtml } from '../lib/documentPreview'
 import { formatByteSize, formatLocalTimestamp } from '../lib/presentation'
 import { EmptyState, LoadingSkeleton, ModalDialog, useConfirmDialog } from './PageElements'
-
-/** 文書一覧取得の非同期状態。 */
-type DocumentsState =
-  | { status: 'loading' }
-  | { status: 'ready'; documents: ProjectDocumentRecord[] }
-  | { status: 'error'; message: string }
 
 /** 多 file/目録 upload の非同期状態。 */
 type UploadState =
@@ -37,7 +34,7 @@ const DOCUMENT_PREVIEWERS: Record<string, DocumentPreviewKind> = {
 }
 
 /** 画面内 preview を許可する最大 byte 数。超過は download へ誘導する。 */
-export const PREVIEW_MAX_BYTES = 1_000_000
+export { PREVIEW_MAX_BYTES }
 
 /** 文書名から preview 種別を引く。対象外は null。 */
 export function documentPreviewKind(name: string): DocumentPreviewKind | null {
@@ -51,6 +48,13 @@ export type DocumentPreviewState =
   | { status: 'ready'; document: ProjectDocumentRecord; kind: DocumentPreviewKind; content: string }
   | { status: 'error'; document: ProjectDocumentRecord; message: string }
 
+/** 同じ ID の再読取も別 request として所有し、閉じる瞬間に旧応答を無効化する。 */
+interface PreviewRequest {
+  id: number
+  document: ProjectDocumentRecord
+  kind: DocumentPreviewKind
+}
+
 /** folder path を実際の階層として表示するための文書 tree node。root は name/path とも空文字。 */
 export interface DocumentTreeNode {
   name: string
@@ -59,75 +63,77 @@ export interface DocumentTreeNode {
   files: ProjectDocumentRecord[]
 }
 
-/** Project 作用域の文書を階層 tree で一覧・preview・upload・download・削除する自蔵 panel。 */
-export function DocumentManagerPanel({ projectId, csrfToken }: {
+/** 原 actor/会話/Project ごとに未知意図と非同期処理の owner を分離する。 */
+interface DocumentManagerProps {
   projectId: string
   csrfToken: string
-}) {
+  actorId: string
+  readOnly: boolean
+  onSessionEnded: SessionEnded
+}
+
+/** 会話切替で同じ Project に戻っても旧 DELETE の結果を引き継がない。 */
+export function DocumentManagerPanel(props: DocumentManagerProps) {
+  return <DocumentManagerBody key={`${props.actorId}:${props.csrfToken}:${props.projectId}`} {...props} />
+}
+
+/** 現在の文書目录と原削除意図を分けて所有する。 */
+function DocumentManagerBody({ projectId, csrfToken, readOnly, onSessionEnded }: DocumentManagerProps) {
   const messages = useMessages()
-  const [documentsState, setDocumentsState] = useState<DocumentsState>({ status: 'loading' })
   const [uploadState, setUploadState] = useState<UploadState>({ status: 'idle' })
-  const [preview, setPreview] = useState<DocumentPreviewState | null>(null)
-  const [actionError, setActionError] = useState<string | null>(null)
-  const [busyId, setBusyId] = useState<string | null>(null)
+  const [preview, setPreview] = useState<PreviewRequest | null>(null)
   const [revision, setRevision] = useState(0)
   const { confirm, confirmDialog } = useConfirmDialog()
-  const loadController = useRef<AbortController | null>(null)
   const uploadController = useRef<AbortController | null>(null)
-  const deleteController = useRef<AbortController | null>(null)
-  const previewController = useRef<AbortController | null>(null)
+  const previewRequest = useRef<PreviewRequest | null>(null)
+  const previewSequence = useRef(0)
+  const mounted = useRef(false)
+  const confirmPending = useRef(false)
+  const [confirming, setConfirming] = useState(false)
+  const refresh = useCallback(() => setRevision((current) => current + 1), [])
+  const deletion = useDocumentDeletion({ projectId, csrfToken, readOnly, onSessionEnded, onDeleted: refresh })
+  const { observeFailure } = deletion
+  const loader = useCallback(async (signal: AbortSignal) => {
+    try { return await loadProjectDocuments(projectId, signal) }
+    catch (error: unknown) { if (!signal.aborted) observeFailure(error); throw error }
+  }, [projectId, observeFailure])
+  const list = useResourceQuery(`${projectId}:${revision}`, loader, onSessionEnded, DOCUMENT_REQUEST_POLICY)
+  const documentsState = list.failure ? { status: 'error' as const, message: messages.documentsPanel.failures[list.failure.key] }
+    : list.data ? { status: 'ready' as const, documents: list.data } : { status: 'loading' as const }
+  const blocked = readOnly || !!deletion.denied || deletion.phase !== 'idle' || confirming || uploadState.status === 'uploading'
+  const busyId = deletion.phase === 'sending' ? deletion.intent?.document_id ?? '__blocked__' : blocked ? '__blocked__' : null
 
-  useEffect(() => () => {
-    loadController.current?.abort()
-    uploadController.current?.abort()
-    deleteController.current?.abort()
-    previewController.current?.abort()
-  }, [])
-
-  // projectId は sidebar/项目管理の検証済み選択に限られるため、未選択（空）だけを弾けばよい。
-  useEffect(() => {
-    loadController.current?.abort()
-    if (!projectId) {
-      setDocumentsState({ status: 'error', message: messages.documentsPanel.selectProjectFirst })
-      return
+  useLayoutEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      uploadController.current?.abort()
+      previewRequest.current = null
     }
-    const controller = new AbortController()
-    loadController.current = controller
-    // 再取得中も直前の一覧を保ち、upload/削除のたびに空表示へ跳ねることを防ぐ。
-    setDocumentsState((current) => current.status === 'ready' ? current : { status: 'loading' })
-    void loadProjectDocuments(projectId, controller.signal)
-      .then((documents) => setDocumentsState({ status: 'ready', documents }))
-      .catch((caught: unknown) => {
-        if (!controller.signal.aborted) {
-          setDocumentsState({
-            status: 'error',
-            message: caught instanceof Error ? caught.message : 'Unknown document API error',
-          })
-        }
-      })
-    return () => controller.abort()
-  }, [projectId, revision])
+  }, [])
 
   /** 選択した file/目録を 1 件ずつ multipart upload し、失敗した file だけを報告する。 */
   async function handleUpload(files: File[]): Promise<void> {
-    if (files.length === 0) return
-    uploadController.current?.abort()
+    if (files.length === 0 || !mounted.current || !deletion.canWrite() || confirmPending.current || uploadController.current) return
     const controller = new AbortController()
     uploadController.current = controller
-    setActionError(null)
     setUploadState({ status: 'uploading', done: 0, total: files.length })
     const failures: string[] = []
     for (const [index, file] of files.entries()) {
       try {
         await uploadProjectDocument(projectId, file, csrfToken, controller.signal)
+        if (controller.signal.aborted || !mounted.current) return
       } catch (caught: unknown) {
         if (controller.signal.aborted) return
         const label = file.webkitRelativePath || file.name
-        failures.push(`${label}: ${caught instanceof Error ? caught.message : messages.documentsPanel.uploadFailed}`)
+        observeFailure(caught)
+        failures.push(`${label}: ${messages.documentsPanel.failures[documentFailure(caught, true).key]}`)
+        if (['sessionExpired', 'denied', 'archived'].includes(documentFailure(caught, true).key)) break
       }
       setUploadState({ status: 'uploading', done: index + 1, total: files.length })
     }
     if (controller.signal.aborted) return
+    uploadController.current = null
     setUploadState(
       failures.length === 0 ? { status: 'idle' } : { status: 'error', message: failures.join(messages.documentsPanel.failureJoin) },
     )
@@ -137,54 +143,35 @@ export function DocumentManagerPanel({ projectId, csrfToken }: {
 
   /** 所有確認は backend に委ね、UI では明示確認の上で 1 件を削除する。 */
   async function handleDelete(document: ProjectDocumentRecord): Promise<void> {
-    if (!await confirm({
+    if (!mounted.current || !deletion.canWrite() || confirmPending.current || uploadController.current) return
+    confirmPending.current = true
+    setConfirming(true)
+    const confirmed = await confirm({
       title: messages.documentsPanel.remove,
       message: messages.documentsPanel.deleteConfirm(document.name),
       confirmLabel: messages.documentsPanel.remove,
       destructive: true,
-    })) return
-    deleteController.current?.abort()
-    const controller = new AbortController()
-    deleteController.current = controller
-    setBusyId(document.document_id)
-    setActionError(null)
-    try {
-      await deleteProjectDocument(projectId, document.document_id, csrfToken, controller.signal)
-      setRevision((current) => current + 1)
-    } catch (caught: unknown) {
-      if (!controller.signal.aborted) {
-        setActionError(caught instanceof Error ? caught.message : 'Unknown delete API error')
-      }
-    } finally {
-      if (!controller.signal.aborted) setBusyId(null)
-    }
+    })
+    confirmPending.current = false
+    if (!mounted.current) return
+    setConfirming(false)
+    if (confirmed) deletion.submit(document)
   }
 
-  /** 対象文書の content を取得し、種別に応じた dialog preview を開く。 */
-  async function handlePreview(
+  /** HTTP 待機は共通 query に委ね、クリックと同時に前 request の所有権を閉じる。 */
+  function handlePreview(
     document: ProjectDocumentRecord,
     kind: DocumentPreviewKind,
-  ): Promise<void> {
-    previewController.current?.abort()
-    const controller = new AbortController()
-    previewController.current = controller
-    setPreview({ status: 'loading', document })
-    try {
-      const content = await loadProjectDocumentText(projectId, document.document_id, controller.signal)
-      setPreview({ status: 'ready', document, kind, content })
-    } catch (caught: unknown) {
-      if (!controller.signal.aborted) {
-        setPreview({
-          status: 'error',
-          document,
-          message: caught instanceof Error ? caught.message : 'Unknown preview error',
-        })
-      }
-    }
+  ): void {
+    if (!mounted.current || document.size > PREVIEW_MAX_BYTES) return
+    const request = { id: ++previewSequence.current, document: { ...document }, kind }
+    previewRequest.current = request
+    setPreview(request)
   }
 
+  /** React commit 前の遅れた 401 も、新しい会話や書込資格へ影響させない。 */
   function closePreview(): void {
-    previewController.current?.abort()
+    previewRequest.current = null
     setPreview(null)
   }
 
@@ -205,6 +192,7 @@ export function DocumentManagerPanel({ projectId, csrfToken }: {
           <input
             type="file"
             multiple
+            disabled={blocked}
             aria-label={messages.documentsPanel.uploadFilesAria}
             onChange={(event) => {
               const selected = event.currentTarget.files ? Array.from(event.currentTarget.files) : []
@@ -218,6 +206,7 @@ export function DocumentManagerPanel({ projectId, csrfToken }: {
           <input
             type="file"
             multiple
+            disabled={blocked}
             aria-label={messages.documentsPanel.uploadFolderAria}
             ref={(element) => { element?.setAttribute('webkitdirectory', '') }}
             onChange={(event) => {
@@ -232,7 +221,27 @@ export function DocumentManagerPanel({ projectId, csrfToken }: {
         <p className="hint" role="status">{messages.documentsPanel.uploading(uploadState.done, uploadState.total)}</p>
       )}
       {uploadState.status === 'error' && <p className="error" role="alert">{uploadState.message}</p>}
-      {actionError && <p className="error" role="alert">{actionError}</p>}
+      {readOnly && <p className="hint">{messages.documentsPanel.failures.archived}</p>}
+      {(deletion.denied || deletion.failure) && <p className="error" role="alert">
+        {messages.documentsPanel.failures[(deletion.denied ?? deletion.failure)!.key]}
+      </p>}
+      {deletion.phase === 'unknown' && deletion.intent && <section className="panel" aria-label={messages.documentsPanel.unknownTitle}>
+        <h3>{messages.documentsPanel.unknownTitle}</h3>
+        <p>{deletion.intent.name}</p><p className="hint">{deletion.intent.document_id}</p>
+        <p>{messages.documentsPanel.factsOnly}</p>
+        <button type="button" className="secondaryButton" disabled={deletion.checking || !!deletion.denied}
+          onClick={deletion.checkOriginal}>{messages.documentsPanel.checkOriginal}</button>
+        {deletion.checking && <p role="status">{messages.documentsPanel.checking}</p>}
+        {deletion.checkFailure && <p role="alert">{messages.documentsPanel.failures[deletion.checkFailure.key]}</p>}
+        {deletion.facts && <>
+          <p role="status">{deletion.facts.status === 'present' ? messages.documentsPanel.present : messages.documentsPanel.absent}</p>
+          <button type="button" className="secondaryButton" disabled={!!deletion.denied}
+            onClick={deletion.release}>{messages.documentsPanel.release}</button>
+        </>}
+      </section>}
+      <button type="button" className="secondaryButton" onClick={refresh} disabled={list.pending}>
+        {messages.documentsPanel.refresh}
+      </button>
       {documentsState.status === 'loading' && <LoadingSkeleton label={messages.documentsPanel.loadingDocs} rows={2} />}
       {documentsState.status === 'error' && <p className="error" role="alert">{documentsState.message}</p>}
       {documentsState.status === 'ready' && documents.length === 0 && (
@@ -247,10 +256,41 @@ export function DocumentManagerPanel({ projectId, csrfToken }: {
           onPreview={(document, kind) => void handlePreview(document, kind)}
         />
       )}
-      {preview && <DocumentPreviewDialog preview={preview} projectId={projectId} onClose={closePreview} />}
+      {preview && <DocumentPreviewLoader key={preview.id} request={preview} projectId={projectId}
+        isCurrent={() => mounted.current && previewRequest.current === preview}
+        observeFailure={observeFailure} onClose={closePreview} />}
       {confirmDialog}
     </section>
   )
+}
+
+/** 読取の期限・取消・遅延応答を通常 query と共有し、現在 request の拒否だけを伝える。 */
+function DocumentPreviewLoader({ request, projectId, isCurrent, observeFailure, onClose }: {
+  request: PreviewRequest
+  projectId: string
+  isCurrent: () => boolean
+  observeFailure: (error: unknown) => void
+  onClose: () => void
+}) {
+  const messages = useMessages()
+  const current = useRef(isCurrent)
+  current.current = isCurrent
+  const loader = useCallback(async (signal: AbortSignal) => {
+    signal.throwIfAborted()
+    if (!current.current()) throw new DOMException('Preview request is no longer current', 'AbortError')
+    const content = await loadProjectDocumentText(projectId, request.document.document_id, signal)
+    signal.throwIfAborted()
+    if (!current.current()) throw new DOMException('Preview request is no longer current', 'AbortError')
+    return content
+  }, [projectId, request])
+  // observeFailure が書込門禁と会話失効を一度に通知するため、query から二重通知しない。
+  const query = useResourceQuery(String(request.id), loader, () => undefined, DOCUMENT_REQUEST_POLICY, true,
+    (error) => { if (current.current()) observeFailure(error) })
+  const preview: DocumentPreviewState = query.failure
+    ? { status: 'error', document: request.document, message: messages.documentsPanel.failures[query.failure.key] }
+    : query.pending || query.data === null ? { status: 'loading', document: request.document }
+      : { status: 'ready', document: request.document, kind: request.kind, content: query.data }
+  return <DocumentPreviewDialog preview={preview} projectId={projectId} onClose={onClose} />
 }
 
 /** 文書一覧を folder path の実階層で表示する presentational tree。folder 先行・file 後続で安定表示する。 */
@@ -382,7 +422,7 @@ function FileRow({ document, projectId, busyId, onDelete, onPreview }: {
         </a>
         <button
           className="secondaryButton compactButton"
-          disabled={busyId === document.document_id}
+          disabled={busyId !== null}
           onClick={() => onDelete(document)}
           type="button"
         >
@@ -393,7 +433,7 @@ function FileRow({ document, projectId, busyId, onDelete, onPreview }: {
   )
 }
 
-/** 文書 preview を共通 modal として描画する。text は原文、html は script 無効の sandbox iframe。
+/** 文書 preview を共通 modal として描画する。HTML は静的 allowlist と CSP 付き sandbox に限定する。
  *
  *  親が preview 有無で条件描画するため、ここでの open は常に true。
  *  遮罩・Escape・背面 scroll 停止・焦点復帰は ModalDialog 側の共通実装に委ねる。 */
@@ -404,6 +444,8 @@ export function DocumentPreviewDialog({ preview, projectId, onClose }: {
 }) {
   const messages = useMessages()
   const { document } = preview
+  const html = useMemo(() => preview.status === 'ready' && preview.kind === 'html'
+    ? documentPreviewHtml(preview.content) : '', [preview])
   return (
     <ModalDialog
       open
@@ -427,8 +469,10 @@ export function DocumentPreviewDialog({ preview, projectId, onClose }: {
         <pre className="previewText">{preview.content}</pre>
       )}
       {preview.status === 'ready' && preview.kind === 'html' && (
-        // sandbox 属性を空集合にして script/同源権限を全面禁止した表示専用 frame。
-        <iframe className="previewFrame" sandbox="" srcDoc={preview.content} title={document.name} />
+        <>
+          <p className="hint">{messages.documentsPanel.previewNotice}</p>
+          <iframe className="previewFrame" sandbox="" referrerPolicy="no-referrer" srcDoc={html} title={document.name} />
+        </>
       )}
     </ModalDialog>
   )

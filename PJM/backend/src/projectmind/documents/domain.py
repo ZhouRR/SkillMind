@@ -43,3 +43,27 @@ class DocumentNotFoundError(LookupError):
 
 class DocumentConflictError(ValueError):
     """同一 folder/name の文書が既に存在することを表す。"""
+
+
+class DocumentContentError(RuntimeError):
+    """保存済み文書の正文を安全に提供できないことを表す。"""
+
+
+class DocumentContentMissingError(DocumentContentError):
+    """元の metadata はあるが、元の blob が存在しないことを表す。"""
+
+
+class DocumentContentInvalidError(DocumentContentError):
+    """正文の実 size/hash が保存された metadata と一致しないことを表す。"""
+
+
+class DocumentStorageUnavailableError(DocumentContentError):
+    """存否を断定できない storage の拒否・通信障害を表す。"""
+
+
+class DocumentInUseError(ValueError):
+    """原文書が実行・調度・保持済み発火に参照されていることを表す。"""
+
+
+class DocumentReferencesUnavailableError(ValueError):
+    """歴史の欠落や破損のため、無参照を安全に確認できないことを表す。"""

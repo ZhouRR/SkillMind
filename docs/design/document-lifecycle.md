@@ -10,16 +10,17 @@
 
 ## 身份、目录与公开面
 
-ProjectDocument 元数据在 PostgreSQL，blob 用内部 storage_key 定位。document_id 是身份，folder/name 是展示路径；同 Project/路径唯一，不按内容去重。只有上传、列表、下载、删除，无覆盖、移动、改名、版本或恢复 API；目录由 folder 投影，空目录不保存。
+ProjectDocument 元数据在 PostgreSQL，blob 用内部 storage_key 定位。document_id 是身份，folder/name 是展示路径；同 Project/路径唯一，不按内容去重。提供上传、列表、精确元数据读取、下载和删除，无覆盖、移动、改名、版本或恢复 API；目录由 folder 投影，空目录不保存。
 
 | 操作 | 当前语义 |
 | --- | --- |
 | POST documents | 单 file + 可选 folder 的 multipart，201 元数据；同名 409 document_conflict |
 | GET documents | 按 folder/name 排序的完整数组，无查询/分页/Folder 契约 |
-| GET document content | Project + 精确 ID 授权后返回附件，不是公共 blob URL |
+| GET document | 按 Project + 原 ID 读取当前元数据；不是原删除或清理回执 |
+| GET document content | Project + 精确 ID 授权、核验实际 size/hash 后返回附件，不是公共 blob URL |
 | DELETE document | 元数据 commit 后调用 storage，通常 204，不保证完整清理 |
 
-公开数据只含身份、路径、size/MIME/checksum、上传者和时间。读用 ProjectReadActor，写用 ProjectWriteActor 且要求 ACTIVE；越权与不存在统一 404。授权先于业务提交，尚不能保证在途撤权/归档阻止随后保存。
+公开数据只含身份、路径、size/MIME/checksum、上传者和时间。读用 ProjectReadActor，写用 ProjectWriteActor 且要求 ACTIVE；越权与不存在统一 404，已处理文档响应使用 no-store。删除另有下述事务复核；上传仍未闭合在途撤权/归档与保存竞争。
 
 ## 上传的三个边界
 
@@ -46,19 +47,57 @@ ProjectDocument 元数据在 PostgreSQL，blob 用内部 storage_key 定位。do
 
 ## 读取、下载与预览
 
-普通下载不复核真实 size/checksum；read_frozen_document 才验证原 ID、元数据与字节。目标统一完整性与安全错误，区分损坏、缺失、存储不可用，不用同路径新文件补旧引用。
+普通下载和冻结来源使用同一实际字节校验；按原 ID 取元数据，锁外读取该对象，确认 size/SHA-256 后才返回完整内容。冻结读取额外比对原快照的 ID、路径、MIME 与 hash，不使用同路径新文件替代。
 
-Web 仅预览 txt/md/markdown/htm/html，元数据不超过 1,000,000 bytes；Markdown 显示原文，超限提示下载。HTML srcDoc 使用 sandbox="" 禁脚本/同源，但没有外部资源禁载策略，不是网络隔离或 generated Host。
+S3 在同一次 GET 中最多读取声明 size + 1 bytes 判定超限，不先 stat 再读；连接、读取、关闭均在线程内，不阻塞事件循环。取消等待不证明 SDK 线程或远端已停止，线程仍负责关闭自己的响应。这个边界不等于全服务内存、并发或网络超时预算。
 
-待补实际预览字节上限、外部图片/CSS 拒绝、下载文件名安全编码。现行直接拼 filename 对非 Latin-1 名称会失败，引号也需测试；上传接受中文名不证明下载可用。
+| 下载结果 | 稳定响应与处理 |
+| --- | --- |
+| 元数据不存在或越权 | 原有 404；不通过存储枚举补查身份 |
+| 元数据仍在、原 blob 缺失 | 409 document_content_missing；不按同名文件补齐 |
+| 实际大小/hash 不符或元数据不合法 | 409 document_content_invalid；不返回部分内容或重算保存 hash |
+| S3 拒绝、断连、读取故障 | 503 document_storage_unavailable；不当作文件不存在，不公开 key/SDK 错误 |
+
+附件始终带 no-store、nosniff 与安全 Content-Disposition；保留合法 MIME，非法值降级为 octet-stream。文件名用单段 ASCII fallback 与 UTF-8 filename*，不直接拼接中文、引号或控制字符，不改数据库原名。
+
+Web 仅预览 txt/md/markdown/htm/html，统一上限 1,000,000 bytes。列表 size 只用于禁用按钮；client 只接受 200，按实际响应流计数，缺失或低报 Content-Length 不绕过上限，错误正文也有界。超限即停止等待并提示下载，不展示截断片段；UTF-8 无法解码时明确失败。
+
+Markdown/文本保持原文。HTML 在无浏览上下文的 template 中解析，只重建静态正文/基础结构白名单；不保留脚本、上传 CSS、表单、嵌套 frame、外部资源、URL/事件属性。图片只留下已有替代文字，链接只显示文本；超过 20,000 个解析节点则安全显示原文，不递归截断内容。
+
+重建后的 srcDoc 在正文之前设置[默认拒绝的 CSP](https://www.w3.org/TR/CSP3/#meta-element)，只允许平台固定显示 CSS；iframe 使用 sandbox="" 与 no-referrer。页面明确提示预览会移除主动内容，原始文件仍可下载。这是静态文档预览，不是 generated Host，也不保证下载后在其他应用打开原文件的安全。
+
+预览共用 30 秒读取门禁。关闭、同 tick 换文件、换 actor/会话/Project 时立即失效原请求；晚到正文或 401 不影响新上下文。当前读取的 401/403/Project 404 关闭写入资格，不被列表刷新重新打开；预览结果不解除未知删除。
 
 ## 删除与历史引用
 
-当前无 Run/Schedule 引用检查或持久清理回执：元数据 commit 后 storage 失败会留下 blob，原 ID 再删先得 404；S3 adapter 吞掉全部 S3Error，204 可掩盖 AccessDenied。整 Project 删除另走元数据清单，不调用逐文件清理。
+单文档删除已接引用检查及原会话门禁；元数据 commit 后才尝试原 key 的 storage 删除。没有持久清理回执：storage 失败仍会留下 blob，原 ID 再删先得 404；S3 adapter 吞掉全部 S3Error，204 可掩盖 AccessDenied。整 Project 删除另走元数据清单，不调用逐文件清理。
 
-### 引用保护与清理的修正要求
+### 删除事务与引用判定
 
-- Run、Schedule、JSON snapshot 和在途冻结引用共同阻止物理删除；引用检查与新增引用共享并发约束，不只隐藏按钮或检查外键。
+```text
+Organization UPDATE → 当前 User SHARE → 原 AuthSession UPDATE
+  → Project / 成员 SHARE → 原 Document UPDATE
+  → 校验历史引用 → 删除元数据 / flush → 最终授权 → commit
+  → 锁外尝试删除原 blob
+```
+
+只接收原 cookie/CSRF 与服务器 request UUID，不另选同用户的新会话。各次锁等待、引用读取后和最终 flush 后复核原授权；资格失效整体回滚。DB 异常、取消或 commit 响应未知不触发 blob 删除，也不自动重发。
+
+| 保存事实 | 删除判定 |
+| --- | --- |
+| 任意状态 Run 的可信文档快照 | 原请求、Project/槽位、成员/hash 一致后，保护冻结 ID；终态和已存副本不解除引用 |
+| 任意状态 Schedule 的 SINGLE/SET | 保护显式原 ID；暂停、归档或未触发不解除引用 |
+| 所有保留 occurrence 的 SINGLE/SET | 原快照/checksum/索引及父身份须匹配；编辑后的旧配置、SETTLED 无 Run 的审计仍保护原 ID |
+| Schedule/occurrence 的动态 ALL | 尚未展开的规则不永久占有当前目录；已创建 Run 的 ALL 只保护原冻结成员 |
+| 原可选槽位未选、无文档的合法 Run | 不推导文档引用；任意输入文本中的 UUID 不是引用 |
+| 旧 provider 名无法辨义、缺失或损坏快照 | 返回 409 document_references_unavailable，不当作空集合放行 |
+
+精确引用返回 409 document_in_use，不公开引用记录的正文或 ID。只扫描相关 Project，不以“项目有任意 Run”代替判定；旧数据不回写、不补 hash。当前扫描成本及真实 PostgreSQL 并发尚待验收。
+
+新 Run 创建、调度保存与删除使用同一 Organization 门禁；调度创建/编辑在锁内重新校验文档元数据，避免“锁外验证成功 → 文档被删 → 保存悬空 ID”。认领只在 Schedule 锁内复制原配置，不反向获取 Organization；已有 Run 的输入回执、工作区和 Evidence 沿原冻结来源派生，不新增授权。任意 SQL、旧 writer 或混合版本不在该保证内。
+
+### 持久清理仍待补齐
+
 - 若需停止新选择，另设计可审计退役状态；不迁移旧 ID/hash，不用删除再上传模拟版本。
 - 元数据持久记录待清理身份和精确对象；异步确认、失败重试，不按 bucket 前缀广泛删除。不存在、拒绝、断连、未知分别记录。
 - 单文档与整 Project 共用清理协议；Run 副本和备份独立保留。当前没有该协议、状态 API 或修复 CLI。
@@ -69,7 +108,11 @@ Web 仅预览 txt/md/markdown/htm/html，元数据不超过 1,000,000 bytes；Ma
 
 目标分别展示成功/确定拒绝/未知，保留原文件、Project、路径，不自动重发整目录，也不以同名列表项证明成功。上传/删除需同步防重复及 actor/Project/request 身份检查；切换、卸载后丢弃晚到响应。
 
-删除未知只读核对原 ID，不能宣称附件已彻底清理。client 尚缺 UUID/日期/checksum/安全整数/Project 关联的严格校验，组件未知状态也未闭合；受控三语错误不暴露存储细节。未来分页须标明已加载范围。
+删除使用共享请求门禁，确认前同步防重复，所有文档共用一个写入入口；不以删除 B 中断删除 A。只有合法 204 才结束本次删除等待；异常 2xx、超时/断连均保留原 ID 为未知，不宣称附件已彻底清理。
+
+未知后人工 GET 原 ID：合法元数据或明确 document_not_found 404 只说明当前目录事实；Project 404、401/403 不算核对成功，并关闭新写入。读取成功后仍须人工解除门禁，解除不重发。刷新列表、预览和同名重传不替换原 ID；换 actor/CSRF/Project 或离页不接收旧响应、不承诺跨刷新恢复。归档项目只读。
+
+client 已校验 UUID/带时区日期/checksum/安全整数、字段白名单及原 Project/ID，受控三语不显示内部错误。上传的持久原意图、完整部分成功/未知处理仍待补齐；未来分页须标明已加载范围。
 
 ## 开发接续与验收
 

@@ -1779,10 +1779,21 @@ class FakeDocumentService:
         document = _fake_document(project_id, uuid4(), "specs", "overview.md", 12, "text/markdown")
         return document, self.content
 
-    async def delete_document(self, *, project_id: UUID, document_id: UUID) -> None:
+    async def get_document(self, *, project_id: UUID, document_id: UUID) -> StoredDocument:
+        """元 ID のみを反映し、本文の読取や削除を行わない。"""
+
+        if self.not_found:
+            raise DocumentNotFoundError("Document unavailable")
+        document = _fake_document(project_id, uuid4(), "specs", "overview.md", 12, "text/markdown")
+        return replace(document, document_id=document_id)
+
+    async def delete_document(
+        self, *, project_id: UUID, document_id: UUID, access: UserAccess
+    ) -> None:
         """削除を記録し、missing scenario では domain error を返す。"""
 
         assert project_id
+        assert access.actor.user_id
         if self.not_found:
             raise DocumentNotFoundError(f"Document not found: {document_id}")
         self.deleted.append(document_id)

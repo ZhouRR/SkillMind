@@ -127,6 +127,7 @@ export type {
 export {
   deleteProjectDocument,
   loadProjectDocuments,
+  loadProjectDocument,
   loadProjectDocumentText,
   projectDocumentContentHref,
   uploadProjectDocument,

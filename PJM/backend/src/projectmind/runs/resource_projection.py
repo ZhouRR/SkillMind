@@ -12,6 +12,7 @@ from projectmind.documents.snapshot import (
     DOCUMENT_READ_CAPABILITY,
     DocumentSnapshot,
     DocumentSnapshotError,
+    is_document_source,
     parse_document_snapshot,
     snapshot_documents,
 )
@@ -51,7 +52,7 @@ def document_snapshots(
 
     result: list[RunDocumentSnapshot] = []
     for key, source in sorted(sources.items()):
-        if not _is_document_source(source):
+        if not is_document_source(source):
             continue
         if not isinstance(source, Mapping) or "document_snapshot" not in source:
             result.append(RunDocumentSnapshot(key, "LEGACY_UNAVAILABLE", None))
@@ -81,18 +82,3 @@ def document_snapshots(
             for item in result
         ]
     return tuple(result)
-
-
-def _is_document_source(source: Any) -> bool:
-    """旧 Provider 表示も欠損として知らせるが、それを全集への権限には変換しない。"""
-
-    if isinstance(source, str):
-        return source in {"project", DOCUMENT_PROVIDER} or source.startswith(
-            ("document:", "documents:", "project-documents:")
-        )
-    return isinstance(source, Mapping) and (
-        source.get("capability") == DOCUMENT_READ_CAPABILITY
-        or source.get("resource_kind") == "document"
-        or source.get("provider") == DOCUMENT_PROVIDER
-        or "document_snapshot" in source
-    )

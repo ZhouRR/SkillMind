@@ -309,7 +309,7 @@ class ScheduleOccurrenceRepository:
                 or row.attempt_count >= max_attempts
             ):
                 continue
-            _snapshot(row)
+            occurrence_snapshot(row)
             if row.schedule_id != schedule.id or row.project_id != schedule.project_id:
                 raise ScheduleOccurrenceConflictError("Occurrence scope does not match")
             positive_integer(row.lease_generation + 1, name="lease_generation")
@@ -365,7 +365,7 @@ class ScheduleOccurrenceRepository:
         )
         if row is None or schedule.occurrence_protocol != 1:
             raise ScheduleClaimLostError("Schedule claim is unavailable")
-        snapshot = _snapshot(row)
+        snapshot = occurrence_snapshot(row)
         _match_claim(row, snapshot, claim)
         _require_fence(row, claim, now=_now(now))
         return LockedScheduleOccurrence(schedule, row, claim)
@@ -379,7 +379,7 @@ class ScheduleOccurrenceRepository:
     ) -> None:
         """元の Run 要求規則を再利用し、更新後の入力や別の key に置換させない。"""
 
-        snapshot = _snapshot(locked.occurrence)
+        snapshot = occurrence_snapshot(locked.occurrence)
         if snapshot.idempotency_key != idempotency_key or canonical_json(
             snapshot.intent.to_json()
         ) != canonical_json(intent.to_json()):
@@ -422,7 +422,7 @@ class ScheduleOccurrenceRepository:
                 raise ScheduleOccurrenceConflictError("Occurrence was settled differently")
             return existing
         if result.run_id is not None:
-            snapshot = _snapshot(row)
+            snapshot = occurrence_snapshot(row)
             existing_run = await RunRepository(self._session).find_task_run_replay(
                 intent=snapshot.intent, idempotency_key=snapshot.idempotency_key
             )
@@ -481,7 +481,7 @@ def _activity(
     )
     projection = None
     if pending is not None:
-        snapshot = _snapshot(pending)
+        snapshot = occurrence_snapshot(pending)
         # project_id を JOIN 条件に置くと壊れた関連を null に見せるため、読取後に拒否する。
         # 編集で変わる name/definition は比較せず、原 identity と過去の版だけを検査する。
         if (
@@ -526,7 +526,7 @@ def _activity(
     )
 
 
-def _snapshot(row: TaskScheduleOccurrence) -> ScheduleOccurrenceSnapshot:
+def occurrence_snapshot(row: TaskScheduleOccurrence) -> ScheduleOccurrenceSnapshot:
     """JSON の実値 checksum と索引列の双方を照合する。"""
 
     snapshot = ScheduleOccurrenceSnapshot.from_json(
@@ -548,7 +548,7 @@ def _snapshot(row: TaskScheduleOccurrence) -> ScheduleOccurrenceSnapshot:
 def _claimed(row: TaskScheduleOccurrence, *, token: str) -> ClaimedSchedule:
     """回復後も原設定を使い、現 Schedule の変更を混ぜない。"""
 
-    snapshot = _snapshot(row)
+    snapshot = occurrence_snapshot(row)
     return ClaimedSchedule(
         schedule_id=row.schedule_id,
         project_id=row.project_id,

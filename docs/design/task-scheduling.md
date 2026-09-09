@@ -68,6 +68,8 @@ User 只读共享锁阻止停用/角色变更，同时兼容认领事务插入 o
 
 该边界只覆盖三类管理写入，不证明读取期间撤权立即生效或在途 Run 已停止；Worker 发火继续按当前创建者资格和持久 claim 授权，不依赖浏览器会话存活。
 
+创建和编辑在同一门禁内重新校验锁外已验证的文档选择，只读取元数据，不持锁调用 blob/Skill/Provider。原 ID 已消失则拒绝保存，不切换为同路径新文档；请求 input/sources 在首次 await 前复制，既有调度先验锁内版本。文档删除与当前规则、所有保留 occurrence 的引用关系见[删除事务](document-lifecycle.md#删除事务与引用判定)。
+
 ### 重叠检查到底看谁
 
 [ScheduleService](../../PJM/backend/src/projectmind/schedules/service.py)先确认原 occurrence，只有不存在原 Run 才查同 Schedule 的其他关联。数据库限定每个 Schedule 最多一个 PENDING；它未结算时不认领下一候选，不新增历史补跑队列。
