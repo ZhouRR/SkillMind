@@ -10,7 +10,7 @@ import {
 import { useMessages } from '../i18n'
 import { useDocumentDeletion } from '../hooks/useDocumentDeletion'
 import { useResourceQuery, type SessionEnded } from '../hooks/useResourceRequest'
-import { DOCUMENT_REQUEST_POLICY, documentFailure } from '../lib/documentFeedback'
+import { DOCUMENT_REQUEST_POLICY, documentUploadFailure } from '../lib/documentFeedback'
 import { DOCUMENT_PREVIEW_MAX_BYTES as PREVIEW_MAX_BYTES, documentPreviewHtml } from '../lib/documentPreview'
 import { formatByteSize, formatLocalTimestamp } from '../lib/presentation'
 import { EmptyState, LoadingSkeleton, ModalDialog, useConfirmDialog } from './PageElements'
@@ -127,8 +127,9 @@ function DocumentManagerBody({ projectId, csrfToken, readOnly, onSessionEnded }:
         if (controller.signal.aborted) return
         const label = file.webkitRelativePath || file.name
         observeFailure(caught)
-        failures.push(`${label}: ${messages.documentsPanel.failures[documentFailure(caught, true).key]}`)
-        if (['sessionExpired', 'denied', 'archived'].includes(documentFailure(caught, true).key)) break
+        const failure = documentUploadFailure(caught)
+        failures.push(`${label}: ${messages.documentsPanel.failures[failure.key]}`)
+        if (['sessionExpired', 'denied', 'archived'].includes(failure.key)) break
       }
       setUploadState({ status: 'uploading', done: index + 1, total: files.length })
     }

@@ -1744,12 +1744,13 @@ class FakeDocumentService:
         self.uploaded: list[tuple[str, str, bytes]] = []
         self.deleted: list[UUID] = []
         self.content = b"document-body"
+        self.max_upload_bytes = 25 * 1024 * 1024
 
     async def upload_document(
         self,
         *,
         project_id: UUID,
-        uploaded_by: UUID,
+        access: UserAccess,
         folder: str,
         name: str,
         data: bytes,
@@ -1762,7 +1763,9 @@ class FakeDocumentService:
         if self.conflict:
             raise DocumentConflictError(f"Document already exists: {folder}/{name}")
         self.uploaded.append((folder, name, data))
-        return _fake_document(project_id, uploaded_by, folder, name, len(data), content_type)
+        return _fake_document(
+            project_id, access.actor.user_id, folder, name, len(data), content_type
+        )
 
     async def list_documents(self, *, project_id: UUID) -> list[StoredDocument]:
         """固定の一件を Project 反映で返す。"""

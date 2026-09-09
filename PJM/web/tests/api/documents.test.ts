@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   API_BASE,
+  ApiProblemError,
   deleteProjectDocument,
   loadProjectDocuments,
   loadProjectDocument,
@@ -111,6 +112,9 @@ describe('Project document API contract', () => {
     // Content-Type は設定しない。undici/browser が multipart boundary を付与する。
     expect(call[1]?.headers).not.toHaveProperty('Content-Type')
     const body = call[1]?.body as FormData
+    expect([...body.keys()]).toEqual(['file', 'folder'])
+    expect(body.getAll('file')).toHaveLength(1)
+    expect(body.getAll('folder')).toHaveLength(1)
     // name は単一 segment に落とし、親 path は folder field で渡す。
     expect((body.get('file') as File).name).toBe('overview.md')
     expect(body.get('folder')).toBe('specs')
@@ -125,6 +129,26 @@ describe('Project document API contract', () => {
     const body = fetchMock.mock.calls[0]?.[1]?.body as FormData
     expect((body.get('file') as File).name).toBe('note.txt')
     expect(body.get('folder')).toBe('')
+  })
+
+  it.each([
+    [413, 'document_upload_too_large'],
+    [422, 'invalid_document_upload'],
+  ] as const)('preserves upload refusal %s/%s without retrying', async (status, code) => {
+    const mock = jsonFetch({ status, code, detail: 'Private upload internals' }, status)
+    vi.stubGlobal('fetch', mock)
+    const request = uploadProjectDocument(PROJECT_ID, new File(['content'], 'note.txt'), CSRF)
+    await expect(request).rejects.toBeInstanceOf(ApiProblemError)
+    await expect(request).rejects.toMatchObject({ status, code })
+    expect(mock).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([200, 202, 206])('does not accept upload status %s as publication', async (status) => {
+    const mock = jsonFetch(DOCUMENT, status)
+    vi.stubGlobal('fetch', mock)
+    await expect(uploadProjectDocument(PROJECT_ID, new File(['content'], 'note.txt'), CSRF))
+      .rejects.toMatchObject({ status })
+    expect(mock).toHaveBeenCalledTimes(1)
   })
 
   it('deletes a document with CSRF and no request body', async () => {

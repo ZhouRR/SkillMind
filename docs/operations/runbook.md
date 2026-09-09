@@ -69,6 +69,8 @@ v2 同 session 的 GET 不轮换 CSRF，但可能更新 idle；login-context 占
 | 症状 | 核对与停止条件 |
 | --- | --- |
 | 同名 409 且占用增加 | blob 先于 metadata 约束写入，可能有孤立对象；不重复上传验证 |
+| 上传 413 document_upload_too_large | 文件实际字节或 multipart 总量超限，未进入本次存储；缩小文件/请求，不以伪报 Content-Length 绕过 |
+| 上传 422 invalid_document_upload | 检查单 file、可选 UTF-8 folder、重复字段/参数及完整结束边界；不导出上传正文或解析器细节 |
 | 目录仅部分完成 | 逐文件分清确认与未知；done 不是成功数，不重传整批 |
 | DELETE 报错后 ID 消失 | metadata 可能已提交；404 不恢复清理，不循环删或改删同路径新 ID |
 | 删除 409 引用冲突 | document_in_use 保留原引用；document_references_unavailable 表示历史无法核实。核对原 Run/调度/保留 occurrence，不删审计、改 hash 或换同名 ID 绕过 |

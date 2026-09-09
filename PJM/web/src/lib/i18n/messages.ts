@@ -545,7 +545,8 @@ export interface UiMessages {
     refresh: string
     failures: Record<'sessionExpired' | 'denied' | 'archived' | 'notFound' | 'inUse'
       | 'referencesUnavailable' | 'invalid' | 'unknown' | 'loadFailed'
-      | 'previewTooLarge' | 'contentMissing' | 'contentInvalid' | 'storageUnavailable', string>
+      | 'previewTooLarge' | 'contentMissing' | 'contentInvalid' | 'storageUnavailable'
+      | 'uploadTooLarge' | 'uploadUnknown', string>
     selectProjectFirst: string
     listTitle: string
     hint: string

@@ -103,6 +103,9 @@ python3 tests/browser/check_document_management.py \
 python3 tests/browser/check_document_preview.py \
   --url http://127.0.0.1:5189/projectmind/tests/browser/projects.html \
   --output /tmp/projectmind-document-preview-browser
+python3 tests/browser/check_document_upload.py \
+  --url http://127.0.0.1:5189/projectmind/tests/browser/projects.html \
+  --output /tmp/projectmind-document-upload-browser
 ```
 
 | runner | 検証する範囲と限界 |
@@ -117,6 +120,7 @@ python3 tests/browser/check_document_preview.py \
 | document_sources | 即時/調度入力、清単、CSRF と凍結表示。Backend 依存と純 parser は使うが、実 blob、物化、調度編集/時区/認領 crash は別 |
 | document_management | 実 App の削除防重、参照拒否、原 ID の未知核対/人工解除、遅延/切替/期限、帰档と三語/狭幅。全面 mock API で、実 DB 参照競争・blob 清理は別 |
 | document_preview | 実 App の静的 HTML/CSP/sandbox、実 stream byte 上限、拒否/期限/旧応答/同 tick 切替、三語/狭幅。HTTP は mock、byte は合成 stream；実 S3・Proxy・他 browser engine は別 |
+| document_upload | 実 App の multipart field/CSRF と 413/422/資格拒否/異常成功の三語表示、私的 detail 非表示。全 HTTP は mock；実 body 上限、DB/PUT、持続意図と完全な未知回復は別 |
 | schedule_times | 実 TasksPage/ScheduleDialog の時区/offset、DST、現在の preview 確認、防重・遅延・期限と対象切替、三語/狭幅。全 API は mock、実 cron 発火・認領/Run transaction・DB/複数 Worker は別 |
 | schedule_management | 実 App の独立調度一覧/検索/全ページ、原配置編集/版衝突/未知と対象切替、在途の旧形式/空/期限/認領上限・独立読取拒否、三語/狭幅。全 API は mock、実 DB の CAS/撤権/多 Worker と発火は別 |
 

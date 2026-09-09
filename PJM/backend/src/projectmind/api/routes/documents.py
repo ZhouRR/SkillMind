@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, File, Form, Request, Response, UploadFile, status
+from fastapi import APIRouter, Request, Response, status
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from projectmind.api.auth_dependencies import (
@@ -18,6 +18,7 @@ from projectmind.api.auth_dependencies import (
     project_not_found_problem,
     user_access,
 )
+from projectmind.api.document_upload import read_document_upload
 from projectmind.api.problems import (
     NO_STORE_PROBLEM_HEADERS,
     ProblemException,
@@ -80,32 +81,65 @@ class DocumentListResponse(BaseModel):
     response_model=DocumentResponse,
     status_code=status.HTTP_201_CREATED,
     responses={
-        409: {"description": "Document with the same name already exists"},
-        422: {"description": "Upload rejected by size, type, quota, or content policy"},
+        201: {"headers": NO_STORE_PROBLEM_HEADERS},
+        **_ACCESS_PROBLEMS,
+        409: problem_openapi_response(
+            "document_conflict or project_archived", headers=NO_STORE_PROBLEM_HEADERS
+        ),
+        413: problem_openapi_response(
+            "document_upload_too_large: actual file or multipart bytes exceed the limit",
+            headers=NO_STORE_PROBLEM_HEADERS,
+        ),
+        422: problem_openapi_response(
+            "Invalid multipart, path, type, quota, or content policy",
+            headers=NO_STORE_PROBLEM_HEADERS,
+        ),
     },
+    # File/Form parameter は dependency 前に本文を読むため宣言しない。公開形状は維持する。
+    openapi_extra={"requestBody": {
+        "required": True,
+        "content": {"multipart/form-data": {"schema": {
+            "type": "object", "required": ["file"], "additionalProperties": False,
+            "properties": {
+                "file": {"type": "string", "format": "binary"},
+                "folder": {"type": "string", "default": "", "maxLength": 200},
+            },
+        }}},
+        "description": (
+            "Exactly one file and optional UTF-8 folder; authentication precedes body reading. "
+            "Actual file bytes are bounded by the configured document limit; total multipart "
+            "bytes may exceed that limit by at most 16 KiB. Duplicate fields are rejected."
+        ),
+    }},
     tags=["documents"],
 )
 async def upload_document(
     request: Request,
     project_id: UUID,
     actor: ProjectWriteActor,
-    file: Annotated[UploadFile, File(description="Uploaded document content")],
-    folder: Annotated[str, Form()] = "",
 ) -> DocumentResponse:
-    """Project 成員が文書 (binary 可) を upload し、metadata を Project 作用域で保存する。"""
+    """入口資格の確認後だけ有界 multipart を読み、原会話を保存 transaction へ渡す。"""
 
-    await authorize_project_access(request, actor, project_id, require_active=True)
     service: DocumentService = request.app.state.document_service
-    data = await file.read()
+    access = user_access(request, actor)
+    upload = await read_document_upload(request, max_bytes=service.max_upload_bytes)
     try:
         stored = await service.upload_document(
             project_id=project_id,
-            uploaded_by=actor.user_id,
-            folder=folder,
-            name=file.filename or "",
-            data=data,
-            content_type=file.content_type or "application/octet-stream",
+            access=access,
+            folder=upload.folder,
+            name=upload.name,
+            data=upload.data,
+            content_type=upload.content_type,
         )
+    except UnauthorizedSessionError as error:
+        raise authentication_required_problem() from error
+    except CsrfRejectedError as error:
+        raise csrf_rejected_problem() from error
+    except ProjectNotFoundError as error:
+        raise project_not_found_problem() from error
+    except ProjectArchivedError as error:
+        raise project_archived_problem() from error
     except UploadRejectedError as error:
         raise ProblemException(
             status=422,
@@ -117,7 +151,7 @@ async def upload_document(
         raise ProblemException(
             status=409,
             title="Document already exists",
-            detail=str(error),
+            detail="Document with the same path already exists",
             code="document_conflict",
         ) from error
     return _document_response(stored)

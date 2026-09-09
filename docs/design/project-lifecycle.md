@@ -64,7 +64,7 @@ preference 只是上次选择，不是授权。服务端只返回当前可访问
 | Run 取消 | WriteActor + Run 项目访问，无 ACTIVE 门槛；取消受理不证明进程停止 |
 | ADMIN 维护 | 编辑、归档/恢复、删除、移除成员走独立用例；新增成员要求 ACTIVE，否则 404 |
 | Schedule 保存 | 创建/编辑/状态修改在业务事务固定原会话、当前 Project/成员并复核归档；锁与未知结果见[调度管理](task-scheduling.md#管理写入的授权事务) |
-| 单文档删除 | 原会话/成员/归档与引用同事务复核；上传和持久 blob 清理仍有独立缺口，见[文档门禁](document-lifecycle.md#删除事务与引用判定) |
+| 单文档上传/删除 | 上传在锁外 PUT 前后复核原会话/成员/归档，删除将原授权与引用同事务复核；持久上传、配额预留与 blob 清理仍待补，见[文档门禁](document-lifecycle.md) |
 | Schedule 触发 | 普通创建/原 Run 关联事务内锁定当前创建者、Project/成员并复查 ACTIVE；项目归档不等于 Schedule 立即 PAUSED，真实并发仍待验 |
 
 ### 并发修改不能只看有无行锁

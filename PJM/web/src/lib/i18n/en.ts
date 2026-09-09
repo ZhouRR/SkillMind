@@ -570,6 +570,8 @@ export const EN: UiMessages = {
       inUse: 'The document is referenced by a Run, schedule, or retained occurrence and cannot be deleted.',
       referencesUnavailable: 'Historical document references could not be verified. Deletion was rejected; do not replace the original ID with a same-name file.',
       invalid: 'Request parameters failed validation.',
+      uploadTooLarge: 'The file or upload request exceeds the server limit. This upload was rejected and no document was published. Reduce the file size and select it again.',
+      uploadUnknown: 'The upload result is unconfirmed. Check before resending; a same-name file does not prove this upload succeeded.',
       unknown: 'No trustworthy deletion response was received. Timeout, disconnection, or an invalid response does not prove rollback. Read the original document first.',
       loadFailed: 'The document could not be read. Check again; a failed read does not change the recorded deletion outcome.',
       previewTooLarge: 'Actual content exceeds the 1 MB preview limit. Reading stopped; download the file to view it.',

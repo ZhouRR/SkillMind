@@ -28,6 +28,19 @@ export function documentFailure(error: unknown, mutation: boolean): DocumentFail
   return { key: mutation ? 'unknown' : 'loadFailed' }
 }
 
+/** Upload の表示語彙は DELETE の門禁 policy に渡せない独立した型に限定する。 */
+export interface DocumentUploadFailure {
+  key: Exclude<DocumentFailure['key'], 'unknown'> | 'uploadTooLarge' | 'uploadUnknown'
+}
+
+/** Upload 固有の確定拒否を DELETE の未知判定と混同せず、本文も表示しない。 */
+export function documentUploadFailure(error: unknown): DocumentUploadFailure {
+  if (error instanceof ApiProblemError && error.status === 413
+    && error.code === 'document_upload_too_large') return { key: 'uploadTooLarge' }
+  const reason = documentFailure(error, true)
+  return { key: reason.key === 'unknown' ? 'uploadUnknown' : reason.key }
+}
+
 /** 拒否された資格は同じ一覧の成功で戻さず、未知は明示核対まで新規書込を閉じる。 */
 export const DOCUMENT_REQUEST_POLICY: ResourceRequestPolicy<DocumentFailure> = {
   classify: documentFailure,

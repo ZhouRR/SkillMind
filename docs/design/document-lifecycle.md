@@ -20,28 +20,39 @@ ProjectDocument 元数据在 PostgreSQL，blob 用内部 storage_key 定位。do
 | GET document content | Project + 精确 ID 授权、核验实际 size/hash 后返回附件，不是公共 blob URL |
 | DELETE document | 元数据 commit 后调用 storage，通常 204，不保证完整清理 |
 
-公开数据只含身份、路径、size/MIME/checksum、上传者和时间。读用 ProjectReadActor，写用 ProjectWriteActor 且要求 ACTIVE；越权与不存在统一 404，已处理文档响应使用 no-store。删除另有下述事务复核；上传仍未闭合在途撤权/归档与保存竞争。
+公开数据只含身份、路径、size/MIME/checksum、上传者和时间。读用 ProjectReadActor，写用 ProjectWriteActor 且要求 ACTIVE；越权与不存在统一 404，已处理文档响应使用 no-store。上传和单文档删除另在业务事务复核原会话与当前 Project/成员；这不等于持久上传、字节配额与清理已完成。
 
 ## 上传的三个边界
 
-[DocumentService](../../PJM/backend/src/projectmind/documents/service.py)当前顺序：
+[上传入口](../../PJM/backend/src/projectmind/api/routes/documents.py)先完成 Origin/CSRF、会话与 Project 授权，再读取 multipart；不使用会在 dependency 前解析正文的 File/Form 参数。公开请求仍为一个 file 和可选一个 folder，重复、未知字段、文件/普通字段混用与不完整结束边界返回 422 invalid_document_upload。
 
-```text
-名称/目录校验 → 读取元数据用量 → 大小/MIME/配额/文本校验
-  → put 新 blob → 元数据事务 commit → 201
-```
+正文用现有 multipart 引擎流式解析，不创建临时文件或后台写线程。文件实际字节受配置上限约束；整个请求最多为该上限 + 16 KiB，分块、缺失/低报 Content-Length 与结束边界后的 epilogue 都计数。超限在追加 buffer 前返回 413 document_upload_too_large，不进入存储。header 合计上限 16 KiB，folder 至多 1,024 bytes，再由业务规则限制字符数；filename/folder 使用严格 UTF-8，拒绝歧义参数、扩展参数和压缩 envelope。
 
-| 当前检查 | 实际缺口 |
+接收完成后交付不可变 bytes；取消与断连直接结束接收，不被解释为成功。每请求有界缓冲不等于全进程内存、并发数、慢请求或代理缓冲预算。
+
+### 上传的授权事务
+
+[DocumentService](../../PJM/backend/src/projectmind/documents/service.py)在首次 await 前复制正文，规范化路径并校验大小/MIME/文本策略：
+
+1. TX A：复核原授权、ACTIVE 与当前元数据配额；commit 后释放锁。
+2. 锁外 PUT：写新对象，核验回执与原 key/size/MIME/hash。
+3. TX B：复核同一原授权、ACTIVE 与最新用量；创建元数据、flush、最终授权，再 commit 并返回 201。
+
+两个事务都采用 Organization UPDATE → 当前 User SHARE → 原 AuthSession UPDATE → Project/成员 SHARE。锁等待、读取和 flush 后重新取时间复核原会话，不另选同用户新登录；归档、成员移除、停用、撤销或项目删除后不得再发布元数据。上传者从原 access 取得，不由调用者另传 UUID。存储 I/O 不持有这些锁。
+
+| 当前检查 | 保证范围与缺口 |
 | --- | --- |
-| 文件默认 25 MiB，Project 默认 500 MiB | route 先完整 file.read；不是请求体/内存硬上限，配额不含孤立 blob/副本/备份 |
-| 名称、folder 最多 200 字符 | storage key 单段最多 128，129–200 名称可能存储失败且未映射上传 422；应写前稳定拒绝，不截断 |
+| 文件默认 25 MiB，Project 默认 500 MiB | 上传入口限制实际文件/请求字节；Project 配额仍不含孤立 blob/副本/备份 |
+| 名称、folder 最多 200 字符 | 名称还须通过共享 storage key 的单段 128 限制；129–200 名称在 PUT 前稳定返回 422 invalid_document_name，不截断 |
 | MIME allowlist、指定文本凭据扫描 | 校验申报类型，不证明真实格式、病毒安全或任意二进制已脱敏 |
-| 读取用量后检查配额 | 没有原子预留，并发上传可分别通过旧用量 |
-| blob 先写、元数据唯一约束后验 | 冲突可留下孤立 blob；所有 IntegrityError 目前被误归为同名冲突 |
+| 最终发布在共享门禁内重读用量 | 防止遵守该门禁的上传并发发布超额元数据；没有持久配额预留，锁外 PUT 仍可留下未计费对象 |
+| blob 先写、元数据唯一约束后验 | 仅精确路径唯一约束映射 document_conflict；其他 DB 异常不冒充同名拒绝。失败仍可能留下孤立 blob |
+
+PUT adapter 回执须与原请求一致，不能让返回的任意 key/大小/hash 决定保存身份；这不是新增远端 GET/read-back 或持久上传确认。拒绝、取消、存储错误和 commit 未知均不立即补偿删除：旧 PUT 可能仍在运行，DB 也可能已提交。上述门禁仅约束本版 writer；旧 API、任意 SQL、真实 PostgreSQL 并发及完整恢复仍需独立验收。
 
 ### 保存可靠性的修正要求
 
-写前限制实际流式字节，明确内容/MIME 策略；为 Project 建立原子配额预留与结算，最终发布时复核授权、状态、路径与预留。网络 I/O 不放入长期 Project 行锁。
+在已有接收与发布门禁上，为 Project 建立持久原子配额预留与结算，最终发布时复核授权、状态、路径与原预留。当前最终用量复查不能替代该协议；网络 I/O 不放入长期 Project 行锁。
 
 持久保存上传意图、原请求身份与 blob 归属，区分确定拒绝、存储未知、commit 未知。未知先核对，不能异常后立即删除可能已提交的对象；确认无引用的失败上传才进入可重试清理。幂等需定义 actor/Project、摘要、保留期和并发胜者，不是仅加 header。
 
