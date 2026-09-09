@@ -43,6 +43,7 @@ from tests.db.test_real_database_invariants import (
 from tests.db.test_real_database_invariants import (
     migrated_database_url as migrated_database_url,
 )
+from tests.runs.budget_fakes import budget_invocation
 from tests.runs.test_repository_budgets import report
 from tests.worker.test_agent_run_executor import _claimed
 
@@ -69,13 +70,22 @@ async def seed_budget(factory: async_sessionmaker[AsyncSession]) -> ClaimedRun:
     )
     attempt.lease_token_hash = lease_token_hash(claim.lease_token)
     attempt.lease_expires_at = claim.lease_expires_at
+    run.permission_snapshot_json = {**run.permission_snapshot_json, "actor_id": str(claim.actor_id)}
     async with factory() as session, session.begin():
         await _insert_in_order(session, run, segment, attempt, primary, account)
     store = PostgresRunBudgetStore(factory)
     await store.reserve_group(
         claim, group_key="primary", requests=(BudgetReservationRequest("primary", 8, 80),)
     )
-    assert await store.start_execution(claim, execution_key="primary")
+    binding = await store.bind_invocation(
+        claim, execution_key="primary", invocation=budget_invocation(claim)
+    )
+    assert await store.start_execution(
+        claim,
+        execution_key="primary",
+        expected_invocation_id=binding.invocation_id,
+        expected_invocation_checksum=binding.invocation_checksum,
+    )
     return claim
 
 
@@ -205,8 +215,22 @@ async def test_postgres_late_settlement_does_not_reopen_terminal_run(
         assert (
             await store.record_usage(claim, report("final", 3, 30, final=True))
         ).disposition == "REPLAY"
+        async with factory() as session:
+            reservation = await session.get(RunBudgetReservation, claim.reservation_id)
+            assert reservation is not None
+            assert reservation.invocation_id is not None
+            assert reservation.invocation_checksum is not None
+            expected_id, expected_checksum = (
+                reservation.invocation_id,
+                reservation.invocation_checksum,
+            )
         with pytest.raises(LeaseValidationError):
-            await store.start_execution(claimed, execution_key="primary")
+            await store.start_execution(
+                claimed,
+                execution_key="primary",
+                expected_invocation_id=expected_id,
+                expected_invocation_checksum=expected_checksum,
+            )
         async with factory() as session:
             run = await session.get(Run, claimed.run_id)
             assert run is not None and run.status == "FAILED"

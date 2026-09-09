@@ -9,15 +9,61 @@ from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from projectmind.db.models import RunBudgetReceipt, RunBudgetReservation
+from projectmind.agent.metering import (
+    AgentInvocation,
+    AgentInvocationMode,
+    InvocationOptions,
+    UsageValue,
+)
+from projectmind.db.models import RunBudgetObservation, RunBudgetReceipt, RunBudgetReservation
 from projectmind.runs.budget import (
+    BudgetInvocationBinding,
     BudgetPolicy,
     BudgetReconciliationClaim,
     BudgetReservationRequest,
     MeteringMode,
 )
+from projectmind.runs.domain import ClaimedRun
 from projectmind.runs.repository_budgets import RunBudgetRepository, new_budget_account
 from tests.runs.test_execution_gates import execution_rows
+
+
+def budget_invocation(claimed: ClaimedRun, *, turns: int = 8) -> AgentInvocation:
+    """実測 profile と誤認できない明示 fixture の実行記述子を作る。"""
+
+    session_id = str(uuid4())
+    return AgentInvocation(
+        invocation_id=uuid4(),
+        project_id=claimed.project_id,
+        run_id=claimed.run_id,
+        run_attempt_id=claimed.run_attempt_id,
+        user_id=claimed.actor_id,
+        session_id=session_id,
+        mode=AgentInvocationMode.INITIAL,
+        parent_session_id=None,
+        prompt_checksum="1" * 64,
+        options=InvocationOptions(
+            model="fixture-model",
+            max_turns=turns,
+            max_budget_usd=UsageValue.capture(None),
+            session_id=session_id,
+            resume=None,
+            fork_session=False,
+            continue_conversation=False,
+            output_format_checksum="2" * 64,
+        ),
+        sdk_version="fixture-sdk",
+        cli_version="fixture-cli",
+    )
+
+
+def start_arguments(binding: BudgetInvocationBinding) -> dict[str, Any]:
+    """照合 DTO を明示的な B 引数にする。確認済みの起動権は返さない。"""
+
+    return {
+        "expected_invocation_id": binding.invocation_id,
+        "expected_invocation_checksum": binding.invocation_checksum,
+    }
 
 
 class BudgetDatabase:
@@ -27,6 +73,7 @@ class BudgetDatabase:
         """Run/Attempt は稼働中、予算だけは新 Run 工場から明示的に作る。"""
 
         self.claimed, self.run, self.segment, self.attempt = execution_rows()
+        self.run.permission_snapshot_json = {"actor_id": str(self.claimed.actor_id)}
         self.run.status = "QUEUED"
         self.run.started_at = None
         self.run.limits_snapshot_json = {"max_turns": 20}
@@ -38,6 +85,7 @@ class BudgetDatabase:
         self.attempt.lease_expires_at = datetime.now(UTC) + timedelta(minutes=5)
         self.reservations: list[RunBudgetReservation] = []
         self.receipts: list[RunBudgetReceipt] = []
+        self.observations: list[RunBudgetObservation] = []
         self.lock_order: list[str] = []
         self.expire_during_budget_lock = False
         self.session = MagicMock(spec=AsyncSession)
@@ -53,6 +101,8 @@ class BudgetDatabase:
             self.reservations.append(row)
         elif isinstance(row, RunBudgetReceipt):
             self.receipts.append(row)
+        elif isinstance(row, RunBudgetObservation):
+            self.observations.append(row)
         else:
             raise AssertionError(f"Unexpected budget write: {type(row).__name__}")
 
@@ -61,7 +111,8 @@ class BudgetDatabase:
 
         table = statement.get_final_froms()[0].name
         params = statement.compile().params
-        if table != "run_budget_receipts":
+        values: list[Any]
+        if table not in {"run_budget_receipts", "run_budget_observations"}:
             assert "FOR UPDATE" in str(statement)
             self.lock_order.append(table)
         if table == "run_budget_reservations":
@@ -74,6 +125,13 @@ class BudgetDatabase:
                 for row in self.receipts
                 if row.reservation_id == params["reservation_id_1"]
                 and row.receipt_key == params["receipt_key_1"]
+            ]
+        elif table == "run_budget_observations":
+            values = [
+                row
+                for row in self.observations
+                if row.reservation_id == params["reservation_id_1"]
+                and row.observation_key == params["observation_key_1"]
             ]
         else:
             row = {
@@ -101,10 +159,35 @@ class BudgetDatabase:
             ),
         )
 
+    async def bind(self, key: str = "primary") -> BudgetInvocationBinding:
+        """既存の原記述子を再送し、ない場合だけ fixture の記述子を用意する。"""
+
+        row = next(item for item in self.reservations if item.execution_key == key)
+        invocation = (
+            AgentInvocation.from_json(row.invocation_json)
+            if row.invocation_json is not None
+            else budget_invocation(self.claimed, turns=int(row.granted_turns))
+        )
+        return await self.repository.bind_invocation(
+            self.claimed, execution_key=key, invocation=invocation
+        )
+
+    def bound_arguments(self, key: str = "primary") -> dict[str, Any]:
+        """保存済みの値だけを返し、未設定のテストを自動修復しない。"""
+
+        row = next(item for item in self.reservations if item.execution_key == key)
+        assert row.invocation_id is not None and row.invocation_checksum is not None
+        return start_arguments(
+            BudgetInvocationBinding(row.id, row.invocation_id, row.invocation_checksum)
+        )
+
     async def start(self, key: str = "primary") -> None:
         """初回の意図だけが起動許可を返すことを確認する。"""
 
-        assert await self.repository.start_execution(self.claimed, execution_key=key)
+        await self.bind(key)
+        assert await self.repository.start_execution(
+            self.claimed, execution_key=key, **self.bound_arguments(key)
+        )
 
     async def reconciler(
         self, key: str = "primary", *, worker: str = "reconciler"

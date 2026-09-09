@@ -13,6 +13,7 @@ from fakes import FakeAuthService, FakeUserService
 from fastapi.testclient import TestClient
 from httpx import Response
 from jsonschema import Draft202012Validator, FormatChecker
+
 from projectmind.auth.login_protection import LoginProtectionUnavailableError, LoginRateLimitedError
 from projectmind.auth.sessions import CsrfRejectedError, UnauthorizedSessionError
 from projectmind.users.domain import (

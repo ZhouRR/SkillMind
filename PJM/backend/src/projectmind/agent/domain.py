@@ -8,10 +8,13 @@ from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
 
 from projectmind.runs.input_snapshot import InputFileSeal
+
+if TYPE_CHECKING:
+    from projectmind.agent.metering import AgentInvocation
 
 
 class AgentEventType(StrEnum):
@@ -180,6 +183,8 @@ class RunContext:
     # 描画されるため、この二つが Agent へ渡した指示内容の監査正本になる。
     task_brief: Mapping[str, Any] = field(default_factory=dict)
     task_brief_checksum: str = ""
+    # 受信調整者が原束縛から再読取した記述子。trace やモデル入力から復元しない。
+    prepared_invocation: AgentInvocation | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         """Attempt を跨ぐ event 採番の開始値が正数であることを保証する。"""

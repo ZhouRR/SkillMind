@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy.exc import DBAPIError
@@ -9,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from projectmind.runs.budget import (
     BudgetExecutionRecord,
+    BudgetInvocationBinding,
     BudgetReceiptResult,
     BudgetReconciliationClaim,
     BudgetReservationRequest,
@@ -17,6 +19,9 @@ from projectmind.runs.budget import (
 )
 from projectmind.runs.domain import ClaimedRun
 from projectmind.runs.repository_budgets import RunBudgetRepository
+
+if TYPE_CHECKING:
+    from projectmind.agent.metering import AgentInvocation, ResultUsageObservation
 
 
 class PostgresRunBudgetStore:
@@ -56,7 +61,41 @@ class PostgresRunBudgetStore:
                 )
         return records
 
-    async def start_execution(self, claimed: ClaimedRun, *, execution_key: str) -> bool:
+    async def bind_invocation(
+        self,
+        claimed: ClaimedRun,
+        *,
+        execution_key: str,
+        invocation: AgentInvocation,
+    ) -> BudgetInvocationBinding:
+        """紐付けの応答喪失は原値だけを読戻す。未保存の値を確認時に補造しない。"""
+
+        binding: BudgetInvocationBinding | None = None
+        try:
+            async with self._session_factory() as session, session.begin():
+                binding = await RunBudgetRepository(session).bind_invocation(
+                    claimed, execution_key=execution_key, invocation=invocation
+                )
+        except (DBAPIError, TimeoutError, ConnectionError):
+            if binding is None:
+                raise
+            async with self._session_factory() as session, session.begin():
+                return await RunBudgetRepository(session).bind_invocation(
+                    claimed,
+                    execution_key=execution_key,
+                    invocation=invocation,
+                    confirm_only=True,
+                )
+        return binding
+
+    async def start_execution(
+        self,
+        claimed: ClaimedRun,
+        *,
+        execution_key: str,
+        expected_invocation_id: UUID,
+        expected_invocation_checksum: str,
+    ) -> bool:
         """B の初回成功だけが True。成否不明な B を retry して許可に変換しない。"""
 
         try:
@@ -64,6 +103,8 @@ class PostgresRunBudgetStore:
                 return await RunBudgetRepository(session).start_execution(
                     claimed,
                     execution_key=execution_key,
+                    expected_invocation_id=expected_invocation_id,
+                    expected_invocation_checksum=expected_invocation_checksum,
                 )
         except (DBAPIError, TimeoutError, ConnectionError) as error:
             raise BudgetStartUncertainError("Budget start intent could not be confirmed") from error
@@ -99,6 +140,16 @@ class PostgresRunBudgetStore:
 
         async with self._session_factory() as session, session.begin():
             return await RunBudgetRepository(session).record_usage(claim, report)
+
+    async def record_observation(
+        self,
+        claim: BudgetReconciliationClaim,
+        observation: ResultUsageObservation,
+    ) -> BudgetReceiptResult:
+        """原観測と異内容の衝突だけを保存し、commit 不明を用量や再起動に変換しない。"""
+
+        async with self._session_factory() as session, session.begin():
+            return await RunBudgetRepository(session).record_observation(claim, observation)
 
     async def confirm_stopped(
         self,

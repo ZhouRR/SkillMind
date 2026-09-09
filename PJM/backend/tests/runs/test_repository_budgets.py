@@ -146,7 +146,9 @@ async def test_start_intent_replay_does_not_authorize_a_second_launch() -> None:
     db = BudgetDatabase()
     await db.reserve()
     await db.start()
-    assert not await db.repository.start_execution(db.claimed, execution_key="primary")
+    assert not await db.repository.start_execution(
+        db.claimed, execution_key="primary", **db.bound_arguments()
+    )
     claim = await db.reconciler()
     with pytest.raises(BudgetError):
         await db.repository.release_unstarted(claim, receipt_key="no-start")
@@ -158,6 +160,7 @@ async def test_unstarted_release_closes_the_start_gate_and_is_idempotent() -> No
 
     db = BudgetDatabase()
     await db.reserve()
+    await db.bind()
     claim = await db.reconciler()
     await db.repository.release_unstarted(claim, receipt_key="closed")
     replay = await db.repository.release_unstarted(claim, receipt_key="closed")
@@ -165,7 +168,9 @@ async def test_unstarted_release_closes_the_start_gate_and_is_idempotent() -> No
     assert db.account.reserved_turns == 0
     assert len(db.receipts) == 1
     with pytest.raises(BudgetUnavailableError):
-        await db.repository.start_execution(db.claimed, execution_key="primary")
+        await db.repository.start_execution(
+            db.claimed, execution_key="primary", **db.bound_arguments()
+        )
 
 
 @pytest.mark.parametrize("stop_first", [False, True])
@@ -296,7 +301,9 @@ async def test_terminal_run_and_expired_attempt_do_not_discard_verified_late_usa
     assert db.account.reserved_turns == 0
     assert db.run.status == "CANCELLED"
     with pytest.raises(LeaseValidationError):
-        await db.repository.start_execution(db.claimed, execution_key="primary")
+        await db.repository.start_execution(
+            db.claimed, execution_key="primary", **db.bound_arguments()
+        )
     with pytest.raises(LeaseValidationError):
         await db.repository.record_usage(db.claimed, report("old-token", 4, 40))  # type: ignore[arg-type]
 

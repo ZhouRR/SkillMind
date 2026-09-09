@@ -120,24 +120,30 @@ class _RunRepositoryBase:
     ) -> RunSegment | None:
         """Run lock 取得後の二番目として Segment 行を FOR UPDATE で取得する。"""
 
-        statement = select(RunSegment).where(
-            RunSegment.id == segment_id, RunSegment.run_id == run_id
-        ).with_for_update()
+        statement = (
+            select(RunSegment)
+            .where(RunSegment.id == segment_id, RunSegment.run_id == run_id)
+            .with_for_update()
+        )
         if populate_existing:
             statement = statement.execution_options(populate_existing=True)
         return (await self._session.scalars(statement)).one_or_none()
 
     async def _lock_claimed_execution(
-        self, claimed: ClaimedRun
+        self, claimed: ClaimedRun, *, populate_existing: bool = False
     ) -> tuple[Run, RunSegment | None, RunAttempt]:
         """Run、Segment、Attempt の順に lock し全 Worker transaction を統一する。"""
 
-        run = await self._lock_run_row(claimed.run_id)
+        run = await self._lock_run_row(claimed.run_id, populate_existing=populate_existing)
         if run is None:
             raise RunNotFoundError(f"Run not found: {claimed.run_id}")
         segment = None
         if claimed.run_segment_id is not None:
-            segment = await self._lock_segment_row(claimed.run_segment_id, run_id=claimed.run_id)
+            segment = await self._lock_segment_row(
+                claimed.run_segment_id,
+                run_id=claimed.run_id,
+                populate_existing=populate_existing,
+            )
             if segment is None:
                 raise LeaseValidationError(f"RunSegment not found: {claimed.run_segment_id}")
         attempt_statement = (
@@ -153,6 +159,8 @@ class _RunRepositoryBase:
             )
             .with_for_update()
         )
+        if populate_existing:
+            attempt_statement = attempt_statement.execution_options(populate_existing=True)
         attempt = (await self._session.scalars(attempt_statement)).one_or_none()
         if attempt is None:
             raise LeaseValidationError(f"RunAttempt not found: {claimed.run_attempt_id}")

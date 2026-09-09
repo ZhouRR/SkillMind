@@ -261,6 +261,26 @@ class BudgetReconciliationClaim:
 
 
 @dataclass(frozen=True, slots=True)
+class BudgetInvocationBinding:
+    """保存した実行の照合値だけを返す。形が正しくても起動権限ではない。"""
+
+    reservation_id: UUID
+    invocation_id: UUID
+    invocation_checksum: str
+
+    def __post_init__(self) -> None:
+        """B の照合で曖昧な識別子や非 canonical checksum を受け付けない。"""
+
+        if (
+            not isinstance(self.reservation_id, UUID)
+            or not isinstance(self.invocation_id, UUID)
+            or not isinstance(self.invocation_checksum, str)
+            or re.fullmatch(r"[0-9a-f]{64}", self.invocation_checksum) is None
+        ):
+            raise BudgetError("Invalid budget invocation binding")
+
+
+@dataclass(frozen=True, slots=True)
 class BudgetExecutionRecord:
     """起動/結算の永続事実を返す。START_INTENT の読戻しは再起動許可ではない。"""
 

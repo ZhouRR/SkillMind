@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
-from typing import Self
+from typing import Any, Self
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -29,6 +29,7 @@ class BudgetTransaction:
         self.factory, self.number = factory, number
         db = factory.database
         self.old_reservations, self.old_receipts = list(db.reservations), list(db.receipts)
+        self.old_observations = list(db.observations)
         self.old_values = [
             (
                 row,
@@ -37,7 +38,7 @@ class BudgetTransaction:
                     for column in row.__table__.columns
                 },
             )
-            for row in [db.account, *db.reservations, *db.receipts]
+            for row in [db.account, *db.reservations, *db.receipts, *db.observations]
         ]
 
     async def __aenter__(self) -> Self:
@@ -59,6 +60,7 @@ class BudgetTransaction:
         if kind is not None or (fail and not self.factory.commit_before_failure):
             self.factory.database.reservations[:] = self.old_reservations
             self.factory.database.receipts[:] = self.old_receipts
+            self.factory.database.observations[:] = self.old_observations
             for row, values in self.old_values:
                 for name, value in values.items():
                     setattr(row, name, value)
@@ -101,7 +103,7 @@ async def test_reservation_lost_response_confirms_original_group_without_realloc
     db = BudgetDatabase()
     factory = BudgetSessions(db, fail_on=1, committed=committed)
     store = PostgresRunBudgetStore(factory)  # type: ignore[arg-type]
-    arguments = {
+    arguments: dict[str, Any] = {
         "group_key": "operation",
         "requests": (BudgetReservationRequest("primary", 8, 80),),
     }
@@ -124,13 +126,16 @@ async def test_start_intent_unknown_commit_cannot_be_replayed_as_permission() ->
 
     db = BudgetDatabase()
     await db.reserve()
+    await db.bind()
     factory = BudgetSessions(db, fail_on=1)
     store = PostgresRunBudgetStore(factory)  # type: ignore[arg-type]
     with pytest.raises(BudgetStartUncertainError):
-        await store.start_execution(db.claimed, execution_key="primary")
+        await store.start_execution(db.claimed, execution_key="primary", **db.bound_arguments())
     assert len(factory.sessions) == 1
     assert db.reservations[0].status == "START_INTENT"
-    assert not await store.start_execution(db.claimed, execution_key="primary")
+    assert not await store.start_execution(
+        db.claimed, execution_key="primary", **db.bound_arguments()
+    )
 
 
 async def test_start_permission_is_not_returned_before_commit() -> None:
@@ -138,10 +143,13 @@ async def test_start_permission_is_not_returned_before_commit() -> None:
 
     db = BudgetDatabase()
     await db.reserve()
+    await db.bind()
     factory = BudgetSessions(db)
     factory.commit_entered, factory.commit_release = asyncio.Event(), asyncio.Event()
     store = PostgresRunBudgetStore(factory)  # type: ignore[arg-type]
-    task = asyncio.create_task(store.start_execution(db.claimed, execution_key="primary"))
+    task = asyncio.create_task(
+        store.start_execution(db.claimed, execution_key="primary", **db.bound_arguments())
+    )
     try:
         await asyncio.wait_for(factory.commit_entered.wait(), 2)
         assert not task.done()

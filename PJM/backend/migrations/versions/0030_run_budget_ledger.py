@@ -163,6 +163,12 @@ def upgrade() -> None:
 def downgrade() -> None:
     """一件でも勘定/未決/回执があれば回退を止め、旧 Worker の再発行を防ぐ。"""
 
+    # 空判定の直後に旧 writer が追加した監査を DROP で消さない。同じ migration
+    # transaction 内で三表を止めるが、運用上の全 writer 停止の代わりにはしない。
+    op.execute(
+        "LOCK TABLE run_budget_accounts, run_budget_reservations, run_budget_receipts "
+        "IN ACCESS EXCLUSIVE MODE"
+    )
     op.execute(
         sa.text("""
         DO $$ BEGIN

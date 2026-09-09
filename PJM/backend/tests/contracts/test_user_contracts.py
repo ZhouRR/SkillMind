@@ -8,6 +8,8 @@ from typing import Any
 
 import pytest
 from fastapi.routing import APIRoute
+from pydantic import BaseModel
+
 from projectmind.api.auth_dependencies import (
     admin_actor,
     authenticated_actor,
@@ -17,7 +19,6 @@ from projectmind.api.auth_dependencies import (
 from projectmind.api.main import create_app
 from projectmind.api.problems import PROBLEM_DETAILS_SCHEMA
 from projectmind.api.routes import users
-from pydantic import BaseModel
 
 CONTRACTS = Path(__file__).resolve().parents[3] / "contracts"
 BASE = "/api/v1/users"

@@ -292,6 +292,29 @@ describe('original interaction request ownership', () => {
     expect(vi.mocked(respondToInteraction).mock.calls[1]!.slice(0, 7)).toEqual(first.slice(0, 7))
   })
 
+  it('rejects a direct new answer for historical choice options with duplicate keys', async () => {
+    question = interactionFixture('CHOICE')
+    question = { ...question, options: [...question.options, { key: 'a', label: 'Historical duplicate' }] }
+    vi.mocked(respondToInteraction).mockReturnValue(deferred<ReturnType<typeof interactionReceipt>>().promise)
+    const hook = render(); commit()
+    hook.start({ selected_option_keys: ['a'], text: 'must not submit' }); await microtasks()
+    expect(respondToInteraction).not.toHaveBeenCalled()
+    expect(render().pending).toBeNull()
+  })
+
+  it('checks current duplicate choice keys before a stale start callback can create an answer', async () => {
+    question = interactionFixture('CHOICE')
+    vi.mocked(respondToInteraction).mockReturnValue(deferred<ReturnType<typeof interactionReceipt>>().promise)
+    const hook = render(); commit()
+    const oldStart = hook.start
+    question = { ...question, options: [...question.options, { key: 'a', label: 'Historical duplicate' }] }
+    render()
+    // 古い callback でも、次の layout を待たず最新の質問で新規送信を拒否する。
+    oldStart({ selected_option_keys: ['a'], text: 'draft from the previous render' }); await microtasks()
+    expect(respondToInteraction).not.toHaveBeenCalled()
+    expect(render().pending).toBeNull()
+  })
+
   it('confirms the frozen request after a refresh reveals duplicate historical choice keys', async () => {
     question = interactionFixture('CHOICE')
     vi.mocked(respondToInteraction).mockRejectedValueOnce(new TypeError('network'))

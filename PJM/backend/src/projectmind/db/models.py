@@ -13,6 +13,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     LargeBinary,
@@ -855,7 +856,16 @@ class RunBudgetReservation(IdentityMixin, TimestampMixin, Base):
     __tablename__ = "run_budget_reservations"
     __table_args__ = (
         UniqueConstraint("run_id", "execution_key", name="uq_run_budget_execution"),
+        UniqueConstraint("invocation_id", name="uq_run_budget_invocation_id"),
+        UniqueConstraint("id", "invocation_id", name="uq_run_budget_reservation_invocation"),
         Index("ix_run_budget_group", "run_id", "group_key"),
+        CheckConstraint(
+            "(invocation_id IS NULL AND invocation_json IS NULL "
+            "AND invocation_checksum IS NULL) OR "
+            "(invocation_id IS NOT NULL AND invocation_json IS NOT NULL "
+            "AND invocation_checksum IS NOT NULL)",
+            name="budget_invocation_binding",
+        ),
         CheckConstraint(
             "status IN ('RESERVED', 'START_INTENT', 'SETTLED', 'RELEASED')",
             name="budget_reservation_status",
@@ -906,6 +916,12 @@ class RunBudgetReservation(IdentityMixin, TimestampMixin, Base):
     group_key: Mapped[str] = mapped_column(String(128), nullable=False)
     group_checksum: Mapped[str] = mapped_column(String(64), nullable=False)
     request_checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    invocation_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    # 未束縛は JSON null ではなく SQL NULL にし、三列の原子的な束縛を検査する。
+    invocation_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON(none_as_null=True), nullable=True
+    )
+    invocation_checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
     parent_reservation_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("run_budget_reservations.id", ondelete="RESTRICT")
     )
@@ -947,6 +963,29 @@ class RunBudgetReceipt(IdentityMixin, Base):
     payload_checksum: Mapped[str] = mapped_column(String(64), nullable=False)
     reconcile_worker_id: Mapped[str] = mapped_column(String(128), nullable=False)
     disposition: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class RunBudgetObservation(IdentityMixin, Base):
+    """元の予約と invocation に原始観察を追記し、消費や停止の根拠には昇格しない。"""
+
+    __tablename__ = "run_budget_observations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["reservation_id", "invocation_id"],
+            ["run_budget_reservations.id", "run_budget_reservations.invocation_id"],
+            name="fk_run_budget_observation_invocation",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("reservation_id", "observation_key", name="uq_run_budget_observation_key"),
+    )
+
+    reservation_id: Mapped[UUID] = mapped_column(nullable=False)
+    invocation_id: Mapped[UUID] = mapped_column(nullable=False)
+    observation_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    payload_checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    reconcile_worker_id: Mapped[str] = mapped_column(String(128), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 

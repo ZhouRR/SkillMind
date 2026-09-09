@@ -45,7 +45,7 @@
 
 #### R02 Run 统一预算
 
-- 状态：DTO、三表/0030、repository/store 已有代码，创建、主子执行、Worker startup 与受信计量/核对方尚未接入。
+- 状态：DTO、账本/0030、原调用绑定与观察/0035、repository/store 和 Engine 内部桥接已有代码；启动核对原描述子，观察去重/冲突先持久化，不将 float 或终端事件当精确计量/停止。已验证 profile、跨协调方启动未知恢复、创建、主子执行与 Worker startup 仍待接齐，真实事务/迁移未验。
 - 范围：[预算](../design/run-budgets.md)、Runtime 与子分析；复用账本，不重建内部保存版或直接当作公开协议。
 - 验收：可信计量、主子共同预约/结算、真实并发与提交未知、跨 Segment/Attempt、旧 Run/混合 Worker/回退和公开投影。
 

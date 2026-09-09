@@ -2,7 +2,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 
 import { respondToInteraction, type InteractionAnswerInput, type RespondedInteractionRecord, type UserInteractionDetail } from '../api'
 import { createIdempotencyKey } from '../lib/idempotency'
-import { canConfirmInteraction, freezeInteractionResponse, interactionAccessFailure, interactionPayload, INTERACTION_REQUEST_POLICY, sameInteractionIdentity,
+import { canConfirmInteraction, freezeInteractionResponse, hasDuplicateChoiceOptionKeys, interactionAccessFailure, interactionPayload, INTERACTION_REQUEST_POLICY, sameInteractionIdentity,
   type InteractionAccessFailure, type InteractionFailure, type InteractionScope, type PendingInteractionResponse } from '../lib/interactionResponse'
 import { useResourceMutation, type SessionEnded } from './useResourceRequest'
 
@@ -84,7 +84,7 @@ export function useInteractionResponse({ scope, csrfToken, interaction, availabl
   function start(answer: InteractionAnswerInput): void {
     const live = current.current
     if (original.current || !live.available || !live.writable || live.interaction.status !== 'OPEN'
-      || live.interaction.interaction_type === 'EFFECT_APPROVAL') return
+      || live.interaction.interaction_type === 'EFFECT_APPROVAL' || hasDuplicateChoiceOptionKeys(live.interaction)) return
     send({ request: freezeInteractionResponse(live.scope, live.interaction, answer, createIdempotencyKey()),
       phase: 'unknown', uncertain: false, failure: null, receipt: null })
   }

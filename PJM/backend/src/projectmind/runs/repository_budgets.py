@@ -5,14 +5,18 @@ from __future__ import annotations
 import hmac
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from sqlalchemy import inspect, select
+from sqlalchemy.exc import IntegrityError
 
+from projectmind.db.errors import matches_constraint
 from projectmind.db.models import (
     Run,
     RunAttempt,
     RunBudgetAccount,
+    RunBudgetObservation,
     RunBudgetReceipt,
     RunBudgetReservation,
     RunSegment,
@@ -24,6 +28,7 @@ from projectmind.runs.budget import (
     BudgetExecutionRecord,
     BudgetExecutionStatus,
     BudgetExhaustedError,
+    BudgetInvocationBinding,
     BudgetPolicy,
     BudgetReceiptResult,
     BudgetReconciliationClaim,
@@ -37,6 +42,9 @@ from projectmind.runs.budget import (
 )
 from projectmind.runs.domain import ClaimedRun, LeaseValidationError, RunStatus, lease_token_hash
 from projectmind.runs.repository_base import _RunRepositoryBase
+
+if TYPE_CHECKING:
+    from projectmind.agent.metering import AgentInvocation, ResultUsageObservation
 
 
 def _stored_units(value: Decimal | int | None) -> int:
@@ -95,7 +103,10 @@ class RunBudgetRepository(_RunRepositoryBase):
 
         account = (
             await self._session.scalars(
-                select(RunBudgetAccount).where(RunBudgetAccount.run_id == run.id).with_for_update()
+                select(RunBudgetAccount)
+                .where(RunBudgetAccount.run_id == run.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
         ).one_or_none()
         if account is None:
@@ -112,6 +123,7 @@ class RunBudgetRepository(_RunRepositoryBase):
                     .where(RunBudgetReservation.run_id == run.id)
                     .order_by(RunBudgetReservation.execution_key)
                     .with_for_update()
+                    .execution_options(populate_existing=True)
                 )
             ).all()
         )
@@ -149,6 +161,7 @@ class RunBudgetRepository(_RunRepositoryBase):
         ):
             raise LeaseValidationError("Run is not available for budgeted execution")
         await self._reject_cancelled_execution(run.id)
+        self._validate_claimed_lease(attempt, claimed, now=datetime.now(UTC))
 
     async def reserve_group(
         self,
@@ -243,6 +256,9 @@ class RunBudgetRepository(_RunRepositoryBase):
                 if item.parent_execution_key
                 else None,
                 execution_lease_hash=lease_token_hash(claimed.lease_token),
+                invocation_id=None,
+                invocation_json=None,
+                invocation_checksum=None,
                 status="RESERVED",
                 granted_turns=Decimal(item.turns),
                 reserved_turns=Decimal(item.turns),
@@ -274,13 +290,12 @@ class RunBudgetRepository(_RunRepositoryBase):
         await self._session.flush()
         return tuple(self._execution(row) for row in added)
 
-    async def start_execution(self, claimed: ClaimedRun, *, execution_key: str) -> bool:
-        """起動意図の初回 commit だけが True。読戻し/retry で再起動を許可しない。"""
+    @staticmethod
+    def _claimed_reservation(
+        rows: list[RunBudgetReservation], claimed: ClaimedRun, execution_key: str
+    ) -> RunBudgetReservation:
+        """予約時の Segment/Attempt/token と異なる実行へ起動権を移さない。"""
 
-        budget_key(execution_key)
-        run, segment, attempt = await self._lock_claimed_execution(claimed)
-        account, _, rows = await self._ledger(run)
-        await self._authorize(run, segment, attempt, claimed)
         row = next((item for item in rows if item.execution_key == execution_key), None)
         if (
             row is None
@@ -291,6 +306,137 @@ class RunBudgetRepository(_RunRepositoryBase):
             )
         ):
             raise LeaseValidationError("Reservation does not belong to this execution lease")
+        return row
+
+    @staticmethod
+    def _stored_invocation(row: RunBudgetReservation) -> AgentInvocation:
+        """旧行へ実行値を補造せず、保存 JSON・識別列・hash の全てを再検証する。"""
+
+        from projectmind.agent.metering import AgentInvocation
+
+        if (
+            row.invocation_id is None
+            or row.invocation_json is None
+            or row.invocation_checksum is None
+        ):
+            raise BudgetUnavailableError("Reservation has no complete invocation binding")
+        try:
+            invocation = AgentInvocation.from_json(row.invocation_json)
+            valid = (
+                invocation.invocation_id == row.invocation_id
+                and invocation.checksum == row.invocation_checksum
+                and invocation.to_json() == row.invocation_json
+                and invocation.run_id == row.run_id
+                and invocation.run_attempt_id == row.run_attempt_id
+                and invocation.options.max_turns is not None
+                and invocation.options.max_turns <= _stored_units(row.granted_turns)
+            )
+        except (TypeError, ValueError, KeyError) as error:
+            raise BudgetUnavailableError("Stored invocation binding is invalid") from error
+        if not valid:
+            raise BudgetUnavailableError("Stored invocation binding is inconsistent")
+        return invocation
+
+    @staticmethod
+    def _invocation_scope(invocation: AgentInvocation, run: Run, claimed: ClaimedRun) -> None:
+        """呼出し自己申告だけでなく、lock 済み Run の原 actor も照合する。"""
+
+        if (
+            invocation.project_id != run.project_id
+            or invocation.project_id != claimed.project_id
+            or invocation.run_id != run.id
+            or invocation.run_id != claimed.run_id
+            or invocation.run_attempt_id != claimed.run_attempt_id
+            or invocation.user_id != claimed.actor_id
+            or not isinstance(run.permission_snapshot_json, dict)
+            or run.permission_snapshot_json.get("actor_id") != str(invocation.user_id)
+        ):
+            raise BudgetConflictError("Invocation does not match the original execution scope")
+
+    @staticmethod
+    def _binding(row: RunBudgetReservation) -> BudgetInvocationBinding:
+        """照合値は起動許可と分離して返す。"""
+
+        assert row.invocation_id is not None and row.invocation_checksum is not None
+        return BudgetInvocationBinding(row.id, row.invocation_id, row.invocation_checksum)
+
+    async def bind_invocation(
+        self,
+        claimed: ClaimedRun,
+        *,
+        execution_key: str,
+        invocation: AgentInvocation,
+        confirm_only: bool = False,
+    ) -> BudgetInvocationBinding:
+        """未起動予約へ一回の実 options を固定し、同じ ID の別予約への流用を拒否する。"""
+
+        from projectmind.agent.metering import AgentInvocation
+
+        budget_key(execution_key)
+        if not isinstance(invocation, AgentInvocation):
+            raise BudgetError("Invocation binding requires a validated invocation")
+        payload = invocation.to_json()
+        checksum = invocation.checksum
+        run, segment, attempt = await self._lock_claimed_execution(claimed, populate_existing=True)
+        account, _, rows = await self._ledger(run)
+        await self._authorize(run, segment, attempt, claimed)
+        row = self._claimed_reservation(rows, claimed, execution_key)
+        self._invocation_scope(invocation, run, claimed)
+        if any(
+            value is not None
+            for value in (row.invocation_id, row.invocation_json, row.invocation_checksum)
+        ):
+            original = self._stored_invocation(row)
+            if original.to_json() != payload or row.invocation_checksum != checksum:
+                raise BudgetConflictError("Reservation already has a different invocation")
+            return self._binding(row)
+        if confirm_only:
+            raise BudgetUnavailableError("Original invocation binding was not committed")
+        if row.status != "RESERVED" or account.block_code:
+            raise BudgetUnavailableError("Reservation cannot bind an invocation")
+        if invocation.options.max_turns is None or invocation.options.max_turns > _stored_units(
+            row.granted_turns
+        ):
+            raise BudgetConflictError("Invocation turn limit exceeds the reservation grant")
+        if any(other.invocation_id == invocation.invocation_id for other in rows):
+            raise BudgetConflictError("Invocation is already bound to another reservation")
+        row.invocation_id = invocation.invocation_id
+        row.invocation_json = payload
+        row.invocation_checksum = checksum
+        row.updated_at = datetime.now(UTC)
+        try:
+            await self._session.flush()
+        except IntegrityError as error:
+            if matches_constraint(error, "uq_run_budget_invocation_id"):
+                raise BudgetConflictError(
+                    "Invocation is already bound to another reservation"
+                ) from error
+            raise
+        await self._authorize(run, segment, attempt, claimed)
+        return self._binding(row)
+
+    async def start_execution(
+        self,
+        claimed: ClaimedRun,
+        *,
+        execution_key: str,
+        expected_invocation_id: UUID,
+        expected_invocation_checksum: str,
+    ) -> bool:
+        """原記述子を明示照合した初回 commit だけが True。読戻しは再起動許可ではない。"""
+
+        budget_key(execution_key)
+        run, segment, attempt = await self._lock_claimed_execution(claimed, populate_existing=True)
+        account, _, rows = await self._ledger(run)
+        await self._authorize(run, segment, attempt, claimed)
+        row = self._claimed_reservation(rows, claimed, execution_key)
+        expected = BudgetInvocationBinding(
+            row.id, expected_invocation_id, expected_invocation_checksum
+        )
+        invocation = self._stored_invocation(row)
+        self._invocation_scope(invocation, run, claimed)
+        if expected != self._binding(row):
+            raise BudgetConflictError("Start intent does not match the bound invocation")
         if row.status == "START_INTENT":
             return False
         if row.status != "RESERVED" or account.block_code:
@@ -309,6 +455,7 @@ class RunBudgetRepository(_RunRepositoryBase):
         row.updated_at = row.start_intent_at
         self._touch(account)
         await self._session.flush()
+        await self._authorize(run, segment, attempt, claimed)
         return True
 
     async def _reconciliation_rows(
@@ -318,7 +465,7 @@ class RunBudgetRepository(_RunRepositoryBase):
     ) -> tuple[RunBudgetAccount, BudgetPolicy, list[RunBudgetReservation]]:
         """終態 Run も核対するが、Project 境界を越えず実行 lease を更新しない。"""
 
-        run = await self._lock_run_row(run_id, project_id=project_id)
+        run = await self._lock_run_row(run_id, project_id=project_id, populate_existing=True)
         if run is None or run.project_id != project_id:
             raise BudgetUnavailableError("Budget Run is not available")
         return await self._ledger(run)
@@ -369,17 +516,113 @@ class RunBudgetRepository(_RunRepositoryBase):
             raise LeaseValidationError("Budget settlement requires a reconciliation claim")
         account, policy, rows = await self._reconciliation_rows(claim.project_id, claim.run_id)
         row = next((item for item in rows if item.id == claim.reservation_id), None)
+        if row is None:
+            raise LeaseValidationError("Budget reconciliation lease is invalid")
+        self._validate_reconciliation_claim(row, claim)
+        return account, policy, row
+
+    @staticmethod
+    def _validate_reconciliation_claim(
+        row: RunBudgetReservation, claim: BudgetReconciliationClaim
+    ) -> None:
+        """最後の await 後にも核対の元世代と現在時刻を照合する。"""
+
         if (
-            row is None
-            or row.reconcile_worker_id != claim.worker_id
+            row.reconcile_worker_id != claim.worker_id
             or not hmac.compare_digest(
                 row.reconcile_token_hash or "", lease_token_hash(claim.token)
             )
             or row.reconcile_expires_at is None
+            or row.reconcile_expires_at != claim.expires_at
             or row.reconcile_expires_at <= datetime.now(UTC)
         ):
             raise LeaseValidationError("Budget reconciliation lease is invalid")
-        return account, policy, row
+
+    async def record_observation(
+        self,
+        claim: BudgetReconciliationClaim,
+        observation: ResultUsageObservation,
+    ) -> BudgetReceiptResult:
+        """原 Result の型付き観測だけを保存し、用量・停止・最終確認へ昇格させない。"""
+
+        from projectmind.agent.metering import ResultUsageObservation
+
+        if not isinstance(observation, ResultUsageObservation):
+            raise BudgetError("Raw observation requires a validated Result observation")
+        account, policy, row = await self._authorize_reconciliation(claim)
+        invocation = self._stored_invocation(row)
+        if (
+            invocation.project_id != claim.project_id
+            or invocation.to_json() != observation.invocation.to_json()
+            or invocation.checksum != observation.invocation.checksum
+        ):
+            raise BudgetConflictError("Observation does not match the bound invocation")
+        if row.status not in {"START_INTENT", "SETTLED"}:
+            raise BudgetUnavailableError("Raw observation requires an original start intent")
+        key = budget_key(observation.observation_key)
+        payload = observation.to_json()
+        checksum = budget_checksum(payload)
+        existing = (
+            await self._session.scalars(
+                select(RunBudgetObservation)
+                .where(
+                    RunBudgetObservation.reservation_id == row.id,
+                    RunBudgetObservation.observation_key == key,
+                )
+                .execution_options(populate_existing=True)
+            )
+        ).one_or_none()
+        self._validate_reconciliation_claim(row, claim)
+        disposition = "OBSERVED"
+        if existing is not None:
+            if (
+                existing.invocation_id == invocation.invocation_id
+                and existing.payload_checksum == checksum
+                # Python の 1 == True == 1.0 ではなく、保存した原 JSON の型も照合する。
+                and budget_checksum(existing.payload_json) == existing.payload_checksum
+                and existing.payload_json == payload
+            ):
+                disposition = "REPLAY"
+            else:
+                conflict_key = "observation-conflict/" + budget_checksum(
+                    {"key": key, "checksum": checksum}
+                )
+                conflict_receipt = await self._receipt(row, conflict_key)
+                self._validate_reconciliation_claim(row, claim)
+                previous_block = account.block_code
+                account.block_code = "observation_conflict"
+                if conflict_receipt is None:
+                    return await self._record_receipt(
+                        account,
+                        policy,
+                        row,
+                        claim,
+                        key=conflict_key,
+                        kind="UNVERIFIABLE",
+                        payload={"original_key": key, "conflicting_checksum": checksum},
+                        disposition="CONFLICT",
+                    )
+                if previous_block != account.block_code:
+                    self._touch(account)
+                disposition = "CONFLICT"
+        else:
+            self._session.add(
+                RunBudgetObservation(
+                    id=uuid4(),
+                    reservation_id=row.id,
+                    invocation_id=invocation.invocation_id,
+                    observation_key=key,
+                    payload_json=payload,
+                    payload_checksum=checksum,
+                    reconcile_worker_id=claim.worker_id,
+                    created_at=datetime.now(UTC),
+                )
+            )
+        await self._session.flush()
+        self._validate_reconciliation_claim(row, claim)
+        return BudgetReceiptResult(
+            self._account(account, policy), self._execution(row), disposition
+        )
 
     async def _receipt(
         self,
@@ -411,8 +654,7 @@ class RunBudgetRepository(_RunRepositoryBase):
     ) -> BudgetReceiptResult:
         """報告と勘定の変更を同じ transaction で残し、例外で異常記録を消さない。"""
 
-        if row.reconcile_expires_at is None or row.reconcile_expires_at <= datetime.now(UTC):
-            raise LeaseValidationError("Reconciliation lease expired before receipt commit")
+        self._validate_reconciliation_claim(row, claim)
         self._session.add(
             RunBudgetReceipt(
                 id=uuid4(),
@@ -429,6 +671,7 @@ class RunBudgetRepository(_RunRepositoryBase):
         row.updated_at = datetime.now(UTC)
         self._touch(account)
         await self._session.flush()
+        self._validate_reconciliation_claim(row, claim)
         return BudgetReceiptResult(
             self._account(account, policy), self._execution(row), disposition
         )

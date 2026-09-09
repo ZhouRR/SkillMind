@@ -43,6 +43,7 @@ from projectmind.agent.claude import (
     ToolDenialCallback,
     build_claude_agent_options,
 )
+from projectmind.agent.claude_metering import capture_invocation, capture_result_usage
 from projectmind.agent.compatibility import probe_claude_agent_sdk
 from projectmind.agent.domain import (
     AgentEvent,
@@ -54,8 +55,15 @@ from projectmind.agent.domain import (
     ResumeContext,
     RunContext,
 )
+from projectmind.agent.metering import (
+    AgentInvocationMode,
+    BeforeInvocationConnect,
+    ExecutionUsageObserver,
+)
+from projectmind.core.cancellation import check_pending_cancellation
 from projectmind.core.json_text import strip_code_fence
 from projectmind.effects.proposal import CHANGE_PROPOSE_SDK_NAME
+from projectmind.runs.budget import BudgetUnavailableError
 from projectmind.runs.interaction import INTERACTION_REQUEST_SDK_NAME
 
 _DEFAULT_RESUME_PROMPT = "Continue the existing ProjectMind run from its saved session."
@@ -403,25 +411,41 @@ class ClaudeAgentSdkEngine:
         session_store: SessionStore | None = None,
         client_factory: ClaudeClientFactory = _default_client_factory,
         interrupt_drain_timeout_seconds: float = 30.0,
+        usage_observer: ExecutionUsageObserver | None = None,
+        before_connect: BeforeInvocationConnect | None = None,
     ) -> None:
-        """Run-scoped MCP、sanitized 環境、client factory を保持する。"""
+        """Run-scoped MCP と受信 factory/観測先を保持する。
+
+        Factory は渡された options を変更・無視せず適用するサービス内部 port とする。
+        観測先の有無は共有予算の許可ではなく、未設定なら既存の表示 event 経路を保つ。
+        """
 
         if interrupt_drain_timeout_seconds <= 0:
             raise ValueError("Interrupt drain timeout must be positive")
+        if before_connect is not None and usage_observer is None:
+            raise ValueError("A budget start gate requires its usage observer")
         self._mcp_server_factory = mcp_server_factory
         self._configuration = configuration
         self._session_store = session_store
         self._client_factory = client_factory
         self._interrupt_drain_timeout_seconds = interrupt_drain_timeout_seconds
+        self._usage_observer = usage_observer
+        self._before_connect = before_connect
         self._active: dict[AgentSessionRef, _ActiveExecution] = {}
         self._active_lock = asyncio.Lock()
 
     async def execute(self, context: RunContext) -> AsyncIterator[AgentEvent]:
         """事前採番した UUID で新規 session を開始する。"""
 
-        session_id = str(uuid4())
+        session_id = (
+            context.prepared_invocation.session_id
+            if context.prepared_invocation is not None
+            else str(uuid4())
+        )
         options = replace(self._base_options(context), session_id=session_id)
-        async with aclosing(self._run(context, session_id, context.prompt, options)) as stream:
+        async with aclosing(
+            self._run(context, session_id, context.prompt, options, AgentInvocationMode.INITIAL)
+        ) as stream:
             async for event in stream:
                 yield event
 
@@ -432,7 +456,9 @@ class ClaudeAgentSdkEngine:
         options = replace(self._base_options(context.run), resume=context.session.session_id)
         prompt = context.input_text or _DEFAULT_RESUME_PROMPT
         async with aclosing(
-            self._run(context.run, context.session.session_id, prompt, options)
+            self._run(
+                context.run, context.session.session_id, prompt, options, AgentInvocationMode.RESUME
+            )
         ) as stream:
             async for event in stream:
                 yield event
@@ -441,7 +467,11 @@ class ClaudeAgentSdkEngine:
         """読み取り専用 session から事前採番した候補 session を作成する。"""
 
         _validate_parent_session(context.run, context.parent_session)
-        session_id = str(uuid4())
+        session_id = (
+            context.run.prepared_invocation.session_id
+            if context.run.prepared_invocation is not None
+            else str(uuid4())
+        )
         options = replace(
             self._base_options(context.run),
             resume=context.parent_session.session_id,
@@ -449,7 +479,9 @@ class ClaudeAgentSdkEngine:
             fork_session=True,
         )
         prompt = context.input_text or _DEFAULT_FORK_PROMPT
-        async with aclosing(self._run(context.run, session_id, prompt, options)) as stream:
+        async with aclosing(
+            self._run(context.run, session_id, prompt, options, AgentInvocationMode.FORK)
+        ) as stream:
             async for event in stream:
                 yield event
 
@@ -523,10 +555,40 @@ class ClaudeAgentSdkEngine:
         session_id: str,
         prompt: str,
         options: ClaudeAgentOptions,
+        mode: AgentInvocationMode,
     ) -> AsyncGenerator[AgentEvent, None]:
         """Connect、message drain、disconnect を一つの所有範囲で完結させる。"""
 
         mapper = ClaudeMessageMapper(context, session_id)
+        prepared = context.prepared_invocation
+        if prepared is not None and self._before_connect is None:
+            raise BudgetUnavailableError("A prepared invocation requires its durable start gate")
+        invocation = (
+            capture_invocation(
+                context,
+                session_id=session_id,
+                prompt=prompt,
+                options=options,
+                mode=mode,
+                invocation_id=prepared.invocation_id if prepared is not None else None,
+            )
+            if self._usage_observer is not None
+            else None
+        )
+        if prepared is not None and invocation != prepared:
+            raise BudgetUnavailableError("Prepared invocation does not match the actual execution")
+        if self._before_connect is not None:
+            assert invocation is not None
+            await check_pending_cancellation()
+            try:
+                permitted = await self._before_connect(invocation)
+            finally:
+                # 依存先の収尾が取消を捕えて戻る場合も、許可や別エラーに置換しない。
+                await check_pending_cancellation()
+            if permitted is not True:
+                raise BudgetUnavailableError(
+                    "Original start intent does not authorize a new launch"
+                )
         client = self._client_factory(options)
         session_ref = AgentSessionRef(
             run_id=context.run_id,
@@ -536,26 +598,80 @@ class ClaudeAgentSdkEngine:
         active = _ActiveExecution(session_ref=session_ref, client=client)
         saw_result = False
         disconnect_error: Exception | None = None
-        await self._register(active)
         try:
+            if self._before_connect is not None:
+                assert invocation is not None
+                await check_pending_cancellation()
+                actual = capture_invocation(
+                    context,
+                    session_id=session_id,
+                    prompt=prompt,
+                    options=options,
+                    mode=mode,
+                    invocation_id=invocation.invocation_id,
+                )
+                if actual != invocation:
+                    raise BudgetUnavailableError("Client factory changed the bound invocation")
+            await self._register(active)
+            await check_pending_cancellation()
             await client.connect(prompt)
+            await check_pending_cancellation()
             async for message in client.receive_response():
+                # SDK が取消しを捕えて message を返しても、観測/表示を続行させない。
+                await check_pending_cancellation()
+                if isinstance(message, ResultMessage) and invocation is not None:
+                    # 消費側は最初の終端/待機 yield で stream を閉じる場合がある。独立観測を
+                    # 先に await し、表示 event の重複や close に最終 Result を失わせない。
+                    observation = capture_result_usage(invocation, message)
+                    assert self._usage_observer is not None
+                    try:
+                        try:
+                            await self._usage_observer(observation)
+                        finally:
+                            # Sink が取消しを捕えて別エラーを返す場合も、表示 yield や
+                            # client cleanup より前に未配送分を受けて取消しを伝播する。
+                            await check_pending_cancellation()
+                    except Exception as error:
+                        # 監査先の失敗/commit 不明を成功や待機へ変換しない。裸取消は伝播する。
+                        yield mapper.engine_failure(
+                            "metering_observation_failed", error_type=type(error).__name__
+                        )
+                        return
                 for event in mapper.map(message, interrupted=active.interrupt_requested):
+                    # 一つの Result の usage yield 中に消費側が取消す場合も次を渡さない。
+                    await check_pending_cancellation()
                     yield event
+                    await check_pending_cancellation()
                 if isinstance(message, ResultMessage):
                     saw_result = True
+            await check_pending_cancellation()
             if not saw_result:
                 yield mapper.engine_failure("result_message_missing")
         except Exception as error:
+            # Register/connect 等が取消しを普通の例外に置換しても、失敗 event で隠さない。
+            await check_pending_cancellation()
             yield mapper.engine_failure("sdk_execution_error", error_type=type(error).__name__)
         finally:
             try:
-                await client.disconnect()
-            except Exception as error:
-                disconnect_error = error
+                # 消費側の cancel→aclose は次の event checkpoint を通らない。
+                # 未配送の取消しを先に受けても、内側 finally の cleanup は必ず試みる。
+                await check_pending_cancellation()
             finally:
-                active.done.set()
-                await self._unregister(active)
+                try:
+                    await client.disconnect()
+                except Exception as error:
+                    disconnect_error = error
+                finally:
+                    active.done.set()
+                    try:
+                        # Disconnect 中に初めて取消された場合も、未配送分で登録解除を
+                        # 中断させず、完了/通常エラーへ取消しをすり替えない。
+                        await check_pending_cancellation()
+                    finally:
+                        try:
+                            await self._unregister(active)
+                        finally:
+                            await check_pending_cancellation()
         if disconnect_error is not None:
             yield mapper.engine_failure(
                 "sdk_disconnect_error", error_type=type(disconnect_error).__name__
