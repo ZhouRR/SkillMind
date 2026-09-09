@@ -15,7 +15,7 @@ from projectmind.api.auth_dependencies import (
     administrator_required_problem,
     project_not_found_problem,
 )
-from projectmind.api.problems import ProblemException
+from projectmind.api.problems import ProblemException, problem_openapi_response
 from projectmind.projects import (
     ProjectDeleteBlockedError,
     ProjectKeyConflictError,
@@ -148,7 +148,11 @@ async def create_project(
 @router.get(
     "/projects/{project_id}",
     response_model=ProjectResponse,
-    responses={404: {"description": "Project not found or inaccessible"}},
+    responses={
+        401: problem_openapi_response("A valid session is required"),
+        404: problem_openapi_response("Project not found or inaccessible"),
+        422: problem_openapi_response("Invalid Project identity"),
+    },
     tags=["projects"],
 )
 async def get_project(
@@ -156,7 +160,7 @@ async def get_project(
     project_id: UUID,
     actor: ReadActor,
 ) -> ProjectResponse:
-    """Actor が参照可能な Project metadata を取得する。"""
+    """Actor が参照可能な Project metadata を ARCHIVED を含めて取得する。"""
 
     service: ProjectService = request.app.state.project_service
     try:
@@ -253,9 +257,14 @@ async def unarchive_project(
     "/projects/{project_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     responses={
-        403: {"description": "ADMIN required"},
-        404: {"description": "Project not found"},
-        409: {"description": "Project cannot be deleted"},
+        401: problem_openapi_response("A valid session is required"),
+        403: problem_openapi_response("ADMIN, same Origin and CSRF required"),
+        404: problem_openapi_response("Project not found or inaccessible"),
+        409: problem_openapi_response(
+            "Deletion rejected: project_delete_requires_archive, "
+            "project_delete_blocked_by_runs, or project_delete_blocked_by_schedules"
+        ),
+        422: problem_openapi_response("Invalid Project identity or missing CSRF header"),
     },
     tags=["projects"],
 )
@@ -264,7 +273,7 @@ async def delete_project(
     project_id: UUID,
     actor: WriteActor,
 ) -> Response:
-    """ADMIN が Run 履歴のない ARCHIVED Project を物理削除し key を解放する。"""
+    """ADMIN が Run/Schedule のない ARCHIVED Project を物理削除し key を解放する。"""
 
     service: ProjectService = request.app.state.project_service
     try:
@@ -398,17 +407,17 @@ def _project_delete_blocked_problem(error: ProjectDeleteBlockedError) -> Problem
     """削除拒否を、利用者が次の操作を選べる安定 code 付き 409 へ変換する。
 
     Problem contract は追加 field を許さないため、阻害要因は code で区別する。Web は
-    この code で「先に archive する」と「Run 履歴があるので消せない」を語彙化する。
+    この code で archive 前、Run 履歴、Schedule 参照による拒否を区別する。
     """
 
-    blocked_by_runs = "run_history_exists" in error.blockers
+    code = "project_delete_requires_archive"
+    if "run_history_exists" in error.blockers:
+        code = "project_delete_blocked_by_runs"
+    elif "task_schedule_exists" in error.blockers:
+        code = "project_delete_blocked_by_schedules"
     return ProblemException(
         status=status.HTTP_409_CONFLICT,
         title="Project delete rejected",
         detail=str(error),
-        code=(
-            "project_delete_blocked_by_runs"
-            if blocked_by_runs
-            else "project_delete_requires_archive"
-        ),
+        code=code,
     )

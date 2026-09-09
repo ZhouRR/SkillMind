@@ -22,7 +22,13 @@ export function userFailure(error: unknown, mutation: boolean): UserFailure {
     if (status === 422 && ['validation_error', 'invalid_user_request'].includes(code ?? '')) {
       return { key: 'invalidRequest' }
     }
-    if (status === 429) return { key: 'rateLimited', retryAfterSeconds: error.retryAfterSeconds }
+    if (status === 429 && code === 'login_rate_limited') {
+      const seconds = error.retryAfterSeconds
+      // 本人改密も login protection の最大 300 秒を使い、未知の header で永久禁止にしない。
+      return seconds !== undefined && Number.isInteger(seconds) && seconds >= 1 && seconds <= 300
+        ? { key: 'rateLimited', retryAfterSeconds: seconds }
+        : { key: 'rateLimited' }
+    }
     if (status === 503 && code === 'login_protection_unavailable') return { key: 'unavailable' }
   }
   return { key: mutation ? 'unknown' : 'loadFailed' }
@@ -37,4 +43,9 @@ export function passwordIssue(password: string, confirmation: string): 'password
 /** 大小文字だけが異なる UUID 表記を同じ対象として照合する。 */
 export function sameUser(left: string, right: string): boolean {
   return left.toLowerCase() === right.toLowerCase()
+}
+
+/** Email は 320 文字まで、検索は 200 文字まで。長い email も原値を残して候補を読む。 */
+export function creationEmailQuery(email: string): string {
+  return [...email.trim()].slice(0, 200).join('')
 }

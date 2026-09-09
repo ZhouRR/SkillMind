@@ -3,7 +3,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   archiveProject,
   createProject,
+  deleteProject,
   loadAuthSession,
+  loadProject,
   loadProjects,
   login,
   logout,
@@ -117,6 +119,81 @@ describe('auth API client', () => {
 })
 
 describe('project API client', () => {
+  it.each(['ACTIVE', 'ARCHIVED'] as const)('reads the requested %s project outside the active list', async (status) => {
+    const project = { ...PROJECT, status }
+    const controller = new AbortController()
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(project))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(loadProject(PROJECT.project_id.toUpperCase(), controller.signal)).resolves.toEqual(project)
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toMatch(new RegExp(`/projects/${PROJECT.project_id.toUpperCase()}$`))
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      signal: controller.signal, cache: 'no-store', credentials: 'same-origin',
+    })
+  })
+
+  it.each(['', 'not-a-uuid', '../projects', `${PROJECT.project_id}?project=other`])('does not request a malformed project identity %s', async (id) => {
+    const fetchMock = vi.fn<typeof fetch>()
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(loadProject(id)).rejects.toThrow('Invalid project identity')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a valid response for a different project without looking for a replacement', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+      ...PROJECT, project_id: 'ffffffff-ffff-ffff-ffff-ffffffffffff',
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(loadProject(PROJECT.project_id)).rejects.toThrow('requested identity')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    { project_id: 'bad-id' }, { organization_id: 'private' }, { key: '' },
+    { name: '' }, { name: 'x'.repeat(201) }, { description: 'x'.repeat(4001) },
+    { retention_days: 0 }, { retention_days: 3651 }, { retention_days: 1.5 },
+    { status: 'DELETED' }, { created_at: '2026-02-30T00:00:00Z' },
+    { updated_at: '2026-09-09' }, { settings: [] },
+  ])('rejects details outside the current Project contract: %j', async (patch) => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ ...PROJECT, ...patch })))
+    await expect(loadProject(PROJECT.project_id)).rejects.toThrow('Project response did not match its contract')
+  })
+
+  it('accepts Unicode character limits without counting surrogate pairs twice', async () => {
+    const project = { ...PROJECT, name: '😀'.repeat(200) }
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(project)))
+    await expect(loadProject(PROJECT.project_id)).resolves.toEqual(project)
+  })
+
+  it('keeps missing or inaccessible projects as one 404 without a list fallback', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+      code: 'project_not_found', detail: 'Project not found.',
+    }, 404))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(loadProject(PROJECT.project_id)).rejects.toMatchObject({ status: 404, code: 'project_not_found' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not read details after an already aborted request', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const fetchMock = vi.fn<typeof fetch>()
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(loadProject(PROJECT.project_id, controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects late project data when a transport ignores abort', async () => {
+    const controller = new AbortController()
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockImplementation(async () => {
+      controller.abort()
+      return jsonResponse(PROJECT)
+    }))
+    await expect(loadProject(PROJECT.project_id, controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
   it('validates accessible project lists', async () => {
     vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ items: [PROJECT] })))
 
@@ -148,6 +225,18 @@ describe('project API client', () => {
     for (const call of fetchMock.mock.calls) {
       expect(new Headers(call[1]?.headers).get('X-CSRF-Token')).toBe(SESSION.csrf_token)
     }
+  })
+
+  it.each([
+    'project_delete_requires_archive', 'project_delete_blocked_by_runs',
+    'project_delete_blocked_by_schedules',
+  ])('preserves the deletion conflict %s and never retries or removes references', async (code) => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ code, detail: 'Deletion blocked.' }, 409))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(deleteProject(PROJECT.project_id, SESSION.csrf_token)).rejects.toMatchObject({ status: 409, code })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe('DELETE')
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('X-CSRF-Token')).toBe(SESSION.csrf_token)
   })
 })
 

@@ -107,7 +107,7 @@ Run 创建冻结 actor、成员资格及 Skill/Tool 权限上限，不随后来�
 
 ## 开发接续与验收
 
-现有登录/登出、v2 稳定 CSRF、统一 actor 和管理 API 是接续起点；账户 Web/OpenAPI 与真实环境缺口以 R05 为准。接口变更同步[认证契约入口](../../PJM/README.md#contracts)、Web client 和回归；不得增加旁路认证。
+现有登录/登出、v2 稳定 CSRF、统一 actor、管理 API 与账户页是接续起点；剩余实现和真实环境缺口以 R05 为准。接口变更同步[认证契约入口](../../PJM/README.md#contracts)、Web client 和回归；不得增加旁路认证。
 
 - 多页面、乱序、换账号：同会话不互撤凭据，原业务动作不自动重放。
 - 错误 challenge/Origin、跨 Project、归档、非 ADMIN：按各层拒绝，不泄露账号或资源。

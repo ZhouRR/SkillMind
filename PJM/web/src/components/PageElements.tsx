@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
 import type { ProjectState } from '../appState'
-import type { RunEventRecord, RunStatus } from '../api'
+import type { ProjectRecord, RunEventRecord, RunStatus } from '../api'
 import { useMessages } from '../i18n'
 import { formatLocalTime } from '../lib/presentation'
 
@@ -20,19 +20,33 @@ export function PageHeader({ title, description, aside }: {
 }
 
 /** 共有 Project context を名称で選択する。UUID の手入力を廃し、選択中の ID は補助行に降格する。 */
-export function ProjectContextSelect({ projectState, projectId, onSelect, label }: {
+export function ProjectContextSelect({ projectState, projectId, currentProject, onSelect, onRefresh, label }: {
   projectState: ProjectState
   projectId: string
+  /** 精確読取で認可済みの現 Project。一覧の成功・失敗とは独立して扱う。 */
+  currentProject?: ProjectRecord | null
   onSelect: (projectId: string) => void
+  /** 読取を再試行しても、明示された対象や権限判断を selector 自身では変えない。 */
+  onRefresh?: () => void
   label?: string
 }) {
   const messages = useMessages()
   const resolvedLabel = label ?? messages.elements.projectLabel
-  const projects = projectState.status === 'ready' ? projectState.projects : []
+  const listed = projectState.status === 'ready' ? projectState.projects : []
+  const candidates = new Map(listed.map((project) => [project.project_id, project] as const))
+  // 詳細読取は一覧完了の証拠ではない。現対象だけを補い、一覧の真の状態は維持する。
+  if (currentProject?.project_id === projectId) candidates.set(projectId, currentProject)
+  const projects = [...candidates.values()]
+  const selectedProject = projects.find((project) => project.project_id === projectId)
+  // 未解決の value を native select に渡すと先頭候補へ見かけ上切り替わるため、
+  // 元の対象を表す option を残し、別 Project は明示的に選ばせる。
+  const needsPlaceholder = !selectedProject
   const placeholder = projectState.status === 'ready'
-    ? (projects.length === 0
-      ? messages.elements.noAccessibleProjects
-      : messages.elements.selectProject)
+    ? (projectId !== ''
+      ? messages.elements.projectUnavailable
+      : projects.length === 0
+        ? messages.elements.noAccessibleProjects
+        : messages.elements.selectProject)
     : projectState.status === 'error'
       ? messages.elements.projectListFailed
       : messages.elements.loadingProjects
@@ -44,15 +58,22 @@ export function ProjectContextSelect({ projectState, projectId, onSelect, label 
           value={projectId}
           onChange={(event) => onSelect(event.target.value)}
         >
-          {projectId === '' && <option value="">{placeholder}</option>}
+          {needsPlaceholder && <option disabled value={projectId}>{placeholder}</option>}
           {projects.map((project) => (
             <option key={project.project_id} value={project.project_id}>
               {project.name} · {project.key}
+              {project.status === 'ARCHIVED' && ` · ${messages.elements.archivedProject}`}
             </option>
           ))}
         </select>
       </label>
+      {selectedProject && (projectState.status === 'idle' || projectState.status === 'loading') && (
+        <p className="muted" role="status">{messages.elements.loadingProjects}</p>
+      )}
       {projectState.status === 'error' && <p className="error" role="alert">{projectState.message}</p>}
+      {projectState.status === 'error' && onRefresh && (
+        <button className="secondaryButton compactButton" onClick={onRefresh} type="button">{messages.runHistory.retry}</button>
+      )}
       {projectId !== '' && <p className="projectContextId" title={projectId}>{projectId}</p>}
     </div>
   )

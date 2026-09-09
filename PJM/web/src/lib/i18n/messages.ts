@@ -21,6 +21,7 @@ export interface UiMessages {
   account: {
     myAccount: string
     manageUsers: string
+    draftMemoryOnly: string
     create: string
     edit: string
     search: string
@@ -66,6 +67,9 @@ export interface UiMessages {
     unknownHint: string
     checkCreation: string
     beginNewCreate: string
+    creationReviewHint: string
+    creationOriginalEmail: string
+    createHint: string
     createdSuccess: string
     mutationSuccess: string
     sessionEnded: string
@@ -73,6 +77,9 @@ export interface UiMessages {
     failures: Record<'sessionExpired' | 'passwordRejected' | 'csrfRejected' | 'adminRequired' | 'notFound' | 'versionConflict' | 'lastAdmin' | 'emailConflict' | 'invalidRequest' | 'rateLimited' | 'unavailable' | 'unknown' | 'loadFailed', string>
   }
   nav: {
+    openMenu: string
+    closeMenu: string
+    menuLabel: string
     brandAriaHome: string
     mainNavAria: string
     platformGroup: string
@@ -129,10 +136,14 @@ export interface UiMessages {
     ok: (version: string) => string
   }
   app: {
+    projectUnavailable: string
+    projectReadFailed: string
+    projectArchived: string
     verifyingSession: string
     cannotVerifySession: string
     sessionExpired: string
     loadProjectsFailed: string
+    loadPreferenceFailed: string
     savePreferenceFailed: string
     saveLanguageFailed: string
     logoutFailed: string
@@ -180,6 +191,8 @@ export interface UiMessages {
   }
   /** 共有 UI 部品(PageElements)の既定文言。 */
   elements: {
+    projectUnavailable: string
+    archivedProject: string
     projectLabel: string
     noAccessibleProjects: string
     selectProject: string
@@ -298,6 +311,7 @@ export interface UiMessages {
     deleteFailed: string
     /** 削除拒否の理由。backend は Problem code で両者を区別する。 */
     deleteBlockedByRuns: string
+    deleteBlockedBySchedules: string
     deleteNeedsArchive: string
     permissionsTitle: string
     permissionsHint: string

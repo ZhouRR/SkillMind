@@ -4,8 +4,150 @@ import { describe, expect, it, vi } from 'vitest'
 import { ConfirmDialog, EmptyState, EventTimelineItem, LoadingSkeleton, ModalDialog, ProjectContextSelect } from '../../src/components/PageElements'
 import type { RunEventRecord } from '../../src/api'
 import { DEMO_PROJECT as PROJECT } from '../fixtures'
+import { MESSAGES } from '../../src/lib/i18n/messages'
 
 describe('ProjectContextSelect', () => {
+  it.each(['idle', 'loading'] as const)('shows authorized archived detail while preserving the list %s status', (status) => {
+    const html = renderToStaticMarkup(
+      <ProjectContextSelect
+        projectId={PROJECT.project_id}
+        projectState={{ status }}
+        currentProject={{ ...PROJECT, status: 'ARCHIVED' }}
+        onSelect={vi.fn()}
+      />,
+    )
+    expect(html).toContain(`Quality Team · quality-team · ${MESSAGES.zh.elements.archivedProject}`)
+    expect(html).toContain(`<option value="${PROJECT.project_id}" selected="">`)
+    expect(html).toContain(`role="status">${MESSAGES.zh.elements.loadingProjects}</p>`)
+    expect(html).not.toContain('<select disabled')
+    expect(html).not.toContain(MESSAGES.zh.elements.projectUnavailable)
+  })
+
+  it('preserves the list failure alert even when authorized current detail is available', () => {
+    const html = renderToStaticMarkup(
+      <ProjectContextSelect
+        projectId={PROJECT.project_id}
+        projectState={{ status: 'error', message: MESSAGES.zh.elements.projectListFailed }}
+        currentProject={{ ...PROJECT, status: 'ARCHIVED' }}
+        onSelect={vi.fn()}
+      />,
+    )
+    expect(html).toContain(`Quality Team · quality-team · ${MESSAGES.zh.elements.archivedProject}`)
+    expect(html).toContain(`role="alert">${MESSAGES.zh.elements.projectListFailed}</p>`)
+    expect(html).not.toContain('<select disabled')
+  })
+
+  it('offers an explicit list retry only when the parent supplies a recovery action', () => {
+    const html = renderToStaticMarkup(
+      <ProjectContextSelect
+        projectId={PROJECT.project_id}
+        projectState={{ status: 'error', message: MESSAGES.zh.elements.projectListFailed }}
+        currentProject={PROJECT}
+        onSelect={vi.fn()}
+        onRefresh={vi.fn()}
+      />,
+    )
+    expect(html).toContain(`type="button">${MESSAGES.zh.runHistory.retry}</button>`)
+    expect(html).toContain(`role="alert">${MESSAGES.zh.elements.projectListFailed}</p>`)
+    expect(html).toContain(`<option value="${PROJECT.project_id}" selected="">`)
+  })
+
+  it('does not offer another retry while the list request is already loading', () => {
+    const html = renderToStaticMarkup(
+      <ProjectContextSelect
+        projectId={PROJECT.project_id}
+        projectState={{ status: 'loading' }}
+        currentProject={PROJECT}
+        onSelect={vi.fn()}
+        onRefresh={vi.fn()}
+      />,
+    )
+    expect(html).toContain('role="status"')
+    expect(html).not.toContain('<button')
+  })
+
+  it('uses current detail once while retaining every other accessible candidate', () => {
+    const other = { ...PROJECT, project_id: '00000000-0000-4000-8000-000000000011', name: 'Other accessible project' }
+    const html = renderToStaticMarkup(
+      <ProjectContextSelect
+        projectId={PROJECT.project_id}
+        projectState={{ status: 'ready', projects: [PROJECT, other] }}
+        currentProject={{ ...PROJECT, name: 'Current authorized detail', status: 'ARCHIVED' }}
+        onSelect={vi.fn()}
+      />,
+    )
+    expect(html.split('<option').length - 1).toBe(2)
+    expect(html).toContain(`Current authorized detail · quality-team · ${MESSAGES.zh.elements.archivedProject}`)
+    expect(html).toContain('Other accessible project')
+    expect(html).not.toContain('Quality Team')
+    expect(html).not.toContain('role="status"')
+    expect(html).not.toContain('role="alert"')
+  })
+
+  it('does not reuse an old detail record as the newly selected project', () => {
+    const html = renderToStaticMarkup(
+      <ProjectContextSelect
+        projectId="00000000-0000-4000-8000-000000000099"
+        projectState={{ status: 'ready', projects: [] }}
+        currentProject={PROJECT}
+        onSelect={vi.fn()}
+      />,
+    )
+    expect(html).not.toContain('Quality Team')
+    expect(html).toContain(MESSAGES.zh.elements.projectUnavailable)
+    expect(html).toContain('<select disabled')
+  })
+
+  it('keeps an unavailable explicit target selected instead of implying the first accessible project', () => {
+    const unavailableId = '00000000-0000-4000-8000-000000000099'
+    const html = renderToStaticMarkup(
+      <ProjectContextSelect
+        projectId={unavailableId}
+        projectState={{ status: 'ready', projects: [PROJECT] }}
+        onSelect={vi.fn()}
+      />,
+    )
+    expect(html).toContain(`<option disabled="" value="${unavailableId}" selected="">${MESSAGES.zh.elements.projectUnavailable}</option>`)
+    expect(html).toContain(`<option value="${PROJECT.project_id}">`)
+    expect(html).not.toContain('<select disabled')
+    expect(html).toContain('projectContextId')
+  })
+
+  it('distinguishes an unavailable target from an empty project list', () => {
+    const html = renderToStaticMarkup(
+      <ProjectContextSelect
+        projectId={PROJECT.project_id}
+        projectState={{ status: 'ready', projects: [] }}
+        onSelect={vi.fn()}
+      />,
+    )
+    expect(html).toContain(MESSAGES.zh.elements.projectUnavailable)
+    expect(html).not.toContain(MESSAGES.zh.elements.noAccessibleProjects)
+    expect(html).toContain('<select disabled')
+  })
+
+  it('retains the unresolved identity while showing a loading placeholder', () => {
+    const html = renderToStaticMarkup(
+      <ProjectContextSelect projectId={PROJECT.project_id} projectState={{ status: 'loading' }} onSelect={vi.fn()} />,
+    )
+    expect(html).toContain(`<option disabled="" value="${PROJECT.project_id}" selected="">`)
+    expect(html).toContain(MESSAGES.zh.elements.loadingProjects)
+    expect(html).not.toContain(MESSAGES.zh.elements.projectUnavailable)
+  })
+
+  it('marks an authorized archived record without presenting it as an active project', () => {
+    const html = renderToStaticMarkup(
+      <ProjectContextSelect
+        projectId={PROJECT.project_id}
+        projectState={{ status: 'ready', projects: [{ ...PROJECT, status: 'ARCHIVED' }] }}
+        onSelect={vi.fn()}
+      />,
+    )
+    expect(html).toContain(`Quality Team · quality-team · ${MESSAGES.zh.elements.archivedProject}`)
+    expect(html).toContain(`<option value="${PROJECT.project_id}" selected="">`)
+    expect(html).not.toContain(MESSAGES.zh.elements.projectUnavailable)
+  })
+
   it('offers projects by name and shows the selected id as a secondary line', () => {
     const html = renderToStaticMarkup(
       <ProjectContextSelect

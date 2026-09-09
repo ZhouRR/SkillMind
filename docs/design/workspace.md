@@ -12,9 +12,9 @@
 
 ### 导航层级
 
-平台含概览、组织技能库、项目管理；当前项目含任务中心/调度、Workspace、历史、文档、资源管理。Composition 的 module/role/task_group 是展示，不是权限。
+平台含概览、组织技能库、项目管理、账户与安全；当前项目含任务中心/调度、Workspace、历史、文档、资源管理。Composition 的 module/role/task_group 是展示，不是权限。
 
-登录属于 App 认证状态，不是 Project/hash 页面。[账户入口](user-lifecycle.md)也属于平台；已有 Backend/client/组件草稿，但账户 route/page 尚未接入，不提前列作可操作功能。
+登录属于 App 认证状态，不是 Project/hash 页面。[账户入口](user-lifecycle.md)属于平台，不依赖项目选择；本人安全设置与 ADMIN 的组织用户管理分区显示。
 
 ### 路由
 
@@ -24,12 +24,15 @@
 | --- | --- |
 | `#/` | 概览与待办 |
 | `#/skills`、`#/projects` | 组织技能、项目管理 |
+| `#/accounts` | 本人账户与安全、ADMIN 用户管理；不携带 Project/Run/Task 或账户搜索参数 |
 | `#/tasks?project=<id>` | 任务、Preflight、调度 |
 | `#/workspace?project=<id>&run=<id>` | 单 Run；task 参数可定位新任务 |
 | `#/history?project=<id>` | 项目历史 |
 | `#/documents?project=<id>`、`#/resources?project=<id>` | 文档、Integration/Secret/Binding/预授权 |
 
-Interaction/Result 在 Workspace 内，无独立 path。显式无效 Project 应显示统一不可访问，不自动换项目；当前 App 仍回退改 hash，按[项目选择](project-lifecycle.md#项目选择与失效链接)修正。路由不授予权限。
+Interaction/Result 在 Workspace 内，无独立 path。显式无效 Project 保留目标、统一提示，不自动换项目；无参数初次选择、详情验证与失效恢复按[项目选择](project-lifecycle.md#项目选择与失效链接)处理。读取未确认时不挂载项目业务页面，账户等平台入口独立可用。路由不授予权限。
+
+窄屏主导航通过菜单按钮展开完整入口，包括项目选择、语言与退出；收起内容不参与 Tab，Escape/选择后关闭并恢复焦点。项目列表失败与当前详情可读分别显示，归档目标有明确标记。切换项目清除旧 Run/Task 参数，返回和刷新仍按原 URL 目标验证。
 
 ### 工作空间布局
 

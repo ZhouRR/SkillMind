@@ -46,9 +46,9 @@ class ProjectMemberNotFoundError(RuntimeError):
 class ProjectDeleteBlockedError(RuntimeError):
     """Project を物理削除できない状態を表す domain error。
 
-    Run と監査記録は削除で復元できないため、ARCHIVED でない、または Run が残っている
-    Project は key を解放するためであっても消させない。``blockers`` には利用者が自分で
-    解消できる理由だけを載せる。
+    Run と監査記録は削除で復元できないため、ARCHIVED でない、または Run/Schedule が残る
+    Project は key を解放するためであっても消させない。``blockers`` は安定した公開拒否へ
+    対応する識別子であり、参照を削除して制約を回避してよいという指示ではない。
     """
 
     def __init__(self, message: str, *, blockers: tuple[str, ...] = ()) -> None:

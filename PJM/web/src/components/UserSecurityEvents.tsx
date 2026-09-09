@@ -3,7 +3,7 @@ import { useCallback, useState } from 'react'
 import { loadMySecurityEvents, loadUserSecurityEvents } from '../api'
 import { useUserQuery, type SessionEnded } from '../hooks/useUserRequest'
 import { useMessages } from '../i18n'
-import { formatLocalTime } from '../lib/presentation'
+import { formatLocalTimestamp } from '../lib/presentation'
 import { sameUser } from '../lib/userFeedback'
 import { UserPager, UserResponseNotice } from './UserAccountElements'
 
@@ -31,10 +31,10 @@ export function UserSecurityEvents({ userId, own, revision, onSessionEnded }: {
     {query.pending && <p role="status">{messages.busy}</p>}
     {query.data && <>
       {query.data.items.length === 0 && <p>{messages.emptyEvents}</p>}
-      <ul className="accountEventList">
+      <ul className="accountEventList" tabIndex={query.data.items.length > 0 ? 0 : undefined} aria-label={messages.securityEvents}>
         {query.data.items.map((event) => <li key={event.event_id}>
           <details>
-            <summary>{messages.eventActions[event.action]} · <time dateTime={event.created_at}>{formatLocalTime(event.created_at)}</time> · {messages.fields.version} {event.row_version}</summary>
+            <summary>{messages.eventActions[event.action]} · <time dateTime={event.created_at} title={event.created_at}>{formatLocalTimestamp(event.created_at)}</time> · {messages.fields.version} {event.row_version}</summary>
             <dl className="accountFacts">
               <div><dt>{messages.eventActor}</dt><dd>{event.actor_id}</dd></div>
               <div><dt>{messages.eventRequest}</dt><dd>{event.request_id}</dd></div>

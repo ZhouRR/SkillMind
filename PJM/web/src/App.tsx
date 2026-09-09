@@ -1,12 +1,10 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
 import {
   ApiProblemError,
   loadAuthSession,
   loadMeta,
   loadProjectModules,
-  loadProjectPreference,
-  loadProjects,
   loadUiLanguage,
   logout,
   saveProjectPreference,
@@ -14,13 +12,19 @@ import {
   type AuthSessionRecord,
   type ProjectModuleRecord,
   type ProjectRecord,
+  type UserAccountRecord,
 } from './api'
 import { type MetaState, type ProjectState } from './appState'
 import { AppNavigation } from './components/AppNavigation'
+import { ProjectContextNotice } from './components/ProjectContextNotice'
 import { LanguageProvider } from './i18n'
+import { navigateHash, useHashRoute } from './hooks/useHashRoute'
+import { useProjectContext } from './hooks/useProjectContext'
+import type { SessionEnded } from './hooks/useUserRequest'
 import { MESSAGES, type UiLanguage } from './lib/i18n/messages'
 import { resolveUiLanguage } from './lib/i18n/resolve'
-import { resolveProjectSelection } from './lib/projectContext'
+import { sameUser } from './lib/userFeedback'
+import { AccountsPage } from './pages/AccountsPage'
 import { DocumentsPage } from './pages/DocumentsPage'
 import { HomePage } from './pages/HomePage'
 import { HistoryPage } from './pages/HistoryPage'
@@ -32,7 +36,6 @@ import { TasksPage } from './pages/TasksPage'
 import { WorkspacePage } from './pages/WorkspacePage'
 import {
   APP_ROUTES,
-  projectIdFromHash,
   routeContextFromHash,
   routeFromHash,
   routeHref,
@@ -43,55 +46,133 @@ import './styles.css'
 
 /** ProjectMind の画面選択と共有 Project context を管理する application shell。 */
 export function App() {
-  const [route, setRoute] = useState<AppRoute>(() => routeFromHash(window.location.hash))
-  const [projectId, setProjectId] = useState('')
+  const hash = useHashRoute()
+  const route = routeFromHash(hash)
   const [metaState, setMetaState] = useState<MetaState>({ status: 'loading' })
   const [authState, setAuthState] = useState<AuthState>({ status: 'loading' })
-  const [projectState, setProjectState] = useState<ProjectState>({ status: 'idle' })
   const [logoutError, setLogoutError] = useState<string | null>(null)
   const [preferenceError, setPreferenceError] = useState<string | null>(null)
   // 業務模块 filter。任务中心と工作空间の双方が読む。sidebar の子菜单が唯一の切替入口。
   // 空は「模块を持たない Project」= 絞り込み無しで、選べる module がある限り空にはしない。
   const [activeModuleId, setActiveModuleId] = useState('')
   const [modules, setModules] = useState<ProjectModuleRecord[]>([])
+  const [moduleContext, setModuleContext] = useState('')
+  const moduleChoice = useRef<{ context: string; moduleId: string } | null>(null)
   // 表示言語。初期値は browser 言語で、認証後に保存済み preference が上書きする。
   const [language, setLanguage] = useState<UiLanguage>(
     () => resolveUiLanguage(null, navigator.languages ?? []),
   )
   const [languageError, setLanguageError] = useState<string | null>(null)
+  const [logoutPending, setLogoutPending] = useState(false)
+  const [accountContextRevision, setAccountContextRevision] = useState(0)
+  const mounted = useRef(true)
+  const authentication = useRef<AuthState>(authState)
+  const logoutRequest = useRef<AbortController | null>(null)
+  const languageRequest = useRef<AbortController | null>(null)
+  const languageChoice = useRef(0)
   const messages = MESSAGES[language]
+  const sessionKey = authState.status === 'authenticated'
+    ? `${authState.session.user.user_id}:${authState.session.csrf_token}` : ''
+
+  /** 旧会話から遅れて到着した response が、次のログインを書き換えないための境界。 */
+  const isCurrentSession = useCallback((session: AuthSessionRecord): boolean => {
+    const current = authentication.current
+    return mounted.current && current.status === 'authenticated'
+      && sameUser(current.session.user.user_id, session.user.user_id)
+      && current.session.csrf_token === session.csrf_token
+  }, [])
+
+  /** React の描画を待たずに認証世代を替え、別会話の Project と非同期書込を破棄する。 */
+  const replaceAuthentication = useCallback((next: AuthState): void => {
+    const sameSession = next.status === 'authenticated' && isCurrentSession(next.session)
+    authentication.current = next
+    setAuthState(next)
+    if (sameSession) return
+    logoutRequest.current?.abort()
+    languageRequest.current?.abort()
+    logoutRequest.current = null
+    languageRequest.current = null
+    setLogoutPending(false)
+    setLogoutError(null)
+    setPreferenceError(null)
+    setLanguageError(null)
+    setModules([])
+    setModuleContext('')
+    moduleChoice.current = null
+    setActiveModuleId('')
+  }, [isCurrentSession])
+
+  /** 自己失効の受理後に logout を重ねず、対象の会話だけをログイン画面へ戻す。 */
+  const endSession = (session: AuthSessionRecord, reason: 'expired' | 'revoked' = 'expired'): void => {
+    if (!isCurrentSession(session)) return
+    replaceAuthentication({
+      status: 'anonymous',
+      message: reason === 'revoked' ? messages.account.sessionEnded : messages.app.sessionExpired,
+    })
+  }
+
+  const projectContext = useProjectContext(
+    authState.status === 'authenticated' ? authState.session : null,
+    hash, isCurrentSession,
+    () => { if (authState.status === 'authenticated') endSession(authState.session) },
+    messages.app.loadProjectsFailed,
+  )
+  const { projectId, projectState, access } = projectContext
+
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      logoutRequest.current?.abort()
+      languageRequest.current?.abort()
+    }
+  }, [])
 
   // 業務模块は sidebar の子菜单と各画面の絞り込みが共有するため、shell が唯一の取得元になる。
   // Project を跨いだ module 選択は無効なので、切替時にいったん捨ててから読み直す。
   useEffect(() => {
     setModules([])
     setActiveModuleId('')
-    if (!projectId) return
+    if (!projectId || authState.status !== 'authenticated') return
+    const session = authState.session
     const controller = new AbortController()
     void loadProjectModules(projectId, controller.signal)
       .then((loaded) => {
-        if (controller.signal.aborted) return
+        if (controller.signal.aborted || !isCurrentSession(session)) return
         setModules(loaded)
-        // 「全部」入口を持たない子菜单なので、既定は先頭 module。module を持たない Project
-        // だけが空のまま残り、そこでは絞り込み自体が働かず公開済み task が全部見える。
-        setActiveModuleId(loaded[0]?.module_id ?? '')
+        setModuleContext(`${sessionKey}:${projectId}`)
+        // 同じ Project の再認可で、人が選んだ module を先頭へ戻さない。
+        // 前 Project の ID や現在一覧から消えた module は新しい候補へ持ち越さない。
+        const context = `${sessionKey}:${projectId}`
+        const chosen = moduleChoice.current
+        const selected = chosen?.context === context && loaded.some((item) => item.module_id === chosen.moduleId)
+          ? chosen.moduleId : loaded[0]?.module_id ?? ''
+        moduleChoice.current = { context, moduleId: selected }
+        setActiveModuleId(selected)
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        if (controller.signal.aborted || !isCurrentSession(session)) return
+        if (error instanceof ApiProblemError && error.status === 401) {
+          endSession(session)
+          return
+        }
         // 取得失敗時は絞り込み無しで続ける。主導航と実行導線を module 取得の失敗で止めない。
-        if (!controller.signal.aborted) setModules([])
+        setModules([])
       })
     return () => controller.abort()
-  }, [projectId])
+  }, [projectId, sessionKey])
 
   useEffect(() => {
     const controller = new AbortController()
     void loadAuthSession(controller.signal)
-      .then((session) => setAuthState(session
-        ? { status: 'authenticated', session }
-        : { status: 'anonymous' }))
+      .then((session) => {
+        if (!controller.signal.aborted) replaceAuthentication(session
+          ? { status: 'authenticated', session }
+          : { status: 'anonymous' })
+      })
       .catch((error: unknown) => {
         if (!controller.signal.aborted) {
-          setAuthState({
+          replaceAuthentication({
             status: 'anonymous',
             message: error instanceof Error ? error.message : messages.app.cannotVerifySession,
           })
@@ -103,16 +184,23 @@ export function App() {
   // 認証後に保存済み言語 preference を読み、browser 既定より優先して適用する。
   useEffect(() => {
     if (authState.status !== 'authenticated') return
+    const session = authState.session
+    const choice = languageChoice.current
     const controller = new AbortController()
     void loadUiLanguage(controller.signal)
       .then((saved) => {
-        if (saved !== null) setLanguage(resolveUiLanguage(saved, navigator.languages ?? []))
+        if (!controller.signal.aborted && isCurrentSession(session)
+          && choice === languageChoice.current && saved !== null) {
+          setLanguage(resolveUiLanguage(saved, navigator.languages ?? []))
+        }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        if (controller.signal.aborted || !isCurrentSession(session)) return
+        if (error instanceof ApiProblemError && error.status === 401) endSession(session)
         // 読み込み失敗時は browser 既定のまま表示を続け、切替操作時の保存 error だけを表示する。
       })
     return () => controller.abort()
-  }, [authState.status === 'authenticated' ? authState.session.user.user_id : null])
+  }, [sessionKey])
 
   // Browser tab だけで現在画面を判別できるよう、route と言語に合わせて文書 title を同期する。
   useEffect(() => {
@@ -130,7 +218,9 @@ export function App() {
   useEffect(() => {
     const controller = new AbortController()
     void loadMeta(controller.signal)
-      .then((meta) => setMetaState({ status: 'ready', meta }))
+      .then((meta) => {
+        if (!controller.signal.aborted) setMetaState({ status: 'ready', meta })
+      })
       .catch((error: unknown) => {
         if (!controller.signal.aborted) {
           setMetaState({
@@ -143,96 +233,21 @@ export function App() {
   }, [])
 
   useEffect(() => {
-    /** Browser の戻る・進む操作も画面と認可済み Project context へ同期する。 */
-    const handleHashChange = (): void => {
-      const nextRoute = routeFromHash(window.location.hash)
-      const context = routeContextFromHash(window.location.hash)
-      setRoute(nextRoute)
-      // 一覧が未着の間は選択に触れない。読み込み完了時の解決が正しい選択を入れる。
-      if (projectState.status !== 'ready') {
-        if (projectId) window.history.replaceState(null, '', routeHref(nextRoute, projectId, context))
-        return
-      }
-      const selected = resolveProjectSelection(
-        projectState.projects,
-        projectIdFromHash(window.location.hash),
-        projectId,
-      )
-      setProjectId(selected)
-      window.history.replaceState(null, '', routeHref(nextRoute, selected, context))
-    }
-    window.addEventListener('hashchange', handleHashChange)
-    return () => window.removeEventListener('hashchange', handleHashChange)
-  }, [projectId, projectState])
-
-  useEffect(() => {
-    if (authState.status !== 'authenticated') {
-      setProjectState({ status: 'idle' })
-      setProjectId('')
-      return
-    }
-    const controller = new AbortController()
-    setProjectState({ status: 'loading' })
-    void Promise.all([
-      loadProjects(false, controller.signal),
-      loadProjectPreference(controller.signal),
-    ])
-      .then(([projects, preference]) => {
-        setProjectState({ status: 'ready', projects })
-        const selected = resolveProjectSelection(
-          projects,
-          projectIdFromHash(window.location.hash),
-          preference.project_id,
-        )
-        setProjectId(selected)
-        window.history.replaceState(
-          null,
-          '',
-          routeHref(
-            routeFromHash(window.location.hash),
-            selected,
-            routeContextFromHash(window.location.hash),
-          ),
-        )
-      })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) return
-        if (error instanceof ApiProblemError && error.status === 401) {
-          setAuthState({ status: 'anonymous', message: messages.app.sessionExpired })
-          return
-        }
-        setProjectState({
-          status: 'error',
-          message: error instanceof Error ? error.message : messages.app.loadProjectsFailed,
-        })
-      })
-    return () => controller.abort()
-  }, [authState.status === 'authenticated' ? authState.session.user.user_id : null])
-
-  useEffect(() => {
-    if (authState.status !== 'authenticated' || projectState.status !== 'ready') return
-    const selectedProjectId = projectState.projects.some(
-      ({ project_id }) => project_id === projectId,
-    ) ? projectId : ''
-    window.history.replaceState(
-      null,
-      '',
-      routeHref(
-        routeFromHash(window.location.hash),
-        selectedProjectId,
-        routeContextFromHash(window.location.hash),
-      ),
-    )
-    if (projectId && !selectedProjectId) return
+    if (authState.status !== 'authenticated' || access.status !== 'ready' || access.project.status !== 'ACTIVE') return
+    const session = authState.session
     const controller = new AbortController()
     const timer = window.setTimeout(() => {
       setPreferenceError(null)
       void saveProjectPreference(
-        selectedProjectId || null,
-        authState.session.csrf_token,
+        projectId,
+        session.csrf_token,
         controller.signal,
       ).catch((error: unknown) => {
-        if (!controller.signal.aborted) {
+        if (!controller.signal.aborted && isCurrentSession(session)) {
+          if (error instanceof ApiProblemError && error.status === 401) {
+            endSession(session)
+            return
+          }
           setPreferenceError(
             error instanceof Error ? error.message : messages.app.savePreferenceFailed,
           )
@@ -243,7 +258,7 @@ export function App() {
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [authState, projectId, projectState])
+  }, [sessionKey, projectId, access.status === 'ready' ? access.project.status : access.status])
 
   if (authState.status === 'loading') {
     return (
@@ -259,92 +274,139 @@ export function App() {
       <LanguageProvider language={language}>
         <LoginPage
           initialError={authState.message}
-          onAuthenticated={(session) => setAuthState({ status: 'authenticated', session })}
+          onAuthenticated={(session) => replaceAuthentication({ status: 'authenticated', session })}
         />
       </LanguageProvider>
     )
   }
 
-  const replaceProject = (project: ProjectRecord): void => {
-    if (projectState.status !== 'ready') return
-    setProjectState({
-      status: 'ready',
-      projects: [
-        ...projectState.projects.filter(({ project_id }) => project_id !== project.project_id),
-        project,
-      ].sort((left, right) => left.name.localeCompare(right.name)),
-    })
+  const replaceProject = (_project: ProjectRecord): void => {
+    if (!isCurrentSession(authState.session)) return
+    // 編集・復元の response だけで継続認可とは扱わず、現在対象を再読取する。
+    projectContext.refresh()
   }
-  const removeProject = (archived: ProjectRecord): void => {
-    if (projectState.status !== 'ready') return
-    const projects = projectState.projects.filter(
-      ({ project_id }) => project_id !== archived.project_id,
-    )
-    setProjectState({ status: 'ready', projects })
-    if (projectId === archived.project_id) setProjectId(projects[0]?.project_id ?? '')
+  /** 初回一覧の到着は草稿を壊さず、人が Project を替えた時だけ Account 文脈を捨てる。 */
+  const selectProject = (next: string): void => {
+    if (!isCurrentSession(authState.session)) return
+    if (next === projectId) return
+    setAccountContextRevision((revision) => revision + 1)
+    projectContext.choose(next)
+    // 意図的な Project 変更だけが URL を変更し、旧 Run/Task を持ち越さない。
+    navigateHash(routeHref(route, next))
   }
   const performLogout = async (): Promise<void> => {
+    if (logoutRequest.current || !isCurrentSession(authState.session)) return
+    const session = authState.session
+    const controller = new AbortController()
+    logoutRequest.current = controller
+    setLogoutPending(true)
     setLogoutError(null)
     try {
-      await logout(authState.session.csrf_token)
-      setAuthState({ status: 'anonymous' })
+      await logout(session.csrf_token, controller.signal)
+      if (!controller.signal.aborted && isCurrentSession(session)) {
+        replaceAuthentication({ status: 'anonymous' })
+      }
     } catch (error) {
-      setLogoutError(error instanceof Error ? error.message : messages.app.logoutFailed)
+      if (!controller.signal.aborted && isCurrentSession(session)) {
+        if (error instanceof ApiProblemError && error.status === 401) endSession(session)
+        else setLogoutError(messages.app.logoutFailed)
+      }
+    } finally {
+      if (logoutRequest.current === controller) {
+        logoutRequest.current = null
+        setLogoutPending(false)
+      }
     }
   }
   const selectLanguage = (next: UiLanguage): void => {
+    if (!isCurrentSession(authState.session)) return
+    const session = authState.session
+    languageChoice.current += 1
+    languageRequest.current?.abort()
+    const controller = new AbortController()
+    languageRequest.current = controller
     // 表示は即時に切替え、保存失敗は sidebar の共有 error 欄で通知する。
     setLanguage(next)
     setLanguageError(null)
-    void saveUiLanguage(next, authState.session.csrf_token).catch((error: unknown) => {
-      setLanguageError(
-        error instanceof Error ? error.message : MESSAGES[next].app.saveLanguageFailed,
-      )
+    void saveUiLanguage(next, session.csrf_token, controller.signal).catch((error: unknown) => {
+      if (!controller.signal.aborted && isCurrentSession(session)) {
+        if (error instanceof ApiProblemError && error.status === 401) endSession(session)
+        else setLanguageError(MESSAGES[next].app.saveLanguageFailed)
+      }
+    }).finally(() => {
+      if (languageRequest.current === controller) languageRequest.current = null
+    })
+  }
+  /** 他人の変更は sidebar の本人表示へ混入させず、同じ会話の表示名だけを更新する。 */
+  const accountChanged = (account: UserAccountRecord): void => {
+    if (!isCurrentSession(authState.session) || !sameUser(account.user_id, authState.session.user.user_id)) return
+    replaceAuthentication({
+      status: 'authenticated',
+      session: {
+        ...authState.session,
+        user: { ...authState.session.user, display_name: account.display_name },
+      },
     })
   }
   // 画面には UUID ではなく Project 名で現在 context を示す。未選択・未読込は null で表す。
-  const currentProject = projectState.status === 'ready'
-    ? projectState.projects.find(({ project_id }) => project_id === projectId) ?? null
-    : null
-  const routeContext = routeContextFromHash(window.location.hash)
+  const currentProject = access.status === 'ready' ? access.project : null
+  const routeContext = routeContextFromHash(hash)
+  const canRenderPage = APP_ROUTES.find((entry) => entry.route === route)?.scope === 'platform' || access.status === 'ready'
+  const currentModules = moduleContext === `${sessionKey}:${projectId}` ? modules : []
+  // 再読取中も同 Project の明示 filter を保ち、一瞬「全 module」の Task を表示しない。
+  const rememberedModuleId = moduleChoice.current?.context === `${sessionKey}:${projectId}` ? moduleChoice.current.moduleId : ''
+  const currentModuleId = currentModules.some((item) => item.module_id === activeModuleId) ? activeModuleId : rememberedModuleId
 
   return (
     <LanguageProvider language={language}>
       <div className="appFrame">
         <AppNavigation
+          key={sessionKey}
           currentRoute={route}
-          logoutError={logoutError ?? preferenceError ?? languageError}
+          logoutError={logoutError ?? preferenceError ?? languageError ?? (projectContext.preferenceFailed ? messages.app.loadPreferenceFailed : null)}
+          logoutPending={logoutPending}
           metaState={metaState}
           onLogout={() => void performLogout()}
+          onSessionEnded={() => endSession(authState.session)}
           onSelectLanguage={selectLanguage}
-          onSelectProject={setProjectId}
+          onSelectProject={selectProject}
+          onRefreshProjects={projectContext.refresh}
           onSelectModule={(moduleId) => {
+            if (!projectId) return
+            moduleChoice.current = { context: `${sessionKey}:${projectId}`, moduleId }
             setActiveModuleId(moduleId)
             // 絞り込みが効く画面に居るなら、その場で範囲だけを切り替える(見ている画面を
             // 奪わない)。効かない画面から選んだときだけ、模块の内容を見せられる主画面へ移す。
             if (routeUsesModuleFilter(route)) return
             window.location.hash = routeHref('workspace', projectId || undefined)
           }}
-          projectId={projectId}
-          projectState={projectState}
+          projectId={projectContext.selectionId}
+          pendingProjectId={projectId}
+          projectHash={hash}
+          projectState={projectContext.selectionState}
+          currentProject={currentProject}
           user={authState.session.user}
-          activeModuleId={activeModuleId}
-          modules={modules}
+          activeModuleId={currentModuleId}
+          modules={projectId ? currentModules : []}
         />
-        <main className="shell">
-          {renderPage(
+        <main className={route === 'accounts' ? 'shell accountsPage' : 'shell'}
+          key={`${sessionKey}:${route === 'accounts' ? `accounts:${accountContextRevision}` : projectContext.selectionId}`}>
+          {route !== 'accounts' && <ProjectContextNotice access={access} onRefresh={projectContext.refresh} />}
+          {canRenderPage && renderPage(
             route,
             projectId,
             currentProject,
-            setProjectId,
+            selectProject,
             metaState,
             authState.session,
             projectState,
             replaceProject,
-            removeProject,
-            activeModuleId,
+            replaceProject,
+            currentModuleId,
             routeContext.runId,
             routeContext.taskId,
+            (reason) => endSession(authState.session, reason),
+            accountChanged,
           )}
         </main>
       </div>
@@ -366,13 +428,18 @@ function renderPage(
   activeModuleId: string,
   initialRunId: string | null,
   initialTaskId: string | null,
+  onSessionEnded: SessionEnded,
+  onAccountChanged: (account: UserAccountRecord) => void,
 ): ReactNode {
   switch (route) {
+    case 'accounts':
+      return <AccountsPage session={session} onSessionEnded={onSessionEnded} onAccountChanged={onAccountChanged} />
     case 'skills':
       return <SkillsPage csrfToken={session.csrf_token} projectId={projectId} />
     case 'projects':
       return <ProjectsPage
         onProjectArchived={onProjectArchived}
+        onProjectDeleted={onProjectArchived}
         onProjectChanged={onProjectChanged}
         projectId={projectId}
         projectState={projectState}

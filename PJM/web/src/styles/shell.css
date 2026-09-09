@@ -13,6 +13,11 @@
   /* 主内容よりさらに一段沈めて「枠」を作り、右の内容へ視線を送る。 */
   background: linear-gradient(180deg, rgba(124, 108, 245, .05), transparent 220px), var(--bg-sidebar);
 }
+.sidebarHeader { flex-shrink: 0; }
+.sidebarMenuToggle { display: none; }
+/* 一つの操作集合を再配置する。閉じた披露は keyboard の tab 順序にも残さない。 */
+.navigationPanel { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow-y: auto; }
+.navigationPanel[hidden] { display: none; }
 .brand { display: flex; align-items: center; gap: 10px; padding: 18px 16px 14px; color: var(--text); }
 .brand:hover { text-decoration: none; }
 /* Brand 印は製品恒等式の aurora gradient を唯一まとまって使う場所。 */
@@ -35,6 +40,7 @@
 .brandName small { display: block; margin-top: 1px; color: var(--text-faint); font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; }
 
 .sideNav { display: grid; gap: 2px; flex: 1; align-content: start; padding: 10px; }
+.sideNav a > span:not(.navBadge) { min-width: 0; overflow-wrap: anywhere; }
 /* 導航は「平台 / 当前项目」の二分組。当前项目分組の見出しは Project 切替 select の label が兼ねる。 */
 .navGroupLabel {
   margin: 2px 0 4px;
@@ -63,6 +69,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.sideNavProject [role="status"], .sideNavProject [role="alert"] { margin: 6px 0; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 .sideNav a {
   position: relative;
   display: flex;
@@ -121,6 +128,7 @@
    background は簡写だと base.css の chevron(background-image)まで消して
    「開けない入力欄」に見えるため、必ず background-color だけを差し替える。 */
 .sidebar select { min-height: 32px; padding: 5px 30px 5px 8px; background-color: var(--surface-input); font-size: 12.5px; }
+.sideNavProject .projectContext, .sideNavProject select { min-width: 0; max-width: 100%; }
 
 .sidebarFooter { display: grid; gap: 10px; border-top: 1px solid var(--border); padding: 14px 16px; }
 .serviceStatus { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 12px; }
@@ -192,19 +200,22 @@
 
 @media (max-width: 960px) {
   .appFrame { flex-direction: column; }
-  .sidebar { position: static; flex-direction: row; align-items: center; width: 100%; height: auto; border-right: 0; border-bottom: 1px solid var(--border); background: var(--bg-sidebar); }
+  .sidebar { position: static; width: 100%; height: auto; border-right: 0; border-bottom: 1px solid var(--border); background: var(--bg-sidebar); }
+  .sidebarHeader { display: flex; align-items: center; justify-content: space-between; min-width: 0; gap: 8px; padding-right: 12px; }
   .brand { padding: 10px 12px; }
   .brandName small { display: none; }
-  .sideNav { display: flex; flex: 1; overflow-x: auto; padding: 8px; }
-  .sideNav a { flex: 0 0 auto; }
-  .sideNav a[aria-current="page"]::before { display: none; }
-  .sidebarFooter { border-top: 0; padding: 0 12px; }
-  .sidebarUser, .sidebarLogout, .sidebarLink { display: none; }
-  /* 狭幅では分組見出し・Project 切替・模块子菜单を隠し、横向導航を優先する。 */
-  .navGroupLabel, .sideNavProject, .sideNavSub { display: none; }
-  /* 横向導航の幅を確保するため、状態は点だけ残す。読み上げ名は aria-label が保持する。 */
-  .serviceStatus { white-space: nowrap; }
-  .serviceStatusText { display: none; }
+  .sidebarMenuToggle { display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex-shrink: 0; min-height: 44px; border: 1px solid var(--border-strong); border-radius: var(--radius-small); padding: 8px 12px; color: var(--text-hi); background: var(--surface-input); font-size: 13px; cursor: pointer; }
+  .sidebarMenuToggle svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
+  .sidebarMenuToggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* 初回 effect 前も畳み、JS と media query の反映順で不可視操作が出ないようにする。 */
+  .sidebarHeader:has(.sidebarMenuToggle[aria-expanded="false"]) + .navigationPanel { display: none; }
+  .navigationPanel { flex: none; max-height: calc(100dvh - 64px); border-top: 1px solid var(--border); }
+  .sideNav { flex: none; padding: 12px; }
+  .sideNav a, .sidebar select, .sideNavProject button, .sideNavSubItem, .sidebarLogout, .sidebarLink { min-height: 44px; }
+  .sideNavSubItem { white-space: normal; overflow-wrap: anywhere; }
+  .sidebarFooter { padding: 16px 22px; }
+  .sidebarUser small { white-space: normal; overflow-wrap: anywhere; }
+  .sidebarLogout, .sidebarLink { display: flex; align-items: center; }
   .shell { padding: 20px 16px 32px; }
   .pageHeader { flex-direction: column; gap: 12px; }
 }

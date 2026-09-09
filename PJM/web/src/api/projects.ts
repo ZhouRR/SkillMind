@@ -1,5 +1,7 @@
+import { isApiTimestamp, isUuid } from '../lib/validation'
 import {
   API_BASE,
+  exactFields,
   hasStrings,
   isRecord,
   parseItemList,
@@ -55,6 +57,25 @@ export async function loadProjects(
   const query = includeArchived ? '?include_archived=true' : ''
   const value = await requestApiJson(`${API_BASE}/projects${query}`, { signal })
   return parseItemList(value, 'items', isProject, 'Project list response did not match its contract')
+}
+
+/** 明示された Project だけを取得し、活動一覧にない認可済み履歴も読み取る。 */
+export async function loadProject(
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<ProjectRecord> {
+  signal?.throwIfAborted()
+  if (!isUuid(projectId)) throw new Error('Invalid project identity')
+  const value = await requestApiJson(
+    `${API_BASE}/projects/${encodeURIComponent(projectId)}`,
+    { signal, cache: 'no-store' },
+  )
+  signal?.throwIfAborted()
+  const project = parseProject(value)
+  if (project.project_id.toLowerCase() !== projectId.toLowerCase()) {
+    throw new Error('Project response did not match its requested identity')
+  }
+  return project
 }
 
 /** ADMIN と CSRF token を使って Project を作成する。 */
@@ -117,10 +138,11 @@ export async function unarchiveProject(
   ))
 }
 
-/** ADMIN が Run 履歴のない ARCHIVED Project を物理削除し key を解放する。
+/** ADMIN が Run/Schedule のない ARCHIVED Project を物理削除し key を解放する。
  *
  * 削除できない場合の理由は `ApiProblemError.code` で区別する
- * (`project_delete_requires_archive` / `project_delete_blocked_by_runs`)。
+ * (`project_delete_requires_archive` / `project_delete_blocked_by_runs` /
+ * `project_delete_blocked_by_schedules`)。拒否されても Schedule を削除して再送しない。
  */
 export async function deleteProject(
   projectId: string,
@@ -185,14 +207,24 @@ function parseProject(value: unknown): ProjectRecord {
 /** Unknown object が Project response の全公開 field を持つことを検証する。 */
 function isProject(value: unknown): value is ProjectRecord {
   return isRecord(value)
+    && exactFields(value, [
+      'project_id', 'key', 'name', 'description', 'status', 'settings',
+      'retention_days', 'created_at', 'updated_at',
+    ])
     && hasStrings(value, [
       'project_id', 'key', 'name', 'description', 'status', 'created_at', 'updated_at',
     ])
+    && isUuid(value.project_id)
+    && typeof value.key === 'string' && [...value.key].length >= 1 && [...value.key].length <= 100
+    && typeof value.name === 'string' && [...value.name].length >= 1 && [...value.name].length <= 200
+    && typeof value.description === 'string' && [...value.description].length <= 4000
     && typeof value.status === 'string'
     && ['ACTIVE', 'ARCHIVED'].includes(value.status)
     && isRecord(value.settings)
     && typeof value.retention_days === 'number'
     && Number.isInteger(value.retention_days)
+    && value.retention_days >= 1 && value.retention_days <= 3650
+    && isApiTimestamp(value.created_at) && isApiTimestamp(value.updated_at)
 }
 
 /** Unknown JSON を ProjectMember response へ制限する。 */

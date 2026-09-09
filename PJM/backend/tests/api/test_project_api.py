@@ -2,12 +2,144 @@
 
 from __future__ import annotations
 
-from uuid import uuid4
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID, uuid4
 
+import pytest
 from fakes import FakeAuthService, FakeProjectService
 from fastapi.testclient import TestClient
 
-from projectmind.auth.service import AuthenticatedActor
+from projectmind.api.auth_dependencies import project_not_found_problem
+from projectmind.api.problems import PROBLEM_DETAILS_SCHEMA
+from projectmind.auth.service import AuthenticatedActor, UnauthorizedSessionError
+from projectmind.projects import (
+    ProjectDeleteBlockedError,
+    ProjectNotFoundError,
+    ProjectService,
+    ProjectStatus,
+    StoredProject,
+)
+
+
+def _stored_project(project_id: UUID, status: ProjectStatus) -> StoredProject:
+    """Project response の既存 Schema と同じ field を持つ公開 read model を生成する。"""
+
+    now = datetime(2026, 9, 9, tzinfo=UTC)
+    return StoredProject(
+        project_id=project_id, key="example", name="Example", description="",
+        status=status, settings={}, retention_days=90, created_at=now, updated_at=now,
+    )
+
+
+@pytest.mark.parametrize("project_status", list(ProjectStatus))
+def test_exact_project_detail_reads_active_and_archived_with_authenticated_actor(
+    client: TestClient, project_status: ProjectStatus,
+) -> None:
+    """詳細 endpoint が一覧への後退をせず、同じ actor と ID で認可 service を呼ぶ。"""
+
+    auth = FakeAuthService()
+    project_id = uuid4()
+    service = MagicMock(spec=ProjectService)
+    service.get_project = AsyncMock(return_value=_stored_project(project_id, project_status))
+    client.app.state.auth_service = auth
+    client.app.state.project_service = service
+
+    response = client.get(f"/api/v1/projects/{project_id}")
+
+    assert response.status_code == 200
+    assert response.json()["project_id"] == str(project_id)
+    assert response.json()["status"] == project_status.value
+    assert set(response.json()) == {
+        "project_id", "key", "name", "description", "status", "settings",
+        "retention_days", "created_at", "updated_at",
+    }
+    service.get_project.assert_awaited_once_with(actor=auth.actor, project_id=project_id)
+    service.list_projects.assert_not_called()
+
+
+@pytest.mark.parametrize("internal_reason", ["missing", "other organization", "removed member"])
+def test_project_detail_hides_the_service_rejection_reason_in_one_not_found_problem(
+    client: TestClient, internal_reason: str,
+) -> None:
+    """内部の拒否理由を HTTP body へ漏らさず共通 404 にする。認可 SQL は別途検証する。"""
+
+    project_id = uuid4()
+    service = MagicMock(spec=ProjectService)
+    service.get_project = AsyncMock(side_effect=ProjectNotFoundError(internal_reason))
+    client.app.state.project_service = service
+
+    response = client.get(f"/api/v1/projects/{project_id}")
+
+    assert response.status_code == 404
+    assert response.headers["content-type"] == "application/problem+json"
+    assert response.json()["code"] == "project_not_found"
+    assert response.json()["detail"] == project_not_found_problem().detail
+    service.get_project.assert_awaited_once()
+    service.list_projects.assert_not_called()
+
+
+def test_project_detail_requires_session_before_lookup(client: TestClient) -> None:
+    """詳細 metadata を返す前に共通 Session dependency を適用する。"""
+
+    auth = FakeAuthService()
+    auth.authenticate_session = AsyncMock(side_effect=UnauthorizedSessionError("test expired"))
+    service = MagicMock(spec=ProjectService)
+    client.app.state.auth_service = auth
+    client.app.state.project_service = service
+
+    response = client.get(f"/api/v1/projects/{uuid4()}")
+
+    assert response.status_code == 401
+    assert response.json()["code"] == "authentication_required"
+    service.get_project.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("blocker", "code"),
+    [
+        ("project_not_archived", "project_delete_requires_archive"),
+        ("run_history_exists", "project_delete_blocked_by_runs"),
+        ("task_schedule_exists", "project_delete_blocked_by_schedules"),
+    ],
+)
+def test_project_delete_returns_a_distinct_stable_conflict_for_each_reference(
+    client: TestClient, blocker: str, code: str,
+) -> None:
+    """Run と Schedule を区別した拒否を伝え、route が参照を削除しない。"""
+
+    service = MagicMock(spec=ProjectService)
+    service.delete_project = AsyncMock(side_effect=ProjectDeleteBlockedError(
+        "Project cannot be deleted", blockers=(blocker,),
+    ))
+    client.app.state.project_service = service
+
+    response = client.delete(f"/api/v1/projects/{uuid4()}")
+
+    assert response.status_code == 409
+    assert response.headers["content-type"] == "application/problem+json"
+    assert response.json()["code"] == code
+    assert response.json()["request_id"] == response.headers["X-Request-ID"]
+    service.delete_project.assert_awaited_once()
+    assert len(service.method_calls) == 1
+
+
+def test_project_detail_and_delete_openapi_declare_the_actual_problem_contract(
+    client: TestClient,
+) -> None:
+    """既存 v1 Problem body と拒否 code が公開詳細/削除の HTTP 声明に残る。"""
+
+    path = client.app.openapi()["paths"]["/api/v1/projects/{project_id}"]
+    for method, statuses in [("get", [401, 404, 422]), ("delete", [401, 403, 404, 409, 422])]:
+        for code in statuses:
+            response = path[method]["responses"][str(code)]
+            assert response["content"]["application/problem+json"]["schema"] == (
+                PROBLEM_DETAILS_SCHEMA
+            )
+            assert "application/json" not in response["content"]
+    assert "project_delete_blocked_by_schedules" in (
+        path["delete"]["responses"]["409"]["description"]
+    )
 
 
 def test_admin_can_create_list_archive_and_assign_project_member(client: TestClient) -> None:

@@ -41,11 +41,12 @@ type ArchivedProjectsState =
 /** Project 削除拒否の Problem code を利用者語へ変換する。
  *
  * backend は Problem contract に追加 field を持てないため、阻害理由を code で区別している。
- * どちらの code でもない失敗は元の message をそのまま見せ、原因を握り潰さない。
+ * 未知の code の失敗は元の message をそのまま見せ、原因を握り潰さない。
  */
 export function projectDeleteErrorMessage(error: unknown, messages: UiMessages): string {
   if (error instanceof ApiProblemError) {
     if (error.code === 'project_delete_blocked_by_runs') return messages.projects.deleteBlockedByRuns
+    if (error.code === 'project_delete_blocked_by_schedules') return messages.projects.deleteBlockedBySchedules
     if (error.code === 'project_delete_requires_archive') return messages.projects.deleteNeedsArchive
   }
   return error instanceof Error ? error.message : messages.projects.deleteFailed
@@ -80,6 +81,7 @@ export function ProjectsPage({
   projectState,
   onProjectChanged,
   onProjectArchived,
+  onProjectDeleted,
 }: {
   projectId: string
   setProjectId: (projectId: string) => void
@@ -87,6 +89,7 @@ export function ProjectsPage({
   projectState: ProjectState
   onProjectChanged: (project: ProjectRecord) => void
   onProjectArchived: (project: ProjectRecord) => void
+  onProjectDeleted?: (project: ProjectRecord) => void
 }) {
   const messages = useMessages()
   const [busy, setBusy] = useState(false)
@@ -99,7 +102,10 @@ export function ProjectsPage({
   const [pageTab, setPageTab] = useState<ProjectsPageTab>('projects')
   const { confirm, confirmDialog } = useConfirmDialog()
   const mounted = useRef(true)
-  useEffect(() => () => { mounted.current = false }, [])
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
 
   const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault()
@@ -242,6 +248,7 @@ export function ProjectsPage({
       {session.user.system_role === 'ADMIN' && (
         <div className="tabPanel" role="tabpanel" hidden={pageTab !== 'archived'}>
           <ArchivedProjectsSection
+            onDeleted={onProjectDeleted}
             onRestored={(project) => { onProjectChanged(project); setArchivedRevision((current) => current + 1) }}
             revision={archivedRevision}
             session={session}
@@ -283,10 +290,11 @@ function ProjectsTabButton({ current, tab, onSelect, children }: {
  * Archive は key の一意制約を解かないため、一覧から消えたまま同じ key で作り直せない状態に
  * なりやすい。ここで「まだ存在すること」を見せ、復元と削除のどちらでも詰まりを解けるようにする。
  */
-function ArchivedProjectsSection({ session, revision, onRestored }: {
+function ArchivedProjectsSection({ session, revision, onRestored, onDeleted }: {
   session: AuthSessionRecord
   revision: number
   onRestored: (project: ProjectRecord) => void
+  onDeleted?: (project: ProjectRecord) => void
 }) {
   const messages = useMessages()
   const [state, setState] = useState<ArchivedProjectsState>({ status: 'loading' })
@@ -358,6 +366,7 @@ function ArchivedProjectsSection({ session, revision, onRestored }: {
     try {
       await deleteProject(project.project_id, session.csrf_token, controller.signal)
       if (controller.signal.aborted) return
+      onDeleted?.(project)
       setLocalRevision((current) => current + 1)
     } catch (caught) {
       if (!controller.signal.aborted) setError(projectDeleteErrorMessage(caught, messages))

@@ -1,12 +1,16 @@
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
+import type { ComponentProps } from 'react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { ProjectModuleRecord } from '../../src/api'
-import type { AppRoute } from '../../src/lib/routing'
+import { routeHref, type AppRoute } from '../../src/lib/routing'
 import { AppNavigation } from '../../src/components/AppNavigation'
+import { MESSAGES } from '../../src/lib/i18n/messages'
 import { DEMO_PROJECT, demoUser } from '../fixtures'
 
 const PROJECT = DEMO_PROJECT
+
+afterEach(() => vi.unstubAllGlobals())
 
 /** sidebar 子菜单に並ぶ業務模块。束縛スキルは導航の表示に関与しないため空でよい。 */
 function moduleRecord(moduleId: string, name: string): ProjectModuleRecord {
@@ -31,6 +35,7 @@ function navigation(
   currentRoute: AppRoute,
   activeModuleId = MODULES[0]!.module_id,
   modules: ProjectModuleRecord[] = MODULES,
+  overrides: Partial<ComponentProps<typeof AppNavigation>> = {},
 ): string {
   return renderToStaticMarkup(
     <AppNavigation
@@ -46,11 +51,82 @@ function navigation(
       user={demoUser()}
       onLogout={vi.fn()}
       logoutError={null}
+      {...overrides}
     />,
   )
 }
 
 describe('AppNavigation grouping', () => {
+  it('forwards current project detail without hiding the independent list failure', () => {
+    const html = navigation('history', '', [], {
+      currentProject: { ...PROJECT, status: 'ARCHIVED' },
+      projectState: { status: 'error', message: MESSAGES.zh.elements.projectListFailed },
+      onRefreshProjects: vi.fn(),
+    })
+    expect(html).toContain(`Quality Team · quality-team · ${MESSAGES.zh.elements.archivedProject}`)
+    expect(html).toContain(`role="alert">${MESSAGES.zh.elements.projectListFailed}</p>`)
+    expect(html).toContain(`type="button">${MESSAGES.zh.runHistory.retry}</button>`)
+  })
+
+  it.each([
+    ['empty', '#/workspace?project=&run=old-run', '#/history?project='],
+    ['duplicate', '#/workspace?project=first&project=second&task=old-task', '#/history?project=first&amp;project=second'],
+    ['malformed', '#/workspace?project=not-a-uuid&run=old-run', '#/history?project=not-a-uuid'],
+  ])('preserves the %s explicit project query instead of replacing it with a fallback', (_case, projectHash, historyHref) => {
+    const html = navigation('workspace', '', [], { projectHash, pendingProjectId: '' })
+    expect(html).toContain(`href="${historyHref}"`)
+    expect(html).toContain('href="#/accounts"')
+    expect(html).not.toContain('old-run')
+    expect(html).not.toContain('old-task')
+    expect(html).not.toContain(`href="${routeHref('history', PROJECT.project_id)}"`)
+  })
+
+  it('preserves an unavailable explicit project in navigation links while leaving accounts independent', () => {
+    const unavailableId = '00000000-0000-4000-8000-000000000099'
+    const html = navigation('workspace', '', [], { projectId: unavailableId, pendingProjectId: '' })
+    for (const route of ['home', 'skills', 'projects', 'tasks', 'workspace', 'history', 'documents', 'resources'] as const) {
+      expect(html).toContain(`href="${routeHref(route, unavailableId)}"`)
+    }
+    expect(html).toContain('href="#/accounts"')
+    expect(html).not.toContain('#/accounts?')
+    expect(html).not.toContain(`href="${routeHref('workspace', PROJECT.project_id)}"`)
+  })
+
+  it('connects one disclosure button to the complete navigation without duplicating controls', () => {
+    const html = navigation('accounts')
+    const controlsId = html.match(/aria-controls="([^"]+)"/)?.[1]
+    expect(controlsId).toBeTruthy()
+    expect(html).toContain(`id="${controlsId}"`)
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).toContain(MESSAGES.zh.nav.openMenu)
+    expect(html.split('class="sidebarMenuToggle"').length - 1).toBe(1)
+    expect(html.split('class="navigationPanel"').length - 1).toBe(1)
+    expect(html.split('class="sidebarLogout"').length - 1).toBe(1)
+    expect(html.split('<select').length - 1).toBe(2)
+    expect(html).not.toMatch(/class="navigationPanel"[^>]*hidden/)
+  })
+
+  it('initially hides the full mobile disclosure while keeping all operations in the same panel', () => {
+    // 静的描画は初期属性だけを証明する。実 focus/resize/keyboard は browser 回帰で守る。
+    vi.stubGlobal('window', { matchMedia: vi.fn().mockReturnValue({ matches: true }) })
+    const html = navigation('workspace')
+    expect(html).toMatch(/class="navigationPanel"[^>]*hidden=""/)
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).toContain('href="#/accounts"')
+    expect(html).toContain('class="sideNavProject"')
+    expect(html).toContain('class="sidebarLogout"')
+    expect(html).toContain('class="sidebarLanguage"')
+  })
+
+  it('provides the account entry outside the project scope', () => {
+    /** 本人安全は Project 未所属でも到達でき、通常 USER の主導航に置く。 */
+    const html = navigation('accounts')
+    expect(html).toContain('href="#/accounts"')
+    expect(html).toContain('账户与安全')
+    expect(html.indexOf('账户与安全')).toBeLessThan(html.indexOf('当前项目'))
+    expect(html).toContain('aria-current="page"')
+  })
+
   it('splits navigation into platform and current-project groups with a single project switcher', () => {
     const html = navigation('workspace')
 
@@ -62,11 +138,11 @@ describe('AppNavigation grouping', () => {
     expect(html.split('<select').length - 1).toBe(2)
     expect(html.split('当前项目').length - 1).toBe(1)
     expect(html).toContain('界面语言')
-    // 分組順:平台(概览・Skills 解析・项目管理)が Project 切替より前、工作空间等が後。
+    // 名前の不在を indexOf=-1 で見逃さず、実際の link が正しい分組にあることを守る。
     expect(html.indexOf('概览')).toBeLessThan(html.indexOf('当前项目'))
     expect(html.indexOf('项目管理')).toBeLessThan(html.indexOf('当前项目'))
-    // Skills 解析は資産を作る平台能力として platform 組へ移設した。
-    expect(html.indexOf('Skills 解析')).toBeLessThan(html.indexOf('当前项目'))
+    expect(html).toContain(`href="${routeHref('skills', PROJECT.project_id)}"`)
+    expect(html.indexOf(`href="${routeHref('skills', PROJECT.project_id)}"`)).toBeLessThan(html.indexOf('当前项目'))
     expect(html.indexOf('当前项目')).toBeLessThan(html.indexOf('工作空间'))
     expect(html).toContain('aria-current="page"')
   })
@@ -75,8 +151,8 @@ describe('AppNavigation grouping', () => {
     // 項目の主画面は工作空间。子菜单の遷移先も同じ画面なので、親子で強調が割れない。
     const html = navigation('workspace')
 
-    expect(html.indexOf('href="#/workspace"')).toBeLessThan(html.indexOf('sideNavSub'))
-    expect(html.indexOf('sideNavSub')).toBeLessThan(html.indexOf('href="#/tasks"'))
+    expect(html.indexOf(`href="${routeHref('workspace', PROJECT.project_id)}"`)).toBeLessThan(html.indexOf('sideNavSub'))
+    expect(html.indexOf('sideNavSub')).toBeLessThan(html.indexOf(`href="${routeHref('tasks', PROJECT.project_id)}"`))
     expect(html).toContain('品质分析')
   })
 

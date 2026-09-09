@@ -5,6 +5,7 @@ import {
   projectIdFromHash,
   routeFromHash,
   routeHref,
+  routeHrefWithProject,
   routeUsesModuleFilter,
 } from '../../src/lib/routing'
 
@@ -14,6 +15,7 @@ describe('application routing', () => {
     expect(routeHref('home')).toBe('#/')
     expect(routeHref('skills')).toBe('#/skills')
     expect(routeHref('projects')).toBe('#/projects')
+    expect(routeHref('accounts')).toBe('#/accounts')
     expect(routeHref('documents')).toBe('#/documents')
     expect(routeHref('resources')).toBe('#/resources')
     expect(routeHref('workspace')).toBe('#/workspace')
@@ -25,6 +27,15 @@ describe('application routing', () => {
     expect(routeFromHash('')).toBe('home')
     expect(routeFromHash('#/unknown')).toBe('home')
     expect(routeFromHash('#/skills/')).toBe('skills')
+  })
+
+  it('keeps accounts independent of project and execution context', () => {
+    /** Organization 画面に Project/Run の URL 文脈を残さない。 */
+    expect(routeHref('accounts', 'project-a', { runId: 'run-a', taskId: 'task-a' })).toBe('#/accounts')
+    expect(routeFromHash('#/accounts?project=project-a')).toBe('accounts')
+    expect(projectIdFromHash('#/accounts?project=project-a')).toBeNull()
+    expect(APP_ROUTES.find(({ route }) => route === 'accounts')?.scope).toBe('platform')
+    expect(routeUsesModuleFilter('accounts')).toBe(false)
   })
 
   it('carries an encoded project context without changing the route', () => {
@@ -63,5 +74,57 @@ describe('application routing', () => {
     expect(routeUsesModuleFilter('workspace')).toBe(true)
     expect(routeUsesModuleFilter('home')).toBe(false)
     expect(routeUsesModuleFilter('projects')).toBe(false)
+  })
+})
+
+describe('routeHrefWithProject', () => {
+  const projectId = '00000000-0000-4000-8000-0000000000ff'
+  const fallbackProjectId = '00000000-0000-4000-8000-000000000010'
+
+  it.each([
+    'project=',
+    'project=invalid',
+    'project=..%2Fother%3Fvalue%3D1',
+    `project=${projectId}`,
+    `project=${projectId}&project=${fallbackProjectId}`,
+    `project=${projectId}&project=${projectId}`,
+    `project=&project=${projectId}`,
+    `project=${projectId}&project=`,
+  ])('preserves explicit project values and order but removes old execution context: %s', (query) => {
+    const hash = `#/workspace?run=old-run&${query}&task=old-task&other=ignored`
+    expect(routeHrefWithProject('history', hash, fallbackProjectId)).toBe(`#/history?${query}`)
+  })
+
+  it('keeps a bare project parameter explicitly empty instead of applying a fallback', () => {
+    expect(routeHrefWithProject('workspace', '#/history?project&run=old', fallbackProjectId))
+      .toBe('#/workspace?project=')
+  })
+
+  it.each(APP_ROUTES.filter(({ route }) => route !== 'accounts'))('preserves invalid targets when navigating to $route', ({ route }) => {
+    expect(routeHrefWithProject(route, '#/workspace?project=&project=invalid&run=old&task=old'))
+      .toBe(`${routeHref(route)}?project=&project=invalid`)
+  })
+
+  it.each(['#/workspace', '#/history?', '#/tasks?run=old&task=old'])('uses the fallback only when the source has no explicit project: %s', (hash) => {
+    expect(routeHrefWithProject('documents', hash, fallbackProjectId))
+      .toBe(`#/documents?project=${fallbackProjectId}`)
+    expect(routeHrefWithProject('documents', hash)).toBe('#/documents')
+  })
+
+  it.each([
+    '#/workspace?project=&project=invalid&run=old&task=old',
+    `#/history?project=${projectId}&run=old`,
+    '#/accounts?project=invalid&task=old',
+  ])('removes all project and execution parameters when entering accounts: %s', (hash) => {
+    expect(routeHrefWithProject('accounts', hash, fallbackProjectId)).toBe('#/accounts')
+  })
+
+  it.each([
+    '#/accounts?project=invalid&run=old&task=old',
+    `#/accounts/?project=${projectId}&project=`,
+  ])('does not import ignored account parameters into a project route: %s', (hash) => {
+    expect(routeHrefWithProject('workspace', hash, fallbackProjectId))
+      .toBe(`#/workspace?project=${fallbackProjectId}`)
+    expect(routeHrefWithProject('workspace', hash)).toBe('#/workspace')
   })
 })

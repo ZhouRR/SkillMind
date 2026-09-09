@@ -79,6 +79,18 @@ _CONFLICT = problem_openapi_response(
 _NOT_FOUND = problem_openapi_response(
     "User not found or inaccessible.", headers=NO_STORE_PROBLEM_HEADERS
 )
+# 成功も auth-tag middleware の cache 境界内にあり、拒否だけを宣言すると consumer が誤る。
+_ACCOUNT_RESPONSE = {"headers": NO_STORE_PROBLEM_HEADERS}
+_MUTATION_RESPONSE = {
+    "headers": {
+        **NO_STORE_PROBLEM_HEADERS,
+        "Set-Cookie": {
+            "description": "Deletes the current session cookie only when session_revoked is true.",
+            "required": False,
+            "schema": {"type": "string"},
+        },
+    }
+}
 PageLimit = Annotated[int, Query(ge=1, le=100)]
 PageOffset = Annotated[int, Query(ge=0)]
 
@@ -183,7 +195,9 @@ class ChangeOwnPasswordRequest(UserVersionRequest):
     new_password: SecretStr = Field(min_length=15, max_length=1024)
 
 
-@account_router.get("/me/account", response_model=UserAccountResponse)
+@account_router.get(
+    "/me/account", response_model=UserAccountResponse, responses={200: _ACCOUNT_RESPONSE}
+)
 async def get_own_account(request: Request, actor: ReadActor) -> UserAccountResponse:
     """Project membership に依存せず現在の本人 account を読み出す。"""
 
@@ -192,7 +206,11 @@ async def get_own_account(request: Request, actor: ReadActor) -> UserAccountResp
         return _account(await service.get_account(access=_user_access(request, actor)))
 
 
-@account_router.get("/me/security-events", response_model=UserSecurityEventPageResponse)
+@account_router.get(
+    "/me/security-events",
+    response_model=UserSecurityEventPageResponse,
+    responses={200: _ACCOUNT_RESPONSE},
+)
 async def get_own_security_events(
     request: Request, actor: ReadActor, limit: PageLimit = 25, offset: PageOffset = 0
 ) -> UserSecurityEventPageResponse:
@@ -210,6 +228,7 @@ async def get_own_security_events(
     "/me/password",
     response_model=UserMutationResponse,
     responses={
+        200: _MUTATION_RESPONSE,
         **LOGIN_PROTECTION_RESPONSES,
         400: problem_openapi_response(
             "Current password was rejected.", headers=NO_STORE_PROBLEM_HEADERS
@@ -236,7 +255,9 @@ async def change_own_password(
 
 
 @account_router.post(
-    "/me/sessions/revoke", response_model=UserMutationResponse, responses={409: _CONFLICT}
+    "/me/sessions/revoke",
+    response_model=UserMutationResponse,
+    responses={200: _MUTATION_RESPONSE, 409: _CONFLICT},
 )
 async def revoke_own_sessions(
     request: Request, response: Response, body: UserVersionRequest, actor: WriteActor
@@ -253,7 +274,7 @@ async def revoke_own_sessions(
         return _mutation(request, response, result)
 
 
-@account_router.get("", response_model=UserPageResponse)
+@account_router.get("", response_model=UserPageResponse, responses={200: _ACCOUNT_RESPONSE})
 async def list_users(
     request: Request,
     actor: AdminReadActor,
@@ -274,7 +295,10 @@ async def list_users(
 
 
 @account_router.post(
-    "", response_model=UserMutationResponse, status_code=201, responses={409: _CONFLICT}
+    "",
+    response_model=UserMutationResponse,
+    status_code=201,
+    responses={201: _MUTATION_RESPONSE, 409: _CONFLICT},
 )
 async def create_user(
     request: Request, response: Response, body: CreateUserRequest, actor: AdminWriteActor
@@ -292,7 +316,11 @@ async def create_user(
         return _mutation(request, response, result)
 
 
-@account_router.get("/{user_id}", response_model=UserAccountResponse, responses={404: _NOT_FOUND})
+@account_router.get(
+    "/{user_id}",
+    response_model=UserAccountResponse,
+    responses={200: _ACCOUNT_RESPONSE, 404: _NOT_FOUND},
+)
 async def get_user_account(
     user_id: UUID, request: Request, actor: AdminReadActor
 ) -> UserAccountResponse:
@@ -300,11 +328,15 @@ async def get_user_account(
 
     service: UserService = request.app.state.user_service
     with _user_errors():
-        return _account(await service.get_user(access=_user_access(request, actor), user_id=user_id))
+        return _account(
+            await service.get_user(access=_user_access(request, actor), user_id=user_id)
+        )
 
 
 @account_router.put(
-    "/{user_id}", response_model=UserMutationResponse, responses={404: _NOT_FOUND, 409: _CONFLICT}
+    "/{user_id}",
+    response_model=UserMutationResponse,
+    responses={200: _MUTATION_RESPONSE, 404: _NOT_FOUND, 409: _CONFLICT},
 )
 async def update_user(
     user_id: UUID,
@@ -330,7 +362,7 @@ async def update_user(
 @account_router.post(
     "/{user_id}/sessions/revoke",
     response_model=UserMutationResponse,
-    responses={404: _NOT_FOUND, 409: _CONFLICT},
+    responses={200: _MUTATION_RESPONSE, 404: _NOT_FOUND, 409: _CONFLICT},
 )
 async def revoke_user_sessions(
     user_id: UUID,
@@ -354,7 +386,7 @@ async def revoke_user_sessions(
 @account_router.get(
     "/{user_id}/security-events",
     response_model=UserSecurityEventPageResponse,
-    responses={404: _NOT_FOUND},
+    responses={200: _ACCOUNT_RESPONSE, 404: _NOT_FOUND},
 )
 async def get_user_security_events(
     user_id: UUID,

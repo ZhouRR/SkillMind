@@ -4,6 +4,12 @@ import type { AppRoute } from '../lib/routing'
 
 /** 各画面を識別する 16px の stroke icon。sidebar 導航と概览の模块 card が共有し、外部 icon library に依存しない。 */
 export const ROUTE_ICONS: Record<AppRoute, ReactNode> = {
+  accounts: (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="8" cy="5" r="2.5" />
+      <path d="M2.5 14v-1.5a5.5 5.5 0 0 1 11 0V14" />
+    </svg>
+  ),
   home: (
     <svg viewBox="0 0 16 16" aria-hidden="true">
       <path d="M2.5 6.5 8 2l5.5 4.5V13a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1Z" />

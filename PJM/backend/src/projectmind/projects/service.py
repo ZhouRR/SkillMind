@@ -151,7 +151,7 @@ class ProjectService:
         actor: AuthenticatedActor,
         project_id: UUID,
     ) -> None:
-        """ADMIN が Run 履歴のない ARCHIVED Project を物理削除し key を解放する。"""
+        """ADMIN が Run/Schedule のない ARCHIVED Project を一つの transaction で削除する。"""
 
         self._require_admin(actor)
         async with self._session_factory() as session, session.begin():

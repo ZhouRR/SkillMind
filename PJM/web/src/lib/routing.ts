@@ -1,5 +1,5 @@
 /** Application shell が表示できる固定画面。 */
-export type AppRoute = 'home' | 'skills' | 'projects' | 'documents' | 'resources' | 'tasks' | 'workspace' | 'history'
+export type AppRoute = 'home' | 'skills' | 'projects' | 'accounts' | 'documents' | 'resources' | 'tasks' | 'workspace' | 'history'
 
 /** 画面の所属。platform は Project 非依存、project は現在 Project の作業区。 */
 export type RouteScope = 'platform' | 'project'
@@ -24,6 +24,7 @@ export const APP_ROUTES: ReadonlyArray<{
   // Skills 解析は資産を作る平台能力として platform 組に置く。保存先は sidebar の現在 Project。
   { route: 'skills', scope: 'platform' },
   { route: 'projects', scope: 'platform' },
+  { route: 'accounts', scope: 'platform' },
 ]
 
 /** 業務模块の絞り込みが効く画面かどうかを返す。
@@ -51,12 +52,24 @@ export interface RouteContext {
 /** 固定画面を static hosting と互換な hash URL へ変換する。 */
 export function routeHref(route: AppRoute, projectId?: string, context?: RouteContext): string {
   const base = route === 'home' ? '#/' : `#/${route}`
+  // Account の検索や対象は画面内に限定し、Project/Run の URL 文脈を引き継がない。
+  if (route === 'accounts') return base
   const query = new URLSearchParams()
   if (projectId) query.set('project', projectId)
   if (context?.runId) query.set('run', context.runId)
   if (context?.taskId) query.set('task', context.taskId)
   const suffix = query.toString()
   return suffix ? `${base}?${suffix}` : base
+}
+
+/** 画面間の導航は不正・重複を含む明示 Project を保持し、旧 Run/Task は引き継がない。 */
+export function routeHrefWithProject(route: AppRoute, hash: string, fallbackProjectId?: string): string {
+  if (route === 'accounts') return routeHref(route)
+  const request = new URLSearchParams(hash.includes('?') ? hash.slice(hash.indexOf('?') + 1) : '')
+  if (routeFromHash(hash) === 'accounts' || !request.has('project')) return routeHref(route, fallbackProjectId)
+  const query = new URLSearchParams()
+  for (const value of request.getAll('project')) query.append('project', value)
+  return `${routeHref(route)}?${query.toString()}`
 }
 
 /** URL hash から明示された Project context を取得する。 */
@@ -66,6 +79,7 @@ export function projectIdFromHash(hash: string): string | null {
 
 /** URL hash から Project と、画面を開く対象の Run/Task を取得する。 */
 export function routeContextFromHash(hash: string): { projectId: string | null; runId: string | null; taskId: string | null } {
+  if (routeFromHash(hash) === 'accounts') return { projectId: null, runId: null, taskId: null }
   const query = hash.split('?', 2)[1]
   if (query === undefined) return { projectId: null, runId: null, taskId: null }
   const params = new URLSearchParams(query)

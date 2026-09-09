@@ -78,6 +78,10 @@ node_modules/.bin/vite --host 127.0.0.1 --port 5189 --strictPort
 ```bash
 python3 tests/browser/check_login.py \
   --url http://127.0.0.1:5189/projectmind/tests/browser/login.html
+python3 tests/browser/check_accounts.py \
+  --url http://127.0.0.1:5189/projectmind/tests/browser/accounts.html
+python3 tests/browser/check_projects.py \
+  --url http://127.0.0.1:5189/projectmind/tests/browser/projects.html
 python3 tests/browser/check_run_submission.py \
   --url http://127.0.0.1:5189/projectmind/tests/browser/run-submission.html
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=../backend/src \
@@ -88,6 +92,8 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=../backend/src \
 | runner | 検証する範囲と限界 |
 | --- | --- |
 | login | 実 LoginPage の二重 submit、拒否・abort・遅延応答、三語/keyboard/窄屏。実 session、HTTPS、多 tab は別 |
+| accounts | 実 AccountsPage と App の本人安全、ADMIN 管理、検索/ページング、原版比較・未知・遅延応答・会話切替。実 DB の競争、Redis、HTTPS は別 |
+| projects | 実 App の失効/空/重複 Project link、精確詳細 gate、原対象の再読取・遅延応答・帰還、帰档履歴、三語/狭幅導航。API は全 mock、実 membership/削除競争・HTTPS は別 |
 | run_submission | 実 Workspace の応答喪失、同 key/body 確認、明示的新規、actor/Project 切替・refresh。実 transaction/唯一制約は別 |
 | document_sources | 即時/調度入力、清単、CSRF と凍結表示。Backend 依存と純 parser は使うが、実 blob、物化、調度編集/時区/認領 crash は別 |
 

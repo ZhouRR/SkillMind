@@ -1,0 +1,52 @@
+/* 本人の安全操作と組織管理を分け、長い ID と三言語文案も全幅をはみ出させない。 */
+.accountsPage .pageHeader h1 { white-space: normal; overflow: visible; }
+.accountsLayout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; align-items: start; }
+.accountsLayout > *, .accountEditor, .accountDirectory { min-width: 0; }
+.accountEditor, .accountDirectory { display: grid; gap: 18px; }
+.accountsLayout h2, .accountsLayout h3 { color: var(--text-hi); overflow-wrap: anywhere; }
+.accountsLayout .panelHeader { flex-wrap: wrap; gap: 10px; }
+.accountsLayout .panelHeader h2, .accountsLayout .panelHeader h3 { margin: 0; font-size: 15px; }
+.accountsLayout button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.accountsLayout button:disabled { cursor: not-allowed; opacity: .55; }
+.accountForm { margin-top: 20px; }
+.accountForm fieldset { display: grid; gap: 2px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.accountForm input, .accountForm select, .accountSearch input { min-width: 0; }
+.accountSearch { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin-bottom: 16px; }
+.accountSearch label { flex: 1 1 200px; min-width: 0; margin: 0; }
+.accountFacts { display: grid; gap: 10px; margin: 14px 0; font-size: 13px; line-height: 1.6; }
+.accountFacts > div { display: grid; grid-template-columns: minmax(80px, .65fr) minmax(0, 1fr); gap: 12px; }
+.accountFacts dt { color: var(--text-muted); }
+.accountFacts dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.accountVersion { color: var(--text-muted); font-size: 13px; }
+.accountComparison, .accountCreateReview { margin: 18px 0; border: 1px solid var(--warn); border-radius: var(--radius-small); padding: 14px; overflow-wrap: anywhere; }
+.accountNotice { margin: 12px 0; border-inline-start: 3px solid var(--warn); padding: 8px 12px; background: var(--warn-soft); overflow-wrap: anywhere; }
+.accountNotice p { margin: 4px 0; }
+.accountNotice:focus-visible, .accountsLayout [tabindex="-1"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.accountDanger { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 12px; }
+.accountDanger .dangerButton { min-height: 38px; padding: 8px 14px; color: var(--danger); font-size: 13px; }
+.accountCheckbox { display: flex; gap: 10px; align-items: start; line-height: 1.7; font-weight: 400; }
+.accountCheckbox input { flex: 0 0 auto; width: 18px; min-height: 18px; margin: 2px 0 0; }
+.accountPager { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin-top: 14px; font-size: 13px; }
+.accountPager .inlineActions { display: flex; flex-wrap: wrap; gap: 8px; }
+.accountUserList, .accountEventList { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+/* 一頁の全件を残しつつ、作成・編集入口が長い履歴の下へ埋もれることを防ぐ。 */
+.accountUserList, .accountEventList { overflow: auto; scrollbar-gutter: stable; padding-inline-end: 4px; }
+.accountUserList { max-height: min(55vh, 560px); }
+.accountEventList { max-height: min(45vh, 320px); }
+.accountUserList:focus-visible, .accountEventList:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.accountUserCard, .accountEventList > li { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-small); padding: 12px; overflow-wrap: anywhere; }
+.accountUserCard { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.accountUserCard > div { flex: 1 1 170px; min-width: 0; }
+.accountUserCard p { margin: 5px 0; font-size: 13px; }
+.accountUserCard small { display: block; color: var(--text-muted); }
+.accountEventList summary { cursor: pointer; line-height: 1.7; }
+.accountEventList summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+@media (min-width: 1200px) {
+  .accountsLayout:has(> .accountDirectory) { grid-template-columns: minmax(320px, .8fr) minmax(0, 1.2fr); }
+}
+
+@media (max-width: 600px) {
+  .accountsLayout .panel { padding: 14px; }
+  .accountFacts > div { grid-template-columns: minmax(80px, .65fr) minmax(0, 1fr); gap: 8px; }
+}

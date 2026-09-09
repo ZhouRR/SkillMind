@@ -14,8 +14,8 @@ U 版本 7、会话 S1/S2 → ADMIN 停用事务保存 DISABLED/版本 8、撤�
 | --- | --- |
 | Backend | [users service/repository](../../PJM/backend/src/projectmind/users/)有锁后认证、版本、末位 ADMIN、撤销/审计；测试多为 mock transaction |
 | DB | [models](../../PJM/backend/src/projectmind/db/models.py)、[0032](../../PJM/backend/migrations/versions/0032_user_lifecycle.py)有用户版本/安全事件，不证明已部署迁移 |
-| HTTP/契约 | [users route](../../PJM/backend/src/projectmind/api/routes/users.py)已接 10 个操作、[Schema](../../PJM/contracts/users/v1/)/example；保存的 OpenAPI 尚未同步 |
-| Web | [users client](../../PJM/web/src/api/users.ts)/validator/barrel 已有；UserAccountPanel/UserSecurityEvents/useUserRequest/account 文案是未接入 App 的草稿，账户 route/page 未完成 |
+| HTTP/契约 | [users route](../../PJM/backend/src/projectmind/api/routes/users.py)的 10 个操作已接 [Schema](../../PJM/contracts/users/v1/)/example、[OpenAPI](../../PJM/contracts/openapi/projectmind-api.v1.json)与响应 header 声明 |
+| Web | [AccountsPage](../../PJM/web/src/pages/AccountsPage.tsx)经 `#/accounts` 接入 App；复用 [users client](../../PJM/web/src/api/users.ts)、版本表单、安全事件与请求 hook，三语区分本人安全和 ADMIN 管理 |
 | 初始化/关联 | bootstrap 已追加 CREATED；middleware 生成服务器 UUID，不信任 X-Request-ID |
 
 接续现有实现，不新造平行服务或 client；文件存在不证明真实事务、可访问页面或部署验收。
@@ -28,7 +28,7 @@ U 版本 7、会话 S1/S2 → ADMIN 停用事务保存 DISABLED/版本 8、撤�
 
 ## 用户操作与目标公开面
 
-以下已在工作副本 /api/v1 路由中，跨层交付尚未完成：
+以下操作由 /api/v1 路由与账户页消费；真实事务和部署仍须独立验收：
 
 | 操作 | 入口 |
 | --- | --- |
@@ -78,7 +78,7 @@ bootstrap 用新 ADMIN 自身作 actor、CLI UUID 作关联，同事务保存；
 
 ## 生效与界面
 
-账户入口独立于 Project，本人安全与 ADMIN 管理分开；隐藏按钮不代替授权。
+账户入口独立于 Project，本人安全与 ADMIN 管理分开；没有项目或项目列表仍在加载时也可访问。首次项目读取不清除账户草稿，用户实际切换项目时丢弃旧表单；隐藏按钮不代替授权。
 
 | 返回 | 处理 |
 | --- | --- |
@@ -101,7 +101,7 @@ bootstrap 用新 ADMIN 自身作 actor、CLI UUID 作关联，同事务保存；
 
 ## 开发接续与验收
 
-先合跑 users/API/contracts，核对错误与 Schema 后用 exporter 同步 OpenAPI；复用 client/组件草稿接平台入口、分页、版本表单与三语。最后在专用授权环境验证：
+修改时合跑 users/API/contracts，核对错误、Schema、OpenAPI 与实际账户页；浏览器入口及 mock 的限度见[本地验证](../development/local-development.md#ブラウザ回帰)。专用授权环境仍须验证：
 
 - 双 ADMIN 互停用/降级、bootstrap、登录/撤销竞争，末位保护与完整回滚。
 - 锁等待过期/撤权、角色改回、停用后启用，旧会话不复活。

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { userFailure, type UserFailure } from '../lib/userFeedback'
 
@@ -21,35 +21,59 @@ export function useUserQuery<T>(key: string, loader: (signal: AbortSignal) => Pr
   const [revision, setRevision] = useState(0)
   const [state, setState] = useState<QueryState<T>>({ key, completed: -1, data: null, failure: null })
   const currentKey = useRef(key)
+  const active = useRef<AbortController | null>(null)
   currentKey.current = key
   const ended = useRef(onSessionEnded)
   ended.current = onSessionEnded
-  const refresh = useCallback(() => setRevision((value) => value + 1), [])
+  /** 手動再読取を要求した瞬間に旧世代を閉じ、再描画前の古い 401 も捨てる。 */
+  const refresh = useCallback(() => {
+    active.current?.abort()
+    active.current = null
+    setRevision((value) => value + 1)
+  }, [])
+
+  // 対象/読取世代の変更と同じ commit で閉じ、passive cleanup 前の microtask も通さない。
+  useLayoutEffect(() => () => {
+    active.current?.abort()
+    active.current = null
+  }, [key, loader, revision])
 
   useEffect(() => {
     const controller = new AbortController()
+    active.current = controller
     let settled = false
+    const expiresAt = performance.now() + USER_REQUEST_TIMEOUT_MS
     setState((old) => ({ key, completed: -1, data: old.key === key ? old.data : null, failure: null }))
     /** Abort を無視する transport から来た結果も request 世代で破棄する。 */
-    const current = (): boolean => !settled && !controller.signal.aborted && currentKey.current === key
-    const timer = window.setTimeout(() => {
+    const current = (): boolean => !settled && !controller.signal.aborted
+      && active.current === controller && currentKey.current === key
+    /** Background tab で timer が遅れても、処理済みという成功には変えない。 */
+    const expire = (): void => {
       if (!current()) return
       settled = true
+      window.clearTimeout(timer)
       controller.abort()
+      if (active.current === controller) active.current = null
       setState((old) => ({ ...old, completed: revision, failure: { key: 'loadFailed' } }))
-    }, USER_REQUEST_TIMEOUT_MS)
+    }
+    const timer = window.setTimeout(expire, USER_REQUEST_TIMEOUT_MS)
     void Promise.resolve().then(() => {
+      if (performance.now() >= expiresAt) expire()
       controller.signal.throwIfAborted()
       return loader(controller.signal)
     }).then((data) => {
       if (!current()) return
+      if (performance.now() >= expiresAt) { expire(); return }
       settled = true
       window.clearTimeout(timer)
+      active.current = null
       setState({ key, completed: revision, data, failure: null })
     }).catch((error: unknown) => {
       if (!current()) return
+      if (performance.now() >= expiresAt) { expire(); return }
       settled = true
       window.clearTimeout(timer)
+      active.current = null
       const failure = userFailure(error, false)
       setState((old) => ({ ...old, completed: revision, failure }))
       if (failure.key === 'sessionExpired') ended.current()
@@ -58,6 +82,7 @@ export function useUserQuery<T>(key: string, loader: (signal: AbortSignal) => Pr
       settled = true
       window.clearTimeout(timer)
       controller.abort()
+      if (active.current === controller) active.current = null
     }
   }, [key, loader, revision])
 
@@ -84,7 +109,8 @@ export function useUserMutation(onSessionEnded: SessionEnded) {
   const ended = useRef(onSessionEnded)
   ended.current = onSessionEnded
 
-  useEffect(() => {
+  // Request の受付/破棄は commit に合わせ、離頁後の password POST や失効通知を防ぐ。
+  useLayoutEffect(() => {
     mounted.current = true
     return () => {
       mounted.current = false
@@ -106,7 +132,8 @@ export function useUserMutation(onSessionEnded: SessionEnded) {
   const acknowledge = useCallback(() => {
     if (active.current) return
     blocked.current = false
-    setFailure(null)
+    // 新版の採用は password 拒否や有効な cooldown を解除した証明にはならない。
+    setFailure((current) => current?.key === 'unknown' || current?.key === 'versionConflict' ? null : current)
   }, [])
 
   /** Callback 自体も現在 request の中で呼び、離頁後の外部 state 更新を防ぐ。 */
@@ -117,6 +144,7 @@ export function useUserMutation(onSessionEnded: SessionEnded) {
   ): boolean => {
     if (!mounted.current || active.current || blocked.current || performance.now() < deadline.current) return false
     const controller = new AbortController()
+    const expiresAt = performance.now() + USER_REQUEST_TIMEOUT_MS
     active.current = controller
     setBusy(true)
     setFailure(null)
@@ -140,15 +168,18 @@ export function useUserMutation(onSessionEnded: SessionEnded) {
     }
     timeout.current = window.setTimeout(() => reject({ key: 'unknown' }), USER_REQUEST_TIMEOUT_MS)
     void Promise.resolve().then(() => {
+      if (performance.now() >= expiresAt) reject({ key: 'unknown' })
       controller.signal.throwIfAborted()
       return operation(controller.signal)
     }).then((value) => {
       if (!current()) return
+      if (performance.now() >= expiresAt) { reject({ key: 'unknown' }); return }
       window.clearTimeout(timeout.current)
       active.current = null
       setBusy(false)
       onSuccess(value)
-    }).catch((error: unknown) => reject(userFailure(error, true)))
+    }).catch((error: unknown) => reject(performance.now() >= expiresAt
+      ? { key: 'unknown' } : userFailure(error, true)))
     return true
   }, [])
 

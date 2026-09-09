@@ -35,7 +35,11 @@ preference 只是上次选择，不是授权。服务端只返回当前可访问
 | URL 明确无效/无权项目 | 保留目标、统一不可访问，不静默换项目或暴露原因差异 |
 | 主动切换或当前资格失效 | 确认/隔离旧草稿，阻止新提交，丢弃旧响应；不迁移未知写请求 |
 
-当前 [resolveProjectSelection](../../PJM/web/src/lib/projectContext.ts)与 [App](../../PJM/web/src/App.tsx)仍在明确目标无效时回退并改 hash；“不悄悄换项目”是待修正要求，不以放宽 API 授权修导航。
+[App](../../PJM/web/src/App.tsx)通过 [useProjectContext](../../PJM/web/src/hooks/useProjectContext.ts)分开读取活动列表、偏好与精确项目详情。空值、重复参数及非法 UUID 不是“未指定”；授权与不存在统一提示，不展示服务器内部原因。首次无参数可以选有效偏好或活动首项，一旦目标确定，列表变化、归档或重新读取都不把它换成别的项目。
+
+进入另一个页面、切换目标或重新读取时，详情未确认前不挂载项目业务页面；平台入口保留。每次读取有独立身份与等待上限，返回曾访问过的 ID 也不能复用旧授权结果。主动切换清除旧 Run/Task 参数并隔离原页面；未知写入不自动迁移或重放。只有已确认 ACTIVE 的项目保存为偏好。
+
+详情成功不代表列表也成功：列表失败仍提示并可重新读取，授权归档详情仍可显示。偏好失败不丢掉成功列表。上述检查不替代每次业务请求的服务器授权，也不承诺权限变化会即时推送到已打开页面。
 
 ## 归档的实际边界
 
@@ -56,11 +60,11 @@ metadata/归档/恢复锁 Project，但没有 expected_row_version 或独立审�
 
 ## 删除与数据保留
 
-当前 ADMIN 锁 Project，要求 ARCHIVED 且无 Run，删除 preference 与列举配置再删除项目；ACTIVE/有 Run 分别返回 project_delete_requires_archive/project_delete_blocked_by_runs，成功 204。不是回收站，前置也不是完整可删证明。
+当前 ADMIN 锁 Project，要求 ARCHIVED 且无 Run/TaskSchedule，删除 preference 与列举配置再删除项目；未归档、有 Run、有 Schedule 分别返回 project_delete_requires_archive/project_delete_blocked_by_runs/project_delete_blocked_by_schedules，成功 204。Schedule 检查不按状态、是否发火或认领字段过滤，拒绝发生在任何关系删除之前。不是回收站，前置也不是完整可删证明。
 
 | 已知缺口 | 风险 |
 | --- | --- |
-| 清单漏 TaskSchedule，外键 RESTRICT | 无 Run 但有 Schedule 仍可 DB 拒绝，未有稳定业务冲突 |
+| 现有 Run/Schedule 检查不是完整引用证明 | 冻结输入、在途认领与并发新增仍须按统一提交协议验证 |
 | 删 ProjectDocument 行不清 blob | 204 不证明附件、Run 副本或备份清除 |
 | retention_days 仅配置 | 不保证自动清理、恢复或保留期定时器 |
 | 引用检查与新增引用不同协议 | 归档/认领/创建/删除竞争尚需真实事务验证 |

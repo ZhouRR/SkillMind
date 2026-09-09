@@ -1,24 +1,32 @@
 import type { ProjectRecord } from '../api'
+import { routeFromHash } from './routing'
+import { isUuid } from './validation'
 
-/** 現在 Project を「URL 指定 → 保存済み選択 → 先頭」の順で解決する。
+/** URL の対象と未指定を分ける。空・重複・不正 UUID を既定 Project に読み替えない。 */
+export type ProjectRequest =
+  | { kind: 'absent' }
+  | { kind: 'explicit'; projectId: string }
+  | { kind: 'invalid'; value: string }
 
-    参照できる Project がある限り必ず一つ選ぶ。未選択のまま置くと、どの画面も
-    「先にプロジェクトを選んでください」しか出せず、操作の入口自体が消えるため。
+/** Account の URL は Project 文脈を持たず、それ以外は明示 parameter を厳密に読む。 */
+export function projectRequestFromHash(hash: string): ProjectRequest {
+  if (routeFromHash(hash) === 'accounts') return { kind: 'absent' }
+  const queryStart = hash.indexOf('?')
+  const values = new URLSearchParams(queryStart < 0 ? '' : hash.slice(queryStart + 1)).getAll('project')
+  if (values.length === 0) return { kind: 'absent' }
+  const value = values[0] ?? ''
+  if (values.length !== 1 || !isUuid(value)) return { kind: 'invalid', value }
+  return { kind: 'explicit', projectId: value }
+}
 
-    URL 指定を採用できなかったときも警告は出さない。呼び出し側は解決結果で hash を
-    書き戻し、sidebar は選択中 Project を常に名前で示すので、どの Project を見ているかは
-    画面上で確定している——失効した link ごとに警告を出しても、利用者が既に見ている事実を
-    繰り返すだけになる。 */
+/** 対象の選択だけを行い、認可は詳細 API に任せる。明示対象は一覧外でも保持する。 */
 export function resolveProjectSelection(
   projects: readonly ProjectRecord[],
   requestedProjectId: string | null,
   preferredProjectId: string | null,
 ): string {
-  const accessible = (candidate: string): boolean =>
-    projects.some(({ project_id }) => project_id === candidate)
-  if (requestedProjectId !== null && accessible(requestedProjectId)) return requestedProjectId
-  const preferred = preferredProjectId !== null && accessible(preferredProjectId)
-    ? preferredProjectId
-    : null
-  return preferred ?? projects[0]?.project_id ?? ''
+  if (requestedProjectId !== null) return requestedProjectId
+  const active = projects.filter(({ status }) => status === 'ACTIVE')
+  return active.find(({ project_id }) => project_id.toLowerCase() === preferredProjectId?.toLowerCase())?.project_id
+    ?? active[0]?.project_id ?? ''
 }

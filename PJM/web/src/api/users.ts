@@ -97,6 +97,19 @@ function isSecurityEvent(value: unknown): value is UserSecurityEventRecord {
 function isMutation(value: unknown): value is UserMutationRecord {
   return isRecord(value) && exactFields(value, ['user', 'revoked_sessions', 'session_revoked'])
     && isAccount(value.user) && isInteger(value.revoked_sessions) && typeof value.session_revoked === 'boolean'
+    && (!value.session_revoked || value.revoked_sessions > 0)
+}
+/** 表示した原版との対応だけを照合し、返却版から元 request の成功を推測しない。 */
+function versionMutation(version: number, allowNoop = false) {
+  return (value: unknown): value is UserMutationRecord => isMutation(value)
+    && (value.user.row_version === version + 1
+      || allowNoop && value.user.row_version === version && value.revoked_sessions === 0 && !value.session_revoked)
+}
+/** 本人の安全操作は有効な current session を必ず失効させ、no-op では返らない。 */
+function ownSecurityMutation(version: number) {
+  const guard = versionMutation(version)
+  return (value: unknown): value is UserMutationRecord => guard(value)
+    && value.user.status === 'ACTIVE' && value.session_revoked
 }
 /** Request と同じ page を検証し、異なる offset を現在一覧へ混ぜない。 */
 function pageGuard<T>(guard: (value: unknown) => value is T, limit: number, offset: number) {
@@ -165,26 +178,35 @@ export function loadUserSecurityEvents(userId: string, limit = 25, offset = 0, s
 /** 初期 password はこの一回の body にだけ含め、unknown 時にも自動再送しない。 */
 export function createUser(input: CreateUserInput, csrfToken: string, signal?: AbortSignal): Promise<UserMutationRecord> {
   const { email, display_name, system_role, password } = input
-  return callUsers('', isMutation, mutationInit({ email, display_name, system_role, password }, csrfToken, signal))
+  // Email の Unicode casefold や ID は server の責任であり、client で別の正規化を作らない。
+  const guard = (value: unknown): value is UserMutationRecord => isMutation(value)
+    && value.user.row_version === 1 && value.user.system_role === system_role && value.user.status === 'ACTIVE'
+    && value.revoked_sessions === 0 && !value.session_revoked
+  return callUsers('', guard, mutationInit({ email, display_name, system_role, password }, csrfToken, signal))
 }
 /** 原版を変えずに三項目を更新し、immutable email を body に混ぜない。 */
 export function updateUser(userId: string, input: UpdateUserInput, csrfToken: string, signal?: AbortSignal): Promise<UserMutationRecord> {
   const { display_name, system_role, status } = input
-  return callUsers(userPath(userId), forUser(isMutation, userId, (result) => result.user.user_id),
-    mutationInit({ display_name, system_role, status, ...versionBody(input.expected_row_version) }, csrfToken, signal, 'PUT'))
+  const version = versionBody(input.expected_row_version)
+  const validVersion = versionMutation(version.expected_row_version, true)
+  const guard = (value: unknown): value is UserMutationRecord => validVersion(value)
+    && value.user.system_role === system_role && value.user.status === status
+  return callUsers(userPath(userId), forUser(guard, userId, (result) => result.user.user_id),
+    mutationInit({ display_name, system_role, status, ...version }, csrfToken, signal, 'PUT'))
 }
 /** 現 password の拒否は 401 へ変換せず、client に元の Problem を返す。 */
 export function changeMyPassword(input: ChangePasswordInput, csrfToken: string, signal?: AbortSignal): Promise<UserMutationRecord> {
   const { current_password, new_password } = input
-  return callUsers('/me/password', isMutation,
-    mutationInit({ current_password, new_password, ...versionBody(input.expected_row_version) }, csrfToken, signal))
+  const version = versionBody(input.expected_row_version)
+  return callUsers('/me/password', ownSecurityMutation(version.expected_row_version),
+    mutationInit({ current_password, new_password, ...version }, csrfToken, signal))
 }
 /** 現在会話も失効するが、client が別途 logout や再ログインを実行してはならない。 */
 export function revokeMySessions(version: number, csrfToken: string, signal?: AbortSignal): Promise<UserMutationRecord> {
-  return callUsers('/me/sessions/revoke', isMutation, mutationInit(versionBody(version), csrfToken, signal))
+  return callUsers('/me/sessions/revoke', ownSecurityMutation(version), mutationInit(versionBody(version), csrfToken, signal))
 }
 /** ADMIN が精確対象の未撤销会話を失効させる。 */
 export function revokeUserSessions(userId: string, version: number, csrfToken: string, signal?: AbortSignal): Promise<UserMutationRecord> {
-  return callUsers(`${userPath(userId)}/sessions/revoke`, forUser(isMutation, userId, (result) => result.user.user_id),
+  return callUsers(`${userPath(userId)}/sessions/revoke`, forUser(versionMutation(version), userId, (result) => result.user.user_id),
     mutationInit(versionBody(version), csrfToken, signal))
 }

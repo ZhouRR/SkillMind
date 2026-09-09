@@ -15,6 +15,7 @@ interface AccountPanelProps {
   userId: string
   own: boolean
   session: AuthSessionRecord
+  revision?: number
   onSessionEnded: SessionEnded
   onChanged: (account: UserAccountRecord) => void
 }
@@ -25,14 +26,14 @@ export function UserAccountPanel(props: AccountPanelProps) {
 }
 
 /** 一つの原版を保ち、競合/unknown 後の最新読取を明示採用する編集器。 */
-function AccountEditor({ userId, own, session, onSessionEnded, onChanged }: AccountPanelProps) {
+function AccountEditor({ userId, own, session, revision = 0, onSessionEnded, onChanged }: AccountPanelProps) {
   const messages = useMessages().account
   const loader = useCallback(async (signal: AbortSignal) => {
     const account = own ? await loadMyAccount(signal) : await loadUserAccount(userId, signal)
     if (!sameUser(account.user_id, userId)) throw new Error('Unexpected account target')
     return account
   }, [own, userId])
-  const query = useUserQuery(`${own}:${userId}`, loader, onSessionEnded)
+  const query = useUserQuery(`${own}:${userId}:${revision}`, loader, onSessionEnded)
   const mutation = useUserMutation(onSessionEnded)
   const [base, setBase] = useState<UserAccountRecord | null>(null)
   const [name, setName] = useState('')
@@ -139,7 +140,7 @@ function AccountEditor({ userId, own, session, onSessionEnded, onChanged }: Acco
           {latest && <><p>{messages.latestVersion(latest.row_version)}</p><UserAccountFacts account={latest} /></>}
           <button className="secondaryButton" disabled={!latest || mutation.busy} type="button" onClick={adopt}>{messages.adoptLatest}</button>
         </section>}
-        {own ? <form className="accountForm" onSubmit={changePassword}>
+        {own ? <form className="accountForm" data-account-form="password" onSubmit={changePassword}>
           <h3>{messages.changePassword}</h3><p className="hint">{messages.passwordHint}</p>
           <fieldset disabled={!canWrite}>
             <label>{messages.currentPassword}<input autoComplete="current-password" type="password" required maxLength={1024} value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} /></label>
@@ -149,13 +150,13 @@ function AccountEditor({ userId, own, session, onSessionEnded, onChanged }: Acco
             {passwordError && <p role="alert" className="error">{passwordError === 'invalidRequest' ? messages.failures.invalidRequest : messages[passwordError]}</p>}
             <button className="primaryButton" type="submit">{messages.changePassword}</button>
           </fieldset>
-        </form> : <form className="accountForm" onSubmit={save}>
+        </form> : <form className="accountForm" data-account-form="edit" onSubmit={save}>
           <fieldset disabled={!canWrite}>
             <label>{messages.fields.name}<input required maxLength={200} value={name} onChange={(event) => { setName(event.target.value); setConfirmChange(false) }} /></label>
-            <label>{messages.fields.role}<select value={role} onChange={(event) => { setRole(event.target.value === 'ADMIN' ? 'ADMIN' : 'USER'); setConfirmChange(false) }}>
+            <label>{messages.fields.role}<select aria-label={messages.fields.role} value={role} onChange={(event) => { setRole(event.target.value === 'ADMIN' ? 'ADMIN' : 'USER'); setConfirmChange(false) }}>
               <option value="USER">{messages.roles.USER}</option><option value="ADMIN">{messages.roles.ADMIN}</option>
             </select></label>
-            <label>{messages.fields.status}<select value={status} onChange={(event) => { setStatus(event.target.value === 'ACTIVE' ? 'ACTIVE' : 'DISABLED'); setConfirmChange(false) }}>
+            <label>{messages.fields.status}<select aria-label={messages.fields.status} value={status} onChange={(event) => { setStatus(event.target.value === 'ACTIVE' ? 'ACTIVE' : 'DISABLED'); setConfirmChange(false) }}>
               <option value="ACTIVE">{messages.statuses.ACTIVE}</option><option value="DISABLED">{messages.statuses.DISABLED}</option>
             </select></label>
             {(role !== base.system_role || status !== base.status) && <label className="accountCheckbox"><input type="checkbox" required checked={confirmChange} onChange={(event) => setConfirmChange(event.target.checked)} />{messages.confirmChange}</label>}
@@ -172,6 +173,6 @@ function AccountEditor({ userId, own, session, onSessionEnded, onChanged }: Acco
         </div>
       </>}
     </section>
-    {base && <UserSecurityEvents userId={userId} own={own} revision={auditRevision} onSessionEnded={onSessionEnded} />}
+    {base && <UserSecurityEvents userId={userId} own={own} revision={auditRevision + revision} onSessionEnded={onSessionEnded} />}
   </div>
 }

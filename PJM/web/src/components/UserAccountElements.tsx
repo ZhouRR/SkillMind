@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 
 import type { UserAccountRecord } from '../api'
 import { useMessages } from '../i18n'
-import { formatLocalTime } from '../lib/presentation'
+import { formatLocalTimestamp } from '../lib/presentation'
 import type { UserFailure } from '../lib/userFeedback'
 
 /** Server の未知本文や password を描画せず、失敗時は読み上げ位置へ移す。 */
@@ -27,9 +27,28 @@ export function UserAccountFacts({ account }: { account: UserAccountRecord }) {
     <div><dt>{messages.fields.status}</dt><dd>{messages.statuses[account.status]}</dd></div>
     <div><dt>{messages.fields.userId}</dt><dd>{account.user_id}</dd></div>
     <div><dt>{messages.fields.version}</dt><dd>{account.row_version}</dd></div>
-    <div><dt>{messages.fields.created}</dt><dd>{formatLocalTime(account.created_at)}</dd></div>
-    <div><dt>{messages.fields.updated}</dt><dd>{formatLocalTime(account.updated_at)}</dd></div>
+    <div><dt>{messages.fields.created}</dt><dd><time dateTime={account.created_at} title={account.created_at}>{formatLocalTimestamp(account.created_at)}</time></dd></div>
+    <div><dt>{messages.fields.updated}</dt><dd><time dateTime={account.updated_at} title={account.updated_at}>{formatLocalTimestamp(account.updated_at)}</time></dd></div>
   </dl>
+}
+
+/** 一覧と作成確認で同じ公開項目を使い、同 email を成功証跡と解釈しない。 */
+export function UserSummaryList({ users, disabled, onSelect }: {
+  users: UserAccountRecord[]
+  disabled: boolean
+  onSelect: (userId: string) => void
+}) {
+  const messages = useMessages().account
+  if (users.length === 0) return <p>{messages.emptyUsers}</p>
+  return <ul className="accountUserList" tabIndex={0} aria-label={messages.manageUsers}>
+    {users.map((account) => <li className="accountUserCard" key={account.user_id}>
+      <div><strong>{account.display_name}</strong><p>{account.email}</p>
+        <p>{messages.roles[account.system_role]} · {messages.statuses[account.status]} · {messages.fields.version} {account.row_version}</p>
+      </div>
+      <button type="button" className="secondaryButton" disabled={disabled}
+        aria-label={`${messages.edit}: ${account.email}`} onClick={() => onSelect(account.user_id)}>{messages.edit}</button>
+    </li>)}
+  </ul>
 }
 
 /** Server の page を移動し、動的な total を固定 snapshot として扱わない。 */

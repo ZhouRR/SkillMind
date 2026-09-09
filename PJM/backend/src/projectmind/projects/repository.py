@@ -22,6 +22,7 @@ from projectmind.db.models import (
     ResourceBinding,
     Run,
     SecretReference,
+    TaskSchedule,
     User,
 )
 from projectmind.projects.domain import (
@@ -221,12 +222,12 @@ class ProjectRepository:
         return self._to_stored(project)
 
     async def delete(self, *, organization_id: UUID, project_id: UUID) -> None:
-        """Run 履歴を持たない ARCHIVED Project と、その設定 row を物理削除する。
+        """Run/Schedule を持たない ARCHIVED Project と、その設定 row を物理削除する。
 
         key の一意制約は status を区別しないため、archive しただけでは key を再利用できない。
         ここは「作成し直したい」用途のための唯一の解放手段であり、監査の正本である Run が
-        一件でもあれば削除しない。Run が無い Project の子 row は再作成可能な設定情報だけなので、
-        同一 transaction で消して FK RESTRICT を満たす。
+        一件でもあれば削除しない。未発火や認領中の Schedule も将来の実行参照なので残す。
+        設定削除は全ての検査後に同一 transaction で行い、FK RESTRICT を最後の防壁に保つ。
         """
 
         project = await self._organization_project(
@@ -246,6 +247,15 @@ class ProjectRepository:
             raise ProjectDeleteBlockedError(
                 f"Project still has {run_count} run(s): {project_id}",
                 blockers=("run_history_exists",),
+            )
+        # status、発火実績、next_run_at による絞込は、停止済み・未発火・認領中の参照を漏らす。
+        has_schedule = await self._session.scalar(
+            select(exists().where(TaskSchedule.project_id == project_id))
+        )
+        if has_schedule:
+            raise ProjectDeleteBlockedError(
+                f"Project still has task schedule references: {project_id}",
+                blockers=("task_schedule_exists",),
             )
         # Preference は FK RESTRICT なので、参照している User を先に未選択へ戻す。
         await self._session.execute(

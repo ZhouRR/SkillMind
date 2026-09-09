@@ -12,6 +12,7 @@ export {
   archiveProject,
   createProject,
   deleteProject,
+  loadProject,
   loadProjectMembers,
   loadProjects,
   removeProjectMember,
