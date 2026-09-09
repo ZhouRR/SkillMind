@@ -53,7 +53,7 @@ preference 只是上次选择，不是授权。服务端只返回当前可访问
 
 ## 归档的实际边界
 
-归档/恢复只修改 status，保留配置；同状态重复操作不刷新时间，不调用 Run/Schedule/Integration/Session 停止服务。
+归档/恢复改变项目状态及版本/更新时间，保留配置；同版同状态操作不增版或刷新时间，不调用 Run/Schedule/Integration/Session 停止服务。
 
 | 入口 | 当前行为 |
 | --- | --- |
@@ -66,11 +66,23 @@ preference 只是上次选择，不是授权。服务端只返回当前可访问
 
 ### 并发修改不能只看有无行锁
 
-metadata/归档/恢复锁 Project，但没有 expected_row_version 或独立审计；行锁不能识别管理员过时草稿。目标定义统一版本/冲突协议，同步 DB/DTO/API/Web，保留非敏感草稿让用户比较，不自动换版本重发。
+项目管理采用以下统一版本协议；DB、API、Web 必须成套切换，接线与验收状态见计划 R05。
+
+- `row_version` 从 1 开始，范围 1–2147483647；只覆盖项目 metadata 与归档状态，不随成员、偏好、Run 或资源变化。它不是审计或全部引用的版本。
+- PATCH 必带原 `expected_row_version` 和至少一个非 null 的可修改字段；归档/恢复 POST 正文必带原版本，DELETE 用必填同名 query。缺版本或非法输入返回 422，不兼容为“使用当前版本”。
+- 本组织 ADMIN 的创建、修改、归档、恢复、删除在业务事务复核原会话与 CSRF；复用 Organization → User → 原 AuthSession → Project 顺序，所有锁后与 flush 后用新时间复核，锁保持到提交。
+- 先比较版本再判 no-op 或删除前置。旧版本即使目标值相同也返回 409 `project_version_conflict`；同版无变化不改版本/时间，有变化只增一次。达到上限后有变化返回 409 `project_version_exhausted`，不回绕。
+- 公开详情/列表均必带版本并使用 no-store。创建 key 冲突不是幂等成功；删除成功仍为 204，无权/不存在仍统一 404。版本通过不免除原来的归档、Run、Schedule、成员审计保护。
+
+页面保留原项目 ID/key/版本及非敏感草稿，提交同步防重。冲突后精确重读原 ID，显示原值、草稿与当前值，人工采用当前版本后仍须另行提交；不自动改版重放。未知结果先核对：既有项目精确重读，创建读取包含归档的完整列表并按原 key 比较。404 或列表无匹配只说明当前不可读/未发现，不证明原请求回滚；当前值符合目标也不证明由原请求造成。
+
+核对读取成功（既有目标的明确 `project_not_found` 404 也只作不可访问事实）后，用户可人工解除新写门禁；解除不重发、删除未知不按同 key 重建。切换页签或刷新列表不消除未知，换 actor/项目或离页丢弃旧响应，不迁移原动作；不承诺跨刷新恢复。无项目参数时，首次默认选择读取完成不是人工切换，不清空已填写的创建草稿、确认或未知状态；显式选择和后续目标切换仍隔离原请求。元数据与归档独立审计尚未定义完整载体，不伪造旧历史或削弱已有审计删除保护。
+
+0034 给旧项目初始化版本 1，不证明旧修改次数。降级须全实例停写并停止旧页面/在途请求；任何项目版本超过 1 拒绝丢列，避免恢复时悄悄重置已使用的并发版本。新旧 API/Web 不混跑，旧客户端缺版本明确拒绝。
 
 ## 删除与数据保留
 
-当前 ADMIN 先锁 Organization、再锁 Project，要求 ARCHIVED 且无 Run/TaskSchedule/成员审计，删除 preference 与列举配置再删除项目；成功 204。拒绝发生在任何关系删除之前：
+当前 ADMIN 按上述业务事务锁定原会话与 Project，先验原版本，再要求 ARCHIVED 且无 Run/TaskSchedule/成员审计；清理 preference 与列举配置后删除项目，成功 204。拒绝发生在任何关系删除之前：
 
 | 阻止条件 | Problem code |
 | --- | --- |
@@ -101,7 +113,7 @@ metadata/归档/恢复锁 Project，但没有 expected_row_version 或独立审�
 
 ## 开发接续与验收
 
-入口：[项目实现](../../PJM/backend/src/projectmind/projects/)、[ProjectsPage](../../PJM/web/src/pages/ProjectsPage.tsx)、[契约](../../PJM/README.md#contracts)。成员页复用账户查询和共用请求边界；项目元数据、归档/恢复、删除的统一版本与完整未知结果处理继续接续，不以成员页回归代替。
+入口：[项目实现](../../PJM/backend/src/projectmind/projects/)、[ProjectsPage](../../PJM/web/src/pages/ProjectsPage.tsx)、[契约](../../PJM/README.md#contracts)。项目 CRUD 共用版本/请求边界，成员页复用账户查询；module 配置仍是独立领域，不由 CRUD 回归证明完整交付。真实事务、独立项目审计、完整引用保护与字节清理继续接续。
 
 - 失效成员、ADMIN membership、跨组织分别授权，旧 Run 身份不变。
 - 实 DB 验证成员加入/禁用、归档/Run/Schedule/删除竞争、版本冲突与审计回滚。

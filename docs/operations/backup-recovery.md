@@ -28,7 +28,7 @@ Redis 不代替 DB；旧队列、Outbox 重投与调度在途需要专用恢复�
 ```bash
 umask 077
 PJM_BACKUP_DIR="$(mktemp -d ./projectmind-backup-XXXXXXXX)" &&
-docker compose --env-file .env exec -T postgres sh -ceu \
+python3 scripts/compose.py -- exec -T postgres sh -ceu \
   'pg_dump --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --format=custom' \
   > "${PJM_BACKUP_DIR:?Backup directory is required}/database.dump"
 ```
@@ -40,7 +40,7 @@ docker compose --env-file .env exec -T postgres sh -ceu \
   set -eu
   : "${PJM_BACKUP_DIR:?Specify the directory created for this backup}"
   test -s "$PJM_BACKUP_DIR/database.dump"
-  docker compose --env-file .env exec -T postgres pg_restore --list \
+  python3 scripts/compose.py -- exec -T postgres pg_restore --list \
     < "$PJM_BACKUP_DIR/database.dump" > "$PJM_BACKUP_DIR/database.toc"
   docker image inspect projectmind/backend:0.1.0 projectmind/web:0.1.0 \
     --format '{{.RepoTags}} {{.Id}}' > "$PJM_BACKUP_DIR/images.txt"
@@ -69,7 +69,7 @@ docker compose --env-file .env exec -T postgres sh -ceu \
   set -eu
   : "${PJM_RESTORE_DIR:?Specify the verified backup directory}"
   test -s "$PJM_RESTORE_DIR/database.dump"
-  docker compose --env-file .env exec -T postgres pg_restore --list \
+  python3 scripts/compose.py -- exec -T postgres pg_restore --list \
     < "$PJM_RESTORE_DIR/database.dump" > /dev/null
   cd "$PJM_RESTORE_DIR"
   sha256sum --check database.dump.sha256
@@ -79,8 +79,8 @@ docker compose --env-file .env exec -T postgres sh -ceu \
 成功后在已全局停写的窗口停止本目录服务，并在受控终端核对实际 DB/角色：
 
 ```bash
-docker compose --env-file .env stop api worker migrate
-docker compose --env-file .env exec -T postgres sh -ceu '
+python3 scripts/compose.py -- stop api worker migrate
+python3 scripts/compose.py -- exec -T postgres sh -ceu '
   psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --no-psqlrc \
     --set=ON_ERROR_STOP=1 --command="SELECT current_database(), current_user"
 '
@@ -95,11 +95,11 @@ docker compose --env-file .env exec -T postgres sh -ceu '
   set -eu
   : "${PJM_RESTORE_DIR:?Specify the verified backup directory}"
   test -s "$PJM_RESTORE_DIR/database.dump"
-  docker compose --env-file .env exec -T postgres sh -ceu '
+  python3 scripts/compose.py -- exec -T postgres sh -ceu '
     dropdb --force --username="$POSTGRES_USER" "$POSTGRES_DB"
     createdb --username="$POSTGRES_USER" --owner="$POSTGRES_USER" "$POSTGRES_DB"
   '
-  docker compose --env-file .env exec -T postgres sh -ceu '
+  python3 scripts/compose.py -- exec -T postgres sh -ceu '
     pg_restore --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" \
       --no-owner --single-transaction --exit-on-error
   ' < "$PJM_RESTORE_DIR/database.dump"
@@ -110,7 +110,7 @@ docker compose --env-file .env exec -T postgres sh -ceu '
 
 ### 恢复后验证
 
-恢复对应 blob/workspace、兼容镜像/配置及旧 KEK。核对 revision 后按[迁移审查](deployment.md#迁移与回退审查)决定是否 forward migration，Worker 继续隔离，不运行自动整体重启的 make deploy。
+恢复对应 blob/workspace、兼容镜像/配置及旧 KEK。核对 revision 后按[迁移审查](deployment.md#迁移与回退审查)决定是否 forward migration，Worker 继续隔离，不用普通 Compose up 绕过分阶段检查。
 
 放行前分别确认：用户/成员/Session 没有重新开放旧权限；Skill/文档/Artifact 字节与 Run/Result/Evidence 引用一致；终态可读与非终态续行分别成立；缺回执/输入/transcript 时拒绝而非补签；旧队列、lease、Schedule 与远端 Effect 已对账。记录实际耗时、数据损失、验收范围、残余问题和放行人。
 
@@ -120,4 +120,4 @@ docker compose --env-file .env exec -T postgres sh -ceu '
 
 旧 API/Web/Worker 能理解当前 schema、数据、队列和非终态快照时，才可保持数据切换兼容旧镜像。兼容不明时不启动旧 Worker，评估完整恢复点和外部对账；无可信恢复点则保全现场、选 forward fix，不试跑破坏性 downgrade。
 
-仅当已允许整体重启且旧队列/在途工作全部核清时，才使用 `make deploy IMAGE_ARCHIVE=images/projectmind-previous.tar`（文件为需预先准备的示例）。该命令先删容器/旧 app image，再 load 并立即启动 Worker；archive 缺镜像时不会自动退回。事先保管前后两代可用 archive 与实际 image ID，同名 tag 不算回退方案。重启后执行发布手册的 preflight 与获准 smoke；需分段门禁时不使用该命令。
+回退仍按[发布阶段](deployment.md#迁移前置与执行)重新核对清单：旧 archive/checksum 与旧 Backend/Web image ID、当前 schema、配置和 daemon/project 都须明确。deploy-load 保留本地旧镜像，但这不保证完整旧 archive、第三方镜像或数据恢复点可用；同名 tag 不算回退方案。旧镜像的 migration-plan/head 检查不能理解当前 DB 时保持隔离，选择已评审的 forward fix 或完整恢复，不跳过门禁、stamp 或试删审计。API/Web、后台和普通业务分别放行，命令不会自动回滚。

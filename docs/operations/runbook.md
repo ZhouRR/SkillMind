@@ -18,7 +18,7 @@
 
 ## 运用原则
 
-先使用已有响应、脱敏日志及获准的只读查询。PostgreSQL 是业务/审计正本；不改 Run 状态、stamp migration、删审计或换幂等键消除错误。启动、停机、模型、外部写入与恢复须重新确认目标、副作用和授权。命令在目标环境的 `PJM/` 执行，使用已确认的 `.env`；[ENV_FILE 不会切换全部配置](deployment.md#环境文件与配置边界)。
+先使用已有响应、脱敏日志及获准的只读查询。PostgreSQL 是业务/审计正本；不改 Run 状态、stamp migration、删审计或换幂等键消除错误。启动、停机、模型、外部写入与恢复须重新确认目标、副作用和授权。命令在目标环境的 `PJM/` 执行，通过[统一配置入口](deployment.md#环境文件与配置边界)使用已确认的 ENV_FILE 和 COMPOSE_PROJECT_NAME；不要直接切默认 Docker context 操作另一目标。
 
 对外交接只保留 UTC 时点、image/revision、必要对象 ID、公开错误码和检查范围，不附 `.env`、Cookie/CSRF、密码、KEK、内部地址、业务正文或完整 workspace。结果未知先保全原请求身份，不自动重放。
 
@@ -51,13 +51,13 @@ v2 同 session 的 GET 不轮换 CSRF，但可能更新 idle；login-context 占
 
 ## 项目与归档的只读分诊
 
-先核对原 project_id、调用者和服务端状态；失效深链接可能回退到另一项目，导航选中项不能证明原项目仍可访问。
+先核对原 project_id、调用者和服务端状态；失效深链接保持原目标，页面须经精确详情授权，导航选中项不能代替该检查。
 
 | 症状 | 核对与停止条件 |
 | --- | --- |
 | 移出成员后仍可访问 | 系统 ADMIN 不依赖 membership，成员移除不是账户降权 |
 | 归档后仍有 Run/Effect | 归档不是取消或全局停写，按原对象停止协议处理 |
-| 无 Run 但 DELETE 失败 | 当前删除清单遗漏 TaskSchedule 的 RESTRICT 引用；不拆外键、删历史或循环 DELETE |
+| 无 Run 但 DELETE 失败 | TaskSchedule 或成员审计仍会阻止删除；原版本冲突须核对，不拆外键、删历史或循环 DELETE |
 | 204 后仍有附件/备份 | 只证明所列元数据删除，不证明字节清理；不递归删目录 |
 
 写入修复先确认权限、目标和可恢复性；正本见[项目生命周期](../design/project-lifecycle.md)。
@@ -170,7 +170,7 @@ smoke 会调用模型、创建 Run/Evaluation 并测试取消，有费用和持�
 明确设置测试 UUID 为 SMOKE_PROJECT_ID 后执行，未指定会拒绝：
 
 ```bash
-docker compose --env-file .env exec \
+python3 scripts/compose.py -- exec \
   -e PROJECTMIND_SMOKE_PROJECT_ID="$SMOKE_PROJECT_ID" \
   api python -m projectmind.ops.smoke
 ```
@@ -182,17 +182,17 @@ docker compose --env-file .env exec \
 仅在可停机专用环境注入。分别选择准备中、模型执行中的测试 Run，保留 Run/Segment/Attempt、快照和 lease；RUNNING 不证明模型已启动。
 
 ```bash
-LEASE_SECONDS="$(docker compose --env-file .env exec -T api python -c \
+LEASE_SECONDS="$(python3 scripts/compose.py -- exec -T api python -c \
   'from projectmind.core.settings import get_settings; print(get_settings().run_lease_seconds)')"
-docker compose --env-file .env stop worker
+python3 scripts/compose.py -- stop worker
 ```
 
 确认 LEASE_SECONDS 是有效秒数，等待该时长加 recovery cron 观察窗口后才启动 Worker。20 秒只是余量，不保证完成恢复：
 
 ```bash
 sleep "$((LEASE_SECONDS + 20))"
-docker compose --env-file .env start worker
-docker compose --env-file .env logs --no-log-prefix --tail=200 worker
+python3 scripts/compose.py -- start worker
+python3 scripts/compose.py -- logs --no-log-prefix --tail=200 worker
 ```
 
 观察实际 recovery tick：旧 Attempt 为 LEASE_EXPIRED，Run 经 RETRY_PENDING 在原 Segment 追加 Attempt，快照不变；超限以 retry_exhausted 失败。准备中断不允许新 Attempt 补签旧 PREPARING 为 READY。部署版本和真实持久恢复分别验，不用 mock test 或仅模型阶段成功代替。
@@ -202,7 +202,7 @@ docker compose --env-file .env logs --no-log-prefix --tail=200 worker
 在受控终端按服务器响应的 request/trace ID 或 Run/Attempt ID 缩小 JSON 日志，再关联 Session/Effect；客户端自带 X-Request-ID 不是当前服务器审计值，request ID 也不是重放键。
 
 ```bash
-docker compose --env-file .env logs --no-log-prefix api worker \
+python3 scripts/compose.py -- logs --no-log-prefix api worker \
   | jq -c 'select(.run_id == "<RUN_ID>" or .trace_id == "<TRACE_ID>")'
 ```
 

@@ -141,7 +141,7 @@ describe('projectDeleteErrorMessage', () => {
     expect(message).not.toContain('private audit detail')
   })
 
-  it('keeps unexpected failures visible instead of masking them', () => {
-    expect(projectDeleteErrorMessage(new Error('network down'), messages)).toBe('network down')
+  it('classifies unexpected writes as unknown without exposing server text', () => {
+    expect(projectDeleteErrorMessage(new Error('private network detail'), messages)).toBe(messages.projectManagement.failures.unknown)
   })
 })

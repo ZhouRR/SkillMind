@@ -58,6 +58,9 @@ EXAMPLE_CONTRACTS = {
     "examples/interaction-response.v1.json": (
         "runs/interaction-response/v1/response.schema.json"
     ),
+    "examples/interaction-response-replay.v1.json": (
+        "runs/interaction-response/v1/response.schema.json"
+    ),
     "examples/subagent-dispatch-request.v1.json": (
         "tools/subagent.dispatch/v1/request.schema.json"
     ),
@@ -69,6 +72,8 @@ EXAMPLE_CONTRACTS = {
     "examples/project-list.v1.json": "projects/v1/list.schema.json",
     "examples/project-member.v1.json": "projects/v1/member.schema.json",
     "examples/project-member-list.v1.json": "projects/v1/member-list.schema.json",
+    "examples/project-version-request.v1.json": "projects/v1/version-request.schema.json",
+    "examples/update-project-request.v1.json": "projects/v1/update-request.schema.json",
     "examples/redmine-effect-discovery.v1.json": (
         "providers/redmine-effect/v1/discovery.schema.json"
     ),
@@ -109,8 +114,12 @@ EXAMPLE_CONTRACTS = {
     ),
     "examples/skill-interpreter-diagnostic.v1.json": "skills/interpreter/v1/diagnostic.schema.json",
     "examples/skill-static-analysis.v1.json": "skills/interpreter/v1/static-analysis.schema.json",
-    "examples/skill-capability-catalog.v1.json": "skills/interpreter/v1/capability-catalog.schema.json",
-    "examples/skill-interpretation-report.v1.json": "skills/interpreter/v1/interpretation-report.schema.json",
+    "examples/skill-capability-catalog.v1.json": (
+        "skills/interpreter/v1/capability-catalog.schema.json"
+    ),
+    "examples/skill-interpretation-report.v1.json": (
+        "skills/interpreter/v1/interpretation-report.schema.json"
+    ),
     "examples/skill-interpreter-request.v1.json": "skills/interpreter/v1/request.schema.json",
     "examples/skill-interpreter-response.v1.json": "skills/interpreter/v1/response.schema.json",
     "examples/task-contract-draft.v1.json": "task-contract-draft/v1.schema.json",

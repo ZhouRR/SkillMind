@@ -129,6 +129,9 @@ class Project(IdentityMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("organization_id", "key", name="uq_projects_organization_key"),
         CheckConstraint("status IN ('ACTIVE', 'ARCHIVED')", name="projects_status"),
+        CheckConstraint(
+            "row_version >= 1 AND row_version <= 2147483647", name="projects_row_version_range",
+        ),
     )
 
     organization_id: Mapped[UUID] = mapped_column(
@@ -140,6 +143,7 @@ class Project(IdentityMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     settings_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     retention_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
 
 
 class ProjectMember(IdentityMixin, TimestampMixin, Base):

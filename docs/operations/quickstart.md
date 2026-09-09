@@ -4,7 +4,7 @@
 
 ## Compose の前提
 
-Linux、Docker Engine / Compose v2、共有 Traefik と external edge network が必要。ProjectMind は Traefik を配備せず、host port を公開しない。
+Linux、Python 3.12（標準 library のみ）、Docker Engine / Compose v2、共有 Traefik と external edge network が必要。Compose は config JSON / up --wait を備えた版を対象環境で検証する。ProjectMind は Traefik を配備せず、host port を公開しない。
 
 `.env` が無い初回だけ実行し、既存設定を上書きしない。
 
@@ -13,17 +13,23 @@ umask 077
 cp .env.example .env
 ```
 
-host/context path、Traefik network/entryPoint、DB/storage password、model 設定を対象環境に合わせる。production は HTTPS を使う。`ENV_FILE` は Backend の固定 `.env` を切り替えないため、[設定境界](deployment.md#环境文件与配置边界)を確認する。
+host/context path、Traefik network/entryPoint、DB/storage password、model 設定を対象環境に合わせる。production は HTTPS を使う。[共通設定入口](deployment.md#环境文件与配置边界)が ENV_FILE を補間と Backend の同一 source に固定する。既定以外の project は shell の COMPOSE_PROJECT_NAME または明示 option で選び、ファイル内の同名値に依存しない。
 
 ```bash
-docker compose --env-file .env config --quiet
-docker compose --env-file .env build
-make run
-make
-docker compose --env-file .env exec -T api python -m projectmind.ops.preflight
+make config
+make build
 ```
 
-各段階の失敗時は停止する。`--quiet` は展開した Secret を表示しない。`make run` は build しないため、移送済みの検証済み image を使う場合だけ build 行を省く。migration、bucket 初期化と各 service の状態を確認する。preflight は DB migration/Redis の基線で、業務実行の保証ではない。
+各段階の失敗時は停止する。config は展開した Secret を表示しない。移送済みの検証済み image を使う場合だけ build を省き、[配備清単](deployment.md#迁移前置与执行)の daemon/project/image ID・archive と確認変数を設定して deploy-load を行う。新規環境も既存の同名 project がないこと、入口閉鎖と必要な復元手段を確認する。
+
+以下は対象の基盤 service と bucket を作成する操作。承認済み環境で一つずつ実行し、失敗時は進まない：
+
+```bash
+python3 scripts/compose.py -- up -d --no-build --no-deps --pull never --wait postgres redis object-storage
+python3 scripts/compose.py -- up --no-build --no-deps --pull never --exit-code-from object-storage-init object-storage-init
+```
+
+同じ配備清単と確認変数で `make deploy-migrate` → `make deploy-api` を個別実行する。make run も API/Web の検査付き起動で、Worker は起動しない。初期 ADMIN と権限を確認した後に[背景放行](deployment.md#启动与放行)を別途承認する。preflight は DB migration/Redis の基線で、業務実行の保証ではない。
 
 新 Run/Effect の配送は既定で無効。業務実行には `PROJECTMIND_WORKER_DISPATCH_ENABLED=true` が必要だが、false は既存 job・Schedule・recovery を止める[保守 mode ではない](deployment.md#一个例子关闭-dispatch-后仍有工作)。
 
@@ -32,7 +38,7 @@ docker compose --env-file .env exec -T api python -m projectmind.ops.preflight
 migration 成功後、既存データを消さない CLI を一度実行する。
 
 ```bash
-docker compose --env-file .env exec api python -m projectmind.ops.bootstrap_admin
+python3 scripts/compose.py -- exec api python -m projectmind.ops.bootstrap_admin
 ```
 
 email、display name、password を対話入力する。migration が作成した Organization を使い、最初の ADMIN と CREATED 安全イベントを追加する。DISABLED を含め ADMIN が既にいれば拒否する。匿名 bootstrap API、既存管理者の password 再設定・復元機能ではない。
@@ -49,9 +55,9 @@ email、display name、password を対話入力する。migration が作成し�
 
 ## Image 移送と更新
 
-Windows PowerShell の `PJM/` で `./scripts/export-images.ps1` を実行する。既定出力は `images/projectmind-images.tar`。script は本地の既存 image を保存するだけで build/pull せず、存在しない第三者 image を除外することがある。archive を上書きせず、実 image ID と必要 image を確認する。context path を変える場合は Web も再 build する。
+Windows PowerShell の `PJM/` で `./scripts/export-images.ps1` を実行する。Python 3.12 が必要で、必要なら -PythonCommand に executable を指定する。既定出力は `images/projectmind-images.tar`。script は既存 image を保存するだけで build/pull せず、存在しない第三者 image を除外することがある。archive と実 image ID/checksum を受控清単に記録する。context path を変える場合は Web も再 build する。
 
-転送後は[公開・移行](deployment.md#迁移前置与执行)へ進む。`make deploy` は旧 app image を削除し、archive を load して Worker を含む全 service を再起動するため、分段放行が必要な現場では直接使わない。
+転送後は[公開・移行](deployment.md#迁移前置与执行)へ進む。make deploy は help のみで、load/migrate/api/worker を個別に進める。旧 image は削除せず、各段階の失敗時に自動復旧・後続起動をしない。
 
 ## 操作の区別
 

@@ -343,6 +343,40 @@ export interface UiMessages {
       configHint: string
     }
   }
+  /** Project CRUD の原版・草稿・現在値と、未知結果の明示的照合。 */
+  projectManagement: {
+    version: string
+    status: string
+    action: string
+    actions: Record<'create' | 'edit' | 'archive' | 'restore' | 'delete', string>
+    states: Record<'ACTIVE' | 'ARCHIVED', string>
+    original: string
+    draft: string
+    current: string
+    newIdentity: string
+    notAccessibleFact: string
+    noKeyMatch: string
+    settingsPreserved: string
+    confirmTitle: string
+    confirm: string
+    archiveHint: string
+    restoreHint: string
+    deleteHint: string
+    saved: string
+    conflictTitle: string
+    conflictHint: string
+    readOriginal: string
+    adopt: string
+    unknownTitle: string
+    unknownHint: string
+    factLimit: string
+    acknowledgeCheck: string
+    acknowledge: string
+    acknowledgedHint: string
+    failures: Record<'sessionExpired' | 'csrfRejected' | 'adminRequired' | 'notFound' | 'invalidRequest'
+      | 'keyConflict' | 'versionConflict' | 'versionExhausted' | 'needsArchive' | 'blockedByRuns'
+      | 'blockedBySchedules' | 'blockedByMemberAudit' | 'unknown' | 'loadFailed', string>
+  }
   /** Project membership と Organization account の状態を混同しない管理区画。 */
   projectMembers: {
     tab: string
@@ -525,6 +559,34 @@ export interface UiMessages {
     panelAria: string
   }
   /** Run 結果・監査 panel(RunResultPanel)。 */
+  /** 普通答復の原要求と読取事実を混同しないための表示。 */
+  interactionResponse: {
+    recordsTitle: string
+    showRecord: string
+    hideRecord: string
+    effectReadOnly: string
+    draftSeparate: string
+    answerTooLong: string
+    duplicateOptions: string
+    staleDetail: string
+    originalVersion: (version: number) => string
+    originalActor: string
+    originalTarget: string
+    unknownHint: string
+    confirmHint: string
+    confirmOriginal: string
+    editAnswer: string
+    responseId: string
+    continuationId: string
+    readOriginal: string
+    reading: string
+    factsOnly: string
+    currentState: string
+    notInDetail: string
+    notConfirmation: string
+    phase: Record<'sending' | 'unknown' | 'rejected' | 'conflict' | 'expired' | 'confirmed', string>
+    failures: Record<'sessionExpired' | 'csrfRejected' | 'projectArchived' | 'forbidden' | 'notFound' | 'invalidAnswer' | 'conflict' | 'expired' | 'unknown' | 'loadFailed', string>
+  }
   runResult: {
     /** 凍結文書の検証状態。実行成功や現在の blob 可達性と混同しない。 */
     documents: {

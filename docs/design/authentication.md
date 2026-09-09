@@ -103,7 +103,9 @@ Run 创建冻结 actor、成员资格及 Skill/Tool 权限上限，不随后来�
 
 [AuthService](../../PJM/backend/src/projectmind/auth/service.py)返回 actor 前结束认证事务。锁后认证只保护当次判断，不证明所有业务提交都重新检查撤权。
 
-[用户管理事务](user-lifecycle.md#事务与并发)另重验原会话，将账户变更、撤销和审计一起提交；[项目成员管理](project-lifecycle.md#成员管理的现状与目标)复用同一凭据校验并保持目标账户锁。其他业务仍须按各自设计闭合授权竞争，不能从这两条链路推导全系统立即停权。
+[用户管理事务](user-lifecycle.md#事务与并发)另重验原会话，将账户变更、撤销和审计一起提交；[项目成员管理](project-lifecycle.md#成员管理的现状与目标)复用同一凭据校验并保持目标账户锁，[项目 CRUD](project-lifecycle.md#并发修改不能只看有无行锁)也在业务锁后及 flush 后复核原 ADMIN 会话。
+
+[普通答复](user-interactions.md#首次答复与原答复重放)复用该凭据验证，固定当前 Project/成员资格，再锁 Run/Segment/Interaction；首次、重放及过期续行都经过最终门禁。其他业务仍须按各自设计闭合授权竞争，不能由这些链路推导全系统立即停权或已有 Run 停止。
 
 ## 开发接续与验收
 

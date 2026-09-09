@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 
 import {
   cancelRun,
@@ -11,6 +11,7 @@ import {
   type PublishedTaskRecord,
   type RunEventRecord,
   type RunRecord,
+  type RunDetailRecord,
   type RespondedInteractionRecord,
   type RunStatus,
 } from '../api'
@@ -20,11 +21,13 @@ import { RunResultPanel, type RunDetailState } from '../components/RunResultPane
 import { RunSubmissionPanel } from '../components/RunSubmissionPanel'
 import { TaskLaunchFields } from '../components/TaskLaunchFields'
 import { useRunSubmission } from '../hooks/useRunSubmission'
+import type { SessionEnded } from '../hooks/useResourceRequest'
 import { useMessages } from '../i18n'
 import type { UiMessages } from '../lib/i18n/messages'
 import { type AgentPromptSummary } from '../lib/agentStream'
 import { routeHref } from '../lib/routing'
 import { applicableRunSnapshot } from '../lib/runReplay'
+import { applyInteractionSnapshot, interactionAccessFailure, interactionFailure, sameInteractionIdentity } from '../lib/interactionResponse'
 import { submissionPayload, type FrozenRunSubmission } from '../lib/runSubmission'
 import {
   buildTaskDraft,
@@ -45,7 +48,12 @@ type ObservationTab = 'conversation' | 'result' | 'events'
  *
  * Project 切替と業務模块の選択はどちらも sidebar が持つ(moduleId 空は模块を持たない Project)。
  */
-export function WorkspacePage({ actorId, projectId, moduleId, csrfToken, initialRunId = null, initialTaskId = null }: {
+export function WorkspacePage(props: WorkspacePageProps) {
+  return <WorkspaceContent key={JSON.stringify([props.actorId, props.projectId.toLowerCase()])} {...props} />
+}
+
+/** 作成は actor/Project、普通答復と読取は Session 世代も含めて所有権を分ける。 */
+interface WorkspacePageProps {
   actorId: string
   projectId: string
   moduleId: string
@@ -53,7 +61,15 @@ export function WorkspacePage({ actorId, projectId, moduleId, csrfToken, initial
   /** Home/Task/History から渡された deep-link context。 */
   initialRunId?: string | null
   initialTaskId?: string | null
-}) {
+  onSessionExpired?: SessionEnded
+}
+
+/** 実 App の guard を持たない単独 harness/読み取り利用向けの無作用 callback。 */
+const ignoreSessionExpired: SessionEnded = () => {}
+
+/** 作成草稿を保持しつつ、現在 Run の観測と普通答復を Session ごとに再検証する。 */
+function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunId = null, initialTaskId = null,
+  onSessionExpired = ignoreSessionExpired }: WorkspacePageProps) {
   const messages = useMessages()
   const [tasks, setTasks] = useState<PublishedTaskRecord[]>([])
   const [modules, setModules] = useState<ProjectModuleRecord[]>([])
@@ -62,11 +78,19 @@ export function WorkspacePage({ actorId, projectId, moduleId, csrfToken, initial
   const [inputText, setInputText] = useState<string>('{}')
   const [sourceProviders, setSourceProviders] = useState<Record<string, string>>({})
   const [run, setRun] = useState<RunRecord | null>(null)
+  const runRef = useRef(run)
+  runRef.current = run
   const [events, setEvents] = useState<RunEventRecord[]>([])
   const [uiState, setUiState] = useState<RunUiState>('idle')
   const [error, setError] = useState<string | null>(null)
   const [promptSummary, setPromptSummary] = useState<AgentPromptSummary | null>(null)
   const [detailState, setDetailState] = useState<RunDetailState>({ status: 'idle' })
+  const detailRef = useRef(detailState)
+  detailRef.current = detailState
+  const sessionIdentity = useMemo(() => ({}), [csrfToken])
+  const currentSessionIdentity = useRef(sessionIdentity)
+  currentSessionIdentity.current = sessionIdentity
+  const detailSessionIdentity = useRef(sessionIdentity)
   const [observationTab, setObservationTab] = useState<ObservationTab>('conversation')
   const [selectionRevision, setSelectionRevision] = useState(0)
   const [runDialogOpen, setRunDialogOpen] = useState(false)
@@ -81,6 +105,16 @@ export function WorkspacePage({ actorId, projectId, moduleId, csrfToken, initial
   const appliedInitialRunId = useRef<string | null>(null)
   const appliedInitialTaskId = useRef<string | null>(null)
   const initializedSourceTask = useRef<string | null>(null)
+  const selectingInitialRun = initialRunId !== null && appliedInitialRunId.current !== initialRunId
+  const runIdentity = useMemo(() => ({}), [run?.run_id, initialRunId, sessionIdentity])
+  const currentRunIdentity = useRef(runIdentity)
+  currentRunIdentity.current = runIdentity
+  const mounted = useRef(false)
+
+  /** token が A→B→A と戻っても、以前の Session closure を現在として扱わない。 */
+  function ownsSession(): boolean {
+    return mounted.current && currentSessionIdentity.current === sessionIdentity
+  }
   const auditEvents = useMemo(
     () => events.filter((event) => event.event_type !== 'TEXT_DELTA'),
     [events],
@@ -98,14 +132,25 @@ export function WorkspacePage({ actorId, projectId, moduleId, csrfToken, initial
 
   useEffect(() => setAcknowledgePrevious(false), [submission.pending?.request.idempotencyKey, submission.pending?.phase])
 
-  useEffect(() => () => {
-    tasksController.current?.abort()
-    modulesController.current?.abort()
-    refreshController.current?.abort()
-    cancelController.current?.abort()
-    detailController.current?.abort()
-    initialRunController.current?.abort()
-  }, [])
+  useLayoutEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      tasksController.current?.abort()
+      modulesController.current?.abort()
+      refreshController.current?.abort()
+      cancelController.current?.abort()
+      detailController.current?.abort()
+      initialRunController.current?.abort()
+    }
+  }, [sessionIdentity])
+
+  // 普通答復の資格は新 Session で読み直す。作成弹窗/草稿/原作成 key は独立して保持する。
+  useLayoutEffect(() => {
+    if (detailSessionIdentity.current === sessionIdentity) return
+    setEvents([])
+    setDetailState({ status: run ? 'loading' : 'idle' })
+  }, [sessionIdentity])
 
   // Project ごとに published task catalog を取得し、任意 task を通用 form で実行できるようにする。
   // projectId は sidebar/项目管理の検証済み選択に限られるため、未選択（空）だけを弾けばよい。
@@ -120,15 +165,15 @@ export function WorkspacePage({ actorId, projectId, moduleId, csrfToken, initial
     tasksController.current = controller
     setTasksError(null)
     void loadProjectTasks(projectId, controller.signal)
-      .then((catalog) => { if (!controller.signal.aborted) setTasks(catalog.tasks) })
+      .then((catalog) => { if (!controller.signal.aborted && ownsSession()) setTasks(catalog.tasks) })
       .catch((caught: unknown) => {
-        if (!controller.signal.aborted) {
+        if (!controller.signal.aborted && ownsSession()) {
           setTasks([])
           setTasksError(caught instanceof Error ? caught.message : 'Unknown task catalog API error')
         }
       })
     return () => controller.abort()
-  }, [projectId])
+  }, [projectId, sessionIdentity])
 
   // Project の module 構成を取得し、任務を業務単位で見せる。失敗は task 実行を妨げない。
   useEffect(() => {
@@ -140,12 +185,12 @@ export function WorkspacePage({ actorId, projectId, moduleId, csrfToken, initial
     const controller = new AbortController()
     modulesController.current = controller
     void loadProjectModules(projectId, controller.signal)
-      .then((loaded) => { if (!controller.signal.aborted) setModules(loaded) })
+      .then((loaded) => { if (!controller.signal.aborted && ownsSession()) setModules(loaded) })
       .catch(() => {
-        if (!controller.signal.aborted) setModules([])
+        if (!controller.signal.aborted && ownsSession()) setModules([])
       })
     return () => controller.abort()
-  }, [projectId])
+  }, [projectId, sessionIdentity])
 
   // 選択 task は常に表示中一覧の中へ丸める。模块切替・catalog 再読込の直後も実行可能な既定を保ち、
   // 選択が実際に変わった時だけ入力を初期化する(手動選択の onChange と同じ規約)。
@@ -188,10 +233,12 @@ export function WorkspacePage({ actorId, projectId, moduleId, csrfToken, initial
     setUiState('streaming')
     const after = auditEvents.at(-1)?.sequence ?? 0
     let subscription: ReturnType<typeof subscribeRunEvents> | null = null
+    let active = true
     subscription = subscribeRunEvents(
       run.run_id,
       after,
       (incoming) => {
+        if (!mounted.current || !active || currentRunIdentity.current !== runIdentity) return
         setEvents((current) => appendEvent(current, incoming))
         setUiState('streaming')
         const snapshot = applicableRunSnapshot(incoming, run.row_version)
@@ -205,11 +252,11 @@ export function WorkspacePage({ actorId, projectId, moduleId, csrfToken, initial
           }
         }
       },
-      () => setUiState('reconnecting'),
+      () => { if (mounted.current && active && currentRunIdentity.current === runIdentity) setUiState('reconnecting') },
     )
-    return () => subscription?.close()
+    return () => { active = false; subscription?.close() }
     // Subscription の再作成は Run identity と終態化だけに限定し、event 追加による再接続を防ぐ。
-  }, [run?.run_id, run?.status, selectionRevision])
+  }, [run?.run_id, run?.status, selectionRevision, runIdentity])
 
   // Home/履歴画面から渡された run ID は直接正本 snapshot へ解決する。
   // Workspace に一覧用の history API を重ねないことで、実行観測と履歴探索の責務を分ける。
@@ -220,7 +267,9 @@ export function WorkspacePage({ actorId, projectId, moduleId, csrfToken, initial
     initialRunController.current = controller
     void loadRun(initialRunId, controller.signal)
       .then((loaded) => {
-        if (controller.signal.aborted) return
+        if (controller.signal.aborted || !ownsSession() || currentRunIdentity.current !== runIdentity) return
+        if (!sameInteractionIdentity(loaded.project_id, projectId)
+          || !sameInteractionIdentity(loaded.run_id, initialRunId)) throw new Error('Run scope mismatch')
         appliedInitialRunId.current = initialRunId
         setEvents([])
         setDetailState({ status: 'idle' })
@@ -235,29 +284,47 @@ export function WorkspacePage({ actorId, projectId, moduleId, csrfToken, initial
         setUiState(TERMINAL_STATUSES.has(loaded.status) ? 'idle' : 'streaming')
       })
       .catch((caught: unknown) => {
-        if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : messages.home.loadRunsFailed)
+        if (!controller.signal.aborted && ownsSession() && currentRunIdentity.current === runIdentity) {
+          if (interactionFailure(caught, false).key === 'sessionExpired') onSessionExpired()
+          setError(messages.home.loadRunsFailed)
+        }
       })
     return () => controller.abort()
-  }, [initialRunId, messages.elements.runFallbackTitle, messages.home.loadRunsFailed, projectId])
+  }, [initialRunId, messages.elements.runFallbackTitle, messages.home.loadRunsFailed, projectId, sessionIdentity])
 
   useEffect(() => {
     if (!run) return
     detailController.current?.abort()
     const controller = new AbortController()
     detailController.current = controller
-    setDetailState({ status: 'loading' })
+    const sameSession = detailSessionIdentity.current === sessionIdentity
+    setDetailState((previous) => ({ status: 'loading', detail: sameSession ? retainedRunDetail(previous, run) : undefined }))
     void loadRunDetail(run.project_id, run.run_id, controller.signal)
-      .then((detail) => { if (!controller.signal.aborted) setDetailState({ status: 'ready', detail }) })
+      .then((detail) => {
+        if (controller.signal.aborted || !ownsSession() || currentRunIdentity.current !== runIdentity) return
+        const latestDetail = retainedRunDetail(detailRef.current, run)
+        detailSessionIdentity.current = sessionIdentity
+        if (detail.row_version < Math.max(runRef.current?.row_version ?? 0, latestDetail?.row_version ?? 0)) {
+          setDetailState((previous) => ({ status: 'error', detail: retainedRunDetail(previous, run), message: messages.interactionResponse.failures.loadFailed }))
+          return
+        }
+        setDetailState({ status: 'ready', detail })
+      })
       .catch((caught: unknown) => {
-        if (!controller.signal.aborted) {
-          setDetailState({
+        if (!controller.signal.aborted && ownsSession() && currentRunIdentity.current === runIdentity) {
+          const failure = interactionFailure(caught, false)
+          if (failure.key === 'sessionExpired') onSessionExpired()
+          detailSessionIdentity.current = sessionIdentity
+          setDetailState((previous) => ({
             status: 'error',
-            message: caught instanceof Error ? caught.message : 'Unknown Result API error',
-          })
+            detail: sameSession ? retainedRunDetail(previous, run) : undefined,
+            message: messages.interactionResponse.failures[failure.key],
+            accessFailure: interactionAccessFailure(failure) ?? undefined,
+          }))
         }
       })
     return () => controller.abort()
-  }, [run?.project_id, run?.run_id, run?.row_version, selectionRevision])
+  }, [run?.project_id, run?.run_id, run?.row_version, selectionRevision, sessionIdentity])
 
   // 終態または user interaction 待機では詳細へ寄せ、実行中は会話タブの streaming を維持する。
   useEffect(() => {
@@ -321,16 +388,18 @@ export function WorkspacePage({ actorId, projectId, moduleId, csrfToken, initial
 
   /** SSE とは別に PostgreSQL 正本の現在 Run 状態を再取得する。 */
   async function handleRefresh(): Promise<void> {
-    if (!run) return
+    if (!run || !ownsSession()) return
     refreshController.current?.abort()
     const controller = new AbortController()
     refreshController.current = controller
     try {
       const refreshed = await loadRun(run.run_id, controller.signal)
-      if (controller.signal.aborted) return
-      setRun(refreshed)
+      if (controller.signal.aborted || !ownsSession() || currentRunIdentity.current !== runIdentity) return
+      setRun((current) => current && sameInteractionIdentity(current.run_id, refreshed.run_id)
+        && sameInteractionIdentity(current.project_id, refreshed.project_id)
+        && refreshed.row_version >= current.row_version ? refreshed : current)
     } catch (caught: unknown) {
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted && ownsSession() && currentRunIdentity.current === runIdentity) {
         setError(caught instanceof Error ? caught.message : 'Unknown API error')
         setUiState('error')
       }
@@ -339,7 +408,7 @@ export function WorkspacePage({ actorId, projectId, moduleId, csrfToken, initial
 
   /** 現在の Run に取消 intent を送り、即時終態なら snapshot も反映する。 */
   async function handleCancel(): Promise<void> {
-    if (!run || TERMINAL_STATUSES.has(run.status)) return
+    if (!run || !ownsSession() || TERMINAL_STATUSES.has(run.status)) return
     cancelController.current?.abort()
     const controller = new AbortController()
     cancelController.current = controller
@@ -347,13 +416,13 @@ export function WorkspacePage({ actorId, projectId, moduleId, csrfToken, initial
     setError(null)
     try {
       const cancelled = await cancelRun(run.run_id, csrfToken, controller.signal)
-      if (controller.signal.aborted) return
+      if (controller.signal.aborted || !ownsSession() || currentRunIdentity.current !== runIdentity) return
       setRun((current) => current && current.run_id === cancelled.run_id
         ? { ...current, status: cancelled.status, row_version: cancelled.row_version }
         : current)
       setUiState(cancelled.status === 'CANCELLED' ? 'idle' : 'streaming')
     } catch (caught: unknown) {
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted && ownsSession() && currentRunIdentity.current === runIdentity) {
         setError(caught instanceof Error ? caught.message : 'Unknown cancel API error')
         setUiState('error')
       }
@@ -362,13 +431,23 @@ export function WorkspacePage({ actorId, projectId, moduleId, csrfToken, initial
 
   /** Interaction response で返った正本 snapshot を反映し、次 Segment の SSE と detail を再接続する。 */
   function handleInteractionResponded(response: RespondedInteractionRecord): void {
-    setRun((current) => current && current.run_id === response.run_id
-      ? { ...current, status: response.status, row_version: response.row_version }
-      : current)
+    setRun((current) => current ? applyInteractionSnapshot(current, response) : current)
     setSelectionRevision((current) => current + 1)
-    setObservationTab('conversation')
-    setUiState('streaming')
+    // 原回执が古くても正常な重放。可視の確認区画を残して現在 detail だけを再取得する。
   }
+
+  /** 原 GET の事実を現在 Run へ投影するが、答復の受理とは扱わず旧 snapshot も戻さない。 */
+  const handleInteractionFacts = useCallback((detail: RunDetailRecord): void => {
+    const current = runRef.current
+    if (!ownsSession() || !current || !sameInteractionIdentity(current.run_id, detail.run_id)
+      || !sameInteractionIdentity(current.project_id, detail.project_id)
+      || detail.row_version < Math.max(current.row_version, retainedRunDetail(detailRef.current, current)?.row_version ?? 0)) return
+    detailSessionIdentity.current = sessionIdentity
+    setDetailState((previous) => previous.status === 'ready' && previous.detail === detail
+      ? previous : { status: 'ready', detail })
+    setRun((previous) => previous && detail.row_version > previous.row_version
+      ? { ...previous, status: detail.status, row_version: detail.row_version } : previous)
+  }, [sessionIdentity])
 
   /** Proposal decision 後に PostgreSQL snapshot と SSE/detail 購読を再同期する。 */
   function handleProposalDecided(): void {
@@ -463,14 +542,19 @@ export function WorkspacePage({ actorId, projectId, moduleId, csrfToken, initial
             <div className="tabPanel" role="tabpanel">
               {observationTab === 'conversation'
                 && <AgentConversation prompt={promptSummary} events={events} runStatus={run?.status ?? null} />}
-              {observationTab === 'result' && (
+              <div className="workspaceResultMount" hidden={observationTab !== 'result'}>
                 <RunResultPanel
+                  actorId={actorId}
                   csrfToken={csrfToken}
+                  projectId={projectId}
+                  runId={selectingInitialRun ? '' : run?.run_id ?? ''}
+                  onSessionExpired={onSessionExpired}
                   onInteractionResponded={handleInteractionResponded}
+                  onInteractionFacts={handleInteractionFacts}
                   onProposalDecided={handleProposalDecided}
-                  state={detailState}
+                  state={selectingInitialRun || detailSessionIdentity.current !== sessionIdentity ? { status: 'loading' } : detailState}
                 />
-              )}
+              </div>
               {observationTab === 'events' && (
                 auditEvents.length === 0
                   ? <EmptyState text={messages.workspace.sseEmpty} />
@@ -524,6 +608,13 @@ export function WorkspacePage({ actorId, projectId, moduleId, csrfToken, initial
       </ModalDialog>
     </>
   )
+}
+
+/** 再取得中の過去表示は同じ Run のものに限定し、現在の書込可否には使わない。 */
+function retainedRunDetail(state: RunDetailState, run: RunRecord): RunDetailRecord | undefined {
+  const detail = 'detail' in state ? state.detail : undefined
+  return detail && sameInteractionIdentity(detail.project_id, run.project_id)
+    && sameInteractionIdentity(detail.run_id, run.run_id) ? detail : undefined
 }
 
 /** 単一の観測タブ button。選択状態を aria-selected で表し、tablist 内で切り替える。 */

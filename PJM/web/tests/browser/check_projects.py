@@ -49,6 +49,7 @@ class ProjectsApi(AccountsApi):
         self.screenshot: Path | None = None
         self.history_requested = asyncio.Event()
         self.modules_requested = asyncio.Event()
+        self.preference_saved = asyncio.Event()
 
     async def respond(self, route: Route) -> None:
         """無関係 URL は共通の拒否 handler に渡し、Project 認可境界を記録する。"""
@@ -85,6 +86,8 @@ class ProjectsApi(AccountsApi):
             or not (suffix == "projects" or suffix.startswith("projects/"))
         ):
             await super().respond(route)
+            if request.method == "PUT" and suffix == "users/me/project-preference":
+                self.preference_saved.set()
             return
         query = parse_qs(url.query)
         body = request.post_data_json if request.post_data else None
@@ -654,6 +657,8 @@ async def default_revocation_stays_target(page: Page, api: ProjectsApi, _: dict)
     """無指定で選んだPが失効しても、再読取時に残りのQへ勝手に乗り換えない。"""
     await default_selection(page, api, {})
     await expect(page.locator(".historyPage .emptyState")).to_be_visible()
+    # 初回の150ms遅延保存を終えてから境界を切り、正当な旧要求を新段階へ混ぜない。
+    await asyncio.wait_for(api.preference_saved.wait(), 10)
     api.projects = [api.details[NEXT_PROJECT]]
     api.reject[f"projects/{PROJECT}"] = (404, "project_not_found")
     api.calls.clear()

@@ -36,12 +36,13 @@ def project(project_id: str) -> dict:
     """実 Project を操作せず sidebar の選択と module lifecycle を再現する。"""
     return {
         "project_id": project_id,
-        "key": "fixture",
+        "key": f"fixture-{project_id[-12:]}",
         "name": f"Browser project {project_id[-2:]}",
         "description": "Browser fixture",
         "status": "ACTIVE",
         "settings": {},
         "retention_days": 30,
+        "row_version": 7,
         "created_at": NOW,
         "updated_at": NOW,
     }

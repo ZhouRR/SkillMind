@@ -29,6 +29,7 @@ from projectmind.integrations.domain import (
     ResolvedRunBinding,
 )
 from projectmind.integrations.repository import IntegrationRepository
+from projectmind.projects.repository import ProjectRepository
 from projectmind.runs.creation_request import CREATION_REQUEST_FIELD, TaskRunIntent
 from projectmind.runs.domain import (
     AgentSessionMetadata,
@@ -58,6 +59,9 @@ from projectmind.runs.repository import RunRepository
 from projectmind.skills.capability_blueprint import resolve_capability_blueprint
 from projectmind.skills.resource_binding import is_write_capability
 from projectmind.skills.task_catalog import ResolvedTaskRun
+from projectmind.users.access import authorize_user_access, validate_user_access
+from projectmind.users.domain import UserAccess
+from projectmind.users.repository import UserRepository
 
 # M0 では Agent に組み込み file/shell/web tool を一切公開しない。これはセキュリティ境界。
 M0_DENIED_BUILTIN_TOOLS = tuple(sorted(DENIED_BUILTIN_TOOLS))
@@ -489,23 +493,37 @@ class RunService:
         project_id: UUID,
         run_id: UUID,
         interaction_id: UUID,
-        actor_id: UUID,
+        access: UserAccess,
         interaction_version: int,
         response_json: dict[str, Any],
         idempotency_key: str,
         trace_id: str | None,
     ) -> RespondedInteraction:
-        """認証済み回答から次 Segment を作成し、Run を再 dispatch する。"""
+        """原会話・現在所属を同 transaction で固定し、認可済み回答だけを dispatch する。"""
 
+        validate_user_access(access)
         expired: InteractionExpiredError | None = None
         result: RespondedInteraction | None = None
         async with self._session_factory() as session, session.begin():
+            users = await UserRepository(session).lock_users(
+                access=access, target_id=None, include_target_sessions=False,
+            )
+            authorize_user_access(access, users, now=datetime.now(UTC), admin=False, write=True)
+            projects = ProjectRepository(session)
+            project = await projects.lock_write_access(user=users.actor, project_id=project_id)
+            authorize_user_access(access, users, now=datetime.now(UTC), admin=False, write=True)
+            projects.require_active_write_access(project)
+            repository = RunRepository(session)
+            locked = await repository.lock_interaction_response(
+                project_id=project_id, run_id=run_id, interaction_id=interaction_id,
+            )
+            # Run 等の待機中に原会話が期限を迎えても、回答・expiry の書き込み前に止める。
+            authorize_user_access(access, users, now=datetime.now(UTC), admin=False, write=True)
+            projects.require_active_write_access(project)
             try:
-                result = await RunRepository(session).respond_to_interaction(
-                    project_id=project_id,
-                    run_id=run_id,
-                    interaction_id=interaction_id,
-                    actor_id=actor_id,
+                result = await repository.respond_to_locked_interaction(
+                    locked=locked,
+                    actor_id=users.actor.id,
                     interaction_version=interaction_version,
                     response_json=response_json,
                     idempotency_key=idempotency_key,
@@ -515,6 +533,10 @@ class RunService:
                 # Expiry event と timeout continuation を rollback しないため、Proposal と
                 # 同様に transaction 内で捕捉し、commit 後に API 用例外を返す。
                 expired = error
+            # Replay と捕捉済み 410 も同じ gate を通す。失効時は expiry/outbox ごと rollback する。
+            await session.flush()
+            authorize_user_access(access, users, now=datetime.now(UTC), admin=False, write=True)
+            projects.require_active_write_access(project)
         if expired is not None:
             raise expired
         if result is None:

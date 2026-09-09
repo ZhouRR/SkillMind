@@ -407,11 +407,7 @@ class AgentRunExecutor:
                         agent_session_id=event.agent_session_id,
                         interaction_id=interaction_id,
                         segment_no=claimed.segment_no,
-                        status=(
-                            RunStatus.WAITING_FOR_APPROVAL.value
-                            if interaction.interaction_type.value == "EFFECT_APPROVAL"
-                            else RunStatus.WAITING_FOR_INPUT.value
-                        ),
+                        status=RunStatus.WAITING_FOR_INPUT.value,
                     )
                     return
                 if event.event_type is AgentEventType.CHANGE_PROPOSED:

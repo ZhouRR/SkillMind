@@ -22,9 +22,7 @@ def as_mapping(value: object, *, name: str) -> dict[str, Any]:
 def validate() -> None:
     """公開 service、route priority、host port の不変条件を検証する。"""
 
-    document = as_mapping(
-        yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8")), name="compose"
-    )
+    document = as_mapping(yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8")), name="compose")
     services = as_mapping(document.get("services"), name="services")
     networks = as_mapping(document.get("networks"), name="networks")
 
@@ -44,14 +42,10 @@ def validate() -> None:
             raise ValueError(f"services.{service_name} must not publish host ports")
 
         attached_networks = service.get("networks", [])
-        if isinstance(attached_networks, dict):
-            attached_network_names = set(attached_networks)
-        elif isinstance(attached_networks, list):
+        if isinstance(attached_networks, dict | list):
             attached_network_names = set(attached_networks)
         else:
-            raise TypeError(
-                f"services.{service_name}.networks must be a list or mapping"
-            )
+            raise TypeError(f"services.{service_name}.networks must be a list or mapping")
         if "edge" in attached_network_names:
             edge_services.add(service_name)
 
@@ -61,13 +55,9 @@ def validate() -> None:
 
     expected_public_services = {"api", "web"}
     if edge_services != expected_public_services:
-        raise ValueError(
-            f"Only api and web may join edge; found {sorted(edge_services)}"
-        )
+        raise ValueError(f"Only api and web may join edge; found {sorted(edge_services)}")
     if routed_services != expected_public_services:
-        raise ValueError(
-            f"Only api and web may enable Traefik; found {sorted(routed_services)}"
-        )
+        raise ValueError(f"Only api and web may enable Traefik; found {sorted(routed_services)}")
 
     # Log と障害調査時の表示を揃えるため、one-shot を含む全 service へ同じ timezone を渡す。
     timezone_expression = "${PROJECTMIND_TIMEZONE:-Asia/Tokyo}"
@@ -77,21 +67,22 @@ def validate() -> None:
             service.get("environment"), name=f"services.{service_name}.environment"
         )
         if environment.get("TZ") != timezone_expression:
-            raise ValueError(
-                f"services.{service_name} must use the shared ProjectMind timezone"
-            )
+            raise ValueError(f"services.{service_name} must use the shared ProjectMind timezone")
 
     # 同一 tag の並列 export を防ぐため、Backend image の build 所有者は API 一つに限定する。
     backend_service_names = {"api", "worker", "migrate"}
-    backend_images = {
-        services[service_name].get("image") for service_name in backend_service_names
-    }
-    if backend_images != {"projectmind/backend:0.1.0"}:
+    backend_images = {services[service_name].get("image") for service_name in backend_service_names}
+    if backend_images != {"${PJM_BACKEND_IMAGE:-projectmind/backend:0.1.0}"}:
         raise ValueError("API, Worker, and Migrate must share one Backend image")
+    if services["web"].get("image") != "${PJM_WEB_IMAGE:-projectmind/web:0.1.0}":
+        raise ValueError("Web must support the same explicit immutable-image selection")
+    # CLI 補間と container 注入の path は共用 runner が同じ絶対値に固定する。
+    source = "${PJM_COMPOSE_ENV_FILE:?use scripts/compose.py to select the environment file}"
+    for service_name in backend_service_names:
+        if services[service_name].get("env_file") != [source]:
+            raise ValueError("API, Worker, and Migrate must share the selected environment file")
     backend_builders = {
-        service_name
-        for service_name in backend_service_names
-        if "build" in services[service_name]
+        service_name for service_name in backend_service_names if "build" in services[service_name]
     }
     if backend_builders != {"api"}:
         raise ValueError("Only API may build the shared Backend image")
@@ -162,9 +153,7 @@ def validate() -> None:
     if web_labels.get("traefik.http.routers.projectmind-web.priority") != "10":
         raise ValueError("Web router must remain the lower-priority host fallback")
 
-    print(
-        f"Validated {len(services)} Compose services and existing-Traefik ingress invariants."
-    )
+    print(f"Validated {len(services)} Compose services and existing-Traefik ingress invariants.")
 
 
 if __name__ == "__main__":

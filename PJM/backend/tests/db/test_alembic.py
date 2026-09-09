@@ -73,7 +73,7 @@ def test_migration_chain_has_a_single_expected_head() -> None:
     config.set_main_option("script_location", str(backend_dir / "migrations"))
     scripts = ScriptDirectory.from_config(config)
 
-    assert scripts.get_heads() == ["0033_project_member_audit"]
+    assert scripts.get_heads() == ["0034_project_row_version"]
 
 
 def test_revision_ids_fit_default_alembic_version_column() -> None:

@@ -65,6 +65,29 @@ def test_parse_interaction_request_rejects_sensitive_content() -> None:
         parse_interaction_request(_request(prompt="api_key=secret-value"))
 
 
+@pytest.mark.parametrize("interaction_type", ["CLARIFICATION", "CHOICE", "REVIEW"])
+def test_question_rejects_duplicate_option_identity(interaction_type: str) -> None:
+    """異なる label でも同じ key は回答から識別できず、新しい質問として保存しない。"""
+
+    options = [
+        {"key": "same", "label": "First", "description": "First scope", "recommended": True},
+        {"key": "same", "label": "Second", "description": "Other scope", "recommended": False},
+    ]
+    with pytest.raises(InteractionResponseInvalidError, match="unique"):
+        parse_interaction_request(_request(interaction_type=interaction_type, options=options))
+
+
+def test_question_preserves_distinct_option_identity_and_order() -> None:
+    """新規質問の識別だけを検証し、推薦・選択順・既存 hash 規則を正規化しない。"""
+
+    options = [
+        {"key": key, "label": key, "description": "Public scope", "recommended": False}
+        for key in ("second", "first")
+    ]
+    parsed = parse_interaction_request(_request(interaction_type="CHOICE", options=options))
+    assert list(parsed.options) == options
+
+
 def test_choice_response_obeys_known_options_and_multiplicity() -> None:
     """CHOICE は提示済み key だけを受理し、単一選択を迂回できない。"""
 
@@ -130,3 +153,29 @@ def test_interaction_response_hash_binds_version_and_payload() -> None:
 
     assert first == reordered
     assert first != changed
+    assert first == "9579bd2b81483c31a135342964494f5df06b5b386c9d72a296cc65255b8997ec"
+
+
+@pytest.mark.parametrize("interaction_type", ["EFFECT_APPROVAL", "UNKNOWN"])
+def test_ordinary_request_rejects_approval_and_unknown_types(interaction_type: str) -> None:
+    """Proposal の無い批准待ちを公開 Tool/parser のどちらからも作成しない。"""
+
+    with pytest.raises(InteractionResponseInvalidError, match="contract"):
+        parse_interaction_request(_request(interaction_type=interaction_type))
+
+
+@pytest.mark.parametrize("interaction_type", ["CLARIFICATION", "REVIEW"])
+def test_optional_ordinary_questions_still_require_explicit_answers(interaction_type: str) -> None:
+    """required=false を skip や暗黙の推薦回答として扱わない。"""
+
+    request = parse_interaction_request(_request(interaction_type=interaction_type, required=False))
+    assert request.required is False
+    with pytest.raises(InteractionResponseInvalidError, match="empty"):
+        validate_interaction_response(
+            interaction_type=request.interaction_type, prompt=request.prompt,
+            options=request.options, response={},
+        )
+    assert validate_interaction_response(
+        interaction_type=request.interaction_type, prompt=request.prompt,
+        options=request.options, response={"text": " "},
+    ) == {"text": " "}

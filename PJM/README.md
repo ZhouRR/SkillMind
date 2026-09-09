@@ -21,10 +21,10 @@ Skill を Project のタスクとして実行し、根拠・結果・人工評�
 ## 実行前の注意
 
 - Python 3.12、Node.js 26 / pnpm 11.7.0 を使う。DB・Redis・object storage と接続設定は別途必要。
-- Compose は既存の共有 Traefik を使い、host port を公開しない。`make run` は image を build しない。
+- Compose は既存の共有 Traefik を使い、host port を公開しない。`make run` は配備検査後に API/Web だけを起動する。
 - dispatch=false は既存 job・cron を止めない。[保守時の停止範囲](../docs/operations/deployment.md#一个例子关闭-dispatch-后仍有工作)を確認する。
 - 通常の初期 ADMIN 作成は `python -m projectmind.ops.bootstrap_admin`。`make bootstrap-admin` は全 volume を消す。
-- [環境 file の境界](../docs/operations/deployment.md#环境文件与配置边界)を確認する。Make の ENV_FILE だけでは全 Backend 設定を切り替えられない。
+- [共通設定入口](../docs/operations/deployment.md#环境文件与配置边界)で ENV_FILE と Compose project を明示する。配備は load/migrate/api/worker の独立段階で、宿主にも Python 3.12 が必要。
 
 ## Backend
 
@@ -96,10 +96,11 @@ Schema 通過は Runtime の実装・公開済み・実環境の受入を保証�
 | --- | --- |
 | `python3 scripts/validate_contracts.py` | Schema / example の読取検査 |
 | `python3 scripts/validate_compose.py` | Compose 構造の読取検査。実起動ではない |
+| [compose.py](scripts/compose.py) / [deploy.py](scripts/deploy.py) | 同一設定源 / identity を固定した分段配備。対象と承認は[配備手順](../docs/operations/deployment.md)を参照 |
 | `PYTHONPATH=backend/src python3 scripts/probe_claude_agent_sdk.py` | offline SDK 契約確認。実モデルを呼ばない |
 | `python3 scripts/build_docs.py --check` | 文書リンクと生成物の一致を検査 |
 | `python3 scripts/build_docs.py` | Markdown と docs-viewer.html から docs/index.html を上書き生成 |
-| `python3 -m unittest discover -s scripts/tests -v` | 文書工具の一時 fixture 回帰 |
+| `python3 -m unittest discover -s scripts/tests -v` | 文書・配備工具の一時 fixture / fake command 回帰。実 Docker は使わない |
 | `python3 scripts/check_docs_browser.py` | offline Chromium 検査。--output 指定時だけ screenshot を上書き保存 |
 | `python3 scripts/export_openapi.py` | 公開 API 変更時に snapshot を上書き。読むだけなら実行しない |
 | [measure_skill_interpretations.py](scripts/measure_skill_interpretations.py) | 実モデル呼出し・課金を伴う品質測定 |
@@ -126,5 +127,5 @@ package の配置は import・公開・Project 有効化ではない。source sc
 - export は build/pull しない。application image 不足は失敗、第三者 image 不足は警告して除外される。
 - 実 image ID と必要 image を確認し、送受信の checksum を比較する。checksum だけでは配布元の真正性は証明できない。
 - 既存 tar は既定で上書きしない。ArchiveName で版を分け、-Force で唯一の回退用 archive を失わない。
-- export 失敗時は不完全 tar を削除する。`make deploy` は旧 image を置換し、途中失敗しても自動復旧しない。
+- export は一時 tar が成功してから公開し、失敗時は旧成品を保持する。deploy-load も旧 image を削除せず、途中失敗時に自動復旧・後続起動しない。
 - DB の復元を外部 write の取消と扱わない。Secret や archive を文書ブラウザへ埋め込まない。

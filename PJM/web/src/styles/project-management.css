@@ -1,0 +1,31 @@
+/* Project の元要求・三方比較を一覧と区別し、狭幅でも原 ID と版を省略しない。 */
+.projectManagement { display: grid; gap: 18px; min-width: 0; }
+.projectManagement[hidden], .projectManagement .tabPanel[hidden] { display: none; }
+.projectManagement h2, .projectManagement h3, .projectManagement h4 { margin: 0; }
+.projectManagement .panel { min-width: 0; }
+.projectManagement .panelHeader { flex-wrap: wrap; gap: 12px; }
+.projectManagement p, .projectManagement strong, .projectManagement dd, .projectManagement small, .projectManagement summary { overflow-wrap: anywhere; }
+.projectManagement button { max-width: 100%; white-space: normal; }
+.projectManagement .projectSelect strong, .projectManagement .projectSelect span, .projectManagement .projectSelect small { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.projectManagement .projectItemActions, .projectManagement .projectFormActions, .projectManagement .inlineActions { flex-wrap: wrap; }
+.projectManagement fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.projectIntent, .projectReview { display: grid; gap: 14px; border-color: var(--border-strong); background: var(--warn-soft); }
+.projectFacts { display: grid; gap: 6px; min-width: 0; }
+.projectFacts p { margin: 0; }
+.projectFacts dl { display: grid; gap: 8px; margin: 6px 0; }
+.projectFacts dl > div { display: grid; grid-template-columns: minmax(84px, .5fr) minmax(0, 1fr); gap: 8px; }
+.projectFacts dt { color: var(--text-muted); }
+.projectFacts dd { margin: 0; }
+.projectComparison { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.projectComparison > section { display: grid; align-content: start; gap: 12px; border: 1px solid var(--border); border-radius: var(--radius-small); padding: 12px; min-width: 0; }
+.projectAcknowledgment { display: flex; align-items: flex-start; gap: 10px; }
+.projectAcknowledgment input { width: 18px; height: 18px; flex: 0 0 18px; }
+.projectResponse { padding: 12px; border: 1px solid var(--danger); border-radius: var(--radius-small); overflow-wrap: anywhere; }
+.projectResponse:focus, .projectManagement h2:focus, .projectManagement h3:focus { outline: 2px solid var(--accent); outline-offset: 3px; }
+.projectPreviousUnknown summary { cursor: pointer; }
+@media (max-width: 960px) { .projectComparison { grid-template-columns: 1fr; } }
+@media (max-width: 600px) {
+  .projectManagement .panel { padding: 14px; }
+  .projectManagement button, .projectManagement input { min-height: 44px; }
+  .projectAcknowledgment input { min-height: 18px; }
+}

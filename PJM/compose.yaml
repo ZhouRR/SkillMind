@@ -1,9 +1,9 @@
 name: ${COMPOSE_PROJECT_NAME:-projectmind}
 
 x-backend-runtime: &backend-runtime
-  image: projectmind/backend:0.1.0
+  image: ${PJM_BACKEND_IMAGE:-projectmind/backend:0.1.0}
   env_file:
-    - .env
+    - ${PJM_COMPOSE_ENV_FILE:?use scripts/compose.py to select the environment file}
   environment:
     PROJECTMIND_CONTEXT_PATH: ${PROJECTMIND_CONTEXT_PATH:-/projectmind}
     TZ: ${PROJECTMIND_TIMEZONE:-Asia/Tokyo}
@@ -19,7 +19,7 @@ services:
       dockerfile: Dockerfile
       args:
         PROJECTMIND_CONTEXT_PATH: ${PROJECTMIND_CONTEXT_PATH:-/projectmind}
-    image: projectmind/web:0.1.0
+    image: ${PJM_WEB_IMAGE:-projectmind/web:0.1.0}
     environment:
       TZ: ${PROJECTMIND_TIMEZONE:-Asia/Tokyo}
     restart: unless-stopped

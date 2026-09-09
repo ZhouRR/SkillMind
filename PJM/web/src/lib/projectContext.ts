@@ -8,6 +8,24 @@ export type ProjectRequest =
   | { kind: 'explicit'; projectId: string }
   | { kind: 'invalid'; value: string }
 
+/** Platform の草稿境界。初回の既定選択は人による Project 切替と区別する。 */
+export interface ProjectManagementBoundary {
+  owner: string
+  selectionId: string
+  revision: number
+}
+
+/** 未指定 URL への初回一覧到着だけでは作成草稿を消さず、以後の対象変更は旧要求を隔離する。 */
+export function nextProjectManagementBoundary(
+  current: ProjectManagementBoundary, owner: string, selectionId: string, request: ProjectRequest,
+): ProjectManagementBoundary {
+  const selected = selectionId.toLowerCase()
+  if (current.owner !== owner) return { owner, selectionId: selected, revision: 0 }
+  if (current.selectionId === selected) return current
+  const initialDefault = current.selectionId === '' && request.kind === 'absent'
+  return { owner, selectionId: selected, revision: current.revision + (initialDefault ? 0 : 1) }
+}
+
 /** Account の URL は Project 文脈を持たず、それ以外は明示 parameter を厳密に読む。 */
 export function projectRequestFromHash(hash: string): ProjectRequest {
   if (routeFromHash(hash) === 'accounts') return { kind: 'absent' }

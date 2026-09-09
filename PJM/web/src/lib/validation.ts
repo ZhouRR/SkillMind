@@ -4,6 +4,11 @@ export function isUuid(value: unknown): value is string {
     && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(value)
 }
 
+/** 検証済み UUID の表記差だけを無視し、原 request や key は書き換えない。 */
+export function sameUuid(left: string, right: string): boolean {
+  return left.toLowerCase() === right.toLowerCase()
+}
+
 /** Python datetime が返す timezone 付き日時を、日付の自動繰上げなしで読む。 */
 export function isApiTimestamp(value: unknown): value is string {
   if (typeof value !== 'string') return false

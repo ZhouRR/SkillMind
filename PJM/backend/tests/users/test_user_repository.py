@@ -57,4 +57,8 @@ async def test_common_lock_queries_gate_org_then_sorted_users_then_original_sess
     assert "ORDER BY auth_sessions.id" in str(queries[2])
     assert set(queries[2].params.values()) == {actor_id, credential.session_token_hash}
     assert all("FOR UPDATE" in str(query) for query in queries)
+    assert all(
+        call.args[0].get_execution_options()["populate_existing"] is True
+        for call in session.scalars.call_args_list
+    )
     assert locked.target is target and locked.current_session is current

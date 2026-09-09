@@ -220,7 +220,7 @@ describe('project API client', () => {
       settings: {},
       retention_days: 90,
     }, SESSION.csrf_token)
-    await archiveProject(PROJECT.project_id, SESSION.csrf_token)
+    await archiveProject(PROJECT.project_id, PROJECT.row_version, SESSION.csrf_token)
 
     for (const call of fetchMock.mock.calls) {
       expect(new Headers(call[1]?.headers).get('X-CSRF-Token')).toBe(SESSION.csrf_token)
@@ -233,7 +233,7 @@ describe('project API client', () => {
   ])('preserves the deletion conflict %s and never retries or removes references', async (code) => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ code, detail: 'Deletion blocked.' }, 409))
     vi.stubGlobal('fetch', fetchMock)
-    await expect(deleteProject(PROJECT.project_id, SESSION.csrf_token)).rejects.toMatchObject({ status: 409, code })
+    await expect(deleteProject(PROJECT.project_id, PROJECT.row_version, SESSION.csrf_token)).rejects.toMatchObject({ status: 409, code })
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[1]?.method).toBe('DELETE')
     expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('X-CSRF-Token')).toBe(SESSION.csrf_token)

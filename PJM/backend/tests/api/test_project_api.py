@@ -28,7 +28,8 @@ def _stored_project(project_id: UUID, status: ProjectStatus) -> StoredProject:
     now = datetime(2026, 9, 9, tzinfo=UTC)
     return StoredProject(
         project_id=project_id, key="example", name="Example", description="",
-        status=status, settings={}, retention_days=90, created_at=now, updated_at=now,
+        status=status, settings={}, retention_days=90, row_version=1,
+        created_at=now, updated_at=now,
     )
 
 
@@ -52,7 +53,7 @@ def test_exact_project_detail_reads_active_and_archived_with_authenticated_actor
     assert response.json()["status"] == project_status.value
     assert set(response.json()) == {
         "project_id", "key", "name", "description", "status", "settings",
-        "retention_days", "created_at", "updated_at",
+        "retention_days", "row_version", "created_at", "updated_at",
     }
     service.get_project.assert_awaited_once_with(actor=auth.actor, project_id=project_id)
     service.list_projects.assert_not_called()
@@ -115,7 +116,7 @@ def test_project_delete_returns_a_distinct_stable_conflict_for_each_reference(
     ))
     client.app.state.project_service = service
 
-    response = client.delete(f"/api/v1/projects/{uuid4()}")
+    response = client.delete(f"/api/v1/projects/{uuid4()}?expected_row_version=1")
 
     assert response.status_code == 409
     assert response.headers["content-type"] == "application/problem+json"
@@ -183,6 +184,7 @@ def test_admin_can_create_list_archive_and_assign_project_member(client: TestCli
     archived = client.post(
         f"/api/v1/projects/{project_id}/archive",
         headers=write_headers,
+        json={"expected_row_version": 1},
     )
     assert archived.status_code == 200
     assert archived.json()["status"] == "ARCHIVED"
@@ -213,28 +215,37 @@ def test_archived_project_can_be_listed_restored_and_deleted(client: TestClient)
             "retention_days": 90,
         },
     ).json()["project_id"]
-    client.post(f"/api/v1/projects/{project_id}/archive", headers=write_headers)
+    client.post(
+        f"/api/v1/projects/{project_id}/archive", headers=write_headers,
+        json={"expected_row_version": 1},
+    )
 
     # 既定一覧からは消えるが、include_archived で監査対象として取り出せる。
     assert client.get("/api/v1/projects").json()["items"] == []
     archived = client.get("/api/v1/projects?include_archived=true").json()["items"]
     assert [item["status"] for item in archived] == ["ARCHIVED"]
 
-    restored = client.post(f"/api/v1/projects/{project_id}/unarchive", headers=write_headers)
+    restored = client.post(
+        f"/api/v1/projects/{project_id}/unarchive", headers=write_headers,
+        json={"expected_row_version": 2},
+    )
     assert restored.status_code == 200
     assert restored.json()["status"] == "ACTIVE"
     assert len(client.get("/api/v1/projects").json()["items"]) == 1
 
     # ACTIVE のまま削除しようとした場合は archive 手順を促す 409 に落ちる。
     blocked = client.request(
-        "DELETE", f"/api/v1/projects/{project_id}", headers=write_headers
+        "DELETE", f"/api/v1/projects/{project_id}?expected_row_version=3", headers=write_headers,
     )
     assert blocked.status_code == 409
     assert blocked.json()["code"] == "project_delete_requires_archive"
 
-    client.post(f"/api/v1/projects/{project_id}/archive", headers=write_headers)
+    client.post(
+        f"/api/v1/projects/{project_id}/archive", headers=write_headers,
+        json={"expected_row_version": 3},
+    )
     deleted = client.request(
-        "DELETE", f"/api/v1/projects/{project_id}", headers=write_headers
+        "DELETE", f"/api/v1/projects/{project_id}?expected_row_version=4", headers=write_headers,
     )
     assert deleted.status_code == 204
     assert client.get("/api/v1/projects?include_archived=true").json()["items"] == []

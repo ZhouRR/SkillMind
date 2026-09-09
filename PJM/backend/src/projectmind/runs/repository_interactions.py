@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -36,11 +37,24 @@ from projectmind.runs.domain import (
     plan_run_transition,
 )
 from projectmind.runs.interaction import (
+    ORDINARY_INTERACTION_TYPES,
     InteractionRequestDraft,
     interaction_response_hash,
+    require_ordinary_interaction,
+    validate_interaction_option_keys,
     validate_interaction_response,
+    validate_interaction_version,
 )
 from projectmind.runs.repository_base import _RunRepositoryBase
+
+
+@dataclass(frozen=True, slots=True)
+class LockedInteractionResponse:
+    """認証再検査の間も保持する Run→Segment→Interaction の内部 lock context。"""
+
+    run: Run = field(repr=False)
+    segment: RunSegment = field(repr=False)
+    interaction: UserInteraction = field(repr=False)
 
 
 class InteractionOperationsMixin(_RunRepositoryBase):
@@ -66,6 +80,8 @@ class InteractionOperationsMixin(_RunRepositoryBase):
         self._validate_agent_event(event, claimed)
         if event.event_type is not AgentEventType.INTERACTION_REQUESTED:
             raise ValueError("Interaction suspension requires INTERACTION_REQUESTED")
+        require_ordinary_interaction(request.interaction_type)
+        validate_interaction_option_keys(request.options)
         await self._reject_cancelled_execution(run.id)
         next_sequence = await self._next_sequence(run.id)
         if event.sequence < next_sequence:
@@ -108,11 +124,7 @@ class InteractionOperationsMixin(_RunRepositoryBase):
             created_at=now,
             updated_at=now,
         )
-        target = (
-            RunStatus.WAITING_FOR_APPROVAL
-            if request.interaction_type is UserInteractionType.EFFECT_APPROVAL
-            else RunStatus.WAITING_FOR_INPUT
-        )
+        target = RunStatus.WAITING_FOR_INPUT
         transition = plan_run_transition(
             current=RunStatus.RUNNING,
             target=target,
@@ -211,6 +223,20 @@ class InteractionOperationsMixin(_RunRepositoryBase):
     ) -> RespondedInteraction:
         """一回限りの回答を追加し、新 Segment と dispatch を同じ transaction で作る。"""
 
+        validate_interaction_version(interaction_version)
+        locked = await self.lock_interaction_response(
+            project_id=project_id, run_id=run_id, interaction_id=interaction_id,
+        )
+        return await self.respond_to_locked_interaction(
+            locked=locked, actor_id=actor_id, interaction_version=interaction_version,
+            response_json=response_json, idempotency_key=idempotency_key, trace_id=trace_id,
+        )
+
+    async def lock_interaction_response(
+        self, *, project_id: UUID, run_id: UUID, interaction_id: UUID
+    ) -> LockedInteractionResponse:
+        """状態遷移をせず lock を取得し、service の最終認可前に回答を保存しない。"""
+
         observed = (
             await self._session.scalars(
                 select(UserInteraction).where(
@@ -221,19 +247,34 @@ class InteractionOperationsMixin(_RunRepositoryBase):
         ).one_or_none()
         if observed is None:
             raise InteractionNotFoundError(f"Interaction not found: {interaction_id}")
-        run = await self._lock_run_row(run_id, project_id=project_id)
+        run = await self._lock_run_row(run_id, project_id=project_id, populate_existing=True)
         if run is None:
             raise InteractionNotFoundError(f"Interaction not found: {interaction_id}")
-        segment = await self._lock_segment_row(observed.run_segment_id, run_id=run_id)
+        segment = await self._lock_segment_row(
+            observed.run_segment_id, run_id=run_id, populate_existing=True,
+        )
         if segment is None:
             raise InteractionNotFoundError(f"Interaction Segment not found: {interaction_id}")
-        interaction = (
-            await self._session.scalars(
-                select(UserInteraction)
-                .where(UserInteraction.id == interaction_id)
-                .with_for_update()
-            )
-        ).one()
+        interaction = await self._lock_interaction_row(
+            interaction_id, run_id=run_id, segment_id=segment.id
+        )
+        return LockedInteractionResponse(run=run, segment=segment, interaction=interaction)
+
+    async def respond_to_locked_interaction(
+        self,
+        *,
+        locked: LockedInteractionResponse,
+        actor_id: UUID,
+        interaction_version: int,
+        response_json: dict[str, Any],
+        idempotency_key: str,
+        trace_id: str | None,
+    ) -> RespondedInteraction:
+        """保持済み lock と現在の認可で原回答の再確認または一回限りの回答を行う。"""
+
+        validate_interaction_version(interaction_version)
+        run, segment, interaction = locked.run, locked.segment, locked.interaction
+        run_id, interaction_id = run.id, interaction.id
         normalized = validate_interaction_response(
             interaction_type=UserInteractionType(interaction.interaction_type),
             prompt=interaction.prompt_json,
@@ -253,13 +294,21 @@ class InteractionOperationsMixin(_RunRepositoryBase):
             )
         ).one_or_none()
         if existing is not None:
-            if existing.idempotency_key != idempotency_key or existing.request_hash != fingerprint:
+            # actor は旧 hash に含まれないため、旧値を書き換えず独立した原作者照合を必須にする。
+            if (
+                existing.actor_id != actor_id
+                or existing.run_id != run.id
+                or existing.interaction_version != interaction_version
+                or existing.idempotency_key != idempotency_key
+                or existing.request_hash != fingerprint
+            ):
                 raise InteractionConflictError("Interaction already has a different response")
             next_segment = (
                 await self._session.scalars(
                     select(RunSegment).where(
                         RunSegment.run_id == run_id,
                         RunSegment.trigger_ref == existing.id,
+                        RunSegment.trigger_type == RunSegmentTrigger.INTERACTION_RESPONSE.value,
                     )
                 )
             ).one()
@@ -272,6 +321,8 @@ class InteractionOperationsMixin(_RunRepositoryBase):
                 continuation_mode=SessionContinuationMode(next_segment.continuation_mode),
                 idempotent_replay=True,
             )
+        # 旧監査の原 hash 再確認は保ち、まだ回答のない曖昧な旧質問への新規回答だけを拒否する。
+        validate_interaction_option_keys(tuple(interaction.options_json))
         now = datetime.now(UTC)
         if interaction.status != UserInteractionStatus.OPEN.value:
             raise InteractionConflictError("Interaction is no longer open")
@@ -286,12 +337,11 @@ class InteractionOperationsMixin(_RunRepositoryBase):
                 trace_id=trace_id,
             )
             raise InteractionExpiredError("Interaction has expired")
-        expected_status = (
-            RunStatus.WAITING_FOR_APPROVAL
-            if interaction.interaction_type == UserInteractionType.EFFECT_APPROVAL.value
-            else RunStatus.WAITING_FOR_INPUT
-        )
-        if RunStatus(run.status) is not expected_status:
+        expected_status = RunStatus.WAITING_FOR_INPUT
+        if (
+            RunStatus(run.status) is not expected_status
+            or segment.status != RunSegmentStatus.WAITING.value
+        ):
             raise InteractionConflictError("Run is not waiting for this interaction")
 
         response_id = uuid4()
@@ -335,11 +385,7 @@ class InteractionOperationsMixin(_RunRepositoryBase):
             id=next_segment_id,
             run_id=run.id,
             segment_no=next_segment_no,
-            trigger_type=(
-                RunSegmentTrigger.APPROVAL_RESPONSE.value
-                if interaction.interaction_type == UserInteractionType.EFFECT_APPROVAL.value
-                else RunSegmentTrigger.INTERACTION_RESPONSE.value
-            ),
+            trigger_type=RunSegmentTrigger.INTERACTION_RESPONSE.value,
             trigger_ref=response_id,
             status=RunSegmentStatus.CREATED.value,
             objective_json={
@@ -456,6 +502,27 @@ class InteractionOperationsMixin(_RunRepositoryBase):
             idempotent_replay=False,
         )
 
+    async def _lock_interaction_row(
+        self, interaction_id: UUID, *, run_id: UUID, segment_id: UUID
+    ) -> UserInteraction:
+        """Run→Segment 後に帰属を限定し、lock 前の ORM snapshot を現在行で上書きする。"""
+
+        interaction = (
+            await self._session.scalars(
+                select(UserInteraction)
+                .where(
+                    UserInteraction.id == interaction_id,
+                    UserInteraction.run_id == run_id,
+                    UserInteraction.run_segment_id == segment_id,
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).one_or_none()
+        if interaction is None:
+            raise InteractionNotFoundError(f"Interaction not found: {interaction_id}")
+        return interaction
+
     async def _expire_pending_interaction(
         self,
         *,
@@ -467,13 +534,24 @@ class InteractionOperationsMixin(_RunRepositoryBase):
     ) -> None:
         """未回答の通常 interaction を閉じ、推測した回答なしで次 Segment へ進める。"""
 
-        if interaction.interaction_type == UserInteractionType.EFFECT_APPROVAL.value:
+        if interaction.interaction_type not in ORDINARY_INTERACTION_TYPES:
             raise InteractionConflictError(
                 "Effect approval expiry requires the ChangeProposal recovery path"
             )
+        if (
+            interaction.status != UserInteractionStatus.OPEN.value
+            or interaction.expires_at > now
+        ):
+            raise InteractionConflictError("Interaction is not awaiting expiry")
         interaction.status = UserInteractionStatus.EXPIRED.value
         interaction.version += 1
         interaction.updated_at = now
+        # API から期限切れを発見した場合も recovery と同じく、既に進んだ Run は再開しない。
+        if (
+            RunStatus(run.status) is not RunStatus.WAITING_FOR_INPUT
+            or segment.status != RunSegmentStatus.WAITING.value
+        ):
+            return
         segment.status = RunSegmentStatus.COMPLETED.value
         segment.finished_at = now
         segment.updated_at = now
@@ -614,8 +692,9 @@ class InteractionOperationsMixin(_RunRepositoryBase):
                     select(UserInteraction)
                     .where(
                         UserInteraction.status == UserInteractionStatus.OPEN.value,
-                        UserInteraction.interaction_type
-                        != UserInteractionType.EFFECT_APPROVAL.value,
+                        UserInteraction.interaction_type.in_(
+                            [item.value for item in ORDINARY_INTERACTION_TYPES]
+                        ),
                         UserInteraction.expires_at <= now,
                     )
                     .order_by(UserInteraction.expires_at, UserInteraction.id)
@@ -633,36 +712,23 @@ class InteractionOperationsMixin(_RunRepositoryBase):
             segment = await self._lock_segment_row(candidate.run_segment_id, run_id=run.id)
             if segment is None:
                 raise RunNotFoundError("Interaction recovery Segment not found")
-            interaction = (
-                await self._session.scalars(
-                    select(UserInteraction)
-                    .where(UserInteraction.id == candidate.id)
-                    .with_for_update()
-                )
-            ).one()
+            interaction = await self._lock_interaction_row(
+                candidate.id, run_id=run.id, segment_id=segment.id
+            )
+            # 候補走査時刻ではなく、回答との lock 待機後の現在時刻で期限を確定する。
+            locked_now = datetime.now(UTC)
             if (
                 interaction.status != UserInteractionStatus.OPEN.value
-                or interaction.interaction_type
-                == UserInteractionType.EFFECT_APPROVAL.value
-                or interaction.expires_at > now
+                or interaction.interaction_type not in ORDINARY_INTERACTION_TYPES
+                or interaction.expires_at > locked_now
             ):
                 continue
-            if (
-                RunStatus(run.status) is RunStatus.WAITING_FOR_INPUT
-                and segment.status == RunSegmentStatus.WAITING.value
-            ):
-                await self._expire_pending_interaction(
-                    run=run,
-                    segment=segment,
-                    interaction=interaction,
-                    now=now,
-                    trace_id=None,
-                )
-            else:
-                # Run が terminal/continuation 済みなら event や Segment を追加せず、古い
-                # interaction だけを再利用不能な状態へ閉じる。
-                interaction.status = UserInteractionStatus.EXPIRED.value
-                interaction.version += 1
-                interaction.updated_at = now
+            await self._expire_pending_interaction(
+                run=run,
+                segment=segment,
+                interaction=interaction,
+                now=locked_now,
+                trace_id=None,
+            )
             recovered += 1
         return recovered

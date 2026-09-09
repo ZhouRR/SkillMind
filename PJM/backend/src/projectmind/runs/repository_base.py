@@ -96,30 +96,36 @@ class _RunRepositoryBase:
         if await self.is_cancellation_requested(run_id):
             raise RunCancellationRequestedError("Run cancellation was requested")
 
-    async def _lock_run_row(self, run_id: UUID, *, project_id: UUID | None = None) -> Run | None:
+    async def _lock_run_row(
+        self, run_id: UUID, *, project_id: UUID | None = None, populate_existing: bool = False
+    ) -> Run | None:
         """Aggregate lock 順の先頭として Run 行を FOR UPDATE で取得する。
 
         Run → Segment → (Attempt / Interaction / Proposal / Effect) の行 lock 順は
         executor・回答 API・recovery が共有する deadlock 回避の不変条件であり、
-        他の行 lock より先にこの helper を呼ぶ。project_id を渡した場合は Project 境界の
+        Run 配下の他の行 lock より先にこの helper を呼ぶ。project_id を渡した場合は Project 境界の
         越権を不存在と同じ None へ畳む。
         """
 
         statement = select(Run).where(Run.id == run_id)
         if project_id is not None:
             statement = statement.where(Run.project_id == project_id)
-        return (await self._session.scalars(statement.with_for_update())).one_or_none()
+        statement = statement.with_for_update()
+        if populate_existing:
+            statement = statement.execution_options(populate_existing=True)
+        return (await self._session.scalars(statement)).one_or_none()
 
-    async def _lock_segment_row(self, segment_id: UUID, *, run_id: UUID) -> RunSegment | None:
+    async def _lock_segment_row(
+        self, segment_id: UUID, *, run_id: UUID, populate_existing: bool = False
+    ) -> RunSegment | None:
         """Run lock 取得後の二番目として Segment 行を FOR UPDATE で取得する。"""
 
-        return (
-            await self._session.scalars(
-                select(RunSegment)
-                .where(RunSegment.id == segment_id, RunSegment.run_id == run_id)
-                .with_for_update()
-            )
-        ).one_or_none()
+        statement = select(RunSegment).where(
+            RunSegment.id == segment_id, RunSegment.run_id == run_id
+        ).with_for_update()
+        if populate_existing:
+            statement = statement.execution_options(populate_existing=True)
+        return (await self._session.scalars(statement)).one_or_none()
 
     async def _lock_claimed_execution(
         self, claimed: ClaimedRun

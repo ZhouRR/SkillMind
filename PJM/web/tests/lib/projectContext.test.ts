@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ProjectRecord } from '../../src/api'
-import { projectRequestFromHash, resolveProjectSelection } from '../../src/lib/projectContext'
+import { nextProjectManagementBoundary, projectRequestFromHash, resolveProjectSelection } from '../../src/lib/projectContext'
 import { DEMO_PROJECT } from '../fixtures'
 
 /** 参照可能な 2 件目の Project。既定選択が先頭を採ることの確認に使う。 */
@@ -18,6 +18,43 @@ const ARCHIVED_PROJECT: ProjectRecord = {
   project_id: UNKNOWN_PROJECT_ID,
   status: 'ARCHIVED',
 }
+
+describe('platform project management boundary', () => {
+  const initial = { owner: 'session-one', selectionId: '', revision: 0 }
+
+  it('retains creation state when the first default selection arrives without a URL target', () => {
+    expect(nextProjectManagementBoundary(initial, initial.owner, DEMO_PROJECT.project_id, { kind: 'absent' }))
+      .toEqual({ ...initial, selectionId: DEMO_PROJECT.project_id })
+  })
+
+  it('resets state when a user explicitly selects the first project', () => {
+    expect(nextProjectManagementBoundary(initial, initial.owner, DEMO_PROJECT.project_id,
+      { kind: 'explicit', projectId: DEMO_PROJECT.project_id }).revision).toBe(1)
+  })
+
+  it('does not reuse old state after A to B to A', () => {
+    const a = nextProjectManagementBoundary(initial, initial.owner, DEMO_PROJECT.project_id, { kind: 'absent' })
+    const b = nextProjectManagementBoundary(a, initial.owner, OTHER_PROJECT.project_id, { kind: 'absent' })
+    const back = nextProjectManagementBoundary(b, initial.owner, DEMO_PROJECT.project_id, { kind: 'absent' })
+    expect([a.revision, b.revision, back.revision]).toEqual([0, 1, 2])
+  })
+
+  it('treats an explicit invalid target as a new boundary, never a default selection', () => {
+    expect(nextProjectManagementBoundary(initial, initial.owner, 'unavailable:', { kind: 'invalid', value: '' }).revision).toBe(1)
+  })
+
+  it('does not reset for UUID spelling or a same-project qualification refresh', () => {
+    const current = { ...initial, selectionId: UNKNOWN_PROJECT_ID, revision: 4 }
+    expect(nextProjectManagementBoundary(current, current.owner, UNKNOWN_PROJECT_ID.toUpperCase(),
+      { kind: 'explicit', projectId: UNKNOWN_PROJECT_ID })).toBe(current)
+  })
+
+  it('puts another session in a different boundary even for the same project', () => {
+    const current = { ...initial, selectionId: DEMO_PROJECT.project_id, revision: 4 }
+    expect(nextProjectManagementBoundary(current, 'session-two', DEMO_PROJECT.project_id, { kind: 'absent' }))
+      .toEqual({ owner: 'session-two', selectionId: DEMO_PROJECT.project_id, revision: 0 })
+  })
+})
 
 describe('resolveProjectSelection', () => {
   it('keeps the explicit project ahead of the saved preference without granting access', () => {

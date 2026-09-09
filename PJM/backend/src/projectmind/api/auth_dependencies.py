@@ -120,12 +120,7 @@ async def authorize_project_access(
     except ProjectNotFoundError as error:
         raise project_not_found_problem() from error
     if require_active and project.status is not ProjectStatus.ACTIVE:
-        raise ProblemException(
-            status=status.HTTP_409_CONFLICT,
-            title="Project is archived",
-            detail="Archived projects cannot be modified.",
-            code="project_archived",
-        )
+        raise project_archived_problem()
     return project
 
 
@@ -164,6 +159,17 @@ def project_not_found_problem() -> ProblemException:
         title="Project not found",
         detail="The requested project resource was not found.",
         code="project_not_found",
+    )
+
+
+def project_archived_problem() -> ProblemException:
+    """入口検査と transaction 内の再検査で同じ帰档済み拒否を返す。"""
+
+    return ProblemException(
+        status=status.HTTP_409_CONFLICT,
+        title="Project is archived",
+        detail="Archived projects cannot be modified.",
+        code="project_archived",
     )
 
 

@@ -105,7 +105,10 @@ const STORED_SKILL_RESPONSE = {
 } as const
 
 const RUN_DETAIL_RESPONSE = {
-  ...RUN_RESPONSE,
+  run_id: RUN_RESPONSE.run_id,
+  project_id: RUN_RESPONSE.project_id,
+  task_id: RUN_RESPONSE.task_id,
+  created_at: RUN_RESPONSE.created_at,
   status: 'SUCCEEDED',
   row_version: 4,
   input: { ticket_id: 'fixture-001' },
@@ -372,7 +375,7 @@ describe('API routing contract', () => {
     const fetchMock = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(() => Promise.resolve(
       new Response(JSON.stringify(response), {
         status: 201,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotent-Replay': 'false' },
       }),
     ))
     vi.stubGlobal('fetch', fetchMock)

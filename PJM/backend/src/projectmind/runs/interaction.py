@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -19,6 +20,11 @@ from projectmind.runs.domain import (
 
 INTERACTION_REQUEST_CAPABILITY = "interaction.request/v1"
 INTERACTION_REQUEST_SDK_NAME = "mcp__projectmind__interaction_request_v1"
+ORDINARY_INTERACTION_TYPES = (
+    UserInteractionType.CLARIFICATION,
+    UserInteractionType.CHOICE,
+    UserInteractionType.REVIEW,
+)
 
 # Runtime は repository 外の contract file に依存しない。公開 Tool contract と完全一致する本文を
 # package に保持し、contract test が drift を拒否する。
@@ -42,7 +48,7 @@ INTERACTION_REQUEST_SCHEMA: dict[str, Any] = {
     ],
     "properties": {
         "interaction_type": {
-            "enum": ["CLARIFICATION", "CHOICE", "REVIEW", "EFFECT_APPROVAL"]
+            "enum": [item.value for item in ORDINARY_INTERACTION_TYPES]
         },
         "prompt": {"type": "string", "minLength": 1, "maxLength": 2000},
         "rationale": {"type": "string", "minLength": 1, "maxLength": 2000},
@@ -59,6 +65,7 @@ INTERACTION_REQUEST_SCHEMA: dict[str, Any] = {
                         "type": "string",
                         "pattern": "^[a-z][a-z0-9_.-]*$",
                         "maxLength": 128,
+                        "description": "Stable option identity, unique within this question.",
                     },
                     "label": {"type": "string", "minLength": 1, "maxLength": 200},
                     "description": {
@@ -139,6 +146,29 @@ class InteractionRequestDraft:
     checkpoint_checksum: str
 
 
+def require_ordinary_interaction(interaction_type: UserInteractionType) -> None:
+    """Proposal の承認を一般質問へ流さず、parser を通らない内部呼出しにも同じ門禁を課す。"""
+
+    if interaction_type not in ORDINARY_INTERACTION_TYPES:
+        raise InteractionResponseInvalidError("Effect approval requires the approval endpoint")
+
+
+def validate_interaction_option_keys(options: tuple[Mapping[str, Any], ...]) -> None:
+    """新規質問の key を一意にし、回答から異なる選択肢を区別できるようにする。"""
+
+    keys = [option.get("key") for option in options]
+    # JSON Schema の uniqueItems では label が異なる同一 key を拒否できない。
+    if not all(isinstance(key, str) for key in keys) or len(set(keys)) != len(keys):
+        raise InteractionResponseInvalidError("Interaction option keys must be unique strings")
+
+
+def validate_interaction_version(version: object) -> None:
+    """問題の原版を bool/小数/文字列から暗黙変換せず、正整数として扱う。"""
+
+    if type(version) is not int or version < 1:
+        raise InteractionResponseInvalidError("Interaction version must be a positive integer")
+
+
 def parse_interaction_request(
     value: Mapping[str, Any], *, now: datetime | None = None
 ) -> InteractionRequestDraft:
@@ -153,6 +183,8 @@ def parse_interaction_request(
         raise InteractionResponseInvalidError("Interaction request did not match its contract")
     if find_sensitive_key(payload) is not None or _contains_sensitive_text(payload):
         raise InteractionResponseInvalidError("Interaction request contains sensitive content")
+    options = tuple(dict(item) for item in payload["options"])
+    validate_interaction_option_keys(options)
     checkpoint = dict(payload["checkpoint"])
     current = (now or datetime.now(UTC)).astimezone(UTC)
     return InteractionRequestDraft(
@@ -163,13 +195,47 @@ def parse_interaction_request(
             "impact": str(payload["impact"]),
             "allow_multiple": bool(payload["allow_multiple"]),
         },
-        options=tuple(dict(item) for item in payload["options"]),
+        options=options,
         required=bool(payload["required"]),
         expires_at=current + timedelta(seconds=int(payload["expires_in_seconds"])),
         continuation_mode=SessionContinuationMode(str(payload["continuation_mode"])),
         checkpoint=checkpoint,
         checkpoint_checksum=f"sha256:{sha256_hex(canonical_json(checkpoint))}",
     )
+
+
+def validate_interaction_answer(response: Mapping[str, Any]) -> dict[str, Any]:
+    """HTTP と内部応答の共通形状を検査し、本文や選択順を変えずに複製する。"""
+
+    payload = dict(response)
+    if set(payload) - {"text", "selected_option_keys"}:
+        raise InteractionResponseInvalidError("Interaction response contains unknown fields")
+    text = payload.get("text")
+    selected = payload.get("selected_option_keys")
+    if "text" in payload and (not isinstance(text, str) or not 1 <= len(text) <= 10_000):
+        raise InteractionResponseInvalidError("Interaction response text is invalid")
+    if "selected_option_keys" in payload and (
+        not isinstance(selected, list)
+        or not selected
+        or len(selected) > 20
+        or not all(
+            isinstance(item, str) and len(item) <= 128
+            and re.fullmatch(r"[a-z][a-z0-9_.-]*", item) is not None
+            for item in selected
+        )
+        or len(set(selected)) != len(selected)
+    ):
+        raise InteractionResponseInvalidError("Interaction selected options are invalid")
+    if text is None and selected is None:
+        raise InteractionResponseInvalidError("Interaction response is empty")
+    if find_sensitive_key(payload) is not None or _contains_sensitive_text(payload):
+        raise InteractionResponseInvalidError("Interaction response contains sensitive content")
+    normalized: dict[str, Any] = {}
+    if isinstance(text, str):
+        normalized["text"] = text
+    if isinstance(selected, list):
+        normalized["selected_option_keys"] = list(selected)
+    return normalized
 
 
 def validate_interaction_response(
@@ -181,25 +247,9 @@ def validate_interaction_response(
 ) -> dict[str, Any]:
     """Interaction 種別と選択肢に対して user response を正規化する。"""
 
-    payload = dict(response)
-    if set(payload) - {"text", "selected_option_keys"}:
-        raise InteractionResponseInvalidError("Interaction response contains unknown fields")
-    text = payload.get("text")
-    selected = payload.get("selected_option_keys")
-    if text is not None and (not isinstance(text, str) or not 1 <= len(text) <= 10_000):
-        raise InteractionResponseInvalidError("Interaction response text is invalid")
-    if selected is not None and (
-        not isinstance(selected, list)
-        or not selected
-        or len(selected) > 20
-        or not all(isinstance(item, str) for item in selected)
-        or len(set(selected)) != len(selected)
-    ):
-        raise InteractionResponseInvalidError("Interaction selected options are invalid")
-    if text is None and selected is None:
-        raise InteractionResponseInvalidError("Interaction response is empty")
-    if find_sensitive_key(payload) is not None or _contains_sensitive_text(payload):
-        raise InteractionResponseInvalidError("Interaction response contains sensitive content")
+    require_ordinary_interaction(interaction_type)
+    normalized = validate_interaction_answer(response)
+    selected = normalized.get("selected_option_keys")
     if interaction_type is UserInteractionType.CHOICE:
         if not isinstance(selected, list):
             raise InteractionResponseInvalidError("Choice response requires selected options")
@@ -211,14 +261,6 @@ def validate_interaction_response(
             raise InteractionResponseInvalidError("Choice response accepts exactly one option")
     elif selected is not None:
         raise InteractionResponseInvalidError("This interaction does not accept option keys")
-    if interaction_type is UserInteractionType.EFFECT_APPROVAL:
-        # EFFECT_APPROVAL は S5 の Proposal version/approval endpoint だけが処理する。
-        raise InteractionResponseInvalidError("Effect approval requires the approval endpoint")
-    normalized: dict[str, Any] = {}
-    if isinstance(text, str):
-        normalized["text"] = text
-    if isinstance(selected, list):
-        normalized["selected_option_keys"] = list(selected)
     return normalized
 
 

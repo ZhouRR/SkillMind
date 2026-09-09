@@ -63,9 +63,9 @@
 
 #### R05 领域与身份安全
 
-- 状态：会话 v2/0031、登录防护、项目 CRUD 已有代码；账户链路、项目精确读取/失效链接隔离已接齐。成员管理已补业务事务重新认证、目标账户锁、0033 追加审计和 ADMIN 页面；成员审计与 Schedule 引用均阻止整项目删除。真实事务、迁移和 HTTPS 仍待验。
+- 状态：会话 v2/0031、登录防护、账户与项目精确上下文已有实现；成员管理有业务事务重新认证、0033 审计与 ADMIN 页面。项目 CRUD 已接原会话复核、0034 版本、冲突比较与未知核对；成员审计和 Schedule 阻止整项目删除。真实事务、迁移和 HTTPS 仍待验。
 - 范围：[领域](../design/domain-model.md)、[项目](../design/project-lifecycle.md)、[认证](../design/authentication.md)、[登录防护](../design/login-protection.md)、[用户](../design/user-lifecycle.md)、[Secret](../design/secret-storage.md)及相应 Web。
-- 验收：最后 ADMIN、改密/撤销及成员/禁用竞争、0031–0033、真实 Redis/DB/HTTPS、多页面与未知提交；项目版本、成员审计真实回滚、归档与创建竞争、完整删除引用和 blob 清理。TaskSchedule/成员审计的 RESTRICT 不能被“无 Run”替代。
+- 验收：最后 ADMIN、改密/撤销及成员/禁用竞争、0031–0034、真实 Redis/DB/HTTPS、多页面与未知提交；项目 CAS/成员审计真实回滚、独立项目审计、归档与创建竞争、完整删除引用和 blob 清理。TaskSchedule/成员审计的 RESTRICT 不能被“无 Run”替代。
 
 #### R06 Skill 生命周期
 
@@ -75,9 +75,9 @@
 
 #### R07 Run 与审计
 
-- 状态：主子结果、停止分类、终态复查、等待/普通事件取消检查已有代码；独立事务、持久停止核对与完整结果校验尚待收口。
+- 状态：主子结果、停止分类、终态复查、等待/普通事件取消检查已有代码。普通提问已与批准分路，答复原作者重放、原会话/Project/成员的事务内复核、锁后刷新与过期保护已接；Web 保留原请求，区分 GET 核对与人工重发，读取遭拒关闭确认。真实事务、撤权竞争、持久停止核对与完整结果校验仍待验收。
 - 范围：[Runtime](../design/agent-runtime.md)、[普通答复](../design/user-interactions.md)、[结果](../design/results-evaluation.md)、[监督](../design/run-supervision.md)；runs/worker/agent/events/evidence/evaluations/storage。
-- 验收：关闭无 Proposal 的普通批准，原 actor 重放、答复/过期竞争、真实锁/回滚/接管/提交未知、Session/Tool 审计、进程退出和 SSE；补 Artifact/效果引用校验及评价原请求确认/分页。
+- 验收：保持普通答复/合法批准分路、历史只读和原 actor 重放回归；补答复/过期与撤权竞争的真实锁/回滚/接管/提交未知，Session/Tool 审计、进程退出和 SSE；补 Artifact/效果引用校验及评价原请求确认/分页。
 
 #### R08 外部效果
 
@@ -93,13 +93,13 @@
 
 #### R10 全部 Web 页面
 
-- 状态：原请求确认、文档选择/详情、调度输入及登录已有局部基础；账户与成员管理入口已接通，共用防重/期限/旧响应隔离，领域拒绝和未知核对各自定义。App 已分离项目目标/精确授权并保留失效深链接，窄屏导航可操作；其他页面完整 mutation/未知结果隔离仍待收口。
+- 状态：原请求确认、文档选择/详情、调度输入及登录已有局部基础；账户、成员、项目 CRUD 与普通答复共用防重/期限/旧响应隔离，各自定义拒绝和未知核对。普通答复有会话/Run 内稳定原请求与三语，App 分离项目目标/精确授权并保留失效深链接和初次平台草稿；module、文档、评价与批准页面的完整 mutation/未知结果隔离仍待收口。
 - 范围：[Workspace](../design/workspace.md)与[文档管理](../design/document-lifecycle.md)；pages/components/API/hooks/lib/styles/i18n。
-- 验收：普通答复/评价/上传删除的同步防重、晚到响应和未知结果；服务端筛选/完整分页、三语、键盘、窄屏与真实用户流程。输入选择回归不能替代资产管理时序。
+- 验收：保持普通答复的切换、详情/SSE 刷新和原请求确认回归；补评价/批准/上传删除的同步防重、晚到响应和未知结果，服务端筛选/完整分页、三语、键盘、窄屏与真实用户流程。输入选择回归不能替代资产管理时序。
 
 #### R11 运维与工程工具
 
-- 状态：ENV_FILE 来源不统一、deploy 缺分阶段放行、0027 downgrade 审计风险、统一停写/清理及真实恢复尚待完成。
+- 状态：ENV_FILE 已统一到公共 Compose 入口；发布有独立 load/migrate/api/worker、daemon/project/image 与有效配置复核，0027 不再降级删子会话审计。脚本/fake 与迁移谓词回归已接；统一全实例停写/清理、实际 Docker/Make/PowerShell 与真实恢复仍待验。
 - 范围：[开发验证](../development/local-development.md)、[发布](../operations/deployment.md)、[恢复](../operations/backup-recovery.md)、[Runbook](../operations/runbook.md)；ops/migrations/scripts/images/Compose/Dockerfile。
 - 验收：锁定依赖、静态检查、迁移/回退、完整恢复点与 KEK、受引用资产清理、smoke；停止全部实例、旧队列、cron/recovery/解释写入者后再操作，dispatch=false 不构成停写证明。
 

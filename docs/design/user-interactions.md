@@ -25,18 +25,20 @@ REVIEW 不等于 Evaluation。普通答复需当前 ProjectWriteActor，批准�
 | 内容 | 规则 |
 | --- | --- |
 | prompt/rationale/impact | 公开说明，不含 hidden reasoning、系统 prompt 或 Secret |
-| options | 必须存在，可空；CHOICE 至少两项，按 allow_multiple 限制，recommended 仅提示 |
+| options | 必须存在，可空；新问题的 key 唯一，CHOICE 至少两项；按 allow_multiple 限制，recommended 仅提示 |
 | 回答 | CLARIFICATION/REVIEW 非空 text；CHOICE 选已知 key，可附 text，不经文本换绑 |
 | required/期限 | 所有普通交互暂停；过期可无信息续行。expires_at 从事件 occurred_at 解析，不按打开页面重算 |
 | checkpoint/continuation | 冻结问题依据，回答追加到新段，Session 续行另守 Runtime 兼容 |
 
 每 Run 最多一个 OPEN 交互。持久化校验 checkpoint 的 Evidence/Artifact/Proposal 归属，格式不证明可读；期限以服务端为准。
 
+旧问题若有重复选项 key，原文保留只读，不再收取无法区分含义的新答案；已有原答复仍可按原身份确认，不改旧选项、payload 或 hash。
+
 ### 普通提问不能代替外部批准
 
-当前 Tool Schema/parser 接受 EFFECT_APPROVAL，Executor 可存等待；普通答复拒绝该类型、普通过期排除它，又没有对应 Proposal，形成悬空风险。
+interaction.request 只允许 CLARIFICATION/CHOICE/REVIEW；Tool Schema、parser 与直接持久化入口使用同一限制，普通等待只能进入 WAITING_FOR_INPUT。外部效果统一 change.propose → 关联批准 → decision/Effect，不能通过普通答案取得批准。
 
-目标只允许三种普通类型从 interaction.request 进入等待；外部效果统一 change.propose → 关联批准 → decision/Effect。同步 Tool/validator/Executor/测试并审查 request 兼容，不放开通用答复批准权。共享 enum 中合法 Proposal 与旧 detail/event 仍保留可读；旧悬空记录只读辨认，不伪造批准或改表解锁。
+共享 enum 中合法 Proposal 与旧 detail/event 保持可读。旧无 Proposal 的 EFFECT_APPROVAL 只读辨认，既不接受普通答复，也不由普通过期恢复解锁；不伪造 Proposal、批准或改写历史记录。
 
 ## 三个提交边界
 
@@ -56,40 +58,51 @@ REVIEW 不等于 Evaluation。普通答复需当前 ProjectWriteActor，批准�
 
 POST /api/v1/projects/{project_id}/runs/{run_id}/interactions/{interaction_id}/responses 带当前 Session/Origin/CSRF、Idempotency-Key、interaction_version/response。入口认证与业务事务分开。
 
-Repository 按 Run → Segment → Interaction 加锁，校验类型并查询原 Response；首次还验 OPEN、原版本、当前期限及等待状态。同事务保存回答、关闭旧段、追加新段/事件/Outbox；首次 201，重放 200 + Idempotent-Replay。
+答复事务须复核入口的原会话凭据，而不是只接收 actor_id。先复用 Organization → User → AuthSession 锁序，再锁当前 Project 与 USER 的成员资格，最后按 Run → Segment → Interaction 加锁并刷新问题。ADMIN 也不能跨组织或绕过归档。
+
+Project/成员使用 FOR SHARE：阻止状态修改，同时兼容 Worker 保存 Project 外键引用需要的 KEY SHARE，避免答复等 Run、Worker 又等 Project 的锁环。模式依据 [PostgreSQL 行锁规则](https://www.postgresql.org/docs/current/explicit-locking.html#LOCKING-ROWS)；仍须真实事务验收。
+
+拿齐业务锁后，以当前时刻复查原会话、CSRF 与当前资格，再校验题型并查询原 Response；首次还验 OPEN、原版本、当前期限、Run 与原 Segment 的等待状态。同事务保存回答、关闭旧段、追加新段/事件/Outbox；flush 后再验会话期限，才允许提交。
+
+首次返回 201 / Idempotent-Replay: false，重放返回 200 / Idempotent-Replay: true，且 header 与 body 的 idempotent_replay 必须一致。详情与答复不缓存；Web 核验状态码、header、白名单字段和原 Project/Run/Interaction，而非把任意 2xx 当成功。
 
 | 身份项 | 准确边界 |
 | --- | --- |
 | interaction_version | 问题原版本，不是 Run.row_version，不刷新版本自动重发旧答案 |
 | key/hash | 按 interaction 唯一答复比较原 key 与 ID/版本/payload hash；对象键规范化，选择数组顺序不变 |
 | 重放响应 | response_id/run_segment_id 是原答复，status/row_version 是当前 Run，不强制退回 QUEUED |
-| actor | 首次存 actor_id，但当前重放 hash 未绑定它；仍需 Project 授权，不宣称仅原作者可重放 |
+| actor | 首次保存回答者；重放独立核对原 actor_id，仍须当前 Project 授权，不要求与 Run 发起人相同 |
 
-Web 必须限定原 actor/context；服务端后续收口原 actor 时审查旧 Response 的归属/重放，不改旧 hash。
+原 actor 独立比较，不加入或重算旧 request_hash。其他成员不能用相同答案/键确认别人的请求；已有答复可以在当前授权详情中阅读。首次与重放都经过上述授权门禁；答复先持锁则先完成，撤权/归档先完成则拒绝。不外推为其他业务、已有 SSE 或模型立即停权。
 
 ### 过期与拒绝响应
 
 首次答复锁后发现到期，或 Recovery 扫描到期：等待 Run 记录 EXPIRED/INTERACTION_EXPIRED、INTERACTION_TIMEOUT 新段与 dispatch，不造 Response；Run 已终态/续行时只关闭旧交互，不重开或追加末次事件之后的记录。
 
-service 在事务内捕获 InteractionExpiredError，提交过期事实后才抛 API 错误，所以 410 不等于回滚；commit 失败仍可能未知。QUEUED 也不证明 Worker 已恢复，dispatch/队列仍可阻塞。
+service 在事务内捕获 InteractionExpiredError，最终授权仍有效且过期事实已提交后才返回 410，所以 410 不等于回滚。最终认证失败则连同过期续行一起回滚并返回权限错误；commit 失败仍可能未知。QUEUED 也不证明 Worker 已恢复，dispatch/队列仍可阻塞。
 
 ## 答复界面与结果未知
 
-当前 [InteractionCard](../../PJM/web/src/components/RunResultPanel.tsx)每次 submit 生成新 key，仅 state 禁用/卸载 abort，无原答复确认，当前请求和同 tick 防重仍未闭合。
+草稿与已发送意图分开；同一浏览器页面内，以原 actor/会话/Project/Run/Interaction 为边界保留原版本、payload 与 key。答复状态只有一个所有者，不能因切换观察标签、详情重新加载，或问题从 OPEN 移到历史区而丢失。
 
-| 情况 | 待补界面规则 |
+| 情况 | 界面规则 |
 | --- | --- |
-| 编辑/发送 | 显示原问题/期限/推荐；同步 guard，冻结 actor/Project/Run/Interaction/版本/payload/key，草稿不改原请求 |
-| 确认成功 | 核对 response_id/续行，刷新当前 Run，不把重放当新段或旧状态 |
-| 409 / 410 | 分别读取已有答复/过期续行，不覆盖别人，不显示“没有发生任何变更” |
-| 422 / 身份权限失败 | 区分无效回答与实际 Problem；登录后不自动重发 |
-| 网络/超时/abort/无效响应 | 保留原请求短期确认，不自动换键或宣称 rollback |
+| 编辑/发送 | 显示原问题/期限/推荐；同步防重，共用 30 秒请求期限，发送后草稿不改原请求 |
+| 确认成功 | 回执确定原 response_id/续行；不以较旧 row_version 回退 Run，再读取当前详情 |
+| 409 / 410 | 读取原 Project/Run 详情中的原问题、已有答复与续行；不覆盖别人，不声称没有发生变更 |
+| 422 / 身份权限失败 | 用稳定 Problem 分类和三语提示，不直接显示服务端原始正文；登录后不自动重发 |
+| 网络/超时/abort/无效响应 | 保留原请求，读取当前事实；不自动重试、换键或宣称 rollback |
+| 详情刷新失败 | 保留待确认意图，不将旧详情当作当前可写资格；自动刷新与人工 GET 的明确权限拒绝均关闭确认门禁，普通读失败不证明提交失败 |
 
-每次 await/callback 前验当前身份；切账号/Project/Run/Interaction、离页后旧响应无效。Abort 不撤销服务端。原请求仅存页面内存，刷新不保证恢复，不放 URL/Web storage/日志；重新进入先读授权历史，不从本地无 key 推断未提交。
+“读取当前事实”只发送 GET；相同正文、作者或已续行都不能证明丢失的那次 POST。“确认原答复”是用户明确发起的同 key、原版本和原 payload POST：若此前已提交，返回原回执；若此前未落库，可能完成首次提交。页面必须说明这一副作用，不把它命名为纯查询。
+
+每次 await/callback 前验当前身份与请求世代；同一 ID 离开后再返回也不能接收旧结果。Abort 不撤销服务端。换账号/会话/Project/Run、离页后旧响应无效；原请求仅存页面内存，整页刷新不保证恢复，不放 URL/Web storage/日志。重新进入先读授权历史，不从本地无 key 推断未提交。
 
 ## 兼容与开发接续
 
-先关无 Proposal 的批准入口，再明确原 actor 重放和期限竞争，后补 Web 发送/未知/确认与三语。Evaluation 当前没有本协议的幂等，不能通用重发。
+这是普通提问入口的安全收窄：旧 Worker 不应继续产生 EFFECT_APPROVAL，API/Worker/Web 配套发布并停止旧写入者；历史读取 enum 与 hash 不变，不用数据迁移“修复”旧悬空等待。
+
+回答请求遵守原公开 Schema：原版本为正整数，可选字段可省略但不接受显式 null、空选择或额外字段；不对已发送正文、对象或选择顺序做新一轮整形。Web 不接受无法无损表示的整数。批准和 Evaluation 仍有独立协议，不能复用普通答复的原请求确认。
 
 ## 验收条件
 

@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["interaction_type", "prompt", "rationale", "impact", "options", "allow_multiple", "required", "expires_in_seconds", "continuation_mode", "checkpoint"],
   "properties": {
-    "interaction_type": { "enum": ["CLARIFICATION", "CHOICE", "REVIEW", "EFFECT_APPROVAL"] },
+    "interaction_type": { "enum": ["CLARIFICATION", "CHOICE", "REVIEW"] },
     "prompt": { "type": "string", "minLength": 1, "maxLength": 2000 },
     "rationale": { "type": "string", "minLength": 1, "maxLength": 2000 },
     "impact": { "type": "string", "minLength": 1, "maxLength": 2000 },
@@ -18,7 +18,7 @@
         "additionalProperties": false,
         "required": ["key", "label", "description", "recommended"],
         "properties": {
-          "key": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$", "maxLength": 128 },
+          "key": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$", "maxLength": 128, "description": "Stable option identity, unique within this question." },
           "label": { "type": "string", "minLength": 1, "maxLength": 200 },
           "description": { "type": "string", "minLength": 1, "maxLength": 1000 },
           "recommended": { "type": "boolean" }

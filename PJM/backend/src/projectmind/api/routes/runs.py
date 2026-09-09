@@ -4,20 +4,30 @@ from __future__ import annotations
 
 from datetime import datetime
 from functools import partial
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Header, Query, Request, Response, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic.json_schema import SkipJsonSchema
 
 from projectmind.api.auth_dependencies import (
     ProjectReadActor,
     ProjectWriteActor,
     ReadActor,
     WriteActor,
+    authentication_required_problem,
     authorize_project_access,
+    csrf_rejected_problem,
+    project_archived_problem,
+    project_not_found_problem,
+    user_access,
 )
-from projectmind.api.problems import ProblemException
+from projectmind.api.problems import (
+    NO_STORE_PROBLEM_HEADERS,
+    ProblemException,
+    problem_openapi_response,
+)
 from projectmind.api.routes.effects import (
     ChangeApprovalResponse,
     ChangeProposalResponse,
@@ -27,7 +37,9 @@ from projectmind.api.routes.effects import (
     proposal_response,
 )
 from projectmind.auth.service import AuthenticatedActor
+from projectmind.auth.sessions import CsrfRejectedError, UnauthorizedSessionError
 from projectmind.documents.snapshot import DocumentSelectionMode
+from projectmind.projects.domain import ProjectArchivedError, ProjectNotFoundError
 from projectmind.runs.domain import (
     AgentSessionKind,
     CancelledRun,
@@ -46,7 +58,10 @@ from projectmind.runs.domain import (
     RunStatus,
     SessionContinuationMode,
     TaskSourceSelectionError,
+    UserInteractionStatus,
+    UserInteractionType,
 )
+from projectmind.runs.interaction import validate_interaction_answer
 from projectmind.runs.resource_projection import (
     DocumentSnapshotStatus,
     RunDocumentSnapshot,
@@ -61,6 +76,29 @@ from projectmind.skills import (
 )
 
 router = APIRouter()
+
+InteractionContinuation = Literal[
+    SessionContinuationMode.RESUME, SessionContinuationMode.FORK, SessionContinuationMode.REPLACE,
+]
+_INTERACTION_PROBLEMS: dict[int | str, dict[str, Any]] = {
+    code: problem_openapi_response(description, headers=NO_STORE_PROBLEM_HEADERS)
+    for code, description in (
+        (401, "A valid session is required"),
+        (403, "Origin or CSRF rejected"),
+        (404, "Project, Run or interaction not found or inaccessible"),
+        (409, "interaction_conflict or project_archived: response or write state conflicts"),
+        (410, "interaction_expired: expiry may already be committed without a response"),
+        (422, "Invalid request or interaction_response_invalid"),
+    )
+}
+
+
+def _answer_schema(schema: dict[str, Any]) -> None:
+    """省略と null を混同せず、共通回答の存在条件を公開 Schema に明示する。"""
+
+    for field in schema["properties"].values():
+        field.pop("default", None)
+    schema["anyOf"] = [{"required": ["text"]}, {"required": ["selected_option_keys"]}]
 
 
 class CreateTaskRunRequest(BaseModel):
@@ -214,9 +252,11 @@ class AgentSessionResponse(BaseModel):
 class InteractionResponseDetail(BaseModel):
     """公開 Interaction に追加された actor 回答。"""
 
+    model_config = ConfigDict(extra="forbid")
+
     response_id: UUID
     actor_id: UUID
-    interaction_version: int
+    interaction_version: int = Field(strict=True, ge=1)
     response: dict[str, Any]
     created_at: datetime
 
@@ -224,18 +264,20 @@ class InteractionResponseDetail(BaseModel):
 class UserInteractionResponse(BaseModel):
     """Run detail に表示する公開質問、選択肢、期限と回答。"""
 
+    model_config = ConfigDict(extra="forbid")
+
     interaction_id: UUID
     run_segment_id: UUID
     agent_session_id: UUID
-    interaction_type: str
+    interaction_type: UserInteractionType
     prompt: dict[str, Any]
     options: list[dict[str, Any]]
     required: bool
     expires_at: datetime
-    status: str
-    version: int
-    continuation_mode: SessionContinuationMode
-    checkpoint_checksum: str
+    status: UserInteractionStatus
+    version: int = Field(strict=True, ge=1)
+    continuation_mode: InteractionContinuation
+    checkpoint_checksum: str = Field(pattern=r"^sha256:[a-f0-9]{64}$")
     change_proposal_id: UUID | None
     response: InteractionResponseDetail | None
     created_at: datetime
@@ -244,10 +286,20 @@ class UserInteractionResponse(BaseModel):
 class InteractionAnswer(BaseModel):
     """CLARIFICATION/CHOICE/REVIEW 共通の追加式回答 payload。"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", json_schema_extra=_answer_schema)
 
-    text: str | None = Field(default=None, min_length=1, max_length=10_000)
-    selected_option_keys: list[str] | None = Field(default=None, min_length=1, max_length=20)
+    text: Annotated[str, Field(min_length=1, max_length=10_000)] | SkipJsonSchema[None] = None
+    selected_option_keys: Annotated[
+        list[Annotated[str, Field(pattern=r"^[a-z][a-z0-9_.-]*$", max_length=128)]],
+        Field(min_length=1, max_length=20, json_schema_extra={"uniqueItems": True}),
+    ] | SkipJsonSchema[None] = None
+
+    @model_validator(mode="after")
+    def validate_shape(self) -> InteractionAnswer:
+        """空回答・明示 null・重複選択の検査を内部経路と共有する。"""
+
+        validate_interaction_answer(self.model_dump(exclude_unset=True))
+        return self
 
 
 class RespondInteractionRequest(BaseModel):
@@ -255,23 +307,44 @@ class RespondInteractionRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    interaction_version: int = Field(ge=1)
+    interaction_version: int = Field(strict=True, ge=1)
     response: InteractionAnswer
 
 
 class RespondInteractionResponse(BaseModel):
     """回答後に作成した次 Segment と Run snapshot。"""
 
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "allOf": [{
+                "if": {
+                    "properties": {"idempotent_replay": {"const": False}},
+                    "required": ["idempotent_replay"],
+                },
+                "then": {"properties": {"status": {"const": "QUEUED"}}},
+            }],
+        },
+    )
+
     run_id: UUID
     project_id: UUID
     status: RunStatus
-    row_version: int
+    row_version: int = Field(strict=True, ge=1)
     interaction_id: UUID
     response_id: UUID
     run_segment_id: UUID
-    segment_no: int
-    continuation_mode: SessionContinuationMode
-    idempotent_replay: bool
+    segment_no: int = Field(strict=True, ge=2)
+    continuation_mode: InteractionContinuation
+    idempotent_replay: bool = Field(strict=True)
+
+    @model_validator(mode="after")
+    def validate_first_response(self) -> RespondInteractionResponse:
+        """初回は新 Segment の QUEUED、重放は現在 Run の状態として区別する。"""
+
+        if not self.idempotent_replay and self.status is not RunStatus.QUEUED:
+            raise ValueError("A first interaction response must queue the Run")
+        return self
 
 
 class RunSourceSummaryResponse(BaseModel):
@@ -324,11 +397,13 @@ class RunDocumentSnapshotResponse(BaseModel):
 class RunDetailResponse(BaseModel):
     """Project-scoped Run、Result、ToolCall、Evidence の read response。"""
 
+    model_config = ConfigDict(extra="forbid")
+
     run_id: UUID
     project_id: UUID
     task_id: UUID
     status: RunStatus
-    row_version: int
+    row_version: int = Field(strict=True, ge=1)
     created_at: datetime
     input: dict[str, Any]
     selected_sources: dict[str, str | RunSourceSummaryResponse]
@@ -552,8 +627,11 @@ async def cancel_run(
 @router.get(
     "/projects/{project_id}/runs/{run_id}/detail",
     response_model=RunDetailResponse,
-    responses={404: {"description": "Run not found in project"}},
-    tags=["runs"],
+    responses={
+        200: {"headers": NO_STORE_PROBLEM_HEADERS},
+        **{code: _INTERACTION_PROBLEMS[code] for code in (401, 403, 404, 422)},
+    },
+    tags=["runs", "auth"],
 )
 async def get_run_detail(
     request: Request,
@@ -577,13 +655,24 @@ async def get_run_detail(
     response_model=RespondInteractionResponse,
     status_code=status.HTTP_201_CREATED,
     responses={
-        200: {"model": RespondInteractionResponse, "description": "Idempotent replay"},
-        404: {"description": "Run or interaction not found"},
-        409: {"description": "Interaction state or version conflict"},
-        410: {"description": "Interaction expired"},
-        422: {"description": "Response does not match interaction type"},
+        **_INTERACTION_PROBLEMS,
+        **{
+            code: {
+                "model": RespondInteractionResponse,
+                "description": (
+                    "Original response replay" if replay == "true" else "Response accepted"
+                ),
+                "headers": {
+                    **NO_STORE_PROBLEM_HEADERS,
+                    "Idempotent-Replay": {
+                        "required": True, "schema": {"type": "string", "const": replay},
+                    },
+                },
+            }
+            for code, replay in ((200, "true"), (201, "false"))
+        },
     },
-    tags=["runs"],
+    tags=["runs", "auth"],
 )
 async def respond_to_interaction(
     request: Request,
@@ -597,18 +686,33 @@ async def respond_to_interaction(
 ) -> RespondInteractionResponse:
     """Project access、version、期限を検証し、回答から次 Segment を作成する。"""
 
+    if len(request.headers.getlist("Idempotency-Key")) != 1:
+        raise ProblemException(
+            status=422,
+            title="Interaction response is invalid",
+            detail="Exactly one original Idempotency-Key is required.",
+            code="interaction_response_invalid",
+        )
     service: RunService = request.app.state.run_service
     try:
         responded = await service.respond_to_interaction(
             project_id=project_id,
             run_id=run_id,
             interaction_id=interaction_id,
-            actor_id=actor.user_id,
+            access=user_access(request, actor),
             interaction_version=body.interaction_version,
             response_json=body.response.model_dump(exclude_none=True),
             idempotency_key=idempotency_key,
             trace_id=request.state.request_id,
         )
+    except UnauthorizedSessionError as error:
+        raise authentication_required_problem() from error
+    except CsrfRejectedError as error:
+        raise csrf_rejected_problem() from error
+    except ProjectNotFoundError as error:
+        raise project_not_found_problem() from error
+    except ProjectArchivedError as error:
+        raise project_archived_problem() from error
     except InteractionNotFoundError as error:
         raise run_not_found_problem(error) from error
     except InteractionExpiredError as error:
@@ -838,14 +942,14 @@ def _run_detail_response(detail: RunDetail) -> RunDetailResponse:
                 interaction_id=item.interaction_id,
                 run_segment_id=item.run_segment_id,
                 agent_session_id=item.agent_session_id,
-                interaction_type=item.interaction_type.value,
+                interaction_type=item.interaction_type,
                 prompt=item.prompt,
                 options=list(item.options),
                 required=item.required,
                 expires_at=item.expires_at,
-                status=item.status.value,
+                status=item.status,
                 version=item.version,
-                continuation_mode=item.continuation_mode,
+                continuation_mode=cast(InteractionContinuation, item.continuation_mode),
                 checkpoint_checksum=item.checkpoint_checksum,
                 change_proposal_id=item.change_proposal_id,
                 response=(
@@ -883,7 +987,7 @@ def _responded_interaction_response(
         response_id=responded.response_id,
         run_segment_id=responded.run_segment_id,
         segment_no=responded.segment_no,
-        continuation_mode=responded.continuation_mode,
+        continuation_mode=cast(InteractionContinuation, responded.continuation_mode),
         idempotent_replay=responded.idempotent_replay,
     )
 

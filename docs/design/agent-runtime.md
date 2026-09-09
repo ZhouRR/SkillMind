@@ -142,7 +142,7 @@ RUNNING 只说明执行状态推进，READY 只说明输入回执已提交，Bri
 
 普通答复只在冻结范围内补充事实，成功答复追加 Segment。REVIEW 不等于 Evaluation，推荐不是默认回答，required=false 不自动跳过；410 也可能伴随已提交的过期续行。
 
-普通 interaction.request 仍可能接受无 Proposal 的 EFFECT_APPROVAL，Web 原答复确认也未闭合。不能通过放开通用答复的批准权限修复悬空等待。类型、期限、幂等和修正要求统一见[普通交互](user-interactions.md)。
+普通 interaction.request 只接受 CLARIFICATION/CHOICE/REVIEW；无 Proposal 的历史批准等待保持只读，不经普通答复或过期恢复解锁。原作者重放、期限竞争与页面原请求确认统一见[普通交互](user-interactions.md)，不与外部批准混用。
 
 ## 外部效果协议
 

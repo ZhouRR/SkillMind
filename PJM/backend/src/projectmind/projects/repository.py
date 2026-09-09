@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -10,6 +11,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from projectmind.auth.service import AuthenticatedActor
+from projectmind.core.hashing import canonical_json
+from projectmind.db.errors import matches_constraint
 from projectmind.db.models import (
     EffectPreauthorization,
     Integration,
@@ -28,6 +31,7 @@ from projectmind.db.models import (
 )
 from projectmind.projects.domain import (
     CreateProjectCommand,
+    ProjectArchivedError,
     ProjectDeleteBlockedError,
     ProjectKeyConflictError,
     ProjectMemberAction,
@@ -38,6 +42,8 @@ from projectmind.projects.domain import (
     StoredProjectMember,
     StoredProjectPreference,
     UpdateProjectCommand,
+    next_project_version,
+    require_project_version,
 )
 from projectmind.users.repository import lock_organization
 
@@ -55,6 +61,15 @@ _PROJECT_OWNED_MODELS = (
     Integration,
     SecretReference,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class LockedProjectAccess:
+    """同一 transaction 内で固定した現在の利用者・Project・所属を保持する。"""
+
+    user: User = field(repr=False)
+    project: Project = field(repr=False)
+    member: ProjectMember | None = field(repr=False)
 
 
 class ProjectRepository:
@@ -99,6 +114,49 @@ class ProjectRepository:
 
         project = await self._accessible_model(actor=actor, project_id=project_id)
         return self._to_stored(project)
+
+    async def lock_write_access(
+        self, *, user: User, project_id: UUID
+    ) -> LockedProjectAccess:
+        """Org→User→Session の後、Run より前に現在の Project と所属を固定する。"""
+
+        # Worker は Run を保持して Project FK の KEY SHARE を取得する。
+        # FOR UPDATE では逆順待ちになるため、FK と両立し更新を止める SHARE を使う。
+        project = await self._session.scalar(
+            select(Project)
+            .where(Project.id == project_id, Project.organization_id == user.organization_id)
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
+        )
+        if project is None:
+            raise ProjectNotFoundError("Project not found")
+        member = None
+        if user.system_role != "ADMIN":
+            member = await self._session.scalar(
+                select(ProjectMember)
+                .where(ProjectMember.project_id == project.id, ProjectMember.user_id == user.id)
+                .with_for_update(read=True)
+                .execution_options(populate_existing=True)
+            )
+        return LockedProjectAccess(user=user, project=project, member=member)
+
+    @staticmethod
+    def require_active_write_access(locked: LockedProjectAccess) -> None:
+        """所属の 404 境界を先に検査し、認可済み Project の帰档だけを 409 にする。"""
+
+        user, project, member = locked.user, locked.project, locked.member
+        if project.organization_id != user.organization_id or (
+            user.system_role != "ADMIN"
+            and (
+                member is None
+                or member.project_id != project.id
+                or member.user_id != user.id
+                or member.status != ProjectMemberStatus.ACTIVE.value
+            )
+        ):
+            raise ProjectNotFoundError("Project not found")
+        if project.status != ProjectStatus.ACTIVE.value:
+            raise ProjectArchivedError("Archived projects cannot be modified")
 
     async def get_preference(self, *, actor: AuthenticatedActor) -> StoredProjectPreference:
         """保存済み preference が現在も認可済み ACTIVE Project の場合だけ返す。"""
@@ -158,6 +216,7 @@ class ProjectRepository:
             status=ProjectStatus.ACTIVE.value,
             settings_json=command.settings,
             retention_days=command.retention_days,
+            row_version=1,
             created_at=now,
             updated_at=now,
         )
@@ -166,23 +225,42 @@ class ProjectRepository:
             # 事前確認と insert の競合も public conflict へ変換するため flush まで行う。
             await self._session.flush()
         except IntegrityError as error:
-            raise ProjectKeyConflictError(f"Project key already exists: {command.key}") from error
+            if matches_constraint(error, "uq_projects_organization_key"):
+                raise ProjectKeyConflictError("Project key already exists") from error
+            raise
         return self._to_stored(project)
 
-    async def update(
+    async def lock_project(self, *, organization_id: UUID, project_id: UUID) -> Project:
+        """共有 Org→User→Session の取得後、同組織の Project を最終の資源 lock として固定する。"""
+
+        return await self._organization_project(
+            organization_id=organization_id, project_id=project_id, lock=True,
+        )
+
+    def update(
         self,
         *,
-        organization_id: UUID,
-        project_id: UUID,
+        project: Project,
         command: UpdateProjectCommand,
+        now: datetime,
     ) -> StoredProject:
         """Project key と status を変えず、許可された metadata だけを更新する。"""
 
-        project = await self._organization_project(
-            organization_id=organization_id,
-            project_id=project_id,
-            lock=True,
-        )
+        require_project_version(project.row_version, command.expected_row_version)
+        changed = any(value is not None and value != current for value, current in (
+            (command.name, project.name),
+            (command.description, project.description),
+            (command.retention_days, project.retention_days),
+        ))
+        # Python の dict 等値では true と 1 が同じになるため、JSON の型を保って比較する。
+        if command.settings is not None:
+            changed = changed or (
+                canonical_json(command.settings) != canonical_json(project.settings_json)
+            )
+        if not changed:
+            return self._to_stored(project)
+        # 上限検査より先にどの metadata も更新しない。
+        next_version = next_project_version(project.row_version)
         if command.name is not None:
             project.name = command.name
         if command.description is not None:
@@ -191,40 +269,24 @@ class ProjectRepository:
             project.settings_json = command.settings
         if command.retention_days is not None:
             project.retention_days = command.retention_days
-        project.updated_at = datetime.now(UTC)
+        project.row_version = next_version
+        project.updated_at = now
         return self._to_stored(project)
 
-    async def archive(self, *, organization_id: UUID, project_id: UUID) -> StoredProject:
-        """監査履歴を削除せず Project を冪等に ARCHIVED へ遷移する。"""
+    def set_status(
+        self, *, project: Project, status: ProjectStatus, expected_row_version: int, now: datetime,
+    ) -> StoredProject:
+        """原版比較後に実遷移だけを増版し、同版同状態は timestamp も保存したまま返す。"""
 
-        project = await self._organization_project(
-            organization_id=organization_id,
-            project_id=project_id,
-            lock=True,
-        )
-        if project.status != ProjectStatus.ARCHIVED.value:
-            project.status = ProjectStatus.ARCHIVED.value
-            project.updated_at = datetime.now(UTC)
+        require_project_version(project.row_version, expected_row_version)
+        if project.status != status.value:
+            next_version = next_project_version(project.row_version)
+            project.status = status.value
+            project.row_version = next_version
+            project.updated_at = now
         return self._to_stored(project)
 
-    async def unarchive(self, *, organization_id: UUID, project_id: UUID) -> StoredProject:
-        """ARCHIVED Project を冪等に ACTIVE へ戻す。
-
-        key は archive 時も解放しないため、同じ key の新規作成が 409 になった利用者は
-        この復元で元の Project へ戻れる。設定と membership は archive で失っていない。
-        """
-
-        project = await self._organization_project(
-            organization_id=organization_id,
-            project_id=project_id,
-            lock=True,
-        )
-        if project.status != ProjectStatus.ACTIVE.value:
-            project.status = ProjectStatus.ACTIVE.value
-            project.updated_at = datetime.now(UTC)
-        return self._to_stored(project)
-
-    async def delete(self, *, organization_id: UUID, project_id: UUID) -> None:
+    async def delete(self, *, project: Project, expected_row_version: int) -> None:
         """Run/Schedule/所属監査を持たない ARCHIVED Project と設定 row を物理削除する。
 
         key の一意制約は status を区別しないため、archive しただけでは key を再利用できない。
@@ -233,13 +295,9 @@ class ProjectRepository:
         設定削除は全ての検査後に同一 transaction で行い、FK RESTRICT を最後の防壁に保つ。
         """
 
-        # Member/User 管理と preference も同じ gate を最初に取り、逆順 row lock を重ねない。
-        await lock_organization(self._session, organization_id)
-        project = await self._organization_project(
-            organization_id=organization_id,
-            project_id=project_id,
-            lock=True,
-        )
+        # Caller は Org→User→Session→Project を保持する。CAS は全参照判定より先に置く。
+        require_project_version(project.row_version, expected_row_version)
+        project_id, organization_id = project.id, project.organization_id
         if project.status != ProjectStatus.ARCHIVED.value:
             raise ProjectDeleteBlockedError(
                 f"Project must be archived before deletion: {project_id}",
@@ -489,6 +547,7 @@ class ProjectRepository:
             status=ProjectStatus(project.status),
             settings=dict(project.settings_json),
             retention_days=project.retention_days,
+            row_version=project.row_version,
             created_at=project.created_at,
             updated_at=project.updated_at,
         )

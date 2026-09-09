@@ -86,7 +86,7 @@ RunStep 是 STEP_* 事件的投影，不是独立持久表。RunEvent 是追加�
 | --- | --- |
 | 账户 | users / auth_sessions / user_security_events；账户 row_version 不覆盖偏好/登录时间，审计唯一键不等于 DB 禁止任意修改 |
 | Skill | skill_sources / skill_interpretations / skills / skill_versions / runtime_manifests；Blueprint 内嵌于解释与 Manifest |
-| 项目资源 | projects / project_members / project_member_events / integrations / resource_bindings / project_documents；成员审计阻止整项目删除，字节保存与数据库提交不同 |
+| 项目资源 | projects / project_members / project_member_events / integrations / resource_bindings / project_documents；Project row_version 只覆盖 metadata/归档，成员审计阻止整项目删除，字节与 DB 分别提交 |
 | 凭据 | secret_references / managed_secret_material；引用 key_version 与密文 kek_version 不是同层版本 |
 | 任务配置 | project_skill_versions、组合表、task_schedules；当前启停单行记录不代表完整历次审计，旧成员关系也不补造事件 |
 | 执行 | runs / run_skill_snapshots / run_segments / run_attempts / agent_task_brief_snapshots |

@@ -2,105 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
+from project_harness import Members
 
-from projectmind.auth.domain import generate_session_credentials
-from projectmind.auth.service import AuthenticatedActor
 from projectmind.auth.sessions import CsrfRejectedError, UnauthorizedSessionError
-from projectmind.db.models import AuthSession, Project, ProjectMember, ProjectMemberEvent, User
+from projectmind.db.models import Project, ProjectMember
 from projectmind.projects.domain import ProjectMemberNotFoundError, ProjectMemberUserNotFoundError
 from projectmind.projects.repository import ProjectRepository
-from projectmind.projects.service import ProjectService
-from projectmind.users.domain import UserAccess, UserAdministrationDeniedError
-from projectmind.users.repository import LockedUsers, UserRepository
-
-
-@dataclass
-class Members:
-    """SQL/transaction は mock と明示し、変更対象と実認証 model を観察可能にする。"""
-
-    service: ProjectService
-    session: MagicMock
-    transaction: MagicMock
-    access: UserAccess
-    locked: LockedUsers
-    project: Project
-    lock_users: AsyncMock
-
-    def member(self, status: str = "ACTIVE") -> ProjectMember:
-        """再追加前の joined_at が新しい変更時刻より前になる固定 row を作る。"""
-
-        assert self.locked.target is not None
-        before = datetime.now(UTC) - timedelta(days=1)
-        return ProjectMember(
-            id=uuid4(), project_id=self.project.id, user_id=self.locked.target.id,
-            status=status, joined_at=before, created_at=before, updated_at=before,
-        )
-
-    def queries(self, member: ProjectMember | None) -> None:
-        """Project と Member の lock query 結果のみを差し替える。"""
-
-        self.session.scalar.side_effect = [self.project, member]
-
-    def events(self) -> list[ProjectMemberEvent]:
-        """実 repository が同じ session に追加した監査だけを取り出す。"""
-
-        return [
-            call.args[0] for call in self.session.add.call_args_list
-            if isinstance(call.args[0], ProjectMemberEvent)
-        ]
-
-
-@pytest.fixture
-def members(monkeypatch: pytest.MonkeyPatch) -> Members:
-    """外部サービスを使わず、原 cookie と照合可能な現在 ADMIN/対象 User を用意する。"""
-
-    now = datetime.now(UTC)
-    organization_id = uuid4()
-    actor = User(
-        id=uuid4(), organization_id=organization_id, email="admin@example.test",
-        display_name="Admin", password_hash="unused", system_role="ADMIN", status="ACTIVE",
-        row_version=1, created_at=now, updated_at=now,
-    )
-    target = User(
-        id=uuid4(), organization_id=organization_id, email="member@example.test",
-        display_name="Member", password_hash="unused", system_role="USER", status="ACTIVE",
-        row_version=1, created_at=now, updated_at=now,
-    )
-    credentials = generate_session_credentials()
-    current = AuthSession(
-        id=uuid4(), user_id=actor.id, token_hash=credentials.session_token_hash,
-        csrf_token_hash=credentials.csrf_token_hash, credential_version=2,
-        system_role_at_login="ADMIN", idle_expires_at=now + timedelta(minutes=30),
-        absolute_expires_at=now + timedelta(hours=8), revoked_at=None,
-        created_at=now, last_seen_at=now,
-    )
-    access = UserAccess(
-        AuthenticatedActor(actor.id, organization_id, actor.email, actor.display_name, "ADMIN"),
-        uuid4(), credentials.session_token, credentials.csrf_token,
-    )
-    project = Project(
-        id=uuid4(), organization_id=organization_id, key="members", name="Members",
-        description="", status="ACTIVE", settings_json={}, retention_days=90,
-        created_at=now, updated_at=now,
-    )
-    session = MagicMock(spec=AsyncSession)
-    session.__aenter__.return_value = session
-    transaction = session.begin.return_value
-    transaction.__aexit__.return_value = False
-    locked = LockedUsers(actor, target, current, (current,))
-    lock_users = AsyncMock(return_value=locked)
-    monkeypatch.setattr(UserRepository, "lock_users", lock_users)
-    return Members(
-        ProjectService(MagicMock(return_value=session)), session, transaction,
-        access, locked, project, lock_users,
-    )
+from projectmind.users.domain import UserAdministrationDeniedError
 
 
 @pytest.mark.asyncio
@@ -131,6 +44,8 @@ async def test_first_add_records_actor_request_and_complete_before_after_state(
         access=members.access, target_id=target.id, include_target_sessions=False,
     )
     assert members.session.flush.await_count == 2
+    assert members.project.row_version == 1
+    assert members.project.updated_at == members.project.created_at
     assert [call[0] for call in members.session.mock_calls if call[0] in {"add", "flush"}] == [
         "add", "flush", "add", "flush",
     ]

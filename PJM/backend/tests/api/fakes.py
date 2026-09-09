@@ -64,6 +64,7 @@ from projectmind.projects import (
     StoredProject,
     StoredProjectMember,
 )
+from projectmind.projects.domain import require_project_version
 from projectmind.runs.domain import (
     CancelledRun,
     CreatedRun,
@@ -365,7 +366,7 @@ class FakeProjectService:
     async def create_project(
         self,
         *,
-        actor: AuthenticatedActor,
+        access: UserAccess,
         key: str,
         name: str,
         description: str,
@@ -374,7 +375,7 @@ class FakeProjectService:
     ) -> StoredProject:
         """ADMIN の入力から固定 Project read model を作成する。"""
 
-        if actor.system_role != "ADMIN":
+        if access.actor.system_role != "ADMIN":
             raise ProjectPermissionDeniedError("denied")
         now = datetime(2026, 7, 4, 12, 0, tzinfo=UTC)
         project = StoredProject(
@@ -385,6 +386,7 @@ class FakeProjectService:
             status=ProjectStatus.ACTIVE,
             settings=settings,
             retention_days=retention_days,
+            row_version=1,
             created_at=now,
             updated_at=now,
         )
@@ -394,20 +396,23 @@ class FakeProjectService:
     async def archive_project(
         self,
         *,
-        actor: AuthenticatedActor,
+        access: UserAccess,
         project_id: UUID,
+        expected_row_version: int,
     ) -> StoredProject:
         """保存済み Project を ARCHIVED read model へ置換する。"""
 
-        if actor.system_role != "ADMIN":
+        if access.actor.system_role != "ADMIN":
             raise ProjectPermissionDeniedError("denied")
         project = self.projects[project_id]
+        require_project_version(project.row_version, expected_row_version)
         archived = StoredProject(
             project_id=project.project_id,
             key=project.key,
             name=project.name,
             description=project.description,
             status=ProjectStatus.ARCHIVED,
+            row_version=project.row_version + (project.status != ProjectStatus.ARCHIVED),
             settings=project.settings,
             retention_days=project.retention_days,
             created_at=project.created_at,
@@ -419,20 +424,23 @@ class FakeProjectService:
     async def unarchive_project(
         self,
         *,
-        actor: AuthenticatedActor,
+        access: UserAccess,
         project_id: UUID,
+        expected_row_version: int,
     ) -> StoredProject:
         """保存済み Project を ACTIVE read model へ戻す。"""
 
-        if actor.system_role != "ADMIN":
+        if access.actor.system_role != "ADMIN":
             raise ProjectPermissionDeniedError("denied")
         project = self.projects[project_id]
+        require_project_version(project.row_version, expected_row_version)
         restored = StoredProject(
             project_id=project.project_id,
             key=project.key,
             name=project.name,
             description=project.description,
             status=ProjectStatus.ACTIVE,
+            row_version=project.row_version + (project.status != ProjectStatus.ACTIVE),
             settings=project.settings,
             retention_days=project.retention_days,
             created_at=project.created_at,
@@ -444,14 +452,16 @@ class FakeProjectService:
     async def delete_project(
         self,
         *,
-        actor: AuthenticatedActor,
+        access: UserAccess,
         project_id: UUID,
+        expected_row_version: int,
     ) -> None:
         """ARCHIVED Project だけを削除し、それ以外は route の 409 経路を再現する。"""
 
-        if actor.system_role != "ADMIN":
+        if access.actor.system_role != "ADMIN":
             raise ProjectPermissionDeniedError("denied")
         project = self.projects[project_id]
+        require_project_version(project.row_version, expected_row_version)
         if project.status is not ProjectStatus.ARCHIVED:
             raise ProjectDeleteBlockedError(
                 "Project must be archived before deletion",
@@ -501,6 +511,7 @@ class FakeProjectAuthorizationService:
             status=ProjectStatus.ACTIVE,
             settings={"organization_id": str(actor.organization_id)},
             retention_days=90,
+            row_version=1,
             created_at=now,
             updated_at=now,
         )
@@ -951,7 +962,7 @@ class FakeRunService:
         project_id: UUID,
         run_id: UUID,
         interaction_id: UUID,
-        actor_id: UUID,
+        access: UserAccess,
         interaction_version: int,
         response_json: dict[str, object],
         idempotency_key: str,
@@ -962,7 +973,7 @@ class FakeRunService:
         run = await self.get_run(run_id)
         if run.project_id != project_id:
             raise RunNotFoundError(f"Run not found in project: {run_id}")
-        assert actor_id
+        assert access.actor.user_id
         assert interaction_version == 1
         assert idempotency_key
         assert trace_id

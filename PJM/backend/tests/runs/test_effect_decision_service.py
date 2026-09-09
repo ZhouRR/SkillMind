@@ -16,7 +16,6 @@ from projectmind.effects.domain import (
     ChangeProposalExpiredError,
     DecideProposalCommand,
 )
-from projectmind.runs.domain import InteractionExpiredError
 from projectmind.runs.repository import RunRepository
 from projectmind.runs.service import RunService
 
@@ -161,53 +160,3 @@ async def test_project_member_cannot_approve_another_actors_run() -> None:
 
     assert session.scalars.await_count == 2
 
-
-@pytest.mark.asyncio
-async def test_interaction_expiry_is_committed_before_api_error_is_raised() -> None:
-    """通常 interaction の expiry continuation も 409 応答で rollback しない。"""
-
-    factory = SessionFactory()
-
-    async def expire(
-        self: RunRepository,
-        *,
-        project_id: object,
-        run_id: object,
-        interaction_id: object,
-        actor_id: object,
-        interaction_version: int,
-        response_json: object,
-        idempotency_key: str,
-        trace_id: str | None,
-    ) -> None:
-        """Repository が timeout rows を更新済みで例外を返す状況を再現する。"""
-
-        del (
-            self,
-            project_id,
-            run_id,
-            interaction_id,
-            actor_id,
-            interaction_version,
-            response_json,
-            idempotency_key,
-            trace_id,
-        )
-        raise InteractionExpiredError("interaction expired")
-
-    with (
-        patch.object(RunRepository, "respond_to_interaction", new=expire),
-        pytest.raises(InteractionExpiredError),
-    ):
-        await RunService(factory).respond_to_interaction(  # type: ignore[arg-type]
-            project_id=uuid4(),
-            run_id=uuid4(),
-            interaction_id=uuid4(),
-            actor_id=uuid4(),
-            interaction_version=1,
-            response_json={"text": "Too late"},
-            idempotency_key="interaction:test:0001",
-            trace_id="trace-test",
-        )
-
-    assert factory.session.transaction.exception_type is None

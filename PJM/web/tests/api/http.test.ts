@@ -5,6 +5,46 @@ import { ApiProblemError, requestApiEmpty, requestApiJson, requestApiText } from
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Problem HTTP metadata', () => {
+  it('checks the requested JSON success status without changing unversioned consumers', async () => {
+    const transport = vi.fn<typeof fetch>().mockImplementation(async () => new Response('{}', { status: 202 }))
+    vi.stubGlobal('fetch', transport)
+    await expect(requestApiJson('/fixture', {}, 201)).rejects.toMatchObject({ status: 202 })
+    await expect(requestApiJson('/fixture')).resolves.toEqual({})
+  })
+
+  it('validates the same parsed JSON and HTTP metadata without rereading the body', async () => {
+    const response = new Response('{"idempotent_replay":true}', {
+      status: 200, headers: { 'Idempotent-Replay': 'true' },
+    })
+    const json = vi.spyOn(response, 'json')
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(response))
+    const validate = vi.fn()
+    await expect(requestApiJson('/fixture', {}, { statuses: [200, 201], validate }))
+      .resolves.toEqual({ idempotent_replay: true })
+    expect(validate).toHaveBeenCalledWith({ idempotent_replay: true }, response)
+    expect(json).toHaveBeenCalledOnce()
+  })
+
+  it('does not relabel a resource contract failure as invalid JSON', async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response('{}', { status: 201 })))
+    const mismatch = new Error('metadata does not match body')
+    await expect(requestApiJson('/fixture', {}, {
+      statuses: [200, 201], validate: () => { throw mismatch },
+    })).rejects.toBe(mismatch)
+  })
+
+  it('does not run the success validator for another status or an HTTP rejection', async () => {
+    const validate = vi.fn()
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response('{}', { status: 202 }))
+      .mockResolvedValueOnce(new Response('{"code":"interaction_conflict"}', { status: 409 })))
+    await expect(requestApiJson('/fixture', {}, { statuses: [200, 201], validate }))
+      .rejects.toMatchObject({ status: 202 })
+    await expect(requestApiJson('/fixture', {}, { statuses: [200, 201], validate }))
+      .rejects.toMatchObject({ status: 409, code: 'interaction_conflict' })
+    expect(validate).not.toHaveBeenCalled()
+  })
+
   for (const [name, request] of [
     ['json', () => requestApiJson('/fixture')],
     ['empty', () => requestApiEmpty('/fixture', { method: 'POST' })],

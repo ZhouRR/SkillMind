@@ -51,6 +51,7 @@ def _project(*, organization_id: object, status: str = "ACTIVE") -> Project:
         status=status,
         settings_json={},
         retention_days=90,
+        row_version=1,
         created_at=now,
         updated_at=now,
     )
@@ -138,6 +139,7 @@ async def test_project_preference_accepts_only_accessible_active_project() -> No
 
     assert stored.project_id == project.id
     assert user.preferred_project_id == project.id
+    assert project.row_version == 1 and project.updated_at == project.created_at
     statements = [str(call.args[0]) for call in session.scalar.call_args_list]
     assert "FROM organizations" in statements[0] and "FOR UPDATE" in statements[0]
     assert "FROM users" in statements[1] and "FOR UPDATE" in statements[1]
@@ -193,13 +195,13 @@ async def test_archive_is_soft_and_idempotent() -> None:
     session = MagicMock(spec=AsyncSession)
     session.scalar = AsyncMock(return_value=project)
 
-    first = await ProjectRepository(session).archive(
-        organization_id=actor.organization_id,
-        project_id=project.id,
+    first = ProjectRepository(session).set_status(
+        project=project, status=ProjectStatus.ARCHIVED,
+        expected_row_version=1, now=datetime.now(UTC),
     )
-    second = await ProjectRepository(session).archive(
-        organization_id=actor.organization_id,
-        project_id=project.id,
+    second = ProjectRepository(session).set_status(
+        project=project, status=ProjectStatus.ARCHIVED,
+        expected_row_version=2, now=datetime.now(UTC),
     )
 
     assert first.status is ProjectStatus.ARCHIVED
@@ -304,9 +306,9 @@ async def test_unarchive_restores_archived_project_without_changing_key() -> Non
     session = MagicMock(spec=AsyncSession)
     session.scalar = AsyncMock(return_value=project)
 
-    stored = await ProjectRepository(session).unarchive(
-        organization_id=actor.organization_id,
-        project_id=project.id,
+    stored = ProjectRepository(session).set_status(
+        project=project, status=ProjectStatus.ACTIVE,
+        expected_row_version=1, now=datetime.now(UTC),
     )
 
     assert stored.status is ProjectStatus.ACTIVE
@@ -323,10 +325,7 @@ async def test_delete_requires_archived_status() -> None:
     session.scalar = AsyncMock(return_value=project)
 
     with pytest.raises(ProjectDeleteBlockedError) as raised:
-        await ProjectRepository(session).delete(
-            organization_id=actor.organization_id,
-            project_id=project.id,
-        )
+        await ProjectRepository(session).delete(project=project, expected_row_version=1)
 
     assert raised.value.blockers == ("project_not_archived",)
     session.delete.assert_not_called()
@@ -339,13 +338,10 @@ async def test_delete_is_blocked_while_run_history_exists() -> None:
     actor = _actor(role="ADMIN")
     project = _project(organization_id=actor.organization_id, status="ARCHIVED")
     session = MagicMock(spec=AsyncSession)
-    session.scalar = AsyncMock(side_effect=[object(), project, 3])
+    session.scalar = AsyncMock(side_effect=[3])
 
     with pytest.raises(ProjectDeleteBlockedError) as raised:
-        await ProjectRepository(session).delete(
-            organization_id=actor.organization_id,
-            project_id=project.id,
-        )
+        await ProjectRepository(session).delete(project=project, expected_row_version=1)
 
     assert raised.value.blockers == ("run_history_exists",)
     session.delete.assert_not_called()
@@ -359,17 +355,13 @@ async def test_delete_rejects_any_schedule_before_removing_preference_or_configu
     actor = _actor(role="ADMIN")
     project = _project(organization_id=actor.organization_id, status="ARCHIVED")
     session = MagicMock(spec=AsyncSession)
-    session.scalar = AsyncMock(side_effect=[object(), project, 0, True])
+    session.scalar = AsyncMock(side_effect=[0, True])
 
     with pytest.raises(ProjectDeleteBlockedError) as raised:
-        await ProjectRepository(session).delete(
-            organization_id=actor.organization_id, project_id=project.id,
-        )
+        await ProjectRepository(session).delete(project=project, expected_row_version=1)
 
     assert raised.value.blockers == ("task_schedule_exists",)
-    project_query = session.scalar.call_args_list[1].args[0]
-    assert "FOR UPDATE" in str(project_query.compile(dialect=postgresql.dialect()))
-    schedule_query = session.scalar.call_args_list[3].args[0]
+    schedule_query = session.scalar.call_args_list[1].args[0]
     compiled = schedule_query.compile(dialect=postgresql.dialect())
     assert "EXISTS" in str(compiled)
     assert "FROM task_schedules" in str(compiled)
@@ -391,12 +383,10 @@ async def test_schedule_lookup_database_error_is_not_reported_as_an_existing_sch
     project = _project(organization_id=actor.organization_id, status="ARCHIVED")
     failure = IntegrityError("test query", {}, RuntimeError("test database failure"))
     session = MagicMock(spec=AsyncSession)
-    session.scalar = AsyncMock(side_effect=[object(), project, 0, failure])
+    session.scalar = AsyncMock(side_effect=[0, failure])
 
     with pytest.raises(IntegrityError) as raised:
-        await ProjectRepository(session).delete(
-            organization_id=actor.organization_id, project_id=project.id,
-        )
+        await ProjectRepository(session).delete(project=project, expected_row_version=1)
 
     assert raised.value is failure
     session.execute.assert_not_called()
@@ -410,14 +400,11 @@ async def test_delete_clears_preference_and_owned_configuration_rows() -> None:
     actor = _actor(role="ADMIN")
     project = _project(organization_id=actor.organization_id, status="ARCHIVED")
     session = MagicMock(spec=AsyncSession)
-    session.scalar = AsyncMock(side_effect=[object(), project, 0, False, False])
+    session.scalar = AsyncMock(side_effect=[0, False, False])
     session.execute = AsyncMock()
     session.delete = AsyncMock()
 
-    await ProjectRepository(session).delete(
-        organization_id=actor.organization_id,
-        project_id=project.id,
-    )
+    await ProjectRepository(session).delete(project=project, expected_row_version=1)
 
     # preference の解除 1 回 + 設定 model ごとの削除。最後に Project 本体を消す。
     assert session.execute.await_count == 1 + len(_PROJECT_OWNED_MODELS)
@@ -425,22 +412,18 @@ async def test_delete_clears_preference_and_owned_configuration_rows() -> None:
 
 
 @pytest.mark.asyncio
-async def test_member_audit_blocks_delete_before_writes_and_organization_gates_project() -> None:
-    """所属監査を key 解放のために消さず、Project→User より前に共通 gate を取る。"""
+async def test_member_audit_blocks_delete_before_any_writes() -> None:
+    """取得済み Project の所属監査を key 解放のために消さず、設定変更も開始しない。"""
 
     actor = _actor(role="ADMIN")
     project = _project(organization_id=actor.organization_id, status="ARCHIVED")
     session = MagicMock(spec=AsyncSession)
-    session.scalar = AsyncMock(side_effect=[object(), project, 0, False, True])
+    session.scalar = AsyncMock(side_effect=[0, False, True])
     with pytest.raises(ProjectDeleteBlockedError) as raised:
-        await ProjectRepository(session).delete(
-            organization_id=actor.organization_id, project_id=project.id,
-        )
+        await ProjectRepository(session).delete(project=project, expected_row_version=1)
     assert raised.value.blockers == ("member_audit_exists",)
     statements = [str(call.args[0]) for call in session.scalar.call_args_list]
-    assert "FROM organizations" in statements[0] and "FOR UPDATE" in statements[0]
-    assert "FROM projects" in statements[1] and "FOR UPDATE" in statements[1]
-    assert "EXISTS" in statements[4] and "project_member_events.project_id =" in statements[4]
+    assert "EXISTS" in statements[2] and "project_member_events.project_id =" in statements[2]
     assert ProjectMemberEvent not in _PROJECT_OWNED_MODELS
     session.execute.assert_not_called()
     session.delete.assert_not_called()

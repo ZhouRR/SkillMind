@@ -425,7 +425,7 @@ async def test_interaction_response_completes_segment_and_dispatches_next() -> N
         return result
 
     locked_interaction = MagicMock()
-    locked_interaction.one.return_value = interaction
+    locked_interaction.one_or_none.return_value = interaction
     session.scalars = AsyncMock(
         side_effect=[
             one_or_none(interaction),
@@ -520,7 +520,7 @@ async def test_expired_interaction_creates_timeout_segment_without_default_respo
         return result
 
     locked_interaction = MagicMock()
-    locked_interaction.one.return_value = interaction
+    locked_interaction.one_or_none.return_value = interaction
     session.scalars = AsyncMock(
         side_effect=[
             one_or_none(interaction),

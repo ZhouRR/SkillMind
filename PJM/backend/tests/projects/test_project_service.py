@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from project_harness import Members
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from projectmind.auth.service import AuthenticatedActor
@@ -38,7 +38,7 @@ async def test_user_cannot_create_or_manage_members_before_database_access() -> 
 
     with pytest.raises(ProjectPermissionDeniedError):
         await service.create_project(
-            actor=actor,
+            access=UserAccess(actor, uuid4(), "", ""),
             key="denied",
             name="Denied",
             description="",
@@ -50,13 +50,15 @@ async def test_user_cannot_create_or_manage_members_before_database_access() -> 
             access=UserAccess(actor, uuid4(), "", ""), project_id=uuid4(), user_id=uuid4(),
         )
     with pytest.raises(ProjectPermissionDeniedError):
-        await service.delete_project(actor=actor, project_id=uuid4())
+        await service.delete_project(
+            access=UserAccess(actor, uuid4(), "", ""), project_id=uuid4(), expected_row_version=1,
+        )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("blocked", [True, False])
 async def test_delete_keeps_repository_failure_inside_the_single_transaction_boundary(
-    monkeypatch: pytest.MonkeyPatch, blocked: bool,
+    monkeypatch: pytest.MonkeyPatch, blocked: bool, members: Members,
 ) -> None:
     """参照拒否も DB 障害も同一 transaction の出口へ渡す。実 rollback の検証は別に行う。"""
 
@@ -66,22 +68,18 @@ async def test_delete_keeps_repository_failure_inside_the_single_transaction_bou
     )
     remove = AsyncMock(side_effect=failure)
     monkeypatch.setattr(ProjectRepository, "delete", remove)
-    session = MagicMock(spec=AsyncSession)
-    session.__aenter__.return_value = session
-    transaction = session.begin.return_value
-    transaction.__aexit__.return_value = False
-    factory = MagicMock(return_value=session)
-    actor = replace(_user_actor(), system_role="ADMIN")
-    project_id = uuid4()
+    session, transaction = members.session, members.transaction
+    session.scalar.side_effect = [members.project]
 
     with pytest.raises(type(failure)) as raised:
-        await ProjectService(factory).delete_project(actor=actor, project_id=project_id)
+        await members.service.delete_project(
+            access=members.access, project_id=members.project.id, expected_row_version=1,
+        )
 
     assert raised.value is failure
-    factory.assert_called_once_with()
     session.begin.assert_called_once_with()
     remove.assert_awaited_once_with(
-        organization_id=actor.organization_id, project_id=project_id,
+        project=members.project, expected_row_version=1,
     )
     transaction.__aexit__.assert_awaited_once()
     assert transaction.__aexit__.call_args.args[:2] == (type(failure), failure)

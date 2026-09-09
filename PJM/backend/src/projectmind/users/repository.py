@@ -69,6 +69,7 @@ class UserRepository:
                 )
                 .order_by(User.id)
                 .with_for_update()
+                .execution_options(populate_existing=True)
             )
         ).all()
         by_id = {user.id: user for user in users}
@@ -87,6 +88,7 @@ class UserRepository:
             (
                 await self._session.scalars(
                     select(AuthSession).where(predicate).order_by(AuthSession.id).with_for_update()
+                    .execution_options(populate_existing=True)
                 )
             ).all()
         )

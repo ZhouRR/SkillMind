@@ -53,6 +53,9 @@ EXAMPLES = {
         "runs/interaction-response/v1/request.schema.json"
     ),
     "examples/interaction-response.v1.json": ("runs/interaction-response/v1/response.schema.json"),
+    "examples/interaction-response-replay.v1.json": (
+        "runs/interaction-response/v1/response.schema.json"
+    ),
     "examples/subagent-dispatch-request.v1.json": (
         "tools/subagent.dispatch/v1/request.schema.json"
     ),
@@ -64,6 +67,8 @@ EXAMPLES = {
     "examples/project-list.v1.json": "projects/v1/list.schema.json",
     "examples/project-member.v1.json": "projects/v1/member.schema.json",
     "examples/project-member-list.v1.json": "projects/v1/member-list.schema.json",
+    "examples/project-version-request.v1.json": "projects/v1/version-request.schema.json",
+    "examples/update-project-request.v1.json": "projects/v1/update-request.schema.json",
     "examples/redmine-effect-discovery.v1.json": (
         "providers/redmine-effect/v1/discovery.schema.json"
     ),

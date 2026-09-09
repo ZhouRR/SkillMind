@@ -15,20 +15,42 @@ export class ApiProblemError extends Error {
   }
 }
 
+/** JSON body と合わせて確認する、消費済み response の公開 HTTP metadata。 */
+export interface ApiResponseMetadata {
+  status: number
+  headers: Headers
+}
+
+/** 資源固有の status/header/body 整合性も、共通 HTTP 境界内で検証する。 */
+export interface ApiJsonResponseContract {
+  statuses: readonly number[]
+  validate: (value: unknown, metadata: ApiResponseMetadata) => void
+}
+
 /** Cookie を含む JSON API request を実行し、Problem Details を型付き error に変換する。 */
-export async function requestApiJson(url: string, init: RequestInit = {}): Promise<unknown> {
+export async function requestApiJson(
+  url: string, init: RequestInit = {}, expectedStatus?: number | ApiJsonResponseContract,
+): Promise<unknown> {
   const response = await fetch(url, {
     ...init,
     credentials: 'same-origin',
     headers: { Accept: 'application/json', ...init.headers },
   })
   if (!response.ok) return throwProblemFromBody(response)
+  if (expectedStatus !== undefined && !(typeof expectedStatus === 'number'
+    ? response.status === expectedStatus : expectedStatus.statuses.includes(response.status))) {
+    throw new ApiProblemError('API returned an unexpected success status', response.status)
+  }
+  let value: unknown
   try {
-    return (await response.json()) as unknown
+    value = await response.json()
   } catch {
     // Gateway error page など非 JSON body は HTTP status を安定 message として返す。
     throw new ApiProblemError('API returned a non-JSON response', response.status)
   }
+  // 契約違反を JSON parse 失敗へ変換せず、呼出元の未知結果分類へ引き渡す。
+  if (typeof expectedStatus === 'object') expectedStatus.validate(value, response)
+  return value
 }
 
 /** Body なし API を実行し、指定された場合は受理 202 と完了 204 も区別する。 */

@@ -28,6 +28,25 @@ down_revision: str | None = "0026_frontend_module_versions"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+# 0026 の列が子種別を格納できても、旧 consumer は子の監査を解釈できない。
+# SDK 開始前の失敗・終了済みの子も残し、旧一意制約を満たす主 Session だけを戻す。
+_INCOMPATIBLE_SESSION_AUDIT = """
+    EXISTS (
+        SELECT 1 FROM agent_sessions
+        WHERE sdk_session_id IS NULL
+           OR session_kind IS DISTINCT FROM 'PRIMARY'
+           OR continuation_mode = 'BRANCH'
+    )
+    OR EXISTS (
+        SELECT 1 FROM agent_sessions
+        GROUP BY run_attempt_id HAVING COUNT(*) > 1
+    )
+    OR EXISTS (
+        SELECT 1 FROM agent_sessions WHERE status = 'ACTIVE'
+        GROUP BY run_id HAVING COUNT(*) > 1
+    )
+"""
+
 
 def upgrade() -> None:
     """二つの一意制約を PRIMARY 限定にし、session_kind と continuation_mode を固定する。"""
@@ -80,10 +99,23 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """PRIMARY 限定の制約を元の全行制約へ戻す。"""
+    """監査を一行も変更せず、0026 と互換の場合だけ全行制約へ戻す。"""
 
+    # 全インスタンスの API/Worker 停止が前提。検査後の INSERT/UPDATE も同じ
+    # DDL transaction の間だけ封じ、書込みや外部処理の停止をこの lock で代替しない。
+    op.execute("LOCK TABLE agent_sessions IN ACCESS EXCLUSIVE MODE")
+    op.execute(
+        f"""
+        DO $$
+        BEGIN
+            IF {_INCOMPATIBLE_SESSION_AUDIT} THEN
+                RAISE EXCEPTION
+                    'Cannot downgrade 0027: AgentSession audit is incompatible with 0026';
+            END IF;
+        END $$;
+        """
+    )
     op.drop_constraint("ck_agent_sessions_branch_is_subagent", "agent_sessions", type_="check")
-    op.execute("DELETE FROM agent_sessions WHERE sdk_session_id IS NULL")
     op.drop_constraint(
         "ck_agent_sessions_primary_has_sdk_session", "agent_sessions", type_="check"
     )

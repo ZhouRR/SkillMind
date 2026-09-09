@@ -6,7 +6,7 @@
 
 Python 3.12、Node.js 26 / pnpm 11.7.0 を用意する。venv は作らず Backend 依存を user site に置き、lockfile を手編集しない。導入だけでは DB/Redis/object storage は起動しない。
 
-`.env.example` は production 雛形。HTTP localhost は `PROJECTMIND_ENVIRONMENT=development`、許可 Origin、専用接続先、書込可能な Run workspace を設定する。`.env` は実行 directory 基準なので、`backend/` から親の file が自動で読まれると仮定せず、設定 file または process environment を明示する。Compose の `ENV_FILE` は別の[設定境界](../operations/deployment.md#环境文件与配置边界)を持つ。
+`.env.example` は production 雛形。HTTP localhost は `PROJECTMIND_ENVIRONMENT=development`、許可 Origin、専用接続先、書込可能な Run workspace を設定する。通常 Backend の `.env` は実行 directory 基準なので、`backend/` から親の file が自動で読まれると仮定せず、設定 file または process environment を明示する。Compose は [compose.py の共通設定入口](../operations/deployment.md#环境文件与配置边界)で ENV_FILE を同一 source に固定する。
 
 ## Backend
 
@@ -84,7 +84,11 @@ python3 tests/browser/check_projects.py \
   --url http://127.0.0.1:5189/projectmind/tests/browser/projects.html
 python3 tests/browser/check_project_members.py \
   --url http://127.0.0.1:5189/projectmind/tests/browser/projects.html
+python3 tests/browser/check_project_management.py \
+  --url http://127.0.0.1:5189/projectmind/tests/browser/projects.html
 python3 tests/browser/check_run_submission.py \
+  --url http://127.0.0.1:5189/projectmind/tests/browser/run-submission.html
+python3 tests/browser/check_interaction_responses.py \
   --url http://127.0.0.1:5189/projectmind/tests/browser/run-submission.html
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=../backend/src \
   python3 tests/browser/check_document_sources.py \
@@ -97,7 +101,9 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=../backend/src \
 | accounts | 実 AccountsPage と App の本人安全、ADMIN 管理、検索/ページング、原版比較・未知・遅延応答・会話切替。実 DB の競争、Redis、HTTPS は別 |
 | projects | 実 App の失効/空/重複 Project link、精確詳細 gate、原対象の再読取・遅延応答・帰還、帰档履歴、三語/狭幅導航。API は全 mock、実 membership/削除競争・HTTPS は別 |
 | project_members | 実 App の ADMIN 成員管理、関係/アカウント状態の区別、候補検索/page、原対象確認・未知結果の照合・遅延・切替。全 API は mock、実加入/禁用競争・監査 transaction は別 |
+| project_management | 実 App の作成/編集/帰档/復元/削除、原版比較・未知照合・初回選択・対象/会話切替、三語/keyboard/狭幅。API は全 mock、実 DB の CAS/rollback、0034 と HTTPS は別 |
 | run_submission | 実 Workspace の応答喪失、同 key/body 確認、明示的新規、actor/Project 切替・refresh。実 transaction/唯一制約は別 |
+| interaction_responses | 実 Workspace の普通答復、原要求確認、競合/期限、同 tick/30 秒/旧応答、会話/対象切替、詳細/SSE/表示 tab 更新と三語。API は全 mock、実答復/過期 transaction・撤権競争と model 停止は別 |
 | document_sources | 即時/調度入力、清単、CSRF と凍結表示。Backend 依存と純 parser は使うが、実 blob、物化、調度編集/時区/認領 crash は別 |
 
 初回導入は download を伴う。外部依存は PYTHONPATH、browser は PLAYWRIGHT_BROWSERS_PATH で指定でき、document_sources では Backend src と両方を含める。`--output` は明示した新しい工作区外 directory に screenshot を保存する。port が使用中なら奪わず別 port と URL を使い、終了時は自分の Vite だけを停止する。
@@ -109,11 +115,11 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=../backend/src \
 | Backend | `PJM/backend/`：`python3 -m ruff check .`、`python3 -m mypy src`、上記副作用確認後の pytest |
 | Web | `PJM/web/`：`node_modules/.bin/tsc -b --pretty false`、`node_modules/.bin/vitest run`、`node_modules/.bin/vite build` |
 | 契約 | `PJM/`：`python3 scripts/validate_contracts.py`。快照一致性は[契約 workflow](contract-workflow.md#遇到未接齐的交付链) |
-| Compose | `PJM/`：`python3 scripts/validate_compose.py`、Docker 利用可なら `docker compose --env-file .env config --quiet` |
+| Compose / 配備 | `PJM/`：`python3 scripts/validate_compose.py`、`python3 -m unittest discover -s scripts/tests -v`。Docker 利用可・対象確認済みなら `make config` |
 | SDK offline | `PJM/`：`PYTHONPATH=backend/src python3 scripts/probe_claude_agent_sdk.py` |
 | 文書 | `PJM/`：[文書維持](documentation.md)の build/check・回帰 |
 
-通常の config 出力には Secret が含まれ得る。実 DB skip、mock と実環境、静的検査と配備を区別し、Docker がなければ実起動/復旧は未実施と報告する。
+通常の config 出力には Secret が含まれ得る。配備工具 test は合成環境 file、tar と fake 子 process で source・引数・拒否・失敗後に進まないことを検証する。実 DB skip、mock と実環境、静的検査と配備を区別する。Docker / Make / PowerShell がない場合、それぞれ実注入・段階起動/復旧、Make 展開、Windows export の未検証を報告する。
 
 ## Skill Interpreter の検証
 

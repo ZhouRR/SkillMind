@@ -4,7 +4,6 @@ import {
   createEvaluation,
   decideChangeProposal,
   loadEvaluations,
-  respondToInteraction,
   type AgentSessionDetail,
   type ChangeProposalRecord,
   type CreateEvaluationInput,
@@ -12,27 +11,54 @@ import {
   type EvidenceDetail,
   type RespondedInteractionRecord,
   type RunDetailRecord,
-  type UserInteractionDetail,
 } from '../api'
 import { useMessages } from '../i18n'
 import { createIdempotencyKey } from '../lib/idempotency'
 import { formatLocalTimestamp } from '../lib/presentation'
+import type { InteractionAccessFailure } from '../lib/interactionResponse'
 import { splitOverflow } from '../lib/resultOverflow'
 import { EmptyState } from './PageElements'
 import { RunDocumentSnapshots } from './RunDocumentSnapshots'
+import { RunInteractions } from './RunInteractions'
+import type { SessionEnded } from '../hooks/useResourceRequest'
 
 /** Run detail 非同期読み込みの排他的 UI state。 */
 export type RunDetailState =
   | { status: 'idle' }
-  | { status: 'loading' }
+  | { status: 'loading'; detail?: RunDetailRecord }
   | { status: 'ready'; detail: RunDetailRecord }
-  | { status: 'error'; message: string }
+  | { status: 'error'; message: string; detail?: RunDetailRecord; accessFailure?: InteractionAccessFailure }
 
-/** Segment/Interaction 監査と検証済み Result、ToolCall、Evidence を標準表示する。 */
-export function RunResultPanel({ state, csrfToken, onInteractionResponded, onProposalDecided }: {
+/** 単独 read-only 表示には認証通知先が無い。実 Workspace は Session guard を渡す。 */
+const ignoreSessionExpired: SessionEnded = () => {}
+
+/** 普通答復の owner は loading/error と表示 tab に依存させない。 */
+export function RunResultPanel({ state, csrfToken, actorId = '', projectId, runId,
+  onInteractionResponded, onInteractionFacts, onProposalDecided, onSessionExpired = ignoreSessionExpired }: {
   state: RunDetailState
   csrfToken: string
+  actorId?: string
+  projectId?: string
+  runId?: string
   onInteractionResponded?: (response: RespondedInteractionRecord) => void
+  onInteractionFacts?: (detail: RunDetailRecord) => void
+  onProposalDecided?: () => void
+  onSessionExpired?: SessionEnded
+}) {
+  const detail = 'detail' in state ? state.detail : undefined
+  const scope = { actorId, projectId: projectId ?? detail?.project_id ?? '', runId: runId ?? detail?.run_id ?? '' }
+  return <>
+    <RunInteractions key={JSON.stringify([actorId, csrfToken, scope.projectId.toLowerCase(), scope.runId.toLowerCase()])}
+      scope={scope} state={state} csrfToken={csrfToken} onResponded={onInteractionResponded}
+      onFacts={onInteractionFacts} onSessionExpired={onSessionExpired} />
+    <RunResultContent state={state} csrfToken={csrfToken} onProposalDecided={onProposalDecided} />
+  </>
+}
+
+/** 普通答復とは独立した Result、Proposal、Segment/ToolCall/Evidence 監査を表示する。 */
+function RunResultContent({ state, csrfToken, onProposalDecided }: {
+  state: RunDetailState
+  csrfToken: string
   onProposalDecided?: () => void
 }) {
   const messages = useMessages()
@@ -46,8 +72,6 @@ export function RunResultPanel({ state, csrfToken, onInteractionResponded, onPro
   const result = detail.result
   // 「今あなたが動く必要があるもの」と「後から辿る記録」を分ける。前者は結果より上へ、
   // 後者は既定で畳む。同じ縦一列に全部広げると、待ち事項も結果も監査の中に埋もれる。
-  const openInteractions = detail.interactions.filter((item) => item.status === 'OPEN')
-  const settledInteractions = detail.interactions.filter((item) => item.status !== 'OPEN')
   const decidableProposals = detail.change_proposals.filter(isDecidable)
   const settledProposals = detail.change_proposals.filter((item) => !isDecidable(item))
   const versionId = detail.skill_snapshots[0]?.skill_version_id
@@ -57,9 +81,7 @@ export function RunResultPanel({ state, csrfToken, onInteractionResponded, onPro
       <PendingActionsSection
         csrfToken={csrfToken}
         detail={detail}
-        interactions={openInteractions}
         onDecided={onProposalDecided}
-        onInteractionResponded={onInteractionResponded}
         proposals={decidableProposals}
       />
       <div className="technicalToggleRow">
@@ -122,10 +144,7 @@ export function RunResultPanel({ state, csrfToken, onInteractionResponded, onPro
 
       <CollapsibleSection count={detail.segments.length} title={messages.runResult.conversationAudit}>
         <RunConversationAudit
-          csrfToken={csrfToken}
           detail={detail}
-          interactions={settledInteractions}
-          onInteractionResponded={onInteractionResponded}
         />
       </CollapsibleSection>
 
@@ -269,36 +288,25 @@ function CollapsibleSection({ title, count, children }: {
   )
 }
 
-/** 未応答の質問と未決の変更提案を結果より上へ集約する。
+/** 未決の変更提案を結果より上へ集約する。普通答復は RunInteractions が別の owner を持つ。
  *
  *  Run が回答・承認待ちで停止している時、Workspace は自動でこの画面へ切り替える。
  *  利用者は「何をすれば続くのか」を探しに来るので、監査記録の下に置いてはいけない。 */
-function PendingActionsSection({ detail, interactions, proposals, csrfToken, onInteractionResponded, onDecided }: {
+function PendingActionsSection({ detail, proposals, csrfToken, onDecided }: {
   detail: RunDetailRecord
-  interactions: UserInteractionDetail[]
   proposals: ChangeProposalRecord[]
   csrfToken: string
-  onInteractionResponded?: (response: RespondedInteractionRecord) => void
   onDecided?: () => void
 }) {
   const messages = useMessages()
-  if (interactions.length === 0 && proposals.length === 0) return null
+  if (proposals.length === 0) return null
   return (
     <section className="resultSection pendingActions">
       <div className="subsectionHeader">
         <h3>{messages.runResult.pendingTitle}</h3>
-        <span>{interactions.length + proposals.length}</span>
+        <span>{proposals.length}</span>
       </div>
       <p className="hint">{messages.runResult.pendingHint}</p>
-      {interactions.map((interaction) => (
-        <InteractionCard
-          csrfToken={csrfToken}
-          detail={detail}
-          interaction={interaction}
-          key={interaction.interaction_id}
-          onResponded={onInteractionResponded}
-        />
-      ))}
       {proposals.map((proposal) => (
         <ChangeProposalCard
           csrfToken={csrfToken}
@@ -587,14 +595,9 @@ function SessionLineageLines({ lineage }: { lineage: SessionLineage }) {
   )
 }
 
-/** Segment、Attempt、Session lineage と決着済み Interaction を記録として表示する。
- *
- *  未応答の質問は上部の「対応が必要」へ移してあるため、ここには回答済み・期限切れだけが並ぶ。 */
-function RunConversationAudit({ detail, interactions, csrfToken, onInteractionResponded }: {
+/** Segment、Attempt、Session lineage を記録として表示し、Interaction の owner は移さない。 */
+function RunConversationAudit({ detail }: {
   detail: RunDetailRecord
-  interactions: UserInteractionDetail[]
-  csrfToken: string
-  onInteractionResponded?: (response: RespondedInteractionRecord) => void
 }) {
   const messages = useMessages()
   return (
@@ -624,123 +627,10 @@ function RunConversationAudit({ detail, interactions, csrfToken, onInteractionRe
           )
         })}
       </ol>
-      {interactions.length > 0 && (
-        <div className="interactionList">
-          {interactions.map((interaction) => (
-            <InteractionCard
-              csrfToken={csrfToken}
-              detail={detail}
-              interaction={interaction}
-              key={interaction.interaction_id}
-              onResponded={onInteractionResponded}
-            />
-          ))}
-        </div>
-      )}
     </>
   )
 }
 
-/** OPEN Interaction を型別 form で一度だけ回答し、受理 snapshot を親へ通知する。 */
-function InteractionCard({ detail, interaction, csrfToken, onResponded }: {
-  detail: RunDetailRecord
-  interaction: UserInteractionDetail
-  csrfToken: string
-  onResponded?: (response: RespondedInteractionRecord) => void
-}) {
-  const messages = useMessages()
-  const [text, setText] = useState('')
-  const [selected, setSelected] = useState<string[]>([])
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const controller = useRef<AbortController | null>(null)
-  useEffect(() => () => controller.current?.abort(), [])
-
-  /** 表示中 interaction の version と選択肢を固定して response を送る。 */
-  async function handleRespond(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault()
-    controller.current?.abort()
-    const requestController = new AbortController()
-    controller.current = requestController
-    setSubmitting(true)
-    setError(null)
-    const answer = interaction.interaction_type === 'CHOICE'
-      ? { selected_option_keys: selected, ...(text.trim() ? { text: text.trim() } : {}) }
-      : { text: text.trim() }
-    try {
-      const response = await respondToInteraction(
-        detail.project_id,
-        detail.run_id,
-        interaction.interaction_id,
-        interaction.version,
-        answer,
-        createIdempotencyKey(),
-        csrfToken,
-        requestController.signal,
-      )
-      onResponded?.(response)
-    } catch (caught: unknown) {
-      if (!requestController.signal.aborted) {
-        setError(caught instanceof Error ? caught.message : 'Unknown Interaction API error')
-      }
-    } finally {
-      if (!requestController.signal.aborted) setSubmitting(false)
-    }
-  }
-
-  const allowMultiple = interaction.prompt.allow_multiple === true
-  const isOpen = interaction.status === 'OPEN'
-  return (
-    <article className={`interactionCard interaction-${interaction.status.toLowerCase()}`}>
-      <div className="segmentHeading">
-        <strong>{messages.enums.interactionType[interaction.interaction_type] ?? interaction.interaction_type}</strong>
-        <span>{messages.enums.interactionStatus[interaction.status] ?? interaction.status} · v{interaction.version}</span>
-      </div>
-      <h4>{displayText(interaction.prompt.prompt, messages.runResult.interactionNeedInput)}</h4>
-      <p>{displayText(interaction.prompt.rationale, '')}</p>
-      {displayText(interaction.prompt.impact, '') && <p className="hint">{messages.runResult.impactLine(displayText(interaction.prompt.impact, ''))}</p>}
-      <p className="hint">{messages.runResult.deadlineLine(formatLocalTimestamp(interaction.expires_at), messages.enums.continuationMode[interaction.continuation_mode] ?? interaction.continuation_mode)}</p>
-      {interaction.response && <p className="interactionAnswer">{messages.runResult.answeredLine(displayResponse(interaction.response.response))}</p>}
-      {isOpen && interaction.interaction_type === 'EFFECT_APPROVAL' && (
-        <p className="hint">{messages.runResult.effectApprovalHint}</p>
-      )}
-      {isOpen && interaction.interaction_type !== 'EFFECT_APPROVAL' && (
-        <form className="interactionForm" onSubmit={(event) => void handleRespond(event)}>
-          {interaction.interaction_type === 'CHOICE' && interaction.options.map((option) => {
-            const key = displayText(option.key, '')
-            return (
-              <label className="interactionOption" key={key}>
-                <input
-                  checked={selected.includes(key)}
-                  name={`interaction-${interaction.interaction_id}`}
-                  onChange={(event) => setSelected((current) => event.target.checked
-                    ? (allowMultiple ? [...current, key] : [key])
-                    : current.filter((item) => item !== key))}
-                  type={allowMultiple ? 'checkbox' : 'radio'}
-                  value={key}
-                />
-                <span>
-                  <strong>{displayText(option.label, key)}{option.recommended === true ? messages.runResult.recommendedSuffix : ''}</strong>
-                  {displayText(option.description, '')}
-                </span>
-              </label>
-            )
-          })}
-          {interaction.interaction_type !== 'CHOICE' && (
-            <label>{messages.runResult.yourAnswer}<textarea maxLength={10000} required value={text} onChange={(event) => setText(event.target.value)} /></label>
-          )}
-          {interaction.interaction_type === 'CHOICE' && (
-            <label>{messages.runResult.choiceNote}<textarea maxLength={10000} value={text} onChange={(event) => setText(event.target.value)} /></label>
-          )}
-          <button className="primaryButton" disabled={submitting || (interaction.interaction_type === 'CHOICE' && selected.length === 0)} type="submit">
-            {submitting ? messages.runResult.submitting : messages.runResult.submitAndContinue}
-          </button>
-          {error && <p className="error" role="alert">{error}</p>}
-        </form>
-      )}
-    </article>
-  )
-}
 
 /** Unknown 公開値を安全な表示文字列へ絞る。 */
 function displayText(value: unknown, fallback: string): string {
@@ -752,12 +642,6 @@ function shortId(value: string): string {
   return value.slice(0, 8)
 }
 
-/** 保存済み InteractionResponse を公開 field だけで簡潔表示する。 */
-function displayResponse(value: Record<string, unknown>): string {
-  const selected = stringItems(value.selected_option_keys)
-  const text = displayText(value.text, '')
-  return [selected.join(', '), text].filter(Boolean).join(' · ') || '—'
-}
 
 /** 通用 OutcomeEnvelope を task-specific business field に依存せず標準表示する。 */
 function OutcomeEnvelopeResult({ data, schema, showTechnicalDetails }: {

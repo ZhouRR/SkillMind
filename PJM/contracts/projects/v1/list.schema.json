@@ -11,7 +11,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["project_id", "key", "name", "description", "status", "settings", "retention_days", "created_at", "updated_at"],
+        "required": ["project_id", "key", "name", "description", "status", "settings", "retention_days", "row_version", "created_at", "updated_at"],
         "properties": {
           "project_id": { "type": "string", "format": "uuid" },
           "key": { "type": "string", "minLength": 1, "maxLength": 100 },
@@ -20,6 +20,7 @@
           "status": { "enum": ["ACTIVE", "ARCHIVED"] },
           "settings": { "type": "object" },
           "retention_days": { "type": "integer", "minimum": 1, "maximum": 3650 },
+          "row_version": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
           "created_at": { "type": "string", "format": "date-time" },
           "updated_at": { "type": "string", "format": "date-time" }
         }

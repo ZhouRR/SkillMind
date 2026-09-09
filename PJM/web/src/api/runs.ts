@@ -1,4 +1,5 @@
-import { API_BASE, hasStrings, isRecord, isStringArray, requestApiJson } from './http'
+import { API_BASE, ApiProblemError, exactFields, hasStrings, isRecord, isStringArray, requestApiJson } from './http'
+import { isApiTimestamp, isUuid, sameUuid } from '../lib/validation'
 import { isRunDocumentSnapshots, isRunSourceSummaries, type RunDocumentSnapshotRecord, type RunSourceSummaries } from './runResources'
 import {
   isChangeApproval,
@@ -183,7 +184,7 @@ export interface UserInteractionDetail {
   expires_at: string
   status: 'OPEN' | 'RESPONDED' | 'EXPIRED' | 'CANCELLED'
   version: number
-  continuation_mode: SessionContinuationMode
+  continuation_mode: Exclude<SessionContinuationMode, 'INITIAL' | 'BRANCH'>
   checkpoint_checksum: string
   change_proposal_id: string | null
   response: InteractionResponseDetail | null
@@ -206,7 +207,7 @@ export interface RespondedInteractionRecord {
   response_id: string
   run_segment_id: string
   segment_no: number
-  continuation_mode: SessionContinuationMode
+  continuation_mode: Exclude<SessionContinuationMode, 'INITIAL' | 'BRANCH'>
   idempotent_replay: boolean
 }
 
@@ -327,10 +328,18 @@ export async function loadRunDetail(
   runId: string,
   signal?: AbortSignal,
 ): Promise<RunDetailRecord> {
-  return parseRunDetail(await requestApiJson(
+  signal?.throwIfAborted()
+  const value = await requestApiJson(
     `${API_BASE}/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/detail`,
-    { signal },
-  ))
+    { signal, cache: 'no-store' },
+    200,
+  )
+  signal?.throwIfAborted()
+  const detail = parseRunDetail(value)
+  if (!sameUuid(detail.project_id, projectId) || !sameUuid(detail.run_id, runId)) {
+    throw new Error('Run detail response did not match its requested scope')
+  }
+  return detail
 }
 
 /** Project/CSRF/version/idempotency 境界を通して Interaction へ追加式回答を保存する。 */
@@ -344,6 +353,11 @@ export async function respondToInteraction(
   csrfToken: string,
   signal?: AbortSignal,
 ): Promise<RespondedInteractionRecord> {
+  signal?.throwIfAborted()
+  if (![projectId, runId, interactionId].every(isUuid) || !isPositiveInteger(interactionVersion)
+    || !isInteractionAnswerInput(response) || idempotencyKey.length < 1 || idempotencyKey.length > 128) {
+    throw new Error('Interaction request did not match its contract')
+  }
   const value = await requestApiJson(
     `${API_BASE}/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}`
       + `/interactions/${encodeURIComponent(interactionId)}/responses`,
@@ -356,9 +370,26 @@ export async function respondToInteraction(
       },
       body: JSON.stringify({ interaction_version: interactionVersion, response }),
       signal,
+      cache: 'no-store',
+    },
+    {
+      statuses: [201, 200],
+      validate: (body, metadata) => {
+        const replay = metadata.status === 200
+        if (!isRecord(body) || body.idempotent_replay !== replay
+          || metadata.headers.get('Idempotent-Replay') !== String(replay)) {
+          throw new ApiProblemError('Interaction response did not match its HTTP contract', metadata.status)
+        }
+      },
     },
   )
-  return parseRespondedInteraction(value)
+  signal?.throwIfAborted()
+  const record = parseRespondedInteraction(value)
+  if (!sameUuid(record.project_id, projectId) || !sameUuid(record.run_id, runId)
+    || !sameUuid(record.interaction_id, interactionId)) {
+    throw new Error('Interaction response did not match its requested scope')
+  }
+  return record
 }
 
 /** Project 内の Run history を新しい順に取得する。 */
@@ -429,9 +460,17 @@ function parseRunRecord(value: unknown): RunRecord {
 function parseRunDetail(value: unknown): RunDetailRecord {
   if (
     !isRecord(value)
+    || !exactFields(value, [
+      'run_id', 'project_id', 'task_id', 'status', 'row_version', 'created_at', 'input',
+      'selected_sources', 'document_snapshots', 'output_schema', 'output_schema_checksum',
+      'result', 'tool_calls', 'evidence', 'skill_snapshots', 'segments', 'attempts', 'sessions',
+      'interactions', 'change_proposals', 'approvals', 'effect_executions',
+    ])
     || !hasStrings(value, ['run_id', 'project_id', 'task_id', 'created_at', 'status'])
+    || ![value.run_id, value.project_id, value.task_id].every(isUuid)
+    || !isApiTimestamp(value.created_at)
     || !RUN_STATUSES.has(value.status as string)
-    || !Number.isInteger(value.row_version)
+    || !isPositiveInteger(value.row_version)
     || !isRecord(value.input)
     || !isRunSourceSummaries(value.selected_sources)
     || !isRunDocumentSnapshots(value.document_snapshots, value.project_id as string, value.selected_sources)
@@ -445,6 +484,7 @@ function parseRunDetail(value: unknown): RunDetailRecord {
     || !value.sessions.every(isAgentSessionDetail)
     || !Array.isArray(value.interactions)
     || !value.interactions.every(isUserInteractionDetail)
+    || new Set(value.interactions.map((item) => item.interaction_id.toLowerCase())).size !== value.interactions.length
     || !Array.isArray(value.change_proposals)
     || !value.change_proposals.every(isChangeProposal)
     || !Array.isArray(value.approvals)
@@ -468,20 +508,42 @@ function parseRunDetail(value: unknown): RunDetailRecord {
 function parseRespondedInteraction(value: unknown): RespondedInteractionRecord {
   if (
     !isRecord(value)
-    || !hasStrings(value, [
-      'run_id', 'project_id', 'status', 'interaction_id', 'response_id',
-      'run_segment_id', 'continuation_mode',
+    || !exactFields(value, [
+      'run_id', 'project_id', 'status', 'row_version', 'interaction_id', 'response_id',
+      'run_segment_id', 'segment_no', 'continuation_mode', 'idempotent_replay',
     ])
+    || ![value.run_id, value.project_id, value.interaction_id, value.response_id, value.run_segment_id].every(isUuid)
     || !RUN_STATUSES.has(value.status as string)
-    || !SESSION_CONTINUATION_MODES.has(value.continuation_mode as string)
-    || !Number.isInteger(value.row_version)
-    || !Number.isInteger(value.segment_no)
+    || !INTERACTION_CONTINUATION_MODES.has(value.continuation_mode as string)
+    || !isPositiveInteger(value.row_version)
+    || !isPositiveInteger(value.segment_no) || value.segment_no < 2
     || typeof value.idempotent_replay !== 'boolean'
+    || (!value.idempotent_replay && value.status !== 'QUEUED')
   ) {
     throw new Error('Interaction response did not match its contract')
   }
   return value as unknown as RespondedInteractionRecord
 }
+
+/** JavaScript で損失なく保持できる正の version/sequence だけを扱う。 */
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
+}
+
+/** 原 payload を整形せず、公開 request の形だけを確認する。型別の判断は Server が行う。 */
+function isInteractionAnswerInput(value: unknown): value is InteractionAnswerInput {
+  if (!isRecord(value) || Object.keys(value).some((key) => key !== 'text' && key !== 'selected_option_keys')) return false
+  const hasText = Object.hasOwn(value, 'text')
+  const hasOptions = Object.hasOwn(value, 'selected_option_keys')
+  return (hasText || hasOptions)
+    && (!hasText || typeof value.text === 'string' && [...value.text].length >= 1 && [...value.text].length <= 10000)
+    && (!hasOptions || isStringArray(value.selected_option_keys)
+      && value.selected_option_keys.length >= 1 && value.selected_option_keys.length <= 20
+      && new Set(value.selected_option_keys).size === value.selected_option_keys.length
+      && value.selected_option_keys.every((key) => /^[a-z][a-z0-9_.-]*$/.test(key) && key.length <= 128))
+}
+
+const INTERACTION_CONTINUATION_MODES: ReadonlySet<string> = new Set(['RESUME', 'FORK', 'REPLACE'])
 
 const SESSION_CONTINUATION_MODES: ReadonlySet<string> = new Set<SessionContinuationMode>([
   'INITIAL', 'RESUME', 'FORK', 'REPLACE', 'BRANCH',
@@ -547,19 +609,23 @@ function isAgentSessionDetail(value: unknown): value is AgentSessionDetail {
 /** Unknown object が公開 Interaction と optional response を満たすか確認する。 */
 function isUserInteractionDetail(value: unknown): value is UserInteractionDetail {
   return isRecord(value)
-    && hasStrings(value, [
-      'interaction_id', 'run_segment_id', 'agent_session_id', 'interaction_type',
-      'expires_at', 'status', 'continuation_mode', 'checkpoint_checksum', 'created_at',
+    && exactFields(value, [
+      'interaction_id', 'run_segment_id', 'agent_session_id', 'interaction_type', 'prompt', 'options',
+      'required', 'expires_at', 'status', 'version', 'continuation_mode', 'checkpoint_checksum',
+      'change_proposal_id', 'response', 'created_at',
     ])
+    && [value.interaction_id, value.run_segment_id, value.agent_session_id].every(isUuid)
+    && isApiTimestamp(value.expires_at) && isApiTimestamp(value.created_at)
+    && typeof value.checkpoint_checksum === 'string' && /^sha256:[a-f0-9]{64}$/.test(value.checkpoint_checksum)
     && INTERACTION_TYPES.has(value.interaction_type as string)
     && INTERACTION_STATUSES.has(value.status as string)
-    && SESSION_CONTINUATION_MODES.has(value.continuation_mode as string)
+    && INTERACTION_CONTINUATION_MODES.has(value.continuation_mode as string)
     && isRecord(value.prompt)
     && Array.isArray(value.options)
     && value.options.every(isRecord)
     && typeof value.required === 'boolean'
-    && Number.isInteger(value.version)
-    && (typeof value.change_proposal_id === 'string' || value.change_proposal_id === null)
+    && isPositiveInteger(value.version)
+    && (isUuid(value.change_proposal_id) || value.change_proposal_id === null)
     && (value.response === null || isInteractionResponseDetail(value.response))
 }
 
@@ -573,8 +639,9 @@ const INTERACTION_STATUSES: ReadonlySet<string> = new Set([
 /** Unknown object が追加式 InteractionResponse を満たすか確認する。 */
 function isInteractionResponseDetail(value: unknown): value is InteractionResponseDetail {
   return isRecord(value)
-    && hasStrings(value, ['response_id', 'actor_id', 'created_at'])
-    && Number.isInteger(value.interaction_version)
+    && exactFields(value, ['response_id', 'actor_id', 'interaction_version', 'response', 'created_at'])
+    && isUuid(value.response_id) && isUuid(value.actor_id) && isApiTimestamp(value.created_at)
+    && isPositiveInteger(value.interaction_version)
     && isRecord(value.response)
 }
 

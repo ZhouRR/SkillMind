@@ -16,6 +16,7 @@ from projectmind.auth.domain import (
     validate_password,
     verify_password,
 )
+from projectmind.db.errors import matches_constraint
 from projectmind.db.models import User
 from projectmind.users.access import authorize_user_access, validate_user_access
 from projectmind.users.domain import (
@@ -173,16 +174,7 @@ class UserService:
                 )
                 return UserMutationResult(repository.to_stored(user), 0, False)
         except IntegrityError as error:
-            original = error.orig
-            candidates = (
-                original,
-                getattr(original, "__cause__", None),
-                getattr(original, "diag", None),
-            )
-            if any(
-                getattr(item, "constraint_name", None) == "uq_users_organization_email"
-                for item in candidates
-            ):
+            if matches_constraint(error, "uq_users_organization_email"):
                 raise UserEmailConflictError("User email already exists") from error
             raise
 

@@ -23,6 +23,7 @@ import { useProjectContext } from './hooks/useProjectContext'
 import type { SessionEnded } from './hooks/useUserRequest'
 import { MESSAGES, type UiLanguage } from './lib/i18n/messages'
 import { resolveUiLanguage } from './lib/i18n/resolve'
+import { nextProjectManagementBoundary, projectRequestFromHash } from './lib/projectContext'
 import { sameUser } from './lib/userFeedback'
 import { AccountsPage } from './pages/AccountsPage'
 import { DocumentsPage } from './pages/DocumentsPage'
@@ -118,6 +119,13 @@ export function App() {
     messages.app.loadProjectsFailed,
   )
   const { projectId, projectState, access } = projectContext
+  const [managementBoundary, setManagementBoundary] = useState({ owner: '', selectionId: '', revision: 0 })
+  const nextManagementBoundary = nextProjectManagementBoundary(
+    managementBoundary, sessionKey, projectContext.selectionId, projectRequestFromHash(hash),
+  )
+  // Effect 後に破棄するのではなく、対象変更と同じ render で旧管理 subtree を閉じる。
+  if (nextManagementBoundary !== managementBoundary) setManagementBoundary(nextManagementBoundary)
+  const managementContextKey = `projects:${nextManagementBoundary.revision}`
 
   useEffect(() => {
     mounted.current = true
@@ -390,7 +398,8 @@ export function App() {
           modules={projectId ? currentModules : []}
         />
         <main className={route === 'accounts' ? 'shell accountsPage' : 'shell'}
-          key={`${sessionKey}:${route === 'accounts' ? `accounts:${accountContextRevision}` : projectContext.selectionId.toLowerCase()}`}>
+          key={`${sessionKey}:${route === 'accounts' ? `accounts:${accountContextRevision}`
+            : route === 'projects' ? managementContextKey : projectContext.selectionId.toLowerCase()}`}>
           {route !== 'accounts' && <ProjectContextNotice access={access} onRefresh={projectContext.refresh} />}
           {canRenderPage && renderPage(
             route,
@@ -408,6 +417,7 @@ export function App() {
             (reason) => endSession(authState.session, reason),
             accountChanged,
             projectContext.selectionId,
+            managementContextKey,
           )}
         </main>
       </div>
@@ -432,6 +442,7 @@ function renderPage(
   onSessionEnded: SessionEnded,
   onAccountChanged: (account: UserAccountRecord) => void,
   projectContextId: string,
+  managementContextKey: string,
 ): ReactNode {
   switch (route) {
     case 'accounts':
@@ -442,6 +453,7 @@ function renderPage(
       return <ProjectsPage
         currentProject={currentProject}
         projectContextId={projectContextId}
+        managementContextKey={managementContextKey}
         onSessionEnded={onSessionEnded}
         onProjectArchived={onProjectArchived}
         onProjectDeleted={onProjectArchived}
@@ -465,6 +477,7 @@ function renderPage(
         initialRunId={initialRunId}
         initialTaskId={initialTaskId}
         moduleId={activeModuleId}
+        onSessionExpired={onSessionEnded}
         projectId={projectId}
       />
     case 'history':
