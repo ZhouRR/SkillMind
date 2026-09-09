@@ -1,0 +1,18 @@
+{
+  "items": [
+    {
+      "user_id": "00000000-0000-4000-8000-000000000320",
+      "email": "member@example.test",
+      "display_name": "Project member",
+      "status": "ACTIVE",
+      "joined_at": "2026-09-09T08:00:00Z"
+    },
+    {
+      "user_id": "00000000-0000-4000-8000-000000000321",
+      "email": "former-member@example.test",
+      "display_name": "Former project member",
+      "status": "REMOVED",
+      "joined_at": "2026-09-08T08:00:00Z"
+    }
+  ]
+}

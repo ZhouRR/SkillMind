@@ -20,6 +20,23 @@ describe('ProjectsPage layout', () => {
     // 非活性 panel は hidden で DOM に残す(本 file の他断言はこの前提に依存する)。
     expect(html).toContain('hidden=""')
   })
+
+  it('provides an ADMIN members tab with an associated panel but no eager member subtree', () => {
+    const html = renderToStaticMarkup(page('ADMIN'))
+    expect(html).toContain('id="project-tab-members"')
+    expect(html).toContain('aria-controls="project-panel-members"')
+    expect(html).toContain('id="project-panel-members" aria-labelledby="project-tab-members"')
+    expect(html).toContain('data-project-tab="members"')
+    expect(html).toContain(MESSAGES.zh.projectMembers.tab)
+    expect(html).not.toContain('data-project-members=')
+  })
+
+  it('does not expose a members tab or panel to USER', () => {
+    const html = renderToStaticMarkup(page('USER'))
+    expect(html).not.toContain('project-tab-members')
+    expect(html).not.toContain('project-panel-members')
+    expect(html).not.toContain('data-project-members=')
+  })
 })
 
 describe('ProjectsPage role projection', () => {
@@ -115,6 +132,13 @@ describe('projectDeleteErrorMessage', () => {
     const error = new ApiProblemError('not archived', 409, 'project_delete_requires_archive')
 
     expect(projectDeleteErrorMessage(error, messages)).toBe(messages.projects.deleteNeedsArchive)
+  })
+
+  it.each(['zh', 'ja', 'en'] as const)('explains the membership audit deletion guard safely in %s', (language) => {
+    const error = new ApiProblemError('private audit detail', 409, 'project_delete_blocked_by_member_audit')
+    const message = projectDeleteErrorMessage(error, MESSAGES[language])
+    expect(message).toBe(MESSAGES[language].projects.deleteBlockedByMemberAudit)
+    expect(message).not.toContain('private audit detail')
   })
 
   it('keeps unexpected failures visible instead of masking them', () => {

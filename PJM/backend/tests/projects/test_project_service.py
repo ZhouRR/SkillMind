@@ -14,6 +14,7 @@ from projectmind.auth.service import AuthenticatedActor
 from projectmind.projects import ProjectPermissionDeniedError, ProjectService
 from projectmind.projects.domain import ProjectDeleteBlockedError
 from projectmind.projects.repository import ProjectRepository
+from projectmind.users.domain import UserAccess
 
 
 def _user_actor() -> AuthenticatedActor:
@@ -45,7 +46,9 @@ async def test_user_cannot_create_or_manage_members_before_database_access() -> 
             retention_days=90,
         )
     with pytest.raises(ProjectPermissionDeniedError):
-        await service.add_member(actor=actor, project_id=uuid4(), user_id=uuid4())
+        await service.add_member(
+            access=UserAccess(actor, uuid4(), "", ""), project_id=uuid4(), user_id=uuid4(),
+        )
     with pytest.raises(ProjectPermissionDeniedError):
         await service.delete_project(actor=actor, project_id=uuid4())
 

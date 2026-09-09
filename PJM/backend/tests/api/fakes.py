@@ -462,13 +462,13 @@ class FakeProjectService:
     async def add_member(
         self,
         *,
-        actor: AuthenticatedActor,
+        access: UserAccess,
         project_id: UUID,
         user_id: UUID,
     ) -> StoredProjectMember:
         """Project に固定 ACTIVE membership を追加する。"""
 
-        if actor.system_role != "ADMIN":
+        if access.actor.system_role != "ADMIN":
             raise ProjectPermissionDeniedError("denied")
         member = StoredProjectMember(
             user_id=user_id,

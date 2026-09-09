@@ -1,0 +1,36 @@
+/* Project membership の確認・未知核対を通常の候補一覧と明確に分ける。 */
+.projectMembersContent { display: grid; gap: 20px; min-width: 0; }
+.projectMembersContent[hidden] { display: none; }
+.projectMembersPanel h2, .projectMembersPanel h3, .projectMembersPanel p { margin: 0; }
+.projectMembersPanel h2 { font-size: 18px; }
+.projectMembersPanel h3 { font-size: 15px; }
+.projectMembersPanel section { display: grid; gap: 12px; min-width: 0; }
+.projectMembersPanel .panelHeader { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+.memberProjectIdentity, .memberOriginal { display: grid; gap: 6px; }
+.memberBoundaryHint, .memberIntent, .memberUnknown, .memberPreviousUnknown { border: 1px solid var(--border-strong); border-radius: var(--radius-small); padding: 14px; }
+.memberIntent, .memberUnknown { background: var(--warn-soft); }
+.memberList { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.memberCard { display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: 14px; border: 1px solid var(--border); border-radius: var(--radius-small); padding: 14px; }
+.memberCard > div { flex: 1 1 240px; min-width: 0; display: grid; gap: 6px; }
+.memberFacts { display: grid; gap: 8px; margin: 8px 0 0; }
+.memberFacts > div { display: grid; grid-template-columns: minmax(100px, .5fr) minmax(0, 1fr); gap: 12px; }
+.memberFacts dt { color: var(--text-muted); }
+.memberFacts dd { margin: 0; }
+.projectMembersPanel p, .projectMembersPanel strong, .projectMembersPanel dd, .projectMembersPanel summary { overflow-wrap: anywhere; }
+.projectMembersPanel button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.projectMembersPanel .inlineActions { flex-wrap: wrap; }
+.memberSearch { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; }
+.memberSearch label { flex: 1 1 240px; margin: 0; min-width: 0; }
+.memberSearch input { min-width: 0; }
+.memberNotice { border: 1px solid var(--danger); border-radius: var(--radius-small); padding: 12px; overflow-wrap: anywhere; }
+.memberNotice:focus, .projectMembersPanel h3:focus { outline: 2px solid var(--accent); outline-offset: 3px; }
+.memberReviewFacts { display: grid; gap: 12px; }
+.memberAcknowledgment { display: flex; gap: 10px; align-items: flex-start; margin: 0; }
+.memberAcknowledgment input { width: 18px; height: 18px; flex: 0 0 18px; margin-top: 3px; }
+.memberPreviousUnknown summary { cursor: pointer; }
+.memberPreviousUnknown .memberOriginal { margin-top: 12px; }
+@media (max-width: 600px) {
+  .projectMembersPanel { padding: 14px; }
+  .projectMembersPanel button, .memberSearch input { min-height: 44px; }
+  .memberFacts > div { grid-template-columns: minmax(86px, .5fr) minmax(0, 1fr); gap: 8px; }
+}

@@ -17,6 +17,19 @@ from projectmind.auth.service import (
 )
 from projectmind.core.settings import Settings
 from projectmind.projects import ProjectNotFoundError, ProjectService, ProjectStatus, StoredProject
+from projectmind.users.domain import UserAccess
+
+
+def user_access(request: Request, actor: AuthenticatedActor) -> UserAccess:
+    """入口 actor と原 credential を内部再認証へ渡し、公開 JSON と混ぜない。"""
+
+    settings: Settings = request.app.state.settings
+    return UserAccess(
+        actor=actor,
+        request_id=UUID(request.state.request_id),
+        session_token=request.cookies.get(settings.auth_session_cookie_name, ""),
+        csrf_token=request.headers.get("X-CSRF-Token", ""),
+    )
 
 
 async def authenticated_actor(request: Request) -> AuthenticatedActor:

@@ -23,6 +23,13 @@ class ProjectMemberStatus(StrEnum):
     REMOVED = "REMOVED"
 
 
+class ProjectMemberAction(StrEnum):
+    """所属関係の実変更だけを記録する監査操作。"""
+
+    ADDED = "ADDED"
+    REMOVED = "REMOVED"
+
+
 class ProjectNotFoundError(RuntimeError):
     """Project が存在しないか actor から参照できない場合の domain error。"""
 
@@ -46,7 +53,7 @@ class ProjectMemberNotFoundError(RuntimeError):
 class ProjectDeleteBlockedError(RuntimeError):
     """Project を物理削除できない状態を表す domain error。
 
-    Run と監査記録は削除で復元できないため、ARCHIVED でない、または Run/Schedule が残る
+    Run と監査記録は削除で復元できないため、ARCHIVED でない、または Run/Schedule/所属監査が残る
     Project は key を解放するためであっても消させない。``blockers`` は安定した公開拒否へ
     対応する識別子であり、参照を削除して制約を回避してよいという指示ではない。
     """

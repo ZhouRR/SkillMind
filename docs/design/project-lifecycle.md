@@ -21,9 +21,19 @@
 
 ### 成员管理的现状与目标
 
-ADMIN API 可列出/添加同组织 ACTIVE 用户/移除成员；列表含两种关系状态，无分页和独立用户状态，不把 membership ACTIVE 显示成账户已启用。
+ADMIN API 可列出/添加同组织 ACTIVE 用户/移除成员；列表含两种关系状态，无分页和独立用户状态，不把 membership ACTIVE 显示成账户已启用。响应使用公开字段白名单与 no-store。
 
-重新添加 REMOVED 复用行并刷新 joined_at，重复添加 ACTIVE 返回原行，重复移除为 404；这不是完整加入/移除审计。目标将 actor、前后状态、关联 ID 与变更同事务保存，提交前保证目标账户仍有效。当前查询 User.status 未持有目标 User 锁到提交，禁用/加入竞争尚需闭合。
+重新添加 REMOVED 复用行并刷新 joined_at；重复添加 ACTIVE 返回原行，不追加事件；重复移除为 404。移除账户已停用用户的关系仍允许，不改变账户本身。
+
+成员写入复用[用户事务](user-lifecycle.md#事务与并发)的 Organization → User（actor/target 去重排序）→ 原 AuthSession，再锁 Project → ProjectMember。锁后与 flush 后以新时刻复查原会话、ADMIN 和 CSRF；目标账户在持锁状态下检查 ACTIVE，锁保持到提交。偏好写入和项目删除也先取同一 Organization gate，避免 User → Project 引用与 Project → User 清理形成反向锁环。这不是全站授权或真实并发验收的证明。
+
+关系变化与 project_member_events 一起提交或回滚：保存组织/项目/关系/目标/actor ID、ADDED/REMOVED、前后 status/joined_at、服务器生成 request UUID 与时间，不记录密码或任意正文。0033 只记录新操作，不由现有关系补造旧历史；有任何事件即拒绝降级丢表。request UUID 不是幂等键，当前没有成员审计查询 API，当前关系与原操作结果须区分。
+
+### 成员管理页面
+
+项目管理的成员页签仅向 ADMIN 提供；以精确已授权项目为边界，归档项目可读/移除但不可添加。候选复用组织账户的服务端搜索和分页，显示账户角色/状态，停用账户不可添加，不过滤第一页冒充全量。成员列表单独标明关系状态与 ADMIN 权限例外。
+
+添加、重新添加和移除先确认原项目/用户，每次只允许一个写请求。超时、中断、断连或成功响应损坏均为结果未知，不自动重放，也不把当前关系符合目标解释为原请求成功。用户显式重读原成员列表与精确账户、两项均成功后才能人工解除新写门禁；解除不执行原动作。切换页签或同项目资格刷新保留未知状态，重新确认资格期间暂停交互并中断在途写为未知；换 actor/项目或离页不迁移旧请求，页面不承诺跨刷新恢复。
 
 ## 项目选择与失效链接
 
@@ -60,7 +70,16 @@ metadata/归档/恢复锁 Project，但没有 expected_row_version 或独立审�
 
 ## 删除与数据保留
 
-当前 ADMIN 锁 Project，要求 ARCHIVED 且无 Run/TaskSchedule，删除 preference 与列举配置再删除项目；未归档、有 Run、有 Schedule 分别返回 project_delete_requires_archive/project_delete_blocked_by_runs/project_delete_blocked_by_schedules，成功 204。Schedule 检查不按状态、是否发火或认领字段过滤，拒绝发生在任何关系删除之前。不是回收站，前置也不是完整可删证明。
+当前 ADMIN 先锁 Organization、再锁 Project，要求 ARCHIVED 且无 Run/TaskSchedule/成员审计，删除 preference 与列举配置再删除项目；成功 204。拒绝发生在任何关系删除之前：
+
+| 阻止条件 | Problem code |
+| --- | --- |
+| 未归档 | project_delete_requires_archive |
+| 存在 Run | project_delete_blocked_by_runs |
+| 存在任意状态/发火/认领阶段的 Schedule | project_delete_blocked_by_schedules |
+| 存在成员变更审计 | project_delete_blocked_by_member_audit |
+
+不为释放 key 删除审计或放宽 FK RESTRICT；这些前置不是完整可删证明，也不是回收站。
 
 | 已知缺口 | 风险 |
 | --- | --- |
@@ -82,7 +101,7 @@ metadata/归档/恢复锁 Project，但没有 expected_row_version 或独立审�
 
 ## 开发接续与验收
 
-入口：[项目实现](../../PJM/backend/src/projectmind/projects/)、[ProjectsPage](../../PJM/web/src/pages/ProjectsPage.tsx)、[契约](../../PJM/README.md#contracts)。页面已有创建/编辑/归档/恢复/删除，成员 API/client 尚无正式 UI。
+入口：[项目实现](../../PJM/backend/src/projectmind/projects/)、[ProjectsPage](../../PJM/web/src/pages/ProjectsPage.tsx)、[契约](../../PJM/README.md#contracts)。成员页复用账户查询和共用请求边界；项目元数据、归档/恢复、删除的统一版本与完整未知结果处理继续接续，不以成员页回归代替。
 
 - 失效成员、ADMIN membership、跨组织分别授权，旧 Run 身份不变。
 - 实 DB 验证成员加入/禁用、归档/Run/Schedule/删除竞争、版本冲突与审计回滚。

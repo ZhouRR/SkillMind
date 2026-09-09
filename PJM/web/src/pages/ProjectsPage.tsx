@@ -3,6 +3,8 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'rea
 import type { ProjectState } from '../appState'
 import type { AuthSessionRecord } from '../api'
 import { EmptyState, LoadingSkeleton, PageHeader, useConfirmDialog } from '../components/PageElements'
+import { ProjectMembersPanel } from '../components/ProjectMembersPanel'
+import type { SessionEnded } from '../hooks/useResourceRequest'
 import { useMessages } from '../i18n'
 import type { UiMessages } from '../lib/i18n/messages'
 import { routeHref } from '../lib/routing'
@@ -29,8 +31,8 @@ type ModulesState =
   | { status: 'ready'; modules: ProjectModuleRecord[] }
   | { status: 'error'; message: string }
 
-/** 項目管理画面の 3 区分。同時に一つだけ見せ、縦積みを解消する。 */
-type ProjectsPageTab = 'projects' | 'archived' | 'modules'
+/** 項目管理画面の対象別区分。同時に一つだけ見せ、縦積みを解消する。 */
+type ProjectsPageTab = 'projects' | 'archived' | 'modules' | 'members'
 
 /** アーカイブ済み Project 一覧の非同期状態。 */
 type ArchivedProjectsState =
@@ -47,6 +49,7 @@ export function projectDeleteErrorMessage(error: unknown, messages: UiMessages):
   if (error instanceof ApiProblemError) {
     if (error.code === 'project_delete_blocked_by_runs') return messages.projects.deleteBlockedByRuns
     if (error.code === 'project_delete_blocked_by_schedules') return messages.projects.deleteBlockedBySchedules
+    if (error.code === 'project_delete_blocked_by_member_audit') return messages.projects.deleteBlockedByMemberAudit
     if (error.code === 'project_delete_requires_archive') return messages.projects.deleteNeedsArchive
   }
   return error instanceof Error ? error.message : messages.projects.deleteFailed
@@ -79,6 +82,9 @@ export function ProjectsPage({
   setProjectId,
   session,
   projectState,
+  projectContextId,
+  currentProject,
+  onSessionEnded,
   onProjectChanged,
   onProjectArchived,
   onProjectDeleted,
@@ -87,6 +93,10 @@ export function ProjectsPage({
   setProjectId: (projectId: string) => void
   session: AuthSessionRecord
   projectState: ProjectState
+  /** 認可読取中も維持する同一 Project の境界。読取成功の証明としては使わない。 */
+  projectContextId?: string
+  currentProject?: ProjectRecord | null
+  onSessionEnded?: SessionEnded
   onProjectChanged: (project: ProjectRecord) => void
   onProjectArchived: (project: ProjectRecord) => void
   onProjectDeleted?: (project: ProjectRecord) => void
@@ -100,6 +110,7 @@ export function ProjectsPage({
   // アーカイブ済みを混ぜると、実行できない Project を選べてしまうため分離する。
   const [archivedRevision, setArchivedRevision] = useState(0)
   const [pageTab, setPageTab] = useState<ProjectsPageTab>('projects')
+  const [membersOpened, setMembersOpened] = useState(false)
   const { confirm, confirmDialog } = useConfirmDialog()
   const mounted = useRef(true)
   useEffect(() => {
@@ -170,29 +181,36 @@ export function ProjectsPage({
   }
 
   const projects = projectState.status === 'ready' ? projectState.projects : []
+  /** 成員は最初に開いたときだけ mount し、その後の tab 切替では未知要求を保持する。 */
+  function selectPageTab(tab: ProjectsPageTab): void {
+    if (tab === 'members') setMembersOpened(true)
+    setPageTab(tab)
+  }
   return (
     <>
       <PageHeader
         title={messages.routes.projects.label}
         description={messages.projects.description}
       />
-      {/* 項目・アーカイブ・模块を tab で分け、1 画面 3 段の縦積みを解消する。
-          非活性側も hidden で DOM に残す(頁面測試の toContain と入力途中の保持のため)。 */}
+      {/* 非活性側は hidden で保持し、tab 切替で元の確認・未知要求を破棄しない。 */}
       <div className="tabBar" role="tablist" aria-label={messages.projects.pageTabsAria}>
-        <ProjectsTabButton current={pageTab} tab="projects" onSelect={setPageTab}>
+        <ProjectsTabButton current={pageTab} tab="projects" onSelect={selectPageTab}>
           {messages.projects.tabProjects}
           <span className="eventCount">{projects.length}</span>
         </ProjectsTabButton>
         {session.user.system_role === 'ADMIN' && (
-          <ProjectsTabButton current={pageTab} tab="archived" onSelect={setPageTab}>
+          <ProjectsTabButton current={pageTab} tab="archived" onSelect={selectPageTab}>
             {messages.projects.tabArchived}
           </ProjectsTabButton>
         )}
-        <ProjectsTabButton current={pageTab} tab="modules" onSelect={setPageTab}>
+        <ProjectsTabButton current={pageTab} tab="modules" onSelect={selectPageTab}>
           {messages.projects.tabModules}
         </ProjectsTabButton>
+        {session.user.system_role === 'ADMIN' && <ProjectsTabButton current={pageTab} tab="members" onSelect={selectPageTab}>
+          {messages.projectMembers.tab}
+        </ProjectsTabButton>}
       </div>
-      <section className="projectManagementLayout tabPanel" role="tabpanel" hidden={pageTab !== 'projects'}>
+      <section className="projectManagementLayout tabPanel" id="project-panel-projects" aria-labelledby="project-tab-projects" role="tabpanel" hidden={pageTab !== 'projects'}>
         <section className="panel">
           <div className="panelHeader"><h2>{messages.projects.accessible}</h2><span className="eventCount">{projects.length}</span></div>
           {projectState.status === 'loading' && <LoadingSkeleton label={messages.projects.loadingList} rows={3} />}
@@ -246,7 +264,7 @@ export function ProjectsPage({
         </aside>
       </section>
       {session.user.system_role === 'ADMIN' && (
-        <div className="tabPanel" role="tabpanel" hidden={pageTab !== 'archived'}>
+        <div className="tabPanel" id="project-panel-archived" aria-labelledby="project-tab-archived" role="tabpanel" hidden={pageTab !== 'archived'}>
           <ArchivedProjectsSection
             onDeleted={onProjectDeleted}
             onRestored={(project) => { onProjectChanged(project); setArchivedRevision((current) => current + 1) }}
@@ -255,11 +273,16 @@ export function ProjectsPage({
           />
         </div>
       )}
-      <div className="tabPanel" role="tabpanel" hidden={pageTab !== 'modules'}>
+      <div className="tabPanel" id="project-panel-modules" aria-labelledby="project-tab-modules" role="tabpanel" hidden={pageTab !== 'modules'}>
         {projectId
           ? <ModulesSection projectId={projectId} session={session} />
           : <EmptyState text={messages.projects.modulesNeedProject} />}
       </div>
+      {session.user.system_role === 'ADMIN' && <div className="tabPanel" id="project-panel-members" aria-labelledby="project-tab-members" role="tabpanel" hidden={pageTab !== 'members'}>
+        {membersOpened && <ProjectMembersPanel
+          projectContextId={projectContextId ?? currentProject?.project_id ?? projectId}
+          currentProject={currentProject} session={session} onSessionEnded={onSessionEnded ?? (() => {})} />}
+      </div>}
       {confirmDialog}
     </>
   )
@@ -275,9 +298,25 @@ function ProjectsTabButton({ current, tab, onSelect, children }: {
   return (
     <button
       aria-selected={current === tab}
+      aria-controls={`project-panel-${tab}`}
       className="tab"
+      data-project-tab={tab}
+      id={`project-tab-${tab}`}
       onClick={() => onSelect(tab)}
+      onKeyDown={(event) => {
+        // 同じ tablist 内だけを移動し、読込や未知状態を持つ panel は再 mount しない。
+        const buttons = Array.from(event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [])
+        const index = buttons.indexOf(event.currentTarget)
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1
+          : event.key === 'ArrowRight' ? (index + 1) % buttons.length
+            : event.key === 'ArrowLeft' ? (index + buttons.length - 1) % buttons.length : null
+        if (next === null) return
+        event.preventDefault()
+        buttons[next]?.focus()
+        buttons[next]?.click()
+      }}
       role="tab"
+      tabIndex={current === tab ? 0 : -1}
       type="button"
     >
       {children}

@@ -33,6 +33,16 @@ class LockedUsers:
     sessions: tuple[AuthSession, ...] = field(repr=False)
 
 
+async def lock_organization(session: AsyncSession, organization_id: UUID) -> None:
+    """User 管理・Project 削除・preference の逆順 FK lock を組織 gate で串行化する。"""
+
+    organization = await session.scalar(
+        select(Organization).where(Organization.id == organization_id).with_for_update()
+    )
+    if organization is None:
+        raise UnauthorizedSessionError("Authentication is required")
+
+
 class UserRepository:
     """Organization → ID 順 User → ID 順 Session で管理操作を串行化する。"""
 
@@ -46,13 +56,7 @@ class UserRepository:
     ) -> LockedUsers:
         """認証時の actor を信用せず、原会話と必要な全 row を固定順で読み直す。"""
 
-        organization = await self._session.scalar(
-            select(Organization)
-            .where(Organization.id == access.actor.organization_id)
-            .with_for_update()
-        )
-        if organization is None:
-            raise UnauthorizedSessionError("Authentication is required")
+        await lock_organization(self._session, access.actor.organization_id)
         user_ids = {access.actor.user_id}
         if target_id is not None:
             user_ids.add(target_id)

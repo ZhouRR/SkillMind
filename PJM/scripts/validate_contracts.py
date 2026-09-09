@@ -68,6 +68,7 @@ EXAMPLE_CONTRACTS = {
     "examples/project.v1.json": "projects/v1/project.schema.json",
     "examples/project-list.v1.json": "projects/v1/list.schema.json",
     "examples/project-member.v1.json": "projects/v1/member.schema.json",
+    "examples/project-member-list.v1.json": "projects/v1/member-list.schema.json",
     "examples/redmine-effect-discovery.v1.json": (
         "providers/redmine-effect/v1/discovery.schema.json"
     ),

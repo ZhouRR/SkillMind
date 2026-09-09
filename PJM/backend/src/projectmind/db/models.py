@@ -161,6 +161,48 @@ class ProjectMember(IdentityMixin, TimestampMixin, Base):
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class ProjectMemberEvent(IdentityMixin, Base):
+    """Credential や任意 metadata を保存せず、所属の変更前後を追加式で保持する。"""
+
+    __tablename__ = "project_member_events"
+    __table_args__ = (
+        CheckConstraint(
+            "(action = 'ADDED' AND status = 'ACTIVE' AND "
+            "(previous_status IS NULL OR previous_status = 'REMOVED')) OR "
+            "(action = 'REMOVED' AND status = 'REMOVED' AND "
+            "previous_status IS NOT NULL AND previous_status = 'ACTIVE')",
+            name="project_member_events_transition",
+        ),
+        CheckConstraint(
+            "(previous_status IS NULL) = (previous_joined_at IS NULL)",
+            name="project_member_events_previous_state",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    member_id: Mapped[UUID] = mapped_column(
+        ForeignKey("project_members.id", ondelete="RESTRICT"), nullable=False
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    actor_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    previous_status: Mapped[str | None] = mapped_column(String(16))
+    previous_joined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    request_id: Mapped[UUID] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class SecretReference(IdentityMixin, TimestampMixin, Base):
     """Worker が Secret を解決するための locator metadata だけを保持する。
 

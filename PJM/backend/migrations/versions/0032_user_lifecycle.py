@@ -71,6 +71,10 @@ def upgrade() -> None:
 def downgrade() -> None:
     """失効済み会話に対応する操作を含め、監査行があれば復元を拒否する。"""
 
+    # User→event の通常書込順を保つ。全 writer の停止は別途必須で、lock で代替しない。
+    # DROP COLUMN 時の User lock を先に取り、監査の検査後 INSERT も閉じる。
+    op.execute("LOCK TABLE users IN ACCESS EXCLUSIVE MODE")
+    op.execute("LOCK TABLE user_security_events IN ACCESS EXCLUSIVE MODE")
     op.execute(
         "DO $$ BEGIN IF EXISTS (SELECT 1 FROM user_security_events) "
         "THEN RAISE EXCEPTION 'user security audit must be preserved before downgrade'; "

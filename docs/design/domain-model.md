@@ -18,6 +18,7 @@
 | User / AuthSession | ADMIN/USER、ACTIVE/DISABLED；浏览器会话保存 hash、期限、撤销、凭据版及登录角色，不是 AgentSession |
 | UserSecurityEvent | 账户安全操作追加记录，不是登录尝试日志或 RunEvent |
 | Project / ProjectMember | 项目资源边界与 ACTIVE/REMOVED 成员关系；不增加 Project ADMIN 角色 |
+| ProjectMemberEvent | 成员加入/移除的前后关系与原 actor/request 关联，和关系变更同事务保存；不回填虚构历史 |
 | Integration | 项目中的版本化 Provider 资源与 scope；内置文档不要求 Integration 行 |
 | SecretReference | 定位凭据；MANAGED 材料独立加密保存，原值不进入 Run |
 | ProjectDocument | ProjectKnowledge 的实际载体：元数据与 blob；自动同步/独立知识索引不是现有服务 |
@@ -85,9 +86,9 @@ RunStep 是 STEP_* 事件的投影，不是独立持久表。RunEvent 是追加�
 | --- | --- |
 | 账户 | users / auth_sessions / user_security_events；账户 row_version 不覆盖偏好/登录时间，审计唯一键不等于 DB 禁止任意修改 |
 | Skill | skill_sources / skill_interpretations / skills / skill_versions / runtime_manifests；Blueprint 内嵌于解释与 Manifest |
-| 项目资源 | projects / project_members / integrations / resource_bindings / project_documents；字节保存与数据库提交不同 |
+| 项目资源 | projects / project_members / project_member_events / integrations / resource_bindings / project_documents；成员审计阻止整项目删除，字节保存与数据库提交不同 |
 | 凭据 | secret_references / managed_secret_material；引用 key_version 与密文 kek_version 不是同层版本 |
-| 任务配置 | project_skill_versions、组合表、task_schedules；当前启停/成员单行记录不代表完整历次审计 |
+| 任务配置 | project_skill_versions、组合表、task_schedules；当前启停单行记录不代表完整历次审计，旧成员关系也不补造事件 |
 | 执行 | runs / run_skill_snapshots / run_segments / run_attempts / agent_task_brief_snapshots |
 | Session | agent_sessions / agent_session_transcripts / agent_session_entries；transcript 追加镜像，不替代业务事实 |
 | 输入与预算 | run_input_snapshots（0029）；run_budget_accounts/reservations/receipts（0030），有载体不等于消费者全部接齐 |

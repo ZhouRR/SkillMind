@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiProblemError } from '../../src/api'
 import { useUserQuery } from '../../src/hooks/useUserRequest'
+import { useResourceMutation, useResourceQuery } from '../../src/hooks/useResourceRequest'
+import { PROJECT_MEMBER_REQUEST_POLICY } from '../../src/lib/projectMemberFeedback'
 
 /** DOM を使わず commit/passive の間を制御する Hook phase 替身。実 React は browser 回帰で別途検証する。 */
 interface HookSlot {
-  kind: 'state' | 'ref' | 'callback' | 'effect'
+  kind: 'state' | 'ref' | 'callback' | 'memo' | 'effect'
   value?: unknown
   dependencies?: readonly unknown[]
   cleanup?: void | (() => void)
@@ -60,6 +62,14 @@ vi.mock('react', () => {
       }
       return current.value
     },
+    useMemo: (factory: () => unknown, dependencies: readonly unknown[]) => {
+      const current = slot('memo')
+      if (!unchanged(current.dependencies, dependencies)) {
+        current.value = factory()
+        current.dependencies = dependencies
+      }
+      return current.value
+    },
     useEffect: (setup: () => void | (() => void), dependencies?: readonly unknown[]) => effect(phases.passive, setup, dependencies),
     useLayoutEffect: (setup: () => void | (() => void), dependencies?: readonly unknown[]) => effect(phases.layout, setup, dependencies),
   }
@@ -95,7 +105,122 @@ beforeEach(() => {
   phases.layout = []
   phases.passive = []
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
-  vi.stubGlobal('window', { setTimeout, clearTimeout })
+  vi.stubGlobal('window', { setTimeout, clearTimeout, setInterval, clearInterval })
+})
+
+describe('shared resource request boundaries', () => {
+  /** アカウントと別の失敗分類でも同じ非同期境界を利用する。 */
+  function resource(key: string, loader: (signal: AbortSignal) => Promise<string>, ended: () => void, enabled = true) {
+    phases.cursor = 0
+    return useResourceQuery(key, loader, ended, PROJECT_MEMBER_REQUEST_POLICY, enabled)
+  }
+  /** 一つの mutation instance を再描画し、同期 ref の効果を観察する。 */
+  function mutation(ended = vi.fn()) {
+    phases.cursor = 0
+    return useResourceMutation(ended, PROJECT_MEMBER_REQUEST_POLICY)
+  }
+
+  it('does not reuse A facts when returning through a pending B query', async () => {
+    const pending = deferred<string>()
+    const loader = vi.fn<(signal: AbortSignal) => Promise<string>>()
+      .mockResolvedValueOnce('A old facts').mockImplementationOnce(() => pending.promise)
+      .mockResolvedValueOnce('A new facts')
+    const ended = vi.fn()
+    resource('A', loader, ended)
+    commit(phases.layout); commit(phases.passive); await microtasks()
+    expect(resource('A', loader, ended).data).toBe('A old facts')
+    resource('B', loader, ended)
+    commit(phases.layout); commit(phases.passive); await microtasks()
+    expect(resource('A', loader, ended)).toMatchObject({ data: null, pending: true })
+    commit(phases.layout); commit(phases.passive); await microtasks()
+    pending.reject(new ApiProblemError('private', 401))
+    await microtasks()
+    expect(resource('A', loader, ended).data).toBe('A new facts')
+    expect(ended).not.toHaveBeenCalled()
+  })
+
+  it('pauses a read without accepting its late result and revalidates on resumption', async () => {
+    const pending = deferred<string>()
+    const loader = vi.fn<(signal: AbortSignal) => Promise<string>>()
+      .mockImplementationOnce(() => pending.promise).mockResolvedValueOnce('current')
+    const ended = vi.fn()
+    resource('A', loader, ended)
+    commit(phases.layout); commit(phases.passive); await microtasks()
+    expect(resource('A', loader, ended, false).pending).toBe(true)
+    commit(phases.layout); commit(phases.passive)
+    expect(loader.mock.calls[0]![0].aborted).toBe(true)
+    pending.reject(new ApiProblemError('private', 401))
+    await microtasks()
+    expect(loader).toHaveBeenCalledTimes(1)
+    expect(ended).not.toHaveBeenCalled()
+    resource('A', loader, ended)
+    commit(phases.layout); commit(phases.passive); await microtasks()
+    expect(resource('A', loader, ended)).toMatchObject({ data: 'current', pending: false })
+  })
+
+  it('retains same-context facts during refresh but does not mark them as current evidence', async () => {
+    const pending = deferred<string>()
+    const loader = vi.fn<(signal: AbortSignal) => Promise<string>>()
+      .mockResolvedValueOnce('prior').mockImplementationOnce(() => pending.promise)
+    const ended = vi.fn()
+    resource('A', loader, ended)
+    commit(phases.layout); commit(phases.passive); await microtasks()
+    resource('A', loader, ended).refresh()
+    expect(resource('A', loader, ended)).toMatchObject({ data: 'prior', pending: true, completed: -1 })
+    commit(phases.layout); commit(phases.passive); await microtasks()
+    pending.resolve('current'); await microtasks()
+    expect(resource('A', loader, ended)).toMatchObject({ data: 'current', completed: 1, pending: false })
+  })
+
+  it('blocks same-tick double writes and requires explicit acknowledgement after interruption', async () => {
+    const pending = deferred<string>()
+    const operation = vi.fn<(signal: AbortSignal) => Promise<string>>(() => pending.promise)
+    const success = vi.fn()
+    const failure = vi.fn()
+    const write = mutation()
+    commit(phases.layout); commit(phases.passive)
+    expect(write.submit(operation, success, failure)).toBe(true)
+    expect(write.submit(operation, success)).toBe(false)
+    await microtasks()
+    write.interrupt()
+    expect(operation.mock.calls[0]![0].aborted).toBe(true)
+    expect(failure).toHaveBeenCalledExactlyOnceWith({ key: 'unknown' })
+    expect(write.submit(operation, success)).toBe(false)
+    pending.resolve('late accepted'); await microtasks()
+    expect(success).not.toHaveBeenCalled()
+    expect(mutation()).toMatchObject({ busy: false, failure: { key: 'unknown' } })
+    write.acknowledge()
+    expect(write.submit(async () => 'new explicit write', success)).toBe(true)
+    await microtasks()
+    expect(success).toHaveBeenCalledExactlyOnceWith('new explicit write')
+    expect(operation).toHaveBeenCalledTimes(1)
+  })
+
+  it('closes a timed-out write as unknown even if the delayed server result succeeds', async () => {
+    const pending = deferred<string>()
+    const success = vi.fn()
+    const write = mutation()
+    commit(phases.layout); commit(phases.passive)
+    write.submit(() => pending.promise, success)
+    await microtasks()
+    vi.advanceTimersByTime(30_000)
+    pending.resolve('late'); await microtasks()
+    expect(mutation()).toMatchObject({ busy: false, failure: { key: 'unknown' } })
+    expect(success).not.toHaveBeenCalled()
+    expect(write.submit(async () => 'replay', success)).toBe(false)
+  })
+
+  it('does not start a queued mutation after layout unmount', async () => {
+    const operation = vi.fn(async () => 'never sent')
+    const ended = vi.fn()
+    const write = mutation(ended)
+    commit(phases.layout); commit(phases.passive)
+    write.submit(operation, vi.fn())
+    for (const current of phases.slots) current.cleanup?.()
+    await microtasks()
+    expect(operation).not.toHaveBeenCalled()
+    expect(ended).not.toHaveBeenCalled()
+  })
 })
 
 afterEach(() => {

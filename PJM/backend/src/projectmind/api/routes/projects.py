@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -10,12 +12,22 @@ from fastapi import APIRouter, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from projectmind.api.auth_dependencies import (
+    AdminReadActor,
+    AdminWriteActor,
     ReadActor,
     WriteActor,
     administrator_required_problem,
+    authentication_required_problem,
+    csrf_rejected_problem,
     project_not_found_problem,
+    user_access,
 )
-from projectmind.api.problems import ProblemException, problem_openapi_response
+from projectmind.api.problems import (
+    NO_STORE_PROBLEM_HEADERS,
+    ProblemException,
+    problem_openapi_response,
+)
+from projectmind.auth.sessions import CsrfRejectedError, UnauthorizedSessionError
 from projectmind.projects import (
     ProjectDeleteBlockedError,
     ProjectKeyConflictError,
@@ -30,8 +42,20 @@ from projectmind.projects import (
     StoredProjectMember,
     UpdateProjectCommand,
 )
+from projectmind.users.domain import UserAdministrationDeniedError
 
 router = APIRouter()
+
+_MEMBER_PROBLEMS: dict[int | str, dict[str, Any]] = {
+    401: problem_openapi_response("A valid session is required", headers=NO_STORE_PROBLEM_HEADERS),
+    403: problem_openapi_response("ADMIN or CSRF rejected", headers=NO_STORE_PROBLEM_HEADERS),
+    404: problem_openapi_response(
+        "Project, eligible User or membership not found", headers=NO_STORE_PROBLEM_HEADERS,
+    ),
+    422: problem_openapi_response(
+        "Invalid identity or missing CSRF header", headers=NO_STORE_PROBLEM_HEADERS,
+    ),
+}
 
 
 class CreateProjectRequest(BaseModel):
@@ -88,15 +112,21 @@ class ProjectListResponse(BaseModel):
 class ProjectMemberResponse(BaseModel):
     """Credential を含まない Project membership response。"""
 
+    model_config = ConfigDict(extra="forbid")
+
     user_id: UUID
-    email: str
-    display_name: str
-    status: ProjectMemberStatus
+    email: str = Field(max_length=320, json_schema_extra={"format": "email"})
+    display_name: str = Field(min_length=1, max_length=200)
+    status: ProjectMemberStatus = Field(
+        description="Membership state, independent of User account status.",
+    )
     joined_at: datetime
 
 
 class ProjectMemberListResponse(BaseModel):
     """Project membership 一覧 response。"""
+
+    model_config = ConfigDict(extra="forbid")
 
     items: list[ProjectMemberResponse]
 
@@ -262,7 +292,8 @@ async def unarchive_project(
         404: problem_openapi_response("Project not found or inaccessible"),
         409: problem_openapi_response(
             "Deletion rejected: project_delete_requires_archive, "
-            "project_delete_blocked_by_runs, or project_delete_blocked_by_schedules"
+            "project_delete_blocked_by_runs, project_delete_blocked_by_schedules, "
+            "or project_delete_blocked_by_member_audit"
         ),
         422: problem_openapi_response("Invalid Project identity or missing CSRF header"),
     },
@@ -273,7 +304,7 @@ async def delete_project(
     project_id: UUID,
     actor: WriteActor,
 ) -> Response:
-    """ADMIN が Run/Schedule のない ARCHIVED Project を物理削除し key を解放する。"""
+    """ADMIN が Run/Schedule/所属監査のない ARCHIVED Project を物理削除し key を解放する。"""
 
     service: ProjectService = request.app.state.project_service
     try:
@@ -290,78 +321,84 @@ async def delete_project(
 @router.get(
     "/projects/{project_id}/members",
     response_model=ProjectMemberListResponse,
-    responses={403: {"description": "ADMIN required"}, 404: {"description": "Project not found"}},
-    tags=["projects"],
+    responses={**_MEMBER_PROBLEMS, 200: {"headers": NO_STORE_PROBLEM_HEADERS}},
+    tags=["projects", "auth"],
 )
 async def list_project_members(
     request: Request,
     project_id: UUID,
-    actor: ReadActor,
+    actor: AdminReadActor,
 ) -> ProjectMemberListResponse:
     """ADMIN に Project membership の一覧を返す。"""
 
     service: ProjectService = request.app.state.project_service
-    try:
-        members = await service.list_members(actor=actor, project_id=project_id)
-    except ProjectNotFoundError as error:
-        raise project_not_found_problem() from error
-    except ProjectPermissionDeniedError as error:
-        raise administrator_required_problem() from error
+    with _member_errors():
+        members = await service.list_members(
+            access=user_access(request, actor), project_id=project_id,
+        )
     return ProjectMemberListResponse(items=[_member_response(member) for member in members])
 
 
 @router.put(
     "/projects/{project_id}/members/{user_id}",
     response_model=ProjectMemberResponse,
-    responses={
-        403: {"description": "ADMIN required"},
-        404: {"description": "Project or active User not found"},
-    },
-    tags=["projects"],
+    responses={**_MEMBER_PROBLEMS, 200: {"headers": NO_STORE_PROBLEM_HEADERS}},
+    tags=["projects", "auth"],
 )
 async def add_project_member(
     request: Request,
     project_id: UUID,
     user_id: UUID,
-    actor: WriteActor,
+    actor: AdminWriteActor,
 ) -> ProjectMemberResponse:
     """ADMIN が同一 Organization の ACTIVE User を Project に追加する。"""
 
     service: ProjectService = request.app.state.project_service
-    try:
-        member = await service.add_member(actor=actor, project_id=project_id, user_id=user_id)
-    except (ProjectNotFoundError, ProjectMemberUserNotFoundError) as error:
-        raise project_not_found_problem() from error
-    except ProjectPermissionDeniedError as error:
-        raise administrator_required_problem() from error
+    with _member_errors():
+        member = await service.add_member(
+            access=user_access(request, actor), project_id=project_id, user_id=user_id,
+        )
     return _member_response(member)
 
 
 @router.delete(
     "/projects/{project_id}/members/{user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    responses={
-        403: {"description": "ADMIN required"},
-        404: {"description": "Project or active membership not found"},
-    },
-    tags=["projects"],
+    responses={**_MEMBER_PROBLEMS, 204: {"headers": NO_STORE_PROBLEM_HEADERS}},
+    tags=["projects", "auth"],
 )
 async def remove_project_member(
     request: Request,
     project_id: UUID,
     user_id: UUID,
-    actor: WriteActor,
+    actor: AdminWriteActor,
 ) -> Response:
     """ADMIN が membership を物理削除せず REMOVED にする。"""
 
     service: ProjectService = request.app.state.project_service
-    try:
-        await service.remove_member(actor=actor, project_id=project_id, user_id=user_id)
-    except (ProjectNotFoundError, ProjectMemberNotFoundError) as error:
-        raise project_not_found_problem() from error
-    except ProjectPermissionDeniedError as error:
-        raise administrator_required_problem() from error
+    with _member_errors():
+        await service.remove_member(
+            access=user_access(request, actor), project_id=project_id, user_id=user_id,
+        )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@contextmanager
+def _member_errors() -> Iterator[None]:
+    """入口後の再認証拒否も、資源の存在を漏らさず共通 Problem へ変換する。"""
+
+    try:
+        yield
+    except UnauthorizedSessionError as error:
+        raise authentication_required_problem() from error
+    except CsrfRejectedError as error:
+        raise csrf_rejected_problem() from error
+    except (ProjectPermissionDeniedError, UserAdministrationDeniedError) as error:
+        raise administrator_required_problem() from error
+    except (
+        ProjectNotFoundError, ProjectMemberUserNotFoundError, ProjectMemberNotFoundError,
+    ) as error:
+        raise project_not_found_problem() from error
 
 
 def _project_response(project: StoredProject) -> ProjectResponse:
@@ -407,7 +444,7 @@ def _project_delete_blocked_problem(error: ProjectDeleteBlockedError) -> Problem
     """削除拒否を、利用者が次の操作を選べる安定 code 付き 409 へ変換する。
 
     Problem contract は追加 field を許さないため、阻害要因は code で区別する。Web は
-    この code で archive 前、Run 履歴、Schedule 参照による拒否を区別する。
+    この code で archive 前、Run 履歴、Schedule 参照、所属監査による拒否を区別する。
     """
 
     code = "project_delete_requires_archive"
@@ -415,6 +452,8 @@ def _project_delete_blocked_problem(error: ProjectDeleteBlockedError) -> Problem
         code = "project_delete_blocked_by_runs"
     elif "task_schedule_exists" in error.blockers:
         code = "project_delete_blocked_by_schedules"
+    elif "member_audit_exists" in error.blockers:
+        code = "project_delete_blocked_by_member_audit"
     return ProblemException(
         status=status.HTTP_409_CONFLICT,
         title="Project delete rejected",

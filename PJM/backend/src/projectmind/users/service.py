@@ -12,17 +12,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from projectmind.auth.domain import (
-    derive_session_csrf,
     hash_password,
     validate_password,
     verify_password,
 )
-from projectmind.auth.sessions import (
-    UnauthorizedSessionError,
-    validate_session_credentials,
-    validate_session_csrf,
-)
 from projectmind.db.models import User
+from projectmind.users.access import authorize_user_access, validate_user_access
 from projectmind.users.domain import (
     CreateUserCommand,
     CurrentPasswordRejectedError,
@@ -31,7 +26,6 @@ from projectmind.users.domain import (
     StoredUserSecurityEvent,
     UpdateUserCommand,
     UserAccess,
-    UserAdministrationDeniedError,
     UserEmailConflictError,
     UserMutationResult,
     UserNotFoundError,
@@ -64,12 +58,7 @@ class UserService:
     ) -> AsyncIterator[tuple[UserRepository, LockedUsers]]:
         """秘密の形式を先に確認し、全 lock 後の credential 判断を共通化する。"""
 
-        try:
-            derive_session_csrf(access.session_token)
-        except ValueError as error:
-            raise UnauthorizedSessionError("Authentication is required") from error
-        if not isinstance(access.request_id, UUID):
-            raise ValueError("Security audit requires a server request UUID")
+        validate_user_access(access)
         async with self._session_factory() as session, session.begin():
             repository = UserRepository(session)
             locked = await repository.lock_users(
@@ -86,20 +75,9 @@ class UserService:
     ) -> datetime:
         """待機/計算後の現在時刻と現在 role を使用し、古い actor の権限を使わない。"""
 
-        now = datetime.now(UTC)
-        if (
-            locked.actor.id != access.actor.user_id
-            or locked.actor.organization_id != access.actor.organization_id
-        ):
-            raise UnauthorizedSessionError("Authentication is required")
-        validate_session_credentials(
-            locked.current_session, locked.actor, session_token=access.session_token, now=now
+        return authorize_user_access(
+            access, locked, now=datetime.now(UTC), admin=admin, write=write
         )
-        if write:
-            validate_session_csrf(locked.current_session, access.csrf_token)
-        if admin and locked.actor.system_role != "ADMIN":
-            raise UserAdministrationDeniedError("Administrator access is required")
-        return now
 
     async def get_account(self, *, access: UserAccess) -> StoredUser:
         """別 user ID の指定を受けず、現在の本人 account だけを返す。"""

@@ -2435,6 +2435,7 @@
         "type": "object"
       },
       "ProjectMemberListResponse": {
+        "additionalProperties": false,
         "description": "Project membership 一覧 response。",
         "properties": {
           "items": {
@@ -2452,13 +2453,18 @@
         "type": "object"
       },
       "ProjectMemberResponse": {
+        "additionalProperties": false,
         "description": "Credential を含まない Project membership response。",
         "properties": {
           "display_name": {
+            "maxLength": 200,
+            "minLength": 1,
             "title": "Display Name",
             "type": "string"
           },
           "email": {
+            "format": "email",
+            "maxLength": 320,
             "title": "Email",
             "type": "string"
           },
@@ -2468,7 +2474,8 @@
             "type": "string"
           },
           "status": {
-            "$ref": "#/components/schemas/ProjectMemberStatus"
+            "$ref": "#/components/schemas/ProjectMemberStatus",
+            "description": "Membership state, independent of User account status."
           },
           "user_id": {
             "format": "uuid",
@@ -7046,7 +7053,7 @@
     },
     "/api/v1/projects/{project_id}": {
       "delete": {
-        "description": "ADMIN が Run/Schedule のない ARCHIVED Project を物理削除し key を解放する。",
+        "description": "ADMIN が Run/Schedule/所属監査のない ARCHIVED Project を物理削除し key を解放する。",
         "operationId": "delete_project_api_v1_projects__project_id__delete",
         "parameters": [
           {
@@ -7398,7 +7405,7 @@
                 }
               }
             },
-            "description": "Deletion rejected: project_delete_requires_archive, project_delete_blocked_by_runs, or project_delete_blocked_by_schedules",
+            "description": "Deletion rejected: project_delete_requires_archive, project_delete_blocked_by_runs, project_delete_blocked_by_schedules, or project_delete_blocked_by_member_audit",
             "headers": {}
           },
           "422": {
@@ -8488,28 +8495,417 @@
                 }
               }
             },
-            "description": "Successful Response"
-          },
-          "403": {
-            "description": "ADMIN required"
-          },
-          "404": {
-            "description": "Project not found"
-          },
-          "422": {
-            "content": {
-              "application/json": {
+            "description": "Successful Response",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "required": true,
+                "schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$id": "https://schemas.projectmind.local/errors/problem/v1.schema.json",
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "pattern": "^[a-z][a-z0-9_]*$",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "errors": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "location",
+                          "message",
+                          "kind"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "instance": {
+                      "pattern": "^/",
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "maximum": 599,
+                      "minimum": 400,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": {
+                      "format": "uri",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail",
+                    "instance",
+                    "code",
+                    "request_id"
+                  ],
+                  "title": "ProjectMind Problem Details v1",
+                  "type": "object"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "A valid session is required",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "required": true,
+                "schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$id": "https://schemas.projectmind.local/errors/problem/v1.schema.json",
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "pattern": "^[a-z][a-z0-9_]*$",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "errors": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "location",
+                          "message",
+                          "kind"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "instance": {
+                      "pattern": "^/",
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "maximum": 599,
+                      "minimum": 400,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": {
+                      "format": "uri",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail",
+                    "instance",
+                    "code",
+                    "request_id"
+                  ],
+                  "title": "ProjectMind Problem Details v1",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ADMIN or CSRF rejected",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "required": true,
+                "schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$id": "https://schemas.projectmind.local/errors/problem/v1.schema.json",
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "pattern": "^[a-z][a-z0-9_]*$",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "errors": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "location",
+                          "message",
+                          "kind"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "instance": {
+                      "pattern": "^/",
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "maximum": 599,
+                      "minimum": 400,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": {
+                      "format": "uri",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail",
+                    "instance",
+                    "code",
+                    "request_id"
+                  ],
+                  "title": "ProjectMind Problem Details v1",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Project, eligible User or membership not found",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "required": true,
+                "schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$id": "https://schemas.projectmind.local/errors/problem/v1.schema.json",
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "pattern": "^[a-z][a-z0-9_]*$",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "errors": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "location",
+                          "message",
+                          "kind"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "instance": {
+                      "pattern": "^/",
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "maximum": 599,
+                      "minimum": 400,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": {
+                      "format": "uri",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail",
+                    "instance",
+                    "code",
+                    "request_id"
+                  ],
+                  "title": "ProjectMind Problem Details v1",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Invalid identity or missing CSRF header",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "required": true,
+                "schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "summary": "List Project Members",
         "tags": [
-          "projects"
+          "projects",
+          "auth"
         ]
       }
     },
@@ -8550,28 +8946,417 @@
         ],
         "responses": {
           "204": {
-            "description": "Successful Response"
-          },
-          "403": {
-            "description": "ADMIN required"
-          },
-          "404": {
-            "description": "Project or active membership not found"
-          },
-          "422": {
-            "content": {
-              "application/json": {
+            "description": "Successful Response",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "required": true,
+                "schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$id": "https://schemas.projectmind.local/errors/problem/v1.schema.json",
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "pattern": "^[a-z][a-z0-9_]*$",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "errors": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "location",
+                          "message",
+                          "kind"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "instance": {
+                      "pattern": "^/",
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "maximum": 599,
+                      "minimum": 400,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": {
+                      "format": "uri",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail",
+                    "instance",
+                    "code",
+                    "request_id"
+                  ],
+                  "title": "ProjectMind Problem Details v1",
+                  "type": "object"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "A valid session is required",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "required": true,
+                "schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$id": "https://schemas.projectmind.local/errors/problem/v1.schema.json",
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "pattern": "^[a-z][a-z0-9_]*$",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "errors": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "location",
+                          "message",
+                          "kind"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "instance": {
+                      "pattern": "^/",
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "maximum": 599,
+                      "minimum": 400,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": {
+                      "format": "uri",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail",
+                    "instance",
+                    "code",
+                    "request_id"
+                  ],
+                  "title": "ProjectMind Problem Details v1",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ADMIN or CSRF rejected",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "required": true,
+                "schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$id": "https://schemas.projectmind.local/errors/problem/v1.schema.json",
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "pattern": "^[a-z][a-z0-9_]*$",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "errors": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "location",
+                          "message",
+                          "kind"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "instance": {
+                      "pattern": "^/",
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "maximum": 599,
+                      "minimum": 400,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": {
+                      "format": "uri",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail",
+                    "instance",
+                    "code",
+                    "request_id"
+                  ],
+                  "title": "ProjectMind Problem Details v1",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Project, eligible User or membership not found",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "required": true,
+                "schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$id": "https://schemas.projectmind.local/errors/problem/v1.schema.json",
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "pattern": "^[a-z][a-z0-9_]*$",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "errors": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "location",
+                          "message",
+                          "kind"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "instance": {
+                      "pattern": "^/",
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "maximum": 599,
+                      "minimum": 400,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": {
+                      "format": "uri",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail",
+                    "instance",
+                    "code",
+                    "request_id"
+                  ],
+                  "title": "ProjectMind Problem Details v1",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Invalid identity or missing CSRF header",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "required": true,
+                "schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "summary": "Remove Project Member",
         "tags": [
-          "projects"
+          "projects",
+          "auth"
         ]
       },
       "put": {
@@ -8617,28 +9402,417 @@
                 }
               }
             },
-            "description": "Successful Response"
-          },
-          "403": {
-            "description": "ADMIN required"
-          },
-          "404": {
-            "description": "Project or active User not found"
-          },
-          "422": {
-            "content": {
-              "application/json": {
+            "description": "Successful Response",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "required": true,
+                "schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$id": "https://schemas.projectmind.local/errors/problem/v1.schema.json",
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "pattern": "^[a-z][a-z0-9_]*$",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "errors": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "location",
+                          "message",
+                          "kind"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "instance": {
+                      "pattern": "^/",
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "maximum": 599,
+                      "minimum": 400,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": {
+                      "format": "uri",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail",
+                    "instance",
+                    "code",
+                    "request_id"
+                  ],
+                  "title": "ProjectMind Problem Details v1",
+                  "type": "object"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "A valid session is required",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "required": true,
+                "schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$id": "https://schemas.projectmind.local/errors/problem/v1.schema.json",
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "pattern": "^[a-z][a-z0-9_]*$",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "errors": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "location",
+                          "message",
+                          "kind"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "instance": {
+                      "pattern": "^/",
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "maximum": 599,
+                      "minimum": 400,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": {
+                      "format": "uri",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail",
+                    "instance",
+                    "code",
+                    "request_id"
+                  ],
+                  "title": "ProjectMind Problem Details v1",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ADMIN or CSRF rejected",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "required": true,
+                "schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$id": "https://schemas.projectmind.local/errors/problem/v1.schema.json",
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "pattern": "^[a-z][a-z0-9_]*$",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "errors": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "location",
+                          "message",
+                          "kind"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "instance": {
+                      "pattern": "^/",
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "maximum": 599,
+                      "minimum": 400,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": {
+                      "format": "uri",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail",
+                    "instance",
+                    "code",
+                    "request_id"
+                  ],
+                  "title": "ProjectMind Problem Details v1",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Project, eligible User or membership not found",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "required": true,
+                "schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$id": "https://schemas.projectmind.local/errors/problem/v1.schema.json",
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "pattern": "^[a-z][a-z0-9_]*$",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "errors": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "location",
+                          "message",
+                          "kind"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "instance": {
+                      "pattern": "^/",
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "maximum": 599,
+                      "minimum": 400,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": {
+                      "format": "uri",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail",
+                    "instance",
+                    "code",
+                    "request_id"
+                  ],
+                  "title": "ProjectMind Problem Details v1",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Invalid identity or missing CSRF header",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "required": true,
+                "schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "summary": "Add Project Member",
         "tags": [
-          "projects"
+          "projects",
+          "auth"
         ]
       }
     },

@@ -18,6 +18,7 @@ from projectmind.db.models import (
     ProjectComposition,
     ProjectDocument,
     ProjectMember,
+    ProjectMemberEvent,
     ProjectSkillVersion,
     ResourceBinding,
     Run,
@@ -29,9 +30,8 @@ from projectmind.projects.domain import (
     CreateProjectCommand,
     ProjectDeleteBlockedError,
     ProjectKeyConflictError,
-    ProjectMemberNotFoundError,
+    ProjectMemberAction,
     ProjectMemberStatus,
-    ProjectMemberUserNotFoundError,
     ProjectNotFoundError,
     ProjectStatus,
     StoredProject,
@@ -39,6 +39,7 @@ from projectmind.projects.domain import (
     StoredProjectPreference,
     UpdateProjectCommand,
 )
+from projectmind.users.repository import lock_organization
 
 # Project 削除時に一緒に消す設定 row を FK の葉から根の順で並べる。
 # Integration は SecretReference を、ResourceBinding と EffectPreauthorization は
@@ -125,6 +126,8 @@ class ProjectRepository:
     ) -> StoredProjectPreference:
         """認可済み ACTIVE Project または未選択を User preference に保存する。"""
 
+        # User→Project FK と削除の Project→User が交差する前に同じ gate を取得する。
+        await lock_organization(self._session, actor.organization_id)
         user = await self._actor_user(actor=actor, lock=True)
         if project_id is not None:
             project = await self._accessible_model(actor=actor, project_id=project_id)
@@ -222,14 +225,16 @@ class ProjectRepository:
         return self._to_stored(project)
 
     async def delete(self, *, organization_id: UUID, project_id: UUID) -> None:
-        """Run/Schedule を持たない ARCHIVED Project と、その設定 row を物理削除する。
+        """Run/Schedule/所属監査を持たない ARCHIVED Project と設定 row を物理削除する。
 
         key の一意制約は status を区別しないため、archive しただけでは key を再利用できない。
-        ここは「作成し直したい」用途のための唯一の解放手段であり、監査の正本である Run が
+        ここは「作成し直したい」用途のための唯一の解放手段であり、Run または所属監査が
         一件でもあれば削除しない。未発火や認領中の Schedule も将来の実行参照なので残す。
         設定削除は全ての検査後に同一 transaction で行い、FK RESTRICT を最後の防壁に保つ。
         """
 
+        # Member/User 管理と preference も同じ gate を最初に取り、逆順 row lock を重ねない。
+        await lock_organization(self._session, organization_id)
         project = await self._organization_project(
             organization_id=organization_id,
             project_id=project_id,
@@ -257,10 +262,18 @@ class ProjectRepository:
                 f"Project still has task schedule references: {project_id}",
                 blockers=("task_schedule_exists",),
             )
-        # Preference は FK RESTRICT なので、参照している User を先に未選択へ戻す。
+        has_member_audit = await self._session.scalar(
+            select(exists().where(ProjectMemberEvent.project_id == project_id))
+        )
+        if has_member_audit:
+            raise ProjectDeleteBlockedError(
+                f"Project still has membership audit history: {project_id}",
+                blockers=("member_audit_exists",),
+            )
+        # 同じ gate の User だけを更新する。組織外の壊れた旧参照は FK RESTRICT で拒否する。
         await self._session.execute(
             update(User)
-            .where(User.preferred_project_id == project_id)
+            .where(User.organization_id == organization_id, User.preferred_project_id == project_id)
             .values(preferred_project_id=None)
         )
         # ResourceBinding の自己参照 (source_binding_id) と run_id は RUN scope snapshot だけが
@@ -287,87 +300,122 @@ class ProjectRepository:
             await self._session.execute(
                 select(ProjectMember, User)
                 .join(User, User.id == ProjectMember.user_id)
-                .where(ProjectMember.project_id == project_id)
+                .where(
+                    ProjectMember.project_id == project_id,
+                    User.organization_id == organization_id,
+                )
                 .order_by(User.display_name, User.id)
             )
         ).all()
         return tuple(self._to_stored_member(member, user) for member, user in rows)
 
-    async def add_member(
+    async def lock_member(
         self,
         *,
         organization_id: UUID,
         project_id: UUID,
         user_id: UUID,
-    ) -> StoredProjectMember:
-        """同一 Organization の ACTIVE User を追加し、REMOVED membership は再有効化する。"""
+        active_project: bool,
+    ) -> ProjectMember | None:
+        """Org/User/Session lock 後に Project→Member を取得し、判断と変更を分離する。"""
 
         project = await self._organization_project(
             organization_id=organization_id,
             project_id=project_id,
             lock=True,
         )
-        if project.status != ProjectStatus.ACTIVE.value:
+        if active_project and project.status != ProjectStatus.ACTIVE.value:
             raise ProjectNotFoundError(f"Active Project not found: {project_id}")
-        user = await self._session.scalar(
-            select(User).where(
-                User.id == user_id,
-                User.organization_id == organization_id,
-                User.status == "ACTIVE",
-            )
-        )
-        if user is None:
-            raise ProjectMemberUserNotFoundError(f"Active User not found: {user_id}")
-        member = await self._session.scalar(
+        member: ProjectMember | None = await self._session.scalar(
             select(ProjectMember)
             .where(ProjectMember.project_id == project_id, ProjectMember.user_id == user_id)
             .with_for_update()
         )
-        now = datetime.now(UTC)
+        return member
+
+    async def add_member(
+        self,
+        *,
+        project_id: UUID,
+        user: User,
+        member: ProjectMember | None,
+        actor_id: UUID,
+        request_id: UUID,
+        now: datetime,
+    ) -> StoredProjectMember:
+        """取得済み row の実変更だけを監査し、反復 ACTIVE add は何も書き換えない。"""
+
+        if member is not None and member.status == ProjectMemberStatus.ACTIVE.value:
+            return self._to_stored_member(member, user)
+        previous_status = member.status if member is not None else None
+        previous_joined_at = member.joined_at if member is not None else None
         if member is None:
             member = ProjectMember(
                 id=uuid4(),
                 project_id=project_id,
-                user_id=user_id,
+                user_id=user.id,
                 status=ProjectMemberStatus.ACTIVE.value,
                 joined_at=now,
                 created_at=now,
                 updated_at=now,
             )
             self._session.add(member)
-        elif member.status != ProjectMemberStatus.ACTIVE.value:
+            # relationship に依存せず、監査 FK の親を同じ transaction で先に INSERT する。
+            await self._session.flush()
+        else:
             member.status = ProjectMemberStatus.ACTIVE.value
             member.joined_at = now
             member.updated_at = now
+        self.append_member_event(
+            member=member, organization_id=user.organization_id, actor_id=actor_id,
+            request_id=request_id, action=ProjectMemberAction.ADDED,
+            previous_status=previous_status, previous_joined_at=previous_joined_at, now=now,
+        )
         return self._to_stored_member(member, user)
 
-    async def remove_member(
+    def remove_member(
         self,
         *,
         organization_id: UUID,
-        project_id: UUID,
-        user_id: UUID,
+        member: ProjectMember,
+        actor_id: UUID,
+        request_id: UUID,
+        now: datetime,
     ) -> None:
-        """Membership row を削除せず REMOVED にして監査可能性を維持する。"""
+        """Membership の物理 row を残し、解除前後を同じ transaction に追加する。"""
 
-        await self._organization_project(
-            organization_id=organization_id,
-            project_id=project_id,
-            lock=True,
-        )
-        member = await self._session.scalar(
-            select(ProjectMember)
-            .where(
-                ProjectMember.project_id == project_id,
-                ProjectMember.user_id == user_id,
-                ProjectMember.status == ProjectMemberStatus.ACTIVE.value,
-            )
-            .with_for_update()
-        )
-        if member is None:
-            raise ProjectMemberNotFoundError(f"Active ProjectMember not found: {user_id}")
+        previous_status = member.status
         member.status = ProjectMemberStatus.REMOVED.value
-        member.updated_at = datetime.now(UTC)
+        member.updated_at = now
+        self.append_member_event(
+            member=member, organization_id=organization_id, actor_id=actor_id,
+            request_id=request_id, action=ProjectMemberAction.REMOVED,
+            previous_status=previous_status, previous_joined_at=member.joined_at, now=now,
+        )
+
+    def append_member_event(
+        self,
+        *,
+        member: ProjectMember,
+        organization_id: UUID,
+        actor_id: UUID,
+        request_id: UUID,
+        action: ProjectMemberAction,
+        previous_status: str | None,
+        previous_joined_at: datetime | None,
+        now: datetime,
+    ) -> None:
+        """自由 payload や credential を受けず、変更前後の許可列だけを監査へ保存する。"""
+
+        if not isinstance(request_id, UUID):
+            raise ValueError("Membership audit requires a server request UUID")
+        self._session.add(ProjectMemberEvent(
+            id=uuid4(), organization_id=organization_id, project_id=member.project_id,
+            member_id=member.id, user_id=member.user_id, actor_id=actor_id,
+            action=action.value, previous_status=previous_status,
+            previous_joined_at=previous_joined_at, status=member.status,
+            joined_at=member.joined_at, request_id=request_id, created_at=now,
+        ))
 
     async def _accessible_model(
         self,

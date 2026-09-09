@@ -21,6 +21,7 @@ from projectmind.api.auth_dependencies import (
     csrf_rejected_problem,
     project_not_found_problem,
 )
+from projectmind.api.auth_dependencies import user_access as _user_access
 from projectmind.api.login_protection import LOGIN_PROTECTION_RESPONSES, login_protection_problem
 from projectmind.api.problems import (
     NO_STORE_PROBLEM_HEADERS,
@@ -29,7 +30,7 @@ from projectmind.api.problems import (
 )
 from projectmind.auth.domain import UI_LANGUAGES
 from projectmind.auth.login_protection import LoginProtectionUnavailableError, LoginRateLimitedError
-from projectmind.auth.service import AuthenticatedActor, AuthService
+from projectmind.auth.service import AuthService
 from projectmind.auth.sessions import CsrfRejectedError, UnauthorizedSessionError
 from projectmind.core.settings import Settings
 from projectmind.projects import ProjectNotFoundError, ProjectService, StoredProjectPreference
@@ -40,7 +41,6 @@ from projectmind.users.domain import (
     StoredUser,
     StoredUserSecurityEvent,
     UpdateUserCommand,
-    UserAccess,
     UserAdministrationDeniedError,
     UserEmailConflictError,
     UserMutationResult,
@@ -403,18 +403,6 @@ async def get_user_security_events(
             access=_user_access(request, actor), user_id=user_id, limit=limit, offset=offset
         )
         return _event_page(events, total, limit, offset)
-
-
-def _user_access(request: Request, actor: AuthenticatedActor) -> UserAccess:
-    """入口 actor と原 credential を内部再認証へ渡し、公開 JSON と混ぜない。"""
-
-    settings: Settings = request.app.state.settings
-    return UserAccess(
-        actor=actor,
-        request_id=UUID(request.state.request_id),
-        session_token=request.cookies.get(settings.auth_session_cookie_name, ""),
-        csrf_token=request.headers.get("X-CSRF-Token", ""),
-    )
 
 
 def _account(user: StoredUser) -> UserAccountResponse:

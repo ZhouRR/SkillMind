@@ -160,16 +160,22 @@ export async function loadProjectMembers(
   projectId: string,
   signal?: AbortSignal,
 ): Promise<ProjectMemberRecord[]> {
-  const value = await requestApiJson(
-    `${API_BASE}/projects/${encodeURIComponent(projectId)}/members`,
-    { signal },
-  )
-  return parseItemList(
+  signal?.throwIfAborted()
+  const value = await requestApiJson(projectMembersPath(projectId), { signal, cache: 'no-store' })
+  signal?.throwIfAborted()
+  if (!isRecord(value) || !exactFields(value, ['items'])) {
+    throw new Error('Project member list response did not match its contract')
+  }
+  const members = parseItemList(
     value,
     'items',
     isProjectMember,
     'Project member list response did not match its contract',
   )
+  if (new Set(members.map((member) => member.user_id.toLowerCase())).size !== members.length) {
+    throw new Error('Project member list contained duplicate identities')
+  }
+  return members
 }
 
 /** ADMIN が ACTIVE User を Project member に追加する。 */
@@ -179,10 +185,16 @@ export async function addProjectMember(
   csrfToken: string,
   signal?: AbortSignal,
 ): Promise<ProjectMemberRecord> {
-  return parseProjectMember(await requestApiJson(
-    `${API_BASE}/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`,
-    { method: 'PUT', headers: { 'X-CSRF-Token': csrfToken }, signal },
+  signal?.throwIfAborted()
+  const member = parseProjectMember(await requestApiJson(
+    projectMembersPath(projectId, userId),
+    { method: 'PUT', headers: { 'X-CSRF-Token': csrfToken }, signal, cache: 'no-store' },
   ))
+  signal?.throwIfAborted()
+  if (member.user_id.toLowerCase() !== userId.toLowerCase() || member.status !== 'ACTIVE') {
+    throw new Error('Project member response did not match the requested addition')
+  }
+  return member
 }
 
 /** ADMIN が Project membership を REMOVED にする。 */
@@ -192,10 +204,22 @@ export async function removeProjectMember(
   csrfToken: string,
   signal?: AbortSignal,
 ): Promise<void> {
+  signal?.throwIfAborted()
   await requestApiEmpty(
-    `${API_BASE}/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`,
-    { method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken }, signal },
+    projectMembersPath(projectId, userId),
+    { method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken }, signal, cache: 'no-store' },
+    204,
   )
+  signal?.throwIfAborted()
+}
+
+/** Project/User の精確な UUID 以外は HTTP を開始する前に拒否する。 */
+function projectMembersPath(projectId: string, userId?: string): string {
+  if (!isUuid(projectId) || userId !== undefined && !isUuid(userId)) {
+    throw new Error('Invalid project member identity')
+  }
+  const member = userId === undefined ? '' : `/${encodeURIComponent(userId)}`
+  return `${API_BASE}/projects/${encodeURIComponent(projectId)}/members${member}`
 }
 
 /** Unknown JSON を Project response へ制限する。 */
@@ -238,7 +262,14 @@ function parseProjectMember(value: unknown): ProjectMemberRecord {
 /** Unknown object が credential 非含有 membership contract を満たすか検証する。 */
 function isProjectMember(value: unknown): value is ProjectMemberRecord {
   return isRecord(value)
+    && exactFields(value, ['user_id', 'email', 'display_name', 'status', 'joined_at'])
     && hasStrings(value, ['user_id', 'email', 'display_name', 'status', 'joined_at'])
+    && isUuid(value.user_id)
+    && typeof value.email === 'string' && [...value.email].length <= 320
+    && /^[^@\s]+@[^@\s]+$/u.test(value.email)
+    && typeof value.display_name === 'string'
+    && [...value.display_name].length >= 1 && [...value.display_name].length <= 200
+    && isApiTimestamp(value.joined_at)
     && typeof value.status === 'string'
     && ['ACTIVE', 'REMOVED'].includes(value.status)
 }

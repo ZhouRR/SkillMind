@@ -31,14 +31,19 @@ export async function requestApiJson(url: string, init: RequestInit = {}): Promi
   }
 }
 
-/** Body を返さない API request を実行し、失敗時だけ Problem Details を解析する。 */
-export async function requestApiEmpty(url: string, init: RequestInit): Promise<void> {
+/** Body なし API を実行し、指定された場合は受理 202 と完了 204 も区別する。 */
+export async function requestApiEmpty(url: string, init: RequestInit, expectedStatus?: number): Promise<void> {
   const response = await fetch(url, {
     ...init,
     credentials: 'same-origin',
     headers: { Accept: 'application/json', ...init.headers },
   })
-  if (response.ok) return
+  if (response.ok) {
+    if (expectedStatus !== undefined && response.status !== expectedStatus) {
+      throw new ApiProblemError('API returned an unexpected success status', response.status)
+    }
+    return
+  }
   return throwProblemFromBody(response)
 }
 

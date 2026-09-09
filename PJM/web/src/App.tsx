@@ -390,7 +390,7 @@ export function App() {
           modules={projectId ? currentModules : []}
         />
         <main className={route === 'accounts' ? 'shell accountsPage' : 'shell'}
-          key={`${sessionKey}:${route === 'accounts' ? `accounts:${accountContextRevision}` : projectContext.selectionId}`}>
+          key={`${sessionKey}:${route === 'accounts' ? `accounts:${accountContextRevision}` : projectContext.selectionId.toLowerCase()}`}>
           {route !== 'accounts' && <ProjectContextNotice access={access} onRefresh={projectContext.refresh} />}
           {canRenderPage && renderPage(
             route,
@@ -407,6 +407,7 @@ export function App() {
             routeContext.taskId,
             (reason) => endSession(authState.session, reason),
             accountChanged,
+            projectContext.selectionId,
           )}
         </main>
       </div>
@@ -430,6 +431,7 @@ function renderPage(
   initialTaskId: string | null,
   onSessionEnded: SessionEnded,
   onAccountChanged: (account: UserAccountRecord) => void,
+  projectContextId: string,
 ): ReactNode {
   switch (route) {
     case 'accounts':
@@ -438,6 +440,9 @@ function renderPage(
       return <SkillsPage csrfToken={session.csrf_token} projectId={projectId} />
     case 'projects':
       return <ProjectsPage
+        currentProject={currentProject}
+        projectContextId={projectContextId}
+        onSessionEnded={onSessionEnded}
         onProjectArchived={onProjectArchived}
         onProjectDeleted={onProjectArchived}
         onProjectChanged={onProjectChanged}

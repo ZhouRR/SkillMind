@@ -101,6 +101,7 @@ def test_project_detail_requires_session_before_lookup(client: TestClient) -> No
         ("project_not_archived", "project_delete_requires_archive"),
         ("run_history_exists", "project_delete_blocked_by_runs"),
         ("task_schedule_exists", "project_delete_blocked_by_schedules"),
+        ("member_audit_exists", "project_delete_blocked_by_member_audit"),
     ],
 )
 def test_project_delete_returns_a_distinct_stable_conflict_for_each_reference(

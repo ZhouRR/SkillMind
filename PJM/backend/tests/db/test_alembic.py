@@ -73,7 +73,7 @@ def test_migration_chain_has_a_single_expected_head() -> None:
     config.set_main_option("script_location", str(backend_dir / "migrations"))
     scripts = ScriptDirectory.from_config(config)
 
-    assert scripts.get_heads() == ["0031_auth_session_credentials"]
+    assert scripts.get_heads() == ["0033_project_member_audit"]
 
 
 def test_revision_ids_fit_default_alembic_version_column() -> None:
@@ -236,9 +236,10 @@ def test_skill_composition_models_are_registered_in_metadata() -> None:
 def test_identity_and_project_models_are_registered_in_metadata() -> None:
     """認証、Project、membership table が migration metadata に登録される。"""
 
-    assert {"organizations", "users", "auth_sessions", "projects", "project_members"} <= set(
-        Base.metadata.tables
-    )
+    assert {
+        "organizations", "users", "auth_sessions", "projects", "project_members",
+        "project_member_events",
+    } <= set(Base.metadata.tables)
     assert "preferred_project_id" in Base.metadata.tables["users"].columns
 
 

@@ -66,6 +66,7 @@ arq projectmind.worker.settings.WorkerSettings
 起動は `PJM/web/` で `npx -y pnpm@11.7.0 dev`。依存導入・proxy と typecheck/Vitest/build は[開発手順](../docs/development/local-development.md#web)へ。
 実 component の応答喪失・切替・三語・keyboard・狭幅は同手順の browser 回帰で確認し、mock と実 Server の検証を分ける。
 [アカウントと安全](../docs/design/user-lifecycle.md)は平台の `#/accounts`。Project 未所属でも本人安全を操作でき、ADMIN は組織ユーザーを管理する。
+[Project の成員管理](../docs/design/project-lifecycle.md#成员管理页面)は `#/projects` の ADMIN 用 tab。会話・対象の隔離と未知結果の門禁はアカウント画面と共通 request hook を使う。
 [生成 Host](../docs/design/generated-modules.md)、[Task Flow](../docs/design/task-flow.md)等の未接続部分は設計と計画から確認する。
 [変更別の入口](../docs/development/change-guide.md)から対象の設計・API・回帰へ進む。
 

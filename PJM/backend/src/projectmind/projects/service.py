@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -9,6 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from projectmind.auth.service import AuthenticatedActor
 from projectmind.projects.domain import (
     CreateProjectCommand,
+    ProjectMemberNotFoundError,
+    ProjectMemberStatus,
+    ProjectMemberUserNotFoundError,
     ProjectPermissionDeniedError,
     StoredProject,
     StoredProjectMember,
@@ -16,6 +22,9 @@ from projectmind.projects.domain import (
     UpdateProjectCommand,
 )
 from projectmind.projects.repository import ProjectRepository
+from projectmind.users.access import authorize_user_access, validate_user_access
+from projectmind.users.domain import UserAccess
+from projectmind.users.repository import LockedUsers, UserRepository
 
 
 class ProjectService:
@@ -151,7 +160,7 @@ class ProjectService:
         actor: AuthenticatedActor,
         project_id: UUID,
     ) -> None:
-        """ADMIN が Run/Schedule のない ARCHIVED Project を一つの transaction で削除する。"""
+        """ADMIN が Run/Schedule/所属監査のない ARCHIVED Project を単一 transaction で削除する。"""
 
         self._require_admin(actor)
         async with self._session_factory() as session, session.begin():
@@ -163,51 +172,96 @@ class ProjectService:
     async def list_members(
         self,
         *,
-        actor: AuthenticatedActor,
+        access: UserAccess,
         project_id: UUID,
     ) -> tuple[StoredProjectMember, ...]:
         """ADMIN に限り Project membership を返す。"""
 
-        self._require_admin(actor)
-        async with self._session_factory() as session:
-            return await ProjectRepository(session).list_members(
-                organization_id=actor.organization_id,
+        async with self._member_transaction(access, write=False) as (repository, locked):
+            result = await repository.list_members(
+                organization_id=locked.actor.organization_id,
                 project_id=project_id,
             )
+            self._authorize_member(access, locked, write=False)
+            return result
 
     async def add_member(
         self,
         *,
-        actor: AuthenticatedActor,
+        access: UserAccess,
         project_id: UUID,
         user_id: UUID,
     ) -> StoredProjectMember:
         """ADMIN に限り ACTIVE User の membership を追加または再有効化する。"""
 
-        self._require_admin(actor)
-        async with self._session_factory() as session, session.begin():
-            return await ProjectRepository(session).add_member(
-                organization_id=actor.organization_id,
-                project_id=project_id,
-                user_id=user_id,
+        async with self._member_transaction(access, target_id=user_id, write=True) as (
+            repository, locked,
+        ):
+            member = await repository.lock_member(
+                organization_id=locked.actor.organization_id, project_id=project_id,
+                user_id=user_id, active_project=True,
+            )
+            now = self._authorize_member(access, locked, write=True)
+            user = locked.target
+            if user is None or user.status != "ACTIVE":
+                raise ProjectMemberUserNotFoundError(f"Active User not found: {user_id}")
+            return await repository.add_member(
+                project_id=project_id, user=user, member=member,
+                actor_id=locked.actor.id, request_id=access.request_id, now=now,
             )
 
     async def remove_member(
         self,
         *,
-        actor: AuthenticatedActor,
+        access: UserAccess,
         project_id: UUID,
         user_id: UUID,
     ) -> None:
         """ADMIN に限り membership を REMOVED へ遷移する。"""
 
-        self._require_admin(actor)
-        async with self._session_factory() as session, session.begin():
-            await ProjectRepository(session).remove_member(
-                organization_id=actor.organization_id,
-                project_id=project_id,
-                user_id=user_id,
+        async with self._member_transaction(access, target_id=user_id, write=True) as (
+            repository, locked,
+        ):
+            member = await repository.lock_member(
+                organization_id=locked.actor.organization_id, project_id=project_id,
+                user_id=user_id, active_project=False,
             )
+            now = self._authorize_member(access, locked, write=True)
+            if (
+                locked.target is None or member is None
+                or member.status != ProjectMemberStatus.ACTIVE.value
+            ):
+                raise ProjectMemberNotFoundError(f"Active ProjectMember not found: {user_id}")
+            repository.remove_member(
+                organization_id=locked.actor.organization_id, member=member,
+                actor_id=locked.actor.id, request_id=access.request_id, now=now,
+            )
+
+    @asynccontextmanager
+    async def _member_transaction(
+        self, access: UserAccess, *, target_id: UUID | None = None, write: bool,
+    ) -> AsyncIterator[tuple[ProjectRepository, LockedUsers]]:
+        """User 管理と同じ Org→User→Session を持ち、所属と監査を一緒に commit する。"""
+
+        self._require_admin(access.actor)
+        validate_user_access(access)
+        async with self._session_factory() as session, session.begin():
+            locked = await UserRepository(session).lock_users(
+                access=access, target_id=target_id, include_target_sessions=False,
+            )
+            self._authorize_member(access, locked, write=write)
+            yield ProjectRepository(session), locked
+            # FK/監査 INSERT の失敗も期限切れも transaction 全体を失敗させる。
+            await session.flush()
+            self._authorize_member(access, locked, write=write)
+
+    @staticmethod
+    def _authorize_member(access: UserAccess, locked: LockedUsers, *, write: bool) -> datetime:
+        """全資源の待機後にも users と共通の原 credential 検証を実行する。"""
+
+        return authorize_user_access(
+            access, locked, now=datetime.now(UTC), admin=True, write=write,
+        )
 
     @staticmethod
     def _require_admin(actor: AuthenticatedActor) -> None:

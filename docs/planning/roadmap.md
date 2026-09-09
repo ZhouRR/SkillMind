@@ -63,9 +63,9 @@
 
 #### R05 领域与身份安全
 
-- 状态：会话 v2/0031、登录防护、项目 CRUD 已有代码；账户 API/Schema/OpenAPI/client 与页面已接齐。项目精确读取、失效链接隔离及 Schedule 引用删除拒绝已接入；真实事务、迁移和 HTTPS 仍待验。
+- 状态：会话 v2/0031、登录防护、项目 CRUD 已有代码；账户链路、项目精确读取/失效链接隔离已接齐。成员管理已补业务事务重新认证、目标账户锁、0033 追加审计和 ADMIN 页面；成员审计与 Schedule 引用均阻止整项目删除。真实事务、迁移和 HTTPS 仍待验。
 - 范围：[领域](../design/domain-model.md)、[项目](../design/project-lifecycle.md)、[认证](../design/authentication.md)、[登录防护](../design/login-protection.md)、[用户](../design/user-lifecycle.md)、[Secret](../design/secret-storage.md)及相应 Web。
-- 验收：最后 ADMIN、改密/撤销竞争、0031/0032、真实 Redis/DB/HTTPS、多页面与未知提交；项目版本/成员审计、归档与创建竞争、完整删除引用和 blob 清理。TaskSchedule 的 RESTRICT 不能被“无 Run”替代。
+- 验收：最后 ADMIN、改密/撤销及成员/禁用竞争、0031–0033、真实 Redis/DB/HTTPS、多页面与未知提交；项目版本、成员审计真实回滚、归档与创建竞争、完整删除引用和 blob 清理。TaskSchedule/成员审计的 RESTRICT 不能被“无 Run”替代。
 
 #### R06 Skill 生命周期
 
@@ -93,7 +93,7 @@
 
 #### R10 全部 Web 页面
 
-- 状态：原请求确认、文档选择/详情、调度输入及登录已有局部基础；账户入口、分页和未知结果处理已接通。App 已分离项目目标/精确授权、隔离旧读结果并保留失效深链接，窄屏导航可操作；成员入口及其他页面完整 mutation/未知结果隔离仍待收口。
+- 状态：原请求确认、文档选择/详情、调度输入及登录已有局部基础；账户与成员管理入口已接通，共用防重/期限/旧响应隔离，领域拒绝和未知核对各自定义。App 已分离项目目标/精确授权并保留失效深链接，窄屏导航可操作；其他页面完整 mutation/未知结果隔离仍待收口。
 - 范围：[Workspace](../design/workspace.md)与[文档管理](../design/document-lifecycle.md)；pages/components/API/hooks/lib/styles/i18n。
 - 验收：普通答复/评价/上传删除的同步防重、晚到响应和未知结果；服务端筛选/完整分页、三语、键盘、窄屏与真实用户流程。输入选择回归不能替代资产管理时序。
 

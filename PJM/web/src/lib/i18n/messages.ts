@@ -271,7 +271,7 @@ export interface UiMessages {
   /** 項目管理画面(ProjectsPage)と module 設定区画。 */
   projects: {
     description: string
-    /** 画面 3 区分(項目・アーカイブ・模块)の tab。縦積みを解消する。 */
+    /** 管理対象別 tab。成員管理は ADMIN のみに追加する。 */
     pageTabsAria: string
     tabProjects: string
     tabArchived: string
@@ -312,6 +312,7 @@ export interface UiMessages {
     /** 削除拒否の理由。backend は Problem code で両者を区別する。 */
     deleteBlockedByRuns: string
     deleteBlockedBySchedules: string
+    deleteBlockedByMemberAudit: string
     deleteNeedsArchive: string
     permissionsTitle: string
     permissionsHint: string
@@ -341,6 +342,47 @@ export interface UiMessages {
       configTitle: string
       configHint: string
     }
+  }
+  /** Project membership と Organization account の状態を混同しない管理区画。 */
+  projectMembers: {
+    tab: string
+    title: string
+    description: string
+    needProject: string
+    adminOnly: string
+    adminBypass: string
+    archivedHint: string
+    relationshipHint: string
+    membersTitle: string
+    emptyMembers: string
+    relationship: string
+    joinedAt: string
+    states: Record<'ACTIVE' | 'REMOVED' | 'ABSENT', string>
+    candidatesTitle: string
+    search: string
+    searchHint: string
+    emptyCandidates: string
+    add: string
+    remove: string
+    alreadyMember: string
+    disabledCandidate: string
+    intentTitle: string
+    confirmAdd: string
+    confirmRemove: string
+    confirm: string
+    selectionChanged: string
+    saved: string
+    unknownTitle: string
+    unknownHint: string
+    reconcile: string
+    reconcileHint: string
+    originalAction: string
+    originalRelationship: string
+    currentRelationship: string
+    acknowledgeCheck: string
+    acknowledge: string
+    acknowledgedHint: string
+    failures: Record<'sessionExpired' | 'csrfRejected' | 'adminRequired' | 'notFound' | 'invalidRequest' | 'unknown' | 'loadFailed', string>
   }
   /** 資源と統合の管理画面(ResourcesPage)。 */
   resources: {
