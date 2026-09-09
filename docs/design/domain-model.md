@@ -1,293 +1,151 @@
-# ProjectMind 领域模型与权限设计
+# 领域模型与权限
 
-> 定位：核心实体、关系、状态与权限不变量。先读[核心术语](../overview/glossary.md)；执行流程见 [Runtime](agent-runtime.md)，当前实现与验收范围见[计划](../planning/roadmap.md#13-当前执行状态)。平台不把 JAF、代码评审等业务字段固化为领域对象。
+本页是实体与边界地图，不重复各专题协议。术语见[词汇表](../overview/glossary.md)，实施状态见[计划](../planning/roadmap.md#当前执行状态)。平台不把特定业务字段固化为通用领域对象。
 
-## 1. 建模原则
+## 建模原则
 
-- Skill 描述业务能力、目标、所需资源、指导规则、交付物和可能的外部效果；它不直接授予平台权限。
-- 平台契约只固定跨 Skill 通用的控制协议，不预定义 Ticket、代码评审等业务 Schema。
-- `Run` 表示一个具有明确目标的持续执行线程，可以包含多个顺序 Segment 和 Agent Session；一次模型会话不等于一个 Run。
-- 用户补充信息、选择方案或批准外部效果时，在同一非终态 Run 中追加 Segment；Worker 故障重试才追加 Attempt。
-- 外部写入必须先形成可审查的 ChangeProposal，再按平台策略批准、执行和回读验证。
-- 已发布 SkillVersion、Run 快照、Result 和审计事件不可原地修改。
+- Skill 描述目标、资源、规则与产物，不授予权限；平台固定跨 Skill 控制协议，不预定义所有业务 Schema。
+- Organization 保存可复用 Skill 资产，Project 显式启用精确版本并绑定资源。
+- Run 固定目标与权限；业务续行追加 Segment，技术恢复追加 Attempt，模型 Session 只是执行载体。
+- 已发布内容、Run snapshot、Result 不变；答复、评价、外部批准和审计各自追加。
+- 外部写入必须 propose → 批准/适用预授权 → 执行 → 回读，不把 Agent 建议变成权限。
 
-## 2. 组织、项目与资源
+## 组织、项目与资源
 
-- `Organization`：组织边界。MVP 只启用一个组织，但核心数据保留 `organization_id`。
-- `User`：平台用户，系统角色只有 `ADMIN` 和 `USER`，账户状态为 ACTIVE / DISABLED；不是项目内的虚拟角色。账户版本及管理事务见[用户生命周期](user-lifecycle.md)。
-- `AuthSession`：浏览器 opaque session，保存 session/CSRF 的 hash、期限、失效记录及内部凭据版本/登录角色；不保存 token 原值。v2 的读取、角色快照与旧会话处理见[会话设计](authentication.md#会话凭据-v2-与切换要求)，不是 AgentSession。
-- `UserSecurityEvent`：账户安全操作的追加记录，不等于登录尝试日志或 RunEvent；持久化、API 与未完成的消费者由[账户接线](user-lifecycle.md#工作副本与公开入口)分别说明。
-- `Project`：Integration、任务、Run 和知识数据的主要隔离边界。
-- `ProjectMember`：User 与 Project 的成员关系，不引入额外系统角色。
-- `Integration`：项目中配置的 Provider 资源实例，例如 Redmine、Git、SVN。不是所有资源都需要 Integration 行；内置 Project 文档走文档目录与[Run 文档快照](resource-snapshots.md)。
-- `SecretReference`：凭据定位信息，不保存明文 Secret。
-- `ProjectKnowledge`：概念名称；当前持久化实体是 `ProjectDocument`，保存上传文档及 blob 元数据。[文档生命周期](document-lifecycle.md)区分身份、目录、数据库保存和附件清理；自动知识同步/独立索引不是已实现服务。
+| 对象 | 责任与实际边界 |
+| --- | --- |
+| Organization | 组织隔离；当前仅单组织部署，不等于多租户登录已实现 |
+| User / AuthSession | ADMIN/USER、ACTIVE/DISABLED；浏览器会话保存 hash、期限、撤销、凭据版及登录角色，不是 AgentSession |
+| UserSecurityEvent | 账户安全操作追加记录，不是登录尝试日志或 RunEvent |
+| Project / ProjectMember | 项目资源边界与 ACTIVE/REMOVED 成员关系；不增加 Project ADMIN 角色 |
+| Integration | 项目中的版本化 Provider 资源与 scope；内置文档不要求 Integration 行 |
+| SecretReference | 定位凭据；MANAGED 材料独立加密保存，原值不进入 Run |
+| ProjectDocument | ProjectKnowledge 的实际载体：元数据与 blob；自动同步/独立知识索引不是现有服务 |
 
-项目身份、成员加入/移除、当前项目选择与归档/删除统一见[项目生命周期](project-lifecycle.md)。归档不等于停止执行，移除成员不等于停用账户；ADMIN 的组织访问不依赖该项目的成员关系。物理删除须核对完整引用，不能只从“没有 Run”推断项目为空。
+[项目生命周期](project-lifecycle.md)负责成员、偏好、归档与删除；归档不停止 Run，移除成员不撤销账户全部会话。ADMIN 的本组织访问不依赖 ProjectMember；[用户管理](user-lifecycle.md)和[会话 v2](authentication.md#会话凭据-v2-与切换要求)分别负责账户变更与凭据。
 
-Skill 资产（SkillSource、SkillInterpretation、Skill、SkillVersion、RuntimeManifest）归 Organization，
-不归单个 Project：同一份 Skill 只导入、解释和发布一次，多个 Project 复用同一个 SkillVersion。这是
-就绪度模型的前提——[Skill 就绪度](skill-contract.md#72-运行就绪度)要求同一 SkillVersion 在一个项目为 RUNNABLE、在另一个项目仍需
-配置，若 SkillVersion 归属单个 Project 则该语义无法成立。
+SkillSource、Interpretation、SkillVersion、Manifest 归 Organization。同一版本可在多个 Project 使用，但每个 Project 必须显式启用精确 PUBLISHED 版本；新发布不自动启用或升级。资源就绪度按项目独立计算，启用关系不授予资源/Tool 权限。
 
-Project 通过 `ProjectSkillVersion` 显式启用精确的 PUBLISHED SkillVersion 才能发现和执行它：
+## Skill 导入、解释与发布
 
-- 启用粒度是 SkillVersion 而不是 Skill。Run 冻结精确版本（§7.2），平台也不自动切换 PUBLISHED 版本；
-  若启用到 Skill，新版本发布会静默改变项目的可执行内容。
-- 默认不启用。新发布的版本不会让任何项目突然多出可执行任务，扩大执行面必须是一次显式的 ADMIN 操作。
-- 启用关系不授予权限，也不改变资源绑定：能否执行仍由 Project 资源、Tool policy 和 Run 权限快照决定。
+| 对象 | 责任 |
+| --- | --- |
+| SkillSource | 不可变来源目录、附件、metadata、hash 与文件索引 |
+| SkillInterpretation | 一次追加式解释；重新调整保留 parent lineage |
+| CapabilityBlueprint | 能力、目标、资源、规则、交付物、交互/效果意图及来源依据 |
+| ResourceRequirement / OutcomeDefinition | 抽象资源条件与交付/证据要求，不绑定 Project Secret |
+| Skill / SkillVersion | 稳定业务身份 / 冻结内容的精确版本；生命周期状态与内容分开 |
+| RuntimeManifest | 版本化运行投影，冻结蓝图、Tool/Task 与可选业务 Schema |
+| SkillComposition / ProjectComposition | 精确版本的展示组合及项目启用；不是新系统角色或自动编排器 |
+| ProjectSkillVersion | Project 对精确 PUBLISHED 版本的启停记录；当前停用关系不能重新启用 |
 
-该模式与既有的 `SkillComposition`（Organization 级）+ `ProjectComposition`（启用关系）一致，不引入
-第二套作用域机制。
+领域 capability 可是新概念，真实 Tool 调用才要求平台注册的 versioned capability。合法蓝图与发布门禁不能因 GUIDANCE_ONLY 或缺资源而省略。
 
-Integration 声明自己实际提供的版本化 Tool capability 和允许范围。Skill 只提出抽象资源要求，例如“一个可读取 Ticket 的 issue source”或“一个允许生成补丁但不直接提交的 repository source”。
+发布、项目启用、readiness 是不同判断：同版在 A 项目可运行，在 B 项目缺资源；ACTIONABLE 不等于具体变更已批准。详见[Skill 契约](skill-contract.md#发布与就绪的判断顺序)与[解释实现](skill-interpretation.md)。
 
-## 3. Skill 导入、解释与发布
+## 任务、Run 与会话
 
-### 3.1 核心对象
+### 任务定义
 
-- `SkillSource`：导入的原始目录式 Skill、附件和来源元数据，不可变保存。
-- `SkillInterpretation`：Interpreter 对同一 SkillSource 的一次追加式理解结果。
-- `CapabilityBlueprint`：解释得到的能力蓝图，描述能做什么、为什么做、需要什么、如何判断完成以及可能产生什么效果。
-- `ResourceRequirement`：能力运行前必须或可选绑定的抽象资源要求。
-- `OutcomeDefinition`：预期交付物、成功条件、证据要求和可选结构提示。
-- `Skill`：稳定业务标识。
-- `SkillVersion`：内容冻结、可发布和废弃的精确版本；生命周期元数据不等于版本内容。[回滚](skill-contract.md#11-版本回滚与评价)改变后续选择，不改写旧版。
-- `RuntimeManifest`：SkillVersion 的平台运行投影，冻结能力蓝图、任务蓝图、Tool requirement、执行策略和可选动态 Schema。
-- `SkillComposition`：多个 SkillVersion 的可配置组合，可展示为虚拟角色、模块或任务组，但不授予系统权限。
-- `ProjectSkillVersion`：Project 对精确 PUBLISHED 版本的启用记录，不授予权限。当前停用后保留记录但不能重新启用；追加式恢复历史属于后续设计。
+ExecutableTask 从精确已发布蓝图投影，无独立 task 业务表，task_id 由服务端生成。ResourceBinding 将抽象要求绑定 Integration、文档或用户输入；Project/Task 配置在创建时冻结为 Run 资源。
 
-### 3.2 能力蓝图
+AgentTaskBriefSnapshot 按 Segment 冻结目标、原 Skill、规则、资源、权限与交付要求。TaskSchedule 保存精确版本、输入及选择规则；每次 ONCE/CRON 触发再经普通创建服务生成 Run，必带 IANA timezone，见[调度](task-scheduling.md)。
 
-`CapabilityBlueprint` 至少表达：
-
-- 领域能力与用户可理解的用途。
-- 触发意图和一个或多个目标。
-- 必要/可选资源、访问方式和绑定条件。
-- 来自 Skill 的指导、判断标准、禁止事项和证据要求。
-- 预期交付物与成功条件。
-- 需要用户参与的澄清、选择、审查和批准点。
-- 可能的外部效果，例如更新 Redmine、提交代码或只生成报告。
-- 假设、未决问题、置信度和 source trace。
-
-领域能力可以是新的业务概念，不要求预先存在于 Tool catalog。只有实际 Tool 调用使用 `issue.read/v1`、`repository.read/v1` 这类平台注册 capability ID。
-
-### 3.3 发布与可运行性分离
-
-SkillVersion 的“可发布”与任务的“当前可运行”是两个判断：
-
-- 安全且可理解、但缺少 Integration 的版本可以发布为可配置能力。
-- 资源绑定完成且所需 Tool 全部可用后，任务才进入 `RUNNABLE`。
-- 请求外部写入但项目没有对应 Provider 或批准策略时，任务可以运行到“生成提案”，不能执行写入。
-- 信息不足的 Skill 可发布为 `GUIDANCE_ONLY`，由对话和人工步骤使用，不伪造业务字段。
-
-这里的 `GUIDANCE_ONLY` 是任务就绪度，不是 SkillVersion 的发布状态；仍须有合法蓝图并通过发布门禁。完整[判断顺序](skill-contract.md#发布与就绪的判断顺序)区分 Preview、gate、发布、启用和 readiness，不能用其中一项替代其它项。
-
-## 4. 任务、Run 与会话
-
-### 4.1 任务定义
-
-- `ExecutableTask`：从已发布 CapabilityBlueprint 投影出的项目任务。
-- `ResourceBinding`：把 ResourceRequirement 绑定到具体 Integration、ProjectKnowledge 或用户输入。
-- `AgentTaskBriefSnapshot`（早期称 AgentInstructionSnapshot）：Run/Segment 传给 Agent 的不可变执行说明，包括原始 Skill 引用、目标、资源、指导、权限和效果策略。
-- `TaskSchedule`：任务的预约与周期规则。[调度规范](task-scheduling.md)定义 `ONCE`（指定时刻一次）与 `CRON`（周期），必带 IANA 时区，保存精确 SkillVersion、任务输入与资源选择规则；每次触发再创建独立 Run 快照。监控条件触发不做。
-
-ExecutableTask 以目标和资源前提为中心。动态 input/output Schema 可以帮助生成表单或验证稳定结构，但属于可选派生产物，不是所有 Skill 的业务能力本体。
-
-### 4.2 执行对象
-
-- `Run`：一个有明确目标的持续执行线程，是审计、交互和最终结果的主记录。
-- `RunSkillSnapshot`：Run 使用的 SkillVersion、Manifest checksum 和配置快照。
-- `RunSegment`：Run 中由“初次启动、用户答复、批准、审查反馈”等业务事件触发的一段连续工作。
-- `RunAttempt`：同一 Segment 的一次 Worker 领取、故障恢复或技术重试。
-- `RunInputSnapshot`：整个 Run 输入准备的独立回执，记录准备世代与全部文件摘要；不是创建请求或每个 Segment 的新资源选择。当前有 model/migration 与部分接线，完整协议见[资源准备](resource-snapshots.md#输入准备与可信缓存)。
-- `RunBudgetAccount` / `RunBudgetReservation` / `RunBudgetReceipt`：按 Run 共享的账户、按执行绑定的预留和追加式核对回执。已有内部持久载体，尚未进入主/子执行路径；不把账户初始化到每个 Segment，也不从 Session 摘要推算余额，详见[预算载体](run-budgets.md#持久账本的当前载体)。
-- `AgentSession`：AgentEngine 会话。一个 Run 可以顺序使用多个主会话，并记录 resume/fork/replace 关系；[并行子分析](subagents.md)的只读子会话以 `session_kind = SUBAGENT`、`continuation_mode = BRANCH` 记录。
-- `AgentSessionTranscript` / `AgentSessionEntry`：SDK opaque transcript 的追加式镜像。
-- `RunStep`：由 STEP_* 事件投影的概念，不是独立持久化表；不要求机械复现 Skill 建议顺序。
-- `RunEvent`：SSE 重连和审计使用的追加式事件。
-- `ToolCall`：一次版本化 Tool capability 调用。
-- `Evidence`：Ticket、文件、代码位置、Diff 或快照等证据引用。
-- `Artifact`：报告、补丁、导出文件等产物。
-- `Result`：保存并冻结的原始结果或通用结果包络；失败/取消可以没有 Result，技术成功也不证明业务结论全对。
-- `Evaluation`：人工评分、结论和修订建议，不覆盖 Result。多条建议都相对于同一[原结果内容](results-evaluation.md#修订指向哪份原值)，不是依次应用的补丁。
-
-### 4.3 用户交互与外部效果
-
-- `UserInteraction`：结构化问题与等待事实。CLARIFICATION / CHOICE / REVIEW 是普通交互；EFFECT_APPROVAL 应关联 ChangeProposal，不能走通用答复。现有入口差距见[用户交互设计](user-interactions.md#普通提问不能代替外部批准)。
-- `InteractionResponse`：对一个交互的追加式答复，记录 actor、时间和问题版本；同一次原答复确认不应追加第二个业务 Segment。[回答重放](user-interactions.md#首次答复与原答复重放)与新 Run 创建使用不同身份作用域。
-- `ChangeProposal`：准备对外部系统实施的结构化变更提案，包含目标、预览、理由、前置版本、风险和幂等键。
-- `EffectExecution`：经批准或命中项目预授权策略后的一次实际写入与回读验证记录。
-
-Agent 可以建议写入、生成补丁和解释风险，但不能把建议直接变成权限。平台只有在注册 write Tool、Project 授权、Integration scope、批准策略和运行时参数校验全部通过后才允许 EffectExecution。
-
-### 4.4 核心关系
-
-- SkillSource 可产生多次 SkillInterpretation；重新解释不覆盖旧记录。
-- SkillInterpretation 产生一个 CapabilityBlueprint candidate；发布时冻结进 SkillVersion/RuntimeManifest。
-- SkillVersion 可以投影多个 ExecutableTask，同一版本可被多个 SkillComposition 复用。
-- 同一 SkillVersion 可被多个 Project 通过 ProjectSkillVersion 启用；就绪度按各 Project 的资源独立计算。
-- 停用 ProjectSkillVersion 只影响新 Run 的发现与创建；已存在的 Run 与其 snapshot、Result 不受影响。
-- ResourceRequirement 的 Project/Task 选择在创建时冻结为 Run 资源；Integration binding 与内置文档快照的载体不同，见[资源快照](resource-snapshots.md)。
-- Run 包含一个或多个顺序 RunSegment；首个 Segment 由用户启动创建。
-- RunSegment 包含一个或多个追加式 RunAttempt；技术重试不创建新的业务 Segment。
-- Run 可以包含多个 AgentSession；同一 Run 同时最多一个活动的主（PRIMARY）Session，只读 SUBAGENT 子会话可在[子分析边界](subagents.md#能力与故障边界)内并行。
-- 普通答复或过期处理使等待中的 Run 追加新 Segment；外部批准需按独立 Effect 链决定何时续行，不能从 APPROVED 推导已恢复模型。Session 再按兼容性 resume、fork 或 replace。
-- Run 包含多个 RunStep、RunEvent、ToolCall、Evidence、Artifact、UserInteraction 和 ChangeProposal。
-- 一个 Run 最多有一个终态 Result；终态后的新目标创建新 Run。child/fork 关系是后续产品关联设计，当前创建请求不承诺 parent Run 字段。
-
-把执行关系放在一起看：
+### 执行对象
 
 ```text
-Run：固定目标、权限与资源选择
-├── Segment 1：初次启动
-│   ├── Attempt 1：一次 Worker 领取 → 主 Session / 只读子 Session
-│   └── Attempt 2：同段技术恢复 → 审计原 Session 的延续/替换
-├── Segment 2：有效答复、批准等业务续行 → 新的 Attempt
-├── 输入回执：按 Run 固定完成世代，不随 Segment / Attempt 重选
-└── Result / Evidence / Interaction / Proposal 等业务与审计事实
+Run：固定目标、版本、权限与资源
+├── Segment 1：初始工作
+│   ├── Attempt 1：Worker 领取
+│   └── Attempt 2：同段技术恢复
+├── Segment 2：业务答复/效果处理后续行
+├── RunInputSnapshot：整个 Run 的准备回执
+├── 主 AgentSession：顺序 resume/fork/replace
+│   └── SUBAGENT / BRANCH：受限只读并行
+└── Result、Evidence、Artifact、Interaction、Proposal 与审计
 ```
 
-这是关系摘要，不是数据库列或完整状态图。Brief 按 Segment 冻结，输入回执按 Run 复用，lease 按 Attempt 校验；它们不能因为都带 checksum 就合并成一种快照。
+Brief 按 Segment 冻结，输入准备回执按 Run 复用，lease 按 Attempt 校验；不是同一种 checksum 对象。RunInputSnapshot 已有模型与部分接线，完整恢复仍见[资源快照](resource-snapshots.md)。RunBudgetAccount/Reservation/Receipt 有内部载体，但尚未接入主/子执行，不从实体存在推断共享预算已生效。
 
-## 5. 核心字段与实际载体
+RunStep 是 STEP_* 事件的投影，不是独立持久表。RunEvent 是追加式审计/SSE 来源；TEXT_DELTA 可消耗 sequence 却不持久化，欠号不自动说明丢事件。
 
-以下给出定位入口，不维护第二份完整字段字典。数据库列读取 [db/models.py](../../PJM/backend/src/projectmind/db/models.py)；公开字段对照资源 Schema、route 与 [OpenAPI](../../PJM/contracts/openapi/projectmind-api.v1.json)。三者不一致时按[未接齐的交付链](../development/contract-workflow.md#遇到未接齐的交付链)核对，不能默认保存的快照代表当前工作副本。概念对象不代表同名数据库表。
+### 用户交互与外部效果
 
-### 账户与会话
+- UserInteraction/InteractionResponse：问题、期限、版本与原答复身份；CLARIFICATION/CHOICE/REVIEW 走[普通答复](user-interactions.md)，EFFECT_APPROVAL 必须关联 Proposal。
+- ChangeProposal/Approval/EffectExecution：精确变更、决定和真实执行/回读事实；APPROVED 不证明 APPLIED 或模型已续行。
+- Result：最多一个终态原始结果，可含通用 Outcome；失败/取消可没有 Result，SUCCEEDED 不证明业务完整。
+- Evidence/Artifact：证据及产物引用；引用格式、可访问对象和实际内容验证不能合并。
+- Evaluation：人工评分和修订建议；多条建议均相对同一原值，不顺次覆盖 Result，见[结果设计](results-evaluation.md)。
 
-| 对象 | 持久化与边界 |
+## 核心字段与实际载体
+
+完整列见 [db/models.py](../../PJM/backend/src/projectmind/db/models.py)，公开数据需同时核对 [Schema](../../PJM/contracts/)、route 和 [OpenAPI](../../PJM/contracts/openapi/projectmind-api.v1.json)。概念不等于同名表，快照存在不证明与工作副本同步。
+
+| 领域 | 持久化入口与限制 |
 | --- | --- |
-| User | users；row_version 属于账户/安全操作，不随语言、Project 偏好和登录时间变化。不能将其当作整行全部字段的版本 |
-| AuthSession | auth_sessions；内部协议版、登录角色和 revoked_at 记录凭据与失效，不用 User 当前状态代替撤销历史 |
-| UserSecurityEvent | user_security_events（工作副本 0032）；actor/target、动作、版本、角色/状态、撤销数量与关联 UUID。管理与 bootstrap 用例均有追加调用；实际提交/回滚及下游消费仍分别验收 |
+| 账户 | users / auth_sessions / user_security_events；账户 row_version 不覆盖偏好/登录时间，审计唯一键不等于 DB 禁止任意修改 |
+| Skill | skill_sources / skill_interpretations / skills / skill_versions / runtime_manifests；Blueprint 内嵌于解释与 Manifest |
+| 项目资源 | projects / project_members / integrations / resource_bindings / project_documents；字节保存与数据库提交不同 |
+| 凭据 | secret_references / managed_secret_material；引用 key_version 与密文 kek_version 不是同层版本 |
+| 任务配置 | project_skill_versions、组合表、task_schedules；当前启停/成员单行记录不代表完整历次审计 |
+| 执行 | runs / run_skill_snapshots / run_segments / run_attempts / agent_task_brief_snapshots |
+| Session | agent_sessions / agent_session_transcripts / agent_session_entries；transcript 追加镜像，不替代业务事实 |
+| 输入与预算 | run_input_snapshots（0029）；run_budget_accounts/reservations/receipts（0030），有载体不等于消费者全部接齐 |
+| 交互/效果 | user_interactions / interaction_responses / change_proposals / change_approvals / effect_executions |
+| 结果/事件 | run_results / evaluations / evidence / run_events / outbox_messages；Artifact 不假设独立表 |
 
-准确的[载体与调用缺口](user-lifecycle.md#工作副本与公开入口)、[审计范围](user-lifecycle.md#审计与请求关联)和[旧用户兼容](user-lifecycle.md#迁移与历史兼容)由用户生命周期设计负责。已有表定义不代表部署已迁移，唯一键也不证明任意数据库写入都具备追加式保护。
+frontend_module_versions（0026）属于[生成展示](generated-modules.md)，不是 SkillComposition；构建、发布与 Host 尚未接通，不能混用版本回退。
 
-### 5.1 Skill 与能力
+Run 创建意图保存在 task_snapshot_json.creation_request；其身份与 runtime snapshot 不同。兼容 hash 与事务规则见[Run 创建](run-creation.md)，不改写旧快照补造请求。
 
-| 概念 | 当前持久化载体 | 契约 |
-| --- | --- | --- |
-| SkillSource | `skill_sources` 的 source metadata、content_hash、file index | 组织资产，不含 Project 选择 |
-| SkillInterpretation | `skill_interpretations` 的 report_json、manifest_draft_json、execution_json、lineage | [Interpreter 协议目录](../../PJM/contracts/skills/interpreter/v1/) |
-| CapabilityBlueprint | 解释结果与 `manifest_json.capability_blueprint` 内嵌数据 | [Blueprint v1](../../PJM/contracts/capability-blueprint/v1.schema.json) |
-| Skill / SkillVersion | `skills` / `skill_versions` | 版本身份与发布状态 |
-| RuntimeManifest | `runtime_manifests.manifest_json` 和 checksum | [Manifest v1alpha1](../../PJM/contracts/runtime-manifest/v1alpha1.schema.json) |
-| ProjectSkillVersion | `project_skill_versions` 的启停记录 | 精确 PUBLISHED 版本可见性；现有唯一关系不能表达多次启停历史 |
-
-### 5.2 项目任务与资源
-
-| 概念 | 当前载体 | 关键边界 |
-| --- | --- | --- |
-| Project / ProjectMember | `projects` / `project_members` | 归档占用原 key；成员状态可重新启用，但单行状态不提供完整的历次变更审计，见[项目边界](project-lifecycle.md) |
-| ExecutableTask | TaskCatalog descriptor，由版本投影 | 无独立 task 业务表；task_id 由服务端生成 |
-| SecretReference | `secret_references`；MANAGED 密文另存 `managed_secret_material` | locator/明文不公开 |
-| Integration / ResourceBinding | `integrations` / `resource_bindings` | Project/Task 配置和 Run 冻结分层 |
-| ProjectDocument | `project_documents` 与 object-storage blob | 保存/读取/清理由[文档资产规则](document-lifecycle.md)负责；Run 选择与内容冻结见[资源快照](resource-snapshots.md)，二者不共用一次提交 |
-| AgentTaskBriefSnapshot | `agent_task_brief_snapshots.brief_json` / checksum | 每个 Segment 唯一、不可变 |
-| TaskSchedule | `task_schedules` | [调度](task-scheduling.md)复用普通 Run 创建 |
-
-业务模块由 SkillComposition / ProjectComposition / CompositionSkillBinding 组织精确版本，不是生成界面的版本。`frontend_module_versions`（migration 0026）另存生成展示的前置记录，但尚无构建/发布服务；其 source 唯一约束、冻结与回退差距见[生成模块的内容身份](generated-modules.md#内容身份与历史兼容)。两种对象不共用发布或回退语义，也不把内部模型当作公开 Host 协议。
-
-### 5.3 Run、交互与效果
-
-| 概念 | 当前表/契约 | 关键边界 |
-| --- | --- | --- |
-| Run / RunSkillSnapshot | `runs` / `run_skill_snapshots` | 初始目标、权限和版本不可漂移 |
-| RunInputSnapshot | 工作副本 model 与 migration 0029 的 `run_input_snapshots` | Run 唯一；全部输入的准备回执，不是公开资源清单；[消费者与真实恢复仍待验收](resource-snapshots.md#已知差距与后续设计) |
-| Segment / Attempt | `run_segments` / `run_attempts` | 业务续行与技术重试分别追加 |
-| Session / Transcript | `agent_sessions` / `agent_session_transcripts` / `agent_session_entries` | 主 Session 顺序，子 Session 只读并行 |
-| UserInteraction / Response | `user_interactions` / `interaction_responses` | 版本、身份、期限、幂等 |
-| Proposal / Approval / EffectExecution | `change_proposals` / `change_approvals` / `effect_executions` | 精确变更审批与可验证执行 |
-| Result / Evaluation | `run_results` / `evaluations` | 原始结果不可变，人工修订追加 |
-| Evidence / Artifact | `evidence`、结果中的 Artifact refs、blob | Artifact 是产物概念，不假设存在独立 artifact 表 |
-| RunEvent / Outbox | `run_events` / `outbox_messages` | 状态与 Outbox 同事务，消费幂等 |
-
-Result 的形状、实际引用校验与人工评价统一见[结果设计](results-evaluation.md)。唯一 RunResult 行与追加式 Evaluation 服务，不自动证明数据库任意更新都受阻；Artifact ref 也不自动指向已验证存储对象。
-
-`TEXT_DELTA` 可以消耗 sequence 但不持久化；sequence 欠号不等于事件丢失。完整协议见 [RunEvent](../../PJM/contracts/events/run-event/v1.schema.json)。
-
-创建请求的身份不等于运行时快照，幂等作用域也不等于权限作用域。工作副本在 `task_snapshot_json.creation_request` 保存版本化意图；新旧 hash 路径与事务边界见[Run 创建与幂等](run-creation.md)，不通过重写旧快照补造历史。该内部载体不是新增公开响应字段。
-
-预算另有工作副本 migration 0030 的 `run_budget_accounts / run_budget_reservations / run_budget_receipts`。关系是 Run → 唯一账户 → 多个执行预留 → 多条核对回执；预留同时引用 Segment/Attempt 与可选父预留。普通 Run 创建尚未生成这些记录，因此不能从本页的实体清单推断每个 Run 已有账户。精确单位、内部状态与上线边界由[预算设计](run-budgets.md#持久账本的当前载体)负责。
-
-## 6. 权限模型
-
-下表定义允许哪些身份执行操作，不是页面或部署的能力清单。用户管理已有 [API 工作副本](user-lifecycle.md#用户操作与目标公开面)，Web 与完整契约交付仍待接续；不能用已有 ProjectMember 管理代替。当前 actor 授权与历史 Run 快照分别核对，不因快照不变跳过当前请求的权限检查。
+## 权限模型
 
 | 操作 | ADMIN | USER |
 | --- | --- | --- |
-| 管理用户、项目成员、Integration 和 SecretReference | 允许 | 禁止 |
-| 查看本人账户/安全历史、改本人密码、撤销本人会话 | 本人范围允许 | 本人范围允许；不授予管理其他用户的权限 |
-| 导入、解释、发布或废弃 SkillVersion（Organization 级） | 允许 | USER 不开放 |
-| 为 Project 启用或停用 SkillVersion | 允许 | USER 不开放 |
-| 查看和执行项目任务 | 允许 | 项目成员且任务已启用可用时允许 |
-| 回答澄清、选择和 Review | 允许 | 当前为具有 ProjectWriteActor 的有效项目成员；仍校验交互版本/期限 |
-| 批准外部效果 | 允许 | 初版仅 Run 发起人；指定审批人模型上线前其他成员禁止 |
-| 配置低风险效果预授权 | 允许 | 禁止 |
-| 查看 Run、Evidence、Artifact 和 Result | 允许 | 仅所属项目成员 |
-| 追加 Evaluation | 允许 | 所属项目成员 |
-| 删除审计记录 | 禁止 | 禁止；只按保留策略清理 |
+| 管理组织用户、项目成员、Integration、Secret | 本组织允许 | 禁止 |
+| 本人账户、安全历史、改密、撤销本人会话 | 本人范围 | 本人范围 |
+| 导入/解释/发布/废弃 Skill，项目启停版本 | 本组织允许 | 禁止 |
+| 执行任务、读 Run/结果、追加评价 | 仍受项目与业务硬约束 | 活动成员及对应业务条件 |
+| 普通答复 | Project 写权限及交互版本/期限 | 同左 |
+| 外部批准 | system ADMIN | 当前有 Project 写权限的 Run 发起人 |
+| 低风险预授权 | 精确 scope；repository.write 除外 | 禁止 |
+| 删除审计 | 禁止；仅独立保留策略清理 | 禁止 |
 
-权限判断顺序：
+判定顺序：平台硬拒绝 → 当前身份/成员 → Project 策略/Integration scope → Skill/Task 要求 → Run 冻结上限 → 参数级 Tool 校验 → 精确批准/适用预授权。后一层不能覆盖前面的拒绝，用户文本和模型建议不扩权。
 
-1. 平台硬拒绝规则。
-2. SystemRole 与 ProjectMember。
-3. Project 策略与 Integration scope。
-4. SkillVersion 的 Tool requirement 和效果意图。
-5. Task/Run 的权限快照与 ResourceBinding。
-6. ToolCall 参数级策略。
-7. 对外部效果的有效批准或显式预授权。
+## 状态与不变量
 
-后面的层不能覆盖前面的拒绝。Skill 文本、Agent 决策和用户自由文本都不能直接扩大权限。
+### 状态流转
 
-SecretReference 的 key_version 与 ManagedSecretMaterial 的 kek_version 是不同层的 metadata。当前主密钥轮换只重加密材料，不改变外部 API key 或原 Run binding；准确载体和失败边界见[Secret 设计](secret-storage.md#managed-的实际加密结构)。
+SkillInterpretation 为 ANALYZING → PREVIEW_READY → SUPERSEDED，失败为 FAILED；SkillVersion 为 DRAFT → PUBLISHED → DEPRECATED，废弃不可复活。readiness 的 GUIDANCE_ONLY/CONFIGURATION_REQUIRED/RUNNABLE/ACTIONABLE 不替代发布状态。
 
-## 7. 状态与不变量
-
-### 7.1 状态流转
-
-- `SkillInterpretation`：`ANALYZING → PREVIEW_READY → SUPERSEDED`，失败进入 `FAILED`。
-- `SkillVersion`：当前枚举为 `DRAFT / PUBLISHED / DEPRECATED`（见 [skills/domain.py](../../PJM/backend/src/projectmind/skills/domain.py)）；不引入不存在的 TESTING/ARCHIVED。重复发布 PUBLISHED 返回原记录，DEPRECATED 不能重新发布；废弃与删除的作用域见[生命周期规则](skill-contract.md#111-版本内容与可见性)。
-- 任务可运行性：`GUIDANCE_ONLY | CONFIGURATION_REQUIRED | RUNNABLE | ACTIONABLE`；它是投影状态，不替代 SkillVersion 状态。
-- `ChangeProposal`：`DRAFT → PENDING_APPROVAL → APPROVED → APPLYING → APPLIED`，可进入 `REJECTED`、`STALE` 或 `FAILED`。
-- `EffectExecution`：`REQUESTED → LEASED → APPLYING → APPLIED`，也可回到同一 `REQUESTED` 技术重试，或进入 `STALE`、`FAILED`、`VERIFICATION_FAILED`。
+Proposal 从 DRAFT/PENDING_APPROVAL 到 APPROVED/APPLYING/APPLIED，也可 REJECTED/STALE/FAILED；EffectExecution 有独立 REQUESTED/LEASED/APPLYING/APPLIED 与失败/重试路径，见[受控写入](repository-effects.md)。
 
 ### Run 状态速查
 
-下表是常见路径，不是另一份完整状态机。允许转换由 [ALLOWED_RUN_TRANSITIONS / plan_run_transition](../../PJM/backend/src/projectmind/runs/domain.py)决定；不能仅凭 API 操作名自行设置状态。
+| 事件 | 常见 Run 路径与执行变化 |
+| --- | --- |
+| 首次启动 | QUEUED → PREPARING → RUNNING；初始 Segment，claim 创建 LEASED Attempt |
+| 等待用户/批准 | WAITING_FOR_INPUT/WAITING_FOR_APPROVAL；Segment WAITING，Attempt DEFERRED，释放 lease |
+| 有效答复/独立期限处理 | 追加 Segment，重新 QUEUED；原答复和批准不覆盖 |
+| lease 失效可恢复 | RETRY_PENDING → PREPARING；原 Attempt LEASE_EXPIRED，同段追加 Attempt |
+| 结束 | SUCCEEDED/FAILED/CANCELLED；terminal RUN_SNAPSHOT，终态不重新打开 |
 
-| 发生的事情 | Run 的路径 | Segment / Attempt 怎么变化 |
-| --- | --- | --- |
-| 首次启动 | `QUEUED → PREPARING → RUNNING` | 创建 Segment 1；Worker claim 创建本段 Attempt |
-| 请求用户输入/批准 | `RUNNING → WAITING_FOR_INPUT / WAITING_FOR_APPROVAL` | Segment 进入 WAITING，Attempt 记 DEFERRED 并释放 lease |
-| 有效答复或独立期限处理 | 等待态 → `QUEUED → PREPARING → RUNNING` | 追加新 Segment；领取时创建新段的 Attempt，不覆盖旧答复或批准 |
-| 活动 lease 失效并允许恢复 | `PREPARING / RUNNING → RETRY_PENDING → PREPARING` | 原 Attempt 记 LEASE_EXPIRED，同一 Segment 追加 Attempt |
-| 完成、不可恢复失败或取消 | `SUCCEEDED / FAILED / CANCELLED` | 对应对象收尾，保存 terminal RUN_SNAPSHOT；终态不能重新打开 |
+允许转换与 enum 以 [runs/domain.py](../../PJM/backend/src/projectmind/runs/domain.py)为准；WAITING_PERMISSION 仅旧协议兼容。RUNNING 可能先于资源物化，不代表输入 READY 或 Session 已启动。取消受理、终态、进程退出和用量结清分别举证。
 
-`RunSegment` 使用 `CREATED / RUNNING / WAITING / COMPLETED / FAILED / CANCELLED`；`RunAttempt` 使用 `CREATED / LEASED / RUNNING / DEFERRED / SUCCEEDED / FAILED / LEASE_EXPIRED / CANCELLED`。枚举存在不代表每次都经历全部状态，例如 claim 直接创建 LEASED Attempt。
+### 执行不变量
 
-`WAITING_PERMISSION` 是旧协议的历史兼容值，不作为新交互的入口。重新投递 Queue job 不等于 Run 必须回到 QUEUED；重试可直接从 RETRY_PENDING 被领取为 PREPARING。取消请求已接受不等于 Run 已终态；终态快照只确认业务状态，也不是外部进程停止或用量结清的证明。用[取消后的具体例子](run-supervision.md#一个例子点击取消之后)区分这些事实，不从一个 CANCELLED 推导所有收尾都已完成。
+- 等待释放 lease，不计 engine wall timeout；普通交互期限独立，过期以 INTERACTION_TIMEOUT 新段携带缺失事实，不代答推荐项。批准过期不执行 Provider。
+- 普通答复/效果处理追加 Segment；可恢复 lease 失效追加同段 Attempt。engine wall timeout 按 FAILED，不能泛化为可重试。
+- aggregate 锁顺序固定 Run → Segment → Attempt 或 Proposal/Interaction/Effect；不先锁子对象。
+- terminal RUN_SNAPSHOT 是最后持久事件；PostgreSQL 为正本，状态与 Outbox 同事务，消费幂等。
+- 改目标、项目、精确版本、权限上限或已用资源须新 Run；Session 变化不改变冻结边界。
+- 预算需跨主/子/续行共享；[内部账本](run-budgets.md)和局部限制均不证明此目标已落实。
+- 外部执行重验版本、binding、scope、前置条件与批准，Provider 必须有可验证并发/幂等和 read-back。
+- Result 保持原值，Evaluation 只追加。
 
-`Run.RUNNING` 在资源准备前写入；输入回执自己的 `PREPARING / READY` 描述文件准备，属于另一个对象。二者都不能替代 Session 已启动或最终执行权校验。[Runtime 启动顺序](agent-runtime.md#74-从领取到模型启动的边界)区分这些事实；Web 不自行合成未公开的准备状态，也不把回执状态混入 RunEvent enum。
+## 实施兼容说明
 
-### 7.2 执行不变量
+新 Run 显式创建 Segment 1 和 immutable binding；旧 Run 按隐式 Segment 只读投影，不回填虚构事实。旧版本、Run 和业务结果继续只读审计，不恢复业务专用 Schema/seed/renderer 为通用规则来源。
 
-- 等待用户时不占用 Worker lease，不继续计算 wall timeout；交互自身使用独立期限。普通交互过期时不推断推荐项为默认回答，而以 `INTERACTION_TIMEOUT` 新 Segment 显式携带缺失事实；批准过期时 Proposal 变为 STALE，Provider 不执行。
-- 业务答复/效果处理的续行追加 RunSegment；允许恢复的 Worker lease 丢失才在同 Segment 追加 Attempt。普通过期续行没有用户答复，且 [410 可能发生在提交之后](user-interactions.md#过期与拒绝响应)。不能把所有 timeout 都当作可重试：engine wall timeout 按 FAILED 收尾，具体策略见 [Runtime](agent-runtime.md#11-事件状态与可靠性)。
-- 执行与恢复按 aggregate 固定锁顺序：Run → Segment → Attempt，或 Run → Segment → Proposal/Interaction/Effect；不得先锁子对象再锁 Run。
-- 终态 `RUN_SNAPSHOT` 必须是 Run 的最后一个持久化事件，SSE 据此结束。
-- 改变目标、SkillVersion、Project、权限上限或已使用的数据源必须创建新 Run；同一 Run 的用户补充只能在冻结边界内收敛目标。
-- 多 Session 只改变 Agent 执行载体，不改变 Run 的权限和资源快照。
-- 预算上限与实际余额不是同一快照；主/子执行与跨段恢复共用预算的目标要求见[预算设计](run-budgets.md)。现有局部限制和未接入的内部账本均不能证明运行中已强制共享预算。
-- 外部效果执行前必须重新验证提案版本、冻结 Binding checksum、目标对象前置版本和批准有效性；Provider 必须证明原子 optimistic concurrency 与幂等协议，执行后必须回读并产生 before/after Evidence。
-- Result 保存 AI 原始输出；人工修订只能追加为 Evaluation。
-- PostgreSQL 是 Run、交互、批准、效果和审计事实来源；Redis 只承担 Queue、短期锁和通知。
-
-## 8. 实施兼容说明
-
-0019–0021 已增加 OutcomeEnvelope、RunSegment/UserInteraction/AgentTaskBrief snapshot、顺序 Session、
-Integration/ResourceBinding 与 controlled effect 表。新 Run 必须显式创建 Segment 1 和 immutable Run
-binding；旧 Run 仍按“一个隐式 Segment”只读投影，不回填不存在的历史业务事实。标准 Redmine REST 接口不被假定具备原子条件更新；`issue.update/v1` 仅连接声明 CAS 与幂等协议的 adapter。Git/SVN 已支持审批后的 `repository.write/v1`，当前 direct/branch 规则见[受控写入](repository-effects.md)。
-
-JAF、repository-review 的旧业务 Schema、seed 和专用 renderer 不再是活动规则来源。历史 SkillVersion 与 Run snapshot 仅用于审计读取，不恢复为平台预定义业务模型。
+模型、migration、repository、公开契约与 Web 必须一起核对；真实锁竞争、事务回滚、历史重放、引用删除保护及跨 Project 拒绝分别验收，不由 DTO 或测试文件存在推断完成。

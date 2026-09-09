@@ -1,89 +1,59 @@
-# Workspace 与 Web 交互设计
+# Workspace 与 Web 交互
 
-> 现行页面规范（旧 docs/07）。后续 Task Flow 与 generated FrontendModule 已拆到独立设计，当前未实现的操作在本页明确标注。
+任务中心说明“能执行什么”，Workspace 观察“这一次发生什么”。本页负责布局、导航和交互交接；协议分别由[创建](run-creation.md)、[普通答复](user-interactions.md)、[受控写入](repository-effects.md)、[结果评价](results-evaluation.md)定义。
 
-## 1. 设计原则
+## 设计原则
 
-任务中心说明“能执行什么”，工作空间观察“这一次发生什么”。结果、证据、人工评价和外部批准分别呈现。
+等待/批准在 Workspace、概览与导航都有持久入口，不以弹窗为唯一通知；服务端筛选待办，不只查首页。等待释放 Worker lease，但有独立期限。
 
-等待输入/批准必须在工作空间、概览与导航保留入口；等待不占用 Worker lease，但有独立交互/批准期限，不能写成“无限期等待”。列表在服务端筛选，避免只检查首页而漏掉旧待办。
+技术终态、业务完整性、引用与人工判断分开；子分析部分失败显式展示未覆盖范围。前端不合成没有服务器依据的准备进度、百分比或外部成功。
 
-并行子分析失败时，完成与未覆盖范围都要以文字和视觉状态区分。部分成功不能显示成全面核查完成。
+## 信息架构
 
-## 2. 信息架构
+### 导航层级
 
-### 2.1 导航层级
+平台含概览、组织技能库、项目管理；当前项目含任务中心/调度、Workspace、历史、文档、资源管理。Composition 的 module/role/task_group 是展示，不是权限。
 
-```text
-平台
-├── 概览
-├── 技能库（组织资产）
-└── 项目管理
-当前项目
-├── 工作空间（单个 Run）
-├── 历史记录
-├── 任务中心（任务、资源就绪度、调度）
-├── 项目文档
-└── 资源管理（Integration、Secret、Binding、预授权）
-```
+登录属于 App 认证状态，不是 Project/hash 页面。[账户入口](user-lifecycle.md)也属于平台；已有 Backend/client/组件草稿，但账户 route/page 尚未接入，不提前列作可操作功能。
 
-SkillComposition 的 module/role/task_group 是展示方式，不是系统角色或权限来源。Project 选择、模块过滤与 Run 选择分别保存上下文。
+### 路由
 
-登录是进入这些业务页面前的 App 状态，不是另一个 Project 页面或独立 hash route。配额拒绝与提示见[登录客户端责任](login-protection.md#公开响应与客户端责任)，在途提交、离页和结果未知见[请求生命周期](login-protection.md#提交离页与结果未知)。业务页复用当前 Session，不把登录等待当成 Run 取消，也不在此复制一套错误与重试规则。
+现有 [routing.ts](../../PJM/web/src/lib/routing.ts)：
 
-后续[账户安全入口](user-lifecycle.md#生效与界面)也属于平台层，不依赖 Project；本人操作与 ADMIN 组织管理分开。Backend 的管理路由、Schema 和 Web client 已有工作副本，账户页面与 hash route 尚未接入，所以下面的现行导航树和路由表不提前加入可点击的账户项。UI language / Project preference 是已有偏好，不代表账户界面已实现。
-
-### 2.2 路由
-
-当前使用 hash 路由，定义在 [routing.ts](../../PJM/web/src/lib/routing.ts)。
-
-| 路由 | 职责 |
+| hash | 职责 |
 | --- | --- |
-| `#/` | 概览：待办、最近运行、状态 |
-| `#/tasks?project=<id>` | 任务中心：选择任务、配置启动与调度 |
-| `#/workspace?project=<id>&run=<id>` | 观察指定 Run；新任务可用 task 参数定位 |
-| `#/history?project=<id>` | 项目运行历史 |
-| `#/documents?project=<id>` | 项目文档 |
-| `#/resources?project=<id>` | 资源管理 |
-| `#/skills` | 组织技能库 |
-| `#/projects` | 项目管理 |
+| `#/` | 概览与待办 |
+| `#/skills`、`#/projects` | 组织技能、项目管理 |
+| `#/tasks?project=<id>` | 任务、Preflight、调度 |
+| `#/workspace?project=<id>&run=<id>` | 单 Run；task 参数可定位新任务 |
+| `#/history?project=<id>` | 项目历史 |
+| `#/documents?project=<id>`、`#/resources?project=<id>` | 文档、Integration/Secret/Binding/预授权 |
 
-Run、Interaction、Result 在工作空间内展示，没有独立 path 路由。设计要求 URL 明确指定了无效/无权 Project 时显示问题，不悄悄换项目；当前 resolveProjectSelection/App 仍会回退并改写 hash，这一差距按[项目选择](project-lifecycle.md#项目选择与失效链接)修正。API 每次重新鉴权，前端路由不构成授权。
+Interaction/Result 在 Workspace 内，无独立 path。显式无效 Project 应显示统一不可访问，不自动换项目；当前 App 仍回退改 hash，按[项目选择](project-lifecycle.md#项目选择与失效链接)修正。路由不授予权限。
 
-项目管理中的创建/编辑、归档/恢复、物理删除各有不同结果；成员 API/client 存在不等于页面可操作。实现入口与验收见[项目生命周期](project-lifecycle.md#开发接续与验收)，归档成功不显示成全部执行已停止，删除成功不显示成附件字节与备份已清除。
-
-### 2.3 工作空间布局
+### 工作空间布局
 
 ```text
-项目与模块上下文
-┌──────────────────┬─────────────────────────────────┐
-│ 新建执行          │ 当前 Run：状态、取消、等待入口      │
-│ 历史列表          │ Conversation / Result / Events    │
-│                  │ Evidence / Interaction / Proposal │
-└──────────────────┴─────────────────────────────────┘
+项目/模块上下文
+├── 辅助区：新建执行、历史
+└── 当前 Run：状态、取消、等待
+    ├── Conversation / Result / Events
+    └── Evidence / Interaction / Proposal
 ```
 
-窄屏收起辅助区域，仍保留当前状态、待办和结果入口。详细实现见 [WorkspacePage](../../PJM/web/src/pages/WorkspacePage.tsx)。
+窄屏收起辅助区仍保留状态/待办/结果，源码见 [WorkspacePage](../../PJM/web/src/pages/WorkspacePage.tsx)。
 
-## 3. 渲染模式
+## 渲染模式
 
-当前使用平台 standard 组件；assisted 表达信息不足/指导型内容，不保证存在独立 assisted renderer。generated 模式尚无实际运行链路。
+当前平台 standard 组件读取 Blueprint、可选输入 Schema 与 Outcome；assisted 表示信息不足，不保证独立 renderer。缺 ViewSpec 不阻止任务，generated 尚无执行链路。
 
-Blueprint、可选输入 Schema 与 Outcome 驱动现有界面。缺少 ViewSpec 不阻塞普通任务；不能从“兼容一个声明”推导出“已有任意组件解释器”。
+## ViewSpec v1alpha1
 
-## 4. ViewSpec v1alpha1
+ViewSpec 是展示契约，不定义能力或权限。必填字段见 [Schema](../../PJM/contracts/view-spec/v1alpha1.schema.json)；新增组件/actions 同步 validator/renderer，合法声明不证明所有行为已实现。
 
-### 4.1 作用
+### 合法结构示例
 
-ViewSpec 是可选的展示契约，不定义业务能力或执行权限。新增字段/组件必须同步 Schema、validator 和 renderer，不能只修改文档示例。
-
-### 4.2 字段
-
-当前 [ViewSpec Schema](../../PJM/contracts/view-spec/v1alpha1.schema.json) 必填 view_version/key/title/mode/input/preflight/result；input 还必填 schema_ref/layout。preflight sections 和 actions 都是枚举，不是任意字符串。
-
-### 4.3 合法结构示例
-
-下例仅展示当前 Schema 的合法结构。input schema_ref 的真实目标仍需在发布上下文解析；不是可以直接发布的完整 Skill package。
+以下通过现有结构约束；schema_ref 仍需在真实发布上下文解析，不是完整可发布 package。
 
 ```json
 {
@@ -101,7 +71,6 @@ ViewSpec 是可选的展示契约，不定义业务能力或执行权限。新�
   "result": {
     "sections": [
       {"component": "summary", "pointer": "/summary"},
-      {"component": "finding-list", "pointer": "/findings"},
       {"component": "evidence-panel", "source": "evidence_refs"}
     ]
   },
@@ -109,187 +78,82 @@ ViewSpec 是可选的展示契约，不定义业务能力或执行权限。新�
 }
 ```
 
-### 4.4 绑定规则
+JSON Pointer 仅读当前授权输入/结果；缺字段空状态，无任意表达式。未知 component/action 拒绝；未声明可回退，声明无效按发布 gate 处理。
 
-JSON Pointer 只读取当前任务或已授权结果。缺字段显示空状态，不执行任意表达式。未声明/未知 action 或 component 不能绕过 Schema；能通过 Schema 也不等于 renderer 已支持所有行为。缺少 ViewSpec 可回退，已声明的无效内容按发布 gate 处理。
+## 现行组件与声明组件
 
-## 5. 现行组件与声明组件
+[TaskLaunchFields](../../PJM/web/src/components/TaskLaunchFields.tsx)/taskDraft 为立即执行与调度共用，有 Schema 使用 SchemaTaskInput。能力/资源/权限 UI 不是可任意声明的组件协议。
 
-### 5.1 启动与准备
+Conversation、事件/Session、Interaction、Proposal 由平台组件负责；Task Center 不重复启动 SSE/取消状态机。RUNNING 不等于输入已物化，取消受理/终态不等于进程退出或用量结清，按[执行监督](run-supervision.md)显示现有事实。
 
-[TaskLaunchFields](../../PJM/web/src/components/TaskLaunchFields.tsx) 与 [taskDraft](../../PJM/web/src/lib/taskDraft.ts) 为立即执行和调度共用；有 Schema 时使用 [SchemaTaskInput](../../PJM/web/src/components/SchemaTaskInput.tsx)。能力摘要、资源选择和权限说明是平台 UI，不等于 ViewSpec 可任意声明这些组件名。
+[RunResultPanel](../../PJM/web/src/components/RunResultPanel.tsx)呈现 Outcome/Evidence/Evaluation；新增 run-flow 等 ViewSpec 名须先扩契约。[Flow](task-flow.md)只观察，不按建议节点猜进度。
 
-### 5.2 执行过程
+## 任务启动与执行
 
-Conversation、Run history、事件/会话时间线、Interaction 和 Proposal 详情由平台组件负责。Task Center 不启动第二套 SSE、取消和终态处理。
+Preflight 显示精确 SkillVersion/task、输入、资源与 readiness；服务端创建重验。文档单份/集合/全集均显式确认，可选未选省略槽位；复用 DocumentSourceField，候选变化不悄悄覆盖草稿。
 
-`RUNNING` 不代表输入准备完毕，取消请求被接受也不代表进程已停止。显示已有 Session/Event 与终态事实；没有公开准备进度时不根据等待秒数、文档清单的 FROZEN 或已冻结 Brief 合成 READY/完成百分比。准备与模型的边界见[Runtime 启动顺序](agent-runtime.md#74-从领取到模型启动的边界)。终态快照只确认业务状态，不据此显示“进程全部退出”或“用量已结清”；[取消后的具体例子](run-supervision.md#一个例子点击取消之后)说明 UI 可表达的事实及尚缺的公开信息。
+创建已分开可编辑草稿与已发送 payload/幂等键；未知先确认原请求，明确确认后才另开 Run。关闭弹窗保留待确认请求，刷新/离页不承诺恢复，见[创建未知](run-creation.md#提交结果未知时的界面责任)。
 
-后续 Flow 观察区复用上述事实，不按推荐节点数计算百分比，也不从 Run SUCCEEDED 或 Proposal APPROVED 推导所有节点已完成。[Flow 的事实来源与例子](task-flow.md#9-节点状态的事实来源)负责这些判定；本页只约束页面位置、导航和可访问性。
+创建后按 Run ID 读 detail/SSE，持久 sequence 恢复，TEXT_DELTA 不推进 replay cursor。冻结资源不能中途换绑，变化须新 Run；多个文档槽位物化成 Run 级并集，不是私有隔离目录，见[资源快照](resource-snapshots.md)。
 
-### 5.3 结果
+## 结果与人工评价
 
-[RunResultPanel](../../PJM/web/src/components/RunResultPanel.tsx) 呈现 Outcome、结构化数据、Evidence 和 Evaluation。ViewSpec 当前枚举包含 schema-form、text-field、enum-select、source-picker、summary、metric-grid、finding-list、data-table、evidence-panel、artifact-list、evaluation-form、raw-result。新增 capability-summary/run-flow 等声明名必须先扩契约。
+摘要、交付、Findings、Evidence、限制、Proposal/Effect、Evaluation 分区。confidence 不是正确率，Artifact ref 不是已验证下载对象。
 
-## 6. 任务启动与执行
+RunDocumentSnapshots 独立展示冻结槽位/模式/成员，即使尚无 Result；FROZEN 不代表已物化或仍可下载。缺失/历史不可用/校验失败与合法空数组区分，不查今天目录补旧事实，长 ID/hash 局部换行或滚动。
 
-### 6.1 Preflight
+### Evaluation
 
-显示精确 SkillVersion/task、输入、已选资源和就绪度。用户从合法候选选择，服务端创建时再次验证，不把 readiness 当作永久授权。
+AI 原值、修订建议、理由与历史并列；多建议不自动合并，不续行。精确指针/包络规则见[结果设计](results-evaluation.md)。
 
-文档范围不默认确认，即时执行与调度配置共用 [DocumentSourceField](../../PJM/web/src/components/DocumentSourceField.tsx) 和同一份[选择与失效规则](resource-snapshots.md#公开选择与读取投影的实施契约)。单份、集合、全集都须确认；可选不选会省略该槽位。Workspace 只在切换实际任务/Project 时初始化默认选择，候选更新不静默替换草稿；服务端仍独立拒绝失效选择。
+当前表单一次一条修订、历史无分页、POST 无原请求幂等，state/abort 未闭合全部竞态；未知不套 Run 创建的重放协议，按[评价界面责任](results-evaluation.md#提交未知与界面责任)接续。
 
-现有提交恢复已把“可编辑草稿”与“已发送的请求内容/幂等键”分开：结果未知时原请求确认；显式确认后才允许当前草稿另开 Run。关闭启动弹窗保留待确认请求，离页/刷新不承诺恢复；状态、超时和隐私要求统一见[Run 创建：提交结果未知](run-creation.md#提交结果未知时的界面责任)。本页不维护另一套请求身份规则。
+## Task Center
 
-### 6.2 实时执行
+列表使用服务端 task_id/latest_run 与精确版本，不由 UUID 或最近 N 条历史推导。已有选择任务、立即执行、创建/暂停/恢复/归档 Schedule；没有任意任务编辑/复制、对话建 Task 或结果比较。
 
-创建后以 Run ID 获取 detail 并订阅 SSE。持久事件使用 sequence 恢复；TEXT_DELTA 不推进持久 replay cursor。刷新从服务端重建状态，不把浏览器存储当审计正本。
+ScheduleDialog 共用实际输入/文档字段；关闭销毁未保存草稿，换 actor/Project 不接收旧结果。修改 Schedule API/client 已有而页面入口缺失，需原配置/expected_row_version 与人工冲突比较。
 
-### 6.3 资源调整
+当前只把前 100 条 Schedule 挂到可见 Task 卡片，失效任务规则可能无入口；目标独立管理列表、服务端分页/筛选。预览不创建 Run、不补造 end_at/max_runs 外次数；浏览器时区与规则 timezone 不能混同。
 
-Run 已冻结的资源选择与权限不能在中途替换。需要变更时创建新 Run；补充已有 scope 内的事实不等于换绑。多个 document 槽位在 workspace 形成 Run 级并集，不是互相隔离的私有目录。具体集合语义、缓存可信性与仓库 revision 边界见[资源快照](resource-snapshots.md)。
+ONCE/CRON、重叠/错过/失效唯一规则见[调度](task-scheduling.md)。暂停不撤销已认领触发，run_count 不是成功数，last_run_at/last_run_id 未必同次，UI 不承诺全局串行或 exactly-once。
 
-## 7. 结果与人工评价
+## 对话与调整
 
-### 7.1 固定区域
-
-摘要、交付物、Findings、Evidence、限制/待确认、Proposal/Effect 与 Evaluation 分开显示。[四种结果事实](results-evaluation.md#先分清四种事实)区分技术终态、交付完整性、引用和人工判断；不把模型 confidence 当作正确率，不把 Artifact 引用当作已验证下载入口。
-
-冻结文档范围属于 Run 输入事实，不能塞进结果摘要冒充分析结论。[RunDocumentSnapshots](../../PJM/web/src/components/RunDocumentSnapshots.tsx) 在 RunResultPanel 内独立显示槽位、验证状态、选择模式和可展开成员；结果尚未生成时也可读取清单。路径、ID、hash 等长内容应换行或局部滚动。
-
-详情区分已验证清单、历史不可用和校验失败，不查询今天的文档库填补旧记录，也不把 `FROZEN` 显示成“文件已物化/仍可下载”。合法空数组不渲染清单区；必需字段缺失则是响应契约错误，不能据此宣称“未使用文档”。投影语义见[资源快照](resource-snapshots.md#读取清单和资源摘要)。
-
-### 7.2 Finding
-
-依据 [OutcomeEnvelope](../../PJM/contracts/outcomes/envelope/v1.schema.json) 呈现。业务字段来自精确版本的可选契约，不添加 JAF 专用 renderer。
-
-### 7.3 Evaluation
-
-本节保留原入口，协议与字段定位集中到[评价请求](results-evaluation.md#评价请求与历史)和[原值指针](results-evaluation.md#修订指向哪份原值)。画面并列展示 AI 原值、建议、理由及评价历史，不自动合并修订或续行。
-
-当前表单一次只提供一条修订，历史接口无分页，POST 无原请求幂等。状态禁用与 abort 尚未闭合晚到响应/读写竞争；按[评价界面责任](results-evaluation.md#提交未知与界面责任)补齐，不照搬普通答复或 Run 创建的重放保证。
-
-## 8. Task Center
-
-### 8.1 列表信息
-
-任务目标、来源 SkillVersion、就绪度、资源需求、关联调度与上次 Run。task_id/latest_run 由服务端返回，不从 UUID 规则或最近 N 条历史在前端推导。
-
-### 8.2 操作
-
-当前支持选择任务进入工作空间、配置立即执行、创建 Schedule、暂停/恢复/归档 Schedule、查看关联历史。暂停的是调度，不是 Agent；任务复制、任意任务编辑、对话创建 Task Draft、流程编辑与结果比较不是已实现操作。
-
-TasksPage 选定精确任务后才打开 ScheduleDialog，使用与立即执行相同的 TaskLaunchFields/taskDraft 配置实际输入和文档范围，再保存时间规则。关闭弹窗会销毁未保存草稿；切换 actor/Project 不继承旧表单或接收其晚到响应。表单和预览的责任见[调度表单边界](task-scheduling.md#保存表单与触发预览)。
-
-修改现有 Schedule 的 API/client 已有，但 Task Center 没有编辑表单入口；不能把 API 能力列作当前页面操作。补齐时须载入原配置、提交 expected_row_version，显式处理冲突并保留用户草稿；暂停/恢复/归档不等于编辑配置。
-
-当前还只把 Project 前 100 条 Schedule 挂到可见 TaskCatalog 的卡片上，失效任务的规则可能找不到入口。后续管理列表应独立于“任务可启动”，支持服务端筛选和分页，保留精确旧任务身份及失效原因；不能因卡片消失就重建规则或切换 latest。现状与同步范围只在[保存后的管理入口](task-scheduling.md#保存后的管理入口)维护。
-
-### 8.3 调度规则
-
-ONCE/CRON、timezone、触发预览、错过/重叠/失效行为以 [TaskSchedule](task-scheduling.md) 为准。当前[重叠查询](task-scheduling.md#重叠检查到底看谁)只看本 Schedule 上次关联的 Run，不扫描同 Task 手动执行或其他 Schedule；UI 不承诺全局串行或精确一次。
-
-预览应呈现真实可发生的次数，end_at/max_runs 使候选不足三次时说明原因，不补造时间。Schedule 暂停不代表已认领触发被撤销；run_count 也不代表 Run 成功数。last_run_at 是最近回写的计划时刻，last_run_id 可能仍指向较早 Run，不能把摘要拼成同次执行事实；用[具体例子](task-scheduling.md#一个例子规则触发与执行分别看)核对显示。错误/迟到/漏记风险及未来在途展示按调度规范同步，不在页面单独定义恢复规则。
-
-预览由用户主动请求，当前保存不强制先预览；服务端仍验证定义。[保存前的候选时刻确认](task-scheduling.md#保存表单与触发预览)仍需补齐。页面不独立实现另一套 cron/DST 求值，也不要求服务端补足已经不可能发生的三次。当前预览按浏览器本地时间显示，不保证与规则 timezone 相同；ONCE 输入和显示的时区歧义及修正要求见[时间输入与展示](task-scheduling.md#时间输入与展示的边界)。
-
-## 9. 对话与调整
-
-当前支持运行中的 CLARIFICATION/CHOICE/REVIEW 响应、Proposal 审查与批准，以及 Skill 解释的显式追加调整。三者使用各自版本/幂等/权限协议。
-
-终态后的继续分析创建新 Run。对话任意创建/编辑任务、自动建立 child Run 关联与自然语言任意执行管理操作属于后续设计，不作为现有功能说明。
+普通 CLARIFICATION/CHOICE/REVIEW、外部批准、Skill 追加调整各走独立协议。终态新目标创建新 Run，不自动建 child 关系或自然语言任意管理入口。
 
 ### 普通答复与续行状态
 
-[用户交互设计](user-interactions.md)负责问题、版本、原答复身份和期限。当前 InteractionCard 提供文本或已知选项，不是资源换绑表单；普通答复可以由有 Project 写权限的成员提交，外部批准的额外身份限制不能反向套用到所有问题。
+InteractionCard 是文本/选项，不换绑资源；有 Project 写权成员可答，外部批准身份不套所有问题。当前每次发新 key，仅 state 禁用/unmount abort，原答复确认与晚到成功仍待补。
 
-界面要分开“发送中、已确认、冲突、已过期、结果未知”。当前卡片每次发送换 key，只有 state 禁用和 unmount abort，尚无完整原答复确认与晚到成功保护。按[界面责任](user-interactions.md#答复界面与结果未知)补齐，不因 Run 创建已有恢复功能而宣称所有写操作都安全重放。
-
-收到 410 后读取过期事实与可能的新 Segment，不显示“服务器未更改”；原答复重放返回的是原续行 ID 与当前 Run 状态，不把时间线切回旧 Segment。推荐不自动勾选/提交，required=false 不显示不存在的跳过动作。期限显示须带可理解的时间信息，最终是否受理由服务端判定。
+区分发送/确认/冲突/过期/未知；410 可能已提交过期并追加 Segment，原答复重放返回原续行与当前状态。推荐不自动提交，required=false 不提供不存在的跳过。规则见[用户交互](user-interactions.md)。
 
 ### 审批请求与执行结果
 
-当前审批卡片在 [RunResultPanel](../../PJM/web/src/components/RunResultPanel.tsx)；[PendingActionsPanel](../../PJM/web/src/components/PendingActionsPanel.tsx)只是待处理 Run 的发现入口，不负责提交批准。卡片发送正在显示的 Proposal version/checksum、decision 和 reason，服务端还独立限制 Run 发起人或 system ADMIN 的决策权。
+批准卡片在 RunResultPanel，PendingActionsPanel 仅发现待办。提交精确 Proposal version/checksum/decision/reason，服务端限制 Run 发起人或 ADMIN。
 
-当前每次点击都会生成新的幂等键。如果决策已提交但响应丢失，再点同一按钮会与原决策冲突；仅禁用请求期间的按钮没有解决恢复。后续按[受控写入的身份规则](repository-effects.md#契约与幂等身份)区分可编辑内容与已发送内容/键，结果未知时先确认原决策，不将它套用为“再创建一个 Run”，也不允许新 reason 或相反 decision 偷用原 key。
+当前每次点击换 key，丢响应后再点可能冲突。目标保留原 payload/key，未知先确认，不让新 reason/相反决定偷用原键；发出/abort 不等于批准撤销，APPROVED 不显示外部成功。
 
-| 用户看到的情况 | 界面责任 |
-| --- | --- |
-| 尚未发送 | 显示目标、版本/checksum、前置 revision、逐文件变更与风险；提交前确认实际内容 |
-| 发送中或结果未知 | 防重复提交，保留原 payload/key；超时、abort 或离页不显示“批准已撤销” |
-| 决策已确认 | 从服务端刷新 Proposal/Approval/Effect；APPROVED 不显示为“外部写入已成功” |
-| 执行失败、部分成功或待确认 | 显示服务器已有状态、错误和证据；before/after 缺失不等于外部没有变化 |
-
-上表包含待补齐的恢复要求，不是现行卡片的完整能力。暂不把敏感变更正文或 token 写入浏览器持久存储；刷新、actor/Project/Proposal 切换后的行为必须显式验证。新的阶段回执尚未形成公开契约，UI 不根据错误码或时间自行生成“commit 已完成/PR 未创建”。改动需同步 effects API validator、组件测试、三语、键盘/窄屏及响应丢失的浏览器验收。
-
-## 10. FrontendModule 生命周期
-
-后续目标与当前前置实现见[生成模块设计](generated-modules.md#目标与流水线)。先区分[业务模块、生成界面与文档预览](generated-modules.md#先分清三种模块与预览)；现有 modules API 和禁脚本文档 iframe 都不是生成界面的发布入口。不在本页重复维护第二套设计。
-
-## 11. Build Sandbox
-
-### 11.1 前置
-
-固定依赖、锁文件、资源限制、无凭据、批准的内部 mirror；实际 builder 尚未实现。
-
-### 11.2 静态检查
-
-现有六组拒绝项、依赖白名单与字面扫描的局限见[静态拒绝与依赖](generated-modules.md#静态拒绝与依赖)。增加检查项时同步 static_analysis.py 与回归；这些检查不能代替完整网络与运行时隔离。
-
-## 12. Runtime Sandbox 与 Host API
-
-### 12.1 iframe 隔离
-
-采用已决定的同主机专用路径、CSP 响应头与无 allow-same-origin iframe。旧“必须独立 Origin”不再是本项目当前设计；同主机剩余风险和 CSP 可执行性要求见[生成模块](generated-modules.md#origin-与-csp)。
-
-### 12.2 Host 协议
-
-尚未冻结。模块只请求受控展示与准备操作，不能直接调用 API 或批准 Proposal。
-
-### 12.3 消息校验
-
-来源窗口、channel nonce、精确模块版本、Project/Run 与 Schema 共同校验；opaque origin 的 null 不能用作可信身份。账号/上下文切换、重载或回退都使旧实例失效；[晚到消息与通道](generated-modules.md#挂载切换与晚到消息)不得覆盖新草稿或取得新的业务权限。
-
-## 13. 生成模块回退
-
-尚未实现。目标是错误时关闭本页 iframe 回到 standard，保留草稿与焦点，展示失败原因，业务记录不变；见[版本与回退](generated-modules.md#版本与回退)。本页异常不自动全局停版，也不切换 SkillComposition 的业务版本；[图表失败的例子](generated-modules.md#一个例子图表坏了任务没有失败)说明用户应看到的区别。
+切换 actor/Project/Proposal、刷新和未知明确处理，不把正文/token 存浏览器持久层，不据错误码猜“commit 已完成/PR 未创建”。新增回执须先有[效果契约](repository-effects.md)。
 
 ## 项目文档管理的职责
 
-项目文档页管理当前文档资产，Task 输入选择和 Run 详情分别管理授权草稿与冻结事实。[文档删除示例](document-lifecycle.md#一个例子列表消失不等于清理完成)说明这三种视图为什么不能互相替代。
+文档页管理当前资产，Task 管草稿选择，Run 显示冻结事实。目录上传逐文件非整批事务；HTML 禁脚本不等于断网，列表消失不等于 blob/副本/备份清除。现有未知/同步防重/context 检查缺口见[文档设计](document-lifecycle.md)，不复刻协议。
 
-上传目录是逐文件请求，不是整批事务；预览受扩展名与大小限制，HTML 禁脚本不等于禁止外部资源。准确的[上传/读取边界](document-lifecycle.md#上传的三个边界)与[未知结果处理](document-lifecycle.md#页面与结果未知)由文档正本负责。现行管理组件没有完整的同步防重、当前 actor/Project 判定和提交核对，不能从 Run 创建已有恢复功能推断此页也已完成。
+## 生成展示与流程的交接
 
-## 14. 可访问性、国际化与隐私
+[生成模块](generated-modules.md)负责 builder、CSP、Host、版本/回退：现有业务 module API 和文档 iframe 不是生成入口，失败不得切换业务 SkillVersion。Flow 由[流程设计](task-flow.md)负责只读投影、冻结和事件关联，两者均不作为当前已完成能力。
 
-当前界面文案通过 zh/ja/en catalog，用户偏好由服务端保存；不再描述为“认证完成前中文单语”。report_language 是任务输出配置，独立于界面语言。
+## 可访问性、国际化与隐私
 
-页面保留键盘操作、焦点和窄屏入口，状态不能仅靠颜色表达。历史测试不代替当前浏览器专项验收。敏感数据查看审计、全部输出格式清洗等如需扩展，须明确代码与验收，不把目标写成统一处理已经存在。
+zh/ja/en catalog 与服务端用户偏好已存在；report_language 独立于 UI 语言。状态不用单一颜色，键盘、焦点、窄屏/长内容可读；不将敏感正文写入遥测，不承诺所有任意输出已有统一清洗。
 
-## 15. JAF 验收
+## 回归验收
 
-只使用平台通用组件，呈现资源、规则、Evidence、Outcome、Review 与必要的 Redmine Proposal。指标与 30 case 的数据隔离见[JAF profile](../acceptance/jaf-quality.md)。
+- 精确任务/版本、有无 Schema、文档显式范围/历史损坏分别验证；创建未知保留原身份。
+- 资产部分成功/未知/换 context，调度分页/失效任务/版本冲突/时区用真实组件验。
+- SSE 重连不重复、terminal 后结束；普通答复/批准/Evaluation 不互借幂等保证，原结果不变。
+- 关闭弹窗仍有待办；410/未知/晚到与跨 actor 响应可解释，子分析失败范围不隐瞒。
+- 三语、键盘、窄屏/长内容与焦点浏览器验收；Flow/generated 另走专项门禁。
 
-## 16. 回归验收
-
-| 变化 | 验证 |
-| --- | --- |
-| 输入/任务选择 | 无业务 Schema 可启动；有 Schema 正确校验；精确 task/version |
-| 文档范围与清单 | 单份/集合/全集显式确认，可选未选不授权；详情使用冻结事实，历史缺失/损坏不补造 |
-| 文档资产管理 | 目录部分成功、未知上传/删除、原 ID 与新 ID、权限/Project 切换、真实预览/下载；metadata 消失不显示为字节彻底清除 |
-| 调度配置 | 即时/调度共用实际输入，预览不创建 Run；编辑冲突、100 条以上分页、失效任务可见性、时区差分别验收 |
-| 提交确认 | 丢响应/超时/异常返回仍保留原请求；编辑不换原键，账号/Project 切换不接收旧结果；新建需明确确认 |
-| SSE/历史 | 断线重连不重复，terminal snapshot 后结束，旧结果可读 |
-| 等待/批准 | 关闭弹窗后仍有待办；普通答复与精确批准分开，版本/期限/授权失败清晰；410 已提交过期、原答复重放和晚到完成分别验收 |
-| Result/Evaluation | 原始结果不变，修订追加，Evidence 不跨 Run |
-| 子分析 | 失败范围可见，不能表现为全部完成 |
-| 语言/布局 | 三语、键盘、窄屏与长内容 |
-| generated/Flow | 后续专项验收，不算入当前已实现功能 |
-
-## 17. 实施入口
-
-状态与下一步见[计划 §13](../planning/roadmap.md#13-当前执行状态)。代码定位与契约同步见[变更指南](../development/change-guide.md)。
-
-## 18. Task Flow View（后续增强）
-
-唯一详细设计见[Task Flow 与 Run Flow](task-flow.md)。首阶段使用现有数据展示资源、建议步骤、确认点和交付物；后续再引入版本化 Flow、Run 冻结与可选事件关联。不能从 STEP_* 自动猜测全部计划节点完成。
+源码与同步入口见[代码 README](../../PJM/README.md#web)、[变更指南](../development/change-guide.md)，完成状态只维护[计划 R10](../planning/roadmap.md#r10-全部-web-页面)。

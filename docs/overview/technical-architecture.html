@@ -504,12 +504,13 @@
       header { padding: 24px 20px 20px; }
       .title-row { display: block; }
       .print-button { margin-top: 15px; }
-      .control-bar { padding: 10px 14px; }
+      /* 折り返す mobile navigation が、移動先の見出しを覆わないようにする。 */
+      .control-bar { position: static; padding: 10px 14px; }
       main { padding: 14px; }
       .capture-area { padding: 16px; }
       .principle-strip { grid-template-columns: 1fr; }
       .bottom-grid { grid-template-columns: 1fr; }
-      .layer-title { flex-wrap: wrap; }
+      .layer-title { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; justify-items: start; }
       .tech-chip { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
       .boundary-list { grid-template-columns: minmax(0, 1fr); }
       .engine-chain { grid-template-columns: 1fr; }
@@ -553,8 +554,7 @@
             组件职责见 <a href="../index.html#docs/overview/architecture.md::">系统结构</a>，运行契约见 <a href="../index.html#docs/design/agent-runtime.md::">Agent Runtime</a>；本页不替代实现状态和专项验收记录。
           </p>
           <div class="doc-meta">
-            <span>文档编号 PJM-DOC-03</span>
-            <span>文档核对 2026-09-05 · 非部署验收日期</span>
+            <span>技术结构摘要 · 实现状态见计划</span>
             <a href="../index.html">返回文档中心</a>
           </div>
         </div>
@@ -736,7 +736,7 @@
               <span class="message">领取当前 Segment，创建带租约的 RunAttempt 与工作目录</span>
               <span class="actor target">PostgreSQL / 存储</span>
             </div>
-            <p class="event-detail">租约防止双 Worker 并发接管;用户交互追加 Segment,基础设施重试才在当前 Segment 追加 Attempt。</p>
+            <p class="event-detail">领取与提交检查 lease/fencing；失去执行权不等于旧进程已停止。业务续行追加 Segment，技术恢复在当前 Segment 追加 Attempt。</p>
           </li>
           <li class="sequence-event">
             <span class="event-number">05</span>
@@ -805,7 +805,7 @@
               <span class="message">Outcome + Artifact/Evidence/Proposal + <code>session_id</code></span>
               <span class="actor target">Worker / 编排器</span>
             </div>
-            <p class="event-detail">平台校验通用 Outcome 与引用所有权，声明了 output schema 时追加结构校验；业务规则和结论语义是否正确需单独验收。</p>
+            <p class="event-detail">平台校验通用 Outcome 及声明的 output schema；引用真实性、归属和业务语义不由结构校验保证，完整性缺口见 <a href="../index.html#docs/design/results-evaluation.md::">结果设计</a>。</p>
           </li>
           <li class="sequence-event">
             <span class="event-number">10</span>
@@ -815,7 +815,7 @@
               <span class="message">保存 Result / Evidence / Effect verification / 会话全文</span>
               <span class="actor target">PostgreSQL / 存储</span>
             </div>
-            <p class="event-detail">终态快照事件是该 Run 的最后一条事件,SSE 以它作为推送结束的判定;失败路径同样以终态事件收敛。</p>
+            <p class="event-detail">终态事件用于结束 SSE 观察，不证明进程已退出或用量结清；晚到事实不得覆盖 Result，收尾与独立审计见 <a href="../index.html#docs/design/run-supervision.md::">执行监督</a>。</p>
           </li>
           <li class="sequence-event">
             <span class="event-number">11</span>
@@ -840,7 +840,7 @@
       <div class="capture-area">
         <div class="view-heading">
           <h2>部署结构(Linux + Docker Compose,复用既有入口)</h2>
-          <p>部署环境已有共享 Traefik 时,ProjectMind 不部署自己的网关、不发布任何宿主机端口。部署契约以 <code>docs/01</code> §2.6 与 <code>compose.yaml</code> 为准。</p>
+          <p>复用共享 Traefik，不另建网关、不发布宿主机端口。配置与停写要求见 <a href="../index.html#docs/operations/deployment.md::">部署手册</a>，服务声明见 <a href="../../PJM/compose.yaml">compose.yaml</a>。</p>
         </div>
 
         <div class="outside-services">
@@ -872,7 +872,7 @@
             <div class="service-card"><code>postgres</code><p>PostgreSQL 17:业务、审计、证据与会话的权威记录</p></div>
             <div class="service-card"><code>redis</code><p>Redis 8:任务队列与短期唤醒;不承担最终数据</p></div>
             <div class="service-card"><code>object-storage</code><p>MinIO:Skill 包、文档与报告产物;不对外暴露控制台</p></div>
-            <div class="service-card"><code>deployment-secret</code><p>凭据由部署环境或 /run/secrets 提供;ProjectMind 仅解析版本化 locator,不新增公开服务</p></div>
+            <div class="service-card"><code>deployment-secret</code><p>ENV/FILE 提供外部凭据；MANAGED 在库中保存密文，KEK 由部署环境提供。详见 <a href="../index.html#docs/design/secret-storage.md::">Secret 设计</a>，不新增公开服务。</p></div>
           </div>
         </div>
 

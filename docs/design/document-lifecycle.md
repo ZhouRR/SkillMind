@@ -1,137 +1,82 @@
 # 项目文档的保存、读取与清理
 
-> 定位：项目文档资产的生命周期设计，不是 Run 输入准备协议。前置阅读：[项目生命周期](project-lifecycle.md)；执行时的选择、冻结与副本由[资源快照](resource-snapshots.md)负责。当前代码核对与验证范围见[计划](../planning/roadmap.md#当前证据怎么用)。下文明确标注修正要求，不能把它们当作已经可用的操作。
-
-按目的阅读：[理解一次删除](#一个例子列表消失不等于清理完成) → [上传如何保存](#上传的三个边界) → [下载与预览](#读取下载与预览) → [删除和引用](#删除与历史引用) → [接续开发](#开发接续与验收)。
+本页负责文档资产；[资源快照](resource-snapshots.md)负责 Run 选择、冻结和副本，[项目生命周期](project-lifecycle.md)负责整项目操作。以下区分现状与修正要求，不是完整存储可靠性已交付的声明。
 
 ## 一个例子：列表消失不等于清理完成
 
-项目上传了 A，随后 Run 1 固定选择 A。用户删除 A，又以相同路径上传 A′：
+上传 A 产生文档 ID 与 blob；Run 1 冻结 A 的 ID/hash。删除 A 当前先删元数据、再尝试删 blob；同路径重传 A′ 是新 ID，不能修复 Run 1 的原引用。
 
-```text
-上传 A → 文档 ID A + 原 blob
-Run 1 → 固定 A 的 ID/hash
-删除 A → 先提交元数据删除
-       → 再尝试删除原 blob
-重传 A′ → 新 ID + 新 blob
-```
-
-这个流程描述现有顺序，不表示允许删除所有受引用文档是合理设计。
-
-| 观察 | 能确定的事实与限制 |
-| --- | --- |
-| A 从列表消失 | 元数据已不可见；不能证明原 blob、Run 副本或备份已清理 |
-| 同路径出现 A′ | 新文档可供新选择；不是 A 的新版，也不修复 Run 1 的原引用 |
-| Run 1 详情仍列出 A | 展示创建时的冻结清单；不证明现在可下载或首次准备能成功 |
-| 页面显示删除失败 | 可能已提交元数据删除；不能据此断定一切未变，也不能自动再删同路径文件 |
-
-这里必须分开四种事实：文档目录、对象存储字节、Run 冻结引用、实际物化副本。任何一份列表都不是另外三份的完整账本。
+必须区分文档目录、存储字节、Run 冻结引用、物化副本：列表消失不证明字节清理，Run 仍显示 A 不证明可下载，删除报错也不证明元数据未提交。
 
 ## 身份、目录与公开面
 
-`ProjectDocument` 的元数据在 PostgreSQL，正文由内部 `storage_key` 指向 object storage。`document_id` 是不变身份，`folder/name` 是展示路径；数据库约束同一 Project 的同一路径不可重复，不是按内容 hash 去重。
+ProjectDocument 元数据在 PostgreSQL，blob 用内部 storage_key 定位。document_id 是身份，folder/name 是展示路径；同 Project/路径唯一，不按内容去重。只有上传、列表、下载、删除，无覆盖、移动、改名、版本或恢复 API；目录由 folder 投影，空目录不保存。
 
-现行只有上传、列举、下载、删除，没有覆盖上传、改名、移动、版本历史或恢复 API。目录由文档的 folder 字符串投影成树，没有独立 Folder 实体；空目录不保存。不能把删除再上传写成“更新原文档”。
-
-| 公开操作 | 当前语义 |
+| 操作 | 当前语义 |
 | --- | --- |
-| POST 项目 documents | multipart：单个 file 与可选 folder；201 返回一份文档元数据。同名冲突为 409 document_conflict |
-| GET 项目 documents | 返回 documents 数组，按 folder/name 排序；没有查询、分页或目录节点契约 |
-| GET 指定文档 content | 按 Project + 精确 ID 取正文，返回附件；不是带签名的公共 blob URL |
-| DELETE 指定文档 | 先删元数据再调用 storage，通常返回 204；完整清理保证见后文 |
+| POST documents | 单 file + 可选 folder 的 multipart，201 元数据；同名 409 document_conflict |
+| GET documents | 按 folder/name 排序的完整数组，无查询/分页/Folder 契约 |
+| GET document content | Project + 精确 ID 授权后返回附件，不是公共 blob URL |
+| DELETE document | 元数据 commit 后调用 storage，通常 204，不保证完整清理 |
 
-公开元数据只含 ID、Project、folder/name、size、MIME、checksum、上传者和创建时间，不含 storage_key、正文或清理状态。精确路径、Schema 与消费者见[契约入口](../../PJM/contracts/README.md#project-文書の保存と読取を読む)。
-
-读取使用 ProjectReadActor，写入使用 ProjectWriteActor 并要求 Project ACTIVE；同组织 ADMIN 不依赖成员关系，普通 USER 需有效成员资格。不存在与越权的文档读取均折叠为 404。当前授权事务先于存储/业务提交，不能据此保证上传中撤权或归档一定阻止随后保存；[项目竞争规则](project-lifecycle.md#并发修改不能只看有无行锁)也适用于这条链路。
+公开数据只含身份、路径、size/MIME/checksum、上传者和时间。读用 ProjectReadActor，写用 ProjectWriteActor 且要求 ACTIVE；越权与不存在统一 404。授权先于业务提交，尚不能保证在途撤权/归档阻止随后保存。
 
 ## 上传的三个边界
 
-现行 [DocumentService](../../PJM/backend/src/projectmind/documents/service.py) 的顺序如下。箭头之间没有跨 PostgreSQL 与 object storage 的原子提交：
+[DocumentService](../../PJM/backend/src/projectmind/documents/service.py)当前顺序：
 
 ```text
-规范化并检查名称与目录
-  → 读取现有元数据的 size 总和
-  → 校验大小、MIME、配额、文本
-  → put 新 ID 对应的 blob
-  → 单独事务插入文档元数据
-  → 返回 201
+名称/目录校验 → 读取元数据用量 → 大小/MIME/配额/文本校验
+  → put 新 blob → 元数据事务 commit → 201
 ```
 
-文档层的名称和 folder 各最多 200 字符，服务端负责规范化；但 storage key 的单段上限为 128，名称 129–200 字符仍可能在存储层失败，文档 route 未将该错误映射为上传 422。后续应统一或明确分层上限，在写入前稳定拒绝，不能静默截断名称。
-
-Web 的目录选择拆为逐文件请求，不能替服务端校验。配额统计只覆盖仍存在的 ProjectDocument 行，不含孤立 blob、Run workspace、备份或其它资源。
-
-| 当前检查 | 实际保证与缺口 |
+| 当前检查 | 实际缺口 |
 | --- | --- |
-| 单文件限制 | 默认 25 MiB，Project 元数据配额默认 500 MiB，均可配置；route 先完整 file.read 再验证，不能当作请求体读取或内存的硬上限 |
-| MIME allowlist | 检查申报 MIME 的规范化值，不识别实际文件格式；Web 仅为空 MIME 补部分扩展名，不代表服务端支持任意 Office 文件 |
-| 内容检查 | 对指定文本 MIME 做凭据样式扫描，不是病毒扫描、压缩包展开检查或任意二进制内容脱敏 |
-| 配额检查 | 读取已有用量后再写入，没有预留/条件更新；两请求读同一旧值时可分别通过，并不构成并发总量门禁 |
-| 同名拒绝 | blob 先写，之后元数据唯一约束拒绝；当前没有补偿删除/持久清理记录，409 也可能留下新 blob |
-
-设置来源是 [Settings](../../PJM/backend/src/projectmind/core/settings.py) 与 API startup，不在此复制完整 MIME 表。存储错误和非唯一约束故障也不能统称为“同名文件”：当前 upload 把插入期间的 IntegrityError 一律转换为 document_conflict，需要按实际约束分类。
+| 文件默认 25 MiB，Project 默认 500 MiB | route 先完整 file.read；不是请求体/内存硬上限，配额不含孤立 blob/副本/备份 |
+| 名称、folder 最多 200 字符 | storage key 单段最多 128，129–200 名称可能存储失败且未映射上传 422；应写前稳定拒绝，不截断 |
+| MIME allowlist、指定文本凭据扫描 | 校验申报类型，不证明真实格式、病毒安全或任意二进制已脱敏 |
+| 读取用量后检查配额 | 没有原子预留，并发上传可分别通过旧用量 |
+| blob 先写、元数据唯一约束后验 | 冲突可留下孤立 blob；所有 IntegrityError 目前被误归为同名冲突 |
 
 ### 保存可靠性的修正要求
 
-1. 在完整读入之前实施可观察的请求体/流式字节上限；服务端独立检查实际内容、MIME 与扩展名的策略，拒绝与未检查范围要能解释。
-2. 为同一 Project 的配额建立原子预留与结算，明确在途、失败、孤立对象占用；不把网络 put 放在长期 Project 行锁里。最终发布元数据时复核授权、Project 状态、路径竞争和原预留。
-3. 保存可恢复的上传意图和 blob 归属，区分存储结果未知、元数据提交未知和确定拒绝。未知时先按原身份核对，不因异常立刻删除可能已经提交成功的对象。
-4. 确认不再被引用的失败上传才进入持久清理流程。进程退出后的恢复不能只依赖一次 except 中的补偿调用；配额释放与真实占用分别核对。
+写前限制实际流式字节，明确内容/MIME 策略；为 Project 建立原子配额预留与结算，最终发布时复核授权、状态、路径与预留。网络 I/O 不放入长期 Project 行锁。
 
-这是待设计落地的内部协议，不是现有公开字段。引入原请求重放须同时定义 actor/Project、内容摘要、保留期、唯一约束和并发胜者，不能仅在客户端加一个 Idempotency-Key 就宣称上传幂等。
+持久保存上传意图、原请求身份与 blob 归属，区分确定拒绝、存储未知、commit 未知。未知先核对，不能异常后立即删除可能已提交的对象；确认无引用的失败上传才进入可重试清理。幂等需定义 actor/Project、摘要、保留期和并发胜者，不是仅加 header。
 
 ## 读取、下载与预览
 
-普通下载先读取元数据，再取得 blob 并返回。当前不会复核实际 bytes 的 size/checksum；Run 使用的 `read_frozen_document` 才同时核对原 ID、元数据与真实字节。不能把 Run 的强校验推广为所有下载都已校验，也不能从对象不存在与读取权限/网络错误的统一转换推断原文件一定被删除。
+普通下载不复核真实 size/checksum；read_frozen_document 才验证原 ID、元数据与字节。目标统一完整性与安全错误，区分损坏、缺失、存储不可用，不用同路径新文件补旧引用。
 
-Web 根据扩展名预览 txt/md/markdown/htm/html，元数据 size 不超过 1,000,000 bytes 才允许打开；超限保留禁用按钮并提示下载。Markdown 按原文显示；其它类型只提供下载。此数值是 UI 判定，不是正文下载的流式上限。HTML 使用 `sandbox=""` 的 srcDoc iframe 禁止脚本与同源权限；没有独立的外部资源加载策略，不能将空 sandbox 描述为网络隔离，也不能改成生成模块的执行 Host。
+Web 仅预览 txt/md/markdown/htm/html，元数据不超过 1,000,000 bytes；Markdown 显示原文，超限提示下载。HTML srcDoc 使用 sandbox="" 禁脚本/同源，但没有外部资源禁载策略，不是网络隔离或 generated Host。
 
-后续应统一下载与冻结读取的完整性策略，明确损坏、缺失和存储不可用的安全错误；为预览增加实际字节上限、外部图片/CSS 等资源的拒绝与验证。下载文件名需要安全的 header 编码：现行直接拼接 filename，非 Latin-1 名称会在 Response 构造时失败，引号也需独立测试。不能因上传接受中文名就认定整条下载链支持它。
+待补实际预览字节上限、外部图片/CSS 拒绝、下载文件名安全编码。现行直接拼 filename 对非 Latin-1 名称会失败，引号也需测试；上传接受中文名不证明下载可用。
 
 ## 删除与历史引用
 
-当前单文档删除是“元数据事务 commit → storage.delete”，既没有 Run/Schedule 引用检查，也没有持久的清理回执。已完成输入副本的保留规则仍属于资源与运维设计；删除原文档不能用于改写历史 Result/Evidence。
-
-| 失败或变化 | 当前可能留下的事实 |
-| --- | --- |
-| 元数据删除提交后，storage 调用失败或进程退出 | 列表消失，blob 仍可能存在；按原 ID 再 DELETE 会先遇到 404，无法靠该路径继续清理 |
-| S3 remove 返回 AccessDenied 等 S3Error | 当前适配器吞掉所有 S3Error，而不只忽略“不存在”；204 可能掩盖清理失败 |
-| Run 已选择该文档，尚未完成输入准备 | 原 ID 可能已不可读取，准备按冻结规则失败；不换成同路径新文件 |
-| 删除整个 Project | 走 ProjectRepository 的元数据删除清单，不调用逐文件删除服务；其引用门禁和字节残留另见[项目删除](project-lifecycle.md#删除与数据保留) |
+当前无 Run/Schedule 引用检查或持久清理回执：元数据 commit 后 storage 失败会留下 blob，原 ID 再删先得 404；S3 adapter 吞掉全部 S3Error，204 可掩盖 AccessDenied。整 Project 删除另走元数据清单，不调用逐文件清理。
 
 ### 引用保护与清理的修正要求
 
-先阻止仍受 Run、Schedule 或在途冻结引用的物理删除，并把引用检查与新引用的提交建立共同的并发约束，不能只在 Web 隐藏按钮。引用保存在 JSON/snapshot 时，也必须纳入检查，不能只查数据库外键。
-
-若需要“停止供新任务选择但保留旧记录”，应另行设计可审计的退役/隐藏状态及解析规则，不通过删除再上传模拟。历史 ID/hash 不迁移到新内容；备份和 Run 副本按独立保留策略处理。
-
-元数据侧持久保存待清理身份与精确对象引用，之后异步执行、确认并记录失败；不通过路径前缀扫描直接删 bucket，也不把业务请求超时当作释放原记录的证据。不存在可作为已清理事实，权限拒绝、断连和未知必须可区分并保留重试依据。当前尚无该协议、清理状态 API 或运营修复 CLI；引入时同步单文档与整个 Project 的删除路径。
+- Run、Schedule、JSON snapshot 和在途冻结引用共同阻止物理删除；引用检查与新增引用共享并发约束，不只隐藏按钮或检查外键。
+- 若需停止新选择，另设计可审计退役状态；不迁移旧 ID/hash，不用删除再上传模拟版本。
+- 元数据持久记录待清理身份和精确对象；异步确认、失败重试，不按 bucket 前缀广泛删除。不存在、拒绝、断连、未知分别记录。
+- 单文档与整 Project 共用清理协议；Run 副本和备份独立保留。当前没有该协议、状态 API 或修复 CLI。
 
 ## 页面与结果未知
 
-目录上传是多个独立 POST，不是批次事务。现行页面顺序执行，单文件失败后继续下一份，最后刷新列表；进度 done 计的是已处理请求，不是成功上传数。取消本地等待不撤回已保存文件。
+目录上传是顺序的独立 POST，单份失败后继续；done 表示已处理，不是成功数。取消本地等待不能撤回已保存文件。
 
-后续 UI 必须做到：
+目标分别展示成功/确定拒绝/未知，保留原文件、Project、路径，不自动重发整目录，也不以同名列表项证明成功。上传/删除需同步防重复及 actor/Project/request 身份检查；切换、卸载后丢弃晚到响应。
 
-- 分别展示成功、确定拒绝与结果未知的文件，原文件/Project/路径保留在本页内存；不自动重发整个目录，不以同名列表项证明原请求成功。
-- 上传、删除和确认框有同步防重复及 actor/Project/request 身份检查；切换、卸载后取消等待并丢弃晚到响应。现有 abort 和 state 不足以证明这些时序已覆盖。
-- 删除失败后只读刷新原 ID 的事实，解释可能已移除元数据；没有清理回执时不伪造“附件已彻底删除”。旧选择不可转到新项目或同路径新 ID。
-- 列表/预览错误使用受控三语文案，不把原始服务错误、业务路径或存储信息拼入公共日志。若增加服务端分页，目录树与计数须标明已加载范围，不能把一页称作全部文件。
-
-这些是修正要求。现行文档 client 仅做基础字段类型检查，没有严格校验 UUID、日期、checksum、非负安全整数和响应 Project 关联；组件也未形成上述完整未知状态。不得把账号或 Run 创建页面的恢复能力直接套用到文档管理。
+删除未知只读核对原 ID，不能宣称附件已彻底清理。client 尚缺 UUID/日期/checksum/安全整数/Project 关联的严格校验，组件未知状态也未闭合；受控三语错误不暴露存储细节。未来分页须标明已加载范围。
 
 ## 开发接续与验收
 
-代码第一跳：[Backend](../../PJM/backend/README.md#project-文書の保存と清理を追う) → [契约](../../PJM/contracts/README.md#project-文書の保存と読取を読む) → [Web](../../PJM/web/README.md#project-文書の管理を追う)。排障只读入口在 [Runbook](../operations/runbook.md#文档保存与删除的只读分诊)；当前任务与证据集中到 [R01](../planning/roadmap.md#r01-资源冻结)、[R10](../planning/roadmap.md#r10-全部-web-页面)、[R11](../planning/roadmap.md#r11-运维与工程工具)，不在这里维护第二份进度表。
+入口：[documents route](../../PJM/backend/src/projectmind/api/routes/documents.py)、[存储实现](../../PJM/backend/src/projectmind/storage/)、[Web 管理组件](../../PJM/web/src/components/DocumentManagerPanel.tsx)、[契约索引](../../PJM/README.md#contracts)。当前缺口登记 R01/R10/R11；排障见[Runbook](../operations/runbook.md#文档保存与删除的只读分诊)。
 
-| 场景 | 验收结果与证据范围 |
-| --- | --- |
-| 并发接近配额、同路径上传 | 实 DB 条件写入保持总量/唯一性；确认失败对象与预留可恢复，mock 的通过不代替 |
-| put、commit、响应任一处失败/未知 | 不重复创建、不删除已提交对象；重启后能核对原意图与孤立对象 |
-| 删除与 Run/Schedule 创建、归档/撤权竞争 | 无检查后的越权保存或引用丢失；整个 Project 和单文件路径共同验证 |
-| S3 权限拒绝、超时、已不存在 | 清理失败与不存在可区分，未确认不报彻底成功；只对专用 bucket 验收 |
-| 内容篡改、伪报 MIME、大文件、Unicode 文件名 | 拒绝点、实际读取上限、下载 header 与损坏提示均可观察 |
-| 目录部分成功、重复提交、切换与晚到结果 | 实组件 + mock API 验证三语/键盘/窄屏和未知状态；真实存储与会话另验 |
-| 历史 Run、已物化副本与备份 | 原 ID/hash 保持，清理与恢复不篡改历史，也不宣称删除操作能撤销所有副本 |
-
-真实 DB/bucket 的写入与故障验收必须使用明确授权的专用目标，另记环境、可恢复性和清理范围；本页不提供直接删除文件或对象的命令。
+- 实 DB 验证配额/同名竞争、撤权/归档/引用竞争和完整回滚。
+- 在 put/commit/响应边界注入失败，重启后可确认原意图，不误删成功对象或重复创建。
+- 专用 bucket 区分 S3 拒绝、超时、不存在；验证篡改、伪报 MIME、大文件与 Unicode header。
+- 实组件 + mock API 验证目录部分成功、重复提交、切换、三语/键盘/窄屏；真实会话和存储另验。
+- 历史 Run、物化副本与备份保持原身份；真实 DB/bucket 写入只使用明确授权的专用目标。

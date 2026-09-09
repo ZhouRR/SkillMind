@@ -28,8 +28,6 @@ GROUPS = {
     "design": "设计规范",
     "development": "开发指南",
     "operations": "部署与运维",
-    "acceptance": "业务验收",
-    "history": "历史归档",
     "code": "工程入口",
 }
 FIRST_PAGES = [
@@ -63,6 +61,7 @@ FIRST_PAGES = [
     "docs/design/generated-modules.md",
     "docs/development/local-development.md",
     "docs/development/change-guide.md",
+    "docs/development/coding-rules.md",
     "docs/development/contract-workflow.md",
     "docs/development/api-usage.md",
     "docs/development/documentation.md",
@@ -70,9 +69,11 @@ FIRST_PAGES = [
     "docs/operations/deployment.md",
     "docs/operations/backup-recovery.md",
     "docs/operations/runbook.md",
-    "docs/acceptance/jaf-quality.md",
-    "docs/acceptance/jaf-benchmark.md",
 ]
+LEGACY_PAGE_ALIASES = {
+    f"PJM/{module}/README.md": {"page": "PJM/README.md", "anchor": module}
+    for module in ("backend", "web", "contracts", "scripts", "skills", "images")
+}
 
 
 @dataclass
@@ -113,7 +114,7 @@ def source_paths() -> list[Path]:
 
     paths = list(DOCS.rglob("*.md"))
     paths += [ROOT / "README.md", ROOT / "PJM/README.md", ROOT / "PJM/AGENTS.md"]
-    paths += sorted((ROOT / "PJM").glob("*/README.md"))
+    # package 用の短い README は索引に重複させず、工程案内をコード root へ集約する。
     order = {name: index for index, name in enumerate(FIRST_PAGES)}
     return sorted(
         set(paths),
@@ -182,15 +183,13 @@ def parse_document(path: Path, parser: MarkdownIt) -> Document:
             raise ValueError(f"{path.relative_to(ROOT)}:{token.map[0] + 1}: unclosed fence")
     if len(titles) != 1:
         raise ValueError(f"{path.relative_to(ROOT)}: expected one H1, got {len(titles)}")
-    if not path.is_relative_to(DOCS / "history"):
-        previous = 0
-        for level, line in levels:
-            if level > previous + 1:
-                raise ValueError(
-                    f"{path.relative_to(ROOT)}:{line}: "
-                    f"heading level jumps from H{previous} to H{level}"
-                )
-            previous = level
+    previous = 0
+    for level, line in levels:
+        if level > previous + 1:
+            raise ValueError(
+                f"{path.relative_to(ROOT)}:{line}: heading level jumps from H{previous} to H{level}"
+            )
+        previous = level
     return Document(path, source, tokens, titles[0], headings, anchors)
 
 
@@ -216,6 +215,9 @@ def validate_link(origin: Path, href: str, anchors: dict[Path, set[str]]) -> Non
         if not anchor or anchor == "main":
             return
         page, separator, section = anchor.partition("::")
+        alias = LEGACY_PAGE_ALIASES.get(page)
+        if alias:
+            page, section = alias["page"], alias["anchor"]
         viewer_target = (ROOT / page).resolve()
         if not separator or viewer_target not in anchors or viewer_target.suffix != ".md":
             raise ValueError(f"{origin.relative_to(ROOT)}: missing viewer page {href}")
@@ -266,8 +268,6 @@ def validate_examples(documents: list[Document]) -> int:
     validator = Draft202012Validator(schema)
     count = 0
     for document in documents:
-        if document.path.is_relative_to(DOCS / "history"):
-            continue  # 当時の例は現行契約に書き換えない。
         for token in document.tokens:
             if token.type == "fence" and token.info == "json" and '"view_version"' in token.content:
                 validator.validate(json.loads(token.content))
@@ -292,6 +292,7 @@ def search_sections(document: Document) -> list[dict[str, str]]:
         sections.append(
             {
                 "title": title,
+                "level": token.tag,
                 "anchor": token.attrGet("id") or "",
                 "text": "".join(lines[start:end]).strip(),
             }
@@ -305,6 +306,10 @@ def build() -> tuple[str, int, int]:
     parser = MarkdownIt("commonmark", {"html": False}).enable(["table", "strikethrough"])
     documents = [parse_document(path, parser) for path in source_paths()]
     anchors = {document.path: document.anchors for document in documents}
+    for legacy, target in LEGACY_PAGE_ALIASES.items():
+        path = ROOT / target["page"]
+        if path not in anchors or target["anchor"] not in anchors[path]:
+            raise ValueError(f"invalid legacy page target: {legacy}")
     html_sources: dict[Path, HtmlLinks] = {}
     for path in sorted(DOCS.rglob("*.html")):
         if path == OUTPUT:
@@ -340,7 +345,10 @@ def build() -> tuple[str, int, int]:
                 "checksum": hashlib.sha256(document.source.encode()).hexdigest(),
             }
         )
-    payload = json.dumps({"groups": GROUPS, "pages": rendered}, ensure_ascii=False)
+    payload = json.dumps(
+        {"groups": GROUPS, "pages": rendered, "aliases": LEGACY_PAGE_ALIASES},
+        ensure_ascii=False,
+    )
     # Markdown 中の </script> を JSON script element の終端として解釈させない。
     payload = payload.replace("<", "\\u003c").replace("&", "\\u0026")
     template = TEMPLATE.read_text(encoding="utf-8")

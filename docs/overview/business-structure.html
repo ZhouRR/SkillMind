@@ -506,8 +506,7 @@
             本页说明平台由哪些业务能力组成、Skill 与任务如何流转；字段与状态机见 <a href="../index.html#docs/design/domain-model.md::">领域模型</a>，实现与验收差距见 <a href="../index.html#docs/planning/roadmap.md::">实施计划</a>。
           </p>
           <div class="doc-meta">
-            <span>文档编号 PJM-DOC-02</span>
-            <span>文档核对 2026-09-05 · 非部署验收日期</span>
+            <span>业务结构摘要 · 实现状态见计划</span>
             <a href="../index.html">返回文档中心</a>
           </div>
         </div>
@@ -721,9 +720,9 @@
       <div class="sequence-heading">
         <div>
           <h2 id="task-sequence-title">一次完整任务的业务时序</h2>
-          <p>以单票据品质分析为例,展示资源绑定、Agent 自主分析、用户 Review/批准、多会话继续与结果评价。SDK 级技术时序见 <code>docs/03</code>「AI 执行时序」。</p>
+          <p>以资料分析为例，展示资源绑定、自主分析、人工确认与结果评价。技术交接见 <a href="technical-architecture.html#view-sequence">AI 执行时序</a>。</p>
         </div>
-        <span class="scenario-badge">示例场景:票据品质分析</span>
+        <span class="scenario-badge">示例场景：资料分析</span>
       </div>
 
       <div class="participants" aria-label="任务流程参与者">
@@ -745,7 +744,7 @@
             <span class="message">选择能力并补充目标</span>
             <span class="actor target">工作空间</span>
           </div>
-          <p class="event-detail">从任务目录选择「票据品质分析」,确认分析目标、期望交付物与本次需要关注的观点。</p>
+          <p class="event-detail">从任务目录选择资料分析任务，确认目标、交付物与本次关注的问题。</p>
         </li>
         <li class="sequence-event">
           <span class="event-number">02</span>
@@ -755,7 +754,7 @@
             <span class="message">展示资源、指导、自主等级与效果策略</span>
             <span class="actor target">用户</span>
           </div>
-          <p class="event-detail">平台逐项展示 Ticket、代码、文档等资源要求与候选绑定;用户可覆盖选择,并确认 SUPERVISED 等执行等级。</p>
+          <p class="event-detail">平台展示文档、代码等资源要求和候选；用户确认精确范围，执行权限与限额由服务端冻结。</p>
         </li>
       </ol>
 
@@ -833,7 +832,7 @@
             <span class="message">提交 Outcome、证据、产物与可选变更提案</span>
             <span class="actor target">数据库 / 存储</span>
           </div>
-          <p class="event-detail">平台校验结果结构与引用归属；Skill 业务规则的语义正确性另行验收。外部变更先形成 Proposal，经批准或精确预授权执行后回读验证。</p>
+          <p class="event-detail">平台校验结果结构；引用真实性与业务正确性不能由 Schema 推导，缺口见 <a href="../index.html#docs/design/results-evaluation.md::">结果设计</a>。外部变更独立走 Proposal、批准与回读验证。</p>
         </li>
         <li class="sequence-event">
           <span class="event-number">10</span>

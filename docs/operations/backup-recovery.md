@@ -1,57 +1,29 @@
 # 备份、恢复与版本回退
 
-[运维入口](runbook.md#按问题找入口) · [发布与迁移](deployment.md) · [Secret 与旧密钥](../design/secret-storage.md#切换与恢复的顺序)
-
-本页负责恢复点、备份检查、数据库替换和恢复后的放行证据。命令均在目标部署目录 `PJM/` 执行，需要已确认的环境和获批维护窗口；不知道目标或缺少恢复材料时停止，不试跑破坏性命令。
-
-## 先选路径
-
-| 目的 | 应走的步骤 |
-| --- | --- |
-| 更新前保留退路 | [一致恢复点](#一致恢复点包含什么) → [数据库备份](#取得并检查数据库备份) → 保存完整受控资产 |
-| 只替换应用版本 | 先做[兼容审查](deployment.md#迁移与回退审查)，再选[版本回退路径](#应用版本回退)；不默认恢复数据库 |
-| 替换损坏或不兼容的数据 | [恢复前置](#恢复前的停止条件) → [数据库替换](#替换数据库) → [关联与放行验证](#恢复后验证) |
-
-备份清单不含 Secret 值，不代表备份资产不敏感。dump 可含账号密码 hash、加密材料和业务记录，blob/workspace 也可能含业务正文；它们均需访问控制和受控保管，不能嵌入文档浏览版、截图或公开附件。KEK 独立保护，不能仅因数据库中保存的是密文而公开 dump。
-
-## 一个例子：恢复不能抹掉后来的事实
-
-```text
-10:00 取得完整恢复点
-10:05 一次会话被撤销，或用户权限被收回
-10:07 外部仓库接受了已批准的 commit
-10:10 决定恢复 10:00 的本地数据
-```
-
-恢复后，数据库可能重新含有旧的会话/权限状态，但远端 commit 仍然存在。两类事实都不能从“dump 导入成功”得出安全结论：前者需要防止旧权限重新开放，后者需要按原 Proposal/Effect 身份对账，防止重复写入。
-
-因此先保全当前安全/外部变更事实，再恢复，在关联核对完成前保持业务隔离。当前没有通用的会话恢复撤销、Effect 补账或跨存储恢复 CLI；不能靠直接 SQL、重跑 bootstrap 或换幂等键补造完成。会话目标见[失效与权限变化](../design/authentication.md#会话失效与权限变化)，外部对账见[Effect 恢复](runbook.md#87-incident-と-recovery)。
-
+命令在目标部署目录 `PJM/` 执行，需确认环境、受控资产位置与获批维护窗口。首次起动见[Quickstart](quickstart.md)，发布顺序见[迁移手册](deployment.md)。目标或材料不明时停止。
 
 ## 配备前备份
 
-先阻止新业务请求与调度触发，等待正在执行的外部 Effect 结算；结果不明时转到[Effect 恢复](runbook.md#87-incident-と-recovery)。随后停止 API/Worker 等写入者，在停写窗口内取得 DB、blob 和必要 workspace 的同一恢复点。仅停止新 Run 创建、仅关闭业务 dispatch 开关或只给文件相同时间戳，都不能证明已无写入。
+先阻止新业务/触发、结算在途 Effect；结果未知按[原执行身份对账](runbook.md#incident-与-recovery)。确认所有 API/Worker 写入者停止后，在同一停写窗口取得恢复点。dispatch=false、仅停止一个实例或相同文件时间戳都不足以证明一致。
 
 ### 一致恢复点包含什么
 
-| 保存对象 | 用途与必须核对的关联 |
+| 资产 | 必须保留的关联 |
 | --- | --- |
-| DB dump | PostgreSQL 的业务事实、快照、Outbox、批准与审计；核对数据库身份、migration revision 和停写时点 |
-| blob snapshot | object storage 中的 SkillSource、Project 文档及其他 DB 引用；保留原对象键、字节与 hash，不能只备份最终报告 |
-| Run 文件 | 必要 workspace/transcript、输入副本和会话恢复材料；对应 Run/Session，缺文件不能标为可续行 |
-| 镜像与配置版本 | 以兼容代码读取恢复数据；核对 Backend/Web image ID、依赖 image 和 context path，配置凭据另行保护 |
-| KEK 及版本 | 用于解封 MANAGED 凭据；由独立受控保管系统保留，不与 DB dump 放在一起 |
-| 外部对账记录 | 防止重做已发生的 Effect；保留原 Proposal/Effect 身份、目标 revision 与 read-back 状态 |
+| DB dump | 数据库身份、migration revision、Run/快照/Outbox/批准/安全审计与停写时点 |
+| blob snapshot | SkillSource、文档等原对象 key、字节/hash及 DB 引用 |
+| Run 文件 | 必要 workspace/transcript、输入副本、Session 恢复材料；缺文件不能标为可续行 |
+| 镜像与配置 | Backend/Web 与依赖 image ID、context path、配置版本 |
+| KEK | 所需旧版本的独立受控保管引用，不与 dump 放一起 |
+| 外部对账事实 | 原 Proposal/Effect、目标 revision、apply/read-back 及恢复点后的变化 |
 
-Redis 不是上述数据的替代品。恢复时如何隔离旧队列、处理 Outbox 重投和调度在途，应纳入专用演练；不能对未知 Redis 使用全库清空命令，也不能假定恢复旧 DB 后现有队列自然一致。
+dump、blob 和 workspace 可含密码 hash、密文或业务正文，须访问控制，不进入公开附件。清单只记录恢复点 ID、UTC 窗口、资产引用/校验值、操作者、结果和缺项，不记录 Secret。RPO/RTO 与保留期由负责人确认，当前没有自动跨存储备份或恢复时效保证。
 
-备份清单只记录恢复点 ID、UTC 停写窗口、上述受控资产引用/校验值、操作者、验证结果和未覆盖项。配置与 KEK 的清单记录版本引用，不记录值。保留期限、RPO（最多允许丢失的数据时间）和 RTO（目标恢复耗时）由环境负责人明确；当前没有自动跨存储备份、统一保留清理或已验证的 RPO/RTO 保证。
-
-ProjectDocument 元数据总量不是 bucket 的实际占用：上传拒绝、删除失败和整个 Project 的删除可能留下未关联字节，见[文档保存与清理边界](../design/document-lifecycle.md)。恢复点应覆盖引用与待核对对象，不能从当前文档列表反推可安全删除的对象集合；本页不提供 bucket 前缀清空命令。
+Redis 不代替 DB；旧队列、Outbox 重投与调度在途需要专用恢复方案，不对未知 Redis 全库清空。文档元数据总量也不等于 bucket 实际占用，不从列表推导可清除的对象；见[文档生命周期](../design/document-lifecycle.md)。
 
 ### 取得并检查数据库备份
 
-下面是经确认的停写窗口内的 DB 备份示例，不替代其他存储的 snapshot。`mktemp` 创建本次独立目录，避免覆盖同名备份；创建失败不执行 dump，变量为空也拒绝输出。父目录和资产存放位置应由操作者控制，密码不写入命令行。两段示例在同一 shell 执行；新开终端先明确原备份目录，不猜测变量。
+以下只备份 DB，不替代 blob/workspace snapshot。两块在同一 shell 执行，mktemp 创建失败或 pg_dump 非零即停；新终端必须重新明确本次目录，不猜测变量。密码不写命令行。
 
 ```bash
 umask 077
@@ -61,7 +33,7 @@ docker compose --env-file .env exec -T postgres sh -ceu \
   > "${PJM_BACKUP_DIR:?Backup directory is required}/database.dump"
 ```
 
-只有 `pg_dump` 退出码为 0 才继续。失败留下的文件保留为故障现场，不标记为有效备份。随后检查非空、记录并核对字节校验值，验证 archive 目录可解析；单凭这些检查仍不能代替实际恢复演练。
+成功后检查非空、archive 目录及字节校验值。失败文件保留为现场，不标作有效备份。
 
 ```bash
 (
@@ -78,24 +50,19 @@ docker compose --env-file .env exec -T postgres sh -ceu \
 )
 ```
 
-此检查块在子 shell 中遇错即停，不更改当前终端的工作目录。TOC 可能含业务对象名，只保存在受控目录。将 DB、blob/workspace snapshot、配置引用和镜像纳入同一备份清单并转存到批准的保管系统。checksum 文件使用目录内相对路径，便于整体转存；它用于发现字节变化，不是备份来源的真实性证明。
-
-完整恢复点就绪前不删除旧镜像或启动 migration。`make bootstrap-admin` 会删除所有 volume，不属于备份、更新或常规管理员创建步骤。
+子 shell 遇错即停。TOC 可能含业务对象名，仅受控保存。将全部资产纳入同一清单并转存；checksum 检查不是来源真实性或实际恢复演练。完整恢复点就绪前不删除旧镜像、不迁移，更不运行删除全 volume 的 `make bootstrap-admin`。
 
 ## 数据库恢复
 
-这是删除并替换指定数据库的破坏性恢复，会丢失恢复点之后的本地数据。先获得环境负责人确认并保全当前现场；通常先在隔离环境演练，不直接试生产。恢复旧数据库不会撤销已经写到 Redmine、Git/SVN 或 forge 的内容。
+**以下会删除并替换数据库，丢失恢复点后的本地数据。** 经负责人确认并保全当前现场后，先在隔离环境演练。
+
+恢复旧 DB 不撤销 Git/SVN/Redmine 等远端变更，还可能恢复已撤销 session/权限。例如 10:00 备份、10:05 撤权、10:07 外部 commit，恢复 10:00 后两项后续事实都须独立核对。未核清前保持隔离；没有通用权限修复/Effect 补账 CLI，不靠 SQL、bootstrap 或新幂等键补造结果。
 
 ### 恢复前的停止条件
 
-以下任一项不满足，就不执行后面的数据库替换：
+以下全部满足才继续：环境/Compose project/DB 名与角色/目标镜像/revision 已明确；可信 dump 的 checksum/archive 和关联 blob/workspace/config/KEK 齐全；当前现场另有备份；所有写入者已停；恢复点后的安全/外部变更有原身份对账方案。
 
-- 环境、Compose project、DB 名称/角色、目标镜像和预期 revision 都已明确，且不是凭目录名推断。
-- dump 来源可信、checksum 与 archive 检查成功，对应 blob/workspace、配置版本及必要 KEK 齐全。
-- 当前现场另有可恢复备份；维护窗口覆盖 API/Worker、调度和外部 Effect，新写入已停止。
-- 已记录恢复点以后可能发生的外部变更，并有原幂等身份的对账方案。
-
-把本次选定的完整备份目录设置为 `PJM_RESTORE_DIR`。只读校验块不会修改数据库；需要整体保留[数据库备份](#取得并检查数据库备份)生成的文件名和相对路径。
+将选定完整备份目录明确设为 `PJM_RESTORE_DIR`，保留原文件名及相对路径。以下只校验材料：
 
 ```bash
 (
@@ -109,7 +76,7 @@ docker compose --env-file .env exec -T postgres sh -ceu \
 )
 ```
 
-校验通过后停写，并在受控终端核对当前连接的数据库与角色；不要把完整连接设置贴到公共报告：
+成功后在已全局停写的窗口停止本目录服务，并在受控终端核对实际 DB/角色：
 
 ```bash
 docker compose --env-file .env stop api worker migrate
@@ -121,7 +88,7 @@ docker compose --env-file .env exec -T postgres sh -ceu '
 
 ### 替换数据库
 
-只有操作者确认上述结果与目标完全一致后，才执行此块。例子以原应用角色恢复对象；自定义多 owner/额外权限的环境需先制定对应恢复方案。子 shell 遇错即停，失败后保持业务关闭。
+仅在上述结果与已批准目标完全相符时执行。例子以原应用角色恢复；多 owner/自定义权限环境须另有验证过的方案。
 
 ```bash
 (
@@ -139,38 +106,18 @@ docker compose --env-file .env exec -T postgres sh -ceu '
 )
 ```
 
-[PostgreSQL 17 的 pg_restore](https://www.postgresql.org/docs/17/app-pgrestore.html) 默认遇到 SQL 错误会继续处理；这里指定单事务与遇错退出，避免把部分导入当成成功。单事务只覆盖导入，不撤销此前的 dropdb/createdb，更不回滚 blob 或外部系统；失败时可能只剩空数据库。大型数据库若需其他导入策略，先在恢复演练中验证，不临场删掉错误保护参数。
+单事务/遇错退出只保护 pg_restore 导入，不撤销 dropdb/createdb、blob 或外部效果；失败可能留下空库，须保持业务关闭。大型 DB 若需其他策略应先演练，不临场删保护参数。参考 [pg_restore](https://www.postgresql.org/docs/17/app-pgrestore.html)。
 
 ### 恢复后验证
 
-恢复与 dump 对应的 object storage/workspace，加载兼容 image 和配置，让所需旧 KEK 可解封。先核对 revision，再依[迁移审查](deployment.md#迁移与回退审查)决定是否 forward migration；保持 Worker 与外部写入隔离，不能直接运行 `make deploy` 自动放开后台任务。
+恢复对应 blob/workspace、兼容镜像/配置及旧 KEK。核对 revision 后按[迁移审查](deployment.md#迁移与回退审查)决定是否 forward migration，Worker 继续隔离，不运行自动整体重启的 make deploy。
 
-| 验证层 | 放行前应取得的证据 |
-| --- | --- |
-| 基础与权限 | 目标 migration head、DB/Redis 连接；恢复的用户/成员/Session 状态已经核对，不把过期权限重新开放 |
-| 数据关联 | 抽样 Skill/文档/Artifact blob 可读且内容匹配；Run/Result/Evidence 引用一致 |
-| 可续行性 | 终态历史可读与非终态可继续分别验证；缺快照/回执/transcript 时明确拒绝，不补签或重新授权 |
-| 外部与在途工作 | 对账恢复点后的 Effect；确认 Outbox/队列、Schedule 在途和旧 lease 的处置，不重发重复写入 |
-| 专项与交接 | 专用环境 smoke/恢复场景、实际恢复耗时、数据损失范围、残余问题和放行责任人 |
+放行前分别确认：用户/成员/Session 没有重新开放旧权限；Skill/文档/Artifact 字节与 Run/Result/Evidence 引用一致；终态可读与非终态续行分别成立；缺回执/输入/transcript 时拒绝而非补签；旧队列、lease、Schedule 与远端 Effect 已对账。记录实际耗时、数据损失、验收范围、残余问题和放行人。
 
-任一不明项保持隔离，不能以 `preflight=ready` 代替业务放行。当前无统一恢复编排 CLI；上述关联验证和外部对账仍需经过授权的运维流程完成。
+任一未知保持隔离，preflight 不替代这些证据。后台与普通入口按[分阶段放行](deployment.md#启动与放行)恢复。
 
 ## 应用版本回退
 
-先选择回退路径，不把 image 回退和数据恢复混成同一条命令：
+旧 API/Web/Worker 能理解当前 schema、数据、队列和非终态快照时，才可保持数据切换兼容旧镜像。兼容不明时不启动旧 Worker，评估完整恢复点和外部对账；无可信恢复点则保全现场、选 forward fix，不试跑破坏性 downgrade。
 
-| 已确认的条件 | 可采用的路径 |
-| --- | --- |
-| 旧 API/Web/Worker 理解当前 schema、数据、队列和非终态快照 | 保持数据，按维护流程切换到兼容旧镜像并重新验证 |
-| 旧代码不理解新数据，或兼容性未确认 | 不启动旧 Worker；评估完整恢复点和外部对账，经确认后按[数据库恢复](#数据库恢复)处理 |
-| 没有可验证的完整恢复点 | 停止回退；保全现场并选择 forward 修复，不试跑破坏性 downgrade |
-
-只有第一行且允许整体重启、旧队列/在途工作均已核对时，可指定已经保留并验证的旧 archive。以下 deploy 会立即启动 Worker；后面的 preflight/smoke 是重启后的检查，不能作为启动前闸门。仍需分阶段放行时改走[发布手册](deployment.md#启动与放行)，不运行此块：
-
-```bash
-make deploy IMAGE_ARCHIVE=images/projectmind-previous.tar
-docker compose --env-file .env exec -T api python -m projectmind.ops.preflight
-docker compose --env-file .env exec -e PROJECTMIND_SMOKE_PROJECT_ID="$SMOKE_PROJECT_ID" api python -m projectmind.ops.smoke
-```
-
-`make deploy` 会先移除容器和旧应用 image，再 load archive 并重启；如果 archive 缺失必要 image，服务不会自动回到原版本。必须事先保管可用的前后两代 archive/image ID，不把保留同名 tag 当作回退方案。
+仅当已允许整体重启且旧队列/在途工作全部核清时，才使用 `make deploy IMAGE_ARCHIVE=images/projectmind-previous.tar`（文件为需预先准备的示例）。该命令先删容器/旧 app image，再 load 并立即启动 Worker；archive 缺镜像时不会自动退回。事先保管前后两代可用 archive 与实际 image ID，同名 tag 不算回退方案。重启后执行发布手册的 preflight 与获准 smoke；需分段门禁时不使用该命令。

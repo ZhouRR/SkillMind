@@ -26,7 +26,6 @@
     .subtitle { margin:2px 0 23px; color:var(--muted); font-size:13px; }
     .search-label { font-size:13px; font-weight:650; }
     #search { width:100%; border:1px solid #b9c9d8; background:white; color:var(--ink); border-radius:7px; padding:9px 10px; margin:5px 0 8px; }
-    .history-control { font-size:12px; color:var(--muted); display:flex; gap:6px; align-items:center; margin-bottom:20px; }
     details { margin:14px 0; }
     summary { color:#405871; font-weight:650; font-size:13px; cursor:pointer; padding:4px 0; }
     nav a { display:block; padding:7px 9px; margin:2px 0; border-radius:6px; color:#41556a; font-size:13px; line-height:1.55; text-decoration:none; }
@@ -75,7 +74,6 @@
     .toc strong { display:block; color:var(--muted); margin-bottom:8px; }
     .toc a { display:block; margin:8px 0; color:var(--muted); text-decoration:none; line-height:1.5; }
     .toc a.sub { padding-left:10px; font-size:11px; }
-    .archive-notice { background:#fff6e5; border:1px solid #e7c88d; border-radius:8px; padding:13px 17px; color:#725419; margin:0 0 22px; font-size:14px; }
     .page-footer { border-top:1px solid var(--line); margin-top:48px; padding-top:20px; color:var(--muted); font-size:12px; }
     #menu-button { display:none; }
     [hidden] { display:none !important; }
@@ -91,7 +89,6 @@
     <p class="subtitle">设计、开发与运行 · 文档中心</p>
     <label class="search-label" for="search">搜索文档</label>
     <input id="search" type="search" placeholder="名称、概念、接口或关键词" autocomplete="off">
-    <label class="history-control"><input id="include-history" type="checkbox">搜索包含历史归档</label>
     <div id="search-status" role="status" aria-live="polite"></div>
     <nav id="navigation" aria-label="文档列表"></nav>
   </aside>
@@ -117,7 +114,6 @@
     const pages = new Map(data.pages.map(page => [page.id, page]));
     const main = document.getElementById('main');
     const search = document.getElementById('search');
-    const historyToggle = document.getElementById('include-history');
     const menuButton = document.getElementById('menu-button');
     const topbar = document.querySelector('.topbar');
     let currentId = '';
@@ -163,7 +159,6 @@
       const query = search.value.trim().toLocaleLowerCase();
       if (query) {
         const found = data.pages.flatMap(page => {
-          if (!historyToggle.checked && page.group === 'history') return [];
           const sections = page.sections.filter(section => section.text.toLocaleLowerCase().includes(query));
           const id = page.id.toLocaleLowerCase();
           const title = page.title.toLocaleLowerCase();
@@ -200,7 +195,7 @@
         const children = data.pages.filter(page => page.group === group);
         if (!children.length) continue;
         const section = document.createElement('details');
-        section.open = group !== 'history' || pages.get(currentId)?.group === 'history';
+        section.open = true;
         const heading = document.createElement('summary');
         heading.textContent = title;
         section.append(heading);
@@ -244,6 +239,11 @@
       try { [id, anchor = ''] = location.hash.slice(1).split('::').map(decodeURIComponent); }
       catch { id = ''; anchor = ''; }
       id ||= 'docs/README.md';
+      // 統合前の module README の bookmark は、本文を残さず対応する中心章へ案内する。
+      if (Object.hasOwn(data.aliases, id)) {
+        ({page: id, anchor} = data.aliases[id]);
+        history.replaceState(null, '', pageHref(pages.get(id), anchor));
+      }
       const page = pages.get(id);
       currentId = id;
       const toc = document.getElementById('toc-links');
@@ -269,12 +269,6 @@
       source.href = page.source;
       // 本文は build 時に raw HTML 無効の parser で生成済み。検索語や URL は混ぜない。
       main.innerHTML = page.html;
-      if (page.group === 'history') {
-        const notice = document.createElement('div');
-        notice.className = 'archive-notice';
-        notice.textContent = '历史归档：保留当时的设计和验证记录；当前状态以实施计划为准。';
-        main.prepend(notice);
-      }
       const inlineToc = document.createElement('details');
       inlineToc.className = 'inline-toc';
       const inlineSummary = document.createElement('summary');
@@ -316,7 +310,6 @@
     }
 
     search.addEventListener('input', renderNavigation);
-    historyToggle.addEventListener('change', renderNavigation);
     window.addEventListener('hashchange', showPage);
     document.addEventListener('click', event => {
       // 同じ章への再クリックでは hashchange が発生しない。検索や目次から再び焦点を戻す。

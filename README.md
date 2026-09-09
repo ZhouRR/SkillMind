@@ -9,7 +9,7 @@ ProjectMind は、Skill を解釈してプロジェクトのタスクとして�
 
 ```text
 projectmind/
-├── docs/    製品・設計・開発・運用・受入・履歴
+├── docs/    製品・設計・開発・運用・現在の計画
 └── PJM/     Backend、Web、契約、Skill package、配備設定
 ```
 

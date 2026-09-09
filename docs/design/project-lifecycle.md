@@ -1,124 +1,87 @@
 # 项目、成员与归档边界
 
-> 定位：项目身份、成员资格、当前项目选择、归档恢复与删除的设计正本。现有代码和待修正行为分开说明；当前进度见[计划 R05](../planning/roadmap.md#r05-领域与身份安全)，验证证据见[交付记录 §84](../history/delivery-history.md#84-项目生命周期与开发导航文档续整2026-09-09)。
-
-先读[领域关系](domain-model.md#2-组织项目与资源)和[认证](authentication.md#6-权限判定)。本页不定义账户密码、Skill 发布、Run 停止或数据保留清理算法。
-
-[具体例子](#一个例子归档不是停止或删除) · [身份与成员](#项目身份与成员资格) · [当前项目](#项目选择与失效链接) · [归档](#归档的实际边界) · [删除](#删除与数据保留) · [开发验收](#开发接续与验收)
+本页负责项目身份、成员、选择、归档与删除；账户、Run 停止、资产清理分别见[认证](authentication.md)、[执行监督](run-supervision.md)、[文档资产](document-lifecycle.md)。现有缺口见[计划 R05](../planning/roadmap.md#r05-领域与身份安全)。
 
 ## 一个例子：归档不是停止或删除
 
-项目 P 有成员 U、一份上传文档、一个尚未触发的 Schedule 和一个正在运行的 Run。ADMIN 将 P 归档：
+项目 P 归档后不再出现在默认活动列表，新建 Run/回答/批准被拒绝；授权历史仍可读，已有 Run、成员、Schedule、附件不会一起停止或删除。恢复复用原 ID/key/配置，但不恢复已移除成员、不自动恢复 ERROR Schedule 或补跑错过触发。
 
-```text
-Project P：ACTIVE → ARCHIVED
-  ├─ 普通活动项目列表：不再列出
-  ├─ 已授权的历史读取：仍可读取
-  ├─ 新建 Run / 回答 / 批准：活动项目检查拒绝
-  ├─ 已有 Run / 外部执行：没有随归档一起停止的事务
-  └─ 文档 / 成员 / Schedule：不是随归档一起删除
-```
-
-稍后恢复 P，复用原 project_id、key 和配置；不会创建一个新项目，也不会自动恢复已经 ERROR 的 Schedule。若 U 在此期间被移出项目，恢复项目不恢复其成员资格；若只归档、未移除 U，原 ACTIVE 成员关系仍在。
-
-因此，“停止执行”“移除成员”“归档”“物理删除”必须是不同操作。希望停止模型或外部写入时，分别走[Run 停止](run-supervision.md)与[Effect 执行权](repository-effects.md#执行权与取消)；不能用归档成功作为进程停止的证明。
+停止执行、移除成员、归档、物理删除分别操作；归档成功不是进程已停止的证明。
 
 ## 项目身份与成员资格
 
-| 对象 | 含义与限制 |
+| 对象 | 含义 |
 | --- | --- |
-| Project | 属于 Organization。project_id 是身份，key 在组织内唯一；归档仍占用 key，name 可以修改。相同名称或后来重用的 key 不等于原项目 |
-| ProjectMember | 某个 User 在某个 Project 的 ACTIVE / REMOVED 关系；没有 Project ADMIN、OWNER 等额外角色 |
-| User | 组织账户的 ACTIVE / DISABLED 与 ADMIN / USER；创建账户不自动加入任何项目，移除成员不撤销账户的全部登录会话 |
-| ProjectSkillVersion | 项目对精确 SkillVersion 的启用；不赋予成员资格或系统权限，规则见[Skill 生命周期](skill-contract.md#11-版本回滚与评价) |
+| Project | organization_id 隔离，project_id 是身份；组织内 key 唯一，归档仍占 key |
+| ProjectMember | ACTIVE/REMOVED 关系，无 Project ADMIN/OWNER 角色 |
+| User | 组织账户 ACTIVE/DISABLED、ADMIN/USER；建账户不自动入项目 |
+| ProjectSkillVersion | 精确版本启用，不授予成员或系统权限 |
 
-ADMIN 在本组织内访问项目，不需要额外 ACTIVE 成员关系；因此从某个项目移除一个 ADMIN 的 ProjectMember，不会撤销其 ADMIN 访问权。需要改变系统角色时必须走[用户管理](user-lifecycle.md)，不能靠隐藏项目选项实现撤权。跨组织资源仍不可访问。
-
-USER 的后续项目请求须重新通过有效账户/会话与 ACTIVE 成员资格。失去成员资格后，不改写旧 Run 的发起人、权限快照、Result 或审计；这也不是已建立 SSE 或模型进程立即终止的保证。
+本组织 ADMIN 不依赖 membership，移除其成员关系不会撤销 ADMIN 权限；跨组织仍拒绝。USER 后续请求重验账户/会话及 ACTIVE 关系，不改写旧 Run actor/权限/结果，也不承诺已有 SSE 立即结束。
 
 ### 成员管理的现状与目标
 
-现有 ADMIN API 可列出成员、添加同组织 ACTIVE 用户、将成员设为 REMOVED。列表包含 ACTIVE 与 REMOVED，返回的 status 属于成员关系，不是 User.status；客户端不能据此显示“账户已启用”。现有成员列表没有分页或独立用户状态字段。
+ADMIN API 可列出/添加同组织 ACTIVE 用户/移除成员；列表含两种关系状态，无分页和独立用户状态，不把 membership ACTIVE 显示成账户已启用。
 
-添加已移除成员会复用原关系行，并刷新 joined_at；重复添加 ACTIVE 成员返回原关系，重复移除 REMOVED 成员则返回 404。一行保留当前状态，不等于拥有完整的历次加入/移除审计。ProjectSkillVersion 的重新启用限制不能套用到 ProjectMember。
-
-后续修正要求：成员变更记录 actor、目标、前后状态和服务器关联 ID，并与关系更新一起提交；明确同一关系的并发控制及历史兼容，不从当前 joined_at 伪造过去事件。添加时应在提交边界保证目标仍是同组织有效账户。当前代码只在查询时检查 User.status，没有锁住目标 User 到成员提交；真实禁用/加入竞争另验。
+重新添加 REMOVED 复用行并刷新 joined_at，重复添加 ACTIVE 返回原行，重复移除为 404；这不是完整加入/移除审计。目标将 actor、前后状态、关联 ID 与变更同事务保存，提交前保证目标账户仍有效。当前查询 User.status 未持有目标 User 锁到提交，禁用/加入竞争尚需闭合。
 
 ## 项目选择与失效链接
 
-Project preference 只是“上次选择”，不是授权或资源快照。服务端读取 preference 时只返回当前仍可访问的 ACTIVE 项目，否则返回 null；它不承诺同时清除旧数据库引用。保存时也检查当前可访问性，删除项目时才显式清理引用它的 preference。
+preference 只是上次选择，不是授权。服务端只返回当前可访问的 ACTIVE preference，否则 null，不保证立即清掉旧引用；删项目才显式清理。
 
-| 场景 | 设计要求 |
+| 进入方式 | 要求 |
 | --- | --- |
-| URL 未指定项目 | 可依次选择有效 preference、活动列表首项；无项目时显示空状态，平台入口仍可使用 |
-| URL 明确指定项目但不可用 | 保留原目标并显示统一不可访问提示，不披露不存在、跨组织或成员失效的区别；不静默改成另一个项目 |
-| 用户主动切换项目 | 明确丢弃或确认旧项目草稿，隔离旧任务/Run/请求；旧响应不能写回新上下文 |
-| 当前项目被归档或成员失效 | 停止提交该项目的新动作，重新确认可访问范围；不把草稿和写请求自动迁到下一个项目 |
+| URL 无项目 | 可选有效 preference、活动首项；无项目时保留平台入口 |
+| URL 明确无效/无权项目 | 保留目标、统一不可访问，不静默换项目或暴露原因差异 |
+| 主动切换或当前资格失效 | 确认/隔离旧草稿，阻止新提交，丢弃旧响应；不迁移未知写请求 |
 
-**现行差距**：[resolveProjectSelection](../../PJM/web/src/lib/projectContext.ts)在显式 project 无效时仍回退 preference/首项；[App](../../PJM/web/src/App.tsx)会改写 hash，未给出上述问题状态。因此 [Workspace 路由](workspace.md#22-路由)中的“不悄悄换项目”是修正要求，不是已实现保证。普通无参数进入与失效深链接应分开处理；不通过放宽 API 授权来解决导航问题。
+当前 [resolveProjectSelection](../../PJM/web/src/lib/projectContext.ts)与 [App](../../PJM/web/src/App.tsx)仍在明确目标无效时回退并改 hash；“不悄悄换项目”是待修正要求，不以放宽 API 授权修导航。
 
 ## 归档的实际边界
 
-归档、恢复只更新 Project.status，保留 key、配置和成员；重复设置同一状态不刷新更新时间。它们没有调用取消 Run、暂停 Schedule、禁用 Integration 或撤销 Session 的服务。
+归档/恢复只修改 status，保留配置；同状态重复操作不刷新时间，不调用 Run/Schedule/Integration/Session 停止服务。
 
-| 入口 | 当前行为与限制 |
+| 入口 | 当前行为 |
 | --- | --- |
-| 活动项目列表 / preference | 默认排除归档项目；include_archived=true 可读取本人有权看到的归档项目 |
-| Project / Run 历史读取 | 按现有账户、组织和成员授权；归档不自动抹掉读取权。当前 Web 活动项目选择器不等于完整归档审计入口 |
-| ProjectWriteActor 业务请求 | 拒绝归档项目，返回 409 project_archived；包括新建 Run、普通回答、评价、效果批准及 Schedule 修改 |
-| Run 取消 | 使用 WriteActor + Run 所属项目访问检查，没有 ACTIVE 限制；归档后仍需独立取消，且取消受理不证明进程退出 |
-| ADMIN 项目维护 | metadata 更新、归档/恢复、删除和成员移除使用独立管理用例；不是所有写操作都返回 project_archived。新增成员要求 ACTIVE 项目，否则返回 404 |
-| Schedule 触发 | 每次检查创建者与活动项目；失效时不能创建新 Run。此检查不与项目归档/Run 创建共用事务，也不是归档时立即把全部 Schedule 改成 PAUSED |
-
-后续保持这个职责区分：归档阻止新业务活动，授权读取和安全收尾有明确入口，不将“归档只读”实现成不能取消在途 Run。已有执行如何停止由监督协议决定；Project 恢复不得悄悄重放错过的触发、批准或未知请求。
+| 列表/preference | 默认只 ACTIVE；include_archived 可读授权归档项目 |
+| Project/Run 历史 | 保留当前授权读取；Web 活动选择器不是完整审计入口 |
+| ProjectWriteActor | 409 project_archived，覆盖创建、回答、评价、批准与 Schedule 修改 |
+| Run 取消 | WriteActor + Run 项目访问，无 ACTIVE 门槛；取消受理不证明进程停止 |
+| ADMIN 维护 | 编辑、归档/恢复、删除、移除成员走独立用例；新增成员要求 ACTIVE，否则 404 |
+| Schedule 触发 | 重新检查创建者/活动项目，但不与归档或 Run 创建同事务，不等于立即 PAUSED |
 
 ### 并发修改不能只看有无行锁
 
-当前项目 metadata 更新、归档和恢复会锁 Project 行，但请求没有 expected_row_version，也没有独立的项目变更审计。行锁串行执行，不会识别第二个管理员正在提交过时表单；不能宣称已有与用户账户相同的冲突比较机制。
-
-后续为项目编辑和生命周期变更定义统一的版本/冲突协议，同步 DTO、持久化、API、Web 草稿与历史读取。拒绝后保留非敏感草稿，由用户确认最新状态，不自动换版本重发。公开字段尚未定义，本页不预先增加 Schema。
+metadata/归档/恢复锁 Project，但没有 expected_row_version 或独立审计；行锁不能识别管理员过时草稿。目标定义统一版本/冲突协议，同步 DB/DTO/API/Web，保留非敏感草稿让用户比较，不自动换版本重发。
 
 ## 删除与数据保留
 
-当前删除是 ADMIN 发起的物理删除，不是回收站：服务先锁本组织 Project，要求已 ARCHIVED 且 Run 数为零，再清理 preference 和列举的项目配置行，最后删除 Project。ACTIVE 返回 project_delete_requires_archive，有 Run 返回 project_delete_blocked_by_runs，成功为 204。
+当前 ADMIN 锁 Project，要求 ARCHIVED 且无 Run，删除 preference 与列举配置再删除项目；ACTIVE/有 Run 分别返回 project_delete_requires_archive/project_delete_blocked_by_runs，成功 204。不是回收站，前置也不是完整可删证明。
 
-**这两个前置不是完整的可删除证明。** 下列边界必须在设计和验收中显式保留：
-
-| 现状 | 影响与修正要求 |
+| 已知缺口 | 风险 |
 | --- | --- |
-| 删除清单未处理 TaskSchedule；0025/model 的 project_id 是 RESTRICT 外键 | 无 Run 但已保存 Schedule 的项目仍可能被数据库拒绝。现有 API 未为此提供稳定的业务冲突；不能承诺“先归档就能删除” |
-| ProjectDocument 行在删除清单，项目服务不调用 blob 存储清理 | 204 不证明附件字节已清除，更不代表备份或外部系统数据被删除 |
-| 保留期限只保存为 retention_days | 当前没有由此保证的跨 DB/blob/workspace 自动清理、回收期限或恢复能力 |
-| Run 数量检查与其他创建链路不共用完整的提交协议 | 需要验证归档/调度认领/Run 创建/删除的竞争；只测试 mock 调用次数不证明无孤立数据或误删 |
-
-TaskSchedule 遗漏来自实际删除清单与外键定义的核对，尚未做真实 PostgreSQL 删除/回滚实验；不据此断言部署环境已出现某种 HTTP 响应。元数据失败应整体回滚，不能为了删除而先拆外键、清历史或改成宽泛 CASCADE。
-
-单文档删除则是另一条“metadata commit 后调用 storage”的路径，同样不能证明字节清除。上传孤立对象、Run/Schedule 引用保护与清理失败统一由[文档生命周期](document-lifecycle.md#删除与历史引用)负责；不要为整个 Project 再造一套不一致的附件协议。
+| 清单漏 TaskSchedule，外键 RESTRICT | 无 Run 但有 Schedule 仍可 DB 拒绝，未有稳定业务冲突 |
+| 删 ProjectDocument 行不清 blob | 204 不证明附件、Run 副本或备份清除 |
+| retention_days 仅配置 | 不保证自动清理、恢复或保留期定时器 |
+| 引用检查与新增引用不同协议 | 归档/认领/创建/删除竞争尚需真实事务验证 |
 
 ### 删除门禁的修正要求
 
-默认保留已归档项目；物理删除只处理可证明没有执行/审计及在途引用的空项目。不再把所有子记录都视为“可以重新创建的配置”。
+默认保留归档项目；物理删除只用于证明无执行/审计及在途引用的空项目。
 
-1. 删除前核对完整引用，至少覆盖 Run、Schedule（包括暂停、归档或未触发的记录）、冻结输入及在途认领。存在 Schedule 时先返回可说明的冲突，不为释放 key 静默删除其规则/触发事实。
-2. 与所有新增引用路径建立一致的锁/条件写入和提交规则；阻止检查结束后又创建引用。旧 Worker 与恢复路径也属于这条约束。
-3. 关系数据在一笔事务中成功或整体回滚；对象存储不能画成同一数据库事务。附件清理由独立、可核对且有重试记录的流程负责，删除响应明确其实际保证。
-4. 新增阻止原因需同步 Problem、OpenAPI、客户端与三语提示；不能把一切数据库错误映射成“仍有 Run”。删除响应丢失后不自动重试，更不自动创建同 key 的新项目。
+1. 纳入所有 Run/Schedule（含暂停/归档/未触发）、冻结输入和在途认领；有引用明确冲突，不静默删规则/审计释放 key。
+2. 所有新增引用、旧 Worker/恢复共用锁或条件提交，阻止检查后新增；关系删除同事务回滚，不拆 FK/宽泛 CASCADE。
+3. 字节清理使用[资产协议](document-lifecycle.md#删除与历史引用)，精确身份、回执、失败重试独立于 DB；同步整项目与单文件路径。
+4. 冲突同步 Problem/OpenAPI/client/三语，不把任意 DB 错误归为仍有 Run。未知先核对，不自动重删或建同 key 项目。
 
-恢复已归档项目与从备份恢复已删除数据是不同操作，后者遵循[一致恢复点](../operations/backup-recovery.md)。retention_days 不是定时器，调整它也不等于已经批准清理历史。
+恢复归档与[备份恢复](../operations/backup-recovery.md)不同；修改 retention_days 不等于授权清理。
 
 ## 开发接续与验收
 
-先复用现有项目 service/repository、API 与 client，代码入口见 [Backend](../../PJM/backend/README.md#project-とメンバーの管理を追う)、[Web](../../PJM/web/README.md#project-の切替と管理を追う)和[契约](../../PJM/contracts/README.md#project-と-membership-の契約を読む)。ProjectsPage 已有创建/编辑/归档/恢复/删除，但成员 API/client 尚无正式页面调用，不能作为已可用的成员管理 UI。
+入口：[项目实现](../../PJM/backend/src/projectmind/projects/)、[ProjectsPage](../../PJM/web/src/pages/ProjectsPage.tsx)、[契约](../../PJM/README.md#contracts)。页面已有创建/编辑/归档/恢复/删除，成员 API/client 尚无正式 UI。
 
-| 给定场景 | 可观察的验收结果 |
-| --- | --- |
-| USER 被移除、ADMIN 被移除成员关系、跨组织 ID | 后续请求分别失去项目访问、保留本组织 ADMIN 权限、统一隐藏跨组织资源；历史身份不改写 |
-| REMOVED 成员重新加入；并发禁用用户/添加成员 | 明确关系状态与账户状态；追加审计与锁后检查一起提交，不虚构历史加入事件 |
-| 显式无效深链接、无参数入口、无可用项目 | 不静默转移有目标的操作；仅无参数入口使用 preference；平台导航不被空项目阻断 |
-| 归档与在途 Run / Schedule 竞争 | 新业务活动被拒绝；读取与独立取消可用；已执行/未执行/未知分别保存，恢复不自动补跑 |
-| 两个管理员提交过时项目表单 | 后续版本协议拒绝旧提交，保留原草稿供比较；行锁本身不算验收证据 |
-| ARCHIVED、无 Run、有未触发或归档 Schedule | 删除返回明确冲突，元数据无部分删除；真实 PostgreSQL 覆盖 RESTRICT 与回滚 |
-| 真正空项目删除、响应丢失、附件清理失败 | 核对 project_id 与完整引用；不自动重建/重发，204 的保证不扩展为全部字节已清除 |
-| actor/项目切换、同 tick 双提交、卸载后晚到响应 | 旧请求不能改变新页面或恢复过期权限；实组件验证三语、键盘与窄屏 |
-
-既有测试通过只作为接续基线，不证明本页列出的新门禁已实现。真实事务测试须使用明确授权的专用数据库，不对用户项目执行删除探针。
+- 失效成员、ADMIN membership、跨组织分别授权，旧 Run 身份不变。
+- 实 DB 验证成员加入/禁用、归档/Run/Schedule/删除竞争、版本冲突与审计回滚。
+- 明确无效链接不换目标；无参数/空项目正常进入，切换和同 tick 双提交不消费旧结果。
+- ARCHIVED 无 Run 但有 Schedule 明确拒绝，无部分删除；真空项目删除与附件失败保持真实语义。
+- 三语、键盘、窄屏用真实组件验；不对用户项目执行删除探针，真实 DB 必须专用授权。
