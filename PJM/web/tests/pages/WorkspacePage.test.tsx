@@ -152,9 +152,9 @@ describe('SourceRequirementField', () => {
   }
 
   /** SourceRequirementField を既定言語(zh)で静的描画する。 */
-  function field(choice: SourceRequirementChoice): string {
+  function field(choice: SourceRequirementChoice, value = ''): string {
     return renderToStaticMarkup(
-      <SourceRequirementField requirement={choice} value="" onChange={vi.fn()} />,
+      <SourceRequirementField requirement={choice} value={value} onChange={vi.fn()} />,
     )
   }
 
@@ -172,11 +172,18 @@ describe('SourceRequirementField', () => {
   })
 
   it('collapses a single required candidate into a static line with no dropdown', () => {
-    // 候補が一つだけなら選択させず「将使用：名称」を静的に示す。
-    const html = field(requirement())
+    // 元の選択と唯一の候補が一致する場合だけ、静的な使用先として表示する。
+    const html = field(requirement(), 'integration:abc')
 
     expect(html).toContain('将使用：我的 Redmine · redmine')
     expect(html).not.toContain('<select')
+  })
+
+  it('does not label an empty selection as the single available source', () => {
+    const html = field(requirement())
+    expect(html).toContain('<select')
+    expect(html).toContain('value="" selected=""')
+    expect(html).not.toContain('将使用：我的 Redmine · redmine')
   })
 
   it('guides to Resources when a required source has no candidate', () => {

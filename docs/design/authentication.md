@@ -105,7 +105,9 @@ Run 创建冻结 actor、成员资格及 Skill/Tool 权限上限，不随后来�
 
 [用户管理事务](user-lifecycle.md#事务与并发)另重验原会话，将账户变更、撤销和审计一起提交；[项目成员管理](project-lifecycle.md#成员管理的现状与目标)复用同一凭据校验并保持目标账户锁，[项目 CRUD](project-lifecycle.md#并发修改不能只看有无行锁)也在业务锁后及 flush 后复核原 ADMIN 会话。
 
-[普通答复](user-interactions.md#首次答复与原答复重放)复用该凭据验证，固定当前 Project/成员资格，再锁 Run/Segment/Interaction；首次、重放及过期续行都经过最终门禁。其他业务仍须按各自设计闭合授权竞争，不能由这些链路推导全系统立即停权或已有 Run 停止。
+[普通 Run 创建与确认](run-creation.md#创建与确认的授权事务)复核原会话和当前 Project/成员，首次、重放及未命中均经过最终门禁，历史权限快照不刷新。[普通答复](user-interactions.md#首次答复与原答复重放)固定同一资格后锁 Run/Segment/Interaction，首次、重放及过期续行也经过最终门禁。
+
+[调度管理写入](task-scheduling.md#管理写入的授权事务)同样复核原会话、当前成员与归档，使用兼容 occurrence 外键的只读 User 锁；Worker 发火仍是独立的当前创建者授权协议。其他业务仍须按各自设计闭合授权竞争，不能由这些链路推导全系统立即停权或已有 Run 停止。
 
 ## 开发接续与验收
 

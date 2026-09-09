@@ -75,7 +75,7 @@ class DocumentApiFixture(ApiFixture):
         if request.method == "GET" and url.path.endswith("/tasks"):
             await route.fulfill(json=self.catalog)
         elif request.method == "GET" and url.path.endswith("/schedules"):
-            await route.fulfill(json={"schedules": []})
+            await route.fulfill(json={"schedules": [], "total": 0, "limit": 100, "offset": 0})
         elif request.method == "POST" and url.path.endswith("/schedules/preview"):
             self.preview_posts.append(request.post_data_json)
             await route.fulfill(json={"occurrences": ["2026-09-09T03:00:00Z"]})
@@ -83,7 +83,9 @@ class DocumentApiFixture(ApiFixture):
             body = request.post_data_json
             self.schedule_posts.append({"body": body, "csrf": request.headers.get("x-csrf-token")})
             await route.fulfill(status=201, json={
-                **body, **body["definition"], "schedule_id": str(uuid4()), "project_id": PROJECT,
+                "cron_expression": None, "run_at": None, "end_at": None, "max_runs": None,
+                **{key: value for key, value in body.items() if key != "definition"},
+                **body["definition"], "schedule_id": str(uuid4()), "project_id": PROJECT,
                 "status": "ACTIVE", "row_version": 1, "run_count": 0, "missed_count": 0,
                 "next_run_at": "2026-09-09T03:00:00Z", "last_run_at": None, "last_run_id": None,
                 "last_outcome": None, "last_error": None, "created_by": str(uuid4()),
@@ -164,6 +166,8 @@ async def exercise(page: Page, api: DocumentApiFixture, url: str, screen: str, m
         await page.locator('.runForm button[type="submit"]').click()
         assert not api.posts
     sources = await select_scope(page, mode)
+    if screen == 'tasks':
+        await page.locator('[data-schedule-confirm]').check()
     assert not api.schedule_posts and not api.posts
     assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth')
     if output is not None and mode == 'SET':

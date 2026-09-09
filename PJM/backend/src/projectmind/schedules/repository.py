@@ -1,48 +1,38 @@
-"""TaskSchedule の永続化を実装する (計画 §22)。
-
-到期 schedule の認領は専用 lease column を持たず、`next_run_at` の CAS
-(`UPDATE ... WHERE id = ? AND next_run_at = ?`) で行う。認領と同時に次回候補へ進めるため、
-発火が失敗しても同じ時刻を掴み直して無限にリトライする状態にならない。二重発火の最終的な
-防止は §22 D7 の決定的 idempotency key が担う。
-"""
+"""TaskSchedule の定義・状態 CAS と永続 occurrence の入口を提供する。"""
 
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import UTC, datetime
-from typing import Any, cast
 from uuid import UUID, uuid4
 
-from sqlalchemy import CursorResult, func, select, update
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import func, or_, select
+from sqlalchemy.sql.elements import ColumnElement
 
 from projectmind.auth.service import AuthenticatedActor
-from projectmind.db.models import TaskSchedule, User
+from projectmind.db.models import TaskSchedule, TaskScheduleOccurrence, User
 from projectmind.schedules.domain import (
+    TERMINAL_SCHEDULE_STATUSES,
     CreateScheduleCommand,
     ScheduleConflictError,
+    ScheduleInvalidError,
     ScheduleKind,
-    ScheduleNotFoundError,
     ScheduleOutcome,
     SchedulePage,
     ScheduleRecord,
     ScheduleStatus,
     UpdateScheduleCommand,
+    plan_schedule_transition,
 )
+from projectmind.schedules.occurrence import positive_integer, utc_time
+from projectmind.schedules.repository_occurrences import ScheduleOccurrenceRepository, _bump
 
-# 発火可能なのは ACTIVE だけ。PAUSED / ERROR / COMPLETED / ARCHIVED は走査に入れない。
-_DUE_STATUS = ScheduleStatus.ACTIVE.value
 
-
-class ScheduleRepository:
-    """Transaction-scoped session 上で schedule を読み書きする。"""
-
-    def __init__(self, session: AsyncSession) -> None:
-        """Transaction-scoped database session を保持する。"""
-
-        self._session = session
+class ScheduleRepository(ScheduleOccurrenceRepository):
+    """短い transaction 内で最新定義を検証し、公開摘要と原監査を混同しない。"""
 
     async def create(self, command: CreateScheduleCommand) -> ScheduleRecord:
-        """schedule 行を追加し、公開投影を返す。"""
+        """新 writer が検証した行だけ明示的に occurrence protocol 1 へ参加させる。"""
 
         now = datetime.now(UTC)
         row = TaskSchedule(
@@ -58,13 +48,19 @@ class ScheduleRepository:
             max_runs=command.definition.max_runs,
             skill_version_id=command.skill_version_id,
             task_key=command.task_key,
-            input_json=dict(command.input_json),
+            input_json=deepcopy(command.input_json),
             sources_json=dict(command.sources),
-            next_run_at=command.next_run_at,
+            next_run_at=utc_time(command.next_run_at, minute=True),
+            last_run_at=None,
+            last_run_id=None,
+            last_outcome=None,
+            last_error=None,
             run_count=0,
             missed_count=0,
             created_by=command.created_by,
             row_version=1,
+            configuration_version=1,
+            occurrence_protocol=1,
             created_at=now,
             updated_at=now,
         )
@@ -73,51 +69,76 @@ class ScheduleRepository:
         return _to_record(row)
 
     async def get(self, *, project_id: UUID, schedule_id: UUID) -> ScheduleRecord:
-        """Project 境界内の schedule を取得する。越境と不存在は同じ例外へ畳む。"""
+        """Project 境界内の schedule を取得し、越境と不存在を同じ例外へ畳む。"""
 
         return _to_record(await self._require_row(project_id=project_id, schedule_id=schedule_id))
 
+    async def lock_schedule(self, *, project_id: UUID, schedule_id: UUID) -> ScheduleRecord:
+        """変更判断の前に最新行を固定し、service が待機後の原会話を再検証できるようにする。"""
+
+        return _to_record(
+            await self._require_row(project_id=project_id, schedule_id=schedule_id, lock=True)
+        )
+
     async def list_for_project(
-        self, *, project_id: UUID, limit: int, offset: int
+        self,
+        *,
+        project_id: UUID,
+        limit: int,
+        offset: int,
+        q: str | None = None,
+        status: ScheduleStatus | None = None,
     ) -> SchedulePage:
-        """Project 内 schedule を次回発火時刻の昇順で列挙する。"""
+        """同じ絞込で件数とページを返し、tick に動かされない作成順を固定する。"""
+
+        filters: list[ColumnElement[bool]] = [TaskSchedule.project_id == project_id]
+        search = q.strip() if q is not None else ""
+        if search:
+            # 入力の %/_ と escape 文字を literal にし、検索語を pattern として実行しない。
+            filters.append(
+                or_(
+                    TaskSchedule.name.icontains(search, autoescape=True),
+                    TaskSchedule.task_key.icontains(search, autoescape=True),
+                )
+            )
+        if status is not None:
+            filters.append(TaskSchedule.status == status.value)
 
         total = int(
             await self._session.scalar(
-                select(func.count())
-                .select_from(TaskSchedule)
-                .where(TaskSchedule.project_id == project_id)
+                select(func.count()).select_from(TaskSchedule).where(*filters)
             )
             or 0
         )
-        statement = (
+        rows = await self._session.scalars(
             select(TaskSchedule)
-            .where(TaskSchedule.project_id == project_id)
-            # 発火待ちを先頭に出す。NULL (発火予定なし) は末尾へ送る。
+            .where(*filters)
             .order_by(
-                TaskSchedule.next_run_at.is_(None),
-                TaskSchedule.next_run_at,
-                TaskSchedule.created_at,
+                TaskSchedule.created_at.desc(),
+                TaskSchedule.id.desc(),
             )
             .limit(limit)
             .offset(offset)
         )
-        rows = list(await self._session.scalars(statement))
-        return SchedulePage(
-            items=tuple(_to_record(row) for row in rows),
-            total=total,
-            limit=limit,
-            offset=offset,
-        )
+        return SchedulePage(tuple(_to_record(row) for row in rows), total, limit, offset)
 
     async def update_definition(self, command: UpdateScheduleCommand) -> ScheduleRecord:
-        """定義と凍結入力を差し替える。row_version 不一致は衝突として拒否する。"""
+        """lock 後の CAS・終態・残枠を確認し、認領済みの原設定は書き換えない。"""
 
         row = await self._require_row(
-            project_id=command.project_id, schedule_id=command.schedule_id
+            project_id=command.project_id, schedule_id=command.schedule_id, lock=True
         )
-        if row.row_version != command.expected_row_version:
-            raise ScheduleConflictError("Schedule was modified by another request")
+        _version(row, command.expected_row_version)
+        if ScheduleStatus(row.status) in TERMINAL_SCHEDULE_STATUSES:
+            raise ScheduleInvalidError("Terminal schedule cannot be edited")
+        pending = await self._pending_count(row.id)
+        if command.definition.max_runs is not None:
+            positive_integer(command.definition.max_runs, name="max_runs")
+            if command.definition.max_runs < row.run_count + pending:
+                raise ScheduleInvalidError(
+                    "Schedule limit cannot be below created and pending runs"
+                )
+        positive_integer(row.configuration_version + 1, name="configuration_version")
         row.name = command.name
         row.kind = command.definition.kind.value
         row.timezone = command.definition.timezone
@@ -125,11 +146,14 @@ class ScheduleRepository:
         row.run_at = command.definition.run_at
         row.end_at = command.definition.end_at
         row.max_runs = command.definition.max_runs
-        row.input_json = dict(command.input_json)
+        row.input_json = deepcopy(command.input_json)
         row.sources_json = dict(command.sources)
-        row.next_run_at = command.next_run_at
-        row.row_version += 1
-        row.updated_at = datetime.now(UTC)
+        # PAUSED/ERROR を編集しただけで次回発火があるように見せない。
+        row.next_run_at = (
+            utc_time(command.next_run_at, minute=True) if row.status == "ACTIVE" else None
+        )
+        row.configuration_version += 1
+        _bump(row, now=datetime.now(UTC))
         await self._session.flush()
         return _to_record(row)
 
@@ -140,108 +164,58 @@ class ScheduleRepository:
         schedule_id: UUID,
         status: ScheduleStatus,
         next_run_at: datetime | None,
+        expected_row_version: int,
         last_error: str | None = None,
     ) -> ScheduleRecord:
-        """状態遷移の結果を書き込む。遷移の可否判定は service 側の状態機が担う。"""
+        """読取後の遷移判断を信用せず、現在の世代と状態機を lock 内で検証する。"""
 
-        row = await self._require_row(project_id=project_id, schedule_id=schedule_id)
+        row = await self._require_row(project_id=project_id, schedule_id=schedule_id, lock=True)
+        _version(row, expected_row_version)
+        plan_schedule_transition(current=ScheduleStatus(row.status), target=status)
+        if status is ScheduleStatus.ACTIVE:
+            if row.occurrence_protocol != 1:
+                raise ScheduleInvalidError(
+                    "Legacy schedule cannot be activated without explicit migration"
+                )
+            if next_run_at is None:
+                raise ScheduleInvalidError("Active schedule requires a future occurrence")
+            pending = await self._pending_count(row.id)
+            if row.max_runs is not None and row.run_count >= row.max_runs:
+                raise ScheduleInvalidError("Schedule run limit is already exhausted")
+            if row.max_runs is not None and row.run_count + pending > row.max_runs:
+                raise ScheduleInvalidError("Schedule limit is below created and pending runs")
+            row.next_run_at = utc_time(next_run_at, minute=True)
+        else:
+            row.next_run_at = None
         row.status = status.value
-        row.next_run_at = next_run_at
         row.last_error = last_error
-        row.row_version += 1
-        row.updated_at = datetime.now(UTC)
+        _bump(row, now=datetime.now(UTC))
         await self._session.flush()
         return _to_record(row)
 
     async def list_due(self, *, now: datetime, limit: int) -> list[ScheduleRecord]:
-        """発火時刻を過ぎた ACTIVE schedule を古い順に返す。"""
+        """候補読取は認領権を与えず、claim 内で状態と原世代を再確認する。"""
 
-        statement = (
+        rows = await self._session.scalars(
             select(TaskSchedule)
             .where(
-                TaskSchedule.status == _DUE_STATUS,
+                TaskSchedule.status == "ACTIVE",
                 TaskSchedule.next_run_at.is_not(None),
-                TaskSchedule.next_run_at <= now,
+                TaskSchedule.next_run_at <= utc_time(now),
+                ~select(TaskScheduleOccurrence.id)
+                .where(
+                    TaskScheduleOccurrence.schedule_id == TaskSchedule.id,
+                    TaskScheduleOccurrence.status == "PENDING",
+                )
+                .exists(),
             )
             .order_by(TaskSchedule.next_run_at)
             .limit(limit)
         )
-        return [_to_record(row) for row in await self._session.scalars(statement)]
-
-    async def claim(
-        self,
-        *,
-        schedule_id: UUID,
-        expected_next_run_at: datetime,
-        next_run_at: datetime | None,
-        missed: int,
-    ) -> bool:
-        """`next_run_at` の CAS で認領する。他 worker に先を越されていれば False。
-
-        認領時点で次回候補へ進めるので、発火処理そのものが落ちても同じ時刻を再走査しない。
-        """
-
-        statement = (
-            update(TaskSchedule)
-            .where(
-                TaskSchedule.id == schedule_id,
-                TaskSchedule.status == _DUE_STATUS,
-                TaskSchedule.next_run_at == expected_next_run_at,
-            )
-            .values(
-                next_run_at=next_run_at,
-                missed_count=TaskSchedule.missed_count + missed,
-                row_version=TaskSchedule.row_version + 1,
-                updated_at=datetime.now(UTC),
-            )
-        )
-        # UPDATE の影響行数がそのまま「自分が獲得したか」の答えになる。SQLAlchemy の型では
-        # 汎用 Result が返るため、行数を持つ CursorResult へ絞り込む。
-        result = cast(CursorResult[Any], await self._session.execute(statement))
-        return result.rowcount == 1
-
-    async def record_outcome(
-        self,
-        *,
-        schedule_id: UUID,
-        occurrence_at: datetime,
-        outcome: ScheduleOutcome,
-        run_id: UUID | None,
-        detail: str | None,
-        status: ScheduleStatus | None,
-    ) -> None:
-        """一回の発火結果を schedule 行へ書き戻す。
-
-        `status` を渡したときだけ状態を変える。Run 生成の成否と状態遷移は別の判断なので、
-        呼び出し側が明示したときにしか status を触らない。
-        """
-
-        values: dict[str, Any] = {
-            "last_run_at": occurrence_at,
-            "last_outcome": outcome.value,
-            "last_error": detail,
-            "row_version": TaskSchedule.row_version + 1,
-            "updated_at": datetime.now(UTC),
-        }
-        if run_id is not None:
-            values["last_run_id"] = run_id
-            values["run_count"] = TaskSchedule.run_count + 1
-        if status is not None:
-            values["status"] = status.value
-            if status is not ScheduleStatus.ACTIVE:
-                # 発火を止める状態では次回予定を消す。残すと一覧で「次に走る」ように見える。
-                values["next_run_at"] = None
-        await self._session.execute(
-            update(TaskSchedule).where(TaskSchedule.id == schedule_id).values(**values)
-        )
+        return [_to_record(row) for row in rows]
 
     async def load_creator_actor(self, user_id: UUID) -> AuthenticatedActor | None:
-        """schedule 作成者の現在の identity を返す。不存在・無効化済みなら None (§22 D8)。
-
-        ここが返すのは identity だけで、Project への到達可否は判定しない。その判定は
-        `ProjectRepository.get_accessible` という単一実装に委ねる——同じ意味の授権判定を
-        二箇所に書くと、片方だけ緩む余地が残る。
-        """
+        """外側の準備用 identity を読む。作成権限は transaction 内で別途再確認する。"""
 
         row = await self._session.scalar(
             select(User).where(User.id == user_id, User.status == "ACTIVE")
@@ -256,21 +230,17 @@ class ScheduleRepository:
             system_role=row.system_role,
         )
 
-    async def _require_row(self, *, project_id: UUID, schedule_id: UUID) -> TaskSchedule:
-        """Project 境界内の行を取得する。越境は不存在と同じ扱いにする。"""
 
-        statement = select(TaskSchedule).where(
-            TaskSchedule.id == schedule_id,
-            TaskSchedule.project_id == project_id,
-        )
-        row = await self._session.scalar(statement)
-        if row is None:
-            raise ScheduleNotFoundError("Schedule was not found")
-        return row
+def _version(row: TaskSchedule, expected: int) -> None:
+    """bool と同値な整数を CAS として扱わない。"""
+
+    positive_integer(expected, name="expected_row_version")
+    if row.row_version != expected:
+        raise ScheduleConflictError("Schedule was modified by another request")
 
 
 def _to_record(row: TaskSchedule) -> ScheduleRecord:
-    """ORM 行を公開投影へ写す。"""
+    """公開摘要と内部 protocol/version を明示的に投影する。"""
 
     return ScheduleRecord(
         schedule_id=row.id,
@@ -285,8 +255,8 @@ def _to_record(row: TaskSchedule) -> ScheduleRecord:
         max_runs=row.max_runs,
         skill_version_id=row.skill_version_id,
         task_key=row.task_key,
-        input_json=dict(row.input_json or {}),
-        sources=dict(row.sources_json or {}),
+        input_json=deepcopy(row.input_json),
+        sources=dict(row.sources_json),
         next_run_at=row.next_run_at,
         last_run_at=row.last_run_at,
         last_run_id=row.last_run_id,
@@ -298,4 +268,6 @@ def _to_record(row: TaskSchedule) -> ScheduleRecord:
         row_version=row.row_version,
         created_at=row.created_at,
         updated_at=row.updated_at,
+        configuration_version=row.configuration_version,
+        occurrence_protocol=row.occurrence_protocol,
     )

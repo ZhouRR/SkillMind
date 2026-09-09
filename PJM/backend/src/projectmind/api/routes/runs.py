@@ -78,7 +78,9 @@ from projectmind.skills import (
 router = APIRouter()
 
 InteractionContinuation = Literal[
-    SessionContinuationMode.RESUME, SessionContinuationMode.FORK, SessionContinuationMode.REPLACE,
+    SessionContinuationMode.RESUME,
+    SessionContinuationMode.FORK,
+    SessionContinuationMode.REPLACE,
 ]
 _INTERACTION_PROBLEMS: dict[int | str, dict[str, Any]] = {
     code: problem_openapi_response(description, headers=NO_STORE_PROBLEM_HEADERS)
@@ -89,6 +91,16 @@ _INTERACTION_PROBLEMS: dict[int | str, dict[str, Any]] = {
         (409, "interaction_conflict or project_archived: response or write state conflicts"),
         (410, "interaction_expired: expiry may already be committed without a response"),
         (422, "Invalid request or interaction_response_invalid"),
+    )
+}
+_CREATION_PROBLEMS: dict[int | str, dict[str, Any]] = {
+    code: problem_openapi_response(description, headers=NO_STORE_PROBLEM_HEADERS)
+    for code, description in (
+        (401, "A valid original session is required"),
+        (403, "Origin or CSRF rejected"),
+        (404, "Project inaccessible or published task not found"),
+        (409, "idempotency_conflict or project_archived"),
+        (422, "Invalid request, task_input_invalid or task_source_selection_invalid"),
     )
 }
 
@@ -289,10 +301,13 @@ class InteractionAnswer(BaseModel):
     model_config = ConfigDict(extra="forbid", json_schema_extra=_answer_schema)
 
     text: Annotated[str, Field(min_length=1, max_length=10_000)] | SkipJsonSchema[None] = None
-    selected_option_keys: Annotated[
-        list[Annotated[str, Field(pattern=r"^[a-z][a-z0-9_.-]*$", max_length=128)]],
-        Field(min_length=1, max_length=20, json_schema_extra={"uniqueItems": True}),
-    ] | SkipJsonSchema[None] = None
+    selected_option_keys: (
+        Annotated[
+            list[Annotated[str, Field(pattern=r"^[a-z][a-z0-9_.-]*$", max_length=128)]],
+            Field(min_length=1, max_length=20, json_schema_extra={"uniqueItems": True}),
+        ]
+        | SkipJsonSchema[None]
+    ) = None
 
     @model_validator(mode="after")
     def validate_shape(self) -> InteractionAnswer:
@@ -317,13 +332,15 @@ class RespondInteractionResponse(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         json_schema_extra={
-            "allOf": [{
-                "if": {
-                    "properties": {"idempotent_replay": {"const": False}},
-                    "required": ["idempotent_replay"],
-                },
-                "then": {"properties": {"status": {"const": "QUEUED"}}},
-            }],
+            "allOf": [
+                {
+                    "if": {
+                        "properties": {"idempotent_replay": {"const": False}},
+                        "required": ["idempotent_replay"],
+                    },
+                    "then": {"properties": {"status": {"const": "QUEUED"}}},
+                }
+            ],
         },
     )
 
@@ -455,12 +472,33 @@ class RunHistoryResponse(BaseModel):
     response_model=RunResponse,
     status_code=status.HTTP_201_CREATED,
     responses={
-        200: {"model": RunResponse, "description": "Idempotent replay"},
-        404: {"description": "Published task not found"},
-        409: {"description": "Idempotency conflict"},
-        422: {"description": "Task input or data source selection is invalid"},
+        **_CREATION_PROBLEMS,
+        201: {
+            "model": RunResponse,
+            "description": "Original request created and committed",
+            "headers": {
+                **NO_STORE_PROBLEM_HEADERS,
+                "Location": {"required": True, "schema": {"type": "string"}},
+                "Idempotent-Replay": {
+                    "required": True,
+                    "schema": {"type": "string", "const": "false"},
+                },
+            },
+        },
+        200: {
+            "model": RunResponse,
+            "description": "Original request confirmed without creating a new Run",
+            "headers": {
+                **NO_STORE_PROBLEM_HEADERS,
+                "Location": {"required": True, "schema": {"type": "string"}},
+                "Idempotent-Replay": {
+                    "required": True,
+                    "schema": {"type": "string", "const": "true"},
+                },
+            },
+        },
     },
-    tags=["runs"],
+    tags=["runs", "auth"],
 )
 async def create_task_run(
     request: Request,
@@ -468,12 +506,24 @@ async def create_task_run(
     project_id: UUID,
     body: CreateTaskRunRequest,
     actor: ProjectWriteActor,
-    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=128)],
+    idempotency_key: Annotated[
+        str,
+        Header(
+            alias="Idempotency-Key",
+            min_length=1,
+            max_length=128,
+            description=(
+                "New manual requests must not use the reserved schedule: prefix; "
+                "existing matching requests may be replayed."
+            ),
+        ),
+    ],
 ) -> RunResponse:
     """PUBLISHED task を精確 version へ束縛し、schema 検証済み入力で通用 Run を作成する。"""
 
     skill_service: SkillService = request.app.state.skill_service
     run_service: RunService = request.app.state.run_service
+    authorization = user_access(request, actor)
     find_replay = partial(
         run_service.find_task_run_replay,
         project_id=project_id,
@@ -483,6 +533,7 @@ async def create_task_run(
         sources=body.sources,
         actor_id=actor.user_id,
         idempotency_key=idempotency_key,
+        authorization=authorization,
     )
     try:
         run = await find_replay()
@@ -508,11 +559,16 @@ async def create_task_run(
                     idempotency_key=idempotency_key,
                     trace_id=request.state.request_id,
                     actor_id=actor.user_id,
-                    actor_system_role=actor.system_role,
-                    project_membership=(
-                        "ADMIN_BYPASS" if actor.system_role == "ADMIN" else "ACTIVE"
-                    ),
+                    authorization=authorization,
                 )
+    except UnauthorizedSessionError as error:
+        raise authentication_required_problem() from error
+    except CsrfRejectedError as error:
+        raise csrf_rejected_problem() from error
+    except ProjectNotFoundError as error:
+        raise project_not_found_problem() from error
+    except ProjectArchivedError as error:
+        raise project_archived_problem() from error
     except PublishedTaskNotFoundError as error:
         raise ProblemException(
             status=404,
@@ -665,7 +721,8 @@ async def get_run_detail(
                 "headers": {
                     **NO_STORE_PROBLEM_HEADERS,
                     "Idempotent-Replay": {
-                        "required": True, "schema": {"type": "string", "const": replay},
+                        "required": True,
+                        "schema": {"type": "string", "const": replay},
                     },
                 },
             }

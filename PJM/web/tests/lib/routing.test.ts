@@ -20,6 +20,7 @@ describe('application routing', () => {
     expect(routeHref('resources')).toBe('#/resources')
     expect(routeHref('workspace')).toBe('#/workspace')
     expect(routeHref('history')).toBe('#/history')
+    expect(routeHref('schedules')).toBe('#/schedules')
   })
 
   it('falls back to home for an unknown or empty route', () => {
@@ -65,7 +66,7 @@ describe('application routing', () => {
     const projectRoutes = APP_ROUTES.filter(({ scope }) => scope === 'project')
       .map(({ route }) => route)
 
-    expect(projectRoutes).toEqual(['workspace', 'history', 'tasks', 'documents', 'resources'])
+    expect(projectRoutes).toEqual(['workspace', 'history', 'tasks', 'schedules', 'documents', 'resources'])
   })
 
   it('keeps the module filter active on both screens that read it', () => {
@@ -74,6 +75,8 @@ describe('application routing', () => {
     expect(routeUsesModuleFilter('workspace')).toBe(true)
     expect(routeUsesModuleFilter('home')).toBe(false)
     expect(routeUsesModuleFilter('projects')).toBe(false)
+    expect(routeUsesModuleFilter('schedules')).toBe(false)
+    expect(routeFromHash('#/schedules?project=original')).toBe('schedules')
   })
 })
 

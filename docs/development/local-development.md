@@ -93,6 +93,10 @@ python3 tests/browser/check_interaction_responses.py \
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=../backend/src \
   python3 tests/browser/check_document_sources.py \
   --url http://127.0.0.1:5189/projectmind/tests/browser/run-submission.html
+python3 tests/browser/check_schedule_times.py \
+  --url http://127.0.0.1:5189/projectmind/tests/browser/run-submission.html
+python3 tests/browser/check_schedule_management.py \
+  --url http://127.0.0.1:5189/projectmind/tests/browser/projects.html
 ```
 
 | runner | 検証する範囲と限界 |
@@ -105,6 +109,8 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=../backend/src \
 | run_submission | 実 Workspace の応答喪失、同 key/body 確認、明示的新規、actor/Project 切替・refresh。実 transaction/唯一制約は別 |
 | interaction_responses | 実 Workspace の普通答復、原要求確認、競合/期限、同 tick/30 秒/旧応答、会話/対象切替、詳細/SSE/表示 tab 更新と三語。API は全 mock、実答復/過期 transaction・撤権競争と model 停止は別 |
 | document_sources | 即時/調度入力、清単、CSRF と凍結表示。Backend 依存と純 parser は使うが、実 blob、物化、調度編集/時区/認領 crash は別 |
+| schedule_times | 実 TasksPage/ScheduleDialog の時区/offset、DST、現在の preview 確認、防重・遅延・期限と対象切替、三語/狭幅。全 API は mock、実 cron 発火・認領/Run transaction・DB/複数 Worker は別 |
+| schedule_management | 実 App の独立調度一覧/検索/全ページ、原配置編集/版衝突/未知と対象切替、在途の旧形式/空/期限/認領上限・独立読取拒否、三語/狭幅。全 API は mock、実 DB の CAS/撤権/多 Worker と発火は別 |
 
 初回導入は download を伴う。外部依存は PYTHONPATH、browser は PLAYWRIGHT_BROWSERS_PATH で指定でき、document_sources では Backend src と両方を含める。`--output` は明示した新しい工作区外 directory に screenshot を保存する。port が使用中なら奪わず別 port と URL を使い、終了時は自分の Vite だけを停止する。
 

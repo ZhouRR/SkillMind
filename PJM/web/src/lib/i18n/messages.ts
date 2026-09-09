@@ -812,6 +812,20 @@ export interface UiMessages {
     selectProjectFirst: string
     loadFailed: string
   }
+  /** Project 全体の調度一覧と原詳細。編集の文案は独立した namespace に置く。 */
+  scheduleManager: {
+    manageAll: string; tasksLink: string; needProject: string; readOnlyProject: string; scopeHint: string
+    listTitle: string; searchLabel: string; searchPlaceholder: string; invalidSearch: string; search: string; statusLabel: string; allStates: string
+    refresh: string; loading: string; empty: string; total: (total: number) => string
+    pagination: string; previous: string; next: string; page: (offset: number, limit: number, total: number) => string
+    detailTitle: string; selectSchedule: string; loadingDetail: string; taskLoading: string; catalogUnavailable: string
+    catalogRetry: string; previousFacts: string; taskUnavailable: string; guidanceOnly: string; readinessUnconfirmed: string; edit: string; controlHint: string
+    editorPending: string; reopenEditor: string; definitionTitle: string; summaryTitle: string; summaryHint: string
+    inputTitle: string; sourcesTitle: string; unlimited: string
+    fields: Record<'id' | 'task' | 'version' | 'rowVersion' | 'creator' | 'created' | 'updated' | 'runCount' | 'missedCount' | 'nextAt' | 'lastAt' | 'lastOutcome' | 'lastRun', string>
+    outcomes: Record<'RUN_CREATED' | 'SKIPPED_OVERLAP' | 'FAILED_PRECONDITION' | 'COMPLETED', string>
+    failures: Record<'sessionExpired' | 'accessUnavailable' | 'loadFailed', string>
+  }
   /** 任务中心 (TasksPage)。「何を走らせられるか」を選ぶ画面。 */
   tasks: {
     description: string
@@ -848,7 +862,21 @@ export interface UiMessages {
     endAtLabel: string
     maxRunsLabel: string
     preview: string
-    previewHint: string
+    previewHint: (timezone: string) => string
+    inputTimezone: (timezone: string) => string
+    ruleTimezoneHint: string
+    invalidLocalTime: string
+    ambiguousLocalTime: string
+    chooseOffset: string
+    previewConfirm: string
+    previewRequired: string
+    previewLoading: string
+    invalidDefinition: string
+    previewFailed: string
+    saveRejected: string
+    saveDenied: string
+    saveUnknown: string
+    closingHint: string
     /** 重なりは既定で見送る (計画 §22 D5)。並行実行しないことを事前に伝える。 */
     overlapHint: string
     noNextRun: string
@@ -859,6 +887,36 @@ export interface UiMessages {
     archive: string
     save: string
     saving: string
+  }
+  /** 在途 occurrence の読取専用投影。lease と実行停止を同一視しない。 */
+  scheduleActivity: {
+    title: string; scopeHint: string; refresh: string; loading: string; checkedAt: string
+    legacy: string; empty: string; emptyLimit: string; pendingTitle: string
+    occurrenceId: string; occurrenceAt: string; originalConfiguration: string; currentConfiguration: string
+    rowVersion: string; createdAt: string; updatedAt: string; attempts: string; leaseExpiresAt: string
+    leaseActive: string; leaseExpired: string; leaseLimit: string
+    attemptsRemaining: string; attemptsReached: string; configurationHint: string
+  }
+  /** 保存済み Schedule の原版比較。manager の一覧語彙とは独立する。 */
+  scheduleEditor: {
+    title: string
+    identity: (id: string, version: number) => string
+    originalInstant: (instant: string) => string
+    retainedSource: (source: string) => string
+    sourceUnavailable: string
+    unavailable: string
+    conflictTitle: string
+    unknownTitle: string
+    original: string
+    submitted: string
+    current: string
+    factLimit: string
+    reconcile: string
+    reading: string
+    adopt: string
+    previousUnknown: string
+    closingHint: string
+    failures: { conflict: string; unknown: string; rejected: string; denied: string; readFailed: string }
   }
   /** Skills 解析画面(SkillsPage)。 */
   skills: {

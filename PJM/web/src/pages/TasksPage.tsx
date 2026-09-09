@@ -12,6 +12,7 @@ import { EmptyState, LoadingSkeleton, PageHeader, StatusBadge } from '../compone
 import { ScheduleDialog, ScheduleStatusActions, summarizeTiming } from '../components/ScheduleDialog'
 import { useMessages } from '../i18n'
 import { formatLocalTimestamp } from '../lib/presentation'
+import { formatScheduleTimestamp } from '../lib/scheduleTime'
 import { routeHref } from '../lib/routing'
 import { filterTasksByModule, sourceRequirements, taskCatalogId } from '../lib/taskDraft'
 
@@ -32,10 +33,11 @@ type LoadState =
  * 比較する）、工作空间は**今走っている一つを観る場所**。以前は task が工作空间の弹窗内の
  * `<select>` にしか存在せず、就緒度も定时も上次执行も別々の場所に散っていた。
  */
-export function TasksPage({ projectId, csrfToken, moduleId }: {
+export function TasksPage({ projectId, csrfToken, moduleId, projectReadOnly = false }: {
   projectId: string
   csrfToken: string
   moduleId: string
+  projectReadOnly?: boolean
 }) {
   const messages = useMessages()
   const [state, setState] = useState<LoadState>({ status: 'loading' })
@@ -101,7 +103,8 @@ export function TasksPage({ projectId, csrfToken, moduleId }: {
       <PageHeader
         title={activeModule ? messages.tasks.titleWithModule(activeModule.name) : messages.routes.tasks.label}
         description={activeModule?.description || messages.tasks.description}
-        aside={<span className="scopeBadge">{messages.tasks.countBadge(rows.length)}</span>}
+        aside={<><span className="scopeBadge">{messages.tasks.countBadge(rows.length)}</span>
+          <a className="secondaryButton compactButton" data-schedules-manager-link href={routeHref('schedules', projectId)}>{messages.scheduleManager.manageAll}</a></>}
       />
       <section className="panel" aria-label={messages.routes.tasks.label}>
         {actionError && <p className="error" role="alert">{actionError}</p>}
@@ -123,6 +126,7 @@ export function TasksPage({ projectId, csrfToken, moduleId }: {
                 onScheduleChanged={() => setRevision((current) => current + 1)}
                 onScheduleError={setActionError}
                 projectId={projectId}
+                projectReadOnly={projectReadOnly}
                 row={row}
               />
             ))}
@@ -131,7 +135,7 @@ export function TasksPage({ projectId, csrfToken, moduleId }: {
       </section>
       {/* 定时执行は task に属する設定なので、設定入口も一覧の行に置く。工作空间の左 rail に
           置いていたときは「今の下書き」に紐づいていて、どの task の予定なのかが読めなかった。 */}
-      {scheduleFor !== null && <ScheduleDialog
+      {scheduleFor !== null && !projectReadOnly && <ScheduleDialog
         key={`${projectId}:${taskCatalogId(scheduleFor)}`}
         csrfToken={csrfToken}
         onClose={() => setScheduleFor(null)}
@@ -169,10 +173,11 @@ export function buildRows(tasks: PublishedTaskRecord[], data: TaskCenterState): 
 }
 
 /** 一つの task を、就緒度・資源・定时・操作の四点で示す card。 */
-function TaskCard({ row, projectId, csrfToken, onSchedule, onScheduleChanged, onScheduleError }: {
+function TaskCard({ row, projectId, csrfToken, projectReadOnly, onSchedule, onScheduleChanged, onScheduleError }: {
   row: TaskRow
   projectId: string
   csrfToken: string
+  projectReadOnly: boolean
   onSchedule: () => void
   onScheduleChanged: () => void
   onScheduleError: (message: string) => void
@@ -181,10 +186,8 @@ function TaskCard({ row, projectId, csrfToken, onSchedule, onScheduleChanged, on
   const readiness = row.task.readiness
   const level = readiness?.level ?? null
   const activeSchedules = row.schedules.filter((schedule) => schedule.status === 'ACTIVE')
-  const nextRun = activeSchedules
-    .map((schedule) => schedule.next_run_at)
-    .filter((value): value is string => value !== null)
-    .sort()[0]
+  const nextSchedule = activeSchedules.filter((schedule) => schedule.next_run_at !== null)
+    .sort((left, right) => Date.parse(left.next_run_at!) - Date.parse(right.next_run_at!))[0]
   return (
     <li className="taskCard">
       <div className="taskCardHead">
@@ -213,7 +216,7 @@ function TaskCard({ row, projectId, csrfToken, onSchedule, onScheduleChanged, on
         </div>
         <div>
           <dt>{messages.tasks.nextRunLabel}</dt>
-          <dd>{nextRun ? formatLocalTimestamp(nextRun) : messages.schedules.noNextRun}</dd>
+          <dd>{nextSchedule ? formatScheduleTimestamp(nextSchedule.next_run_at!, nextSchedule.timezone) : messages.schedules.noNextRun}</dd>
         </div>
       </dl>
       {/* 未実行を空欄にすると読み込み中と区別が付かない。「実行履歴なし」と明示する。 */}
@@ -231,7 +234,7 @@ function TaskCard({ row, projectId, csrfToken, onSchedule, onScheduleChanged, on
         </a>
         <button
           className="secondaryButton compactButton"
-          disabled={level === 'GUIDANCE_ONLY'}
+          disabled={projectReadOnly || level === 'GUIDANCE_ONLY'}
           type="button"
           onClick={onSchedule}
         >
@@ -257,6 +260,7 @@ function TaskCard({ row, projectId, csrfToken, onSchedule, onScheduleChanged, on
                 onError={onScheduleError}
                 projectId={projectId}
                 schedule={schedule}
+                disabled={projectReadOnly}
               />
               {schedule.last_error && <small className="error">{schedule.last_error}</small>}
             </li>

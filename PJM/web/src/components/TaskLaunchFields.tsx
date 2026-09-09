@@ -20,7 +20,8 @@ export function SourceRequirementField({ requirement, value, onChange }: {
   if (requirement.kind === 'document') return <DocumentSourceField requirement={requirement} value={value} onChange={onChange} />
   const label = messages.workspace.resourceKind[requirement.kind] ?? requirement.key
   const soleOption = requirement.options[0]
-  if (requirement.required && requirement.options.length === 1 && soleOption !== undefined) {
+  const unavailable = !!value && !requirement.options.some((option) => option.value === value)
+  if (requirement.required && requirement.options.length === 1 && soleOption !== undefined && value === soleOption.value) {
     return (
       <div className="sourceField" title={requirement.key}>
         <span className="sourceFieldLabel">{label}</span>
@@ -28,7 +29,7 @@ export function SourceRequirementField({ requirement, value, onChange }: {
       </div>
     )
   }
-  if (requirement.required && requirement.options.length === 0) {
+  if (requirement.required && requirement.options.length === 0 && !value) {
     return (
       <div className="sourceField" title={requirement.key}>
         <span className="sourceFieldLabel">{label}</span>
@@ -44,10 +45,12 @@ export function SourceRequirementField({ requirement, value, onChange }: {
         onChange={(event) => onChange(event.target.value)}
       >
         <option value="">{requirement.required ? messages.workspace.selectConfiguredResource : messages.workspace.notUsed}</option>
+        {unavailable && <option value={value} disabled>{messages.scheduleEditor.retainedSource(value)}</option>}
         {requirement.options.map((option) => (
           <option key={option.value} value={option.value}>{option.label}</option>
         ))}
       </select>
+      {unavailable && <small>{messages.scheduleEditor.sourceUnavailable}</small>}
     </label>
   )
 }

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import secrets
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from typing import Any
 from uuid import UUID
 
@@ -14,6 +17,7 @@ from projectmind.agent.domain import AgentEvent
 from projectmind.agent.subagent import SUBAGENT_DISPATCH_CAPABILITY
 from projectmind.agent.task_brief import resolve_execution_profile
 from projectmind.agent.tool_policy import DENIED_BUILTIN_TOOLS
+from projectmind.auth.sessions import UnauthorizedSessionError
 from projectmind.documents.binding import resolve_document_binding
 from projectmind.documents.repository import DocumentRepository
 from projectmind.documents.snapshot import DOCUMENT_READ_CAPABILITY, DocumentSnapshotError
@@ -29,7 +33,9 @@ from projectmind.integrations.domain import (
     ResolvedRunBinding,
 )
 from projectmind.integrations.repository import IntegrationRepository
+from projectmind.projects.domain import ProjectNotFoundError
 from projectmind.projects.repository import ProjectRepository
+from projectmind.runs.creation_participation import RunCreationAuthority, RunCreationParticipant
 from projectmind.runs.creation_request import CREATION_REQUEST_FIELD, TaskRunIntent
 from projectmind.runs.domain import (
     AgentSessionMetadata,
@@ -37,6 +43,7 @@ from projectmind.runs.domain import (
     ClaimedRun,
     CreatedRun,
     CreateRunCommand,
+    IdempotencyConflictError,
     InteractionExpiredError,
     PreparedExecution,
     RespondedInteraction,
@@ -92,35 +99,39 @@ class RunService:
         idempotency_key: str,
         trace_id: str | None,
         actor_id: UUID,
-        actor_system_role: str | None = None,
-        project_membership: str | None = None,
+        authorization: UserAccess | RunCreationParticipant,
     ) -> CreatedRun:
-        """解決済み PUBLISHED task から通用 Run を作成する。JAF 定数には依存しない。
+        """解決済み PUBLISHED task と現在の資格から通用 Run を作成する。
 
         入力は SkillService が task の input schema で検証済み。ここでは資源選択を
         blueprint の resource_requirements と突き合わせ、精確 version 束縛と platform 権限・limit
         を不変 snapshot に固定する。
         """
 
-        # 精確な (version, task) から決定的な task_id を導き、idempotency 境界を安定させる。
-        task_id = derive_task_id(
-            skill_version_id=resolved.skill_version_id, task_key=resolved.task_key
-        )
-        intent = _task_run_intent(
+        async with self._creation_transaction(
+            authorization,
             project_id=project_id,
             skill_version_id=resolved.skill_version_id,
             task_key=resolved.task_key,
             input_json=input_json,
             sources=sources,
             actor_id=actor_id,
-        )
-        async with self._session_factory() as session, session.begin():
+            idempotency_key=idempotency_key,
+        ) as (session, intent, authority):
+            # 精確 task の同一性は現在の権限や資源の変化から独立させる。
+            task_id = derive_task_id(
+                skill_version_id=intent.skill_version_id, task_key=intent.task_key
+            )
             repository = RunRepository(session)
             replay = await repository.find_task_run_replay(
                 intent=intent, idempotency_key=idempotency_key
             )
             if replay is not None:
+                await _complete_creation(authorization, session, replay)
                 return replay
+            _require_creation_namespace(idempotency_key, authorization)
+            if not isinstance(authorization, UserAccess):
+                await authorization.before_create(session)
             input_schema_json = deepcopy(resolved.input_schema)
             output_schema_json = deepcopy(resolved.output_schema)
             manifest = resolved.skill_snapshot.get("manifest")
@@ -151,6 +162,7 @@ class RunService:
                     intent=intent, idempotency_key=idempotency_key
                 )
                 if replay is not None:
+                    await _complete_creation(authorization, session, replay)
                     return replay
                 raise
             command = CreateRunCommand(
@@ -180,8 +192,8 @@ class RunService:
                 permission_snapshot_json={
                     "mode": "auto_read_only",
                     "actor_id": str(actor_id),
-                    "actor_system_role": actor_system_role or "M0",
-                    "project_membership": project_membership or "M0",
+                    "actor_system_role": authority.actor_system_role,
+                    "project_membership": authority.project_membership,
                     "execution_profile": execution_profile,
                     # 構造化質問と扇出は外部資源への権限ではなく platform control capability。
                     # 新規 Run にだけ固定し、歴史 snapshot へ後付けしない。扇出を無条件に付ける
@@ -204,6 +216,7 @@ class RunService:
             )
             created = await repository.create_idempotent(command)
             if created.idempotent_replay:
+                await _complete_creation(authorization, session, created)
                 return created
             frozen_sources = deepcopy(selected_sources)
             for binding in run_bindings:
@@ -228,6 +241,7 @@ class RunService:
                     run_id=created.run_id,
                     selected_sources=frozen_sources,
                 )
+            await _complete_creation(authorization, session, created)
             return created
 
     async def find_task_run_replay(
@@ -240,21 +254,112 @@ class RunService:
         sources: dict[str, str],
         actor_id: UUID,
         idempotency_key: str,
+        authorization: UserAccess | RunCreationParticipant,
     ) -> CreatedRun | None:
         """API と調度が現在の Project 授権後に、元の要求を先に確認する共通入口。"""
 
-        intent = _task_run_intent(
+        async with self._creation_transaction(
+            authorization,
             project_id=project_id,
             skill_version_id=skill_version_id,
             task_key=task_key,
             input_json=input_json,
             sources=sources,
             actor_id=actor_id,
-        )
-        async with self._session_factory() as session:
-            return await RunRepository(session).find_task_run_replay(
+            idempotency_key=idempotency_key,
+        ) as (session, intent, _):
+            replay = await RunRepository(session).find_task_run_replay(
                 intent=intent, idempotency_key=idempotency_key
             )
+            if replay is None:
+                _require_creation_namespace(idempotency_key, authorization)
+            else:
+                await _complete_creation(authorization, session, replay)
+            return replay
+
+    @asynccontextmanager
+    async def _creation_transaction(
+        self,
+        authorization: UserAccess | RunCreationParticipant,
+        *,
+        project_id: UUID,
+        skill_version_id: UUID,
+        task_key: str,
+        input_json: dict[str, Any],
+        sources: dict[str, str],
+        actor_id: UUID,
+        idempotency_key: str,
+    ) -> AsyncIterator[tuple[AsyncSession, TaskRunIntent, RunCreationAuthority]]:
+        """普通要求の原会話と内部認領を区別し、すべての確認/作成出口を保護する。"""
+
+        if isinstance(authorization, UserAccess):
+            validate_user_access(authorization)
+            if actor_id != authorization.actor.user_id:
+                raise UnauthorizedSessionError("Authentication is required")
+        elif not isinstance(authorization, RunCreationParticipant):
+            raise TypeError("Run creation requires user access or an internal claim participant")
+        make_intent = partial(
+            _task_run_intent,
+            project_id=project_id,
+            skill_version_id=skill_version_id,
+            task_key=task_key,
+            input_json=deepcopy(input_json),
+            sources=deepcopy(sources),
+            actor_id=actor_id,
+        )
+        async with self._session_factory() as session, session.begin():
+            if not isinstance(authorization, UserAccess):
+                # Worker は人間の login に依存させず、元の持久 claim と結算の門禁を維持する。
+                intent = make_intent()
+                authority = await authorization.authorize(
+                    session, intent=intent, idempotency_key=idempotency_key
+                )
+                yield session, intent, authority
+                return
+            users = await UserRepository(session).lock_users(
+                access=authorization,
+                target_id=None,
+                include_target_sessions=False,
+                read_only_actor=True,
+            )
+            authorize_user_access(
+                authorization, users, now=datetime.now(UTC), admin=False, write=True
+            )
+            projects = ProjectRepository(session)
+            try:
+                project = await projects.lock_write_access(user=users.actor, project_id=project_id)
+            except ProjectNotFoundError:
+                # 不存在で lock helper が早期拒否しても、待機中の会話失効を見落とさない。
+                authorize_user_access(
+                    authorization, users, now=datetime.now(UTC), admin=False, write=True
+                )
+                raise
+
+            def require_current_access() -> None:
+                """新時刻で原会話を先に検証し、失効時に Project 状態を漏らさない。"""
+
+                authorize_user_access(
+                    authorization, users, now=datetime.now(UTC), admin=False, write=True
+                )
+                projects.require_active_write_access(project)
+
+            require_current_access()
+            authority = RunCreationAuthority(
+                actor_system_role=users.actor.system_role,
+                project_membership=(
+                    "ADMIN_BYPASS" if users.actor.system_role == "ADMIN" else "ACTIVE"
+                ),
+            )
+            try:
+                # 選択構文の拒否も現在の資格の後に行い、旧認証から状態を推測させない。
+                yield session, make_intent(), authority
+            except (TaskSourceSelectionError, IdempotencyConflictError):
+                require_current_access()
+                raise
+            # 重放/不存在も同じ出口を通る。FK 等の待機後に失効すれば全初期書込を rollback。
+            # DB 障害・取消・commit 応答未知は変換せず、別 key の自動再試行も行わない。
+            await session.flush()
+            require_current_access()
 
     async def validate_task_sources(
         self,
@@ -506,7 +611,9 @@ class RunService:
         result: RespondedInteraction | None = None
         async with self._session_factory() as session, session.begin():
             users = await UserRepository(session).lock_users(
-                access=access, target_id=None, include_target_sessions=False,
+                access=access,
+                target_id=None,
+                include_target_sessions=False,
             )
             authorize_user_access(access, users, now=datetime.now(UTC), admin=False, write=True)
             projects = ProjectRepository(session)
@@ -515,7 +622,9 @@ class RunService:
             projects.require_active_write_access(project)
             repository = RunRepository(session)
             locked = await repository.lock_interaction_response(
-                project_id=project_id, run_id=run_id, interaction_id=interaction_id,
+                project_id=project_id,
+                run_id=run_id,
+                interaction_id=interaction_id,
             )
             # Run 等の待機中に原会話が期限を迎えても、回答・expiry の書き込み前に止める。
             authorize_user_access(access, users, now=datetime.now(UTC), admin=False, write=True)
@@ -603,6 +712,24 @@ class RunService:
             return await RunRepository(session).recover_expired_interactions(
                 now=datetime.now(UTC), limit=limit
             )
+
+
+def _require_creation_namespace(
+    idempotency_key: str, authorization: UserAccess | RunCreationParticipant
+) -> None:
+    """調度 key の新規作成は持久認領を必須とし、既存要求の確認は妨げない。"""
+
+    if idempotency_key.startswith("schedule:") and isinstance(authorization, UserAccess):
+        raise IdempotencyConflictError("Schedule keys are reserved for scheduled Run creation")
+
+
+async def _complete_creation(
+    authorization: UserAccess | RunCreationParticipant, session: AsyncSession, created: CreatedRun
+) -> None:
+    """すべての作成/再送 return に同じ transaction 内の結算を適用する。"""
+
+    if not isinstance(authorization, UserAccess):
+        await authorization.complete(session, created)
 
 
 def _task_run_intent(

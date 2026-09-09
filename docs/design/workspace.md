@@ -25,7 +25,8 @@
 | `#/` | 概览与待办 |
 | `#/skills`、`#/projects` | 组织技能、项目管理 |
 | `#/accounts` | 本人账户与安全、ADMIN 用户管理；不携带 Project/Run/Task 或账户搜索参数 |
-| `#/tasks?project=<id>` | 任务、Preflight、调度 |
+| `#/tasks?project=<id>` | 任务、Preflight、创建调度与任务汇总 |
+| `#/schedules?project=<id>` | 项目全部调度的分页、筛选、详情与原配置管理，不受 module 筛选影响 |
 | `#/workspace?project=<id>&run=<id>` | 单 Run；task 参数可定位新任务 |
 | `#/history?project=<id>` | 项目历史 |
 | `#/documents?project=<id>`、`#/resources?project=<id>` | 文档、Integration/Secret/Binding/预授权 |
@@ -119,9 +120,11 @@ AI 原值、修订建议、理由与历史并列；多建议不自动合并，�
 
 列表使用服务端 task_id/latest_run 与精确版本，不由 UUID 或最近 N 条历史推导。已有选择任务、立即执行、创建/暂停/恢复/归档 Schedule；没有任意任务编辑/复制、对话建 Task 或结果比较。
 
-ScheduleDialog 共用实际输入/文档字段；关闭销毁未保存草稿，换 actor/Project 不接收旧结果。修改 Schedule API/client 已有而页面入口缺失，需原配置/expected_row_version 与人工冲突比较。
+ScheduleDialog 共用实际输入/文档字段；创建关闭销毁未保存草稿，换 actor/Project 不接收旧结果。独立调度管理页不依赖可见任务卡片，分页/状态/字面搜索在服务端执行；归档和失效精确任务仍有只读入口，不跟随 latest。
 
-当前只把前 100 条 Schedule 挂到可见 Task 卡片，失效任务规则可能无入口；目标独立管理列表、服务端分页/筛选。预览不创建 Run、不补造 end_at/max_runs 外次数；浏览器时区与规则 timezone 不能混同。
+编辑先读原配置，版本冲突/未知时保留草稿与已发送内容，人工核对当前值并采用版本后才继续；关闭再打开不能绕过未决门禁，读取拒绝后关闭写入。详细边界只在[调度管理](task-scheduling.md#保存后的管理入口)维护。预览不创建 Run、不补造 end_at/max_runs 外次数；浏览器时区与规则 timezone 不能混同。
+
+详情的[在途核对](task-scheduling.md#在途只读核对)独立显示读取时刻、原触发配置版本与认领/租约事实；旧协议、读取失败与未见 PENDING 分开。暂停或租约到期不显示执行已停止，刷新不重发原写入。
 
 ONCE/CRON、重叠/错过/失效唯一规则见[调度](task-scheduling.md)。暂停不撤销已认领触发，run_count 不是成功数，last_run_at/last_run_id 未必同次，UI 不承诺全局串行或 exactly-once。
 

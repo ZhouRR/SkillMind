@@ -1,0 +1,27 @@
+/* 一覧と原詳細は別の責務を保ち、狭幅では読む順序のまま縦に並べる。 */
+.scheduleManagerLayout { display: grid; grid-template-columns: minmax(270px, .9fr) minmax(0, 1.4fr); gap: 20px; align-items: start; }
+.scheduleManagerList, .scheduleManagerDetail { min-width: 0; }
+.scheduleFilters { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+.scheduleFilters label { flex: 1 1 150px; min-width: 0; }
+.scheduleFilters input, .scheduleFilters select { width: 100%; min-width: 0; }
+/* 全行を残し、Tab/矢印/タッチで巡れる有界一覧にする。狭幅でも詳細まで長く送らない。 */
+.scheduleRows { list-style: none; padding: 4px; display: grid; gap: 10px; max-height: min(60vh, 42rem); overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; }
+.scheduleRows li { min-width: 0; }
+.scheduleSelect { width: 100%; text-align: start; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; padding: 14px; border: 1px solid var(--border-strong); border-radius: var(--radius-small); background: var(--surface-raised); color: var(--text); cursor: pointer; }
+.scheduleSelect strong { flex: 1 1 160px; overflow-wrap: anywhere; }
+.scheduleSelect small { flex-basis: 100%; overflow-wrap: anywhere; color: var(--text-muted); }
+.scheduleSelect:hover:not(:disabled) { border-color: var(--border-hover); }
+.scheduleSelect:disabled { cursor: not-allowed; }
+.scheduleSelect[aria-pressed='true'] { border-color: var(--accent); background: var(--accent-soft); }
+.schedulePager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.schedulePager span { overflow-wrap: anywhere; }
+.scheduleFacts { overflow-wrap: anywhere; }
+.scheduleFacts dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.scheduleFacts dt { font-size: .85em; color: var(--text-muted); }
+.scheduleFacts dd { margin: 4px 0 0; }
+.scheduleFacts pre { max-width: 100%; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.scheduleFacts summary { cursor: pointer; padding: 12px 0; }
+.scheduleNotice { padding: 14px; border: 1px solid var(--border-strong); border-radius: var(--radius-small); background: var(--surface-raised); color: var(--text); overflow-wrap: anywhere; }
+.scheduleNotice button { margin-inline-start: 10px; }
+@media (max-width: 1100px) { .scheduleManagerLayout { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 480px) { .scheduleFacts dl { grid-template-columns: minmax(0, 1fr); } .scheduleNotice button { margin: 10px 0 0; } }

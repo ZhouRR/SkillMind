@@ -58,7 +58,7 @@ arq projectmind.worker.settings.WorkerSettings
 
 | コード入口 | 責務・設計 |
 | --- | --- |
-| [pages](web/src/pages/)・[components](web/src/components/) | [Workspace](../docs/design/workspace.md) / [Project](../docs/design/project-lifecycle.md) / [文書管理](../docs/design/document-lifecycle.md) |
+| [pages](web/src/pages/)・[components](web/src/components/) | [Workspace](../docs/design/workspace.md) / [Project](../docs/design/project-lifecycle.md) / [文書管理](../docs/design/document-lifecycle.md) / [調度管理](../docs/design/task-scheduling.md#保存后的管理入口) |
 | [api](web/src/api/) | 資源別 client と validator。画面は index.ts、HTTP は http.ts を経由する |
 | [lib](web/src/lib/)・[hooks](web/src/hooks/) | routing・SSE・入力草稿 / 非同期処理と cleanup。即時実行と調度は taskDraft / TaskLaunchFields を共有する |
 | [i18n](web/src/lib/i18n/)・[styles](web/src/styles/)・[assets](web/src/assets/) | zh/ja/en、responsive layout、自己保持 font |
@@ -76,7 +76,7 @@ arq projectmind.worker.settings.WorkerSettings
 
 | 配置 | 内容 |
 | --- | --- |
-| [runs](contracts/runs/) / [users](contracts/users/v1/) / [projects](contracts/projects/) / [events](contracts/events/) / [errors](contracts/errors/) | 公開 API・RunEvent・Problem の Schema |
+| [runs](contracts/runs/) / [users](contracts/users/v1/) / [projects](contracts/projects/) / [task-schedule](contracts/task-schedule/) / [events](contracts/events/) / [errors](contracts/errors/) | 公開 API・RunEvent・Problem の Schema |
 | [tools](contracts/tools/) | versioned Tool capability の request / response / error |
 | agent-task-brief / capability-blueprint / runtime-manifest / outcomes / view-spec | 業務固有 field を持たない共有契約 |
 | [examples](contracts/examples/)・[fixtures](contracts/fixtures/) | 代表値 / offline 回帰入力。実 account や自動 seed ではない |

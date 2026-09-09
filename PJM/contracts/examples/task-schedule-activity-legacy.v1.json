@@ -1,0 +1,10 @@
+{
+  "schedule_id": "00000000-0000-4000-8000-000000000091",
+  "project_id": "00000000-0000-4000-8000-000000000020",
+  "row_version": 1,
+  "configuration_version": 1,
+  "tracking": "LEGACY_UNAVAILABLE",
+  "checked_at": "2035-01-01T12:05:00Z",
+  "automatic_attempt_limit": 3,
+  "pending": null
+}

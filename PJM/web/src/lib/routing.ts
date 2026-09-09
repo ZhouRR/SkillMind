@@ -1,5 +1,5 @@
 /** Application shell が表示できる固定画面。 */
-export type AppRoute = 'home' | 'skills' | 'projects' | 'accounts' | 'documents' | 'resources' | 'tasks' | 'workspace' | 'history'
+export type AppRoute = 'home' | 'skills' | 'projects' | 'accounts' | 'documents' | 'resources' | 'tasks' | 'schedules' | 'workspace' | 'history'
 
 /** 画面の所属。platform は Project 非依存、project は現在 Project の作業区。 */
 export type RouteScope = 'platform' | 'project'
@@ -19,6 +19,7 @@ export const APP_ROUTES: ReadonlyArray<{
   { route: 'workspace', scope: 'project' },
   { route: 'history', scope: 'project' },
   { route: 'tasks', scope: 'project' },
+  { route: 'schedules', scope: 'project' },
   { route: 'documents', scope: 'project' },
   { route: 'resources', scope: 'project' },
   // Skills 解析は資産を作る平台能力として platform 組に置く。保存先は sidebar の現在 Project。

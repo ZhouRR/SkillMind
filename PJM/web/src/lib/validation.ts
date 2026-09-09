@@ -22,3 +22,10 @@ export function isApiTimestamp(value: unknown): value is string {
     && (parts[7] === undefined || Number(parts[8]) <= 23 && Number(parts[9]) <= 59)
     && Number.isFinite(Date.parse(value))
 }
+
+/** 検証済み API 時刻を Python datetime と同じ六桁精度で比較する。発火 ID は生成しない。 */
+export function apiTimestampMicroseconds(value: string): bigint {
+  const fraction = /\.(\d+)(?=Z|[+-]\d{2}:\d{2}$)/i.exec(value)?.[1] ?? ''
+  const whole = value.replace(/\.\d+(?=Z|[+-]\d{2}:\d{2}$)/i, '')
+  return BigInt(Date.parse(whole)) * 1000n + BigInt(fraction.slice(0, 6).padEnd(6, '0'))
+}

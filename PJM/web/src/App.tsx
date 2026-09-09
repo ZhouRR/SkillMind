@@ -32,6 +32,7 @@ import { HistoryPage } from './pages/HistoryPage'
 import { LoginPage } from './pages/LoginPage'
 import { ProjectsPage } from './pages/ProjectsPage'
 import { ResourcesPage } from './pages/ResourcesPage'
+import { SchedulesPage } from './pages/SchedulesPage'
 import { SkillsPage } from './pages/SkillsPage'
 import { TasksPage } from './pages/TasksPage'
 import { WorkspacePage } from './pages/WorkspacePage'
@@ -468,7 +469,11 @@ function renderPage(
     case 'resources':
       return <ResourcesPage csrfToken={session.csrf_token} projectId={projectId} />
     case 'tasks':
-      return <TasksPage key={`${session.user.user_id}:${projectId}`} csrfToken={session.csrf_token} moduleId={activeModuleId} projectId={projectId} />
+      return <TasksPage key={`${session.user.user_id}:${projectId}`} csrfToken={session.csrf_token} moduleId={activeModuleId} projectId={projectId}
+        projectReadOnly={currentProject?.status !== 'ACTIVE'} />
+    case 'schedules':
+      return <SchedulesPage projectId={projectId} actorId={session.user.user_id} csrfToken={session.csrf_token}
+        currentProject={currentProject} onSessionEnded={onSessionEnded} />
     case 'workspace':
       return <WorkspacePage
         key={`${session.user.user_id}:${projectId}`}

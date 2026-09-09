@@ -250,8 +250,8 @@ class InteractionApi:
                     if parts[2] == "modules":
                         await route.fulfill(json={"modules": []})
                         return
-                    if parts[2] == "schedules" and address.query == "limit=100":
-                        await route.fulfill(json={"schedules": [], "has_more": False})
+                    if parts[2] == "schedules" and address.query == "limit=100&offset=0":
+                        await route.fulfill(json={"schedules": [], "total": 0, "limit": 100, "offset": 0})
                         return
                 if len(parts) == 2 and parts[0] == "runs" and parts[1] in self.details:
                     await route.fulfill(json=self.run(parts[1]))

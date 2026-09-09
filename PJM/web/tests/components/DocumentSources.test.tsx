@@ -27,7 +27,7 @@ describe.each(['zh', 'ja', 'en'] as const)('document input and history in %s', (
     expect(html).toContain('Objective')
     expect(html).toContain(MESSAGES[language].workspace.documentSelection.mode)
     expect(html).toContain('scheduleConfiguration')
-    expect(html).toContain('disabled="" type="submit"')
+    expect(html).toContain('type="submit" disabled=""')
   })
 
   it('displays the frozen members, checksum and explicit historical limitations', () => {

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 from projectmind.db.models import Run
@@ -28,7 +29,7 @@ def creation_command(intent: TaskRunIntent, *, legacy: bool = False) -> CreateRu
     """新版と旧版の違いを request identity の有無だけに限定した command を返す。"""
 
     task_id = derive_task_id(skill_version_id=intent.skill_version_id, task_key=intent.task_key)
-    task = {
+    task: dict[str, Any] = {
         "task_id": str(task_id),
         "task_key": intent.task_key,
         "skill_version_id": str(intent.skill_version_id),

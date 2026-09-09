@@ -7,10 +7,11 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Self
 from unittest.mock import AsyncMock, patch
-from uuid import NAMESPACE_URL, uuid4, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import pytest
 
+from projectmind.documents.domain import StoredDocument
 from projectmind.documents.repository import DocumentRepository
 from projectmind.documents.snapshot import ALL_DOCUMENTS_SELECTION, DOCUMENT_READ_CAPABILITY
 from projectmind.integrations.repository import IntegrationRepository
@@ -26,6 +27,29 @@ from projectmind.runs.service import M0_DENIED_BUILTIN_TOOLS, RunService, _resol
 from projectmind.skills import ResolvedTaskRun
 from tests.documents.fakes import document_content, stored_document
 from tests.runs.creation_fakes import creation_command, creation_intent, stored_creation
+from tests.schedules.authorization_harness import ScheduleAuthorizationDatabase
+
+
+def _authorized_database(
+    project_id: UUID, actor_id: UUID, *, admin: bool = False
+) -> ScheduleAuthorizationDatabase:
+    """既存 SQL fake の原会話と所属を対象へ揃え、共通認証 repository を実際に通す。"""
+
+    database = ScheduleAuthorizationDatabase()
+    role = "ADMIN" if admin else "USER"
+    database.user.id = actor_id
+    database.user.system_role = role
+    database.auth_session.user_id = actor_id
+    database.auth_session.system_role_at_login = role
+    database.access = replace(
+        database.access,
+        actor=replace(database.access.actor, user_id=actor_id, system_role=role),
+    )
+    database.project.id = project_id
+    assert database.member is not None
+    database.member.project_id = project_id
+    database.member.user_id = actor_id
+    return database
 
 
 def _resolved(
@@ -188,7 +212,7 @@ class _Transaction:
 
 
 class _Session:
-    """create_task_run が使う最小 session seam。"""
+    """Worker tick が使う最小 session seam。普通作成の認証には使用しない。"""
 
     async def __aenter__(self) -> Self:
         """何も接続せずに自身を返す。"""
@@ -229,6 +253,7 @@ async def test_create_task_run_freezes_generic_snapshot() -> None:
 
     project_id = uuid4()
     actor_id = uuid4()
+    database = _authorized_database(project_id, actor_id, admin=True)
     with (
         patch.object(RunRepository, "find_task_run_replay", new=AsyncMock(return_value=None)),
         patch.object(RunRepository, "create_idempotent", new=_fake_create),
@@ -238,7 +263,7 @@ async def test_create_task_run_freezes_generic_snapshot() -> None:
             new=_no_configured_binding,
         ),
     ):
-        run = await RunService(_Session).create_task_run(  # type: ignore[arg-type]
+        run = await RunService(database.session_factory).create_task_run(
             project_id=project_id,
             resolved=resolved,
             input_json={"target": "main"},
@@ -246,8 +271,7 @@ async def test_create_task_run_freezes_generic_snapshot() -> None:
             idempotency_key="req-1",
             trace_id="trace-1",
             actor_id=actor_id,
-            actor_system_role="ADMIN",
-            project_membership="ADMIN_BYPASS",
+            authorization=database.access,
         )
 
     assert run.status is RunStatus.QUEUED
@@ -274,6 +298,8 @@ async def test_create_task_run_freezes_generic_snapshot() -> None:
     ]
     assert command.permission_snapshot_json["denied_builtin_tools"] == list(M0_DENIED_BUILTIN_TOOLS)
     assert command.permission_snapshot_json["actor_id"] == str(actor_id)
+    assert command.permission_snapshot_json["actor_system_role"] == "ADMIN"
+    assert command.permission_snapshot_json["project_membership"] == "ADMIN_BYPASS"
     assert command.permission_snapshot_json["execution_profile"] == "SUPERVISED"
     assert command.selected_sources_json == {
         "repository-source": {
@@ -284,12 +310,15 @@ async def test_create_task_run_freezes_generic_snapshot() -> None:
     }
     assert command.limits_snapshot_json["wall_timeout_seconds"] == 900
     assert command.skill_snapshots_json == (resolved.skill_snapshot,)
+    assert database.transactions == database.commits == 1
+    database.session.flush.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_create_task_run_rejects_invalid_source_before_persistence() -> None:
     """Source 選択が不正なら永続化前に拒否する。"""
 
+    database = _authorized_database(uuid4(), uuid4())
     with (
         patch.object(RunRepository, "find_task_run_replay", new=AsyncMock(return_value=None)),
         patch.object(RunRepository, "create_idempotent") as create,
@@ -300,16 +329,18 @@ async def test_create_task_run_rejects_invalid_source_before_persistence() -> No
         ),
         pytest.raises(TaskSourceSelectionError),
     ):
-        await RunService(_Session).create_task_run(  # type: ignore[arg-type]
-            project_id=uuid4(),
+        await RunService(database.session_factory).create_task_run(
+            project_id=database.project.id,
             resolved=_resolved((_REPOSITORY_SOURCE,)),
             input_json={},
             sources={},
             idempotency_key="req-2",
             trace_id=None,
-            actor_id=uuid4(),
+            actor_id=database.user.id,
+            authorization=database.access,
         )
     create.assert_not_called()
+    assert database.rollbacks == 1 and database.commits == 0
 
 
 @pytest.mark.asyncio
@@ -351,7 +382,9 @@ async def test_document_create_replay_keeps_original_members_without_reading_liv
         captured.append(command)
         return self._to_created_run(stored_creation(command), idempotent_replay=False)
 
-    async def get_document(self: DocumentRepository, *, project_id: object, document_id: object):
+    async def get_document(
+        self: DocumentRepository, *, project_id: object, document_id: object
+    ) -> StoredDocument:
         """選ばれた ID の metadata だけを fixture から返す。"""
 
         del self
@@ -361,7 +394,8 @@ async def test_document_create_replay_keeps_original_members_without_reading_liv
             if item.project_id == project_id and item.document_id == document_id
         )
 
-    service = RunService(_Session)  # type: ignore[arg-type]
+    database = _authorized_database(project_id, actor_id)
+    service = RunService(database.session_factory)
     with (
         patch.object(RunRepository, "_load_by_idempotency", new=AsyncMock(return_value=None)),
         patch.object(RunRepository, "create_idempotent", new=create),
@@ -374,6 +408,7 @@ async def test_document_create_replay_keeps_original_members_without_reading_liv
             input_json={},
             sources={"docs": token},
             actor_id=actor_id,
+            authorization=database.access,
             idempotency_key="one-request",
             trace_id="first",
         )
@@ -398,6 +433,7 @@ async def test_document_create_replay_keeps_original_members_without_reading_liv
             input_json={},
             sources={"docs": token},
             actor_id=actor_id,
+            authorization=database.access,
             idempotency_key="one-request",
             trace_id="retry",
         )
@@ -411,6 +447,8 @@ async def test_document_create_replay_keeps_original_members_without_reading_liv
     assert len(snapshot["documents"]) == (1 if mode == "SINGLE" else 2)
     resolve.assert_not_awaited()
     insert.assert_not_awaited()
+    assert database.transactions == database.commits == 2
+    assert database.session.flush.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -422,6 +460,7 @@ async def test_resource_resolution_failure_rechecks_a_concurrent_committed_winne
         creation_intent(), skill_version_id=resolved.skill_version_id, task_key=resolved.task_key
     )
     row = stored_creation(creation_command(intent))
+    database = _authorized_database(intent.project_id, intent.actor_id)
     with (
         patch.object(
             RunRepository, "_load_by_idempotency", new=AsyncMock(side_effect=[None, row])
@@ -432,12 +471,13 @@ async def test_resource_resolution_failure_rechecks_a_concurrent_committed_winne
         ),
         patch.object(RunRepository, "create_idempotent", new=AsyncMock()) as insert,
     ):
-        replay = await RunService(_Session).create_task_run(  # type: ignore[arg-type]
+        replay = await RunService(database.session_factory).create_task_run(
             project_id=intent.project_id,
             resolved=resolved,
             input_json=intent.input_json,
             sources=intent.sources,
             actor_id=intent.actor_id,
+            authorization=database.access,
             idempotency_key=row.idempotency_key,
             trace_id=None,
         )
@@ -445,6 +485,8 @@ async def test_resource_resolution_failure_rechecks_a_concurrent_committed_winne
     assert replay.idempotent_replay is True
     assert lookup.await_count == 2
     insert.assert_not_awaited()
+    assert database.transactions == database.commits == 1
+    database.session.flush.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -453,14 +495,18 @@ async def test_public_replay_entry_uses_the_same_repository_identity_check() -> 
 
     intent: TaskRunIntent = creation_intent()
     row = stored_creation(creation_command(intent))
+    database = _authorized_database(intent.project_id, intent.actor_id)
     with patch.object(RunRepository, "_load_by_idempotency", new=AsyncMock(return_value=row)):
-        replay = await RunService(_Session).find_task_run_replay(  # type: ignore[arg-type]
+        replay = await RunService(database.session_factory).find_task_run_replay(
             project_id=intent.project_id,
             skill_version_id=intent.skill_version_id,
             task_key=intent.task_key,
             input_json=intent.input_json,
             sources=intent.sources,
             actor_id=intent.actor_id,
+            authorization=database.access,
             idempotency_key=row.idempotency_key,
         )
     assert replay is not None and replay.run_id == row.id
+    assert database.transactions == database.commits == 1
+    database.session.flush.assert_awaited_once()

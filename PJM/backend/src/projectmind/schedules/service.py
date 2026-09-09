@@ -8,44 +8,44 @@ binding 再検証) には一切触れない。
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+import secrets
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from functools import partial
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import TimeoutError as DatabaseTimeoutError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from projectmind.auth.service import AuthenticatedActor
+from projectmind.core.cancellation import check_pending_cancellation
 from projectmind.core.logging import log_event
 from projectmind.projects.domain import ProjectNotFoundError, ProjectStatus
 from projectmind.projects.repository import ProjectRepository
 from projectmind.runs.domain import (
-    TERMINAL_RUN_STATUSES,
     CreatedRun,
     IdempotencyConflictError,
-    RunNotFoundError,
     TaskSourceSelectionError,
 )
-from projectmind.runs.repository import RunRepository
 from projectmind.runs.service import RunService
-from projectmind.schedules.cron import (
-    CronExpressionError,
-    next_occurrence,
-    normalize_timezone,
-    parse_cron,
-    upcoming_occurrences,
-)
+from projectmind.schedules.creation import ScheduleRunCreationParticipant
 from projectmind.schedules.domain import (
     DEFAULT_SCHEDULE_TICK_LIMIT,
-    MAX_SCHEDULE_NAME_LENGTH,
     ClaimedSchedule,
     CreateScheduleCommand,
+    ScheduleActivity,
+    ScheduleClaimLostError,
+    ScheduleConflictError,
     ScheduleDefinition,
     ScheduleInvalidError,
-    ScheduleKind,
     ScheduleNotFoundError,
+    ScheduleOccurrenceConflictError,
     ScheduleOutcome,
+    ScheduleOverlapError,
+    ScheduleOwnerUnavailableError,
     SchedulePage,
     ScheduleRecord,
     ScheduleStatus,
@@ -55,15 +55,35 @@ from projectmind.schedules.domain import (
     plan_schedule_transition,
     schedule_idempotency_key,
 )
+from projectmind.schedules.planning import (
+    PREVIEW_OCCURRENCE_COUNT,
+    OccurrencePlan,
+    build_definition,
+    plan_occurrence,
+)
+from projectmind.schedules.planning import (
+    definition_of as _definition_of,
+)
+from projectmind.schedules.planning import (
+    first_occurrence as _first_occurrence,
+)
+from projectmind.schedules.planning import (
+    next_from_definition as _next_from_definition,
+)
+from projectmind.schedules.planning import (
+    occurrences as _occurrences,
+)
+from projectmind.schedules.planning import (
+    validate_name as _validate_name,
+)
 from projectmind.schedules.repository import ScheduleRepository
 from projectmind.skills import PublishedTaskNotFoundError, SkillService, TaskInputInvalidError
+from projectmind.users.access import authorize_user_access, validate_user_access
+from projectmind.users.domain import UserAccess
+from projectmind.users.repository import LockedUsers, UserRepository
 
 logger = logging.getLogger(__name__)
 
-# 保存前に提示する発火時刻の件数 (docs/07 §8.3 は「少なくとも三次」)。
-PREVIEW_OCCURRENCE_COUNT = 5
-# ONCE の予約が過去になっていないかを判定するときの許容差。時計のずれで保存が弾かれるのを防ぐ。
-_PAST_TOLERANCE = timedelta(minutes=1)
 # 失敗理由は一覧に出す短い説明。Ticket 本文や接続情報を載せないため上限を切る。
 _MAX_DETAIL_LENGTH = 500
 
@@ -83,15 +103,28 @@ class ScheduleService:
         self._session_factory = session_factory
         self._skill_service = skill_service
         self._run_service = run_service
+        self._worker_id = f"schedule-{uuid4()}"
 
     # ------------------------------------------------------------------ 読み取り
 
-    async def list_schedules(self, *, project_id: UUID, limit: int, offset: int) -> SchedulePage:
+    async def list_schedules(
+        self,
+        *,
+        project_id: UUID,
+        limit: int,
+        offset: int,
+        q: str | None = None,
+        status: ScheduleStatus | None = None,
+    ) -> SchedulePage:
         """Project 内 schedule を列挙する。"""
 
         async with self._session_factory() as session:
             return await ScheduleRepository(session).list_for_project(
-                project_id=project_id, limit=limit, offset=offset
+                project_id=project_id,
+                limit=limit,
+                offset=offset,
+                q=q,
+                status=status,
             )
 
     async def get_schedule(self, *, project_id: UUID, schedule_id: UUID) -> ScheduleRecord:
@@ -99,6 +132,14 @@ class ScheduleService:
 
         async with self._session_factory() as session:
             return await ScheduleRepository(session).get(
+                project_id=project_id, schedule_id=schedule_id
+            )
+
+    async def get_activity(self, *, project_id: UUID, schedule_id: UUID) -> ScheduleActivity:
+        """在途の読取だけを行い、作成者再認可・発火・lease 更新を呼び出さない。"""
+
+        async with self._session_factory() as session:
+            return await ScheduleRepository(session).get_activity(
                 project_id=project_id, schedule_id=schedule_id
             )
 
@@ -119,7 +160,7 @@ class ScheduleService:
         self,
         *,
         project_id: UUID,
-        actor: AuthenticatedActor,
+        access: UserAccess,
         name: str,
         definition: ScheduleDefinition,
         skill_version_id: UUID,
@@ -138,8 +179,8 @@ class ScheduleService:
             input_json=input_json,
             sources=sources,
         )
-        async with self._session_factory() as session, session.begin():
-            return await ScheduleRepository(session).create(
+        async with self._write_transaction(access, project_id=project_id) as (repository, users, _):
+            result = await repository.create(
                 CreateScheduleCommand(
                     project_id=project_id,
                     name=validated_name,
@@ -148,16 +189,18 @@ class ScheduleService:
                     task_key=task_key,
                     input_json=input_json,
                     sources=sources,
-                    created_by=actor.user_id,
+                    created_by=users.actor.id,
                     next_run_at=first,
                 )
             )
+        return result
 
     async def update_schedule(
         self,
         *,
         project_id: UUID,
         schedule_id: UUID,
+        access: UserAccess,
         name: str,
         definition: ScheduleDefinition,
         input_json: dict[str, Any],
@@ -168,19 +211,27 @@ class ScheduleService:
 
         validated_name = _validate_name(name)
         first = _first_occurrence(definition)
-        async with self._session_factory() as session, session.begin():
-            repository = ScheduleRepository(session)
-            current = await repository.get(project_id=project_id, schedule_id=schedule_id)
-            if current.status in {ScheduleStatus.COMPLETED, ScheduleStatus.ARCHIVED}:
-                raise ScheduleInvalidError("Schedule is no longer editable")
-            await self._validate_task_configuration(
-                project_id=project_id,
-                skill_version_id=current.skill_version_id,
-                task_key=current.task_key,
-                input_json=input_json,
-                sources=sources,
+        async with self._session_factory() as session:
+            current = await ScheduleRepository(session).get(
+                project_id=project_id, schedule_id=schedule_id
             )
-            return await repository.update_definition(
+        # 旧草稿は現在の終態/入力エラーへ読み替えず、比較・再読取のため原版衝突を先に返す。
+        if current.row_version != expected_row_version:
+            raise ScheduleConflictError("Schedule was modified by another request")
+        if current.status in {ScheduleStatus.COMPLETED, ScheduleStatus.ARCHIVED}:
+            raise ScheduleInvalidError("Schedule is no longer editable")
+        # Task 解決は row lock の外、版/状態/名額の最終判断は repository の同じ lock 内に置く。
+        await self._validate_task_configuration(
+            project_id=project_id,
+            skill_version_id=current.skill_version_id,
+            task_key=current.task_key,
+            input_json=input_json,
+            sources=sources,
+        )
+        async with self._write_transaction(
+            access, project_id=project_id, schedule_id=schedule_id
+        ) as (repository, _, _):
+            result = await repository.update_definition(
                 UpdateScheduleCommand(
                     schedule_id=schedule_id,
                     project_id=project_id,
@@ -192,9 +243,16 @@ class ScheduleService:
                     expected_row_version=expected_row_version,
                 )
             )
+        return result
 
     async def change_status(
-        self, *, project_id: UUID, schedule_id: UUID, target: ScheduleStatus
+        self,
+        *,
+        project_id: UUID,
+        schedule_id: UUID,
+        access: UserAccess,
+        target: ScheduleStatus,
+        expected_row_version: int,
     ) -> ScheduleRecord:
         """暂停/恢复/归档を状態機経由で適用する。
 
@@ -202,9 +260,14 @@ class ScheduleService:
         (§22 D6 と同じ理由——復帰の瞬間に溜まった回数だけ走らせない)。
         """
 
-        async with self._session_factory() as session, session.begin():
-            repository = ScheduleRepository(session)
-            current = await repository.get(project_id=project_id, schedule_id=schedule_id)
+        async with self._write_transaction(
+            access, project_id=project_id, schedule_id=schedule_id
+        ) as (repository, _, current):
+            if current is None:
+                raise RuntimeError("Schedule status change requires a locked schedule")
+            # 利用者が見た版を最新読取で置換せず、旧画面の操作は遷移判断の前に拒否する。
+            if current.row_version != expected_row_version:
+                raise ScheduleConflictError("Schedule was modified by another request")
             plan_schedule_transition(current=current.status, target=target)
             next_run_at: datetime | None = None
             if target is ScheduleStatus.ACTIVE:
@@ -215,80 +278,131 @@ class ScheduleService:
                     raise ScheduleInvalidError(
                         "Schedule has no future occurrence and cannot be resumed"
                     )
-            return await repository.set_status(
+            result = await repository.set_status(
                 project_id=project_id,
                 schedule_id=schedule_id,
                 status=target,
                 next_run_at=next_run_at,
                 last_error=None if target is ScheduleStatus.ACTIVE else current.last_error,
+                expected_row_version=expected_row_version,
             )
+        return result
+
+    @asynccontextmanager
+    async def _write_transaction(
+        self, access: UserAccess, *, project_id: UUID, schedule_id: UUID | None = None
+    ) -> AsyncIterator[tuple[ScheduleRepository, LockedUsers, ScheduleRecord | None]]:
+        """原会話と現在の Project 資格を短期 lock で固定し、全管理書込に同じ門禁を適用する。"""
+
+        validate_user_access(access)
+        async with self._session_factory() as session, session.begin():
+            users = await UserRepository(session).lock_users(
+                access=access,
+                target_id=None,
+                include_target_sessions=False,
+                read_only_actor=True,
+            )
+            authorize_user_access(access, users, now=datetime.now(UTC), admin=False, write=True)
+            projects = ProjectRepository(session)
+            project = await projects.lock_write_access(user=users.actor, project_id=project_id)
+            authorize_user_access(access, users, now=datetime.now(UTC), admin=False, write=True)
+            projects.require_active_write_access(project)
+            repository = ScheduleRepository(session)
+            current = None
+            if schedule_id is not None:
+                current = await repository.lock_schedule(
+                    project_id=project_id, schedule_id=schedule_id
+                )
+                # Schedule の待機中に失効しても、状態/CAS 判断や書き込みへ進めない。
+                authorize_user_access(access, users, now=datetime.now(UTC), admin=False, write=True)
+                projects.require_active_write_access(project)
+            yield repository, users, current
+            # flush は commit ではない。FK/名額の待機後も再検証し、例外は全変更を巻き戻す。
+            await session.flush()
+            authorize_user_access(access, users, now=datetime.now(UTC), admin=False, write=True)
+            projects.require_active_write_access(project)
 
     # ------------------------------------------------------------------ 発火
 
     async def run_due_schedules(
         self, *, now: datetime | None = None, limit: int = DEFAULT_SCHEDULE_TICK_LIMIT
     ) -> ScheduleTickReport:
-        """到期 schedule を認領して発火する。Worker の cron tick から呼ぶ。"""
+        """元の PENDING を先に回収し、残りの枠だけ新しい到期予定を認領する。"""
 
-        reference = now or datetime.now(UTC)
-        async with self._session_factory() as session:
-            due = await ScheduleRepository(session).list_due(now=reference, limit=limit)
+        if type(limit) is not int or limit < 1:
+            raise ValueError("Schedule tick limit must be positive")
         results: list[ScheduleTriggerResult] = []
-        for record in due:
-            claimed = await self._claim(record, now=reference)
-            if claimed is None:
-                continue
-            results.append(await self._fire(claimed))
+        attempts = 0
+        while attempts < limit:
+            await check_pending_cancellation()
+            async with self._session_factory() as session, session.begin():
+                recovered = await ScheduleRepository(session).claim_recoverable(
+                    now=now or datetime.now(UTC),
+                    limit=1,
+                    worker_id=self._worker_id,
+                    token=secrets.token_urlsafe(32),
+                )
+            if not recovered:
+                break
+            attempts += 1
+            result = await self._try_fire(recovered[0])
+            if result is not None:
+                results.append(result)
+        if attempts < limit:
+            async with self._session_factory() as session:
+                due = await ScheduleRepository(session).list_due(
+                    now=now or datetime.now(UTC),
+                    limit=limit - attempts,
+                )
+            for record in due:
+                await check_pending_cancellation()
+                claimed = await self._claim(record, now=now or datetime.now(UTC))
+                if claimed is not None:
+                    result = await self._try_fire(claimed)
+                    if result is not None:
+                        results.append(result)
         return ScheduleTickReport(results=tuple(results))
 
     async def _claim(self, record: ScheduleRecord, *, now: datetime) -> ClaimedSchedule | None:
-        """`next_run_at` の CAS で一件を獲得し、同時に次回候補へ進める (§22 D6/D7)。"""
+        """版/候補/名額と原 snapshot を同じ認領 transaction で保存する。"""
 
-        occurrence = record.next_run_at
-        if occurrence is None:
-            return None
-        plan = plan_occurrence(
-            _definition_of(record),
-            occurrence=occurrence,
-            now=now,
-            run_count=record.run_count,
-        )
         async with self._session_factory() as session, session.begin():
-            claimed = await ScheduleRepository(session).claim(
-                schedule_id=record.schedule_id,
-                expected_next_run_at=occurrence,
-                next_run_at=None if plan.exhausted else plan.next_run_at,
-                missed=plan.missed,
+            return await ScheduleRepository(session).claim_due(
+                record,
+                now=now,
+                worker_id=self._worker_id,
+                token=secrets.token_urlsafe(32),
             )
-        if not claimed:
-            return None
-        return ClaimedSchedule(
-            schedule_id=record.schedule_id,
-            project_id=record.project_id,
-            occurrence_at=occurrence,
-            skill_version_id=record.skill_version_id,
-            task_key=record.task_key,
-            input_json=record.input_json,
-            sources=record.sources,
-            created_by=record.created_by,
-            exhausted=plan.exhausted,
-            missed=plan.missed,
+
+    async def _try_fire(self, claimed: ClaimedSchedule) -> ScheduleTriggerResult | None:
+        """基盤失敗/旧認領を業務失効と偽らず、原 PENDING の回復へ委ねる。"""
+
+        try:
+            return await self._fire(claimed)
+        except (ScheduleClaimLostError, ScheduleOccurrenceConflictError):
+            reason = "claim_unavailable"
+        except (DBAPIError, DatabaseTimeoutError, OSError, TimeoutError):
+            # commit の応答が失われても新しい key を作らず、次の tick が元の Run を照会する。
+            reason = "persistence_unknown"
+        await check_pending_cancellation()
+        log_event(
+            logger,
+            logging.WARNING,
+            "schedule.trigger.unconfirmed",
+            schedule_id=str(claimed.schedule_id),
+            project_id=str(claimed.project_id),
+            outcome=reason,
         )
+        return None
 
     async def _fire(self, claimed: ClaimedSchedule) -> ScheduleTriggerResult:
-        """一件の発火を実行し、結果を schedule 行へ書き戻す。"""
+        """Run 関連は作成 transaction、既知の見送り/失効だけは独立に結算する。"""
 
         result = await self._create_scheduled_run(claimed)
-        status = _status_after(result, exhausted=claimed.exhausted)
-        async with self._session_factory() as session, session.begin():
-            await ScheduleRepository(session).record_outcome(
-                schedule_id=claimed.schedule_id,
-                occurrence_at=claimed.occurrence_at,
-                outcome=result.outcome,
-                run_id=result.run_id,
-                detail=result.detail,
-                status=status,
-            )
+        if result.outcome is not ScheduleOutcome.RUN_CREATED:
+            async with self._session_factory() as session, session.begin():
+                result = await ScheduleRepository(session).record_outcome(claimed, result)
+        await check_pending_cancellation()
         log_event(
             logger,
             logging.WARNING
@@ -312,6 +426,7 @@ class ScheduleService:
         idempotency_key = schedule_idempotency_key(
             schedule_id=claimed.schedule_id, occurrence_at=claimed.occurrence_at
         )
+        participant = ScheduleRunCreationParticipant(claimed)
         find_replay = partial(
             self._run_service.find_task_run_replay,
             project_id=claimed.project_id,
@@ -321,10 +436,15 @@ class ScheduleService:
             sources=claimed.sources,
             actor_id=actor.user_id,
             idempotency_key=idempotency_key,
+            authorization=participant,
         )
         try:
             replay = await find_replay()
-        except (TaskSourceSelectionError, IdempotencyConflictError) as error:
+        except (
+            TaskSourceSelectionError,
+            IdempotencyConflictError,
+            ScheduleOwnerUnavailableError,
+        ) as error:
             return _failed(claimed, str(error))
         if replay is not None:
             # 自分が既に作った Run は「他の実行との重複」ではない。現在の version や
@@ -334,7 +454,11 @@ class ScheduleService:
         if overlap is not None:
             try:
                 replay = await find_replay()
-            except (TaskSourceSelectionError, IdempotencyConflictError) as error:
+            except (
+                TaskSourceSelectionError,
+                IdempotencyConflictError,
+                ScheduleOwnerUnavailableError,
+            ) as error:
                 return _failed(claimed, str(error))
             if replay is not None:
                 return _created_run_result(claimed, replay)
@@ -354,7 +478,11 @@ class ScheduleService:
         except (PublishedTaskNotFoundError, TaskInputInvalidError) as error:
             try:
                 replay = await find_replay()
-            except (TaskSourceSelectionError, IdempotencyConflictError) as replay_error:
+            except (
+                TaskSourceSelectionError,
+                IdempotencyConflictError,
+                ScheduleOwnerUnavailableError,
+            ) as replay_error:
                 return _failed(claimed, str(replay_error))
             return (
                 _created_run_result(claimed, replay)
@@ -370,10 +498,20 @@ class ScheduleService:
                 idempotency_key=idempotency_key,
                 trace_id=None,
                 actor_id=actor.user_id,
-                actor_system_role=actor.system_role,
-                project_membership=("ADMIN_BYPASS" if actor.system_role == "ADMIN" else "ACTIVE"),
+                authorization=participant,
             )
-        except (TaskSourceSelectionError, IdempotencyConflictError) as error:
+        except ScheduleOverlapError:
+            return ScheduleTriggerResult(
+                schedule_id=claimed.schedule_id,
+                occurrence_at=claimed.occurrence_at,
+                outcome=ScheduleOutcome.SKIPPED_OVERLAP,
+                detail="Another Run from this schedule is still active",
+            )
+        except (
+            TaskSourceSelectionError,
+            IdempotencyConflictError,
+            ScheduleOwnerUnavailableError,
+        ) as error:
             return _failed(claimed, str(error))
         return _created_run_result(claimed, run)
 
@@ -396,21 +534,12 @@ class ScheduleService:
         return actor
 
     async def _overlapping_run(self, claimed: ClaimedSchedule) -> str | None:
-        """直前の Run がまだ非終態なら、その状態名を返す (§22 D5)。"""
+        """摘要指針でなく同じ Schedule に関連済みの全非終態 Run を確認する。"""
 
-        async with self._session_factory() as session:
-            record = await ScheduleRepository(session).get(
-                project_id=claimed.project_id, schedule_id=claimed.schedule_id
-            )
-            if record.last_run_id is None:
-                return None
-            try:
-                run = await RunRepository(session).get(record.last_run_id)
-            except RunNotFoundError:
-                return None
-        if run.status in TERMINAL_RUN_STATUSES:
-            return None
-        return run.status.value
+        async with self._session_factory() as session, session.begin():
+            repository = ScheduleRepository(session)
+            locked = await repository.lock_claim(claimed)
+            return "non-terminal" if await repository.has_overlapping_run(locked) else None
 
     async def _validate_task_configuration(
         self,
@@ -442,177 +571,6 @@ class ScheduleService:
             raise ScheduleInvalidError(str(error)) from error
 
 
-def build_definition(
-    *,
-    kind: str,
-    timezone: str,
-    cron_expression: str | None,
-    run_at: datetime | None,
-    end_at: datetime | None,
-    max_runs: int | None,
-    now: datetime | None = None,
-) -> ScheduleDefinition:
-    """入力から検証済みの `ScheduleDefinition` を作る。API と service が同じ検証を通す。"""
-
-    reference = now or datetime.now(UTC)
-    try:
-        schedule_kind = ScheduleKind(kind)
-    except ValueError as error:
-        raise ScheduleInvalidError("Schedule kind is not supported") from error
-    try:
-        zone = normalize_timezone(timezone)
-    except CronExpressionError as error:
-        raise ScheduleInvalidError(str(error)) from error
-    if schedule_kind is ScheduleKind.CRON:
-        if not cron_expression:
-            raise ScheduleInvalidError("Cron schedule requires an expression")
-        if run_at is not None:
-            raise ScheduleInvalidError("Cron schedule must not fix a single instant")
-        try:
-            parse_cron(cron_expression)
-        except CronExpressionError as error:
-            raise ScheduleInvalidError(str(error)) from error
-        normalized_cron: str | None = " ".join(cron_expression.split())
-        normalized_run_at: datetime | None = None
-    else:
-        if run_at is None:
-            raise ScheduleInvalidError("One-shot schedule requires an instant")
-        if cron_expression:
-            raise ScheduleInvalidError("One-shot schedule must not carry an expression")
-        normalized_run_at = run_at.astimezone(UTC).replace(second=0, microsecond=0)
-        if normalized_run_at < reference - _PAST_TOLERANCE:
-            raise ScheduleInvalidError("One-shot schedule is in the past")
-        normalized_cron = None
-    if max_runs is not None and max_runs < 1:
-        raise ScheduleInvalidError("Schedule run limit must be positive")
-    normalized_end = end_at.astimezone(UTC) if end_at is not None else None
-    if normalized_end is not None and normalized_end <= reference:
-        raise ScheduleInvalidError("Schedule end is already in the past")
-    return ScheduleDefinition(
-        kind=schedule_kind,
-        timezone=zone,
-        cron_expression=normalized_cron,
-        run_at=normalized_run_at,
-        end_at=normalized_end,
-        max_runs=max_runs,
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class OccurrencePlan:
-    """一回の発火を認領するときに決まること。"""
-
-    next_run_at: datetime | None
-    missed: int
-    exhausted: bool
-
-
-def plan_occurrence(
-    definition: ScheduleDefinition,
-    *,
-    occurrence: datetime,
-    now: datetime,
-    run_count: int,
-) -> OccurrencePlan:
-    """認領時の「次回候補・見送り回数・打ち切りか」を決める純関数 (§22 D6/D9)。
-
-    停止中に過ぎた分は数えるだけで走らせない。次回候補を「今より後の最初の一致」に取ることで、
-    復帰の瞬間に溜まった回数だけ Run が並ぶ状態を構造的に避ける。
-    """
-
-    following = _next_from_definition(definition, after=now)
-    missed = _count_missed(definition, start=occurrence, until=now)
-    run_count_after = run_count + 1
-    exhausted = (
-        definition.kind is ScheduleKind.ONCE
-        or following is None
-        or (definition.max_runs is not None and run_count_after >= definition.max_runs)
-        or (definition.end_at is not None and following > definition.end_at)
-    )
-    return OccurrencePlan(next_run_at=following, missed=missed, exhausted=exhausted)
-
-
-def _occurrences(definition: ScheduleDefinition, *, after: datetime, count: int) -> list[datetime]:
-    """定義が生む発火時刻を最大 `count` 件、`end_at` で打ち切って返す。"""
-
-    if definition.kind is ScheduleKind.ONCE:
-        instant = definition.run_at
-        if instant is None or instant <= after:
-            return []
-        if definition.end_at is not None and instant > definition.end_at:
-            return []
-        return [instant]
-    expression = parse_cron(definition.cron_expression or "")
-    limit = count
-    if definition.max_runs is not None:
-        limit = min(limit, definition.max_runs)
-    occurrences = upcoming_occurrences(
-        expression, after=after, timezone=definition.timezone, count=limit
-    )
-    if definition.end_at is not None:
-        occurrences = [item for item in occurrences if item <= definition.end_at]
-    return occurrences
-
-
-def _first_occurrence(definition: ScheduleDefinition) -> datetime:
-    """保存に必要な最初の発火時刻。存在しなければ保存させない。"""
-
-    occurrences = _occurrences(definition, after=datetime.now(UTC), count=1)
-    if not occurrences:
-        raise ScheduleInvalidError("Schedule has no future occurrence")
-    return occurrences[0]
-
-
-def _next_from_definition(definition: ScheduleDefinition, *, after: datetime) -> datetime | None:
-    """次の発火時刻。尽きていれば None。"""
-
-    occurrences = _occurrences(definition, after=after, count=1)
-    return occurrences[0] if occurrences else None
-
-
-def _count_missed(definition: ScheduleDefinition, *, start: datetime, until: datetime) -> int:
-    """`start` の次から `until` までに過ぎた発火回数を数える (§22 D6 の記録用)。
-
-    追いかけないと決めた回数そのものなので、監査のために残す。数え上げも有界にする。
-    """
-
-    if definition.kind is ScheduleKind.ONCE:
-        return 0
-    expression = parse_cron(definition.cron_expression or "")
-    missed = 0
-    cursor = start
-    while missed < 1000:
-        upcoming = next_occurrence(expression, after=cursor, timezone=definition.timezone)
-        if upcoming is None or upcoming > until:
-            return missed
-        missed += 1
-        cursor = upcoming
-    return missed
-
-
-def _definition_of(record: ScheduleRecord) -> ScheduleDefinition:
-    """保存済み行から発火定義を復元する。"""
-
-    return ScheduleDefinition(
-        kind=record.kind,
-        timezone=record.timezone,
-        cron_expression=record.cron_expression,
-        run_at=record.run_at,
-        end_at=record.end_at,
-        max_runs=record.max_runs,
-    )
-
-
-def _status_after(result: ScheduleTriggerResult, *, exhausted: bool) -> ScheduleStatus | None:
-    """発火結果から次の status を決める。変えるべきでないときは None。"""
-
-    if result.outcome is ScheduleOutcome.FAILED_PRECONDITION:
-        return ScheduleStatus.ERROR
-    if exhausted:
-        return ScheduleStatus.COMPLETED
-    return None
-
-
 def _created_run_result(claimed: ClaimedSchedule, run: CreatedRun) -> ScheduleTriggerResult:
     """初回作成と再送を同じ occurrence/Run 関連へ投影する。"""
 
@@ -633,15 +591,6 @@ def _failed(claimed: ClaimedSchedule, detail: str) -> ScheduleTriggerResult:
         outcome=ScheduleOutcome.FAILED_PRECONDITION,
         detail=detail[:_MAX_DETAIL_LENGTH],
     )
-
-
-def _validate_name(name: str) -> str:
-    """一覧に出す短い名前だけを受け付ける。"""
-
-    cleaned = name.strip()
-    if not cleaned or len(cleaned) > MAX_SCHEDULE_NAME_LENGTH:
-        raise ScheduleInvalidError("Schedule name is invalid")
-    return cleaned
 
 
 __all__ = [

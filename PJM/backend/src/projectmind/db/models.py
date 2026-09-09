@@ -1536,11 +1536,10 @@ class ProjectDocument(IdentityMixin, Base):
     uploaded_by: Mapped[UUID] = mapped_column(nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 class TaskSchedule(IdentityMixin, TimestampMixin, Base):
-    """Task を時刻起動するための凍結設定と発火状態を保持する (計画 §22)。
+    """Task の設定と摘要を保持し、発火の原設定と結果は occurrence に分離する。
 
-    `skill_version_id` / `task_key` / `input_json` / `sources_json` は保存時点で凍結する。
-    版や資源が失効したら黙って別の来源へ切り替えず、status を ERROR にして発火を止める
-    (§22 D4)。`next_run_at` は発火予定の UTC 時刻で、worker は同 column の CAS で認領する。
+    configuration_version は入力設定の世代で、tick による row_version と区別する。
+    occurrence_protocol=0 の旧行は、摘要だけから過去の発火や正確な残枠を補造しない。
     """
 
     __tablename__ = "task_schedules"
@@ -1559,6 +1558,8 @@ class TaskSchedule(IdentityMixin, TimestampMixin, Base):
         CheckConstraint("max_runs IS NULL OR max_runs > 0", name="task_schedules_max_runs"),
         CheckConstraint("run_count >= 0", name="task_schedules_run_count"),
         CheckConstraint("missed_count >= 0", name="task_schedules_missed_count"),
+        CheckConstraint("configuration_version >= 1", name="configuration_version"),
+        CheckConstraint("occurrence_protocol IN (0, 1)", name="occurrence_protocol"),
         Index(
             "ix_task_schedules_due",
             "status",
@@ -1602,6 +1603,77 @@ class TaskSchedule(IdentityMixin, TimestampMixin, Base):
     row_version: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("1")
     )
+    # 旧 writer が作る行も 0 に留め、新しい認領門禁を暗黙に通過させない。
+    configuration_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1")
+    )
+    occurrence_protocol: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+
+
+class TaskScheduleOccurrence(IdentityMixin, TimestampMixin, Base):
+    """原予定・凍結設定・認領世代・一回の結算を保持し、lease 切れでも監査を残す。"""
+
+    __tablename__ = "task_schedule_occurrences"
+    __table_args__ = (
+        UniqueConstraint(
+            "schedule_id", "occurrence_at", name="uq_task_schedule_occurrence_identity"
+        ),
+        UniqueConstraint("run_id", name="uq_task_schedule_occurrence_run"),
+        Index(
+            "uq_task_schedule_occurrence_pending",
+            "schedule_id",
+            unique=True,
+            postgresql_where=text("status = 'PENDING'"),
+        ),
+        CheckConstraint("configuration_version >= 1", name="configuration_version"),
+        CheckConstraint("lease_generation >= 1", name="lease_generation"),
+        CheckConstraint("attempt_count >= 1", name="attempt_count"),
+        CheckConstraint("status IN ('PENDING', 'SETTLED')", name="status"),
+        CheckConstraint(
+            "outcome IS NULL OR outcome IN "
+            "('RUN_CREATED', 'SKIPPED_OVERLAP', 'FAILED_PRECONDITION')",
+            name="outcome",
+        ),
+        CheckConstraint(
+            "(status = 'PENDING' AND run_id IS NULL AND outcome IS NULL AND settled_at IS NULL) OR "
+            "(status = 'SETTLED' AND outcome IS NOT NULL AND settled_at IS NOT NULL AND "
+            "((outcome = 'RUN_CREATED' AND run_id IS NOT NULL) OR "
+            "(outcome IN ('SKIPPED_OVERLAP', 'FAILED_PRECONDITION') AND run_id IS NULL)))",
+            name="settlement",
+        ),
+    )
+
+    schedule_id: Mapped[UUID] = mapped_column(
+        ForeignKey("task_schedules.id", ondelete="RESTRICT"), nullable=False
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_by: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    skill_version_id: Mapped[UUID] = mapped_column(
+        ForeignKey("skill_versions.id", ondelete="RESTRICT"), nullable=False
+    )
+    occurrence_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    configuration_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    snapshot_checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    worker_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    lease_token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    lease_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    lease_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    run_id: Mapped[UUID | None] = mapped_column(ForeignKey("runs.id", ondelete="RESTRICT"))
+    outcome: Mapped[str | None] = mapped_column(String(32))
+    detail: Mapped[str | None] = mapped_column(String(512))
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class FrontendModuleVersion(IdentityMixin, TimestampMixin, Base):
     """生成 FrontendModule の一版を凍結する (計画 §24 M1 / `docs/07` §10)。
 

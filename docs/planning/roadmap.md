@@ -63,7 +63,7 @@
 
 #### R05 领域与身份安全
 
-- 状态：会话 v2/0031、登录防护、账户与项目精确上下文已有实现；成员管理有业务事务重新认证、0033 审计与 ADMIN 页面。项目 CRUD 已接原会话复核、0034 版本、冲突比较与未知核对；成员审计和 Schedule 阻止整项目删除。真实事务、迁移和 HTTPS 仍待验。
+- 状态：会话 v2/0031、登录防护、账户与项目精确上下文已有实现；成员管理有业务事务重新认证、0033 审计与 ADMIN 页面。项目 CRUD 已接原会话复核、0034 版本、冲突比较与未知核对；普通 Run 创建/原请求确认已接原会话、当前成员与归档的事务内复核，成员审计和 Schedule 阻止整项目删除。真实事务、迁移和 HTTPS 仍待验。
 - 范围：[领域](../design/domain-model.md)、[项目](../design/project-lifecycle.md)、[认证](../design/authentication.md)、[登录防护](../design/login-protection.md)、[用户](../design/user-lifecycle.md)、[Secret](../design/secret-storage.md)及相应 Web。
 - 验收：最后 ADMIN、改密/撤销及成员/禁用竞争、0031–0034、真实 Redis/DB/HTTPS、多页面与未知提交；项目 CAS/成员审计真实回滚、独立项目审计、归档与创建竞争、完整删除引用和 blob 清理。TaskSchedule/成员审计的 RESTRICT 不能被“无 Run”替代。
 
@@ -87,7 +87,7 @@
 
 #### R09 调度
 
-- 状态：ONCE/CRON、tick、API/创建 UI 已有代码；持久 occurrence、并发更新、计数/迟到恢复、编辑/分页/时区待补。
+- 状态：ONCE/CRON、0036 持久 occurrence、原键恢复、普通创建事务内关联/结算与锁内配置版本已接；时间/DST/预览、项目独立管理、版本冲突/未知核对与单 PENDING 只读投影已接。管理三写已接原会话、成员与归档的事务内复核；真实撤权/多 Worker 事务、历史调度迁移、人工处理和迟到策略仍待补。
 - 范围：[TaskSchedule](../design/task-scheduling.md)；schedules/worker/API/Web。
 - 验收：精确时间、同 Schedule 重叠、原子配置、在途执行权、幂等计数、失效来源拒绝与兼容；不扩展成全局精确一次或停机补跑。
 

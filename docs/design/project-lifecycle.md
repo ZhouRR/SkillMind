@@ -60,9 +60,11 @@ preference 只是上次选择，不是授权。服务端只返回当前可访问
 | 列表/preference | 默认只 ACTIVE；include_archived 可读授权归档项目 |
 | Project/Run 历史 | 保留当前授权读取；Web 活动选择器不是完整审计入口 |
 | ProjectWriteActor | 409 project_archived，覆盖创建、回答、评价、批准与 Schedule 修改 |
+| 普通 Run 创建/确认 | 在各次业务事务固定原会话及当前 Project/成员，锁后与最终 flush 后复核；已有同键 Run 不绕过归档，详见[创建授权](run-creation.md#创建与确认的授权事务) |
 | Run 取消 | WriteActor + Run 项目访问，无 ACTIVE 门槛；取消受理不证明进程停止 |
 | ADMIN 维护 | 编辑、归档/恢复、删除、移除成员走独立用例；新增成员要求 ACTIVE，否则 404 |
-| Schedule 触发 | 重新检查创建者/活动项目，但不与归档或 Run 创建同事务，不等于立即 PAUSED |
+| Schedule 保存 | 创建/编辑/状态修改在业务事务固定原会话、当前 Project/成员并复核归档；锁与未知结果见[调度管理](task-scheduling.md#管理写入的授权事务) |
+| Schedule 触发 | 普通创建/原 Run 关联事务内锁定当前创建者、Project/成员并复查 ACTIVE；项目归档不等于 Schedule 立即 PAUSED，真实并发仍待验 |
 
 ### 并发修改不能只看有无行锁
 

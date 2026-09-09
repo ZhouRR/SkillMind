@@ -65,6 +65,7 @@ from projectmind.projects import (
     StoredProjectMember,
 )
 from projectmind.projects.domain import require_project_version
+from projectmind.runs.creation_participation import RunCreationParticipant
 from projectmind.runs.domain import (
     CancelledRun,
     CreatedRun,
@@ -868,10 +869,13 @@ class FakeRunService:
         sources: dict[str, str],
         actor_id: UUID,
         idempotency_key: str,
+        authorization: UserAccess | RunCreationParticipant,
     ) -> CreatedRun | None:
         """初回要求を先に確認し、再送では現在の task 解決を必要としない。"""
 
         self.replay_lookups += 1
+        assert isinstance(authorization, UserAccess)
+        assert authorization.actor.user_id == actor_id
         assert skill_version_id and task_key and idempotency_key
         if self.conflict:
             raise IdempotencyConflictError("different request")
@@ -901,8 +905,7 @@ class FakeRunService:
         idempotency_key: str,
         trace_id: str | None,
         actor_id: UUID,
-        actor_system_role: str | None = None,
-        project_membership: str | None = None,
+        authorization: UserAccess | RunCreationParticipant,
     ) -> CreatedRun:
         """通用 Run を作成し、source 不正と conflict の scenario を再現する。"""
 
@@ -913,11 +916,15 @@ class FakeRunService:
         assert idempotency_key
         assert trace_id
         assert resolved.task_key
+        assert isinstance(authorization, UserAccess)
+        assert authorization.actor.user_id == actor_id
         self.received_input = input_json
         self.received_sources = sources
         self.received_actor_id = actor_id
-        self.received_actor_role = actor_system_role
-        self.received_membership = project_membership
+        self.received_actor_role = authorization.actor.system_role
+        self.received_membership = (
+            "ADMIN_BYPASS" if authorization.actor.system_role == "ADMIN" else "ACTIVE"
+        )
         self.created_run = CreatedRun(
             run_id=uuid4(),
             project_id=project_id,
@@ -1947,7 +1954,8 @@ class FakeScheduleService:
         self.transition_rejected = transition_rejected
         self.created: list[tuple[str, ScheduleDefinition]] = []
         self.updated: list[tuple[UUID, int]] = []
-        self.status_changes: list[tuple[UUID, ScheduleStatus]] = []
+        self.status_changes: list[tuple[UUID, ScheduleStatus, int]] = []
+        self.listed: list[tuple[UUID, int, int, str | None, ScheduleStatus | None]] = []
         self.previewed: list[ScheduleDefinition] = []
         self.preview_result: list[datetime] = [
             datetime(2026, 7, 27, 0, 0, tzinfo=UTC),
@@ -1955,9 +1963,18 @@ class FakeScheduleService:
             datetime(2026, 7, 29, 0, 0, tzinfo=UTC),
         ]
 
-    async def list_schedules(self, *, project_id: UUID, limit: int, offset: int) -> SchedulePage:
+    async def list_schedules(
+        self,
+        *,
+        project_id: UUID,
+        limit: int,
+        offset: int,
+        q: str | None = None,
+        status: ScheduleStatus | None = None,
+    ) -> SchedulePage:
         """固定の一件を Project 反映で返す。"""
 
+        self.listed.append((project_id, limit, offset, q, status))
         return SchedulePage(
             items=(_fake_schedule(project_id),), total=1, limit=limit, offset=offset
         )
@@ -1979,7 +1996,7 @@ class FakeScheduleService:
         self,
         *,
         project_id: UUID,
-        actor: AuthenticatedActor,
+        access: UserAccess,
         name: str,
         definition: ScheduleDefinition,
         skill_version_id: UUID,
@@ -1993,12 +2010,13 @@ class FakeScheduleService:
         if self.invalid:
             raise ScheduleInvalidError("Schedule has no future occurrence")
         self.created.append((name, definition))
-        return _fake_schedule(project_id, name=name, created_by=actor.user_id)
+        return _fake_schedule(project_id, name=name, created_by=access.actor.user_id)
 
     async def update_schedule(
         self,
         *,
         project_id: UUID,
+        access: UserAccess,
         schedule_id: UUID,
         name: str,
         definition: ScheduleDefinition,
@@ -2008,7 +2026,7 @@ class FakeScheduleService:
     ) -> ScheduleRecord:
         """受信した更新要求を記録する。"""
 
-        del definition, input_json, sources
+        del access, definition, input_json, sources
         if self.not_found:
             raise ScheduleNotFoundError("Schedule was not found")
         if self.conflict:
@@ -2017,16 +2035,28 @@ class FakeScheduleService:
         return _fake_schedule(project_id, schedule_id=schedule_id, name=name)
 
     async def change_status(
-        self, *, project_id: UUID, schedule_id: UUID, target: ScheduleStatus
+        self,
+        *,
+        project_id: UUID,
+        access: UserAccess,
+        schedule_id: UUID,
+        target: ScheduleStatus,
+        expected_row_version: int,
     ) -> ScheduleRecord:
         """受信した状態遷移を記録する。"""
 
+        del access
         if self.not_found:
             raise ScheduleNotFoundError("Schedule was not found")
+        if self.conflict:
+            raise ScheduleConflictError("Schedule was modified by another request")
         if self.transition_rejected:
             raise InvalidScheduleTransitionError("Schedule transition is not allowed")
-        self.status_changes.append((schedule_id, target))
-        return _fake_schedule(project_id, schedule_id=schedule_id, status=target)
+        self.status_changes.append((schedule_id, target, expected_row_version))
+        return replace(
+            _fake_schedule(project_id, schedule_id=schedule_id, status=target),
+            row_version=expected_row_version + 1,
+        )
 
 
 def _fake_schedule(

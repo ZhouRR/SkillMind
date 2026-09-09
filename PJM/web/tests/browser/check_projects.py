@@ -152,7 +152,12 @@ class ProjectsApi(AccountsApi):
                         }
                         result["tasks"] = [first, second]
             elif parts[2] == "schedules":
-                result = {"schedules": []}
+                result = {
+                    "schedules": [],
+                    "total": 0,
+                    "limit": int(query.get("limit", ["20"])[0]),
+                    "offset": int(query.get("offset", ["0"])[0]),
+                }
             elif parts[2] == "runs":
                 result = {
                     "items": [],

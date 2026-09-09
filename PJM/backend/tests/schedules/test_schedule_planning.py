@@ -107,6 +107,36 @@ def test_definition_rejects_an_end_that_already_passed() -> None:
         )
 
 
+@pytest.mark.parametrize("field", ["run_at", "end_at", "now"])
+def test_definition_rejects_naive_timestamps(field: str) -> None:
+    """時区なし入力は API を経由しない use case でも拒否する。"""
+
+    moments = {"run_at": _NOW + timedelta(days=1), "end_at": _NOW + timedelta(days=2), "now": _NOW}
+    moments[field] = moments[field].replace(tzinfo=None)
+    with pytest.raises(ScheduleInvalidError, match="UTC offset"):
+        build_definition(
+            kind="ONCE",
+            timezone="Asia/Tokyo",
+            cron_expression=None,
+            run_at=moments["run_at"],
+            end_at=moments["end_at"],
+            max_runs=None,
+            now=moments["now"],
+        )
+
+
+def test_missed_count_stops_at_the_original_end() -> None:
+    """終了時刻より後の候補を見送り監査へ補造しない。"""
+
+    plan = plan_occurrence(
+        _cron(end_at=_NOW + timedelta(hours=2)),
+        occurrence=_NOW,
+        now=_NOW + timedelta(hours=6),
+    )
+    assert plan.missed == 2
+    assert plan.exhausted is True
+
+
 def test_missed_occurrences_are_counted_but_not_replayed() -> None:
     """停止中に過ぎた発火は回数だけ数え、次回は「今より後」に取る (§22 D6)。
 
@@ -159,8 +189,8 @@ def test_one_shot_schedule_is_exhausted_after_its_only_trigger() -> None:
     assert plan.missed == 0
 
 
-def test_run_limit_exhausts_the_schedule_on_the_final_trigger() -> None:
-    """`max_runs` に達する回で打ち切る (次回を残さない)。"""
+def test_reserved_final_slot_does_not_exhaust_the_time_plan() -> None:
+    """認領は作成ではないため、最後の名額で重複見送りしても次回を残す。"""
 
     plan = plan_occurrence(
         _cron(max_runs=3),
@@ -169,7 +199,8 @@ def test_run_limit_exhausts_the_schedule_on_the_final_trigger() -> None:
         run_count=2,
     )
 
-    assert plan.exhausted is True
+    assert plan.exhausted is False
+    assert plan.next_run_at == _NOW + timedelta(hours=1)
 
 
 def test_run_limit_keeps_the_schedule_alive_before_the_final_trigger() -> None:
@@ -243,9 +274,7 @@ def test_different_occurrences_get_different_keys() -> None:
         (ScheduleStatus.COMPLETED, ScheduleStatus.ARCHIVED),
     ],
 )
-def test_allowed_status_transitions(
-    current: ScheduleStatus, target: ScheduleStatus
-) -> None:
+def test_allowed_status_transitions(current: ScheduleStatus, target: ScheduleStatus) -> None:
     """設定を直した後の手動復帰を含む正当な遷移を許す。"""
 
     assert plan_schedule_transition(current=current, target=target) is target
@@ -259,9 +288,7 @@ def test_allowed_status_transitions(
         (ScheduleStatus.ERROR, ScheduleStatus.PAUSED),
     ],
 )
-def test_rejected_status_transitions(
-    current: ScheduleStatus, target: ScheduleStatus
-) -> None:
+def test_rejected_status_transitions(current: ScheduleStatus, target: ScheduleStatus) -> None:
     """終態からの復活と、ERROR の素通りを拒否する。
 
     ERROR は「凍結した版や資源が失効した」状態なので、設定を直したという明示操作 (ACTIVE) 以外で

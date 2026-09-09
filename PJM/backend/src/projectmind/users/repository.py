@@ -52,10 +52,17 @@ class UserRepository:
         self._session = session
 
     async def lock_users(
-        self, *, access: UserAccess, target_id: UUID | None, include_target_sessions: bool
+        self,
+        *,
+        access: UserAccess,
+        target_id: UUID | None,
+        include_target_sessions: bool,
+        read_only_actor: bool = False,
     ) -> LockedUsers:
         """認証時の actor を信用せず、原会話と必要な全 row を固定順で読み直す。"""
 
+        if read_only_actor and (target_id is not None or include_target_sessions):
+            raise ValueError("Read-only actor locking cannot include target users or sessions")
         await lock_organization(self._session, access.actor.organization_id)
         user_ids = {access.actor.user_id}
         if target_id is not None:
@@ -68,7 +75,9 @@ class UserRepository:
                     User.id.in_(sorted(user_ids)),
                 )
                 .order_by(User.id)
-                .with_for_update()
+                # 調度認領は Schedule lock 後に User FK の KEY SHARE を取得する。
+                # 読取専用 actor は SHARE で失効/変更を防ぎ、逆順の FK 待機と両立させる。
+                .with_for_update(read=read_only_actor)
                 .execution_options(populate_existing=True)
             )
         ).all()

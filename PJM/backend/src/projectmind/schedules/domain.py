@@ -17,6 +17,8 @@ from uuid import UUID
 MAX_SCHEDULE_NAME_LENGTH = 200
 # 一回の tick で扱う到期 schedule の既定上限。Outbox と同じく「一度に処理する量」を有界にする。
 DEFAULT_SCHEDULE_TICK_LIMIT = 20
+# 公開観察と Worker の既定回復上限を同じ値から取得する。実行許可ではない。
+DEFAULT_SCHEDULE_MAX_ATTEMPTS = 3
 
 
 class ScheduleKind(StrEnum):
@@ -50,9 +52,7 @@ class ScheduleOutcome(StrEnum):
 
 
 # 終態。ここから戻せるのは ERROR だけで、それは利用者が設定を直した後の明示操作に限る。
-TERMINAL_SCHEDULE_STATUSES = frozenset(
-    {ScheduleStatus.COMPLETED, ScheduleStatus.ARCHIVED}
-)
+TERMINAL_SCHEDULE_STATUSES = frozenset({ScheduleStatus.COMPLETED, ScheduleStatus.ARCHIVED})
 
 ALLOWED_SCHEDULE_TRANSITIONS: dict[ScheduleStatus, frozenset[ScheduleStatus]] = {
     ScheduleStatus.ACTIVE: frozenset(
@@ -88,6 +88,60 @@ class InvalidScheduleTransitionError(ValueError):
 
 class ScheduleConflictError(ValueError):
     """楽観ロックの衝突 (同時更新) を表す。"""
+
+
+class ScheduleClaimLostError(RuntimeError):
+    """失効した認領で新しい Run や結算を書き込む試みを拒否する。"""
+
+
+class ScheduleOverlapError(RuntimeError):
+    """同じ schedule に非終態の Run があるため新規作成を見送る。"""
+
+
+class ScheduleOwnerUnavailableError(RuntimeError):
+    """作成者の現在の権限で発火できないことを表す。"""
+
+
+class ScheduleOccurrenceConflictError(ScheduleConflictError):
+    """保存された原要求や結算と一致しない確認を拒否する。"""
+
+
+class ScheduleActivityUnavailableError(RuntimeError):
+    """破損した在途記録を未決なしへ読み替えず、公開観察を拒否する。"""
+
+
+class ScheduleTracking(StrEnum):
+    """在途台帳を読める形式かどうかだけを示し、再発火や停止を保証しない。"""
+
+    TRACKED = "TRACKED"
+    LEGACY_UNAVAILABLE = "LEGACY_UNAVAILABLE"
+
+
+@dataclass(frozen=True, slots=True)
+class SchedulePendingOccurrence:
+    """現在の PENDING 一件だけを公開し、原入力や lease credential は含めない。"""
+
+    occurrence_id: UUID
+    occurrence_at: datetime
+    configuration_version: int
+    created_at: datetime
+    updated_at: datetime
+    attempt_count: int
+    lease_expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleActivity:
+    """同じ SELECT で観察した親の版と未決を運び、履歴や再実行権を表さない。"""
+
+    schedule_id: UUID
+    project_id: UUID
+    row_version: int
+    configuration_version: int
+    tracking: ScheduleTracking
+    checked_at: datetime
+    automatic_attempt_limit: int
+    pending: SchedulePendingOccurrence | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +217,9 @@ class ScheduleRecord:
     row_version: int
     created_at: datetime
     updated_at: datetime
+    # 旧投影から新 writer の認領資格を補造しない。
+    configuration_version: int = 1
+    occurrence_protocol: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,12 +234,7 @@ class SchedulePage:
 
 @dataclass(frozen=True, slots=True)
 class ClaimedSchedule:
-    """`next_run_at` の CAS で一つの worker が獲得した到期 schedule。
-
-    獲得した時点で `next_run_at` は次の候補へ進めてある。発火自体が失敗しても同じ時刻を
-    もう一度掴み直さないため、失敗が無限リトライにならない。実際の二重発火防止は
-    §22 D7 の決定的 idempotency key が担う。
-    """
+    """原 occurrence の不変設定と、今回だけ有効な認領世代を運ぶ。"""
 
     schedule_id: UUID
     project_id: UUID
@@ -192,10 +244,19 @@ class ClaimedSchedule:
     input_json: dict[str, Any]
     sources: dict[str, str]
     created_by: UUID
-    # 発火後に COMPLETED まで落とすべきか (ONCE の消化 / end_at / max_runs 到達)。
+    # 時間規則だけの終端 (ONCE / end_at)。残枠は実際の Run 結算後に判定する。
     exhausted: bool
     # D6: 追いつかないと決めたぶんの回数。監査のために持ち回る。
     missed: int
+    occurrence_id: UUID
+    definition: ScheduleDefinition
+    configuration_version: int
+    claim_row_version: int
+    snapshot_checksum: str
+    worker_id: str
+    lease_token: str = field(repr=False)
+    lease_generation: int
+    lease_expires_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,24 +286,18 @@ class ScheduleTickReport:
     def skipped(self) -> int:
         """重なりで見送った件数。"""
 
-        return sum(
-            1 for item in self.results if item.outcome is ScheduleOutcome.SKIPPED_OVERLAP
-        )
+        return sum(1 for item in self.results if item.outcome is ScheduleOutcome.SKIPPED_OVERLAP)
 
     @property
     def failed(self) -> int:
         """前提失効で止めた件数。"""
 
         return sum(
-            1
-            for item in self.results
-            if item.outcome is ScheduleOutcome.FAILED_PRECONDITION
+            1 for item in self.results if item.outcome is ScheduleOutcome.FAILED_PRECONDITION
         )
 
 
-def plan_schedule_transition(
-    *, current: ScheduleStatus, target: ScheduleStatus
-) -> ScheduleStatus:
+def plan_schedule_transition(*, current: ScheduleStatus, target: ScheduleStatus) -> ScheduleStatus:
     """状態遷移の唯一の検証点。許されない遷移は例外にする。"""
 
     if target not in ALLOWED_SCHEDULE_TRANSITIONS[current]:

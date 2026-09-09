@@ -6,19 +6,29 @@ unsafe request は `ProjectWriteActor` で CSRF と membership を同時に検�
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Self
 from uuid import UUID
 
 from fastapi import APIRouter, Query, Request, status
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi.exceptions import RequestValidationError
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 from projectmind.api.auth_dependencies import (
     ProjectReadActor,
     ProjectWriteActor,
-    authorize_project_access,
+    authentication_required_problem,
+    csrf_rejected_problem,
+    project_archived_problem,
+    project_not_found_problem,
+    user_access,
 )
-from projectmind.api.problems import ProblemException
+from projectmind.api.problems import (
+    NO_STORE_PROBLEM_HEADERS,
+    ProblemException,
+    problem_openapi_response,
+)
+from projectmind.auth.sessions import CsrfRejectedError, UnauthorizedSessionError
+from projectmind.projects.domain import ProjectArchivedError, ProjectNotFoundError
 from projectmind.schedules import (
     PREVIEW_OCCURRENCE_COUNT,
     InvalidScheduleTransitionError,
@@ -33,8 +43,23 @@ from projectmind.schedules import (
     ScheduleStatus,
     build_definition,
 )
+from projectmind.schedules.domain import (
+    ScheduleActivity,
+    ScheduleActivityUnavailableError,
+    ScheduleTracking,
+)
 
 router = APIRouter()
+
+# 入口 dependency と保存 transaction の拒否を同じ公開契約で宣言する。
+_WRITE_ACCESS_PROBLEMS: dict[int | str, dict[str, Any]] = {
+    code: problem_openapi_response(description, headers=NO_STORE_PROBLEM_HEADERS)
+    for code, description in (
+        (401, "The original authenticated session must remain valid"),
+        (403, "The request origin or original session CSRF token was rejected"),
+        (404, "The project or schedule is not accessible"),
+    )
+}
 
 
 class ScheduleDefinitionRequest(BaseModel):
@@ -45,9 +70,13 @@ class ScheduleDefinitionRequest(BaseModel):
     kind: ScheduleKind
     timezone: str = Field(min_length=1, max_length=64)
     cron_expression: str | None = Field(default=None, max_length=128)
-    run_at: datetime | None = None
-    end_at: datetime | None = None
-    max_runs: int | None = Field(default=None, ge=1, le=100_000)
+    run_at: AwareDatetime | None = Field(
+        default=None, description="Instant with an explicit UTC offset"
+    )
+    end_at: AwareDatetime | None = Field(
+        default=None, description="Instant with an explicit UTC offset"
+    )
+    max_runs: int | None = Field(default=None, ge=1, le=100_000, strict=True)
 
 
 class CreateScheduleRequest(BaseModel):
@@ -76,15 +105,16 @@ class UpdateScheduleRequest(BaseModel):
     definition: ScheduleDefinitionRequest
     input: dict[str, Any] = Field(default_factory=dict)
     sources: dict[str, str] = Field(default_factory=dict, max_length=50)
-    expected_row_version: int = Field(ge=1)
+    expected_row_version: int = Field(ge=1, strict=True)
 
 
 class ScheduleStatusRequest(BaseModel):
-    """暂停/恢复/归档の遷移要求。"""
+    """表示した原版に対する暂停/恢复/归档の遷移要求。"""
 
     model_config = ConfigDict(extra="forbid")
 
     status: ScheduleStatus
+    expected_row_version: int = Field(ge=1, strict=True)
 
 
 class SchedulePreviewRequest(BaseModel):
@@ -98,46 +128,92 @@ class SchedulePreviewRequest(BaseModel):
 class SchedulePreviewResponse(BaseModel):
     """次の発火時刻の予告。空なら保存も通らない。"""
 
-    occurrences: list[datetime]
+    occurrences: list[AwareDatetime] = Field(min_length=1, max_length=PREVIEW_OCCURRENCE_COUNT)
 
 
 class ScheduleResponse(BaseModel):
     """schedule の公開 response。接続情報も Secret も含まない。"""
 
+    model_config = ConfigDict(extra="forbid")
+
     schedule_id: UUID
     project_id: UUID
-    name: str
+    name: str = Field(min_length=1)
     kind: ScheduleKind
     status: ScheduleStatus
-    timezone: str
+    timezone: str = Field(min_length=1)
     cron_expression: str | None
-    run_at: datetime | None
-    end_at: datetime | None
-    max_runs: int | None
+    run_at: AwareDatetime | None
+    end_at: AwareDatetime | None
+    max_runs: int | None = Field(ge=1, strict=True)
     skill_version_id: UUID
-    task_key: str
+    task_key: str = Field(min_length=1)
     input: dict[str, Any]
     sources: dict[str, str]
-    next_run_at: datetime | None
-    last_run_at: datetime | None
+    next_run_at: AwareDatetime | None
+    last_run_at: AwareDatetime | None
     last_run_id: UUID | None
     last_outcome: ScheduleOutcome | None
     last_error: str | None
-    run_count: int
-    missed_count: int
+    run_count: int = Field(ge=0, strict=True)
+    missed_count: int = Field(ge=0, strict=True)
     created_by: UUID
-    row_version: int
-    created_at: datetime
-    updated_at: datetime
+    row_version: int = Field(ge=1, strict=True)
+    created_at: AwareDatetime
+    updated_at: AwareDatetime
 
 
 class ScheduleListResponse(BaseModel):
     """Project 内 schedule の一覧ページ。"""
 
-    schedules: list[ScheduleResponse]
-    total: int
-    limit: int
-    offset: int
+    model_config = ConfigDict(extra="forbid")
+
+    schedules: list[ScheduleResponse] = Field(max_length=100)
+    total: int = Field(ge=0, strict=True)
+    limit: int = Field(ge=1, le=100, strict=True)
+    offset: int = Field(ge=0, strict=True)
+
+
+class SchedulePendingOccurrenceResponse(BaseModel):
+    """在途一件の観察値だけを返し、期限を実行停止や再送許可と同一視しない。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    occurrence_id: UUID
+    occurrence_at: AwareDatetime
+    configuration_version: int = Field(ge=1, strict=True)
+    created_at: AwareDatetime
+    updated_at: AwareDatetime
+    attempt_count: int = Field(ge=1, strict=True)
+    lease_expires_at: AwareDatetime
+
+
+class ScheduleActivityResponse(BaseModel):
+    """原 Schedule と同一 SELECT の PENDING 観察であり、完全履歴ではない。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schedule_id: UUID
+    project_id: UUID
+    row_version: int = Field(ge=1, strict=True)
+    configuration_version: int = Field(ge=1, strict=True)
+    tracking: ScheduleTracking
+    checked_at: AwareDatetime
+    automatic_attempt_limit: int = Field(ge=1, strict=True)
+    pending: SchedulePendingOccurrenceResponse | None
+
+    @model_validator(mode="after")
+    def require_tracked_pending(self) -> Self:
+        """旧形式や親より未来の設定を追跡済み台帳と見せず、原関係を維持する。"""
+
+        if self.tracking is ScheduleTracking.LEGACY_UNAVAILABLE and self.pending is not None:
+            raise ValueError("Legacy schedule cannot expose a tracked pending occurrence")
+        if (
+            self.pending is not None
+            and self.pending.configuration_version > self.configuration_version
+        ):
+            raise ValueError("Pending configuration cannot exceed the observed schedule version")
+        return self
 
 
 @router.get(
@@ -151,12 +227,53 @@ async def list_schedules(
     actor: ProjectReadActor,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
+    q: Annotated[
+        str | None,
+        Query(
+            max_length=200,
+            description=(
+                "Literal case-insensitive substring of name or task_key; "
+                "whitespace-only means no filter"
+            ),
+        ),
+    ] = None,
+    status: Annotated[
+        ScheduleStatus | None,
+        Query(description="One schedule status; omitted includes all statuses"),
+    ] = None,
 ) -> ScheduleListResponse:
     """Project access 検証後の schedule 一覧だけを返す。"""
 
     del actor
+    for field in ("q", "status"):
+        if len(request.query_params.getlist(field)) > 1:
+            raise RequestValidationError(
+                [
+                    {
+                        "type": "value_error",
+                        "loc": ("query", field),
+                        "msg": "At most one filter value is allowed",
+                    }
+                ]
+            )
+    if q is not None and "\x00" in q:
+        raise RequestValidationError(
+            [
+                {
+                    "type": "value_error",
+                    "loc": ("query", "q"),
+                    "msg": "Search must not contain a NUL character",
+                }
+            ]
+        )
     service: ScheduleService = request.app.state.schedule_service
-    page = await service.list_schedules(project_id=project_id, limit=limit, offset=offset)
+    page = await service.list_schedules(
+        project_id=project_id,
+        limit=limit,
+        offset=offset,
+        q=q,
+        status=status,
+    )
     return ScheduleListResponse(
         schedules=[_schedule_response(item) for item in page.items],
         total=page.total,
@@ -194,8 +311,15 @@ async def preview_schedule(
     "/projects/{project_id}/schedules",
     response_model=ScheduleResponse,
     status_code=status.HTTP_201_CREATED,
-    responses={422: {"description": "Schedule definition or task configuration is invalid"}},
-    tags=["schedules"],
+    responses={
+        **_WRITE_ACCESS_PROBLEMS,
+        201: {"headers": NO_STORE_PROBLEM_HEADERS},
+        409: problem_openapi_response("Project is archived", headers=NO_STORE_PROBLEM_HEADERS),
+        422: problem_openapi_response(
+            "Schedule definition or task configuration is invalid", headers=NO_STORE_PROBLEM_HEADERS
+        ),
+    },
+    tags=["schedules", "auth"],
 )
 async def create_schedule(
     request: Request,
@@ -205,13 +329,12 @@ async def create_schedule(
 ) -> ScheduleResponse:
     """定義・task・資源選択をすべて検証してから schedule を作成する。"""
 
-    await authorize_project_access(request, actor, project_id, require_active=True)
     service: ScheduleService = request.app.state.schedule_service
     definition = _definition(body.definition)
     try:
         record = await service.create_schedule(
             project_id=project_id,
-            actor=actor,
+            access=user_access(request, actor),
             name=body.name,
             definition=definition,
             skill_version_id=body.skill_version_id,
@@ -219,6 +342,14 @@ async def create_schedule(
             input_json=body.input,
             sources=body.sources,
         )
+    except UnauthorizedSessionError as error:
+        raise authentication_required_problem() from error
+    except CsrfRejectedError as error:
+        raise csrf_rejected_problem() from error
+    except ProjectNotFoundError as error:
+        raise project_not_found_problem() from error
+    except ProjectArchivedError as error:
+        raise project_archived_problem() from error
     except ScheduleInvalidError as error:
         raise _invalid_problem(error) from error
     return _schedule_response(record)
@@ -251,11 +382,17 @@ async def get_schedule(
     "/projects/{project_id}/schedules/{schedule_id}",
     response_model=ScheduleResponse,
     responses={
-        404: {"description": "Schedule not found"},
-        409: {"description": "Schedule was modified by another request"},
-        422: {"description": "Schedule definition or task configuration is invalid"},
+        **_WRITE_ACCESS_PROBLEMS,
+        200: {"headers": NO_STORE_PROBLEM_HEADERS},
+        409: problem_openapi_response(
+            "Project is archived or schedule was modified by another request",
+            headers=NO_STORE_PROBLEM_HEADERS,
+        ),
+        422: problem_openapi_response(
+            "Schedule definition or task configuration is invalid", headers=NO_STORE_PROBLEM_HEADERS
+        ),
     },
-    tags=["schedules"],
+    tags=["schedules", "auth"],
 )
 async def update_schedule(
     request: Request,
@@ -266,12 +403,12 @@ async def update_schedule(
 ) -> ScheduleResponse:
     """定義と凍結入力を差し替える。楽観ロックの不一致は 409 にする。"""
 
-    await authorize_project_access(request, actor, project_id, require_active=True)
     service: ScheduleService = request.app.state.schedule_service
     definition = _definition(body.definition)
     try:
         record = await service.update_schedule(
             project_id=project_id,
+            access=user_access(request, actor),
             schedule_id=schedule_id,
             name=body.name,
             definition=definition,
@@ -279,29 +416,80 @@ async def update_schedule(
             sources=body.sources,
             expected_row_version=body.expected_row_version,
         )
+    except UnauthorizedSessionError as error:
+        raise authentication_required_problem() from error
+    except CsrfRejectedError as error:
+        raise csrf_rejected_problem() from error
+    except ProjectNotFoundError as error:
+        raise project_not_found_problem() from error
+    except ProjectArchivedError as error:
+        raise project_archived_problem() from error
     except ScheduleNotFoundError as error:
         raise _not_found_problem() from error
     except ScheduleConflictError as error:
-        raise ProblemException(
-            status=409,
-            title="Schedule conflict",
-            detail=str(error),
-            code="schedule_conflict",
-        ) from error
+        raise _conflict_problem(error) from error
     except ScheduleInvalidError as error:
         raise _invalid_problem(error) from error
     return _schedule_response(record)
+
+
+@router.get(
+    "/projects/{project_id}/schedules/{schedule_id}/activity",
+    response_model=ScheduleActivityResponse,
+    responses={
+        200: {"headers": NO_STORE_PROBLEM_HEADERS},
+        **{
+            code: problem_openapi_response(description, headers=NO_STORE_PROBLEM_HEADERS)
+            for code, description in (
+                (401, "A current authenticated session is required"),
+                (404, "Project or schedule is not accessible"),
+                (409, "Stored schedule activity cannot be verified"),
+                (422, "The project or schedule identity is invalid"),
+            )
+        },
+    },
+    tags=["schedules", "auth"],
+)
+async def get_schedule_activity(
+    request: Request,
+    project_id: UUID,
+    schedule_id: UUID,
+    actor: ProjectReadActor,
+) -> ScheduleActivityResponse:
+    """帰档・作成者失効でも現在の読者資格で観察し、元の Worker 権限は復活させない。"""
+
+    del actor
+    service: ScheduleService = request.app.state.schedule_service
+    try:
+        activity = await service.get_activity(project_id=project_id, schedule_id=schedule_id)
+    except ScheduleNotFoundError as error:
+        raise _not_found_problem() from error
+    except ScheduleActivityUnavailableError as error:
+        raise ProblemException(
+            status=409,
+            title="Schedule activity is unavailable",
+            detail="The stored schedule activity cannot be verified. No retry is authorized.",
+            code="schedule_activity_unavailable",
+        ) from error
+    return _activity_response(activity)
 
 
 @router.post(
     "/projects/{project_id}/schedules/{schedule_id}/status",
     response_model=ScheduleResponse,
     responses={
-        404: {"description": "Schedule not found"},
-        409: {"description": "Schedule transition is not allowed"},
-        422: {"description": "Schedule has no future occurrence"},
+        **_WRITE_ACCESS_PROBLEMS,
+        200: {"headers": NO_STORE_PROBLEM_HEADERS},
+        409: problem_openapi_response(
+            "Project is archived, schedule changed, or transition is not allowed",
+            headers=NO_STORE_PROBLEM_HEADERS,
+        ),
+        422: problem_openapi_response(
+            "Schedule has no future occurrence or the request is invalid",
+            headers=NO_STORE_PROBLEM_HEADERS,
+        ),
     },
-    tags=["schedules"],
+    tags=["schedules", "auth"],
 )
 async def change_schedule_status(
     request: Request,
@@ -312,12 +500,23 @@ async def change_schedule_status(
 ) -> ScheduleResponse:
     """暂停・恢复・归档を状態機経由で適用する。"""
 
-    await authorize_project_access(request, actor, project_id, require_active=True)
     service: ScheduleService = request.app.state.schedule_service
     try:
         record = await service.change_status(
-            project_id=project_id, schedule_id=schedule_id, target=body.status
+            project_id=project_id,
+            access=user_access(request, actor),
+            schedule_id=schedule_id,
+            target=body.status,
+            expected_row_version=body.expected_row_version,
         )
+    except UnauthorizedSessionError as error:
+        raise authentication_required_problem() from error
+    except CsrfRejectedError as error:
+        raise csrf_rejected_problem() from error
+    except ProjectNotFoundError as error:
+        raise project_not_found_problem() from error
+    except ProjectArchivedError as error:
+        raise project_archived_problem() from error
     except ScheduleNotFoundError as error:
         raise _not_found_problem() from error
     except InvalidScheduleTransitionError as error:
@@ -327,6 +526,8 @@ async def change_schedule_status(
             detail=str(error),
             code="schedule_transition_invalid",
         ) from error
+    except ScheduleConflictError as error:
+        raise _conflict_problem(error) from error
     except ScheduleInvalidError as error:
         raise _invalid_problem(error) from error
     return _schedule_response(record)
@@ -346,6 +547,14 @@ def _definition(body: ScheduleDefinitionRequest) -> ScheduleDefinition:
         )
     except ScheduleInvalidError as error:
         raise _invalid_problem(error) from error
+
+
+def _conflict_problem(error: ScheduleConflictError) -> ProblemException:
+    """定義/状態の同時変更を同じ公開 conflict として返す。"""
+
+    return ProblemException(
+        status=409, title="Schedule conflict", detail=str(error), code="schedule_conflict"
+    )
 
 
 def _invalid_problem(error: ScheduleInvalidError) -> ProblemException:
@@ -399,4 +608,32 @@ def _schedule_response(record: ScheduleRecord) -> ScheduleResponse:
         row_version=record.row_version,
         created_at=record.created_at,
         updated_at=record.updated_at,
+    )
+
+
+def _activity_response(record: ScheduleActivity) -> ScheduleActivityResponse:
+    """内部 snapshot/worker/token/hash/key を属性列挙で除外して返す。"""
+
+    pending = record.pending
+    return ScheduleActivityResponse(
+        schedule_id=record.schedule_id,
+        project_id=record.project_id,
+        row_version=record.row_version,
+        configuration_version=record.configuration_version,
+        tracking=record.tracking,
+        checked_at=record.checked_at,
+        automatic_attempt_limit=record.automatic_attempt_limit,
+        pending=(
+            SchedulePendingOccurrenceResponse(
+                occurrence_id=pending.occurrence_id,
+                occurrence_at=pending.occurrence_at,
+                configuration_version=pending.configuration_version,
+                created_at=pending.created_at,
+                updated_at=pending.updated_at,
+                attempt_count=pending.attempt_count,
+                lease_expires_at=pending.lease_expires_at,
+            )
+            if pending is not None
+            else None
+        ),
     )

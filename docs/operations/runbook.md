@@ -120,10 +120,14 @@ tick 的 created/skipped/failed、Schedule 的 last_*、计数与业务结果分
 | --- | --- |
 | 迟到/漏跑 | 当前可能执行最早迟到 occurrence，再跳过后续过期时刻；missed_count 单次最多 1000 |
 | last_* 不一致 | 跳过/失败可保留旧 Run ID，不能拼成同一次执行事实 |
-| next_run_at 已进但无 Run | 认领后创建前有崩溃窗口，尚无持久在途账本 |
-| 编辑/停止同时触发 | 旧回写可能影响新配置；查 occurrence、操作时点和关联 Run |
-| 同 Task 多 Run | 仅检查本 Schedule 的 last_run_id，不覆盖手动或其他 Schedule |
-| 页面找不到 Schedule | 查授权分页 API；前 100 条/当前 catalog 可漏显，不因此重建。编辑目前无页面入口 |
+| next_run_at 已进但无 Run | 在管理详情刷新“在途核对”，查原 occurrence、配置版本、认领次数和租约截止；可能仍在处理、提交未知或恢复耗尽，不清记录/额度或换键 |
+| 在途为空/租约到期 | 仅说明该次查询未见 PENDING 或租约已过期，不证明 Run 不存在、执行停止或可以重发；旧协议/读取失败另列，不补空值 |
+| 编辑/停止同时触发 | 认领提交前后的权限不同；已认领项按原配置完成，暂停不撤回在途，旧结算不覆盖新配置/暂停状态 |
+| 同 Task 多 Run | 重叠检查覆盖本 Schedule 的全部关联非终态 Run，不覆盖手动或其他 Schedule |
+| 页面找不到 Schedule | 打开项目“定时安排”，清除服务端筛选并翻页；失效 task/归档仍可读，不因未找到而重建 |
+| 修改冲突/保存响应未知 | 保留草稿与原请求；管理页独立读取、人工比较采用当前版，不自动重发；GET 不是原请求成功证明 |
+| 旧状态按钮返回 422 | 新协议要求 expected_row_version；刷新 Web，不让 API 自动补当前版 |
+| 历史 Schedule 不能恢复 | protocol=0 须独立历史核对/迁移，工具仍待实现；不改 protocol、清计数或归档重建 |
 
 保留 Schedule ID、带 offset 的 occurrence、原键与日志；时间同时核对规则和浏览器时区。摘要不足就保持未知，不伪造结算。Run/Effect lease、Interaction/Proposal 超期的 recovery 计数分别观察；Effect 技术重试保持原身份，未知远端仍先对账。正本见[调度](../design/task-scheduling.md)。
 
