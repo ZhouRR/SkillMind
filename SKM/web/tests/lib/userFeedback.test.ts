@@ -56,17 +56,21 @@ describe('account failure boundaries', () => {
 })
 
 describe('account input constraints', () => {
-  it('counts Unicode code points rather than UTF-16 units', () => {
-    expect(passwordIssue('😀'.repeat(8), '😀'.repeat(8))).toBe('passwordPolicy')
-    expect(passwordIssue('😀'.repeat(15), '😀'.repeat(15))).toBeNull()
-    expect(passwordIssue(' '.repeat(15), ' '.repeat(15))).toBeNull()
+  it.each(['1234567', 'abcdefg', '😀'.repeat(7), ' '.repeat(7)])('rejects seven code points even when UTF-16 is longer: %j', (password) => {
+    expect(passwordIssue(password, password)).toBe('passwordPolicy')
+  })
+
+  it.each(['12345678', 'abcdefgh', '😀'.repeat(8), ' '.repeat(8), ' 123456 ', 'longer than eight'])('accepts at least eight characters without composition rules or trimming: %j', (password) => {
+    expect(passwordIssue(password, password)).toBeNull()
   })
 
   it('enforces the UTF-8 byte ceiling and the confirmation separately', () => {
     expect(passwordIssue('😀'.repeat(256), '😀'.repeat(256))).toBeNull()
     expect(passwordIssue('😀'.repeat(257), '😀'.repeat(257))).toBe('passwordPolicy')
-    expect(passwordIssue('x'.repeat(15), 'y'.repeat(15))).toBe('passwordMismatch')
-    expect(passwordIssue('x'.repeat(14), 'x'.repeat(14))).toBe('passwordPolicy')
+    expect(passwordIssue('x'.repeat(1024), 'x'.repeat(1024))).toBeNull()
+    expect(passwordIssue('x'.repeat(1025), 'x'.repeat(1025))).toBe('passwordPolicy')
+    expect(passwordIssue('x'.repeat(8), 'y'.repeat(8))).toBe('passwordMismatch')
+    expect(passwordIssue(' 123456 ', '123456')).toBe('passwordMismatch')
   })
 
   it('normalizes only UUID letter case when comparing response targets', () => {

@@ -22,7 +22,7 @@
 
 email 标准化后在组织内唯一。不存在、停用和密码错误统一为 invalid_credentials；配额、防护不可用、CSRF 和结构错误保持各自语义，见[登录错误](login-protection.md#公开响应与客户端责任)。
 
-密码允许 Unicode、空格和密码管理器值：至少 15 字符，UTF-8 最多 1,024 bytes，不强制字符组合。使用 Argon2id（19 MiB、iterations 2、parallelism 1），只保存 PHC hash；成功登录按需 rehash。密码、完整 session/CSRF 不进入日志、Problem、审计或 fixture。
+密码允许 Unicode、空格和密码管理器值：至少 8 字符，UTF-8 最多 1,024 bytes，不强制字符组合。使用 Argon2id（19 MiB、iterations 2、parallelism 1），只保存 PHC hash；成功登录按需 rehash。密码、完整 session/CSRF 不进入日志、Problem、审计或 fixture。
 
 策略依据：[密码存储](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)、[认证建议](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html)。项目参数仍需结合部署容量验证。
 

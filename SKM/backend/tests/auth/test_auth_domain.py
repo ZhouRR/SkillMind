@@ -35,6 +35,24 @@ def test_password_policy_rejects_short_and_oversized_values() -> None:
         hash_password("密" * 400)
 
 
+@pytest.mark.parametrize("password", ["x" * 8, "x" * 14, "密" * 8, "🙂" * 8, " secret "])
+def test_password_policy_accepts_eight_characters_without_normalizing(password: str) -> None:
+    """8 文字以上を Unicode code point で数え、空白を除去せず hash へ渡す。"""
+
+    password_hash = hash_password(password)
+    assert verify_password(password_hash, password) == (True, False)
+    if password != password.strip():
+        assert verify_password(password_hash, password.strip()) == (False, False)
+
+
+@pytest.mark.parametrize("password", ["x" * 7, "密" * 7, "🙂" * 7])
+def test_password_policy_rejects_seven_characters_before_hashing(password: str) -> None:
+    """UTF-8 byte 数が 8 以上でも、7 文字の password は拒否する。"""
+
+    with pytest.raises(PasswordPolicyError, match="at least 8 characters"):
+        hash_password(password)
+
+
 def test_session_credentials_store_only_separate_hashes() -> None:
     """Session と用途分離した CSRF の原値を、いずれも DB hash に含めない。"""
 

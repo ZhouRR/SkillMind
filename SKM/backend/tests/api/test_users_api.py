@@ -29,7 +29,7 @@ from tests.api.fakes import FakeAuthService, FakeUserService
 
 CONTRACTS = Path(__file__).resolve().parents[3] / "contracts"
 BASE = "/api/v1/users"
-NEW_PASSWORD = "test-only replacement password"
+NEW_PASSWORD = "new pass"
 ACCOUNT_OPERATIONS = (
     ("GET", "/me/account", None),
     ("GET", "/me/security-events", None),

@@ -177,8 +177,9 @@ async def test_explicit_revoke_records_even_zero_and_self_revoke_invalidates_cal
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("new_password", ["test-only next password", "new pass"])
 async def test_password_change_uses_real_hash_and_revokes_current_session(
-    users: UserHarness,
+    users: UserHarness, new_password: str,
 ) -> None:
     """現 password を実 verifier で確認してから更新し、現在会話も持久失効させる。"""
 
@@ -186,18 +187,18 @@ async def test_password_change_uses_real_hash_and_revokes_current_session(
         await users.service.change_password(
             access=users.access,
             current_password="incorrect",
-            new_password="test-only next password",
+            new_password=new_password,
             expected_row_version=1,
         )
     assert users.current.revoked_at is None and not users.added
     result = await users.service.change_password(
         access=users.access,
         current_password=PASSWORD,
-        new_password="test-only next password",
+        new_password=new_password,
         expected_row_version=1,
     )
     assert result.session_revoked and result.user.row_version == 2
-    assert verify_password(users.actor.password_hash, "test-only next password")[0]
+    assert verify_password(users.actor.password_hash, new_password)[0]
     assert not verify_password(users.actor.password_hash, PASSWORD)[0]
     assert users.added[0].action == "PASSWORD_CHANGED"
 
@@ -280,17 +281,21 @@ async def test_admin_role_csrf_and_target_boundaries(users: UserHarness) -> None
 
 
 @pytest.mark.asyncio
-async def test_creation_flushes_parent_before_event_and_hides_password(users: UserHarness) -> None:
+@pytest.mark.parametrize("password", [PASSWORD, "new pass"])
+async def test_creation_flushes_parent_before_event_and_hides_password(
+    users: UserHarness, password: str,
+) -> None:
     """FK 順序と公開 DTO の非秘密性を、DB default に依存せず確認する。"""
 
-    input = CreateUserCommand(" New@Example.test ", " New ", UserRole.USER, PASSWORD)
+    input = CreateUserCommand(" New@Example.test ", " New ", UserRole.USER, password)
     result = await users.service.create_user(access=users.access, command=input)
     assert users.order == ["User", "flush", "UserSecurityEvent", "flush"]
     assert result.user.email == "new@example.test" and result.user.display_name == "New"
     assert result.user.row_version == 1
     assert isinstance(users.added[0], User)
     assert users.added[1].action == "CREATED"
-    assert PASSWORD not in repr(input) + repr(result)
+    assert verify_password(users.added[0].password_hash, password)[0]
+    assert password not in repr(input) + repr(result)
     assert users.access.session_token not in repr(users.access)
     assert users.access.csrf_token not in repr(users.access)
 

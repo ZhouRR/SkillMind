@@ -3,7 +3,7 @@ import { useCallback, useState, type FormEvent } from 'react'
 import { createUser, loadUsers, type AuthSessionRecord, type UserAccountRecord, type UserRole } from '../api'
 import { useUserMutation, useUserQuery, type SessionEnded } from '../hooks/useUserRequest'
 import { useMessages } from '../i18n'
-import { creationEmailQuery, passwordIssue } from '../lib/userFeedback'
+import { creationEmailQuery, PASSWORD_MIN_LENGTH, passwordIssue } from '../lib/userFeedback'
 import { UserPager, UserResponseNotice, UserSummaryList } from './UserAccountElements'
 
 /** 新規作成には再送契約がない。unknown は元 email の確認と明示的な別意図に分ける。 */
@@ -68,9 +68,9 @@ export function UserCreatePanel({ session, onSessionEnded, onCreated, onSelect }
         <label>{messages.fields.role}<select aria-label={messages.fields.role} required value={role} onChange={(event) => setRole(event.target.value === 'ADMIN' ? 'ADMIN' : event.target.value === 'USER' ? 'USER' : '')}>
           <option value="">{messages.rolePlaceholder}</option><option value="USER">{messages.roles.USER}</option><option value="ADMIN">{messages.roles.ADMIN}</option>
         </select></label>
-        <label>{messages.initialPassword}<input type="password" autoComplete="new-password" required minLength={15} maxLength={1024}
+        <label>{messages.initialPassword}<input type="password" autoComplete="new-password" required minLength={PASSWORD_MIN_LENGTH} maxLength={1024}
           value={password} onChange={(event) => setPassword(event.target.value)} /></label>
-        <label>{messages.confirmPassword}<input type="password" autoComplete="new-password" required minLength={15} maxLength={1024}
+        <label>{messages.confirmPassword}<input type="password" autoComplete="new-password" required minLength={PASSWORD_MIN_LENGTH} maxLength={1024}
           value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
         <p className="hint">{messages.passwordPolicy}</p>
         {issue && <p role="alert" className="error">{issue === 'invalidRequest' ? messages.failures.invalidRequest : messages[issue]}</p>}

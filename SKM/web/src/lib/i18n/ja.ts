@@ -23,7 +23,7 @@ export const JA: UiMessages = {
     fields: { email: 'メール', name: '表示名', role: 'システム権限', status: 'アカウント状態', userId: 'ユーザー ID', version: 'アカウント版', created: '作成日時', updated: '更新日時' },
     roles: { ADMIN: '管理者', USER: '一般ユーザー' }, statuses: { ACTIVE: '有効', DISABLED: '無効' },
     currentPassword: '現在のパスワード', newPassword: '新しいパスワード', confirmPassword: '新しいパスワードの確認', initialPassword: '初期パスワード',
-    passwordPolicy: '15 文字以上、UTF-8 で 1024 バイト以内にしてください。', passwordMismatch: '二つのパスワードが一致しません。',
+    passwordPolicy: '8 文字以上、UTF-8 で 1024 バイト以内にしてください。', passwordMismatch: '二つのパスワードが一致しません。',
     changePassword: 'パスワードを変更してログアウト', passwordHint: '成功すると現在のログインを含む全ての旧セッションが失効します。送信後は入力を消去し、自動再送しません。',
     revoke: '全セッションを失効', revokeHint: '実行中のタスクは停止しません。対象ユーザーは再ログインが必要です。',
     confirmRevoke: 'このアカウントの全セッション失効を確認しました', confirmChange: '権限または状態の変更と、旧セッションの失効を確認しました',

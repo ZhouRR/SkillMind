@@ -434,7 +434,7 @@
           "new_password": {
             "format": "password",
             "maxLength": 1024,
-            "minLength": 15,
+            "minLength": 8,
             "title": "New Password",
             "type": "string",
             "writeOnly": true
@@ -1091,7 +1091,7 @@
           "password": {
             "format": "password",
             "maxLength": 1024,
-            "minLength": 15,
+            "minLength": 8,
             "title": "Password",
             "type": "string",
             "writeOnly": true

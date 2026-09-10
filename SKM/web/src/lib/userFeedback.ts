@@ -34,9 +34,12 @@ export function userFailure(error: unknown, mutation: boolean): UserFailure {
   return { key: mutation ? 'unknown' : 'loadFailed' }
 }
 
+/** 新しい password の最小文字数を入力属性と送信前検証で共有する。 */
+export const PASSWORD_MIN_LENGTH = 8
+
 /** 文字符号数と UTF-8 byte 数を分け、Server の password 制限に合わせる。 */
 export function passwordIssue(password: string, confirmation: string): 'passwordPolicy' | 'passwordMismatch' | null {
-  if ([...password].length < 15 || new TextEncoder().encode(password).length > 1024) return 'passwordPolicy'
+  if ([...password].length < PASSWORD_MIN_LENGTH || new TextEncoder().encode(password).length > 1024) return 'passwordPolicy'
   return password === confirmation ? null : 'passwordMismatch'
 }
 

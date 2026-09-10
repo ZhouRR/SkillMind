@@ -8,7 +8,8 @@ from typing import Any
 
 import pytest
 from fastapi.routing import APIRoute
-from pydantic import BaseModel
+from jsonschema import Draft202012Validator
+from pydantic import BaseModel, ValidationError
 
 from skillmind.api.auth_dependencies import (
     admin_actor,
@@ -128,6 +129,32 @@ def test_user_models_match_versioned_schemas(name: str, model: type[BaseModel]) 
 
     declared, versioned = model.model_json_schema(), contract(name)
     assert normalized_schema(declared, declared) == normalized_schema(versioned, versioned)
+
+
+@pytest.mark.parametrize("name", ["create-request", "password-request"])
+@pytest.mark.parametrize("password", ["x" * 8, "密" * 8, "🙂" * 8, " secret "])
+def test_new_password_minimum_matches_models_and_contracts(name: str, password: str) -> None:
+    """作成と本人改密の両入口で 8 文字を受理し、7 文字を拒否する。"""
+
+    if name == "create-request":
+        model: type[BaseModel] = users.CreateUserRequest
+        field = "password"
+        body = {
+            "email": "synthetic@example.test", "display_name": "Synthetic",
+            "system_role": "USER", field: password,
+        }
+    else:
+        model = users.ChangeOwnPasswordRequest
+        field = "new_password"
+        body = {"expected_row_version": 1, "current_password": "old", field: password}
+    validator = Draft202012Validator(contract(name))
+    validator.validate(body)
+    assert getattr(model.model_validate(body), field).get_secret_value() == password
+
+    body[field] = password[:-1]
+    assert not validator.is_valid(body)
+    with pytest.raises(ValidationError):
+        model.model_validate(body)
 
 
 def test_all_ten_user_operations_describe_models_guards_statuses_and_headers() -> None:

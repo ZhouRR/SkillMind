@@ -69,6 +69,9 @@ describe.each(UI_LANGUAGES)('real account components in %s', (language) => {
     expect(html).toContain(`<label>${messages.confirmPassword}<input`)
     expect(html.match(/type="password"/g)).toHaveLength(2)
     expect(html.match(/autoComplete="new-password"/g)).toHaveLength(2)
+    expect(html.match(/minLength="8"/g)).toHaveLength(2)
+    expect(html).toContain(messages.passwordPolicy)
+    expect(messages.passwordPolicy).toContain('8 ')
     expect(html).toContain(messages.createHint)
   })
 

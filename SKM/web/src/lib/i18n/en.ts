@@ -22,7 +22,7 @@ export const EN: UiMessages = {
     fields: { email: 'Email', name: 'Display name', role: 'System role', status: 'Account status', userId: 'User ID', version: 'Account version', created: 'Created', updated: 'Updated' },
     roles: { ADMIN: 'Administrator', USER: 'User' }, statuses: { ACTIVE: 'Active', DISABLED: 'Disabled' },
     currentPassword: 'Current password', newPassword: 'New password', confirmPassword: 'Confirm new password', initialPassword: 'Initial password',
-    passwordPolicy: 'Use at least 15 characters and no more than 1024 UTF-8 bytes.', passwordMismatch: 'The passwords do not match.',
+    passwordPolicy: 'Use at least 8 characters and no more than 1024 UTF-8 bytes.', passwordMismatch: 'The passwords do not match.',
     changePassword: 'Change password and sign out', passwordHint: 'Success revokes all old sessions, including this login. Password inputs are cleared on submission and never resent automatically.',
     revoke: 'Revoke all sessions', revokeHint: 'This does not stop running tasks. The target user must sign in again.',
     confirmRevoke: 'I confirm revoking all sessions for this account', confirmChange: 'I confirm the role or status change and revocation of old sessions',

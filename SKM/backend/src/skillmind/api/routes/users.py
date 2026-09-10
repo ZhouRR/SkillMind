@@ -28,7 +28,7 @@ from skillmind.api.problems import (
     ProblemException,
     problem_openapi_response,
 )
-from skillmind.auth.domain import UI_LANGUAGES
+from skillmind.auth.domain import MIN_PASSWORD_CHARACTERS, UI_LANGUAGES
 from skillmind.auth.login_protection import LoginProtectionUnavailableError, LoginRateLimitedError
 from skillmind.auth.service import AuthService
 from skillmind.auth.sessions import CsrfRejectedError, UnauthorizedSessionError
@@ -169,7 +169,7 @@ class CreateUserRequest(BaseModel):
     email: str = Field(min_length=3, max_length=320)
     display_name: str = Field(min_length=1, max_length=200)
     system_role: UserRole
-    password: SecretStr = Field(min_length=15, max_length=1024)
+    password: SecretStr = Field(min_length=MIN_PASSWORD_CHARACTERS, max_length=1024)
 
 
 class UserVersionRequest(BaseModel):
@@ -192,7 +192,7 @@ class ChangeOwnPasswordRequest(UserVersionRequest):
     """現在と次の password は入力専用で repr にも露出させない。"""
 
     current_password: SecretStr = Field(min_length=1, max_length=1024)
-    new_password: SecretStr = Field(min_length=15, max_length=1024)
+    new_password: SecretStr = Field(min_length=MIN_PASSWORD_CHARACTERS, max_length=1024)
 
 
 @account_router.get(

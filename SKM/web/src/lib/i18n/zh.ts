@@ -24,7 +24,7 @@ export const ZH: UiMessages = {
     fields: { email: '邮箱', name: '显示名称', role: '系统角色', status: '账户状态', userId: '用户 ID', version: '账户版本', created: '创建时间', updated: '更新时间' },
     roles: { ADMIN: '管理员', USER: '普通用户' }, statuses: { ACTIVE: '已启用', DISABLED: '已停用' },
     currentPassword: '当前密码', newPassword: '新密码', confirmPassword: '确认新密码', initialPassword: '初始密码',
-    passwordPolicy: '密码至少 15 个字符，UTF-8 编码不超过 1024 字节。', passwordMismatch: '两次输入的密码不一致。',
+    passwordPolicy: '密码至少 8 个字符，UTF-8 编码不超过 1024 字节。', passwordMismatch: '两次输入的密码不一致。',
     changePassword: '修改密码并退出', passwordHint: '修改成功会撤销全部旧会话，包括当前登录。提交后将清空密码输入，不会自动重发。',
     revoke: '撤销全部会话', revokeHint: '此操作不停止已有任务；目标用户需要重新登录。',
     confirmRevoke: '我确认撤销该账户的全部会话', confirmChange: '我已确认角色或状态变更，会撤销该账户的旧会话',

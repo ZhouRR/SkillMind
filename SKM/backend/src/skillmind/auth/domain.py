@@ -14,7 +14,7 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from skillmind.core.hashing import sha256_hex
 
-MIN_PASSWORD_CHARACTERS = 15
+MIN_PASSWORD_CHARACTERS = 8
 MAX_PASSWORD_BYTES = 1024
 SESSION_SECRET_BYTES = 32
 SESSION_CREDENTIAL_VERSION = 2

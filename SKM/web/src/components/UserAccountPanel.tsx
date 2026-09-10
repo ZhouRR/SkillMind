@@ -6,7 +6,7 @@ import {
 } from '../api'
 import { useUserMutation, useUserQuery, type SessionEnded } from '../hooks/useUserRequest'
 import { useMessages } from '../i18n'
-import { passwordIssue, sameUser, type UserFailure } from '../lib/userFeedback'
+import { PASSWORD_MIN_LENGTH, passwordIssue, sameUser, type UserFailure } from '../lib/userFeedback'
 import { UserAccountFacts, UserResponseNotice } from './UserAccountElements'
 import { UserSecurityEvents } from './UserSecurityEvents'
 
@@ -144,8 +144,8 @@ function AccountEditor({ userId, own, session, revision = 0, onSessionEnded, onC
           <h3>{messages.changePassword}</h3><p className="hint">{messages.passwordHint}</p>
           <fieldset disabled={!canWrite}>
             <label>{messages.currentPassword}<input autoComplete="current-password" type="password" required maxLength={1024} value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} /></label>
-            <label>{messages.newPassword}<input autoComplete="new-password" type="password" required minLength={15} maxLength={1024} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
-            <label>{messages.confirmPassword}<input autoComplete="new-password" type="password" required minLength={15} maxLength={1024} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
+            <label>{messages.newPassword}<input autoComplete="new-password" type="password" required minLength={PASSWORD_MIN_LENGTH} maxLength={1024} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+            <label>{messages.confirmPassword}<input autoComplete="new-password" type="password" required minLength={PASSWORD_MIN_LENGTH} maxLength={1024} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
             <p className="hint">{messages.passwordPolicy}</p>
             {passwordError && <p role="alert" className="error">{passwordError === 'invalidRequest' ? messages.failures.invalidRequest : messages[passwordError]}</p>}
             <button className="primaryButton" type="submit">{messages.changePassword}</button>
