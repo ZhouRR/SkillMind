@@ -5,12 +5,12 @@ import { useMessages } from '../i18n'
 export function ProjectContextNotice({ access, onRefresh }: { access: ProjectAccess; onRefresh: () => void }) {
   const messages = useMessages()
   if (access.status === 'ready') return access.project.status === 'ARCHIVED'
-    ? <section className="panel" data-project-context="archived"><p role="status">{messages.app.projectArchived}</p></section>
+    ? <section className="panel projectContextNotice" data-project-context="archived"><p role="status">{messages.app.projectArchived}</p></section>
     : null
   const text = access.status === 'loading' ? messages.elements.loadingProjects
     : access.status === 'empty' ? messages.elements.noAccessibleProjects
       : access.status === 'unavailable' ? messages.app.projectUnavailable : messages.app.projectReadFailed
-  return <section className="panel" data-project-context={access.status} aria-busy={access.status === 'loading'}>
+  return <section className="panel projectContextNotice" data-project-context={access.status} aria-busy={access.status === 'loading'}>
     <p role={access.status === 'error' || access.status === 'unavailable' ? 'alert' : 'status'}>{text}</p>
     {access.status !== 'loading' && <button className="secondaryButton" type="button" onClick={onRefresh}>{messages.runHistory.retry}</button>}
   </section>

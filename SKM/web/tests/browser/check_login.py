@@ -260,7 +260,9 @@ async def check(url: str, output: Path | None) -> None:
                             "send(input,{...init,signal:undefined});"
                         )
                     await prepare(page, url, language)
-                    await expect(page.locator(".authBrand .brandMark")).to_have_text("SM")
+                    await expect(page.locator(".authBrand img.brandMark")).to_have_attribute(
+                        "src", "/skillmind/favicon.svg"
+                    )
                     await expect(page.locator(".authBrand strong")).to_have_text("Skillmind")
                     if name.endswith("-abort"):
                         api.hold = "context" if "context" in name else "login"

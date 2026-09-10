@@ -18,7 +18,9 @@
 
 ## 运用原则
 
-优先已有响应/脱敏日志/获准只读查询。PostgreSQL 是正本，不改状态、stamp、删审计或换键消错；未知保全原身份，不自动重放。启动/停机/模型/外部写入/恢复须另确认目标、副作用和授权；命令在目标 `SKM/` 经[统一入口](deployment.md#环境文件与配置边界)使用已确认 ENV_FILE/project，不切默认 context 误操作。
+按症状选择对应一节，优先已有响应/脱敏日志/获准只读查询，不把整页当日常检查清单。PostgreSQL 是正本，不改状态、stamp、删审计或换键消错；未知保全原身份，不自动重放。仅请求排障时不擅自停机、调模型、外部写入或恢复；已授权的部署按[发布流程](deployment.md)执行，不逐命令重复确认。
+
+命令在服务器四文件部署目录使用已确认的 ENV_FILE/project，配置见[统一入口](deployment.md#环境文件与配置边界)，不切默认 context 误操作。
 
 对外只留 UTC、image/revision、对象 ID、公开错误码和范围；不附 `.env`、Cookie/CSRF、密码/KEK、内部地址、正文或完整 workspace/HAR。
 
@@ -169,11 +171,11 @@ PR/MR 仅 Git branch 且完整 forge_kind/forge_api_base_url/forge_project；全
 
 ## MANAGED Secret の KEK 運用
 
-MANAGED 直接用主密钥 AES-256-GCM，非两层信封。keyring 为逗号分隔 version:base64key（32 字节），首项加密、其余解旧密文，经 Secret 管理注入；DB 备份补不了丢失 KEK。
+keyring 格式与加密边界见[Secret 正本](../design/secret-storage.md)；经 Secret 管理注入，DB 备份补不了丢失 KEK。
 
 按[切换/恢复](../design/secret-storage.md#切换与恢复的顺序)核备份、维护窗口、全部进程及旧备份解封。API/Worker 启动加载 cipher，改 CLI 环境不更新实例；新标签必须配新 key，不能同标签换 bytes。
 
-获批后在目标环境执行 `sh scripts/compose.sh exec api python -m skillmind.ops.rotate_secrets`，会锁定/改写材料，不改 Run/binding。核退出/数量及必要解封；skipped 不验证解密，全 skipped 不证明成功。无全量只读解密 CLI，不输出明文替验。
+获批后在目标环境执行 `docker compose --env-file "${ENV_FILE:-.env}" --file compose.yml exec api python -m skillmind.ops.rotate_secrets`，会锁定/改写材料，不改 Run/binding。核退出/数量及必要解封；skipped 不验证解密，全 skipped 不证明成功。无全量只读解密 CLI，不输出明文替验。
 
 旧备份所需 KEK 继续独立保管；版本不明/缺 key/认证失败拒绝，不降明文。不能防同时掌控 host/process 与 DB 的攻击者，KMS/HSM 未实现。
 
@@ -181,12 +183,12 @@ MANAGED 直接用主密钥 AES-256-GCM，非两层信封。keyring 为逗号分�
 
 ### 通常 smoke
 
-smoke 调模型、创建 Run/Evaluation、测试取消，会计费/持久写入。须获准专用环境/Project/published task，并满足[Worker 放行](deployment.md#启动与放行)、dispatch/模型凭据；单独 Project 不隔离旧 job/cron。
+这里是业务执行验收，不是普通部署或页面检查的默认步骤。smoke 调模型、创建 Run/Evaluation、测试取消，会计费/持久写入。须获准专用环境/Project/published task，并满足[Worker 放行](deployment.md#启动与放行)、dispatch/模型凭据；单独 Project 不隔离旧 job/cron。
 
 明确设置测试 UUID 为 SMOKE_PROJECT_ID 后执行，未指定会拒绝：
 
 ```bash
-sh scripts/compose.sh exec \
+docker compose --env-file "${ENV_FILE:-.env}" --file compose.yml exec \
   -e SKILLMIND_SMOKE_PROJECT_ID="$SMOKE_PROJECT_ID" \
   api python -m skillmind.ops.smoke
 ```
@@ -198,17 +200,17 @@ sh scripts/compose.sh exec \
 仅可停机专用环境，分别选准备中/模型执行中 Run，保留原 ID、快照/lease；RUNNING 不证明模型已启动。
 
 ```bash
-LEASE_SECONDS="$(sh scripts/compose.sh exec -T api python -c \
+LEASE_SECONDS="$(docker compose --env-file "${ENV_FILE:-.env}" --file compose.yml exec -T api python -c \
   'from skillmind.core.settings import get_settings; print(get_settings().run_lease_seconds)')"
-sh scripts/compose.sh stop worker
+docker compose --env-file "${ENV_FILE:-.env}" --file compose.yml stop worker
 ```
 
 确认 LEASE_SECONDS 为有效秒数，加 recovery cron 观察窗口后再启动；20 秒余量不保证恢复完成：
 
 ```bash
 sleep "$((LEASE_SECONDS + 20))"
-sh scripts/compose.sh start worker
-sh scripts/compose.sh logs --no-log-prefix --tail=200 worker
+docker compose --env-file "${ENV_FILE:-.env}" --file compose.yml start worker
+docker compose --env-file "${ENV_FILE:-.env}" --file compose.yml logs --no-log-prefix --tail=200 worker
 ```
 
 观察实际 tick：旧 Attempt 为 LEASE_EXPIRED，经 RETRY_PENDING 在原 Segment 追加 Attempt，快照不变；超限 retry_exhausted。新 Attempt 不补签旧 PREPARING。部署版本/真实持久恢复分别验，mock 或仅模型阶段成功不能替代。
@@ -218,7 +220,7 @@ sh scripts/compose.sh logs --no-log-prefix --tail=200 worker
 受控终端按服务器 request/trace 或 Run/Attempt ID 查日志并关联 Session/Effect；客户端 X-Request-ID 非服务器审计值，request ID 非重放键。
 
 ```bash
-sh scripts/compose.sh logs --no-log-prefix --tail=200 api worker
+docker compose --env-file "${ENV_FILE:-.env}" --file compose.yml logs --no-log-prefix --tail=200 api worker
 ```
 
 原日志可能敏感，只转录[运用原则](#运用原则)的脱敏事实，不附 Tool 正文/Evidence/配置。

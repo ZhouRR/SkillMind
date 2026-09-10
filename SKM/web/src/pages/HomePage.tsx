@@ -62,7 +62,6 @@ export function HomePage({ metaState, project, projectId }: {
           <span className="homeEyebrow">{messages.home.currentProject}</span>
           <h2 title={project?.project_id}>{project ? project.name : messages.home.notSelected}</h2>
           <p>{project ? messages.home.startHint : messages.home.selectProjectHint}</p>
-          {project && <span className="homeProjectKey">{ROUTE_ICONS.projects}<code>{project.key}</code></span>}
         </div>
         <div className="homeHeroAction">
           <span className="homeHeroGlyph" aria-hidden="true">{ROUTE_ICONS.tasks}</span>

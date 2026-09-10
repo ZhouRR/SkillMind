@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { createProjectModule, deleteProjectModule, loadProjectModules, loadProjectTasks, updateProjectModule, type AuthSessionRecord, type ProjectModuleRecord } from '../api'
 import { EmptyState, LoadingSkeleton, useConfirmDialog } from './PageElements'
 import { useMessages } from '../i18n'
+import { apiErrorMessage } from '../lib/apiFeedback'
 
 /** Module 一覧取得の非同期状態。 */
 type ModulesState =
@@ -69,7 +70,7 @@ export function ProjectModulesPanel({ projectId, session }: {
         if (!controller.signal.aborted) {
           setModulesState({
             status: 'error',
-            message: caught instanceof Error ? caught.message : 'Unknown module API error',
+            message: apiErrorMessage(caught, 'Unknown module API error', messages),
           })
         }
       })
@@ -136,7 +137,7 @@ export function ProjectModulesPanel({ projectId, session }: {
       setRevision((current) => current + 1)
     } catch (caught) {
       if (!controller.signal.aborted) {
-        setError(caught instanceof Error ? caught.message : messages.projects.modules.saveFailed)
+        setError(apiErrorMessage(caught, messages.projects.modules.saveFailed, messages))
       }
     } finally {
       if (!controller.signal.aborted) setBusy(false)
@@ -162,7 +163,7 @@ export function ProjectModulesPanel({ projectId, session }: {
       setRevision((current) => current + 1)
     } catch (caught) {
       if (!controller.signal.aborted) {
-        setError(caught instanceof Error ? caught.message : messages.projects.modules.removeFailed)
+        setError(apiErrorMessage(caught, messages.projects.modules.removeFailed, messages))
       }
     } finally {
       if (!controller.signal.aborted) setBusy(false)

@@ -1,6 +1,6 @@
 # 生成 FrontendModule
 
-本页负责生成界面的构建、隔离、版本和回退，业务/执行仍归 [SkillVersion](skill-contract.md)/[Runtime](agent-runtime.md)。当前仅有版本模型与纯检查函数，完整链路未接；状态见[计划 R04](../planning/roadmap.md#开发任务)。
+本页仅适用于执行生成代码的界面，负责构建、隔离、版本和回退；普通 React 页面、主题及静态文档预览不要求建设 builder/Host。业务/执行仍归 [SkillVersion](skill-contract.md)/[Runtime](agent-runtime.md)。当前仅有版本模型与纯检查函数，完整链路按[计划 R04](../planning/roadmap.md#开发任务)后置。
 
 ## 先分清三种模块与预览
 
@@ -11,10 +11,6 @@
 | 文档预览 | DocumentManagerPanel 的禁脚本 HTML，不可加 allow-scripts 当作生成 Preview |
 
 standard/ViewSpec 不执行生成代码；生成 Preview 已是代码执行，必须先过首次执行门禁。
-
-## 一个例子：图表坏了，任务没有失败
-
-目标行为：G2 超时则关闭本页 iframe/通道，以 standard 展示原 Result/Evidence；不重跑、不换业务 SkillVersion、不全局停版。管理员可另选兼容且未停用的 G1，当前尚未实现。
 
 ## 目标与流水线
 
@@ -104,7 +100,7 @@ opaque origin 不保证请求无本站 cookie；静态路径不处理 mutation�
 
 ## 实施顺序与验收
 
-按身份/契约 → builder → 安全投放/Host → 发布/选择/回退推进；威胁模型与隔离门禁通过前不执行代码。
+获准实现生成代码链路时，按身份/契约 → builder → 安全投放/Host → 发布/选择/回退推进；威胁模型与隔离门禁通过前不执行代码。
 
 - 同源码换依赖/策略有新身份；超时重试无重复发布，未知可确认。
 - 拒绝外部 host/重定向、传递脚本、伪造报告和超额产物，无半份可运行产物。

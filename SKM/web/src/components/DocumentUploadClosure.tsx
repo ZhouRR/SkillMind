@@ -10,12 +10,12 @@ export function DocumentUploadClosure({ upload, closure }: {
 }) {
   const messages = useMessages().documentsPanel
   const labels = messages.closure
-  const [key, setKey] = useState('')
   const original = upload.batch.items.find((item) => item.phase === 'unknown')?.original
   const state = closure.state
   const recovery = closure.recovery
   const candidate = upload.recovery?.phase === 'settled' && upload.recovery.record?.state === 'PENDING'
     && !upload.recovery.failure ? upload.recovery.original : null
+  if (!original && !candidate && !state && !recovery.key && !recovery.failure) return null
   return <section className="documentUploadClosure" aria-label={labels.title}>
     <h3>{labels.title}</h3><p className="hint">{labels.scope}</p>
     {original && !closure.locked() && <div className="buttonRow">
@@ -53,13 +53,6 @@ export function DocumentUploadClosure({ upload, closure }: {
       {state.kind === 'recovery' && ['closed', 'refused'].includes(state.phase) && <button type="button"
         className="secondaryButton" onClick={closure.finishRecovery}>{labels.finishRecovery}</button>}
     </section>}
-    <details className="documentUploadClosureRecovery"><summary>{labels.recover}</summary>
-      <p className="hint">{labels.recoveryHint}</p>
-      <form onSubmit={(event) => { event.preventDefault(); recovery.lookup(key) }}>
-        <label>{messages.upload.recoveryKey}<input value={key} onChange={(event) => setKey(event.currentTarget.value)}
-          autoComplete="off" spellCheck={false} disabled={!closure.readable()} /></label>
-        <button type="submit" className="secondaryButton" disabled={!closure.readable()}>{labels.recover}</button>
-      </form>
       {recovery.failure && <p role="alert" className="error">{labels.failures[recovery.failure.key]}</p>}
       {recovery.key && <section className="documentUploadClosureRecoveryResult panel" aria-label={labels.recoveryTitle}>
         <label>{messages.upload.key}<input readOnly value={recovery.key} onFocus={(event) => event.currentTarget.select()} /></label>
@@ -68,6 +61,22 @@ export function DocumentUploadClosure({ upload, closure }: {
           <p>{labels.documentId}: {recovery.receipt.document_id}<br />{labels.closedAt}: {recovery.receipt.closed_at}</p></>}
         <button type="button" className="secondaryButton" onClick={recovery.close}>{labels.closeRecovery}</button>
       </section>}
-    </details>
   </section>
+}
+
+/** 過去の停止結果だけを照会する。未確定の現操作は主画面から隠さない。 */
+export function DocumentUploadClosureRecovery({ closure }: {
+  closure: ReturnType<typeof useDocumentUploadClosure>
+}) {
+  const messages = useMessages().documentsPanel
+  const labels = messages.closure
+  const [key, setKey] = useState('')
+  return <details className="documentUploadClosureRecovery"><summary>{labels.recover}</summary>
+    <p className="hint">{labels.recoveryHint}</p>
+    <form onSubmit={(event) => { event.preventDefault(); closure.recovery.lookup(key) }}>
+      <label>{messages.upload.recoveryKey}<input value={key} onChange={(event) => setKey(event.currentTarget.value)}
+        autoComplete="off" spellCheck={false} disabled={!closure.readable()} /></label>
+      <button type="submit" className="secondaryButton" disabled={!closure.readable()}>{labels.recover}</button>
+    </form>
+  </details>
 }

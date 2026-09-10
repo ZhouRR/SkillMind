@@ -202,6 +202,9 @@ async def inject_selection(page: Page, name: str) -> None:
 
 async def recover_key(page: Page, key: str, labels: dict) -> None:
     """実際の入力と二重 click を通し、同 tick に一つの GET だけを開始する。"""
+    help_panel = page.locator(".documentHelp")
+    if await help_panel.get_attribute("open") is None:
+        await help_panel.locator(":scope > summary").click()
     form = page.locator(".uploadRecovery")
     if await form.get_attribute("open") is None:
         await form.locator("summary").click()
@@ -511,12 +514,7 @@ async def scenario(
             await page.reload()
             await expect(panel.locator(".documentItem")).to_have_count(2)
             assert not api.reads and not api.uploads
-            await state.locator(".uploadRecovery > summary").click()
-            key_input = state.get_by_label(texts["recoveryKey"], exact=True)
-            await key_input.fill(
-                "00000000-0000-0000-0000-000000000000" if mode == "bad-uuid" else KEY
-            )
-            await state.get_by_role("button", name=texts["recover"], exact=True).click()
+            await recover_key(page, "00000000-0000-0000-0000-000000000000" if mode == "bad-uuid" else KEY, labels)
             if mode == "bad-uuid":
                 await expect(
                     state.get_by_text(labels["failures"]["uploadInvalidKey"], exact=True)
@@ -672,9 +670,7 @@ async def scenario(
                     await expect(state.locator(".documentUploadItems > li")).to_have_count(0)
                     assert not api.reads
                     api.read_result = "PUBLISHED"
-                    await state.locator(".uploadRecovery > summary").click()
-                    await state.get_by_label(texts["recoveryKey"], exact=True).fill(original_key)
-                    await state.get_by_role("button", name=texts["recover"], exact=True).click()
+                    await recover_key(page, original_key, labels)
                     await summary(page, [], labels)
                     await expect(
                         state.locator(".documentUploadRecoveryResult").get_by_text(

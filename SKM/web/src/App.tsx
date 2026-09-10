@@ -41,7 +41,6 @@ import {
   routeContextFromHash,
   routeFromHash,
   routeHref,
-  routeUsesModuleFilter,
   type AppRoute,
 } from './lib/routing'
 import './styles.css'
@@ -384,9 +383,9 @@ export function App() {
             if (!projectId) return
             moduleChoice.current = { context: `${sessionKey}:${projectId}`, moduleId }
             setActiveModuleId(moduleId)
-            // 絞り込みが効く画面に居るなら、その場で範囲だけを切り替える(見ている画面を
-            // 奪わない)。効かない画面から選んだときだけ、模块の内容を見せられる主画面へ移す。
-            if (routeUsesModuleFilter(route)) return
+            // Workspace 配下の導航なので、Task 一覧からも Workspace へ戻す。
+            // 同じ Workspace 内では現在 Run と草稿を維持して範囲だけを切り替える。
+            if (route === 'workspace') return
             window.location.hash = routeHref('workspace', projectId || undefined)
           }}
           projectId={projectContext.selectionId}

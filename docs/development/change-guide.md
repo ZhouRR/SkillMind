@@ -21,7 +21,7 @@
 | 变更 | 设计 / 核心问题 |
 | --- | --- |
 | 解释、发布、启停 | [Skill 契约](../design/skill-contract.md) / [解释器](../design/skill-interpretation.md)：来源、候选、精确版本 |
-| 页面、流程预览 | [Workspace](../design/workspace.md) / [Task Flow](../design/task-flow.md)：投影、身份隔离、用户流程 |
+| 页面风格、交互、流程预览 | [全站视觉规范](../design/workspace.md#视觉规范) / [Workspace](../design/workspace.md) / [Task Flow](../design/task-flow.md)：信息层级、投影、身份隔离 |
 | 生成 UI、子分析 | [生成模块](../design/generated-modules.md) / [子分析](../design/subagents.md)：安全门禁、能力与共享预算 |
 
 ### 身份与交付
@@ -33,15 +33,13 @@
 | 外部凭据 | [Secret](../design/secret-storage.md)：密文、轮换、旧备份 |
 | 配置、迁移、恢复 | [发布](../operations/deployment.md) / [恢复](../operations/backup-recovery.md)：所有写入者、同一恢复点、外部事实 |
 
-## 开工前必须回答的六个问题
+## 按本次范围使用设计
 
-明确场景与非目标、规则正本、冻结/授权时点、受影响消费者、失败/重发/恢复行为、可观察验收结果。
-已有 service/validator 应接续，不重造组件；新增概念不必然需要新表或公开字段。
+- 先明确用户场景、最小改动和验收。局部文案/样式修正直接沿用既有规则与组件，不机械产出六项报告或完整设计流程。
+- 涉及权限、持久化或公开契约时，再核冻结/授权时点、受影响消费者、失败/重发/恢复与兼容；已有 service/validator 继续复用。
+- 设计中的后置能力、恢复要求只在相关场景适用，不是每次开发都要补齐的清单；不把风险提示自动变成新参数、审批步骤或框架。确需扩大范围，说明具体风险与代价后确认。
 
-## 留下一条可接手的开发任务
-
-任务格式：**场景 → 目标/非目标 → 设计 → 当前缺口 → 同步范围 → 验收**。
-涉及历史数据时说明读取与版本共存；未接齐的链路按[契约 workflow](contract-workflow.md#遇到未接齐的交付链)定位，不把单层完成当成交付。
+需要跨轮交接时才记录场景、缺口、相关设计/消费者和验收；涉及历史数据说明版本共存。未接齐的链路按[契约 workflow](contract-workflow.md#遇到未接齐的交付链)定位，不把单层完成当成交付。
 
 ## 验证与记录
 

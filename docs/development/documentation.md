@@ -14,22 +14,22 @@
 | 按改动查阅的实现约束 | development/coding-rules.md |
 | 离线浏览版 | docs/index.html，由 Markdown 生成 |
 
-浏览版只收录 docs Markdown、工作区/代码根 README 和 AGENTS。Backend 短 README 用于打包，不重复导航；默认不建模块 README。
-禁止扩大扫描到 .env、配置、凭据、Gold、源码或 Skill 的 SKILL.md/references。执行资产不随文档整理修改。
+浏览版只收录 docs Markdown、工作区/代码根 README 和 AGENTS；非固定分类的普通文档归“其他资料”。Backend 短 README 用于打包，不重复导航；默认不建模块 README。
+禁止扩大扫描到 .env、配置、凭据、Gold、源码或 Skill 执行资产。docs 内含 SKILL.md 的目录也作为 Skill 包整体排除（含 references/HTML），相邻普通文档照常收录；原文件不随文档整理修改。
 
 ## 写一份设计
 
-按“用途/非目标 → 责任与数据 → 流程及失败 → 实施入口与验收”组织，复杂关系才用短表或图。
+较大设计按“用途/非目标 → 责任与数据 → 流程及失败 → 实施入口与验收”组织，只保留有关部分；小改动更新原段，不为套模板扩成整页。复杂关系才用短表或图。
 
 - 新内容优先替换原段，不追加“本轮完成”或迁移流水。设计保留限制及待接协议，完整进度集中计划。
 - 一个规则只写一次；字段全集链接契约，命令链接操作指南。跨页引用优于复制长段。
-- 明确设计要求、局部实现与已验证行为。不能删掉权限、冻结、批准、原请求、事务/结果未知和兼容条件来缩短文档。
+- 区分当前行为与目标设计；待接协议写清触发条件，不混入日常操作或每次开发的必做项。权限、冻结、批准、原请求、事务/结果未知和兼容保留唯一正本，不为缩短而删除。
 - README/AGENTS 用日文，设计正文用中文，标识符不翻译。每页一个 H1，标题层级不跳号。
 - 标题保持稳定；合并/删除时同步现行链接，不留空章节。旧代码编号仅由[对应表](../README.md#旧番号の対応)解释。
 
 ## 一次整理的更新顺序
 
-核对正本及相关代码/契约 → 精简正文和重复入口 → 检查链接/示例并生成浏览版 → 工具回归与实际浏览。
+核对正本及相关代码/契约 → 原位精简 → 检查链接/示例并生成浏览版 → 浏览修改涉及的页面；构建器或模板变化再做工具回归。
 保留无关改动，不重导出 OpenAPI 来掩盖差距；交付说明本次验证和未覆盖范围，不复制旧测试次数。
 
 ## 维护进度报告
@@ -40,17 +40,15 @@
 
 ## 生成和验证浏览版
 
-在 `SKM/` 执行；已有依赖不重复安装：
+在 `SKM/` 执行；首次缺依赖时才运行 `python3 -m pip install --user -r scripts/docs-requirements.txt`。正文修改只需：
 
 ```bash
-python3 -m pip install --user -r scripts/docs-requirements.txt
 python3 scripts/build_docs.py
 python3 scripts/build_docs.py --check
-python3 -m unittest discover -s scripts/tests -v
 ```
 
-build 校验标题、代码块、本地链接/锚点及 ViewSpec JSON，并由 Markdown + docs-viewer.html 覆盖生成 index.html；`--check` 不回写。
-只改正文时不动模板。`source_paths()` / `FIRST_PAGES` 分别控制收录与阅读顺序。
+build 校验标题、代码块及 ViewSpec JSON，并由 Markdown + docs-viewer.html 覆盖生成 index.html。普通生成遇到本地文件、锚点或浏览版页面链接失效时只向终端报告警告，不阻断预览、不删正文或改原文件；失效目标仍无法访问。`--check` 严格检查链接与生成物是否最新，失败也不回写。其他解析、读取和契约错误仍阻止生成；外部链接不联网验证。
+只改正文时不动模板。构建器/模板改变时加跑 `python3 -m unittest scripts.tests.test_build_docs -v`；不为正文修改执行部署工具全套测试。`source_paths()` / `FIRST_PAGES` 分别控制收录与阅读顺序。
 
 外置依赖用 PYTHONPATH，检查用 PYTHONDONTWRITEBYTECODE=1，不建 venv、不清理用户已有文件。
 若检查 Python 工具，Ruff 显式使用 `--config backend/pyproject.toml --no-cache`。

@@ -15,8 +15,8 @@ import { DOCUMENT_REQUEST_POLICY } from '../lib/documentFeedback'
 import { DOCUMENT_PREVIEW_MAX_BYTES as PREVIEW_MAX_BYTES, documentPreviewHtml } from '../lib/documentPreview'
 import { formatByteSize, formatLocalTimestamp } from '../lib/presentation'
 import { EmptyState, LoadingSkeleton, ModalDialog, useConfirmDialog } from './PageElements'
-import { DocumentUploadStatus } from './DocumentUploadStatus'
-import { DocumentUploadClosure } from './DocumentUploadClosure'
+import { DocumentUploadStatus, DocumentUploadRecovery } from './DocumentUploadStatus'
+import { DocumentUploadClosure, DocumentUploadClosureRecovery } from './DocumentUploadClosure'
 
 /** 画面内 preview の描画種別。拡張子登録で excel 等の viewer を後付けする拡張点。 */
 export type DocumentPreviewKind = 'text' | 'html'
@@ -163,11 +163,8 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
         <h2>{messages.documentsPanel.listTitle}</h2>
         {documentsState.status === 'ready' && <span className="eventCount">{documents.length}</span>}
       </div>
-      <p className="hint">
-        {messages.documentsPanel.hint}
-      </p>
-      <div className="documentUpload">
-        <label className="secondaryButton fileUploadButton">
+      <div className="documentUpload documentToolbar">
+        <label className="primaryButton fileUploadButton">
           {messages.documentsPanel.chooseFiles}
           <input
             type="file"
@@ -196,6 +193,9 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
             }}
           />
         </label>
+        <button type="button" className="secondaryButton documentRefresh" onClick={refresh} disabled={list.pending}>
+          {messages.documentsPanel.refresh}
+        </button>
       </div>
       <DocumentUploadStatus upload={upload} canRead={deletion.canRead() && !confirming} />
       <DocumentUploadClosure upload={upload} closure={closure} />
@@ -217,9 +217,6 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
             onClick={deletion.release}>{messages.documentsPanel.release}</button>
         </>}
       </section>}
-      <button type="button" className="secondaryButton" onClick={refresh} disabled={list.pending}>
-        {messages.documentsPanel.refresh}
-      </button>
       {documentsState.status === 'loading' && <LoadingSkeleton label={messages.documentsPanel.loadingDocs} rows={2} />}
       {documentsState.status === 'error' && <p className="error" role="alert">{documentsState.message}</p>}
       {documentsState.status === 'ready' && documents.length === 0 && (
@@ -234,6 +231,11 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
           onPreview={(document, kind) => void handlePreview(document, kind)}
         />
       )}
+      <details className="detailDisclosure documentHelp"><summary>{messages.documentsPanel.uploadHelp}</summary>
+        <p className="hint">{messages.documentsPanel.hint}</p>
+        <DocumentUploadRecovery upload={upload} canRead={deletion.canRead() && !confirming} />
+        <DocumentUploadClosureRecovery closure={closure} />
+      </details>
       {preview && <DocumentPreviewLoader key={preview.id} request={preview} projectId={projectId}
         isCurrent={() => mounted.current && previewRequest.current === preview}
         observeFailure={observeFailure} onClose={closePreview} />}
@@ -411,7 +413,7 @@ function FileRow({ document, projectId, busyId, onDelete, onPreview }: {
   )
 }
 
-/** 文書 preview を共通 modal として描画する。HTML は静的 allowlist と CSP 付き sandbox に限定する。
+/** 文書 preview を広い共通 modal に描画する。埋め込み CSS/静的 SVG は CSP 付き sandbox に保持する。
  *
  *  親が preview 有無で条件描画するため、ここでの open は常に true。
  *  遮罩・Escape・背面 scroll 停止・焦点復帰は ModalDialog 側の共通実装に委ねる。 */
@@ -427,7 +429,7 @@ export function DocumentPreviewDialog({ preview, projectId, onClose }: {
   return (
     <ModalDialog
       open
-      wide
+      viewport
       title={document.name}
       meta={`${formatByteSize(document.size)} · ${document.mime}`}
       actions={(

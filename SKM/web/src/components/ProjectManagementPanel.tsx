@@ -143,7 +143,7 @@ export function ProjectRows({ projects, projectId, locked, admin, onSelect, onAc
   return <div className="projectList">{projects.map((project) => <article className={`projectItem${project.project_id.toLowerCase() === projectId.toLowerCase() ? ' projectItemSelected' : ''}`} data-project-row={project.project_id} key={project.project_id}>
     <button className="projectSelect" type="button" data-project-action="select" onClick={() => onSelect(project.project_id)}>
       <strong>{project.name}</strong><span>{project.key}</span><small>{project.description || messages.projects.noDescription}</small>
-      <small className="mono">{project.project_id}</small><small>{messages.projectManagement.version}: {project.row_version} · {messages.projectManagement.states[project.status]}</small>
+      <small>{messages.projectManagement.states[project.status]}</small>
     </button>
     {admin && <div className="projectItemActions"><button className="secondaryButton" type="button" data-project-action="edit" disabled={locked} onClick={() => onAction('edit', project)}>{messages.projects.edit}</button>
       {project.status === 'ACTIVE'
@@ -151,6 +151,9 @@ export function ProjectRows({ projects, projectId, locked, admin, onSelect, onAc
         : <><button className="secondaryButton" type="button" data-project-action="restore" disabled={locked} onClick={() => onAction('restore', project)}>{messages.projects.restore}</button>
           <button className="dangerButton" type="button" data-project-action="delete" disabled={locked} onClick={() => onAction('delete', project)}>{messages.projects.deleteProject}</button></>}
     </div>}
+    <details className="detailDisclosure projectRowDetails"><summary>{messages.elements.technicalDetails}</summary>
+      <p className="mono">{project.project_id}</p><p>{messages.projectManagement.version}: {project.row_version}</p>
+    </details>
   </article>)}</div>
 }
 

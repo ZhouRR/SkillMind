@@ -22,6 +22,7 @@ import {
 } from '../api'
 import { EmptyState, LoadingSkeleton, ModalDialog, PageHeader } from '../components/PageElements'
 import { useMessages } from '../i18n'
+import { apiErrorMessage } from '../lib/apiFeedback'
 import { formatLocalTimestamp } from '../lib/presentation'
 import {
   COMMON_REDMINE_FIELD_KEYS,
@@ -131,7 +132,7 @@ export function ResourcesPage({ projectId, csrfToken }: {
       setTasks(nextTasks)
     }).catch((caught: unknown) => {
       if (!controller.signal.aborted) {
-        setError(caught instanceof Error ? caught.message : messages.resources.loadFailed)
+        setError(apiErrorMessage(caught, messages.resources.loadFailed, messages))
       }
     }).finally(() => {
       if (!controller.signal.aborted) setLoading(false)
@@ -155,7 +156,7 @@ export function ResourcesPage({ projectId, csrfToken }: {
       return true
     } catch (caught: unknown) {
       if (!controller.signal.aborted) {
-        setError(caught instanceof Error ? caught.message : messages.resources.mutationFailed)
+        setError(apiErrorMessage(caught, messages.resources.mutationFailed, messages))
       }
       return false
     } finally {
@@ -420,8 +421,7 @@ export function ResourcesPage({ projectId, csrfToken }: {
                   </button>
                 </div>
               </div>
-              {integrations.length === 0 && <p className="hint">{messages.resources.connectGuide}</p>}
-              <ResourceList items={integrations.map((item) => {
+              <ResourceList emptyText={messages.resources.connectGuide} items={integrations.map((item) => {
                 const provider = asResourceProvider(item.provider)
                 const accessText = accessForCapabilities(item.capabilities) === 'read_write'
                   ? messages.resources.accessBadgeReadWrite
@@ -1127,7 +1127,7 @@ function SecretResolverFields({
 }
 
 /** 管理資源の共通 audit list。削除ではなく disable だけを許可する。 */
-function ResourceList({ items }: { items: Array<{
+function ResourceList({ items, emptyText }: { emptyText?: string; items: Array<{
   id: string
   title: string
   detail: string
@@ -1136,7 +1136,7 @@ function ResourceList({ items }: { items: Array<{
   onDisable?: () => void
 }> }) {
   const messages = useMessages()
-  if (items.length === 0) return <p className="compactEmpty">{messages.resources.notConfigured}</p>
+  if (items.length === 0) return <p className="compactEmpty">{emptyText ?? messages.resources.notConfigured}</p>
   return (
     <ul className="resourceList">
       {items.map((item) => (

@@ -13,7 +13,7 @@ Skill をタスクとして実行し、結果・根拠・人工評価・外部�
 | API・障害対応 | [API 利用](../docs/development/api-usage.md) / [Runbook](../docs/operations/runbook.md) / [復元](../docs/operations/backup-recovery.md) |
 
 ソース開発は Python 3.12、Node.js 26 / pnpm 11.7.0。配備は Windows/Rancher で image を構築し、Linux の Docker Compose + make で実行する（宿主 Python/Node 不要）。
-`make bootstrap-admin` は既存 data を削除せず最初の ADMIN を作成する。
+配備先は images.tar・compose.yml・.env・Makefile の四 file だけ。`make deploy` は初回/更新共通で API/Web/Worker を起動し、`make bootstrap-admin` は既存 data を削除せず最初の ADMIN を作成する。
 
 ## Backend
 
@@ -30,7 +30,7 @@ route は認証と入出力、service は業務処理、repository は永続化�
 ## Web
 
 [web/src](web/src/) は React + TypeScript。pages・components は画面、api は共有 HTTP client、lib・hooks は純粋処理・非同期制御。
-Task Center は実行対象の選択、[Workspace](../docs/design/workspace.md) は一つの Run の観察を担当する。
+Task Center は実行対象の選択、[Workspace](../docs/design/workspace.md) は一つの Run の観察を担当する。配色・情報密度・操作配置・PC 検証は[全画面の視覚規範](../docs/design/workspace.md#视觉规范)に従う。
 
 環境・proxy・typecheck/Vitest/build・mock browser は[Web 手順](../docs/development/local-development.md#web)へ。画面別の実装状態は計画で確認する。
 
@@ -41,7 +41,7 @@ Task Center は実行対象の選択、[Workspace](../docs/design/workspace.md) 
 
 ## Scripts
 
-[scripts](scripts/) に契約/Compose の検査、OpenAPI・文書生成、配備・image 移送の工具を置く。
+[scripts](scripts/) に契約/Compose の検査、OpenAPI・文書生成、image export の工具を置く。配備先へのコピーは不要。
 コマンドと副作用は[検証表](../docs/development/local-development.md#変更に応じた検証)、[文書管理](../docs/development/documentation.md)、[配備手順](../docs/operations/deployment.md)を参照する。
 
 ## Skills
@@ -51,5 +51,5 @@ Task Center は実行対象の選択、[Workspace](../docs/design/workspace.md) 
 
 ## Images
 
-`images/skillmind-<Version>/` は checksum 付き offline release であり、DB・blob・workspace・KEK の backup ではない。
-[image 移送と更新](../docs/operations/quickstart.md#image-移送と更新)で必要 image・送受信 checksum・既存 archive の保全を確認し、復旧は[同一復元点](../docs/operations/backup-recovery.md#一致恢复点包含什么)を使う。
+`images/images.tar` は構築済み image の export であり、DB・blob・workspace・KEK の backup ではない。`-Force` は archive の置換のみ許可する。
+[image 移送と更新](../docs/operations/quickstart.md#image-移送と更新)で必要 image・信頼できる移送・旧 archive の保全を確認し、復旧は[同一復元点](../docs/operations/backup-recovery.md#一致恢复点包含什么)を使う。

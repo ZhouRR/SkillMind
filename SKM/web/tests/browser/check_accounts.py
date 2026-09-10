@@ -375,6 +375,10 @@ async def password_form(page: Page, messages: dict) -> Locator:
     """実 label から password を入力し、送信回数と消去を後続 case で検証する。"""
 
     form = page.locator('[data-account-form="password"]')
+    disclosure = page.locator('[data-account-action="password"]')
+    await expect(disclosure).to_be_attached()
+    if await disclosure.get_attribute("open") is None:
+        await disclosure.locator(":scope > summary").click()
     await expect(form.get_by_label(messages["currentPassword"], exact=True)).to_be_enabled()
     for field, value in (
         ("currentPassword", CURRENT_PASSWORD),
@@ -382,6 +386,10 @@ async def password_form(page: Page, messages: dict) -> Locator:
         ("confirmPassword", PASSWORD),
     ):
         await form.get_by_label(messages[field], exact=True).fill(value)
+    await disclosure.locator(":scope > summary").click()
+    await expect(form).not_to_be_visible()
+    await disclosure.locator(":scope > summary").click()
+    await expect(form.get_by_label(messages["newPassword"], exact=True)).to_have_value(PASSWORD)
     return form
 
 
@@ -502,6 +510,10 @@ async def exercise_case(
             await expect(page.locator(".accountEvents > details")).to_be_attached()
             await settle(page)
             await page.screenshot(path=str(output / f"{name}-entry.png"), full_page=True)
+        if role == "ADMIN":
+            disclosure = page.locator(".accountDirectorySection")
+            if await disclosure.get_attribute("open") is None:
+                await disclosure.locator(":scope > summary").click()
         await action(page, api, messages)
         await settle(page)
         await privacy(page)
@@ -566,6 +578,10 @@ async def self_revoke(page: Page, api: AccountsApi, messages: dict) -> None:
     """自己失効は LoginPage に戻るだけで、追加 logout や password の再送をしない。"""
 
     logout_count = len([call for call in api.calls if call[1] == "auth/logout"])
+    disclosure = page.locator('[data-account-own] [data-account-action="sessions"]')
+    await expect(disclosure).to_be_attached()
+    if await disclosure.get_attribute("open") is None:
+        await disclosure.locator(":scope > summary").click()
     await page.get_by_label(messages["confirmRevoke"], exact=True).check()
     await page.get_by_role("button", name=messages["revoke"], exact=True).click()
     await expect(page.locator('input[name="email"]')).to_be_visible()
@@ -620,10 +636,21 @@ async def version_conflict(page: Page, api: AccountsApi, messages: dict) -> None
     api.users[TARGET]["row_version"] = 8
     api.users[TARGET]["display_name"] = "New server facts"
     api.failure = (409, "user_version_conflict")
+    api.hold = True
+    directory = page.locator(".accountDirectorySection")
+    await directory.locator(":scope > summary").click()
+    await expect(form).not_to_be_visible()
+    await directory.locator(":scope > summary").click()
+    await expect(form.get_by_label(messages["fields"]["name"], exact=True)).to_have_value("Unsaved original draft")
     await double_submit(form)
+    await asyncio.wait_for(api.received.wait(), 10)
+    await directory.locator(":scope > summary").click()
+    api.release.set()
     await expect(editor.get_by_role("alert")).to_contain_text(
         messages["failures"]["versionConflict"]
     )
+    await expect(directory).to_have_attribute("open", "")
+    await expect(editor.get_by_role("alert")).to_be_visible()
     await expect(editor.locator(".accountVersion")).to_contain_text("7")
     await expect(form.get_by_label(messages["fields"]["name"], exact=True)).to_have_value(
         "Unsaved original draft"

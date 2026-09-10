@@ -1,6 +1,6 @@
 # 公开契约变更与联调
 
-字段语义见[领域设计](../design/README.md)，状态见[计划](../planning/roadmap.md)，命令环境见[本地开发](local-development.md)。
+本页适用于公开协议或持久格式变更；内部重构、样式和文案不因此新增 Schema、版本或 migration。字段语义见[领域设计](../design/README.md)，状态见[计划](../planning/roadmap.md)，命令环境见[本地开发](local-development.md)。
 
 ## 先看整条交付链
 
@@ -21,14 +21,7 @@
 
 ## 开工时列出消费者和同步先后
 
-按[同步表](coding-rules.md#同步点)核对：
-
-- Schema/DTO：required、nullable、enum、额外字段；route：status、media type、header、缓存和 Problem。
-- service/repository：授权、hash、幂等、持久兼容与迁移；Worker/CLI/Schedule：旁路消费者。
-- Web：validator/barrel、页面、三语、fixture 与 mock browser。
-- [OpenAPI](../../SKM/contracts/openapi/skillmind-api.v1.json)：由 app 生成，不能手补。
-
-新 example 同步 [validator](../../SKM/scripts/validate_contracts.py)与[契约测试](../../SKM/backend/tests/contracts/test_contracts.py)的注册表。
+按[同步表](coding-rules.md#同步点)识别实际消费者，包括 Worker/CLI/Schedule 等旁路；只同步受影响项。除了 JSON 字段，还需核对 route 的 status、media type、header、缓存和 Problem。[OpenAPI](../../SKM/contracts/openapi/skillmind-api.v1.json)由 app 生成，不能手补。
 Schema 不验证授权/并发，OpenAPI 一致性不证明声明覆盖真实响应；例如登录 429 还须检查 Retry-After 和页面处理。
 
 ## 遇到未接齐的交付链

@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
@@ -29,6 +30,7 @@ GROUPS = {
     "development": "开发指南",
     "operations": "部署与运维",
     "code": "工程入口",
+    "other": "其他资料",
 }
 FIRST_PAGES = [
     "docs/README.md",
@@ -109,10 +111,20 @@ class HtmlLinks(HTMLParser):
             self.links.append(str(values[key]))
 
 
+def is_skill_asset(path: Path) -> bool:
+    """docs 内でも SKILL.md を持つ package 全体を文書の収録対象から除く。"""
+
+    return any(
+        (parent / "SKILL.md").is_file()
+        for parent in path.parents
+        if parent.is_relative_to(DOCS)
+    )
+
+
 def source_paths() -> list[Path]:
     """文書だけを列挙し、Skill 入力・設定・依存 directory は読まない。"""
 
-    paths = list(DOCS.rglob("*.md"))
+    paths = [path for path in DOCS.rglob("*.md") if not is_skill_asset(path)]
     paths += [ROOT / "README.md", ROOT / "SKM/README.md", ROOT / "SKM/AGENTS.md"]
     # package 用の短い README は索引に重複させず、工程案内をコード root へ集約する。
     order = {name: index for index, name in enumerate(FIRST_PAGES)}
@@ -203,6 +215,10 @@ def local_target(origin: Path, href: str) -> tuple[Path, str] | None:
     return path, unquote(parts.fragment)
 
 
+class MissingLinkError(ValueError):
+    """参照先の欠落だけを、構文・読取・設定の異常から区別する。"""
+
+
 def validate_link(origin: Path, href: str, anchors: dict[Path, set[str]]) -> None:
     """ローカル file と Markdown/HTML anchor の実在を確認する。"""
 
@@ -220,14 +236,27 @@ def validate_link(origin: Path, href: str, anchors: dict[Path, set[str]]) -> Non
             page, section = alias["page"], alias["anchor"]
         viewer_target = (ROOT / page).resolve()
         if not separator or viewer_target not in anchors or viewer_target.suffix != ".md":
-            raise ValueError(f"{origin.relative_to(ROOT)}: missing viewer page {href}")
+            raise MissingLinkError(f"{origin.relative_to(ROOT)}: missing viewer page {href}")
         if section and section not in anchors[viewer_target]:
-            raise ValueError(f"{origin.relative_to(ROOT)}: missing viewer anchor {href}")
+            raise MissingLinkError(f"{origin.relative_to(ROOT)}: missing viewer anchor {href}")
         return
     if not path.exists():
-        raise ValueError(f"{origin.relative_to(ROOT)}: missing link {href}")
+        raise MissingLinkError(f"{origin.relative_to(ROOT)}: missing link {href}")
     if anchor and path in anchors and anchor not in anchors[path]:
-        raise ValueError(f"{origin.relative_to(ROOT)}: missing anchor {href}")
+        raise MissingLinkError(f"{origin.relative_to(ROOT)}: missing anchor {href}")
+
+
+def check_link(
+    origin: Path, href: str, anchors: dict[Path, set[str]], *, strict_links: bool,
+) -> None:
+    """通常生成は欠落リンクを警告にし、厳密検査は従来どおり失敗させる。"""
+
+    try:
+        validate_link(origin, href, anchors)
+    except MissingLinkError as error:
+        if strict_links:
+            raise
+        print(f"Documentation warning: {error}", file=sys.stderr)
 
 
 def page_url(path: Path, anchor: str = "") -> str:
@@ -236,7 +265,10 @@ def page_url(path: Path, anchor: str = "") -> str:
     return "#" + quote(path.relative_to(ROOT).as_posix(), safe="/") + "::" + quote(anchor)
 
 
-def prepare_links(document: Document, anchors: dict[Path, set[str]], pages: set[Path]) -> None:
+def prepare_links(
+    document: Document, anchors: dict[Path, set[str]], pages: set[Path],
+    *, strict_links: bool = True,
+) -> None:
     """元 Markdown の参照を検証後、閲覧版専用の参照へ変換する。"""
 
     for token in document.tokens:
@@ -247,7 +279,7 @@ def prepare_links(document: Document, anchors: dict[Path, set[str]], pages: set[
             href = child.attrGet(attribute) if attribute else None
             if not href:
                 continue
-            validate_link(document.path, href, anchors)
+            check_link(document.path, href, anchors, strict_links=strict_links)
             target = local_target(document.path, href)
             if target:
                 path, anchor = target
@@ -300,8 +332,8 @@ def search_sections(document: Document) -> list[dict[str, str]]:
     return sections
 
 
-def build() -> tuple[str, int, int]:
-    """全検証が成功した場合だけ決定的な HTML を組み立てる。"""
+def build(*, strict_links: bool = False) -> tuple[str, int, int]:
+    """欠落リンクは既定で警告に留め、本文や検証対象を落とさず HTML を組み立てる。"""
 
     parser = MarkdownIt("commonmark", {"html": False}).enable(["table", "strikethrough"])
     documents = [parse_document(path, parser) for path in source_paths()]
@@ -312,7 +344,7 @@ def build() -> tuple[str, int, int]:
             raise ValueError(f"invalid legacy page target: {legacy}")
     html_sources: dict[Path, HtmlLinks] = {}
     for path in sorted(DOCS.rglob("*.html")):
-        if path == OUTPUT:
+        if path == OUTPUT or is_skill_asset(path):
             continue
         parsed = HtmlLinks()
         parsed.feed(path.read_text(encoding="utf-8-sig"))
@@ -320,16 +352,18 @@ def build() -> tuple[str, int, int]:
         anchors[path] = parsed.anchors
     for path, parsed in html_sources.items():
         for link in parsed.links:
-            validate_link(path, link, anchors)
+            check_link(path, link, anchors, strict_links=strict_links)
     count = validate_examples(documents)
     pages = set(document.path for document in documents)
     rendered = []
     for document in documents:
-        prepare_links(document, anchors, pages)
+        prepare_links(document, anchors, pages, strict_links=strict_links)
         relative = document.path.relative_to(ROOT).as_posix()
         group = relative.split("/")[1] if relative.startswith("docs/") else "code"
         if group == "README.md":
             group = "overview"
+        if group not in GROUPS:
+            group = "other"
         body = parser.renderer.render(document.tokens, parser.options, {})
         body = body.replace("<table>", '<div class="table-scroll" tabindex="0"><table>')
         body = body.replace("</table>", "</table></div>")
@@ -361,10 +395,12 @@ def main() -> int:
     """check は検証のみ、通常実行は生成物だけを更新する。"""
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--check", action="store_true", help="Validate without writing files")
+    parser.add_argument(
+        "--check", action="store_true", help="Strictly validate links and freshness without writing"
+    )
     args = parser.parse_args()
     try:
-        content, count, examples = build()
+        content, count, examples = build(strict_links=args.check)
         if args.check:
             if not OUTPUT.exists() or OUTPUT.read_text(encoding="utf-8") != content:
                 raise ValueError("docs/index.html is stale; run python3 scripts/build_docs.py")
@@ -375,7 +411,8 @@ def main() -> int:
         return 1
     print(
         f"Documentation {'check' if args.check else 'build'} passed: "
-        f"{count} Markdown files, {examples} ViewSpec example(s), local links and anchors"
+        f"{count} Markdown files, {examples} ViewSpec example(s); "
+        f"link policy: {'strict' if args.check else 'warn on missing targets'}"
     )
     return 0
 

@@ -11,13 +11,13 @@ from pathlib import Path
 from types import CoroutineType
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock
+from uuid import UUID
 
 import pytest
 from alembic.script import ScriptDirectory
 from alembic.script.revision import Revision, RevisionMap
 from alembic.util import CommandError
 from redis.asyncio import Redis
-
 from skillmind.ops import preflight
 
 _MIGRATIONS = Path(__file__).resolve().parents[2] / "migrations"
@@ -38,6 +38,7 @@ def settings() -> Mock:
     return Mock(
         database_url="postgresql+asyncpg://database.invalid/preflight-test",
         redis_url="redis://redis.invalid/0",
+        object_storage_namespace_id=UUID("00000000-0000-4000-8000-000000000001"),
     )
 
 
@@ -49,6 +50,36 @@ def _graph(revisions: tuple[tuple[str, str | None], ...]) -> ScriptDirectory:
         lambda: (Revision(identifier, parent) for identifier, parent in revisions)
     )
     return script
+
+
+@pytest.mark.parametrize("migration_plan", [False, True])
+@pytest.mark.parametrize(
+    ("namespace", "reason"), [(None, "namespace_missing"), (UUID(int=0), "namespace_invalid")],
+)
+async def test_namespace_configuration_stops_before_external_checks(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], settings: Mock,
+    migration_plan: bool, namespace: UUID | None, reason: str,
+) -> None:
+    """欠落/ゼロ namespace は両入口で非成功とし、接続前に安全な修正先を示す。"""
+
+    settings.object_storage_namespace_id = namespace
+    database = AsyncMock(side_effect=AssertionError("Database must not be contacted"))
+    redis = Mock(side_effect=AssertionError("Redis must not be contacted"))
+    monkeypatch.setattr(preflight, "Settings", Mock(return_value=settings))
+    monkeypatch.setattr(preflight, "inspect_database", database)
+    monkeypatch.setattr(preflight.Redis, "from_url", redis)
+
+    assert await preflight._main(migration_plan=migration_plan) == 1
+    output = capsys.readouterr().out
+    report = json.loads(output)
+    assert report["status"] == "not_ready"
+    check = report["checks"]["object_storage_configuration"]
+    assert check["reason"] == reason
+    assert check["field"] == "SKILLMIND_OBJECT_STORAGE_NAMESPACE_ID"
+    assert ".env" in check["hint"] and "Preserve" in check["hint"]
+    assert settings.database_url not in output and settings.redis_url not in output
+    database.assert_not_called()
+    redis.assert_not_called()
 
 
 @pytest.mark.parametrize("allow_pending", [False, True])

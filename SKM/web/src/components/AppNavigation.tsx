@@ -15,7 +15,6 @@ import {
   APP_ROUTES,
   routeHref,
   routeHrefWithProject,
-  routeUsesModuleFilter,
   type AppRoute,
   type RouteScope,
 } from '../lib/routing'
@@ -29,7 +28,7 @@ const PENDING_BADGE_LIMIT = 20
 /** CSS と同じ閾値を使い、狭幅で隠した操作を tab 順序からも外す。 */
 const COMPACT_NAV_QUERY = '(max-width: 960px)'
 
-/** Product identity、主導航、唯一の Project 切替、接続状態を幅に応じて披露する。 */
+/** 主導航、唯一の Project 切替、接続状態を幅に応じて披露する。 */
 export function AppNavigation({ currentRoute, metaState, projectId, projectState, currentProject, pendingProjectId = projectId, projectHash, onRefreshProjects, onSelectLanguage, onSelectProject, onSelectModule, activeModuleId, modules, user, onLogout, onSessionEnded, logoutError, logoutPending = false }: {
   currentRoute: AppRoute
   metaState: MetaState
@@ -66,7 +65,7 @@ export function AppNavigation({ currentRoute, metaState, projectId, projectState
   const [menuOpen, setMenuOpen] = useState(false)
   const menuToggle = useRef<HTMLButtonElement>(null)
   const menuPanel = useRef<HTMLDivElement>(null)
-  const brandLink = useRef<HTMLAnchorElement>(null)
+  const restoreNavFocus = useRef(false)
   const lastFocused = useRef<Element | null>(null)
   sessionEnded.current = onSessionEnded
 
@@ -98,10 +97,9 @@ export function AppNavigation({ currentRoute, metaState, projectId, projectState
     function updateLayout(): void {
       const active = window.document.activeElement
       const focused = active === window.document.body ? lastFocused.current : active
+      restoreNavFocus.current = !query.matches && focused === menuToggle.current
       if (query.matches && focused && menuPanel.current?.contains(focused)) {
         menuToggle.current?.focus()
-      } else if (!query.matches && focused === menuToggle.current) {
-        brandLink.current?.focus()
       }
       setCompact(query.matches)
       setMenuOpen(false)
@@ -115,6 +113,15 @@ export function AppNavigation({ currentRoute, metaState, projectId, projectState
       window.document.removeEventListener('focusin', rememberFocus)
     }
   }, [])
+
+  useLayoutEffect(() => {
+    // hidden 属性が外れた後に、消えた menu button の焦点を現在の導航へ戻す。
+    if (compact || !restoreNavFocus.current) return
+    restoreNavFocus.current = false
+    const target = menuPanel.current?.querySelector<HTMLAnchorElement>('.sideNav a[aria-current="page"]')
+      ?? menuPanel.current?.querySelector<HTMLAnchorElement>('.sideNav a')
+    target?.focus()
+  }, [compact])
 
   useEffect(() => {
     if (!compact || !menuOpen) return
@@ -156,10 +163,6 @@ export function AppNavigation({ currentRoute, metaState, projectId, projectState
   return (
     <aside className="sidebar">
       <div className="sidebarHeader">
-        <a className="brand" href={navigationHref('home')} aria-label={messages.nav.brandAriaHome} onClick={closeMenu} ref={brandLink}>
-          <span className="brandMark">SM</span>
-          <span className="brandName"><strong>Skillmind</strong><small>{messages.nav.brandTagline}</small></span>
-        </a>
         <button
           aria-controls={menuId}
           aria-expanded={compact && menuOpen}
@@ -198,7 +201,7 @@ export function AppNavigation({ currentRoute, metaState, projectId, projectState
             subNavFor="workspace"
             subNav={projectId !== '' && modules.length > 0 && (
               <ModuleNavList
-                activeModuleId={routeUsesModuleFilter(currentRoute) ? activeModuleId : null}
+                activeModuleId={currentRoute === 'workspace' ? activeModuleId : null}
                 modules={modules}
                 onSelect={(selected) => { closeMenu(); onSelectModule(selected) }}
               />
@@ -282,7 +285,7 @@ function NavGroup({ currentRoute, hrefFor, scope, subNavFor, subNav, badges, onN
  * 強調も両画面で続ける。遷移先の画面で強調が消えると、選択が失われたように見える。 */
 export function ModuleNavList({ modules, activeModuleId, onSelect }: {
   modules: ProjectModuleRecord[]
-  /** 絞り込みが効かない画面では null(未強調)。 */
+  /** Workspace 以外では null とし、子导航を現在地として強調しない。 */
   activeModuleId: string | null
   onSelect: (moduleId: string) => void
 }) {
@@ -315,7 +318,7 @@ function ServiceStatus({ state }: { state: MetaState }) {
       : ['dotReady', messages.service.ok(state.meta.version)]
   // 状態の意味を色だけに頼らず、披露内でも文字と読み上げ名を保持する。
   return (
-    <div className="serviceStatus" aria-label={label} title={label}>
+    <div className="serviceStatus" aria-label={label} title={`${label}\n${messages.service.scope}`}>
       <span className={`statusDot ${dotClass}`} />
       <span className="serviceStatusText">{label}</span>
     </div>

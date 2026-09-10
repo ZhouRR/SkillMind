@@ -141,9 +141,17 @@ async def show_frozen(page: Page, language: str, count: int) -> None:
         await expect(page.locator('.frozenDocuments')).to_have_count(0)
         return
     await expect(page.locator('.frozenDocuments')).to_be_visible()
-    await page.locator('.frozenDocuments summary').click()
+    members = page.locator('.frozenDocumentSlot > details')
+    if await members.get_attribute('open') is None:
+        await members.locator(':scope > summary').click()
     await expect(page.locator('.frozenDocumentMembers > li')).to_have_count(count)
     await expect(page.locator('.frozenDocuments')).to_contain_text(FROZEN.documents[0].path)
+    technical = page.locator('.frozenDocumentMembers > li').first.locator('.detailDisclosure')
+    if await technical.get_attribute('open') is not None:
+        await technical.locator(':scope > summary').click()
+    await expect(technical.locator('code').first).not_to_be_visible()
+    await technical.locator(':scope > summary').click()
+    await expect(technical.locator('code').first).to_have_text(str(FROZEN.documents[0].document_id))
     await expect(page.locator('.frozenDocuments')).to_contain_text(FROZEN.documents[0].content_hash)
 
 
@@ -153,7 +161,7 @@ async def exercise(page: Page, api: DocumentApiFixture, url: str, screen: str, m
     await page.goto(url)
     await page.evaluate('next => window.updateSubmissionTestContext(next)', {'screen': screen, 'language': language})
     if screen == 'tasks':
-        await page.locator('.taskCard .formRow button').first.click()
+        await page.locator('.taskCardActions button:not([data-flow-open])').first.click()
     else:
         await page.locator('.runLauncher > button').click()
     await expect(page.get_by_role('dialog')).to_be_visible()

@@ -11,8 +11,8 @@ export function DocumentUploadStatus({ upload, canRead }: {
   const messages = useMessages()
   const labels = messages.documentsPanel.upload
   const failures = messages.documentsPanel.failures
-  const [key, setKey] = useState('')
   const counts = uploadCounts(upload.batch)
+  if (counts.total === 0 && !upload.recovery && !upload.notice && !upload.checkFailure && !upload.checking) return null
   return <section className="documentUploadStatus" aria-label={labels.title}>
     <h3>{labels.title}</h3>
     {counts.total > 0 && <>
@@ -20,9 +20,11 @@ export function DocumentUploadStatus({ upload, canRead }: {
       <ul className="documentUploadItems">
         {upload.batch.items.map((item) => <li key={item.original.uploadKey}>
           <strong>{item.original.label}</strong><p>{labels.phase[item.phase]}</p>
-          <label>{labels.key}<input readOnly value={item.original.uploadKey}
-            onFocus={(event) => event.currentTarget.select()} /></label>
-          {item.document && <p>{labels.documentId}: {item.document.document_id}<br />{item.document.name}</p>}
+          <details className="detailDisclosure"><summary>{messages.elements.technicalDetails}</summary>
+            <label>{labels.key}<input readOnly value={item.original.uploadKey}
+              onFocus={(event) => event.currentTarget.select()} /></label>
+            {item.document && <p>{labels.documentId}: {item.document.document_id}<br />{item.document.name}</p>}
+          </details>
           {item.failure && <p className="error" role="alert">{failures[item.failure.key]}</p>}
         </li>)}
       </ul>
@@ -62,7 +64,17 @@ export function DocumentUploadStatus({ upload, canRead }: {
       {upload.recovery.failure && <p className="error" role="alert">{failures[upload.recovery.failure.key]}</p>}
       <button type="button" className="secondaryButton" onClick={upload.closeRecovery}>{labels.closeRecovery}</button>
     </section>}
-    <details className="uploadRecovery"><summary>{labels.recover}</summary>
+  </section>
+}
+
+/** 過去の要求の照会入口。進行中の batch 状態とは分け、結果は主画面へ表示する。 */
+export function DocumentUploadRecovery({ upload, canRead }: {
+  upload: ReturnType<typeof useDocumentUpload>
+  canRead: boolean
+}) {
+  const labels = useMessages().documentsPanel.upload
+  const [key, setKey] = useState('')
+  return <details className="uploadRecovery"><summary>{labels.recover}</summary>
     <p className="hint">{labels.recoveryHint}</p>
     <form onSubmit={(event) => { event.preventDefault(); upload.recover(key) }}>
       <label>{labels.recoveryKey}<input value={key} onChange={(event) => setKey(event.currentTarget.value)}
@@ -70,5 +82,4 @@ export function DocumentUploadStatus({ upload, canRead }: {
       <button type="submit" className="secondaryButton" disabled={!upload.canRecover() || !canRead}>
         {labels.recover}</button>
     </form></details>
-  </section>
 }

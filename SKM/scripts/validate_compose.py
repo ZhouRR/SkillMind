@@ -8,7 +8,7 @@ from typing import Any
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-COMPOSE_FILE = ROOT / "compose.yaml"
+COMPOSE_FILE = ROOT / "compose.yml"
 
 
 def as_mapping(value: object, *, name: str) -> dict[str, Any]:
@@ -72,15 +72,15 @@ def validate() -> None:
     # 同一 tag の並列 export を防ぐため、Backend image の build 所有者は API 一つに限定する。
     backend_service_names = {"api", "worker", "migrate"}
     backend_images = {services[service_name].get("image") for service_name in backend_service_names}
-    if backend_images != {"${SKM_BACKEND_IMAGE:-skillmind/backend:0.1.0}"}:
+    if backend_images != {"skillmind/backend:0.1.0"}:
         raise ValueError("API, Worker, and Migrate must share one Backend image")
-    if services["web"].get("image") != "${SKM_WEB_IMAGE:-skillmind/web:0.1.0}":
-        raise ValueError("Web must support the same explicit immutable-image selection")
-    # CLI 補間と container 注入の path は共用 runner が同じ絶対値に固定する。
-    source = (
-        "${SKM_COMPOSE_ENV_FILE:?select the environment file through the deployment entrypoint}"
-    )
+    if services["web"].get("image") != "skillmind/web:0.1.0":
+        raise ValueError("Web must use the exported application image tag")
+    # build/配備とも既定は .env。Makefile の ENV_FILE は補間/注入で共有する。
+    source = "${ENV_FILE:-.env}"
     for service_name in backend_service_names:
+        if services[service_name].get("pull_policy") != "never":
+            raise ValueError("Backend services must use local images through pull_policy: never")
         if services[service_name].get("env_file") != [source]:
             raise ValueError("API, Worker, and Migrate must share the selected environment file")
     backend_builders = {
@@ -142,6 +142,8 @@ def validate() -> None:
     if backend_environment.get("SKILLMIND_CONTEXT_PATH") != context_expression:
         raise ValueError("API must receive the same context path used by Traefik")
     web_build = as_mapping(services["web"].get("build"), name="services.web.build")
+    if web_build.get("context") != "." or web_build.get("dockerfile") != "web/Dockerfile":
+        raise ValueError("Web build context must include sibling contracts through web/Dockerfile")
     web_build_args = as_mapping(web_build.get("args"), name="services.web.build.args")
     if web_build_args.get("SKILLMIND_CONTEXT_PATH") != context_expression:
         raise ValueError("Web build must receive the same context path used by Traefik")

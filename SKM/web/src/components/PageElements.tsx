@@ -61,7 +61,7 @@ export function ProjectContextSelect({ projectState, projectId, currentProject, 
           {needsPlaceholder && <option disabled value={projectId}>{placeholder}</option>}
           {projects.map((project) => (
             <option key={project.project_id} value={project.project_id}>
-              {project.name} · {project.key}
+              {project.name}
               {project.status === 'ARCHIVED' && ` · ${messages.elements.archivedProject}`}
             </option>
           ))}
@@ -113,7 +113,7 @@ export function EmptyState({ text, action }: { text: string; action?: ReactNode 
  *  実際に破棄すべき草稿は呼び出し元が明示的に破棄する。
  *  開いている間は Escape と遮罩 click で閉じられ、背面の scroll を止め、
  *  閉じた後は開いた時の要素へ焦点を戻す(keyboard 利用者が現在地を失わないため)。 */
-export function ModalDialog({ open, title, meta, actions, wide = false, drawer = false, onClose, children }: {
+export function ModalDialog({ open, title, meta, actions, wide = false, drawer = false, viewport = false, onClose, children }: {
   open: boolean
   title: string
   /** 見出し横の補助情報(寸法・種別など)。 */
@@ -123,6 +123,8 @@ export function ModalDialog({ open, title, meta, actions, wide = false, drawer =
   wide?: boolean
   /** 同じ focus lifecycle で右側の補助閲覧を表示する。 */
   drawer?: boolean
+  /** 文書 preview は四辺に同じ余白を残して viewport を使う。 */
+  viewport?: boolean
   onClose: () => void
   children: ReactNode
 }) {
@@ -168,7 +170,7 @@ export function ModalDialog({ open, title, meta, actions, wide = false, drawer =
   }, [open])
   return (
     <div
-      className={`modalOverlay${wide ? ' modalWide' : ''}${drawer ? ' modalDrawer' : ''}`}
+      className={`modalOverlay${wide ? ' modalWide' : ''}${drawer ? ' modalDrawer' : ''}${viewport ? ' modalViewport' : ''}`}
       hidden={!open}
       onClick={(event) => { if (event.target === event.currentTarget) onClose() }}
     >

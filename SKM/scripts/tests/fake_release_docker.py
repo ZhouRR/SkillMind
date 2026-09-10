@@ -1,150 +1,114 @@
-"""Shell/PowerShell の release 回帰専用で、実 Docker には接続しない。"""
+"""実 Docker の代わりに固定 fixture の image/container 状態と argv を記録する。"""
 
 from __future__ import annotations
 
 import json
 import os
-import shutil
-import subprocess
+import signal
 import sys
 from pathlib import Path
 
-from test_deploy import DAEMON, IMAGE_ENV, IMAGES, READY, SERVICE_IMAGES
+BASE = Path(os.environ["SKM_FAKE_ROOT"])
 
 
-def main() -> int:
-    """一時 fixture に限定して process protocol と失敗を模倣する。"""
+def main(args: list[str]) -> int:
+    """外部接続せず、Makefile/PowerShell が要求した操作だけを再現する。"""
 
-    root = Path(os.environ["SKM_FAKE_ROOT"])
-    state = json.loads((root / "state.json").read_text())
-    args = sys.argv[1:]
-    with (root / "trace.jsonl").open("a") as stream:
+    state = json.loads((BASE / "state.json").read_text())
+    with (BASE / "trace.jsonl").open("a") as stream:
         stream.write(json.dumps(args) + "\n")
-    if os.environ.get("SKM_FAKE_FAIL") and os.environ["SKM_FAKE_FAIL"] in " ".join(args):
-        print("fixture-private-error", file=sys.stderr)
+    joined = " ".join(args)
+    if os.environ.get("SKM_FAKE_TERMINATE_SUFFIX") and joined.endswith(
+        os.environ["SKM_FAKE_TERMINATE_SUFFIX"]
+    ):
+        os.kill(os.getppid(), signal.SIGTERM)
+        return 0
+    suffix = os.environ.get("SKM_FAKE_FAIL_SUFFIX")
+    if suffix and joined.endswith(suffix):
+        print("fixture docker failure: requested operation failed", file=sys.stderr)
         return 17
-    if os.environ.get("SKM_FAKE_FAIL_EXACT") == " ".join(args[9:]):
-        print("fixture-private-error", file=sys.stderr)
-        return 17
-    if args[0] == "compose":
-        args = args[9:]
-        if args == ["config", "--quiet"]:
-            return 0
-        if args == ["config", "--format", "json"]:
-            print(json.dumps(state["config"]))
-        elif args == ["config", "--images"]:
-            print("\n".join(service["image"] for service in state["config"]["services"].values()))
-        elif "skillmind.ops.preflight" in args:
-            print(json.dumps(READY))
-        elif args[:1] == ["run"]:
-            if args[-1] != "migrate":
-                raise ValueError("unexpected command")
-        elif args[:1] == ["up"]:
-            services = args[9:]
-            for service in services:
-                row = next(row for row in state["containers"] if row["service"] == service)
-                row.update(state="running", image=SERVICE_IMAGES[service])
-            (root / "state.json").write_text(json.dumps(state))
-        elif args[:1] == ["build"]:
-            pass
-        else:
-            raise ValueError(f"unexpected compose arguments {args}")
-    elif args[:1] == ["info"]:
-        print(DAEMON if args[-1] == "{{.ID}}" else state.get("platform", "linux/x86_64"))
-    elif args[:1] == ["ps"]:
-        print("\n".join(row["id"] for row in state["containers"]))
-    elif args[:2] == ["container", "inspect"]:
-        rows = [row for row in state["containers"] if row["id"] in args]
-        if "--format" in args:
-            template = args[args.index("--format") + 1]
-            for row in rows:
-                print(
-                    row["image"]
-                    if template == "{{.Image}}"
-                    else f"{row['service']}|{row['oneoff']}|{row['state']}"
-                )
-        else:
-            print(
-                json.dumps(
-                    [
-                        {
-                            "Id": row["id"],
-                            "Image": row["image"],
-                            "Config": {
-                                "Env": row["environment"],
-                                "Labels": {
-                                    "com.docker.compose.project": row["project"],
-                                    "com.docker.compose.service": row["service"],
-                                    "com.docker.compose.oneoff": row["oneoff"],
-                                },
-                            },
-                            "State": {
-                                "Status": row["state"],
-                                "ExitCode": row["exit_code"],
-                                "Health": {"Status": row["health"]},
-                            },
-                        }
-                        for row in rows
-                    ]
-                )
-            )
-    elif args[:2] == ["image", "inspect"]:
-        reference = args[-1]
-        reference = {
-            "skillmind/backend:0.1.0": IMAGES["backend"],
-            "skillmind/web:0.1.0": IMAGES["web"],
-        }.get(reference, reference)
-        if "--format" not in args:
-            print(
-                json.dumps(
-                    [
-                        {
-                            "Id": reference,
-                            "Os": "linux",
-                            "Architecture": "amd64",
-                            "Config": {"Labels": {"org.skillmind.context-path": "/skillmind"}},
-                        }
-                    ]
-                )
-            )
-            return 0
-        template = args[args.index("--format") + 1]
-        if template == "{{.Id}}|{{.Os}}/{{.Architecture}}":
-            print(f"{reference}|linux/amd64")
-        elif template == "{{.Id}}":
-            print(reference)
-        elif "org.skillmind.context-path" in template:
-            print("/skillmind")
-        else:
-            print(json.dumps({"id": reference, "environment": IMAGE_ENV}))
+    services = state["config"]["services"]
+    if args[:2] == ["image", "save"]:
+        output = Path(args[args.index("--output") + 1])
+        references = args[args.index("--output") + 2 :]
+        output.write_text(json.dumps({ref: state["images"][ref] for ref in references}))
     elif args[:2] == ["image", "load"]:
-        if not sys.stdin.buffer.read():
-            raise ValueError("archive not supplied on stdin")
-    elif args[:2] == ["image", "save"]:
-        shutil.copyfile(root / "images.tar", args[args.index("--output") + 1])
-    elif args[:1] == ["version"]:
-        print("linux")
-    elif args[:1] == ["pull"]:
-        pass
-    elif args[:1] == ["run"]:
-        offset = args.index("/opt/skillmind-deploy/deploy_checks.py")
-        command = [
-            sys.executable,
-            str(Path(__file__).parents[1] / "deploy_checks.py"),
-            *args[offset + 1 :],
-        ]
-        for token in args:
-            if token.startswith("type=bind,"):
-                fields = dict(field.split("=", 1) for field in token.split(",") if "=" in field)
-                if fields["dst"] == "/snapshot":
-                    command.extend(("--directory", fields["src"]))
-                elif fields["dst"] == "/release/images.tar":
-                    command.extend(("--archive", fields["src"]))
-        return subprocess.run(command, check=False).returncode
+        state["images"].update(json.loads(Path(args[args.index("--input") + 1]).read_text()))
+        print("Loaded fixture images")
+    elif args[:2] == ["image", "inspect"]:
+        position = args.index("--format")
+        for reference in args[2:position]:
+            item = state["images"].get(reference)
+            if item is None:
+                print(f"No such image: {reference}", file=sys.stderr)
+                return 1
+            template = args[position + 1]
+            if template == "{{.Id}}":
+                print(item["id"])
+            elif template == "{{.Os}}/{{.Architecture}}":
+                print(item["platform"])
+            else:
+                raise AssertionError(args)
+    elif args[0] == "info":
+        print(state.get("server_platform", "linux/x86_64"))
+    elif args[0] == "compose":
+        if "--no-interpolate" in args:
+            assert "--no-env-resolution" in args
+            assert os.environ["COMPOSE_DISABLE_ENV_FILE"] == "true"
+            assert not os.environ.get("COMPOSE_ENV_FILES")
+            assert os.environ["COMPOSE_PROFILES"] == "skillmind-export-no-profiles"
+            print(json.dumps(state["config"]))
+            return 0
+        assert args[1:5] == ["--project-directory", ".", "--file", "compose.yml"], args
+        assert args[5] == "--env-file", args
+        if not Path(args[6]).is_file():
+            print("Environment file is unavailable", file=sys.stderr)
+            return 1
+        command = args[7:]
+        if command[0] == "run" and "--pull" in command:
+            print("unknown flag: --pull", file=sys.stderr)
+            return 16
+        if command == ["config", "--quiet"]:
+            pass
+        elif command == ["config", "--images"]:
+            for service in services.values():
+                print(service["image"])
+        elif command[:3] == ["pull", "--policy", "missing"]:
+            for name in command[3:]:
+                reference = services[name]["image"]
+                if reference not in state["images"]:
+                    if os.environ.get("SKM_FAKE_OFFLINE"):
+                        print("Fixture registry unavailable", file=sys.stderr)
+                        return 1
+                    state["images"][reference] = {
+                        "id": "sha256:" + "c" * 64,
+                        "platform": "linux/amd64",
+                    }
+        elif command[0] == "stop":
+            for name in command[3:]:
+                if name in state["containers"]:
+                    state["containers"][name] = "exited"
+        elif command[0] == "up":
+            names = [arg for arg in command[1:] if arg in services]
+            for name in names:
+                state["containers"][name] = (
+                    "exited(0)" if name == "object-storage-init" else "running"
+                )
+        elif command[0] == "run":
+            assert services["migrate"]["pull_policy"] == "never"
+            if command[-1] == "migrate":
+                state["revision"] = "head"
+            else:
+                print('{"status": "ready"}')
+        elif command == ["ps", "--all"]:
+            print(json.dumps(state["containers"]))
+        else:
+            raise AssertionError(command)
     else:
-        raise ValueError(f"unexpected docker arguments {args}")
+        raise AssertionError(args)
+    (BASE / "state.json").write_text(json.dumps(state))
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

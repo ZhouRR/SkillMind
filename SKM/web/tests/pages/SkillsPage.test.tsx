@@ -175,7 +175,9 @@ describe('SkillsPage entry affordances', () => {
     )
 
     expect(html).toContain('role="tablist"')
-    expect(html).toContain('导入与解析')
+    expect(html).toContain('导入技能')
+    expect(html).toContain('class="detailDisclosure skillTextSource"')
+    expect(html).toContain('role="tabpanel" hidden=""')
     expect(html).toContain('hidden=""')
   })
 })
@@ -457,7 +459,7 @@ describe('SkillLibraryPanel project enablement', () => {
 
     expect(html).toContain('为项目启用')
     expect(html).toContain(published.skill_key)
-    expect(html).toContain('发布不会自动扩大任何项目的执行范围')
+    expect(html).toContain('启用后，技能中的任务才会出现在项目中')
   })
 
   it('shows an active relationship as disableable instead of re-enabling it', () => {

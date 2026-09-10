@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ProjectModuleRecord } from '../../src/api'
 import { routeHref, type AppRoute } from '../../src/lib/routing'
 import { AppNavigation } from '../../src/components/AppNavigation'
+import { ROUTE_ICONS } from '../../src/components/routeIcons'
+import { LanguageProvider } from '../../src/i18n'
 import { MESSAGES } from '../../src/lib/i18n/messages'
 import { DEMO_PROJECT, demoUser } from '../fixtures'
 
@@ -36,33 +38,63 @@ function navigation(
   activeModuleId = MODULES[0]!.module_id,
   modules: ProjectModuleRecord[] = MODULES,
   overrides: Partial<ComponentProps<typeof AppNavigation>> = {},
+  language: 'zh' | 'ja' | 'en' = 'zh',
 ): string {
   return renderToStaticMarkup(
-    <AppNavigation
-      currentRoute={currentRoute}
-      metaState={{ status: 'loading' }}
-      projectId={PROJECT.project_id}
-      projectState={{ status: 'ready', projects: [PROJECT] }}
-      onSelectLanguage={vi.fn()}
-      onSelectProject={vi.fn()}
-      onSelectModule={vi.fn()}
-      activeModuleId={activeModuleId}
-      modules={modules}
-      user={demoUser()}
-      onLogout={vi.fn()}
-      logoutError={null}
-      {...overrides}
-    />,
+    <LanguageProvider language={language}>
+      <AppNavigation
+        currentRoute={currentRoute}
+        metaState={{ status: 'loading' }}
+        projectId={PROJECT.project_id}
+        projectState={{ status: 'ready', projects: [PROJECT] }}
+        onSelectLanguage={vi.fn()}
+        onSelectProject={vi.fn()}
+        onSelectModule={vi.fn()}
+        activeModuleId={activeModuleId}
+        modules={modules}
+        user={demoUser()}
+        onLogout={vi.fn()}
+        logoutError={null}
+        {...overrides}
+      />
+    </LanguageProvider>,
   )
 }
 
 describe('AppNavigation grouping', () => {
-  it('renders the Skillmind brand with its matching initials', () => {
-    /** ブランド表記・略記・アクセシブル名を同時に検証する。 */
+  it('uses a calendar with an execution mark for schedules, not a clock', () => {
+    const html = renderToStaticMarkup(<>{ROUTE_ICONS.schedules}</>)
+    expect(html).toContain('viewBox="0 0 16 16"')
+    expect(html).toContain('aria-hidden="true"')
+    expect(html).toContain('<rect')
+    expect(html).toContain('m6.5 8 3.5 2-3.5 2Z')
+    expect(html).not.toContain('<circle')
+  })
+  it.each(['zh', 'ja', 'en'] as const)('limits connection claims to the version API in %s', (language) => {
+    const labels = MESSAGES[language].service
+    for (const metaState of [
+      { status: 'loading' },
+      { status: 'error', message: 'unavailable' },
+      { status: 'ready', meta: { name: 'skillmind', version: '0.1.0', phase: 'test', task: 'test', ingress: '/skillmind' } },
+    ] as const) {
+      const html = navigation('home', '', [], { metaState }, language)
+      const label = metaState.status === 'loading' ? labels.connecting
+        : metaState.status === 'error' ? labels.failed : labels.ok(metaState.meta.version)
+      expect(html).toContain(`aria-label="${label}"`)
+      expect(html).toContain(labels.scope)
+      expect(label).toContain('API')
+      expect(html).not.toMatch(/服务正常|サービス正常|Service healthy/)
+    }
+  })
+
+  it('omits the brand block while retaining the overview navigation entry', () => {
     const html = navigation('home')
-    expect(html).toContain('<strong>Skillmind</strong>')
-    expect(html).toContain('class="brandMark">SM</span>')
-    expect(html).toContain(`aria-label="${MESSAGES.zh.nav.brandAriaHome}"`)
+    expect(html).not.toContain('<strong>Skillmind</strong>')
+    expect(html).not.toContain('brandName')
+    expect(html).not.toContain('brandMark')
+    expect(html).not.toContain('class="brand"')
+    expect(html).toContain(`href="${routeHref('home', PROJECT.project_id)}"`)
+    expect(html).toContain(MESSAGES.zh.routes.home.label)
   })
 
   it('forwards current project detail without hiding the independent list failure', () => {
@@ -71,7 +103,7 @@ describe('AppNavigation grouping', () => {
       projectState: { status: 'error', message: MESSAGES.zh.elements.projectListFailed },
       onRefreshProjects: vi.fn(),
     })
-    expect(html).toContain(`Quality Team · quality-team · ${MESSAGES.zh.elements.archivedProject}`)
+    expect(html).toContain(`Quality Team · ${MESSAGES.zh.elements.archivedProject}`)
     expect(html).toContain(`role="alert">${MESSAGES.zh.elements.projectListFailed}</p>`)
     expect(html).toContain(`type="button">${MESSAGES.zh.runHistory.retry}</button>`)
   })
@@ -141,7 +173,8 @@ describe('AppNavigation grouping', () => {
     // 平台組と当前项目組(select label が見出しを兼ねる)が両方描画される。
     expect(html).toContain('平台')
     expect(html).toContain('当前项目')
-    expect(html).toContain('Quality Team · quality-team')
+    expect(html).toContain(`<option value="${PROJECT.project_id}" selected="">${PROJECT.name}</option>`)
+    expect(html).not.toContain(PROJECT.key)
     // select は Project 切替と言語切替の 2 つだけ。Project 切替入口は「当前项目」1 箇所に限る。
     expect(html.split('<select').length - 1).toBe(2)
     expect(html.split('当前项目').length - 1).toBe(1)
@@ -177,10 +210,10 @@ describe('AppNavigation grouping', () => {
     expect(navigation('workspace', '', [])).not.toContain('sideNavSub')
   })
 
-  it('keeps the module submenu current on every screen the filter reaches', () => {
-    // 絞り込みが効く画面では子菜单の現在地を保ち、効かない画面では強調しない。
+  it('highlights the workspace module only while viewing its parent screen', () => {
+    // Task の filter は保持しても、Workspace の現在地としては強調しない。
     expect(navigation('workspace')).toContain('aria-current="true"')
-    expect(navigation('tasks')).toContain('aria-current="true"')
+    expect(navigation('tasks')).not.toContain('aria-current="true"')
     expect(navigation('documents')).not.toContain('aria-current="true"')
     expect(navigation('schedules')).not.toContain('aria-current="true"')
   })

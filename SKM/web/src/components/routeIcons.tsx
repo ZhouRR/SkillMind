@@ -50,8 +50,9 @@ export const ROUTE_ICONS: Record<AppRoute, ReactNode> = {
   ),
   schedules: (
     <svg viewBox="0 0 16 16" aria-hidden="true">
-      <circle cx="8" cy="8" r="6" />
-      <path d="M8 4v4l3 2" />
+      <rect height="11.2" rx="1" width="12.4" x="1.8" y="2.6" />
+      <path d="M1.8 6h12.4M5 1.8v2.4M11 1.8v2.4" />
+      <path d="m6.5 8 3.5 2-3.5 2Z" />
     </svg>
   ),
   workspace: (

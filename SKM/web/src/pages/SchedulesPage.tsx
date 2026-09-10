@@ -83,13 +83,10 @@ function ScheduleManager({ projectId, currentProject, csrfToken, onSessionEnded 
   }
 
   return <div data-schedule-manager>
-    <PageHeader title={messages.routes.schedules.label} description={messages.routes.schedules.description}
-      aside={<a className="secondaryButton compactButton" href={routeHref('tasks', projectId)}>{labels.tasksLink}</a>} />
+    <PageHeader title={messages.routes.schedules.label} description={messages.routes.schedules.description} />
     {!authorized ? <section className="panel"><EmptyState text={labels.needProject} /></section> : <>
-      <p className="hint">{currentProject!.name} · <span className="mono">{projectId}</span></p>
       {readonly && <p className="scheduleNotice" role="status">{labels.readOnlyProject}</p>}
       {state.readDenied && <p className="error" role="alert" data-schedule-read-denied>{labels.failures[state.readDenied.key]}</p>}
-      <p className="hint">{labels.scopeHint}</p>
       <div className="scheduleManagerLayout">
         <section className="panel scheduleManagerList" aria-label={labels.listTitle}>
           <form className="scheduleFilters" onSubmit={search}>
@@ -120,9 +117,8 @@ function ScheduleManager({ projectId, currentProject, csrfToken, onSessionEnded 
                     if (editorLock.current || statusLock.current) return
                     setEditor(null); state.select(schedule.schedule_id)
                   }}>
-                  <strong>{schedule.name}</strong>
+                  <strong title={schedule.schedule_id}>{schedule.name}</strong>
                   <span className={`statusBadge scheduleStatus-${schedule.status.toLowerCase()}`}>{messages.enums.scheduleStatus[schedule.status]}</span>
-                  <small className="mono">{schedule.schedule_id}</small>
                   <small>{summarizeTiming(schedule)}</small>
                 </button>
               </li>)}

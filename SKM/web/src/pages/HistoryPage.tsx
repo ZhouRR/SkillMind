@@ -55,16 +55,11 @@ export function HistoryPage({ projectId }: { projectId: string }) {
       />
       <section className="panel historyPage" aria-label={messages.historyPage.aria}>
         <div className="panelHeader">
-          <div>
-            <p className="hint">{messages.historyPage.hint}</p>
-          </div>
+          <h2>{messages.routes.history.label}</h2>
           <div className="formRow">
             <button className="secondaryButton compactButton" type="button" onClick={() => setRevision((current) => current + 1)}>
               {messages.runHistory.retry}
             </button>
-            <a className="secondaryButton compactButton" href={routeHref('workspace', projectId)}>
-              {messages.historyPage.openWorkspace}
-            </a>
           </div>
         </div>
         <RunHistoryPanel

@@ -136,8 +136,7 @@ function TaskCenter({ projectId, csrfToken, moduleId, projectReadOnly = false, a
       <PageHeader
         title={activeModule ? messages.tasks.titleWithModule(activeModule.name) : messages.routes.tasks.label}
         description={activeModule?.description || messages.tasks.description}
-        aside={<><span className="scopeBadge">{messages.tasks.countBadge(rows.length)}</span>
-          <a className="secondaryButton compactButton" data-schedules-manager-link href={routeHref('schedules', projectId)}>{messages.scheduleManager.manageAll}</a></>}
+        aside={<span className="scopeBadge">{messages.tasks.countBadge(rows.length)}</span>}
       />
       <section className="panel taskCatalog" aria-label={messages.routes.tasks.label}>
         {actionError && <p className="error" role="alert">{actionError}</p>}
@@ -267,10 +266,10 @@ function TaskCard({ row, projectId, csrfToken, projectReadOnly, onSchedule, onSc
             ? messages.tasks.noSchedule
             : messages.tasks.scheduleCount(activeSchedules.length)}</dd>
         </div>
-        <div>
+        {activeSchedules.length > 0 && <div>
           <dt>{messages.tasks.nextRunLabel}</dt>
           <dd>{nextSchedule ? formatScheduleTimestamp(nextSchedule.next_run_at!, nextSchedule.timezone) : messages.schedules.noNextRun}</dd>
-        </div>
+        </div>}
       </dl>
       {/* 未実行を空欄にすると読み込み中と区別が付かない。「実行履歴なし」と明示する。 */}
       <p className="hint taskCardLastRun">

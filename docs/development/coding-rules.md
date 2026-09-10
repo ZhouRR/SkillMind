@@ -1,6 +1,6 @@
 # 按改动类型查阅的实现细则
 
-本页由 [AGENTS](../../SKM/AGENTS.md)强制引用，只读本次涉及的章节。领域规则见[变更指南](change-guide.md)，运行命令见[本地开发](local-development.md)。
+按 [AGENTS](../../SKM/AGENTS.md)只读本次涉及的章节；领域规则见[变更指南](change-guide.md)，运行命令见[本地开发](local-development.md)。
 Backend 路径相对 SKM/backend/src/skillmind/，Web 路径相对 SKM/web/。
 
 ## Backend
@@ -27,19 +27,16 @@ repository.write/v1 不可预授权。direct 仅默认 branch fast-forward；bra
 
 ## Run lifecycle
 
-涉及 Run/Worker/Session/调度/子 Agent 时，先读 [Runtime](../design/agent-runtime.md)和[监督](../design/run-supervision.md)。
+修改执行、认领、续行或取消时，查 [Runtime](../design/agent-runtime.md)和[监督](../design/run-supervision.md)；仅改页面展示先查 [Workspace](../design/workspace.md)，不因此补齐全部执行链路。
 
 - 转换只经 plan_run_transition / ALLOWED_RUN_TRANSITIONS；锁序 Run → Segment → Attempt。旧 migration 路径仍为 Run → Attempt，不反转 _lock_claimed_execution。
-- 答复/批准追加 Segment，retry/recovery 在同 Segment 追加 Attempt；等待不占 worker lease 或 active wall timeout。重发/新运行区别见[创建协议](../design/run-creation.md)。
 - 终态 RUN_SNAPSHOT 是最后一个 RunEvent。sequence 在 Run 内单调；TEXT_DELTA 消耗 sequence 但不持久化，允许缺号、不改子层编号。遵守 RunEvent Schema。
 - 重新 dispatch 也受 SKILLMIND_RUN_MAX_ATTEMPTS 限制，耗尽以 retry_exhausted 关闭为 FAILED。
 - wall_timeout_seconds 只中断 event 等待，不中断终态 transaction；ARQ job_timeout 必须更长，不能替代执行 deadline。
-- PRIMARY Session 单 ACTIVE，只有设计允许的只读 SUBAGENT/BRANCH 可并行；resume/fork/replace 审计 parent 与 checkpoint checksum。
-- resolve_subagent_capabilities 同时按禁止集合和名称拦截 write，显式拒绝而非静默删减。split_budget 整除分配；子 Session 不写 RunEvent，归入主 Session 的一个 ToolCall + Evidence。
+- 子能力统一经 resolve_subagent_capabilities，分配与消费不混同；权限、返回和 Session 审计见[子分析](../design/subagents.md)。
 - 预算执行接线须满足[上线门禁](../design/run-budgets.md#上线门禁与接线顺序)，内部账本不等于实际执行受控。
-- scope 内资源物化为只读 input/：超限失败不截断、不可读记 skipped、冻结 ID/hash 不符失败。准备/缓存见[资源快照](../design/resource-snapshots.md)。
-- TaskSchedule 调用 RunService.create_task_run；精确版/输入/资源失效即 ERROR，不换来源、不补跑全部历史发火。[迟发规则](../design/task-scheduling.md)。
-- Result 满足 OutcomeEnvelope；task-specific output Schema 可选，未声明时不报 structured_output_missing。[结果与评价](../design/results-evaluation.md)。
+- 准备遵循[资源快照](../design/resource-snapshots.md)，Result 遵循[结果与评价](../design/results-evaluation.md)，不在 route/job 复制校验。
+- TaskSchedule 复用 RunService.create_task_run；版本、失效与迟发行为见[调度](../design/task-scheduling.md)。
 
 ## Web
 
@@ -47,7 +44,7 @@ repository.write/v1 不可预授权。direct 仅默认 branch fast-forward；bra
 - TasksPage 选任务，WorkspacePage 管理 Run；不重造 SSE/取消/终态 lifecycle。即时/调度共用 taskDraft.ts / TaskLaunchFields.tsx。
 - 不在前端重算服务端 ID（如 derive_task_id）。筛选/分页在服务端，不能过滤第一页冒充全量。
 - 三语统一 src/lib/i18n/{zh,ja,en}.ts，同步 UiMessages / MESSAGES；画面用 useMessages()。
-- 生成 FrontendModule 不继承应用权限；CSP/iframe 隔离需回归，M3 后先完成威胁模型，见[生成界面](../design/generated-modules.md)。
+- 实现生成 FrontendModule 时先完成威胁模型与 CSP/iframe 隔离回归，且不继承应用权限，见[生成界面](../design/generated-modules.md)；普通 Web 页面不套用 builder/Host 门禁。
 
 ## 同步点
 

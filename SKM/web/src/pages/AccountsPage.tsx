@@ -32,14 +32,15 @@ function AccountsContent({ session, onSessionEnded, onAccountChanged }: {
   }
   return <>
     <PageHeader title={messages.routes.accounts.label} description={messages.routes.accounts.description} />
-    <p className="hint">{messages.account.draftMemoryOnly}</p>
     <div className="accountsLayout">
       <div data-account-own="">
         <UserAccountPanel userId={session.user.user_id} own session={session} revision={revision}
           onSessionEnded={onSessionEnded} onChanged={changed} />
       </div>
-      {session.user.system_role === 'ADMIN' && <UserDirectory session={session} revision={revision}
-        onSessionEnded={onSessionEnded} onChanged={changed} />}
+      {session.user.system_role === 'ADMIN' && <details className="detailDisclosure accountDirectorySection">
+        <summary>{messages.account.manageUsers}</summary>
+        <UserDirectory session={session} revision={revision} onSessionEnded={onSessionEnded} onChanged={changed} />
+      </details>}
     </div>
   </>
 }

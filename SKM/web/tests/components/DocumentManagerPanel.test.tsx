@@ -135,6 +135,7 @@ describe('DocumentPreviewDialog', () => {
 
     expect(html).toContain('role="dialog"')
     expect(html).toContain('aria-modal="true"')
+    expect(html).toContain('modalViewport')
     expect(html).toContain('guide.md')
     expect(html).toContain('正文内容。')
     expect(html).toContain('/documents/doc-md/content')

@@ -135,6 +135,7 @@ export interface UiMessages {
     connecting: string
     failed: string
     ok: (version: string) => string
+    scope: string
   }
   app: {
     projectUnavailable: string
@@ -540,6 +541,7 @@ export interface UiMessages {
   }
   /** 項目文書 panel(DocumentManagerPanel)。 */
   documentsPanel: {
+    uploadHelp: string
     unknownTitle: string
     factsOnly: string
     checkOriginal: string
@@ -1166,6 +1168,7 @@ export interface UiMessages {
     /** 画面 2 分割(取込と解析 / 組織ライブラリ)と解釈詳細内の tab 群。 */
     pageTabsAria: string
     tabWorkbench: string
+    manualSource: string
     detailTabsAria: string
     tabReport: string
     reportEmpty: string

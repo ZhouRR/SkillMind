@@ -79,7 +79,7 @@ describe('ResourcesPage guided layout', () => {
     const html = page()
 
     expect(html).toContain('已接入系统')
-    expect(html).toContain('还没有接入任何外部系统')
+    expect(html).toContain('尚未连接外部系统')
   })
 
   it('keeps each section as a list and hosts the creation forms in always-mounted modals', () => {

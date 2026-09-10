@@ -1,6 +1,6 @@
 # 备份、恢复与版本回退
 
-命令在目标 `SKM/` 执行，先确认环境、受控资产和维护窗口，材料不明即停。起动见[Quickstart](quickstart.md)，发布见[迁移手册](deployment.md)。
+本页用于已有数据的备份、恢复和回退，不是空库首次部署的前置清单。命令在目标四文件部署目录执行，先确认环境、受控资产和维护窗口，材料不明即停。起动见[Quickstart](quickstart.md)，发布见[迁移手册](deployment.md)。
 
 ## 配备前备份
 
@@ -19,7 +19,7 @@
 
 dump/blob/workspace 含敏感材料，须访问控制、不作公开附件。清单只留恢复点 ID、UTC 窗口、资产引用/校验值、操作者、结果/缺项；KEK 独立保管。负责人确定 RPO/RTO/保留期，当前无自动跨存储备份或时效保证。
 
-以下关联不能只靠公开字段或旧 dump 重建：
+下列关联按本环境实际保存的数据核对，不为尚未使用的能力创造记录；已有记录不能因能力后置而丢弃，也不能只靠公开字段或旧 dump 重建：
 
 - Redis 不是 DB 正本；旧队列、Outbox 重投、调度在途另定恢复方案，不清未知 Redis 全库。
 - [附件](../design/results-evaluation.md#可信附件的发布与读取)：Evidence 私有原字节与 Tool/Run、size/hash 同恢复，不能用 output 文件替代；历史无绑定仍未发布。
@@ -36,7 +36,7 @@ dump/blob/workspace 含敏感材料，须访问控制、不作公开附件。清
 ```bash
 umask 077
 SKM_BACKUP_DIR="$(mktemp -d ./skillmind-backup-XXXXXXXX)" &&
-sh scripts/compose.sh exec -T postgres sh -ceu \
+docker compose --env-file "${ENV_FILE:-.env}" --file compose.yml exec -T postgres sh -ceu \
   'pg_dump --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --format=custom' \
   > "${SKM_BACKUP_DIR:?Backup directory is required}/database.dump"
 ```
@@ -48,7 +48,7 @@ sh scripts/compose.sh exec -T postgres sh -ceu \
   set -eu
   : "${SKM_BACKUP_DIR:?Specify the directory created for this backup}"
   test -s "$SKM_BACKUP_DIR/database.dump"
-  sh scripts/compose.sh exec -T postgres pg_restore --list \
+  docker compose --env-file "${ENV_FILE:-.env}" --file compose.yml exec -T postgres pg_restore --list \
     < "$SKM_BACKUP_DIR/database.dump" > "$SKM_BACKUP_DIR/database.toc"
   docker image inspect skillmind/backend:0.1.0 skillmind/web:0.1.0 \
     --format '{{.RepoTags}} {{.Id}}' > "$SKM_BACKUP_DIR/images.txt"
@@ -77,7 +77,7 @@ sh scripts/compose.sh exec -T postgres sh -ceu \
   set -eu
   : "${SKM_RESTORE_DIR:?Specify the verified backup directory}"
   test -s "$SKM_RESTORE_DIR/database.dump"
-  sh scripts/compose.sh exec -T postgres pg_restore --list \
+  docker compose --env-file "${ENV_FILE:-.env}" --file compose.yml exec -T postgres pg_restore --list \
     < "$SKM_RESTORE_DIR/database.dump" > /dev/null
   cd "$SKM_RESTORE_DIR"
   sha256sum --check database.dump.sha256
@@ -87,8 +87,8 @@ sh scripts/compose.sh exec -T postgres sh -ceu \
 成功后，在全局停写窗口停止本目录服务并核实 DB/角色：
 
 ```bash
-sh scripts/compose.sh stop api worker migrate
-sh scripts/compose.sh exec -T postgres sh -ceu '
+docker compose --env-file "${ENV_FILE:-.env}" --file compose.yml stop api worker migrate
+docker compose --env-file "${ENV_FILE:-.env}" --file compose.yml exec -T postgres sh -ceu '
   psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --no-psqlrc \
     --set=ON_ERROR_STOP=1 --command="SELECT current_database(), current_user"
 '
@@ -103,11 +103,11 @@ sh scripts/compose.sh exec -T postgres sh -ceu '
   set -eu
   : "${SKM_RESTORE_DIR:?Specify the verified backup directory}"
   test -s "$SKM_RESTORE_DIR/database.dump"
-  sh scripts/compose.sh exec -T postgres sh -ceu '
+  docker compose --env-file "${ENV_FILE:-.env}" --file compose.yml exec -T postgres sh -ceu '
     dropdb --force --username="$POSTGRES_USER" "$POSTGRES_DB"
     createdb --username="$POSTGRES_USER" --owner="$POSTGRES_USER" "$POSTGRES_DB"
   '
-  sh scripts/compose.sh exec -T postgres sh -ceu '
+  docker compose --env-file "${ENV_FILE:-.env}" --file compose.yml exec -T postgres sh -ceu '
     pg_restore --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" \
       --no-owner --single-transaction --exit-on-error
   ' < "$SKM_RESTORE_DIR/database.dump"
@@ -118,6 +118,8 @@ sh scripts/compose.sh exec -T postgres sh -ceu '
 
 ### 恢复后验证
 
+恢复窗口不要执行 `make deploy`，它会启动 Worker；需要保持后台隔离时用原生 Compose 分步操作，明确批准后再启动 Worker。
+
 恢复 blob/workspace、兼容镜像/配置与旧 KEK，核 revision 后按[迁移审查](deployment.md#迁移与回退审查)决定前进；Worker 保持隔离，不用普通 up 绕检查。
 
 分别验旧权限未复活、资产字节/引用一致、终态可读与非终态可续、队列/lease/Schedule/Effect 已对账。缺回执/输入/transcript 拒绝而非补签；记录耗时、损失、范围、残余问题和放行人。未知继续隔离，preflight 不替代验收，后台与普通入口[分阶段放行](deployment.md#启动与放行)。
@@ -126,4 +128,4 @@ sh scripts/compose.sh exec -T postgres sh -ceu '
 
 旧 API/Web/Worker 能理解当前 schema、数据、队列和非终态快照才可保留数据回镜像。未知不启动旧 Worker；无可信恢复点保全现场、选 forward fix，不试跑破坏性 downgrade。
 
-按[发布阶段](deployment.md#迁移前置与执行)重验旧 archive/checksum/image ID、当前 schema/配置及 daemon/project。保留旧镜像不保证 archive、第三方镜像或恢复点齐全，同名 tag 不算方案；旧 migration-plan/head 不识别当前 DB 时保持隔离，评审 forward fix/完整恢复，不 stamp 或删审计。API/Web、后台、普通入口分别放行，无自动回滚。
+按[发布阶段](deployment.md#迁移前置与执行)重验旧 archive 来源/image ID、当前 schema/配置及 daemon/project。保留旧镜像不保证 archive、第三方镜像或恢复点齐全，同名 tag 不算方案；旧 migration-plan/head 不识别当前 DB 时保持隔离，评审 forward fix/完整恢复，不 stamp 或删审计。API/Web、后台、普通入口分别放行，无自动回滚。

@@ -2,32 +2,47 @@
 export const DOCUMENT_PREVIEW_MAX_BYTES = 1_000_000
 
 const HTML_NAMESPACE = 'http://www.w3.org/1999/xhtml'
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg'
 const PREVIEW_POLICY = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"
 const ALLOWED_TAGS = new Set([
+  'html', 'head', 'body', 'style', 'details', 'summary', 'nav', 'col', 'colgroup',
   'a', 'abbr', 'article', 'aside', 'b', 'blockquote', 'br', 'caption', 'code', 'dd', 'del',
   'div', 'dl', 'dt', 'em', 'figcaption', 'figure', 'footer', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
   'header', 'hr', 'i', 'ins', 'kbd', 'li', 'main', 'mark', 'ol', 'p', 'pre', 'q', 's',
   'samp', 'section', 'small', 'span', 'strong', 'sub', 'sup', 'table', 'tbody', 'td', 'tfoot',
   'th', 'thead', 'tr', 'u', 'ul', 'var', 'wbr',
 ])
+const SVG_TAGS = new Set([
+  'svg', 'g', 'defs', 'symbol', 'use', 'path', 'rect', 'circle', 'ellipse', 'line',
+  'polyline', 'polygon', 'text', 'tspan', 'textPath', 'title', 'desc', 'style',
+  'linearGradient', 'radialGradient', 'stop', 'clipPath', 'mask', 'pattern', 'marker',
+  'filter', 'feBlend', 'feColorMatrix', 'feComponentTransfer', 'feComposite',
+  'feConvolveMatrix', 'feDiffuseLighting', 'feDisplacementMap', 'feDistantLight',
+  'feDropShadow', 'feFlood', 'feFuncA', 'feFuncB', 'feFuncG', 'feFuncR', 'feGaussianBlur',
+  'feMerge', 'feMergeNode', 'feMorphology', 'feOffset', 'fePointLight', 'feSpecularLighting',
+  'feSpotLight', 'feTile', 'feTurbulence',
+])
+const RESOURCE_ATTRIBUTES = new Set([
+  'src', 'srcset', 'href', 'xlink:href', 'action', 'formaction', 'poster', 'background',
+  'data', 'codebase', 'manifest', 'ping', 'srcdoc', 'xml:base', 'autofocus', 'is', 'target',
+])
 const DROP_CONTENTS = new Set([
-  'script', 'style', 'template', 'noscript', 'iframe', 'object', 'embed', 'svg', 'math',
+  'script', 'template', 'noscript', 'iframe', 'object', 'embed', 'math', 'title',
   'link', 'meta', 'base', 'input', 'button', 'select', 'textarea', 'video', 'audio',
 ])
 
-/** Sandbox に加え、URL/能動要素/CSS を持たない静的 HTML だけを新しい tree に再構成する。 */
+/** 埋め込み CSS と静的 SVG は保持し、能動要素を除いた専用 document を sandbox へ渡す。 */
 export function documentPreviewHtml(source: string): string {
   if (typeof document === 'undefined') return envelope(`<pre>${escapeText(source)}</pre>`)
-  // browsing context のない document の template 内容は live DOM に移さない。
+  // browsing context のない document で head/body の構造と属性を保持する。原 tree は live DOM に移さない。
   const inert = document.implementation.createHTMLDocument('')
-  const template = inert.createElement('template')
-  template.innerHTML = source
+  inert.documentElement.innerHTML = source
   const output = inert.createElement('div')
   const pending: { node: Node; parent: Node }[] = []
   const enqueue = (node: Node, parent: Node): void => {
     for (let child = node.lastChild; child; child = child.previousSibling) pending.push({ node: child, parent })
   }
-  enqueue(template.content, output)
+  pending.push({ node: inert.documentElement, parent: output })
   let visited = 0
   while (pending.length) {
     const item = pending.pop()!
@@ -39,26 +54,36 @@ export function documentPreviewHtml(source: string): string {
     }
     if (item.node.nodeType !== 1) continue
     const element = item.node as Element
-    if (element.namespaceURI !== HTML_NAMESPACE || DROP_CONTENTS.has(element.localName)) continue
+    const svg = element.namespaceURI === SVG_NAMESPACE
+    if (svg ? !SVG_TAGS.has(element.localName)
+      : element.namespaceURI !== HTML_NAMESPACE || DROP_CONTENTS.has(element.localName)) continue
     if (element.localName === 'img') {
       item.parent.appendChild(inert.createTextNode(element.getAttribute('alt') ?? ''))
       continue
     }
-    if (!ALLOWED_TAGS.has(element.localName)) { enqueue(element, item.parent); continue }
-    const safe = inert.createElement(element.localName)
-    // style、URL、id/name、event handler は一切コピーしない。
-    for (const key of ['title', 'lang', 'dir', 'colspan', 'rowspan']) {
-      const value = element.getAttribute(key)
-      if (value !== null && (key !== 'dir' || ['ltr', 'rtl', 'auto'].includes(value))
-        && (!['colspan', 'rowspan'].includes(key) || /^[1-9]\d{0,2}$/.test(value))) safe.setAttribute(key, value)
+    if (!svg && !ALLOWED_TAGS.has(element.localName)) { enqueue(element, item.parent); continue }
+    const safe = inert.createElementNS(element.namespaceURI, element.localName)
+    // CSS は書換えず CSP で外部読取を拒否する。SVG の同一文書参照だけは図形描画に必要。
+    for (const attribute of element.attributes) {
+      const key = attribute.name.toLowerCase()
+      if (key.startsWith('on')) continue
+      if (RESOURCE_ATTRIBUTES.has(key) && !(svg && ['href', 'xlink:href'].includes(key)
+        && /^#[^\s]+$/.test(attribute.value))) continue
+      safe.setAttributeNS(attribute.namespaceURI, attribute.name, attribute.value)
     }
     item.parent.appendChild(safe)
     enqueue(element, safe)
   }
-  return envelope(output.innerHTML)
+  const root = output.firstElementChild!
+  const head = root.querySelector('head')!
+  const policy = inert.createElement('meta')
+  policy.setAttribute('http-equiv', 'Content-Security-Policy')
+  policy.setAttribute('content', PREVIEW_POLICY)
+  head.prepend(policy)
+  return '<!doctype html>' + root.outerHTML
 }
 
-/** CSP は全 user content より前、表示 CSS は平台の固定文字列だけに限定する。 */
+/** 非 DOM/過大 tree の原文 fallback にだけ最小の読み取り用 CSS を添える。 */
 function envelope(body: string): string {
   return '<!doctype html><html><head><meta charset="utf-8">'
     + `<meta http-equiv="Content-Security-Policy" content="${PREVIEW_POLICY}">`

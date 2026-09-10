@@ -49,7 +49,7 @@ parse 不调用模型，初始 Draft 可无蓝图、不可直接发布。ZIP/TAR
 
 ### 异步解释的交接要求
 
-当前解释/调整只传组织/参数入队，无持久原请求授权；Worker 重建输入，终态唯一键不能阻止重复模型调用。须成套补齐：
+当前解释/调整只传组织/参数入队，无持久原请求授权；Worker 重建输入，终态唯一键不能阻止重复模型调用。修正异步授权链路时须一起处理以下边界，不把单点修复当作链路闭合：
 
 1. 原请求 ID 与内容 execution key 分开；短事务绑定原 actor/会话引用、冻结输入/Interpreter/model 身份及 dispatch Outbox。队列只传持久 ID，不传 cookie/CSRF。
 2. Worker 复用原会话资格校验，锁外模型调用前和结果提交时复核；每次初次/修复调用分别取得原 Worker 一次启动许可。未知启动不由重投/新会话接管。
@@ -89,10 +89,6 @@ Manifest checksum 证明自身内容一致，Interpretation 既有 checksum 是�
 ## CapabilityBlueprint
 
 以 [Schema](../../SKM/contracts/capability-blueprint/v1.schema.json)为准；标题/说明保留源语言，enum 大小写按契约。identity/hash/trace/结构错误拒绝，新业务 capability 允许，真实 Tool 须注册；缺业务 Schema/ViewSpec/fixture 不单独硬拒绝，assisted_review_required 须接受。结构/trace 不证明自然语言完整性。
-
-### 蓝图是唯一来源
-
-Interpreter 唯一生成；parse null 发布报 capability_blueprint_missing。Draft Schema 不是许可，Worker 只读冻结蓝图，不从旧 workflows/data_sources 反推，手工 native fixture 不绕门禁。
 
 ### 过程重表达
 
@@ -136,4 +132,4 @@ GUIDED/SUPERVISED/DELEGATED 默认 SUPERVISED，不能覆盖硬拒绝。新 Run 
 - 泛化/安全：分析、审查、开放文档、缺资源、恶意指令走同链路，敏感阻断、scope/跨项目拒绝、不扩权。
 - 模型质量：固定输入重复采样，独立人工评审保真/证据/调整量；prompt JSON 与 structured-output 分别举证。
 
-入口：[skills](../../SKM/backend/tests/skills/)、[contracts](../../SKM/backend/tests/contracts/)。真实事务、存储残留/恢复、模型/部署分别验收。结构/系统 Skill 改动同步契约、版本/checksum、validator/projector、Web、example/回归与质量评审；不引入任意脚本、自动扩权/升级或生成后端服务。
+按改动选择 [skills](../../SKM/backend/tests/skills/)、[contracts](../../SKM/backend/tests/contracts/)与受影响消费者；真实事务、存储恢复、模型质量和部署分别举证，不为错误文案修改调用模型。系统 Interpreter 的版本/hash 按上文同步，公开结构变化按[契约流程](../development/contract-workflow.md)处理；不引入任意脚本、自动扩权/升级或生成后端服务。

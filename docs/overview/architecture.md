@@ -32,7 +32,7 @@ Redis 承担队列、短期锁、通知与登录防护；blob 在 object storage
 | 一次 Run | 冻结输入/授权 → Outbox → claim → 受监督准备 → Brief/启动校验 → 执行 → 等待或终态 |
 | 外部变更 | Proposal → 精确批准 → EffectExecution → CAS → 写入 → read-back |
 
-模型提出调用，平台校验 capability、绑定、参数、预算与批准后才执行。
+模型提出调用，平台校验 capability、绑定、参数及适用的批准后才执行；当前只有局部限额，不能把未接入的[Run 统一预算](../design/run-budgets.md)当作既有保证。
 创建冻结授权与选择；Run 输入回执、Segment Brief、Attempt lease 分别证明不同事实，不能互相替代。
 登录防护的 Redis 配额也不等于数据库 Session 的撤销状态。
 
@@ -51,5 +51,5 @@ Redis 承担队列、短期锁、通知与登录防护；blob 在 object storage
 
 复用共享 Traefik，仅 web/api 进入 edge network，不发布宿主端口。外部 context path 被 Traefik 去除；
 API 内部保持 `/api`、Web 保持 `/`，Web build path 与 API root_path 须匹配。
-[Compose](../../SKM/compose.yaml)包含应用、存储与一次性迁移/初始化服务，module-builder 尚未接入。
+[Compose](../../SKM/compose.yml)包含应用、存储与一次性迁移/初始化服务，module-builder 尚未接入。
 [技术结构图](technical-architecture.html)用于整体展示，发布步骤见[部署指南](../operations/deployment.md)。

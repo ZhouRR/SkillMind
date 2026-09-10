@@ -132,16 +132,17 @@ function AccountEditor({ userId, own, session, revision = 0, onSessionEnded, onC
       {(query.pending || mutation.busy) && <p role="status">{messages.busy}</p>}
       {success && <p role="status">{messages.mutationSuccess} {messages.revokedCount(success.revoked_sessions)}</p>}
       {base && <>
-        <UserAccountFacts account={base} />
-        <p className="accountVersion">{messages.versionUsed(base.row_version)}</p>
+        <UserAccountFacts account={base} compact />
         {unknownVersion !== null && <p className="accountNotice" role="status">{messages.unknownHint} {messages.versionUsed(unknownVersion)}</p>}
         {needsReview && <section className="accountComparison" aria-label={messages.reviewTitle}>
           <h3>{messages.reviewTitle}</h3><p>{messages.reviewHint}</p>
           {latest && <><p>{messages.latestVersion(latest.row_version)}</p><UserAccountFacts account={latest} /></>}
           <button className="secondaryButton" disabled={!latest || mutation.busy} type="button" onClick={adopt}>{messages.adoptLatest}</button>
         </section>}
-        {own ? <form className="accountForm" data-account-form="password" onSubmit={changePassword}>
-          <h3>{messages.changePassword}</h3><p className="hint">{messages.passwordHint}</p>
+        {own ? <details className="detailDisclosure accountAction" data-account-action="password">
+          <summary>{messages.changePassword}</summary>
+          <form className="accountForm" data-account-form="password" onSubmit={changePassword}>
+          <p className="hint">{messages.passwordHint}</p>
           <fieldset disabled={!canWrite}>
             <label>{messages.currentPassword}<input autoComplete="current-password" type="password" required maxLength={1024} value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} /></label>
             <label>{messages.newPassword}<input autoComplete="new-password" type="password" required minLength={PASSWORD_MIN_LENGTH} maxLength={1024} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
@@ -150,7 +151,8 @@ function AccountEditor({ userId, own, session, revision = 0, onSessionEnded, onC
             {passwordError && <p role="alert" className="error">{passwordError === 'invalidRequest' ? messages.failures.invalidRequest : messages[passwordError]}</p>}
             <button className="primaryButton" type="submit">{messages.changePassword}</button>
           </fieldset>
-        </form> : <form className="accountForm" data-account-form="edit" onSubmit={save}>
+        </form></details> : <form className="accountForm" data-account-form="edit" onSubmit={save}>
+          <p className="hint">{messages.draftMemoryOnly}</p>
           <fieldset disabled={!canWrite}>
             <label>{messages.fields.name}<input required maxLength={200} value={name} onChange={(event) => { setName(event.target.value); setConfirmChange(false) }} /></label>
             <label>{messages.fields.role}<select aria-label={messages.fields.role} value={role} onChange={(event) => { setRole(event.target.value === 'ADMIN' ? 'ADMIN' : 'USER'); setConfirmChange(false) }}>
@@ -163,14 +165,14 @@ function AccountEditor({ userId, own, session, revision = 0, onSessionEnded, onC
             <button className="primaryButton" type="submit">{messages.save}</button>
           </fieldset>
         </form>}
-        <div className="accountDanger">
-          <h3>{messages.revoke}</h3><p>{messages.revokeHint}</p>
+        <details className="detailDisclosure accountDanger accountAction" data-account-action="sessions">
+          <summary>{messages.revoke}</summary><p>{messages.revokeHint}</p>
           <label className="accountCheckbox"><input type="checkbox" disabled={!canWrite} checked={confirmRevoke} onChange={(event) => setConfirmRevoke(event.target.checked)} />{messages.confirmRevoke}</label>
           <button className="dangerButton" type="button" disabled={!canWrite || !confirmRevoke} onClick={() => {
             if (!confirmRevoke) return
             perform((signal) => own ? revokeMySessions(base.row_version, session.csrf_token, signal) : revokeUserSessions(userId, base.row_version, session.csrf_token, signal))
           }}>{messages.revoke}</button>
-        </div>
+        </details>
       </>}
     </section>
     {base && <UserSecurityEvents userId={userId} own={own} revision={auditRevision + revision} onSessionEnded={onSessionEnded} />}

@@ -1,117 +1,97 @@
-# 发布、迁移与分阶段放行
+# 发布、迁移与启动
 
-已有环境的发布手册；首次准备见[启动](quickstart.md)，数据替换见[恢复](backup-recovery.md)。命令在 Linux 服务器的版本发布目录执行，先确认环境、维护窗口、版本与负责人；未知目标不试运行。
-
-本工程按 Skillmind 全新命名部署，不保留旧产品标识或旧数据兼容层；既有 volume、数据库、队列和对象存储不会自动迁移。使用独立的新环境初始化，旧环境数据按其原版本保全。镜像只包含 system Interpreter Skill；合成测试素材仅保存在 `backend/tests`，业务 Skill 在部署后导入。
-
-## 先分清四种操作
-
-| 操作 | 范围 |
-| --- | --- |
-| config / preflight | 配置解析 / DB migration 与 Redis PING，不证明业务就绪 |
-| build / export / load | 构建镜像 / 打包本地镜像 / 导入 archive，不是备份或应用验收 |
-| migration | 改变 DB；失败后查实际 revision，不用 stamp 掩盖 |
-| 启动 / 放行 | 进程启动可能消费旧工作；后台恢复和普通业务开放分别批准 |
-
-## 一个例子：关闭 dispatch 后仍有工作
-
-已入 Redis 的 Effect 和即将到期的 Schedule，不会因 `SKILLMIND_WORKER_DISPATCH_ENABLED=false` 自动停止：
-
-| 入口 | false 时的实际行为 |
-| --- | --- |
-| Outbox relay | 不选择新的 Run/Effect dispatch topic，lifecycle 通知仍可配送 |
-| 已入队 Run/Effect job | 仍可进入 claim/executor；不检查该开关 |
-| Schedule / recovery cron | 仍可创建 Run、处理期限和恢复 |
-| Skill 解释/调整 job | 独立入口，仍可能调用模型 |
-
-入口见 [WorkerSettings](../../SKM/backend/src/skillmind/worker/settings.py)。开关不是维护模式，不终止远端请求，环境修改也不即时重载。停写须关闭全部入口/触发、处理在途并确认所有 API/Worker 实例停止；远端未知则隔离，按[原 Effect 对账](runbook.md#incident-与-recovery)，不换键重做。
+Windows 构建镜像，Linux 用 Docker Compose + GNU make 部署。首次安装与后续更新均执行 `make deploy`，不要求宿主 Python/Node。首次配置与管理员创建见[启动](quickstart.md)，数据恢复见[恢复](backup-recovery.md)。
 
 ## 环境文件与配置边界
 
-构建端为 Windows + Rancher Desktop（Moby）+ PowerShell + Docker Compose；部署端为 Linux + Docker Compose v2 + GNU make 和常规系统工具（sh、realpath、sha256sum、mktemp、id）。两端都不要求宿主 Python、Node 或 jq。CPU 架构仍须匹配：默认 linux/amd64，ARM64 显式构建 linux/arm64；不能仅凭都是 Linux 混用镜像。
+服务器部署目录只需四个文件：
 
-[Makefile](../../SKM/Makefile)经 [compose.sh](../../SKM/scripts/compose.sh)调用宿主 Docker；[deploy.sh](../../SKM/scripts/deploy.sh)收集受控观测值，再用 Backend 镜像内的 Python 校验既有部署契约。检查容器不接网络、不挂 Docker socket，只读临时观测和镜像 archive；迁移/preflight 才经 Compose 连接基建。当前只支持在部署服务器本机执行，远程 daemon 的 bind path 不在支持范围。
+```text
+skm/
+├── images.tar
+├── compose.yml
+├── .env
+└── Makefile
+```
 
-| 选择 | 唯一来源 |
-| --- | --- |
-| 环境文件 | make/shell 的 ENV_FILE → 发布目录 .env；同一绝对文件同时供 Compose 插值和 API/Worker/migrate 注入，不随发布包分发 |
-| Compose project | make/shell 的 COMPOSE_PROJECT_NAME → skillmind；文件内同名值不选择目标，必须保留服务器现有 project 名以复用原 volume |
-| Compose 文件 / 目录 | 固定当前发布目录的 compose.yaml；拒绝命令参数中的 file、project、profile 旁路 |
-| 应用镜像 | 发布从校验后的 release.env 取完整 Backend/Web image ID；API/Worker/migrate 共用 Backend ID。日常操作默认 tag，可用 BACKEND_IMAGE_ID / WEB_IMAGE_ID 显式固定 |
+[Compose](../../SKM/compose.yml)是服务正本，[Makefile](../../SKM/Makefile)直接调用 Docker Compose。首次从源码 `.env.example` 准备配置；更新只替换镜像包、Compose 和 Makefile，不覆盖服务器密码和业务配置。镜像只包含 system Interpreter，业务 Skill 在部署后导入。
 
-例如 `make config ENV_FILE=/controlled/config/app.env COMPOSE_PROJECT_NAME=approved-project`。相对环境路径以发布目录为准，缺失/空路径拒绝；不手设内部 SKM_COMPOSE_ENV_FILE。发布包不替换服务端 .env、密码、存储世代或数据卷。
+默认使用当前目录 `.env`，不要 source/include dotenv。特殊路径用 `make deploy ENV_FILE=/path/app.env`，同一文件供 Compose 插值与 Backend env_file 注入。COMPOSE_PROJECT_NAME 按 shell → .env → 默认 skillmind 选择；更新保留原 project 名和数据卷。
 
-保留 Docker 优先级：shell 插值高于文件，service.environment 高于 env_file，不 source dotenv。切换 ENV_FILE 不改现有进程/容器/DB URL/外部资源，须另核目标；见[插值规则](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/)和 [env_file](https://docs.docker.com/reference/compose-file/services/#env_file)。
-
-日常用 `make config`（quiet）；完整 config、容器 env/inspect 可泄密，不进报告。发布工具只内部比较有效环境，不输出或持久保留值。
-
-文档存储必配 SKILLMIND_OBJECT_STORAGE_NAMESPACE_ID，由同世代 API/Worker 与恢复清单共享；未配置拒绝 blob 操作。UUID 与 endpoint/bucket 共同校验，新建存储换 UUID、凭据轮换不换身份。旧文档不自动绑定，按[归属迁移](../design/document-lifecycle.md#存储归属与配置切换)处理；health/preflight 或改配置不能替代。
+复用既有 Traefik 与外部网络，不部署网关、不发布 host port。服务器域名、TLS、网络及 SKILLMIND_CONTEXT_PATH 须正确配置；Web 路径已编入镜像，改服务器 .env 不能改变静态产物。数据库、存储、KEK/model 在首次启动前准备。SKILLMIND_OBJECT_STORAGE_NAMESPACE_ID 必填非零 UUID、API/Worker 共用；新存储首次生成，更新保留，不自动迁移旧对象。migration-check/readiness 拒绝缺失或零值，但不证明 blob 可读写。
 
 ## 迁移前置与执行
 
-先在独立环境验收 API/Worker/migrate/Web 兼容组合，取得[一致恢复点](backup-recovery.md#一致恢复点包含什么)，保留新旧 image ID/archive。
+先区分操作场景，不把升级/恢复要求套到空环境首次安装：
 
-```text
-恢复点 → 全实例停写/在途对账 → 加载镜像 → 查 revision/head
-  → 单独迁移 → API/Web 核对 → 批准恢复后台 → 验收 → 普通入口放行
-```
+- **全新安装**：确认使用新环境、配置和镜像齐全后执行；不存在的旧数据、队列无需备份/对账。复用旧卷或旧队列不算全新安装。
+- **已有环境更新**：先关闭新业务入口、核清在途调用/远端未知效果，停止全部写入者并取得[一致恢复点](backup-recovery.md#一致恢复点包含什么)。不并发部署或改写镜像/tag、配置；重命名不迁移旧数据。
+- **数据恢复/故障对账**：走[恢复流程](backup-recovery.md)，不执行会自动启动 Worker 的 `make deploy`。
+
+`make deploy` 停止当前 project 应用服务，再初始化基建、迁移并启动 API/Web/Worker；执行即允许恢复后台工作，可能立即消费队列、调度和恢复任务。SKILLMIND_WORKER_DISPATCH_ENABLED=false 不是维护模式。Makefile 不控制其他实例、orphan、其他 daemon 或远端写入，不能代替全局停写确认。
 
 ### Windows 构建与移送
 
-在源码 `SKM/` 的 PowerShell 执行；context path 必须与服务器一致：
+在源码 SKM/ 的 PowerShell 执行：
 
 ```powershell
-./scripts/export-images.ps1 -Version 0.1.0-preview1 -Platform linux/amd64 -ContextPath /skillmind
+docker compose build
+.\scripts\export-images.ps1
 ```
 
-默认构建 API/Web，导出共享 Backend + Web，不重新构建 PostgreSQL、Redis、MinIO。服务器缺少配套基建镜像或首次离线部署时加 `-IncludeInfrastructure`，显式 pull/save 当前 Compose 指定版本；通常更新可复用服务器已有基建镜像。第三方版本升级仍需单独审查，不在 make deploy 中自动替换运行中的基建。
+也可只构建 `docker compose build web` 或 `docker compose build api`。导出仍保存当前两个应用 tag：skillmind/backend:0.1.0 与 skillmind/web:0.1.0，不按创建时间猜测版本，不 build/pull、不读取 .env、不启动校验容器。
 
-输出 `SKM/images/skillmind-<Version>/`：images.tar、compose.yaml、Makefile、必要 Shell、.env.example、release.env 和 SHA256SUMS。清单记录版本、平台、context path 和实际 image ID；脚本在 Backend 检查容器内验证 archive 后才发布目录。没有真实 .env 或业务内容。完整目录移送到 Linux 的新版本目录，禁止只拷 tar 配旧脚本；保存终端显示的 RELEASE_SHA256 到独立可信记录。
+输出固定为 `images/images.tar`。再次导出用 `.\scripts\export-images.ps1 -Force`，只允许替换已有 archive，不重建镜像；保存完成才替换，失败时保留旧 archive，残留 .partial 不是成品。PowerShell 使用单横线 `-Force`。
 
-`-SkipBuild` 仅导出已有合格镜像；`-WebOnly` 只构建 Web，但包内仍携带同一 Backend 作为基线/校验 runtime。版本目录不覆盖，失败 staging 保留供检查，不能当成成品；不要并发修改源码、tag 或输出目录。
+构建时 Compose 默认读取 .env 用于解析配置；只有 Web context path 作为业务构建参数，不把数据库/存储密码传入 build args。服务器 CPU 架构须与镜像匹配；需要跨架构时在构建/拉取阶段设置 DOCKER_DEFAULT_PLATFORM，导出不转换架构。
+
+将 **images.tar、compose.yml、Makefile** 拷到服务器同一部署目录，保留服务器 .env。使用可信传输渠道并保留上一版镜像包；导出不提供独立来源认证或 archive 内部身份核验。
+
+PostgreSQL/Redis/MinIO/mc 已有时复用本地镜像，不足时部署自动拉取 Compose 指定版本。服务器完全离线且尚无基建镜像时，在 Windows 先准备并同包导出：
+
+```powershell
+docker compose pull postgres redis object-storage object-storage-init
+.\scripts\export-images.ps1 -IncludeInfrastructure -Force
+```
+
+该选项只保存本地镜像；第三方版本升级单独评估。
 
 ### Linux 核验与部署
 
-进入新发布目录，先从可信记录设置下列值。必须在执行包内 Makefile/脚本之前核对来源和文件；包内 checksum 本身不证明真实性。
-
-| 变量 | 确认内容 |
-| --- | --- |
-| ENV_FILE / COMPOSE_PROJECT_NAME | 服务器原配置的绝对路径与原 project 名，各阶段不变 |
-| DAEMON_ID | 人工核准的目标 `docker info --format '{{.ID}}'`，不能跨 daemon 流用 |
-| RELEASE_SHA256 | Windows 输出并独立保管的 SHA256SUMS 文件摘要，不从收到的包自动自签 |
-| MAINTENANCE_CONFIRMED=1 | 一致恢复点、全实例停写/在途对账、普通入口关闭和独占维护均已确认 |
+进入四文件所在目录，执行：
 
 ```bash
-printf '%s  SHA256SUMS\n' "$RELEASE_SHA256" | sha256sum --check -
-sha256sum --check --strict SHA256SUMS
-make config
-```
-
-逐条确认成功；变量须 shell export 或作为 make 参数传入。完成维护准备后，停止本 project 的业务容器（其他实例仍需人工确认），再运行：
-
-```bash
-sh scripts/compose.sh stop api web worker migrate
 make deploy
 ```
 
-`make deploy` 连续执行 load → migration-plan → migration → API/Web health 与 preflight，任一步失败立即停止；它不建立备份、不停止其他实例、不启动基建或 Worker、不开放普通入口。只看说明用 `make deploy-help`。需要逐阶段审查可分别执行 `make deploy-load`、`make deploy-migrate`、`make deploy-api`；首次基建准备见 [Quickstart](quickstart.md)。
+输出阶段与操作：
 
-load 先验整个包与 tar checksum，从同一打开的 archive 导入，再按不可变 ID/平台/context path 和 tar 中两个必需 tag 的唯一 config digest 校验。首次服务器没有 Python runtime，因此内部 manifest 检查发生在 Docker load 之后、迁移/业务启动之前；失败可能留下已导入镜像或已更新 tag，但绝不拿本地旧 tag 补缺项。保留旧 image ID/archive，不并发改写文件。
+| 阶段 | 行为 |
+| --- | --- |
+| configuration / load-images | 检查配置和 archive 存在，Docker 导入镜像 |
+| prepare-images | 应用镜像必须已导入；补齐缺失基建镜像，核镜像与服务器架构 |
+| stop-application | 停止当前 project 的应用服务和旧一次性任务，保留数据卷 |
+| infrastructure / initialize-storage | 等 PostgreSQL/Redis 就绪、启动 MinIO、幂等创建 bucket；连接重试有上限 |
+| migration-check / migrate / readiness | 校验存储 namespace 配置及合法前进路径、执行 Alembic upgrade head，再核配置与 DB head/Redis |
+| api-web / worker | 等 API/Web health，再启动 Worker |
+| complete | 显示当前服务状态 |
 
-migrate 前 PostgreSQL/Redis 必须健康、storage 运行且当前 bucket 初始化成功。工具检查同 daemon/project 全部容器（含 orphan/one-off）、镜像和有效环境并拒绝活动写入者；目标镜像的 `preflight --migration-plan` 确认全部 revision、单 head 和合法前进路径，单独 upgrade 后再验 DB head/Redis。观测暂存在仅操作者可读的临时目录，正常退出/可捕获中断时清理，不输出值；断电或强杀后的残留仍按敏感材料保管。
-
-只读排查 current/heads 也须使用同一配置，把 BACKEND_IMAGE_ID 设为已核实清单中的完整 ID：
+失败显示原始错误、阶段与退出码，立即停止，不自动重试、回滚、删卷或重置密码。镜像、部分迁移或服务可能已生效；先查状态和原错误，再决定如何继续：
 
 ```bash
-sh scripts/compose.sh run --rm -T --no-deps --pull never migrate alembic current
-sh scripts/compose.sh run --rm -T --no-deps --pull never migrate alembic heads
+make status
+make logs
+docker compose --file compose.yml run --rm -T --no-deps migrate alembic current
+docker compose --file compose.yml run --rm -T --no-deps migrate alembic heads
 ```
 
-revision 越链、多 head 或检查失败即停，核对已提交 revision 后决定 forward fix/完整恢复。不改 alembic_version/stamp；此前 revision、非事务操作及外部事实不自动回滚。
+自定义 ENV_FILE 时，原生 Compose 命令也须传 `--env-file "$ENV_FILE"`。迁移通过 compose.yml 的 pull_policy: never 使用本地镜像。日志/config/inspect 可能含敏感值，只分享脱敏错误，不上传 .env。
+
+revision 不识别、多个 head、连接失败或迁移错误均需核对实际 DB 状态；不 stamp、不删除 alembic_version/审计记录绕过。数据库初始化、migration 与 bucket 创建是实际写入，health/preflight 成功不证明业务、HTTPS、blob/KEK 或恢复已验收。
 
 ## 迁移与回退审查
 
-每次发布审查[实际 upgrade/downgrade](../../SKM/backend/migrations/versions/)和消费者，不从下表推导可任意降级：
+有数据库/协议变化时审查本次跨越的 [upgrade/downgrade](../../SKM/backend/migrations/versions/)及消费者；回退时核相关限制。纯样式更新不要求重审所有历史迁移，`make deploy` 仍自动检查当前 DB 路径。下表是版本兼容索引，不是每次发布逐项执行的清单：
 
 | revision | 回退限制 |
 | --- | --- |
@@ -138,48 +118,20 @@ revision 越链、多 head 或检查失败即停，核对已提交 revision 后�
 
 ## 会话协议切换检查
 
-1. 核清全部入口/实例，保全未确认动作 ID/key、通知重登，排空并停旧 API。
-2. 隔离环境验旧行升级、新登录/失效和降级拒绝；head 正确后才开新 API。
-3. 同一 v2 参数下以真实 HTTPS 验多页/多实例 CSRF、失效和 no-store，不采集原凭据或探测真实用户密码。
-4. 失败关闭入口，选 forward fix/完整恢复，不改默认 version、删会话或直接回旧镜像。
+仅升级涉及[会话凭据协议](../design/authentication.md#会话凭据-v2-与切换要求)时适用：保全未确认动作 ID/key、通知重登并排空旧 API；隔离验证旧行升级、新登录/失效和降级拒绝，head 正确后开新 API。用真实 HTTPS 验多页/多实例 CSRF、失效与 no-store，不采集凭据或探测真实用户密码。
 
-旧备份可能复活撤销会话，须另核；字符串字段不证明旧 Web 兼容，重登与后台放行分别审核。正本见[认证](../design/authentication.md#会话凭据-v2-与切换要求)。
+失败关闭入口，选 forward fix/完整恢复，不改默认 version、删会话或直接回旧镜像。旧备份可能复活撤销会话，恢复时另核；字段存在不证明旧 Web 兼容，重登不代替后台放行。
 
 ## 启动与放行
 
-保持 Worker 停止、普通入口关闭。逐阶段执行时，迁移成功后使用同一清单与维护变量启动 API/Web（make deploy 已包含此阶段，不重复执行）：
-
-```bash
-make deploy-api
-make
-```
-
-`make run` 是 deploy-api 别名。工具固定 --no-build/--no-deps/--pull never，等 health 并复验 image ID/有效环境/preflight；基建/初始化缺失、配置不符或失败即停，不删保护参数。preflight 不验 blob/KEK/认证/模型/恢复，须另核权限、Run/结果/证据和输入；授权 GET 可更新 idle，不是备份所需完全停写。
-
-核清旧队列和在途 Run/Effect/Schedule，另获准恢复本环境全部后台工作（MAINTENANCE_CONFIRMED 不含此授权），再执行：
-
-```bash
-make deploy-worker BACKGROUND_APPROVED=1
-```
-
-工具复查目标、API/Web 配置/镜像/health/preflight 后仅开 Worker；无独立业务 healthcheck，运行状态不证明旧工作已核清。先只开获准 [smoke](runbook.md#通常-smoke)，通过后人工开放普通业务，失败隔离并保留事实。
-
-smoke 会写入/计费，须隔离 DB、Redis/队列、存储、Worker、凭据；单独 Project 不隔离旧 job/cron，当前无“只消费测试 Project”模式，不得跳过后台许可。
-
-任何阶段失败/超时/中断不自动续行、回滚或重发：镜像可能部分导入、迁移已提交、服务已启动。先核原事实；重调用不会自动把活动容器当作上次成功跳过。
+部署默认启动 API/Web/Worker，不改业务开关；首次完成后执行 `make bootstrap-admin`。普通业务开放前验证登录、权限、Skill、Run/结果/证据和外部接入；真实 smoke 会写入或计费，只用获准环境与输入。启动成功不替代模型、事务、存储或备份恢复验收；恢复场景仍须核清事实后分别放行 API/Web、后台与普通入口。
 
 ## 仅更新 Web
 
-仅当 API/契约/数据库/运行配置均未变，且新 Web 与现用 Backend 已验兼容时使用。Windows 加 `-WebOnly` 构建导出；Linux 用同一清单方式验证新版本目录，另确认 Web 切换窗口：
-
-```bash
-make deploy-web WEB_ONLY_CONFIRMED=1
-```
-
-此路径仍要求 MAINTENANCE_CONFIRMED=1，含义限定为 Web 切换维护窗口和独占操作，不要求停 API/Worker；不能拿它批准 Backend 或配置变更。检查现有 API/可选 Worker 的 image ID、有效环境及必要服务健康后，仅 `up web --no-deps`；不执行 migration/preflight、不重启 API/Worker。Backend 版本不一致、旧 Web 不健康或有效环境变化即拒绝；路由、挂载等其他配置未变仍须人工审查。失败保持 Web 入口隔离、核实际状态，不自动回滚。
+Windows 只构建 Web 后正常导出，Linux 仍执行 `make deploy`。此入口统一走应用停机、迁移检查与重启流程，不承诺 Web-only 零停机；未变的 Backend 镜像仍需包含在包内。API/契约/路径兼容性须在发布前确认。
 
 ## 后续开发约束与验收
 
-脚本不控制共享 Traefik、其他 daemon/进程或远端效果，不是跨实例锁/授权系统。独占维护时不得并发改配置、镜像、context 或启动其他 writer；确认变量只是声明，不证明全局停写。
+保持交付为镜像包、Compose、.env 与 Makefile，不重新增加服务器端辅助脚本、隐藏错误或日常部署必填审批参数。新增检查优先使用 Compose 状态/退出码与镜像内已有运维命令；不能用删数据、忽略错误或自动回滚来简化流程。
 
-[R11](../planning/roadmap.md#开发任务)保留全实例停写/清理及真实恢复缺口。脚本回归只验参数、身份拒绝与失败不续行；实际 Compose/PowerShell、迁移事务、health/HTTPS 和业务放行须获准环境验收。
+[R11](../planning/roadmap.md#开发任务)仍缺跨实例停写/清理与真实恢复证据。Make/PowerShell 的 fake Docker 回归只证明命令顺序与失败停止；实际 Rancher/Linux、CPU、迁移事务、health/HTTPS 和业务效果须在目标环境验收。

@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <!-- Sidebar と同じ琥珀色と炭色の製品印。 -->
+  <!-- 四つの技能が中央へ集まる星。小サイズでも読めるよう文字を使わない。 -->
   <rect x="1" y="1" width="30" height="30" rx="9" fill="#f3ce67" stroke="#cbb36e"/>
-  <text x="16" y="21.5" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="800" letter-spacing="-.5" fill="#302a18">SM</text>
+  <path d="M16 5 20 11 16 14 12 11ZM27 16 21 20 18 16 21 12ZM16 27 12 21 16 18 20 21ZM5 16 11 12 14 16 11 20Z" fill="#302a18"/>
 </svg>

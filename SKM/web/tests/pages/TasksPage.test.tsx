@@ -142,7 +142,7 @@ describe('TasksPage', () => {
 
     expect(html).not.toContain('modalOverlay')
     expect(html).not.toContain('scheduleConfiguration')
-    expect(html).toContain('data-schedules-manager-link')
-    expect(html).toContain('href="#/schedules?project=00000000-0000-4000-8000-000000000020"')
+    expect(html).not.toContain('data-schedules-manager-link')
+    expect(html).not.toContain('href="#/schedules?project=00000000-0000-4000-8000-000000000020"')
   })
 })

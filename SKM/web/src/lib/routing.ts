@@ -28,14 +28,6 @@ export const APP_ROUTES: ReadonlyArray<{
   { route: 'accounts', scope: 'platform' },
 ]
 
-/** 業務模块の絞り込みが効く画面かどうかを返す。
-
-    子菜单の強調表示はこの判定だけを見る。任务中心と工作空间は同じ module 選択を読むため、
-    片方の画面でしか強調しないと「選んだのに反映されていない」ように見える。 */
-export function routeUsesModuleFilter(route: AppRoute): boolean {
-  return route === 'tasks' || route === 'workspace'
-}
-
 /** URL hash を既知の画面へ正規化し、不明な値は主页へ安全に戻す。 */
 export function routeFromHash(hash: string): AppRoute {
   const candidate = hash.replace(/^#\/?/, '').split('?', 1)[0]?.replace(/\/+$/, '') ?? ''

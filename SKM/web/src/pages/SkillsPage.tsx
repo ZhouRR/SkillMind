@@ -33,6 +33,7 @@ import {
 } from '../api'
 import { DetailDrawer, EmptyState, LoadingSkeleton, PageHeader, useConfirmDialog } from '../components/PageElements'
 import { useMessages } from '../i18n'
+import { apiErrorMessage } from '../lib/apiFeedback'
 import type { UiMessages } from '../lib/i18n/messages'
 import { formatByteSize } from '../lib/presentation'
 import { isNearBottom } from '../lib/scroll'
@@ -140,7 +141,7 @@ export function SkillsPage({ projectId, csrfToken }: {
   const [libraryState, setLibraryState] = useState<SkillLibraryState>({ status: 'loading' })
   const [enablementState, setEnablementState] = useState<ProjectEnablementState>({ status: 'idle' })
   const [libraryBusyVersionId, setLibraryBusyVersionId] = useState<string | null>(null)
-  const [pageTab, setPageTab] = useState<SkillsPageTab>('workbench')
+  const [pageTab, setPageTab] = useState<SkillsPageTab>('library')
   const { confirm, confirmDialog } = useConfirmDialog()
   const parseController = useRef<AbortController | null>(null)
   const saveController = useRef<AbortController | null>(null)
@@ -187,7 +188,7 @@ export function SkillsPage({ projectId, csrfToken }: {
       if (!controller.signal.aborted) {
         setLibraryState({
           status: 'error',
-          message: error instanceof Error ? error.message : messages.skills.loadLibraryFailed,
+          message: apiErrorMessage(error, messages.skills.loadLibraryFailed, messages),
         })
       }
     }
@@ -210,7 +211,7 @@ export function SkillsPage({ projectId, csrfToken }: {
       if (!controller.signal.aborted) {
         setEnablementState({
           status: 'error',
-          message: error instanceof Error ? error.message : messages.skills.loadEnablementsFailed,
+          message: apiErrorMessage(error, messages.skills.loadEnablementsFailed, messages),
         })
       }
     }
@@ -247,7 +248,7 @@ export function SkillsPage({ projectId, csrfToken }: {
       })
     } catch (error: unknown) {
       if (!controller.signal.aborted) {
-        setParseState({ status: 'error', message: error instanceof Error ? error.message : 'Unknown parser error' })
+        setParseState({ status: 'error', message: apiErrorMessage(error, 'Unknown parser error', messages) })
       }
     }
   }
@@ -266,7 +267,7 @@ export function SkillsPage({ projectId, csrfToken }: {
       })
     } catch (error: unknown) {
       if (!controller.signal.aborted) {
-        setSaveState({ status: 'error', message: error instanceof Error ? error.message : 'Unknown persistence error' })
+        setSaveState({ status: 'error', message: apiErrorMessage(error, 'Unknown persistence error', messages) })
       }
     }
   }
@@ -291,7 +292,7 @@ export function SkillsPage({ projectId, csrfToken }: {
       setSaveState({ status: 'ready', stored })
     } catch (error: unknown) {
       if (!controller.signal.aborted) {
-        setSaveState({ status: 'error', message: error instanceof Error ? error.message : 'Unknown upload error' })
+        setSaveState({ status: 'error', message: apiErrorMessage(error, 'Unknown upload error', messages) })
       }
     }
   }
@@ -346,7 +347,7 @@ export function SkillsPage({ projectId, csrfToken }: {
         const execution = await loadInterpretationExecution(interpretationId)
         setInterpretState({ status: 'ready', execution })
       } catch (error: unknown) {
-        setInterpretState({ status: 'error', message: error instanceof Error ? error.message : 'Unknown interpret error' })
+        setInterpretState({ status: 'error', message: apiErrorMessage(error, 'Unknown interpret error', messages) })
       }
     }
   }
@@ -372,7 +373,7 @@ export function SkillsPage({ projectId, csrfToken }: {
       if (!controller.signal.aborted) driveLaunch(launch)
     } catch (error: unknown) {
       if (!controller.signal.aborted) {
-        setInterpretState({ status: 'error', message: error instanceof Error ? error.message : 'Unknown interpret error' })
+        setInterpretState({ status: 'error', message: apiErrorMessage(error, 'Unknown interpret error', messages) })
       }
     }
   }
@@ -399,7 +400,7 @@ export function SkillsPage({ projectId, csrfToken }: {
       driveLaunch(launch)
     } catch (error: unknown) {
       if (!controller.signal.aborted) {
-        setAdjustState({ status: 'error', message: error instanceof Error ? error.message : 'Unknown adjust error' })
+        setAdjustState({ status: 'error', message: apiErrorMessage(error, 'Unknown adjust error', messages) })
       }
     }
   }
@@ -420,7 +421,7 @@ export function SkillsPage({ projectId, csrfToken }: {
       await refreshLibrary()
     } catch (error: unknown) {
       if (!controller.signal.aborted) {
-        setVersionState({ status: 'error', message: error instanceof Error ? error.message : 'Unknown draft API error' })
+        setVersionState({ status: 'error', message: apiErrorMessage(error, 'Unknown draft API error', messages) })
       }
     }
   }
@@ -456,7 +457,7 @@ export function SkillsPage({ projectId, csrfToken }: {
       await refreshLibrary()
     } catch (error: unknown) {
       if (!controller.signal.aborted) {
-        setVersionState({ status: 'error', message: error instanceof Error ? error.message : 'Unknown publish API error' })
+        setVersionState({ status: 'error', message: apiErrorMessage(error, 'Unknown publish API error', messages) })
       }
     }
   }
@@ -481,7 +482,7 @@ export function SkillsPage({ projectId, csrfToken }: {
       if (!controller.signal.aborted) {
         setLibraryState({
           status: 'error',
-          message: error instanceof Error ? error.message : messages.skills.deprecateFailed,
+          message: apiErrorMessage(error, messages.skills.deprecateFailed, messages),
         })
       }
     } finally {
@@ -516,7 +517,7 @@ export function SkillsPage({ projectId, csrfToken }: {
           status: 'error',
           message: error instanceof ApiProblemError && error.code === 'skill_version_delete_blocked'
             ? messages.skills.deleteBlocked
-            : error instanceof Error ? error.message : messages.skills.deleteFailed,
+            : apiErrorMessage(error, messages.skills.deleteFailed, messages),
         })
       }
     } finally {
@@ -543,7 +544,7 @@ export function SkillsPage({ projectId, csrfToken }: {
       if (!controller.signal.aborted) {
         setEnablementState({
           status: 'error',
-          message: error instanceof Error ? error.message : messages.skills.enableFailed,
+          message: apiErrorMessage(error, messages.skills.enableFailed, messages),
         })
       }
     } finally {
@@ -570,7 +571,7 @@ export function SkillsPage({ projectId, csrfToken }: {
       if (!controller.signal.aborted) {
         setEnablementState({
           status: 'error',
-          message: error instanceof Error ? error.message : messages.skills.disableFailed,
+          message: apiErrorMessage(error, messages.skills.disableFailed, messages),
         })
       }
     } finally {
@@ -578,46 +579,43 @@ export function SkillsPage({ projectId, csrfToken }: {
     }
   }
 
+  const importFailure = [parseState, saveState, interpretState, adjustState, versionState]
+    .find((state) => state.status === 'error')
+  const importPending = parseState.status === 'parsing' ? messages.skills.parsing
+    : saveState.status === 'saving' ? messages.skills.saving
+      : interpretState.status === 'interpreting' || adjustState.status === 'adjusting' ? messages.skills.interpreting
+        : versionState.status === 'loading' ? messages.skills.saving : null
+
   return (
     <>
       <PageHeader
         title={messages.routes.skills.label}
         description={messages.skills.description}
-        aside={<span className="scopeBadge">
+        aside={<span className="scopeBadge skillScopeBadge">
           {projectId ? messages.skills.scopeBadgeWithProject : messages.skills.scopeBadgeNoProject}
         </span>}
       />
-      {/* 取込〜発行の作業台と組織 library を tab で分け、1 画面の縦積みを解消する。
-          非活性側も hidden で DOM に残す(頁面測試の toContain と状態保持のため)。 */}
+      {/* 非活性側も mount を保ち、頁签切替で入力草稿や進行中の要求を破棄しない。 */}
       <div className="tabBar" role="tablist" aria-label={messages.skills.pageTabsAria}>
-        <SkillsPageTabButton current={pageTab} tab="workbench" onSelect={setPageTab}>
-          {messages.skills.tabWorkbench}
-        </SkillsPageTabButton>
         <SkillsPageTabButton current={pageTab} tab="library" onSelect={setPageTab}>
           {messages.skills.libraryTitle}
           {libraryState.status === 'ready' && <span className="eventCount">{libraryState.versions.length}</span>}
         </SkillsPageTabButton>
+        <SkillsPageTabButton current={pageTab} tab="workbench" onSelect={setPageTab}>
+          {messages.skills.tabWorkbench}
+        </SkillsPageTabButton>
       </div>
+      {pageTab === 'library' && <>
+        {importPending && <p role="status">{importPending}</p>}
+        {importFailure?.status === 'error' && <p className="error" role="alert">{importFailure.message}</p>}
+      </>}
       <div className="tabPanel" role="tabpanel" hidden={pageTab !== 'workbench'}>
       <section className="skillWorkspace" aria-label={messages.skills.workspaceAria}>
         <form className="panel skillForm" onSubmit={(event) => void handleParse(event)}>
           <div className="panelHeader"><h2>{messages.skills.sourceTitle}</h2></div>
-          {uploadedSource === null ? (
-            <>
-              <label>SKILL.md<textarea placeholder={messages.skills.skillMdPlaceholder} value={skillMarkdown} onChange={(event) => setSkillMarkdown(event.target.value)} spellCheck={false} /></label>
-              <details className="detailDisclosure">
-                <summary>{messages.skills.referencesLabel}</summary>
-                <label>{messages.skills.referencesLabel}<textarea placeholder={messages.skills.referencesPlaceholder} value={referenceMarkdown} onChange={(event) => setReferenceMarkdown(event.target.value)} spellCheck={false} /></label>
-              </details>
-              <p className="hint">{messages.skills.parserHint}</p>
-              <button className="primaryButton" disabled={parseState.status === 'parsing' || !skillMarkdown.trim()} type="submit">{parseState.status === 'parsing' ? messages.skills.parsing : messages.skills.parseSkill}</button>
-            </>
-          ) : (
-            <UploadedSourceFiles files={uploadedSource} onClear={() => setUploadedSource(null)} />
-          )}
           <div className="skillUpload">
             <span>{messages.skills.orUploadDir}</span>
-            <label className="secondaryButton fileUploadButton">
+            <label className="primaryButton fileUploadButton">
               {messages.skills.chooseSkillDir}
               <input
                 type="file"
@@ -633,6 +631,20 @@ export function SkillsPage({ projectId, csrfToken }: {
             </label>
           </div>
           <p className="hint">{messages.skills.uploadHint}</p>
+          {uploadedSource === null ? (
+            <details className="detailDisclosure skillTextSource">
+              <summary>{messages.skills.manualSource}</summary>
+              <label>SKILL.md<textarea placeholder={messages.skills.skillMdPlaceholder} value={skillMarkdown} onChange={(event) => setSkillMarkdown(event.target.value)} spellCheck={false} /></label>
+              <details className="detailDisclosure">
+                <summary>{messages.skills.referencesLabel}</summary>
+                <label>{messages.skills.referencesLabel}<textarea placeholder={messages.skills.referencesPlaceholder} value={referenceMarkdown} onChange={(event) => setReferenceMarkdown(event.target.value)} spellCheck={false} /></label>
+              </details>
+              <p className="hint">{messages.skills.parserHint}</p>
+              <button className="primaryButton" disabled={parseState.status === 'parsing' || !skillMarkdown.trim()} type="submit">{parseState.status === 'parsing' ? messages.skills.parsing : messages.skills.parseSkill}</button>
+            </details>
+          ) : (
+            <UploadedSourceFiles files={uploadedSource} onClear={() => setUploadedSource(null)} />
+          )}
         </form>
 
         <section className="panel skillResult" aria-live="polite">

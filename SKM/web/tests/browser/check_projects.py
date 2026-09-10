@@ -347,8 +347,7 @@ async def navigation(page: Page, api: ProjectsApi, labels: dict) -> None:
     """三語/窄屏の keyboard 開閉・選択・平台 route・logout を実導航から辿る。"""
     await selected(page, PROJECT)
     await expect(page.locator(".historyPage")).to_be_visible()
-    await expect(page.locator(".brandMark")).to_have_text("SM")
-    await expect(page.locator(".brandName strong")).to_have_text("Skillmind")
+    await expect(page.locator(".sidebar .brandMark, .sidebar .brand")).to_have_count(0)
     assert (await page.title()).endswith(" · Skillmind")
     if api.screenshot:
         await page.screenshot(
@@ -392,7 +391,7 @@ async def navigation(page: Page, api: ProjectsApi, labels: dict) -> None:
     await page.locator(".sidebarLogout").focus()
     await page.keyboard.press("Enter")
     await expect(page.locator('input[name="email"]')).to_be_visible()
-    await expect(page.locator(".authBrand .brandMark")).to_have_text("SM")
+    await expect(page.locator(".authBrand img.brandMark")).to_have_attribute("src", "/skillmind/favicon.svg")
     await expect(page.locator(".authBrand strong")).to_have_text("Skillmind")
     assert any(call[1] == "auth/logout" for call in api.calls)
 
@@ -406,7 +405,7 @@ async def resize_navigation(page: Page, api: ProjectsApi, _: dict) -> None:
     await expect(toggle).to_be_focused()
     await expect(toggle).to_have_attribute("aria-expanded", "false")
     await page.set_viewport_size({"width": 1440, "height": 1000})
-    await expect(page.locator(".brand")).to_be_focused()
+    await expect(page.locator('.sideNav a[aria-current="page"]')).to_be_focused()
     await page.set_viewport_size({"width": 390, "height": 1000})
     await menu(page)
     await page.locator(".sideNavSubItem").first.focus()
@@ -441,6 +440,19 @@ async def second_module_navigation(page: Page, api: ProjectsApi, labels: dict) -
     await expect(options).to_contain_text("Second module task")
     assert "First module task" not in await page.locator(".runForm").inner_text()
     assert any(call[1] == f"projects/{PROJECT}/tasks" for call in api.calls)
+    await page.keyboard.press("Escape")
+    # 同じ選択済み module も、Task 頁からは Workspace へ戻る入口になる。
+    for index in (1, 0):
+        await menu(page)
+        await page.locator('.sideNav a[href*="/tasks"]').click()
+        await expect(page.locator('main[data-page="tasks"]')).to_be_visible()
+        await expect(page.locator('.sideNavSubItem[aria-current="true"]')).to_have_count(0)
+        await menu(page)
+        await modules.nth(index).click()
+        await expect(page.locator(".workspace")).to_be_visible()
+        await expect(modules.nth(index)).to_have_attribute("aria-current", "true")
+        assert urlsplit(page.url).fragment == f"/workspace?project={PROJECT}"
+        await expect(page.locator("main .pageHeader h1")).to_contain_text(f"Browser module {index + 1}")
     await no_other_project(api, PROJECT)
 
 
@@ -994,15 +1006,17 @@ async def check(url: str, output: Path | None, only: str | None) -> None:
                 resize_navigation,
                 setup=lambda api: setattr(api, "with_module", True),
             )
-            await run(
-                "navigation-second-module",
-                second_module_navigation,
-                fragment=f"/?project={PROJECT}",
-                setup=lambda api: (
-                    setattr(api, "with_module", True),
-                    setattr(api, "with_tasks", True),
-                ),
-            )
+            for language in ("zh", "ja", "en"):
+                await run(
+                    f"navigation-second-module-{language}",
+                    second_module_navigation,
+                    fragment=f"/?project={PROJECT}",
+                    language=language,
+                    setup=lambda api: (
+                        setattr(api, "with_module", True),
+                        setattr(api, "with_tasks", True),
+                    ),
+                )
         finally:
             await browser.close()
     if executed == 0:

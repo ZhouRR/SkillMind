@@ -119,6 +119,9 @@ class ClosureApi(UploadReceiptsApi):
 
 async def lookup(page: Page, labels: dict, key: str) -> None:
     """実入力と同 tick の二重 click で、独立読取の防重を検査する。"""
+    help_panel = page.locator(".documentHelp")
+    if await help_panel.get_attribute("open") is None:
+        await help_panel.locator(":scope > summary").click()
     form = page.locator(".documentUploadClosureRecovery")
     if await form.get_attribute("open") is None:
         await form.locator("summary").click()
@@ -448,7 +451,7 @@ async def scenario(
                 content = await result.inner_text()
                 if texts["closedAt"] in content:
                     assert texts["documentId"] in content
-                    assert labels["upload"]["documentId"] not in content
+                    assert labels["upload"]["documentId"] not in content, (labels["upload"]["documentId"], content)
         await privacy(page)
         assert PRIVATE not in await page.locator("body").inner_text()
         assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")

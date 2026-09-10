@@ -43,7 +43,7 @@ describe('project-wide schedule management', () => {
     const labels = MESSAGES[language].scheduleManager
     expect(html).toContain(labels.total(101))
     expect(html).toContain(labels.page(100, 25, 101))
-    expect(html).toContain(labels.scopeHint)
+    expect(html).not.toContain(labels.scopeHint)
     expect(html).toContain('data-schedule-next="true" disabled=""')
     expect(html).toContain('data-schedule-row=')
     expect(html).toContain(`class="scheduleRows" tabindex="0" role="list" aria-label="${labels.listTitle}"`)

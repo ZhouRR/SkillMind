@@ -40,11 +40,12 @@ export function RunHistoryPanel({ state, selectedRunId, onOpen, onPrevious, onNe
               {!item.result_summary && <p>{messages.runHistory.noSummary}</p>}
               <div className="historyMeta">
                 <span>{sourceLabel(item, messages.runHistory.sourceUnavailable)}</span>
-                <span>{item.result_confidence === null ? '—' : `${Math.round(item.result_confidence * 100)}%`}</span>
-                {/* 完全な UUID は一覧では雑音になるため短縮表示し、全文は title(hover)へ退避する。 */}
-                <code title={item.run_id}>{item.run_id.slice(0, 8)}</code>
               </div>
             </button>
+            <details className="detailDisclosure historyTechnical"><summary>{messages.elements.technicalDetails}</summary>
+              <p><code>{item.run_id}</code></p>
+              {item.result_confidence !== null && <p>{messages.runResult.reading.confidenceHint} {Math.round(item.result_confidence * 100)}%</p>}
+            </details>
           </article>
         ))}
       </div>

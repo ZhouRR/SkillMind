@@ -7,7 +7,7 @@
 Python 3.12、Node.js 26 / pnpm 11.7.0 を使用する。venv は作らず、Backend 依存は user site、lockfile は手編集しない。依存導入と外部 service 起動は別である。
 
 `.env.example` は production 雛形。HTTP localhost では development、許可 Origin、専用接続先、書込可能な Run workspace を設定する。
-Backend の .env は実行 directory 基準なので file または process environment を明示する。Compose は[共通設定入口](../operations/deployment.md#环境文件与配置边界)で ENV_FILE を固定する。
+Backend の .env は実行 directory 基準なので file または process environment を明示する。Compose の配備は[共通設定入口](../operations/deployment.md#环境文件与配置边界)で ENV_FILE を固定する。通常の image build は SKM/ で `docker compose build api web`（既定 .env）；[構築時の設定範囲](../operations/deployment.md#windows-构建与移送)を参照する。
 
 ## Backend
 
@@ -126,16 +126,18 @@ python3 tests/browser/check_task_flow.py \
 
 ## 変更に応じた検証
 
-| 対象 | 実行位置とコマンド |
+まず変更箇所の test を選び、共有契約・認証・transaction・共通 UI に影響する場合は関連する消費側へ広げる。下表は選択肢であり、毎回全部を実行する checklist ではない。広範な変更やリリース候補では全体回帰を行い、実 DB・モデル・配備の証拠は別に取る。
+
+| 対象 | 実行位置と選択基準 |
 | --- | --- |
-| Backend | SKM/backend/：`python3 -m ruff check .`、`python3 -m mypy src`、副作用確認後の pytest |
-| Web | SKM/web/：`node_modules/.bin/tsc -b --pretty false`、`node_modules/.bin/vitest run`、`node_modules/.bin/vite build` |
+| Backend | SKM/backend/：対象 file の Ruff と pytest、型の変更は `python3 -m mypy src`。全体検査は `python3 -m ruff check .` と全 pytest（先に副作用を確認） |
+| Web | SKM/web/：`node_modules/.bin/tsc -b --pretty false` と対象の Vitest。画面変更は該当 harness の PC・両テーマ、共通スタイル/ナビ変更は全画面。bundle/依存/配備変更は `node_modules/.bin/vite build` |
 | 契約 | SKM/：`python3 scripts/validate_contracts.py`。[OpenAPI 一致性](contract-workflow.md#遇到未接齐的交付链)も確認 |
-| Compose / 工具 | SKM/：`python3 scripts/validate_compose.py`、`python3 -m unittest discover -s scripts/tests -v` |
-| SDK offline | SKM/：`PYTHONPATH=backend/src python3 scripts/probe_claude_agent_sdk.py` |
+| Compose / 工具 | SKM/：変更した工具の unittest。Compose 変更は `python3 scripts/validate_compose.py`、配備工具を横断する変更は `python3 -m unittest discover -s scripts/tests -v` |
+| SDK 接続/更新 | SKM/：`PYTHONPATH=backend/src python3 scripts/probe_claude_agent_sdk.py` と対象 Adapter test（offline） |
 | 文書 | SKM/：[build/check と閲覧検証](documentation.md) |
 
-配備工具 test は合成 file/fake process で実 Docker を使わない。PowerShell 実行回帰は SKM_TEST_PWSH に実行 file を指定する（未指定なら skip）。Shell/Python validator と PowerShell の command/失敗検査であり、Windows/Rancher・実 image の証拠ではない。
+配備工具 test は実 GNU make と合成 file/fake Docker を使い、四 file 配備の順序・失敗停止・Worker 起動を検査する。PowerShell 実行回帰は SKM_TEST_PWSH に実行 file を指定する（未指定なら skip）。archive export/Force の検査も Windows/Rancher・実 image の証拠ではない。
 実環境の `make config` は Docker と確認済み対象が必要で、通常 config 出力には Secret が含まれ得る。
 mock/実環境、成功/skip/失敗を分け、Docker・Make・PowerShell 等がなければ該当する実起動・復旧・Windows 操作は未検証と報告する。
 

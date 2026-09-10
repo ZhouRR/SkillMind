@@ -1,9 +1,11 @@
 name: ${COMPOSE_PROJECT_NAME:-skillmind}
 
 x-backend-runtime: &backend-runtime
-  image: ${SKM_BACKEND_IMAGE:-skillmind/backend:0.1.0}
+  image: skillmind/backend:0.1.0
+  # 古い Compose run でも CLI flag に依存せず local image のみ使う。
+  pull_policy: never
   env_file:
-    - ${SKM_COMPOSE_ENV_FILE:?select the environment file through the deployment entrypoint}
+    - ${ENV_FILE:-.env}
   environment:
     SKILLMIND_CONTEXT_PATH: ${SKILLMIND_CONTEXT_PATH:-/skillmind}
     TZ: ${SKILLMIND_TIMEZONE:-Asia/Tokyo}
@@ -15,11 +17,11 @@ x-backend-runtime: &backend-runtime
 services:
   web:
     build:
-      context: web
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: web/Dockerfile
       args:
         SKILLMIND_CONTEXT_PATH: ${SKILLMIND_CONTEXT_PATH:-/skillmind}
-    image: ${SKM_WEB_IMAGE:-skillmind/web:0.1.0}
+    image: skillmind/web:0.1.0
     environment:
       TZ: ${SKILLMIND_TIMEZONE:-Asia/Tokyo}
     restart: unless-stopped
@@ -188,8 +190,13 @@ services:
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - >-
+        attempts=0;
         until mc alias set skillmind http://object-storage:9000
-        "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"; do sleep 1; done;
+        "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}" >/dev/null 2>&1; do
+        attempts=$$((attempts + 1));
+        if [ "$$attempts" -ge 60 ]; then
+        echo 'MinIO initialization failed: check service readiness and credentials.' >&2; exit 1;
+        fi; sleep 2; done;
         mc mb --ignore-existing "skillmind/$${SKILLMIND_OBJECT_STORAGE_BUCKET}"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}

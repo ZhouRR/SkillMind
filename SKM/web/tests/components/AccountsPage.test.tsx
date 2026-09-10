@@ -39,7 +39,7 @@ describe.each(UI_LANGUAGES)('real account components in %s', (language) => {
     </LanguageProvider>)
     expect(html).toContain(MESSAGES[language].routes.accounts.label)
     expect(html).toContain(messages.myAccount)
-    expect(html).toContain(messages.draftMemoryOnly)
+    expect(html).not.toContain(messages.draftMemoryOnly)
     expect(html).toContain('data-account-own')
     expect(html).not.toContain('data-account-directory')
     expect(html).not.toContain('data-account-form="create"')
@@ -51,6 +51,7 @@ describe.each(UI_LANGUAGES)('real account components in %s', (language) => {
       <AccountsPage session={session('ADMIN')} onSessionEnded={() => {}} onAccountChanged={() => {}} />
     </LanguageProvider>)
     expect(html).toContain('data-account-directory')
+    expect(html).toContain('class="detailDisclosure accountDirectorySection"')
     expect(html).toContain('data-account-form="search"')
     expect(html).toContain('data-account-form="create"')
     expect(html).toContain(messages.manageUsers)

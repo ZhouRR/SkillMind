@@ -1,25 +1,12 @@
 # 并行子分析
 
-子分析不改变父 Run 的目标、主 Session 或审批链。额度见[预算](run-budgets.md)，停止见[监督](run-supervision.md)，状态见[计划](../planning/roadmap.md)。
+本页适用于平台的 subagent.dispatch/v1，不要求每个任务采用多 Agent。子分析不改变父 Run 的目标、主 Session 或审批链；新协议按[计划](../planning/roadmap.md)后置，现有入口的风险与限制仍须保留。额度见[预算](run-budgets.md)，停止见[监督](run-supervision.md)。
 
 ## 责任与数据流
 
 PRIMARY 调用 subagent.dispatch/v1 → 多个只读子分析 → 结果/失败摘要与子 Session ID → Gateway 保存主 Session 的一条 ToolCall/Evidence → 返回主 Agent 汇总。
 
 SUBAGENT/BRANCH 共用父 RunAttempt，不另写 RunEvent sequence；唯一活动限制仅针对 PRIMARY。
-
-## 一个例子：完成的是哪一层
-
-A 完成配置检查，B 读日志后失败，两支 Session 与 Gateway 审计都保存：
-
-| 看到什么 | 只说明什么 |
-| --- | --- |
-| Tool success | 整组符合返回协议，不是每支成功 |
-| A COMPLETED / B FAILED | 仅 A 有有效结论，主结果保留 B 未完成的限制 |
-| Session 关闭 | 生命周期已保存，不保证进程停/预算结清 |
-| 主 Run 仍执行 | 主 Agent 还需综合证据与提交 Result |
-
-Session 保存未知时，v1 仍须 Tool 错误，不省略必需 ID 或自动重跑补数据。
 
 ## 能力与故障边界
 
@@ -44,7 +31,7 @@ Session 保存未知时，v1 仍须 Tool 错误，不省略必需 ID 或自动�
 
 ## 完成、失败与审计如何表示
 
-COMPLETED 须有效终端/结果，不是无异常；失败保留安全原因/已知 Session identity，不用中途文本凑摘要。结论、审计、结清分别判断。
+Tool success 只说明整组符合协议，不是每支成功；COMPLETED 须有效终端/结果，不是无异常。失败保留安全原因/已知 Session identity，不用中途文本凑摘要。Session 关闭不证明进程停止或预算结清，主 Agent 仍须综合证据与未覆盖范围后提交 Result。
 
 将来可版本化表达“结论有效但 Session 审计缺口”，v1 不支持，不伪造 ID 或降级预算保存。收费身份在启动前取得，不靠事后 Session 行补造。
 

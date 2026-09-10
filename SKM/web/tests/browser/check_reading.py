@@ -145,7 +145,16 @@ async def check(url: str, output: Path) -> None:
                         await expect(
                             page.get_by_text(labels["home"]["emptyNoRuns"])
                         ).to_be_visible()
-                    for name in ("home", "workspace"):
+                    for name in ("home", "history", "workspace"):
+                        if name == "history":
+                            await page.goto(f"{url}#/history?project={PROJECT}")
+                            await expect(page.locator(".historyItem")).to_have_count(5 if populated else 0)
+                            if populated:
+                                technical = page.locator(".historyTechnical").first
+                                await expect(technical.locator("code")).not_to_be_visible()
+                                await technical.locator(":scope > summary").click()
+                                await expect(technical.locator("code")).to_have_text(RUN)
+                                await technical.locator(":scope > summary").click()
                         if name == "workspace":
                             await page.goto(f"{url}#/workspace?project={PROJECT}&run={RUN}")
                             await expect(page.locator(".outcomeCard pre")).to_have_text(REPORT)

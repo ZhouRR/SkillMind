@@ -18,7 +18,7 @@
 .sidebarFooter .themeToggle button { flex: 1; }
 .authAppearance { position: absolute; top: 24px; right: 28px; }
 .authShell { position: relative; padding-top: 88px; }
-.detailDisclosure { border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; background: var(--surface-raised); }
+.detailDisclosure { border: 0; border-top: 1px solid var(--border); border-radius: 0; padding: 12px 0; background: transparent; }
 .detailDisclosure > summary { color: var(--text-muted); font-size: 13px; font-weight: 600; cursor: pointer; }
 .detailDisclosure[open] > summary { margin-bottom: 16px; }
 .detailDisclosure > p:last-child { margin-bottom: 0; }
@@ -34,15 +34,30 @@
 [data-page='projects'] .projectSidePanel { background: var(--surface-raised); }
 [data-page='skills'] .skillWorkspace { grid-template-columns: minmax(300px, .8fr) minmax(0, 1.5fr); gap: 24px; }
 [data-page='skills'] .skillForm { background: var(--surface-raised); }
+[data-page='skills'] .skillForm { display: flex; flex-direction: column; gap: 16px; }
+[data-page='skills'] .skillForm > .panelHeader { margin-bottom: 0; }
+[data-page='skills'] .skillForm > .skillUpload { margin: 0; padding: 0; border: 0; }
+[data-page='skills'] .skillForm > .hint { margin: 0; }
 [data-page='skills'] .skillForm textarea { min-height: 160px; }
 [data-page='skills'] .skillResult > .emptyState { min-height: 280px; }
 [data-page='resources'] .resourceList { gap: 0; }
 [data-page='resources'] .resourceItem { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 20px 4px; background: transparent; }
 [data-page='resources'] .resourceInfo { gap: 8px; }
 [data-page='resources'] .resourceInfo strong { font-size: 15px; }
-[data-page='documents'] .documentUpload { padding-bottom: 18px; margin-bottom: 18px; border-bottom: 1px solid var(--border); }
+[data-page='documents'] .documentUpload { padding: 0; margin-bottom: 16px; border: 0; }
+.documentToolbar { align-items: center; }
+.documentToolbar .fileUploadButton { width: auto; margin: 0; }
+.documentToolbar .documentRefresh { margin: 0 0 0 auto; }
+[data-page='documents'] .documentHelp { margin-top: 24px; }
+[data-page='documents'] .documentUploadStatus, [data-page='documents'] .documentUploadClosure { margin-bottom: 20px; }
+.documentHelp details { margin-top: 12px; }
+.documentHelp summary { cursor: pointer; color: var(--text-muted); }
+.documentHelp form, .documentHelp label { display: grid; gap: 10px; min-width: 0; }
+.documentHelp input { width: 100%; min-width: 0; box-sizing: border-box; }
+.documentHelp button { justify-self: start; max-width: 100%; white-space: normal; }
 [data-page='documents'] .docFolder { border-radius: 10px; }
 [data-page='documents'] .documentItem { padding-block: 14px; }
+[data-page='documents'] .docFolderBody .documentItem { border: 0; border-radius: 0; background: transparent; }
 [data-page='history'] .historyList { gap: 0; }
 [data-page='history'] .historyItem { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; }
 [data-page='history'] .historyItem > button { padding: 18px 8px; }
@@ -57,13 +72,16 @@
 [data-page='schedules'] .scheduleFacts h3 { margin-top: 24px; }
 .accountUserCard { background: var(--surface-raised); }
 .accountEditor > .panel, .accountDirectory > .panel { padding: 24px; }
+.accountsLayout { grid-template-columns: minmax(0, 1fr); max-width: 1100px; }
+.accountDirectorySection > summary { color: var(--text-hi); font-size: 16px; }
+.accountAction { margin-top: 20px; }
+.accountAction > summary { color: var(--text-hi); font-size: 14px; }
+.accountAction .accountForm { margin-top: 16px; }
+.accountTechnical, .historyTechnical, .projectRowDetails { font-size: 12px; }
+.projectRowDetails { grid-column: 1 / -1; }
+.historyTechnical { margin: 0 8px 8px; }
+.frozenDocumentSlot > details { margin-top: 12px; }
 
-/* 低い PC 画面でも外観・言語・退出は常設し、長いメニューだけをスクロールする。 */
-@media (min-width: 961px) {
-  .navigationPanel { overflow: hidden; }
-  .sideNav { min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; }
-  .sidebarFooter { flex-shrink: 0; }
-}
 @media (max-width: 1100px) {
   [data-page='skills'] .skillWorkspace, [data-page='projects'] .projectManagementLayout,
   [data-page='schedules'] .scheduleManagerLayout { grid-template-columns: minmax(0, 1fr); }

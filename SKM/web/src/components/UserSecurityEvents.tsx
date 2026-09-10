@@ -26,11 +26,11 @@ export function UserSecurityEvents({ userId, own, revision, onSessionEnded }: {
     <div className="panelHeader"><h3>{messages.securityEvents}</h3>
       <button className="secondaryButton" type="button" disabled={query.pending} onClick={query.refresh}>{messages.refresh}</button>
     </div>
-    <p className="hint">{messages.auditHint}</p>
     <UserResponseNotice failure={query.failure} />
     {query.pending && <p role="status">{messages.busy}</p>}
     {query.data && <details className="detailDisclosure">
       <summary>{messages.page(offset, query.data.items.length, query.data.total)}</summary>
+      <p className="hint">{messages.auditHint}</p>
       {query.data.items.length === 0 && <p>{messages.emptyEvents}</p>}
       <ul className="accountEventList" tabIndex={query.data.items.length > 0 ? 0 : undefined} aria-label={messages.securityEvents}>
         {query.data.items.map((event) => <li key={event.event_id}>

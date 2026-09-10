@@ -561,9 +561,9 @@ async def owner_aba(
 
 
 async def tasks_entry(page: Page, api: ScheduleManagementApi, labels: dict) -> None:
-    """Task card 集約も 100 件で切らず、catalog エラー時も管理へ進める。"""
+    """Task card 集約も 100 件で切らず、catalog エラー時も側欄から管理へ進める。"""
     await page.evaluate("project => location.hash='/tasks?project='+project", PROJECT)
-    await expect(page.locator("[data-schedules-manager-link]")).to_be_visible()
+    await expect(page.locator("[data-schedules-manager-link]")).to_have_count(0)
     await expect(page.locator(".taskCard")).to_have_count(1)
     assert any(
         call[2].get("limit") == ["100"] and call[2].get("offset") == ["100"]
@@ -574,8 +574,8 @@ async def tasks_entry(page: Page, api: ScheduleManagementApi, labels: dict) -> N
     await page.evaluate("project => location.hash='/schedules?project='+project", PROJECT)
     await expect(page.locator("[data-schedule-row]")).to_have_count(25)
     await page.evaluate("project => location.hash='/tasks?project='+project", PROJECT)
-    await expect(page.locator("[data-schedules-manager-link]")).to_be_visible()
-    await page.locator("[data-schedules-manager-link]").click()
+    await expect(page.locator("[data-schedules-manager-link]")).to_have_count(0)
+    await page.locator('.sideNav a[href*="/schedules"]').click()
     await expect(page.locator("[data-schedule-row]")).to_have_count(25)
     assert not api.writes
 
@@ -850,6 +850,11 @@ async def exercise(
         await expect(page.locator("[data-schedule-manager]")).to_be_visible()
         await expect(page.locator("[data-schedule-row]")).to_have_count(25)
         labels = await messages(page, language)
+        spacing = await page.locator(".schedulePager").evaluate("""el => ({
+          list: el.getBoundingClientRect().top - el.previousElementSibling.getBoundingClientRect().bottom,
+          controls: el.querySelector('button').getBoundingClientRect().top - el.getBoundingClientRect().top,
+        })""")
+        assert spacing["list"] >= 20 and spacing["controls"] >= 16, spacing
         await action(page, api, labels)
         await settle(page)
         await privacy(page)

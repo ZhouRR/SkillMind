@@ -1,4 +1,4 @@
-"""PostgreSQL migration head と Redis 接続を secret-safe に事前検査する。"""
+"""保存先 namespace 設定、PostgreSQL migration head と Redis 接続を事前検査する。"""
 
 from __future__ import annotations
 
@@ -87,8 +87,23 @@ async def inspect_database(settings: Settings, *, allow_pending: bool = False) -
 async def inspect_infrastructure(
     settings: Settings, *, migration_plan: bool = False
 ) -> dict[str, Any]:
-    """Credential や URL を出力せず DB/Redis の必須状態を返す。"""
+    """Namespace 必須設定を先に検査し、Secret を出力せず DB/Redis の状態を返す。"""
 
+    namespace = settings.object_storage_namespace_id
+    if namespace is None or namespace.int == 0:
+        # 設定のみの検査であり、blob の接続・書込成功を保証しない。
+        return {
+            "status": "not_ready",
+            "checks": {
+                "object_storage_configuration": {
+                    "status": "error",
+                    "reason": "namespace_missing" if namespace is None else "namespace_invalid",
+                    "field": "SKILLMIND_OBJECT_STORAGE_NAMESPACE_ID",
+                    "hint": "Set a persistent, non-nil UUID in .env, shared by API and Worker. "
+                    "Preserve the existing storage namespace on updates.",
+                },
+            },
+        }
     postgres = await inspect_database(settings, allow_pending=migration_plan)
     report: dict[str, Any] = {
         "status": "ready" if postgres["status"] == "ok" else "not_ready",

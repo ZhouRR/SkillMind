@@ -19,20 +19,22 @@ export function RunDocumentSnapshots({ snapshots }: { snapshots: readonly RunDoc
           </div>
           {entry.status === 'FROZEN' ? <>
             <p>{entry.snapshot.selection_mode === 'SINGLE' ? modes.single : entry.snapshot.selection_mode === 'SET' ? modes.set : modes.all}</p>
-            <dl className="frozenDocumentFacts">
-              <div><dt>{labels.checksum}</dt><dd><code>{entry.snapshot.checksum}</code></dd></div>
-            </dl>
             <details>
               <summary>{labels.members(entry.snapshot.documents.length)}</summary>
+              <details className="detailDisclosure"><summary>{messages.elements.technicalDetails}</summary>
+                <dl className="frozenDocumentFacts">
+                  <div><dt>{labels.checksum}</dt><dd><code>{entry.snapshot.checksum}</code></dd></div>
+                </dl>
+              </details>
               <ul className="frozenDocumentMembers">
                 {entry.snapshot.documents.map((document) => (
                   <li key={document.document_id}>
                     <strong>{document.folder ? `${document.folder}/${document.name}` : document.name}</strong>
                     <p className="hint">{document.mime} · {labels.size(document.size)}</p>
-                    <dl className="frozenDocumentFacts">
+                    <details className="detailDisclosure"><summary>{messages.elements.technicalDetails}</summary><dl className="frozenDocumentFacts">
                       <div><dt>{labels.documentId}</dt><dd><code>{document.document_id}</code></dd></div>
                       <div><dt>{labels.contentHash}</dt><dd><code>{document.content_hash}</code></dd></div>
-                    </dl>
+                    </dl></details>
                   </li>
                 ))}
               </ul>

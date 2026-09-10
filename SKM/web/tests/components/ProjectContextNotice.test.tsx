@@ -16,6 +16,7 @@ describe('project boundary feedback', () => {
         <ProjectContextNotice access={{ status: 'unavailable' }} onRefresh={vi.fn()} />
       </LanguageProvider>)
       expect(html).toContain('data-project-context="unavailable"')
+      expect(html).toContain('class="panel projectContextNotice"')
       expect(html).toContain('role="alert"')
       expect(html).toContain(messages.app.projectUnavailable)
       expect(html).toContain(messages.runHistory.retry)
@@ -28,6 +29,7 @@ describe('project boundary feedback', () => {
       </LanguageProvider>)
       expect(html).toContain(messages.app.projectArchived)
       expect(html).toContain('data-project-context="archived"')
+      expect(html).toContain('class="panel projectContextNotice"')
       const failure = new ApiProblemError('private diagnostic', 409, 'project_delete_blocked_by_schedules')
       expect(projectDeleteErrorMessage(failure, messages)).toBe(messages.projects.deleteBlockedBySchedules)
       expect(projectDeleteErrorMessage(failure, messages)).not.toContain('private diagnostic')
@@ -38,6 +40,15 @@ describe('project boundary feedback', () => {
     const html = renderToStaticMarkup(<ProjectContextNotice access={{ status: 'loading' }} onRefresh={vi.fn()} />)
     expect(html).toContain('aria-busy="true"')
     expect(html).not.toContain('<button')
+  })
+
+  it('keeps an empty-project notice separate from the page with a read-only retry', () => {
+    const html = renderToStaticMarkup(<ProjectContextNotice access={{ status: 'empty' }} onRefresh={vi.fn()} />)
+    expect(html).toContain('class="panel projectContextNotice"')
+    expect(html).toContain('data-project-context="empty"')
+    expect(html).toContain('role="status"')
+    expect(html).toContain(MESSAGES.zh.elements.noAccessibleProjects)
+    expect(html).toContain(MESSAGES.zh.runHistory.retry)
   })
 
   it('does not warn for an authorized active project', () => {

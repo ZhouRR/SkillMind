@@ -1,0 +1,13 @@
+# SKM/ を context とし、Backend 用の root .dockerignore とは分離する。
+**
+!web/
+!web/**
+!contracts/
+!contracts/**
+**/.env
+**/.env.*
+**/node_modules
+**/dist
+**/*.log
+**/__pycache__
+**/.git

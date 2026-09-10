@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import io
 import json
 import re
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -126,6 +128,112 @@ class DocumentParsingTests(unittest.TestCase):
 
         build_docs.validate_link(self.page, "https://example.invalid/no-network", {})
 
+    def test_preview_keeps_content_and_warns_for_each_missing_target_kind(self) -> None:
+        """欠落 file/anchor/viewer でも本文と原参照を残し、strict のみ失敗させる。"""
+
+        for href in (
+            "missing.md", "#missing", "index.html#docs/missing.md::",
+            "index.html#docs/example.md::missing",
+        ):
+            with self.subTest(href=href):
+                source = f"# Page\n\nReadable content. [Reference]({href})\n"
+                document = self.document(source)
+                warnings = io.StringIO()
+                with redirect_stderr(warnings):
+                    build_docs.prepare_links(
+                        document, {self.page: document.anchors}, {self.page}, strict_links=False,
+                    )
+                rendered = self.parser.renderer.render(document.tokens, self.parser.options, {})
+                self.assertIn("Readable content.", rendered)
+                self.assertIn("Reference</a>", rendered)
+                self.assertIn("Documentation warning:", warnings.getvalue())
+                self.assertIn(href, warnings.getvalue())
+                self.assertEqual(self.page.read_text(), source)
+                with self.assertRaises(build_docs.MissingLinkError):
+                    build_docs.prepare_links(
+                        self.document(source), {self.page: document.anchors}, {self.page},
+                    )
+
+    def test_default_cli_builds_despite_html_links_and_strict_check_preserves_output(self) -> None:
+        """HTML の欠落参照は通常生成を止めず、check は元資料も生成済み版も変更しない。"""
+
+        self.document("# Page\n\nReadable preview.\n")
+        html = self.docs / "reference.html"
+        source = '<h1 id="title">Original</h1><a href="missing.html">Related</a>'
+        html.write_text(source, encoding="utf-8")
+        output = io.StringIO()
+        warnings = io.StringIO()
+        with (
+            patch.object(build_docs, "source_paths", return_value=[self.page]),
+            patch.object(build_docs, "LEGACY_PAGE_ALIASES", {}),
+            patch.object(build_docs, "validate_examples", return_value=0),
+            redirect_stdout(output), redirect_stderr(warnings),
+        ):
+            with patch("sys.argv", ["build_docs.py"]):
+                self.assertEqual(build_docs.main(), 0)
+            generated = build_docs.OUTPUT.read_bytes()
+            self.assertIn(b"Readable preview.", generated)
+            self.assertIn("missing.html", warnings.getvalue())
+            with patch("sys.argv", ["build_docs.py", "--check"]):
+                self.assertEqual(build_docs.main(), 1)
+            self.assertEqual(build_docs.OUTPUT.read_bytes(), generated)
+            self.assertEqual(html.read_text(), source)
+            # 参照が直れば同じ出力を再生成せず strict check も通る。
+            (self.docs / "missing.html").write_text("<h1>Target</h1>", encoding="utf-8")
+            with patch("sys.argv", ["build_docs.py", "--check"]):
+                self.assertEqual(build_docs.main(), 0)
+
+    def test_preview_does_not_swallow_unrelated_validation_errors(self) -> None:
+        """警告化をリンク欠落だけに限定し、解析器などの異常は伝播させる。"""
+
+        with (
+            patch.object(
+                build_docs, "validate_link", side_effect=ValueError("invalid parser state"),
+            ),
+            self.assertRaisesRegex(ValueError, "invalid parser state"),
+        ):
+            build_docs.check_link(self.page, "missing.md", {}, strict_links=False)
+
+    def test_nested_skill_package_is_not_read_or_embedded(self) -> None:
+        """docs 内の Skill 本文・参照・HTML は読まず、隣接する通常文書は維持する。"""
+
+        self.document("# Page\n\nReadable project documentation.\n")
+        for relative in ("README.md", "SKM/README.md", "SKM/AGENTS.md"):
+            path = self.root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("# Entry\n", encoding="utf-8")
+        skill = self.docs / "materials" / "test-skill"
+        assets = ("SKILL.md", "references/rules.md", "assets/preview.html")
+        for relative in assets:
+            path = skill / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            # UTF-8 として読めない byte により、単に索引から隠すだけの実装も検出する。
+            path.write_bytes(b"\xff\xfe")
+        sibling = skill.parent / "references" / "guide.md"
+        sibling.parent.mkdir()
+        sibling.write_text("# Nearby guide\n", encoding="utf-8")
+
+        with (
+            patch.object(build_docs, "LEGACY_PAGE_ALIASES", {}),
+            patch.object(build_docs, "validate_examples", return_value=0),
+        ):
+            content, count, _ = build_docs.build(strict_links=True)
+
+        self.assertEqual(count, 5)
+        self.assertIn("Readable project documentation.", content)
+        self.assertIn("Nearby guide", content)
+        self.assertNotIn("test-skill", content)
+        marker = '<script type="application/json" id="docs-data">'
+        payload = json.loads(content.split(marker, 1)[1].split("</script>", 1)[0])
+        nearby = next(
+            page for page in payload["pages"]
+            if page["id"] == "docs/materials/references/guide.md"
+        )
+        self.assertEqual(nearby["group"], "other")
+        self.assertIn(nearby["group"], payload["groups"])
+        for relative in assets:
+            self.assertEqual((skill / relative).read_bytes(), b"\xff\xfe")
+
     def test_viewer_links_are_checked_before_index_exists(self) -> None:
         """初回 build でも閲覧版の文書 ID と章を検証する。"""
 
@@ -240,9 +348,13 @@ class DocumentationBuildTests(unittest.TestCase):
                 self.assertTrue((build_docs.ROOT / relative).is_file())
 
     def test_source_list_covers_only_docs_and_central_code_entries(self) -> None:
-        """docs は全件を対象にし、実行資産や module README は埋め込まない。"""
+        """通常 docs は全件を対象にし、Skill package や module README は埋め込まない。"""
 
-        expected = set(build_docs.DOCS.rglob("*.md")) | {
+        skill_roots = {path.parent for path in build_docs.DOCS.rglob("SKILL.md")}
+        expected = {
+            path for path in build_docs.DOCS.rglob("*.md")
+            if not any(path.is_relative_to(root) for root in skill_roots)
+        } | {
             build_docs.ROOT / relative
             for relative in ("README.md", "SKM/README.md", "SKM/AGENTS.md")
         }

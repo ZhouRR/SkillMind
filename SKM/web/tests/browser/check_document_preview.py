@@ -26,7 +26,21 @@ MALICIOUS = """<!doctype html><html><head>
 <style>@import 'https://preview.invalid/import.css';
 body { background: url('/preview-probe/css'); }</style>
 </head><body onload="parent.document.body.dataset.previewMutated='yes'">
+<style>.preview-grid{display:grid;grid-template-columns:1fr 2fr;gap:12px}
+.preview-card{background:rgb(224, 236, 248);padding:17px;border-radius:9px}</style>
 <h1>Readable preview</h1><p>Safe paragraph <strong>strong text</strong>.</p>
+<div class="preview-grid"><div id="styled-card" class="preview-card">Styled card</div>
+<div>Layout</div></div>
+<svg id="static-diagram" viewBox="0 0 240 80" width="240" height="80">
+<defs><linearGradient id="paint"><stop stop-color="blue"/>
+<stop offset="1" stop-color="white"/></linearGradient>
+<symbol id="shape" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="blue"/></symbol></defs>
+<rect width="240" height="80" fill="url(#paint)"/><use href="#shape" width="20" height="20"/>
+<text x="30" y="40">Static diagram</text>
+<foreignObject><p>Forbidden SVG HTML</p></foreignObject>
+<animate attributeName="href" values="https://preview.invalid/animated"/>
+<use href="https://preview.invalid/external.svg#shape"/>
+<script>parent.postMessage('preview-attacked','*')</script></svg>
 <ul><li>First item</li><li>Second item</li></ul>
 <table><thead><tr><th>Field</th><th>Value</th></tr></thead>
 <tbody><tr><td>State</td><td>Safe</td></tr></tbody></table>
@@ -205,7 +219,8 @@ async def static_html(page: Page) -> None:
     await expect(
         frame.locator(
             "script, link, img, iframe, object, embed, video, audio, "
-            "svg, math, form, input, button, base, template, "
+            "svg image, svg script, foreignObject, animate, math, form, input, button, "
+            "base, template, "
             "unknown-active-element, meta[http-equiv=refresh]"
         )
     ).to_have_count(0)
@@ -220,13 +235,30 @@ async def static_html(page: Page) -> None:
       }
       return element.parentElement.tagName === 'HEAD';
     }""")
-    assert await frame.locator("style").evaluate_all(r"""elements => elements.every(element =>
-      !/@import|preview-probe|preview\.invalid|url\(/i.test(element.textContent))""")
+    await expect(frame.locator("#static-diagram text")).to_have_text("Static diagram")
+    await expect(frame.locator('#static-diagram use[href="#shape"]')).to_have_count(1)
+    assert await frame.locator(".preview-grid").evaluate(
+        "el => getComputedStyle(el).display"
+    ) == "grid"
+    assert await frame.locator("#styled-card").evaluate(
+        "el => getComputedStyle(el).backgroundColor"
+    ) == "rgb(224, 236, 248)"
+    # CSS の原文は保持し、@import/url の通信は CSP と probe 検査で拒否を実証する。
+    assert await frame.locator("style").evaluate_all(
+        "elements => elements.some(el => el.textContent.includes('@import'))"
+    )
     assert await frame.locator(
         "body"
     ).evaluate("""element => [...element.querySelectorAll('*')]
       .every(node => [...node.attributes].every(attribute =>
-        !/^(on|style$|src|href$|action$|formaction$|poster$|background$)/i.test(attribute.name)))""")
+        !/^(on|src|action$|formaction$|poster$|background$)/i.test(attribute.name)
+        && (!/href$/i.test(attribute.name) || attribute.value.startsWith('#'))))""")
+    bounds = await page.get_by_role("dialog").bounding_box()
+    assert bounds and page.viewport_size
+    inset = 10 if page.viewport_size["width"] <= 480 else 24
+    assert abs(bounds["x"] - inset) <= 1 and abs(bounds["y"] - inset) <= 1, bounds
+    assert abs(bounds["width"] - (page.viewport_size["width"] - inset * 2)) <= 1, bounds
+    assert abs(bounds["height"] - (page.viewport_size["height"] - inset * 2)) <= 1, bounds
     original_url = page.url
     await frame.get_by_text("Readable link text", exact=True).click()
     await settle(page)

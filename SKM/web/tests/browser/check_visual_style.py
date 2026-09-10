@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 
 from check_projects import PROJECT, RUN, layout, messages, settle
 from check_result_references import CONTRACTS, ResultApi
-from playwright.async_api import Browser, Route, async_playwright, expect
+from playwright.async_api import Browser, Page, Route, async_playwright, expect
 
 
 class VisualApi(ResultApi):
@@ -53,6 +53,29 @@ class VisualApi(ResultApi):
         await super().respond(route)
 
 
+async def brand_identity(page: Page, *, login: bool = False) -> None:
+    """製品印はログインだけに残し、導航には重複したブランド領域を置かない。"""
+    if not login:
+        await expect(page.locator(".sidebar .brand, .sidebar .brandMark")).to_have_count(0)
+        return
+    mark = page.locator(".authBrand .brandMark")
+    await expect(mark).to_be_visible()
+    await expect(mark).to_have_attribute("alt", "")
+    await mark.evaluate("el => el.decode()")
+    size = await mark.bounding_box()
+    assert size and size["width"] == size["height"] == 42, size
+    await expect(page.locator(".authBrand strong")).to_have_text("Skillmind")
+
+
+async def header_navigation(page: Page) -> None:
+    """側欄・tab と同じ遷移を頁見出しへ重複させず、共通の予定 icon を使う。"""
+    await expect(page.locator(".pageHeader button, .pageHeader a")).to_have_count(0)
+    await expect(page.locator(".historyPage .panelHeader a")).to_have_count(0)
+    icon = page.locator('.sideNav a[href*="/schedules"] svg')
+    await expect(icon.locator("rect")).to_have_count(1)
+    await expect(icon.locator("circle")).to_have_count(0)
+
+
 async def theme_controls(browser: Browser, url: str, output: Path) -> None:
     """実 button・再読込・別 tab・storage 拒否を検証し、業務草稿の再 mount を検出する。"""
     api = VisualApi(url, "zh")
@@ -74,8 +97,15 @@ async def theme_controls(browser: Browser, url: str, output: Path) -> None:
             "aria-pressed", "true"
         )
         assert await page.evaluate("localStorage.getItem('skillmind.theme')") is None
+        await page.get_by_role("tab", name=labels["skills"]["tabWorkbench"], exact=True).click()
+        await page.locator(".skillTextSource > summary").click()
         source = page.locator(".skillForm textarea").first
         await source.fill("Browser-only unsaved draft")
+        await page.locator(".skillTextSource > summary").click()
+        await page.get_by_role("tab", name=labels["skills"]["libraryTitle"]).click()
+        await page.get_by_role("tab", name=labels["skills"]["tabWorkbench"], exact=True).click()
+        await page.locator(".skillTextSource > summary").click()
+        await expect(source).to_have_value("Browser-only unsaved draft")
         await toggle.get_by_role("button", name=labels["theme"]["light"]).click()
         await expect(page.locator("html")).to_have_attribute("data-theme", "light")
         await expect(source).to_have_value("Browser-only unsaved draft")
@@ -118,7 +148,7 @@ async def theme_controls(browser: Browser, url: str, output: Path) -> None:
         )
         await page.reload()
         await expect(page.locator("html")).to_have_attribute("data-theme", "light")
-        assert await page.locator('meta[name="theme-color"]').get_attribute("content") == "#f7f5ef"
+        await expect(page.locator('meta[name="theme-color"]')).to_have_attribute("content", "#f7f5ef")
         assert not api.mutations() and not api.unexpected and not api.failures and not errors
         print("PASS theme-default-persistence-cross-tab-draft-drawer", flush=True)
     finally:
@@ -149,6 +179,7 @@ async def theme_controls(browser: Browser, url: str, output: Path) -> None:
     try:
         await page.goto(url.removesuffix("tests/browser/projects.html"))
         await expect(page.locator(".authLayout")).to_be_visible()
+        await brand_identity(page, login=True)
         await expect(page.locator("html")).to_have_attribute("data-theme", "dark")
         await page.screenshot(path=str(output / "login-zh-1440-dark.png"))
         await page.locator('input[name="email"]').fill("draft@example.com")
@@ -164,6 +195,211 @@ async def theme_controls(browser: Browser, url: str, output: Path) -> None:
         await context.close()
 
 
+async def sidebar_layout(page: Page) -> None:
+    """親だけが縦スクロールし、footer が menu を覆わず横にも溢れないことを守る。"""
+    metrics = await page.evaluate("""() => {
+      const panel = document.querySelector('.navigationPanel');
+      const nav = document.querySelector('.sideNav');
+      const footer = document.querySelector('.sidebarFooter');
+      return {
+        widths: [panel, nav, footer].map(el => [el.clientWidth, el.scrollWidth]),
+        panelScroll: getComputedStyle(panel).overflowY,
+        navScroll: getComputedStyle(nav).overflowY,
+        footerGap: footer.getBoundingClientRect().top - nav.getBoundingClientRect().bottom,
+      };
+    }""")
+    assert all(scroll <= client + 1 for client, scroll in metrics["widths"]), metrics
+    assert metrics["panelScroll"] == "auto" and metrics["navScroll"] == "visible", metrics
+    assert metrics["footerGap"] >= -1, metrics
+    # focus による親 scroll で、退出・言語・外観の全操作へ到達できる。
+    for selector in (".sidebarLogout", ".sidebarLanguage select", ".themeToggle button"):
+        control = page.locator(selector).first
+        await control.focus()
+        await expect(control).to_be_focused()
+        assert await control.evaluate("""el => {
+          const r = el.getBoundingClientRect();
+          const p = el.closest('.navigationPanel').getBoundingClientRect();
+          return r.top >= p.top - 1 && r.bottom <= p.bottom + 1;
+        }""")
+    await page.locator(".navigationPanel").evaluate("el => el.scrollTop = 0")
+
+
+async def empty_project_layout(browser: Browser, url: str, output: Path) -> None:
+    """空 Project の三語・両テーマで、notice の本文間隔と再読込を実測する。"""
+    for language, width in (("zh", 1366), ("ja", 1440), ("en", 1920), ("zh", 390)):
+        for theme in ("dark", "light"):
+            api = VisualApi(url, language)
+            api.projects = []
+            api.details = {}
+            api.preference = None
+            context = await browser.new_context(
+                viewport={"width": width, "height": 768 if width == 1366 else 900},
+                locale=language, reduced_motion="reduce",
+            )
+            await context.route("**/*", api.route)
+            await context.add_init_script(f"localStorage.setItem('skillmind.theme', '{theme}')")
+            page = await context.new_page()
+            errors: list[str] = []
+            page.on("pageerror", lambda error, errors=errors: errors.append(str(error)))
+            try:
+                await page.goto(f"{url}#/")
+                labels = await messages(page, language)
+                notice = page.locator('.projectContextNotice[data-project-context="empty"]')
+                await expect(notice).to_be_visible()
+                await expect(page.locator(".pageHeader h1")).to_be_visible()
+                await settle(page)
+                await page.evaluate("document.fonts.ready")
+                metrics = await notice.evaluate("""el => {
+                  const r = el.getBoundingClientRect();
+                  const next = el.nextElementSibling.getBoundingClientRect();
+                  return {height: r.height, gap: next.top - r.bottom};
+                }""")
+                assert metrics["gap"] >= 23, metrics
+                if width > 960:
+                    assert metrics["height"] < 110, metrics
+                    await sidebar_layout(page)
+                await notice.get_by_role("button", name=labels["runHistory"]["retry"]).click()
+                await expect(notice).to_be_visible()
+                await layout(page)
+                assert not api.mutations() and not api.unexpected and not api.failures
+                assert not errors
+                await page.screenshot(path=str(output / f"empty-{language}-{width}-{theme}.png"))
+                print(f"PASS empty-{language}-{width}-{theme} {metrics}", flush=True)
+            finally:
+                await context.close()
+
+
+async def skill_identity_layout(browser: Browser, url: str, output: Path) -> None:
+    """合成 parse/save 応答だけで技術 drawer を開き、二つの UUID 枠を実測する。"""
+    manifest = json.loads((CONTRACTS / "examples/generic-native-manifest.v1alpha1.json").read_text())
+    preview = {
+        "normalized_package": {
+            "package_format": "skillmind.normalized/v1",
+            "source": {"type": "directory", "content_hash": manifest["identity"]["source_hash"],
+                       "detected_adapter": "directory-skill/v1", "files": []},
+            "metadata": {"name": "Browser skill", "description": "Layout fixture", "argument_hint": None},
+            "resources": {"scripts": [], "references": [], "assets": []},
+            "declared_tools": [], "diagnostics": [],
+        },
+        "runtime_manifest_draft": {**manifest, "extensions": {}}, "capability_blueprint": None,
+    }
+    stored = {
+        "skill_source_id": "00000000-0000-4000-8000-000000000040",
+        "interpretation_id": manifest["identity"]["interpretation_id"],
+        "organization_id": "00000000-0000-4000-8000-000000000002",
+        "name": "Browser skill", "source_hash": manifest["identity"]["source_hash"],
+        "source_type": "directory", "interpretation_status": "PREVIEW_READY",
+        "compatibility_level": "native", "confidence": 1,
+        "interpreter_version": manifest["identity"]["interpreter_version"],
+        "created_at": "2026-09-10T00:00:00Z", "preview": preview,
+    }
+    for language, width in (("ja", 1440), ("zh", 1366), ("en", 1920), ("ja", 390)):
+        for theme in ("dark", "light"):
+            api = VisualApi(url, language)
+            context = await browser.new_context(viewport={"width": width, "height": 900},
+                                                locale=language, reduced_motion="reduce")
+            posts: list[str] = []
+
+            async def respond(route: Route) -> None:
+                """parse/save だけを fixture へ閉じ、モデル・実保存へ到達させない。"""
+                suffix = route.request.url.removeprefix(f"{api.origin}{api.prefix}")
+                if route.request.method == "POST" and suffix in ("skills/parse", "skill-imports"):
+                    posts.append(suffix)
+                    await route.fulfill(status=200 if suffix == "skills/parse" else 201,
+                                        json=preview if suffix == "skills/parse" else stored)
+                else:
+                    await api.route(route)
+
+            await context.route("**/*", respond)
+            await context.add_init_script(f"localStorage.setItem('skillmind.theme', '{theme}')")
+            page = await context.new_page()
+            errors: list[str] = []
+            page.on("pageerror", lambda error, errors=errors: errors.append(str(error)))
+            try:
+                await page.goto(f"{url}#/skills?project={PROJECT}")
+                labels = await messages(page, language)
+                await page.get_by_role("tab", name=labels["skills"]["tabWorkbench"], exact=True).click()
+                await page.locator(".skillTextSource > summary").click()
+                await page.locator(".skillForm textarea").first.fill("# Browser-only layout fixture")
+                await page.locator('.skillForm button[type="submit"]').click()
+                await page.locator(".saveSkillButton").click()
+                trigger = page.locator(".savedSkill .detailDrawerTrigger")
+                await trigger.click()
+                drawer = page.locator(".savedSkill [role=dialog]")
+                await expect(drawer).to_be_visible()
+                fields = drawer.locator(".runFacts > div")
+                await expect(fields).to_have_count(2)
+                boxes = [await field.bounding_box() for field in await fields.all()]
+                assert all(boxes) and abs(boxes[0]["width"] - boxes[1]["width"]) < 1, boxes
+                assert boxes[1]["y"] >= boxes[0]["y"] + boxes[0]["height"], boxes
+                assert await drawer.locator("dd").all_text_contents() == [
+                    stored["skill_source_id"], stored["interpretation_id"],
+                ]
+                for field in await drawer.locator("dd").all():
+                    assert await field.evaluate("el => el.scrollWidth <= el.clientWidth + 1")
+                await layout(page)
+                await page.screenshot(path=str(output / f"skill-identity-{language}-{width}-{theme}.png"))
+                await page.keyboard.press("Escape")
+                await expect(trigger).to_be_focused()
+                assert posts == ["skills/parse", "skill-imports"]
+                assert not errors and not api.unexpected and not api.failures and not api.mutations()
+                print(f"PASS skill-identity-{language}-{width}-{theme}", flush=True)
+            finally:
+                await context.close()
+
+
+async def permission_feedback(browser: Browser, url: str, output: Path) -> None:
+    """USER の一覧取得と技能操作の 403 を模擬し、三語・両テーマの翻訳を確認する。"""
+    output.mkdir(parents=True, exist_ok=True)
+    for language in ("zh", "ja", "en"):
+        for theme in ("dark", "light"):
+            api = VisualApi(url, language)
+            api.role = "USER"
+            api.users[api.actor]["system_role"] = "USER"
+            context = await browser.new_context(viewport={"width": 1440, "height": 900}, locale=language)
+            posts: list[str] = []
+
+            async def respond(route: Route) -> None:
+                """安定 code は維持し、英語の Problem 本文が画面へ漏れないことを試す。"""
+                suffix = route.request.url.removeprefix(f"{api.origin}{api.prefix}")
+                denied_read = route.request.method == "GET" and suffix in {
+                    f"projects/{PROJECT}/{resource}" for resource in
+                    ("secret-references", "integrations", "resource-bindings", "effect-preauthorizations")
+                }
+                denied_write = route.request.method == "POST" and suffix == "skills/parse"
+                if denied_read or denied_write:
+                    if denied_write:
+                        posts.append(suffix)
+                    await route.fulfill(status=403, json={"status": 403, "title": "Access denied",
+                        "code": "administrator_required", "detail": "Administrator access is required."})
+                else:
+                    await api.route(route)
+
+            await context.route("**/*", respond)
+            await context.add_init_script(f"localStorage.setItem('skillmind.theme', '{theme}')")
+            page = await context.new_page()
+            errors: list[str] = []
+            page.on("pageerror", lambda error, errors=errors: errors.append(str(error)))
+            try:
+                for name in ("resources", "skills"):
+                    await page.goto(f"{url}#/{name}?project={PROJECT}")
+                    labels = await messages(page, language)
+                    if name == "skills":
+                        await page.get_by_role("tab", name=labels["skills"]["tabWorkbench"], exact=True).click()
+                        await page.locator(".skillTextSource > summary").click()
+                        await page.locator(".skillForm textarea").first.fill("# Browser-only permission fixture")
+                        await page.locator('.skillForm button[type="submit"]').click()
+                    await expect(page.get_by_text(labels["account"]["failures"]["adminRequired"], exact=True)).to_be_visible()
+                    assert "Administrator access is required." not in await page.locator("main").inner_text()
+                    await layout(page)
+                    await page.screenshot(path=str(output / f"permission-{name}-{language}-{theme}.png"))
+                assert posts == ["skills/parse"]
+                assert not api.unexpected and not api.failures and not api.mutations() and not errors
+                print(f"PASS permissions-{language}-{theme}", flush=True)
+            finally:
+                await context.close()
+
+
 async def check(url: str, output: Path) -> None:
     """全ルートで横溢れ・描画例外・配色・非意図的な API 書込を検出する。"""
     output.mkdir(parents=True, exist_ok=True)
@@ -171,6 +407,9 @@ async def check(url: str, output: Path) -> None:
         browser = await playwright.chromium.launch()
         try:
             await theme_controls(browser, url, output)
+            await empty_project_layout(browser, url, output)
+            await skill_identity_layout(browser, url, output)
+            await permission_feedback(browser, url, output)
             for language, width in (
                 ("zh", 1366),
                 ("zh", 1440),
@@ -224,16 +463,35 @@ async def check(url: str, output: Path) -> None:
                             await settle(page)
                             await page.evaluate("document.fonts.ready")
                             await layout(page)
+                            await brand_identity(page)
+                            await header_navigation(page)
+                            if name == "skills" and language == "ja" and width > 960:
+                                lines = await page.locator(".skillScopeBadge").evaluate("""el => {
+                                  const range = document.createRange();
+                                  range.selectNodeContents(el);
+                                  return new Set([...range.getClientRects()].map(r => r.top)).size;
+                                }""")
+                                assert lines == 1, lines
+                            if name == "documents":
+                                await expect(page.locator(".documentUploadStatus, .documentUploadClosure")).to_have_count(0)
+                                await expect(page.locator(".documentHelp")).not_to_have_attribute("open", "")
+                                spacing = await page.locator(".documentToolbar").evaluate("""el =>
+                                  el.nextElementSibling.getBoundingClientRect().top
+                                  - el.getBoundingClientRect().bottom""")
+                                assert spacing >= 16, spacing
+                                if width > 960:
+                                    controls = await page.locator(".documentToolbar").evaluate("""el =>
+                                      [...el.children].map(child => child.getBoundingClientRect().top)""")
+                                    assert max(controls) - min(controls) <= 1, controls
+                                    bounds = await page.locator(".documentTree").bounding_box()
+                                    assert bounds and bounds["y"] < 500, bounds
+                            if name == "skills":
+                                await expect(page.locator(".skillForm")).not_to_be_visible()
+                            if name == "accounts":
+                                await expect(page.locator('[data-account-form="password"]')).not_to_be_visible()
+                                await expect(page.locator("[data-account-directory]")).not_to_be_visible()
                             if width > 960:
-                                position = await page.locator(".themeToggle").bounding_box()
-                                assert (
-                                    position
-                                        and position["y"] >= 0
-                                    and (
-                                        position["y"] + position["height"]
-                                        <= page.viewport_size["height"]
-                                    )
-                                ), position
+                                await sidebar_layout(page)
                             assert (
                                 await page.evaluate(
                                     "getComputedStyle(document.documentElement).colorScheme"
@@ -297,7 +555,7 @@ async def check(url: str, output: Path) -> None:
                             if width == 1440 and name in {"skills", "projects", "resources"}:
                                 # 読取 tab だけを実操作する。権限変更・公開・接続は実行しない。
                                 tabs = page.get_by_role("tab")
-                                for index in range(1, await tabs.count()):
+                                for index in range(await tabs.count()):
                                     await tabs.nth(index).click()
                                     await settle(page)
                                     await layout(page)

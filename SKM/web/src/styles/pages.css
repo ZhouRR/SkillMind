@@ -186,10 +186,10 @@
 .savedSkillStatus span { color: var(--text-faint); font-size: 12px; font-weight: 600; }
 .savedSkillStatus strong { color: var(--ok); font-size: 12px; }
 .skillVersionDetail { display: grid; gap: 10px; margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
-/* Version detail は checksum/UUID が長いため、fact card を 1 列にして全文を折り返す。 */
-.skillVersionDetail .runFacts { grid-template-columns: 1fr; }
-.skillVersionDetail .runFacts div:first-child { grid-column: auto; }
-.skillVersionDetail .runFacts dd { overflow-wrap: anywhere; white-space: normal; }
+/* 技術情報の checksum/UUID は等幅の 1 列にして全文を折り返す。 */
+.skillVersionDetail .runFacts, .savedSkill .runFacts { grid-template-columns: minmax(0, 1fr); }
+.skillVersionDetail .runFacts div:first-child, .savedSkill .runFacts div:first-child { grid-column: auto; }
+.skillVersionDetail .runFacts dd, .savedSkill .runFacts dd { overflow-wrap: anywhere; white-space: normal; }
 .skillVersionDetail .primaryButton { justify-self: start; }
 /* 画面 tab(取込と解析/組織 library)の中に入ったため、上余白は tabBar が担う。 */
 .skillLibrary { display: grid; gap: 14px; }

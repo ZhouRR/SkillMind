@@ -1,4 +1,4 @@
-"""YAML source の検査は PyYAML 依存とし、標準 library の wrapper 回帰から分離する。"""
+"""Compose source の共有 image/config と ingress 境界を検査する。"""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from scripts import validate_compose
 
 
 class ComposeSourceInvariantTests(unittest.TestCase):
-    """YAML 静的検証でも三つの env_file と image pin 入口の退行を拒否する。"""
+    """Backend の設定源・export tag の不一致を拒否する。"""
 
     def test_repository_compose_invariants_pass_without_dotenv_or_docker(self) -> None:
         """Compose source だけを読み、実環境へ接続しない。"""
@@ -23,7 +23,7 @@ class ComposeSourceInvariantTests(unittest.TestCase):
             validate_compose.validate()
 
     def test_each_backend_service_must_use_same_explicit_source(self) -> None:
-        """一 service だけ .env へ戻っても validator が失敗する。"""
+        """ENV_FILE の選択が一 service にだけ伝わらない変更を拒否する。"""
 
         document = yaml.safe_load(validate_compose.COMPOSE_FILE.read_text(encoding="utf-8"))
         for name in ("api", "worker", "migrate"):
@@ -36,8 +36,36 @@ class ComposeSourceInvariantTests(unittest.TestCase):
                 ):
                     validate_compose.validate()
 
-    def test_each_application_image_must_support_explicit_pins(self) -> None:
-        """mutable tag 直書きが一箇所へ戻った場合も検出する。"""
+    def test_web_build_context_cannot_drop_sibling_contracts(self) -> None:
+        """local だけで通る test import を Docker build でも解決できる構造を守る。"""
+
+        document = yaml.safe_load(validate_compose.COMPOSE_FILE.read_text(encoding="utf-8"))
+        for key, value in (("context", "web"), ("dockerfile", "Dockerfile")):
+            with self.subTest(key=key):
+                changed = json.loads(json.dumps(document))
+                changed["services"]["web"]["build"][key] = value
+                with (
+                    patch.object(validate_compose.yaml, "safe_load", return_value=changed),
+                    self.assertRaisesRegex(ValueError, "sibling contracts"),
+                ):
+                    validate_compose.validate()
+
+    def test_backend_pull_policy_prevents_implicit_downloads(self) -> None:
+        """run --pull に頼らず、共通設定で不足 image の自動取得を拒否する。"""
+
+        document = yaml.safe_load(validate_compose.COMPOSE_FILE.read_text(encoding="utf-8"))
+        for name in ("api", "worker", "migrate"):
+            with self.subTest(name=name):
+                changed = json.loads(json.dumps(document))
+                changed["services"][name].pop("pull_policy")
+                with (
+                    patch.object(validate_compose.yaml, "safe_load", return_value=changed),
+                    self.assertRaisesRegex(ValueError, "pull_policy"),
+                ):
+                    validate_compose.validate()
+
+    def test_each_application_image_must_match_export_tags(self) -> None:
+        """一 service だけ別の image tag を使う変更を拒否する。"""
 
         document = yaml.safe_load(validate_compose.COMPOSE_FILE.read_text(encoding="utf-8"))
         for name in ("api", "worker", "migrate", "web"):

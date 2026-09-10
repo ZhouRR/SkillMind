@@ -112,9 +112,9 @@ S3 同一次 GET 最多读取声明 size + 1 bytes，不先 stat；连接/读取
 
 Web 预览仅 txt/md/markdown/htm/html，最多 1,000,000 实际 bytes，只接受 200，错误正文也有界。列表 size 仅作按钮提示，Content-Length 不可信；超限停止并提示下载，不显示截断片段，UTF-8 错误明确拒绝。
 
-文本/Markdown 保留原文；HTML 在无浏览上下文 template 解析，只重建静态结构白名单，无脚本、上传 CSS、表单/frame、外部资源、URL/事件属性；图片留 alt、链接留文本。超过 20,000 节点安全显示原文，不递归截断。
+文本/Markdown 保留原文；HTML 在无浏览上下文的独立 document 解析，重建静态 HTML/SVG，保留内嵌 CSS、class/id、布局属性、渐变/滤镜和 SVG 同文档引用，不逐条改写 CSS。脚本、事件、表单/frame、SVG 动画/foreignObject、外部资源属性和页面跳转不开放；图片留 alt、链接留文本。超过 20,000 节点安全显示原文，不递归截断。
 
-srcDoc 正文前设置[默认拒绝 CSP](https://www.w3.org/TR/CSP3/#meta-element)，仅允许平台固定 CSS；iframe sandbox=""、no-referrer。页面说明主动内容已移除、原文件仍可下载；这不是 generated Host，也不保证其他应用打开原文件安全。
+srcDoc 的 head 最前设置[默认拒绝 CSP](https://www.w3.org/TR/CSP3/#meta-element)，仅允许内嵌 CSS，CSS 的外部 import/url 仍受拒绝；iframe sandbox=""、no-referrer，不允许脚本或访问主页面。预览弹窗使用可用视口，PC 四边留 24px、窄屏留 10px，正文占剩余高度。页面说明展示保留与禁用范围、原文件仍可下载；这不是 generated Host，也不保证其他应用打开原文件安全。
 
 预览读取期限 30 秒；关闭/同 tick 换文件、换 actor/会话/Project 立即作废旧请求，晚到正文/401 不影响新上下文。当前 401/403/Project 404 关闭写资格，列表刷新不重开，预览不解除未知删除。
 
@@ -162,7 +162,7 @@ Organization UPDATE → User SHARE → 原 AuthSession UPDATE
 
 ### 持久清理仍待补齐
 
-已实现独立停止发布和删除后的清理要求；清理成功/结算 API、修复 CLI 尚未实现。必须分开保存：
+当前仅实现独立停止发布和删除后的清理要求；清理成功/结算 API、修复 CLI 尚未实现。以下是接入可靠清理的目标协议，不是当前部署或预览修改的前置步骤；现有 namespace UUID 配置仍按[存储归属](#存储归属与配置切换)要求提供。接线时分开保存：
 
 | 事实 | 必要证明 |
 | --- | --- |
@@ -174,11 +174,11 @@ Organization UPDATE → User SHARE → 原 AuthSession UPDATE
 
 服务端封闭前提不能由 client 条件 header 代替。当前 Compose 固定 MinIO 使用 [policy v3.1.3](https://github.com/minio/minio/blob/RELEASE.2025-09-07T16-13-09Z/go.mod#L62)，[条件键](https://github.com/minio/pkg/blob/v3.1.3/policy/condition/keyname.go#L225)不含 s3:if-none-match / s3:if-match，不能照搬 AWS 策略限制无条件写；[PUT 条件检查](https://github.com/minio/minio/blob/RELEASE.2025-09-07T16-13-09Z/cmd/erasure-object.go#L1176)也未对读仲裁错误一律拒绝，不能认定未知时已封闭。
 
-新 namespace 需受保护的服务端 marker、与旧 put/delete 隔离的权限、全对象版本保证；[前缀/目录排除](https://github.com/minio/minio/blob/RELEASE.2025-09-07T16-13-09Z/internal/bucket/versioning/versioning.go#L91)使仅验 versioning=Enabled 不足。启动只核对已有 marker，不自动创建或以配置布尔值充当验收。服务端方案/故障验收后再接 Worker 重试、结算与恢复；长期占用是缺口。Run 副本、备份、退役另行评审，不改旧 ID/hash。
+可靠清理方案的新 namespace 需受保护的服务端 marker、与旧 put/delete 隔离的权限、全对象版本保证；[前缀/目录排除](https://github.com/minio/minio/blob/RELEASE.2025-09-07T16-13-09Z/internal/bucket/versioning/versioning.go#L91)使仅验 versioning=Enabled 不足。接入该方案后，启动只核对已有 marker，不自动创建或以配置布尔值充当验收；当前不要求运维手工补 marker。服务端方案/故障验收后再接 Worker 重试、结算与恢复；长期占用是缺口。Run 副本、备份、退役另行评审，不改旧 ID/hash。
 
 ## 页面与结果未知
 
-目录上传依次独立 POST，选择时冻结 actor/Project、每份 UUID/File/路径，显示已发布、确定拒绝、未知、未发送。确定文件拒绝可继续；未知或资格拒绝暂停，剩余不发送。取消、30 秒期限、损坏成功响应、断连均不撤回操作或自动重发。
+默认显示上传入口与文档列表；历史 key 查询收在上传帮助，活动进度、失败/未知及其处理直接显示，技术编号可展开复制。目录上传依次独立 POST，选择时冻结 actor/Project、每份 UUID/File/路径，区分已发布、确定拒绝、未知、未发送。确定文件拒绝可继续；未知或资格拒绝暂停，剩余不发送。取消、30 秒期限、损坏成功响应、断连均不撤回操作或自动重发。
 
 | 操作 | 恢复门禁 |
 | --- | --- |

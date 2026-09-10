@@ -4,6 +4,7 @@ import { login, type AuthSessionRecord } from '../api'
 import { useMessages } from '../i18n'
 import { loginFeedback } from '../lib/loginFeedback'
 import { ThemeToggle } from '../components/ThemeToggle'
+import { BrandMark } from '../components/BrandMark'
 
 /** 初期表示の案内と request 失敗を分け、言語切替時には失敗を再翻訳する。 */
 type LoginError = { message: string } | { reason: unknown }
@@ -59,7 +60,7 @@ export function LoginPage({ onAuthenticated, initialError }: {
         <aside className="authStory">
           <div>
             <div className="authBrand">
-              <span className="brandMark">SM</span>
+              <BrandMark />
               <span><strong>Skillmind</strong><small>{messages.nav.brandTagline}</small></span>
             </div>
             <p className="authHeadline">{messages.login.introTitle}</p>

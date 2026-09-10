@@ -16,7 +16,7 @@ describe('ProjectContextSelect', () => {
         onSelect={vi.fn()}
       />,
     )
-    expect(html).toContain(`Quality Team · quality-team · ${MESSAGES.zh.elements.archivedProject}`)
+    expect(html).toContain(`Quality Team · ${MESSAGES.zh.elements.archivedProject}`)
     expect(html).toContain(`<option value="${PROJECT.project_id}" selected="">`)
     expect(html).toContain(`role="status">${MESSAGES.zh.elements.loadingProjects}</p>`)
     expect(html).not.toContain('<select disabled')
@@ -32,7 +32,7 @@ describe('ProjectContextSelect', () => {
         onSelect={vi.fn()}
       />,
     )
-    expect(html).toContain(`Quality Team · quality-team · ${MESSAGES.zh.elements.archivedProject}`)
+    expect(html).toContain(`Quality Team · ${MESSAGES.zh.elements.archivedProject}`)
     expect(html).toContain(`role="alert">${MESSAGES.zh.elements.projectListFailed}</p>`)
     expect(html).not.toContain('<select disabled')
   })
@@ -77,7 +77,7 @@ describe('ProjectContextSelect', () => {
       />,
     )
     expect(html.split('<option').length - 1).toBe(2)
-    expect(html).toContain(`Current authorized detail · quality-team · ${MESSAGES.zh.elements.archivedProject}`)
+    expect(html).toContain(`Current authorized detail · ${MESSAGES.zh.elements.archivedProject}`)
     expect(html).toContain('Other accessible project')
     expect(html).not.toContain('Quality Team')
     expect(html).not.toContain('role="status"')
@@ -143,7 +143,7 @@ describe('ProjectContextSelect', () => {
         onSelect={vi.fn()}
       />,
     )
-    expect(html).toContain(`Quality Team · quality-team · ${MESSAGES.zh.elements.archivedProject}`)
+    expect(html).toContain(`Quality Team · ${MESSAGES.zh.elements.archivedProject}`)
     expect(html).toContain(`<option value="${PROJECT.project_id}" selected="">`)
     expect(html).not.toContain(MESSAGES.zh.elements.projectUnavailable)
   })
@@ -157,7 +157,8 @@ describe('ProjectContextSelect', () => {
       />,
     )
 
-    expect(html).toContain('Quality Team · quality-team')
+    expect(html).toContain(`<option value="${PROJECT.project_id}" selected="">${PROJECT.name}</option>`)
+    expect(html).not.toContain(PROJECT.key)
     // UUID は手入力欄ではなく補助行として表示する。
     expect(html).toContain('projectContextId')
     expect(html).toContain(PROJECT.project_id)

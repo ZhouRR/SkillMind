@@ -6,7 +6,6 @@ import {
   routeFromHash,
   routeHref,
   routeHrefWithProject,
-  routeUsesModuleFilter,
 } from '../../src/lib/routing'
 
 describe('application routing', () => {
@@ -36,7 +35,6 @@ describe('application routing', () => {
     expect(routeFromHash('#/accounts?project=project-a')).toBe('accounts')
     expect(projectIdFromHash('#/accounts?project=project-a')).toBeNull()
     expect(APP_ROUTES.find(({ route }) => route === 'accounts')?.scope).toBe('platform')
-    expect(routeUsesModuleFilter('accounts')).toBe(false)
   })
 
   it('carries an encoded project context without changing the route', () => {
@@ -69,13 +67,7 @@ describe('application routing', () => {
     expect(projectRoutes).toEqual(['workspace', 'history', 'tasks', 'schedules', 'documents', 'resources'])
   })
 
-  it('keeps the module filter active on both screens that read it', () => {
-    /** 任务中心と工作空间は同じ module 選択を読む。片方だけ強調すると選択が消えて見える。 */
-    expect(routeUsesModuleFilter('tasks')).toBe(true)
-    expect(routeUsesModuleFilter('workspace')).toBe(true)
-    expect(routeUsesModuleFilter('home')).toBe(false)
-    expect(routeUsesModuleFilter('projects')).toBe(false)
-    expect(routeUsesModuleFilter('schedules')).toBe(false)
+  it('resolves the project-wide schedule route independently', () => {
     expect(routeFromHash('#/schedules?project=original')).toBe('schedules')
   })
 })

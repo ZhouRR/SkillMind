@@ -52,4 +52,9 @@ describe('message catalogs', () => {
     expect(MESSAGES.ja.routes.workspace.label).not.toBe(MESSAGES.zh.routes.workspace.label)
     expect(MESSAGES.en.routes.workspace.label).not.toBe(MESSAGES.zh.routes.workspace.label)
   })
+
+  it('keeps Japanese navigation and skill scope labels concise', () => {
+    expect(MESSAGES.ja.nav.currentProject).toBe('プロジェクト')
+    expect(MESSAGES.ja.skills.scopeBadgeWithProject).toBe('組織資産 · プロジェクトで設定可能')
+  })
 })

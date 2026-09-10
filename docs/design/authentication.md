@@ -79,7 +79,7 @@ auth-tag route 的已处理响应与登录防护路径设置 Cache-Control: no-s
 
 ## 首个 ADMIN 初始化
 
-仅受控交互 CLI，密码经 getpass，不进参数、环境或 shell history。锁 migration 创建的 Organization，存在任何 ADMIN 即拒绝；后续走[用户管理](user-lifecycle.md)，不以反复 bootstrap、匿名 HTTP、启动自动创建或 SQL 提权恢复账户。命令见[首次起动](../operations/quickstart.md#最初の-admin-を作成する)，与会清空数据的近名 Make target 区分。
+仅受控交互 CLI，密码经 getpass，不进参数、环境或 shell history。锁 migration 创建的 Organization，存在任何 ADMIN 即拒绝；后续走[用户管理](user-lifecycle.md)，不以反复 bootstrap、匿名 HTTP、启动自动创建或 SQL 提权恢复账户。命令见[首次起动](../operations/quickstart.md#最初の-admin-を作成する)；当前 make bootstrap-admin 不清空数据，也不是重置入口。
 
 ## 权限判定
 
