@@ -38,6 +38,7 @@ COPY contracts /app/contracts
 COPY skills/skillmind-skill-interpreter /app/skills/skillmind-skill-interpreter
 COPY backend/alembic.ini /app/backend/alembic.ini
 COPY backend/migrations /app/backend/migrations
+COPY scripts/compose.py scripts/deploy.py scripts/deploy_checks.py /opt/skillmind-deploy/
 
 WORKDIR /app/backend
 USER 10001:10001

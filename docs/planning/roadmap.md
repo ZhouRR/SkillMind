@@ -24,7 +24,7 @@
 | 4 | [R01 资源冻结](../design/resource-snapshots.md) | 70% | 输入冻结与限额已接；[存储归属、封闭写入及精确清理结算](../design/document-lifecycle.md#持久清理仍待补齐)、真实事务/恢复待补。 | 先保障一种只读来源的权限、版本和内容一致性；非首版上传/删除入口需服务端限制。 |
 | 5 | [R05 领域与身份安全](../design/authentication.md) | 80% | 登录、账户、成员、项目和运行授权已接；独立项目审计、完整删除、真实事务/Redis/HTTPS 及 Secret 恢复待验。 | 收口首版授权与撤权；完整业务删除及高级管理后置。 |
 | 6 | [R02 Run 统一预算](../design/run-budgets.md) | 45% | 账本、原调用绑定和 Engine 桥接已有；普通 Run 尚未接入，可信计量、停止与未知费用核对未闭合。 | 先接主执行限额、一次启动和未知处理；子 Agent 共享分摊后置。 |
-| 7 | [R11 运维与工程工具](../operations/deployment.md) | 65% | 构建、迁移和分阶段部署工具已有；全实例停写/清理、实际 Docker/Make/PowerShell 与[恢复](../operations/backup-recovery.md)待验。 | 完成目标环境部署、重启和备份恢复，不以脚本回归代替。 |
+| 7 | [R11 运维与工程工具](../operations/deployment.md) | 65% | Windows 离线发布包、Linux Compose + make、容器内校验/迁移及独立 Worker/Web 放行已有；全实例停写/清理、真实 Rancher/Linux 部署与[恢复](../operations/backup-recovery.md)待验。 | 完成目标环境部署、重启和备份恢复，不以脚本回归代替。 |
 | 8 | [R10 全部 Web 页面](../design/workspace.md) | 70% | 核心操作页面、全站信息分层与日/夜主题已有，默认夜间；管理操作未知确认、晚到响应隔离、全站分页和真实会话/存储验收待补。 | 先部署预览界面，再收口首版必需页面和异常交互；视觉改造不代替业务验收。 |
 | 9 | [R13 全量契约与最终审计](../development/contract-workflow.md) | 30% | 契约校验和局部回归已有；全项目逐需求核对与最终审计未完成。 | 验收本期需求对应的代码、契约、消费者和真实证据；全量审计后置。 |
 | 10 | [R09 调度](../design/task-scheduling.md) | 80% | ONCE/CRON、持久触发与原键恢复已有；真实撤权/多 Worker 事务、人工处置与迟到策略待补。 | 整体后置，服务端限制创建、触发和恢复入口。 |

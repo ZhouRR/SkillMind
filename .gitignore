@@ -15,6 +15,7 @@ node_modules/
 web/dist/
 .pnpm-store/
 /images/*.tar
+/SKM/images/
 .DS_Store
 .idea/
 .vscode/

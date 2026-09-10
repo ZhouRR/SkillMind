@@ -14,6 +14,9 @@ RUN pnpm build
 
 FROM nginx:1.28-alpine
 
+ARG SKILLMIND_CONTEXT_PATH=/skillmind
+LABEL org.skillmind.context-path=${SKILLMIND_CONTEXT_PATH}
+
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY --from=builder /build/dist /usr/share/nginx/html
 

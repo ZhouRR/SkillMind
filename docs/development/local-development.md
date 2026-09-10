@@ -135,7 +135,8 @@ python3 tests/browser/check_task_flow.py \
 | SDK offline | SKM/：`PYTHONPATH=backend/src python3 scripts/probe_claude_agent_sdk.py` |
 | 文書 | SKM/：[build/check と閲覧検証](documentation.md) |
 
-配備工具 test は合成 file/fake process で実 Docker を使わない。実環境の `make config` は Docker と確認済み対象が必要で、通常 config 出力には Secret が含まれ得る。
+配備工具 test は合成 file/fake process で実 Docker を使わない。PowerShell 実行回帰は SKM_TEST_PWSH に実行 file を指定する（未指定なら skip）。Shell/Python validator と PowerShell の command/失敗検査であり、Windows/Rancher・実 image の証拠ではない。
+実環境の `make config` は Docker と確認済み対象が必要で、通常 config 出力には Secret が含まれ得る。
 mock/実環境、成功/skip/失敗を分け、Docker・Make・PowerShell 等がなければ該当する実起動・復旧・Windows 操作は未検証と報告する。
 
 ## Skill Interpreter の検証

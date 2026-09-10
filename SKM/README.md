@@ -12,8 +12,8 @@ Skill をタスクとして実行し、結果・根拠・人工評価・外部�
 | 起動・更新 | [Quickstart](../docs/operations/quickstart.md) / [配備手順](../docs/operations/deployment.md) |
 | API・障害対応 | [API 利用](../docs/development/api-usage.md) / [Runbook](../docs/operations/runbook.md) / [復元](../docs/operations/backup-recovery.md) |
 
-Python 3.12、Node.js 26 / pnpm 11.7.0 を使用する。DB・Redis・object storage は別途必要。
-通常の ADMIN 作成は `python -m skillmind.ops.bootstrap_admin`。**`make bootstrap-admin` は全 volume を消す**ため、初回の通常手順と混同しない。
+ソース開発は Python 3.12、Node.js 26 / pnpm 11.7.0。配備は Windows/Rancher で image を構築し、Linux の Docker Compose + make で実行する（宿主 Python/Node 不要）。
+`make bootstrap-admin` は既存 data を削除せず最初の ADMIN を作成する。
 
 ## Backend
 
@@ -51,5 +51,5 @@ Task Center は実行対象の選択、[Workspace](../docs/design/workspace.md) 
 
 ## Images
 
-`images/skillmind-images.tar` は配備 image であり、DB・blob・workspace・KEK の backup ではない。
+`images/skillmind-<Version>/` は checksum 付き offline release であり、DB・blob・workspace・KEK の backup ではない。
 [image 移送と更新](../docs/operations/quickstart.md#image-移送と更新)で必要 image・送受信 checksum・既存 archive の保全を確認し、復旧は[同一復元点](../docs/operations/backup-recovery.md#一致恢复点包含什么)を使う。

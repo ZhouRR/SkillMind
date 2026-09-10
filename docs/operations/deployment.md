@@ -1,6 +1,6 @@
 # 发布、迁移与分阶段放行
 
-已有环境的发布手册；首次准备见[启动](quickstart.md)，数据替换见[恢复](backup-recovery.md)。命令在目标 `SKM/` 执行，先确认环境、维护窗口、版本与负责人；未知目标不试运行。
+已有环境的发布手册；首次准备见[启动](quickstart.md)，数据替换见[恢复](backup-recovery.md)。命令在 Linux 服务器的版本发布目录执行，先确认环境、维护窗口、版本与负责人；未知目标不试运行。
 
 本工程按 Skillmind 全新命名部署，不保留旧产品标识或旧数据兼容层；既有 volume、数据库、队列和对象存储不会自动迁移。使用独立的新环境初始化，旧环境数据按其原版本保全。镜像只包含 system Interpreter Skill；合成测试素材仅保存在 `backend/tests`，业务 Skill 在部署后导入。
 
@@ -28,20 +28,22 @@
 
 ## 环境文件与配置边界
 
-[Makefile](../../SKM/Makefile)和镜像导出共用 [compose.py](../../SKM/scripts/compose.py)，仅需宿主 Python 3.12 标准库；Windows 可指定 executable。
+构建端为 Windows + Rancher Desktop（Moby）+ PowerShell + Docker Compose；部署端为 Linux + Docker Compose v2 + GNU make 和常规系统工具（sh、realpath、sha256sum、mktemp、id）。两端都不要求宿主 Python、Node 或 jq。CPU 架构仍须匹配：默认 linux/amd64，ARM64 显式构建 linux/arm64；不能仅凭都是 Linux 混用镜像。
+
+[Makefile](../../SKM/Makefile)经 [compose.sh](../../SKM/scripts/compose.sh)调用宿主 Docker；[deploy.sh](../../SKM/scripts/deploy.sh)收集受控观测值，再用 Backend 镜像内的 Python 校验既有部署契约。检查容器不接网络、不挂 Docker socket，只读临时观测和镜像 archive；迁移/preflight 才经 Compose 连接基建。当前只支持在部署服务器本机执行，远程 daemon 的 bind path 不在支持范围。
 
 | 选择 | 唯一来源 |
 | --- | --- |
-| 环境文件 | 显式 `--env-file` → shell `ENV_FILE` → `SKM/.env`，解析为同一绝对文件路径，供插值和 API/Worker/migrate 的 env_file 使用 |
-| Compose project | 显式 `--project-name` → shell `COMPOSE_PROJECT_NAME` → skillmind；**文件内同名变量不选择目标**，旧的非默认部署须显式指定 |
-| Compose 文件 / 目录 | 固定本套代码的 compose.yaml / SKM；拒绝旁路 file、project、profile 选择器 |
-| 应用镜像 | 普通入口固定默认 tag；发布入口显式 pin Backend/Web 的完整 sha256 image ID，三 Backend service 共用同一 ID |
+| 环境文件 | make/shell 的 ENV_FILE → 发布目录 .env；同一绝对文件同时供 Compose 插值和 API/Worker/migrate 注入，不随发布包分发 |
+| Compose project | make/shell 的 COMPOSE_PROJECT_NAME → skillmind；文件内同名值不选择目标，必须保留服务器现有 project 名以复用原 volume |
+| Compose 文件 / 目录 | 固定当前发布目录的 compose.yaml；拒绝命令参数中的 file、project、profile 旁路 |
+| 应用镜像 | 发布从校验后的 release.env 取完整 Backend/Web image ID；API/Worker/migrate 共用 Backend ID。日常操作默认 tag，可用 BACKEND_IMAGE_ID / WEB_IMAGE_ID 显式固定 |
 
-例如 `python3 scripts/compose.py --env-file /controlled/config/app.env --project-name approved-project -- config --quiet`。相对路径以 `SKM/` 为准，缺失/空路径拒绝；不手设内部 SKM_COMPOSE_ENV_FILE 或绕过入口。
+例如 `make config ENV_FILE=/controlled/config/app.env COMPOSE_PROJECT_NAME=approved-project`。相对环境路径以发布目录为准，缺失/空路径拒绝；不手设内部 SKM_COMPOSE_ENV_FILE。发布包不替换服务端 .env、密码、存储世代或数据卷。
 
 保留 Docker 优先级：shell 插值高于文件，service.environment 高于 env_file，不 source dotenv。切换 ENV_FILE 不改现有进程/容器/DB URL/外部资源，须另核目标；见[插值规则](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/)和 [env_file](https://docs.docker.com/reference/compose-file/services/#env_file)。
 
-日常用 `make config`（quiet）；完整 config、容器 env/inspect 可泄密，不进报告。发布工具只内部比较有效环境，不输出或保存值。
+日常用 `make config`（quiet）；完整 config、容器 env/inspect 可泄密，不进报告。发布工具只内部比较有效环境，不输出或持久保留值。
 
 文档存储必配 SKILLMIND_OBJECT_STORAGE_NAMESPACE_ID，由同世代 API/Worker 与恢复清单共享；未配置拒绝 blob 操作。UUID 与 endpoint/bucket 共同校验，新建存储换 UUID、凭据轮换不换身份。旧文档不自动绑定，按[归属迁移](../design/document-lifecycle.md#存储归属与配置切换)处理；health/preflight 或改配置不能替代。
 
@@ -54,32 +56,55 @@
   → 单独迁移 → API/Web 核对 → 批准恢复后台 → 验收 → 普通入口放行
 ```
 
-各阶段独立批准，不凭上一阶段文件自动放行。从受控清单确认以下变量，不照抄示例身份：
+### Windows 构建与移送
+
+在源码 `SKM/` 的 PowerShell 执行；context path 必须与服务器一致：
+
+```powershell
+./scripts/export-images.ps1 -Version 0.1.0-preview1 -Platform linux/amd64 -ContextPath /skillmind
+```
+
+默认构建 API/Web，导出共享 Backend + Web，不重新构建 PostgreSQL、Redis、MinIO。服务器缺少配套基建镜像或首次离线部署时加 `-IncludeInfrastructure`，显式 pull/save 当前 Compose 指定版本；通常更新可复用服务器已有基建镜像。第三方版本升级仍需单独审查，不在 make deploy 中自动替换运行中的基建。
+
+输出 `SKM/images/skillmind-<Version>/`：images.tar、compose.yaml、Makefile、必要 Shell、.env.example、release.env 和 SHA256SUMS。清单记录版本、平台、context path 和实际 image ID；脚本在 Backend 检查容器内验证 archive 后才发布目录。没有真实 .env 或业务内容。完整目录移送到 Linux 的新版本目录，禁止只拷 tar 配旧脚本；保存终端显示的 RELEASE_SHA256 到独立可信记录。
+
+`-SkipBuild` 仅导出已有合格镜像；`-WebOnly` 只构建 Web，但包内仍携带同一 Backend 作为基线/校验 runtime。版本目录不覆盖，失败 staging 保留供检查，不能当成成品；不要并发修改源码、tag 或输出目录。
+
+### Linux 核验与部署
+
+进入新发布目录，先从可信记录设置下列值。必须在执行包内 Makefile/脚本之前核对来源和文件；包内 checksum 本身不证明真实性。
 
 | 变量 | 确认内容 |
 | --- | --- |
-| ENV_FILE / COMPOSE_PROJECT_NAME | 已批准的配置文件和目标项目，后续各命令保持一致 |
-| DAEMON_ID | 目标 `docker info --format '{{.ID}}'`，同名项目不能跨 daemon 复用 |
-| BACKEND_IMAGE_ID / WEB_IMAGE_ID | 经验证的完整 `sha256:…` image ID，不是 tag、短 hash 或 registry manifest digest |
-| IMAGE_ARCHIVE / ARCHIVE_SHA256 | 可信 Docker save tar 与已核实的完整文件 checksum；只读受控保存，不允许并发改写 |
-| MAINTENANCE_CONFIRMED=1 | 恢复点、全部实例停写/在途对账、普通入口关闭、独占维护责任均已人工确认 |
-
-`make deploy` 只显示帮助，无状态变化。确认后逐个执行，不拼成自动继续的命令链：
+| ENV_FILE / COMPOSE_PROJECT_NAME | 服务器原配置的绝对路径与原 project 名，各阶段不变 |
+| DAEMON_ID | 人工核准的目标 `docker info --format '{{.ID}}'`，不能跨 daemon 流用 |
+| RELEASE_SHA256 | Windows 输出并独立保管的 SHA256SUMS 文件摘要，不从收到的包自动自签 |
+| MAINTENANCE_CONFIRMED=1 | 一致恢复点、全实例停写/在途对账、普通入口关闭和独占维护均已确认 |
 
 ```bash
-make deploy-load
-make deploy-migrate
+printf '%s  SHA256SUMS\n' "$RELEASE_SHA256" | sha256sum --check -
+sha256sum --check --strict SHA256SUMS
+make config
 ```
 
-Make 要求 shell 显式导出清单变量，缺确认/身份即拒绝；等价参数见 `python3 scripts/deploy.py <phase> --help`。load 不删旧容器/镜像，先验 tar checksum 与两个必需 tag 的唯一 config digest，再从同一打开文件导入、按 ID 复查。archive 缺项不能用本地旧 tag 补，缺 manifest/含糊多平台映射拒绝。
-
-migrate 前自行确认 PostgreSQL/Redis 健康、storage 运行和当前 bucket 初始化成功，发布不隐式启动基建。工具检查同 daemon/project 全部容器（含 orphan/one-off）并拒绝活动写入者；目标镜像的 `preflight --migration-plan` 须确认全部 revision、单 head 和合法前进路径，单独 upgrade 后再验 DB head/Redis。
-
-只读排查 current/heads 也须用相同配置和已核实镜像。以下默认 tag 的实际 ID 必须与清单一致：
+逐条确认成功；变量须 shell export 或作为 make 参数传入。完成维护准备后，停止本 project 的业务容器（其他实例仍需人工确认），再运行：
 
 ```bash
-python3 scripts/compose.py -- run --rm -T --no-deps --pull never migrate alembic current
-python3 scripts/compose.py -- run --rm -T --no-deps --pull never migrate alembic heads
+sh scripts/compose.sh stop api web worker migrate
+make deploy
+```
+
+`make deploy` 连续执行 load → migration-plan → migration → API/Web health 与 preflight，任一步失败立即停止；它不建立备份、不停止其他实例、不启动基建或 Worker、不开放普通入口。只看说明用 `make deploy-help`。需要逐阶段审查可分别执行 `make deploy-load`、`make deploy-migrate`、`make deploy-api`；首次基建准备见 [Quickstart](quickstart.md)。
+
+load 先验整个包与 tar checksum，从同一打开的 archive 导入，再按不可变 ID/平台/context path 和 tar 中两个必需 tag 的唯一 config digest 校验。首次服务器没有 Python runtime，因此内部 manifest 检查发生在 Docker load 之后、迁移/业务启动之前；失败可能留下已导入镜像或已更新 tag，但绝不拿本地旧 tag 补缺项。保留旧 image ID/archive，不并发改写文件。
+
+migrate 前 PostgreSQL/Redis 必须健康、storage 运行且当前 bucket 初始化成功。工具检查同 daemon/project 全部容器（含 orphan/one-off）、镜像和有效环境并拒绝活动写入者；目标镜像的 `preflight --migration-plan` 确认全部 revision、单 head 和合法前进路径，单独 upgrade 后再验 DB head/Redis。观测暂存在仅操作者可读的临时目录，正常退出/可捕获中断时清理，不输出值；断电或强杀后的残留仍按敏感材料保管。
+
+只读排查 current/heads 也须使用同一配置，把 BACKEND_IMAGE_ID 设为已核实清单中的完整 ID：
+
+```bash
+sh scripts/compose.sh run --rm -T --no-deps --pull never migrate alembic current
+sh scripts/compose.sh run --rm -T --no-deps --pull never migrate alembic heads
 ```
 
 revision 越链、多 head 或检查失败即停，核对已提交 revision 后决定 forward fix/完整恢复。不改 alembic_version/stamp；此前 revision、非事务操作及外部事实不自动回滚。
@@ -122,7 +147,7 @@ revision 越链、多 head 或检查失败即停，核对已提交 revision 后�
 
 ## 启动与放行
 
-保持 Worker 停止、普通入口关闭。迁移阶段成功后，使用同一清单与已确认的维护变量，只启动 API/Web：
+保持 Worker 停止、普通入口关闭。逐阶段执行时，迁移成功后使用同一清单与维护变量启动 API/Web（make deploy 已包含此阶段，不重复执行）：
 
 ```bash
 make deploy-api
@@ -142,6 +167,16 @@ make deploy-worker BACKGROUND_APPROVED=1
 smoke 会写入/计费，须隔离 DB、Redis/队列、存储、Worker、凭据；单独 Project 不隔离旧 job/cron，当前无“只消费测试 Project”模式，不得跳过后台许可。
 
 任何阶段失败/超时/中断不自动续行、回滚或重发：镜像可能部分导入、迁移已提交、服务已启动。先核原事实；重调用不会自动把活动容器当作上次成功跳过。
+
+## 仅更新 Web
+
+仅当 API/契约/数据库/运行配置均未变，且新 Web 与现用 Backend 已验兼容时使用。Windows 加 `-WebOnly` 构建导出；Linux 用同一清单方式验证新版本目录，另确认 Web 切换窗口：
+
+```bash
+make deploy-web WEB_ONLY_CONFIRMED=1
+```
+
+此路径仍要求 MAINTENANCE_CONFIRMED=1，含义限定为 Web 切换维护窗口和独占操作，不要求停 API/Worker；不能拿它批准 Backend 或配置变更。检查现有 API/可选 Worker 的 image ID、有效环境及必要服务健康后，仅 `up web --no-deps`；不执行 migration/preflight、不重启 API/Worker。Backend 版本不一致、旧 Web 不健康或有效环境变化即拒绝；路由、挂载等其他配置未变仍须人工审查。失败保持 Web 入口隔离、核实际状态，不自动回滚。
 
 ## 后续开发约束与验收
 

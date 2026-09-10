@@ -36,7 +36,7 @@ dump/blob/workspace 含敏感材料，须访问控制、不作公开附件。清
 ```bash
 umask 077
 SKM_BACKUP_DIR="$(mktemp -d ./skillmind-backup-XXXXXXXX)" &&
-python3 scripts/compose.py -- exec -T postgres sh -ceu \
+sh scripts/compose.sh exec -T postgres sh -ceu \
   'pg_dump --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --format=custom' \
   > "${SKM_BACKUP_DIR:?Backup directory is required}/database.dump"
 ```
@@ -48,7 +48,7 @@ python3 scripts/compose.py -- exec -T postgres sh -ceu \
   set -eu
   : "${SKM_BACKUP_DIR:?Specify the directory created for this backup}"
   test -s "$SKM_BACKUP_DIR/database.dump"
-  python3 scripts/compose.py -- exec -T postgres pg_restore --list \
+  sh scripts/compose.sh exec -T postgres pg_restore --list \
     < "$SKM_BACKUP_DIR/database.dump" > "$SKM_BACKUP_DIR/database.toc"
   docker image inspect skillmind/backend:0.1.0 skillmind/web:0.1.0 \
     --format '{{.RepoTags}} {{.Id}}' > "$SKM_BACKUP_DIR/images.txt"
@@ -58,7 +58,7 @@ python3 scripts/compose.py -- exec -T postgres sh -ceu \
 )
 ```
 
-子 shell 遇错即停，TOC 受控保存；全部资产同清单转存。checksum 不证明来源或可恢复性；完整恢复点就绪前不删旧镜像/迁移，更不执行全 volume 删除的 `make bootstrap-admin`。
+子 shell 遇错即停，TOC 受控保存；全部资产同清单转存。checksum 不证明来源或可恢复性；完整恢复点就绪前不删旧镜像/迁移，更不删除数据卷。
 
 ## 数据库恢复
 
@@ -77,7 +77,7 @@ python3 scripts/compose.py -- exec -T postgres sh -ceu \
   set -eu
   : "${SKM_RESTORE_DIR:?Specify the verified backup directory}"
   test -s "$SKM_RESTORE_DIR/database.dump"
-  python3 scripts/compose.py -- exec -T postgres pg_restore --list \
+  sh scripts/compose.sh exec -T postgres pg_restore --list \
     < "$SKM_RESTORE_DIR/database.dump" > /dev/null
   cd "$SKM_RESTORE_DIR"
   sha256sum --check database.dump.sha256
@@ -87,8 +87,8 @@ python3 scripts/compose.py -- exec -T postgres sh -ceu \
 成功后，在全局停写窗口停止本目录服务并核实 DB/角色：
 
 ```bash
-python3 scripts/compose.py -- stop api worker migrate
-python3 scripts/compose.py -- exec -T postgres sh -ceu '
+sh scripts/compose.sh stop api worker migrate
+sh scripts/compose.sh exec -T postgres sh -ceu '
   psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --no-psqlrc \
     --set=ON_ERROR_STOP=1 --command="SELECT current_database(), current_user"
 '
@@ -103,11 +103,11 @@ python3 scripts/compose.py -- exec -T postgres sh -ceu '
   set -eu
   : "${SKM_RESTORE_DIR:?Specify the verified backup directory}"
   test -s "$SKM_RESTORE_DIR/database.dump"
-  python3 scripts/compose.py -- exec -T postgres sh -ceu '
+  sh scripts/compose.sh exec -T postgres sh -ceu '
     dropdb --force --username="$POSTGRES_USER" "$POSTGRES_DB"
     createdb --username="$POSTGRES_USER" --owner="$POSTGRES_USER" "$POSTGRES_DB"
   '
-  python3 scripts/compose.py -- exec -T postgres sh -ceu '
+  sh scripts/compose.sh exec -T postgres sh -ceu '
     pg_restore --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" \
       --no-owner --single-transaction --exit-on-error
   ' < "$SKM_RESTORE_DIR/database.dump"

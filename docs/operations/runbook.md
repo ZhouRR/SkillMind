@@ -173,7 +173,7 @@ MANAGED 直接用主密钥 AES-256-GCM，非两层信封。keyring 为逗号分�
 
 按[切换/恢复](../design/secret-storage.md#切换与恢复的顺序)核备份、维护窗口、全部进程及旧备份解封。API/Worker 启动加载 cipher，改 CLI 环境不更新实例；新标签必须配新 key，不能同标签换 bytes。
 
-获批后在目标环境执行 `python -m skillmind.ops.rotate_secrets`，会锁定/改写材料，不改 Run/binding。核退出/数量及必要解封；skipped 不验证解密，全 skipped 不证明成功。无全量只读解密 CLI，不输出明文替验。
+获批后在目标环境执行 `sh scripts/compose.sh exec api python -m skillmind.ops.rotate_secrets`，会锁定/改写材料，不改 Run/binding。核退出/数量及必要解封；skipped 不验证解密，全 skipped 不证明成功。无全量只读解密 CLI，不输出明文替验。
 
 旧备份所需 KEK 继续独立保管；版本不明/缺 key/认证失败拒绝，不降明文。不能防同时掌控 host/process 与 DB 的攻击者，KMS/HSM 未实现。
 
@@ -186,7 +186,7 @@ smoke 调模型、创建 Run/Evaluation、测试取消，会计费/持久写入�
 明确设置测试 UUID 为 SMOKE_PROJECT_ID 后执行，未指定会拒绝：
 
 ```bash
-python3 scripts/compose.py -- exec \
+sh scripts/compose.sh exec \
   -e SKILLMIND_SMOKE_PROJECT_ID="$SMOKE_PROJECT_ID" \
   api python -m skillmind.ops.smoke
 ```
@@ -198,17 +198,17 @@ python3 scripts/compose.py -- exec \
 仅可停机专用环境，分别选准备中/模型执行中 Run，保留原 ID、快照/lease；RUNNING 不证明模型已启动。
 
 ```bash
-LEASE_SECONDS="$(python3 scripts/compose.py -- exec -T api python -c \
+LEASE_SECONDS="$(sh scripts/compose.sh exec -T api python -c \
   'from skillmind.core.settings import get_settings; print(get_settings().run_lease_seconds)')"
-python3 scripts/compose.py -- stop worker
+sh scripts/compose.sh stop worker
 ```
 
 确认 LEASE_SECONDS 为有效秒数，加 recovery cron 观察窗口后再启动；20 秒余量不保证恢复完成：
 
 ```bash
 sleep "$((LEASE_SECONDS + 20))"
-python3 scripts/compose.py -- start worker
-python3 scripts/compose.py -- logs --no-log-prefix --tail=200 worker
+sh scripts/compose.sh start worker
+sh scripts/compose.sh logs --no-log-prefix --tail=200 worker
 ```
 
 观察实际 tick：旧 Attempt 为 LEASE_EXPIRED，经 RETRY_PENDING 在原 Segment 追加 Attempt，快照不变；超限 retry_exhausted。新 Attempt 不补签旧 PREPARING。部署版本/真实持久恢复分别验，mock 或仅模型阶段成功不能替代。
@@ -218,8 +218,7 @@ python3 scripts/compose.py -- logs --no-log-prefix --tail=200 worker
 受控终端按服务器 request/trace 或 Run/Attempt ID 查日志并关联 Session/Effect；客户端 X-Request-ID 非服务器审计值，request ID 非重放键。
 
 ```bash
-python3 scripts/compose.py -- logs --no-log-prefix api worker \
-  | jq -c 'select(.run_id == "<RUN_ID>" or .trace_id == "<TRACE_ID>")'
+sh scripts/compose.sh logs --no-log-prefix --tail=200 api worker
 ```
 
 原日志可能敏感，只转录[运用原则](#运用原则)的脱敏事实，不附 Tool 正文/Evidence/配置。

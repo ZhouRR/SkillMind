@@ -1,169 +1,156 @@
 ﻿<#
 .SYNOPSIS
-Skillmind の Docker Compose 関連 image を一つの tar file へ書き出す。
-
+Windows/Rancher Desktop で build し、Linux 向け offline release directory を作る。
 .DESCRIPTION
-compose.yaml から image 一覧を取得して重複を除去し、local Docker に存在する image を
-docker image save で書き出す。Skillmind application image の不足は失敗とし、既存配備で
-再利用できる PostgreSQL、Redis、MinIO などの不足は警告して書き出し対象から除外する。
-
-.PARAMETER EnvFile
-共用 Compose runner が補間と Backend 注入へ使う同一環境 file。
-省略時は shell の ENV_FILE、次に repository root の .env。相対 path は root 基準。
-
-.PARAMETER ProjectName
-Compose project 名。省略時は shell の COMPOSE_PROJECT_NAME、次に skillmind。
-
-.PARAMETER PythonCommand
-Python 3.12 以上の実行 file 名または単一 path。引数を含む command 文字列は受け付けない。
-
-.PARAMETER OutputDirectory
-tar file の出力先。既定値は repository root の images directory。
-
-.PARAMETER ArchiveName
-出力する tar file 名。既定値は skillmind-images.tar。
-
-.PARAMETER Force
-書き出し成功後に同名 tar file を原子的に置換する。失敗時は既存 file を保持する。
+宿主 Python/Node/make は不要。既存 release と runtime .env は上書きしない。
+-WebOnly は Backend を再 build せず、現用 Backend と同じ image の存在を要求する。
+-IncludeInfrastructure は初回用の第三者 image も pull/save する。
 #>
 [CmdletBinding()]
 param(
-    [string]$EnvFile,
-    [string]$ProjectName,
-    [string]$PythonCommand = "python",
+    [Parameter(Mandatory = $true)]
+    [ValidatePattern('^[a-zA-Z0-9][a-zA-Z0-9._-]*$')]
+    [string]$Version,
+    [ValidateSet("linux/amd64", "linux/arm64")]
+    [string]$Platform = "linux/amd64",
+    [string]$ContextPath = "/skillmind",
+    [string]$EnvFile = ".env.example",
     [string]$OutputDirectory = (Join-Path $PSScriptRoot "..\images"),
-    [string]$ArchiveName = "skillmind-images.tar",
-    [switch]$Force
+    [switch]$IncludeInfrastructure,
+    [switch]$WebOnly,
+    [switch]$SkipBuild
 )
-
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-
-$composeRunner = Join-Path $PSScriptRoot "compose.py"
-$resolvedOutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
-
+$projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
+if (-not [System.IO.Path]::IsPathRooted($EnvFile)) { $EnvFile = Join-Path $projectRoot $EnvFile }
+$resolvedEnvFile = (Resolve-Path -LiteralPath $EnvFile).Path
+if (-not (Test-Path -LiteralPath $resolvedEnvFile -PathType Leaf)) { throw "Environment file is missing." }
+if ($ContextPath -notmatch '^/[a-zA-Z0-9/_-]*[a-zA-Z0-9_-]$') { throw "Use a non-root context path without a trailing slash." }
 if (-not (Get-Command docker -CommandType Application -ErrorAction SilentlyContinue)) {
-    throw "docker command が見つかりません。Docker Desktop を起動してから再実行してください。"
-}
-$pythonExecutable = Get-Command $PythonCommand -CommandType Application -ErrorAction SilentlyContinue |
-    Select-Object -First 1
-if (-not $pythonExecutable) {
-    throw "Python 3.12 以上の実行 file を -PythonCommand で指定してください。"
-}
-if (-not (Test-Path -LiteralPath $composeRunner -PathType Leaf)) {
-    throw "共用 Compose runner が見つかりません。"
-}
-if ([System.IO.Path]::GetFileName($ArchiveName) -ne $ArchiveName -or
-    [System.IO.Path]::GetExtension($ArchiveName) -ne ".tar") {
-    throw "ArchiveName には path を含まない .tar file 名を指定してください。"
+    throw "Docker CLI is missing. Start Rancher Desktop with the Moby engine."
 }
 
-# dotenv を別実装で解釈せず、通常操作/配備と同じ runner に対象の確定を任せる。
-$composeArguments = @("-B", $composeRunner)
-if ($PSBoundParameters.ContainsKey("EnvFile")) {
-    $composeArguments += @("--env-file", $EnvFile)
+function Invoke-Docker {
+    param([string[]]$DockerArgs)
+    # Native stderr は設定値を含み得るため、公開するのは固定 error だけにする。
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $result = @(& docker @DockerArgs 2>$null)
+        $code = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $previousPreference }
+    if ($code -ne 0) { throw "Docker command failed; inspect the build environment privately." }
+    return $result
 }
-if ($PSBoundParameters.ContainsKey("ProjectName")) {
-    $composeArguments += @("--project-name", $ProjectName)
+function Write-Lf {
+    param([string]$Path, [string]$Content)
+    # Windows PowerShell 5.1 でも Linux script は BOM なし UTF-8/LF とする。
+    [System.IO.File]::WriteAllText($Path, ($Content -replace "`r`n", "`n"), [System.Text.UTF8Encoding]::new($false))
 }
-$composeArguments += @("--", "config", "--images")
-$images = @(& $pythonExecutable.Source @composeArguments)
-if ($LASTEXITCODE -ne 0) {
-    throw "Docker Compose 設定から image 一覧を取得できませんでした。"
-}
-$images = @($images | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
-if ($images.Count -eq 0) {
-    throw "書き出し対象の Docker image がありません。"
-}
-
-# 必須 application の役割を固定し、第三者 image の名前 prefix から推測しない。
-# 通常 wrapper は shell/.env の image selector をこの既定 tag へ固定する。
 $applicationImages = @{
     backend = "skillmind/backend:0.1.0"
     web = "skillmind/web:0.1.0"
 }
-foreach ($requiredImage in $applicationImages.Values) {
-    if ($images -cnotcontains $requiredImage) {
-        throw "Compose 設定に必須 application image がありません。"
-    }
+$environment = @{
+    SKM_COMPOSE_ENV_FILE = $resolvedEnvFile
+    COMPOSE_PROJECT_NAME = "skillmind"
+    COMPOSE_DISABLE_ENV_FILE = "true"
+    COMPOSE_COMPATIBILITY = "false"
+    # Windows の空文字は環境変数削除になるため、未使用の明示 profile で dotenv を遮断する。
+    COMPOSE_PROFILES = "skillmind-export-no-profiles"
+    COMPOSE_FILE = $null
+    COMPOSE_ENV_FILES = $null
+    COMPOSE_PATH_SEPARATOR = $null
+    SKM_BACKEND_IMAGE = $applicationImages.backend
+    SKM_WEB_IMAGE = $applicationImages.web
+    SKILLMIND_CONTEXT_PATH = $ContextPath
+    DOCKER_DEFAULT_PLATFORM = $Platform
 }
-
-$availableImages = [System.Collections.Generic.List[string]]::new()
-$missingApplicationImages = [System.Collections.Generic.List[string]]::new()
-$skippedImages = [System.Collections.Generic.List[string]]::new()
-foreach ($image in $images) {
-    # Windows PowerShell 5.1 は native stderr を ErrorRecord 化するため、存在確認中だけ
-    # Stop を解除し、Docker の exit code を唯一の判定根拠として全不足 image を集約する。
-    $previousErrorActionPreference = $ErrorActionPreference
-    try {
-        $ErrorActionPreference = "Continue"
-        & docker image inspect $image *> $null
-        $inspectExitCode = $LASTEXITCODE
-    }
-    finally {
-        $ErrorActionPreference = $previousErrorActionPreference
-    }
-    if ($inspectExitCode -eq 0) {
-        $availableImages.Add($image)
-    }
-    elseif ($applicationImages.Values -ccontains $image) {
-        # 配備 archive に application image が欠けると旧 version のまま起動するため fail closed とする。
-        $missingApplicationImages.Add($image)
-    }
-    else {
-        $skippedImages.Add($image)
-    }
-}
-if ($missingApplicationImages.Count -gt 0) {
-    throw "Local Docker に Skillmind application image がありません。先に共用 Compose runner で build を実行してください:`n$($missingApplicationImages -join "`n")"
-}
-if ($skippedImages.Count -gt 0) {
-    Write-Warning "Local Docker に存在しない第三者 image を書き出し対象から除外します:`n$($skippedImages -join "`n")"
-}
-$images = @($availableImages)
-if ($images.Count -eq 0) {
-    throw "書き出し可能な Docker image がありません。"
-}
-
-New-Item -ItemType Directory -Path $resolvedOutputDirectory -Force | Out-Null
-$archivePath = Join-Path $resolvedOutputDirectory $ArchiveName
-if (Test-Path -LiteralPath $archivePath) {
-    if (-not $Force) {
-        throw "出力 file は既に存在します。上書きする場合は -Force を指定してください: $archivePath"
-    }
-}
-
-Write-Host "Export images:"
-$images | ForEach-Object { Write-Host "  $_" }
-
-# 同じ directory の新規 file に完成させてから置換し、途中失敗で旧成品を失わない。
-$temporaryPath = Join-Path $resolvedOutputDirectory (".skillmind-export-" + [Guid]::NewGuid().ToString("N") + ".tar")
-$ownsTemporaryFile = $false
+$originalEnvironment = @{}
+$releaseRoot = [System.IO.Path]::GetFullPath($OutputDirectory)
+$releasePath = Join-Path $releaseRoot ("skillmind-" + $Version)
+if (Test-Path -LiteralPath $releasePath) { throw "Release already exists; choose another version." }
+$temporaryPath = Join-Path $releaseRoot (".skillmind-export-" + [Guid]::NewGuid().ToString("N"))
+$composeArguments = @("compose", "--project-directory", $projectRoot,
+    "--file", (Join-Path $projectRoot "compose.yaml"), "--env-file", $resolvedEnvFile,
+    "--project-name", "skillmind")
 try {
-    $reservation = [System.IO.File]::Open($temporaryPath, [System.IO.FileMode]::CreateNew)
-    $ownsTemporaryFile = $true
-    $reservation.Dispose()
-    & docker image save --output $temporaryPath @images
-    if ($LASTEXITCODE -ne 0 -or (Get-Item -LiteralPath $temporaryPath).Length -le 0) {
-        throw "Docker image の書き出しに失敗しました。既存 archive は変更していません。"
+    foreach ($key in $environment.Keys) {
+        $originalEnvironment[$key] = [Environment]::GetEnvironmentVariable($key, "Process")
+        [Environment]::SetEnvironmentVariable($key, $environment[$key], "Process")
     }
-
-    if (Test-Path -LiteralPath $archivePath) {
-        if (-not $Force) {
-            throw "出力 file が既に存在します。既存 archive は変更していません。"
+    Invoke-Docker @("version", "--format", "{{.Server.Os}}") | ForEach-Object {
+        if ($_ -ne "linux") { throw "The Rancher daemon must run Linux containers." }
+    }
+    $configText = Invoke-Docker ($composeArguments + @("config", "--format", "json"))
+    $config = ($configText -join "`n") | ConvertFrom-Json
+    if (-not $SkipBuild) {
+        Write-Host "Building $Platform images..."
+        $buildServices = @("api", "web")
+        if ($WebOnly) { $buildServices = @("web") }
+        Invoke-Docker ($composeArguments + @("build") + $buildServices) | Out-Null
+    }
+    $images = @($applicationImages.backend, $applicationImages.web)
+    if ($IncludeInfrastructure) {
+        foreach ($service in @("postgres", "redis", "object-storage", "object-storage-init")) {
+            $reference = $config.services.$service.image
+            Invoke-Docker @("pull", "--platform", $Platform, $reference) | Out-Null
+            $images += $reference
         }
-        # 置換が非対応の filesystem では失敗とし、削除後 rename には退行しない。
-        [System.IO.File]::Replace($temporaryPath, $archivePath, $null)
     }
-    else {
-        [System.IO.File]::Move($temporaryPath, $archivePath)
+    $identities = @{}
+    foreach ($reference in $images) {
+        $details = ((Invoke-Docker @("image", "inspect", $reference)) -join "`n") | ConvertFrom-Json
+        $item = @($details)[0]
+        if ($item.Id -notmatch '^sha256:[0-9a-f]{64}$' -or "$($item.Os)/$($item.Architecture)" -ne $Platform) {
+            throw "Image identity/platform mismatch. Rebuild for the target server architecture."
+        }
+        $identities[$reference] = $item.Id
+        if ($reference -eq $applicationImages.web -and $item.Config.Labels.'org.skillmind.context-path' -ne $ContextPath) {
+            throw "Web context path does not match. Rebuild the Web image."
+        }
     }
+    New-Item -ItemType Directory -Path (Join-Path $temporaryPath "scripts") -Force | Out-Null
+    Write-Host "Saving release images..."
+    $archivePath = Join-Path $temporaryPath "images.tar"
+    Invoke-Docker (@("image", "save", "--output", $archivePath) + $images) | Out-Null
+    if ((Get-Item -LiteralPath $archivePath).Length -le 0) { throw "Image archive is empty." }
+    $archiveHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archivePath).Hash.ToLowerInvariant()
+    Invoke-Docker @("run", "--rm", "--pull", "never", "--network", "none", "--read-only",
+        "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+        "--mount", "type=bind,src=$archivePath,dst=/release/images.tar,readonly",
+        "--entrypoint", "python", $identities[$applicationImages.backend],
+        "/opt/skillmind-deploy/deploy_checks.py", "archive", "--checksum", $archiveHash,
+        "--backend", $identities[$applicationImages.backend], "--web", $identities[$applicationImages.web]) | Out-Null
+    $files = @("compose.yaml", "Makefile", ".env.example", "scripts/compose.sh", "scripts/deploy.sh")
+    foreach ($relative in $files) {
+        Write-Lf (Join-Path $temporaryPath $relative) ([System.IO.File]::ReadAllText((Join-Path $projectRoot $relative)))
+    }
+    $manifest = @(
+        "FORMAT=1",
+        "BACKEND_IMAGE_ID=$($identities[$applicationImages.backend])",
+        "WEB_IMAGE_ID=$($identities[$applicationImages.web])",
+        "PLATFORM=$Platform",
+        "CONTEXT_PATH=$ContextPath",
+        "VERSION=$Version"
+    ) -join "`n"
+    Write-Lf (Join-Path $temporaryPath "release.env") ($manifest + "`n")
+    $checksums = foreach ($relative in ($files + @("release.env", "images.tar"))) {
+        $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $temporaryPath $relative)).Hash.ToLowerInvariant()
+        "$digest  $relative"
+    }
+    Write-Lf (Join-Path $temporaryPath "SHA256SUMS") (($checksums -join "`n") + "`n")
+    # Directory rename は完成後だけ。失敗した staging は診断用に残し、旧 release は消さない。
+    [System.IO.Directory]::Move($temporaryPath, $releasePath)
+    $releaseHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $releasePath "SHA256SUMS")).Hash.ToLowerInvariant()
+    Write-Host "Release: $releasePath"
+    Write-Host "RELEASE_SHA256=$releaseHash"
+    Write-Host "Transfer the whole directory. Keep this checksum separately; never copy runtime .env."
 }
 finally {
-    if ($ownsTemporaryFile -and (Test-Path -LiteralPath $temporaryPath)) {
-        Remove-Item -LiteralPath $temporaryPath -Force
+    foreach ($key in $originalEnvironment.Keys) {
+        [Environment]::SetEnvironmentVariable($key, $originalEnvironment[$key], "Process")
     }
 }
-
-$archive = Get-Item -LiteralPath $archivePath
-Write-Host "Exported: $($archive.FullName) ($([Math]::Round($archive.Length / 1MB, 2)) MiB)"

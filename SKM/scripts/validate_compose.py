@@ -77,7 +77,9 @@ def validate() -> None:
     if services["web"].get("image") != "${SKM_WEB_IMAGE:-skillmind/web:0.1.0}":
         raise ValueError("Web must support the same explicit immutable-image selection")
     # CLI 補間と container 注入の path は共用 runner が同じ絶対値に固定する。
-    source = "${SKM_COMPOSE_ENV_FILE:?use scripts/compose.py to select the environment file}"
+    source = (
+        "${SKM_COMPOSE_ENV_FILE:?select the environment file through the deployment entrypoint}"
+    )
     for service_name in backend_service_names:
         if services[service_name].get("env_file") != [source]:
             raise ValueError("API, Worker, and Migrate must share the selected environment file")

@@ -3,7 +3,7 @@ name: ${COMPOSE_PROJECT_NAME:-skillmind}
 x-backend-runtime: &backend-runtime
   image: ${SKM_BACKEND_IMAGE:-skillmind/backend:0.1.0}
   env_file:
-    - ${SKM_COMPOSE_ENV_FILE:?use scripts/compose.py to select the environment file}
+    - ${SKM_COMPOSE_ENV_FILE:?select the environment file through the deployment entrypoint}
   environment:
     SKILLMIND_CONTEXT_PATH: ${SKILLMIND_CONTEXT_PATH:-/skillmind}
     TZ: ${SKILLMIND_TIMEZONE:-Asia/Tokyo}

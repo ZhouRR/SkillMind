@@ -435,36 +435,36 @@ class BackendPackagingSourceTests(unittest.TestCase):
 class ExportSourceContractTests(unittest.TestCase):
     """PowerShell 不在でも守れる構造検査。native runtime の実測とは区別する。"""
 
-    def test_export_uses_shared_runner_and_explicit_application_roles(self) -> None:
-        """dotenv の独自解決や prefix 判定の再導入を検知する。"""
+    def test_export_uses_native_compose_and_explicit_application_roles(self) -> None:
+        """宿主 Python と dotenv の独自 parser を再導入しない。"""
 
         source = (compose.PROJECT_ROOT / "scripts/export-images.ps1").read_text(
             encoding="utf-8-sig"
         )
-        self.assertIn('[string]$PythonCommand = "python"', source)
-        self.assertIn('$composeArguments += @("--", "config", "--images")', source)
-        self.assertIn("& $pythonExecutable.Source @composeArguments", source)
-        self.assertNotIn("docker compose --env-file", source)
-        self.assertNotIn("$resolvedEnvFile", source)
+        self.assertNotIn("PythonCommand", source)
+        self.assertIn(
+            '$composeArguments = @("compose", "--project-directory", $projectRoot', source
+        )
+        self.assertIn('"--env-file", $resolvedEnvFile', source)
+        self.assertIn("SKM_COMPOSE_ENV_FILE = $resolvedEnvFile", source)
         self.assertNotIn('.StartsWith("skillmind/"', source)
         for role, tag in compose.DEFAULT_IMAGES.items():
             self.assertIn(f'{role} = "{tag}"', source)
 
-    def test_export_replaces_only_after_success_without_deleting_old_archive(self) -> None:
-        """失敗時の削除対象はこの実行で予約した temp 一つに限定する。"""
+    def test_export_publishes_only_complete_new_version_directories(self) -> None:
+        """完成前の staging を release と誤認せず、既存版は置換しない。"""
 
         source = (compose.PROJECT_ROOT / "scripts/export-images.ps1").read_text(
             encoding="utf-8-sig"
         )
-        self.assertIn("[System.IO.FileMode]::CreateNew", source)
-        self.assertIn("& docker image save --output $temporaryPath @images", source)
-        self.assertIn("(Get-Item -LiteralPath $temporaryPath).Length -le 0", source)
-        self.assertIn("[System.IO.File]::Replace($temporaryPath, $archivePath, $null)", source)
-        self.assertIn("[System.IO.File]::Move($temporaryPath, $archivePath)", source)
-        self.assertNotIn("Remove-Item -LiteralPath $archivePath", source)
-        self.assertIn("Remove-Item -LiteralPath $temporaryPath -Force", source)
+        self.assertIn('"image", "save", "--output", $archivePath', source)
+        self.assertIn("(Get-Item -LiteralPath $archivePath).Length -le 0", source)
+        self.assertIn("[System.IO.Directory]::Move($temporaryPath, $releasePath)", source)
+        self.assertIn('"SHA256SUMS"', source)
+        self.assertNotIn("Remove-Item", source)
         self.assertLess(
-            source.index("image save --output"), source.index("[System.IO.File]::Replace")
+            source.index('Write-Lf (Join-Path $temporaryPath "SHA256SUMS")'),
+            source.index("[System.IO.Directory]::Move"),
         )
 
 
