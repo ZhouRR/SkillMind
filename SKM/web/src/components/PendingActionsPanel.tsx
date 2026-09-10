@@ -18,8 +18,8 @@ const PENDING_LIMIT = 10
 /** 利用者の応答・承認を待っている Run を一覧する。
  *
  * これが無いと、待機中の Run は「工作空间へ行って、たまたまその Run を選んだとき」にしか
- * 見えない。Run は待機中は lease も wall timeout も持たず、いつまでも待ち続けるため、
- * 気付かれない待機は事実上の停止になる。
+ * 見えない。待機は Worker lease を解放するが独立した期限があるため、
+ * 気付かれないまま期限切れになる前に、精確な Run への入口を示す。
  */
 export function PendingActionsPanel({ projectId }: { projectId: string }) {
   const messages = useMessages()
@@ -72,7 +72,7 @@ export function PendingActionsPanel({ projectId }: { projectId: string }) {
         <ul className="pendingList">
           {state.items.map((item) => (
             <li key={item.run_id}>
-              <a className="pendingItem" href={routeHref('workspace', projectId)}>
+              <a className="pendingItem" href={routeHref('workspace', projectId, { runId: item.run_id })}>
                 <span className="pendingItemTitle">
                   <strong>{runHistoryTitle(item.result_summary, item.run_id, messages.elements.runFallbackTitle)}</strong>
                   <small>{formatLocalTimestamp(item.created_at)}</small>

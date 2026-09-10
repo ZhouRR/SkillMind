@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 
 import type { ProjectRecord, PublishedTaskRecord, ScheduleRecord, ScheduleStatus } from '../api'
-import { EmptyState, LoadingSkeleton, PageHeader } from '../components/PageElements'
+import { DetailDrawer, EmptyState, LoadingSkeleton, PageHeader } from '../components/PageElements'
 import { ScheduleActivityPanel } from '../components/ScheduleActivityPanel'
 import { ScheduleEditDialog, ScheduleStatusActions, summarizeTiming } from '../components/ScheduleDialog'
 import { useSchedules } from '../hooks/useSchedules'
@@ -201,15 +201,19 @@ export function ScheduleDetails({ schedule }: { schedule: ScheduleRecord }) {
   return <div className="scheduleFacts">
     <h3>{schedule.name}</h3>
     <dl>
-      <div><dt>{labels.fields.id}</dt><dd className="mono">{schedule.schedule_id}</dd></div>
       <div><dt>{labels.statusLabel}</dt><dd>{messages.enums.scheduleStatus[schedule.status]}</dd></div>
       <div><dt>{labels.fields.task}</dt><dd className="mono">{schedule.task_key}</dd></div>
+    </dl>
+    <DetailDrawer title={messages.elements.technicalDetails}>
+    <dl>
+      <div><dt>{labels.fields.id}</dt><dd className="mono">{schedule.schedule_id}</dd></div>
       <div><dt>{labels.fields.version}</dt><dd className="mono">{schedule.skill_version_id}</dd></div>
       <div><dt>{labels.fields.rowVersion}</dt><dd>{schedule.row_version}</dd></div>
       <div><dt>{labels.fields.creator}</dt><dd className="mono">{schedule.created_by}</dd></div>
       <div><dt>{labels.fields.created}</dt><dd>{stamp(schedule.created_at)}</dd></div>
       <div><dt>{labels.fields.updated}</dt><dd>{stamp(schedule.updated_at)}</dd></div>
     </dl>
+    </DetailDrawer>
     <h3>{labels.definitionTitle}</h3>
     <dl>
       <div><dt>{messages.schedules.kindLabel}</dt><dd>{messages.enums.scheduleKind[schedule.kind]}</dd></div>

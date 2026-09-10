@@ -4,6 +4,7 @@ import type { MetaState } from '../appState'
 import { loadRunHistory, type ProjectRecord, type RunHistoryItemRecord } from '../api'
 import { EmptyState, LoadingSkeleton, PageHeader, StatusBadge } from '../components/PageElements'
 import { PendingActionsPanel } from '../components/PendingActionsPanel'
+import { ROUTE_ICONS } from '../components/routeIcons'
 import { useMessages } from '../i18n'
 import { routeHref } from '../lib/routing'
 import { formatLocalTimestamp, runHistoryTitle } from '../lib/presentation'
@@ -51,45 +52,42 @@ export function HomePage({ metaState, project, projectId }: {
   }, [projectId])
 
   return (
-    <>
+    <div className="homePage">
       <PageHeader
         title={messages.routes.home.label}
         description={messages.home.description}
-        aside={project
-          ? <span className="scopeBadge">{project.name}</span>
-          : undefined}
       />
-      <section className="statGrid" aria-label={messages.home.statusSectionAria}>
-        <ServiceStatCard state={metaState} />
-        <article className="statCard">
-          <span className="statLabel">{messages.home.currentProject}</span>
-          <strong className="statValue" title={project?.project_id}>
-            {project ? project.name : messages.home.notSelected}
-          </strong>
-          <p className="statHint">
-            {project ? messages.home.projectReady : messages.home.selectProjectHint}
-          </p>
-        </article>
-        <article className="statCard">
-          <span className="statLabel">{messages.home.executionBoundary}</span>
-          <strong className="statValue">{messages.home.readOnlyTools}</strong>
-          <p className="statHint">{messages.home.boundaryHint}</p>
-        </article>
-      </section>
-      {/* 「待你处理」を最初に置く。Run は待機中に lease も timeout も持たないため、
-          気付かれない待機はそのまま止まったままになる。 */}
-      <PendingActionsPanel projectId={projectId} />
-      <section className="panel homeRuns" aria-label={messages.home.recentRuns}>
-        <div className="panelHeader">
-          <h2>{messages.home.recentRuns}</h2>
-          <div className="formRow">
-            <a href={routeHref('history', projectId || undefined)}>{messages.routes.history.label}</a>
-            <a href={routeHref('tasks', projectId || undefined)}>{messages.home.goTasks}</a>
-          </div>
+      <section className="homeHero" aria-label={messages.home.currentProject}>
+        <div className="homeHeroBody">
+          <span className="homeEyebrow">{messages.home.currentProject}</span>
+          <h2 title={project?.project_id}>{project ? project.name : messages.home.notSelected}</h2>
+          <p>{project ? messages.home.startHint : messages.home.selectProjectHint}</p>
+          {project && <span className="homeProjectKey">{ROUTE_ICONS.projects}<code>{project.key}</code></span>}
         </div>
-        <RecentRuns projectId={projectId} state={runsState} />
+        <div className="homeHeroAction">
+          <span className="homeHeroGlyph" aria-hidden="true">{ROUTE_ICONS.tasks}</span>
+          <a className="primaryButton" href={routeHref(project ? 'tasks' : 'projects', project ? projectId : undefined)}>
+            {project ? messages.home.goTasks : messages.routes.projects.label}<span aria-hidden="true">↗</span>
+          </a>
+        </div>
       </section>
-    </>
+      {/* 対応待ちは DOM/視線の順とも先頭に残し、空状態は小さく保つ。 */}
+      <div className="homeActivity">
+        <aside className="homeAttention">
+          <PendingActionsPanel projectId={projectId} />
+          {metaState.status === 'error' && <ServiceStatCard state={metaState} />}
+        </aside>
+        <section className="panel homeRuns" aria-label={messages.home.recentRuns}>
+          <div className="panelHeader">
+            <h2>{messages.home.recentRuns}</h2>
+            <div className="homeActions">
+              <a href={routeHref('history', projectId || undefined)}>{messages.routes.history.label}</a>
+            </div>
+          </div>
+          <RecentRuns projectId={projectId} state={runsState} />
+        </section>
+      </div>
+    </div>
   )
 }
 
@@ -132,7 +130,7 @@ function ServiceStatCard({ state }: { state: MetaState }) {
   if (state.status === 'error') {
     return (
       <article className="statCard">
-        <span className="statLabel">{messages.home.serviceStatus}</span>
+        <span className="statCardIcon">{ROUTE_ICONS.resources}<span className="statLabel">{messages.home.serviceStatus}</span></span>
         <strong className="statValue statError">{messages.home.connectFailed}</strong>
         <p className="statHint">{state.message}</p>
       </article>
@@ -140,7 +138,7 @@ function ServiceStatCard({ state }: { state: MetaState }) {
   }
   return (
     <article className="statCard">
-      <span className="statLabel">{messages.home.serviceStatus}</span>
+      <span className="statCardIcon">{ROUTE_ICONS.resources}<span className="statLabel">{messages.home.serviceStatus}</span></span>
       <strong className={`statValue${state.status === 'ready' ? ' statReady' : ''}`}>
         {state.status === 'loading' ? messages.home.connectingShort : messages.home.running}
       </strong>

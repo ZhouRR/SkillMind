@@ -19,6 +19,15 @@ function render(projectId: string): string {
 }
 
 describe('HomePage', () => {
+  it('gives the project a single primary task entry without invented totals', () => {
+    const html = render(PROJECT.project_id)
+    expect(html).toContain('class="homeHero"')
+    expect(html).toContain('class="homeAttention"')
+    expect(html).not.toContain('class="statGrid"')
+    expect(html).not.toContain('只读工具')
+    expect(html).not.toContain('class="statCard"')
+  })
+
   it('leads with what is waiting for the user', () => {
     // Run は待機中に lease も wall timeout も持たない。気付かれない待機はそのまま停止になるため、
     // 「待你处理」は最近执行より前に置く。

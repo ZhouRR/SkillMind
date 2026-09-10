@@ -56,7 +56,6 @@ export function HistoryPage({ projectId }: { projectId: string }) {
       <section className="panel historyPage" aria-label={messages.historyPage.aria}>
         <div className="panelHeader">
           <div>
-            <h2>{messages.routes.history.label}</h2>
             <p className="hint">{messages.historyPage.hint}</p>
           </div>
           <div className="formRow">

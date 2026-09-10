@@ -164,7 +164,7 @@ class ResultApi(ProjectsApi):
 
 
 async def check_view(page: Page, mode: str, labels: dict) -> None:
-    """scope は既定で可視にし、旧/不正 record と現在の APPLIED を混同しない。"""
+    """短い範囲表示と詳細 drawer で旧/不正 record を成功と混同しない。"""
     texts = labels["runResult"]
     scope = page.locator(".resultValidationScope")
     if mode in INVALID:
@@ -182,6 +182,8 @@ async def check_view(page: Page, mode: str, labels: dict) -> None:
         await expect(scope).to_have_count(0)
         await expect(page.locator(".resultSummary")).to_have_count(0)
         return
+    await expect(page.locator(".validationBrief")).to_be_visible()
+    await page.get_by_role("button", name=texts["reading"]["checks"], exact=True).click()
     await expect(scope).to_be_visible()
     await expect(scope.get_by_text(texts["referenceChecks"]["limit"], exact=True)).to_be_visible()
     await expect(
@@ -202,11 +204,14 @@ async def check_view(page: Page, mode: str, labels: dict) -> None:
             await expect(
                 scope.get_by_text(texts["referenceChecks"][key], exact=True)
             ).to_be_visible()
+    await page.keyboard.press("Escape")
     if mode not in ("structured", "contract"):
         await expect(page.locator(".outcomeStatus")).to_contain_text("PARTIAL")
         await expect(page.get_by_text(texts["modelEffectsHint"], exact=True)).to_be_visible()
         await expect(page.locator(".outcomeGroup > p").filter(has_text=INJECTION)).to_be_visible()
+        await page.get_by_role("button", name=texts["reading"]["details"], exact=True).click()
         await page.get_by_role("button", name=texts["technicalDetails"], exact=True).click()
+        await page.keyboard.press("Escape")
         await expect(page.locator(".outcomeCard code").filter(has_text=ARTIFACT)).to_be_visible()
         await expect(page.locator(".outcomeCard a")).to_have_count(0)
         audit = page.locator(".resultCollapse").filter(has_text=texts["platformEffectsHint"])
@@ -217,7 +222,9 @@ async def check_view(page: Page, mode: str, labels: dict) -> None:
             await expect(
                 scope.get_by_text(texts["referenceChecks"]["recorded"], exact=True)
             ).to_have_count(0)
+        await page.get_by_role("button", name=texts["reading"]["details"], exact=True).click()
         await page.get_by_role("button", name=texts["hideTechnicalDetails"], exact=True).click()
+        await page.keyboard.press("Escape")
 
 
 async def scenario(
@@ -253,9 +260,13 @@ async def scenario(
         assert "must-not-display" not in await page.locator("body").inner_text()
         assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
         if mode not in (*INVALID, "none"):
+            await page.get_by_role(
+                "button", name=labels["runResult"]["reading"]["checks"], exact=True
+            ).click()
             await page.locator(".resultValidationScope").screenshot(
                 path=str(output / f"{name}-scope.png")
             )
+            await page.keyboard.press("Escape")
         await page.screenshot(path=str(output / f"{name}.png"), full_page=True)
         print(f"PASS {name}", flush=True)
     except Exception:

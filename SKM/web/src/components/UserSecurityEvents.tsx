@@ -29,7 +29,8 @@ export function UserSecurityEvents({ userId, own, revision, onSessionEnded }: {
     <p className="hint">{messages.auditHint}</p>
     <UserResponseNotice failure={query.failure} />
     {query.pending && <p role="status">{messages.busy}</p>}
-    {query.data && <>
+    {query.data && <details className="detailDisclosure">
+      <summary>{messages.page(offset, query.data.items.length, query.data.total)}</summary>
       {query.data.items.length === 0 && <p>{messages.emptyEvents}</p>}
       <ul className="accountEventList" tabIndex={query.data.items.length > 0 ? 0 : undefined} aria-label={messages.securityEvents}>
         {query.data.items.map((event) => <li key={event.event_id}>
@@ -46,6 +47,6 @@ export function UserSecurityEvents({ userId, own, revision, onSessionEnded }: {
         </li>)}
       </ul>
       <UserPager offset={offset} limit={limit} count={query.data.items.length} total={query.data.total} pending={query.pending} onChange={setOffset} />
-    </>}
+    </details>}
   </section>
 }

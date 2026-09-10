@@ -4,6 +4,7 @@ import type { UiMessages } from './messages'
     契約の識別子(capability ID・ファイル名・API field)だけを英語のまま残す。
     句読点は中文 UI の慣例に合わせ、文中は全角記号で統一する。 */
 export const ZH: UiMessages = {
+  theme: { label: '外观', light: '日间', dark: '夜间' },
   routes: {
     home: { label: '概览', description: '看清现在有什么需要你处理、最近跑了什么' },
     tasks: { label: '任务', description: '查看可执行的任务、就绪度与定时安排' },
@@ -206,6 +207,8 @@ export const ZH: UiMessages = {
     logoutFailed: '退出登录失败。',
   },
   login: {
+    introTitle: '让技能，融入日常工作。',
+    introDescription: '把技能与资源放在一起，执行任务，回看结果，让每一步都有据可查。',
     title: '登录',
     subtitle: '使用 Skillmind 账户访问已授权项目。',
     email: '邮箱',
@@ -221,6 +224,7 @@ export const ZH: UiMessages = {
     footer: 'AI 驱动的项目管理执行平台 · 全程可审计',
   },
   home: {
+    startHint: '从一项任务开始，在这里跟进执行、处理待办，回看结果与依据。',
     description: '当前项目里需要你回答或批准的执行、最近的执行记录与服务状态。',
     statusSectionAria: '服务与上下文状态',
     serviceStatus: '服务状态',
@@ -247,6 +251,7 @@ export const ZH: UiMessages = {
     names: { zh: '中文', ja: '日本語', en: 'English' },
   },
   elements: {
+    technicalDetails: '技术信息',
     projectUnavailable: '项目不可访问',
     archivedProject: '已归档',
     projectLabel: '项目',
@@ -711,7 +716,10 @@ export const ZH: UiMessages = {
     failures: { sessionExpired: '会话已失效，请重新登录后查询原请求。', csrfRejected: '会话安全校验失败，已停止写入。', forbidden: '没有当前操作权限，已停止写入。', notFound: '当前项目或执行不存在，或无权访问。', projectArchived: '项目已归档；可以查看历史和核对原请求，不能提交评价。', resultUnavailable: '当前执行没有可评价的结果。', resultMismatch: '当前结果与原请求不一致，已停止写入。', invalidRequest: '评价输入不符合要求，请检查后修改。', invalidRevision: '修订路径无效、重复或原值不存在；整份评价未被接收。', conflict: '原 UUID 与已保存的内容冲突；不能换 UUID 当作重试，请核对原请求。', notSeen: '暂未查到原请求；这不证明原提交不会稍后保存。', unavailable: '暂时无法读取评价回执或历史，请稍后只读核对。', cursorInvalid: '历史游标无效，请从头刷新历史。', unknown: '未收到可信保存回执；原请求保持未确认。', loadFailed: '无法读取可信的评价记录，请重试读取。', readTimeout: '读取超时，原请求的保存状态未改变。' },
   },
   runResult: {
+    reading: { details: '运行详情', checks: '检查说明', confidenceHint: '模型置信度不代表正确率。' },
     referenceChecks: {
+      briefV1: '保存时已核对引用；附件内容未验证，结论仍需人工判断。',
+      briefV2: '保存时已核对引用及附件归属与内容；不代表结论正确或附件当前可读。',
       title: '保存时的引用检查',
       recorded: '该结果记录了以下检查范围，不是整体正确性保证：',
       legacy: '历史结果未记录本版引用检查范围，不能据当前平台记录补造验证通过。',

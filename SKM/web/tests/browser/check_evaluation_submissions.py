@@ -341,12 +341,13 @@ class EvaluationApi(ArtifactApi):
 
 
 async def open_evaluation(page: Page, labels: dict) -> None:
-    """結果の初期選択を待ち、実際の details をキーボードで開く。"""
+    """結果の初期選択を待ち、評価 drawer をキーボードで開く。"""
     await expect(page.locator(f'.runFacts dd[title="{RUN}"]')).to_be_visible()
     section = page.locator(".evaluationSection")
-    await expect(section).to_be_visible()
-    if await section.get_attribute("open") is None:
-        await section.locator("summary").first.focus()
+    if not await section.locator(".evaluationForm").is_visible():
+        await page.get_by_role(
+            "button", name=labels["runResult"]["manualEvaluation"], exact=True
+        ).focus()
         await page.keyboard.press("Enter")
     await expect(section.locator(".evaluationForm")).to_be_visible()
 
@@ -610,12 +611,17 @@ async def scenario(
                     await expect(intent).to_contain_text(labels["failures"]["notSeen"])
                     assert len(api.posts) == 1
                 if mode in ("detail-refresh", "result-late"):
+                    await page.keyboard.press("Escape")
+                    await expect(page.locator(".evaluationNotice")).to_contain_text(
+                        labels["phase"]["sending"]
+                    )
                     await page.get_by_role(
                         "tab", name=catalog["workspace"]["tabConversation"], exact=True
                     ).click()
                     await page.get_by_role(
                         "tab", name=catalog["workspace"]["tabResult"], exact=True
                     ).click()
+                    await open_evaluation(page, catalog)
                     await expect(intent).to_contain_text(labels["phase"]["sending"])
                     api.body["row_version"] = 5
                     marker = f"Accepted detail {mode}"
@@ -751,8 +757,12 @@ async def scenario(
                     else:
                         await expect(section.locator(".evaluationItem")).to_have_count(1)
                     if mode == "success":
-                        await section.screenshot(path=str(output / f"{name}-evaluation.png"))
-                        await section.evaluate("element => element.scrollIntoView({block:'start'})")
+                        await section.locator(".modalDialog").screenshot(
+                            path=str(output / f"{name}-evaluation.png")
+                        )
+                        await section.locator(".modalBody").evaluate(
+                            "element => { element.scrollTop = 0 }"
+                        )
                         await page.screenshot(path=str(output / f"{name}-evaluation-viewport.png"))
                         await page.reload()
                         await open_evaluation(page, catalog)
@@ -846,7 +856,7 @@ async def check(url: str, output: Path, cases: list[str] | None) -> None:
                     for mode in ("refused", "forbidden", "archived", "manual"):
                         await scenario(browser, url, mode, language, 390, output)
                 for mode in CASES:
-                    await scenario(browser, url, mode, "zh", 390, output)
+                    await scenario(browser, url, mode, "zh", 1440, output)
         finally:
             await browser.close()
 

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { login, type AuthSessionRecord } from '../api'
 import { useMessages } from '../i18n'
 import { loginFeedback } from '../lib/loginFeedback'
+import { ThemeToggle } from '../components/ThemeToggle'
 
 /** 初期表示の案内と request 失敗を分け、言語切替時には失敗を再翻訳する。 */
 type LoginError = { message: string } | { reason: unknown }
@@ -53,28 +54,42 @@ export function LoginPage({ onAuthenticated, initialError }: {
 
   return (
     <main className="authShell">
-      <section className="authCard">
-        <div className="authBrand">
-          <span className="brandMark">SM</span>
-          <span><strong>Skillmind</strong><small>{messages.nav.brandTagline}</small></span>
-        </div>
-        <div><h1>{messages.login.title}</h1><p>{messages.login.subtitle}</p></div>
-        <form aria-busy={busy} onSubmit={(event) => void submit(event)}>
-          <label>
-            {messages.login.email}
-            <input autoComplete="username" autoFocus name="email" required type="email" />
-          </label>
-          <label>
-            {messages.login.password}
-            <input autoComplete="current-password" name="password" required type="password" />
-          </label>
-          {errorMessage && <p className="error" role="alert">{errorMessage}</p>}
-          <button className="primaryButton" disabled={busy} type="submit">
-            {busy ? messages.login.submitting : messages.login.submit}
-          </button>
-        </form>
-        <p className="authFooter">{messages.login.footer}</p>
-      </section>
+      <div className="authAppearance"><ThemeToggle /></div>
+      <div className="authLayout">
+        <aside className="authStory">
+          <div>
+            <div className="authBrand">
+              <span className="brandMark">SM</span>
+              <span><strong>Skillmind</strong><small>{messages.nav.brandTagline}</small></span>
+            </div>
+            <p className="authHeadline">{messages.login.introTitle}</p>
+            <p className="authStoryDescription">{messages.login.introDescription}</p>
+          </div>
+          <ol className="authSteps">
+            {[messages.routes.skills.label, messages.routes.resources.label, messages.routes.workspace.label].map((label, index) => (
+              <li key={label}><span className="stepNumber" aria-hidden="true">0{index + 1}</span>{label}</li>
+            ))}
+          </ol>
+        </aside>
+        <section className="authCard">
+          <div><h1>{messages.login.title}</h1><p>{messages.login.subtitle}</p></div>
+          <form aria-busy={busy} onSubmit={(event) => void submit(event)}>
+            <label>
+              {messages.login.email}
+              <input autoComplete="username" autoFocus name="email" required type="email" />
+            </label>
+            <label>
+              {messages.login.password}
+              <input autoComplete="current-password" name="password" required type="password" />
+            </label>
+            {errorMessage && <p className="error" role="alert">{errorMessage}</p>}
+            <button className="primaryButton" disabled={busy} type="submit">
+              {busy ? messages.login.submitting : messages.login.submit}
+            </button>
+          </form>
+          <p className="authFooter">{messages.login.footer}</p>
+        </section>
+      </div>
     </main>
   )
 }

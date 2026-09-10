@@ -10,11 +10,13 @@ import { formatLocalTimestamp } from '../lib/presentation'
 import { isNonNilUuid, sameUuid } from '../lib/validation'
 import type { RunDetailState } from './RunResultPanel'
 import '../styles/evaluations.css'
+import { ModalDialog } from './PageElements'
 
 /** 同じ所有者の detail 再読取では未決を保持し、別 Result へは移行しない。 */
-export function RunEvaluations({ scope, state, csrfToken, readOnly, onSessionExpired }: {
+export function RunEvaluations({ scope, state, csrfToken, readOnly, onSessionExpired, open, onClose, onOpen }: {
   scope: Omit<EvaluationScope, 'resultId'>; state: RunDetailState; csrfToken: string
   readOnly: boolean; onSessionExpired: SessionEnded
+  open?: boolean; onClose?: () => void; onOpen?: () => void
 }) {
   const messages = useMessages()
   const detail = 'detail' in state ? state.detail : undefined
@@ -29,6 +31,7 @@ export function RunEvaluations({ scope, state, csrfToken, readOnly, onSessionExp
   const failure: EvaluationFailure | null = state.status === 'error' && state.accessFailure
     ? { key: state.accessFailure.key } : readOnly ? { key: 'projectArchived' } : null
   return <EvaluationSection key={result.result_id.toLowerCase()}
+    open={open} onClose={onClose} onOpen={onOpen}
     scope={{ ...scope, resultId: result.result_id }} result={result} csrfToken={csrfToken}
     writable={state.status === 'ready' && Boolean(valid?.result) && !readOnly}
     accessFailure={failure} onSessionExpired={onSessionExpired} />
@@ -38,9 +41,10 @@ export function RunEvaluations({ scope, state, csrfToken, readOnly, onSessionExp
 function emptyDraft(): EvaluationDraft { return { rating: 3, verdict: 'uncertain', comment: '', revisions: [] } }
 
 /** 原要求受付記録、修訂 form、server cursor 履歴を一つの安定所有者の下に分離する。 */
-export function EvaluationSection({ scope, result, csrfToken, writable, accessFailure, onSessionExpired }: {
+export function EvaluationSection({ scope, result, csrfToken, writable, accessFailure, onSessionExpired, open = false, onClose = () => {}, onOpen }: {
   scope: EvaluationScope; result: RunResultDetail; csrfToken: string; writable: boolean
   accessFailure: EvaluationFailure | null; onSessionExpired: SessionEnded
+  open?: boolean; onClose?: () => void; onOpen?: () => void
 }) {
   const messages = useMessages()
   const labels = messages.evaluation
@@ -87,8 +91,13 @@ export function EvaluationSection({ scope, result, csrfToken, writable, accessFa
     }
   }
 
-  return <details className="resultCollapse evaluationSection">
-    <summary>{messages.runResult.manualEvaluation}<span className="eventCount">{history.items.length}</span></summary>
+  // 開閉は表示だけを変える。原要求・草稿・履歴の owner を drawer の外へ保つ。
+  return <section className="evaluationSection">
+    {!open && pending && <p className="evaluationNotice" role="status">{messages.runResult.manualEvaluation} · {labels.phase[pending.phase]}
+      {onOpen && <button className="secondaryButton compactButton" type="button" onClick={onOpen}>{labels.originalRequest}</button>}</p>}
+    {!open && denied && <p className="error" role="alert">{labels.failures[denied.key]}</p>}
+    {!open && history.failure && !denied && <p className="error" role="alert">{labels.failures[history.failure.key]}</p>}
+    <ModalDialog drawer wide open={open} title={messages.runResult.manualEvaluation} onClose={onClose}>
     <div className="resultCollapseBody">
       <p className="hint">{labels.hint}</p>
       {denied && <p className="error" role="alert">{labels.failures[denied.key]}</p>}
@@ -171,7 +180,8 @@ export function EvaluationSection({ scope, result, csrfToken, writable, accessFa
         </div>
       </section>
     </div>
-  </details>
+    </ModalDialog>
+  </section>
 }
 
 /** AI 原値と人の提案を分けて表示し、採用済みや最新の正式判断とは呼ばない。 */

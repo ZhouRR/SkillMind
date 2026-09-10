@@ -1,29 +1,36 @@
 /* 概览・项目管理・Skills 解析の画面別 style。Workspace 系は workspace.css が持つ。 */
 
 /* ---- 概览:状態 card と機能模块 ---- */
-.statGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.statGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
 .statCard {
   display: grid;
-  gap: 6px;
+  gap: 10px;
   align-content: start;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 16px 18px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, .016), transparent 40%), var(--surface);
-  box-shadow: var(--inset-hi), var(--shadow-panel);
+  padding: 24px;
+  background: var(--surface);
+  box-shadow: var(--shadow-panel);
 }
-.statLabel { color: var(--text-faint); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
-.statValue { overflow: hidden; color: var(--text-hi); font-size: 16px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.statLabel { color: var(--text-faint); font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.statValue { overflow: hidden; color: var(--text-hi); font-size: 23px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .statReady { color: var(--ok); }
 .statError { color: var(--danger); }
-.statHint { margin: 0; color: var(--text-muted); font-size: 12.5px; line-height: 1.55; }
-.statHint code { overflow-wrap: anywhere; font-size: 11px; }
+.statHint { margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.55; }
+.statHint code { overflow-wrap: anywhere; font-size: 12px; }
 /* 状态卡与「対応待ち」属于两个独立区块，避免首屏上下边界贴在一起。 */
 .statGrid + .pendingPanel { margin-top: 16px; }
 
 /* ---- 概览:最近执行(現在 Project の直近 Run) ---- */
-.homeRuns { margin-top: 16px; }
-.homeRuns .panelHeader a { font-size: 12.5px; font-weight: 600; }
+.homeRuns { margin-top: 24px; }
+.homeActions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.homeActions .primaryButton { width: auto; }
+.taskCatalog { padding: 0; border: 0; background: transparent; box-shadow: none; }
+.taskCardActions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+.taskCardActions > * { flex: 1 1 110px; width: auto; min-height: 38px; text-align: center; }
+.statCardIcon { display: flex; align-items: center; gap: 10px; }
+.statCardIcon svg { width: 18px; height: 18px; fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.homeRuns .panelHeader a { font-size: 13px; font-weight: 600; }
 .homeRunList { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .homeRunItem {
   display: flex;
@@ -40,10 +47,10 @@
 .homeRunItem:hover { border-color: var(--accent-border); background: var(--surface-raised); text-decoration: none; }
 .homeRunTitle { display: grid; gap: 3px; min-width: 0; }
 .homeRunTitle strong { overflow: hidden; color: var(--text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.homeRunTitle small { color: var(--text-faint); font-size: 11px; }
+.homeRunTitle small { color: var(--text-faint); font-size: 12px; }
 
 /* ---- 项目管理 ---- */
-.inlineActions { display: flex; gap: 10px; margin-top: 20px; }
+.inlineActions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 20px; }
 .inlineActions a {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-small);
@@ -55,15 +62,15 @@
 }
 .inlineActions a:hover { border-color: var(--accent-border); color: var(--text-hi); background: var(--accent-soft); text-decoration: none; }
 
-.projectManagementLayout { display: grid; grid-template-columns: minmax(420px, 1.2fr) minmax(300px, .8fr); gap: 16px; }
+.projectManagementLayout { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr); gap: 16px; }
 .projectList { display: grid; gap: 8px; }
 .projectItem { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; border: 1px solid var(--border); border-radius: var(--radius-small); padding: 8px; background: var(--surface-input); transition: border-color .15s ease, background .15s ease; }
 .projectItem:hover { border-color: var(--border-strong); }
 .projectItemSelected { border-color: var(--accent-border); background: var(--accent-soft); }
 .projectSelect { display: grid; gap: 3px; min-width: 0; border: 0; padding: 4px; color: var(--text); background: transparent; text-align: left; cursor: pointer; }
 .projectSelect strong, .projectSelect span, .projectSelect small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.projectSelect span { color: var(--accent); font: 10px var(--font-mono); }
-.projectSelect small { color: var(--text-faint); font-size: 11px; }
+.projectSelect span { color: var(--accent); font: 12px var(--font-mono); }
+.projectSelect small { color: var(--text-faint); font-size: 12px; }
 .projectItemActions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
 /* 作成のみのときは submit を全幅に保ち、編集時だけ取消と横並びにする。 */
 .projectFormActions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
@@ -80,8 +87,8 @@
 .projectItemArchived:hover { opacity: 1; }
 .projectArchivedIdentity { display: grid; gap: 3px; min-width: 0; padding: 4px; }
 .projectArchivedIdentity strong { overflow-wrap: anywhere; color: var(--text); font-size: 13px; }
-.projectArchivedIdentity span { color: var(--accent); font: 10px var(--font-mono); }
-.projectArchivedIdentity small { color: var(--text-faint); font-size: 11px; line-height: 1.5; }
+.projectArchivedIdentity span { color: var(--accent); font: 12px var(--font-mono); }
+.projectArchivedIdentity small { color: var(--text-faint); font-size: 12px; line-height: 1.5; }
 
 /* ---- 项目管理:模块配置 ---- */
 .modulesPanel { display: grid; gap: 4px; }
@@ -108,45 +115,45 @@
   padding: 2px 9px;
   color: var(--accent);
   background: var(--accent-soft);
-  font-size: 10.5px;
+  font-size: 12px;
 }
 .moduleItemActions { display: flex; flex-direction: column; flex-shrink: 0; gap: 6px; }
 .moduleForm { display: grid; gap: 2px; align-content: start; border-left: 1px solid var(--border); padding-left: 18px; }
 .moduleForm h3 { margin: 0 0 10px; color: var(--text-hi); font-size: 13.5px; }
 .moduleSkillPicker { display: grid; gap: 7px; margin: 0 0 14px; border: 1px solid var(--border); border-radius: var(--radius-small); padding: 11px 12px; }
 .moduleSkillPicker legend { padding: 0 4px; color: var(--text-muted); font-size: 12px; font-weight: 600; }
-.moduleSkillOption { display: flex; gap: 8px; align-items: center; margin: 0; color: var(--text); font-size: 12.5px; font-weight: 500; }
+.moduleSkillOption { display: flex; gap: 8px; align-items: center; margin: 0; color: var(--text); font-size: 13px; font-weight: 500; }
 .moduleSkillOption input { width: auto; min-height: 0; box-shadow: none; accent-color: var(--accent-strong); }
 .moduleSkillOption span { line-height: 1.4; }
 /* 束縛は残るが候補から外れた版。外さないと保存できないため警告色で理由を添える。 */
 .moduleSkillOptionStale span { display: grid; gap: 2px; color: var(--warn); }
-.moduleSkillOptionStale small { color: var(--warn); font-size: 10.5px; }
+.moduleSkillOptionStale small { color: var(--warn); font-size: 12px; }
 .moduleFormActions { display: flex; gap: 10px; align-items: center; }
 .moduleFormActions .primaryButton { width: auto; padding: 8px 20px; }
 
 /* ---- Skill 解析結果 ---- */
 .skillWorkspace {
   display: grid;
-  grid-template-columns: minmax(290px, .78fr) minmax(360px, 1.22fr);
+  grid-template-columns: minmax(260px, .85fr) minmax(0, 1.15fr);
   gap: 16px;
   align-items: start;
 }
 .skillSummary { display: grid; gap: 14px; }
 .resourceGrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 .metric { display: grid; gap: 4px; border: 1px solid var(--border); border-radius: var(--radius-small); padding: 11px 12px; background: var(--surface-input); }
-.metric span { color: var(--text-faint); font-size: 11px; font-weight: 600; }
+.metric span { color: var(--text-faint); font-size: 12px; font-weight: 600; }
 .metric strong { color: var(--text-hi); font-size: 18px; }
 .diagnostics { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .diagnostics li {
   display: grid;
   gap: 4px;
-  border: 1px solid rgba(242, 182, 76, .3);
+  border: 1px solid var(--warn-border);
   border-radius: var(--radius-small);
   padding: 10px;
   background: var(--warn-soft);
 }
 .diagnostics strong { color: var(--warn); font-size: 12px; }
-.diagnostics span { color: var(--text-muted); font-size: 12.5px; line-height: 1.5; }
+.diagnostics span { color: var(--text-muted); font-size: 13px; line-height: 1.5; }
 .saveSkillButton { width: 100%; margin-top: 14px; }
 /* ---- Skill 源文件:上传目录の読取専用 preview ---- */
 .sourcePreview { display: grid; gap: 10px; margin-bottom: 6px; }
@@ -156,12 +163,12 @@
 .sourcePreviewFile summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; cursor: pointer; list-style: none; }
 .sourcePreviewFile summary::-webkit-details-marker { display: none; }
 .sourcePreviewFile summary:hover code { color: var(--text-hi); }
-.sourcePreviewFile code { overflow-wrap: anywhere; color: var(--accent); font-size: 11px; transition: color .15s ease; }
-.sourcePreviewFile summary span { flex-shrink: 0; color: var(--text-faint); font-size: 10.5px; }
-.sourcePreviewFile pre { overflow: auto; max-height: 260px; margin: 0; border-top: 1px solid var(--border); padding: 10px 12px; color: var(--text-muted); font: 11.5px/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.sourcePreviewFile code { overflow-wrap: anywhere; color: var(--accent); font-size: 12px; transition: color .15s ease; }
+.sourcePreviewFile summary span { flex-shrink: 0; color: var(--text-faint); font-size: 12px; }
+.sourcePreviewFile pre { overflow: auto; max-height: 260px; margin: 0; border-top: 1px solid var(--border); padding: 10px 12px; color: var(--text-muted); font: 12px/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .sourcePreviewOpaque { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px dashed var(--border-strong); border-radius: var(--radius-small); padding: 9px 12px; background: var(--surface-raised); }
-.sourcePreviewOpaque code { overflow-wrap: anywhere; color: var(--text-muted); font-size: 11px; }
-.sourcePreviewOpaque span { flex-shrink: 0; color: var(--text-faint); font-size: 10.5px; }
+.sourcePreviewOpaque code { overflow-wrap: anywhere; color: var(--text-muted); font-size: 12px; }
+.sourcePreviewOpaque span { flex-shrink: 0; color: var(--text-faint); font-size: 12px; }
 /* 目录 upload は解析 form の従属動線として、区切り線の下に説明+button で並べる。 */
 .skillUpload { display: grid; gap: 8px; margin: 16px 0 6px; border-top: 1px solid var(--border); padding-top: 14px; }
 .skillUpload > span { color: var(--text-muted); font-size: 12px; font-weight: 600; }
@@ -170,16 +177,14 @@
   display: grid;
   gap: 9px;
   margin-top: 12px;
-  border: 1px solid rgba(63, 214, 143, .32);
+  border: 1px solid var(--ok-border);
   border-radius: var(--radius-small);
   padding: 13px;
   background: var(--ok-soft);
 }
-.savedSkill > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.savedSkill span { color: var(--text-faint); font-size: 11px; font-weight: 600; }
-.savedSkill strong { color: var(--ok); font-size: 12px; }
-.savedSkill p { display: grid; gap: 4px; margin: 0; }
-.savedSkill code { overflow: hidden; color: var(--text); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.savedSkillStatus { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.savedSkillStatus span { color: var(--text-faint); font-size: 12px; font-weight: 600; }
+.savedSkillStatus strong { color: var(--ok); font-size: 12px; }
 .skillVersionDetail { display: grid; gap: 10px; margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
 /* Version detail は checksum/UUID が長いため、fact card を 1 列にして全文を折り返す。 */
 .skillVersionDetail .runFacts { grid-template-columns: 1fr; }
@@ -203,7 +208,7 @@
 }
 .skillLibraryIdentity { display: grid; gap: 4px; min-width: 0; }
 .skillLibraryIdentity strong { color: var(--text-hi); font-size: 13px; }
-.skillLibraryIdentity > span { overflow-wrap: anywhere; font-size: 11px; }
+.skillLibraryIdentity > span { overflow-wrap: anywhere; font-size: 12px; }
 /* SKILL.md 原文の説明。skill_key より読める識別なので、key より一段強く出す。 */
 .skillLibraryDescription { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
 .skillLibraryStatus { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
@@ -221,16 +226,16 @@
 }
 .interpretStreamHead { display: flex; align-items: center; gap: 8px; }
 .interpretStreamHead strong { color: var(--text-hi); font-size: 13px; }
-.interpretStreamHint { margin-left: auto; color: var(--text-faint); font-size: 11px; }
-/* Live 信号は aurora cyan。Run 状態点と同じ pulse で「実行中」を示す。 */
+.interpretStreamHint { margin-left: auto; color: var(--text-faint); font-size: 12px; }
+/* Live 信号は共通の teal。Run 状態と同じ意味を保つ。 */
 .streamDot { width: 8px; height: 8px; border-radius: 999px; background: var(--live); box-shadow: 0 0 0 3px var(--live-soft); animation: statusPulse 1.4s ease-in-out infinite; }
 .interpretPrompt { border: 1px solid var(--border); border-radius: var(--radius-small); background: var(--surface-raised); }
 .interpretPrompt summary { padding: 8px 11px; color: var(--text-muted); cursor: pointer; font-size: 12px; }
-.interpretPrompt pre { overflow: auto; max-height: 220px; margin: 0; border-top: 1px solid var(--border); padding: 11px; color: var(--text-faint); font: 11px/1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.interpretPrompt pre { overflow: auto; max-height: 220px; margin: 0; border-top: 1px solid var(--border); padding: 11px; color: var(--text-faint); font: 12px/1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .interpretOutput { display: grid; gap: 6px; }
-.interpretOutput > span { color: var(--text-faint); font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+.interpretOutput > span { color: var(--text-faint); font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
 .interpretOutput pre { overflow: auto; max-height: 320px; margin: 0; border: 1px solid var(--border); border-radius: var(--radius-small); padding: 12px; color: var(--text); background: var(--surface-raised); font: 12px/1.65 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
-.interpretOutputWaiting { margin: 0; border: 1px dashed var(--border-strong); border-radius: var(--radius-small); padding: 12px; color: var(--text-faint); font-size: 12.5px; line-height: 1.6; }
+.interpretOutputWaiting { margin: 0; border: 1px dashed var(--border-strong); border-radius: var(--radius-small); padding: 12px; color: var(--text-faint); font-size: 13px; line-height: 1.6; }
 
 /* ---- Model interpretation 実行 detail ---- */
 .subsectionHeader h4 { margin: 0; font-size: 13px; }
@@ -252,7 +257,7 @@
 .noteBlock h4 {
   margin: 0;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: .05em;
   text-transform: uppercase;
@@ -265,13 +270,13 @@
   padding: 4px 0 4px 10px;
 }
 .noteList strong { color: var(--text); font-size: 12px; }
-.noteList span, .sourceTraceList span { color: var(--text-muted); font-size: 12.5px; line-height: 1.5; }
+.noteList span, .sourceTraceList span { color: var(--text-muted); font-size: 13px; line-height: 1.5; }
 /* 資源要求は「種別・必須/任意」を主に、契約 key を副に置く。Skill 原文由来の選択指針は
    平台文言と言語が異なりうるため、行を分けて出典の違いを見た目でも示す。 */
 .readinessList strong { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
-.readinessList strong code { color: var(--text-faint); font: 400 10px var(--font-mono); opacity: .75; }
+.readinessList strong code { color: var(--text-faint); font: 400 12px var(--font-mono); opacity: .75; }
 .readinessGuidance { color: var(--text-faint) !important; font-size: 12px !important; font-style: italic; }
-.sourceTraceList code { color: var(--accent); font-size: 11px; }
+.sourceTraceList code { color: var(--accent); font-size: 12px; }
 /* 詳細 tab 内に移ったため区切り線は持たない。差分 badge は行の左端に置く。 */
 .revisionDiff { display: grid; gap: 8px; }
 .revisionDiff > .scopeBadge { justify-self: start; }
@@ -303,13 +308,13 @@
 }
 
 /* ---- 项目文档画面:現在 Project の文書管理器のみの単列 layout(Project 切替は sidebar) ---- */
-.documentsPage { display: grid; gap: 16px; align-content: start; max-width: 900px; }
+.documentsPage { display: grid; gap: 16px; align-content: start; max-width: 1080px; }
 
 /* ---- 资源管理:各 tab は「設定済み一覧」が主役。新規作成 form は共通弹窗(base.css の modal)へ ---- */
 .resourceAdmin { display: grid; gap: 12px; }
 .resourceAdminError { margin: 0; }
 /* 一覧 panel が全幅に伸びて行が読みにくくならない程度に幅を抑える。 */
-.resourceTabPanel { max-width: 880px; }
+.resourceTabPanel { max-width: 1080px; }
 .resourceForm { display: grid; gap: 11px; }
 .resourceForm textarea { min-height: 112px; }
 .resourceForm > .resourceList { margin-top: 4px; border-top: 1px solid var(--border); padding-top: 12px; }
@@ -319,7 +324,7 @@
   padding-left: 10px;
   color: var(--warn);
 }
-.resourceGroupLabel { margin: 0; color: var(--text-faint); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.resourceGroupLabel { margin: 0; color: var(--text-faint); font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
 .resourceList { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .resourceItem {
   display: flex;
@@ -335,8 +340,8 @@
 .resourceItem:hover { border-color: var(--border-strong); }
 .resourceInfo { display: grid; gap: 3px; min-width: 0; }
 .resourceInfo strong { overflow: hidden; color: var(--text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.resourceValue { overflow: hidden; color: var(--text-muted); font: 11.5px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
-.resourceInfo small { color: var(--text-faint); font-size: 10.5px; }
+.resourceValue { overflow: hidden; color: var(--text-muted); font: 12px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.resourceInfo small { color: var(--text-faint); font-size: 12px; }
 /* 権限档位・scope 部分集合の radio/checkbox 群。moduleSkillPicker と同じ見た目規則を踏襲する。 */
 .scopePicker { display: grid; gap: 7px; margin: 0; border: 1px solid var(--border); border-radius: var(--radius-small); padding: 11px 12px; }
 .scopePicker legend { padding: 0 4px; color: var(--text-muted); font-size: 12px; font-weight: 600; }
@@ -344,7 +349,7 @@
 .scopePickerGroup { display: grid; gap: 6px; }
 .scopePickerGroup + .scopePickerGroup { margin-top: 6px; }
 .scopePickerGroup > .compactEmpty { padding: 6px 8px; }
-.scopeOption { display: flex; gap: 8px; align-items: center; margin: 0; color: var(--text); font-size: 12.5px; font-weight: 500; }
+.scopeOption { display: flex; gap: 8px; align-items: center; margin: 0; color: var(--text); font-size: 13px; font-weight: 500; }
 .scopeOption input { width: auto; min-height: 0; box-shadow: none; accent-color: var(--accent-strong); }
 .scopeOption .mono { font: 12px var(--font-mono); }
 
@@ -354,7 +359,7 @@
 /* ---- 任务中心:何を走らせられるかを card で横並びに比較する ---- */
 .taskCards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
   gap: 12px;
   margin: 0;
   padding: 0;
@@ -364,23 +369,27 @@
 }
 .taskCard {
   display: grid;
-  gap: 10px;
+  gap: 20px;
   align-content: start;
   min-width: 0;
   border: 1px solid var(--border);
-  border-radius: var(--radius-small);
-  padding: 14px 16px;
-  background: var(--surface-input);
+  border-radius: var(--radius);
+  padding: 22px;
+  background: var(--surface);
+  box-shadow: var(--shadow-panel);
 }
 .taskCard > * { min-width: 0; }
-.taskCardHead { display: flex; align-items: start; justify-content: space-between; gap: 10px; min-width: 0; }
+.taskCardHead { display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: 12px; min-width: 0; }
+.taskCardIdentity { display: flex; gap: 12px; align-items: flex-start; min-width: 0; flex: 1 1 180px; }
+.taskCardIcon { display: grid; flex-shrink: 0; place-items: center; width: 38px; height: 38px; border: 1px solid var(--border); border-radius: 11px; color: var(--accent); background: var(--accent-soft); }
+.taskCardIcon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 .taskCardTitle { display: grid; gap: 2px; min-width: 0; }
-.taskCardTitle strong { color: var(--text-hi); font-size: 14px; overflow-wrap: anywhere; }
-.taskCardTitle small { color: var(--text-faint); font-size: 11.5px; overflow-wrap: anywhere; }
-.taskCardFacts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.taskCardTitle strong { color: var(--text-hi); font-size: 16px; overflow-wrap: anywhere; }
+.taskCardTitle small { color: var(--text-faint); font-size: 12px; overflow-wrap: anywhere; }
+.taskCardFacts { border-top: 1px solid var(--border); padding-top: 16px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; }
 .taskCardFacts div { display: grid; gap: 2px; min-width: 0; }
-.taskCardFacts dt { color: var(--text-faint); font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; }
-.taskCardFacts dd { margin: 0; color: var(--text); font-size: 12.5px; overflow-wrap: anywhere; }
+.taskCardFacts dt { color: var(--text-faint); font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
+.taskCardFacts dd { margin: 0; color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
 .taskCardLastRun { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .taskScheduleList {
   display: grid;
@@ -392,15 +401,15 @@
 }
 .taskScheduleList li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .taskScheduleList .mono { overflow-wrap: anywhere; font-size: 12px; }
-.taskScheduleList small { color: var(--text-faint); font-size: 11px; }
+.taskScheduleList small { color: var(--text-faint); font-size: 12px; }
 .scheduleActions { display: inline-flex; gap: 6px; margin-left: auto; }
 .schedulePreview { display: grid; gap: 4px; margin: 0 0 12px; padding-left: 20px; }
 .schedulePreview li { min-width: 0; overflow-wrap: anywhere; }
 
 /* 就緒度は Run status と同じ token 体系を使い、色の意味を画面間で一致させる。 */
-.readiness-actionable { border-color: rgba(63, 214, 143, .38); color: var(--ok); background: var(--ok-soft); }
-.readiness-runnable { border-color: rgba(85, 214, 240, .38); color: var(--live); background: var(--live-soft); }
-.readiness-configuration_required { border-color: rgba(242, 182, 76, .38); color: var(--warn); background: var(--warn-soft); }
+.readiness-actionable { border-color: var(--ok-border); color: var(--ok); background: var(--ok-soft); }
+.readiness-runnable { border-color: var(--live-border); color: var(--live); background: var(--live-soft); }
+.readiness-configuration_required { border-color: var(--warn-border); color: var(--warn); background: var(--warn-soft); }
 .readiness-guidance_only { border-color: var(--border-strong); color: var(--text-muted); background: var(--surface-raised); }
 
 /* 狭幅では三列の事実行を積む。横 scroll は出さない。 */
@@ -411,7 +420,7 @@
 /* ---- 待你处理:応答・承認待ちの Run。気付かれない待機はそのまま停止になるため強調する ---- */
 .pendingPanel { margin-bottom: 16px; }
 /* 件数があるときだけ warn 系の枠にする。常時目立たせると「常に何かある」ように見えて麻痺する。 */
-.pendingPanelActive { border-color: rgba(242, 182, 76, .38); background: var(--warn-soft); }
+.pendingPanelActive { border-color: var(--warn-border); background: var(--warn-soft); }
 .pendingList { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; min-width: 0; }
 .pendingItem {
   display: flex;
@@ -428,4 +437,4 @@
 .pendingItem:hover { border-color: var(--border-hover); text-decoration: none; }
 .pendingItemTitle { display: grid; gap: 2px; min-width: 0; }
 .pendingItemTitle strong { color: var(--text-hi); font-size: 13px; overflow-wrap: anywhere; }
-.pendingItemTitle small { color: var(--text-faint); font-size: 11px; }
+.pendingItemTitle small { color: var(--text-faint); font-size: 12px; }

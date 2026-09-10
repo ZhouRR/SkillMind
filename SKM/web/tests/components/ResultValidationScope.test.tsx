@@ -31,6 +31,20 @@ function scope(value: RunResultDetail, language: UiLanguage): string {
 }
 
 describe('Result validation scope display', () => {
+  it.each(['zh', 'ja', 'en'] as const)('keeps compact save-time limits honest in %s', (language) => {
+    const labels = MESSAGES[language].runResult.referenceChecks
+    const compact = (value: RunResultDetail) => renderToStaticMarkup(
+      <LanguageProvider language={language}><ResultValidationScope result={value} compact /></LanguageProvider>,
+    )
+    expect(compact(result())).toContain(labels.legacy)
+    expect(compact(result(CHECKS))).toContain(labels.briefV1)
+    const value = result({ ...CHECKS, version: 'skillmind.result-reference-checks/v2', artifacts: 'RUN_OWNERSHIP_AND_CONTENT' })
+    value.validation.artifact_refs_valid = true
+    expect(compact(value)).toContain(labels.briefV2)
+    value.validation.artifact_refs_valid = false
+    expect(compact(value)).toContain(labels.invalid)
+    expect(compact(value)).not.toContain(labels.briefV2)
+  })
   it.each(['zh', 'ja', 'en'] as const)('distinguishes v2 save-time artifact checks without changing v1 in %s', (language) => {
     const value = result({ ...CHECKS, version: 'skillmind.result-reference-checks/v2', artifacts: 'RUN_OWNERSHIP_AND_CONTENT' })
     value.validation.artifact_refs_valid = true

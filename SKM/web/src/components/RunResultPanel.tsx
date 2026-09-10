@@ -13,7 +13,7 @@ import { createIdempotencyKey } from '../lib/idempotency'
 import { formatLocalTimestamp } from '../lib/presentation'
 import type { InteractionAccessFailure } from '../lib/interactionResponse'
 import { splitOverflow } from '../lib/resultOverflow'
-import { EmptyState } from './PageElements'
+import { EmptyState, ModalDialog } from './PageElements'
 import { RunDocumentSnapshots } from './RunDocumentSnapshots'
 import { ResultValidationScope } from './ResultValidationScope'
 import { RunArtifacts } from './RunArtifacts'
@@ -47,30 +47,38 @@ export function RunResultPanel({ state, csrfToken, actorId = '', projectId, runI
 }) {
   const detail = 'detail' in state ? state.detail : undefined
   const scope = { actorId, projectId: projectId ?? detail?.project_id ?? '', runId: runId ?? detail?.run_id ?? '' }
+  const owner = JSON.stringify([actorId, csrfToken, scope.projectId.toLowerCase(), scope.runId.toLowerCase()])
+  const [evaluationOwner, setEvaluationOwner] = useState<string | null>(null)
+  useEffect(() => setEvaluationOwner(null), [owner])
   return <>
     <RunInteractions key={JSON.stringify([actorId, csrfToken, scope.projectId.toLowerCase(), scope.runId.toLowerCase()])}
       scope={scope} state={state} csrfToken={csrfToken} onResponded={onInteractionResponded}
       onFacts={onInteractionFacts} onSessionExpired={onSessionExpired} />
-    <RunResultContent state={state} csrfToken={csrfToken} onProposalDecided={onProposalDecided}
+    <RunEvaluations key={JSON.stringify(['evaluations', actorId, csrfToken, scope.projectId.toLowerCase(), scope.runId.toLowerCase()])}
+      open={evaluationOwner === owner} onClose={() => setEvaluationOwner(null)} onOpen={() => setEvaluationOwner(owner)}
+      scope={scope} state={state} csrfToken={csrfToken} readOnly={projectReadOnly} onSessionExpired={onSessionExpired} />
+    <RunResultContent key={`content:${owner}`} state={state} csrfToken={csrfToken} onProposalDecided={onProposalDecided}
+      onEvaluate={() => setEvaluationOwner(owner)}
       artifactOwner={JSON.stringify([actorId, csrfToken, scope.projectId.toLowerCase(), scope.runId.toLowerCase()])}
       artifactScope={scope}
       onSessionExpired={onSessionExpired} />
-    <RunEvaluations key={JSON.stringify(['evaluations', actorId, csrfToken, scope.projectId.toLowerCase(), scope.runId.toLowerCase()])}
-      scope={scope} state={state} csrfToken={csrfToken} readOnly={projectReadOnly} onSessionExpired={onSessionExpired} />
   </>
 }
 
 /** 普通答復とは独立した Result、Proposal、Segment/ToolCall/Evidence 監査を表示する。 */
-function RunResultContent({ state, csrfToken, onProposalDecided, artifactOwner, artifactScope, onSessionExpired }: {
+function RunResultContent({ state, csrfToken, onProposalDecided, artifactOwner, artifactScope, onSessionExpired, onEvaluate }: {
   state: RunDetailState
   csrfToken: string
   onProposalDecided?: () => void
   artifactOwner: string
   artifactScope: { projectId: string; runId: string }
   onSessionExpired: SessionEnded
+  onEvaluate: () => void
 }) {
   const messages = useMessages()
   const [showTechnicalDetails, setShowTechnicalDetails] = useState(false)
+  const [drawer, setDrawer] = useState<'details' | 'checks' | 'evidence' | null>(null)
+  const [evidenceSelection, setEvidenceSelection] = useState<string[] | null>(null)
   if (state.status === 'idle') {
     return <EmptyState text={messages.runResult.idleEmpty} />
   }
@@ -92,7 +100,21 @@ function RunResultContent({ state, csrfToken, onProposalDecided, artifactOwner, 
         onDecided={onProposalDecided}
         proposals={decidableProposals}
       />
-      <div className="technicalToggleRow">
+      <div className="resultActions" aria-label={messages.workspace.tabResult}>
+        {result && <button className="secondaryButton compactButton" type="button" onClick={onEvaluate}>{messages.runResult.manualEvaluation}</button>}
+        <button className="secondaryButton compactButton" type="button" onClick={() => { setEvidenceSelection(null); setDrawer('evidence') }}>{messages.runResult.evidenceTitle}<span className="eventCount">{detail.evidence.length}</span></button>
+        {result && <button className="secondaryButton compactButton" type="button" onClick={() => setDrawer('checks')}>{messages.runResult.reading.checks}</button>}
+        <button className="secondaryButton compactButton" type="button" onClick={() => setDrawer('details')}>{messages.runResult.reading.details}</button>
+      </div>
+      <ModalDialog drawer open={drawer === 'details'} title={messages.runResult.reading.details} onClose={() => setDrawer(null)}>
+        <dl className="runDetailFacts">
+          <div><dt>{messages.workspace.runIdLabel}</dt><dd><code>{detail.run_id}</code></dd></div>
+          <div><dt>{messages.runResult.taskVersionLabel}</dt><dd><code>{versionId ?? '—'}</code></dd></div>
+          {result && <>
+            <div><dt>{messages.runResult.confidenceLabel}</dt><dd>{formatConfidence(result.confidence)} · {messages.runResult.reading.confidenceHint}</dd></div>
+            <div><dt>{messages.runResult.structuredResult}</dt><dd>{result.result_kind === 'OUTCOME_ENVELOPE' ? messages.runResult.formatBadgeOutcome : (detail.output_schema_checksum ? messages.runResult.formatBadgeSchema : messages.runResult.formatBadgeLegacy)}</dd></div>
+          </>}
+        </dl>
         <button
           aria-pressed={showTechnicalDetails}
           className="secondaryButton compactButton"
@@ -101,36 +123,42 @@ function RunResultContent({ state, csrfToken, onProposalDecided, artifactOwner, 
         >
           {showTechnicalDetails ? messages.runResult.hideTechnicalDetails : messages.runResult.technicalDetails}
         </button>
-      </div>
+      </ModalDialog>
+      <ModalDialog drawer open={drawer === 'checks'} title={messages.runResult.reading.checks} onClose={() => setDrawer(null)}>
+        {result && <ResultValidationScope result={result} />}
+      </ModalDialog>
+      <ModalDialog drawer open={drawer === 'evidence'} title={messages.runResult.evidenceTitle} onClose={() => setDrawer(null)}>
+        {evidenceSelection === null ? (detail.evidence.length === 0 ? <p className="compactEmpty">{messages.runResult.noEvidence}</p>
+          : <div className="evidenceList">{detail.evidence.map((evidence) => <EvidenceCard evidence={evidence} key={evidence.evidence_ref} />)}</div>)
+          : <div className="evidenceList">{Array.from(new Set(evidenceSelection)).map((ref) => {
+            const evidence = detail.evidence.find((item) => item.evidence_ref === ref)
+            // 未解決参照は文字で残す。現在の資源や model URL から証拠を補完しない。
+            return evidence ? <EvidenceCard evidence={evidence} expanded key={`selected:${ref}`} />
+              : <p key={ref}><code>{ref}</code> · {messages.runResult.noEvidence}</p>
+          })}</div>}
+      </ModalDialog>
       {result === null ? (
         <EmptyState text={messages.runResult.noValidatedResult(messages.enums.runStatus[detail.status] ?? detail.status)} />
       ) : <>
-      {/* 結果区画の先頭に固定される行。畳まれた要約の全文は title から読める。 */}
+      {/* 要約を報告の見出しとして全文表示し、技術指標は補助行に分ける。 */}
       <section className="resultSummary">
         <div>
-          <span>{messages.runResult.summaryLabel}</span>
           <h3 title={result.summary}>{result.summary}</h3>
         </div>
         <dl>
-          <div><dt>{messages.runResult.confidenceLabel}</dt><dd>{formatConfidence(result.confidence)}</dd></div>
-          <div><dt>{messages.runResult.reviewLabel}</dt><dd>{result.needs_review ? messages.runResult.needsReview : messages.runResult.noExtraReview}</dd></div>
+          <div className={result.needs_review ? 'reviewRequired' : undefined}><dt>{messages.runResult.reviewLabel}</dt><dd>{result.needs_review ? messages.runResult.needsReview : messages.runResult.noExtraReview}</dd></div>
           <div><dt>{messages.runResult.schemaCheckLabel}</dt><dd>{result.validation.schema_valid === true ? messages.runResult.schemaValidText : messages.runResult.schemaCheckRequiredText}</dd></div>
-          {/* UUID 全文は判断材料にならないうえ右列を押し広げて要約を潰す。全文は title へ退避する。 */}
-          <div><dt>{messages.runResult.taskVersionLabel}</dt><dd title={versionId}>{versionId ? shortId(versionId) : '—'}</dd></div>
         </dl>
       </section>
+      <ResultValidationScope result={result} compact />
 
-      <ResultValidationScope result={result} />
-
-      <section className="resultSection">
-        <div className="subsectionHeader">
-          <h3>{result.result_kind === 'OUTCOME_ENVELOPE' ? messages.runResult.genericOutcome : messages.runResult.structuredResult}</h3>
-          <span>{result.result_kind === 'OUTCOME_ENVELOPE' ? messages.runResult.formatBadgeOutcome : (detail.output_schema_checksum ? messages.runResult.formatBadgeSchema : messages.runResult.formatBadgeLegacy)}</span>
-        </div>
-        {result.result_kind === 'OUTCOME_ENVELOPE'
-          ? <OutcomeEnvelopeResult data={result.data} schema={detail.output_schema} showTechnicalDetails={showTechnicalDetails} />
-          : <SchemaResultValue schema={detail.output_schema} value={result.data} path="$" showTechnicalDetails={showTechnicalDetails} />}
-      </section>
+      <div className="resultReportGrid">
+        <section className="resultSection resultReportBody" aria-label={messages.runResult.genericOutcome}>
+          {result.result_kind === 'OUTCOME_ENVELOPE'
+            ? <OutcomeEnvelopeResult data={result.data} schema={detail.output_schema} showTechnicalDetails={showTechnicalDetails} onEvidence={(refs) => { setEvidenceSelection(refs); setDrawer('evidence') }} />
+            : <SchemaResultValue schema={detail.output_schema} value={result.data} path="$" showTechnicalDetails={showTechnicalDetails} />}
+        </section>
+      </div>
       </>}
 
       {/* 扇出は「結論の根拠がどこまで揃っているか」を左右するので備査へ畳まない。
@@ -147,12 +175,6 @@ function RunResultContent({ state, csrfToken, onProposalDecided, artifactOwner, 
       <CollapsibleSection count={detail.tool_calls.length} title={messages.runResult.toolCalls}>
         {detail.tool_calls.length === 0 ? <p className="compactEmpty">{messages.runResult.noToolCalls}</p> : (
           <ul className="toolSummaryList">{detail.tool_calls.map((tool) => <li key={tool.tool_call_id}><div><strong>{tool.capability}</strong><span>{tool.status}</span></div><p>{tool.provider} · {tool.duration_ms === null ? '—' : `${tool.duration_ms} ms`}</p><code>{JSON.stringify(tool.arguments_summary)}</code></li>)}</ul>
-        )}
-      </CollapsibleSection>
-
-      <CollapsibleSection count={detail.evidence.length} title={messages.runResult.evidenceTitle}>
-        {detail.evidence.length === 0 ? <p className="compactEmpty">{messages.runResult.noEvidence}</p> : (
-          <div className="evidenceList">{detail.evidence.map((evidence) => <EvidenceCard evidence={evidence} key={evidence.evidence_ref} />)}</div>
         )}
       </CollapsibleSection>
 
@@ -658,10 +680,11 @@ function shortId(value: string): string {
 
 
 /** 通用 OutcomeEnvelope を task-specific business field に依存せず標準表示する。 */
-function OutcomeEnvelopeResult({ data, schema, showTechnicalDetails }: {
+function OutcomeEnvelopeResult({ data, schema, showTechnicalDetails, onEvidence }: {
   data: Record<string, unknown>
   schema: Record<string, unknown> | null
   showTechnicalDetails: boolean
+  onEvidence: (refs: string[]) => void
 }) {
   const messages = useMessages()
   const deliverables = recordItems(data.deliverables)
@@ -676,8 +699,8 @@ function OutcomeEnvelopeResult({ data, schema, showTechnicalDetails }: {
     : null
   return (
     <div className="outcomeEnvelope">
-      <div className="outcomeStatus"><strong>{textValue(data.status, messages.runResult.outcomeUnknown)}</strong>{showTechnicalDetails && <span>{textValue(data.outcome_version, '—')}</span>}</div>
-      <OutcomeCollection title={messages.runResult.deliverables} empty={messages.runResult.noDeliverables}>
+      <div className={`outcomeStatus${data.status === 'PARTIAL' ? ' outcomePartial' : ''}`}><strong>{textValue(data.status, messages.runResult.outcomeUnknown)}</strong>{showTechnicalDetails && <span>{textValue(data.outcome_version, '—')}</span>}</div>
+      <OutcomeCollection title={messages.runResult.deliverables} empty={messages.runResult.noDeliverables} singleHeading>
         {deliverables.map((item, index) => (
           <article className="outcomeCard" key={textValue(item.key, `deliverable-${index}`)}>
             <div><strong>{textValue(item.title, textValue(item.key, messages.runResult.untitledLabel))}</strong>{showTechnicalDetails && <span>{textValue(item.kind, '—')}</span>}</div>
@@ -693,6 +716,7 @@ function OutcomeEnvelopeResult({ data, schema, showTechnicalDetails }: {
             <div><strong>{textValue(item.title, textValue(item.key, messages.runResult.untitledLabel))}</strong>{typeof item.severity === 'string' && <span>{item.severity}</span>}</div>
             <p>{textValue(item.detail, '—')}</p>
             {renderOutcomeRefs(stringItems(item.evidence_refs), showTechnicalDetails, messages.runResult.evidenceTitle)}
+            {stringItems(item.evidence_refs).length > 0 && <button className="secondaryButton compactButton" type="button" onClick={() => onEvidence(stringItems(item.evidence_refs))}>{messages.runResult.viewExcerpt}</button>}
           </article>
         ))}
       </OutcomeCollection>
@@ -731,17 +755,19 @@ function OutcomeEnvelopeResult({ data, schema, showTechnicalDetails }: {
 }
 
 /** Outcome の一群へ共通見出しと空状態を付与し、長い一覧の尾部を畳む。 */
-function OutcomeCollection({ title, empty, children }: {
+function OutcomeCollection({ title, empty, children, singleHeading = false }: {
   title: string
   empty: string
   children: ReactNode
+  /** 単一交付物は自身の見出しで足りる。複数件は件数付き見出しを保つ。 */
+  singleHeading?: boolean
 }) {
   const items = Array.isArray(children) ? (children as ReactNode[]) : [children]
   const { visible, hidden } = splitOverflow(items)
   return (
-    <section className="outcomeGroup">
+    <section className="outcomeGroup" aria-label={title}>
       {/* 畳んだ後も総数が読めるよう、見出しに件数を残す。 */}
-      <h4>{title}{items.length > 0 && <span className="eventCount">{items.length}</span>}</h4>
+      {!(singleHeading && items.length === 1) && <h4>{title}{items.length > 0 && <span className="eventCount">{items.length}</span>}</h4>}
       {items.length === 0 ? <p className="compactEmpty">{empty}</p> : <>
         {visible}
         <OverflowFold count={hidden.length}>{hidden}</OverflowFold>
@@ -881,10 +907,10 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Evidence locator を常時表示し、本文 excerpt は利用者操作まで折り畳む。 */
-function EvidenceCard({ evidence }: { evidence: EvidenceDetail }) {
+function EvidenceCard({ evidence, expanded = false }: { evidence: EvidenceDetail; expanded?: boolean }) {
   const messages = useMessages()
   return (
-    <details className="evidenceCard">
+    <details className="evidenceCard" open={expanded || undefined}>
       <summary><span><strong>{evidence.evidence_ref}</strong><small>{evidence.evidence_type}</small></span><span>{messages.runResult.viewExcerpt}</span></summary>
       <dl><div><dt>{messages.runResult.evidenceSourceLabel}</dt><dd>{evidence.source_uri}</dd></div><div><dt>{messages.runResult.evidenceLocatorLabel}</dt><dd>{JSON.stringify(evidence.source_locator)}</dd></div><div><dt>{messages.runResult.evidenceHashLabel}</dt><dd>{evidence.content_hash}</dd></div></dl>
       <pre>{evidence.excerpt ?? messages.runResult.noExcerpt}</pre>

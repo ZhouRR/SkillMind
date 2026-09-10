@@ -26,6 +26,7 @@ import { useMessages } from '../i18n'
 import type { UiMessages } from '../lib/i18n/messages'
 import { type AgentPromptSummary } from '../lib/agentStream'
 import { routeHref } from '../lib/routing'
+import { formatLocalTimestamp } from '../lib/presentation'
 import { applicableRunSnapshot } from '../lib/runReplay'
 import { applyInteractionSnapshot, interactionAccessFailure, interactionFailure, sameInteractionIdentity } from '../lib/interactionResponse'
 import { submissionPayload, type FrozenRunSubmission } from '../lib/runSubmission'
@@ -463,15 +464,15 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
     <>
       <PageHeader
         title={activeModule ? messages.workspace.titleWithModule(activeModule.name) : messages.routes.workspace.label}
-        description={activeModule?.description || messages.workspace.description}
-        aside={<span className="scopeBadge">{messages.workspace.scopeBadge(activeModule ? activeModule.name : messages.workspace.projectWideScope)}</span>}
+        description={run ? undefined : activeModule?.description || messages.workspace.description}
+        aside={<span className="scopeBadge">{activeModule?.name ?? messages.workspace.projectWideScope}</span>}
       />
-      <section className="workspace" aria-label={messages.workspace.taskExecutionAria}>
+      <section className={`workspace${run ? ' workspaceReading' : ''}`} aria-label={messages.workspace.taskExecutionAria}>
         {/* 左 rail は「実行の入口」と履歴へのショートカット、右 main は現在 Run の観測に責務を分離する。
             履歴の検索・ページングは独立画面へ移し、ここでは実行観測を縦に圧迫しない。 */}
         <div className="workspaceRail">
           <section className="panel runLauncher">
-            <div className="panelHeader"><h2>{messages.workspace.newRun}</h2></div>
+            {!run && <div className="panelHeader"><h2>{messages.workspace.newRun}</h2></div>}
             {tasksError && <p className="error" role="alert">{tasksError}</p>}
             {/* 空態は文言だけで終わらせず、解決先(技能库)への入口を同じ行に置く。 */}
             {!tasksError && tasks.length === 0 && (
@@ -485,11 +486,11 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
                 <a href={routeHref('projects')}>{messages.workspace.goModuleSettings}</a>
               </p>
             )}
-            {visibleTasks.length > 0 && (
+            {!run && visibleTasks.length > 0 && (
               <p className="hint">{messages.workspace.newRunIntro} {messages.workspace.runnableCount(visibleTasks.length)}</p>
             )}
             <button
-              className="primaryButton"
+              className={run ? 'secondaryButton' : 'primaryButton'}
               disabled={visibleTasks.length === 0 && submission.pending === null}
               type="button"
               onClick={openRunDialog}
@@ -501,18 +502,19 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
 
           <section className="panel historyShortcut">
             <div className="panelHeader">
-              <h2>{messages.workspace.history}</h2>
+              {!run && <h2>{messages.workspace.history}</h2>}
               <a className="secondaryButton compactButton" href={routeHref('history', projectId)}>
                 {messages.routes.history.label}
               </a>
             </div>
-            <p className="hint">{messages.historyPage.description}</p>
+            {!run && <p className="hint">{messages.historyPage.description}</p>}
           </section>
         </div>
 
         <div className="workspaceMain">
           <section className="panel runPanel" aria-live="polite">
-            <div className="panelHeader"><h2>{messages.workspace.runStatus}</h2>{run && <StatusBadge status={run.status} />}</div>
+            <div className="panelHeader"><h2>{run && promptSummary?.taskTitle !== messages.elements.runFallbackTitle(shortRunId(run.run_id)) ? promptSummary?.taskTitle ?? messages.workspace.runStatus : messages.workspace.runStatus}</h2>{run && <StatusBadge status={run.status} />}</div>
+            {run && <time className="runTimestamp" dateTime={run.created_at}>{formatLocalTimestamp(run.created_at)}</time>}
             {!run && (
               <EmptyState
                 text={submission.pending ? messages.workspace.submission.phase[submission.pending.phase] : messages.workspace.emptyBeforeRun}
@@ -524,7 +526,7 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
               />
             )}
             {/* Row version は楽観 lock の実装細部のため表示しない。状態は enum catalog の利用者語で示す。 */}
-            {run && <><dl className="runFacts"><div><dt>{messages.workspace.runIdLabel}</dt><dd className="mono" title={run.run_id}>{shortRunId(run.run_id)}</dd></div><div><dt>{messages.workspace.statusLabel}</dt><dd>{messages.enums.runStatus[run.status] ?? run.status}</dd></div><div><dt>{messages.workspace.connLabel}</dt><dd>{connectionLabel(messages, uiState, run.status)}</dd></div></dl>{!TERMINAL_STATUSES.has(run.status) && <div className="formRow"><button className="secondaryButton" type="button" onClick={() => void handleRefresh()}>{messages.workspace.refreshDb}</button><button className="secondaryButton" disabled={uiState === 'cancelling'} type="button" onClick={() => void handleCancel()}>{uiState === 'cancelling' ? messages.workspace.cancelling : messages.workspace.cancelRun}</button></div>}</>}
+            {run && <><dl className="runFacts"><div><dt>{messages.workspace.runIdLabel}</dt><dd className="mono" title={run.run_id}>{shortRunId(run.run_id)}</dd></div>{!TERMINAL_STATUSES.has(run.status) && <div><dt>{messages.workspace.connLabel}</dt><dd>{connectionLabel(messages, uiState, run.status)}</dd></div>}</dl>{!TERMINAL_STATUSES.has(run.status) && <div className="formRow"><button className="secondaryButton" type="button" onClick={() => void handleRefresh()}>{messages.workspace.refreshDb}</button><button className="secondaryButton" disabled={uiState === 'cancelling'} type="button" onClick={() => void handleCancel()}>{uiState === 'cancelling' ? messages.workspace.cancelling : messages.workspace.cancelRun}</button></div>}</>}
           </section>
 
           {/* 会話・結果・監査は同時に一つだけ観測する。runPanel を残し、以下をタブへ束ねて縦の積み上げを解消する。 */}

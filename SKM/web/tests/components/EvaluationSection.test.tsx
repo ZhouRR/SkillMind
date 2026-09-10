@@ -147,6 +147,20 @@ beforeEach(() => {
 afterEach(() => { unmountHooks(); vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals() })
 
 describe('evaluation component draft and original request', () => {
+  it('keeps the unknown request visible outside a closed drawer and retains its draft on reopening', async () => {
+    vi.mocked(submitEvaluation).mockRejectedValue(new TypeError('offline'))
+    render({ open: true }); commitHooks(); await settle({ open: true })
+    change(render({ open: true }), resultLabels.commentLabel, 'retained draft')
+    submitForm(render({ open: true }))
+    await settle({ open: false })
+    const closed = render({ open: false })
+    const notice = one(closed, (item) => item.props.className === 'evaluationNotice')
+    expect(text(notice)).toContain(labels.phase.unknown)
+    const reopened = render({ open: true })
+    expect(field(reopened, resultLabels.commentLabel).props.value).toBe('retained draft')
+    expect(draftLocked(reopened)).toBe(true)
+    expect(submitEvaluation).toHaveBeenCalledTimes(1)
+  })
   it('keeps ordered revisions, original null/escaped values, JSON suggestions and untrimmed reasons distinct', async () => {
     vi.mocked(submitEvaluation).mockImplementation(async (_project, _run, input) => {
       const receipt = evaluationReceipt(input)

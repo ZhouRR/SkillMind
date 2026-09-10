@@ -8,12 +8,12 @@ import { formatLocalTime } from '../lib/presentation'
 /** 画面の目的と補助情報を統一した compact heading として表示する。 */
 export function PageHeader({ title, description, aside }: {
   title: string
-  description: string
+  description?: string
   aside?: ReactNode
 }) {
   return (
     <header className="pageHeader">
-      <div><h1>{title}</h1><p className="pageDescription">{description}</p></div>
+      <div><h1>{title}</h1>{description && <p className="pageDescription">{description}</p>}</div>
       {aside && <div className="pageActions">{aside}</div>}
     </header>
   )
@@ -109,11 +109,11 @@ export function EmptyState({ text, action }: { text: string; action?: ReactNode 
 
 /** 長い form や全画面 preview を一覧・観測画面から切り離す共通 modal。
  *
- *  常時 mount + hidden 切替とする:頁面測試(renderToStaticMarkup + toContain)が
- *  中身を検証できる状態を保ち、条件描画による断言切れを防ぐ。
+ *  常時 mount + hidden 切替で草稿と原要求の owner を維持する。
+ *  実際に破棄すべき草稿は呼び出し元が明示的に破棄する。
  *  開いている間は Escape と遮罩 click で閉じられ、背面の scroll を止め、
  *  閉じた後は開いた時の要素へ焦点を戻す(keyboard 利用者が現在地を失わないため)。 */
-export function ModalDialog({ open, title, meta, actions, wide = false, onClose, children }: {
+export function ModalDialog({ open, title, meta, actions, wide = false, drawer = false, onClose, children }: {
   open: boolean
   title: string
   /** 見出し横の補助情報(寸法・種別など)。 */
@@ -121,6 +121,8 @@ export function ModalDialog({ open, title, meta, actions, wide = false, onClose,
   /** 閉じる button の手前に置く固有操作(download など)。 */
   actions?: ReactNode
   wide?: boolean
+  /** 同じ focus lifecycle で右側の補助閲覧を表示する。 */
+  drawer?: boolean
   onClose: () => void
   children: ReactNode
 }) {
@@ -138,6 +140,20 @@ export function ModalDialog({ open, title, meta, actions, wide = false, onClose,
     dialogRef.current?.focus()
     const handleKey = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') closeRef.current()
+      if (event.key === 'Tab' && dialogRef.current) {
+        const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
+          'button, a[href], input, select, textarea, summary, [tabindex="0"]',
+        )).filter((element) => !element.matches(':disabled') && element.getClientRects().length > 0)
+        const first = focusable[0]
+        const last = focusable.at(-1)
+        const active = window.document.activeElement
+        if (!first) { event.preventDefault(); dialogRef.current.focus() }
+        else if (event.shiftKey && (active === first || active === dialogRef.current)) {
+          event.preventDefault(); last?.focus()
+        } else if (!event.shiftKey && (active === last || active === dialogRef.current)) {
+          event.preventDefault(); first.focus()
+        }
+      }
     }
     window.addEventListener('keydown', handleKey)
     // 背面の scroll を止める。閉じたら元の値へ戻し、他所の overflow 指定を壊さない。
@@ -152,7 +168,7 @@ export function ModalDialog({ open, title, meta, actions, wide = false, onClose,
   }, [open])
   return (
     <div
-      className={wide ? 'modalOverlay modalWide' : 'modalOverlay'}
+      className={`modalOverlay${wide ? ' modalWide' : ''}${drawer ? ' modalDrawer' : ''}`}
       hidden={!open}
       onClick={(event) => { if (event.target === event.currentTarget) onClose() }}
     >
@@ -176,6 +192,15 @@ export function ModalDialog({ open, title, meta, actions, wide = false, onClose,
       </div>
     </div>
   )
+}
+
+/** 読取専用の補助情報を退避する。業務上の警告や mutation owner は呼出側に残す。 */
+export function DetailDrawer({ title, children }: { title: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return <>
+    <button className="secondaryButton compactButton detailDrawerTrigger" type="button" onClick={() => setOpen(true)}>{title}</button>
+    <ModalDialog drawer open={open} title={title} onClose={() => setOpen(false)}>{children}</ModalDialog>
+  </>
 }
 
 /** 破壊的操作の実行前確認。文言は呼び出し元が用意する。 */

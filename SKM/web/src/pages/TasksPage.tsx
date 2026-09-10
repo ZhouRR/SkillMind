@@ -12,6 +12,7 @@ import {
 import { EmptyState, LoadingSkeleton, PageHeader, StatusBadge } from '../components/PageElements'
 import { ScheduleDialog, ScheduleStatusActions, summarizeTiming } from '../components/ScheduleDialog'
 import { TaskFlowPreview } from '../components/TaskFlowPreview'
+import { ROUTE_ICONS } from '../components/routeIcons'
 import { useTaskFlowPreview } from '../hooks/useTaskFlowPreview'
 import type { SessionEnded } from '../hooks/useResourceRequest'
 import { useMessages } from '../i18n'
@@ -138,7 +139,7 @@ function TaskCenter({ projectId, csrfToken, moduleId, projectReadOnly = false, a
         aside={<><span className="scopeBadge">{messages.tasks.countBadge(rows.length)}</span>
           <a className="secondaryButton compactButton" data-schedules-manager-link href={routeHref('schedules', projectId)}>{messages.scheduleManager.manageAll}</a></>}
       />
-      <section className="panel" aria-label={messages.routes.tasks.label}>
+      <section className="panel taskCatalog" aria-label={messages.routes.tasks.label}>
         {actionError && <p className="error" role="alert">{actionError}</p>}
         {state.status === 'loading' && <LoadingSkeleton label={messages.tasks.loading} rows={4} />}
         {state.status === 'error' && <p className="error" role="alert">{state.message}</p>}
@@ -240,9 +241,12 @@ function TaskCard({ row, projectId, csrfToken, projectReadOnly, onSchedule, onSc
   return (
     <li className="taskCard">
       <div className="taskCardHead">
-        <div className="taskCardTitle">
-          <strong>{row.task.title}</strong>
-          <small>{row.task.skill_name} v{row.task.version}</small>
+        <div className="taskCardIdentity">
+          <span className="taskCardIcon" aria-hidden="true">{ROUTE_ICONS.tasks}</span>
+          <div className="taskCardTitle">
+            <strong>{row.task.title}</strong>
+            <small>{row.task.skill_name} v{row.task.version}</small>
+          </div>
         </div>
         {level && (
           <span className={`statusBadge readiness-${level.toLowerCase()}`}>
@@ -275,7 +279,7 @@ function TaskCard({ row, projectId, csrfToken, projectReadOnly, onSchedule, onSc
           ? <>{formatLocalTimestamp(row.task.last_run.created_at)} <StatusBadge status={row.task.last_run.status} /></>
           : messages.tasks.neverRun}
       </p>
-      <div className="formRow">
+      <div className="taskCardActions">
         <button className="secondaryButton compactButton" type="button" data-flow-open={taskCatalogId(row.task)}
           aria-expanded={previewSelected} aria-controls="task-flow-preview" disabled={!previewAllowed}
           onClick={(event) => onPreview(event.currentTarget)}>{messages.taskFlow.open}</button>

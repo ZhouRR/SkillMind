@@ -1,0 +1,79 @@
+/* 全 route の PC 情報階層。色は base token、request lifecycle は各 owner に委ねる。 */
+.shell { max-width: 1640px; width: 100%; margin-inline: auto; }
+.shell .pageHeader { margin-bottom: 26px; }
+.shell .pageHeader h1 { font-size: 30px; font-weight: 700; }
+.shell .pageDescription { max-width: 860px; line-height: 1.8; }
+.shell > .tabBar { padding: 0 0 10px; margin: 0 0 22px; gap: 8px; }
+.shell .panel { min-width: 0; }
+.shell .panelHeader { gap: 16px; }
+.shell .panelHeader h2 { font-size: 16px; font-weight: 700; }
+.shell:not([data-page='home']):not([data-page='workspace']) .emptyState { min-height: 150px; }
+.shell .hint { line-height: 1.8; }
+.themeToggle { display: inline-flex; gap: 4px; padding: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-input); }
+.themeToggle button { display: inline-flex; justify-content: center; align-items: center; gap: 7px; min-height: 34px; padding: 6px 12px; border: 1px solid transparent; border-radius: 8px; color: var(--text-muted); background: transparent; font-size: 12px; cursor: pointer; }
+.themeToggle button[aria-pressed='true'] { color: var(--accent); border-color: var(--accent-border); background: var(--accent-soft); }
+.themeToggle button:hover { color: var(--text-hi); }
+.themeToggle svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.6; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.sidebarFooter .themeToggle { width: 100%; }
+.sidebarFooter .themeToggle button { flex: 1; }
+.authAppearance { position: absolute; top: 24px; right: 28px; }
+.authShell { position: relative; padding-top: 88px; }
+.detailDisclosure { border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; background: var(--surface-raised); }
+.detailDisclosure > summary { color: var(--text-muted); font-size: 13px; font-weight: 600; cursor: pointer; }
+.detailDisclosure[open] > summary { margin-bottom: 16px; }
+.detailDisclosure > p:last-child { margin-bottom: 0; }
+.detailDrawerTrigger { justify-self: start; }
+
+/* 一覧では名前・状態・次の操作を強調し、card の中に card を重ねない。 */
+[data-page='projects'] .projectManagementLayout { grid-template-columns: minmax(0, 1.45fr) minmax(300px, .85fr); gap: 24px; }
+[data-page='projects'] .projectList { gap: 0; }
+[data-page='projects'] .projectItem { padding: 16px 12px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; }
+[data-page='projects'] .projectItemSelected { border-radius: 10px; background: var(--accent-soft); }
+[data-page='projects'] .projectSelect { gap: 6px; }
+[data-page='projects'] .projectSelect strong { font-size: 15px; }
+[data-page='projects'] .projectSidePanel { background: var(--surface-raised); }
+[data-page='skills'] .skillWorkspace { grid-template-columns: minmax(300px, .8fr) minmax(0, 1.5fr); gap: 24px; }
+[data-page='skills'] .skillForm { background: var(--surface-raised); }
+[data-page='skills'] .skillForm textarea { min-height: 160px; }
+[data-page='skills'] .skillResult > .emptyState { min-height: 280px; }
+[data-page='resources'] .resourceList { gap: 0; }
+[data-page='resources'] .resourceItem { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 20px 4px; background: transparent; }
+[data-page='resources'] .resourceInfo { gap: 8px; }
+[data-page='resources'] .resourceInfo strong { font-size: 15px; }
+[data-page='documents'] .documentUpload { padding-bottom: 18px; margin-bottom: 18px; border-bottom: 1px solid var(--border); }
+[data-page='documents'] .docFolder { border-radius: 10px; }
+[data-page='documents'] .documentItem { padding-block: 14px; }
+[data-page='history'] .historyList { gap: 0; }
+[data-page='history'] .historyItem { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; }
+[data-page='history'] .historyItem > button { padding: 18px 8px; }
+[data-page='history'] .historyItem:hover { background: var(--surface-raised); }
+[data-page='history'] .historyPrimary strong { font-size: 15px; white-space: normal; }
+[data-page='history'] .historyMeta { margin-top: 10px; }
+[data-page='tasks'] .taskCards { grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 24px; }
+[data-page='tasks'] .taskCard { padding: 24px; }
+[data-page='schedules'] .scheduleManagerLayout { grid-template-columns: minmax(300px, .75fr) minmax(0, 1.35fr); gap: 24px; }
+[data-page='schedules'] .scheduleManagerDetail { background: var(--surface); }
+[data-page='schedules'] .scheduleSelect { padding: 16px; }
+[data-page='schedules'] .scheduleFacts h3 { margin-top: 24px; }
+.accountUserCard { background: var(--surface-raised); }
+.accountEditor > .panel, .accountDirectory > .panel { padding: 24px; }
+
+/* 低い PC 画面でも外観・言語・退出は常設し、長いメニューだけをスクロールする。 */
+@media (min-width: 961px) {
+  .navigationPanel { overflow: hidden; }
+  .sideNav { min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; }
+  .sidebarFooter { flex-shrink: 0; }
+}
+@media (max-width: 1100px) {
+  [data-page='skills'] .skillWorkspace, [data-page='projects'] .projectManagementLayout,
+  [data-page='schedules'] .scheduleManagerLayout { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+  .shell .pageHeader h1 { font-size: 26px; }
+  .shell .panelHeader { flex-wrap: wrap; }
+  .authAppearance { top: 18px; right: 18px; }
+  .accountEditor > .panel, .accountDirectory > .panel, [data-page='tasks'] .taskCard { padding: 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+}

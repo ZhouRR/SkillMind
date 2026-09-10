@@ -3,6 +3,7 @@ import type { UiMessages } from './messages'
 /** 日本語。技術用語(Run/Evidence/SkillVersion 等)は利用者向けの平易な語へ統一し、
     契約の識別子(capability ID・ファイル名・API field)だけを英語のまま残す。 */
 export const JA: UiMessages = {
+  theme: { label: '外観', light: 'ライト', dark: 'ダーク' },
   routes: {
     home: { label: '概要', description: '対応待ちと最近の実行をひと目で確認する' },
     tasks: { label: 'タスク', description: '実行できるタスク・準備状況・定期実行を確認する' },
@@ -185,6 +186,8 @@ export const JA: UiMessages = {
     logoutFailed: 'ログアウトに失敗しました。',
   },
   login: {
+    introTitle: 'スキルを、日々の仕事に。',
+    introDescription: 'スキルとリソースをつなぎ、タスクを実行。結果と根拠を、一つの場所で確認できます。',
     title: 'ログイン',
     subtitle: 'Skillmind アカウントで認可済みプロジェクトへアクセスします。',
     email: 'メールアドレス',
@@ -200,6 +203,7 @@ export const JA: UiMessages = {
     footer: 'AI 駆動のプロジェクト管理実行プラットフォーム · 全過程監査可能',
   },
   home: {
+    startHint: 'タスクを選ぶところから。実行状況と対応待ちを確認し、結果と根拠を振り返ります。',
     description: '現在のプロジェクトで回答・承認が必要な実行、最近の実行記録、サービス状態。',
     statusSectionAria: 'サービスとコンテキストの状態',
     serviceStatus: 'サービス状態',
@@ -226,6 +230,7 @@ export const JA: UiMessages = {
     names: { zh: '中文', ja: '日本語', en: 'English' },
   },
   elements: {
+    technicalDetails: '技術情報',
     projectUnavailable: 'アクセスできないプロジェクト',
     archivedProject: 'アーカイブ済み',
     projectLabel: 'プロジェクト',
@@ -690,7 +695,10 @@ export const JA: UiMessages = {
     failures: { sessionExpired: 'セッションが失効しました。再ログイン後に元リクエストを照会してください。', csrfRejected: 'セッションの安全確認に失敗したため、書込を停止しました。', forbidden: '現在の操作権限がないため、書込を停止しました。', notFound: '現在のプロジェクト・実行が存在しないか、アクセスできません。', projectArchived: 'プロジェクトはアーカイブ済みです。履歴と元リクエストは読めますが、評価は送信できません。', resultUnavailable: 'この実行には評価可能な結果がありません。', resultMismatch: '現在の結果が元リクエストと一致しないため、書込を停止しました。', invalidRequest: '評価入力が要件を満たしていません。確認して修正してください。', invalidRevision: '修正案パスが無効・重複、または原値がありません。評価全体が受理されませんでした。', conflict: '元の UUID が保存内容と競合しています。UUID を変えて再試行せず、元リクエストを確認してください。', notSeen: '元リクエストはまだ見つかりません。先の送信が後から保存されない証明ではありません。', unavailable: '受付記録または履歴を現在読み取れません。後で読取確認してください。', cursorInvalid: '履歴カーソルが無効です。先頭から再読込してください。', unknown: '信頼できる保存受付記録が届いていないため、元リクエストは未確認のままです。', loadFailed: '信頼できる評価記録を読み取れません。読取を再試行してください。', readTimeout: '読取が時間切れになりました。元リクエストの保存状態は変わりません。' },
   },
   runResult: {
+    reading: { details: '実行詳細', checks: '検証の範囲', confidenceHint: 'モデルの確信度は正答率ではありません。' },
     referenceChecks: {
+      briefV1: '保存時の参照を検証済み。添付内容は未検証で、結論には人の判断が必要です。',
+      briefV2: '保存時の参照・添付の帰属と内容を検証済み。結論の正しさや現在の読取可否は保証しません。',
       title: '保存時の参照チェック',
       recorded: 'この結果には以下の検証範囲が記録されています。全体の正しさの保証ではありません。',
       legacy: 'この履歴には本版の参照チェック範囲がありません。現在の記録から検証済みと補完しません。',

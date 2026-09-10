@@ -398,7 +398,7 @@ export function App() {
           activeModuleId={currentModuleId}
           modules={projectId ? currentModules : []}
         />
-        <main className={route === 'accounts' ? 'shell accountsPage' : 'shell'}
+        <main data-page={route} className={route === 'accounts' ? 'shell accountsPage' : 'shell'}
           key={`${sessionKey}:${route === 'accounts' ? `accounts:${accountContextRevision}`
             : route === 'projects' ? managementContextKey : projectContext.selectionId.toLowerCase()}`}>
           {route !== 'accounts' && <ProjectContextNotice access={access} onRefresh={projectContext.refresh} />}

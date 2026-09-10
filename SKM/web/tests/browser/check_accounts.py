@@ -499,7 +499,7 @@ async def exercise_case(
         ).to_be_visible()
         if app and output is not None:
             await expect(page.locator('[data-account-form="password"] input').first).to_be_enabled()
-            await expect(page.locator(".accountEvents .accountPager")).to_be_visible()
+            await expect(page.locator(".accountEvents > details")).to_be_attached()
             await settle(page)
             await page.screenshot(path=str(output / f"{name}-entry.png"), full_page=True)
         await action(page, api, messages)
@@ -551,6 +551,7 @@ async def own_refusal(page: Page, api: AccountsApi, messages: dict) -> None:
     await expect(alert).to_be_focused()
     await expect(page.locator('[data-testid="session-ended-count"]')).to_have_text("0")
     events = page.locator(".accountEvents")
+    await events.locator(":scope > details > summary").click()
     # 日付のない時刻だけでは、別日の安全操作を人が区別できない。
     await expect(events.locator("time").first).to_contain_text("2026")
     await keyboard_scroll(page, events.locator(".accountEventList"))

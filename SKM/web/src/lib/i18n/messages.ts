@@ -15,6 +15,7 @@ export type UiLanguage = (typeof UI_LANGUAGES)[number]
     key を追加する場合は三言語すべてへ同時に追加する。Record<UiLanguage, UiMessages>
     の型検査が欠落を compile error として検出する。 */
 export interface UiMessages {
+  theme: { label: string; light: string; dark: string }
   /** Route ごとの表示名と概要。導航、browser title、概览 card が共有する。 */
   routes: Record<AppRoute, { label: string; description: string }>
   /** Project 非依存の本人操作・組織ユーザー管理。Server error 本文は表示しない。 */
@@ -149,6 +150,8 @@ export interface UiMessages {
     logoutFailed: string
   }
   login: {
+    introTitle: string
+    introDescription: string
     title: string
     subtitle: string
     email: string
@@ -164,6 +167,7 @@ export interface UiMessages {
     footer: string
   }
   home: {
+    startHint: string
     description: string
     statusSectionAria: string
     serviceStatus: string
@@ -191,6 +195,7 @@ export interface UiMessages {
   }
   /** 共有 UI 部品(PageElements)の既定文言。 */
   elements: {
+    technicalDetails: string
     projectUnavailable: string
     archivedProject: string
     projectLabel: string
@@ -680,8 +685,11 @@ export interface UiMessages {
       | 'unknown' | 'loadFailed' | 'readTimeout', string>
   }
   runResult: {
+    reading: { details: string; checks: string; confidenceHint: string }
     /** 原 Result の保存時に記録した検証範囲。歴史欠損は成功へ補完しない。 */
     referenceChecks: {
+      briefV1: string
+      briefV2: string
       title: string
       recorded: string
       legacy: string

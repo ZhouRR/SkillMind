@@ -21,6 +21,7 @@ import {
 } from '../lib/routing'
 import { ProjectContextSelect } from './PageElements'
 import { ROUTE_ICONS } from './routeIcons'
+import { ThemeToggle } from './ThemeToggle'
 
 /** 導航徽标が読む待機 Run の上限。件数の桁を抑え、徽标が数字で崩れないようにする。 */
 const PENDING_BADGE_LIMIT = 20
@@ -205,6 +206,7 @@ export function AppNavigation({ currentRoute, metaState, projectId, projectState
           />
         </nav>
         <div className="sidebarFooter">
+          <ThemeToggle />
           <ServiceStatus state={metaState} />
           {/* 言語切替は認証済み sidebar だけに置き、選択は user preference として保存される。 */}
           <label className="sidebarLanguage">

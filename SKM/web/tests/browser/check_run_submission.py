@@ -154,6 +154,24 @@ class ApiFixture:
             )
         elif request.method == "GET" and url.path.endswith("/evaluations"):
             await route.fulfill(json={"evaluations": []})
+        elif request.method == "GET" and any(
+            url.path.endswith(f"/projects/{record['project_id']}/runs/{record['run_id']}/{suffix}")
+            for record in self.runs.values()
+            for suffix in ("artifacts", "evaluations/page")
+        ):
+            # 確認済み Run の新しい結果 UI も空の公開索引/評価履歴として検証する。
+            if url.path.endswith("/artifacts"):
+                await route.fulfill(json=[])
+            else:
+                record = next(item for item in self.runs.values() if item["run_id"] in url.path)
+                detail = json.loads(
+                    (ROOT.parent / "contracts/examples/run-detail.v1.json").read_text()
+                )
+                await route.fulfill(json={
+                    "project_id": record["project_id"], "run_id": record["run_id"],
+                    "result_id": detail["result"]["result_id"],
+                    "items": [], "next_cursor": None,
+                })
         else:
             self.unexpected.append(f"{request.method} {request.url}")
             await route.abort()
@@ -274,7 +292,10 @@ async def exercise(
     if case in {"double-click", "timeout", "actor-switch", "project-switch"}:
         await expect(page.locator('.runForm button[type="submit"]')).to_be_disabled()
         await page.locator(".runForm").evaluate(
-            "form => { form.dispatchEvent(new Event('submit', {bubbles:true,cancelable:true})); form.dispatchEvent(new Event('submit', {bubbles:true,cancelable:true})); }"
+            """form => {
+                form.dispatchEvent(new Event('submit', {bubbles:true,cancelable:true}));
+                form.dispatchEvent(new Event('submit', {bubbles:true,cancelable:true}));
+            }"""
         )
         assert len(api.posts) == 1
         if case == "double-click":
@@ -364,7 +385,8 @@ async def exercise(
                 await page.keyboard.press("Space")
                 await expect(page.get_by_role("checkbox")).to_be_checked()
                 focus = await page.get_by_role("checkbox").evaluate(
-                    "element => ({focused: document.activeElement === element, active: document.activeElement?.outerHTML.slice(0, 300)})"
+                    """element => ({focused: document.activeElement === element,
+                        active: document.activeElement?.outerHTML.slice(0, 300)})"""
                 )
                 assert focus["focused"], (language, width, focus)
                 await page.keyboard.press("Space")
@@ -425,9 +447,12 @@ async def check(url: str, output: Path | None, selected_case: str | None) -> Non
             )
             page = await context.new_page()
             errors: list[str] = []
-            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.on("pageerror", lambda error, errors=errors: errors.append(str(error)))
             await page.add_init_script(
-                "window.storageWrites=[]; const original=Storage.prototype.setItem; Storage.prototype.setItem=function(key,value){window.storageWrites.push(key); return original.call(this,key,value);};"
+                """window.storageWrites=[]; const original=Storage.prototype.setItem;
+                Storage.prototype.setItem=function(key,value){
+                    window.storageWrites.push(key); return original.call(this,key,value);
+                };"""
             )
             api = ApiFixture(f"{address.scheme}://{address.netloc}", actions)
             await context.route("**/*", api.route)

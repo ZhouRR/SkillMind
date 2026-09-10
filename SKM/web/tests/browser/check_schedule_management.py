@@ -285,6 +285,20 @@ async def normal(page: Page, api: ScheduleManagementApi, labels: dict) -> None:
     await expect(page.locator('[data-schedule-status="ACTIVE"]')).to_be_enabled()
     assert len(api.writes) == 2
     assert api.writes[1]["body"] == {"status": "PAUSED", "expected_row_version": 8}
+    trigger = page.locator(DETAIL_FACTS).get_by_role(
+        "button",
+        name=labels["elements"]["technicalDetails"],
+        exact=True,
+    )
+    await trigger.click()
+    dialog = page.get_by_role("dialog", name=labels["elements"]["technicalDetails"], exact=True)
+    await expect(dialog).to_be_visible()
+    await expect(dialog).to_contain_text(SCHEDULE)
+    await expect(page.locator(".modalDrawer:not([hidden])")).to_have_count(1)
+    await page.keyboard.press("Escape")
+    await expect(dialog).to_be_hidden()
+    await expect(trigger).to_be_focused()
+    assert len(api.writes) == 2
 
 
 async def pagination(page: Page, api: ScheduleManagementApi, labels: dict) -> None:
@@ -574,7 +588,7 @@ async def close_same_tick(page: Page, api: ScheduleManagementApi, labels: dict) 
     await page.evaluate(
         """closeText => {
         const form = document.querySelector('[data-schedule-editor]');
-        const close = [...document.querySelectorAll('[role="dialog"] button')]
+        const close = [...form.closest('[role="dialog"]').querySelectorAll('button')]
             .find(button => button.textContent === closeText);
         const edit = document.querySelector('[data-schedule-edit]');
         form.dispatchEvent(new Event('submit', {bubbles:true,cancelable:true}));
@@ -642,12 +656,12 @@ async def unicode_search(page: Page, api: ScheduleManagementApi, labels: dict) -
     await page.get_by_role("button", name=labels["scheduleManager"]["search"], exact=True).click()
     await expect(page.locator("[data-schedule-row]")).to_have_count(0)
     assert any(call[2].get("q") == ["😀" * 200] for call in api.calls if call[1] == LIST)
-    before = len(api.calls)
+    before = sum(call[1] == LIST for call in api.calls)
     await page.locator("[data-schedule-search]").fill("😀" * 201)
     await expect(
         page.get_by_role("button", name=labels["scheduleManager"]["search"], exact=True)
     ).to_be_disabled()
-    assert len(api.calls) == before
+    assert sum(call[1] == LIST for call in api.calls) == before
 
 
 async def read_deadline(page: Page, api: ScheduleManagementApi, labels: dict) -> None:

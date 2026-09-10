@@ -464,6 +464,22 @@ describe('業務データ明細 (structured_data) rendering', () => {
     expect(html).toContain('查看技术字段')
   })
 
+  it('keeps validation warnings inline and moves detailed checks off the report width', () => {
+    const record = structuredDetail()
+    record.result!.needs_review = true
+    record.result!.data.status = 'PARTIAL'
+    const original = JSON.stringify(record.result)
+    const html = render(record)
+    expect(html).toContain('class="resultReportGrid"')
+    expect(html).toContain('class="resultSection resultReportBody"')
+    expect(html).not.toContain('class="resultReportNotes"')
+    expect(html).toContain('class="validationBrief validationWarning"')
+    expect(html).toContain('aria-label="检查说明"')
+    expect(html).toContain('class="reviewRequired"')
+    expect(html).toContain('outcomePartial')
+    expect(JSON.stringify(record.result)).toBe(original)
+  })
+
   it('does not truncate business values with the fixed Run-facts layout', () => {
     /** .runFacts は Run 事実行用の固定 3 列 + 省略表示で、任意構造の業務データを
         載せると値が切れる。専用 layout を使い続けることを回帰点として固定する。 */

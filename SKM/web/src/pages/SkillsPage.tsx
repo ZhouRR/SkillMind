@@ -31,7 +31,7 @@ import {
   type SourceTrace,
   type StoredSkillPreviewRecord,
 } from '../api'
-import { EmptyState, LoadingSkeleton, PageHeader, useConfirmDialog } from '../components/PageElements'
+import { DetailDrawer, EmptyState, LoadingSkeleton, PageHeader, useConfirmDialog } from '../components/PageElements'
 import { useMessages } from '../i18n'
 import type { UiMessages } from '../lib/i18n/messages'
 import { formatByteSize } from '../lib/presentation'
@@ -605,7 +605,10 @@ export function SkillsPage({ projectId, csrfToken }: {
           {uploadedSource === null ? (
             <>
               <label>SKILL.md<textarea placeholder={messages.skills.skillMdPlaceholder} value={skillMarkdown} onChange={(event) => setSkillMarkdown(event.target.value)} spellCheck={false} /></label>
-              <label>{messages.skills.referencesLabel}<textarea placeholder={messages.skills.referencesPlaceholder} value={referenceMarkdown} onChange={(event) => setReferenceMarkdown(event.target.value)} spellCheck={false} /></label>
+              <details className="detailDisclosure">
+                <summary>{messages.skills.referencesLabel}</summary>
+                <label>{messages.skills.referencesLabel}<textarea placeholder={messages.skills.referencesPlaceholder} value={referenceMarkdown} onChange={(event) => setReferenceMarkdown(event.target.value)} spellCheck={false} /></label>
+              </details>
               <p className="hint">{messages.skills.parserHint}</p>
               <button className="primaryButton" disabled={parseState.status === 'parsing' || !skillMarkdown.trim()} type="submit">{parseState.status === 'parsing' ? messages.skills.parsing : messages.skills.parseSkill}</button>
             </>
@@ -1256,7 +1259,10 @@ export function SkillVersionDetail({ version, onPublish }: {
   return (
     <section className="skillVersionDetail">
       <div className="subsectionHeader"><h3>{messages.skills.versionHeading(version.version)}</h3><span>{messages.enums.skillVersionStatus[version.status] ?? version.status}</span></div>
-      <dl className="runFacts"><div><dt>{messages.skills.versionIdLabel}</dt><dd className="mono">{version.skill_version_id}</dd></div><div><dt>{messages.skills.manifestChecksumLabel}</dt><dd className="mono">{version.manifest_checksum}</dd></div><div><dt>{messages.skills.gateLabel}</dt><dd>{version.gate_passed ? messages.skills.gatePassed : messages.skills.gateFailed}</dd></div></dl>
+      <dl className="runFacts"><div><dt>{messages.skills.gateLabel}</dt><dd>{version.gate_passed ? messages.skills.gatePassed : messages.skills.gateFailed}</dd></div></dl>
+      <DetailDrawer title={messages.elements.technicalDetails}>
+        <dl className="runFacts"><div><dt>{messages.skills.versionIdLabel}</dt><dd className="mono">{version.skill_version_id}</dd></div><div><dt>{messages.skills.manifestChecksumLabel}</dt><dd className="mono">{version.manifest_checksum}</dd></div></dl>
+      </DetailDrawer>
       <ul className="diagnostics">{version.gate_findings.map((finding, index) => <li key={`${finding.code}-${index}`}><strong>{finding.severity} · {finding.code}</strong><span>{finding.message}</span></li>)}</ul>
       <details className="rawResult"><summary>{messages.skills.viewInterpretationDiff}</summary><pre>{JSON.stringify(version.interpretation_diff, null, 2)}</pre></details>
       <button className="primaryButton" disabled={!version.gate_passed || version.status !== 'DRAFT'} type="button" onClick={onPublish}>{version.status === 'PUBLISHED' ? messages.skills.published : messages.skills.publishVersion}</button>
@@ -1303,9 +1309,13 @@ function SavedSkillIdentity({ stored }: { stored: StoredSkillPreviewRecord }) {
   const messages = useMessages()
   return (
     <div className="savedSkill">
-      <div><span>{messages.skills.savedInterpretationStatus}</span><strong>{stored.interpretation_status}</strong></div>
-      <p><span>{messages.skills.savedSourceId}</span><code>{stored.skill_source_id}</code></p>
-      <p><span>{messages.skills.savedInterpretationId}</span><code>{stored.interpretation_id}</code></p>
+      <div className="savedSkillStatus"><span>{messages.skills.savedInterpretationStatus}</span><strong>{stored.interpretation_status}</strong></div>
+      <DetailDrawer title={messages.elements.technicalDetails}>
+        <dl className="runFacts">
+          <div><dt>{messages.skills.savedSourceId}</dt><dd className="mono">{stored.skill_source_id}</dd></div>
+          <div><dt>{messages.skills.savedInterpretationId}</dt><dd className="mono">{stored.interpretation_id}</dd></div>
+        </dl>
+      </DetailDrawer>
     </div>
   )
 }

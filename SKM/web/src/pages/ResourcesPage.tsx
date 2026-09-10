@@ -440,6 +440,7 @@ export function ResourcesPage({ projectId, csrfToken }: {
 
           <ModalDialog
             open={openDialog === 'connect'}
+            drawer
             title={messages.resources.connectTitle}
             wide
             onClose={() => setOpenDialog(null)}
@@ -751,6 +752,7 @@ export function ResourcesPage({ projectId, csrfToken }: {
 
           <ModalDialog
             open={openDialog === 'secret'}
+            drawer
             title={messages.resources.registerLocator}
             onClose={() => setOpenDialog(null)}
           >
@@ -804,6 +806,7 @@ export function ResourcesPage({ projectId, csrfToken }: {
 
           <ModalDialog
             open={openDialog === 'binding'}
+            drawer
             title={messages.resources.bindingTitle}
             wide
             onClose={() => setOpenDialog(null)}
@@ -986,6 +989,7 @@ export function ResourcesPage({ projectId, csrfToken }: {
 
           <ModalDialog
             open={openDialog === 'policy'}
+            drawer
             title={messages.resources.policyTitle}
             wide
             onClose={() => setOpenDialog(null)}

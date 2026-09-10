@@ -2,6 +2,7 @@ import type { UiMessages } from './messages'
 
 /** English。実装細部の語(PostgreSQL/SSE/CamelCase 内部名)を避け、利用者視点の平易な表現に統一する。 */
 export const EN: UiMessages = {
+  theme: { label: 'Appearance', light: 'Light', dark: 'Dark' },
   routes: {
     home: { label: 'Overview', description: 'See what needs you and what ran recently' },
     tasks: { label: 'Tasks', description: 'What this project can run, its readiness and schedules' },
@@ -186,6 +187,8 @@ export const EN: UiMessages = {
     logoutFailed: 'Sign-out failed.',
   },
   login: {
+    introTitle: 'Put your skills to work.',
+    introDescription: 'Bring skills and resources together. Run a task, review the results, and follow the evidence.',
     title: 'Sign in',
     subtitle: 'Use your Skillmind account to access authorized projects.',
     email: 'Email',
@@ -201,6 +204,7 @@ export const EN: UiMessages = {
     footer: 'AI-powered project management platform · fully auditable',
   },
   home: {
+    startHint: 'Start with a task. Follow your runs, respond where needed, and revisit the results and evidence.',
     description: 'Runs waiting for your answer or approval in this project, recent runs, and service status.',
     statusSectionAria: 'Service and context status',
     serviceStatus: 'Service status',
@@ -227,6 +231,7 @@ export const EN: UiMessages = {
     names: { zh: '中文', ja: '日本語', en: 'English' },
   },
   elements: {
+    technicalDetails: 'Technical details',
     projectUnavailable: 'Project unavailable',
     archivedProject: 'Archived',
     projectLabel: 'Project',
@@ -691,7 +696,10 @@ export const EN: UiMessages = {
     failures: { sessionExpired: 'The session expired. Log in again to look up the original request.', csrfRejected: 'Session security verification failed. Writes are stopped.', forbidden: 'You do not have permission for this operation. Writes are stopped.', notFound: 'The project or run does not exist, or is not accessible.', projectArchived: 'This project is archived. History and original receipts remain readable; evaluations cannot be submitted.', resultUnavailable: 'This run has no result available for evaluation.', resultMismatch: 'The current result does not match the original request. Writes are stopped.', invalidRequest: 'The evaluation input does not meet the requirements. Review and edit it.', invalidRevision: 'A revision path is invalid, duplicated, or missing its original value. The whole evaluation was refused.', conflict: 'The original UUID conflicts with saved content. Do not change UUIDs to retry; check the original request.', notSeen: 'The original request is not visible yet. Its earlier POST may still be saved later.', unavailable: 'The receipt or history is temporarily unavailable. Check it with a read request later.', cursorInvalid: 'The history cursor is invalid. Reload history from the start.', unknown: 'No trustworthy saved receipt arrived. The original request remains unconfirmed.', loadFailed: 'Trustworthy evaluation records could not be read. Retry the read.', readTimeout: 'The read timed out. The original request’s save status is unchanged.' },
   },
   runResult: {
+    reading: { details: 'Run details', checks: 'Check scope', confidenceHint: 'Model confidence is not an accuracy score.' },
     referenceChecks: {
+      briefV1: 'References checked at save time; attachment content was not verified. Conclusions still need human judgment.',
+      briefV2: 'References, attachment ownership and content checked at save time; not a guarantee of correct conclusions or current access.',
       title: 'Reference checks at save time',
       recorded: 'This result records the following checks, not a guarantee of overall correctness:',
       legacy: 'This historical result did not record this version of reference checks. Current platform records cannot manufacture a past validation claim.',

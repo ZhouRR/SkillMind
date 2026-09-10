@@ -37,7 +37,7 @@ export function RunHistoryPanel({ state, selectedRunId, onOpen, onPrevious, onNe
                 <span><strong>{runHistoryTitle(item.result_summary, item.run_id, messages.elements.runFallbackTitle)}</strong><small>{formatLocalTimestamp(item.created_at)}</small></span>
                 <StatusBadge status={item.status} />
               </div>
-              <p>{item.result_summary ?? messages.runHistory.noSummary}</p>
+              {!item.result_summary && <p>{messages.runHistory.noSummary}</p>}
               <div className="historyMeta">
                 <span>{sourceLabel(item, messages.runHistory.sourceUnavailable)}</span>
                 <span>{item.result_confidence === null ? '—' : `${Math.round(item.result_confidence * 100)}%`}</span>

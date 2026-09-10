@@ -94,6 +94,8 @@ python3 tests/browser/check_projects.py \
 | runner | harness HTML | 主な対象 |
 | --- | --- | --- |
 | login / accounts | login.html / accounts.html | ログイン防重、本人安全、ADMIN 管理 |
+| visual_style | projects.html | 全ページの両テーマ、PC 1366/1440/1920px 優先・三語/390px 補助、contrast、保存/別 tab/入力保持と Login の storage 拒否（`--output` 必須） |
+| reading | projects.html | 概览/結果の PC 三尺寸・三語、首画面の本文、証拠/検証 drawer、評価草稿保持と focus、手機補助（`--output` 必須） |
 | projects / project_members / project_management | projects.html | 精確 Project、成員、CRUD、版衝突 |
 | run_submission / interaction_responses | run-submission.html | 原 key/内容の確認、答復、期限 |
 | result_references / artifacts / evaluation_submissions | projects.html | 結果範囲、原 byte download、評価回执/履歴 |
