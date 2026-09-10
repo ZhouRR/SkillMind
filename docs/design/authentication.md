@@ -14,7 +14,7 @@
 ## 威胁边界与目标
 
 - 独立账号体系，当前只支持一个 Organization。email 唯一键含组织，但登录只按 email 查询；引入多组织前须先定义组织选择与查询隔离。
-- 生产由共享 Traefik 提供 HTTPS；API/Web 同源，位于 PROJECTMIND_CONTEXT_PATH 下。浏览器不持有长期 Bearer token，不将会话存入 Local/Session Storage。
+- 生产由共享 Traefik 提供 HTTPS；API/Web 同源，位于 SKILLMIND_CONTEXT_PATH 下。浏览器不持有长期 Bearer token，不将会话存入 Local/Session Storage。
 - PostgreSQL 保存用户、会话、成员与审计；Redis 仅承载登录防护等短期状态。
 - 当前不提供 OAuth/OIDC、API token、找回密码、邮件验证或 MFA；受控内部部署的边界不能直接推广到公网。
 
@@ -28,7 +28,7 @@ email 标准化后在组织内唯一。不存在、停用和密码错误统一�
 
 ## 浏览器会话
 
-登录使用至少 256 bit 随机 opaque token，数据库保存 `sha256:<hex>`。生产 cookie 为 `__Host-projectmind_session`，固定 `Secure; HttpOnly; SameSite=Strict; Path=/`，无 Domain；非 Secure 开发设置不能带入生产。
+登录使用至少 256 bit 随机 opaque token，数据库保存 `sha256:<hex>`。生产 cookie 为 `__Host-skillmind_session`，固定 `Secure; HttpOnly; SameSite=Strict; Path=/`，无 Domain；非 Secure 开发设置不能带入生产。
 
 默认 idle 30 分钟，absolute 12 小时，ADMIN absolute 8 小时；idle 写入按 5 分钟节流且不超过 absolute 截止。每次登录创建新 token，不自动撤销其他登录。认证仍锁行，节流不等于无锁。
 
@@ -45,25 +45,23 @@ email 标准化后在组织内唯一。不存在、停用和密码错误统一�
 
 ## CSRF 与同源约束
 
-非安全方法同时验证 Origin 与 synchronizer CSRF；SameSite 只是纵深防御。登录前 challenge 经 header/cookie 配对后以 Redis GETDEL 消费，每次重试重新获取；登录后 token 只经 X-CSRF-Token 返回，不能混用两种凭据。
+非安全方法同时验证 Origin 与 synchronizer CSRF；SameSite 只是纵深防御。登录前 challenge 经 header/cookie 配对后以 Redis GETDEL 消费，每次重试重新获取；登录后写请求仅通过 X-CSRF-Token 提交会话 CSRF，不能混用两种凭据。
 
 GET/SSE 不触发业务命令，但认证可能更新 idle，login-context 会保存 challenge；不能作为无持久副作用的健康检查。只信任明确配置的代理，不直接相信任意 X-Forwarded-*。
 
 ### 会话读取与多页面
 
-同一有效 session 的页面 A、B 读取会话都得到相同 CSRF S；B 的读取不撤销 A 的写凭据。重新登录换 cookie 后，旧页面的 S 不适用于新会话。
-
-这仅保证稳定凭据，不是跨标签页身份同步或业务重试协议。CSRF 失败后先确认当前 actor/Project 与原提交事实，不自动重放创建、批准或外部写入；Web 不自行派生 token。
+同一有效 session 的各页面读取相同 CSRF；重新登录换 cookie 后，旧 token 不再适用。稳定凭据不等于跨标签同步或重试协议：CSRF 失败先核对 actor/Project 与原提交事实，不自动重放创建、批准或外部写入，Web 不自行派生 token。
 
 ### 会话凭据 v2 与切换要求
 
-[auth/domain.py](../../PJM/backend/src/projectmind/auth/domain.py)定义内部凭据协议，不改变公开 SessionResponse 版本：
+[auth/domain.py](../../SKM/backend/src/skillmind/auth/domain.py)定义内部凭据协议，不改变公开 SessionResponse 版本：
 
 | 项目 | 固定值 |
 | --- | --- |
-| session | pm2. + 32 随机 bytes 的无填充 base64url，47 ASCII 字符 |
+| session | sm2. + 32 随机 bytes 的无填充 base64url，47 ASCII 字符 |
 | HKDF 输入 | 完整 session 原值的 ASCII bytes，不是数据库 hash |
-| 派生 | SHA-256，32 bytes，salt=None，info=projectmind.auth.session-csrf/v2 |
+| 派生 | SHA-256，32 bytes，salt=None，info=skillmind.auth.session-csrf/v2 |
 | CSRF | csrf2. + 派生值的无填充 base64url，49 ASCII 字符 |
 | 保存 | session/CSRF 各自 hash；不存明文或可逆 token 密文 |
 
@@ -71,19 +69,17 @@ GET/SSE 不触发业务命令，但认证可能更新 idle，login-context 会�
 
 新登录保存 credential_version=2 与 system_role_at_login；数据库默认仍为 1，以识别旧写入方。认证校验格式后锁 User/AuthSession，锁后检查期限、撤销、用户状态、协议、角色和派生 hash；损坏/未知版本 fail closed，无旧格式 fallback。
 
-[0031 migration](../../PJM/backend/migrations/versions/0031_auth_session_credentials.py)标记并撤销旧活动会话，要求重新登录，不迁移旧随机 CSRF。任何 v2 行存在时均拒绝 downgrade 丢列。新旧 API 不混跑，不删除审计绕过回退限制；上线见[会话切换](../operations/deployment.md#会话协议切换检查)。
+[0031 migration](../../SKM/backend/migrations/versions/0031_auth_session_credentials.py)标记并撤销旧活动会话，要求重新登录，不迁移旧随机 CSRF。任何 v2 行存在时均拒绝 downgrade 丢列。新旧 API 不混跑，不删除审计绕过回退限制；上线见[会话切换](../operations/deployment.md#会话协议切换检查)。
 
 ### 缓存与代理
 
 auth-tag route 的已处理响应与登录防护路径设置 Cache-Control: no-store，Web auth client 同样禁止缓存；不外推到未处理异常、代理自产错误或全站。实际 HTTPS 入口仍须验收。
 
-[require_same_origin](../../PJM/backend/src/projectmind/api/auth_dependencies.py)比较 Origin 与代理恢复后的 scheme/host/port；context path 不属于 Origin。缺失 Origin 拒绝，不以关掉 Secure/CSRF 或信任全部代理解决配置错误。
+[require_same_origin](../../SKM/backend/src/skillmind/api/auth_dependencies.py)比较 Origin 与代理恢复后的 scheme/host/port；context path 不属于 Origin。缺失 Origin 拒绝，不以关掉 Secure/CSRF 或信任全部代理解决配置错误。
 
 ## 首个 ADMIN 初始化
 
-仅提供受控 CLI，不提供匿名 HTTP bootstrap 或启动时自动建管理员。CLI 交互读取 email/display name/密码，密码使用 getpass，不进入参数、环境或 shell history。
-
-初始化锁定 migration 已创建的 Organization，存在任何 ADMIN 即拒绝；后续创建走[用户管理](user-lifecycle.md)。不能反复 bootstrap 或直接 SQL 提权。普通 CLI 与会清空数据的近名 Make target 须区分，命令只维护在[首次起动](../operations/quickstart.md#最初の-admin-を作成する)。
+仅受控交互 CLI，密码经 getpass，不进参数、环境或 shell history。锁 migration 创建的 Organization，存在任何 ADMIN 即拒绝；后续走[用户管理](user-lifecycle.md)，不以反复 bootstrap、匿名 HTTP、启动自动创建或 SQL 提权恢复账户。命令见[首次起动](../operations/quickstart.md#最初の-admin-を作成する)，与会清空数据的近名 Make target 区分。
 
 ## 权限判定
 
@@ -101,26 +97,19 @@ Run 创建冻结 actor、成员资格及 Skill/Tool 权限上限，不随后来�
 
 ### 认证与业务提交不是同一个事务
 
-[AuthService](../../PJM/backend/src/projectmind/auth/service.py)返回 actor 前结束认证事务。锁后认证只保护当次判断，不证明所有业务提交都重新检查撤权。
+[AuthService](../../SKM/backend/src/skillmind/auth/service.py)返回 actor 前已结束认证事务。业务用例须在自身锁等待后及最终提交门禁重验原请求；入口成功不证明提交时仍有资格。各用例的锁序、重复/未知结果和审计规则只在所属设计维护：
 
-[用户管理事务](user-lifecycle.md#事务与并发)另重验原会话，将账户变更、撤销和审计一起提交；[项目成员管理](project-lifecycle.md#成员管理的现状与目标)复用同一凭据校验并保持目标账户锁，[项目 CRUD](project-lifecycle.md#并发修改不能只看有无行锁)也在业务锁后及 flush 后复核原 ADMIN 会话。
+| 授权对象 | 事务正本 |
+| --- | --- |
+| 账户、成员、项目 | [用户](user-lifecycle.md#事务与并发)、[成员](project-lifecycle.md#成员管理的现状与目标)、[项目 CRUD](project-lifecycle.md#并发修改不能只看有无行锁) |
+| Run 与人工操作 | [创建/确认](run-creation.md#创建与确认的授权事务)、[普通答复](user-interactions.md#首次答复与原答复重放)、[评价](results-evaluation.md#评价的授权事务) |
+| Skill 组织资产与项目配置 | [导入](skill-interpretation.md#导入保存与上传授权)、[版本管理](skill-interpretation.md#版本管理的授权事务)、[组合](skill-contract.md#组合保存的授权事务) |
+| 调度与文档 | [调度管理](task-scheduling.md#管理写入的授权事务)、[上传](document-lifecycle.md#上传的授权事务)、[删除](document-lifecycle.md#删除事务与引用判定) |
 
-[普通 Run 创建与确认](run-creation.md#创建与确认的授权事务)复核原会话和当前 Project/成员，首次、重放及未命中均经过最终门禁，历史权限快照不刷新。[普通答复](user-interactions.md#首次答复与原答复重放)固定同一资格后锁 Run/Segment/Interaction，首次、重放及过期续行也经过最终门禁。
-
-[评价事务](results-evaluation.md#评价的授权事务)在原 Result 下复核同一资格，新旧 POST、原键确认和分页均保持锁后/最终门禁；归档可读不可写。原提交键绑定用户而非浏览器会话，同用户重新登录可人工查询，不恢复已撤销会话或自动重发旧正文。
-
-[Skill 版本管理](skill-interpretation.md#版本管理的授权事务)在草稿、发布、废弃、删除及项目启停事务中锁定原 User/会话，业务等待后、写入前和最终 flush 后复核当前 ADMIN。组织资产不加 Project 门禁，项目启停另锁精确 ACTIVE Project；重复操作仍需有效资格，保留原审计值。导入与解释写入不由此推导已覆盖。
-
-[组合管理](skill-contract.md#组合保存的授权事务)三写同样复核原 ADMIN 与当前 ACTIVE Project，随后锁同组织组合/关联和精确可用版本；共享对象更新不等于项目私有配置。
-
-[调度管理写入](task-scheduling.md#管理写入的授权事务)同样复核原会话、当前成员与归档，使用兼容 occurrence 外键的只读 User 锁；Worker 发火仍是独立的当前创建者授权协议。[单文档删除](document-lifecycle.md#删除事务与引用判定)固定原资格后检查历史引用；[文档上传](document-lifecycle.md#上传的授权事务)在锁外 PUT 前后分别复核原资格，入口授权先于 multipart 正文接收。原 upload key 查询也复核当前会话/成员，允许同 actor 新有效会话和授权归档读取；这不授权新会话接管旧 PUT。其他业务仍须按各自设计闭合授权竞争，不能由这些链路推导全系统立即停权或已有 Run 停止。
+新会话可按各协议人工查询原事实，不能恢复旧会话或接管旧写入；历史 Run/发布/上传回执不因当前授权而重写。[异步解释/Worker/SSE](skill-interpretation.md#异步解释的交接要求)尚未闭合原请求授权，其他业务与长连接也不能从上述局部实现推导立即停权。
 
 ## 开发接续与验收
 
-现有登录/登出、v2 稳定 CSRF、统一 actor、管理 API 与账户页是接续起点；剩余实现和真实环境缺口以 R05 为准。接口变更同步[认证契约入口](../../PJM/README.md#contracts)、Web client 和回归；不得增加旁路认证。
+复用统一 actor 与凭据校验，接口变更同步[契约](../../SKM/README.md#contracts)、Web client 和回归。重点验证多页面/换账号不自动重放、拒绝不泄漏身份、撤销/登录与锁等待竞争、旧会话不复活，以及 0031、HTTPS/context path、cookie/no-store 和多实例代理信任。
 
-- 多页面、乱序、换账号：同会话不互撤凭据，原业务动作不自动重放。
-- 错误 challenge/Origin、跨 Project、归档、非 ADMIN：按各层拒绝，不泄露账号或资源。
-- 真正锁等待、并发撤销/登录、停用后启用：旧会话不复活，管理事务完整回滚。
-- 0031 升降级、HTTPS/context path、多 API：旧会话切换、cookie、no-store、代理信任与限流分别验证。
-- [service 回归](../../PJM/backend/tests/auth/test_session_service.py)与[真实会话测试](../../PJM/backend/tests/db/test_real_auth_sessions.py)按替身/真实数据库区分证据；创建测试数据库前确认专用目标授权。
+[service 回归](../../SKM/backend/tests/auth/test_session_service.py)与[真实会话测试](../../SKM/backend/tests/db/test_real_auth_sessions.py)分别举证；真实数据库须使用获准的专用目标。

@@ -14,13 +14,13 @@ REVIEW 不等于 Evaluation。普通答复需当前 ProjectWriteActor，批准�
 
 ## 一个例子：回答超时不等于什么都没发生
 
-问题推荐 A、也可选 B，用户提交 B 后丢响应：可能 B 与新 Segment/Outbox 已提交，应确认原请求；也可能已过期，服务端先提交无答复续行再返回 410；另一成员先回答则返回 409 并保留对方决定。
+推荐 A、可选 B，提交 B 后丢响应：可能原答案/续行已提交，也可能服务端先提交过期续行再返回 410；另一成员抢先回答则 409，保留对方决定。
 
-推荐不是默认答案，required=false 不自动跳过，也不允许空答案；当前无 skip。超时记录“未收到答复”，不能伪造用户选了推荐项。
+推荐非默认答案，required=false 不自动跳过/允许空答；当前无 skip。超时只记未答，不伪造选择。
 
 ## 提问与答复的实际形状
 
-精确字段见[提问 Tool](../../PJM/contracts/tools/interaction.request/v1/request.schema.json)和[答复契约](../../PJM/contracts/runs/interaction-response/v1/request.schema.json)。
+精确字段见[提问 Tool](../../SKM/contracts/tools/interaction.request/v1/request.schema.json)和[答复契约](../../SKM/contracts/runs/interaction-response/v1/request.schema.json)。
 
 | 内容 | 规则 |
 | --- | --- |
@@ -30,15 +30,13 @@ REVIEW 不等于 Evaluation。普通答复需当前 ProjectWriteActor，批准�
 | required/期限 | 所有普通交互暂停；过期可无信息续行。expires_at 从事件 occurred_at 解析，不按打开页面重算 |
 | checkpoint/continuation | 冻结问题依据，回答追加到新段，Session 续行另守 Runtime 兼容 |
 
-每 Run 最多一个 OPEN 交互。持久化校验 checkpoint 的 Evidence/Artifact/Proposal 归属，格式不证明可读；期限以服务端为准。
-
-旧问题若有重复选项 key，原文保留只读，不再收取无法区分含义的新答案；已有原答复仍可按原身份确认，不改旧选项、payload 或 hash。
+每 Run 最多一个 OPEN；保存时验 checkpoint 引用归属，期限以服务端为准。旧重复选项 key 保持只读，不收新答案；已有答复可按原身份确认，不改历史 payload/hash。
 
 ### 普通提问不能代替外部批准
 
-interaction.request 只允许 CLARIFICATION/CHOICE/REVIEW；Tool Schema、parser 与直接持久化入口使用同一限制，普通等待只能进入 WAITING_FOR_INPUT。外部效果统一 change.propose → 关联批准 → decision/Effect，不能通过普通答案取得批准。
+Tool Schema/parser/持久化入口均只接受 CLARIFICATION/CHOICE/REVIEW，进入 WAITING_FOR_INPUT。效果必须 change.propose → 关联批准 → decision/Effect。
 
-共享 enum 中合法 Proposal 与旧 detail/event 保持可读。旧无 Proposal 的 EFFECT_APPROVAL 只读辨认，既不接受普通答复，也不由普通过期恢复解锁；不伪造 Proposal、批准或改写历史记录。
+合法 Proposal 和旧 detail/event enum 保持可读；无 Proposal 的旧 EFFECT_APPROVAL 只读，普通答复/过期都不解锁，不补造批准或改历史。
 
 ## 三个提交边界
 
@@ -52,19 +50,22 @@ interaction.request 只允许 CLARIFICATION/CHOICE/REVIEW；Tool Schema、parser
 新 Attempt：准备输入 / 冻结 Brief / 启动校验 → Session
 ```
 
-提问锁顺序 Run → Segment → Attempt，重验 lease/RUNNING/取消。等待保存与 lease 释放不证明进程退出/费用结清，[监督](run-supervision.md#等待提交仍是独立边界)另管；任何事务都不持锁等模型或资源 I/O。
+提问按 Run → Segment → Attempt 取锁，验 lease/RUNNING/取消；不持锁等 I/O。等待提交/释放 lease 不证明退出或结清，另走[监督](run-supervision.md#等待提交仍是独立边界)。
 
 ### 首次答复与原答复重放
 
-POST /api/v1/projects/{project_id}/runs/{run_id}/interactions/{interaction_id}/responses 带当前 Session/Origin/CSRF、Idempotency-Key、interaction_version/response。入口认证与业务事务分开。
+答复 POST 携带 Session/Origin/CSRF、Idempotency-Key、interaction_version/response，路径与字段见[答复契约](../../SKM/contracts/runs/interaction-response/v1/request.schema.json)。事务复用[原会话校验](authentication.md#认证与业务提交不是同一个事务)，不能只收 actor_id：
 
-答复事务须复核入口的原会话凭据，而不是只接收 actor_id。先复用 Organization → User → AuthSession 锁序，再锁当前 Project 与 USER 的成员资格，最后按 Run → Segment → Interaction 加锁并刷新问题。ADMIN 也不能跨组织或绕过归档。
+```text
+Organization → User → 原 AuthSession → Project/USER 成员 SHARE
+  → Run → Segment → Interaction
+  → 原会话/CSRF/资格复核 → 原 Response / 首次答复
+  → flush → 最终期限复核 → commit
+```
 
-Project/成员使用 FOR SHARE：阻止状态修改，同时兼容 Worker 保存 Project 外键引用需要的 KEY SHARE，避免答复等 Run、Worker 又等 Project 的锁环。模式依据 [PostgreSQL 行锁规则](https://www.postgresql.org/docs/current/explicit-locking.html#LOCKING-ROWS)；仍须真实事务验收。
+Project/成员 SHARE 阻止状态修改且兼容 Worker 外键 KEY SHARE，避免双方反向等待；ADMIN 不免组织/归档检查。首次另验题型、OPEN、原版本、期限及原 Run/Segment 等待状态，同事务存答复、关旧段、增新段/事件/Outbox。
 
-拿齐业务锁后，以当前时刻复查原会话、CSRF 与当前资格，再校验题型并查询原 Response；首次还验 OPEN、原版本、当前期限、Run 与原 Segment 的等待状态。同事务保存回答、关闭旧段、追加新段/事件/Outbox；flush 后再验会话期限，才允许提交。
-
-首次返回 201 / Idempotent-Replay: false，重放返回 200 / Idempotent-Replay: true，且 header 与 body 的 idempotent_replay 必须一致。详情与答复不缓存；Web 核验状态码、header、白名单字段和原 Project/Run/Interaction，而非把任意 2xx 当成功。
+首次 201/Idempotent-Replay: false，重放 200/true，header 与 body 必须一致。详情/答复 no-store，Web 验状态/header/白名单及原 Project/Run/Interaction。
 
 | 身份项 | 准确边界 |
 | --- | --- |
@@ -73,17 +74,17 @@ Project/成员使用 FOR SHARE：阻止状态修改，同时兼容 Worker 保存
 | 重放响应 | response_id/run_segment_id 是原答复，status/row_version 是当前 Run，不强制退回 QUEUED |
 | actor | 首次保存回答者；重放独立核对原 actor_id，仍须当前 Project 授权，不要求与 Run 发起人相同 |
 
-原 actor 独立比较，不加入或重算旧 request_hash。其他成员不能用相同答案/键确认别人的请求；已有答复可以在当前授权详情中阅读。首次与重放都经过上述授权门禁；答复先持锁则先完成，撤权/归档先完成则拒绝。不外推为其他业务、已有 SSE 或模型立即停权。
+原 actor 独立比较，不重算旧 hash；他人可授权读历史，不能用同键/答案确认原请求。首次/重放同门禁：答复先持锁可先完成，撤权/归档先完成则拒绝；不代表 SSE/模型立即停权。
 
 ### 过期与拒绝响应
 
-首次答复锁后发现到期，或 Recovery 扫描到期：等待 Run 记录 EXPIRED/INTERACTION_EXPIRED、INTERACTION_TIMEOUT 新段与 dispatch，不造 Response；Run 已终态/续行时只关闭旧交互，不重开或追加末次事件之后的记录。
+首次答复锁后到期或 Recovery 扫描到期：等待 Run 保存 EXPIRED/INTERACTION_EXPIRED、INTERACTION_TIMEOUT 新段/dispatch，不造 Response；已终态/续行只关闭旧交互，不重开或追加末次事件。
 
-service 在事务内捕获 InteractionExpiredError，最终授权仍有效且过期事实已提交后才返回 410，所以 410 不等于回滚。最终认证失败则连同过期续行一起回滚并返回权限错误；commit 失败仍可能未知。QUEUED 也不证明 Worker 已恢复，dispatch/队列仍可阻塞。
+service 捕获 InteractionExpiredError，最终授权有效且过期提交后返回 410；认证失败整笔回滚，commit 失败仍可能未知。410 非回滚证明，QUEUED 非 Worker 已恢复证明。
 
 ## 答复界面与结果未知
 
-草稿与已发送意图分开；同一浏览器页面内，以原 actor/会话/Project/Run/Interaction 为边界保留原版本、payload 与 key。答复状态只有一个所有者，不能因切换观察标签、详情重新加载，或问题从 OPEN 移到历史区而丢失。
+草稿与原请求分开；单一页面 owner 按 actor/会话/Project/Run/Interaction 保留版本/payload/key，不因切标签、重载详情或移入历史而丢失。
 
 | 情况 | 界面规则 |
 | --- | --- |
@@ -94,18 +95,18 @@ service 在事务内捕获 InteractionExpiredError，最终授权仍有效且过
 | 网络/超时/abort/无效响应 | 保留原请求，读取当前事实；不自动重试、换键或宣称 rollback |
 | 详情刷新失败 | 保留待确认意图，不将旧详情当作当前可写资格；自动刷新与人工 GET 的明确权限拒绝均关闭确认门禁，普通读失败不证明提交失败 |
 
-“读取当前事实”只发送 GET；相同正文、作者或已续行都不能证明丢失的那次 POST。“确认原答复”是用户明确发起的同 key、原版本和原 payload POST：若此前已提交，返回原回执；若此前未落库，可能完成首次提交。页面必须说明这一副作用，不把它命名为纯查询。
+GET 只读当前事实；相同正文/作者或已续行不证明原 POST。“确认原答复”是用户明确的原 key/版本/payload POST，可能首次落库，必须说明此副作用，不能称纯查询。
 
-每次 await/callback 前验当前身份与请求世代；同一 ID 离开后再返回也不能接收旧结果。Abort 不撤销服务端。换账号/会话/Project/Run、离页后旧响应无效；原请求仅存页面内存，整页刷新不保证恢复，不放 URL/Web storage/日志。重新进入先读授权历史，不从本地无 key 推断未提交。
+每次 await/callback 验身份/世代，离开再回同 ID 也不收旧结果。Abort 不撤销服务端；换账号/会话/Project/Run 或离页使旧响应失效。原请求只存内存，不进 URL/Web storage/日志，刷新不承诺恢复；重新进入先读历史，无本地 key 不证明未提交。
 
 ## 兼容与开发接续
 
-这是普通提问入口的安全收窄：旧 Worker 不应继续产生 EFFECT_APPROVAL，API/Worker/Web 配套发布并停止旧写入者；历史读取 enum 与 hash 不变，不用数据迁移“修复”旧悬空等待。
+API/Worker/Web 配套发布并停旧写入者，不再产生普通 EFFECT_APPROVAL；旧 enum/hash 不变，不迁移“修复”悬空等待。
 
-回答请求遵守原公开 Schema：原版本为正整数，可选字段可省略但不接受显式 null、空选择或额外字段；不对已发送正文、对象或选择顺序做新一轮整形。Web 不接受无法无损表示的整数。批准和 Evaluation 仍有独立协议，不能复用普通答复的原请求确认。
+原版本为正整数，可选字段可省略但不接受 null/空选择/额外字段；已发送正文和选择顺序不重新整形，Web 拒绝无法无损表示的整数。批准/Evaluation 不复用本确认协议。
 
 ## 验收条件
 
 覆盖禁止普通 EFFECT_APPROVAL 但保留合法/旧记录；CHOICE/REVIEW/非必答无隐式选择；原请求同 Response/Segment/dispatch；同键改内容/版本/actor 冲突；双人/expiry 竞争只一续行；410 已提交过期而未保存答案；丢响应/同 tick/切换不乱写；终态不重开。
 
-真实 DB 锁/回滚、浏览器时序、模型暂停退出分别验证。代码入口见[代码根 README](../../PJM/README.md)。
+真实 DB 锁/回滚、浏览器时序、模型暂停退出分别验证。代码入口见[代码根 README](../../SKM/README.md)。

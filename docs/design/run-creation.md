@@ -1,6 +1,6 @@
 # Run 创建、重发与幂等
 
-本页定义创建身份、首次快照与原请求确认。Backend 版本化重放和 Web 确认已有接线；真实事务验收与调度缺口见[计划](../planning/roadmap.md)。资源成员规则由[资源快照](resource-snapshots.md)负责。
+本页定义创建身份、首次快照与原请求确认；资源规则见[资源快照](resource-snapshots.md)，实现状态见[计划](../planning/roadmap.md)。
 
 ## 先分清三种“再执行”
 
@@ -14,7 +14,7 @@
 
 ## 请求身份与执行快照分开保存
 
-请求身份保存“用户要创建什么”，执行快照保存“首次实际固定什么”。两者都不可在重放时改写。
+请求身份是用户意图，执行快照是首次固定的事实；重放均不改写。
 
 | 内容 | 身份 / 首次快照 |
 | --- | --- |
@@ -25,19 +25,17 @@
 | Integration/binding | 比较显式身份或默认选择规则；冻结实际 scope/配置版本/binding，不重读今天的默认值 |
 | 权限/额度与追踪 | 上限由服务端冻结；trace、时间、生成 ID 不造成请求差异 |
 
-文档必需显式选择，省略可选槽位不授权全集；Integration 可按 Task/Project 默认 binding 解析。省略与显式指定是不同意图。未来开放限额选项须版本化纳入身份。
+文档必须显式选择，可选省略不授权全集；Integration 可解析默认 binding，但省略与显式指定仍是不同意图。新增限额选项须版本化纳入身份。
 
-服务端用[共享 hashing](../../PJM/backend/src/projectmind/core/hashing.py)保存规范化意图、摘要及格式版本；客户端 fingerprint 不能代替认证或原内容比较。
+服务端用[共享 hashing](../../SKM/backend/src/skillmind/core/hashing.py)保存规范化意图、摘要及格式版本；客户端 fingerprint 不能代替认证或原内容比较。
 
 ### 幂等键的作用域
 
-唯一约束为 (project_id, task_id, Idempotency-Key)，task_id 从精确 SkillVersion/task_key 导出，不按 actor 隔离。作用域内同键不同 actor/input/选择冲突；不同 Project/精确任务不承诺冲突。每个新意图仍生成新键，不能使用常量。
+唯一约束为 (project_id, task_id, Idempotency-Key)，task_id 由精确 SkillVersion/task_key 导出，不按 actor 隔离。同作用域同键异 actor/input/选择冲突，跨作用域不承诺冲突；新意图生成新键。
 
-`schedule:` 前缀保留给持久 occurrence 的内部创建。普通入口可以确认已有同身份/内容的原 Run，但不存在时返回 409 idempotency_conflict，不用该前缀新建；避免手动请求绕过调度关联、重叠和计数。旧键/快照不改写，发布时 API 与 Worker 一起切换，旧 API 也不能混用。
+`schedule:` 保留给持久 occurrence。普通入口仅可确认已有同身份/内容的 Run；不存在则 409 idempotency_conflict，不能绕过调度关联/重叠/计数新建。旧键/快照不改，发布时 API/Worker 配套切换，不混用旧 API。
 
 ## 目标创建流程
-
-以下流程已接入，仍需真实 PostgreSQL 并发/回滚验收：
 
 ```text
 入口认证 / CSRF / ProjectWriteActor / 请求校验
@@ -49,17 +47,16 @@
        → 最终认证 → commit 后交付结果
 ```
 
-- 所有请求都做当前授权；无权限者不能用 key 探测旧 Run。重放要求原 actor，不因有历史查看权即可冒充。
-- 重放先于当前资源/版本解析，不再枚举文档、调用 Provider 或改写权限快照；仍复核当前访问资格。新建才检查版本可用、输入、资源与策略。锁外已解析的版本/启用关系必须在初始写入事务再次固定，停用/废弃先提交时拒绝新建，不消费旧解析结果。
-- 创建事务一次保存 Run、Segment 1、Skill/资源快照、初始事件与 dispatch Outbox；失败整体回滚，模型/大文件物化在事务外。
-- 预查询不替代唯一约束。并发同意图只接受胜者的首次快照，不拼接两次解析。
-- 解析失败时复查刚提交的同键胜者；仍不存在则返回原错误，不无限等待。再次确认继续保留原键。
+- 所有出口复核当前授权；重放另验原 actor，历史查看权不能代替。
+- 先重放、后解析当前版本/资源；原 Run 不重新枚举、调用 Provider 或更新快照。新建另验输入/资源/策略，并在写入事务重新固定版本可用性。
+- 一次提交 Run、Segment 1、全部快照、初始事件和 dispatch Outbox；失败整体回滚，模型/大文件物化在锁外。
+- 唯一约束决定并发胜者，只接受其完整首次快照。解析失败也查询同键胜者，未见则返回原错误；不无限等待或换键。
 
-确认已有 Run 不等于它仍可执行。运行时 Provider 继续验证冻结授权、Integration 状态与批准；版本停用后的旧请求确认也不许可新建。
+确认不保证可执行：Provider 仍验冻结授权、Integration 状态和批准，版本停用后的确认不许可新建。
 
 ### 创建与确认的授权事务
 
-普通请求必须传入内部 UserAccess，保留原 cookie、CSRF 和服务器 request UUID；不能只凭入口 actor 或另选该用户的新会话。它不改变 HTTP 正文，也不是新的持久身份格式。请求 actor 必须与原会话一致；首次权限快照使用锁内当前角色及成员资格，不接受调用者提供角色或 M0 默认授权。
+普通请求以内部 UserAccess 保留原 cookie/CSRF、服务器 request UUID；不改 HTTP/持久身份格式，不只凭入口 actor 或换用该用户的新会话。actor 须匹配原会话，首次权限取锁内当前角色/成员，不接受调用者角色或 M0 默认授权。
 
 ```text
 Organization UPDATE → 当前 User SHARE → 原 AuthSession UPDATE
@@ -67,15 +64,15 @@ Organization UPDATE → 当前 User SHARE → 原 AuthSession UPDATE
   → 原请求查询 / 首次快照写入 → flush → 最终认证 → commit
 ```
 
-复用[共同凭据校验](authentication.md#认证与业务提交不是同一个事务)，在身份锁后、Project/成员锁后和最终 flush 后取新时间。ADMIN 无需 membership，但仍受组织、原会话与归档限制。失效会话 401、CSRF 403、无权/不存在 404；仅已授权的归档项目返回 409。User 使用只读共享锁，不更新账户或延长会话。
+复用[共同凭据校验](authentication.md#认证与业务提交不是同一个事务)，身份锁、Project/成员锁及最终 flush 后取新时间。ADMIN 免 membership，不免组织/会话/归档检查。会话失效 401、CSRF 403、无权/不存在 404，已授权归档项目 409；不更新 User 或延长会话。
 
-首次重放、资源解析失败后的胜者、唯一冲突胜者、新建和独立查询的命中/未命中均经过同一出口；查询未命中不授权随后跨事务的创建。选择语法、来源与幂等冲突拒绝也复核当前资格，但不提交部分写入。Skill 解析失败后仍用原凭据再次查询，不能因旧入口认证已通过就直接返回旧结果。
+重放、解析失败/唯一冲突后的胜者、新建及独立查询命中/未命中均走同一授权出口；选择/来源/幂等拒绝也复核，不提交部分写入。查询未命中不授权下一事务，Skill 解析失败仍用原凭据查询胜者。
 
-首次插入胜者在保存 Skill snapshot 前，经[共享可用性检查](skill-interpretation.md#resourcebinding-与-readiness)依序锁精确 SkillVersion SHARE 与 ProjectSkillVersion SHARE，核对同组织/Project、PUBLISHED 和未停用。锁保持到事务结束，失败回滚全部初始写入；同键原 Run 不重新要求可用。使用 SHARE 而非 UPDATE，避免与 occurrence 的外键锁形成反向等待。
+首次保存 Skill snapshot 前，[共享可用性检查](skill-interpretation.md#resourcebinding-与-readiness)依序持有精确 SkillVersion SHARE、ProjectSkillVersion SHARE 至事务结束，核对组织/Project、PUBLISHED、未停用。SHARE 兼容 occurrence 外键锁；停用/废弃先提交则整笔拒绝，同键原 Run 不重验可用性。
 
-最后 flush 可能等待约束；其后失效则整体回滚，历史胜者及快照不改写。未知 DB 异常、取消和 commit 响应未知保留原语义，不自动重发，也不宣称物理 commit 瞬间会话一定尚未过期。处理过的创建响应使用 no-store。
+flush 后失效整体回滚，不改历史胜者。DB 异常、取消、commit 未知不自动重发；最终认证不保证物理 commit 瞬间未过期。创建响应使用 no-store。
 
-调度必须显式传入[持久 occurrence participant](task-scheduling.md#持久认领与结算)，继续校验当前创建者与原 claim 并同事务结算，不依赖浏览器会话存活。浏览器 UserAccess 不具有 `schedule:` 新建资格。上述锁协调项目/成员管理，不代替单文档删除引用保护、Integration 配置竞争或真实 PostgreSQL 验收。
+调度使用[持久 occurrence participant](task-scheduling.md#持久认领与结算)，验证当前创建者/原 claim 并同事务结算，不依赖浏览器会话；UserAccess 不授予调度新建资格。此锁协议不代替文档引用保护或 Integration 配置竞争控制。
 
 ## 响应、界面与历史兼容
 
@@ -88,7 +85,7 @@ Organization UPDATE → 当前 User SHARE → 原 AuthSession UPDATE
 
 ### 提交结果未知时的界面责任
 
-[WorkspacePage](../../PJM/web/src/pages/WorkspacePage.tsx)把可编辑 TaskDraft 与已发送请求分开。提交时固定 actor/Project/精确任务/input/sources/key，确认只发送原内容，不复制服务端 hash 算法。
+页面分开 TaskDraft 与已发送请求；提交固定 actor/Project/精确任务/input/sources/key，确认只发送原内容，不复制服务端 hash。
 
 | 状态 | 界面行为 |
 | --- | --- |
@@ -97,15 +94,13 @@ Organization UPDATE → 当前 User SHARE → 原 AuthSession UPDATE
 | rejected | 其余非 409 的 4xx；只说明本次拒绝，不清除先前“可能已创建”事实 |
 | conflict | 不自动重试、刷新原内容或换键；明确核对后新建 |
 
-草稿继续可编辑，原请求确认不依赖草稿现是否合法。另建前明确提示原 Run 可能存在，再由用户提交新意图。30 秒只结束 HTTP 等待，不取消 Run。
+确认不依赖草稿是否合法；另建前提示原 Run 可能存在，由用户明确提交新意图。30 秒只结束 HTTP 等待，不取消 Run。
 
-重发用当前 CSRF，但必须仍是原 actor/Project；每次 await 后检查请求身份。切换账号/Project、离页后不处理旧结果，确认合法响应后才切换 detail/SSE 观察对象。
-
-待确认内容只存页面内存：关弹窗保留，刷新/离页/身份切换不保证恢复；正文和 token 不进 URL/Web storage。未知后再收到拒绝不能抹去不确定性。
+重发用当前 CSRF 和原 actor/Project；每次 await 后验身份，合法回执才切换 detail/SSE。切换账号/Project、离页使旧响应失效。原请求只存内存：关弹窗保留，刷新/离页不保证恢复，正文/token 不进 URL/Web storage；后续拒绝不能抹去先前未知。
 
 ### 历史身份的证明范围
 
-旧 request_hash 计算早于 binding 字段补入，不能直接对持久 selected_sources 重算。当前[兼容器](../../PJM/backend/src/projectmind/runs/creation_replay.py)仅移除能证明属于初次初始化的 binding_id / binding_checksum / binding_capability，以完整旧 hash 验证剩余快照，再从保存的 candidate/default 恢复意图。
+旧 request_hash 早于 binding 字段，不能直接重算 selected_sources。[兼容器](../../SKM/backend/src/skillmind/runs/creation_replay.py)仅移除可证明为初次补入的 binding_id/binding_checksum/binding_capability，用完整旧 hash 验证后，从保存的 candidate/default 恢复意图。
 
 不读当前资源、不改旧行；缺原选择、未知版本或 hash 不符返回 409。历史可读、创建可确认、非终态可按新输入协议续行分别判断。
 
@@ -113,17 +108,15 @@ Organization UPDATE → 当前 User SHARE → 原 AuthSession UPDATE
 
 | 责任 | 入口 |
 | --- | --- |
-| 意图/持久格式 | [creation_request](../../PJM/backend/src/projectmind/runs/creation_request.py)；task_snapshot_json.creation_request 保存 v1，无独立公开字段 |
-| 重放/创建/胜者 | [service](../../PJM/backend/src/projectmind/runs/service.py)、[repository](../../PJM/backend/src/projectmind/runs/repository.py)；API 在解析当前任务前先查询 |
-| Web 原请求 | [runSubmission](../../PJM/web/src/lib/runSubmission.ts)、[useRunSubmission](../../PJM/web/src/hooks/useRunSubmission.ts) |
-| Schedule | [ScheduleService](../../PJM/backend/src/projectmind/schedules/service.py)以内部 participant 在同一创建/确认事务校验当前授权与持久 claim，并关联原 occurrence、幂等计数；不另建 Run/hash |
+| 意图/持久格式 | [creation_request](../../SKM/backend/src/skillmind/runs/creation_request.py)；task_snapshot_json.creation_request 保存 v1，无独立公开字段 |
+| 重放/创建/胜者 | [service](../../SKM/backend/src/skillmind/runs/service.py)、[repository](../../SKM/backend/src/skillmind/runs/repository.py) |
+| Web 原请求 | [runSubmission](../../SKM/web/src/lib/runSubmission.ts)、[useRunSubmission](../../SKM/web/src/hooks/useRunSubmission.ts) |
+| Schedule | [ScheduleService](../../SKM/backend/src/skillmind/schedules/service.py)提供 occurrence participant，不另建 Run/hash |
 
-公开修改同步 Problem/response、Schema/example/OpenAPI、Web validator 和测试。内部身份版本不等于 HTTP 版本；仅 DB schema 变化才加 migration。
+内部身份版本不等于 HTTP 版本；同步要求见[契约 workflow](../development/contract-workflow.md)。
 
 ## 验收清单
 
-验收原全集在新增/删除后重放不变；集合换序重放、改 ID 冲突；并发创建只留一个完整初始事务；解析失败能确认并发胜者；换 actor/越权不泄露；版本停用区分确认与新建；旧 hash 无法证明时拒绝兼容。各创建/确认出口另验原会话撤销、锁等待/flush 过期、成员移除与归档，确认拒绝时无部分初始写入，commit 未知不换键。
+覆盖全集变化不改重放、集合换序/改 ID、并发唯一完整胜者、解析失败确认、跨 actor/权限拒绝、停用区分新建/确认、旧 hash 拒绝。各出口检验撤销、锁/flush 过期、移除成员、归档与整笔回滚；commit 未知不换键。
 
-Web 另验同 tick 防重、丢响应、编辑草稿、身份切换及原键确认。Schedule 同 occurrence 不重建/不重复计数属于[调度验收](task-scheduling.md#实现与验收)，不是创建服务独自保证。
-
-测试入口：[Backend runs](../../PJM/backend/tests/runs/)、[原请求浏览器回归](../../PJM/web/tests/browser/check_run_submission.py)。数据库竞争与浏览器时序分别执行，mock API 不证明事务可靠。
+Web 验同 tick 防重、丢响应、草稿/身份切换及原键确认；调度另验[关联/计数](task-scheduling.md#实现与验收)。入口：[Backend](../../SKM/backend/tests/runs/)、[浏览器](../../SKM/web/tests/browser/check_run_submission.py)；真实事务与浏览器时序分别举证。

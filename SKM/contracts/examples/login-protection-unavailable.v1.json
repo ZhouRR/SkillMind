@@ -1,0 +1,9 @@
+{
+  "type": "https://skillmind.local/problems/login_protection_unavailable",
+  "title": "Login temporarily unavailable",
+  "status": 503,
+  "detail": "Login protection is unavailable. Try again later.",
+  "instance": "/api/v1/auth/login-context",
+  "code": "login_protection_unavailable",
+  "request_id": "login-protection-unavailable-example"
+}

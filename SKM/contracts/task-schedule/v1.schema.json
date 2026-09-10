@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/task-schedule/v1.schema.json",
+  "title": "Skillmind TaskSchedule management v1",
+  "description": "Public record, paginated list, versioned status request and read-only pending observation. Lease credentials and frozen internal snapshots are not public DTOs.",
+  "oneOf": [
+    { "$ref": "#/$defs/schedule" },
+    { "$ref": "#/$defs/page" },
+    { "$ref": "#/$defs/status_request" },
+    { "$ref": "#/$defs/activity" }
+  ],
+  "$defs": {
+    "status": { "enum": ["ACTIVE", "PAUSED", "COMPLETED", "ERROR", "ARCHIVED"] },
+    "nullable_instant": { "type": ["string", "null"], "format": "date-time" },
+    "schedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schedule_id", "project_id", "name", "kind", "status", "timezone",
+        "cron_expression", "run_at", "end_at", "max_runs", "skill_version_id", "task_key",
+        "input", "sources", "next_run_at", "last_run_at", "last_run_id", "last_outcome",
+        "last_error", "run_count", "missed_count", "created_by", "row_version", "created_at", "updated_at"
+      ],
+      "properties": {
+        "schedule_id": { "type": "string", "format": "uuid" },
+        "project_id": { "type": "string", "format": "uuid" },
+        "name": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["ONCE", "CRON"] },
+        "status": { "$ref": "#/$defs/status" },
+        "timezone": { "type": "string", "minLength": 1 },
+        "cron_expression": { "type": ["string", "null"] },
+        "run_at": { "$ref": "#/$defs/nullable_instant" },
+        "end_at": { "$ref": "#/$defs/nullable_instant" },
+        "max_runs": { "type": ["integer", "null"], "minimum": 1 },
+        "skill_version_id": { "type": "string", "format": "uuid" },
+        "task_key": { "type": "string", "minLength": 1 },
+        "input": { "type": "object" },
+        "sources": { "type": "object", "additionalProperties": { "type": "string" } },
+        "next_run_at": { "$ref": "#/$defs/nullable_instant" },
+        "last_run_at": { "$ref": "#/$defs/nullable_instant" },
+        "last_run_id": { "type": ["string", "null"], "format": "uuid" },
+        "last_outcome": { "enum": [null, "RUN_CREATED", "SKIPPED_OVERLAP", "FAILED_PRECONDITION", "COMPLETED"] },
+        "last_error": { "type": ["string", "null"] },
+        "run_count": { "type": "integer", "minimum": 0 },
+        "missed_count": { "type": "integer", "minimum": 0 },
+        "created_by": { "type": "string", "format": "uuid" },
+        "row_version": { "type": "integer", "minimum": 1 },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "page": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schedules", "total", "limit", "offset"],
+      "properties": {
+        "schedules": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/schedule" } },
+        "total": { "type": "integer", "minimum": 0 },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "offset": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "activity_pending": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["occurrence_id", "occurrence_at", "configuration_version", "created_at", "updated_at", "attempt_count", "lease_expires_at"],
+      "properties": {
+        "occurrence_id": { "type": "string", "format": "uuid" },
+        "occurrence_at": { "type": "string", "format": "date-time" },
+        "configuration_version": { "type": "integer", "minimum": 1 },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "attempt_count": { "type": "integer", "minimum": 1 },
+        "lease_expires_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "activity": {
+      "type": "object",
+      "description": "One statement-time observation, not an execution receipt, complete history or permission to retry. LEGACY_UNAVAILABLE does not imply no pending work.",
+      "additionalProperties": false,
+      "required": ["schedule_id", "project_id", "row_version", "configuration_version", "tracking", "checked_at", "automatic_attempt_limit", "pending"],
+      "properties": {
+        "schedule_id": { "type": "string", "format": "uuid" },
+        "project_id": { "type": "string", "format": "uuid" },
+        "row_version": { "type": "integer", "minimum": 1 },
+        "configuration_version": { "type": "integer", "minimum": 1 },
+        "tracking": { "enum": ["TRACKED", "LEGACY_UNAVAILABLE"] },
+        "checked_at": { "type": "string", "format": "date-time" },
+        "automatic_attempt_limit": { "type": "integer", "minimum": 1 },
+        "pending": { "oneOf": [{ "$ref": "#/$defs/activity_pending" }, { "type": "null" }] }
+      },
+      "allOf": [{
+        "if": { "properties": { "tracking": { "const": "LEGACY_UNAVAILABLE" } } },
+        "then": { "properties": { "pending": { "type": "null" } } }
+      }]
+    },
+    "status_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "expected_row_version"],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "expected_row_version": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

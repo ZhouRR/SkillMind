@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/runs/interaction-response/v1/response.schema.json",
+  "title": "Skillmind InteractionResponse response v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_id", "project_id", "status", "row_version", "interaction_id", "response_id", "run_segment_id", "segment_no", "continuation_mode", "idempotent_replay"],
+  "properties": {
+    "run_id": { "type": "string", "format": "uuid" },
+    "project_id": { "type": "string", "format": "uuid" },
+    "status": { "enum": ["QUEUED", "PREPARING", "RUNNING", "RETRY_PENDING", "WAITING_FOR_INPUT", "WAITING_FOR_APPROVAL", "WAITING_PERMISSION", "SUCCEEDED", "FAILED", "CANCELLED"] },
+    "row_version": { "type": "integer", "minimum": 1 },
+    "interaction_id": { "type": "string", "format": "uuid" },
+    "response_id": { "type": "string", "format": "uuid" },
+    "run_segment_id": { "type": "string", "format": "uuid" },
+    "segment_no": { "type": "integer", "minimum": 2 },
+    "continuation_mode": { "enum": ["RESUME", "FORK", "REPLACE"] },
+    "idempotent_replay": { "type": "boolean" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "idempotent_replay": { "const": false } },
+        "required": ["idempotent_replay"]
+      },
+      "then": { "properties": { "status": { "const": "QUEUED" } } }
+    }
+  ]
+}

@@ -1,9 +1,0 @@
-{
-  "type": "https://projectmind.local/problems/login_rate_limited",
-  "title": "Login temporarily limited",
-  "status": 429,
-  "detail": "Too many login attempts. Try again later.",
-  "instance": "/api/v1/auth/login",
-  "code": "login_rate_limited",
-  "request_id": "login-rate-limited-example"
-}

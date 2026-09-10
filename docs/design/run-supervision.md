@@ -4,7 +4,7 @@
 
 ## 一个例子：点击取消之后
 
-模型尚未返回首事件时，API 先保存取消意图；Worker 观察后取消自己拥有的 await，等待 client 清理，有效 lease 下才提交 CANCELLED。以下事实不能互相替代：
+首事件前取消：API 保存意图，Worker 取消自己拥有的 await、等待 client 清理，再以有效 lease 提交 CANCELLED。须区分：
 
 | 事实 | 只证明什么 |
 | --- | --- |
@@ -13,15 +13,15 @@
 | client 清理返回 | 清理调用结束，adapter 仍须证明外部停止 |
 | 用量已确认 | 对应执行范围已核对，不把其他未知调用归零 |
 
-这不是固定顺序的 UI 向导。主执行已有首事件时，终态和清理的顺序不同；Web 不得在无公开证据时显示“进程全停/额度退还”。
+已有首事件时终态/清理顺序不同；Web 无公开证明不得显示“进程全停/额度退还”。
 
 ## 谁负责停止
 
 | 责任方 | 责任 |
 | --- | --- |
 | API / RunService | 授权并保存意图，不等待所有外部进程 |
-| [Executor](../../PJM/backend/src/projectmind/worker/executor.py) | 监督准备、heartbeat、取消、事件等待；有效 lease 下提交 |
-| [AgentEngine](../../PJM/backend/src/projectmind/agent/engine.py) | 向其拥有的 client 传递取消/关闭，清理并提供核对依据 |
+| [Executor](../../SKM/backend/src/skillmind/worker/executor.py) | 监督准备、heartbeat、取消、事件等待；有效 lease 下提交 |
+| [AgentEngine](../../SKM/backend/src/skillmind/agent/engine.py) | 向其拥有的 client 传递取消/关闭，清理并提供核对依据 |
 | 子 Provider | TaskGroup 持有全组 task，等待各支清理，不遗留后台工作 |
 | Repository / Recovery | 按持久状态与 fencing 决定提交/接管 |
 | [预算协议](run-budgets.md#结束取消与故障恢复) | 确认消费、保留未知占用，lease 过期不退款 |
@@ -37,9 +37,7 @@
 | 已有首事件 | 以 session_ref interrupt，消费侧继续处理终端/等待/deadline；interrupt 失败不是停止证明 |
 | 子执行中 | TaskGroup 取消并等待全组，某支完成不再次打断兄弟清理 |
 
-首事件前路径为“持久意图 → 取消等待 → connect/receive 退出 → 清理 → 有效 lease 下 CANCELLED”，以协作取消、清理返回为前提。各 deadline 见[计时器](run-budgets.md#现有计时器的覆盖范围)，不承诺硬杀时间。
-
-线程文件 I/O 可晚返回，但不能再提交 READY/Brief 或启动；[输入现场](resource-snapshots.md#准备中断与再次使用)保留不重建。启动 gate 与模型调用不原子，gate、运行监督和数据库 fencing 缺一不可。
+以上依赖协作取消/清理，deadline 不承诺硬杀，见[计时器](run-budgets.md#现有计时器的覆盖范围)。线程 I/O 可晚返回，但不得再提交 READY/Brief 或启动；[输入现场](resource-snapshots.md#准备中断与再次使用)保留。启动 gate 与模型调用不原子，仍需运行监督和 DB fencing。
 
 ## 原因与执行权如何分类
 
@@ -54,11 +52,11 @@
 | job 关停/裸取消 | 传播执行取消，不创造用户意图 |
 | SDK interrupted 但无持久取消 | 主执行 FAILED / agent_session_interrupted；payload 自称 user 也不授权取消 |
 
-上述主执行分类已接入；子收集器将 interrupted 作为失败终端，分支失败不等于整个 Run 失败。旧原因缺来源则保持未记录，不改历史 CANCELLED。
+子收集器将 interrupted 作为分支失败，不直接决定 Run 终态；旧原因缺来源保持未记录，不改历史 CANCELLED。
 
 ## 提交时谁决定最终状态
 
-按 Run → Segment → Attempt 锁后的持久事实与当前 lease 判定，不按浏览器点击或 SDK 时间戳。前提是事件身份与终态参数合法。
+先验事件身份/终态参数，再按 Run → Segment → Attempt 锁后事实和当前 lease 判定，不按浏览器/SDK 时间戳。
 
 | 提交顺序 | 结果 |
 | --- | --- |
@@ -67,13 +65,13 @@
 | 已 CANCELLED 再取消 | 返回已有状态，不重复终态 |
 | 旧 lease 失效 | 不能因存在取消意图恢复提交权 |
 
-[finalize_execution](../../PJM/backend/src/projectmind/runs/repository.py)已锁内复查取消，拒绝无意图 CANCELLED 候选并返回实际状态；service 在事务成功退出后才返回。repository 返回不等于 commit，提交响应未知须读原事实，不换身份重跑。
+[finalize_execution](../../SKM/backend/src/skillmind/runs/repository.py)锁内复查取消，拒绝无意图 CANCELLED，service 在 commit 确认后返回实际状态；未知只查原事实，不换身份重跑。
 
-主终态只查同 Run/Attempt 的 PRIMARY，不把多个子 Session 当查询错误。取消覆盖时保留事件已观察用量但不保存成功正文；Session usage 与账本另见[用量投影](run-budgets.md#用量现在流向哪里)。
+主终态只处理同 Run/Attempt 的 PRIMARY；取消覆盖保留已观察用量、丢弃成功正文，[Session 用量](run-budgets.md#用量现在流向哪里)与账本另算。
 
 ### 等待提交仍是独立边界
 
-普通事件、suspend_for_interaction、suspend_for_proposal 已共用取消拒绝检查：锁后先验 lease/状态/事件身份，再查持久取消，随后才分配 sequence/新增记录。取消不能使旧 lease 或外来事件合法；TEXT_DELTA 不走持久路径。
+普通事件及 interaction/proposal 等待共用检查：锁后验 lease/状态/事件身份、持久取消，再分配 sequence/新增记录。取消不恢复旧 lease、不合法化外来事件；TEXT_DELTA 不持久化。
 
 ```text
 TX A：合法身份/lease → 发现取消 → 回滚等待/事件
@@ -83,13 +81,13 @@ TX B：重新取锁/验证 lease 与持久意图
   └─ 失效：旧 Worker 退出
 ```
 
-A 不新增待办、checkpoint、Session、事件/Outbox 或预授权 Effect，但不等于 B 已提交。两事务间可崩溃/失去 lease；意图保留，由合法恢复处理，不持锁 interrupt。等待先提交时按已存状态取消，独立 Effect 不被视为撤销。
+A 不留待办/checkpoint/Session/事件/Outbox/预授权 Effect，也不证明 B 完成。两事务间崩溃或失权由合法恢复接手，不持锁 interrupt；等待先提交则按已存状态取消，不撤销独立 Effect。
 
 ### Tool 调用的提交与重放
 
-ToolAuditLease 是调用回执，不是 Worker lease。Executor 在主 stream 的消费与关闭范围内绑定私有原 claim；MCP runtime 捕获该范围，子调用继承同 Run/Attempt，原 token 不进入 RunContext、Provider 参数或 SDK options。范围退出即撤销本地许可，但不证明模型或进程已停。
+ToolAuditLease 是调用回执，不是 Worker lease。Executor 在主 stream 消费/关闭范围绑定私有原 claim，MCP 捕获、子调用继承同 Run/Attempt；token 不进 RunContext、Provider 参数或 SDK options。退出撤销本地许可，不证明进程停止。
 
-注册、Provider 调用前确认、成功/失败保存均按 Run → Segment → Attempt → ToolCall 取锁，核对原调用完整身份、运行状态、lease 与持久取消；等锁、取消查询和 flush 后重新取时间。Provider I/O 不在锁内，最后检查和数据库 commit 仍不是原子时钟判定。
+注册、调用前确认、结果保存均按 Run → Segment → Attempt → ToolCall 取锁，验完整原身份、状态、lease、取消；等锁、取消查询、flush 后取新时间。Provider I/O 在锁外，最终检查不保证物理 commit 时刻的 lease。
 
 | 原调用事实 | 处理 |
 | --- | --- |
@@ -99,27 +97,25 @@ ToolAuditLease 是调用回执，不是 Worker lease。Executor 在主 stream �
 | 已存成功属于旧 Attempt | 仅同 SDK Session 的合法 RESUME 可读；不把原 Tool/Evidence 改归当前 Attempt，fork/replace 不借用 |
 | 注册或成功提交响应未知 | 不当作回滚，不补写失败或换键重跑；后续原调用查询区分成功与未决 |
 
-首次等待前固定参数、响应及 Evidence 的嵌套内容，不能因 frozen dataclass 外形而信任可变 mapping。失效/取消后的晚到 Provider 不能发布成功 Evidence；已经写入的可变 workspace 文件不因此回滚。[v2 附件](results-evaluation.md#可信附件的发布与读取)在同一门禁下保存原字节与成功回执，成功重放再核验保存内容；此门禁不提供独立 Effect、子 Session recorder、远端精确一次或真实进程停止保证。
+首次 await 前复制参数、响应及 Evidence 的嵌套内容，frozen dataclass 不冻结 mapping。失权/取消后的晚到结果不发布成功 Evidence，已改 workspace 不回滚。[v2 附件](results-evaluation.md#可信附件的发布与读取)同门禁保存原字节/回执，重放再验内容；独立 Effect、子 Session recorder 和进程停止不由此保证。
 
 ## 收尾、终态与晚到信息
 
-当前主执行先保存 Result/终态，再 finally 关闭 stream；子执行先关闭 stream/校验结果，再保存 Session/Tool 审计。首事件前取消及超时另有先收束 await 的路径。
+当前主执行先存 Result/终态再关 stream，子执行先关流/验结果再存 Session/Tool；首事件前取消/超时先收束 await。主 _close_stream 吞普通关闭异常，disconnect 失败也移除 active 注册，不能据“无活动 Session”证明退出。
 
-主 _close_stream 会吞普通关闭异常，Engine disconnect 失败也会移除 active 注册；没有活动 Session 不是退出证明。目标要求：
+待完善的停止协议必须满足：
 
-1. 准备、事件等待、清理和提交各有唯一所有者；不重复取消兄弟清理，真实进程须有界停止/核对，wait_for 不等于硬杀。
-2. DB 锁外清理，锁后以当前时间 fencing。done 会影响 heartbeat 寿命，不能假定 finally 都续租，也不能无限清理无限占权。
-3. 停止事实独立追加核对；终态 Run 不重开、不在最后 RUN_SNAPSHOT 后补事件。当前尚无完整持久停止回执/查询接口。
-4. 晚到用量由可信核对方按原身份处理；旧 Worker 不复权，未知占用不退款。子 v1 的必需 Session/Gateway 审计不放宽。
+1. 准备/等待/清理/提交各有唯一所有者；不重复取消兄弟清理，真实进程有界停止并核对，wait_for 不是硬杀。
+2. 锁外清理、锁后 fencing；done 会影响 heartbeat，不假定 finally 持续续租，也不无限占权。
+3. 独立追加停止核对，不重开终态、不在末次 RUN_SNAPSHOT 后补事件；完整持久回执/查询尚缺。
+4. 可信核对方按原身份处理晚到用量，旧 Worker 不复权、未知占用不退款；子 v1 必需审计不降级。
 
 ## 兼容与开发接续
 
-保持准备监督、首事件取消、终态/等待与 Tool/Artifact 审计门禁及子 TaskGroup；接续真实锁竞争、事务间崩溃、提交不明及进程清理，再将停止核对身份与[共享预算](run-budgets.md)接齐。附件发布与授权读取不证明进程停止或模型用量结清。
-
-现有 endpoint/RunStatus/SSE 不变；旧 Brief/Result/事件不回写，缺原因/回执不补造。新增公开信息同步版本化 DTO、授权 allowlist、Web validator 与三语，不临时塞 STOPPING 状态。
+保持既有监督/Tool/Artifact/TaskGroup 门禁，停止核对与[共享预算](run-budgets.md)接续范围见[计划 R07](../planning/roadmap.md#r07-run-与审计)。endpoint/RunStatus/SSE 不变，旧 Brief/Result/事件不回写、缺回执不补造；新增公开信息须版本化同步，不临时增加 STOPPING。
 
 ## 验收矩阵
 
 覆盖准备取消/超时、connect/receive 无首事件、清理暂停、兄弟清理交错、无原因 interrupted、取消与终态两种提交顺序、等待拒绝后失去 lease、等待先提交后取消、多子 Session 下只终态化 PRIMARY、disconnect 失败和终态后晚到用量。
 
-入口：[执行结果回归](../../PJM/backend/tests/worker/test_execution_outcomes.py)、[取消写入回归](../../PJM/backend/tests/runs/test_cancelled_execution_writes.py)。真实事务/进程与 Web 事实展示分别验证，不把 task 结束或文档浏览检查当业务停止验收。
+入口：[执行结果](../../SKM/backend/tests/worker/test_execution_outcomes.py)、[取消写入](../../SKM/backend/tests/runs/test_cancelled_execution_writes.py)。真实事务、进程停止与 Web 展示分别验收。

@@ -1,10 +1,10 @@
 # 起動と初期管理者
 
-初回起動の手順。既存環境の更新は[公開・移行](deployment.md)、データ復元は[backup・復元](backup-recovery.md)、故障時は [Runbook](runbook.md)へ進む。コマンドは `PJM/` で実行する。
+初回起動の手順。更新は[公開・移行](deployment.md)、復元は[backup](backup-recovery.md)、故障は [Runbook](runbook.md)へ。コマンドは対象環境の `SKM/` で実行する。
 
 ## Compose の前提
 
-Linux、Python 3.12（標準 library のみ）、Docker Engine / Compose v2、共有 Traefik と external edge network が必要。Compose は config JSON / up --wait を備えた版を対象環境で検証する。ProjectMind は Traefik を配備せず、host port を公開しない。
+Linux、Python 3.12 標準 library、Docker Engine / Compose v2、共有 Traefik と external edge network が必要。config JSON / up --wait 対応版を対象環境で検証する。Traefik の配備と host port 公開は行わない。
 
 `.env` が無い初回だけ実行し、既存設定を上書きしない。
 
@@ -13,39 +13,39 @@ umask 077
 cp .env.example .env
 ```
 
-host/context path、Traefik network/entryPoint、DB/storage password、model 設定を対象環境に合わせる。production は HTTPS を使う。[共通設定入口](deployment.md#环境文件与配置边界)が ENV_FILE を補間と Backend の同一 source に固定する。既定以外の project は shell の COMPOSE_PROJECT_NAME または明示 option で選び、ファイル内の同名値に依存しない。
+host/context path、Traefik、DB/storage password、model を設定し、production は HTTPS を使う。[共通入口](deployment.md#环境文件与配置边界)の ENV_FILE を使い、非既定 project は shell の COMPOSE_PROJECT_NAME または明示 option で選ぶ（ファイル内同名値は無効）。
 
-新しい文書 storage 世代用に UUID を一度生成し、`.env.example` の `PROJECTMIND_OBJECT_STORAGE_NAMESPACE_ID` 行を有効化して設定する。API/Worker と復元清単で同じ値を保持し、storage 再作成時は新 UUID にする。未設定では文書 blob 操作を拒否する。既存文書へ自動で帰属を補わないため、更新時は[帰属と移行条件](../design/document-lifecycle.md#存储归属与配置切换)を先に確認する。
+新 storage 世代の UUID を `SKILLMIND_OBJECT_STORAGE_NAMESPACE_ID` に設定し、API/Worker と復元清単で共有する。再作成時は新 UUID、未設定では文書 blob 操作を拒否する。旧文書は自動帰属されないため[移行条件](../design/document-lifecycle.md#存储归属与配置切换)を確認する。
 
 ```bash
 make config
 make build
 ```
 
-各段階の失敗時は停止する。config は展開した Secret を表示しない。移送済みの検証済み image を使う場合だけ build を省き、[配備清単](deployment.md#迁移前置与执行)の daemon/project/image ID・archive と確認変数を設定して deploy-load を行う。新規環境も既存の同名 project がないこと、入口閉鎖と必要な復元手段を確認する。
+失敗時は停止する。config は Secret を表示しない。検証済み image を移送した場合だけ build を省き、[配備清単](deployment.md#迁移前置与执行)と確認変数を使って deploy-load を行う。新規環境も同名 project の不存在、入口閉鎖、復元手段を確認する。
 
-以下は対象の基盤 service と bucket を作成する操作。承認済み環境で一つずつ実行し、失敗時は進まない：
+承認済み環境で基盤 service と bucket を順に作成する。失敗時は進まない：
 
 ```bash
 python3 scripts/compose.py -- up -d --no-build --no-deps --pull never --wait postgres redis object-storage
 python3 scripts/compose.py -- up --no-build --no-deps --pull never --exit-code-from object-storage-init object-storage-init
 ```
 
-同じ配備清単と確認変数で `make deploy-migrate` → `make deploy-api` を個別実行する。make run も API/Web の検査付き起動で、Worker は起動しない。初期 ADMIN と権限を確認した後に[背景放行](deployment.md#启动与放行)を別途承認する。preflight は DB migration/Redis の基線で、業務実行の保証ではない。
+同じ清単/変数で `make deploy-migrate` → `make deploy-api` を個別実行する。make run も API/Web のみ。ADMIN/権限確認後に[背景放行](deployment.md#启动与放行)を別途承認する。preflight は DB/Redis の基線であり業務保証ではない。
 
-新 Run/Effect の配送は既定で無効。業務実行には `PROJECTMIND_WORKER_DISPATCH_ENABLED=true` が必要だが、false は既存 job・Schedule・recovery を止める[保守 mode ではない](deployment.md#一个例子关闭-dispatch-后仍有工作)。
+新 Run/Effect 配送には `SKILLMIND_WORKER_DISPATCH_ENABLED=true` が必要。既定 false でも既存 job/Schedule/recovery は止まらず、[保守 mode ではない](deployment.md#一个例子关闭-dispatch-后仍有工作)。
 
 ## 最初の ADMIN を作成する
 
 migration 成功後、既存データを消さない CLI を一度実行する。
 
 ```bash
-python3 scripts/compose.py -- exec api python -m projectmind.ops.bootstrap_admin
+python3 scripts/compose.py -- exec api python -m skillmind.ops.bootstrap_admin
 ```
 
-email、display name、password を対話入力する。migration が作成した Organization を使い、最初の ADMIN と CREATED 安全イベントを追加する。DISABLED を含め ADMIN が既にいれば拒否する。匿名 bootstrap API、既存管理者の password 再設定・復元機能ではない。
+email/display name/password を対話入力し、既定 Organization に ADMIN と CREATED 安全イベントを追加する。DISABLED を含め既存 ADMIN があれば拒否する。匿名 API や password 再設定/復元機能ではない。
 
-**`make bootstrap-admin` は全データ再初期化であり、通常の管理者作成には使わない。** PostgreSQL、Redis、object storage、Run workspace の volume を削除する。全消去を明示的に選び、対象と復元手段を確認した場合だけ使用する。
+**`make bootstrap-admin` は PostgreSQL・Redis・object storage・Run workspace の全 volume を削除する再初期化。通常の管理者作成には使わない。** 全消去を明示的に選び、対象と復元手段を確認した場合だけ使用する。
 
 ## 最初の業務実行
 
@@ -57,10 +57,10 @@ email、display name、password を対話入力する。migration が作成し�
 
 ## Image 移送と更新
 
-Windows PowerShell の `PJM/` で `./scripts/export-images.ps1` を実行する。Python 3.12 が必要で、必要なら -PythonCommand に executable を指定する。既定出力は `images/projectmind-images.tar`。script は既存 image を保存するだけで build/pull せず、存在しない第三者 image を除外することがある。archive と実 image ID/checksum を受控清単に記録する。context path を変える場合は Web も再 build する。
+Windows PowerShell の `SKM/` で `./scripts/export-images.ps1`（Python 3.12、必要なら -PythonCommand）を実行する。既定出力は `images/skillmind-images.tar`。build/pull はせず、application image 不足は失敗、第三者 image 不足は警告して除外する。context path 変更時は Web を再 build する。
 
-転送後は[公開・移行](deployment.md#迁移前置与执行)へ進む。make deploy は help のみで、load/migrate/api/worker を個別に進める。旧 image は削除せず、各段階の失敗時に自動復旧・後続起動をしない。
+既存 tar は既定で上書きしない。-ArchiveName で版別に保存し、-Force は成功後に同名 tar を置換するため唯一の回退資産には使わない；失敗時は旧 tar を保持する。実 image ID と送受信双方の checksum を清単で照合するが、checksum は出所の真正性を証明しない。export 成功後に[公開・移行](deployment.md#迁移前置与执行)へ進み、旧 image を保持する。make deploy は help のみで、失敗後に自動続行しない。
 
 ## 操作の区別
 
-`make` は状態表示、`make stop` は container を保持して停止、`make down` は container/network を削除して永続 volume を保持する。起動・更新・全初期化は上記の異なる操作であり、相互の代用にしない。
+`make` は状態表示、`make stop` は container を保持して停止、`make down` は container/network を削除して永続 volume を保持する。起動・更新・全初期化の代用にはしない。

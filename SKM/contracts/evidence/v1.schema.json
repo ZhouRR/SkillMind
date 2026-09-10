@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/evidence/v1.schema.json",
+  "title": "Skillmind Evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "evidence_ref",
+    "run_id",
+    "tool_call_id",
+    "evidence_type",
+    "source_uri",
+    "source_locator",
+    "content_hash",
+    "snapshot_uri",
+    "excerpt",
+    "metadata",
+    "created_at"
+  ],
+  "properties": {
+    "evidence_ref": { "type": "string", "pattern": "^ev_[a-zA-Z0-9_-]+$" },
+    "run_id": { "type": "string", "format": "uuid" },
+    "tool_call_id": { "type": "string", "format": "uuid" },
+    "evidence_type": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "source_uri": { "type": "string", "format": "uri", "maxLength": 2048 },
+    "source_locator": { "type": "object" },
+    "content_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "snapshot_uri": {
+      "type": ["string", "null"],
+      "format": "uri",
+      "maxLength": 2048
+    },
+    "excerpt": { "type": ["string", "null"], "maxLength": 2000 },
+    "metadata": { "type": "object" },
+    "created_at": { "type": "string", "format": "date-time" }
+  }
+}

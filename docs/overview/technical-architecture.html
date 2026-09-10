@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ProjectMind 技术架构</title>
+  <title>Skillmind 技术架构</title>
   <style>
     /* 顧客向け提示資料。外部 CDN(mermaid/html2canvas)依存を排し、offline の客先環境でも欠けなく表示・印刷できる純 HTML/CSS 構成。 */
     :root {
@@ -545,7 +545,7 @@
         <div>
           <div class="brand-line">
             <span class="brand-mark">PM</span>
-            <span><strong>ProjectMind</strong><small>Agent Workspace</small></span>
+            <span><strong>Skillmind</strong><small>Agent Workspace</small></span>
           </div>
           <p class="eyebrow">技术架构总览</p>
           <h1>为可审计的 AI 执行而设计的工程架构</h1>
@@ -605,7 +605,7 @@
           <section class="layer">
             <div class="layer-title"><h3>前端层</h3><span>用户交互与受控模块宿主</span><code class="tech-chip">React 19 · TypeScript · Vite</code></div>
             <div class="component-grid">
-              <div class="component"><strong>ProjectMind Web</strong><small>概览、项目、任务中心、工作空间、文档、Skills 与历史；会话登录 + 项目上下文导航</small></div>
+              <div class="component"><strong>Skillmind Web</strong><small>概览、项目、任务中心、工作空间、文档、Skills 与历史；会话登录 + 项目上下文导航</small></div>
               <div class="component"><strong>Workspace Host</strong><small>观察一个 Run：执行动态、交互审批、Session、结果与证据；任务选择归任务中心</small></div>
               <div class="component planned"><strong>FrontendModule</strong><small>Skill 自带界面模块的受控宿主;当前标准版本禁用,只使用标准组件</small></div>
             </div>
@@ -840,22 +840,22 @@
       <div class="capture-area">
         <div class="view-heading">
           <h2>部署结构(Linux + Docker Compose,复用既有入口)</h2>
-          <p>复用共享 Traefik，不另建网关、不发布宿主机端口。配置与停写要求见 <a href="../index.html#docs/operations/deployment.md::">部署手册</a>，服务声明见 <a href="../../PJM/compose.yaml">compose.yaml</a>。</p>
+          <p>复用共享 Traefik，不另建网关、不发布宿主机端口。配置与停写要求见 <a href="../index.html#docs/operations/deployment.md::">部署手册</a>，服务声明见 <a href="../../SKM/compose.yaml">compose.yaml</a>。</p>
         </div>
 
         <div class="outside-services">
-          <h3>既有共享入口(ProjectMind Compose 外部)</h3>
+          <h3>既有共享入口(Skillmind Compose 外部)</h3>
           <div class="service-row">
             <div class="service-card"><code>existing-traefik</code><p>统一监听 80/443 与 TLS 终止;证书、Dashboard、入口策略均由环境运维统一管理</p></div>
-            <div class="service-card"><code>域名 + 上下文路径</code><p><code>/projectmind/api/*</code>(含 SSE)路由到 api;<code>/projectmind/*</code> 路由到 web</p></div>
-            <div class="service-card"><code>external edge network</code><p>由运维预创建并接入既有 Traefik;ProjectMind 仅声明最小动态路由</p></div>
+            <div class="service-card"><code>域名 + 上下文路径</code><p><code>/skillmind/api/*</code>(含 SSE)路由到 api;<code>/skillmind/*</code> 路由到 web</p></div>
+            <div class="service-card"><code>external edge network</code><p>由运维预创建并接入既有 Traefik;Skillmind 仅声明最小动态路由</p></div>
           </div>
         </div>
 
         <div class="deployment-arrow">HTTPS · REST + SSE · 会话认证</div>
 
         <div class="compose-network">
-          <h3>ProjectMind Compose:external edge + internal backend(共 7 服务)</h3>
+          <h3>Skillmind Compose:external edge + internal backend(共 7 服务)</h3>
           <div class="service-row">
             <div class="service-card"><code>web</code><p>React 静态资源与工作空间;仅加入 edge 网络,不发布宿主机端口</p></div>
             <div class="service-card"><code>api</code><p>FastAPI:认证、任务、执行与 SSE;加入 edge + backend,不发布宿主机端口</p></div>
@@ -880,7 +880,7 @@
           <table>
             <thead><tr><th>服务</th><th>网络 / 端口</th><th>说明</th></tr></thead>
             <tbody>
-              <tr><td><code>existing-traefik</code></td><td>Compose 外部;宿主机 80/443</td><td>ProjectMind 不管理 entryPoint、TLS、证书、Dashboard 或 Docker Socket</td></tr>
+              <tr><td><code>existing-traefik</code></td><td>Compose 外部;宿主机 80/443</td><td>Skillmind 不管理 entryPoint、TLS、证书、Dashboard 或 Docker Socket</td></tr>
               <tr><td><code>web</code></td><td>external edge;仅容器内部端口</td><td><code>{contextPath}/*</code> 路由;不做 API 反向代理</td></tr>
               <tr><td><code>api</code></td><td>external edge + internal backend;仅容器内部端口</td><td><code>{contextPath}/api/*</code> 优先路由,包含 SSE 长连接</td></tr>
               <tr><td><code>worker</code></td><td>internal backend + egress;无入口路由</td><td>每个 Run workspace 隔离；主 Session 顺序执行，受控子 Session 可并行；Provider 解析凭据，不交给 Agent</td></tr>
@@ -893,7 +893,7 @@
 
         <div class="boundary-list">
           <div class="boundary-item">部署前置条件:由环境运维提供公开域名、HTTPS entryPoint、已接入 Traefik 的 external Docker network 与可信转发头范围。</div>
-          <div class="boundary-item">ProjectMind 只在 web/api 上声明最小动态路由;不包含 Traefik 镜像、宿主机端口、静态配置、证书解析器、Dashboard 或 Docker Socket 挂载。</div>
+          <div class="boundary-item">Skillmind 只在 web/api 上声明最小动态路由;不包含 Traefik 镜像、宿主机端口、静态配置、证书解析器、Dashboard 或 Docker Socket 挂载。</div>
           <div class="boundary-item">API 优先匹配 <code>{contextPath}/api/*</code>,Web 匹配 <code>{contextPath}/*</code>;入口剥离上下文路径后由 FastAPI 内部 <code>/api</code> 路由处理。</div>
           <div class="boundary-item">若既有入口不使用 Docker Provider,可由运维在外部配置等价路由;服务边界与「无宿主机端口」规则不变。</div>
         </div>
@@ -916,7 +916,7 @@
 
   <footer>
     <div class="footer-inner">
-      <span>ProjectMind · Skill 驱动的项目管理 AI 执行平台</span>
+      <span>Skillmind · Skill 驱动的项目管理 AI 执行平台</span>
       <span>可视化摘要 · <a href="../index.html#docs/planning/roadmap.md::">实施计划</a> · <a href="../index.html#docs/overview/architecture.md::">设计与代码映射</a></span>
     </div>
   </footer>

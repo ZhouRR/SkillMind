@@ -1,0 +1,7 @@
+{
+  "protocol": "skillmind.redmine-effect/v1",
+  "provider": "redmine",
+  "capabilities": ["issue.update/v1"],
+  "atomic_precondition": "revision",
+  "idempotency": "key"
+}

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/errors/problem/v1.schema.json",
+  "title": "Skillmind Problem Details v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "title", "status", "detail", "instance", "code", "request_id"],
+  "properties": {
+    "type": { "type": "string", "format": "uri" },
+    "title": { "type": "string", "minLength": 1 },
+    "status": { "type": "integer", "minimum": 400, "maximum": 599 },
+    "detail": { "type": "string" },
+    "instance": { "type": "string", "pattern": "^/" },
+    "code": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "request_id": { "type": ["string", "null"] },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["location", "message", "kind"],
+        "properties": {
+          "location": { "type": "array", "items": { "type": "string" } },
+          "message": { "type": "string" },
+          "kind": { "type": "string" }
+        }
+      }
+    }
+  }
+}
+

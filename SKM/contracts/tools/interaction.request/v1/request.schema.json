@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/interaction.request/v1/request.schema.json",
+  "title": "interaction.request/v1 request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["interaction_type", "prompt", "rationale", "impact", "options", "allow_multiple", "required", "expires_in_seconds", "continuation_mode", "checkpoint"],
+  "properties": {
+    "interaction_type": { "enum": ["CLARIFICATION", "CHOICE", "REVIEW"] },
+    "prompt": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "rationale": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "impact": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "options": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "label", "description", "recommended"],
+        "properties": {
+          "key": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$", "maxLength": 128, "description": "Stable option identity, unique within this question." },
+          "label": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "description": { "type": "string", "minLength": 1, "maxLength": 1000 },
+          "recommended": { "type": "boolean" }
+        }
+      }
+    },
+    "allow_multiple": { "type": "boolean" },
+    "required": { "type": "boolean" },
+    "expires_in_seconds": { "type": "integer", "minimum": 300, "maximum": 604800 },
+    "continuation_mode": { "enum": ["RESUME", "FORK", "REPLACE"] },
+    "checkpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "confirmed_facts", "evidence_refs", "artifact_refs", "change_proposal_refs"],
+      "properties": {
+        "summary": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "confirmed_facts": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "type": "string", "minLength": 1, "maxLength": 1000 }
+        },
+        "evidence_refs": {
+          "type": "array",
+          "maxItems": 200,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^ev_[a-zA-Z0-9_-]+$" }
+        },
+        "artifact_refs": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^art_[a-zA-Z0-9_-]+$" }
+        },
+        "change_proposal_refs": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^cp_[a-zA-Z0-9_-]+$" }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "interaction_type": { "const": "CHOICE" } }, "required": ["interaction_type"] },
+      "then": { "properties": { "options": { "minItems": 2 } } },
+      "else": { "properties": { "allow_multiple": { "const": false } } }
+    }
+  ]
+}

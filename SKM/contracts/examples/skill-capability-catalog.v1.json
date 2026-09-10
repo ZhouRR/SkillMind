@@ -1,0 +1,127 @@
+{
+  "catalog_version": "skillmind.tool-catalog/1",
+  "checksum": "sha256:8b541cb757e6520c6237a7c5dca1557bde562196bb10fcbf75e4c7e103231ce3",
+  "capabilities": [
+    {
+      "capability": "change.propose/v1",
+      "description": "Create an audited ChangeProposal without applying an external effect.",
+      "request_schema": "tools/change.propose/v1/request.schema.json",
+      "response_schema": "tools/change.propose/v1/response.schema.json",
+      "error_schema": "tools/change.propose/v1/error.schema.json",
+      "providers": [
+        "platform"
+      ]
+    },
+    {
+      "capability": "document.read/v1",
+      "description": "Read one project document at a fixed content hash.",
+      "request_schema": "tools/document.read/v1/request.schema.json",
+      "response_schema": "tools/document.read/v1/response.schema.json",
+      "error_schema": "tools/document.read/v1/error.schema.json",
+      "providers": [
+        "project"
+      ]
+    },
+    {
+      "capability": "interaction.request/v1",
+      "description": "Pause a Run and request structured user input through Skillmind.",
+      "request_schema": "tools/interaction.request/v1/request.schema.json",
+      "response_schema": "tools/interaction.request/v1/response.schema.json",
+      "error_schema": "tools/interaction.request/v1/error.schema.json",
+      "providers": [
+        "platform"
+      ]
+    },
+    {
+      "capability": "issue.read/v1",
+      "description": "Read one issue from a configured provider.",
+      "request_schema": "tools/issue.read/v1/request.schema.json",
+      "response_schema": "tools/issue.read/v1/response.schema.json",
+      "error_schema": "tools/issue.read/v1/error.schema.json",
+      "providers": [
+        "redmine"
+      ]
+    },
+    {
+      "capability": "issue.update/v1",
+      "description": "Apply an approved Redmine issue field update with optimistic concurrency and read-back.",
+      "request_schema": "tools/issue.update/v1/request.schema.json",
+      "response_schema": "tools/issue.update/v1/response.schema.json",
+      "error_schema": "tools/issue.update/v1/error.schema.json",
+      "providers": [
+        "redmine"
+      ]
+    },
+    {
+      "capability": "repository.read/v1",
+      "description": "Read repository content at a fixed revision.",
+      "request_schema": "tools/repository.read/v1/request.schema.json",
+      "response_schema": "tools/repository.read/v1/response.schema.json",
+      "error_schema": "tools/repository.read/v1/error.schema.json",
+      "providers": [
+        "git",
+        "svn"
+      ]
+    },
+    {
+      "capability": "repository.write/v1",
+      "description": "Land an approved repository change as a platform-owned branch commit; Skillmind applies it only after approval and never on the default branch.",
+      "request_schema": "tools/repository.write/v1/request.schema.json",
+      "response_schema": "tools/repository.write/v1/response.schema.json",
+      "error_schema": "tools/repository.write/v1/error.schema.json",
+      "providers": [
+        "git"
+      ]
+    },
+    {
+      "capability": "subagent.dispatch/v1",
+      "description": "Fan out bounded read-only sub-analyses within the current Run and collect their conclusions",
+      "request_schema": "tools/subagent.dispatch/v1/request.schema.json",
+      "response_schema": "tools/subagent.dispatch/v1/response.schema.json",
+      "error_schema": "tools/subagent.dispatch/v1/error.schema.json",
+      "providers": [
+        "platform"
+      ]
+    },
+    {
+      "capability": "workspace.read/v1",
+      "description": "Read one UTF-8 file from the isolated Run workspace.",
+      "request_schema": "tools/workspace.read/v1/request.schema.json",
+      "response_schema": "tools/workspace.read/v1/response.schema.json",
+      "error_schema": "tools/workspace.read/v1/error.schema.json",
+      "providers": [
+        "workspace"
+      ]
+    },
+    {
+      "capability": "workspace.search/v1",
+      "description": "Search UTF-8 files in the isolated Run workspace.",
+      "request_schema": "tools/workspace.search/v1/request.schema.json",
+      "response_schema": "tools/workspace.search/v1/response.schema.json",
+      "error_schema": "tools/workspace.search/v1/error.schema.json",
+      "providers": [
+        "workspace"
+      ]
+    },
+    {
+      "capability": "workspace.write/v1",
+      "description": "Write one UTF-8 file to the isolated Run workspace or output.",
+      "request_schema": "tools/workspace.write/v1/request.schema.json",
+      "response_schema": "tools/workspace.write/v1/response.schema.json",
+      "error_schema": "tools/workspace.write/v1/error.schema.json",
+      "providers": [
+        "workspace"
+      ]
+    },
+    {
+      "capability": "workspace.write/v2",
+      "description": "Write UTF-8 drafts within the isolated Run; output files return committed immutable Artifact references, while workspace drafts do not.",
+      "request_schema": "tools/workspace.write/v2/request.schema.json",
+      "response_schema": "tools/workspace.write/v2/response.schema.json",
+      "error_schema": "tools/workspace.write/v2/error.schema.json",
+      "providers": [
+        "workspace"
+      ]
+    }
+  ]
+}

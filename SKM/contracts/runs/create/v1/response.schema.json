@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/runs/create/v1/response.schema.json",
+  "title": "Create Run response v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "run_id",
+    "project_id",
+    "task_id",
+    "status",
+    "row_version",
+    "created_at",
+    "idempotent_replay"
+  ],
+  "properties": {
+    "run_id": { "type": "string", "format": "uuid" },
+    "project_id": { "type": "string", "format": "uuid" },
+    "task_id": { "type": "string", "format": "uuid" },
+    "status": {
+      "enum": [
+        "QUEUED",
+        "PREPARING",
+        "RUNNING",
+        "RETRY_PENDING",
+        "WAITING_PERMISSION",
+        "WAITING_FOR_INPUT",
+        "WAITING_FOR_APPROVAL",
+        "SUCCEEDED",
+        "FAILED",
+        "CANCELLED"
+      ]
+    },
+    "row_version": { "type": "integer", "minimum": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "idempotent_replay": { "type": "boolean" }
+  }
+}

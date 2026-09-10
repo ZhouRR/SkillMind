@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/repository.read/v1/request.schema.json",
+  "title": "repository.read/v1 request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["revision", "path", "purpose"],
+  "properties": {
+    "revision": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "not": { "pattern": "(^/|(^|/)\\.\\.(/|$))" }
+    },
+    "line_start": { "type": "integer", "minimum": 1 },
+    "line_end": { "type": "integer", "minimum": 1 },
+    "purpose": { "type": "string", "minLength": 1, "maxLength": 500 }
+  }
+}

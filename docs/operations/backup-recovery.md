@@ -1,10 +1,10 @@
 # 备份、恢复与版本回退
 
-命令在目标部署目录 `PJM/` 执行，需确认环境、受控资产位置与获批维护窗口。首次起动见[Quickstart](quickstart.md)，发布顺序见[迁移手册](deployment.md)。目标或材料不明时停止。
+命令在目标 `SKM/` 执行，先确认环境、受控资产和维护窗口，材料不明即停。起动见[Quickstart](quickstart.md)，发布见[迁移手册](deployment.md)。
 
 ## 配备前备份
 
-先阻止新业务/触发、结算在途 Effect；结果未知按[原执行身份对账](runbook.md#incident-与-recovery)。确认所有 API/Worker 写入者停止后，在同一停写窗口取得恢复点。dispatch=false、仅停止一个实例或相同文件时间戳都不足以证明一致。
+先关新业务/触发、核清在途 Effect，未知按[原身份对账](runbook.md#incident-与-recovery)。全部 API/Worker 写入者停止后，在同一窗口取得恢复点；dispatch=false、停单实例或文件同时间戳不证明一致。
 
 ### 一致恢复点包含什么
 
@@ -17,74 +17,74 @@
 | KEK | 所需旧版本的独立受控保管引用，不与 dump 放一起 |
 | 外部对账事实 | 原 Proposal/Effect、目标 revision、apply/read-back 及恢复点后的变化 |
 
-dump、blob 和 workspace 可含密码 hash、密文或业务正文，须访问控制，不进入公开附件。清单只记录恢复点 ID、UTC 窗口、资产引用/校验值、操作者、结果和缺项，不记录 Secret。RPO/RTO 与保留期由负责人确认，当前没有自动跨存储备份或恢复时效保证。
+dump/blob/workspace 含敏感材料，须访问控制、不作公开附件。清单只留恢复点 ID、UTC 窗口、资产引用/校验值、操作者、结果/缺项；KEK 独立保管。负责人确定 RPO/RTO/保留期，当前无自动跨存储备份或时效保证。
 
-Redis 不代替 DB；旧队列、Outbox 重投与调度在途需要专用恢复方案，不对未知 Redis 全库清空。文档元数据总量也不等于 bucket 实际占用，不从列表推导可清除的对象；见[文档生命周期](../design/document-lifecycle.md)。
+以下关联不能只靠公开字段或旧 dump 重建：
 
-可信附件原字节保存在 Evidence 的私有列，随同原 Tool/Run 恢复；不能只导出公开元数据，也不能用恢复后的 output 文件替代原字节。旧无绑定行保持未发布，下载和结果核验共用原 size/hash；具体边界见[附件发布](../design/results-evaluation.md#可信附件的发布与读取)。
+- Redis 不是 DB 正本；旧队列、Outbox 重投、调度在途另定恢复方案，不清未知 Redis 全库。
+- [附件](../design/results-evaluation.md#可信附件的发布与读取)：Evidence 私有原字节与 Tool/Run、size/hash 同恢复，不能用 output 文件替代；历史无绑定仍未发布。
+- 评价：保留原 Result、用户和 submission_key/request_hash。恢复点后提交可能缺失，原键 GET 未见不证明从未提交，不换键/合并相似记录补历史。
+- 预算：账户、预留、调用绑定、启动所有权 hash、观察/核对同恢复。hash 不重建原协调器 token，也不授新 Worker 启动权；旧 RESERVED/无绑定不证明后来未启动，未知不释放占用或换 invocation/owner 重跑。
+- [文档](../design/document-lifecycle.md)：意图/原回执/占用、清理记录、关闭标记/审计同恢复；标记与审计须双向一致。旧恢复点可能漏掉后来关闭/迟到 PUT，核清前不发布、清理或结算，关闭不证明远端停止。原 key 查询不授权重放 PENDING，未来精确版本/清理凭证也纳入恢复点。
 
-评价需连同原 Result、用户归属和 0041 submission_key/request_hash 恢复；只导出显示字段会丢失原提交确认能力。恢复点后新增评价可能不在旧 dump 中，原键 GET 未见不能证明它从未提交，不以换键重发或合并相似评价补造历史。
-
-预算账户、预留、原调用绑定、0043 启动所有权 hash、观察与核对回执须一起恢复。原启动 token 只属于存活协调器，不从 dump 的 hash 重建或向新 Worker 发放。恢复较早的 RESERVED/无绑定行不能证明恢复点后未启动；先核对原执行，未知占用不释放，不靠换 invocation 或 owner 再跑。
-
-存储 UUID 不是备份或服务端身份凭证。恢复到新 endpoint/bucket 或重新创建存储时，不能只改配置、复用旧 UUID 或改写文档摘要来让校验通过；须先核验原资产并完成受控归属迁移，当前尚无该工具。未绑定旧文档保留元数据并拒绝 blob 操作。0038 上传意图/原发布回执/占用、0039新旧文档清理记录、0042关闭标记及独立审计须随 dump 一起恢复；原 key 可查询，不据此自动重放 PENDING。关闭标记缺审计或反向不匹配不得修补放行；旧恢复点可能遗漏后来关闭，须对账后再开放发布。恢复点后的迟到 PUT 也须核对，关闭不证明远端停止。未来精确版本及清理凭证纳入同一恢复点，未对账前不清理或释放占用。
+存储 UUID 不证明服务端身份。换 endpoint/bucket 或重建存储须核原资产并做受控归属迁移，当前无该工具；不复用 UUID、改摘要绕过，未绑定旧文档保留元数据并拒绝 blob 操作。目录总量不等于 bucket 占用，不能据列表删对象。
 
 ### 取得并检查数据库备份
 
-以下只备份 DB，不替代 blob/workspace snapshot。两块在同一 shell 执行，mktemp 创建失败或 pg_dump 非零即停；新终端必须重新明确本次目录，不猜测变量。密码不写命令行。
+以下仅备份 DB。两块在同一 shell 执行，mktemp/pg_dump 失败即停；新终端重新确认目录，不猜变量。密码不入命令行。
 
 ```bash
 umask 077
-PJM_BACKUP_DIR="$(mktemp -d ./projectmind-backup-XXXXXXXX)" &&
+SKM_BACKUP_DIR="$(mktemp -d ./skillmind-backup-XXXXXXXX)" &&
 python3 scripts/compose.py -- exec -T postgres sh -ceu \
   'pg_dump --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --format=custom' \
-  > "${PJM_BACKUP_DIR:?Backup directory is required}/database.dump"
+  > "${SKM_BACKUP_DIR:?Backup directory is required}/database.dump"
 ```
 
-成功后检查非空、archive 目录及字节校验值。失败文件保留为现场，不标作有效备份。
+成功后查非空、archive 目录及 checksum；失败文件只作现场，不作有效备份。
 
 ```bash
 (
   set -eu
-  : "${PJM_BACKUP_DIR:?Specify the directory created for this backup}"
-  test -s "$PJM_BACKUP_DIR/database.dump"
+  : "${SKM_BACKUP_DIR:?Specify the directory created for this backup}"
+  test -s "$SKM_BACKUP_DIR/database.dump"
   python3 scripts/compose.py -- exec -T postgres pg_restore --list \
-    < "$PJM_BACKUP_DIR/database.dump" > "$PJM_BACKUP_DIR/database.toc"
-  docker image inspect projectmind/backend:0.1.0 projectmind/web:0.1.0 \
-    --format '{{.RepoTags}} {{.Id}}' > "$PJM_BACKUP_DIR/images.txt"
-  cd "$PJM_BACKUP_DIR"
+    < "$SKM_BACKUP_DIR/database.dump" > "$SKM_BACKUP_DIR/database.toc"
+  docker image inspect skillmind/backend:0.1.0 skillmind/web:0.1.0 \
+    --format '{{.RepoTags}} {{.Id}}' > "$SKM_BACKUP_DIR/images.txt"
+  cd "$SKM_BACKUP_DIR"
   sha256sum database.dump > database.dump.sha256
   sha256sum --check database.dump.sha256
 )
 ```
 
-子 shell 遇错即停。TOC 可能含业务对象名，仅受控保存。将全部资产纳入同一清单并转存；checksum 检查不是来源真实性或实际恢复演练。完整恢复点就绪前不删除旧镜像、不迁移，更不运行删除全 volume 的 `make bootstrap-admin`。
+子 shell 遇错即停，TOC 受控保存；全部资产同清单转存。checksum 不证明来源或可恢复性；完整恢复点就绪前不删旧镜像/迁移，更不执行全 volume 删除的 `make bootstrap-admin`。
 
 ## 数据库恢复
 
 **以下会删除并替换数据库，丢失恢复点后的本地数据。** 经负责人确认并保全当前现场后，先在隔离环境演练。
 
-恢复旧 DB 不撤销 Git/SVN/Redmine 等远端变更，还可能恢复已撤销 session/权限。例如 10:00 备份、10:05 撤权、10:07 外部 commit，恢复 10:00 后两项后续事实都须独立核对。未核清前保持隔离；没有通用权限修复/Effect 补账 CLI，不靠 SQL、bootstrap 或新幂等键补造结果。
+恢复旧 DB 不撤销远端变更，还可能复活撤销的 session/权限。恢复点后的撤权和 commit 均须独立对账；未核清保持隔离。没有通用权限修复/Effect 补账 CLI，不以 SQL、bootstrap 或新键补造结果。
 
 ### 恢复前的停止条件
 
-以下全部满足才继续：环境/Compose project/DB 名与角色/目标镜像/revision 已明确；可信 dump 的 checksum/archive 和关联 blob/workspace/config/KEK 齐全；当前现场另有备份；所有写入者已停；恢复点后的安全/外部变更有原身份对账方案。
+须同时确认：环境/project/DB/角色/镜像/revision；可信 dump/checksum/archive 及关联 blob/workspace/config/KEK；当前现场备份；全写入者停止；恢复点后安全/外部事实的原身份对账方案。
 
-将选定完整备份目录明确设为 `PJM_RESTORE_DIR`，保留原文件名及相对路径。以下只校验材料：
+明确将完整备份目录设为 `SKM_RESTORE_DIR`，保留原文件名/相对路径，先只校验材料：
 
 ```bash
 (
   set -eu
-  : "${PJM_RESTORE_DIR:?Specify the verified backup directory}"
-  test -s "$PJM_RESTORE_DIR/database.dump"
+  : "${SKM_RESTORE_DIR:?Specify the verified backup directory}"
+  test -s "$SKM_RESTORE_DIR/database.dump"
   python3 scripts/compose.py -- exec -T postgres pg_restore --list \
-    < "$PJM_RESTORE_DIR/database.dump" > /dev/null
-  cd "$PJM_RESTORE_DIR"
+    < "$SKM_RESTORE_DIR/database.dump" > /dev/null
+  cd "$SKM_RESTORE_DIR"
   sha256sum --check database.dump.sha256
 )
 ```
 
-成功后在已全局停写的窗口停止本目录服务，并在受控终端核对实际 DB/角色：
+成功后，在全局停写窗口停止本目录服务并核实 DB/角色：
 
 ```bash
 python3 scripts/compose.py -- stop api worker migrate
@@ -96,13 +96,13 @@ python3 scripts/compose.py -- exec -T postgres sh -ceu '
 
 ### 替换数据库
 
-仅在上述结果与已批准目标完全相符时执行。例子以原应用角色恢复；多 owner/自定义权限环境须另有验证过的方案。
+结果与批准目标完全相符才执行；示例用原应用角色，多 owner/自定义权限须另有已验证方案。
 
 ```bash
 (
   set -eu
-  : "${PJM_RESTORE_DIR:?Specify the verified backup directory}"
-  test -s "$PJM_RESTORE_DIR/database.dump"
+  : "${SKM_RESTORE_DIR:?Specify the verified backup directory}"
+  test -s "$SKM_RESTORE_DIR/database.dump"
   python3 scripts/compose.py -- exec -T postgres sh -ceu '
     dropdb --force --username="$POSTGRES_USER" "$POSTGRES_DB"
     createdb --username="$POSTGRES_USER" --owner="$POSTGRES_USER" "$POSTGRES_DB"
@@ -110,22 +110,20 @@ python3 scripts/compose.py -- exec -T postgres sh -ceu '
   python3 scripts/compose.py -- exec -T postgres sh -ceu '
     pg_restore --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" \
       --no-owner --single-transaction --exit-on-error
-  ' < "$PJM_RESTORE_DIR/database.dump"
+  ' < "$SKM_RESTORE_DIR/database.dump"
 )
 ```
 
-单事务/遇错退出只保护 pg_restore 导入，不撤销 dropdb/createdb、blob 或外部效果；失败可能留下空库，须保持业务关闭。大型 DB 若需其他策略应先演练，不临场删保护参数。参考 [pg_restore](https://www.postgresql.org/docs/17/app-pgrestore.html)。
+单事务仅保护 pg_restore，不撤销 dropdb/createdb、blob 或外部效果；失败可能留空库，保持业务关闭。其他大库策略先演练，不删保护参数，见 [pg_restore](https://www.postgresql.org/docs/17/app-pgrestore.html)。
 
 ### 恢复后验证
 
-恢复对应 blob/workspace、兼容镜像/配置及旧 KEK。核对 revision 后按[迁移审查](deployment.md#迁移与回退审查)决定是否 forward migration，Worker 继续隔离，不用普通 Compose up 绕过分阶段检查。
+恢复 blob/workspace、兼容镜像/配置与旧 KEK，核 revision 后按[迁移审查](deployment.md#迁移与回退审查)决定前进；Worker 保持隔离，不用普通 up 绕检查。
 
-放行前分别确认：用户/成员/Session 没有重新开放旧权限；Skill/文档/Artifact 字节与 Run/Result/Evidence 引用一致；终态可读与非终态续行分别成立；缺回执/输入/transcript 时拒绝而非补签；旧队列、lease、Schedule 与远端 Effect 已对账。记录实际耗时、数据损失、验收范围、残余问题和放行人。
-
-任一未知保持隔离，preflight 不替代这些证据。后台与普通入口按[分阶段放行](deployment.md#启动与放行)恢复。
+分别验旧权限未复活、资产字节/引用一致、终态可读与非终态可续、队列/lease/Schedule/Effect 已对账。缺回执/输入/transcript 拒绝而非补签；记录耗时、损失、范围、残余问题和放行人。未知继续隔离，preflight 不替代验收，后台与普通入口[分阶段放行](deployment.md#启动与放行)。
 
 ## 应用版本回退
 
-旧 API/Web/Worker 能理解当前 schema、数据、队列和非终态快照时，才可保持数据切换兼容旧镜像。兼容不明时不启动旧 Worker，评估完整恢复点和外部对账；无可信恢复点则保全现场、选 forward fix，不试跑破坏性 downgrade。
+旧 API/Web/Worker 能理解当前 schema、数据、队列和非终态快照才可保留数据回镜像。未知不启动旧 Worker；无可信恢复点保全现场、选 forward fix，不试跑破坏性 downgrade。
 
-回退仍按[发布阶段](deployment.md#迁移前置与执行)重新核对清单：旧 archive/checksum 与旧 Backend/Web image ID、当前 schema、配置和 daemon/project 都须明确。deploy-load 保留本地旧镜像，但这不保证完整旧 archive、第三方镜像或数据恢复点可用；同名 tag 不算回退方案。旧镜像的 migration-plan/head 检查不能理解当前 DB 时保持隔离，选择已评审的 forward fix 或完整恢复，不跳过门禁、stamp 或试删审计。API/Web、后台和普通业务分别放行，命令不会自动回滚。
+按[发布阶段](deployment.md#迁移前置与执行)重验旧 archive/checksum/image ID、当前 schema/配置及 daemon/project。保留旧镜像不保证 archive、第三方镜像或恢复点齐全，同名 tag 不算方案；旧 migration-plan/head 不识别当前 DB 时保持隔离，评审 forward fix/完整恢复，不 stamp 或删审计。API/Web、后台、普通入口分别放行，无自动回滚。

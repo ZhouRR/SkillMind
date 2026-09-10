@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/change.propose/v1/response.schema.json",
+  "title": "change.propose/v1 response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "deferred"],
+  "properties": {
+    "status": { "const": "success" },
+    "deferred": { "const": true }
+  }
+}

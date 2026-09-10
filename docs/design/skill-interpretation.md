@@ -1,129 +1,139 @@
 # Skill 解释与发布实现
 
-本页连接[语义契约](skill-contract.md)与代码，负责解释、确定性门禁和发布；运行协议见[Runtime](agent-runtime.md)，当前缺口见[计划 R06](../planning/roadmap.md#r06-skill-生命周期)。
+本页连接[语义契约](skill-contract.md)与实现，负责解释、确定性门禁和发布；运行见[Runtime](agent-runtime.md)，缺口见[计划 R06](../planning/roadmap.md#r06-skill-生命周期)。
 
 ## 目标与主流程
 
 ```text
-文件 → Normalize / Static Analyze → immutable SkillSource
+文件 → Normalize/Static Analyze → immutable SkillSource
   → 冻结 identity/catalog → 模型 Blueprint candidate
-  → 确定性验证 → Preview / 追加调整
-  → SkillVersion DRAFT → ADMIN 发布
-  → Project 显式启用精确版 → TaskCatalog/readiness
+  → 确定性验证 → Preview/追加调整 → SkillVersion DRAFT
+  → ADMIN 发布 → Project 启用精确版 → TaskCatalog/readiness
 ```
 
-当前导入、结构解释、调整/diff、发布与项目启用已有实现。parse 不调用模型，初始 Draft 可无蓝图，不能直接发布；ZIP/TAR 自动解包、远程 Git、TaskFlow 和生成模块执行不在这条已接链路中。
+parse 不调用模型，初始 Draft 可无蓝图、不可直接发布。ZIP/TAR、远程 Git、TaskFlow/生成模块执行不属于这条已接链路。
 
 ## 信任边界
 
-来源/附件/外部内容是数据，不覆盖平台规则。Tool/Shell 声明不授权，静态发现 credential 在解释前阻断；Interpreter 不读取 Project Secret/Integration、不发布、不建 Run。业务 required 不因缺工具而弱化，可重表达实现手段。
+来源/附件/外部内容不覆盖平台规则，Tool/Shell 声明不授权，credential 静态发现后在模型前阻断。Interpreter 不读 Project Secret/Integration、不发布或建 Run；可重表达手段，不因缺工具弱化 required。
 
 ## 代码责任
 
 | 入口 | 责任 |
 | --- | --- |
-| [importer](../../PJM/backend/src/projectmind/skills/importer.py) | 归一化、文件/引用、静态 Draft |
-| [interpreter](../../PJM/backend/src/projectmind/skills/interpreter.py) / [model_interpreter](../../PJM/backend/src/projectmind/skills/model_interpreter.py) | 静态发现、identity、报告与结构化模型适配 |
-| [interpreter_execution](../../PJM/backend/src/projectmind/skills/interpreter_execution.py) | 冻结执行、复用和恢复 |
-| [capability_blueprint](../../PJM/backend/src/projectmind/skills/capability_blueprint.py) / [task_contract](../../PJM/backend/src/projectmind/skills/task_contract.py) | 蓝图校验/投影，受限动态契约编译 |
-| [design_validation](../../PJM/backend/src/projectmind/skills/design_validation.py) | 预览与发布共用的原始身份、全部 Task 和来源校验，不依赖 Project 或补写声明 |
-| [manifest_gate](../../PJM/backend/src/projectmind/skills/manifest_gate.py) | 复用来源校验，检查 Tool/权限、生成契约、可选资产与 warning |
-| [service](../../PJM/backend/src/projectmind/skills/service.py) / [repository](../../PJM/backend/src/projectmind/skills/repository.py) | 解释协调、版本/可见性、引用门禁和 TaskCatalog |
+| [importer](../../SKM/backend/src/skillmind/skills/importer.py) | 归一化、文件/引用、静态 Draft |
+| [interpreter](../../SKM/backend/src/skillmind/skills/interpreter.py) / [model_interpreter](../../SKM/backend/src/skillmind/skills/model_interpreter.py) | 静态发现、identity/报告、结构化模型适配 |
+| [interpreter_execution](../../SKM/backend/src/skillmind/skills/interpreter_execution.py) | 冻结执行、复用/恢复 |
+| [capability_blueprint](../../SKM/backend/src/skillmind/skills/capability_blueprint.py) / [task_contract](../../SKM/backend/src/skillmind/skills/task_contract.py) | 蓝图校验/投影、动态契约编译 |
+| [design_validation](../../SKM/backend/src/skillmind/skills/design_validation.py) | 预览/发布共用原 identity、全部 Task/来源校验，无 Project 或补写声明 |
+| [manifest_gate](../../SKM/backend/src/skillmind/skills/manifest_gate.py) | 复用来源校验，验 Tool/权限、契约、可选资产/warning |
+| [service](../../SKM/backend/src/skillmind/skills/service.py) / [repository](../../SKM/backend/src/skillmind/skills/repository.py) | 协调、版本/可见性、引用门禁、TaskCatalog |
 
-系统 [Interpreter Skill](../../PJM/skills/projectmind-skill-interpreter/SKILL.md)是版本化执行资产，改正文/references 必须同步 package hash、prompt identity、版本/example/回归，不当普通文档搬迁。
+系统 [Interpreter Skill](../../SKM/skills/skillmind-skill-interpreter/SKILL.md)是执行资产；改正文/references 须同步 package hash、prompt identity、版本/example/回归，不当普通文档搬迁。
+
+### 导入保存与上传授权
+
+内联/上传必填原 UserAccess，组织/导入者从事务锁定的当前 ADMIN 取得，不另传 UUID。解析无模型/DB 锁；首次 await 前冻结原会话和文件。保存采用 Organization → User SHARE → 原 AuthSession UPDATE，无 Project 门禁；查询、父行 flush、写前/最终 flush 后取新时间复核，Source/静态 Interpretation 原子保存。
+
+| 阶段 | 边界 |
+| --- | --- |
+| 接收 | Origin/CSRF/ADMIN 后才读 multipart；仅重复 files 文件字段，filename 保留相对路径，不截 basename |
+| 限额 | 共用 HTTP parser：100 文件、单份 1,000,000 bytes、总 5,000,000；正文总 + 128 KiB，header 总 128 KiB、单 part 16 KiB，实际计数不信 Content-Length |
+| TX A | 原 ADMIN 下查本组织精确 source hash；已有来源复用静态预览，保留 URI/导入者/时间，不 PUT 或修旧 blob |
+| 锁外 PUT | 新来源先验全部 key；每份 PUT 前后短事务重验原资格，核对返回 key/size/MIME/hash，不跨 I/O 持锁 |
+| TX B | 所有 PUT 返回后重验原 ADMIN，再保存 Source/Interpretation；撤销/到期/降级不发布元数据 |
+
+超限为 skill_upload_too_large 413，结构/不完整边界为 invalid_skill_upload 422，静态解析拒绝仍 400。不建 spool/写线程，取消/断连直接传播。原资格失效 401，CSRF/非 ADMIN 403，存储故障/回执不符静态 skill_storage_unavailable 503；Web 只认 201，不自动重发未知。
+
+这不是跨存储原子提交：取消不停止线程/远端 PUT，最终拒绝可留字节，不补偿删除共享内容 key。hash 非原请求回执，并发首次仍可能重复 PUT。持久意图/确认、SkillSource 归属、旧 blob 核验/精确清理尚缺，不套用文档协议或重写原 hash。
+
+### 异步解释的交接要求
+
+当前解释/调整只传组织/参数入队，无持久原请求授权；Worker 重建输入，终态唯一键不能阻止重复模型调用。须成套补齐：
+
+1. 原请求 ID 与内容 execution key 分开；短事务绑定原 actor/会话引用、冻结输入/Interpreter/model 身份及 dispatch Outbox。队列只传持久 ID，不传 cookie/CSRF。
+2. Worker 复用原会话资格校验，锁外模型调用前和结果提交时复核；每次初次/修复调用分别取得原 Worker 一次启动许可。未知启动不由重投/新会话接管。
+3. 原请求只读确认、撤权审计、旧队列拒绝、迁移/恢复一起实现，不补造旧作者/执行事实。
+4. SSE 先按持久身份验组织归属，再订阅并复查终态/长连接资格。当前仅把组织写入 key、查不到终态仍转 Pub/Sub 不满足授权；超时/断连不证明持久 FAILED 或模型未运行，页面不能据此自动换身份生成。
 
 ### 从候选到项目任务的接线
 
-PREVIEW_READY → create_version_draft 冻结 Manifest/checksum/findings → publish_skill_version 重验原始设计并确认 warning → 显式项目启用 → 按真实资源计算 readiness。
+PREVIEW_READY → create_version_draft 冻结 Manifest/checksum/findings → publish_skill_version 重验设计/确认 warning → 显式启用 → 真实资源 readiness。
 
-初次冻结仅将 Manifest/Blueprint 中相同的候选 Interpretation UUID 绑定到实际行；不规范化候选、补齐蓝图身份或改写 source/hash/interpreter version。DRAFT 可保存错误供审查；parse 无蓝图仍不可发布。
+首次冻结只把 Manifest/Blueprint 相同候选 Interpretation UUID 绑定实际行，不规范化候选、补蓝图身份或改 source/hash/interpreter version。DRAFT 可保存错误供审查，parse 无蓝图仍不可发布。
 
-首次发布锁定精确版本，复核组织、Source/Interpretation/Manifest 关系，再以原索引、文本快照和冻结 Manifest 运行当前门禁。旧报告缺失、损坏或含 hard error 均拒绝；保存时和当前的 warning 都须在本次请求明确接受。仅更新版本/gate metadata，不重新调用模型、修补 Manifest 或改变 checksum。
+首次发布锁精确版本，验组织及 Source/Interpretation/Manifest 关系，再用原索引、文本、冻结 Manifest 跑当前门禁。旧报告缺损/hard error 拒绝；保存时与当前 warning 都须本次明确接受。只改版本/gate metadata，不调用模型、修 Manifest/checksum。
 
-PUBLISHED 重复发布读取原记录，不补验后撤销历史或改写发布者/时间，但仍须通过下述当前 ADMIN 授权。来源/解释改变需追加解释和新 DRAFT。TaskCatalog 不证明外部可达；创建/Provider 重验。来源重建、模型恢复与发布复用是不同幂等边界。
+PUBLISHED 重复发布仍验当前 ADMIN，但返回原记录，不追溯撤销/改 actor/时间。来源/解释变化须追加解释和 DRAFT；TaskCatalog 不证明外部可达。来源重建、模型恢复、发布复用是独立边界。
 
-Manifest checksum 证明冻结内容自身一致；模型 Interpretation 的既有 checksum 是执行复用键，不是候选正文 hash。候选到冻结内容的独立持久绑定仍需定义候选 checksum 和冻结转换版本，不能用今天的 normalizer 推断历史等值或回填旧资产。
+Manifest checksum 证明自身内容一致，Interpretation 既有 checksum 是执行复用键而非候选正文 hash。候选持久绑定尚须候选 checksum/冻结转换版，不用当前 normalizer 推断历史等值或回填。
 
 ### 版本管理的授权事务
 
-草稿、发布、废弃、删除和项目启停都必填原请求的会话/CSRF，组织及首次发布者/启用者从业务事务锁定的 User 取得。入口 ADMIN 认证不代替提交资格。
-
-| 操作 | 额外边界 |
-| --- | --- |
-| 组织草稿/发布/废弃/删除 | 不依赖 Project 成员或归档状态 |
-| 项目启用/停用 | 先锁本组织精确 Project 并检查 ACTIVE；ADMIN 无需成员关系 |
+草稿、发布、废弃、删除、项目启停必填原会话/CSRF；组织、首次发布者/启用者从锁定 User 取得。组织资产不受 Project 成员/归档限制；项目启停须同组织精确 ACTIVE Project，ADMIN 无需 membership。
 
 ```text
-入口认证结束
-  → Organization UPDATE
-  → User SHARE
-  → 原 AuthSession UPDATE
-  → 当前 ADMIN / 原凭据 / 期限
-  → 项目启停时 Project SHARE
-  → 既有 SkillVersion UPDATE
-  → 启停关系 UPDATE / 业务门禁
-  → 写入前复核
-  → 最终 flush / 再复核
-  → commit
+入口认证结束 → Organization UPDATE → User SHARE
+  → 原 AuthSession UPDATE / 当前 ADMIN、凭据、期限
+  → 项目启停时 Project SHARE → 既有 SkillVersion UPDATE
+  → 启停关系 UPDATE / 业务门禁 → 写前复核
+  → 最终 flush / 复核 → commit
 ```
 
-复用[账户的取锁顺序与凭据校验](user-lifecycle.md#事务与并发)；User SHARE 阻止角色/状态变化，同时兼容业务外键 KEY SHARE。草稿父行 flush、来源/引用读取、版本及启停关系等待后均取新时间；idle/absolute 到期即拒绝。领域 404/409 返回前也复核资格，失效先返回共享 401，CSRF 或当前非 ADMIN 返回相应 403，不泄露原凭据或来源正文。项目不存在/越权统一 404，只有已授权的归档项目返回 409。
+复用[账户锁序/凭据校验](user-lifecycle.md#事务与并发)；User SHARE 阻止角色/状态修改且兼容 FK KEY SHARE。父行 flush、来源/引用读取、版本/关系等锁后取新时间验 idle/absolute；领域 404/409 前也复核，失效优先共享 401，CSRF/非 ADMIN 403。Project 越权/不存在统一 404，授权归档 409，不泄漏原凭据/来源。
 
-重复发布/废弃/启用/停用仍经当前授权，保留原发布者、启用者及已有时间；删除成功后再次删除为 404，不补造删除回执。同一或另一位当前有效的本组织 ADMIN 可操作原版，新会话不恢复旧会话。判定点是持锁的最终检查，不承诺物理 commit 瞬间未过期。SQL 失败后只用锁内复制的资格值与新时间分类，不触发过期 ORM 的隐式查询；提交响应未知和取消不转为成功、不自动重试或补偿。
+重复发布/废弃/启停保留原 actor/时间仍重验资格，删后再删 404，不补删除回执。同组织其他有效 ADMIN 可操作原版，新会话不恢复旧会话。最终持锁判定不承诺物理 commit 瞬间未过期；SQL 失败仅以锁内副本和新时间分类，不隐式读失效 ORM。取消/提交未知不转成功、不重试/补偿。
 
-删除在版本锁内检查全部执行/配置引用，拒绝发生在关系和 Manifest 删除之前，范围见[版本边界](skill-contract.md#版本内容与可见性)。导入与解释写入的业务资格仍须接齐；离线 SQL/回滚替身不证明 PostgreSQL 的实际锁竞争、回滚或旧写入者兼容。
+删除在版本锁内验[全部引用](skill-contract.md#版本内容与可见性)，拒绝先于关系/Manifest 删除；真实锁、回滚及旧 writer 兼容另验。
 
 ## CapabilityBlueprint
 
-字段以 [Blueprint Schema](../../PJM/contracts/capability-blueprint/v1.schema.json)为准；标题/说明保留源语言，协议 enum 大小写按 Schema，不笼统要求全小写。
-
-identity/hash/trace/结构错误拒绝；新领域 capability 允许，实际 Tool 必须注册；缺业务 Schema/ViewSpec/fixture 不能单独硬拒绝，assisted_review_required 须接受。自然语言完整性不能靠 trace/Schema 证明。
+以 [Schema](../../SKM/contracts/capability-blueprint/v1.schema.json)为准；标题/说明保留源语言，enum 大小写按契约。identity/hash/trace/结构错误拒绝，新业务 capability 允许，真实 Tool 须注册；缺业务 Schema/ViewSpec/fixture 不单独硬拒绝，assisted_review_required 须接受。结构/trace 不证明自然语言完整性。
 
 ### 蓝图是唯一来源
 
-蓝图只由 Interpreter 产生，parse 返回 null 时发布 gate 报 capability_blueprint_missing。Manifest Schema 保留 Draft 形态不等于发布许可；Worker 只读冻结蓝图，不从旧 workflows/data_sources 反推。手工 native fixture 不是绕过路径。
+Interpreter 唯一生成；parse null 发布报 capability_blueprint_missing。Draft Schema 不是许可，Worker 只读冻结蓝图，不从旧 workflows/data_sources 反推，手工 native fixture 不绕门禁。
 
 ### 过程重表达
 
 | 来源表达 | 平台路径与限制 |
 | --- | --- |
-| curl 读取业务记录、git/svn 读代码 | issue.read/v1、repository.read/v1；地址/凭据/revision 归绑定 |
-| list/grep/log | 资源物化、files.txt、workspace.search/read、有界 history.txt；无自由 shell |
-| xlsx/xlsm/docx | 平台文本化后读位置；不宣称支持 PDF/任意格式 |
-| 报告/补丁 | 需下载的交付使用显式声明的 workspace.write/v2 写 output/ 并取得已提交的 Artifact 引用；v1 或 workspace/ 中间文件不证明附件发布 |
-| 修改外部内容 | change.propose/v1 → 批准/效果链，不给 Agent 直调 write |
-| 无等价能力 | 说明限制、人工处理或 GUIDANCE_ONLY，不虚构 Tool/弱化 required |
+| curl 业务读取、git/svn 读代码 | issue.read/v1、repository.read/v1，地址/凭据/revision 来自绑定 |
+| list/grep/log | 物化、files.txt、workspace.search/read、有界 history.txt，无自由 shell |
+| xlsx/xlsm/docx | 平台文本化后定位读取，不宣称支持 PDF/任意格式 |
+| 报告/补丁 | 显式 workspace.write/v2 写 output/ 并取得已提交 Artifact；v1/workspace 中间文件不是已发布附件 |
+| 外部修改 | change.propose/v1 → 批准/效果链，不给 Agent 直调 write |
+| 无等价能力 | 限制、人工处理或 GUIDANCE_ONLY，不虚构 Tool/弱化 required |
 
-确定性守卫只检查显式能力引用与结构，不证明语义等价或运行参数正确；Gateway 校验参数，Preview/质量评审检查保真。新增 [Flow](task-flow.md)字段须先冻结 Schema，不随意扩 Blueprint/Brief。
+确定性守卫只验显式能力/结构，不证明语义等价或参数正确；Gateway 验参数，Preview/质量评审验保真。[Flow](task-flow.md)新字段先冻结 Schema。
 
 ## ResourceBinding 与 readiness
 
-资源唯一来自 capability_blueprint.resource_requirements，无顶层 data_sources；Tool 投影引用相同 key，write 不折入 Agent allowed_capabilities。
+资源仅来自 capability_blueprint.resource_requirements，无顶层 data_sources；Tool 投影用相同 key，write 不进入 Agent allowed_capabilities。
 
-空 allowlist 不授权。issue_ids/field_keys 允许显式 ["*"]，子 scope 不能枚举扩 wildcard；repository path 不用该 wildcard，LOW 预授权必须精确 scope。
+空 allowlist 不授权；issue_ids/field_keys 可显式 ["*"]，子 scope 不枚举扩 wildcard；repository path 不用该 wildcard，LOW 预授权须精确 scope。
 
-[resource_binding](../../PJM/backend/src/projectmind/skills/resource_binding.py)先查精确项目启用，再算任务 readiness 与 requirement AVAILABLE/UNAVAILABLE/UNSUPPORTED；依据真实已安装 Provider。候选可用不是选择或实际连通，选择创建前冻结，运行中 CHOICE 不换绑。旧注释若相反按[冻结规则](resource-snapshots.md)修正。
+[resource_binding](../../SKM/backend/src/skillmind/skills/resource_binding.py)先验精确项目启用，再按已安装 Provider 算任务及 requirement AVAILABLE/UNAVAILABLE/UNSUPPORTED。候选不是选定/实际连通，创建前冻结，运行 CHOICE 不换绑，见[资源规则](resource-snapshots.md)。
 
-新建 Run、保存调度及恢复 ACTIVE、[组合保存](skill-contract.md#组合保存的授权事务)在写入事务经共享 `require_current_task_binding` 复核精确 PUBLISHED 版和未停用关系。先锁 SkillVersion SHARE，再锁 ProjectSkillVersion SHARE；兼容 occurrence 外键 KEY SHARE，同时与启停/废弃写锁协调。它只固定当前可用性，不重解 Manifest/资源，也不用于[原 Run 确认](run-creation.md#目标创建流程)。
+业务资源必须绑定真实 Integration 或显式选择的 Project 文档；裸 Provider 名称不代表来源。缺少绑定或客户端时拒绝创建/执行，不回退到模拟数据。合成 Provider 与 Skill 仅保留在 Backend tests，不随镜像部署。
 
-同版停用后不可恢复，发布不可复活 DEPRECATED；目标审计恢复由[生命周期](skill-contract.md#可审计的重新启用与回滚)维护。
+新 Run、调度保存/恢复 ACTIVE、[组合保存](skill-contract.md#组合保存的授权事务)在事务共用 require_current_task_binding，锁 SkillVersion SHARE → ProjectSkillVersion SHARE，固定精确 PUBLISHED/未停用关系；兼容 occurrence FK 并协调启停/废弃。它不重解 Manifest/资源，也不用于[原 Run 确认](run-creation.md#目标创建流程)。
+
+同版停用不可恢复、DEPRECATED 不复活；目标审计恢复见[生命周期](skill-contract.md#可审计的重新启用与回滚)。
 
 ## Brief 与运行交接
 
-[AgentTaskBrief](../../PJM/contracts/agent-task-brief/v1.schema.json)按 Segment 保存 brief_json/checksum，完整带 required/quality、目标、资源、权限、交付和限制。物化路径只来自物化器，日志仅 identity/checksum/profile，不记录业务 Brief 正文。
+[AgentTaskBrief](../../SKM/contracts/agent-task-brief/v1.schema.json)按 Segment 存 brief_json/checksum，完整携带 required/quality、目标、资源、权限、交付/限制。物化路径仅来自物化器，日志只记 identity/checksum/profile，不记 Brief 正文。
 
-GUIDED/SUPERVISED/DELEGATED 默认 SUPERVISED，不能覆盖硬拒绝。新 Run 显式 Segment/Brief，旧 Run 只读隐式投影；续行/Attempt、Session、workspace 和效果的唯一规则分别在 Runtime、[资源](resource-snapshots.md)、[受控写入](repository-effects.md)，不再维护副本。
+GUIDED/SUPERVISED/DELEGATED 默认 SUPERVISED，不能覆盖硬拒绝。新 Run 显式 Segment/Brief，旧 Run 只读隐式投影；续行/Attempt/Session、workspace/效果分别遵循 Runtime、[资源](resource-snapshots.md)、[受控写入](repository-effects.md)，不另存规则副本。
 
-结果用通用 Outcome，可选 task-specific structured_data；缺业务 Schema 不等于 structured_output_missing，结构不保证业务正确。
+结果用通用 Outcome、可选 structured_data；缺业务 Schema 不等于 structured_output_missing，结构不证明业务正确。
 
 ## 验证与接续
 
-- Parser：不执行来源，路径/大小/引用/hash；Interpreter：冻结 identity、结构输出、失败恢复、追加调整/diff。
-- 版本管理：蓝图/来源与 warning 门禁；六操作的原会话、锁等待/flush 过期、回滚、取消与提交未知；删除全部引用保护和重复操作保留原值。版本停用与新建/保存竞争不改变旧 Run；目标重新启用另验审计。
-- 泛化：资料分析、代码审查、开放文档、缺资源、恶意指令走同一路径，不添平台业务分支。
-- 安全：敏感来源阻断、scope/跨 Project 拒绝、能力不扩权；runtime/Provider 再验证。
-- 模型质量：固定输入重复采样，独立人工判断规则保真/证据/调整量；prompt JSON 与 SDK structured-output 分别举证。
+- Parser/导入：不执行来源，路径/限额/hash，未授权不收正文，原会话/等锁/flush、旧来源不重写、PUT 前后撤权/错误/取消/未知。
+- 解释/发布：冻结身份、结构输出、追加调整、来源/warning 门禁、六操作授权/回滚/引用保护；模型恢复、候选绑定、目标重新启用分别验证。
+- 泛化/安全：分析、审查、开放文档、缺资源、恶意指令走同链路，敏感阻断、scope/跨项目拒绝、不扩权。
+- 模型质量：固定输入重复采样，独立人工评审保真/证据/调整量；prompt JSON 与 structured-output 分别举证。
 
-回归入口：[skills tests](../../PJM/backend/tests/skills/)、[contracts tests](../../PJM/backend/tests/contracts/)。mock repository 不证明真实事务竞争；模型、部署、外部系统另按授权环境验收。
-
-改解释结构/系统 Skill 时同步契约、版本/checksum、Backend validator/projector、Web 预览、example/回归及质量评审。不增加任意脚本、自动扩权、自动升级发布版或生成后端服务。
+入口：[skills](../../SKM/backend/tests/skills/)、[contracts](../../SKM/backend/tests/contracts/)。真实事务、存储残留/恢复、模型/部署分别验收。结构/系统 Skill 改动同步契约、版本/checksum、validator/projector、Web、example/回归与质量评审；不引入任意脚本、自动扩权/升级或生成后端服务。

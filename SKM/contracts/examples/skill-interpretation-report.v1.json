@@ -1,0 +1,44 @@
+{
+  "report_version": "skillmind.skill-interpretation-report/v1",
+  "summary": "The source can be adapted to one evidence-backed repository review task.",
+  "compatibility_level": "adapted",
+  "confidence": {
+    "capabilities": 0.94,
+    "tasks": 0.91,
+    "resources": 0.9,
+    "tools": 0.96,
+    "workflows": 0.88,
+    "schemas": 0.85
+  },
+  "assumptions": [
+    {
+      "key": "single-file-review",
+      "text": "The first version reviews one repository file per Run."
+    }
+  ],
+  "questions": [],
+  "diagnostics": [
+    {
+      "severity": "info",
+      "code": "source_tool_mapped_to_registered_capability",
+      "message": "The declared repository Tool was mapped to repository.read/v1 without granting a Project binding.",
+      "path": "SKILL.md",
+      "line": 3
+    }
+  ],
+  "source_traces": [
+    {
+      "target": "/tasks/0",
+      "path": "SKILL.md",
+      "line": 5,
+      "reason": "The Inputs section defines revision, path, and review focus."
+    },
+    {
+      "target": "/tools/0",
+      "path": "SKILL.md",
+      "line": 3,
+      "reason": "The source requests repository.read/v1 and the capability exists in the frozen catalog."
+    }
+  ],
+  "unmapped_references": []
+}

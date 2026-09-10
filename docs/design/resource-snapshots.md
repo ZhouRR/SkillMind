@@ -10,7 +10,7 @@
 | 内容快照 | 文档 ID/hash/成员，或仓库读取时解析出的 revision；checksum 不是授权，也不是备份 |
 | 物化副本 | 实际文件、转换、索引与 skipped；首次准备不等于创建瞬间已取得内容 |
 
-三个时点分别记录。当前 document 使用创建清单，repository 首次打开才解析具体版本，issue 按 binding 逐条 live 读取并形成 Evidence，不物化文件树。
+分别记录三个时点：document 用创建清单，repository 首次打开解析版本；issue 按 binding live 读取形成 Evidence，不物化文件树。
 
 ## 文档选择与冻结设计
 
@@ -23,11 +23,11 @@
 | 可选不选 | 不授予该槽位读取权，不回退全集 |
 | 必需未选 | 创建失败，不在后续对话中补授权 |
 
-多槽位文档形成 Run 级去重并集，共用 input/documents/，不是槽位间隔离。Manifest 保留各 requirement 成员关系，重复 ID 的元数据必须一致。
+多槽位共用 Run 级去重并集与 input/documents/，不做槽位隔离；manifest 保留 requirement 关系，重复 ID 元数据必须一致。
 
 ### 公开选择与读取投影的实施契约
 
-沿用 sources 字符串，由客户端编码、服务端独立校验；用户界面显示名称与范围。
+sources 由客户端编码、服务端校验，界面显示名称与范围。
 
 | 模式 | 编码与数量 |
 | --- | --- |
@@ -36,13 +36,13 @@
 | 全集 | project-documents:all，创建时 1–5000 个成员；空/超量拒绝，不截断 |
 | 不使用 | 省略可选槽位；空串不是合法选择 |
 
-不自动选择首份文档；即时执行和 Schedule 共用输入组件。候选变化后保留可解释草稿并要求修正，不偷偷改全集、替换 ID 或把单成员集合当有效集合。原请求确认使用已发送内容，不受新草稿影响。
+即时执行/Schedule 共用组件，不自动选首份。候选变化保留草稿并要求修正，不改全集、替换 ID 或接受单成员集合；原请求确认不受草稿影响。
 
-服务端创建时保存 Project/requirement、模式、ID、路径、MIME、size、hash 与快照 checksum 于 selected_sources_json；客户端 checksum 不提供信任。Worker 按原 ID 校验实际字节，后续 Segment/Attempt 不重新枚举。
+selected_sources_json 保存 Project/requirement、模式、成员 ID/路径/MIME/size/hash 与服务端 checksum。Worker 按原 ID 验字节，后续 Segment/Attempt 不重新枚举；客户端 checksum 不提供信任。
 
 ### 用一个例子理解冻结边界
 
-全集创建 Run 1 时只有 A、B，随后新增 C：Run 1 的排队、重试和原请求确认仍只有 A、B；明确新建 Run 2 或下一次 Schedule occurrence 才可能固定 A、B、C。A 同路径重传为 A′不替代原 ID；缺失原内容明确失败。
+Run 1 全集冻结 A、B 后新增 C：排队、重试、原请求确认仍只有 A、B，新 Run/occurrence 才可包含 C。同路径重传 A′不能替代 A，原内容缺失则失败。
 
 ### 读取清单和资源摘要
 
@@ -54,11 +54,9 @@ Run detail 的 document_snapshots 按 requirement_key 提供服务端验证后�
 | LEGACY_UNAVAILABLE | null；旧记录没有可信清单，不猜测历史范围 |
 | INVALID | null；校验失败，不公开未验证成员，其他合法历史仍可读 |
 
-合法空数组表示未识别到文档来源，不等于旧响应缺字段。Web 对缺少必需 document_snapshots 的旧 API 报契约错误；新 API 读取旧 Run 用明确历史状态。
+空数组表示未识别文档来源；缺必需 document_snapshots 是 API 契约错误，旧 Run 则用历史状态表达。
 
-detail/history 的 selected_sources 只公开 provider / capability / resource_kind / access 摘要，兼容已知旧字符串；不暴露内部 JSON、scope、Secret locator 或未来字段。大成员清单只在 detail，不成为 Provider 授权输入。
-
-[服务端投影](../../PJM/backend/src/projectmind/runs/resource_projection.py)重算 checksum；[Web validator](../../PJM/web/src/api/runResources.ts)校验形状、Project/slot 与关联，不复制服务端身份算法。公开变化同步 response、Schema/example/OpenAPI、Web 与三语，不改冻结快照。
+detail/history 的 selected_sources 仅公开 provider/capability/resource_kind/access，兼容已知旧字符串，不暴露内部 JSON、scope 或 Secret locator。大清单只在 detail，不作授权输入。[服务端投影](../../SKM/backend/src/skillmind/runs/resource_projection.py)重算 checksum，[Web](../../SKM/web/src/api/runResources.ts)只验形状和 Project/slot/关联，不复制身份算法。
 
 ### 失败、缓存与历史
 
@@ -71,39 +69,39 @@ detail/history 的 selected_sources 只公开 provider / capability / resource_k
 | live Tool 无法取原 ID | 返回不可用；已存副本与 live 可达性分别判断 |
 | 旧 Run 无清单/回执 | 终态只读且标未知；非终态不自动授权全集，需新输入则新建 Run |
 
-单文档删除已按原 Run 快照、调度及保留 occurrence 接入[引用门禁](document-lifecycle.md#删除事务与引用判定)，未知历史拒绝删除；真实并发和持久 blob 清理仍待补齐。缓存保留不由恢复流程任意删除。
+删除须经[原 Run/调度/occurrence 引用门禁](document-lifecycle.md#删除事务与引用判定)，未知历史拒绝；恢复不得任意删除缓存。
 
 ### 创建重放与调度
 
-“全集”是稳定请求意图，首次成员是执行事实；重放查询原身份，沿用原快照，不把动态展开结果混入请求 hash。Schedule 保存选择规则，每个 occurrence 独立冻结；同 occurrence 返回原 Run。失效选择按[调度规则](task-scheduling.md#保存和执行边界)拒绝，不换来源。
+全集规则是请求意图，首次成员是执行事实，不把动态展开混入请求 hash。重放沿用原快照；Schedule 每 occurrence 独立冻结，原 occurrence 返回原 Run，失效按[调度规则](task-scheduling.md#保存和执行边界)拒绝，不换来源。
 
 ## 仓库授权与内容版本
 
-scope.paths 是硬边界，scope.revisions 是允许范围；HEAD/分支可以移动，空 allowlist 不表示只许读首次版本。[repository_source](../../PJM/backend/src/projectmind/agent/repository_source.py)负责解析与检查。
+scope.paths 是硬边界，scope.revisions 是允许范围；HEAD/分支可移动，空 allowlist 不限首次版本。[repository_source](../../SKM/backend/src/skillmind/agent/repository_source.py)解析检查后，manifest 记录具体 commit/SVN revision。
 
-首次物化 manifest 记录具体 commit/SVN revision；复现优先读副本。额外 live 读取仍满足冻结授权，并标实际 revision；跨版本证据不能混为同一事实。若要求创建瞬间内容，须显式固定可达 revision 或先实现创建时解析持久化，分支名不满足要求。
+复现优先副本；live 读取仍验冻结授权并标实际 revision，跨版本证据分开。要求创建瞬间内容时，须指定固定可达 revision 或先实现创建时解析持久化。
 
 ## 产物与访问
 
 ```text
 input/（只读）
 ├── documents/               文档或转换文本
-│   └── .projectmind/        manifest.json、files.txt
+│   └── .skillmind/        manifest.json、files.txt
 └── <repository requirement>/
-    └── .projectmind/        manifest.json、files.txt、history.txt
+    └── .skillmind/        manifest.json、files.txt、history.txt
 workspace/                   可写临时工作
 output/                      可写报告/补丁
 ```
 
-这是 Tool 逻辑路径。实际 input_dir 是 Run 根下 .projectmind-inputs/&lt;snapshot_id&gt;/，由平台映射，不开放世代目录或用 symlink 切换；旧 input/ 不搬迁补签。PreparedInput 的新 workspace/resources 必须由 Brief、read/search、Evidence 全部消费。
+Tool 逻辑路径映射到 Run 根下 .skillmind-inputs/&lt;snapshot_id&gt;/，不开放世代目录、不用 symlink 切换，也不搬迁旧 input/ 补签。Brief、read/search、Evidence 必须消费同一 PreparedInput。
 
-只经 workspace.write 写 workspace/output；input 与 Project 文档库不自由覆盖。v2 的 output 写入另将原 UTF-8 字节发布为[不可变附件](results-evaluation.md#可信附件的发布与读取)，覆盖文件不改变已发布字节；v1 和 workspace 中间文件不自动成为附件。xlsx/xlsm/docx 经[统一转换器](../../PJM/backend/src/projectmind/agent/binary_text.py)生成文本，保留源 hash/位置；PDF 未支持。凭据不进入文件、manifest、Evidence 或上下文。
+workspace.write 只写 workspace/output；v2 output 原 UTF-8 字节另作[不可变附件](results-evaluation.md#可信附件的发布与读取)，v1/中间文件不自动成为附件。xlsx/xlsm/docx 经[统一转换](../../SKM/backend/src/skillmind/agent/binary_text.py)保留源 hash/位置，PDF 未支持；文件、manifest、Evidence、上下文均不含凭据。
 
 ## 输入准备与可信缓存
 
-一个 Run 使用一份覆盖全部资源根的数据库回执；各根 manifest 不能证明自己未被连同文件改写。威胁模型允许 workspace 被篡改，但信任数据库与受控 Worker，不替代路径隔离/授权。
+每 Run 一份覆盖全部根的 DB 回执，防止文件与本地 manifest 一起被改；信任 DB/受控 Worker，不替代路径隔离和授权。
 
-[DTO](../../PJM/backend/src/projectmind/runs/input_snapshot.py)、[store](../../PJM/backend/src/projectmind/runs/repository_inputs.py)与 [0029](../../PJM/backend/migrations/versions/0029_run_input_snapshots.py)已有 Run 唯一的 PREPARING/READY 记录，固定世代、Run/Project/Attempt、来源摘要、全部文件 path/size/hash、总量与完成时间。这不是 Run 状态或新公开 API；合法 READY 空集与缺回执不同。
+[DTO](../../SKM/backend/src/skillmind/runs/input_snapshot.py)/[store](../../SKM/backend/src/skillmind/runs/repository_inputs.py)/[0029](../../SKM/backend/migrations/versions/0029_run_input_snapshots.py)固定 PREPARING/READY、世代、Run/Project/Attempt、来源摘要、全部 path/size/hash、总量和完成时间。它是内部回执，非 Run 状态/API；READY 空集不同于缺回执。
 
 ### 一次准备的提交边界
 
@@ -116,9 +114,9 @@ output/                      可写报告/补丁
   → 冻结 Brief / 最终启动校验 → Agent
 ```
 
-锁顺序 Run → Segment → Attempt，获锁后判定当前 lease/取消。候选落盘不叫发布；来源摘要来自冻结数据，不能从未知旧目录重新采样补信任。首次完成核对回执与候选，复用另验完整树/字节/总量/manifest；重复完成只能返回同一事实。
+按 Run → Segment → Attempt 取锁后验当前 lease/取消。候选落盘不是发布；摘要只取冻结数据，不从旧目录补信任。首次核对回执/候选，复用验完整树/字节/总量/manifest，重复完成不改事实。
 
-后续 Segment/Attempt 只复用原 READY 世代。慢 I/O 在取消后返回也不能提交或启动；独立准备 timeout 可能发生在提交中，不证明回滚，不许可删世代。监督责任见[Runtime](agent-runtime.md#从领取到模型启动的边界)。
+后续 Segment/Attempt 只复用原 READY；取消后的慢 I/O 不得提交/启动，准备 timeout 不证明回滚或许可删世代。启动监督见[Runtime](agent-runtime.md#从领取到模型启动的边界)。
 
 ### 准备中断与再次使用
 
@@ -131,29 +129,27 @@ output/                      可写报告/补丁
 | 完成响应未知 | 只确认原 Run 的同世代 READY；不再次 begin/complete 或新建输入 |
 | lease 失效/取消成立 | 禁止完成与模型启动，由合法恢复处理 |
 
-[安全 I/O](../../PJM/backend/src/projectmind/agent/materialization_storage.py)先独占 .projectmind-inputs 命名空间，再建指定 UUID；只独占 UUID 不足以发现丢回执现场。创建中断保留痕迹，READY 复用不再首次创建。
+[安全 I/O](../../SKM/backend/src/skillmind/agent/materialization_storage.py)先独占整个 .skillmind-inputs，再建 UUID，防止绕开丢回执现场；中断保留痕迹，READY 不重新创建。
 
-当前 store 仅在 complete 已返回、事务退出发生 DBAPIError/TimeoutError/ConnectionError 时，另开 session 一次确认原准备者/世代/来源/文件及当前 lease/取消。complete 返回前错误与 CancelledError 不走确认；未知仍失败，不假设自动恢复。
+store 仅对 complete 已返回后、事务退出的 DBAPIError/TimeoutError/ConnectionError，另开 session 一次确认原准备者/世代/来源/文件及当前 lease/取消。complete 前错误、CancelledError 不确认；仍未知则失败。
 
-恢复核对同一数据库、世代文件与 transcript [恢复点](../operations/backup-recovery.md)，不能用较晚文件给较早数据库补签。
+DB、世代文件、transcript 必须来自匹配的[恢复点](../operations/backup-recovery.md)，不以较晚文件补签较早 DB。
 
 ### 读取时的完整性边界
 
-read/search 返回与 Evidence 引用必须来自对照回执验证的同一份字节，不先 hash 再重新打开。使用锚定 Run 根、不跟随任何 symlink 的描述符、有界读取、普通单链接文件检查。
+read/search 与 Evidence 使用同次回执核验的字节，不先 hash 后重开。描述符锚定 Run 根、不跟 symlink、有界读取，且只接受普通单链接文件。
 
-input search 先验证完整树，再按可信清单搜索；未知文件、hardlink/FIFO、缺失或篡改不伪装 binary skipped。正常结果/扫描截断显式 truncated；零匹配只覆盖实际搜索范围。可变 workspace 不需要伪造回执，但仍受路径和读取上限约束。
+input search 先验全树再查可信清单；未知文件、hardlink/FIFO、缺失/篡改不得伪装 skipped。结果/扫描截断标 truncated，零匹配仅覆盖实际范围。可变 workspace 不要求回执，仍守路径/读取上限。
 
 ### 跨根总量
 
-当前已接入逐根及 max_total_files / max_total_bytes，最终存量按实际字节计，包含转换物、manifest、索引/history；保留原文另计，未落盘 skipped 不计原文字节。共享文档只计一次，不同仓库根的副本分别计。
+三层限制为单文件、逐根 max_files/max_bytes、跨根 max_total_files/max_total_bytes。最终存量包含转换物、manifest、索引/history；保留原文另计，未落盘 skipped 不计。共享文档计一次，不同仓库根副本分别计。
 
-单文件、逐根 max_files/max_bytes、全部输入总量是三层限制。必需 manifest/索引超限须失败，最后一根或总量失败时不能交付前几根。复用不重复消耗存量，但仍按有效限制验证。临时峰值磁盘、workspace/output、搜索响应和[模型预算](run-budgets.md)各自控制，不从最终存量推导磁盘不会耗尽。
+必需索引或任一根/总量超限则整批失败，不交付部分根。复用不双计，但按有效限制验证。临时峰值、workspace/output、搜索响应与[模型预算](run-budgets.md)另限，最终存量不保证磁盘不耗尽。
 
 ## 已知差距与后续设计
 
-公开选择/清单、回执/物化/ContextBuilder/Tool/Worker 接线、跨根限额与准备监督已有代码。接续核对 [workspace_materializer](../../PJM/backend/src/projectmind/agent/workspace_materializer.py)和[协议回归](../../PJM/backend/tests/agent/test_input_preparation_protocol.py)，不把必需 store 改为可选。
-
-剩余验收是完整消费者联调、真实 DB 并发/提交不明/迁移恢复、旧非终态与混合版本隔离、真实仓库凭据/故障及进程停止。当前无 PREPARING/孤立目录自动修复器；部署和完整恢复不由局部文件测试替代。
+接续 [workspace_materializer](../../SKM/backend/src/skillmind/agent/workspace_materializer.py)与[协议回归](../../SKM/backend/tests/agent/test_input_preparation_protocol.py)，必需 store 不得改为可选。PREPARING/孤立目录尚无自动修复；消费者联调、历史/混合版本及真实事务/恢复/仓库验收见[计划 R01](../planning/roadmap.md#r01-资源冻结)。
 
 ## 验收条件
 

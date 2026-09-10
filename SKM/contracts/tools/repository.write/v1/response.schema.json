@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/repository.write/v1/response.schema.json",
+  "title": "repository.write/v1 response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "provider",
+    "base_revision",
+    "target_branch",
+    "commit_revision",
+    "before_ref",
+    "after_ref",
+    "verification",
+    "replayed"
+  ],
+  "properties": {
+    "status": {
+      "const": "success"
+    },
+    "provider": {
+      "const": "git"
+    },
+    "proposal_ref": {
+      "type": "string",
+      "pattern": "^cp_[a-zA-Z0-9_-]+$"
+    },
+    "base_revision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "target_branch": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "commit_revision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "before_ref": {
+      "type": "string",
+      "pattern": "^ev_[a-zA-Z0-9_-]+$"
+    },
+    "after_ref": {
+      "type": "string",
+      "pattern": "^ev_[a-zA-Z0-9_-]+$"
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "method",
+        "matched_paths"
+      ],
+      "properties": {
+        "method": {
+          "const": "READ_BACK"
+        },
+        "matched_paths": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "replayed": {
+      "type": "boolean"
+    },
+    "pull_request_url": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "pull_request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    }
+  }
+}

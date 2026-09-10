@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/projects/v1/version-request.schema.json",
+  "title": "Skillmind Project Version Request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["expected_row_version"],
+  "properties": {
+    "expected_row_version": { "type": "integer", "minimum": 1, "maximum": 2147483647 }
+  }
+}

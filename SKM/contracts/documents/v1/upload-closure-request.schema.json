@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/documents/v1/upload-closure-request.schema.json",
+  "title": "Skillmind Document Upload Publication Closure Request v1",
+  "description": "Explicitly close publication of the original pending upload. This does not stop remote writes, delete blobs, or release quota.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["confirmation"],
+  "properties": {
+    "confirmation": { "type": "string", "const": "STOP_PUBLICATION" }
+  }
+}

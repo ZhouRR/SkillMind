@@ -1,0 +1,15 @@
+.git
+.env
+.idea
+.vscode
+**/__pycache__
+**/*.py[cod]
+**/.mypy_cache
+**/.pytest_cache
+**/.ruff_cache
+**/*.egg-info
+backend/.venv
+backend/tests
+skills/examples
+plans
+web

@@ -1,0 +1,185 @@
+{
+  "brief_version": "skillmind.agent-task-brief/v1",
+  "identity": {
+    "run_id": "00000000-0000-4000-8000-000000000301",
+    "segment_no": 1,
+    "task_key": "review-revision",
+    "capability": "repository.review",
+    "skill_version_id": "00000000-0000-4000-8000-000000000203",
+    "manifest_checksum": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "blueprint_checksum": "sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+    "result_schema_checksum": "sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4"
+  },
+  "objective": {
+    "run_objective": "Review the selected repository revision and report evidence-backed findings.",
+    "segment_objective": "Review the selected repository revision and report evidence-backed findings.",
+    "success_criteria": [
+      {
+        "key": "findings-have-evidence",
+        "text": "Every finding cites a repository path and revision."
+      }
+    ]
+  },
+  "guidance": {
+    "required_rules": [
+      {
+        "key": "cite-evidence",
+        "text": "Every finding must cite the repository path and revision it was observed in."
+      }
+    ],
+    "recommended_steps": [
+      {
+        "key": "load-source",
+        "text": "Read the changed files before judging the change as a whole."
+      },
+      {
+        "key": "report",
+        "text": "Group findings by severity and explain the reasoning behind each one."
+      }
+    ],
+    "quality_criteria": [
+      {
+        "key": "actionable",
+        "text": "Each finding states what to change and why it matters."
+      }
+    ],
+    "prohibited_actions": [
+      {
+        "key": "no-silent-fix",
+        "text": "Do not present a rewritten file as if it were the reviewed revision."
+      }
+    ]
+  },
+  "execution": {
+    "profile": "SUPERVISED",
+    "profile_source": "skill_recommendation",
+    "stop_conditions": [
+      {
+        "key": "revision-unreadable",
+        "text": "Stop and ask when the requested revision cannot be read."
+      }
+    ],
+    "session_split_hints": [
+      {
+        "key": "split-after-review",
+        "text": "Continue in a new Session once the user has responded to the review."
+      }
+    ]
+  },
+  "resources": [
+    {
+      "key": "target_repository",
+      "kind": "repository",
+      "required": true,
+      "access": "read",
+      "capabilities": [
+        "repository.read/v1"
+      ],
+      "selection_guidance": "Prefer the revision named by the user; ask when it is not stated.",
+      "binding": {
+        "capability": "repository.read/v1",
+        "provider": "git",
+        "binding_source": "RUN_PREFLIGHT"
+      },
+      "materialization": {
+        "root": "input/target_repository",
+        "manifest": "input/target_repository/.skillmind/manifest.json",
+        "index": "input/target_repository/.skillmind/files.txt",
+        "history": "input/target_repository/.skillmind/history.txt",
+        "revision": "9f2c1d4b8a6e5307c1b2d3e4f5a6b7c8d9e0f1a2",
+        "materialized_files": 24,
+        "skipped_files": 2
+      }
+    },
+    {
+      "key": "review_notes",
+      "kind": "document",
+      "required": false,
+      "access": "read",
+      "capabilities": [
+        "document.read/v1"
+      ],
+      "selection_guidance": "Use the project review checklist when one is bound.",
+      "binding": null
+    },
+    {
+      "key": "review_tracker",
+      "kind": "issue",
+      "required": false,
+      "access": "write",
+      "capabilities": [
+        "issue.read/v1"
+      ],
+      "selection_guidance": "Only needed when the user asks for the outcome to be recorded.",
+      "binding": null
+    }
+  ],
+  "allowed_tools": [
+    {
+      "capability": "repository.read/v1",
+      "provider": "git",
+      "read_only": true
+    },
+    {
+      "capability": "interaction.request/v1",
+      "provider": "platform",
+      "read_only": true
+    }
+  ],
+  "effect_policy": {
+    "external_write": "deny",
+    "network_scope": "project_integrations_only",
+    "declared_intents": [
+      {
+        "key": "read-repository",
+        "mode": "observe",
+        "resource_key": "target_repository",
+        "operation": "Read the reviewed revision and its changed files.",
+        "risk": "low",
+        "executable": true
+      },
+      {
+        "key": "update-tracker",
+        "mode": "apply",
+        "resource_key": "review_tracker",
+        "operation": "Record the review outcome on the tracked issue.",
+        "risk": "medium",
+        "executable": false
+      }
+    ]
+  },
+  "interaction_policy": [
+    {
+      "key": "review-findings",
+      "type": "REVIEW",
+      "condition": "The final severity depends on a project-specific risk decision.",
+      "prompt": "Ask the user to review the evidence-backed severity before finalising."
+    }
+  ],
+  "checkpoint": {
+    "summary": null,
+    "confirmed_facts": [],
+    "user_responses": [],
+    "evidence_refs": [],
+    "artifact_refs": [],
+    "change_proposal_refs": []
+  },
+  "deliverables": [
+    {
+      "key": "review-report",
+      "kind": "report",
+      "description": "A Markdown report listing findings, risk and suggested follow-up."
+    },
+    {
+      "key": "tracker-update",
+      "kind": "change_proposal",
+      "description": "A proposed tracker update summarising the review outcome."
+    }
+  ],
+  "limits": {
+    "max_turns": 20,
+    "wall_timeout_seconds": 900,
+    "max_output_bytes": 1048576,
+    "max_budget_usd": null
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/repository.write/v1/error.schema.json",
+  "title": "repository.write/v1 error",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "code",
+    "message",
+    "retryable"
+  ],
+  "properties": {
+    "status": {
+      "const": "error"
+    },
+    "code": {
+      "enum": [
+        "approval_required",
+        "approval_stale",
+        "change_set_too_large",
+        "credential_unavailable",
+        "effect_policy_or_configuration_invalid",
+        "effect_provider_failed",
+        "invalid_request",
+        "lease_expired",
+        "proposal_expired",
+        "provider_effect_protocol_unavailable",
+        "provider_http_error",
+        "provider_response_invalid",
+        "provider_response_too_large",
+        "provider_unavailable",
+        "read_back_verification_failed",
+        "retry_exhausted",
+        "run_cancelled",
+        "scope_denied",
+        "target_branch_conflict",
+        "target_stale",
+        "verification_failed"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "retryable": {
+      "type": "boolean"
+    }
+  }
+}

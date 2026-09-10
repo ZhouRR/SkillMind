@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/auth/v1/login-request.schema.json",
+  "title": "Skillmind Login Request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["email", "password"],
+  "properties": {
+    "email": { "type": "string", "minLength": 3, "maxLength": 320 },
+    "password": { "type": "string", "minLength": 1, "maxLength": 1024 }
+  }
+}

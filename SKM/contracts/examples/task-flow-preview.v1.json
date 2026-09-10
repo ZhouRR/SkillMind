@@ -1,0 +1,204 @@
+{
+  "preview_version": "skillmind.task-flow-preview/v1",
+  "identity": {
+    "project_id": "00000000-0000-4000-8000-000000000002",
+    "skill_id": "00000000-0000-4000-8000-000000000003",
+    "skill_version_id": "00000000-0000-4000-8000-000000000004",
+    "task_id": "5d8402ff-4fe6-5049-ae37-b5de0ed1fdad",
+    "task_key": "explain",
+    "skill_key": "reading-guide",
+    "version": "1.2.3",
+    "manifest_checksum": "sha256:70de79c5bf1196d267c0cd693fcf2d0b86b1b5a1d40f66c672f7b3ad90f8d8cd"
+  },
+  "status": "AVAILABLE",
+  "blueprint_checksum": "sha256:2ad563ebd2d1e0ca06a7bfa8173e2dda84a0d746a1a2871c7afb22e173bc5f30",
+  "preview_checksum": "sha256:d5e574b767ed374959bcc69cc3ebec4e1f68a7bd4419ba5c3973597b86a05fe7",
+  "plan": {
+    "task": {
+      "scope": "TASK",
+      "blueprint_ref": "/tasks/1",
+      "value": {
+        "key": "explain",
+        "capability": "reading.explain",
+        "objective": "Explain input",
+        "success_criteria": [
+          {
+            "key": "complete",
+            "text": "Explain the evidence"
+          }
+        ],
+        "resource_keys": [
+          "notes",
+          "source"
+        ],
+        "deliverables": [
+          {
+            "key": "report",
+            "kind": "report",
+            "description": "A report"
+          }
+        ]
+      }
+    },
+    "task_resources": [
+      {
+        "scope": "TASK",
+        "blueprint_ref": "/resource_requirements/1",
+        "value": {
+          "key": "notes",
+          "kind": "document",
+          "required": false,
+          "access": "read"
+        }
+      },
+      {
+        "scope": "TASK",
+        "blueprint_ref": "/resource_requirements/0",
+        "value": {
+          "key": "source",
+          "kind": "document",
+          "required": true,
+          "access": "read"
+        }
+      }
+    ],
+    "shared": {
+      "scope": "SKILL",
+      "resource_requirements": [
+        {
+          "scope": "SKILL",
+          "blueprint_ref": "/resource_requirements/2",
+          "value": {
+            "key": "tracker",
+            "kind": "issue",
+            "required": false,
+            "access": "write"
+          }
+        }
+      ],
+      "guidance": {
+        "required_rules": [
+          {
+            "key": "cite",
+            "text": "Cite original evidence"
+          }
+        ],
+        "recommended_steps": [
+          {
+            "key": "read",
+            "text": "Read source first"
+          }
+        ],
+        "quality_criteria": [
+          {
+            "key": "clear",
+            "text": "Use clear language"
+          }
+        ],
+        "prohibited_actions": [
+          {
+            "key": "fabricate",
+            "text": "Do not invent evidence"
+          }
+        ]
+      },
+      "interaction_points": [
+        {
+          "key": "review",
+          "type": "REVIEW",
+          "condition": "When requested"
+        }
+      ],
+      "effect_intents": [
+        {
+          "key": "update",
+          "mode": "apply",
+          "resource_key": "tracker",
+          "operation": "Record an approved summary",
+          "risk": "low",
+          "approval_mode": "ask"
+        }
+      ],
+      "assumptions": [
+        {
+          "key": "scope",
+          "text": "The input is in scope"
+        }
+      ],
+      "questions": [
+        {
+          "key": "language",
+          "text": "Which language?",
+          "required": false
+        }
+      ],
+      "execution_preferences": {
+        "recommended_profile": "SUPERVISED"
+      }
+    }
+  },
+  "source_traces": [
+    {
+      "target": "/tasks/1",
+      "path": "説明/SKILL.md",
+      "line": 1,
+      "reason": "Declared task",
+      "verification": "TEXT_SNAPSHOT"
+    },
+    {
+      "target": "/guidance/required_rules/0",
+      "path": "説明/SKILL.md",
+      "line": 2,
+      "reason": "Declared rule",
+      "verification": "TEXT_SNAPSHOT"
+    },
+    {
+      "target": "/tasks/0",
+      "path": "説明/SKILL.md",
+      "line": null,
+      "reason": "Other task",
+      "verification": "TEXT_SNAPSHOT"
+    }
+  ],
+  "readiness": {
+    "scope": "SKILL_BLUEPRINT",
+    "assessment": {
+      "level": "CONFIGURATION_REQUIRED",
+      "requirements": [
+        {
+          "key": "source",
+          "kind": "document",
+          "required": true,
+          "access": "read",
+          "status": "UNAVAILABLE",
+          "reason": "The project has no resource bound for this requirement yet",
+          "capabilities": [],
+          "selection_guidance": null,
+          "candidates": []
+        },
+        {
+          "key": "notes",
+          "kind": "document",
+          "required": false,
+          "access": "read",
+          "status": "UNAVAILABLE",
+          "reason": "The project has no resource bound for this requirement yet",
+          "capabilities": [],
+          "selection_guidance": null,
+          "candidates": []
+        },
+        {
+          "key": "tracker",
+          "kind": "issue",
+          "required": false,
+          "access": "write",
+          "status": "UNAVAILABLE",
+          "reason": "The project has no resource bound for this requirement yet",
+          "capabilities": [],
+          "selection_guidance": null,
+          "candidates": []
+        }
+      ]
+    }
+  }
+}

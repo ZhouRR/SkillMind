@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/evaluations/v1/create-request.schema.json",
+  "title": "Create Evaluation request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["rating", "verdict"],
+  "properties": {
+    "rating": { "type": "integer", "minimum": 1, "maximum": 5 },
+    "verdict": {
+      "enum": ["accurate", "partially_accurate", "inaccurate", "uncertain"]
+    },
+    "comment": { "type": "string", "maxLength": 4000, "default": "" },
+    "revisions": {
+      "type": "array",
+      "maxItems": 100,
+      "default": [],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["pointer", "suggested_value", "reason"],
+        "properties": {
+          "pointer": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^/" },
+          "suggested_value": true,
+          "reason": { "type": "string", "minLength": 1, "maxLength": 1000 }
+        }
+      }
+    }
+  }
+}

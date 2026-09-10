@@ -1,0 +1,211 @@
+{
+  "blueprint_version": "skillmind.capability-blueprint/v1",
+  "identity": {
+    "skill_key": "generic-native-review",
+    "source_hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+    "interpretation_id": "00000000-0000-4000-8000-0000000005a1",
+    "interpreter_version": "skillmind-skill-interpreter/2.2.0"
+  },
+  "compatibility": {
+    "level": "adapted",
+    "confidence": 0.82
+  },
+  "capabilities": [
+    {
+      "key": "repository.review",
+      "title": "Repository Review",
+      "summary": "Review a repository revision against the rules carried by the Skill source.",
+      "intents": ["The user wants an evidence-backed review of a code change."]
+    }
+  ],
+  "tasks": [
+    {
+      "key": "review-revision",
+      "capability": "repository.review",
+      "objective": "Review the selected repository revision and report evidence-backed findings.",
+      "success_criteria": [
+        {
+          "key": "findings-have-evidence",
+          "text": "Every finding cites a repository path and revision."
+        }
+      ],
+      "resource_keys": ["target_repository", "review_notes"],
+      "deliverables": [
+        {
+          "key": "review-report",
+          "kind": "report",
+          "description": "A Markdown report listing findings, risk and suggested follow-up."
+        },
+        {
+          "key": "tracker-update",
+          "kind": "change_proposal",
+          "description": "A proposed tracker update summarising the review outcome."
+        }
+      ],
+      "result_contract": {
+        "contract_version": "skillmind.task-contract-draft/v1",
+        "type": "object",
+        "description": "Optional machine-readable review summary",
+        "fields": [
+          {
+            "key": "summary",
+            "type": "string",
+            "required": true,
+            "description": "Review summary",
+            "min_length": 1
+          }
+        ]
+      }
+    }
+  ],
+  "resource_requirements": [
+    {
+      "key": "target_repository",
+      "kind": "repository",
+      "required": true,
+      "access": "read",
+      "capabilities": ["repository.read/v1"],
+      "accepted_providers": ["git", "svn", "project-files"],
+      "selection_guidance": "Prefer the revision named by the user; ask when it is not stated."
+    },
+    {
+      "key": "review_notes",
+      "kind": "document",
+      "required": false,
+      "access": "read",
+      "capabilities": ["document.read/v1"],
+      "accepted_providers": ["project-documents"],
+      "selection_guidance": "Use the project review checklist when one is bound."
+    },
+    {
+      "key": "review_tracker",
+      "kind": "issue",
+      "required": false,
+      "access": "write",
+      "capabilities": ["issue.read/v1"],
+      "accepted_providers": ["redmine"],
+      "selection_guidance": "Only needed when the user asks for the outcome to be recorded."
+    }
+  ],
+  "guidance": {
+    "required_rules": [
+      {
+        "key": "cite-evidence",
+        "text": "Every finding must cite the repository path and revision it was observed in."
+      }
+    ],
+    "recommended_steps": [
+      {
+        "key": "load-source",
+        "text": "Read the changed files before judging the change as a whole."
+      },
+      {
+        "key": "report",
+        "text": "Group findings by severity and explain the reasoning behind each one."
+      }
+    ],
+    "quality_criteria": [
+      {
+        "key": "actionable",
+        "text": "Each finding states what to change and why it matters."
+      }
+    ],
+    "prohibited_actions": [
+      {
+        "key": "no-silent-fix",
+        "text": "Do not present a rewritten file as if it were the reviewed revision."
+      }
+    ]
+  },
+  "interaction_points": [
+    {
+      "key": "revision-choice",
+      "type": "CHOICE",
+      "condition": "The user did not name the revision to review.",
+      "prompt": "Which revision should be reviewed?"
+    },
+    {
+      "key": "tracker-update-approval",
+      "type": "EFFECT_APPROVAL",
+      "condition": "A tracker update was proposed and needs approval before it is applied.",
+      "prompt": "Apply the proposed tracker update?"
+    }
+  ],
+  "effect_intents": [
+    {
+      "key": "read-repository",
+      "mode": "observe",
+      "resource_key": "target_repository",
+      "operation": "Read the reviewed revision and its changed files.",
+      "risk": "low"
+    },
+    {
+      "key": "update-tracker",
+      "mode": "apply",
+      "resource_key": "review_tracker",
+      "operation": "Record the review outcome on the tracked issue.",
+      "risk": "medium",
+      "approval_mode": "ask"
+    }
+  ],
+  "execution_preferences": {
+    "recommended_profile": "SUPERVISED",
+    "session_split_hints": [
+      {
+        "key": "split-after-review",
+        "text": "Continue in a new Session once the user has responded to the review."
+      }
+    ],
+    "stop_conditions": [
+      {
+        "key": "revision-unreadable",
+        "text": "Stop and ask when the requested revision cannot be read."
+      }
+    ]
+  },
+  "source_traces": [
+    {
+      "target": "/capabilities/0",
+      "path": "SKILL.md",
+      "line": 3,
+      "reason": "The Overview section describes reviewing a repository revision."
+    },
+    {
+      "target": "/tasks/0",
+      "path": "SKILL.md",
+      "line": 5,
+      "reason": "The Goal section defines the review objective and its report."
+    },
+    {
+      "target": "/resource_requirements/0",
+      "path": "SKILL.md",
+      "line": 8,
+      "reason": "The Inputs section requires a repository revision."
+    },
+    {
+      "target": "/guidance/required_rules/0",
+      "path": "SKILL.md",
+      "line": 12,
+      "reason": "The Rules section states that findings must cite evidence."
+    },
+    {
+      "target": "/effect_intents/1",
+      "path": "SKILL.md",
+      "line": 18,
+      "reason": "The Follow-up section asks for the outcome to be recorded on the tracker."
+    }
+  ],
+  "assumptions": [
+    {
+      "key": "single-revision",
+      "text": "The first version reviews one repository revision per Run."
+    }
+  ],
+  "questions": [
+    {
+      "key": "severity-scale",
+      "text": "Which severity scale should findings use?",
+      "required": false
+    }
+  ]
+}

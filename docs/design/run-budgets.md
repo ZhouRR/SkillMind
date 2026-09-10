@@ -1,10 +1,10 @@
 # Run 预算与执行限额
 
-同一 Run 的主执行、子分析、Segment 续行与 Attempt 重试必须共用账户。本页区分现行局部限制与尚未接入执行的持久账本；不是预算 API。当前状态见[计划 R02](../planning/roadmap.md#r02-run-统一预算)。
+主/子执行、Segment 续行、Attempt 重试须共用 Run 账户。本文区分局部限制与未接入执行的账本，不是预算 API；状态见[计划 R02](../planning/roadmap.md#r02-run-统一预算)。
 
 ## 先区分上限、分配与消耗
 
-冻结上限是授权，预留是已承诺额度，消耗是已确认用量。分支拿到 10 turns 不等于用掉 10；Session 数和摘要长度也不是消费。
+上限是冻结授权，预留是承诺额度，消耗是确认用量；分配、Session 数、摘要长度都不是消费。
 
 ### 当前实现的实际口径
 
@@ -17,7 +17,7 @@
 | RUN_MAX_ATTEMPTS | 当前 Segment 的技术重试次数，不限制全部业务续行或 Run 成本 |
 | 输入文件数量/字节 | 逐根及跨根最终存量，规则见[资源总量](resource-snapshots.md#跨根总量) |
 
-例如父快照 20 turns，两次各派两支时每次仍各分 10，不构成全 Run 20 的保证。账本已有内部实现，但创建、主 Executor、子 Provider 与 Worker startup 均未调用。
+父 20 turns 连续两次 dispatch 两支，每次仍各分 10，并非全 Run 20。创建、主 Executor、子 Provider、startup 尚未调用账本。
 
 ### 用量现在流向哪里
 
@@ -28,21 +28,21 @@
 | 取消覆盖事件 | 保留该事件已观察 usage/cost，丢弃成功/提问正文；SESSION_INTERRUPTED 不更新 Session usage，不能从事件反推相同投影 |
 | 子收集器 / Session | 校验终端和结果，但不归集用量；子 usage 仅 branch_key、cost 空，失败也不等于零消耗 |
 
-计量必须先确认 SDK 报告是否含历史、重试或子调用，不能把 Session、Result 和最终报告重复入账。
+入账前须确认历史/重试/子调用范围，Session、Result、最终报告不可重复计量。
 
 ### 原始用量观察入口
 
-[Engine](../../PJM/backend/src/projectmind/agent/engine.py)提供服务装配专用的可选 `usage_observer`，在原 SDK Result 的任何展示事件交出前等待观察处理；普通 usage/rate-limit 通知不进入此口。观察失败关闭该执行的成功/等待输出，取消继续传递，不启动后台补写。
+[Engine](../../SKM/backend/src/skillmind/agent/engine.py)的可选 `usage_observer` 在原 SDK Result 展示前同步处理；普通 usage/rate-limit 不进入。失败阻止成功/等待输出，取消传播，不后台补写。
 
-[内部观察类型](../../PJM/backend/src/projectmind/agent/metering.py)固定本次 adapter invocation、Project/Run/Attempt/actor、SDK Session、INITIAL/RESUME/FORK 与构建 SDK/CLI 版本。指令取实际 prompt 的 checksum；options 仅保存最终传给 client 的模型、局部限额、Session/续行与输出格式摘要，不含凭据、任意 usage 或结果正文，不冒充完整 options 审计。相同 invocation 的 Result 使用固定观察键，内容变化不能改键逃避核对；同 Session 的再次 resume 则是另一 invocation。
+[观察](../../SKM/backend/src/skillmind/agent/metering.py)固定 invocation、Project/Run/Attempt/actor、SDK Session、续行模式、SDK/CLI 构建版本与实际 prompt checksum。options 仅记录实际模型、局部限额、Session/续行/输出格式摘要，不含凭据/结果，不冒充完整 options 审计。同 invocation 固定观察键，异内容不得换键；再次 resume 是新 invocation。
 
-整数、缺失和无效值分开；有限非负成本 float 只保存其 binary64 hex 表示，不转换为精确 USD/nano-USD。该观察不是 `BudgetUsageReport`，不声明累计范围、final 或 stopped。流关闭、未收到 Result、观察提交不明也不补零或退款。
+整数、缺失、无效分开；有限非负 float 成本只存 binary64 hex，不转换为精确金额。观察不是 BudgetUsageReport，不声明累计范围/final/stopped；无 Result、流关闭、提交未知均不补零退款。
 
-原始观察已有独立持久入口，绑定和启动规则见[原调用绑定](#原调用绑定与启动)。当前 startup 尚未注入该服务；接入前仍须由可信协调方验证计量 profile、构建版本和实际局部强制，再归一化到现有报告。离线 compatibility probe 只核对包的版本标记和接口；SDK 可回退到系统 CLI，不能据此证明实际启动的二进制、resume 用量范围或硬上界。不能从 trace、Session 或 invocation ID 补造预算身份，这个入口本身不代表共享限额生效。
+接入前，可信协调方须验证计量 profile、实际构建和局部强制再归一化。离线 probe 只验版本标记/接口；SDK 可回退系统 CLI，故不证明实际二进制、resume 范围或硬上界。预算身份须经[绑定](#原调用绑定与启动)，不从 trace/Session/invocation ID 补造。
 
 ### 现有计时器的覆盖范围
 
-默认配置来自 [Settings](../../PJM/backend/src/projectmind/core/settings.py)、[创建快照](../../PJM/backend/src/projectmind/runs/service.py)和 [Worker 注册](../../PJM/backend/src/projectmind/worker/settings.py)，部署以实际注入值为准。
+默认值来自 [Settings](../../SKM/backend/src/skillmind/core/settings.py)、[创建快照](../../SKM/backend/src/skillmind/runs/service.py)、[Worker](../../SKM/backend/src/skillmind/worker/settings.py)，部署以注入值为准。
 
 | 计时器 | 默认值与覆盖 |
 | --- | --- |
@@ -54,13 +54,11 @@
 | ARQ execute_run | 1200 + 准备秒数，默认 1500；整个 job 最终防线，其他 job/cron 独立 |
 | 人工等待 | 持久 expires_at；释放主 lease，不刷新 Run 总额度 |
 
-准备 240 秒加模型 850 秒可分别合法，但不是 900 秒的 Run 总预算。续 lease 不延长 deadline；准备/事件 timeout 为协作取消，线程 I/O、清理或 DB 等待可能晚返回，不能承诺按秒硬杀。Job timeout/关停仍可能中断终态提交。
-
-Effect Worker 另有 lease，复用部分配置但无主 Executor 的贯穿监督；其[执行权/取消缺口](repository-effects.md#执行权与取消)不能由本表推导为已解决。
+准备 240 秒加模型 850 秒不违反各自限制，但不是 Run 共计 900 秒。续 lease 不延长 deadline；timeout 为协作取消，I/O/清理/DB 可晚返回，job 关停可打断终态提交。Effect 有[独立监督缺口](repository-effects.md#执行权与取消)。
 
 ## 目标与非目标
 
-目标是冻结授权不变、余额可审计变化，重试/续行不重领完整额度。不引入钱包、充值或组织计费；扩大上限新建 Run。Skill 解释、独立评估、模块构建另设限制，不借本 Run 账户。
+重试/续行不重领额度，扩大上限新建 Run。不引入钱包/组织计费；Skill 解释、独立评估、模块构建另设限制。
 
 ### 分开定义计量维度
 
@@ -71,7 +69,7 @@ Effect Worker 另有 lease，复用部分配置但无主 Executor 的贯穿监�
 | 累计输出（后续） | 明确文本/结构化/Tool response 范围，DELTA 与 COMPLETED 不重复 |
 | 活动时长（后续） | 累计墙钟区间，子并行重叠不相加，排队/人工等待不计，准备仍独立 timeout |
 
-只有 adapter 可强制执行上界，才可承诺硬限额。未启用某维度不宣称受限；已启用但不可计量则阻止新收费执行。null 不等于零或免费。
+硬限额须有 adapter 强制上界。未启用不宣称受限，启用但不可计量则禁止新收费；null 不是零/免费。
 
 ### 计量报告如何归一化
 
@@ -82,15 +80,15 @@ Effect Worker 另有 lease，复用部分配置但无主 Executor 的贯穿监�
 | resume/fork/范围变化 | 证明覆盖范围、历史/子调用与基线；不能共用一个 last_usage |
 | 缺失/冲突/无效 | 保留未知占用；负数、非有限数、错单位或无执行归属不变成零，更正另存审计 |
 
-可信 adapter 归一化并固定 SDK/CLI/规则版本，一个来源入账、其他交叉核对。BudgetUsageReport 只接收已归一化值；final=True 必须证明启用维度收齐，而非“最后事件”。增量须无漏报，累计 turns/cost 各自水位，缺测不推进。
+可信 adapter 固定 SDK/CLI/规则版本，一个来源入账、其余交叉核对。BudgetUsageReport 只收归一化值；final=True 证明启用维度收齐，不指最后事件。增量无漏报，累计 turns/cost 各有水位，缺测不推进。
 
 ## 一个账户，多个执行预留
 
-每个可加维度：remaining = limit - consumed - reserved。预留前不启动，余额不足/账本不可用则拒绝；reserved 包含未知占用，确认用量原子转 consumed，不双算。实际超支保留真实差额并阻断新分配，不截断数字。活动时长按区间另算。
+可加维度满足 remaining = limit - consumed - reserved。预留前不启动，余额不足/账本不可用则拒绝；未知仍占 reserved，用量原子转 consumed。超支记真实差额并阻断新分配，不截断；活动时长另按区间计。
 
 ### 一个例子：已用、占用与可用
 
-以下是目标账户，不是当前 dispatch 输出，假设已验证 20 turns 的共享硬上界：
+假设目标账户已验证 20 turns 硬上界（非当前 dispatch 输出）：
 
 | 时点 | 已用 | 占用 | 可用 |
 | --- | ---: | ---: | ---: |
@@ -104,7 +102,7 @@ B 的 3 不因 lease 过期退还，新执行最多用 6；若不能证明 B 仍
 
 ### 持久账本的当前载体
 
-[budget_store](../../PJM/backend/src/projectmind/runs/budget_store.py)与 [repository_budgets](../../PJM/backend/src/projectmind/runs/repository_budgets.py)复用 [0030](../../PJM/backend/migrations/versions/0030_run_budget_ledger.py) 的三张账本表；[0035](../../PJM/backend/migrations/versions/0035_budget_invocations.py)追加调用绑定和原始观察，[0043](../../PJM/backend/migrations/versions/0043_budget_start_owner.py)追加启动所有权：
+[store](../../SKM/backend/src/skillmind/runs/budget_store.py)/[repository](../../SKM/backend/src/skillmind/runs/repository_budgets.py)使用 [0030](../../SKM/backend/migrations/versions/0030_run_budget_ledger.py) 账本、[0035](../../SKM/backend/migrations/versions/0035_budget_invocations.py) 调用/观察、[0043](../../SKM/backend/migrations/versions/0043_budget_start_owner.py) 启动所有权：
 
 | 表 | 责任 |
 | --- | --- |
@@ -113,13 +111,13 @@ B 的 3 不因 lease 过期退还，新执行最多用 6；若不能证明 B 仍
 | run_budget_receipts | 原预留+回执键去重，追加用量、停止、未启动释放或核对失败；不依赖 RunEvent |
 | run_budget_observations | 原预留+原 invocation 的 SDK Result 观察；未归一化，不改变消耗、停止或结算事实 |
 
-内部 run-budget/v1 只定义 turns/可选成本，非 HTTP 协议。成本为 nano-USD，DTO 整数、列 Numeric(38,0)，计算先转整数、存储再转 Decimal；边界拒绝 float/不足最小单位，不静默舍入。旧数值须经版本化转换。
+内部 run-budget/v1 定义 turns/可选 nano-USD，非 HTTP。DTO 为整数，列 Numeric(38,0)，计算用整数、存储用 Decimal；拒绝 float/不足最小单位，不舍入，旧值需版本化转换。
 
-new_budget_account 仅构造未保存/未开始且限额匹配的新账户；未来与 Run 同事务按 FK 顺序保存。0030 不回填旧 Run、不启动核对；执行端不能补造零余额。
+new_budget_account 只构造未保存/未开始、限额匹配的账户，须与 Run 按 FK 顺序同事务保存；迁移不回填旧 Run，执行端不补零。
 
 ### 原调用绑定与启动
 
-预留的 invocation ID、完整描述子 JSON 和 checksum 必须同时为空或同时存在；一份 invocation 全局只绑定一个预留。描述子采用内部 `agent-invocation/v1`，不改变原预算 policy/request/group 的 hash，也不是公开 API。
+invocation ID、完整 JSON/checksum 成组保存，一次 invocation 全局只绑定一份预留。内部 agent-invocation/v1 不改原 policy/request/group hash，不是 API。
 
 | 边界 | 必须核对的原事实 |
 | --- | --- |
@@ -127,15 +125,15 @@ new_budget_account 仅构造未保存/未开始且限额匹配的新账户；未
 | 启动 | 显式传原 invocation ID/checksum，并重验完整保存值、scope 和当前执行权；仅首次确认的 START_INTENT commit 允许调用 client |
 | 观察 | 独立核对 lease 的 worker/token/到期世代、原预留与完整 invocation；重复同内容不重复写，异内容保留原值并先提交账户阻断及冲突审计 |
 
-原观察使用 `sdk-result-observation/v1`，不写成归一化 USAGE 回执。同一次 invocation 的观察冲突不能换键重收，也不允许成功事件掩盖冲突；未知提交保留占用。终态后可按独立核对权保存，不恢复旧 Attempt 执行权或追加 RunEvent。
+sdk-result-observation/v1 不是 USAGE 回执。冲突先保存阻断审计，不以换键/成功事件掩盖；未知保留占用。终态后可独立核对，不恢复旧 Attempt 或追加 RunEvent。
 
-[BudgetInvocationRecorder](../../PJM/backend/src/projectmind/runs/budget_execution.py)把绑定、严格启动和观察保存接到 Engine 的 `before_connect` / `usage_observer`。两者成对装配；只有明确的 `True` 才创建 client，拒绝、提交未知或取消不得继续启动。依赖收尾捕获取消也不能据此获得下一副作用的许可；client 已创建后由同一执行负责清理。
+[Recorder](../../SKM/backend/src/skillmind/runs/budget_execution.py)成对装配 before_connect/usage_observer；只有首次明确 True 才创建 client，拒绝/未知/取消不许可启动，client 由原执行清理。捕获取消不能获得下一副作用许可。
 
-可信协调方可传 `prepared_invocation` 固定原 SDK Session/调用身份；Engine 从实际 prompt/options/模式重建后逐字段核对，不把原描述子本身当许可。读到 RESERVED 也不能证明此前没有尝试 B。
+prepared_invocation 可固定原 Session/调用，Engine 仍从实际 prompt/options/模式逐字段重建核对；描述子或 RESERVED 都不是启动许可。
 
 ### 启动所有权与协调方更替
 
-原调用描述回答“是哪次执行”，启动所有权回答“哪个存活的协调器可以尝试 B”，两者分开。每个 recorder 自行生成随机 token，在首次 await 前从实例取走并关闭复用；局部变量仅供本次绑定/B 调用。首次绑定事务同时保存独立用途的 token hash。token 不进入调用描述、返回 DTO、SDK options、观察或公开接口，也不从 Worker lease、Session 或 invocation ID 推导。
+描述子标识执行，owner 指定可尝试启动事务（TX B）的存活协调器。recorder 生成随机 token，首次 await 前取走并关闭复用，仅供本次绑定与启动；首次绑定同事务保存独立用途 hash。token 不从 lease/Session/invocation 派生，不进描述子、DTO、options、观察或 API。
 
 | 恢复场景 | 必须保持的判定 |
 | --- | --- |
@@ -145,9 +143,9 @@ new_budget_account 仅构造未保存/未开始且限额匹配的新账户；未
 | 已有 START_INTENT | 读回不许可再次启动；换协调方也不能继承原 token |
 | 旧绑定没有所有权 | 保留原值并拒绝启动，不为旧调用补造 owner |
 
-所有权检查与原 lease、actor、绑定和父调用检查一起执行，不替代任何一项。它阻止重新装配 recorder 把未知启动变为新许可，不证明模型已开始/停止或费用已结清，也不防止任意受信代码复制内存 token 后绕过 recorder。store/repository 仅供受信装配；未完成的独立核对服务不能直接开放这些入口。
+owner 与原 lease/actor/绑定/父调用一起检查，阻止换 recorder 重获未知启动权；不证明开始、停止、结清，也不防受信代码复制内存 token 绕过 recorder。store/repository 仅供受信装配，不向未建身份的核对方开放。
 
-丢失 token 后仍保留占用；独立核对方依据原执行事实处理未启动关闭或停止/计量，不把核对 lease 当启动权。0043 对旧行保持空值，任何 owner 痕迹都在排他锁内阻止降级；旧预算调用方不检查此列，须隔离。恢复到较早的数据库状态也不能证明后来没有启动。
+丢 token 保留占用，由独立核对方按原事实关闭未启动或结算；核对 lease 不授启动权。0043 旧行留空，任何 owner 痕迹均在排他锁内阻止降级；隔离不识别它的旧调用方。恢复较早 DB 不证明后来未启动。
 
 ### 内部状态不能当作运行证明
 
@@ -158,15 +156,15 @@ new_budget_account 仅构造未保存/未开始且限额匹配的新账户；未
 | SETTLED | 已提供停止依据和完整用量并释放未用量，不等于 Run 成功 |
 | RELEASED | 未启动预留已关闭，不是启动后的退款 |
 
-verified_evidence 目前只校验键形状，claim_reconciliation 只操作内部 lease。二者不验证真实停止、不建立核对方身份；须接受信服务、锁外证据校验和来源验证，不能开放给模型/用户/旧 Worker。
+verified_evidence 仅验键形状，claim_reconciliation 仅管内部 lease；均不证明停止/核对方身份。须由受信服务锁外验来源/证据，不开放模型、用户或旧 Worker。
 
 ### 原子性与重复请求
 
-预留同事务验证状态/权限/余额/身份。所需锁顺序为 Run → Segment → Attempt → 账户 → 预留，可跳不需要层，不得反向取锁；获锁后再判当前时间/fencing，锁外调用模型和核对。
+同事务验状态/权限/余额/身份，按 Run → Segment → Attempt → 账户 → 预留取所需锁，不反向；锁后用新时间 fencing，锁外调用模型/核对。
 
-同操作同键返回原记录，异内容冲突；真正重执行用新身份取余额。回放 Tool 结果不重调 Provider，但新模型执行仍计量。全组 dispatch 原子预留，全部获准才逐支启动，之后各自结算。
+同操作同键返原记录、异内容冲突，新执行以新身份取余额。Tool 重放不重调 Provider，新模型仍计量。整组 dispatch 原子预留，全部获准再逐支启动/独立结算。
 
-主执行未用预留不能复制给子支。主模型等待 Tool 不表示已停止或缩额；现有 adapter 无中途缩额协议时，只从未承诺余额分配，不足拒绝。转移额度须先证明主执行停止且局部上限同步收窄。
+主模型等 Tool 不释放预留；无中途缩额协议时，子支只用未承诺余额，不足拒绝。转移须先证明主执行停止并同步收窄局部上限。
 
 ### 启动与结算的提交边界
 
@@ -178,11 +176,9 @@ TX A：执行权 + 原子预留，确认原键
   → TX C：去重核对，结算或保留占用
 ```
 
-DB 与模型不能原子启动。A 响应丢失查原键，不换键扣额；B 后崩溃/响应丢失可能已收费，只在证明未开始且不能再开始时释放。
+DB/模型不原子。A 提交错误在 repository 返回后用新 session 按原组确认，绑定同样只确认、不补缺失值，均要求有效 lease。B 首次明确 commit 才返回 True；已有意图为 False，未知抛 BudgetStartUncertainError，均不重启。C 冲突先提交阻断审计，不抛异常回滚它；flush/fencing 不等于 commit 瞬间保证。
 
-当前 store 的 A 在 repository 返回后遇提交错误会新 session 按原组确认，绑定事务同样只确认原描述子、不补写缺失绑定，二者仍要求有效 lease。B 仅首次明确提交返回 True；已有意图返回 False，提交未知抛 BudgetStartUncertainError，均不许可再次启动。C 冲突以结果返回并先提交阻断事实，不能改抛异常使审计回滚。repository.flush 不等于 commit；锁内最后一次等待后的 fencing 也不等于精确 commit 时刻的 lease 保证。
-
-B 后仍有取消窗口，需运行监督与硬上界。执行身份包含原 Tool/branch/重执行，不仅 branch_key；Attempt 接管不洗掉旧未决预留。
+B 后崩溃/丢响应可能已收费，只有证明未开始且不能再开始才释放；取消窗口仍靠监督/硬上界。身份包括原 Tool/branch/重执行，接管不清旧未决预留。
 
 ## 结束、取消与故障恢复
 
@@ -196,17 +192,17 @@ B 后仍有取消窗口，需运行监督与硬上界。执行身份包含原 To
 
 ### 执行权与结算权分开
 
-旧 Worker 无权启动、续期、增额或释放；可信核对方可按原执行身份、来源/水位和停止证据接受晚到报告，不恢复旧执行权。停止与结清分别证明，Session CLOSED/branch outcome/Run 终态不能清零占用；部分证明只结算该部分，不增手工退款绕行入口。
+旧 Worker 不得启动/续期/增额/释放。可信核对方按原身份、来源/水位、停止证据收晚到报告，不恢复执行权；Session CLOSED、branch outcome、Run 终态均不清零占用。部分证明只结部分，不设手工退款绕行。
 
 ## 兼容、公开信息与实施顺序
 
-旧 Run 无可靠账本时标累计未知，不从 Session 摘要回填零；旧非终态能可靠重建才续行，否则停止收费并明确新建。max_output_bytes 保持单响应含义；公开上限/已用/占用/待核对量取服务端投影，Brief 余额也只是带时点观察。
+旧 Run 无账本标累计未知，不从 Session 回填零；非终态须可靠重建才续行，否则停止收费、明确新建。max_output_bytes 仍指单响应；公开余额取服务端投影，Brief 余额带观察时点。
 
 ### 上线门禁与接线顺序
 
-先固定计量契约/局部强制，再验证真实 DB 并发、未知提交与受信核对方；随后把创建重放、主子执行、等待/取消/重试全部接同一账户，最后开放投影、三语与新策略。缺一入口不回退完整上限。
+顺序为计量/局部强制 → 真实 DB 并发/未知提交/受信核对 → 创建、主子、等待/取消/重试共用账户 → 公开投影/三语/新策略。缺入口不回退完整上限。
 
-切换前隔离不识别策略或原调用绑定的旧 Worker，处理在途。0035 不给旧预留补造身份，旧未绑定 START_INTENT 不允许补绑后重启。回退保留账户/预留/报告：0035 在排他锁内检查，有任一绑定或原观察时拒绝删除；0030 也有非空拒绝，但仍须停写，不能把局部迁移 guard 当全链并发回退或完整恢复证明。公开变化同步 DTO、Schema/example/OpenAPI 与消费者。
+切换前隔离旧 Worker 并处理在途；旧未绑定 START_INTENT 不补绑重启。0035 任一绑定/观察、0030 非空账本均阻止破坏性降级，0043 另验 owner；仍须全实例停写，不以 migration guard 代替恢复证明。公开变化按[契约流程](../development/contract-workflow.md)同步。
 
 ## 验收矩阵
 

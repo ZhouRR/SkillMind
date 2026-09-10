@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/skills/interpreter/v1/capability-catalog.schema.json",
+  "title": "Skill Interpreter capability catalog snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["catalog_version", "checksum", "capabilities"],
+  "properties": {
+    "catalog_version": { "type": "string", "minLength": 1 },
+    "checksum": { "$ref": "#/$defs/sha256" },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "capability", "description", "request_schema", "response_schema", "error_schema", "providers"
+        ],
+        "properties": {
+          "capability": { "$ref": "#/$defs/capability" },
+          "description": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "request_schema": { "$ref": "#/$defs/path" },
+          "response_schema": { "$ref": "#/$defs/path" },
+          "error_schema": { "$ref": "#/$defs/path" },
+          "providers": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+            "uniqueItems": true
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "capability": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$" },
+    "path": { "type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$" }
+  }
+}
