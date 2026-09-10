@@ -1,6 +1,6 @@
 # Skill 兼容、解释与发布
 
-本页是目录式 Skill 的语义与生命周期正本；代码见[解释实现](skill-interpretation.md)，缺口见[计划 R06](../planning/roadmap.md#r06-skill-生命周期)。
+本页是目录式 Skill 的语义与生命周期正本；代码见[解释实现](skill-interpretation.md)，缺口见[计划 R06](../planning/roadmap.md#开发任务)。
 
 ## 设计目标
 

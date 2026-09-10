@@ -1,6 +1,6 @@
 # 执行监督与停止
 
-本页负责已有 Run 的取消、超时、失去 lease 与清理，不新增状态机。启动见 [Runtime](agent-runtime.md#从领取到模型启动的边界)，外部 Effect 有[独立边界](repository-effects.md#执行权与取消)，实施状态见[计划 R07](../planning/roadmap.md#r07-run-与审计)。
+本页负责已有 Run 的取消、超时、失去 lease 与清理，不新增状态机。启动见 [Runtime](agent-runtime.md#从领取到模型启动的边界)，外部 Effect 有[独立边界](repository-effects.md#执行权与取消)，实施状态见[计划 R07](../planning/roadmap.md#开发任务)。
 
 ## 一个例子：点击取消之后
 
@@ -112,7 +112,7 @@ ToolAuditLease 是调用回执，不是 Worker lease。Executor 在主 stream �
 
 ## 兼容与开发接续
 
-保持既有监督/Tool/Artifact/TaskGroup 门禁，停止核对与[共享预算](run-budgets.md)接续范围见[计划 R07](../planning/roadmap.md#r07-run-与审计)。endpoint/RunStatus/SSE 不变，旧 Brief/Result/事件不回写、缺回执不补造；新增公开信息须版本化同步，不临时增加 STOPPING。
+保持既有监督/Tool/Artifact/TaskGroup 门禁，停止核对与[共享预算](run-budgets.md)接续范围见[计划 R07](../planning/roadmap.md#开发任务)。endpoint/RunStatus/SSE 不变，旧 Brief/Result/事件不回写、缺回执不补造；新增公开信息须版本化同步，不临时增加 STOPPING。
 
 ## 验收矩阵
 

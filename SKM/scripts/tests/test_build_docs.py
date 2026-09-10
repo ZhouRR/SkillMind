@@ -276,15 +276,32 @@ class DocumentationBuildTests(unittest.TestCase):
             with self.subTest(document=path.name):
                 self.assertIn(path.name, source)
 
-    def test_roadmap_retains_all_work_items_without_delivery_log(self) -> None:
-        """全体範囲を保持し、古い輪次記録を現在の状態と混在させない。"""
+    def test_roadmap_uses_current_report_with_all_work_items(self) -> None:
+        """進捗・優先表・首版範囲・受入条件を保ち、割合や優先順位は固定しない。"""
 
         document = self.parse("docs/planning/roadmap.md")
-        for number in range(1, 14):
-            with self.subTest(item=number):
-                self.assertTrue(
-                    any(anchor.startswith(f"r{number:02d}-") for anchor in document.anchors)
-                )
+        self.assertTrue(
+            {"当前执行状态", "开发任务", "首版目标与推进顺序", "首版验收与停止条件"}
+            <= document.anchors
+        )
+        tasks = next(
+            section for section in build_docs.search_sections(document)
+            if section["anchor"] == "开发任务"
+        )
+        rows = re.findall(
+            r"^\| (\d+) \| \[(R\d{2}) [^\]]+\]\([^)]+\) \| (\d+)% \| ([^|]+) \| ([^|]+) \|$",
+            tasks["text"],
+            re.MULTILINE,
+        )
+        self.assertEqual(len(rows), 13)
+        self.assertEqual([int(row[0]) for row in rows], list(range(1, 14)))
+        self.assertEqual({row[1] for row in rows}, {f"R{number:02d}" for number in range(1, 14)})
+        for _, identifier, percentage, status, scope in rows:
+            with self.subTest(item=identifier):
+                self.assertTrue(0 <= int(percentage) <= 100)
+                self.assertTrue(status.strip())
+                self.assertTrue(scope.strip())
+        self.assertEqual(sum(token.type == "table_open" for token in document.tokens), 1)
         self.assertNotIn("delivery-history", document.source)
 
     def test_design_headings_use_topics_without_legacy_numbers(self) -> None:

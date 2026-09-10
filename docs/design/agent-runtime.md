@@ -1,6 +1,6 @@
 # Agent Runtime 与持续执行
 
-本页负责已有 Run 的执行、会话与事件协议。创建身份见[Run 创建](run-creation.md)，输入一致性见[资源快照](resource-snapshots.md)，状态与剩余工作见[计划](../planning/roadmap.md#r07-run-与审计)。
+本页负责已有 Run 的执行、会话与事件协议。创建身份见[Run 创建](run-creation.md)，输入一致性见[资源快照](resource-snapshots.md)，状态与剩余工作见[计划](../planning/roadmap.md#开发任务)。
 
 ## 设计结论
 

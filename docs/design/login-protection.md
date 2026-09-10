@@ -1,6 +1,6 @@
 # 登录入口防护与失败恢复
 
-本页定义登录/本人改密的配额、短期状态与失败语义；身份见[认证](authentication.md)，改密事务见[用户管理](user-lifecycle.md)，缺口与操作分别见[计划 R05](../planning/roadmap.md#r05-领域与身份安全)、[Runbook](../operations/runbook.md#登录防护的排查与恢复)。
+本页定义登录/本人改密的配额、短期状态与失败语义；身份见[认证](authentication.md)，改密事务见[用户管理](user-lifecycle.md)，缺口与操作分别见[计划 R05](../planning/roadmap.md#开发任务)、[Runbook](../operations/runbook.md#登录防护的排查与恢复)。
 
 ## 一个例子：一次登录，两次入口请求
 

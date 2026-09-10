@@ -1,6 +1,6 @@
 # 生成 FrontendModule
 
-本页负责生成界面的构建、隔离、版本和回退，业务/执行仍归 [SkillVersion](skill-contract.md)/[Runtime](agent-runtime.md)。当前仅有版本模型与纯检查函数，完整链路未接；状态见[计划 R04](../planning/roadmap.md#r04-生成模块)。
+本页负责生成界面的构建、隔离、版本和回退，业务/执行仍归 [SkillVersion](skill-contract.md)/[Runtime](agent-runtime.md)。当前仅有版本模型与纯检查函数，完整链路未接；状态见[计划 R04](../planning/roadmap.md#开发任务)。
 
 ## 先分清三种模块与预览
 

@@ -1,6 +1,6 @@
 # Skill 解释与发布实现
 
-本页连接[语义契约](skill-contract.md)与实现，负责解释、确定性门禁和发布；运行见[Runtime](agent-runtime.md)，缺口见[计划 R06](../planning/roadmap.md#r06-skill-生命周期)。
+本页连接[语义契约](skill-contract.md)与实现，负责解释、确定性门禁和发布；运行见[Runtime](agent-runtime.md)，缺口见[计划 R06](../planning/roadmap.md#开发任务)。
 
 ## 目标与主流程
 

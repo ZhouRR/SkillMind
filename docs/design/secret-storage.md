@@ -1,6 +1,6 @@
 # Secret 保存、解析与轮换
 
-本页负责 Provider 凭据；浏览器 token、模型连接、批准分别见[认证](authentication.md)、[Runtime](agent-runtime.md)、[受控写入](repository-effects.md)。Secret 可用不增加 scope/Tool 权限，缺口见[计划 R05](../planning/roadmap.md#r05-领域与身份安全)。
+本页负责 Provider 凭据；浏览器 token、模型连接、批准分别见[认证](authentication.md)、[Runtime](agent-runtime.md)、[受控写入](repository-effects.md)。Secret 可用不增加 scope/Tool 权限，缺口见[计划 R05](../planning/roadmap.md#开发任务)。
 
 ## 一个例子：保存成功不等于资源可用
 

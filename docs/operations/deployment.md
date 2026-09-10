@@ -147,4 +147,4 @@ smoke 会写入/计费，须隔离 DB、Redis/队列、存储、Worker、凭据�
 
 脚本不控制共享 Traefik、其他 daemon/进程或远端效果，不是跨实例锁/授权系统。独占维护时不得并发改配置、镜像、context 或启动其他 writer；确认变量只是声明，不证明全局停写。
 
-[R11](../planning/roadmap.md#r11-运维与工程工具)保留全实例停写/清理及真实恢复缺口。脚本回归只验参数、身份拒绝与失败不续行；实际 Compose/PowerShell、迁移事务、health/HTTPS 和业务放行须获准环境验收。
+[R11](../planning/roadmap.md#开发任务)保留全实例停写/清理及真实恢复缺口。脚本回归只验参数、身份拒绝与失败不续行；实际 Compose/PowerShell、迁移事务、health/HTTPS 和业务放行须获准环境验收。

@@ -1,6 +1,6 @@
 # 结果、证据与人工评价
 
-本页定义模型交付、引用与追加评价。执行终态见 [Runtime](agent-runtime.md)，运行中回答见[普通交互](user-interactions.md)，远端事实见[受控效果](repository-effects.md)；当前缺口见[计划 R07](../planning/roadmap.md#r07-run-与审计)。
+本页定义模型交付、引用与追加评价。执行终态见 [Runtime](agent-runtime.md)，运行中回答见[普通交互](user-interactions.md)，远端事实见[受控效果](repository-effects.md)；当前缺口见[计划 R07](../planning/roadmap.md#开发任务)。
 
 ## 先分清四种事实
 
@@ -176,7 +176,7 @@ pointer 以 / 指向既有目标，支持 ~0/~1；空值、缺字段、非法数
 
 ## 兼容与开发接续
 
-新评价提交/确认/分页为独立契约，不改旧响应或将旧无键记录当可重放。新包络与旧 STRUCTURED_OUTPUT 分别可读，损坏不作空成功。唯一 Result 不等于禁止 UPDATE；追加式服务、真实迁移/竞争和运维保护仍须分层验收，状态见[计划 R07](../planning/roadmap.md#r07-run-与审计)。
+新评价提交/确认/分页为独立契约，不改旧响应或将旧无键记录当可重放。新包络与旧 STRUCTURED_OUTPUT 分别可读，损坏不作空成功。唯一 Result 不等于禁止 UPDATE；追加式服务、真实迁移/竞争和运维保护仍须分层验收，状态见[计划 R07](../planning/roadmap.md#开发任务)。
 
 ## 验收条件
 

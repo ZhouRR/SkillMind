@@ -1,6 +1,6 @@
 # 资源快照与 Run 工作区
 
-本页定义 Run 的读取范围、内容冻结和输入副本。上传/下载/删除属于[文档生命周期](document-lifecycle.md)，请求重放属于[创建协议](run-creation.md)，实施状态见[计划 R01](../planning/roadmap.md#r01-资源冻结)。
+本页定义 Run 的读取范围、内容冻结和输入副本。上传/下载/删除属于[文档生命周期](document-lifecycle.md)，请求重放属于[创建协议](run-creation.md)，实施状态见[计划 R01](../planning/roadmap.md#开发任务)。
 
 ## 先区分三种“冻结”
 
@@ -149,7 +149,7 @@ input search 先验全树再查可信清单；未知文件、hardlink/FIFO、缺
 
 ## 已知差距与后续设计
 
-接续 [workspace_materializer](../../SKM/backend/src/skillmind/agent/workspace_materializer.py)与[协议回归](../../SKM/backend/tests/agent/test_input_preparation_protocol.py)，必需 store 不得改为可选。PREPARING/孤立目录尚无自动修复；消费者联调、历史/混合版本及真实事务/恢复/仓库验收见[计划 R01](../planning/roadmap.md#r01-资源冻结)。
+接续 [workspace_materializer](../../SKM/backend/src/skillmind/agent/workspace_materializer.py)与[协议回归](../../SKM/backend/tests/agent/test_input_preparation_protocol.py)，必需 store 不得改为可选。PREPARING/孤立目录尚无自动修复；消费者联调、历史/混合版本及真实事务/恢复/仓库验收见[计划 R01](../planning/roadmap.md#开发任务)。
 
 ## 验收条件
 

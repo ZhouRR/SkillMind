@@ -1,6 +1,6 @@
 # 用户答复、等待与续行
 
-本页定义普通交互的提出、答复、过期和原请求确认。外部批准见[受控效果](repository-effects.md)，结果评价见[结果设计](results-evaluation.md)；实施状态见[计划 R07](../planning/roadmap.md#r07-run-与审计)。
+本页定义普通交互的提出、答复、过期和原请求确认。外部批准见[受控效果](repository-effects.md)，结果评价见[结果设计](results-evaluation.md)；实施状态见[计划 R07](../planning/roadmap.md#开发任务)。
 
 ## 先分清三种人工参与
 

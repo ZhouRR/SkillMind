@@ -1,6 +1,6 @@
 # 用户生命周期与安全管理
 
-本页负责组织账号的创建、资料/角色/状态、本人改密、会话撤销与审计，不依赖 Project。凭据和配额见[认证](authentication.md)、[登录防护](login-protection.md)，缺口见[计划 R05](../planning/roadmap.md#r05-领域与身份安全)。
+本页负责组织账号的创建、资料/角色/状态、本人改密、会话撤销与审计，不依赖 Project。凭据和配额见[认证](authentication.md)、[登录防护](login-protection.md)，缺口见[计划 R05](../planning/roadmap.md#开发任务)。
 
 ## 一个例子：停用再启用，不恢复旧登录
 

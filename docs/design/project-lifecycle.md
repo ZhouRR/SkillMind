@@ -1,6 +1,6 @@
 # 项目、成员与归档边界
 
-本页定义项目身份、成员、选择、归档与删除。账户、执行停止、资产清理分别见[认证](authentication.md)、[执行监督](run-supervision.md)、[文档资产](document-lifecycle.md)；缺口集中在[计划 R05](../planning/roadmap.md#r05-领域与身份安全)。
+本页定义项目身份、成员、选择、归档与删除。账户、执行停止、资产清理分别见[认证](authentication.md)、[执行监督](run-supervision.md)、[文档资产](document-lifecycle.md)；缺口集中在[计划 R05](../planning/roadmap.md#开发任务)。
 
 ## 一个例子：归档不是停止或删除
 

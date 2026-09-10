@@ -1,6 +1,6 @@
 # 受控外部写入
 
-本页定义提案、批准、远端效果与恢复；实现状态见[计划 R08](../planning/roadmap.md#r08-外部效果)，续行见 [Runtime](agent-runtime.md)，处置见[Runbook](../operations/runbook.md)。
+本页定义提案、批准、远端效果与恢复；实现状态见[计划 R08](../planning/roadmap.md#开发任务)，续行见 [Runtime](agent-runtime.md)，处置见[Runbook](../operations/runbook.md)。
 
 ## 先分清四种事实
 

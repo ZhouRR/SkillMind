@@ -1,6 +1,6 @@
 # 认证、会话与项目授权
 
-本页负责浏览器身份和授权入口；[登录防护](login-protection.md)、[用户管理](user-lifecycle.md)、[外部 Secret](secret-storage.md)分别维护独立协议。当前交付缺口见[计划 R05](../planning/roadmap.md#r05-领域与身份安全)。
+本页负责浏览器身份和授权入口；[登录防护](login-protection.md)、[用户管理](user-lifecycle.md)、[外部 Secret](secret-storage.md)分别维护独立协议。当前交付缺口见[计划 R05](../planning/roadmap.md#开发任务)。
 
 ## 先分清四类凭据
 

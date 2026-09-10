@@ -1,6 +1,6 @@
 # Run 预算与执行限额
 
-主/子执行、Segment 续行、Attempt 重试须共用 Run 账户。本文区分局部限制与未接入执行的账本，不是预算 API；状态见[计划 R02](../planning/roadmap.md#r02-run-统一预算)。
+主/子执行、Segment 续行、Attempt 重试须共用 Run 账户。本文区分局部限制与未接入执行的账本，不是预算 API；状态见[计划 R02](../planning/roadmap.md#开发任务)。
 
 ## 先区分上限、分配与消耗
 
