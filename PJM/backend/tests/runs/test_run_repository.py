@@ -5,10 +5,12 @@ from __future__ import annotations
 import hashlib
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import Select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from projectmind.agent.domain import AgentEvent, AgentEventType
@@ -17,6 +19,8 @@ from projectmind.db.models import (
     AgentSession,
     Evidence,
     OutboxMessage,
+    Project,
+    ProjectSkillVersion,
     Run,
     RunAttempt,
     RunEvent,
@@ -48,6 +52,7 @@ from projectmind.runs.domain import (
 )
 from projectmind.runs.interaction import InteractionRequestDraft
 from projectmind.runs.repository import RunRepository
+from tests.runs.task_binding_fakes import TaskBindingRows
 
 
 def create_command() -> CreateRunCommand:
@@ -71,7 +76,7 @@ def create_command() -> CreateRunCommand:
     )
 
 
-def mock_session(*, inserted: bool, existing: Run | None = None) -> AsyncSession:
+def mock_session(*, inserted: bool, existing: Run | None = None) -> MagicMock:
     """PostgreSQL statement の結果だけを置き換えた AsyncSession mock を返す。"""
 
     session = MagicMock(spec=AsyncSession)
@@ -136,6 +141,19 @@ async def test_create_freezes_explicit_published_skill_version() -> None:
     manifest.manifest_json = manifest_payload
     session = mock_session(inserted=True)
     session.get = AsyncMock(return_value=version)
+    project = Project(id=command.project_id, organization_id=uuid4())
+    binding = TaskBindingRows(project, version)
+
+    async def scalar(statement: Select[Any]) -> object:
+        """元 Project の組織と実共有 guard の二つの SQL だけを評価する。"""
+
+        if statement.column_descriptions[0]["expr"] is Project.organization_id:
+            assert statement.compile().params == {"id_1": command.project_id}
+            return project.organization_id
+        assert statement.column_descriptions[0]["entity"] in (SkillVersion, ProjectSkillVersion)
+        return binding.scalar(statement)
+
+    session.scalar = AsyncMock(side_effect=scalar)
     manifest_result = MagicMock()
     manifest_result.one_or_none.return_value = manifest
     session.scalars = AsyncMock(return_value=manifest_result)
@@ -690,6 +708,7 @@ def create_claimed_running() -> tuple[ClaimedRun, Run, RunAttempt]:
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
+    assert attempt.lease_expires_at is not None
     claimed = ClaimedRun(
         run_id=run.id,
         run_attempt_id=attempt.id,

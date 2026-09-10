@@ -152,16 +152,19 @@ async def test_heartbeat_uses_fresh_locked_row_and_time(
         side_effect=[row_result(run), row_result(segment), row_result(attempt)]
     )
     repository = RunRepository(session)
-    arguments = {
-        "lease_token_hash": lease_token_hash(claimed.lease_token),
-        "lease_expires_at": requested_at + timedelta(seconds=60),
-        "now": requested_at,
-    }
+    token_hash = lease_token_hash(claimed.lease_token)
+    requested_expiry = requested_at + timedelta(seconds=60)
     if expired_during_lock:
         with pytest.raises(LeaseValidationError, match="expired"):
-            await repository.heartbeat_attempt(attempt.id, **arguments)
+            await repository.heartbeat_attempt(
+                attempt.id, lease_token_hash=token_hash, lease_expires_at=requested_expiry,
+                now=requested_at,
+            )
     else:
-        await repository.heartbeat_attempt(attempt.id, **arguments)
+        await repository.heartbeat_attempt(
+            attempt.id, lease_token_hash=token_hash, lease_expires_at=requested_expiry,
+            now=requested_at,
+        )
         assert attempt.heartbeat_at == locked_at
         assert attempt.lease_expires_at == locked_at + timedelta(seconds=60)
     locked_query = session.scalars.await_args_list[-1].args[0]

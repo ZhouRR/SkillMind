@@ -64,6 +64,7 @@ from projectmind.runs.interaction import (
 )
 from projectmind.runs.repository import RunRepository
 from projectmind.skills.capability_blueprint import resolve_capability_blueprint
+from projectmind.skills.domain import PublishedTaskNotFoundError
 from projectmind.skills.resource_binding import is_write_capability
 from projectmind.skills.task_catalog import ResolvedTaskRun
 from projectmind.users.access import authorize_user_access, validate_user_access
@@ -314,7 +315,14 @@ class RunService:
                 authority = await authorization.authorize(
                     session, intent=intent, idempotency_key=idempotency_key
                 )
-                yield session, intent, authority
+                try:
+                    yield session, intent, authority
+                except PublishedTaskNotFoundError:
+                    # 可用性の待機後に失った認領を業務拒否として結算してはいけない。
+                    await authorization.authorize(
+                        session, intent=intent, idempotency_key=idempotency_key
+                    )
+                    raise
                 return
             users = await UserRepository(session).lock_users(
                 access=authorization,
@@ -353,7 +361,11 @@ class RunService:
             try:
                 # 選択構文の拒否も現在の資格の後に行い、旧認証から状態を推測させない。
                 yield session, make_intent(), authority
-            except (TaskSourceSelectionError, IdempotencyConflictError):
+            except (
+                TaskSourceSelectionError,
+                IdempotencyConflictError,
+                PublishedTaskNotFoundError,
+            ):
                 require_current_access()
                 raise
             # 重放/不存在も同じ出口を通る。FK 等の待機後に失効すれば全初期書込を rollback。

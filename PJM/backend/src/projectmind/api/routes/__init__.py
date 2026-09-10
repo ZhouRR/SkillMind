@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from projectmind import __version__
 from projectmind.api.routes import (
+    artifacts,
     auth,
     compositions,
     documents,
@@ -18,6 +19,7 @@ from projectmind.api.routes import (
     runs,
     schedules,
     skills,
+    task_flow,
     users,
 )
 
@@ -53,7 +55,9 @@ router.include_router(users.router)
 router.include_router(users.language_router)
 router.include_router(users.account_router)
 router.include_router(skills.router)
+router.include_router(task_flow.router)
 router.include_router(runs.router)
+router.include_router(artifacts.router)
 router.include_router(schedules.router)
 router.include_router(evaluations.router)
 router.include_router(integrations.router)

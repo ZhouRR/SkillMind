@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from copy import deepcopy
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import delete, func, select
@@ -10,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from projectmind.db.models import (
     ChangeProposal,
+    FrontendModuleVersion,
     Project,
     ProjectSkillVersion,
     RunSkillSnapshot,
@@ -19,11 +23,15 @@ from projectmind.db.models import (
     SkillInterpretation,
     SkillSource,
     SkillVersion,
+    TaskSchedule,
+    TaskScheduleOccurrence,
 )
+from projectmind.skills.design_validation import SkillDesignInvalidError, SkillDesignSource
 from projectmind.skills.domain import (
     CreateSkillVersionDraftCommand,
     InlineSkillFile,
     ManifestGateFinding,
+    PublishedTaskNotFoundError,
     SaveModelInterpretationCommand,
     SaveSkillPreviewCommand,
     SkillInterpretationNotFoundError,
@@ -43,8 +51,10 @@ from projectmind.skills.domain import (
     StoredSkillPreview,
     StoredSkillSource,
     StoredSkillVersion,
+    validate_skill_publication,
 )
 from projectmind.skills.task_catalog import PublishedTaskDescriptor, project_published_tasks
+from projectmind.skills.task_flow_preview import TaskFlowPreviewInvalidError, TaskFlowPreviewSource
 
 
 class SkillRepository:
@@ -146,9 +156,7 @@ class SkillRepository:
         source = await self._session.get(SkillSource, skill_source_id)
         if source is None or source.organization_id != organization_id:
             raise SkillSourceNotFoundError(f"SkillSource not found: {skill_source_id}")
-        existing = await self._find_model_row(
-            source.id, interpreter_version, execution_key
-        )
+        existing = await self._find_model_row(source.id, interpreter_version, execution_key)
         if existing is None:
             return None
         return self._to_stored_execution(source, existing, reused=True)
@@ -160,9 +168,7 @@ class SkillRepository:
 
         source = await self._session.get(SkillSource, command.skill_source_id)
         if source is None or source.organization_id != command.organization_id:
-            raise SkillSourceNotFoundError(
-                f"SkillSource not found: {command.skill_source_id}"
-            )
+            raise SkillSourceNotFoundError(f"SkillSource not found: {command.skill_source_id}")
         existing = await self._find_model_row(
             source.id, command.interpreter_version, command.execution_key
         )
@@ -260,7 +266,10 @@ class SkillRepository:
         return self._to_stored(source, interpretation)
 
     async def create_version_draft(
-        self, command: CreateSkillVersionDraftCommand
+        self,
+        command: CreateSkillVersionDraftCommand,
+        *,
+        authorize: Callable[[], datetime],
     ) -> StoredSkillVersion:
         """Organization 所有 Interpretation から idempotent な frozen DRAFT を作成する。"""
 
@@ -282,8 +291,25 @@ class SkillRepository:
             )
         ).one_or_none()
         if existing is not None:
-            skill = await self._required_skill(existing.skill_id)
-            manifest = await self._required_manifest(existing.id)
+            skill = await self._session.get(Skill, existing.skill_id)
+            if skill is None or skill.organization_id != command.organization_id:
+                raise SkillInterpretationNotFoundError("SkillInterpretation was not found")
+            try:
+                manifest = await self._required_manifest(existing.id)
+            except RuntimeError:
+                raise SkillInterpretationNotReadyError(
+                    "Saved SkillVersion does not match its interpretation"
+                ) from None
+            if (
+                existing.interpretation_id != interpretation.id
+                or existing.skill_source_id != source.id
+                or manifest.skill_version_id != existing.id
+                or manifest.interpretation_id != interpretation.id
+            ):
+                raise SkillInterpretationNotReadyError(
+                    "Saved SkillVersion does not match its interpretation"
+                )
+            authorize()
             return self._to_stored_version(skill, existing, manifest)
 
         # 失敗や中間状態の interpretation から発行可能な DRAFT を生成させない。
@@ -304,7 +330,7 @@ class SkillRepository:
                 )
             )
         ).one_or_none()
-        now = datetime.now(UTC)
+        now = authorize()
         if existing_skill is None:
             metadata = interpretation.normalized_package_json.get("metadata", {})
             skill = Skill(
@@ -320,6 +346,8 @@ class SkillRepository:
                 updated_at=now,
             )
             self._session.add(skill)
+            # SkillVersion の FK 親を先に確定する。relationship のない UOW の順序に頼らない。
+            await self._session.flush()
         else:
             skill = existing_skill
         versions = list(
@@ -329,6 +357,7 @@ class SkillRepository:
                 )
             ).all()
         )
+        now = authorize()
         version_id = uuid4()
         version = SkillVersion(
             id=version_id,
@@ -362,17 +391,46 @@ class SkillRepository:
         # relationship がないため UOW は挿入順を依存関係から決められない。version と新規 skill を
         # 先に flush して親行を確定し、manifest 挿入時の FK 違反を環境非依存に防ぐ。
         await self._session.flush()
+        authorize()
         self._session.add(manifest)
         return self._to_stored_version(skill, version, manifest)
+
+    async def get_draft_design_source(
+        self,
+        *,
+        organization_id: UUID,
+        interpretation_id: UUID,
+        manifest: dict[str, Any],
+        manifest_checksum: str,
+    ) -> SkillDesignSource:
+        """初回凍結用に元の解釈と source を読み、文字列化や欠損の除去をしない。"""
+
+        interpretation = await self._session.get(
+            SkillInterpretation, interpretation_id, populate_existing=True
+        )
+        if interpretation is None:
+            raise SkillInterpretationNotFoundError("SkillInterpretation was not found")
+        source = await self._session.get(
+            SkillSource, interpretation.skill_source_id, populate_existing=True
+        )
+        if source is None or source.organization_id != organization_id:
+            raise SkillInterpretationNotFoundError("SkillInterpretation was not found")
+        if interpretation.status != SkillInterpretationStatus.PREVIEW_READY.value or (
+            manifest.get("capability_blueprint") is not None and interpretation.origin != "model"
+        ):
+            raise SkillInterpretationNotReadyError("SkillInterpretation is not preview-ready")
+        identity = manifest.get("identity")
+        skill_key = identity.get("skill_key") if isinstance(identity, dict) else None
+        if not isinstance(skill_key, str):
+            raise SkillInterpretationNotReadyError("Saved interpretation has no draft identity")
+        return _design_source(source, interpretation, skill_key, manifest, manifest_checksum)
 
     async def get_skill_version(
         self, *, organization_id: UUID, skill_version_id: UUID
     ) -> StoredSkillVersion:
         """Source の Organization ownership を確認して frozen version を返す。"""
 
-        skill, version, manifest = await self._version_models(
-            organization_id, skill_version_id
-        )
+        skill, version, manifest = await self._version_models(organization_id, skill_version_id)
         return self._to_stored_version(skill, version, manifest)
 
     async def publish_skill_version(
@@ -382,24 +440,38 @@ class SkillRepository:
         skill_version_id: UUID,
         published_by: UUID,
         accepted_warnings: frozenset[str],
+        validate: Callable[[SkillDesignSource], tuple[bool, tuple[ManifestGateFinding, ...]]],
+        authorize: Callable[[], datetime],
     ) -> StoredSkillVersion:
         """全 hard gate と warning acceptance を強制して DRAFT を publish する。"""
 
         skill, version, manifest = await self._version_models(
-            organization_id, skill_version_id
+            organization_id,
+            skill_version_id,
+            lock=True,
+            missing_manifest_error=SkillPublishGateError(
+                "SkillVersion publish gate has unresolved findings"
+            ),
         )
+        # 原資格の lock は service が先に取得する。版待機後の重放も現在の ADMIN を要する。
+        authorize()
         if SkillVersionStatus(version.status) is SkillVersionStatus.PUBLISHED:
             return self._to_stored_version(skill, version, manifest)
         if SkillVersionStatus(version.status) is not SkillVersionStatus.DRAFT:
-            raise SkillVersionTransitionError(
-                "Only a draft SkillVersion can be published"
-            )
-        findings = _findings_from_report(version.gate_report_json)
-        errors = [item.code for item in findings if item.severity == "error"]
-        warnings = {item.code for item in findings if item.severity == "warning"}
-        if errors or not warnings.issubset(accepted_warnings):
-            raise SkillPublishGateError("SkillVersion publish gate has unresolved findings")
-        now = datetime.now(UTC)
+            raise SkillVersionTransitionError("Only a draft SkillVersion can be published")
+        try:
+            source = await self._version_design_source(organization_id, skill, version, manifest)
+        except SkillDesignInvalidError:
+            raise SkillPublishGateError(
+                "SkillVersion publish gate has unresolved findings"
+            ) from None
+        findings = validate_skill_publication(
+            report=version.gate_report_json,
+            evaluation=validate(source),
+            accepted_warnings=accepted_warnings,
+        )
+        # 原 source の読取と全 gate の検査時間も含め、metadata 変更直前に期限を判定する。
+        now = authorize()
         version.status = SkillVersionStatus.PUBLISHED.value
         version.published_by = published_by
         version.published_at = now
@@ -407,6 +479,7 @@ class SkillRepository:
         version.gate_report_json = {
             **version.gate_report_json,
             "passed": True,
+            "findings": [_finding_json(item) for item in findings],
             "accepted_warnings": sorted(accepted_warnings),
         }
         skill.status = "PUBLISHED"
@@ -418,62 +491,84 @@ class SkillRepository:
         *,
         organization_id: UUID,
         skill_version_id: UUID,
+        authorize: Callable[[], datetime],
     ) -> StoredSkillVersion:
         """PUBLISHED 版を DEPRECATED へ進め、新規 Project 利用だけを閉じる。"""
 
         skill, version, manifest = await self._version_models(
-            organization_id, skill_version_id
+            organization_id,
+            skill_version_id,
+            lock=True,
+            missing_manifest_error=SkillVersionTransitionError(
+                "SkillVersion has no frozen RuntimeManifest"
+            ),
         )
+        now = authorize()
         status = SkillVersionStatus(version.status)
         if status is SkillVersionStatus.DEPRECATED:
             return self._to_stored_version(skill, version, manifest)
         if status is not SkillVersionStatus.PUBLISHED:
-            raise SkillVersionTransitionError(
-                "Only a published SkillVersion can be deprecated"
-            )
+            raise SkillVersionTransitionError("Only a published SkillVersion can be deprecated")
         version.status = SkillVersionStatus.DEPRECATED.value
-        version.updated_at = datetime.now(UTC)
+        version.updated_at = now
         return self._to_stored_version(skill, version, manifest)
 
     async def delete_skill_version(
-        self, *, organization_id: UUID, skill_version_id: UUID
+        self,
+        *,
+        organization_id: UUID,
+        skill_version_id: UUID,
+        authorize: Callable[[], datetime],
     ) -> None:
         """監査参照のない DEPRECATED 版と、その付随 row を物理削除する。
 
-        Library は版が増え続ける一方で、廃止しても一覧から消えない。ここは「二度と使わない版を
-        片付ける」唯一の経路だが、Run snapshot と ChangeProposal は frozen Manifest を指す監査の
-        正本なので、一件でも参照があれば削除しない。Composition item も同様に構成の正本を壊す。
+        Run snapshot/Proposal、Composition、Schedule/occurrence、生成 module は精確版を
+        指す実行・構成の正本なので、状態を問わず一件でも参照があれば削除しない。
 
         逆に ProjectSkillVersion は「その Project から見えるか」の可視性設定にすぎず、参照先の
         版が消えれば意味を失うため一緒に削除する。RuntimeManifest は版と 1:1。
         """
 
-        _, version, manifest = await self._version_models(organization_id, skill_version_id)
+        _, version, manifest = await self._version_models(
+            organization_id,
+            skill_version_id,
+            lock=True,
+            missing_manifest_error=SkillVersionDeleteBlockedError(
+                "SkillVersion has no frozen RuntimeManifest"
+            ),
+        )
+        authorize()
         if SkillVersionStatus(version.status) is not SkillVersionStatus.DEPRECATED:
-            raise SkillVersionDeleteBlockedError(
-                "Only a deprecated SkillVersion can be deleted"
-            )
-        for model in (RunSkillSnapshot, ChangeProposal, SkillCompositionItem):
+            raise SkillVersionDeleteBlockedError("Only a deprecated SkillVersion can be deleted")
+        for model in (
+            RunSkillSnapshot,
+            ChangeProposal,
+            SkillCompositionItem,
+            TaskSchedule,
+            TaskScheduleOccurrence,
+            FrontendModuleVersion,
+        ):
             referenced = await self._session.scalar(
                 select(func.count())
                 .select_from(model)
                 .where(model.skill_version_id == skill_version_id)
             )
+            authorize()
             if referenced:
                 raise SkillVersionDeleteBlockedError(
-                    "SkillVersion is still referenced by run or composition records"
+                    "SkillVersion is still referenced by execution or configuration records"
                 )
         await self._session.execute(
             delete(ProjectSkillVersion).where(
                 ProjectSkillVersion.skill_version_id == skill_version_id
             )
         )
+        authorize()
         await self._session.delete(manifest)
+        authorize()
         await self._session.delete(version)
 
-    async def list_skill_versions(
-        self, *, organization_id: UUID
-    ) -> tuple[StoredSkillVersion, ...]:
+    async def list_skill_versions(self, *, organization_id: UUID) -> tuple[StoredSkillVersion, ...]:
         """Organization の frozen SkillVersion を identity/version 順で列挙する。"""
 
         statement = (
@@ -500,25 +595,36 @@ class SkillRepository:
         project_id: UUID,
         skill_version_id: UUID,
         enabled_by: UUID,
+        authorize: Callable[[], datetime],
     ) -> StoredProjectSkillVersion:
         """同一 Organization の PUBLISHED 精確版を Project へ明示的に有効化する。"""
 
         await self._require_project_organization(project_id, organization_id)
         skill, version, manifest = await self._version_models(
-            organization_id, skill_version_id
+            organization_id,
+            skill_version_id,
+            lock=True,
+            missing_manifest_error=SkillVersionEnablementConflictError(
+                "SkillVersion has no frozen RuntimeManifest"
+            ),
         )
+        authorize()
         if SkillVersionStatus(version.status) is not SkillVersionStatus.PUBLISHED:
             raise SkillVersionEnablementConflictError(
                 "Only a published SkillVersion can be enabled"
             )
         existing = (
             await self._session.scalars(
-                select(ProjectSkillVersion).where(
+                select(ProjectSkillVersion)
+                .where(
                     ProjectSkillVersion.project_id == project_id,
                     ProjectSkillVersion.skill_version_id == skill_version_id,
                 )
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
         ).one_or_none()
+        now = authorize()
         if existing is not None:
             if existing.disabled_at is not None:
                 # disabled_at を消すと停用監査が失われる。再有効化 lifecycle を導入するまでは
@@ -534,13 +640,11 @@ class SkillRepository:
             project_id=project_id,
             skill_version_id=skill_version_id,
             enabled_by=enabled_by,
-            enabled_at=datetime.now(UTC),
+            enabled_at=now,
             disabled_at=None,
         )
         self._session.add(binding)
-        return self._to_project_skill_version(
-            organization_id, binding, skill, version, manifest
-        )
+        return self._to_project_skill_version(organization_id, binding, skill, version, manifest)
 
     async def disable_project_skill_version(
         self,
@@ -548,30 +652,39 @@ class SkillRepository:
         organization_id: UUID,
         project_id: UUID,
         skill_version_id: UUID,
+        authorize: Callable[[], datetime],
     ) -> StoredProjectSkillVersion:
         """Project の有効化を監査行ごと残したまま停用する。"""
 
         await self._require_project_organization(project_id, organization_id)
         skill, version, manifest = await self._version_models(
-            organization_id, skill_version_id
+            organization_id,
+            skill_version_id,
+            lock=True,
+            missing_manifest_error=SkillVersionEnablementConflictError(
+                "SkillVersion has no frozen RuntimeManifest"
+            ),
         )
+        authorize()
         binding = (
             await self._session.scalars(
-                select(ProjectSkillVersion).where(
+                select(ProjectSkillVersion)
+                .where(
                     ProjectSkillVersion.project_id == project_id,
                     ProjectSkillVersion.skill_version_id == skill_version_id,
                 )
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
         ).one_or_none()
+        now = authorize()
         if binding is None:
             raise SkillVersionEnablementNotFoundError(
                 f"SkillVersion enablement not found: {skill_version_id}"
             )
         if binding.disabled_at is None:
-            binding.disabled_at = datetime.now(UTC)
-        return self._to_project_skill_version(
-            organization_id, binding, skill, version, manifest
-        )
+            binding.disabled_at = now
+        return self._to_project_skill_version(organization_id, binding, skill, version, manifest)
 
     async def list_project_skill_versions(
         self,
@@ -600,12 +713,8 @@ class SkillRepository:
         if not include_disabled:
             statement = statement.where(ProjectSkillVersion.disabled_at.is_(None))
         return tuple(
-            self._to_project_skill_version(
-                organization_id, binding, skill, version, manifest
-            )
-            for binding, skill, version, manifest in (
-                await self._session.execute(statement)
-            ).all()
+            self._to_project_skill_version(organization_id, binding, skill, version, manifest)
+            for binding, skill, version, manifest in (await self._session.execute(statement)).all()
         )
 
     async def list_published_task_descriptors(
@@ -653,6 +762,45 @@ class SkillRepository:
             )
         return tuple(descriptors)
 
+    async def require_current_task_binding(
+        self, *, organization_id: UUID, project_id: UUID, skill_version_id: UUID
+    ) -> None:
+        """新規 Run/調度だけで、鎖外解析した精確版の現行可用性を保存 transaction に固定する。
+
+        呼出元は現在の資格/Project を先に固定する。SkillVersion → 有効化の順を二つの
+        SELECT で保証し、Schedule 認領が必要とする外鍵 KEY SHARE と互換な SHARE を使う。
+        原 Run の重放では呼ばず、Manifest の再生成や resource/Provider 解決も行わない。
+        """
+
+        version = await self._session.scalar(
+            select(SkillVersion)
+            .join(SkillSource, SkillSource.id == SkillVersion.skill_source_id)
+            .join(Skill, Skill.id == SkillVersion.skill_id)
+            .join(Project, Project.organization_id == Skill.organization_id)
+            .where(
+                SkillVersion.id == skill_version_id,
+                SkillVersion.status == SkillVersionStatus.PUBLISHED.value,
+                Skill.organization_id == organization_id,
+                SkillSource.organization_id == organization_id,
+                Project.id == project_id,
+            )
+            .with_for_update(read=True, of=SkillVersion)
+            .execution_options(populate_existing=True)
+        )
+        if version is None:
+            raise PublishedTaskNotFoundError("Published task is not available")
+        binding = await self._session.scalar(
+            select(ProjectSkillVersion)
+            .where(
+                ProjectSkillVersion.project_id == project_id,
+                ProjectSkillVersion.skill_version_id == skill_version_id,
+            )
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
+        )
+        if binding is None or binding.disabled_at is not None:
+            raise PublishedTaskNotFoundError("Published task is not available")
+
     async def get_published_task_binding(
         self, *, project_id: UUID, skill_version_id: UUID
     ) -> tuple[Skill, SkillVersion, RuntimeManifest]:
@@ -684,21 +832,122 @@ class SkillRepository:
         skill, version, manifest = row
         return skill, version, manifest
 
+    async def get_task_flow_preview_source(
+        self,
+        *,
+        organization_id: UUID,
+        project_id: UUID,
+        skill_version_id: UUID,
+    ) -> TaskFlowPreviewSource:
+        """有効な精確版を認可してから、補正していない原 source JSON と解釈 identity を読む。"""
+
+        skill, version, manifest = await self.get_published_task_binding(
+            project_id=project_id,
+            skill_version_id=skill_version_id,
+        )
+        if (
+            skill.organization_id != organization_id
+            or version.status != SkillVersionStatus.PUBLISHED.value
+            or version.id != skill_version_id
+        ):
+            raise SkillVersionNotFoundError("Task Flow preview was not found")
+        try:
+            design = await self._version_design_source(organization_id, skill, version, manifest)
+        except SkillDesignInvalidError:
+            raise TaskFlowPreviewInvalidError() from None
+        return TaskFlowPreviewSource(
+            project_id=project_id,
+            skill_id=skill.id,
+            skill_version_id=version.id,
+            skill_key=design.skill_key,
+            version=version.version,
+            manifest_checksum=design.manifest_checksum,
+            manifest=design.manifest,
+            skill_source_id=version.skill_source_id,
+            source_hash=design.source_hash,
+            source_file_index=design.source_file_index,
+            source_snapshot=design.source_snapshot,
+            interpretation_id=design.interpretation_id,
+            interpreter_version=design.interpreter_version,
+        )
+
+    async def _version_design_source(
+        self,
+        organization_id: UUID,
+        skill: Skill,
+        version: SkillVersion,
+        manifest: RuntimeManifest,
+    ) -> SkillDesignSource:
+        """発行とプレビューで同じ原 aggregate の FK と解釈由来を確認する。"""
+
+        source = await self._session.get(
+            SkillSource,
+            version.skill_source_id,
+            populate_existing=True,
+        )
+        if source is not None and source.organization_id != organization_id:
+            raise SkillVersionNotFoundError("SkillVersion was not found")
+        interpretation = await self._session.get(
+            SkillInterpretation,
+            version.interpretation_id,
+            populate_existing=True,
+        )
+        if (
+            source is None
+            or interpretation is None
+            or skill.id != version.skill_id
+            or source.id != version.skill_source_id
+            or interpretation.id != version.interpretation_id
+            or interpretation.skill_source_id != source.id
+            or interpretation.status != SkillInterpretationStatus.PREVIEW_READY.value
+            or manifest.skill_version_id != version.id
+            or manifest.interpretation_id != interpretation.id
+            or not isinstance(manifest.manifest_json, dict)
+            or manifest.manifest_version != manifest.manifest_json.get("manifest_version")
+            or (
+                manifest.manifest_json.get("capability_blueprint") is not None
+                and interpretation.origin != "model"
+            )
+        ):
+            raise SkillDesignInvalidError()
+        # 現行 published aggregate は PREVIEW_READY を参照する。将来 SUPERSEDED を書く場合も
+        # 新しい解釈だけを理由に、既発行版を暗黙に別 source へ差し替えてはならない。
+        # 既存 get_source の str/filter 補正は使わず、破損や欠落を純投影の検査へ渡す。
+        return _design_source(
+            source, interpretation, skill.key, manifest.manifest_json, manifest.checksum
+        )
+
     async def _version_models(
-        self, organization_id: UUID, skill_version_id: UUID
+        self,
+        organization_id: UUID,
+        skill_version_id: UUID,
+        *,
+        lock: bool = False,
+        missing_manifest_error: ValueError | None = None,
     ) -> tuple[Skill, SkillVersion, RuntimeManifest]:
         """Organization ownership を source と Skill identity の双方で検証する。"""
 
-        version = await self._session.get(SkillVersion, skill_version_id)
+        version = await self._session.get(
+            SkillVersion, skill_version_id, with_for_update=lock, populate_existing=lock
+        )
         if version is None:
             raise SkillVersionNotFoundError(f"SkillVersion not found: {skill_version_id}")
-        source = await self._session.get(SkillSource, version.skill_source_id)
+        source = await self._session.get(
+            SkillSource, version.skill_source_id, populate_existing=lock
+        )
         if source is None or source.organization_id != organization_id:
             raise SkillVersionNotFoundError(f"SkillVersion not found: {skill_version_id}")
-        skill = await self._required_skill(version.skill_id)
-        if skill.organization_id != organization_id:
+        skill = await self._session.get(Skill, version.skill_id, populate_existing=lock)
+        if skill is None or skill.organization_id != organization_id:
             raise SkillVersionNotFoundError(f"SkillVersion not found: {skill_version_id}")
-        return skill, version, await self._required_manifest(version.id)
+        try:
+            manifest = await self._required_manifest(version.id)
+        except RuntimeError:
+            # 同じ版 lock を使う廃止/削除/啓停を、発行専用の拒否へ誤分類しない。
+            if missing_manifest_error is not None:
+                raise missing_manifest_error from None
+            raise
+        return skill, version, manifest
 
     async def _required_skill(self, skill_id: UUID) -> Skill:
         """Version foreign key が参照する Skill を取得する。"""
@@ -713,16 +962,16 @@ class SkillRepository:
 
         manifest = (
             await self._session.scalars(
-                select(RuntimeManifest).where(RuntimeManifest.skill_version_id == skill_version_id)
+                select(RuntimeManifest)
+                .where(RuntimeManifest.skill_version_id == skill_version_id)
+                .execution_options(populate_existing=True)
             )
         ).one_or_none()
         if manifest is None:
             raise RuntimeError("SkillVersion references a missing RuntimeManifest")
         return manifest
 
-    async def _require_project_organization(
-        self, project_id: UUID, organization_id: UUID
-    ) -> None:
+    async def _require_project_organization(self, project_id: UUID, organization_id: UUID) -> None:
         """Project が actor と同じ Organization に属することを repository 境界でも保証する。"""
 
         statement = select(Project.id).where(
@@ -736,9 +985,7 @@ class SkillRepository:
                 f"Project SkillVersion scope not found: {project_id}"
             )
 
-    async def _find_source(
-        self, organization_id: UUID, content_hash: str
-    ) -> SkillSource | None:
+    async def _find_source(self, organization_id: UUID, content_hash: str) -> SkillSource | None:
         """Organization と content hash が一致する既存 source を検索する。"""
 
         statement = select(SkillSource).where(
@@ -881,6 +1128,27 @@ class SkillRepository:
             enabled_at=binding.enabled_at,
             disabled_at=binding.disabled_at,
         )
+
+
+def _design_source(
+    source: SkillSource,
+    interpretation: SkillInterpretation,
+    skill_key: str,
+    manifest: dict[str, Any],
+    manifest_checksum: str,
+) -> SkillDesignSource:
+    """認可済み行の原 JSON を共通 validator へ渡し、正常化による破損隠しを防ぐ。"""
+
+    return SkillDesignSource(
+        skill_key=skill_key,
+        manifest_checksum=manifest_checksum,
+        manifest=deepcopy(manifest),
+        source_hash=source.content_hash,
+        source_file_index=deepcopy(source.source_file_index_json),
+        source_snapshot=deepcopy(source.source_snapshot_json),
+        interpretation_id=interpretation.id,
+        interpreter_version=interpretation.interpreter_version,
+    )
 
 
 def _next_patch_version(versions: list[str]) -> str:

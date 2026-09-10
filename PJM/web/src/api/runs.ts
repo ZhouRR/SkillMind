@@ -1,6 +1,7 @@
 import { API_BASE, ApiProblemError, exactFields, hasStrings, isRecord, isStringArray, requestApiJson } from './http'
 import { isApiTimestamp, isUuid, sameUuid } from '../lib/validation'
 import { isRunDocumentSnapshots, isRunSourceSummaries, type RunDocumentSnapshotRecord, type RunSourceSummaries } from './runResources'
+import { isRunResultValidation, type RunResultValidation } from './resultValidation'
 import {
   isChangeApproval,
   isChangeProposal,
@@ -52,7 +53,7 @@ export interface CreateTaskRunInput {
   sources: Record<string, string>
 }
 
-/** Project-scoped detail API が返す検証済み Result。 */
+/** Project-scoped detail API が返す元 Result。検証範囲は保存された validation のみで判断する。 */
 export interface RunResultDetail {
   result_id: string
   output_schema: string
@@ -67,7 +68,7 @@ export interface RunResultDetail {
   needs_review: boolean
   usage: Record<string, unknown>
   cost: Record<string, unknown>
-  validation: Record<string, unknown>
+  validation: RunResultValidation
   created_at: string
 }
 
@@ -697,7 +698,7 @@ function isRunResultDetail(value: unknown): value is RunResultDetail {
     && typeof value.needs_review === 'boolean'
     && isRecord(value.usage)
     && isRecord(value.cost)
-    && isRecord(value.validation)
+    && isRunResultValidation(value.validation, value.result_kind)
 }
 
 /** Unknown object が raw payload を含まない ToolCall summary か確認する。 */

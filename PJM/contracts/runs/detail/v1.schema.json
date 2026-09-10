@@ -5,6 +5,66 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["run_id", "project_id", "task_id", "status", "row_version", "created_at", "input", "selected_sources", "document_snapshots", "output_schema", "output_schema_checksum", "result", "tool_calls", "evidence", "skill_snapshots", "segments", "attempts", "sessions", "interactions", "change_proposals", "approvals", "effect_executions"],
+  "$defs": {
+    "referenceChecks": {
+      "description": "Recorded validation scope, not proof of reasoning quality or current external state. Absent on legacy results; never inferred on read.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "evidence", "proposals", "effects", "artifacts"],
+      "properties": {
+        "version": { "enum": ["projectmind.result-reference-checks/v1", "projectmind.result-reference-checks/v2"] },
+        "evidence": { "const": "RUN_OWNERSHIP" },
+        "proposals": { "const": "RUN_OWNERSHIP_AND_STATE" },
+        "effects": { "enum": ["PLATFORM_RECORD_MATCH", "NOT_APPLICABLE"] },
+        "artifacts": { "enum": ["NOT_VERIFIED", "RUN_OWNERSHIP_AND_CONTENT"] }
+      },
+      "oneOf": [
+        { "properties": { "version": { "const": "projectmind.result-reference-checks/v1" }, "artifacts": { "const": "NOT_VERIFIED" } } },
+        { "properties": { "version": { "const": "projectmind.result-reference-checks/v2" }, "artifacts": { "const": "RUN_OWNERSHIP_AND_CONTENT" } } }
+      ]
+    },
+    "resultValidation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_ref": { "type": "string" },
+        "schema_valid": { "type": "boolean" },
+        "outcome_envelope_valid": { "type": "boolean" },
+        "outcome_version": { "type": "string" },
+        "task_schema_valid": { "type": ["boolean", "null"] },
+        "task_schema_ref": { "type": ["string", "null"] },
+        "evidence_refs_valid": { "type": "boolean" },
+        "artifact_refs_valid": { "type": "boolean" },
+        "evidence_count": { "type": "integer", "minimum": 0 },
+        "artifact_count": { "type": "integer", "minimum": 0 },
+        "change_proposal_count": { "type": "integer", "minimum": 0 },
+        "change_proposal_refs_valid": { "type": "boolean" },
+        "reference_checks": { "$ref": "#/$defs/referenceChecks" }
+      },
+      "allOf": [{
+        "if": {
+          "required": ["reference_checks"],
+          "properties": { "reference_checks": {
+            "required": ["version"],
+            "properties": { "version": { "const": "projectmind.result-reference-checks/v2" } }
+          } }
+        },
+        "then": {
+          "required": ["artifact_refs_valid"],
+          "properties": { "artifact_refs_valid": { "const": true } }
+        }
+      }, {
+        "if": {
+          "required": ["reference_checks"],
+          "properties": { "reference_checks": {
+            "required": ["version"],
+            "properties": { "version": { "const": "projectmind.result-reference-checks/v1" } }
+          } }
+        },
+        "then": { "properties": { "artifact_refs_valid": { "const": false } } }
+      }]
+    }
+  },
   "properties": {
     "run_id": { "type": "string", "format": "uuid" },
     "project_id": { "type": "string", "format": "uuid" },
@@ -271,9 +331,54 @@
             "needs_review": { "type": "boolean" },
             "usage": { "type": "object" },
             "cost": { "type": "object" },
-            "validation": { "type": "object" },
+            "validation": { "$ref": "#/$defs/resultValidation" },
             "created_at": { "type": "string", "format": "date-time" }
-          }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "result_kind": { "const": "OUTCOME_ENVELOPE" } } },
+              "then": {
+                "properties": {
+                  "validation": {
+                    "properties": { "reference_checks": { "properties": { "effects": { "const": "PLATFORM_RECORD_MATCH" } } } },
+                    "allOf": [{
+                      "if": { "required": ["reference_checks"] },
+                      "then": {
+                        "required": ["schema_valid", "evidence_refs_valid", "change_proposal_refs_valid", "outcome_envelope_valid"],
+                        "properties": {
+                          "schema_valid": { "const": true },
+                          "evidence_refs_valid": { "const": true },
+                          "change_proposal_refs_valid": { "const": true },
+                          "outcome_envelope_valid": { "const": true }
+                        }
+                      }
+                    }]
+                  }
+                }
+              }
+            },
+            {
+              "if": { "properties": { "result_kind": { "const": "STRUCTURED_OUTPUT" } } },
+              "then": {
+                "properties": {
+                  "validation": {
+                    "properties": { "reference_checks": { "properties": { "effects": { "const": "NOT_APPLICABLE" } } } },
+                    "allOf": [{
+                      "if": { "required": ["reference_checks"] },
+                      "then": {
+                        "required": ["schema_valid", "evidence_refs_valid", "change_proposal_refs_valid"],
+                        "properties": {
+                          "schema_valid": { "const": true },
+                          "evidence_refs_valid": { "const": true },
+                          "change_proposal_refs_valid": { "const": true }
+                        }
+                      }
+                    }]
+                  }
+                }
+              }
+            }
+          ]
         }
       ]
     },

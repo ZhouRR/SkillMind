@@ -58,6 +58,7 @@ interface WorkspacePageProps {
   projectId: string
   moduleId: string
   csrfToken: string
+  projectReadOnly?: boolean
   /** Home/Task/History から渡された deep-link context。 */
   initialRunId?: string | null
   initialTaskId?: string | null
@@ -69,6 +70,7 @@ const ignoreSessionExpired: SessionEnded = () => {}
 
 /** 作成草稿を保持しつつ、現在 Run の観測と普通答復を Session ごとに再検証する。 */
 function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunId = null, initialTaskId = null,
+  projectReadOnly = false,
   onSessionExpired = ignoreSessionExpired }: WorkspacePageProps) {
   const messages = useMessages()
   const [tasks, setTasks] = useState<PublishedTaskRecord[]>([])
@@ -546,6 +548,7 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
                 <RunResultPanel
                   actorId={actorId}
                   csrfToken={csrfToken}
+                  projectReadOnly={projectReadOnly}
                   projectId={projectId}
                   runId={selectingInitialRun ? '' : run?.run_id ?? ''}
                   onSessionExpired={onSessionExpired}

@@ -67,7 +67,7 @@ arq projectmind.worker.settings.WorkerSettings
 実 component の応答喪失・切替・三語・keyboard・狭幅は同手順の browser 回帰で確認し、mock と実 Server の検証を分ける。
 [アカウントと安全](../docs/design/user-lifecycle.md)は平台の `#/accounts`。Project 未所属でも本人安全を操作でき、ADMIN は組織ユーザーを管理する。
 [Project の成員管理](../docs/design/project-lifecycle.md#成员管理页面)は `#/projects` の ADMIN 用 tab。会話・対象の隔離と未知結果の門禁はアカウント画面と共通 request hook を使う。
-[生成 Host](../docs/design/generated-modules.md)、[Task Flow](../docs/design/task-flow.md)等の未接続部分は設計と計画から確認する。
+Task Center の[読取専用 Flow](../docs/design/task-flow.md#只读任务预览)は、Task 宣言・Skill 共通事項・現在 readiness を分けて表示する。Run Flow と[生成 Host](../docs/design/generated-modules.md)の未接続部分は計画を参照する。
 [変更別の入口](../docs/development/change-guide.md)から対象の設計・API・回帰へ進む。
 
 ## Contracts
@@ -76,7 +76,7 @@ arq projectmind.worker.settings.WorkerSettings
 
 | 配置 | 内容 |
 | --- | --- |
-| [runs](contracts/runs/) / [users](contracts/users/v1/) / [projects](contracts/projects/) / [task-schedule](contracts/task-schedule/) / [events](contracts/events/) / [errors](contracts/errors/) | 公開 API・RunEvent・Problem の Schema |
+| [runs](contracts/runs/) / [users](contracts/users/v1/) / [projects](contracts/projects/) / [tasks](contracts/tasks/) / [task-schedule](contracts/task-schedule/) / [events](contracts/events/) / [errors](contracts/errors/) | 公開 API・RunEvent・Problem の Schema |
 | [tools](contracts/tools/) | versioned Tool capability の request / response / error |
 | agent-task-brief / capability-blueprint / runtime-manifest / outcomes / view-spec | 業務固有 field を持たない共有契約 |
 | [examples](contracts/examples/)・[fixtures](contracts/fixtures/) | 代表値 / offline 回帰入力。実 account や自動 seed ではない |

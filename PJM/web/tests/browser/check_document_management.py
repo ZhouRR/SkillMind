@@ -54,6 +54,7 @@ class DocumentsApi(ProjectsApi):
         self.delete_calls: list[str] = []
         self.exact_reads: list[str] = []
         self.gate = ResponseGate()
+        self.read_gate = ResponseGate()
 
     async def problem(self, route: Route, status: int, code: str) -> None:
         """code だけを表示規則に使わせ、内部 detail の漏洩を検知する。"""
@@ -80,7 +81,14 @@ class DocumentsApi(ProjectsApi):
             elif len(parts) == 4:
                 self.exact_reads.append(parts[3])
                 assert parts[3] == DOCUMENT, "Read drifted from original ID"
-                if self.mode == "read-denied" or (
+                if self.mode in {"read-timeout-401", "read-absolute-401"}:
+                    self.read_gate.received.set()
+                    await asyncio.wait_for(self.read_gate.release.wait(), 45)
+                    await self.problem(route, 401, "authentication_required")
+                    self.read_gate.returned.set()
+                elif self.mode == "read-expired":
+                    await self.problem(route, 401, "authentication_required")
+                elif self.mode == "read-denied" or (
                     self.mode == "recheck-denied" and len(self.exact_reads) > 1
                 ):
                     await self.problem(route, 404, "project_not_found")
@@ -98,7 +106,15 @@ class DocumentsApi(ProjectsApi):
         if self.mode in {"switch", "timeout", "actor-switch"}:
             self.gate.received.set()
             await asyncio.wait_for(self.gate.release.wait(), 45)
-        if self.mode in {"unknown-present", "unknown-absent", "read-denied", "recheck-denied"}:
+        if self.mode in {
+            "unknown-present",
+            "unknown-absent",
+            "read-denied",
+            "recheck-denied",
+            "read-expired",
+            "read-timeout-401",
+            "read-absolute-401",
+        }:
             if self.mode == "unknown-absent":
                 self.rows[project_id] = [{**document(project_id, SECOND), "name": "overview.md"}]
             await self.problem(route, 500, "server_error")
@@ -164,7 +180,7 @@ async def scenario(
             await expect(panel.locator('input[type="file"]').first).to_be_disabled()
             assert not api.delete_calls
         else:
-            if mode == "timeout":
+            if mode in {"timeout", "read-timeout-401", "read-absolute-401"}:
                 await page.clock.install()
             await delete_first(page, labels)
             if mode in {"switch", "timeout", "actor-switch"}:
@@ -232,13 +248,40 @@ async def scenario(
                 ).to_be_disabled()
                 await expect(panel.locator('input[type="file"]').first).to_be_disabled()
                 await panel.get_by_role("button", name=labels["checkOriginal"], exact=True).click()
-                if mode == "read-denied":
+                if mode in {"read-timeout-401", "read-absolute-401"}:
+                    await asyncio.wait_for(api.read_gate.received.wait(), 5)
+                    if mode == "read-timeout-401":
+                        await page.clock.run_for(30_001)
+                    else:
+                        # timer を発火させず、loader 内の早すぎる失効通知を検知する。
+                        await page.evaluate("""() => {
+                          const originalNow = performance.now.bind(performance);
+                          performance.now = () => originalNow() + 31_000;
+                        }""")
+                    api.read_gate.release.set()
+                    await asyncio.wait_for(api.read_gate.returned.wait(), 5)
+                    await expect(
+                        panel.get_by_text(labels["failures"]["loadFailed"], exact=True)
+                    ).to_be_visible()
+                    await expect(panel.get_by_text(labels["checking"], exact=True)).to_have_count(0)
+                    await expect(
+                        panel.get_by_text(labels["unknownTitle"], exact=True)
+                    ).to_be_visible()
+                    await expect(page.locator('input[name="email"]')).to_have_count(0)
+                    await expect(
+                        panel.get_by_role("button", name=labels["release"], exact=True)
+                    ).to_have_count(0)
+                elif mode == "read-expired":
+                    await expect(panel).to_have_count(0)
+                    await expect(page.locator('input[name="email"]')).to_be_visible()
+                elif mode == "read-denied":
                     await expect(
                         panel.get_by_text(labels["failures"]["denied"], exact=True).first
                     ).to_be_visible()
                     await expect(
                         panel.get_by_role("button", name=labels["release"], exact=True)
                     ).to_have_count(0)
+                    await expect(panel.get_by_text(labels["checking"], exact=True)).to_have_count(0)
                 else:
                     fact = "absent" if mode == "unknown-absent" else "present"
                     await expect(panel.get_by_text(labels[fact], exact=True)).to_be_visible()
@@ -292,6 +335,7 @@ async def scenario(
         raise
     finally:
         api.gate.release.set()
+        api.read_gate.release.set()
         api.release.set()
         await context.close()
 
@@ -315,6 +359,9 @@ async def check(url: str, output: Path) -> None:
                 "expired",
                 "read-denied",
                 "recheck-denied",
+                "read-expired",
+                "read-timeout-401",
+                "read-absolute-401",
                 "switch",
                 "actor-switch",
                 "timeout",

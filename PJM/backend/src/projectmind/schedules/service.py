@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import secrets
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import UTC, datetime
@@ -40,6 +40,7 @@ from projectmind.schedules.domain import (
     DEFAULT_SCHEDULE_TICK_LIMIT,
     ClaimedSchedule,
     CreateScheduleCommand,
+    InvalidScheduleTransitionError,
     ScheduleActivity,
     ScheduleClaimLostError,
     ScheduleConflictError,
@@ -82,6 +83,7 @@ from projectmind.schedules.planning import (
 )
 from projectmind.schedules.repository import ScheduleRepository
 from projectmind.skills import PublishedTaskNotFoundError, SkillService, TaskInputInvalidError
+from projectmind.skills.repository import SkillRepository
 from projectmind.users.access import authorize_user_access, validate_user_access
 from projectmind.users.domain import UserAccess
 from projectmind.users.repository import LockedUsers, UserRepository
@@ -188,7 +190,9 @@ class ScheduleService:
             repository,
             users,
             _,
+            require_task_binding,
         ):
+            await require_task_binding(skill_version_id)
             result = await repository.create(
                 CreateScheduleCommand(
                     project_id=project_id,
@@ -244,7 +248,10 @@ class ScheduleService:
             schedule_id=schedule_id,
             sources=sources,
             expected_row_version=expected_row_version,
-        ) as (repository, _, _):
+        ) as (repository, _, locked_schedule, require_task_binding):
+            if locked_schedule is None:
+                raise RuntimeError("Schedule update requires a locked schedule")
+            await require_task_binding(locked_schedule.skill_version_id)
             result = await repository.update_definition(
                 UpdateScheduleCommand(
                     schedule_id=schedule_id,
@@ -276,7 +283,7 @@ class ScheduleService:
 
         async with self._write_transaction(
             access, project_id=project_id, schedule_id=schedule_id
-        ) as (repository, _, current):
+        ) as (repository, _, current, require_task_binding):
             if current is None:
                 raise RuntimeError("Schedule status change requires a locked schedule")
             # 利用者が見た版を最新読取で置換せず、旧画面の操作は遷移判断の前に拒否する。
@@ -292,6 +299,8 @@ class ScheduleService:
                     raise ScheduleInvalidError(
                         "Schedule has no future occurrence and cannot be resumed"
                     )
+                # 停止操作は常に残すが、復帰は現在の有効化を保存 transaction に固定する。
+                await require_task_binding(current.skill_version_id)
             result = await repository.set_status(
                 project_id=project_id,
                 schedule_id=schedule_id,
@@ -311,7 +320,14 @@ class ScheduleService:
         schedule_id: UUID | None = None,
         sources: dict[str, str] | None = None,
         expected_row_version: int | None = None,
-    ) -> AsyncIterator[tuple[ScheduleRepository, LockedUsers, ScheduleRecord | None]]:
+    ) -> AsyncIterator[
+        tuple[
+            ScheduleRepository,
+            LockedUsers,
+            ScheduleRecord | None,
+            Callable[[UUID], Awaitable[None]],
+        ]
+    ]:
         """原会話と現在の Project 資格を短期 lock で固定し、全管理書込に同じ門禁を適用する。"""
 
         validate_user_access(access)
@@ -324,15 +340,44 @@ class ScheduleService:
             )
             authorize_user_access(access, users, now=datetime.now(UTC), admin=False, write=True)
             projects = ProjectRepository(session)
-            project = await projects.lock_write_access(user=users.actor, project_id=project_id)
-            authorize_user_access(access, users, now=datetime.now(UTC), admin=False, write=True)
-            projects.require_active_write_access(project)
+            try:
+                project = await projects.lock_write_access(user=users.actor, project_id=project_id)
+            except ProjectNotFoundError:
+                # 不存在で helper が早く返っても、待機中の原会話失効を先に検証する。
+                authorize_user_access(access, users, now=datetime.now(UTC), admin=False, write=True)
+                raise
+
+            def require_current_access() -> None:
+                """既存の原会話/Project validator を、SQL 待機後の新時刻で共用する。"""
+
+                authorize_user_access(access, users, now=datetime.now(UTC), admin=False, write=True)
+                projects.require_active_write_access(project)
+
+            async def require_task_binding(skill_version_id: UUID) -> None:
+                """共有 Task gate の成否とも、新しい書込や状態拒否より先に資格を再検証する。"""
+
+                try:
+                    await SkillRepository(session).require_current_task_binding(
+                        organization_id=users.actor.organization_id,
+                        project_id=project_id,
+                        skill_version_id=skill_version_id,
+                    )
+                except PublishedTaskNotFoundError as error:
+                    require_current_access()
+                    raise ScheduleInvalidError("Published task is not available") from error
+                require_current_access()
+
+            require_current_access()
             repository = ScheduleRepository(session)
             current = None
             if schedule_id is not None:
-                current = await repository.lock_schedule(
-                    project_id=project_id, schedule_id=schedule_id
-                )
+                try:
+                    current = await repository.lock_schedule(
+                        project_id=project_id, schedule_id=schedule_id
+                    )
+                except ScheduleNotFoundError:
+                    require_current_access()
+                    raise
                 # Schedule の待機中に失効しても、状態/CAS 判断や書き込みへ進めない。
                 authorize_user_access(access, users, now=datetime.now(UTC), admin=False, write=True)
                 projects.require_active_write_access(project)
@@ -353,7 +398,17 @@ class ScheduleService:
                     ) from error
                 authorize_user_access(access, users, now=datetime.now(UTC), admin=False, write=True)
                 projects.require_active_write_access(project)
-            yield repository, users, current
+            try:
+                yield repository, users, current, require_task_binding
+            except (
+                ScheduleConflictError,
+                ScheduleInvalidError,
+                InvalidScheduleTransitionError,
+                ScheduleNotFoundError,
+            ):
+                # 業務拒否でも原会話を先に判定する。DB 失敗/取消は触らず、そのまま rollback。
+                require_current_access()
+                raise
             # flush は commit ではない。FK/名額の待機後も再検証し、例外は全変更を巻き戻す。
             await session.flush()
             authorize_user_access(access, users, now=datetime.now(UTC), admin=False, write=True)
@@ -548,6 +603,7 @@ class ScheduleService:
             TaskSourceSelectionError,
             IdempotencyConflictError,
             ScheduleOwnerUnavailableError,
+            PublishedTaskNotFoundError,
         ) as error:
             return _failed(claimed, str(error))
         return _created_run_result(claimed, run)

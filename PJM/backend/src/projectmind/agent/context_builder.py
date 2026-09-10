@@ -309,7 +309,7 @@ def _change_propose_tool_definition(contracts: ContractStore) -> ToolDefinition:
 
 
 def _workspace_tool_definitions(contracts: ContractStore) -> tuple[ToolDefinition, ...]:
-    """Run-scoped input/workspace だけを読む platform Provider を登録する。"""
+    """Run 内の読取と制限付き書込を精確な capability version ごとに登録する。"""
 
     return (
         ToolDefinition(
@@ -338,6 +338,19 @@ def _workspace_tool_definitions(contracts: ContractStore) -> tuple[ToolDefinitio
             request_schema=contracts.load("tools/workspace.write/v1/request.schema.json"),
             response_schema=contracts.load("tools/workspace.write/v1/response.schema.json"),
             error_schema=contracts.load("tools/workspace.write/v1/error.schema.json"),
+            providers={"workspace": WorkspaceWriteProvider()},
+            unbound_provider="workspace",
+            minimum_execution_profile="SUPERVISED",
+        ),
+        ToolDefinition(
+            capability="workspace.write/v2",
+            description=(
+                "Write one UTF-8 file within the isolated Run; output files receive an "
+                "immutable Artifact reference only after their exact bytes are committed"
+            ),
+            request_schema=contracts.load("tools/workspace.write/v2/request.schema.json"),
+            response_schema=contracts.load("tools/workspace.write/v2/response.schema.json"),
+            error_schema=contracts.load("tools/workspace.write/v2/error.schema.json"),
             providers={"workspace": WorkspaceWriteProvider()},
             unbound_provider="workspace",
             minimum_execution_profile="SUPERVISED",

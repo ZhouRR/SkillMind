@@ -3,8 +3,8 @@
   "source_hash": "sha256:613de186ec2f208e92c913568333b057ad2b12ead5032f895489f68b78e302b5",
   "interpreter": {
     "skill_key": "projectmind-skill-interpreter",
-    "version": "3.4.0",
-    "prompt_checksum": "sha256:918b2cae1794d8c9dde72b09ef8953af2498371712d73553ccdb95aa0ce44b4b"
+    "version": "3.5.0",
+    "prompt_checksum": "sha256:46a07a2e87827b6e824c3069aad37bb23daeec1db5d346e6edd430b001c00258"
   },
   "report": {
     "report_version": "projectmind.skill-interpretation-report/v1",
@@ -56,7 +56,7 @@
       "skill_key": "repository-review",
       "source_hash": "sha256:613de186ec2f208e92c913568333b057ad2b12ead5032f895489f68b78e302b5",
       "interpretation_id": "00000000-0000-4000-8000-000000000301",
-      "interpreter_version": "projectmind-skill-interpreter/3.4.0"
+      "interpreter_version": "projectmind-skill-interpreter/3.5.0"
     },
     "compatibility": {
       "level": "adapted",
@@ -78,7 +78,7 @@
         "skill_key": "repository-review",
         "source_hash": "sha256:613de186ec2f208e92c913568333b057ad2b12ead5032f895489f68b78e302b5",
         "interpretation_id": "00000000-0000-4000-8000-000000000301",
-        "interpreter_version": "projectmind-skill-interpreter/3.4.0"
+        "interpreter_version": "projectmind-skill-interpreter/3.5.0"
       },
       "compatibility": {
         "level": "adapted",

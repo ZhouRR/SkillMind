@@ -199,6 +199,7 @@ async def test_write_persists_output_file_with_hash_and_evidence(tmp_path: Path)
     written = context.workspace.output_dir / "review.md"
     assert written.read_text(encoding="utf-8") == body
     assert result.evidence[0].evidence_type == "workspace-write"
+    assert result.evidence[0].metadata is not None
     assert result.evidence[0].metadata["read_only"] is False
 
 

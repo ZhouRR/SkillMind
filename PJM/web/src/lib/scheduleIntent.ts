@@ -2,6 +2,7 @@ import type {
   CreateScheduleInput, ScheduleDefinitionInput, ScheduleRecord, UpdateScheduleInput,
 } from '../api/schedules'
 import { apiTimestampMicroseconds, isApiTimestamp, isUuid } from './validation'
+import { sameJsonValue as sameJson } from './jsonValue'
 
 type ScheduleMutation = CreateScheduleInput | UpdateScheduleInput
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
@@ -97,20 +98,6 @@ function freezeJson(value: unknown, ancestors = new Set<object>()): JsonValue {
   } finally {
     ancestors.delete(value)
   }
-}
-
-/** Object の順序だけを無視し、配列順序・数値・bool・null の違いは維持する。 */
-function sameJson(left: unknown, right: unknown): boolean {
-  if (left === right) return true
-  if (typeof left !== 'object' || left === null || typeof right !== 'object' || right === null) return false
-  if (Array.isArray(left) || Array.isArray(right)) {
-    return Array.isArray(left) && Array.isArray(right) && left.length === right.length
-      && left.every((item, index) => sameJson(item, right[index]))
-  }
-  const a = left as Record<string, unknown>
-  const b = right as Record<string, unknown>
-  return Object.keys(a).length === Object.keys(b).length
-    && Object.keys(a).every((key) => Object.hasOwn(b, key) && sameJson(a[key], b[key]))
 }
 
 /** Offset は同じ instant として比較し、end_at の microsecond を millisecond へ丸めない。 */

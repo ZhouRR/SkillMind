@@ -76,6 +76,8 @@ A 成功、B 失败可留下 Session 而无成功 Tool 结果，不删行、不�
 
 [v1 response](../../PJM/contracts/tools/subagent.dispatch/v1/response.schema.json)要求每支 agent_session_id，保存失败保持拒绝。审计降级另定可表达缺口的版本，同步 registry/Provider/Gateway/Evidence/Web/历史；旧消费者不得接收新结构。Tool 审计不可省略，提交未知查原调用。Session 重放、取消记录与跨事务恢复还须补齐。
 
+主/子 Gateway 均绑定父 Worker 的[原执行权](run-supervision.md#tool-调用的提交与重放)。已有未决 dispatch 不重新启动整组，B 提交未知不补写失败；此保护不等于 A 的 Session recorder 已具备相同 fencing 或停止回执。
+
 ## 预算现状与修正设计
 
 split_budget 每次重拆父冻结 turns/output，美元上限不拆，返回分配不是消费；连续 dispatch、主子混合和跨 Attempt/Segment 无累计保证。内部账本已有但 Provider 未调用。

@@ -1,13 +1,9 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import {
-  createEvaluation,
   decideChangeProposal,
-  loadEvaluations,
   type AgentSessionDetail,
   type ChangeProposalRecord,
-  type CreateEvaluationInput,
-  type EvaluationRecord,
   type EvidenceDetail,
   type RespondedInteractionRecord,
   type RunDetailRecord,
@@ -19,7 +15,10 @@ import type { InteractionAccessFailure } from '../lib/interactionResponse'
 import { splitOverflow } from '../lib/resultOverflow'
 import { EmptyState } from './PageElements'
 import { RunDocumentSnapshots } from './RunDocumentSnapshots'
+import { ResultValidationScope } from './ResultValidationScope'
+import { RunArtifacts } from './RunArtifacts'
 import { RunInteractions } from './RunInteractions'
+import { RunEvaluations } from './EvaluationSection'
 import type { SessionEnded } from '../hooks/useResourceRequest'
 
 /** Run detail 非同期読み込みの排他的 UI state。 */
@@ -33,13 +32,14 @@ export type RunDetailState =
 const ignoreSessionExpired: SessionEnded = () => {}
 
 /** 普通答復の owner は loading/error と表示 tab に依存させない。 */
-export function RunResultPanel({ state, csrfToken, actorId = '', projectId, runId,
+export function RunResultPanel({ state, csrfToken, actorId = '', projectId, runId, projectReadOnly = false,
   onInteractionResponded, onInteractionFacts, onProposalDecided, onSessionExpired = ignoreSessionExpired }: {
   state: RunDetailState
   csrfToken: string
   actorId?: string
   projectId?: string
   runId?: string
+  projectReadOnly?: boolean
   onInteractionResponded?: (response: RespondedInteractionRecord) => void
   onInteractionFacts?: (detail: RunDetailRecord) => void
   onProposalDecided?: () => void
@@ -51,15 +51,23 @@ export function RunResultPanel({ state, csrfToken, actorId = '', projectId, runI
     <RunInteractions key={JSON.stringify([actorId, csrfToken, scope.projectId.toLowerCase(), scope.runId.toLowerCase()])}
       scope={scope} state={state} csrfToken={csrfToken} onResponded={onInteractionResponded}
       onFacts={onInteractionFacts} onSessionExpired={onSessionExpired} />
-    <RunResultContent state={state} csrfToken={csrfToken} onProposalDecided={onProposalDecided} />
+    <RunResultContent state={state} csrfToken={csrfToken} onProposalDecided={onProposalDecided}
+      artifactOwner={JSON.stringify([actorId, csrfToken, scope.projectId.toLowerCase(), scope.runId.toLowerCase()])}
+      artifactScope={scope}
+      onSessionExpired={onSessionExpired} />
+    <RunEvaluations key={JSON.stringify(['evaluations', actorId, csrfToken, scope.projectId.toLowerCase(), scope.runId.toLowerCase()])}
+      scope={scope} state={state} csrfToken={csrfToken} readOnly={projectReadOnly} onSessionExpired={onSessionExpired} />
   </>
 }
 
 /** 普通答復とは独立した Result、Proposal、Segment/ToolCall/Evidence 監査を表示する。 */
-function RunResultContent({ state, csrfToken, onProposalDecided }: {
+function RunResultContent({ state, csrfToken, onProposalDecided, artifactOwner, artifactScope, onSessionExpired }: {
   state: RunDetailState
   csrfToken: string
   onProposalDecided?: () => void
+  artifactOwner: string
+  artifactScope: { projectId: string; runId: string }
+  onSessionExpired: SessionEnded
 }) {
   const messages = useMessages()
   const [showTechnicalDetails, setShowTechnicalDetails] = useState(false)
@@ -112,6 +120,8 @@ function RunResultContent({ state, csrfToken, onProposalDecided }: {
         </dl>
       </section>
 
+      <ResultValidationScope result={result} />
+
       <section className="resultSection">
         <div className="subsectionHeader">
           <h3>{result.result_kind === 'OUTCOME_ENVELOPE' ? messages.runResult.genericOutcome : messages.runResult.structuredResult}</h3>
@@ -128,6 +138,10 @@ function RunResultContent({ state, csrfToken, onProposalDecided }: {
       {dispatches.length > 0 && <SubagentDispatchSection dispatches={dispatches} />}
 
       <RunDocumentSnapshots snapshots={detail.document_snapshots} />
+      {detail.project_id.toLowerCase() === artifactScope.projectId.toLowerCase()
+        && detail.run_id.toLowerCase() === artifactScope.runId.toLowerCase()
+        && <RunArtifacts key={artifactOwner} projectId={detail.project_id} runId={detail.run_id}
+          result={result} onSessionExpired={onSessionExpired} />}
 
       {/* 以下は備査情報。既定で畳み、件数だけ見出しに残す。 */}
       <CollapsibleSection count={detail.tool_calls.length} title={messages.runResult.toolCalls}>
@@ -161,7 +175,6 @@ function RunResultContent({ state, csrfToken, onProposalDecided }: {
         </CollapsibleSection>
       )}
 
-      {result !== null && <EvaluationSection csrfToken={csrfToken} detail={detail} />}
     </div>
   )
 }
@@ -337,6 +350,7 @@ function ControlledEffectsSection({ detail, proposals, csrfToken, onDecided }: {
   ) return null
   return (
     <CollapsibleSection count={proposals.length} title={messages.runResult.controlledEffects}>
+      <p className="hint">{messages.runResult.platformEffectsHint}</p>
       <div className="proposalList">
         {proposals.map((proposal) => (
           <ChangeProposalCard
@@ -703,6 +717,7 @@ function OutcomeEnvelopeResult({ data, schema, showTechnicalDetails }: {
       {(proposalRefs.length > 0 || effects.length > 0) && (
         <section className="outcomeGroup">
           <h4>{messages.runResult.changesAndEffects}</h4>
+          <p className="hint">{messages.runResult.modelEffectsHint}</p>
           {renderOutcomeRefs(proposalRefs, showTechnicalDetails, messages.runResult.evidenceTitle)}
           {effects.map((effect, index) => (
             <p key={`${textValue(effect.proposal_ref, 'effect')}-${index}`}>
@@ -770,142 +785,6 @@ function renderOutcomeRefs(refs: string[], showTechnicalDetails: boolean, label:
 /** Unknown 値を表示用 string へ絞り、欠損時は既定値を返す。 */
 function textValue(value: unknown, fallback: string): string {
   return typeof value === 'string' && value ? value : fallback
-}
-
-/** Evaluation 履歴の非同期取得状態。 */
-type EvaluationState =
-  | { status: 'loading' }
-  | { status: 'ready'; items: EvaluationRecord[] }
-  | { status: 'error'; message: string }
-
-/** Result の人工評価履歴と追加式入力 form を表示する。 */
-function EvaluationSection({ detail, csrfToken }: { detail: RunDetailRecord; csrfToken: string }) {
-  const messages = useMessages()
-  const [state, setState] = useState<EvaluationState>({ status: 'loading' })
-  const [rating, setRating] = useState(3)
-  const [verdict, setVerdict] = useState<CreateEvaluationInput['verdict']>('uncertain')
-  const [comment, setComment] = useState('')
-  const [pointer, setPointer] = useState('')
-  const [suggestedValue, setSuggestedValue] = useState('')
-  const [reason, setReason] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [submitError, setSubmitError] = useState<string | null>(null)
-  const submitController = useRef<AbortController | null>(null)
-
-  useEffect(() => {
-    const controller = new AbortController()
-    setState({ status: 'loading' })
-    void loadEvaluations(detail.project_id, detail.run_id, controller.signal)
-      .then((items) => setState({ status: 'ready', items }))
-      .catch((caught: unknown) => {
-        if (!controller.signal.aborted) {
-          setState({
-            status: 'error',
-            message: caught instanceof Error ? caught.message : 'Unknown Evaluation API error',
-          })
-        }
-      })
-    return () => controller.abort()
-  }, [detail.project_id, detail.run_id])
-
-  useEffect(() => () => submitController.current?.abort(), [])
-
-  /** Form 値を一件の追加式 Evaluation として保存する。 */
-  async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault()
-    submitController.current?.abort()
-    const controller = new AbortController()
-    submitController.current = controller
-    setSubmitting(true)
-    setSubmitError(null)
-    const revisions = pointer.trim()
-      ? [{
-          pointer: pointer.trim(),
-          suggested_value: parseSuggestedValue(suggestedValue),
-          reason: reason.trim(),
-        }]
-      : []
-    try {
-      const saved = await createEvaluation(
-        detail.project_id,
-        detail.run_id,
-        { rating, verdict, comment: comment.trim(), revisions },
-        csrfToken,
-        controller.signal,
-      )
-      setState((current) => current.status === 'ready'
-        ? { status: 'ready', items: [...current.items, saved] }
-        : { status: 'ready', items: [saved] })
-      setComment('')
-      setPointer('')
-      setSuggestedValue('')
-      setReason('')
-    } catch (caught: unknown) {
-      if (!controller.signal.aborted) {
-        setSubmitError(caught instanceof Error ? caught.message : 'Unknown Evaluation API error')
-      }
-    } finally {
-      if (!controller.signal.aborted) setSubmitting(false)
-    }
-  }
-
-  return (
-    <CollapsibleSection
-      count={state.status === 'ready' ? state.items.length : undefined}
-      title={messages.runResult.manualEvaluation}
-    >
-      {state.status === 'loading' && <p className="compactEmpty">{messages.runResult.loadingEvaluations}</p>}
-      {state.status === 'error' && <p className="error" role="alert">{state.message}</p>}
-      {state.status === 'ready' && state.items.length === 0 && <p className="compactEmpty">{messages.runResult.noEvaluations}</p>}
-      {state.status === 'ready' && state.items.length > 0 && (
-        <ol className="evaluationList">{state.items.map((item) => <EvaluationItem item={item} key={item.evaluation_id} />)}</ol>
-      )}
-      <form className="evaluationForm" onSubmit={(event) => void handleSubmit(event)}>
-        <div className="formRow">
-          <label>{messages.runResult.ratingLabel}<select value={rating} onChange={(event) => setRating(Number(event.target.value))}>{[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-          <label>{messages.runResult.verdictLabel}<select value={verdict} onChange={(event) => setVerdict(event.target.value as CreateEvaluationInput['verdict'])}><option value="accurate">{messages.runResult.verdictAccurate}</option><option value="partially_accurate">{messages.runResult.verdictPartial}</option><option value="inaccurate">{messages.runResult.verdictInaccurate}</option><option value="uncertain">{messages.runResult.verdictUncertain}</option></select></label>
-        </div>
-        <label>{messages.runResult.commentLabel}<textarea maxLength={4000} value={comment} onChange={(event) => setComment(event.target.value)} /></label>
-        <details className="revisionEditor">
-          <summary>{messages.runResult.addRevision}</summary>
-          <label>{messages.runResult.jsonPointerLabel}<input maxLength={512} pattern="^/.*" placeholder="/items/0/value" value={pointer} onChange={(event) => setPointer(event.target.value)} /></label>
-          <label>{messages.runResult.suggestedValueLabel}<input disabled={!pointer.trim()} value={suggestedValue} onChange={(event) => setSuggestedValue(event.target.value)} /></label>
-          <label>{messages.runResult.revisionReasonLabel}<input disabled={!pointer.trim()} maxLength={1000} required={Boolean(pointer.trim())} value={reason} onChange={(event) => setReason(event.target.value)} /></label>
-        </details>
-        <button className="secondaryButton" disabled={submitting} type="submit">{submitting ? messages.runResult.saving : messages.runResult.addEvaluation}</button>
-        {submitError && <p className="error" role="alert">{submitError}</p>}
-      </form>
-    </CollapsibleSection>
-  )
-}
-
-/** 一件の Evaluation と AI 原値・人工提案値の並列 revision を表示する。 */
-function EvaluationItem({ item }: { item: EvaluationRecord }) {
-  const messages = useMessages()
-  return (
-    <li className="evaluationItem">
-      <div><strong>{item.rating}/5 · {messages.enums.verdict[item.verdict] ?? item.verdict}</strong><time>{formatLocalTimestamp(item.created_at)}</time></div>
-      {item.comment && <p>{item.comment}</p>}
-      {item.revisions.map((revision) => (
-        <div className="evaluationRevision" key={revision.pointer}>
-          <code>{revision.pointer}</code>
-          <div><p><span>{messages.runResult.aiOriginal}</span>{displayJsonValue(revision.original_value)}</p><p><span>{messages.runResult.humanSuggestion}</span>{displayJsonValue(revision.suggested_value)}</p></div>
-          <small>{revision.reason}</small>
-        </div>
-      ))}
-    </li>
-  )
-}
-
-/** Text input を JSON として解釈できる場合だけ型付き suggested value にする。 */
-function parseSuggestedValue(value: string): unknown {
-  const trimmed = value.trim()
-  if (!trimmed) return ''
-  try {
-    return JSON.parse(trimmed) as unknown
-  } catch {
-    return trimmed
-  }
 }
 
 /** 任意 JSON value を比較表示用の短い text へ変換する。 */

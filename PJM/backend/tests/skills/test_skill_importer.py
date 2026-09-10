@@ -5,7 +5,6 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
-from uuid import UUID
 
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker, ValidationError
@@ -30,6 +29,7 @@ from projectmind.skills import (
 )
 from projectmind.skills.interpreter_cli import run_fixture
 from projectmind.skills.manifest_gate import ManifestValidator
+from tests.skills.manifest_gate_fixtures import directory_gate_source
 
 ROOT = Path(__file__).resolve().parents[3]
 CONTRACTS = ROOT / "contracts"
@@ -269,9 +269,7 @@ def test_static_analysis_is_deterministic_and_contract_valid() -> None:
     assert first == second
     assert first.blocked is False
     assert first.declared_tools == ("repository.read/v1",)
-    assert first.checksum == _load_contract("examples/skill-static-analysis.v1.json")[
-        "checksum"
-    ]
+    assert first.checksum == _load_contract("examples/skill-static-analysis.v1.json")["checksum"]
 
 
 def test_static_analysis_records_declared_builtin_tool_without_blocking() -> None:
@@ -337,9 +335,7 @@ def test_static_analysis_rejects_content_changed_after_normalization() -> None:
 def test_capability_catalog_is_sorted_unique_and_checksum_bound() -> None:
     """Catalog 順序を固定し、重複 capability と checksum drift を拒否する。"""
 
-    loaded = load_capability_catalog(
-        CONTRACTS / "examples" / "skill-capability-catalog.v1.json"
-    )
+    loaded = load_capability_catalog(CONTRACTS / "examples" / "skill-capability-catalog.v1.json")
     assert [item.capability for item in loaded.capabilities] == [
         "change.propose/v1",
         "document.read/v1",
@@ -352,9 +348,10 @@ def test_capability_catalog_is_sorted_unique_and_checksum_bound() -> None:
         "workspace.read/v1",
         "workspace.search/v1",
         "workspace.write/v1",
+        "workspace.write/v2",
     ]
     assert loaded.checksum == (
-        "sha256:bbfa45eaf29cabe08800abb56e8fc2c2d58c8c10ade202b29562302431ea34d5"
+        "sha256:f87b93f3272fd952f53140d617ca17358a51b09d0c73fa7111c14a2c32f092b2"
     )
     duplicate = CapabilityCatalogEntry(
         capability="issue.read/v1",
@@ -376,8 +373,8 @@ def test_system_skill_identity_is_versioned_and_matches_fixture_contract() -> No
     identity = load_interpreter_system_skill(SYSTEM_SKILL)
     example = _load_contract("examples/skill-interpreter-request.v1.json")["interpreter"]
 
-    assert identity.version == "3.4.0"
-    assert identity.interpreter_version == "projectmind-skill-interpreter/3.4.0"
+    assert identity.version == "3.5.0"
+    assert identity.interpreter_version == "projectmind-skill-interpreter/3.5.0"
     assert identity.to_dict() == example
 
 
@@ -390,9 +387,7 @@ def test_system_skill_instructs_output_language_to_follow_the_source() -> None:
     """
 
     package = SkillPackageParser().parse_directory(SYSTEM_SKILL.resolve())
-    prompt = "\n".join(
-        item.content for item in load_inline_text_files(SYSTEM_SKILL, package)
-    )
+    prompt = "\n".join(item.content for item in load_inline_text_files(SYSTEM_SKILL, package))
 
     assert "same natural language as the Skill source" in prompt
     assert "stay lowercase ASCII" in prompt
@@ -460,6 +455,9 @@ def test_system_skill_maps_procedure_onto_the_capabilities_that_now_exist() -> N
     assert "<original name>.txt" in prompt
     # 中間産物の書き出しは workspace.write (§19 W2)。物化 input/ は書けない。
     assert "`workspace.write/v1`" in prompt
+    assert "`workspace.write/v2`" in prompt
+    assert "committed Tool response's `artifact_refs`" in prompt
+    assert "never upgrade an existing published Skill or Run permission" in prompt
     assert "frozen evidence and is never" in prompt
     # 仓库への変更は直訳ではなく提案 (§20)。Agent は commit しない。
     assert "`svn commit`, `git commit`" in prompt
@@ -489,9 +487,7 @@ def test_fixture_runner_validates_response_and_publishable_manifest() -> None:
     manifest = validated["runtime_manifest_draft"]
     assert isinstance(manifest, dict)
     passed, findings = ManifestValidator(CONTRACTS).evaluate(
-        manifest,
-        source_hash=str(response["source_hash"]),
-        interpretation_id=UUID("00000000-0000-4000-8000-000000000301"),
+        directory_gate_source(manifest, GENERIC_SKILL)
     )
 
     assert passed is True
@@ -512,7 +508,9 @@ def test_bind_identity_stamps_platform_identity_on_model_output() -> None:
 
     # model 経路は contract draft を受け取り、platform 権威の identity と Schema を stamp する。
     generated = _load_contract("examples/generated-task-manifest.v1alpha1.json")
-    task = generated["tasks"][0]
+    generated_tasks = generated["tasks"]
+    assert isinstance(generated_tasks, list)
+    task = generated_tasks[0]
     assert isinstance(task, dict)
     for key in (
         "input_schema",
@@ -523,16 +521,17 @@ def test_bind_identity_stamps_platform_identity_on_model_output() -> None:
         task.pop(key)
     response["runtime_manifest_draft"]["tasks"] = [task]  # type: ignore[index]
     validated = InterpreterFixtureRunner(CONTRACTS).run(request, response, bind_identity=True)
-    identity = validated["runtime_manifest_draft"]["identity"]  # type: ignore[index]
-    assert identity["interpreter_version"] == "projectmind-skill-interpreter/3.4.0"
+    identity = validated["runtime_manifest_draft"]["identity"]
+    assert identity["interpreter_version"] == "projectmind-skill-interpreter/3.5.0"
     assert identity["source_hash"] == request["source"]["content_hash"]  # type: ignore[index]
     # 蓝图は同じ解釈の一部であり、manifest と別の identity/互換 level を持ってはならない。
-    blueprint = validated["runtime_manifest_draft"]["capability_blueprint"]  # type: ignore[index]
+    blueprint = validated["runtime_manifest_draft"]["capability_blueprint"]
     assert blueprint["identity"] == identity
-    assert blueprint["compatibility"]["level"] == (
-        validated["runtime_manifest_draft"]["compatibility"]["level"]  # type: ignore[index]
+    assert (
+        blueprint["compatibility"]["level"]
+        == (validated["runtime_manifest_draft"]["compatibility"]["level"])
     )
-    compiled_task = validated["runtime_manifest_draft"]["tasks"][0]  # type: ignore[index]
+    compiled_task = validated["runtime_manifest_draft"]["tasks"][0]
     assert compiled_task["input_schema_checksum"] == (
         "sha256:80d83714d6fd98b37626acec9bfe7c9ba8dc749812549f523c01a02e1281f75c"
     )
@@ -556,7 +555,7 @@ def test_model_path_accepts_open_outcome_without_output_contract() -> None:
     task["contract_source_trace"] = [item for item in traces if item["contract"] == "input"]
 
     validated = InterpreterFixtureRunner(CONTRACTS).run(request, response, bind_identity=True)
-    compiled = validated["runtime_manifest_draft"]["tasks"][0]  # type: ignore[index]
+    compiled = validated["runtime_manifest_draft"]["tasks"][0]
 
     assert "output_contract" not in compiled
     assert "output_schema" not in compiled
@@ -589,12 +588,10 @@ def test_fixture_manifest_gate_rejects_generated_schema_drift() -> None:
     assert isinstance(tasks, list)
     task = tasks[0]
     assert isinstance(task, dict)
-    task["input_schema"] = {"type": "object", "additionalProperties": True}
+    task["input_schema"]["additionalProperties"] = True
 
     passed, findings = ManifestValidator(CONTRACTS).evaluate(
-        manifest,
-        source_hash=str(response["source_hash"]),
-        interpretation_id=UUID("00000000-0000-4000-8000-000000000301"),
+        directory_gate_source(manifest, GENERIC_SKILL)
     )
 
     assert passed is False
@@ -633,6 +630,8 @@ def test_offline_fixture_runner_uses_repository_assets() -> None:
     response = result["response"]
     assert isinstance(response, dict)
     assert response["response_version"] == "projectmind.skill-interpreter.response/v1"
+
+
 def test_system_skill_maps_independent_aspects_onto_bounded_fan_out() -> None:
     """扇出の档と、その適用境界が prompt に載っていることを固定する (計画 §23 D1/D5)。
 

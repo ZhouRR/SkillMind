@@ -1,0 +1,26 @@
+.taskFlowPanel { margin-top: 1.25rem; min-width: 0; }
+.taskFlowPanel > .panelHeader { align-items: start; flex-wrap: wrap; gap: .75rem; }
+.taskFlowPanel h2:focus { outline: 2px solid var(--accent, #29668a); outline-offset: .3rem; }
+.taskFlowPreview { min-width: 0; line-height: 1.65; }
+.taskFlowPreview p { white-space: pre-wrap; }
+.taskFlowPreview :is(p, strong, code, small, dd, summary) { overflow-wrap: anywhere; word-break: normal; }
+.taskFlowNotice { border-left: .25rem solid var(--accent); padding: .75rem 1rem; color: var(--text); background: var(--surface-raised); }
+.taskFlowScope { margin: 1.5rem 0; padding-top: .5rem; border-top: 1px solid var(--border); }
+.taskFlowScope > h3 { margin: .4rem 0; font-size: 1.1rem; }
+.taskFlowSection { margin: 1rem 0; min-width: 0; }
+.taskFlowSection h4 { margin: .5rem 0; }
+.taskFlowItems { padding-left: 1.4rem; margin: .5rem 0; }
+.taskFlowItems li { margin: .65rem 0; padding: .4rem 0; }
+.taskFlowItems p { margin: .3rem 0; }
+.taskFlowGuidance { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 1.5rem; }
+.taskFlowDetails { padding: .8rem 0; border-top: 1px solid var(--border); min-width: 0; }
+.taskFlowDetails summary { cursor: pointer; font-weight: 600; }
+.taskFlowDetails pre { max-height: 22rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.taskFlowIdentity { margin: .5rem 0; }
+.taskFlowIdentity > div { display: grid; grid-template-columns: minmax(8rem, 1fr) minmax(0, 3fr); gap: .75rem; margin: .4rem 0; }
+.taskFlowIdentity dd { margin: 0; }
+@media (max-width: 600px) {
+  .taskFlowGuidance { grid-template-columns: minmax(0, 1fr); }
+  .taskFlowIdentity > div { grid-template-columns: minmax(0, 1fr); gap: .1rem; }
+  .taskFlowPanel .formRow { flex-wrap: wrap; }
+}

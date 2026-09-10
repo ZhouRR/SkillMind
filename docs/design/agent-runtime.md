@@ -83,6 +83,8 @@ Agent 可调整分析顺序、交叉验证、组织证据并在 workspace/output
 
 请求侧检查在 Provider 前执行；响应 Schema、敏感信息与大小检查在返回后执行，失败内容不交给 Agent。错误仅存脱敏审计，禁止全局 bypassPermissions。
 
+Tool 审计还须核对原 Worker 执行权：首次许可只消费一次，未决/失败不自动重跑，成功只读重放；私有 scope、锁内检查与提交未知规则见[调用提交与重放](run-supervision.md#tool-调用的提交与重放)。
+
 ### 资源快照的物化
 
 repository 按冻结授权物化至 input/&lt;requirement_key&gt;/，具体 revision 在打开资源时解析；document 使用创建时冻结的 ID/hash/成员，映射至 input/documents/。分支名不等于固定 commit，公开清单不是 Provider 的授权输入。

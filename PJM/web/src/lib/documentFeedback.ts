@@ -31,13 +31,23 @@ export function documentFailure(error: unknown, mutation: boolean): DocumentFail
 /** Upload の表示語彙は DELETE の門禁 policy に渡せない独立した型に限定する。 */
 export interface DocumentUploadFailure {
   key: Exclude<DocumentFailure['key'], 'unknown'> | 'uploadTooLarge' | 'uploadUnknown'
+    | 'uploadPending' | 'uploadKeyConflict' | 'uploadConflict' | 'uploadNotFound'
+    | 'uploadUnavailable' | 'uploadInvalidKey' | 'uploadPreparationFailed' | 'uploadClosed'
 }
 
 /** Upload 固有の確定拒否を DELETE の未知判定と混同せず、本文も表示しない。 */
-export function documentUploadFailure(error: unknown): DocumentUploadFailure {
-  if (error instanceof ApiProblemError && error.status === 413
+export function documentUploadFailure(error: unknown, mutation = true): DocumentUploadFailure {
+  if (error instanceof ApiProblemError) {
+    if (error.status === 409 && error.code === 'document_upload_closed') return { key: 'uploadClosed' }
+    if (error.status === 409 && error.code === 'document_upload_pending') return { key: 'uploadPending' }
+    if (error.status === 409 && error.code === 'document_upload_key_conflict') return { key: 'uploadKeyConflict' }
+    if (mutation && error.status === 409 && error.code === 'document_conflict') return { key: 'uploadConflict' }
+    if (!mutation && error.status === 404 && error.code === 'document_upload_not_found') return { key: 'uploadNotFound' }
+    if (!mutation && error.status === 503 && error.code === 'document_upload_unavailable') return { key: 'uploadUnavailable' }
+  }
+  if (mutation && error instanceof ApiProblemError && error.status === 413
     && error.code === 'document_upload_too_large') return { key: 'uploadTooLarge' }
-  const reason = documentFailure(error, true)
+  const reason = documentFailure(error, mutation)
   return { key: reason.key === 'unknown' ? 'uploadUnknown' : reason.key }
 }
 

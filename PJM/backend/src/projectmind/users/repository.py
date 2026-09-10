@@ -33,6 +33,37 @@ class LockedUsers:
     sessions: tuple[AuthSession, ...] = field(repr=False)
 
 
+def authorization_failure_snapshot(locked: LockedUsers) -> LockedUsers:
+    """失敗分類専用の資格値を、expire/lazy load しない新しい transient model へ写す。
+
+    呼出元は認可済みの row lock 保持中、flush 前に呼ぶ。失敗後の新しい now で既存の
+    authorize_user_access を再利用するためだけの値であり、成功や新しい write の認可に
+    使わない。Session へ add/merge せず、target/他会話や ORM の内部状態を複写しない。
+    """
+
+    actor, current = locked.actor, locked.current_session
+    return LockedUsers(
+        actor=User(
+            id=actor.id,
+            organization_id=actor.organization_id,
+            system_role=actor.system_role,
+            status=actor.status,
+        ),
+        target=None,
+        current_session=AuthSession(
+            user_id=current.user_id,
+            token_hash=current.token_hash,
+            csrf_token_hash=current.csrf_token_hash,
+            credential_version=current.credential_version,
+            system_role_at_login=current.system_role_at_login,
+            revoked_at=current.revoked_at,
+            idle_expires_at=current.idle_expires_at,
+            absolute_expires_at=current.absolute_expires_at,
+        ),
+        sessions=(),
+    )
+
+
 async def lock_organization(session: AsyncSession, organization_id: UUID) -> None:
     """User 管理・Project 削除・preference の逆順 FK lock を組織 gate で串行化する。"""
 

@@ -67,6 +67,7 @@ class PostgresRunBudgetStore:
         *,
         execution_key: str,
         invocation: AgentInvocation,
+        start_owner_token: str,
     ) -> BudgetInvocationBinding:
         """紐付けの応答喪失は原値だけを読戻す。未保存の値を確認時に補造しない。"""
 
@@ -74,7 +75,10 @@ class PostgresRunBudgetStore:
         try:
             async with self._session_factory() as session, session.begin():
                 binding = await RunBudgetRepository(session).bind_invocation(
-                    claimed, execution_key=execution_key, invocation=invocation
+                    claimed,
+                    execution_key=execution_key,
+                    invocation=invocation,
+                    start_owner_token=start_owner_token,
                 )
         except (DBAPIError, TimeoutError, ConnectionError):
             if binding is None:
@@ -84,6 +88,7 @@ class PostgresRunBudgetStore:
                     claimed,
                     execution_key=execution_key,
                     invocation=invocation,
+                    start_owner_token=start_owner_token,
                     confirm_only=True,
                 )
         return binding
@@ -95,6 +100,7 @@ class PostgresRunBudgetStore:
         execution_key: str,
         expected_invocation_id: UUID,
         expected_invocation_checksum: str,
+        start_owner_token: str,
     ) -> bool:
         """B の初回成功だけが True。成否不明な B を retry して許可に変換しない。"""
 
@@ -105,6 +111,7 @@ class PostgresRunBudgetStore:
                     execution_key=execution_key,
                     expected_invocation_id=expected_invocation_id,
                     expected_invocation_checksum=expected_invocation_checksum,
+                    start_owner_token=start_owner_token,
                 )
         except (DBAPIError, TimeoutError, ConnectionError) as error:
             raise BudgetStartUncertainError("Budget start intent could not be confirmed") from error

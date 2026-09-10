@@ -15,6 +15,8 @@ cp .env.example .env
 
 host/context path、Traefik network/entryPoint、DB/storage password、model 設定を対象環境に合わせる。production は HTTPS を使う。[共通設定入口](deployment.md#环境文件与配置边界)が ENV_FILE を補間と Backend の同一 source に固定する。既定以外の project は shell の COMPOSE_PROJECT_NAME または明示 option で選び、ファイル内の同名値に依存しない。
 
+新しい文書 storage 世代用に UUID を一度生成し、`.env.example` の `PROJECTMIND_OBJECT_STORAGE_NAMESPACE_ID` 行を有効化して設定する。API/Worker と復元清単で同じ値を保持し、storage 再作成時は新 UUID にする。未設定では文書 blob 操作を拒否する。既存文書へ自動で帰属を補わないため、更新時は[帰属と移行条件](../design/document-lifecycle.md#存储归属与配置切换)を先に確認する。
+
 ```bash
 make config
 make build

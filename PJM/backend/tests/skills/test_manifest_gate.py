@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 import pytest
 from jsonschema import Draft202012Validator, ValidationError
 
-from projectmind.skills import InlineSkillFile, SkillService
+from projectmind.core.hashing import canonical_json, sha256_hex
+from projectmind.skills.design_validation import SkillDesignSource
 from projectmind.skills.domain import ManifestGateFinding
 from projectmind.skills.manifest_gate import ManifestValidator
 from projectmind.skills.runtime_defaults import normalize_runtime_manifest
@@ -23,6 +26,35 @@ from projectmind.skills.task_contract import (
 )
 
 ROOT = Path(__file__).resolve().parents[3]
+_SOURCE_CONTENT = "# Gate source\n" + "合成の契約と規則。\n" * 16
+_SOURCE_INDEX = [
+    {
+        "path": "SKILL.md",
+        "mime": "text/markdown",
+        "size": len(_SOURCE_CONTENT.encode("utf-8")),
+        "sha256": "sha256:" + sha256_hex(_SOURCE_CONTENT),
+        "binary": False,
+    }
+]
+# 保存済み importer の index hash は ASCII escape 方式を維持する。
+_SOURCE_HASH = "sha256:" + sha256_hex(
+    json.dumps(_SOURCE_INDEX, sort_keys=True, separators=(",", ":"))
+)
+
+
+def _source_context(manifest: dict[str, Any]) -> SkillDesignSource:
+    """原 snapshot/index/identity を固定し、検査対象 Manifest だけを渡す。"""
+
+    return SkillDesignSource(
+        skill_key="repository-review",
+        manifest_checksum="sha256:" + sha256_hex(canonical_json(manifest)),
+        manifest=manifest,
+        source_hash=_SOURCE_HASH,
+        source_file_index=deepcopy(_SOURCE_INDEX),
+        source_snapshot=[{"path": "SKILL.md", "content": _SOURCE_CONTENT}],
+        interpretation_id=UUID("00000000-0000-4000-8000-000000000123"),
+        interpreter_version="projectmind-skill-interpreter/2.3.0",
+    )
 
 
 def _minimal_manifest() -> dict[str, object]:
@@ -31,17 +63,12 @@ def _minimal_manifest() -> dict[str, object]:
     return _generated_manifest()
 
 
-def test_minimal_generated_manifest_is_completed_and_passes_gate() -> None:
-    """省略 field は安全な既定値で補い、Generated Schema で gate を通す。"""
+def test_completed_generated_manifest_passes_without_gate_normalization() -> None:
+    """作成時に補完済みの原 Manifest を変更せず gate へ通す。"""
 
     manifest = _minimal_manifest()
     normalized = normalize_runtime_manifest(manifest)
-    identity = normalized["identity"]
-    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(
-        manifest,
-        source_hash=str(identity["source_hash"]),
-        interpretation_id=UUID(str(identity["interpretation_id"])),
-    )
+    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(_source_context(manifest))
 
     assert normalized["tasks"][0]["capability"] == "repository-review.review-file"
     assert normalized["tasks"][0]["view"] == "standard"
@@ -60,12 +87,7 @@ def test_missing_custom_view_is_warning_with_standard_fallback() -> None:
 
     manifest = _minimal_manifest()
     manifest["tasks"][0]["view"] = "custom-report"  # type: ignore[index]
-    identity = manifest["identity"]  # type: ignore[assignment]
-    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(
-        manifest,
-        source_hash=str(identity["source_hash"]),  # type: ignore[index]
-        interpretation_id=UUID(str(identity["interpretation_id"])),  # type: ignore[index]
-    )
+    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(_source_context(manifest))
 
     assert passed is True
     view_finding = next(item for item in findings if item.code == "view_fallback_required")
@@ -90,13 +112,7 @@ def _manifest_with_steps(
 def _evaluate(manifest: dict[str, object]) -> tuple[bool, tuple[ManifestGateFinding, ...]]:
     """基準 identity で publish gate を実行する。"""
 
-    identity = manifest["identity"]
-    assert isinstance(identity, dict)
-    return ManifestValidator(ROOT / "contracts").evaluate(
-        manifest,
-        source_hash=str(identity["source_hash"]),
-        interpretation_id=UUID(str(identity["interpretation_id"])),
-    )
+    return ManifestValidator(ROOT / "contracts").evaluate(_source_context(manifest))
 
 
 def _step_codes(findings: tuple[ManifestGateFinding, ...]) -> set[str]:
@@ -232,15 +248,10 @@ def test_required_task_key_is_not_invented_by_defaults() -> None:
 
     manifest = _minimal_manifest()
     del manifest["tasks"][0]["key"]  # type: ignore[index]
-    identity = manifest["identity"]  # type: ignore[assignment]
-    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(
-        manifest,
-        source_hash=str(identity["source_hash"]),  # type: ignore[index]
-        interpretation_id=UUID(str(identity["interpretation_id"])),  # type: ignore[index]
-    )
+    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(_source_context(manifest))
 
     assert passed is False
-    assert "manifest_schema_invalid" in {item.code for item in findings}
+    assert "skill_design_invalid" in {item.code for item in findings}
 
 
 def test_optional_asset_diagnostic_cannot_create_a_hard_error() -> None:
@@ -257,33 +268,19 @@ def test_optional_asset_diagnostic_cannot_create_a_hard_error() -> None:
             }
         ],
     }
-    identity = manifest["identity"]  # type: ignore[assignment]
-    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(
-        manifest,
-        source_hash=str(identity["source_hash"]),  # type: ignore[index]
-        interpretation_id=UUID(str(identity["interpretation_id"])),  # type: ignore[index]
-    )
+    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(_source_context(manifest))
 
     assert passed is True
-    finding = next(
-        item for item in findings if item.code == "interpretation:missing:view_spec"
-    )
+    finding = next(item for item in findings if item.code == "interpretation:missing:view_spec")
     assert finding.severity == "warning"
 
 
 def _assisted_manifest() -> dict[str, object]:
-    """実 parser と同じ Assisted Manifest を database なしで生成する。
+    """同じ原 identity と task 対応を保つ Assisted 候補を生成する。"""
 
-    導入期の決定的 draft 自体は蓝图を持たない。ただし発行は PREVIEW_READY な interpretation
-    だけを入口とし、model の生成 Schema は蓝图を必須にしている。したがって gate が実際に見る
-    assisted manifest は「決定的 draft + model の蓝图」であり、ここでもその形を再現する。
-    """
-
-    service = SkillService(None, ROOT / "contracts")  # type: ignore[arg-type]
-    manifest = service.preview_inline(
-        (InlineSkillFile(path="SKILL.md", content="# Gate Test\n"),)
-    ).runtime_manifest_draft
-    manifest["capability_blueprint"] = _capability_blueprint()
+    manifest = _generated_manifest()
+    manifest["compatibility"]["level"] = "assisted"  # type: ignore[index]
+    manifest["capability_blueprint"]["compatibility"]["level"] = "assisted"  # type: ignore[index]
     return manifest
 
 
@@ -291,12 +288,7 @@ def test_assisted_manifest_requires_warning_acceptance() -> None:
     """Assisted compatibility は hard error ではなく管理者確認 warning とする。"""
 
     manifest = _assisted_manifest()
-    interpretation_id = UUID(str(manifest["identity"]["interpretation_id"]))  # type: ignore[index]
-    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(
-        manifest,
-        source_hash=str(manifest["identity"]["source_hash"]),  # type: ignore[index]
-        interpretation_id=interpretation_id,
-    )
+    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(_source_context(manifest))
 
     assert passed is True
     assisted = next(item for item in findings if item.code == "assisted_review_required")
@@ -307,17 +299,10 @@ def test_unregistered_tool_and_script_are_hard_failures() -> None:
     """Schema 内の Tool/script 宣言でも registry と checksum がなければ拒否する。"""
 
     manifest = deepcopy(_assisted_manifest())
-    identity = manifest["identity"]  # type: ignore[index]
-    compatibility = manifest["compatibility"]  # type: ignore[index]
-    compatibility["level"] = "adapted"  # type: ignore[index]
     manifest["tools"] = [{"capability": "unknown.read/v1", "required": True}]
     manifest["workflows"][0]["steps"] = [{"key": "run", "kind": "script"}]  # type: ignore[index]
 
-    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(
-        manifest,
-        source_hash=str(identity["source_hash"]),  # type: ignore[index]
-        interpretation_id=UUID(str(identity["interpretation_id"])),  # type: ignore[index]
-    )
+    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(_source_context(manifest))
 
     assert passed is False
     assert {"tool_capability_unregistered", "script_checksum_missing"}.issubset(
@@ -329,15 +314,9 @@ def test_document_read_tool_is_registered_capability() -> None:
     """document.read/v1 を Tool に宣言しても未登録 capability 判定を受けない。"""
 
     manifest = deepcopy(_assisted_manifest())
-    identity = manifest["identity"]  # type: ignore[index]
-    manifest["compatibility"]["level"] = "adapted"  # type: ignore[index]
     manifest["tools"] = [{"capability": "document.read/v1", "required": True}]
 
-    _passed, findings = ManifestValidator(ROOT / "contracts").evaluate(
-        manifest,
-        source_hash=str(identity["source_hash"]),  # type: ignore[index]
-        interpretation_id=UUID(str(identity["interpretation_id"])),  # type: ignore[index]
-    )
+    _passed, findings = ManifestValidator(ROOT / "contracts").evaluate(_source_context(manifest))
 
     # 登録済みなので未登録 capability の hard gate は立たない (他の gate は問わない)。
     assert "tool_capability_unregistered" not in {item.code for item in findings}
@@ -401,45 +380,47 @@ def _generated_manifest() -> dict[str, object]:
     }
     compiled_input = compile_task_contract(input_contract)
     compiled_output = compile_task_contract(output_contract)
-    return {
-        "manifest_version": "projectmind/v1alpha1",
-        "identity": {
-            "skill_key": "repository-review",
-            "source_hash": "sha256:" + ("a" * 64),
-            "interpretation_id": "00000000-0000-4000-8000-000000000123",
-            "interpreter_version": "projectmind-skill-interpreter/2.1.0",
-        },
-        "compatibility": {"level": "adapted"},
-        "tasks": [
-            {
-                "key": "review-file",
-                "input_contract": input_contract,
-                "output_contract": output_contract,
-                "input_schema": compiled_input.schema,
-                "output_schema": compiled_output.schema,
-                "input_schema_checksum": compiled_input.checksum,
-                "output_schema_checksum": compiled_output.checksum,
-                "contract_source_trace": [
-                    {
-                        "contract": "input",
-                        "field_path": "/target_path",
-                        "source_path": "SKILL.md",
-                        "source_section": "Inputs",
-                        "line": 8,
-                    },
-                    {
-                        "contract": "output",
-                        "field_path": "/summary",
-                        "source_path": "SKILL.md",
-                        "source_section": "Output",
-                        "line": 15,
-                    },
-                ],
-            }
-        ],
-        # 蓝图は発行の必須要素になったため、基準 fixture が最初から備える。
-        "capability_blueprint": _capability_blueprint(),
-    }
+    return normalize_runtime_manifest(
+        {
+            "manifest_version": "projectmind/v1alpha1",
+            "identity": {
+                "skill_key": "repository-review",
+                "source_hash": _SOURCE_HASH,
+                "interpretation_id": "00000000-0000-4000-8000-000000000123",
+                "interpreter_version": "projectmind-skill-interpreter/2.3.0",
+            },
+            "compatibility": {"level": "adapted"},
+            "tasks": [
+                {
+                    "key": "review-file",
+                    "input_contract": input_contract,
+                    "output_contract": output_contract,
+                    "input_schema": compiled_input.schema,
+                    "output_schema": compiled_output.schema,
+                    "input_schema_checksum": compiled_input.checksum,
+                    "output_schema_checksum": compiled_output.checksum,
+                    "contract_source_trace": [
+                        {
+                            "contract": "input",
+                            "field_path": "/target_path",
+                            "source_path": "SKILL.md",
+                            "source_section": "Inputs",
+                            "line": 8,
+                        },
+                        {
+                            "contract": "output",
+                            "field_path": "/summary",
+                            "source_path": "SKILL.md",
+                            "source_section": "Output",
+                            "line": 15,
+                        },
+                    ],
+                }
+            ],
+            # 蓝图は発行の必須要素になったため、基準 fixture が最初から備える。
+            "capability_blueprint": _capability_blueprint(),
+        }
+    )
 
 
 def _capability_blueprint() -> dict[str, object]:
@@ -449,7 +430,7 @@ def _capability_blueprint() -> dict[str, object]:
         "blueprint_version": "projectmind.capability-blueprint/v1",
         "identity": {
             "skill_key": "repository-review",
-            "source_hash": "sha256:" + ("a" * 64),
+            "source_hash": _SOURCE_HASH,
             "interpretation_id": "00000000-0000-4000-8000-000000000123",
             "interpreter_version": "projectmind-skill-interpreter/2.3.0",
         },
@@ -601,11 +582,7 @@ def test_generated_contract_gate_does_not_read_business_schema_file() -> None:
 
     manifest = _generated_manifest()
 
-    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(
-        manifest,
-        source_hash="sha256:" + ("a" * 64),
-        interpretation_id=UUID("00000000-0000-4000-8000-000000000123"),
-    )
+    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(_source_context(manifest))
 
     assert passed is True, findings
     assert not [finding for finding in findings if finding.severity == "error"]
@@ -616,14 +593,10 @@ def test_generated_contract_gate_rejects_schema_and_checksum_tampering() -> None
 
     manifest = _generated_manifest()
     task = manifest["tasks"][0]  # type: ignore[index]
-    task["input_schema"]["additionalProperties"] = True  # type: ignore[index]
-    task["output_schema_checksum"] = "sha256:" + ("0" * 64)  # type: ignore[index]
+    task["input_schema"]["additionalProperties"] = True
+    task["output_schema_checksum"] = "sha256:" + ("0" * 64)
 
-    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(
-        manifest,
-        source_hash="sha256:" + ("a" * 64),
-        interpretation_id=UUID("00000000-0000-4000-8000-000000000123"),
-    )
+    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(_source_context(manifest))
 
     assert passed is False
     assert {
@@ -636,34 +609,27 @@ def test_declared_capability_blueprint_passes_the_publish_gate() -> None:
     """契約に適合する蓝图は publish gate を通る。"""
 
     passed, findings = ManifestValidator(ROOT / "contracts").evaluate(
-        _generated_manifest(),
-        source_hash="sha256:" + ("a" * 64),
-        interpretation_id=UUID("00000000-0000-4000-8000-000000000123"),
+        _source_context(_generated_manifest())
     )
 
     assert passed is True
     assert not [item for item in findings if item.code.startswith("capability_blueprint")]
 
 
-def test_run_scoped_workspace_tool_does_not_invent_a_resource_requirement() -> None:
+@pytest.mark.parametrize("capability", ["workspace.write/v1", "workspace.write/v2"])
+def test_run_scoped_workspace_tool_does_not_invent_a_resource_requirement(capability: str) -> None:
     """隔離 workspace Tool は新 Integration を読まないため、虚偽の資源候補を要求しない。"""
 
     manifest = _generated_manifest()
     manifest["tools"] = [
         {"capability": "workspace.read/v1", "required": True},
-        {"capability": "workspace.write/v1", "required": True},
+        {"capability": capability, "required": True},
     ]
 
-    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(
-        manifest,
-        source_hash="sha256:" + ("a" * 64),
-        interpretation_id=UUID("00000000-0000-4000-8000-000000000123"),
-    )
+    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(_source_context(manifest))
 
     assert passed is True
-    assert "capability_blueprint:resource_not_disclosed" not in {
-        item.code for item in findings
-    }
+    assert "capability_blueprint:resource_not_disclosed" not in {item.code for item in findings}
 
 
 def test_change_propose_is_platform_scoped_but_apply_provider_is_not_agent_tool() -> None:
@@ -671,26 +637,16 @@ def test_change_propose_is_platform_scoped_but_apply_provider_is_not_agent_tool(
 
     manifest = _generated_manifest()
     manifest["tools"] = [{"capability": "change.propose/v1", "required": False}]
-    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(
-        manifest,
-        source_hash="sha256:" + ("a" * 64),
-        interpretation_id=UUID("00000000-0000-4000-8000-000000000123"),
-    )
+    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(_source_context(manifest))
     assert passed is True, findings
 
     # 登録済み write capability はいずれも Agent Tool として宣言できない。片方だけ守ると、
     # 新しい apply 能力を足したときに「Agent が直接呼べる書き込み」が静かに生まれる。
     for capability in ("issue.update/v1", "repository.write/v1"):
         manifest["tools"] = [{"capability": capability, "required": True}]
-        passed, findings = ManifestValidator(ROOT / "contracts").evaluate(
-            manifest,
-            source_hash="sha256:" + ("a" * 64),
-            interpretation_id=UUID("00000000-0000-4000-8000-000000000123"),
-        )
+        passed, findings = ManifestValidator(ROOT / "contracts").evaluate(_source_context(manifest))
         assert passed is False, capability
-        assert "effect_capability_exposed_to_agent" in {
-            item.code for item in findings
-        }, capability
+        assert "effect_capability_exposed_to_agent" in {item.code for item in findings}, capability
 
 
 def test_missing_capability_blueprint_is_a_gate_error() -> None:
@@ -702,11 +658,7 @@ def test_missing_capability_blueprint_is_a_gate_error() -> None:
 
     manifest = _generated_manifest()
     del manifest["capability_blueprint"]
-    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(
-        manifest,
-        source_hash="sha256:" + ("a" * 64),
-        interpretation_id=UUID("00000000-0000-4000-8000-000000000123"),
-    )
+    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(_source_context(manifest))
 
     assert passed is False
     assert "capability_blueprint_missing" in {item.code for item in findings}
@@ -735,16 +687,10 @@ def test_blueprint_apply_intent_without_write_resource_fails_the_gate() -> None:
         }
     ]
 
-    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(
-        manifest,
-        source_hash="sha256:" + ("a" * 64),
-        interpretation_id=UUID("00000000-0000-4000-8000-000000000123"),
-    )
+    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(_source_context(manifest))
 
     assert passed is False
-    assert "capability_blueprint:effect_resource_not_writable" in {
-        finding.code for finding in findings
-    }
+    assert "skill_design_invalid" in {finding.code for finding in findings}
 
 
 def test_blueprint_required_rule_without_trace_fails_the_gate() -> None:
@@ -756,16 +702,10 @@ def test_blueprint_required_rule_without_trace_fails_the_gate() -> None:
         {"key": "invented", "text": "Always escalate to the release manager."}
     ]
 
-    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(
-        manifest,
-        source_hash="sha256:" + ("a" * 64),
-        interpretation_id=UUID("00000000-0000-4000-8000-000000000123"),
-    )
+    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(_source_context(manifest))
 
     assert passed is False
-    assert "capability_blueprint:required_rule_source_trace_missing" in {
-        finding.code for finding in findings
-    }
+    assert "skill_design_invalid" in {finding.code for finding in findings}
 
 
 def test_blueprint_must_disclose_every_capability_the_manifest_reads() -> None:
@@ -780,11 +720,7 @@ def test_blueprint_must_disclose_every_capability_the_manifest_reads() -> None:
     # 蓝图側は資源を一切宣言しない。
     manifest["capability_blueprint"]["resource_requirements"] = []  # type: ignore[index]
 
-    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(
-        manifest,
-        source_hash="sha256:" + ("a" * 64),
-        interpretation_id=UUID("00000000-0000-4000-8000-000000000123"),
-    )
+    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(_source_context(manifest))
 
     assert passed is False
     assert "capability_blueprint:resource_not_disclosed" in {item.code for item in findings}
@@ -805,11 +741,7 @@ def test_disclosed_capability_passes_the_gate() -> None:
         }
     ]
 
-    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(
-        manifest,
-        source_hash="sha256:" + ("a" * 64),
-        interpretation_id=UUID("00000000-0000-4000-8000-000000000123"),
-    )
+    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(_source_context(manifest))
 
     assert passed is True
     assert not [item for item in findings if item.code.startswith("capability_blueprint")]

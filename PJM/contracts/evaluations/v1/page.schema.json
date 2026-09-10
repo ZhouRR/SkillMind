@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.projectmind.local/evaluations/v1/page.schema.json",
+  "title": "Evaluation history page v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "project_id",
+    "run_id",
+    "result_id",
+    "items",
+    "next_cursor"
+  ],
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "format": "uuid",
+      "not": {
+        "const": "00000000-0000-0000-0000-000000000000"
+      }
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid",
+      "not": {
+        "const": "00000000-0000-0000-0000-000000000000"
+      }
+    },
+    "result_id": {
+      "type": "string",
+      "format": "uuid",
+      "not": {
+        "const": "00000000-0000-0000-0000-000000000000"
+      }
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/$defs/evaluation"
+      }
+    },
+    "next_cursor": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "uuid",
+          "not": {
+            "const": "00000000-0000-0000-0000-000000000000"
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "evaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evaluation_id",
+        "result_id",
+        "run_id",
+        "user_id",
+        "rating",
+        "verdict",
+        "comment",
+        "revisions",
+        "created_at"
+      ],
+      "properties": {
+        "evaluation_id": {
+          "type": "string",
+          "format": "uuid",
+          "not": {
+            "const": "00000000-0000-0000-0000-000000000000"
+          }
+        },
+        "result_id": {
+          "type": "string",
+          "format": "uuid",
+          "not": {
+            "const": "00000000-0000-0000-0000-000000000000"
+          }
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid",
+          "not": {
+            "const": "00000000-0000-0000-0000-000000000000"
+          }
+        },
+        "user_id": {
+          "type": "string",
+          "format": "uuid",
+          "not": {
+            "const": "00000000-0000-0000-0000-000000000000"
+          }
+        },
+        "rating": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "verdict": {
+          "enum": [
+            "accurate",
+            "partially_accurate",
+            "inaccurate",
+            "uncertain"
+          ]
+        },
+        "comment": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "revisions": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "pointer",
+              "original_value",
+              "suggested_value",
+              "reason"
+            ],
+            "properties": {
+              "pointer": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512,
+                "pattern": "^/"
+              },
+              "original_value": true,
+              "suggested_value": true,
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              }
+            }
+          }
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "(?:Z|[+-][0-9]{2}:[0-9]{2})$"
+        }
+      }
+    }
+  }
+}

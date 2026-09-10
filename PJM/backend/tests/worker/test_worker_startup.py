@@ -8,11 +8,19 @@ from unittest.mock import MagicMock
 import pytest
 from arq.worker import Function
 
+from projectmind.agent.engine import ClaudeAgentSdkEngine, RunMcpRuntime
+from projectmind.agent.evidence import PostgresToolAuditWriter
+from projectmind.agent.result_references import PostgresEffectSummaryLookup
+from projectmind.agent.result_validation import PostgresArtifactLookup, ResultValidator
+from projectmind.agent.subagent_provider import SubagentDispatchProvider
 from projectmind.agent.workspace_materializer import WorkspaceMaterializer
 from projectmind.core.settings import Settings
+from projectmind.runs.domain import LeaseValidationError
 from projectmind.runs.repository_inputs import PostgresInputSnapshotStore
 from projectmind.worker import settings as worker
 from projectmind.worker.executor import AgentRunExecutor
+from projectmind.worker.tool_authority import bind_tool_authority, require_tool_authority
+from tests.worker.test_agent_run_executor import _claimed, _context
 
 
 @pytest.mark.asyncio
@@ -22,7 +30,7 @@ async def test_startup_injects_required_receipt_and_preparation_limits(
 ) -> None:
     """呼出しを記録しつつ実 constructor を通し、必須依存の渡し忘れを隠さない。"""
 
-    settings = Settings(
+    settings = Settings(  # type: ignore[call-arg]  # BaseSettings の runtime-only 引数。
         _env_file=None,
         contracts_dir=Path(__file__).resolve().parents[3] / "contracts",
         run_workspace_root=tmp_path / "runs",
@@ -51,8 +59,16 @@ async def test_startup_injects_required_receipt_and_preparation_limits(
     )
     materializer = MagicMock(wraps=WorkspaceMaterializer)
     executor = MagicMock(wraps=AgentRunExecutor)
+    validator = MagicMock(wraps=ResultValidator)
+    subagent = MagicMock(wraps=SubagentDispatchProvider)
+    engine = MagicMock(wraps=ClaudeAgentSdkEngine)
+    audit_writer = MagicMock(wraps=PostgresToolAuditWriter)
     monkeypatch.setattr(worker, "WorkspaceMaterializer", materializer)
     monkeypatch.setattr(worker, "AgentRunExecutor", executor)
+    monkeypatch.setattr(worker, "ResultValidator", validator)
+    monkeypatch.setattr(worker, "SubagentDispatchProvider", subagent)
+    monkeypatch.setattr(worker, "ClaudeAgentSdkEngine", engine)
+    monkeypatch.setattr(worker, "PostgresToolAuditWriter", audit_writer)
     context = {"redis": MagicMock()}
 
     await worker.startup(context)
@@ -62,6 +78,30 @@ async def test_startup_injects_required_receipt_and_preparation_limits(
     assert values["max_total_bytes"] == 7_654_321 and values["max_total_files"] == 432
     assert executor.call_args.kwargs["preparation_timeout_seconds"] == 123
     assert isinstance(context["run_executor"], AgentRunExecutor)
+    assert isinstance(validator.call_args.kwargs["effect_lookup"], PostgresEffectSummaryLookup)
+    assert isinstance(validator.call_args.kwargs["artifact_lookup"], PostgresArtifactLookup)
+    assert isinstance(executor.call_args.kwargs["result_validator"], ResultValidator)
+    assert executor.call_args.kwargs["result_validator"] is subagent.call_args.kwargs[
+        "result_validator"
+    ]
+    factory = engine.call_args.kwargs["mcp_server_factory"]
+    claimed = _claimed()
+    run_context = _context(claimed, tmp_path, 1)
+    with pytest.raises(LeaseValidationError):
+        factory(run_context)
+    audit_writer.assert_not_called()
+    with bind_tool_authority(claimed):
+        authority = require_tool_authority(run_context)
+        runtime = factory(run_context)
+        assert isinstance(runtime, RunMcpRuntime)
+        assert audit_writer.call_args.kwargs["claimed_run"] is claimed
+        callback = audit_writer.call_args.kwargs["authority_check"]
+        assert callback.__self__ is authority
+        callback()
+    with pytest.raises(LeaseValidationError):
+        callback()
+    with pytest.raises(LeaseValidationError):
+        factory(run_context)
     sessions.assert_not_called()
 
 

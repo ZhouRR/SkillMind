@@ -33,6 +33,7 @@ from projectmind.db.models import (
     Project,
     ProjectDocument,
     ProjectMember,
+    ProjectSkillVersion,
     ResourceBinding,
     Run,
     RunEvent,
@@ -46,6 +47,7 @@ from projectmind.runs.domain import CreatedRun
 from projectmind.runs.service import RunService
 from projectmind.users.domain import UserAccess
 from tests.runs.creation_fakes import creation_command, creation_intent, stored_creation
+from tests.runs.task_binding_fakes import TaskBindingRows
 from tests.runs.test_task_run_service import _resolved
 
 PATHS = ("new", "first-replay", "source-winner", "unique-winner", "find-hit", "find-miss")
@@ -237,6 +239,7 @@ class CreationAuthorizationHarness:
             updated_at=now,
         )
         self.version = SkillVersion(id=raw.skill_version_id, status="PUBLISHED")
+        self.task_binding = TaskBindingRows(self.project, self.version)
         self.manifest = RuntimeManifest(
             id=uuid4(),
             skill_version_id=raw.skill_version_id,
@@ -291,6 +294,10 @@ class CreationAuthorizationHarness:
         """組織/Project/所属を実 SQL の完全な scope 条件で検索する。"""
 
         entity, params = self.query(statement)
+        if entity in (SkillVersion, ProjectSkillVersion):
+            if entity is SkillVersion:
+                self.step("skill")
+            return self.task_binding.scalar(statement)
         if entity is Organization:
             assert set(params) == {"id_1"}
             require_where(statement, entity, Organization.id == params["id_1"])
@@ -300,6 +307,16 @@ class CreationAuthorizationHarness:
                 else None
             )
         if entity is Project:
+            if statement.column_descriptions[0]["expr"] is Project.organization_id:
+                assert set(params) == {"id_1"}
+                assert statement.whereclause is not None and statement.whereclause.compare(
+                    Project.id == params["id_1"]
+                )
+                return (
+                    self.project.organization_id
+                    if (self.project_present and self.project.id == params["id_1"])
+                    else None
+                )
             assert set(params) == {"id_1", "organization_id_1"}
             require_where(
                 statement,

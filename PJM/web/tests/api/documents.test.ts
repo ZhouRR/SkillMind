@@ -7,14 +7,22 @@ import {
   loadProjectDocuments,
   loadProjectDocument,
   loadProjectDocumentText,
+  loadDocumentUpload,
   projectDocumentContentHref,
   uploadProjectDocument,
 } from '../../src/api/index'
 import { withInferredContentType } from '../../src/api/documents'
+import { freezeDocumentUpload } from '../../src/lib/documentUpload'
 
 const CSRF = 's'.repeat(32)
 const PROJECT_ID = '00000000-0000-4000-8000-000000000020'
 const DOCUMENT_ID = '00000000-0000-4000-8000-000000000090'
+const UPLOAD_KEY = '00000000-0000-4000-8000-000000000080'
+
+/** 選択時の原 multipart を本番 helper で固定し、client 呼出しには key を明示する。 */
+function uploadBody(file: File) {
+  return freezeDocumentUpload(DOCUMENT.uploaded_by, PROJECT_ID, file).body!
+}
 
 /** 保存済み文書 metadata の代表 response。 */
 const DOCUMENT = {
@@ -96,19 +104,20 @@ describe('Project document API contract', () => {
   })
 
   it('uploads a directory file by splitting webkitRelativePath into folder and name', async () => {
-    const fetchMock = jsonFetch(DOCUMENT, 201)
+    const fetchMock = jsonFetch({ ...DOCUMENT, size: 11 }, 201)
     vi.stubGlobal('fetch', fetchMock)
 
     const file = new File(['# Overview\n'], 'overview.md', { type: 'text/markdown' })
     // Browser の目録 upload と同じく basename の name と相対 path の webkitRelativePath を併せ持つ。
     Object.defineProperty(file, 'webkitRelativePath', { value: 'specs/overview.md' })
-    await uploadProjectDocument(PROJECT_ID, file, CSRF)
+    await uploadProjectDocument(PROJECT_ID, UPLOAD_KEY, uploadBody(file), CSRF)
 
     const call = fetchMock.mock.calls[0]
     if (!call) throw new Error('Expected one fetch call')
     expect(call[0]).toBe(`${API_BASE}/projects/${PROJECT_ID}/documents`)
     expect(call[1]?.method).toBe('POST')
-    expect(call[1]?.headers).toMatchObject({ 'X-CSRF-Token': CSRF })
+    expect(call[1]?.headers).toMatchObject({ 'X-CSRF-Token': CSRF, 'Idempotency-Key': UPLOAD_KEY })
+    expect(call[1]?.cache).toBe('no-store')
     // Content-Type は設定しない。undici/browser が multipart boundary を付与する。
     expect(call[1]?.headers).not.toHaveProperty('Content-Type')
     const body = call[1]?.body as FormData
@@ -121,10 +130,10 @@ describe('Project document API contract', () => {
   })
 
   it('uploads a plain file selection with an empty root folder', async () => {
-    const fetchMock = jsonFetch({ ...DOCUMENT, folder: '' }, 201)
+    const fetchMock = jsonFetch({ ...DOCUMENT, folder: '', size: 1 }, 201)
     vi.stubGlobal('fetch', fetchMock)
 
-    await uploadProjectDocument(PROJECT_ID, new File(['x'], 'note.txt', { type: 'text/plain' }), CSRF)
+    await uploadProjectDocument(PROJECT_ID, UPLOAD_KEY, uploadBody(new File(['x'], 'note.txt', { type: 'text/plain' })), CSRF)
 
     const body = fetchMock.mock.calls[0]?.[1]?.body as FormData
     expect((body.get('file') as File).name).toBe('note.txt')
@@ -134,10 +143,11 @@ describe('Project document API contract', () => {
   it.each([
     [413, 'document_upload_too_large'],
     [422, 'invalid_document_upload'],
-  ] as const)('preserves upload refusal %s/%s without retrying', async (status, code) => {
+    [503, 'document_storage_unavailable'],
+  ] as const)('preserves upload errors %s/%s without retrying', async (status, code) => {
     const mock = jsonFetch({ status, code, detail: 'Private upload internals' }, status)
     vi.stubGlobal('fetch', mock)
-    const request = uploadProjectDocument(PROJECT_ID, new File(['content'], 'note.txt'), CSRF)
+    const request = uploadProjectDocument(PROJECT_ID, UPLOAD_KEY, uploadBody(new File(['content'], 'note.txt')), CSRF)
     await expect(request).rejects.toBeInstanceOf(ApiProblemError)
     await expect(request).rejects.toMatchObject({ status, code })
     expect(mock).toHaveBeenCalledTimes(1)
@@ -146,7 +156,7 @@ describe('Project document API contract', () => {
   it.each([200, 202, 206])('does not accept upload status %s as publication', async (status) => {
     const mock = jsonFetch(DOCUMENT, status)
     vi.stubGlobal('fetch', mock)
-    await expect(uploadProjectDocument(PROJECT_ID, new File(['content'], 'note.txt'), CSRF))
+    await expect(uploadProjectDocument(PROJECT_ID, UPLOAD_KEY, uploadBody(new File(['content'], 'note.txt')), CSRF))
       .rejects.toMatchObject({ status })
     expect(mock).toHaveBeenCalledTimes(1)
   })
@@ -196,4 +206,76 @@ describe('withInferredContentType', () => {
     const unknown = new File(['x'], 'data.bin', { type: '' })
     expect(withInferredContentType(unknown, 'data.bin')).toBe(unknown)
   })
+})
+
+describe('original document upload receipts', () => {
+  const identity = { upload_key: UPLOAD_KEY, project_id: PROJECT_ID, created_at: DOCUMENT.created_at }
+  const published = { ...identity, state: 'PUBLISHED', document: DOCUMENT }
+
+  it.each(['PENDING', 'PUBLISHED'])('reads only the original key in state %s', async (state) => {
+    const record = { ...identity, state, document: state === 'PENDING' ? null : DOCUMENT }
+    const mock = jsonFetch(record, 200)
+    vi.stubGlobal('fetch', mock)
+    expect(await loadDocumentUpload(PROJECT_ID, UPLOAD_KEY)).toEqual(record)
+    expect(mock).toHaveBeenCalledTimes(1)
+    expect(mock.mock.calls[0]?.[0]).toBe(`${API_BASE}/projects/${PROJECT_ID}/document-uploads/${UPLOAD_KEY}`)
+    expect(mock.mock.calls[0]?.[1]).toMatchObject({ cache: 'no-store', credentials: 'same-origin' })
+    expect(mock.mock.calls[0]?.[1]?.method).toBeUndefined()
+  })
+
+  it.each([
+    { upload_key: DOCUMENT_ID }, { project_id: DOCUMENT_ID }, { upload_key: 'bad' },
+    { created_at: '2026-01-01' }, { created_at: '2026-02-30T00:00:00Z' },
+    { state: 'DONE' }, { state: 'PENDING' }, { document: null },
+    { document: { ...DOCUMENT, project_id: DOCUMENT_ID } },
+    { document: { ...DOCUMENT, storage_key: 'private' } },
+    { document: { ...DOCUMENT, size: 1.5 } }, { storage_namespace_id: 'private' },
+    { document: { ...DOCUMENT, created_at: '2026-07-09T23:59:59.999999Z' } },
+    { document: undefined }, { created_at: undefined },
+  ])('rejects invalid or cross-original receipt %j', async (changes) => {
+    vi.stubGlobal('fetch', jsonFetch({ ...published, ...changes }, 200))
+    await expect(loadDocumentUpload(PROJECT_ID, UPLOAD_KEY)).rejects.toThrow()
+  })
+
+  it.each([201, 202, 206])('does not accept receipt status %s', async (status) => {
+    vi.stubGlobal('fetch', jsonFetch(published, status))
+    await expect(loadDocumentUpload(PROJECT_ID, UPLOAD_KEY)).rejects.toMatchObject({ status })
+  })
+
+  it.each(['', 'bad', '00000000-0000-0000-0000-000000000000'])('never generates or substitutes invalid key %s', async (key) => {
+    const mock = jsonFetch(published, 200)
+    vi.stubGlobal('fetch', mock)
+    vi.stubGlobal('crypto', undefined)
+    const body = { file: new File(['fixed'], 'note.txt', { type: 'text/plain' }), name: 'note.txt', folder: '' }
+    await expect(uploadProjectDocument(PROJECT_ID, key, body, CSRF)).rejects.toThrow('key')
+    await expect(loadDocumentUpload(PROJECT_ID, key)).rejects.toThrow('key')
+    expect(mock).not.toHaveBeenCalled()
+  })
+
+  it('does not need randomness or fetch current directory to accept an original published receipt', async () => {
+    const mock = jsonFetch(published, 200)
+    vi.stubGlobal('fetch', mock)
+    vi.stubGlobal('crypto', undefined)
+    expect(await loadDocumentUpload(PROJECT_ID, UPLOAD_KEY)).toEqual(published)
+    expect(mock).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects a valid but different-size document as an unconfirmed original POST', async () => {
+    const mock = jsonFetch(DOCUMENT, 201)
+    vi.stubGlobal('fetch', mock)
+    await expect(uploadProjectDocument(PROJECT_ID, UPLOAD_KEY,
+      { name: 'overview.md', folder: 'specs', file: new File(['short'], 'overview.md') }, CSRF))
+      .rejects.toThrow('size')
+    expect(mock).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([[404, 'document_upload_not_found'], [503, 'document_upload_unavailable'],
+    [409, 'document_upload_pending'], [409, 'document_upload_key_conflict']] as const)(
+    'retains exact status/code %s/%s without retry', async (status, code) => {
+      const mock = jsonFetch({ status, code, detail: 'private' }, status)
+      vi.stubGlobal('fetch', mock)
+      await expect(loadDocumentUpload(PROJECT_ID, UPLOAD_KEY)).rejects.toMatchObject({ status, code })
+      expect(mock).toHaveBeenCalledTimes(1)
+    },
+  )
 })

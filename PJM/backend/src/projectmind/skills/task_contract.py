@@ -221,9 +221,7 @@ def _compile_array(
 
     items = node.get("items")
     if not isinstance(items, Mapping):
-        raise _failure(
-            "contract_items_missing", f"{path}items", "Array items contract is required"
-        )
+        raise _failure("contract_items_missing", f"{path}items", "Array items contract is required")
     item = dict(items)
     _reject_unknown_keys(item, allowed=_COMMON_KEYS, path=f"{path}items/")
     schema["items"] = _compile_node(
@@ -234,15 +232,11 @@ def _compile_array(
     )
 
 
-def _compile_string(
-    node: Mapping[str, Any], schema: dict[str, Any], *, path: str
-) -> None:
+def _compile_string(node: Mapping[str, Any], schema: dict[str, Any], *, path: str) -> None:
     """String 長と安全な正規表現 subset をコンパイルする。"""
 
     minimum = _optional_integer(node, "min_length", path=path, lower=0)
-    maximum = _optional_integer(
-        node, "max_length", path=path, lower=0, upper=MAX_STRING_LENGTH
-    )
+    maximum = _optional_integer(node, "max_length", path=path, lower=0, upper=MAX_STRING_LENGTH)
     if minimum is not None and maximum is not None and minimum > maximum:
         raise _failure(
             "contract_string_range_invalid",
@@ -276,17 +270,13 @@ def _compile_string(
         schema["pattern"] = pattern
 
 
-def _compile_number(
-    node: Mapping[str, Any], schema: dict[str, Any], *, path: str
-) -> None:
+def _compile_number(node: Mapping[str, Any], schema: dict[str, Any], *, path: str) -> None:
     """Number range を bool と区別してコンパイルする。"""
 
     minimum = _optional_number(node, "minimum", path=path)
     maximum = _optional_number(node, "maximum", path=path)
     if minimum is not None and maximum is not None and minimum > maximum:
-        raise _failure(
-            "contract_number_range_invalid", path, "minimum must not exceed maximum"
-        )
+        raise _failure("contract_number_range_invalid", path, "minimum must not exceed maximum")
     if minimum is not None:
         schema["minimum"] = minimum
     if maximum is not None:
@@ -315,7 +305,6 @@ def _compile_enum(
             f"{path}enum",
             f"Enum must contain 1 to {MAX_ENUM_VALUES} values",
         )
-    unique: set[str] = set()
     normalized: list[Any] = []
     for index, value in enumerate(values):
         if not _matches_type(value, value_type):
@@ -324,21 +313,20 @@ def _compile_enum(
                 f"{path}enum/{index}",
                 "Enum value does not match contract type",
             )
-        marker = canonical_json(value)
-        if marker in unique:
+        # 有限 JSON の検査を保持するが、同値判定に 1/1.0 の表記差を持ち込まない。
+        # 型検査済み scalar の比較なら bool 混入を拒み、bigint を float に丸めず比較できる。
+        canonical_json(value)
+        if value in normalized:
             raise _failure(
                 "contract_enum_duplicate",
                 f"{path}enum/{index}",
                 "Enum values must be unique",
             )
-        unique.add(marker)
         normalized.append(value)
     schema["enum"] = normalized
 
 
-def _reject_inapplicable_keywords(
-    node: Mapping[str, Any], *, value_type: str, path: str
-) -> None:
+def _reject_inapplicable_keywords(node: Mapping[str, Any], *, value_type: str, path: str) -> None:
     """Type ごとに意味を持たない keyword を拒否し、曖昧な draft を残さない。"""
 
     allowed_by_type = {
@@ -398,9 +386,7 @@ def _optional_integer(
     if isinstance(value, bool) or not isinstance(value, int):
         raise _failure("contract_constraint_invalid", f"{path}{key}", f"{key} must be integer")
     if value < lower or (upper is not None and value > upper):
-        raise _failure(
-            "contract_constraint_out_of_range", f"{path}{key}", f"{key} is out of range"
-        )
+        raise _failure("contract_constraint_out_of_range", f"{path}{key}", f"{key} is out of range")
     return value
 
 

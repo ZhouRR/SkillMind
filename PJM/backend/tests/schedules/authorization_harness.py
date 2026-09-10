@@ -14,7 +14,15 @@ from sqlalchemy import Select, and_
 
 from projectmind.auth.domain import generate_session_credentials
 from projectmind.auth.service import AuthenticatedActor
-from projectmind.db.models import AuthSession, Organization, Project, ProjectMember, User
+from projectmind.db.models import (
+    AuthSession,
+    Organization,
+    Project,
+    ProjectMember,
+    ProjectSkillVersion,
+    SkillVersion,
+    User,
+)
 from projectmind.schedules.domain import (
     ScheduleDefinition,
     ScheduleKind,
@@ -24,6 +32,7 @@ from projectmind.schedules.domain import (
 from projectmind.schedules.repository import ScheduleRepository
 from projectmind.schedules.service import ScheduleService
 from projectmind.users.domain import UserAccess
+from tests.runs.task_binding_fakes import TaskBindingRows
 from tests.schedules.fakes import ScheduleDatabase
 
 
@@ -99,6 +108,9 @@ class ScheduleAuthorizationDatabase(ScheduleDatabase):
             updated_at=now,
         )
         self.project_present = True
+        self.task_binding = TaskBindingRows(
+            self.project, SkillVersion(id=self.schedule.skill_version_id, status="PUBLISHED")
+        )
         self.on_lock: Callable[[type[Any]], None] | None = None
         self.on_flush: Callable[[], None] | None = None
         self.on_resolve: Callable[[], None] | None = None
@@ -137,6 +149,9 @@ class ScheduleAuthorizationDatabase(ScheduleDatabase):
 
         self.observe_lock(statement)
         entity = statement.column_descriptions[0]["entity"]
+        if entity in (SkillVersion, ProjectSkillVersion):
+            self.statements.append(statement)
+            return self.task_binding.scalar(statement)
         if entity not in (Organization, Project, ProjectMember):
             return await super().scalar(statement)
         assert statement.column_descriptions[0]["expr"] is entity

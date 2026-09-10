@@ -103,6 +103,7 @@ def test_project_detail_requires_session_before_lookup(client: TestClient) -> No
         ("run_history_exists", "project_delete_blocked_by_runs"),
         ("task_schedule_exists", "project_delete_blocked_by_schedules"),
         ("member_audit_exists", "project_delete_blocked_by_member_audit"),
+        ("document_upload_exists", "project_delete_blocked_by_document_uploads"),
     ],
 )
 def test_project_delete_returns_a_distinct_stable_conflict_for_each_reference(
@@ -140,6 +141,12 @@ def test_project_detail_and_delete_openapi_declare_the_actual_problem_contract(
             )
             assert "application/json" not in response["content"]
     assert "project_delete_blocked_by_schedules" in (
+        path["delete"]["responses"]["409"]["description"]
+    )
+    assert "project_delete_blocked_by_document_uploads" in (
+        path["delete"]["responses"]["409"]["description"]
+    )
+    assert "document assets/upload/cleanup records" in (
         path["delete"]["responses"]["409"]["description"]
     )
 

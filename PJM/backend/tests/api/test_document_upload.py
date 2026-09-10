@@ -58,7 +58,10 @@ def _scope(headers: list[tuple[bytes, bytes]] | None = None) -> Scope:
         "type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"},
         "http_version": "1.1", "method": "POST", "scheme": "http",
         "path": f"/api/v1/projects/{uuid4()}/documents", "query_string": b"",
-        "root_path": "", "headers": headers or [(b"content-type", _CONTENT_TYPE)],
+        "root_path": "", "headers": [
+            *(headers or [(b"content-type", _CONTENT_TYPE)]),
+            (b"idempotency-key", str(uuid4()).encode()),
+        ],
         "server": ("testserver", 80), "client": ("127.0.0.1", 12345),
     }
 
@@ -436,7 +439,8 @@ def test_http_admission_refusal_never_calls_upload_service(
     monkeypatch.setattr(fake, "upload_document", spy)
     client.app.state.document_service = fake
     response = client.post(f"/api/v1/projects/{uuid4()}/documents", content=body,
-                           headers={"Content-Type": _CONTENT_TYPE.decode()})
+                           headers={"Content-Type": _CONTENT_TYPE.decode(),
+                                    "Idempotency-Key": str(uuid4())})
     assert response.status_code == status and response.json()["code"] == code
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["content-type"].startswith("application/problem+json")
@@ -461,6 +465,7 @@ def test_upload_maps_original_transaction_refusals(
     monkeypatch.setattr(fake, "upload_document", AsyncMock(side_effect=error("private details")))
     client.app.state.document_service = fake
     response = client.post(f"/api/v1/projects/{uuid4()}/documents",
+                           headers={"Idempotency-Key": str(uuid4())},
                            files={"file": ("note.txt", b"body", "text/plain")})
     assert response.status_code == status and response.json()["code"] == code
     assert "private details" not in response.text
@@ -485,7 +490,8 @@ def test_upload_passes_original_credentials_and_bounded_payload(
     )
     response = client.post(f"/api/v1/projects/{uuid4()}/documents",
                            data={"folder": "資料"},
-                           headers={"X-CSRF-Token": credentials.csrf_token},
+                           headers={"X-CSRF-Token": credentials.csrf_token,
+                                    "Idempotency-Key": str(uuid4())},
                            files={"file": ("設計.txt", b"body", "text/plain")})
     assert response.status_code == 201
     assert response.headers["cache-control"] == "no-store"
@@ -494,6 +500,7 @@ def test_upload_passes_original_credentials_and_bounded_payload(
     assert isinstance(access, UserAccess) and isinstance(access.request_id, UUID)
     assert access.session_token == credentials.session_token
     assert access.csrf_token == credentials.csrf_token
+    assert isinstance(spy.await_args.kwargs["upload_key"], UUID)
     assert str(access.request_id) == response.headers["x-request-id"]
     assert fake.uploaded == [("資料", "設計.txt", b"body")]
 

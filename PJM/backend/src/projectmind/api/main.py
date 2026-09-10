@@ -25,6 +25,7 @@ from projectmind.api.problems import (
     validation_exception_handler,
 )
 from projectmind.api.routes import router as api_router
+from projectmind.artifacts.service import ArtifactService
 from projectmind.auth.login_protection import LoginProtectionUnavailableError, LoginRateLimitedError
 from projectmind.auth.service import AuthService
 from projectmind.compositions import CompositionService
@@ -94,6 +95,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         secret_cipher=load_secret_cipher(settings.managed_secret_kek),
     )
     app.state.run_service = RunService(app.state.database_session_factory)
+    app.state.artifact_service = ArtifactService(app.state.database_session_factory)
     app.state.evaluation_service = EvaluationService(app.state.database_session_factory)
     app.state.effect_service = EffectService(app.state.database_session_factory)
     interpreter, catalog, identity, default_model = build_skill_interpreter(settings)

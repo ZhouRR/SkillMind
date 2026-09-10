@@ -7,12 +7,21 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.dialects import postgresql
+from alembic.migration import MigrationContext
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from projectmind.auth.service import AuthenticatedActor
-from projectmind.db.models import Project, ProjectMember, ProjectMemberEvent, TaskSchedule, User
+from projectmind.db.models import (
+    Project,
+    ProjectDocument,
+    ProjectDocumentCleanup,
+    ProjectDocumentUpload,
+    ProjectMember,
+    ProjectMemberEvent,
+    TaskSchedule,
+    User,
+)
 from projectmind.projects.domain import (
     CreateProjectCommand,
     ProjectDeleteBlockedError,
@@ -21,6 +30,8 @@ from projectmind.projects.domain import (
     ProjectStatus,
 )
 from projectmind.projects.repository import _PROJECT_OWNED_MODELS, ProjectRepository
+
+_POSTGRESQL = MigrationContext.configure(dialect_name="postgresql").dialect
 
 
 def _actor(*, role: str = "USER") -> AuthenticatedActor:
@@ -105,7 +116,7 @@ async def test_detail_query_retains_organization_and_membership_without_archive_
     stored = await ProjectRepository(session).get_accessible(actor=actor, project_id=project.id)
 
     statement = session.scalar.call_args.args[0]
-    compiled = statement.compile(dialect=postgresql.dialect())
+    compiled = statement.compile(dialect=_POSTGRESQL)
     predicates = str(statement.whereclause)
     assert stored.status is ProjectStatus.ARCHIVED
     assert "projects.id =" in predicates
@@ -226,7 +237,7 @@ async def test_member_lock_hides_missing_project_before_membership_lookup() -> N
             active_project=True,
         )
     session.scalar.assert_awaited_once()
-    query = session.scalar.call_args.args[0].compile(dialect=postgresql.dialect())
+    query = session.scalar.call_args.args[0].compile(dialect=_POSTGRESQL)
     assert set(query.params.values()) == {actor.organization_id, project.id}
     assert "FOR UPDATE" in str(query)
     session.add.assert_not_called()
@@ -362,14 +373,16 @@ async def test_delete_rejects_any_schedule_before_removing_preference_or_configu
 
     assert raised.value.blockers == ("task_schedule_exists",)
     schedule_query = session.scalar.call_args_list[1].args[0]
-    compiled = schedule_query.compile(dialect=postgresql.dialect())
+    compiled = schedule_query.compile(dialect=_POSTGRESQL)
     assert "EXISTS" in str(compiled)
     assert "FROM task_schedules" in str(compiled)
     assert "task_schedules.project_id =" in str(compiled)
     assert list(compiled.params.values()) == [project.id]
     for excluded_filter in ("status", "run_count", "last_run_id", "next_run_at"):
         assert excluded_filter not in str(compiled)
-    assert TaskSchedule not in _PROJECT_OWNED_MODELS
+    assert TaskSchedule.__tablename__ not in {
+        model.__tablename__ for model in _PROJECT_OWNED_MODELS
+    }
     assert {fk.ondelete for fk in TaskSchedule.__table__.c.project_id.foreign_keys} == {"RESTRICT"}
     session.execute.assert_not_called()
     session.delete.assert_not_called()
@@ -400,7 +413,7 @@ async def test_delete_clears_preference_and_owned_configuration_rows() -> None:
     actor = _actor(role="ADMIN")
     project = _project(organization_id=actor.organization_id, status="ARCHIVED")
     session = MagicMock(spec=AsyncSession)
-    session.scalar = AsyncMock(side_effect=[0, False, False])
+    session.scalar = AsyncMock(side_effect=[0, False, False, False, False, False])
     session.execute = AsyncMock()
     session.delete = AsyncMock()
 
@@ -424,7 +437,54 @@ async def test_member_audit_blocks_delete_before_any_writes() -> None:
     assert raised.value.blockers == ("member_audit_exists",)
     statements = [str(call.args[0]) for call in session.scalar.call_args_list]
     assert "EXISTS" in statements[2] and "project_member_events.project_id =" in statements[2]
-    assert ProjectMemberEvent not in _PROJECT_OWNED_MODELS
+    assert ProjectMemberEvent.__tablename__ not in {
+        model.__tablename__ for model in _PROJECT_OWNED_MODELS
+    }
+    session.execute.assert_not_called()
+    session.delete.assert_not_called()
+
+
+@pytest.mark.parametrize("model", [ProjectDocumentUpload, ProjectDocumentCleanup, ProjectDocument])
+async def test_document_assets_block_project_delete_without_state_or_cleanup_exclusions(
+    model: type[ProjectDocumentUpload] | type[ProjectDocumentCleanup] | type[ProjectDocument],
+) -> None:
+    """意図・独立清理・旧目録のどれも一括消去せず、metadata 零件を無占用と誤認しない。"""
+
+    actor = _actor(role="ADMIN")
+    project = _project(organization_id=actor.organization_id, status="ARCHIVED")
+    session = MagicMock(spec=AsyncSession)
+    order = [ProjectDocumentUpload, ProjectDocumentCleanup, ProjectDocument].index(model)
+    session.scalar = AsyncMock(side_effect=[0, False, False] + [False] * order + [True])
+    with pytest.raises(ProjectDeleteBlockedError) as raised:
+        await ProjectRepository(session).delete(project=project, expected_row_version=1)
+    assert raised.value.blockers == ("document_upload_exists",)
+    query = session.scalar.call_args_list[3 + order].args[0]
+    compiled = query.compile(dialect=_POSTGRESQL)
+    assert "EXISTS" in str(compiled) and f"FROM {model.__tablename__}" in str(compiled)
+    assert f"{model.__tablename__}.project_id =" in str(compiled)
+    assert list(compiled.params.values()) == [project.id]
+    for excluded in ("state", "cleanup_requested_at", "published_at", "storage_is_durable"):
+        assert excluded not in str(compiled)
+    assert model.__tablename__ not in {
+        model.__tablename__ for model in _PROJECT_OWNED_MODELS
+    }
+    if model is not ProjectDocument:
+        assert {fk.ondelete for fk in model.__table__.c.project_id.foreign_keys} == {"RESTRICT"}
+    session.execute.assert_not_called()
+    session.delete.assert_not_called()
+
+
+async def test_intent_lookup_failure_is_not_reported_as_confirmed_project_blocker() -> None:
+    """保存有無が不明な DB 障害を、確定拒否に置き換えて削除結果を偽らない。"""
+
+    actor = _actor(role="ADMIN")
+    project = _project(organization_id=actor.organization_id, status="ARCHIVED")
+    failure = IntegrityError("synthetic query", {}, RuntimeError("synthetic database failure"))
+    session = MagicMock(spec=AsyncSession)
+    session.scalar = AsyncMock(side_effect=[0, False, False, failure])
+    with pytest.raises(IntegrityError) as raised:
+        await ProjectRepository(session).delete(project=project, expected_row_version=1)
+    assert raised.value is failure
     session.execute.assert_not_called()
     session.delete.assert_not_called()
 
@@ -481,5 +541,5 @@ async def test_member_list_projects_all_relationship_states_without_account_stat
     assert "LIMIT" not in query and "OFFSET" not in query
     assert "users.status =" not in query and "project_members.status =" not in query
     assert "users.organization_id =" in query
-    compiled = session.execute.call_args.args[0].compile(dialect=postgresql.dialect())
+    compiled = session.execute.call_args.args[0].compile(dialect=_POSTGRESQL)
     assert set(compiled.params.values()) == {actor.organization_id, project.id}

@@ -68,7 +68,9 @@ User 只读共享锁阻止停用/角色变更，同时兼容认领事务插入 o
 
 该边界只覆盖三类管理写入，不证明读取期间撤权立即生效或在途 Run 已停止；Worker 发火继续按当前创建者资格和持久 claim 授权，不依赖浏览器会话存活。
 
-创建和编辑在同一门禁内重新校验锁外已验证的文档选择，只读取元数据，不持锁调用 blob/Skill/Provider。原 ID 已消失则拒绝保存，不切换为同路径新文档；请求 input/sources 在首次 await 前复制，既有调度先验锁内版本。文档删除与当前规则、所有保留 occurrence 的引用关系见[删除事务](document-lifecycle.md#删除事务与引用判定)。
+创建/编辑及恢复 ACTIVE 在原 CAS/状态检查后，经[共享可用性门禁](skill-interpretation.md#resourcebinding-与-readiness)依次取 SkillVersion SHARE、ProjectSkillVersion SHARE，核对精确 PUBLISHED 版及未停用关系；失效拒绝保存，不换 latest。暂停/归档不要求任务仍可用。SHARE 与 occurrence 外键 KEY SHARE 兼容，不使用版本 UPDATE 锁。
+
+创建和编辑在同一门禁内重新校验锁外已验证的文档选择，只读取元数据，不持锁重新解释 Skill 或调用 blob/Provider。原 ID 已消失则拒绝保存，不切换为同路径新文档；请求 input/sources 在首次 await 前复制，既有调度先验锁内版本。文档删除与当前规则、所有保留 occurrence 的引用关系见[删除事务](document-lifecycle.md#删除事务与引用判定)。
 
 ### 重叠检查到底看谁
 
@@ -141,6 +143,8 @@ _count_missed 单次最多 1000，长期停机可能截顶。迟到容忍/截止
 持久 claim 有 worker/token hash/generation/到期时刻，非 RunAttempt；旧持有者不能晚到关联/结算。锁顺序是当前身份/Project → Schedule → occurrence → 普通 Run；Skill 解析在外，创建事务内的资源快照及关联共享短期锁。
 
 恢复顺序：当前授权 → 查原键，有 Run 即关联 → 无 Run 才查本 Schedule 其他在途和非终态关联 → 允许时经普通创建。创建事务也须验证认领仍可新建，不能仅在调用前检查。
+
+普通创建还在初始快照事务复核当前精确版本/启用关系。解析后停用或废弃导致无 Run 的发火为 FAILED_PRECONDITION，不当作基础设施未知；先确认原 claim 仍有效，失去 claim 不得借业务拒绝结算。已有原 Run 仍按原身份关联，不重验今天的任务可用性。
 
 普通入口不能用保留的 `schedule:` 前缀新建 Run；已有合法原请求仍可确认，规则见[幂等键作用域](run-creation.md#幂等键的作用域)。否则手动插入可绕开 occurrence 的事务锁、关联与计数。
 

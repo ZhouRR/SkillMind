@@ -107,7 +107,11 @@ Run 创建冻结 actor、成员资格及 Skill/Tool 权限上限，不随后来�
 
 [普通 Run 创建与确认](run-creation.md#创建与确认的授权事务)复核原会话和当前 Project/成员，首次、重放及未命中均经过最终门禁，历史权限快照不刷新。[普通答复](user-interactions.md#首次答复与原答复重放)固定同一资格后锁 Run/Segment/Interaction，首次、重放及过期续行也经过最终门禁。
 
-[调度管理写入](task-scheduling.md#管理写入的授权事务)同样复核原会话、当前成员与归档，使用兼容 occurrence 外键的只读 User 锁；Worker 发火仍是独立的当前创建者授权协议。[单文档删除](document-lifecycle.md#删除事务与引用判定)固定原资格后检查历史引用；[文档上传](document-lifecycle.md#上传的授权事务)在锁外 PUT 前后分别复核原资格，入口授权先于 multipart 正文接收。其他业务仍须按各自设计闭合授权竞争，不能由这些链路推导全系统立即停权或已有 Run 停止。
+[评价事务](results-evaluation.md#评价的授权事务)在原 Result 下复核同一资格，新旧 POST、原键确认和分页均保持锁后/最终门禁；归档可读不可写。原提交键绑定用户而非浏览器会话，同用户重新登录可人工查询，不恢复已撤销会话或自动重发旧正文。
+
+[Skill 版本管理](skill-interpretation.md#版本管理的授权事务)在草稿、发布、废弃、删除及项目启停事务中锁定原 User/会话，业务等待后、写入前和最终 flush 后复核当前 ADMIN。组织资产不加 Project 门禁，项目启停另锁精确 ACTIVE Project；重复操作仍需有效资格，保留原审计值。导入与解释写入不由此推导已覆盖。
+
+[调度管理写入](task-scheduling.md#管理写入的授权事务)同样复核原会话、当前成员与归档，使用兼容 occurrence 外键的只读 User 锁；Worker 发火仍是独立的当前创建者授权协议。[单文档删除](document-lifecycle.md#删除事务与引用判定)固定原资格后检查历史引用；[文档上传](document-lifecycle.md#上传的授权事务)在锁外 PUT 前后分别复核原资格，入口授权先于 multipart 正文接收。原 upload key 查询也复核当前会话/成员，允许同 actor 新有效会话和授权归档读取；这不授权新会话接管旧 PUT。其他业务仍须按各自设计闭合授权竞争，不能由这些链路推导全系统立即停权或已有 Run 停止。
 
 ## 开发接续与验收
 

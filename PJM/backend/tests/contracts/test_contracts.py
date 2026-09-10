@@ -16,10 +16,18 @@ ROOT = Path(__file__).resolve().parents[3]
 CONTRACTS = ROOT / "contracts"
 
 EXAMPLES = {
+    "examples/task-flow-preview.v1.json": "tasks/flow-preview/v1.schema.json",
+    "examples/task-flow-preview-not-declared.v1.json": "tasks/flow-preview/v1.schema.json",
     "examples/agent-task-brief.v1.json": "agent-task-brief/v1.schema.json",
     "examples/capability-blueprint.v1.json": "capability-blueprint/v1.schema.json",
     "examples/create-project-request.v1.json": "projects/v1/create-request.schema.json",
     "examples/document.v1.json": "documents/v1/document.schema.json",
+    "examples/document-upload-pending.v1.json": "documents/v1/upload.schema.json",
+    "examples/document-upload-published.v1.json": "documents/v1/upload.schema.json",
+    "examples/document-upload-closure.v1.json": "documents/v1/upload-closure.schema.json",
+    "examples/document-upload-closure-request.v1.json": (
+        "documents/v1/upload-closure-request.schema.json"
+    ),
     "examples/document-read-request.v1.json": "tools/document.read/v1/request.schema.json",
     "examples/document-read-response.v1.json": "tools/document.read/v1/response.schema.json",
     "examples/login-context.v1.json": "auth/v1/login-context.schema.json",
@@ -126,6 +134,18 @@ EXAMPLES = {
     "examples/workspace-search-response.v1.json": "tools/workspace.search/v1/response.schema.json",
     "examples/workspace-write-request.v1.json": "tools/workspace.write/v1/request.schema.json",
     "examples/workspace-write-response.v1.json": "tools/workspace.write/v1/response.schema.json",
+    "examples/workspace-write-request.v2.json": "tools/workspace.write/v2/request.schema.json",
+    "examples/workspace-write-response.v2.json": "tools/workspace.write/v2/response.schema.json",
+    "examples/workspace-write-draft-response.v2.json": (
+        "tools/workspace.write/v2/response.schema.json"
+    ),
+    "examples/artifact-list.v1.json": "artifacts/v1/list.schema.json",
+    "examples/run-detail-artifacts.v1.json": "runs/detail/v1.schema.json",
+    "examples/evaluation-submission-request.v1.json": (
+        "evaluations/v1/submission-request.schema.json"
+    ),
+    "examples/evaluation-submission.v1.json": "evaluations/v1/submission.schema.json",
+    "examples/evaluation-page.v1.json": "evaluations/v1/page.schema.json",
 }
 
 
@@ -181,7 +201,7 @@ def test_examples_match_contracts() -> None:
     for example_name, schema_name in EXAMPLES.items():
         schema = load(CONTRACTS / schema_name)
         validator_for(schema)(schema, format_checker=FormatChecker()).validate(
-            load(CONTRACTS / example_name)
+            json.loads((CONTRACTS / example_name).read_text(encoding="utf-8"))
         )
 
 

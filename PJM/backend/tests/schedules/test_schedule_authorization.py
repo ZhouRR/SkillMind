@@ -23,6 +23,8 @@ from projectmind.db.models import (
     Organization,
     Project,
     ProjectMember,
+    ProjectSkillVersion,
+    SkillVersion,
     TaskSchedule,
     TaskScheduleOccurrence,
     User,
@@ -457,7 +459,11 @@ async def test_success_returns_only_after_commit_with_fixed_lock_order(operation
     assert db.session.flush.await_count == 2
     expected = [Organization, User, AuthSession, Project, ProjectMember]
     if operation != "create":
-        expected += [TaskSchedule, TaskSchedule]
+        expected += [TaskSchedule]
+    if operation in {"create", "edit"}:
+        expected += [SkillVersion, ProjectSkillVersion]
+    if operation != "create":
+        expected += [TaskSchedule]
     assert db.lock_events == expected
     locked = [query for query in db.statements if query._for_update_arg is not None]
     assert [query.column_descriptions[0]["entity"] for query in locked] == expected
@@ -465,8 +471,14 @@ async def test_success_returns_only_after_commit_with_fixed_lock_order(operation
     for query in locked:
         entity = query.column_descriptions[0]["entity"]
         sql = str(query.compile(dialect=dialect_factory()))
+        if entity is SkillVersion:
+            assert sql.endswith("FOR SHARE OF skill_versions")
+            assert query.get_execution_options()["populate_existing"] is True
+            continue
         assert sql.endswith(
-            "FOR SHARE" if entity in {User, Project, ProjectMember} else "FOR UPDATE"
+            "FOR SHARE"
+            if entity in {User, Project, ProjectMember, ProjectSkillVersion}
+            else "FOR UPDATE"
         )
         if entity is not Organization:
             assert query.get_execution_options()["populate_existing"] is True

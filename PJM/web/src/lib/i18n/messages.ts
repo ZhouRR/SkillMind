@@ -375,7 +375,7 @@ export interface UiMessages {
     acknowledgedHint: string
     failures: Record<'sessionExpired' | 'csrfRejected' | 'adminRequired' | 'notFound' | 'invalidRequest'
       | 'keyConflict' | 'versionConflict' | 'versionExhausted' | 'needsArchive' | 'blockedByRuns'
-      | 'blockedBySchedules' | 'blockedByMemberAudit' | 'unknown' | 'loadFailed', string>
+      | 'blockedBySchedules' | 'blockedByMemberAudit' | 'blockedByDocumentUploads' | 'unknown' | 'loadFailed', string>
   }
   /** Project membership と Organization account の状態を混同しない管理区画。 */
   projectMembers: {
@@ -546,7 +546,57 @@ export interface UiMessages {
     failures: Record<'sessionExpired' | 'denied' | 'archived' | 'notFound' | 'inUse'
       | 'referencesUnavailable' | 'invalid' | 'unknown' | 'loadFailed'
       | 'previewTooLarge' | 'contentMissing' | 'contentInvalid' | 'storageUnavailable'
-      | 'uploadTooLarge' | 'uploadUnknown', string>
+      | 'uploadTooLarge' | 'uploadUnknown' | 'uploadPending' | 'uploadKeyConflict' | 'uploadConflict'
+      | 'uploadNotFound' | 'uploadUnavailable' | 'uploadInvalidKey' | 'uploadPreparationFailed' | 'uploadClosed', string>
+    closure: {
+      title: string
+      scope: string
+      prepare: string
+      prepareRecovered: string
+      recoveredHint: string
+      finishRecovery: string
+      check: string
+      original: string
+      confirmHint: string
+      confirm: string
+      cancelPreparation: string
+      cancelWait: string
+      unknownHint: string
+      checking: string
+      cancelCheck: string
+      closedAt: string
+      documentId: string
+      recover: string
+      recoveryHint: string
+      recoveryTitle: string
+      closeRecovery: string
+      phase: Record<'confirming' | 'sending' | 'unknown' | 'closed' | 'refused', string>
+      failures: Record<'sessionExpired' | 'denied' | 'archived' | 'alreadyPublished' | 'uploadNotFound'
+        | 'notFound' | 'unavailable' | 'invalid' | 'unknown' | 'loadFailed' | 'invalidKey', string>
+    }
+    upload: {
+      title: string
+      key: string
+      documentId: string
+      summary: (published: number, refused: number, unknown: number, queued: number, closed: number) => string
+      phase: Record<'queued' | 'sending' | 'unknown' | 'published' | 'refused' | 'closed', string>
+      cancelUpload: string
+      unknownHint: string
+      checkOriginal: string
+      checking: string
+      cancelCheck: string
+      pending: string
+      continueRemaining: string
+      finishReview: string
+      recoveryHint: string
+      recoveryKey: string
+      recover: string
+      recoveryTitle: string
+      recoveryOnly: string
+      recoveryPending: string
+      recoveryCancelled: string
+      closeRecovery: string
+    }
     selectProjectFirst: string
     listTitle: string
     hint: string
@@ -600,7 +650,57 @@ export interface UiMessages {
     phase: Record<'sending' | 'unknown' | 'rejected' | 'conflict' | 'expired' | 'confirmed', string>
     failures: Record<'sessionExpired' | 'csrfRejected' | 'projectArchived' | 'forbidden' | 'notFound' | 'invalidAnswer' | 'conflict' | 'expired' | 'unknown' | 'loadFailed', string>
   }
+  evaluation: {
+    hint: string
+    originalRequest: string
+    submissionKey: string
+    unknownHint: string
+    lookupOnly: string
+    closeLookup: string
+    cancel: string
+    confirm: string
+    resend: string
+    newEvaluation: string
+    editRejected: string
+    draft: string
+    revisionHint: string
+    revisionNumber: (number: number) => string
+    removeRevision: string
+    lookupLabel: string
+    lookupHint: string
+    invalidKey: string
+    history: string
+    historyHint: string
+    refreshHistory: string
+    loadMore: string
+    phase: Record<'sending' | 'checking' | 'unknown' | 'refused' | 'confirmed', string>
+    draftErrors: Record<'invalidJson' | 'invalidPointer' | 'duplicatePointer' | 'invalidReason' | 'invalidDraft', string>
+    failures: Record<'sessionExpired' | 'csrfRejected' | 'forbidden' | 'notFound' | 'projectArchived' | 'resultUnavailable'
+      | 'resultMismatch' | 'invalidRequest' | 'invalidRevision' | 'conflict' | 'notSeen' | 'unavailable' | 'cursorInvalid'
+      | 'unknown' | 'loadFailed' | 'readTimeout', string>
+  }
   runResult: {
+    /** 原 Result の保存時に記録した検証範囲。歴史欠損は成功へ補完しない。 */
+    referenceChecks: {
+      title: string
+      recorded: string
+      legacy: string
+      invalid: string
+      references: string
+      effects: string
+      effectsNotApplicable: string
+      artifacts: string
+      artifactsVerified: string
+      limit: string
+    }
+    modelEffectsHint: string
+    platformEffectsHint: string
+    /** 公開索引・保存時の検証・今回の取得結果を分けて表示する。 */
+    artifacts: {
+      title: string; hint: string; loading: string; empty: string; referenced: string; unreferenced: string
+      unavailableRefs: string; download: string; refresh: string; preparing: string; delivered: string; cancel: string; close: string
+      failures: Record<'sessionExpired' | 'denied' | 'notFound' | 'contentInvalid' | 'storageUnavailable' | 'tooLarge' | 'loadFailed' | 'timeout', string>
+    }
     /** 凍結文書の検証状態。実行成功や現在の blob 可達性と混同しない。 */
     documents: {
       title: string
@@ -840,6 +940,28 @@ export interface UiMessages {
     failures: Record<'sessionExpired' | 'accessUnavailable' | 'loadFailed', string>
   }
   /** 任务中心 (TasksPage)。「何を走らせられるか」を選ぶ画面。 */
+  /** 原宣言の単 Task preview。準備評価と実行済み事実は同じ状態にしない。 */
+  taskFlow: {
+    open: string; title: string; intro: string; close: string; refresh: string; loading: string
+    missing: string; taskScope: string; sharedScope: string; sharedHint: string
+    objective: string; taskResources: string; sharedResources: string; noTaskResources: string
+    success: string; deliverables: string; deliverableHint: string
+    required_rules: string; recommended_steps: string; quality_criteria: string; prohibited_actions: string
+    interactions: string; interactionHint: string; effects: string; effectHint: string
+    preferences: string; assumptions: string; questions: string; notDeclared: string; declaredEmpty: string
+    readiness: string; readinessHint: string; unassessed: string
+    sources: string; sourcesHint: string; sourcesEmpty: string; originalReference: string
+    itemSources: string; noItemSources: string
+    verification: Record<'SOURCE_INDEX' | 'TEXT_SNAPSHOT', string>
+    originalContracts: string; parameters: string; resultContract: string; identity: string
+    identityLabels: Record<'project_id' | 'skill_id' | 'skill_version_id' | 'task_id' | 'task_key' | 'skill_key' | 'version' | 'manifest_checksum' | 'blueprint_checksum' | 'preview_checksum', string>
+    modes: Record<'observe' | 'propose' | 'apply', string>; risks: Record<'low' | 'medium' | 'high', string>
+    interactionTypes: Record<'CLARIFICATION' | 'CHOICE' | 'REVIEW' | 'EFFECT_APPROVAL', string>
+    deliverableKinds: Record<'report' | 'structured_data' | 'patch' | 'change_proposal' | 'artifact', string>
+    profile: string; sessionHints: string; stopConditions: string; approval: string
+    access: Record<'read' | 'write', string>; providers: string
+    failures: Record<'sessionExpired' | 'unavailable' | 'invalid' | 'loadFailed' | 'timeout', string>
+  }
   tasks: {
     description: string
     titleWithModule: (moduleName: string) => string

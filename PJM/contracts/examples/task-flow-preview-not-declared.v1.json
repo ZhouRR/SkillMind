@@ -1,0 +1,22 @@
+{
+  "preview_version": "projectmind.task-flow-preview/v1",
+  "identity": {
+    "project_id": "00000000-0000-4000-8000-000000000002",
+    "skill_id": "00000000-0000-4000-8000-000000000003",
+    "skill_version_id": "00000000-0000-4000-8000-000000000004",
+    "task_id": "013b9603-a5b4-5e80-88a9-f1a7d2ff4e04",
+    "task_key": "explain",
+    "skill_key": "reading-guide",
+    "version": "1.2.3",
+    "manifest_checksum": "sha256:6dfaeefd984bdedddb17965412622f8bddfd2371f3690e332077a96bebfe86d3"
+  },
+  "status": "NOT_DECLARED",
+  "blueprint_checksum": null,
+  "preview_checksum": "sha256:73bc444bad9969acb00de91a2bc197cafca9f0c921c3d3de3bc9c43da0183d89",
+  "plan": null,
+  "source_traces": [],
+  "readiness": {
+    "scope": "SKILL_BLUEPRINT",
+    "assessment": null
+  }
+}

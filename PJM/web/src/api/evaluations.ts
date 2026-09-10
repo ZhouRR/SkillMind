@@ -1,4 +1,7 @@
 import { API_BASE, hasStrings, isRecord, parseItemList, requestApiJson } from './http'
+import { exactFields } from './http'
+import { isApiTimestamp, isNonNilUuid } from '../lib/validation'
+import { isJsonValue } from '../lib/jsonValue'
 
 /** Result field に対する人工 revision 入力。 */
 export interface EvaluationRevisionInput {
@@ -98,4 +101,19 @@ function isEvaluationRevision(value: unknown): value is EvaluationRevisionRecord
     && hasStrings(value, ['pointer', 'reason'])
     && Object.hasOwn(value, 'original_value')
     && Object.hasOwn(value, 'suggested_value')
+}
+
+/** 新しい受付記録/ページだけを厳格化し、旧 API の互換形状には遡及しない。 */
+export function isStrictEvaluation(value: unknown): value is EvaluationRecord {
+  return isRecord(value) && isEvaluation(value) && exactFields(value, [
+    'evaluation_id', 'result_id', 'run_id', 'user_id', 'rating', 'verdict', 'comment', 'revisions', 'created_at',
+  ]) && [value.evaluation_id, value.result_id, value.run_id, value.user_id].every(isNonNilUuid)
+    && isApiTimestamp(value.created_at) && isJsonValue(value) && [...value.comment].length <= 4000
+    && value.revisions.length <= 100
+    && new Set(value.revisions.map((revision) => revision.pointer)).size === value.revisions.length
+    && value.revisions.every((revision) => isRecord(revision) && exactFields(revision, ['pointer', 'original_value', 'suggested_value', 'reason'])
+      && revision.pointer.startsWith('/') && [...revision.pointer].length <= 512
+      && !/~(?:[^01]|$)/.test(revision.pointer)
+      && [...revision.reason].length >= 1 && [...revision.reason].length <= 1000
+      && isJsonValue(revision.original_value) && isJsonValue(revision.suggested_value))
 }

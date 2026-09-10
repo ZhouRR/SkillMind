@@ -27,6 +27,9 @@ from projectmind.runs.domain import ClaimedRun
 from projectmind.runs.repository_budgets import RunBudgetRepository, new_budget_account
 from tests.runs.test_execution_gates import execution_rows
 
+# 実 credential ではない固定値。試験の同一所有者を明示し、保存行から復元しない。
+START_OWNER_TOKEN = "A" * 43
+
 
 def budget_invocation(claimed: ClaimedRun, *, turns: int = 8) -> AgentInvocation:
     """実測 profile と誤認できない明示 fixture の実行記述子を作る。"""
@@ -63,6 +66,7 @@ def start_arguments(binding: BudgetInvocationBinding) -> dict[str, Any]:
     return {
         "expected_invocation_id": binding.invocation_id,
         "expected_invocation_checksum": binding.invocation_checksum,
+        "start_owner_token": START_OWNER_TOKEN,
     }
 
 
@@ -169,7 +173,10 @@ class BudgetDatabase:
             else budget_invocation(self.claimed, turns=int(row.granted_turns))
         )
         return await self.repository.bind_invocation(
-            self.claimed, execution_key=key, invocation=invocation
+            self.claimed,
+            execution_key=key,
+            invocation=invocation,
+            start_owner_token=START_OWNER_TOKEN,
         )
 
     def bound_arguments(self, key: str = "primary") -> dict[str, Any]:

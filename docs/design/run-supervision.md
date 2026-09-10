@@ -85,6 +85,22 @@ TX B：重新取锁/验证 lease 与持久意图
 
 A 不新增待办、checkpoint、Session、事件/Outbox 或预授权 Effect，但不等于 B 已提交。两事务间可崩溃/失去 lease；意图保留，由合法恢复处理，不持锁 interrupt。等待先提交时按已存状态取消，独立 Effect 不被视为撤销。
 
+### Tool 调用的提交与重放
+
+ToolAuditLease 是调用回执，不是 Worker lease。Executor 在主 stream 的消费与关闭范围内绑定私有原 claim；MCP runtime 捕获该范围，子调用继承同 Run/Attempt，原 token 不进入 RunContext、Provider 参数或 SDK options。范围退出即撤销本地许可，但不证明模型或进程已停。
+
+注册、Provider 调用前确认、成功/失败保存均按 Run → Segment → Attempt → ToolCall 取锁，核对原调用完整身份、运行状态、lease 与持久取消；等锁、取消查询和 flush 后重新取时间。Provider I/O 不在锁内，最后检查和数据库 commit 仍不是原子时钟判定。
+
+| 原调用事实 | 处理 |
+| --- | --- |
+| 首次注册提交已确认 | 仅该 runtime 的首次许可可执行一次；调用前再检查执行权 |
+| RUNNING / FAILED / DENIED | 不发放新许可，不重跑 Provider，也不覆盖原失败/拒绝 |
+| SUCCEEDED | 当前执行权有效且原 SDK Session/Tool/参数身份完整匹配时，只读重放原结果；仍校验响应契约与上限 |
+| 已存成功属于旧 Attempt | 仅同 SDK Session 的合法 RESUME 可读；不把原 Tool/Evidence 改归当前 Attempt，fork/replace 不借用 |
+| 注册或成功提交响应未知 | 不当作回滚，不补写失败或换键重跑；后续原调用查询区分成功与未决 |
+
+首次等待前固定参数、响应及 Evidence 的嵌套内容，不能因 frozen dataclass 外形而信任可变 mapping。失效/取消后的晚到 Provider 不能发布成功 Evidence；已经写入的可变 workspace 文件不因此回滚。[v2 附件](results-evaluation.md#可信附件的发布与读取)在同一门禁下保存原字节与成功回执，成功重放再核验保存内容；此门禁不提供独立 Effect、子 Session recorder、远端精确一次或真实进程停止保证。
+
 ## 收尾、终态与晚到信息
 
 当前主执行先保存 Result/终态，再 finally 关闭 stream；子执行先关闭 stream/校验结果，再保存 Session/Tool 审计。首事件前取消及超时另有先收束 await 的路径。
@@ -98,7 +114,7 @@ A 不新增待办、checkpoint、Session、事件/Outbox 或预授权 Effect，�
 
 ## 兼容与开发接续
 
-保持已有准备监督、首事件取消、原因分类、终态覆盖、等待/普通事件拒绝与子 TaskGroup；接续真实取消/终态锁竞争、两个事务之间崩溃、提交不明及进程清理，随后将停止核对身份与[共享预算](run-budgets.md)接齐。
+保持准备监督、首事件取消、终态/等待与 Tool/Artifact 审计门禁及子 TaskGroup；接续真实锁竞争、事务间崩溃、提交不明及进程清理，再将停止核对身份与[共享预算](run-budgets.md)接齐。附件发布与授权读取不证明进程停止或模型用量结清。
 
 现有 endpoint/RunStatus/SSE 不变；旧 Brief/Result/事件不回写，缺原因/回执不补造。新增公开信息同步版本化 DTO、授权 allowlist、Web validator 与三语，不临时塞 STOPPING 状态。
 

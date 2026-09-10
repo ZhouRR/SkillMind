@@ -259,6 +259,55 @@ class SkillPublishGateError(ValueError):
     """Hard gate 未通過の SkillVersion に publish が要求されたことを表す。"""
 
 
+def validate_skill_publication(
+    *,
+    report: object,
+    evaluation: tuple[bool, tuple[ManifestGateFinding, ...]],
+    accepted_warnings: frozenset[str],
+) -> tuple[ManifestGateFinding, ...]:
+    """保存時と現在の門禁を共に満たし、明示受理済みの finding だけを発行へ渡す。"""
+
+    message = "SkillVersion publish gate has unresolved findings"
+    if not isinstance(report, dict) or type(report.get("passed")) is not bool:
+        raise SkillPublishGateError(message)
+    if "interpretation_diff" in report and not isinstance(report["interpretation_diff"], dict):
+        raise SkillPublishGateError(message)
+    if "accepted_warnings" in report:
+        accepted = report["accepted_warnings"]
+        if not isinstance(accepted, list) or any(not isinstance(code, str) for code in accepted):
+            raise SkillPublishGateError(message)
+    raw = report.get("findings")
+    if not isinstance(raw, list):
+        raise SkillPublishGateError(message)
+    saved: list[ManifestGateFinding] = []
+    for item in raw:
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("code"), str)
+            or not item["code"].strip()
+            or item.get("severity") not in ("error", "warning", "info")
+            or not isinstance(item.get("message"), str)
+            or (item.get("path") is not None and not isinstance(item["path"], str))
+        ):
+            raise SkillPublishGateError(message)
+        saved.append(
+            ManifestGateFinding(
+                code=item["code"],
+                severity=item["severity"],
+                message=item["message"],
+                path=item.get("path"),
+            )
+        )
+    passed, current = evaluation
+    # 新検査で古い error/warning を消さず、保存済みの受理履歴も今回の権限にしない。
+    findings = tuple(dict.fromkeys((*saved, *current)))
+    errors = any(item.severity == "error" for item in findings)
+    warnings = {item.code for item in findings if item.severity == "warning"}
+    if not report["passed"] or not passed or errors or not warnings.issubset(accepted_warnings):
+        raise SkillPublishGateError(message)
+    return findings
+
+
 class SkillVersionTransitionError(ValueError):
     """SkillVersion の不可変 lifecycle に反する状態遷移が要求されたことを表す。"""
 

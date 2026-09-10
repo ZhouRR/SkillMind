@@ -351,7 +351,8 @@ async def unarchive_project(
         409: problem_openapi_response(
             "Deletion rejected: project_delete_requires_archive, "
             "project_delete_blocked_by_runs, project_delete_blocked_by_schedules, "
-            "project_delete_blocked_by_member_audit, or project_version_conflict",
+            "project_delete_blocked_by_member_audit, project_delete_blocked_by_document_uploads, "
+            "or project_version_conflict; document assets/upload/cleanup records block deletion",
             headers=NO_STORE_PROBLEM_HEADERS,
         ),
     },
@@ -362,7 +363,7 @@ async def delete_project(
     actor: AdminWriteActor,
     expected_row_version: QueryProjectVersion,
 ) -> Response:
-    """ADMIN が Run/Schedule/所属監査のない ARCHIVED Project を物理削除し key を解放する。"""
+    """ADMIN が実行・所属監査・文書資産/保存/清理記録のない ARCHIVED Project を削除する。"""
 
     if len(request.query_params.getlist("expected_row_version")) != 1:
         raise RequestValidationError([{
@@ -518,7 +519,7 @@ def _project_delete_blocked_problem(error: ProjectDeleteBlockedError) -> Problem
     """削除拒否を、利用者が次の操作を選べる安定 code 付き 409 へ変換する。
 
     Problem contract は追加 field を許さないため、阻害要因は code で区別する。Web は
-    この code で archive 前、Run 履歴、Schedule 参照、所属監査による拒否を区別する。
+    この code で archive 前、Run/所属監査、Schedule、文書資産/保存/清理記録を区別する。
     """
 
     code = "project_delete_requires_archive"
@@ -528,6 +529,8 @@ def _project_delete_blocked_problem(error: ProjectDeleteBlockedError) -> Problem
         code = "project_delete_blocked_by_schedules"
     elif "member_audit_exists" in error.blockers:
         code = "project_delete_blocked_by_member_audit"
+    elif "document_upload_exists" in error.blockers:
+        code = "project_delete_blocked_by_document_uploads"
     return ProblemException(
         status=status.HTTP_409_CONFLICT,
         title="Project delete rejected",

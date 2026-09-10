@@ -445,18 +445,21 @@ async def test_context_builder_opens_registered_workspace_read_and_search(
 
 
 @pytest.mark.asyncio
-async def test_context_builder_opens_registered_workspace_write(tmp_path: Path) -> None:
-    """SUPERVISED Run が明示宣言・許可した workspace.write/v1 を取得する (計画 §19 W2)。"""
+@pytest.mark.parametrize("capability", ["workspace.write/v1", "workspace.write/v2"])
+async def test_context_builder_opens_registered_workspace_write(
+    tmp_path: Path, capability: str,
+) -> None:
+    """SUPERVISED Run は明示された精確版だけを取得し、v1 を暗黙に v2 へ上げない。"""
 
     manifest = _generic_manifest(required=False)
-    manifest["tools"] = [{"capability": "workspace.write/v1", "required": True}]
+    manifest["tools"] = [{"capability": capability, "required": True}]
     manifest["capability_blueprint"]["execution_preferences"] = {
         "recommended_profile": "SUPERVISED"
     }
     claimed = _generic_claimed(
         selected_sources={},
         required=False,
-        allowed=("workspace.write/v1",),
+        allowed=(capability,),
         manifest=manifest,
     )
     claimed.permission_snapshot_json["execution_profile"] = "SUPERVISED"
@@ -471,18 +474,20 @@ async def test_context_builder_opens_registered_workspace_write(tmp_path: Path) 
 
     context = await builder.build(claimed, sequence_start=1)
 
-    assert [tool.capability for tool in context.tools] == ["workspace.write/v1"]
+    assert [tool.capability for tool in context.tools] == [capability]
     assert context.tools[0].provider == "workspace"
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("capability", ["workspace.search/v1", "workspace.write/v2"])
 async def test_context_builder_denies_workspace_search_below_profile_or_without_snapshot(
     tmp_path: Path,
+    capability: str,
 ) -> None:
     """Skill 宣言だけでは profile 上限や旧 permission snapshot を越えて検索権限を得られない。"""
 
     manifest = _generic_manifest(required=False)
-    manifest["tools"] = [{"capability": "workspace.search/v1", "required": True}]
+    manifest["tools"] = [{"capability": capability, "required": True}]
     manifest["capability_blueprint"]["execution_preferences"] = {"recommended_profile": "GUIDED"}
     contracts = ContractStore(CONTRACTS)
     builder = ProductionRunContextBuilder(
@@ -496,7 +501,7 @@ async def test_context_builder_denies_workspace_search_below_profile_or_without_
     guided = _generic_claimed(
         selected_sources={},
         required=False,
-        allowed=("workspace.search/v1",),
+        allowed=(capability,),
         manifest=manifest,
     )
     guided.permission_snapshot_json["execution_profile"] = "GUIDED"
@@ -506,11 +511,37 @@ async def test_context_builder_denies_workspace_search_below_profile_or_without_
     historical = _generic_claimed(
         selected_sources={},
         required=False,
-        allowed=("workspace.search/v1",),
+        allowed=(capability,),
         manifest=manifest,
     )
     with pytest.raises(ValueError, match="does not authorize workspace"):
         await builder.build(historical, sequence_start=1)
+
+
+@pytest.mark.asyncio
+async def test_workspace_v1_permission_does_not_authorize_v2_manifest(tmp_path: Path) -> None:
+    """版番号の似た能力を代替せず、拡権を workspace 作成より前に拒否する。"""
+
+    manifest = _generic_manifest(required=False)
+    manifest["tools"] = [{"capability": "workspace.write/v2", "required": True}]
+    manifest["capability_blueprint"]["execution_preferences"] = {
+        "recommended_profile": "SUPERVISED",
+    }
+    claimed = _generic_claimed(
+        selected_sources={}, required=False, allowed=("workspace.write/v1",), manifest=manifest,
+    )
+    claimed.permission_snapshot_json["execution_profile"] = "SUPERVISED"
+    root = (tmp_path / "runs").resolve()
+    builder = ProductionRunContextBuilder(
+        workspace_manager=WorkspaceManager(root),
+        tool_registry=create_run_tool_registry(
+            ContractStore(CONTRACTS), document_source=_NoopDocumentSource(),
+        ),
+        model="claude-test",
+    )
+    with pytest.raises(ValueError, match="not allowed by the permission snapshot"):
+        await builder.build(claimed, sequence_start=1)
+    assert not (root / str(claimed.run_id)).exists()
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
+from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -53,7 +56,7 @@ class CsvIssueProvider:
         self.contexts: list[RunToolContext] = []
 
     async def execute(
-        self, context: RunToolContext, arguments: dict[str, Any]
+        self, context: RunToolContext, arguments: Mapping[str, Any]
     ) -> ProviderToolResult:
         """固定 Ticket と再現可能な CSV Evidence を返す。"""
 
@@ -108,8 +111,8 @@ class MemoryAuditWriter:
 
         existing = self.by_use_id.get(invocation.sdk_tool_use_id)
         if existing is not None:
-            return existing
-        lease = ToolAuditLease(uuid4(), "RUNNING")
+            return replace(existing, is_new=False)
+        lease = ToolAuditLease(uuid4(), "RUNNING", invocation=invocation, is_new=True)
         self.by_use_id[invocation.sdk_tool_use_id] = lease
         self.invocations[lease.tool_call_id] = invocation
         return lease
@@ -118,6 +121,11 @@ class MemoryAuditWriter:
         """Denied invocation と理由を記録する。"""
 
         self.denied.append((invocation, reason))
+
+    async def verify_dispatch(self, lease: ToolAuditLease) -> None:
+        """Gateway の実行前 port を満たす。実 DB lease は別の transaction 回帰が検証する。"""
+
+        assert lease.tool_call_id in self.invocations
 
     async def complete(
         self,
@@ -131,7 +139,9 @@ class MemoryAuditWriter:
 
         assert evidence
         assert duration_ms >= 0
-        completed = ToolAuditLease(lease.tool_call_id, "SUCCEEDED", dict(result))
+        completed = ToolAuditLease(
+            lease.tool_call_id, "SUCCEEDED", deepcopy(result), invocation=lease.invocation
+        )
         invocation = self.invocations[lease.tool_call_id]
         self.by_use_id[invocation.sdk_tool_use_id] = completed
         self.completed.append((lease.tool_call_id, evidence))

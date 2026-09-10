@@ -24,6 +24,8 @@ export interface ApiResponseMetadata {
 /** 資源固有の status/header/body 整合性も、共通 HTTP 境界内で検証する。 */
 export interface ApiJsonResponseContract {
   statuses: readonly number[]
+  /** 数値保真が必要な consumer は、native JSON parse 前の UTF-8 本文を読む。 */
+  decode?: (source: string) => unknown
   validate: (value: unknown, metadata: ApiResponseMetadata) => void
 }
 
@@ -41,12 +43,21 @@ export async function requestApiJson(
     ? response.status === expectedStatus : expectedStatus.statuses.includes(response.status))) {
     throw new ApiProblemError('API returned an unexpected success status', response.status)
   }
+  const decode = typeof expectedStatus === 'object' ? expectedStatus.decode : undefined
   let value: unknown
+  let source = ''
   try {
-    value = await response.json()
+    if (decode) source = await readBoundedText(response, undefined, init.signal)
+    else value = await response.json()
   } catch {
+    if (decode) init.signal?.throwIfAborted()
     // Gateway error page など非 JSON body は HTTP status を安定 message として返す。
     throw new ApiProblemError('API returned a non-JSON response', response.status)
+  }
+  if (decode) {
+    init.signal?.throwIfAborted()
+    // 文法・資源契約の拒否を transport error へ変換しない。
+    value = decode(source)
   }
   // 契約違反を JSON parse 失敗へ変換せず、呼出元の未知結果分類へ引き渡す。
   if (typeof expectedStatus === 'object') expectedStatus.validate(value, response)
@@ -75,6 +86,35 @@ export interface ApiTextResponseContract {
   maxBytes: number
 }
 
+/** 添付は成功 status、実 byte 上限、公開 header を読み始める前に確認する。 */
+export interface ApiBlobResponseContract extends ApiTextResponseContract {
+  validate?: (metadata: ApiResponseMetadata) => void
+}
+
+/** 同源の添付だけを有界で読み、本文待機が資格拒否や取消を隠さない。 */
+export async function requestApiBlob(
+  url: string, init: RequestInit, contract: ApiBlobResponseContract,
+): Promise<Blob> {
+  if (!Number.isSafeInteger(contract.maxBytes) || contract.maxBytes < 0) throw new TypeError('Invalid blob byte limit')
+  init.signal?.throwIfAborted()
+  const response = await fetch(url, { ...init, credentials: 'same-origin', redirect: 'error' })
+  if (response.status === 401 || response.status === 403) {
+    void response.body?.cancel().catch(() => undefined)
+    throw new ApiProblemError(`API returned ${response.status}`, response.status)
+  }
+  if (!response.ok) return throwProblemFromBody(response, 65_536, init.signal)
+  try {
+    if (response.status !== contract.status) throw new ApiProblemError('API returned an unexpected success status', response.status)
+    contract.validate?.(response)
+  } catch (error) {
+    void response.body?.cancel().catch(() => undefined)
+    throw error
+  }
+  const bytes = await readBoundedBytes(response, contract.maxBytes, init.signal)
+  init.signal?.throwIfAborted()
+  return new Blob([bytes], { type: response.headers.get('Content-Type') ?? 'application/octet-stream' })
+}
+
 /** Raw text も共通 HTTP 境界で扱い、有界 consumer は error body も全量読みしない。 */
 export async function requestApiText(
   url: string, init: RequestInit = {}, contract?: ApiTextResponseContract,
@@ -98,32 +138,44 @@ export async function requestApiText(
   return contract ? readBoundedText(response, contract.maxBytes, init.signal) : response.text()
 }
 
-/** Content-Length は早期拒否だけに使い、展開後の stream を数えて超過時に破棄する。 */
-async function readBoundedText(response: Response, maxBytes: number, signal?: AbortSignal | null): Promise<string> {
+/** 厳密な UTF-8 を読む。数値用 JSON には未定義の本文上限を新設しない。 */
+async function readBoundedText(response: Response, maxBytes: number | undefined, signal?: AbortSignal | null): Promise<string> {
+  const decoder = new TextDecoder('utf-8', { fatal: true })
+  const parts: string[] = []
+  await readBoundedBytes(response, maxBytes, signal, (chunk) => parts.push(decoder.decode(chunk, { stream: true })))
+  parts.push(decoder.decode())
+  return parts.join('')
+}
+
+/** 上限のある Text/Blob は受信 chunk を数え、宣言だけで実 byte 数を信頼しない。 */
+async function readBoundedBytes(response: Response, maxBytes: number | undefined, signal?: AbortSignal | null,
+  inspectChunk?: (chunk: Uint8Array) => void): Promise<ArrayBuffer> {
   const reader = response.body?.getReader()
   const cancel = (): void => { void reader?.cancel().catch(() => undefined) }
   signal?.addEventListener('abort', cancel, { once: true })
   try {
     signal?.throwIfAborted()
     const declared = response.headers.get('Content-Length')
-    if (declared !== null && /^\d+$/.test(declared) && Number(declared) > maxBytes) {
+    if (maxBytes !== undefined && declared !== null && /^\d+$/.test(declared) && Number(declared) > maxBytes) {
       throw new ApiProblemError('Text response exceeds its byte limit', response.status, 'response_too_large')
     }
-    const decoder = new TextDecoder('utf-8', { fatal: true })
-    const parts: string[] = []
+    const parts: Uint8Array[] = []
     let size = 0
     while (reader) {
       const { done, value } = await reader.read()
       signal?.throwIfAborted()
       if (done) break
       size += value.byteLength
-      if (size > maxBytes) {
+      if (maxBytes !== undefined && size > maxBytes) {
         throw new ApiProblemError('Text response exceeds its byte limit', response.status, 'response_too_large')
       }
-      parts.push(decoder.decode(value, { stream: true }))
+      inspectChunk?.(value)
+      parts.push(value.slice())
     }
-    parts.push(decoder.decode())
-    return parts.join('')
+    const bytes = new Uint8Array(size)
+    let offset = 0
+    for (const part of parts) { bytes.set(part, offset); offset += part.byteLength }
+    return bytes.buffer
   } finally {
     signal?.removeEventListener('abort', cancel)
     // cancel の完了待ちで UI の期限や元の失敗を上書きしない。

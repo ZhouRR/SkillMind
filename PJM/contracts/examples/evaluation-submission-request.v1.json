@@ -1,0 +1,14 @@
+{
+  "submission_key": "00000000-0000-4000-8000-000000000911",
+  "result_id": "00000000-0000-4000-8000-000000000080",
+  "rating": 4,
+  "verdict": "partially_accurate",
+  "comment": "字段判断需要修正。",
+  "revisions": [
+    {
+      "pointer": "/field_assessments/0/proposed_value",
+      "suggested_value": "manual-value",
+      "reason": "人工复核 Evidence 后确认。"
+    }
+  ]
+}

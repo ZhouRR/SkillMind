@@ -3,13 +3,20 @@ import { ApiProblemError, deleteProjectDocument, loadProjectDocument, type Proje
 import { DOCUMENT_REQUEST_POLICY, documentFailure, type DocumentFailure } from '../lib/documentFeedback'
 import { useResourceMutation, useResourceQuery, type SessionEnded } from './useResourceRequest'
 
-/** 現在目录の観察であり、原 DELETE や blob 清理の受理回执ではない。 */
+/** 現在の一覧の観察であり、原 DELETE や blob 清理の受付記録ではない。 */
 type DocumentFacts = { status: 'present'; document: ProjectDocumentRecord } | { status: 'absent' }
+
+/** 帰档は書込だけを閉じ、認証・所属拒否は原 ID の読取も閉じる。 */
+function blocksRead(failure: DocumentFailure | null): boolean {
+  return failure?.key === 'sessionExpired' || failure?.key === 'denied'
+}
 
 /** 呼出元は actor/CSRF/Project の変更で owner を remount する。未知は同 owner 内で保持する。 */
 export function useDocumentDeletion({ projectId, csrfToken, readOnly, onSessionEnded, onDeleted }: {
   projectId: string; csrfToken: string; readOnly: boolean; onSessionEnded: SessionEnded; onDeleted: () => void
 }) {
+  const mounted = useRef(false)
+  const expiryNotified = useRef(false)
   const [intent, setIntent] = useState<ProjectDocumentRecord | null>(null)
   const intentRef = useRef<ProjectDocumentRecord | null>(null)
   const [phase, setPhase] = useState<'idle' | 'sending' | 'unknown'>('idle')
@@ -21,45 +28,64 @@ export function useDocumentDeletion({ projectId, csrfToken, readOnly, onSessionE
   const [ticket, setTicket] = useState<{ original: ProjectDocumentRecord } | null>(null)
   const ticketRef = useRef(ticket)
   const mutation = useResourceMutation(() => {
-    deniedRef.current = { key: 'sessionExpired' }
-    setDenied(deniedRef.current)
-    onSessionEnded()
+    // 当該 DELETE の確定 401 と、別の読取拒否による待機中断を区別する。
+    phaseRef.current = 'idle'; intentRef.current = null
+    setPhase('idle'); setIntent(null)
+    observeDenial({ key: 'sessionExpired' })
   }, DOCUMENT_REQUEST_POLICY)
 
+  useLayoutEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false; ticketRef.current = null }
+  }, [])
+
   /** 一つの読取の拒否だけでも書込資格を閉じ、別の古い成功で解除しない。 */
-  const observeFailure = useCallback((error: unknown) => {
-    const reason = documentFailure(error, false)
-    if (!['sessionExpired', 'denied', 'archived'].includes(reason.key)) return
+  const observeDenial = useCallback((reason: DocumentFailure) => {
+    if (!mounted.current || !['sessionExpired', 'denied', 'archived'].includes(reason.key)) return
+    // より弱い帰档通知で、先に確認した会話・所属の拒否を戻さない。
+    if (deniedRef.current?.key === 'sessionExpired'
+      || deniedRef.current?.key === 'denied' && reason.key === 'archived') return
     deniedRef.current = reason
     setDenied(reason)
-    ticketRef.current = null
+    ticketRef.current = null; setTicket(null)
     mutation.interrupt()
-    if (reason.key === 'sessionExpired') onSessionEnded()
+    if (reason.key === 'sessionExpired' && !expiryNotified.current) {
+      expiryNotified.current = true
+      onSessionEnded()
+    }
   }, [mutation.interrupt, onSessionEnded])
+  /** 他の文書操作からの資格拒否も同じ sticky gate へ通知する。 */
+  const observeFailure = useCallback((error: unknown) => {
+    observeDenial(documentFailure(error, false))
+  }, [observeDenial])
 
   const loader = useCallback(async (signal: AbortSignal): Promise<DocumentFacts> => {
-    if (!ticket || ticketRef.current !== ticket || deniedRef.current) throw new Error('No current document review')
+    if (!ticket || ticketRef.current !== ticket || blocksRead(deniedRef.current)) throw new Error('No current document review')
     try {
       return { status: 'present', document: await loadProjectDocument(projectId, ticket.original.document_id, signal) }
     } catch (error: unknown) {
-      if (!signal.aborted && ticketRef.current === ticket) {
-        if (error instanceof ApiProblemError && error.status === 404 && error.code === 'document_not_found') {
-          return { status: 'absent' }
-        }
-        observeFailure(error)
+      if (error instanceof ApiProblemError && error.status === 404 && error.code === 'document_not_found') {
+        return { status: 'absent' }
       }
       throw error
     }
-  }, [projectId, ticket, observeFailure])
+  }, [projectId, ticket])
+  // 資格と失効の通知は共有 query の現在世代・絶対期限の判定後に一度だけ行う。
   const query = useResourceQuery(`${projectId}:${intent?.document_id ?? ''}`, loader,
-    onSessionEnded, DOCUMENT_REQUEST_POLICY, !!ticket && !denied)
+    () => undefined, DOCUMENT_REQUEST_POLICY, !!ticket && !blocksRead(denied), (error) => {
+      if (ticket && ticketRef.current === ticket) observeFailure(error)
+    })
   const facts = ticket && ticketRef.current === ticket && !query.pending && !query.failure ? query.data : null
 
   useLayoutEffect(() => { if (readOnly) mutation.interrupt() }, [readOnly, mutation.interrupt])
 
   /** 呼出瞬間に門禁を閉じ、再描画前に別 ID の DELETE を開始させない。 */
   function canWrite(): boolean {
-    return !readOnlyRef.current && !deniedRef.current && phaseRef.current === 'idle'
+    return mounted.current && !readOnlyRef.current && !deniedRef.current && phaseRef.current === 'idle'
+  }
+  /** 帰档中の upload 受付記録の読取は許可するが、別の未知 DELETE を上書きさせない。 */
+  function canRead(): boolean {
+    return mounted.current && !blocksRead(deniedRef.current) && phaseRef.current === 'idle'
   }
   /** original は一覧更新や同名再 upload に置き換えない。 */
   function submit(document: ProjectDocumentRecord): boolean {
@@ -76,9 +102,7 @@ export function useDocumentDeletion({ projectId, csrfToken, readOnly, onSessionE
         phaseRef.current = unknown ? 'unknown' : 'idle'
         setPhase(phaseRef.current)
         if (!unknown) { intentRef.current = null; setIntent(null) }
-        if (['denied', 'archived'].includes(failure.key)) {
-          deniedRef.current = failure; setDenied(failure)
-        }
+        observeDenial(failure)
       },
     )
     if (accepted) {
@@ -90,18 +114,20 @@ export function useDocumentDeletion({ projectId, csrfToken, readOnly, onSessionE
   }
   /** 明示 GET だけを開始し、サーバーの原書込を再送しない。 */
   function checkOriginal(): void {
-    if (phaseRef.current !== 'unknown' || !intentRef.current || deniedRef.current) return
+    if (!mounted.current || phaseRef.current !== 'unknown' || !intentRef.current || blocksRead(deniedRef.current)
+      || ticketRef.current && (ticketRef.current !== ticket || query.pending)) return
     const next = { original: intentRef.current }
     ticketRef.current = next; setTicket(next)
   }
   /** 読取成功は人工解除の前提に限り、削除成功や自動再送の根拠にはしない。 */
   function release(): void {
-    if (!facts || !ticket || ticketRef.current !== ticket || phaseRef.current !== 'unknown' || deniedRef.current) return
+    if (!mounted.current || !facts || !ticket || ticketRef.current !== ticket
+      || phaseRef.current !== 'unknown' || blocksRead(deniedRef.current)) return
     mutation.acknowledge()
     phaseRef.current = 'idle'; intentRef.current = null; ticketRef.current = null
     setPhase('idle'); setIntent(null); setTicket(null)
     onDeleted()
   }
-  return { intent, phase, denied, failure: mutation.failure, canWrite, submit, observeFailure,
-    checkOriginal, release, facts, checking: !!ticket && query.pending, checkFailure: query.failure }
+  return { intent, phase, denied, readDenied: blocksRead(denied), failure: mutation.failure, canWrite, canRead, submit, observeFailure, observeDenial,
+    checkOriginal, release, facts, checking: !!ticket && query.pending, checkFailure: ticket ? query.failure : null }
 }

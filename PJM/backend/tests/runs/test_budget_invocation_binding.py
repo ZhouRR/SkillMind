@@ -23,7 +23,12 @@ from projectmind.runs.budget import (
 )
 from projectmind.runs.budget_store import PostgresRunBudgetStore
 from projectmind.runs.domain import LeaseValidationError, RunCancellationRequestedError
-from tests.runs.budget_fakes import BudgetDatabase, budget_invocation, start_arguments
+from tests.runs.budget_fakes import (
+    START_OWNER_TOKEN,
+    BudgetDatabase,
+    budget_invocation,
+    start_arguments,
+)
 from tests.runs.test_budget_store import BudgetSessions
 
 
@@ -43,7 +48,10 @@ async def test_binding_is_immutable_metadata_and_preserves_all_previous_hashes()
         ),
     )
     binding = await db.repository.bind_invocation(
-        db.claimed, execution_key="primary", invocation=invocation
+        db.claimed,
+        execution_key="primary",
+        invocation=invocation,
+        start_owner_token=START_OWNER_TOKEN,
     )
     assert binding == BudgetInvocationBinding(row.id, invocation.invocation_id, invocation.checksum)
     assert row.invocation_json is not None
@@ -55,7 +63,10 @@ async def test_binding_is_immutable_metadata_and_preserves_all_previous_hashes()
     saved_at = row.updated_at
     assert (
         await db.repository.bind_invocation(
-            db.claimed, execution_key="primary", invocation=invocation
+            db.claimed,
+            execution_key="primary",
+            invocation=invocation,
+            start_owner_token=START_OWNER_TOKEN,
         )
         == binding
     )
@@ -92,6 +103,7 @@ async def test_rebinding_any_execution_content_cannot_replace_the_original(field
             db.claimed,
             execution_key="primary",
             invocation=replace(original, **{field: values[field]}),
+            start_owner_token=START_OWNER_TOKEN,
         )
     assert (
         row.invocation_json == original.to_json() and row.invocation_checksum == original.checksum
@@ -116,7 +128,10 @@ async def test_binding_rejects_foreign_scope_including_the_locked_original_actor
         invocation = replace(invocation, **changes)
     with pytest.raises(BudgetConflictError):
         await db.repository.bind_invocation(
-            db.claimed, execution_key="primary", invocation=invocation
+            db.claimed,
+            execution_key="primary",
+            invocation=invocation,
+            start_owner_token=START_OWNER_TOKEN,
         )
     assert db.reservations[0].invocation_json is None
 
@@ -128,7 +143,10 @@ async def test_binding_rejects_increased_turn_limit_and_same_invocation_on_two_c
     await db.reserve()
     with pytest.raises(BudgetConflictError, match="turn limit"):
         await db.repository.bind_invocation(
-            db.claimed, execution_key="primary", invocation=budget_invocation(db.claimed, turns=9)
+            db.claimed,
+            execution_key="primary",
+            invocation=budget_invocation(db.claimed, turns=9),
+            start_owner_token=START_OWNER_TOKEN,
         )
     await db.start()
     await db.repository.reserve_group(
@@ -140,10 +158,18 @@ async def test_binding_rejects_increased_turn_limit_and_same_invocation_on_two_c
         ),
     )
     invocation = budget_invocation(db.claimed, turns=2)
-    await db.repository.bind_invocation(db.claimed, execution_key="child/a", invocation=invocation)
+    await db.repository.bind_invocation(
+        db.claimed,
+        execution_key="child/a",
+        invocation=invocation,
+        start_owner_token=START_OWNER_TOKEN,
+    )
     with pytest.raises(BudgetConflictError, match="another reservation"):
         await db.repository.bind_invocation(
-            db.claimed, execution_key="child/b", invocation=invocation
+            db.claimed,
+            execution_key="child/b",
+            invocation=invocation,
+            start_owner_token=START_OWNER_TOKEN,
         )
     assert db.reservations[-1].invocation_id is None
 
@@ -167,11 +193,15 @@ async def test_unbound_legacy_rows_never_get_start_permission_or_backfilled_star
             execution_key="primary",
             expected_invocation_id=invocation.invocation_id,
             expected_invocation_checksum=invocation.checksum,
+            start_owner_token=START_OWNER_TOKEN,
         )
     if status != "RESERVED":
         with pytest.raises(BudgetUnavailableError):
             await db.repository.bind_invocation(
-                db.claimed, execution_key="primary", invocation=invocation
+                db.claimed,
+                execution_key="primary",
+                invocation=invocation,
+                start_owner_token=START_OWNER_TOKEN,
             )
     assert row.invocation_id is None and row.invocation_json is None and row.status == status
 
@@ -221,7 +251,10 @@ async def test_start_and_binding_confirmation_reject_partial_or_corrupt_binding(
         )
     with pytest.raises((BudgetUnavailableError, LeaseValidationError)):
         await db.repository.bind_invocation(
-            db.claimed, execution_key="primary", invocation=invocation
+            db.claimed,
+            execution_key="primary",
+            invocation=invocation,
+            start_owner_token=START_OWNER_TOKEN,
         )
     assert row.status == "RESERVED"
 
@@ -317,12 +350,20 @@ async def test_unknown_binding_commit_confirms_only_original_metadata(committed:
     store = PostgresRunBudgetStore(factory)  # type: ignore[arg-type]
     if committed:
         binding = await store.bind_invocation(
-            db.claimed, execution_key="primary", invocation=invocation
+            db.claimed,
+            execution_key="primary",
+            invocation=invocation,
+            start_owner_token=START_OWNER_TOKEN,
         )
         assert binding.invocation_id == invocation.invocation_id
     else:
         with pytest.raises(BudgetUnavailableError, match="not committed"):
-            await store.bind_invocation(db.claimed, execution_key="primary", invocation=invocation)
+            await store.bind_invocation(
+                db.claimed,
+                execution_key="primary",
+                invocation=invocation,
+                start_owner_token=START_OWNER_TOKEN,
+            )
         assert db.reservations[0].invocation_id is None
     assert len(factory.sessions) == 2
     factory.sessions[1].add.assert_not_called()
@@ -356,12 +397,20 @@ async def test_post_flush_execution_expiry_rolls_back_metadata_or_start_intent(
     invocation = budget_invocation(db.claimed)
     if operation == "start":
         await db.repository.bind_invocation(
-            db.claimed, execution_key="primary", invocation=invocation
+            db.claimed,
+            execution_key="primary",
+            invocation=invocation,
+            start_owner_token=START_OWNER_TOKEN,
         )
     store = PostgresRunBudgetStore(ExpiringBudgetSessions(db))  # type: ignore[arg-type]
     with pytest.raises(LeaseValidationError):
         if operation == "bind":
-            await store.bind_invocation(db.claimed, execution_key="primary", invocation=invocation)
+            await store.bind_invocation(
+                db.claimed,
+                execution_key="primary",
+                invocation=invocation,
+                start_owner_token=START_OWNER_TOKEN,
+            )
         else:
             await store.start_execution(db.claimed, execution_key="primary", **db.bound_arguments())
     assert db.reservations[0].status == "RESERVED" and db.reservations[0].start_intent_at is None

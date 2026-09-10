@@ -1,8 +1,13 @@
-"""SkillRepository の不変 source と interpretation 保存を検証する。"""
+"""SkillRepository の不変 source と interpretation 保存を検証する。
+
+低層の authorize callback は scope/状態テストの時刻だけを返す。原会話の資格と
+transaction 内の再検証は実 UserRepository を使う service/API 回帰で別に確認する。
+"""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
@@ -28,6 +33,7 @@ from projectmind.skills.domain import (
     SkillVersionStatus,
     SkillVersionTransitionError,
 )
+from projectmind.skills.manifest_gate import ManifestValidator
 from projectmind.skills.repository import SkillRepository
 
 ORGANIZATION_ID = UUID("00000000-0000-4000-8000-0000000000a1")
@@ -161,9 +167,7 @@ def _source(organization_id: object, source_id: object) -> SkillSource:
     )
 
 
-def _model_command(
-    organization_id: object, source_id: object
-) -> SaveModelInterpretationCommand:
+def _model_command(organization_id: object, source_id: object) -> SaveModelInterpretationCommand:
     """PREVIEW_READY の model interpretation 保存 command を生成する。"""
 
     return SaveModelInterpretationCommand(
@@ -211,9 +215,7 @@ async def test_get_source_hides_other_organization_source() -> None:
     session.get = AsyncMock(return_value=_source(uuid4(), uuid4()))
 
     with pytest.raises(SkillSourceNotFoundError):
-        await SkillRepository(session).get_source(
-            organization_id=uuid4(), skill_source_id=uuid4()
-        )
+        await SkillRepository(session).get_source(organization_id=uuid4(), skill_source_id=uuid4())
 
 
 @pytest.mark.asyncio
@@ -326,7 +328,10 @@ async def test_create_version_draft_rejects_non_preview_ready_interpretation() -
     )
 
     with pytest.raises(SkillInterpretationNotReadyError):
-        await SkillRepository(session).create_version_draft(command)
+        # これは repository の状態検査だけを対象とし、実資格は service 回帰で検証する。
+        await SkillRepository(session).create_version_draft(
+            command, authorize=lambda: datetime.now(UTC)
+        )
 
     session.add.assert_not_called()
 
@@ -412,8 +417,12 @@ def _binding_session(status: str) -> MagicMock:
 
     project_id = uuid4()
     version = SimpleNamespace(
-        id=uuid4(), skill_source_id=uuid4(), skill_id=uuid4(), status=status,
-        version="1.0.0", published_at=datetime(2026, 7, 9, tzinfo=UTC),
+        id=uuid4(),
+        skill_source_id=uuid4(),
+        skill_id=uuid4(),
+        status=status,
+        version="1.0.0",
+        published_at=datetime(2026, 7, 9, tzinfo=UTC),
     )
     skill = SimpleNamespace(
         id=version.skill_id,
@@ -426,11 +435,9 @@ def _binding_session(status: str) -> MagicMock:
     )
     session = MagicMock(spec=AsyncSession)
     joined = MagicMock()
-    joined.one_or_none.return_value = (
-        (skill, version, manifest) if status == "PUBLISHED" else None
-    )
+    joined.one_or_none.return_value = (skill, version, manifest) if status == "PUBLISHED" else None
     session.execute = AsyncMock(return_value=joined)
-    session.project_id = project_id  # type: ignore[attr-defined]
+    session.project_id = project_id
     return session
 
 
@@ -519,6 +526,7 @@ async def test_enable_project_skill_version_creates_exact_binding() -> None:
         project_id=project_id,
         skill_version_id=aggregate[1].id,
         enabled_by=enabled_by,
+        authorize=lambda: datetime.now(UTC),
     )
 
     binding = session.add.call_args.args[0]
@@ -550,6 +558,7 @@ async def test_enable_project_skill_version_rejects_unpublished_version() -> Non
             project_id=project_id,
             skill_version_id=uuid4(),
             enabled_by=uuid4(),
+            authorize=lambda: datetime.now(UTC),
         )
     session.add.assert_not_called()
 
@@ -569,6 +578,7 @@ async def test_enable_project_skill_version_hides_foreign_project() -> None:
             project_id=uuid4(),
             skill_version_id=uuid4(),
             enabled_by=uuid4(),
+            authorize=lambda: datetime.now(UTC),
         )
 
 
@@ -591,6 +601,8 @@ async def test_publish_does_not_reactivate_deprecated_version() -> None:
             skill_version_id=aggregate[1].id,
             published_by=uuid4(),
             accepted_warnings=frozenset(),
+            validate=ManifestValidator(Path(__file__).resolve().parents[3] / "contracts").evaluate,
+            authorize=lambda: datetime.now(UTC),
         )
 
 
@@ -608,6 +620,7 @@ async def test_delete_skill_version_rejects_versions_that_are_not_deprecated() -
         await repository.delete_skill_version(
             organization_id=organization_id,
             skill_version_id=aggregate[1].id,
+            authorize=lambda: datetime.now(UTC),
         )
     session.delete.assert_not_called()
 
@@ -627,6 +640,7 @@ async def test_delete_skill_version_rejects_versions_referenced_by_runs() -> Non
         await repository.delete_skill_version(
             organization_id=organization_id,
             skill_version_id=aggregate[1].id,
+            authorize=lambda: datetime.now(UTC),
         )
     session.delete.assert_not_called()
 
@@ -651,8 +665,10 @@ async def test_delete_skill_version_removes_manifest_and_project_visibility() ->
     await repository.delete_skill_version(
         organization_id=organization_id,
         skill_version_id=version.id,
+        authorize=lambda: datetime.now(UTC),
     )
 
     # 可視性 row の一括削除と、Manifest → Version の順の物理削除を確認する。
+    assert session.scalar.await_count == 6
     assert session.execute.await_count == 1
     assert [call.args[0] for call in session.delete.await_args_list] == [manifest, version]

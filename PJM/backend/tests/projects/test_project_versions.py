@@ -7,8 +7,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from alembic.migration import MigrationContext
 from project_harness import Members
-from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 
 from projectmind.auth.sessions import UnauthorizedSessionError
@@ -22,6 +22,8 @@ from projectmind.projects.domain import (
     validate_project_version,
 )
 from projectmind.projects.repository import ProjectRepository
+
+_POSTGRESQL = MigrationContext.configure(dialect_name="postgresql").dialect
 
 
 async def mutate(members: Members, operation: str, *, expected: int = 1) -> object:
@@ -178,7 +180,9 @@ async def test_all_project_writes_recheck_original_session_in_their_transaction(
         members.project.status = "ARCHIVED"
     if operation == "delete":
         members.project.status = "ARCHIVED"
-    query_results = [None] if operation == "create" else [members.project, 0, False, False]
+    query_results = (
+        [None] if operation == "create" else [members.project, 0, False, False, False, False, False]
+    )
     if stage == "initial_lock":
         members.locked.current_session.revoked_at = datetime.now(UTC)
         members.session.scalar.side_effect = query_results
@@ -232,7 +236,7 @@ async def test_delete_uses_common_user_gate_before_project_and_retains_max_versi
     members.lock_users.side_effect = locked
     members.project.status = "ARCHIVED"
     members.project.row_version = MAX_PROJECT_VERSION
-    responses = [members.project, 0, False, False]
+    responses = [members.project, 0, False, False, False, False, False]
 
     async def scalar(statement: object) -> object:
         """Project lock が共通 lock より前に呼ばれないことを記録する。"""
@@ -243,7 +247,7 @@ async def test_delete_uses_common_user_gate_before_project_and_retains_max_versi
     members.session.scalar.side_effect = scalar
     await mutate(members, "delete", expected=MAX_PROJECT_VERSION)
     assert order[0:2] == ["users_and_session", "project_or_reference"]
-    query = members.session.scalar.call_args_list[0].args[0].compile(dialect=postgresql.dialect())
+    query = members.session.scalar.call_args_list[0].args[0].compile(dialect=_POSTGRESQL)
     assert "FOR UPDATE" in str(query)
     assert set(query.params.values()) == {members.project.id, members.access.actor.organization_id}
     members.session.delete.assert_awaited_once_with(members.project)

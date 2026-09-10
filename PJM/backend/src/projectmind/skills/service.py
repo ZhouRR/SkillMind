@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from typing import Any, cast
@@ -14,12 +16,13 @@ from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 from jsonschema import Draft202012Validator, FormatChecker, ValidationError
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from projectmind.core.hashing import canonical_json, sha256_hex
 from projectmind.core.logging import log_event
-from projectmind.skills.capability_blueprint import bind_blueprint_identity
+from projectmind.projects.domain import ProjectArchivedError, ProjectNotFoundError
+from projectmind.projects.repository import LockedProjectAccess, ProjectRepository
 from projectmind.skills.domain import (
     CreateSkillVersionDraftCommand,
     InlineSkillFile,
@@ -27,12 +30,19 @@ from projectmind.skills.domain import (
     PublishedTaskNotFoundError,
     SaveModelInterpretationCommand,
     SaveSkillPreviewCommand,
+    SkillInterpretationNotFoundError,
     SkillInterpretationNotReadyError,
     SkillInterpretationStatus,
     SkillInterpreterUnavailableError,
     SkillPreview,
+    SkillPublishGateError,
     SkillSourceIntegrityError,
     SkillStorageUnavailableError,
+    SkillVersionDeleteBlockedError,
+    SkillVersionEnablementConflictError,
+    SkillVersionEnablementNotFoundError,
+    SkillVersionNotFoundError,
+    SkillVersionTransitionError,
     StoredInterpretationExecution,
     StoredProjectSkillVersion,
     StoredSkillPreview,
@@ -71,21 +81,33 @@ from projectmind.skills.manifest_gate import ManifestValidator
 from projectmind.skills.repository import SkillRepository
 from projectmind.skills.resource_binding import (
     ProjectResourceCatalog,
+    TaskReadiness,
     evaluate_blueprint_readiness,
 )
-from projectmind.skills.runtime_defaults import normalize_runtime_manifest
 from projectmind.skills.task_catalog import (
     PublishedTaskDescriptor,
     ResolvedTaskRun,
     resolve_task_run_from_manifest,
 )
 from projectmind.skills.task_contract import TaskContractCompilationError
+from projectmind.skills.task_flow_preview import TaskFlowPreview, project_task_flow_preview
 from projectmind.storage import FileStorage, FileStorageError, sanitize_object_key
+from projectmind.users.access import authorize_user_access, validate_user_access
+from projectmind.users.domain import UserAccess
+from projectmind.users.repository import LockedUsers, UserRepository, authorization_failure_snapshot
 
 logger = logging.getLogger(__name__)
 
 # Model 候補の decode または platform validation が落ちた場合、一度だけ完全再生成する。
 _MAX_CANDIDATE_REPAIR_ATTEMPTS = 1
+
+
+@dataclass(frozen=True, slots=True)
+class TaskFlowPreviewResult:
+    """不変な設計投影と、checksum に含めない現在の Skill 全体の就緒度を分離する。"""
+
+    preview: TaskFlowPreview
+    readiness: TaskReadiness | None
 
 
 class SkillService:
@@ -522,8 +544,17 @@ class SkillService:
             )
             stored = await self._finalize(
                 self._failure_command(
-                    source, package, analysis, catalog, identity, model, parameters, key,
-                    InterpreterErrorCode.UNSAFE_SOURCE, parent_id, adjustment_value,
+                    source,
+                    package,
+                    analysis,
+                    catalog,
+                    identity,
+                    model,
+                    parameters,
+                    key,
+                    InterpreterErrorCode.UNSAFE_SOURCE,
+                    parent_id,
+                    adjustment_value,
                 )
             )
             return stored, key, prepared
@@ -584,11 +615,15 @@ class SkillService:
         if request is None:  # pragma: no cover - prepare は決定的で直前の分岐が処理済み。
             raise RuntimeError("Unsafe source must have been finalized during preparation")
         adjustment_value = dict(adjustment) if adjustment is not None else None
-        await _emit(on_event, "interpret.started", {
-            "model": model,
-            "skill_source_id": str(source.skill_source_id),
-            "parent_interpretation_id": str(parent_id) if parent_id else None,
-        })
+        await _emit(
+            on_event,
+            "interpret.started",
+            {
+                "model": model,
+                "skill_source_id": str(source.skill_source_id),
+                "parent_interpretation_id": str(parent_id) if parent_id else None,
+            },
+        )
         validation_attempts: list[str] = []
         validation_feedback: str | None = None
         validated: dict[str, Any] | None = None
@@ -621,8 +656,17 @@ class SkillService:
                 # 直る根拠がなく、障害分類を保つため fail-fast とする。
                 stored = await self._finalize(
                     self._failure_command(
-                        source, package, analysis, catalog, identity, model, parameters, key,
-                        error.code, parent_id, adjustment_value,
+                        source,
+                        package,
+                        analysis,
+                        catalog,
+                        identity,
+                        model,
+                        parameters,
+                        key,
+                        error.code,
+                        parent_id,
+                        adjustment_value,
                         validation_attempts=validation_attempts,
                     )
                 )
@@ -651,7 +695,14 @@ class SkillService:
                     continue
                 stored = await self._finalize(
                     self._failure_command(
-                        source, package, analysis, catalog, identity, model, parameters, key,
+                        source,
+                        package,
+                        analysis,
+                        catalog,
+                        identity,
+                        model,
+                        parameters,
+                        key,
                         InterpreterErrorCode.SCHEMA_VALIDATION_FAILED,
                         parent_id,
                         adjustment_value,
@@ -665,8 +716,18 @@ class SkillService:
             raise RuntimeError("Interpreter validation loop ended without a result")
         stored = await self._finalize(
             self._success_command(
-                source, package, analysis, catalog, identity, model, parameters, key, validated,
-                parent_id, adjustment_value, validation_attempts=validation_attempts,
+                source,
+                package,
+                analysis,
+                catalog,
+                identity,
+                model,
+                parameters,
+                key,
+                validated,
+                parent_id,
+                adjustment_value,
+                validation_attempts=validation_attempts,
             )
         )
         await _emit_terminal(on_event, stored)
@@ -737,46 +798,60 @@ class SkillService:
         }
 
     async def create_version_draft(
-        self, *, organization_id: UUID, interpretation_id: UUID
+        self, *, access: UserAccess, interpretation_id: UUID
     ) -> StoredSkillVersion:
         """Interpretation を実 ID に再 binding し、gate report 付き DRAFT へ固定する。"""
 
-        async with self._session_factory() as session, session.begin():
-            repository = SkillRepository(session)
+        access = deepcopy(access)
+        async with self._admin_transaction(access) as (repository, locked, authorize):
+            organization_id = locked.actor.organization_id
             interpretation = await repository.get_interpretation(
                 organization_id=organization_id,
                 interpretation_id=interpretation_id,
             )
             # 失敗や中間状態の interpretation から発行可能な DRAFT を作らせない。
-            if (
-                interpretation.interpretation_status
-                is not SkillInterpretationStatus.PREVIEW_READY
-            ):
+            if interpretation.interpretation_status is not SkillInterpretationStatus.PREVIEW_READY:
                 raise SkillInterpretationNotReadyError(
                     f"SkillInterpretation is not preview-ready: {interpretation_id}"
                 )
-            manifest = normalize_runtime_manifest(
-                deepcopy(interpretation.preview.runtime_manifest_draft)
-            )
+            manifest = deepcopy(interpretation.preview.runtime_manifest_draft)
+            if not isinstance(manifest, dict):
+                raise SkillInterpretationNotReadyError("Saved interpretation has no draft identity")
             identity = manifest.get("identity")
             if not isinstance(identity, dict):
-                raise ValueError("RuntimeManifest identity must be an object")
+                raise SkillInterpretationNotReadyError("Saved interpretation has no draft identity")
             previous_interpretation_id = identity.get("interpretation_id")
-            identity["interpretation_id"] = str(interpretation_id)
-            # 蓝图は manifest と同じ identity を持つ。凍結時に片方だけ再 stamp すると、
-            # 発行済み version の監査値が互いに食い違ったまま不変化してしまう。
-            bind_blueprint_identity(manifest)
-            source = await repository.get_source(
-                organization_id=organization_id,
-                skill_source_id=interpretation.skill_source_id,
-            )
-            passed, findings = self._manifest_validator.evaluate(
-                manifest,
-                source_hash=interpretation.source_hash,
-                interpretation_id=interpretation_id,
-                source_files=source.source_files,
-            )
+            # 初回凍結で候補 UUID だけを実行 row の UUID へ束縛する。原 Blueprint の
+            # 別 identity を上書きして不整合を隠さず、source/hash/version は変更しない。
+            try:
+                candidate_id = UUID(previous_interpretation_id)
+            except (ValueError, TypeError, AttributeError):
+                candidate_id = None
+            if (
+                candidate_id is not None
+                and candidate_id.int != 0
+                and FormatChecker().conforms(previous_interpretation_id, "uuid")
+            ):
+                blueprint = manifest.get("capability_blueprint")
+                blueprint_identity = (
+                    blueprint.get("identity") if isinstance(blueprint, dict) else None
+                )
+                if (
+                    isinstance(blueprint_identity, dict)
+                    and blueprint_identity.get("interpretation_id") == previous_interpretation_id
+                ):
+                    blueprint_identity["interpretation_id"] = str(interpretation_id)
+                    identity["interpretation_id"] = str(interpretation_id)
+                elif blueprint is None:
+                    identity["interpretation_id"] = str(interpretation_id)
             checksum = f"sha256:{sha256_hex(canonical_json(manifest))}"
+            source = await repository.get_draft_design_source(
+                organization_id=organization_id,
+                interpretation_id=interpretation_id,
+                manifest=manifest,
+                manifest_checksum=checksum,
+            )
+            passed, findings = self._manifest_validator.evaluate(source)
             return await repository.create_version_draft(
                 CreateSkillVersionDraftCommand(
                     organization_id=organization_id,
@@ -795,7 +870,8 @@ class SkillService:
                         ),
                         "mapped_tools": manifest.get("tools", []),
                     },
-                )
+                ),
+                authorize=authorize,
             )
 
     async def get_skill_version(
@@ -809,9 +885,7 @@ class SkillService:
                 skill_version_id=skill_version_id,
             )
 
-    async def list_skill_versions(
-        self, *, organization_id: UUID
-    ) -> tuple[StoredSkillVersion, ...]:
+    async def list_skill_versions(self, *, organization_id: UUID) -> tuple[StoredSkillVersion, ...]:
         """Organization の Skill library に属する全 frozen version を列挙する。"""
 
         async with self._session_factory() as session:
@@ -849,6 +923,41 @@ class SkillService:
             )
             for descriptor in descriptors
         )
+
+    async def get_task_flow_preview(
+        self,
+        *,
+        organization_id: UUID,
+        project_id: UUID,
+        skill_version_id: UUID,
+        task_key: str,
+    ) -> TaskFlowPreviewResult:
+        """原版を読むだけで単一 Task を投影し、モデル・storage・発行・Run 作成は呼ばない。"""
+
+        async with self._session_factory() as session:
+            source = await SkillRepository(session).get_task_flow_preview_source(
+                organization_id=organization_id,
+                project_id=project_id,
+                skill_version_id=skill_version_id,
+            )
+        preview = project_task_flow_preview(
+            source=source,
+            task_key=task_key,
+            contracts_dir=self._contracts_dir,
+        )
+        readiness = None
+        blueprint = source.manifest.get("capability_blueprint")
+        if self._resource_catalog is not None and isinstance(blueprint, dict):
+            candidates = await self._resource_catalog.candidates(project_id=project_id)
+            # 既存 catalog と同じ全 Blueprint 範囲を明記し、Task 限定の実行証明にしない。
+            readiness = evaluate_blueprint_readiness(
+                blueprint,
+                candidates=candidates,
+                registered_capabilities=self._registered_capabilities,
+                registered_write_capabilities=self._registered_write_capabilities,
+                installed_provider_capabilities=self._installed_provider_capabilities,
+            )
+        return TaskFlowPreviewResult(preview=preview, readiness=readiness)
 
     async def resolve_task_run(
         self,
@@ -922,75 +1031,154 @@ class SkillService:
     async def publish_skill_version(
         self,
         *,
-        organization_id: UUID,
+        access: UserAccess,
         skill_version_id: UUID,
-        published_by: UUID,
         accepted_warnings: frozenset[str],
     ) -> StoredSkillVersion:
         """Repository hard gate を迂回せず SkillVersion を publish する。"""
 
-        async with self._session_factory() as session, session.begin():
-            return await SkillRepository(session).publish_skill_version(
-                organization_id=organization_id,
+        access = deepcopy(access)
+        async with self._admin_transaction(access) as (repository, locked, authorize):
+            return await repository.publish_skill_version(
+                organization_id=locked.actor.organization_id,
                 skill_version_id=skill_version_id,
-                published_by=published_by,
+                published_by=locked.actor.id,
                 accepted_warnings=accepted_warnings,
+                validate=self._manifest_validator.evaluate,
+                authorize=authorize,
             )
 
+    @asynccontextmanager
+    async def _admin_transaction(
+        self,
+        access: UserAccess,
+        *,
+        project_id: UUID | None = None,
+    ) -> AsyncIterator[tuple[SkillRepository, LockedUsers, Callable[[], datetime]]]:
+        """版管理は原 ADMIN 会話を固定し、Project 啓停だけに現在の ACTIVE gate を加える。"""
+
+        validate_user_access(access)
+        async with self._session_factory() as session, session.begin():
+            locked = await UserRepository(session).lock_users(
+                access=access,
+                target_id=None,
+                include_target_sessions=False,
+                read_only_actor=True,
+            )
+            project: LockedProjectAccess | None = None
+
+            def authorize() -> datetime:
+                """業務 row の待機や検査に費やした時間を含め、同じ原資格で判定する。"""
+
+                now = authorize_user_access(
+                    access, locked, now=datetime.now(UTC), admin=True, write=True
+                )
+                if project is not None:
+                    ProjectRepository.require_active_write_access(project)
+                return now
+
+            authorize()
+            failure_snapshot = authorization_failure_snapshot(locked)
+            try:
+                if project_id is not None:
+                    # 現在の資格を先に固定し、版/有効化より前に帰档との競争を止める。
+                    project = await ProjectRepository(session).lock_write_access(
+                        user=locked.actor, project_id=project_id
+                    )
+                    authorize()
+                yield SkillRepository(session), locked, authorize
+                authorize()
+                await session.flush()
+                authorize()
+            except (
+                ProjectNotFoundError,
+                ProjectArchivedError,
+                SkillInterpretationNotFoundError,
+                SkillInterpretationNotReadyError,
+                SkillVersionNotFoundError,
+                SkillPublishGateError,
+                SkillVersionTransitionError,
+                SkillVersionDeleteBlockedError,
+                SkillVersionEnablementConflictError,
+                SkillVersionEnablementNotFoundError,
+            ):
+                # 失効した会話へ、遅れて到着した別の対象情報や拒否理由を返さない。
+                authorize()
+                raise
+            except SQLAlchemyError:
+                # 失敗した flush は ORM を expire し得る。複写は失敗分類だけに使う。
+                authorize_user_access(
+                    access, failure_snapshot, now=datetime.now(UTC), admin=True, write=True
+                )
+                raise
+
     async def deprecate_skill_version(
-        self, *, organization_id: UUID, skill_version_id: UUID
+        self, *, access: UserAccess, skill_version_id: UUID
     ) -> StoredSkillVersion:
         """Organization の PUBLISHED 版を廃止し、新規 discovery/Run を閉じる。"""
 
-        async with self._session_factory() as session, session.begin():
-            return await SkillRepository(session).deprecate_skill_version(
-                organization_id=organization_id,
+        access = deepcopy(access)
+        async with self._admin_transaction(access) as (repository, locked, authorize):
+            return await repository.deprecate_skill_version(
+                organization_id=locked.actor.organization_id,
                 skill_version_id=skill_version_id,
+                authorize=authorize,
             )
 
-    async def delete_skill_version(
-        self, *, organization_id: UUID, skill_version_id: UUID
-    ) -> None:
+    async def delete_skill_version(self, *, access: UserAccess, skill_version_id: UUID) -> None:
         """監査参照のない DEPRECATED 版を library から物理削除する。"""
 
-        async with self._session_factory() as session, session.begin():
-            await SkillRepository(session).delete_skill_version(
-                organization_id=organization_id,
+        access = deepcopy(access)
+        async with self._admin_transaction(access) as (repository, locked, authorize):
+            await repository.delete_skill_version(
+                organization_id=locked.actor.organization_id,
                 skill_version_id=skill_version_id,
+                authorize=authorize,
             )
 
     async def enable_project_skill_version(
         self,
         *,
-        organization_id: UUID,
+        access: UserAccess,
         project_id: UUID,
         skill_version_id: UUID,
-        enabled_by: UUID,
     ) -> StoredProjectSkillVersion:
         """PUBLISHED 精確版を Project の discovery 集合へ追加する。"""
 
-        async with self._session_factory() as session, session.begin():
-            return await SkillRepository(session).enable_project_skill_version(
-                organization_id=organization_id,
+        access = deepcopy(access)
+        async with self._admin_transaction(access, project_id=project_id) as (
+            repository,
+            locked,
+            authorize,
+        ):
+            return await repository.enable_project_skill_version(
+                organization_id=locked.actor.organization_id,
                 project_id=project_id,
                 skill_version_id=skill_version_id,
-                enabled_by=enabled_by,
+                enabled_by=locked.actor.id,
+                authorize=authorize,
             )
 
     async def disable_project_skill_version(
         self,
         *,
-        organization_id: UUID,
+        access: UserAccess,
         project_id: UUID,
         skill_version_id: UUID,
     ) -> StoredProjectSkillVersion:
         """Project の version discovery を停用し、既存 Run snapshot は変更しない。"""
 
-        async with self._session_factory() as session, session.begin():
-            return await SkillRepository(session).disable_project_skill_version(
-                organization_id=organization_id,
+        access = deepcopy(access)
+        async with self._admin_transaction(access, project_id=project_id) as (
+            repository,
+            locked,
+            authorize,
+        ):
+            return await repository.disable_project_skill_version(
+                organization_id=locked.actor.organization_id,
                 project_id=project_id,
                 skill_version_id=skill_version_id,
+                authorize=authorize,
             )
 
     async def list_project_skill_versions(
@@ -1076,9 +1264,7 @@ class SkillService:
                 ) from error
             actual_hash = f"sha256:{sha256_hex(data)}"
             if len(data) != expected_size or actual_hash != expected_hash:
-                raise SkillSourceIntegrityError(
-                    f"Stored SkillSource file checksum drifted: {path}"
-                )
+                raise SkillSourceIntegrityError(f"Stored SkillSource file checksum drifted: {path}")
             target = (root / path).resolve()
             if not target.is_relative_to(root):
                 raise SkillSourceIntegrityError("Stored SkillSource file path escapes source root")
@@ -1140,9 +1326,7 @@ class SkillService:
         )
         compatibility = manifest.get("compatibility")
         fallback_confidence = (
-            float(compatibility.get("confidence", 0.5))
-            if isinstance(compatibility, dict)
-            else 0.5
+            float(compatibility.get("confidence", 0.5)) if isinstance(compatibility, dict) else 0.5
         )
         return SaveModelInterpretationCommand(
             organization_id=source.organization_id,
@@ -1318,9 +1502,7 @@ def _schema_failure_detail(error: Exception) -> str:
         # additionalProperties は「どの余分な key か」で直せるので、値ではなく key 名だけ添える。
         if error.validator == "additionalProperties" and isinstance(error.instance, dict):
             allowed = (
-                set(error.schema.get("properties", {}))
-                if isinstance(error.schema, dict)
-                else set()
+                set(error.schema.get("properties", {})) if isinstance(error.schema, dict) else set()
             )
             unexpected = sorted(key for key in error.instance if key not in allowed)
             if unexpected:
@@ -1537,20 +1719,13 @@ def _storage_uri_prefix(storage_uri: str, bucket: str) -> str:
         raise SkillSourceIntegrityError("Stored SkillSource storage URI is invalid") from error
 
 
-def _validate_source_file_index(
-    item: Mapping[str, Any], seen: set[str]
-) -> tuple[str, int, str]:
+def _validate_source_file_index(item: Mapping[str, Any], seen: set[str]) -> tuple[str, int, str]:
     """Persisted file index の path、size、checksum を検証し、重複を拒否する。"""
 
     path = item.get("path")
     size = item.get("size")
     checksum = item.get("sha256")
-    if (
-        not isinstance(path, str)
-        or isinstance(size, bool)
-        or not isinstance(size, int)
-        or size < 0
-    ):
+    if not isinstance(path, str) or isinstance(size, bool) or not isinstance(size, int) or size < 0:
         raise SkillSourceIntegrityError("Stored SkillSource file manifest is invalid")
     if not isinstance(checksum, str) or not checksum.startswith("sha256:"):
         raise SkillSourceIntegrityError("Stored SkillSource file manifest is invalid")

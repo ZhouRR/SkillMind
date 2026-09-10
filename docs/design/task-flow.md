@@ -1,6 +1,6 @@
 # Task Flow 与 Run Flow
 
-本页是后续展示设计，不是 Workflow Controller。当前没有 TaskFlowProjection Schema、持久字段或运行画布，状态见[计划 R03](../planning/roadmap.md#r03-task-flow-完整链路)。前置：[Skill 契约](skill-contract.md)、[Workspace](workspace.md)。
+本页定义只读任务预览及后续 Run Flow，不是 Workflow Controller。只读预览与下文尚未冻结的 TaskFlowProjection 是两个协议，不由预览补造持久流程或运行画布；交付状态见[计划 R03](../planning/roadmap.md#r03-task-flow-完整链路)。前置：[Skill 契约](skill-contract.md)、[Workspace](workspace.md)。
 
 ## 目标
 
@@ -28,6 +28,50 @@
 - Run 引入 Flow 后创建时冻结语义及 checksum；后续 Segment/Attempt、版本/配置/布局变化不替换旧计划。
 - SDK step_id 不等于节点 ID；未来可选 flow_node_ref 须在本 Run frozen flow 校验，无关联保持动态。
 - 等待使用节点 + 持久待办双入口；关闭 Modal/离页不丢服务端 PendingActions，回答/批准仍走原 API 的权限/版本/CSRF/期限。
+
+## 只读任务预览
+
+任务中心读取精确版本的单个 Task，将“任务本身的声明”“Skill 共享要求”“当前准备情况”分开展示。项目读取授权、同组织、活动启用关系与 PUBLISHED 同时成立；不存在、未启用与越权统一拒绝。归档项目可以授权读取，但预览不授予执行权。
+
+[projectmind.task-flow-preview/v1](../../PJM/contracts/tasks/flow-preview/v1.schema.json) 将原蓝图按所选 Task 分区，不生成工作流、节点状态或执行顺序：
+
+| 内容 | 展示规则 |
+| --- | --- |
+| Task 目标、成功标准、交付物 | 原 Task 声明及原 Blueprint 指针；可选字段未声明与合法空值分别保留 |
+| Task 资源 | 仅取该 Task 的 resource_keys；其余资源单列为 Skill 共享声明 |
+| 规则、推荐、确认、效果与执行建议 | 标明 Skill 共享范围；现 Blueprint 无 Task 关联，不能推定为本任务必经步骤 |
+| 来源 | 原 target/path/line/reason；只验证指针、原文件索引和可用文本快照，不宣称自然语言含义已验证 |
+| 当前 readiness | 独立 `scope=SKILL_BLUEPRINT` 的 assessment；null 为未评估，不显示“无需资源”，候选不等于已选择或已读取 |
+
+读取入口：
+
+```text
+GET /api/v1/projects/{project_id}/skill-versions/{skill_version_id}/tasks/{task_key}/flow-preview
+```
+
+### 身份、来源与失败
+
+服务端与 DRAFT/发布复用原始设计校验，核对 Manifest checksum、版本/解释/来源身份、原 Blueprint 结构与全部 Task 对应关系，再投影所选 Task。读取不规范化回写历史；Manifest 的既有 `skill_key.task_key` 默认 capability 别名与蓝图原 capability 分开保留，不据别名生成新能力。
+
+每个 source trace 的 target 必须在原 Blueprint 中解析，path 必须属于保存的安全相对文件索引；非 binary 文件须有完整文本快照。`TEXT_SNAPSHOT` 表示索引及保存的 UTF-8 文本 size/hash、行范围已核对；`SOURCE_INDEX` 仅用于 line=null 的 binary 文件级引用，只证明索引记录存在，未读取 blob。两者都不证明原规则完整、模型理解正确或外部资源可达。
+
+`AVAILABLE` 带原声明投影；确实未声明或为 null 的 Blueprint 返回 `NOT_DECLARED`，不从 Manifest workflow 反推。已声明却损坏、身份/checksum/来源不一致返回静态 `409 task_flow_preview_invalid`，不降级为空流程。缺失目标为 `404 task_flow_preview_not_found`，读取依赖故障为 `503 task_flow_preview_unavailable`；错误不回显源正文或内部路径。成功和已处理拒绝均禁止缓存。
+
+`blueprint_checksum` 对原 Blueprint 使用共享 canonical hash；`preview_checksum` 覆盖 preview_version、identity、status、blueprint_checksum、plan、source_traces，不含当前 readiness 或自身。浏览器校验形状及精确请求身份，显示服务端 checksum，不用 JavaScript 数字序列化重算 Python 历史格式。它不是 Run 冻结身份或签名。
+
+### 数值读取与校验
+
+参数/结果契约经共享 HTTP 入口的显式 decoder 读取严格 UTF-8 原文；安全整数可用普通数值，其余数值保留原 token，展示不暴露内部包装。不能先转成 JavaScript Number 再把舍入值标为原声明；checksum 字符串未变也不证明原数值保真。协议、快照及 checksum 不因此改写，不添加重复的 raw 字段。
+
+enum 按原声明的 scalar type 校验；integer 不接收 `1.0` 等浮点 token。判重与上下限顺序沿用后端整数/双精度浮点语义：`1` 与 `1.0` 相等，整数 `10**100` 与浮点 `1e100` 不等。大整数不先转浮点数；嵌套参数和结果契约遵守同一规则。
+
+decoder 拒绝非法 JSON、解码后的重复 key 和超过 64 层的容器；原 TaskContract 深度仍以契约为准。来源上传限额不代表生成 Manifest/enum 的字节上限，不据它截断或拒绝合法原声明。响应总量及并发内存预算仍需独立的生产端/消费端协议；本入口不宣称其他 API 已全局无损。
+
+### 页面边界
+
+一次打开一个 Task，以标题、列表和可展开来源呈现；不要求拖拽或横向画布。各项来源只匹配原指针本身及其子项，不继承上级或其他 Task 的来源；全部来源仍可独立查看，未匹配不补造依据。刷新、关闭、Task/版本/项目/会话切换即时隔离旧读取，读取有独立期限；旧 200/401 不污染新目标。页面平台文案覆盖三语，来源标题和正文保留原语言。
+
+预览不调用 Interpreter、不建 DRAFT/Run、不查询运行事件、不访问来源脚本或 blob；认证原有会话续期仍可能写入。缺失预览保留既有任务入口，损坏预览显示不可用而不改写原 SkillVersion；执行仍由原创建与运行门禁判断。
 
 ## TaskFlowProjection 目标契约
 

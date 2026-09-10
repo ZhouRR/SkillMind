@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.projectmind.local/tools/workspace.write/v2/response.schema.json",
+  "title": "workspace.write/v2 response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "provider", "path", "content_hash", "bytes_written", "created", "evidence_refs", "artifact_refs", "warnings"],
+  "properties": {
+    "status": { "const": "success" },
+    "provider": { "const": "workspace" },
+    "path": { "type": "string", "minLength": 8, "maxLength": 4096, "pattern": "^(?:workspace|output)/" },
+    "content_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "bytes_written": { "type": "integer", "minimum": 0, "maximum": 1048576 },
+    "created": { "type": "boolean" },
+    "evidence_refs": {
+      "type": "array", "minItems": 1, "maxItems": 1,
+      "items": { "type": "string", "maxLength": 64, "pattern": "^ev_[a-zA-Z0-9_-]+$" },
+      "uniqueItems": true
+    },
+    "artifact_refs": {
+      "type": "array", "maxItems": 1,
+      "items": { "type": "string", "maxLength": 64, "pattern": "^art_[a-zA-Z0-9_-]+$" },
+      "uniqueItems": true
+    },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  },
+  "allOf": [{
+    "if": { "properties": { "path": { "pattern": "^output/" } } },
+    "then": { "properties": { "artifact_refs": { "minItems": 1, "maxItems": 1 } } },
+    "else": { "properties": { "artifact_refs": { "maxItems": 0 } } }
+  }]
+}

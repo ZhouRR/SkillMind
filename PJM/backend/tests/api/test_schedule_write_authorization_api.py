@@ -232,6 +232,27 @@ def test_unknown_database_failure_is_not_reclassified_as_access_rejection(
     writer.assert_awaited_once()
 
 
+@pytest.mark.parametrize("action", list(_METHODS))
+def test_current_task_binding_rejection_does_not_save_or_retry_schedule(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, action: str
+) -> None:
+    """保存/復帰 TX の確定した Task 失効を既存の入力 Problem として一回だけ返す。"""
+
+    writer = install_writer(client, monkeypatch, action)
+    writer.side_effect = ScheduleInvalidError("Published task is not available")
+    method, url, body = write_request(action)
+    if action == "status":
+        body["status"] = "ACTIVE"
+    response = client.request(method, url, json=body)
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "schedule_invalid"
+    assert response.json()["detail"] == "Published task is not available"
+    assert response.headers["Content-Type"] == "application/problem+json"
+    assert response.headers["Cache-Control"] == "no-store"
+    writer.assert_awaited_once()
+
+
 @pytest.mark.parametrize(
     "action,error,status,code",
     [

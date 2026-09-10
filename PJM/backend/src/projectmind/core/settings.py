@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from uuid import UUID
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -73,6 +74,8 @@ class Settings(BaseSettings):
     object_storage_bucket: str = "projectmind"
     object_storage_access_key: str = "projectmind"
     object_storage_secret_key: str = "projectmind"
+    # 保存先を再作成したら新 UUID にする。未指定では文書の blob 操作を放行しない。
+    object_storage_namespace_id: UUID | None = None
 
     # MANAGED SecretReference の envelope 暗号鍵(KEK)。"version:base64key" を "," で連ねた
     # keyring で、先頭が新規封入用の active 鍵、残りは rotation 中の復号専用の旧鍵。未設定なら

@@ -47,6 +47,8 @@ from tests.runs.budget_fakes import budget_invocation
 from tests.runs.test_repository_budgets import report
 from tests.worker.test_agent_run_executor import _claimed
 
+_START_OWNER_TOKEN = "A" * 43
+
 
 async def seed_budget(factory: async_sessionmaker[AsyncSession]) -> ClaimedRun:
     """実 DB 用の Run/Segment/Attempt と勘定を FK の親順に保存する。"""
@@ -78,13 +80,17 @@ async def seed_budget(factory: async_sessionmaker[AsyncSession]) -> ClaimedRun:
         claim, group_key="primary", requests=(BudgetReservationRequest("primary", 8, 80),)
     )
     binding = await store.bind_invocation(
-        claim, execution_key="primary", invocation=budget_invocation(claim)
+        claim,
+        execution_key="primary",
+        invocation=budget_invocation(claim),
+        start_owner_token=_START_OWNER_TOKEN,
     )
     assert await store.start_execution(
         claim,
         execution_key="primary",
         expected_invocation_id=binding.invocation_id,
         expected_invocation_checksum=binding.invocation_checksum,
+        start_owner_token=_START_OWNER_TOKEN,
     )
     return claim
 
@@ -113,7 +119,9 @@ async def test_postgres_serializes_groups_competing_for_remaining_budget(
             """別 connection の transaction で元 Tool ごとの分支を預留する。"""
 
             async with factory() as session, session.begin():
-                pids.put_nowait(await session.scalar(select(func.pg_backend_pid())))
+                pid = await session.scalar(select(func.pg_backend_pid()))
+                assert type(pid) is int and pid > 0
+                pids.put_nowait(pid)
                 return await RunBudgetRepository(session).reserve_group(
                     claim,
                     group_key=key,
@@ -124,6 +132,7 @@ async def test_postgres_serializes_groups_competing_for_remaining_budget(
         try:
             async with factory() as holder, holder.begin(), factory() as observer:
                 holder_pid = await holder.scalar(select(func.pg_backend_pid()))
+                assert type(holder_pid) is int and holder_pid > 0
                 await holder.scalar(select(Run).where(Run.id == claim.run_id).with_for_update())
                 tasks = [asyncio.create_task(compete(key)) for key in ("a", "b")]
                 for _ in tasks:
@@ -230,6 +239,7 @@ async def test_postgres_late_settlement_does_not_reopen_terminal_run(
                 execution_key="primary",
                 expected_invocation_id=expected_id,
                 expected_invocation_checksum=expected_checksum,
+                start_owner_token=_START_OWNER_TOKEN,
             )
         async with factory() as session:
             run = await session.get(Run, claimed.run_id)

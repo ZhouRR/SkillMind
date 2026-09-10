@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.projectmind.local/evaluations/v1/submission-request.schema.json",
+  "title": "Original Evaluation submission request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "submission_key",
+    "result_id",
+    "rating",
+    "verdict"
+  ],
+  "properties": {
+    "submission_key": {
+      "type": "string",
+      "format": "uuid",
+      "not": {
+        "const": "00000000-0000-0000-0000-000000000000"
+      }
+    },
+    "result_id": {
+      "type": "string",
+      "format": "uuid",
+      "not": {
+        "const": "00000000-0000-0000-0000-000000000000"
+      }
+    },
+    "rating": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5
+    },
+    "verdict": {
+      "enum": [
+        "accurate",
+        "partially_accurate",
+        "inaccurate",
+        "uncertain"
+      ]
+    },
+    "comment": {
+      "type": "string",
+      "maxLength": 4000,
+      "default": ""
+    },
+    "revisions": {
+      "type": "array",
+      "maxItems": 100,
+      "default": [],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pointer",
+          "suggested_value",
+          "reason"
+        ],
+        "properties": {
+          "pointer": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^/"
+          },
+          "suggested_value": true,
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        }
+      }
+    }
+  }
+}

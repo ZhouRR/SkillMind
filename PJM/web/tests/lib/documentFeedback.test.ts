@@ -24,6 +24,14 @@ describe('document read failure boundaries', () => {
 })
 
 describe('document upload refusal boundaries', () => {
+  it('keeps storage 503 unknown for both writes while reads report unavailable', () => {
+    const error = new ApiProblemError('Private storage binding', 503, 'document_storage_unavailable')
+    expect(documentUploadFailure(error)).toEqual({ key: 'uploadUnknown' })
+    expect(documentFailure(error, true)).toEqual({ key: 'unknown' })
+    expect(DOCUMENT_REQUEST_POLICY.blocks(documentFailure(error, true))).toBe(true)
+    expect(documentFailure(error, false)).toEqual({ key: 'storageUnavailable' })
+  })
+
   it('recognizes only the exact upload size rejection without releasing DELETE unknown', () => {
     const error = new ApiProblemError('Private upload internals', 413, 'document_upload_too_large')
     expect(documentUploadFailure(error)).toEqual({ key: 'uploadTooLarge' })

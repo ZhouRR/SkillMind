@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hmac
+import re
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -38,6 +39,7 @@ from projectmind.runs.budget import (
     MeteringMode,
     budget_checksum,
     budget_key,
+    budget_start_owner_hash,
     usd_to_nanos,
 )
 from projectmind.runs.domain import ClaimedRun, LeaseValidationError, RunStatus, lease_token_hash
@@ -259,6 +261,7 @@ class RunBudgetRepository(_RunRepositoryBase):
                 invocation_id=None,
                 invocation_json=None,
                 invocation_checksum=None,
+                invocation_start_owner_hash=None,
                 status="RESERVED",
                 granted_turns=Decimal(item.turns),
                 reserved_turns=Decimal(item.turns),
@@ -360,12 +363,25 @@ class RunBudgetRepository(_RunRepositoryBase):
         assert row.invocation_id is not None and row.invocation_checksum is not None
         return BudgetInvocationBinding(row.id, row.invocation_id, row.invocation_checksum)
 
+    @staticmethod
+    def _verify_start_owner(row: RunBudgetReservation, owner_hash: str) -> None:
+        """旧束縛への所有者補造や、別調整者による未知の B 再試行を許可しない。"""
+
+        original = row.invocation_start_owner_hash
+        if (
+            not isinstance(original, str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", original) is None
+            or not hmac.compare_digest(original, owner_hash)
+        ):
+            raise BudgetUnavailableError("Invocation start owner is not available")
+
     async def bind_invocation(
         self,
         claimed: ClaimedRun,
         *,
         execution_key: str,
         invocation: AgentInvocation,
+        start_owner_token: str,
         confirm_only: bool = False,
     ) -> BudgetInvocationBinding:
         """未起動予約へ一回の実 options を固定し、同じ ID の別予約への流用を拒否する。"""
@@ -373,6 +389,7 @@ class RunBudgetRepository(_RunRepositoryBase):
         from projectmind.agent.metering import AgentInvocation
 
         budget_key(execution_key)
+        owner_hash = budget_start_owner_hash(start_owner_token)
         if not isinstance(invocation, AgentInvocation):
             raise BudgetError("Invocation binding requires a validated invocation")
         payload = invocation.to_json()
@@ -384,11 +401,17 @@ class RunBudgetRepository(_RunRepositoryBase):
         self._invocation_scope(invocation, run, claimed)
         if any(
             value is not None
-            for value in (row.invocation_id, row.invocation_json, row.invocation_checksum)
+            for value in (
+                row.invocation_id,
+                row.invocation_json,
+                row.invocation_checksum,
+                row.invocation_start_owner_hash,
+            )
         ):
             original = self._stored_invocation(row)
             if original.to_json() != payload or row.invocation_checksum != checksum:
                 raise BudgetConflictError("Reservation already has a different invocation")
+            self._verify_start_owner(row, owner_hash)
             return self._binding(row)
         if confirm_only:
             raise BudgetUnavailableError("Original invocation binding was not committed")
@@ -403,6 +426,7 @@ class RunBudgetRepository(_RunRepositoryBase):
         row.invocation_id = invocation.invocation_id
         row.invocation_json = payload
         row.invocation_checksum = checksum
+        row.invocation_start_owner_hash = owner_hash
         row.updated_at = datetime.now(UTC)
         try:
             await self._session.flush()
@@ -422,10 +446,12 @@ class RunBudgetRepository(_RunRepositoryBase):
         execution_key: str,
         expected_invocation_id: UUID,
         expected_invocation_checksum: str,
+        start_owner_token: str,
     ) -> bool:
         """原記述子を明示照合した初回 commit だけが True。読戻しは再起動許可ではない。"""
 
         budget_key(execution_key)
+        owner_hash = budget_start_owner_hash(start_owner_token)
         run, segment, attempt = await self._lock_claimed_execution(claimed, populate_existing=True)
         account, _, rows = await self._ledger(run)
         await self._authorize(run, segment, attempt, claimed)
@@ -437,6 +463,7 @@ class RunBudgetRepository(_RunRepositoryBase):
         self._invocation_scope(invocation, run, claimed)
         if expected != self._binding(row):
             raise BudgetConflictError("Start intent does not match the bound invocation")
+        self._verify_start_owner(row, owner_hash)
         if row.status == "START_INTENT":
             return False
         if row.status != "RESERVED" or account.block_code:

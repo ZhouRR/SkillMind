@@ -54,7 +54,7 @@ def test_upgrade_composes_with_0030_and_matches_current_budget_models(
     migration: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """旧三表に実際の追加 operation を適用し、四表の最終契約を ORM と一致させる。"""
+    """旧三表に 0035 を適用し、0043 の owner 追加だけを除く歴史契約と比較する。"""
 
     old = ledger_migration()
     old_operations = Mock()
@@ -96,9 +96,24 @@ def test_upgrade_composes_with_0030_and_matches_current_budget_models(
         actual = model.__table__
         assert isinstance(actual, sa.Table)
         migrated = metadata.tables[actual.name]
-        assert _contract(migrated) == _contract(actual)
+        expected = _contract(actual)
+        excluded = set()
+        if actual.name == "run_budget_reservations":
+            del expected["columns"]["invocation_start_owner_hash"]
+            owner_checks = {
+                check for check in expected["checks"] if "invocation_start_owner_hash" in check
+            }
+            assert len(owner_checks) == 1
+            expected["checks"] -= owner_checks
+            excluded = {
+                constraint.name
+                for constraint in actual.constraints
+                if isinstance(constraint, sa.CheckConstraint)
+                and "invocation_start_owner_hash" in str(constraint.sqltext)
+            }
+        assert _contract(migrated) == expected
         assert {constraint.name for constraint in migrated.constraints} == {
-            constraint.name for constraint in actual.constraints
+            constraint.name for constraint in actual.constraints if constraint.name not in excluded
         }
     for table in (metadata.tables["run_budget_reservations"], RunBudgetReservation.__table__):
         assert isinstance(table, sa.Table)

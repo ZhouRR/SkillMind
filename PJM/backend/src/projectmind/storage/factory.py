@@ -19,6 +19,7 @@ def create_file_storage(settings: Settings) -> FileStorage:
         bucket=settings.object_storage_bucket,
         access_key=settings.object_storage_access_key,
         secret_key=settings.object_storage_secret_key,
+        namespace_id=settings.object_storage_namespace_id,
     )
 
 

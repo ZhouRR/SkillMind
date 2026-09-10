@@ -10,8 +10,8 @@
 
 | 资产 | 必须保留的关联 |
 | --- | --- |
-| DB dump | 数据库身份、migration revision、Run/快照/Outbox/批准/安全审计与停写时点 |
-| blob snapshot | SkillSource、文档等原对象 key、字节/hash及 DB 引用 |
+| DB dump | 数据库身份、migration revision、Run/快照/Outbox/批准/安全审计、上传意图/占用/清理要求、附件原字节/回执、评价原请求绑定与停写时点 |
+| blob snapshot | SkillSource、文档等原对象 key、字节/hash及 DB 引用；新文档的 namespace UUID/连接描述摘要与实际存储世代须一起保留 |
 | Run 文件 | 必要 workspace/transcript、输入副本、Session 恢复材料；缺文件不能标为可续行 |
 | 镜像与配置 | Backend/Web 与依赖 image ID、context path、配置版本 |
 | KEK | 所需旧版本的独立受控保管引用，不与 dump 放一起 |
@@ -20,6 +20,14 @@
 dump、blob 和 workspace 可含密码 hash、密文或业务正文，须访问控制，不进入公开附件。清单只记录恢复点 ID、UTC 窗口、资产引用/校验值、操作者、结果和缺项，不记录 Secret。RPO/RTO 与保留期由负责人确认，当前没有自动跨存储备份或恢复时效保证。
 
 Redis 不代替 DB；旧队列、Outbox 重投与调度在途需要专用恢复方案，不对未知 Redis 全库清空。文档元数据总量也不等于 bucket 实际占用，不从列表推导可清除的对象；见[文档生命周期](../design/document-lifecycle.md)。
+
+可信附件原字节保存在 Evidence 的私有列，随同原 Tool/Run 恢复；不能只导出公开元数据，也不能用恢复后的 output 文件替代原字节。旧无绑定行保持未发布，下载和结果核验共用原 size/hash；具体边界见[附件发布](../design/results-evaluation.md#可信附件的发布与读取)。
+
+评价需连同原 Result、用户归属和 0041 submission_key/request_hash 恢复；只导出显示字段会丢失原提交确认能力。恢复点后新增评价可能不在旧 dump 中，原键 GET 未见不能证明它从未提交，不以换键重发或合并相似评价补造历史。
+
+预算账户、预留、原调用绑定、0043 启动所有权 hash、观察与核对回执须一起恢复。原启动 token 只属于存活协调器，不从 dump 的 hash 重建或向新 Worker 发放。恢复较早的 RESERVED/无绑定行不能证明恢复点后未启动；先核对原执行，未知占用不释放，不靠换 invocation 或 owner 再跑。
+
+存储 UUID 不是备份或服务端身份凭证。恢复到新 endpoint/bucket 或重新创建存储时，不能只改配置、复用旧 UUID 或改写文档摘要来让校验通过；须先核验原资产并完成受控归属迁移，当前尚无该工具。未绑定旧文档保留元数据并拒绝 blob 操作。0038 上传意图/原发布回执/占用、0039新旧文档清理记录、0042关闭标记及独立审计须随 dump 一起恢复；原 key 可查询，不据此自动重放 PENDING。关闭标记缺审计或反向不匹配不得修补放行；旧恢复点可能遗漏后来关闭，须对账后再开放发布。恢复点后的迟到 PUT 也须核对，关闭不证明远端停止。未来精确版本及清理凭证纳入同一恢复点，未对账前不清理或释放占用。
 
 ### 取得并检查数据库备份
 

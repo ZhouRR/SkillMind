@@ -23,6 +23,7 @@ _PARENT = frozenset(
         "workspace.read/v1",
         "workspace.search/v1",
         "workspace.write/v1",
+        "workspace.write/v2",
         "issue.read/v1",
         "repository.read/v1",
         "repository.write/v1",
@@ -58,7 +59,9 @@ def test_forbidden_capabilities_are_rejected_not_silently_dropped(capability: st
 
 
 @pytest.mark.parametrize(
-    "capability", ["repository.write/v1", "issue.update/v1", "workspace.write/v1"]
+    "capability", [
+        "repository.write/v1", "issue.update/v1", "workspace.write/v1", "workspace.write/v2",
+    ]
 )
 def test_write_capabilities_never_reach_a_sub_agent(capability: str) -> None:
     """登録済み write capability は主が持っていても子へ渡らない (§23 D1)。"""

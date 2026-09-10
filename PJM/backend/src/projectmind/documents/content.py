@@ -14,9 +14,12 @@ from projectmind.documents.domain import (
 from projectmind.storage import (
     BlobNotFoundError,
     BlobReadLimitExceededError,
+    BlobReference,
     FileStorage,
     FileStorageError,
+    StorageNamespace,
 )
+from projectmind.storage.namespace import require_storage_namespace
 
 _CHECKSUM = re.compile(r"sha256:[0-9a-f]{64}")
 
@@ -31,7 +34,7 @@ def verify_document_bytes(data: bytes, *, size: int, checksum: str) -> None:
 
 
 async def read_document_bytes(
-    storage: FileStorage, *, storage_key: str, document: StoredDocument
+    storage: FileStorage, *, reference: BlobReference, document: StoredDocument
 ) -> bytes:
     """metadata の上限で一度だけ実 byte を読み、内部 locator を安定 error に閉じる。"""
 
@@ -42,13 +45,24 @@ async def read_document_bytes(
         or _CHECKSUM.fullmatch(document.checksum) is None
     ):
         raise DocumentContentInvalidError("Document content metadata is invalid")
+    require_document_storage(storage, reference)
     try:
-        data = await storage.get(storage_key, max_bytes=document.size)
+        data = await storage.get(reference.key, max_bytes=document.size)
     except BlobNotFoundError as error:
         raise DocumentContentMissingError("Document content is missing") from error
     except BlobReadLimitExceededError as error:
         raise DocumentContentInvalidError("Document content does not match its metadata") from error
     except FileStorageError as error:
         raise DocumentStorageUnavailableError("Document storage is unavailable") from error
+    require_document_storage(storage, reference)
     verify_document_bytes(data, size=document.size, checksum=document.checksum)
     return data
+
+
+def require_document_storage(storage: FileStorage, reference: BlobReference) -> StorageNamespace:
+    """新規保存・通常読取・凍結読取・削除で原 namespace の照合を共有する。"""
+
+    try:
+        return require_storage_namespace(storage, reference.namespace)
+    except FileStorageError as error:
+        raise DocumentStorageUnavailableError("Document storage is unavailable") from error

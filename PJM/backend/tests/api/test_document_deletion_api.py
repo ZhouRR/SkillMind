@@ -16,8 +16,11 @@ from projectmind.documents.domain import (
     DocumentInUseError,
     DocumentNotFoundError,
     DocumentReferencesUnavailableError,
+    DocumentStorageUnavailableError,
+    DocumentUploadInvalidError,
 )
 from projectmind.projects.domain import ProjectArchivedError, ProjectNotFoundError
+from projectmind.storage import FileStorageError
 from projectmind.users.domain import UserAccess
 
 
@@ -31,9 +34,12 @@ from projectmind.users.domain import UserAccess
         (CsrfRejectedError, 403, "csrf_rejected"),
         (ProjectNotFoundError, 404, "project_not_found"),
         (ProjectArchivedError, 409, "project_archived"),
+        (DocumentStorageUnavailableError, 503, "document_storage_unavailable"),
+        (DocumentUploadInvalidError, 503, "document_upload_unavailable"),
+        (FileStorageError, 503, "document_storage_unavailable"),
     ],
 )
-def test_delete_maps_original_transaction_refusals_without_details(
+def test_delete_maps_transaction_refusals_and_storage_unknown_without_details(
     client: TestClient,
     error: type[Exception],
     status: int,

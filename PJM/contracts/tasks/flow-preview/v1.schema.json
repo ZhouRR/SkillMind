@@ -1,0 +1,1350 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.projectmind.local/tasks/flow-preview/v1.schema.json",
+  "$defs": {
+    "FlowAssessmentResponse": {
+      "additionalProperties": false,
+      "description": "既存の四段階 readiness を全 Blueprint の現在状態として保持する。",
+      "properties": {
+        "level": {
+          "enum": [
+            "GUIDANCE_ONLY",
+            "CONFIGURATION_REQUIRED",
+            "RUNNABLE",
+            "ACTIONABLE"
+          ],
+          "title": "Level",
+          "type": "string"
+        },
+        "requirements": {
+          "items": {
+            "$ref": "#/$defs/FlowRequirementAssessmentResponse"
+          },
+          "maxItems": 50,
+          "title": "Requirements",
+          "type": "array"
+        }
+      },
+      "required": [
+        "level",
+        "requirements"
+      ],
+      "title": "FlowAssessmentResponse",
+      "type": "object"
+    },
+    "FlowCandidateResponse": {
+      "additionalProperties": false,
+      "description": "候補の公開ラベルだけを返し、接続情報・Secret・scope は公開しない。",
+      "properties": {
+        "key": {
+          "minLength": 1,
+          "title": "Key",
+          "type": "string"
+        },
+        "kind": {
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "provider": {
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "label": {
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "kind",
+        "provider",
+        "label"
+      ],
+      "title": "FlowCandidateResponse",
+      "type": "object"
+    },
+    "FlowContractFieldResponse": {
+      "additionalProperties": false,
+      "description": "入力・出力 field の原 required を保持し、画面側の既定値で増やさない。",
+      "properties": {
+        "type": {
+          "enum": [
+            "object",
+            "array",
+            "string",
+            "integer",
+            "number",
+            "boolean"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "enum": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          },
+          "maxItems": 50,
+          "minItems": 1,
+          "title": "Enum",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/FlowContractFieldResponse"
+          },
+          "maxItems": 100,
+          "title": "Fields",
+          "type": "array"
+        },
+        "items": {
+          "$ref": "#/$defs/FlowContractItemResponse"
+        },
+        "min_length": {
+          "maximum": 100000,
+          "minimum": 0,
+          "title": "Min Length",
+          "type": "integer"
+        },
+        "max_length": {
+          "maximum": 100000,
+          "minimum": 0,
+          "title": "Max Length",
+          "type": "integer"
+        },
+        "pattern": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Pattern",
+          "type": "string"
+        },
+        "minimum": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Minimum"
+        },
+        "maximum": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Maximum"
+        },
+        "key": {
+          "pattern": "^[a-z][a-z0-9_]{0,63}$",
+          "title": "Key",
+          "type": "string"
+        },
+        "required": {
+          "title": "Required",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "key",
+        "required"
+      ],
+      "title": "FlowContractFieldResponse",
+      "type": "object"
+    },
+    "FlowContractItemResponse": {
+      "additionalProperties": false,
+      "description": "既存 TaskContractDraft の再帰値を明示 field だけへ写す。",
+      "properties": {
+        "type": {
+          "enum": [
+            "object",
+            "array",
+            "string",
+            "integer",
+            "number",
+            "boolean"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "enum": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          },
+          "maxItems": 50,
+          "minItems": 1,
+          "title": "Enum",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/FlowContractFieldResponse"
+          },
+          "maxItems": 100,
+          "title": "Fields",
+          "type": "array"
+        },
+        "items": {
+          "$ref": "#/$defs/FlowContractItemResponse"
+        },
+        "min_length": {
+          "maximum": 100000,
+          "minimum": 0,
+          "title": "Min Length",
+          "type": "integer"
+        },
+        "max_length": {
+          "maximum": 100000,
+          "minimum": 0,
+          "title": "Max Length",
+          "type": "integer"
+        },
+        "pattern": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Pattern",
+          "type": "string"
+        },
+        "minimum": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Minimum"
+        },
+        "maximum": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Maximum"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "FlowContractItemResponse",
+      "type": "object"
+    },
+    "FlowContractResponse": {
+      "additionalProperties": false,
+      "description": "保存された任意業務契約の版を明記し、公開 task 専用 Schema を補造しない。",
+      "properties": {
+        "type": {
+          "enum": [
+            "object",
+            "array",
+            "string",
+            "integer",
+            "number",
+            "boolean"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "enum": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          },
+          "maxItems": 50,
+          "minItems": 1,
+          "title": "Enum",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/FlowContractFieldResponse"
+          },
+          "maxItems": 100,
+          "title": "Fields",
+          "type": "array"
+        },
+        "items": {
+          "$ref": "#/$defs/FlowContractItemResponse"
+        },
+        "min_length": {
+          "maximum": 100000,
+          "minimum": 0,
+          "title": "Min Length",
+          "type": "integer"
+        },
+        "max_length": {
+          "maximum": 100000,
+          "minimum": 0,
+          "title": "Max Length",
+          "type": "integer"
+        },
+        "pattern": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Pattern",
+          "type": "string"
+        },
+        "minimum": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Minimum"
+        },
+        "maximum": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Maximum"
+        },
+        "contract_version": {
+          "const": "projectmind.task-contract-draft/v1",
+          "title": "Contract Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "contract_version"
+      ],
+      "title": "FlowContractResponse",
+      "type": "object"
+    },
+    "FlowDeliverableResponse": {
+      "additionalProperties": false,
+      "description": "予定交付物だけを表示し、Artifact の保存やダウンロード成功を示さない。",
+      "properties": {
+        "key": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Key",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "report",
+            "structured_data",
+            "patch",
+            "change_proposal",
+            "artifact"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "kind",
+        "description"
+      ],
+      "title": "FlowDeliverableResponse",
+      "type": "object"
+    },
+    "FlowEffectResponse": {
+      "additionalProperties": false,
+      "description": "原効果意図を表示し、承認や外部 apply の成功に変換しない。",
+      "properties": {
+        "key": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Key",
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "observe",
+            "propose",
+            "apply"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "resource_key": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Resource Key",
+          "type": "string"
+        },
+        "operation": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Operation",
+          "type": "string"
+        },
+        "risk": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "title": "Risk",
+          "type": "string"
+        },
+        "approval_mode": {
+          "const": "ask",
+          "title": "Approval Mode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "mode",
+        "operation",
+        "risk"
+      ],
+      "title": "FlowEffectResponse",
+      "type": "object"
+    },
+    "FlowExecutionPreferencesResponse": {
+      "additionalProperties": false,
+      "description": "実行推奨は表示だけとし、Run profile や停止証明として利用しない。",
+      "properties": {
+        "recommended_profile": {
+          "enum": [
+            "GUIDED",
+            "SUPERVISED",
+            "DELEGATED"
+          ],
+          "title": "Recommended Profile",
+          "type": "string"
+        },
+        "session_split_hints": {
+          "items": {
+            "$ref": "#/$defs/FlowNoteResponse"
+          },
+          "maxItems": 100,
+          "title": "Session Split Hints",
+          "type": "array"
+        },
+        "stop_conditions": {
+          "items": {
+            "$ref": "#/$defs/FlowNoteResponse"
+          },
+          "maxItems": 100,
+          "title": "Stop Conditions",
+          "type": "array"
+        }
+      },
+      "title": "FlowExecutionPreferencesResponse",
+      "type": "object"
+    },
+    "FlowGuidanceResponse": {
+      "additionalProperties": false,
+      "description": "必須・推奨・品質・禁止を混ぜず、Skill 共通の原 guidance を表示する。",
+      "properties": {
+        "required_rules": {
+          "items": {
+            "$ref": "#/$defs/FlowNoteResponse"
+          },
+          "maxItems": 100,
+          "title": "Required Rules",
+          "type": "array"
+        },
+        "recommended_steps": {
+          "items": {
+            "$ref": "#/$defs/FlowNoteResponse"
+          },
+          "maxItems": 100,
+          "title": "Recommended Steps",
+          "type": "array"
+        },
+        "quality_criteria": {
+          "items": {
+            "$ref": "#/$defs/FlowNoteResponse"
+          },
+          "maxItems": 100,
+          "title": "Quality Criteria",
+          "type": "array"
+        },
+        "prohibited_actions": {
+          "items": {
+            "$ref": "#/$defs/FlowNoteResponse"
+          },
+          "maxItems": 100,
+          "title": "Prohibited Actions",
+          "type": "array"
+        }
+      },
+      "title": "FlowGuidanceResponse",
+      "type": "object"
+    },
+    "FlowIdentityResponse": {
+      "additionalProperties": false,
+      "description": "表示対象を原 Project・SkillVersion・Task・Manifest へ精確に固定する。",
+      "properties": {
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "skill_id": {
+          "format": "uuid",
+          "title": "Skill Id",
+          "type": "string"
+        },
+        "skill_version_id": {
+          "format": "uuid",
+          "title": "Skill Version Id",
+          "type": "string"
+        },
+        "task_id": {
+          "format": "uuid",
+          "title": "Task Id",
+          "type": "string"
+        },
+        "task_key": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Task Key",
+          "type": "string"
+        },
+        "skill_key": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Skill Key",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 32,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        },
+        "manifest_checksum": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Manifest Checksum",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "skill_id",
+        "skill_version_id",
+        "task_id",
+        "task_key",
+        "skill_key",
+        "version",
+        "manifest_checksum"
+      ],
+      "title": "FlowIdentityResponse",
+      "type": "object"
+    },
+    "FlowInteractionResponse": {
+      "additionalProperties": false,
+      "description": "予定確認点だけを表示し、OPEN や受理済みなどの持久待办を作らない。",
+      "properties": {
+        "key": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Key",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "CLARIFICATION",
+            "CHOICE",
+            "REVIEW",
+            "EFFECT_APPROVAL"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "condition": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Condition",
+          "type": "string"
+        },
+        "prompt": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Prompt",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "type",
+        "condition"
+      ],
+      "title": "FlowInteractionResponse",
+      "type": "object"
+    },
+    "FlowNoteResponse": {
+      "additionalProperties": false,
+      "description": "原 guidance の識別子と本文だけを表示する。",
+      "properties": {
+        "key": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Key",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "text"
+      ],
+      "title": "FlowNoteResponse",
+      "type": "object"
+    },
+    "FlowPlanResponse": {
+      "additionalProperties": false,
+      "description": "既存 Blueprint の read-only 構造であり、新たな DAG やノード実行器ではない。",
+      "properties": {
+        "task": {
+          "$ref": "#/$defs/FlowTaskEntryResponse"
+        },
+        "task_resources": {
+          "items": {
+            "$ref": "#/$defs/FlowResourceEntryResponse"
+          },
+          "maxItems": 50,
+          "title": "Task Resources",
+          "type": "array"
+        },
+        "shared": {
+          "$ref": "#/$defs/FlowSharedResponse"
+        }
+      },
+      "required": [
+        "task",
+        "task_resources",
+        "shared"
+      ],
+      "title": "FlowPlanResponse",
+      "type": "object"
+    },
+    "FlowQuestionResponse": {
+      "additionalProperties": false,
+      "description": "解釈が残した質問と原 required を、そのまま未知情報として示す。",
+      "properties": {
+        "key": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Key",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "required": {
+          "title": "Required",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "key",
+        "text",
+        "required"
+      ],
+      "title": "FlowQuestionResponse",
+      "type": "object"
+    },
+    "FlowReadinessResponse": {
+      "additionalProperties": false,
+      "description": "未配線なら null のままにし、計画 checksum と現在の候補を分離する。",
+      "properties": {
+        "scope": {
+          "const": "SKILL_BLUEPRINT",
+          "title": "Scope",
+          "type": "string"
+        },
+        "assessment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FlowAssessmentResponse"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "scope",
+        "assessment"
+      ],
+      "title": "FlowReadinessResponse",
+      "type": "object"
+    },
+    "FlowRequirementAssessmentResponse": {
+      "additionalProperties": false,
+      "description": "候補と不足理由を現時点の資源照合として返し、実行済みとは表示しない。",
+      "properties": {
+        "key": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Key",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "issue",
+            "repository",
+            "document",
+            "file",
+            "knowledge",
+            "other"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "required": {
+          "title": "Required",
+          "type": "boolean"
+        },
+        "access": {
+          "enum": [
+            "read",
+            "write"
+          ],
+          "title": "Access",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "AVAILABLE",
+            "UNAVAILABLE",
+            "UNSUPPORTED"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "capabilities": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "selection_guidance": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Selection Guidance"
+        },
+        "candidates": {
+          "items": {
+            "$ref": "#/$defs/FlowCandidateResponse"
+          },
+          "title": "Candidates",
+          "type": "array"
+        }
+      },
+      "required": [
+        "key",
+        "kind",
+        "required",
+        "access",
+        "status",
+        "reason",
+        "capabilities",
+        "selection_guidance",
+        "candidates"
+      ],
+      "title": "FlowRequirementAssessmentResponse",
+      "type": "object"
+    },
+    "FlowResourceEntryResponse": {
+      "additionalProperties": false,
+      "description": "資源要求の原位置と Task/Skill 適用範囲を保持する。",
+      "properties": {
+        "scope": {
+          "enum": [
+            "TASK",
+            "SKILL"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "blueprint_ref": {
+          "pattern": "^/resource_requirements/(0|[1-9][0-9]*)$",
+          "title": "Blueprint Ref",
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/FlowResourceResponse"
+        }
+      },
+      "required": [
+        "scope",
+        "blueprint_ref",
+        "value"
+      ],
+      "title": "FlowResourceEntryResponse",
+      "type": "object"
+    },
+    "FlowResourceResponse": {
+      "additionalProperties": false,
+      "description": "原資源要求は要求として表示し、候補選択やアクセス済み事実に読み替えない。",
+      "properties": {
+        "key": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Key",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "issue",
+            "repository",
+            "document",
+            "file",
+            "knowledge",
+            "other"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "required": {
+          "title": "Required",
+          "type": "boolean"
+        },
+        "access": {
+          "enum": [
+            "read",
+            "write"
+          ],
+          "title": "Access",
+          "type": "string"
+        },
+        "capabilities": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "accepted_providers": {
+          "items": {
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Accepted Providers",
+          "type": "array"
+        },
+        "selection_guidance": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Selection Guidance",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "kind",
+        "required",
+        "access"
+      ],
+      "title": "FlowResourceResponse",
+      "type": "object"
+    },
+    "FlowSharedResponse": {
+      "additionalProperties": false,
+      "description": "Task 専用と偽らず、全 Skill の共通規則・確認・効果を別区画に残す。",
+      "properties": {
+        "scope": {
+          "const": "SKILL",
+          "title": "Scope",
+          "type": "string"
+        },
+        "resource_requirements": {
+          "items": {
+            "$ref": "#/$defs/FlowResourceEntryResponse"
+          },
+          "maxItems": 50,
+          "title": "Resource Requirements",
+          "type": "array"
+        },
+        "guidance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FlowGuidanceResponse"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "interaction_points": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/FlowInteractionResponse"
+              },
+              "maxItems": 50,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Interaction Points"
+        },
+        "effect_intents": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/FlowEffectResponse"
+              },
+              "maxItems": 50,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Effect Intents"
+        },
+        "assumptions": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/FlowNoteResponse"
+              },
+              "maxItems": 100,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Assumptions"
+        },
+        "questions": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/FlowQuestionResponse"
+              },
+              "maxItems": 50,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Questions"
+        },
+        "execution_preferences": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FlowExecutionPreferencesResponse"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "scope",
+        "resource_requirements",
+        "guidance",
+        "interaction_points",
+        "effect_intents",
+        "assumptions",
+        "questions",
+        "execution_preferences"
+      ],
+      "title": "FlowSharedResponse",
+      "type": "object"
+    },
+    "FlowTaskEntryResponse": {
+      "additionalProperties": false,
+      "description": "選択 Task と原 Blueprint 内の位置を明示する。",
+      "properties": {
+        "scope": {
+          "const": "TASK",
+          "title": "Scope",
+          "type": "string"
+        },
+        "blueprint_ref": {
+          "pattern": "^/tasks/(0|[1-9][0-9]*)$",
+          "title": "Blueprint Ref",
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/FlowTaskResponse"
+        }
+      },
+      "required": [
+        "scope",
+        "blueprint_ref",
+        "value"
+      ],
+      "title": "FlowTaskEntryResponse",
+      "type": "object"
+    },
+    "FlowTaskResponse": {
+      "additionalProperties": false,
+      "description": "選択した原 Task の field を保持し、欠けた任意項目は補完しない。",
+      "properties": {
+        "key": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Key",
+          "type": "string"
+        },
+        "capability": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Capability",
+          "type": "string"
+        },
+        "objective": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Objective",
+          "type": "string"
+        },
+        "success_criteria": {
+          "items": {
+            "$ref": "#/$defs/FlowNoteResponse"
+          },
+          "maxItems": 50,
+          "title": "Success Criteria",
+          "type": "array"
+        },
+        "resource_keys": {
+          "items": {
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Resource Keys",
+          "type": "array"
+        },
+        "deliverables": {
+          "items": {
+            "$ref": "#/$defs/FlowDeliverableResponse"
+          },
+          "maxItems": 50,
+          "title": "Deliverables",
+          "type": "array"
+        },
+        "parameter_contract": {
+          "$ref": "#/$defs/FlowContractResponse"
+        },
+        "result_contract": {
+          "$ref": "#/$defs/FlowContractResponse"
+        }
+      },
+      "required": [
+        "key",
+        "capability",
+        "objective"
+      ],
+      "title": "FlowTaskResponse",
+      "type": "object"
+    },
+    "FlowTraceResponse": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "verification": {
+                "const": "SOURCE_INDEX"
+              }
+            },
+            "required": [
+              "verification"
+            ]
+          },
+          "then": {
+            "properties": {
+              "line": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ],
+      "description": "検証範囲を持つ原 trace を返し、binary 取得や意味的な正しさは主張しない。",
+      "properties": {
+        "target": {
+          "maxLength": 512,
+          "pattern": "^/",
+          "title": "Target",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Line"
+        },
+        "reason": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "verification": {
+          "enum": [
+            "SOURCE_INDEX",
+            "TEXT_SNAPSHOT"
+          ],
+          "title": "Verification",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "path",
+        "line",
+        "reason",
+        "verification"
+      ],
+      "title": "FlowTraceResponse",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "else": {
+        "properties": {
+          "plan": {
+            "type": "null"
+          },
+          "blueprint_checksum": {
+            "type": "null"
+          },
+          "source_traces": {
+            "maxItems": 0
+          },
+          "readiness": {
+            "properties": {
+              "assessment": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "const": "AVAILABLE"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "plan": {
+            "type": "object"
+          },
+          "blueprint_checksum": {
+            "type": "string"
+          },
+          "source_traces": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ],
+  "description": "新しい read-only preview の完全な公開 shape。Run の frozen plan ではない。",
+  "properties": {
+    "preview_version": {
+      "const": "projectmind.task-flow-preview/v1",
+      "title": "Preview Version",
+      "type": "string"
+    },
+    "identity": {
+      "$ref": "#/$defs/FlowIdentityResponse"
+    },
+    "status": {
+      "enum": [
+        "AVAILABLE",
+        "NOT_DECLARED"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "blueprint_checksum": {
+      "anyOf": [
+        {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Blueprint Checksum"
+    },
+    "preview_checksum": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Preview Checksum",
+      "type": "string"
+    },
+    "plan": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FlowPlanResponse"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "source_traces": {
+      "items": {
+        "$ref": "#/$defs/FlowTraceResponse"
+      },
+      "maxItems": 500,
+      "title": "Source Traces",
+      "type": "array"
+    },
+    "readiness": {
+      "$ref": "#/$defs/FlowReadinessResponse"
+    }
+  },
+  "required": [
+    "preview_version",
+    "identity",
+    "status",
+    "blueprint_checksum",
+    "preview_checksum",
+    "plan",
+    "source_traces",
+    "readiness"
+  ],
+  "title": "TaskFlowPreviewResponse",
+  "type": "object"
+}

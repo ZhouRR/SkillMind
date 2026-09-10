@@ -21,9 +21,17 @@ from projectmind.api.auth_dependencies import (
     AdminReadActor,
     AdminWriteActor,
     ProjectReadActor,
+    administrator_required_problem,
+    authentication_required_problem,
     authorize_project_access,
+    csrf_rejected_problem,
+    project_archived_problem,
+    project_not_found_problem,
+    user_access,
 )
-from projectmind.api.problems import ProblemException
+from projectmind.api.problems import ProblemException, problem_openapi_response
+from projectmind.auth.sessions import CsrfRejectedError, UnauthorizedSessionError
+from projectmind.projects.domain import ProjectArchivedError, ProjectNotFoundError
 from projectmind.runs.domain import RunStatus, TaskLastRun
 from projectmind.runs.service import RunService
 from projectmind.skills import (
@@ -58,6 +66,7 @@ from projectmind.skills.realtime import (
     interpret_event_data,
 )
 from projectmind.skills.resource_binding import TaskReadiness
+from projectmind.users.domain import UserAdministrationDeniedError
 
 router = APIRouter()
 
@@ -562,16 +571,18 @@ async def stream_interpretation_events(
                 name = (
                     "interpret.completed" if status_value == "PREVIEW_READY" else "interpret.failed"
                 )
-                yield _interpret_sse_message(interpret_event_data(
-                    event=name,
-                    execution_key=execution_key,
-                    data={
-                        "interpretation_id": str(interpretation_id),
-                        "status": status_value,
-                        "error_code": error_code,
-                        "reused": True,
-                    },
-                ))
+                yield _interpret_sse_message(
+                    interpret_event_data(
+                        event=name,
+                        execution_key=execution_key,
+                        data={
+                            "interpretation_id": str(interpretation_id),
+                            "status": status_value,
+                            "error_code": error_code,
+                            "reused": True,
+                        },
+                    )
+                )
                 return
             deadline = monotonic() + _INTERPRET_STREAM_MAX_SECONDS
             last_activity = monotonic()
@@ -579,9 +590,7 @@ async def stream_interpretation_events(
                 if await request.is_disconnected():
                     return
                 try:
-                    message = await pubsub.get_message(
-                        ignore_subscribe_messages=True, timeout=1.0
-                    )
+                    message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
                 except RedisError:
                     yield _interpret_sse_message(
                         _stream_failure(execution_key, "stream_unavailable")
@@ -710,7 +719,14 @@ async def get_skill_interpretation_execution(
     "/skill-interpretations/{interpretation_id}/draft",
     response_model=SkillVersionResponse,
     status_code=status.HTTP_201_CREATED,
-    responses={404: {"description": "Skill interpretation not found in organization"}},
+    responses={
+        401: problem_openapi_response("The original session is no longer valid"),
+        403: problem_openapi_response("Administrator access or session CSRF was rejected"),
+        404: {"description": "Skill interpretation not found in organization"},
+        409: problem_openapi_response(
+            "Skill interpretation is not ready to create a draft",
+        ),
+    },
     tags=["skills"],
 )
 async def create_skill_version_draft(
@@ -723,11 +739,19 @@ async def create_skill_version_draft(
     service: SkillService = request.app.state.skill_service
     try:
         stored = await service.create_version_draft(
-            organization_id=actor.organization_id,
+            access=user_access(request, actor),
             interpretation_id=interpretation_id,
         )
+    except UnauthorizedSessionError as error:
+        raise authentication_required_problem() from error
+    except CsrfRejectedError as error:
+        raise csrf_rejected_problem() from error
+    except UserAdministrationDeniedError as error:
+        raise administrator_required_problem() from error
     except SkillInterpretationNotFoundError as error:
         raise _skill_interpretation_not_found(error) from error
+    except SkillInterpretationNotReadyError as error:
+        raise _interpretation_not_ready(error) from error
     return _skill_version_response(stored)
 
 
@@ -777,6 +801,8 @@ async def get_skill_version(
     "/skill-versions/{skill_version_id}/publish",
     response_model=SkillVersionResponse,
     responses={
+        401: problem_openapi_response("The original session is no longer valid"),
+        403: problem_openapi_response("Administrator access or session CSRF was rejected"),
         404: {"description": "Skill version not found in organization"},
         409: {"description": "Skill version publish gate did not pass"},
     },
@@ -793,11 +819,16 @@ async def publish_skill_version(
     service: SkillService = request.app.state.skill_service
     try:
         stored = await service.publish_skill_version(
-            organization_id=actor.organization_id,
+            access=user_access(request, actor),
             skill_version_id=skill_version_id,
-            published_by=actor.user_id,
             accepted_warnings=frozenset(body.accepted_warnings),
         )
+    except UnauthorizedSessionError as error:
+        raise authentication_required_problem() from error
+    except CsrfRejectedError as error:
+        raise csrf_rejected_problem() from error
+    except UserAdministrationDeniedError as error:
+        raise administrator_required_problem() from error
     except SkillVersionNotFoundError as error:
         raise _skill_version_not_found(error) from error
     except SkillPublishGateError as error:
@@ -821,8 +852,10 @@ async def publish_skill_version(
     "/skill-versions/{skill_version_id}/deprecate",
     response_model=SkillVersionResponse,
     responses={
-        404: {"description": "Skill version not found in organization"},
-        409: {"description": "Skill version cannot enter DEPRECATED"},
+        401: problem_openapi_response("The original session is no longer valid"),
+        403: problem_openapi_response("Administrator access or session CSRF was rejected"),
+        404: problem_openapi_response("Skill version not found in organization"),
+        409: problem_openapi_response("Skill version cannot enter DEPRECATED"),
     },
     tags=["skills"],
 )
@@ -836,9 +869,15 @@ async def deprecate_skill_version(
     service: SkillService = request.app.state.skill_service
     try:
         stored = await service.deprecate_skill_version(
-            organization_id=actor.organization_id,
+            access=user_access(request, actor),
             skill_version_id=skill_version_id,
         )
+    except UnauthorizedSessionError as error:
+        raise authentication_required_problem() from error
+    except CsrfRejectedError as error:
+        raise csrf_rejected_problem() from error
+    except UserAdministrationDeniedError as error:
+        raise administrator_required_problem() from error
     except SkillVersionNotFoundError as error:
         raise _skill_version_not_found(error) from error
     except SkillVersionTransitionError as error:
@@ -855,8 +894,10 @@ async def deprecate_skill_version(
     "/skill-versions/{skill_version_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     responses={
-        404: {"description": "Skill version not found in organization"},
-        409: {"description": "Skill version is still referenced or not deprecated"},
+        401: problem_openapi_response("The original session is no longer valid"),
+        403: problem_openapi_response("Administrator access or session CSRF was rejected"),
+        404: problem_openapi_response("Skill version not found in organization"),
+        409: problem_openapi_response("Skill version is still referenced or not deprecated"),
     },
     tags=["skills"],
 )
@@ -868,15 +909,22 @@ async def delete_skill_version(
     """ADMIN が監査参照のない DEPRECATED 版を library から取り除く。
 
     廃止しただけでは一覧から消えないため、二度と使わない版が増え続ける。監査の正本を守る
-    ため、Run snapshot・ChangeProposal・Composition から参照されている版は 409 で拒否する。
+    ため、Run snapshot・ChangeProposal・Composition・Schedule/Occurrence・FrontendModule
+    から参照されている版は、参照の状態に関係なく 409 で拒否する。
     """
 
     service: SkillService = request.app.state.skill_service
     try:
         await service.delete_skill_version(
-            organization_id=actor.organization_id,
+            access=user_access(request, actor),
             skill_version_id=skill_version_id,
         )
+    except UnauthorizedSessionError as error:
+        raise authentication_required_problem() from error
+    except CsrfRejectedError as error:
+        raise csrf_rejected_problem() from error
+    except UserAdministrationDeniedError as error:
+        raise administrator_required_problem() from error
     except SkillVersionNotFoundError as error:
         raise _skill_version_not_found(error) from error
     except SkillVersionDeleteBlockedError as error:
@@ -923,8 +971,10 @@ async def list_project_skill_versions(
     "/projects/{project_id}/skill-versions/{skill_version_id}",
     response_model=ProjectSkillVersionResponse,
     responses={
-        404: {"description": "Project or Skill version not found"},
-        409: {"description": "Skill version cannot be enabled"},
+        401: problem_openapi_response("The original session is no longer valid"),
+        403: problem_openapi_response("Administrator access or session CSRF was rejected"),
+        404: problem_openapi_response("Project or Skill version not found"),
+        409: problem_openapi_response("Skill version cannot be enabled or Project is archived"),
     },
     tags=["skills"],
 )
@@ -940,11 +990,20 @@ async def enable_project_skill_version(
     service: SkillService = request.app.state.skill_service
     try:
         stored = await service.enable_project_skill_version(
-            organization_id=actor.organization_id,
+            access=user_access(request, actor),
             project_id=project_id,
             skill_version_id=skill_version_id,
-            enabled_by=actor.user_id,
         )
+    except UnauthorizedSessionError as error:
+        raise authentication_required_problem() from error
+    except CsrfRejectedError as error:
+        raise csrf_rejected_problem() from error
+    except UserAdministrationDeniedError as error:
+        raise administrator_required_problem() from error
+    except ProjectNotFoundError as error:
+        raise project_not_found_problem() from error
+    except ProjectArchivedError as error:
+        raise project_archived_problem() from error
     except (SkillVersionNotFoundError, SkillVersionEnablementNotFoundError) as error:
         raise _project_skill_version_not_found(error) from error
     except SkillVersionEnablementConflictError as error:
@@ -955,7 +1014,12 @@ async def enable_project_skill_version(
 @router.delete(
     "/projects/{project_id}/skill-versions/{skill_version_id}",
     response_model=ProjectSkillVersionResponse,
-    responses={404: {"description": "Project Skill version enablement not found"}},
+    responses={
+        401: problem_openapi_response("The original session is no longer valid"),
+        403: problem_openapi_response("Administrator access or session CSRF was rejected"),
+        404: problem_openapi_response("Project Skill version enablement not found"),
+        409: problem_openapi_response("Project is archived or Skill version binding is invalid"),
+    },
     tags=["skills"],
 )
 async def disable_project_skill_version(
@@ -970,12 +1034,24 @@ async def disable_project_skill_version(
     service: SkillService = request.app.state.skill_service
     try:
         stored = await service.disable_project_skill_version(
-            organization_id=actor.organization_id,
+            access=user_access(request, actor),
             project_id=project_id,
             skill_version_id=skill_version_id,
         )
+    except UnauthorizedSessionError as error:
+        raise authentication_required_problem() from error
+    except CsrfRejectedError as error:
+        raise csrf_rejected_problem() from error
+    except UserAdministrationDeniedError as error:
+        raise administrator_required_problem() from error
+    except ProjectNotFoundError as error:
+        raise project_not_found_problem() from error
+    except ProjectArchivedError as error:
+        raise project_archived_problem() from error
     except (SkillVersionNotFoundError, SkillVersionEnablementNotFoundError) as error:
         raise _project_skill_version_not_found(error) from error
+    except SkillVersionEnablementConflictError as error:
+        raise _project_skill_version_conflict(error) from error
     return _project_skill_version_response(stored)
 
 
@@ -1279,10 +1355,11 @@ def _source_integrity_failed(error: Exception) -> ProblemException:
 def _interpretation_not_ready(error: Exception) -> ProblemException:
     """PREVIEW_READY でない interpretation への操作を 409 Problem へ変換する。"""
 
+    del error
     return ProblemException(
         status=409,
         title="Skill interpretation not ready",
-        detail=str(error),
+        detail="Skill interpretation is not ready for this operation",
         code="skill_interpretation_not_ready",
     )
 

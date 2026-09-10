@@ -28,6 +28,11 @@ from projectmind.api.problems import (
     ProblemException,
     problem_openapi_response,
 )
+from projectmind.api.result_validation import (
+    RunResultValidationResponse,
+    result_reference_checks_schema,
+    result_validation_response,
+)
 from projectmind.api.routes.effects import (
     ChangeApprovalResponse,
     ChangeProposalResponse,
@@ -149,6 +154,8 @@ class CancelRunResponse(BaseModel):
 class RunResultResponse(BaseModel):
     """検証済み Result と validation metadata の公開 response。"""
 
+    model_config = ConfigDict(json_schema_extra=result_reference_checks_schema)
+
     result_id: UUID
     output_schema: str
     result_kind: str
@@ -162,7 +169,7 @@ class RunResultResponse(BaseModel):
     needs_review: bool
     usage: dict[str, Any]
     cost: dict[str, Any]
-    validation: dict[str, Any]
+    validation: RunResultValidationResponse
     created_at: datetime
 
 
@@ -686,6 +693,10 @@ async def cancel_run(
     responses={
         200: {"headers": NO_STORE_PROBLEM_HEADERS},
         **{code: _INTERACTION_PROBLEMS[code] for code in (401, 403, 404, 422)},
+        503: problem_openapi_response(
+            "run_result_validation_unavailable: saved validation metadata is invalid",
+            headers=NO_STORE_PROBLEM_HEADERS,
+        ),
     },
     tags=["runs", "auth"],
 )
@@ -896,7 +907,9 @@ def _run_detail_response(detail: RunDetail) -> RunDetailResponse:
             needs_review=result.needs_review,
             usage=result.usage,
             cost=result.cost,
-            validation=result.validation,
+            validation=result_validation_response(
+                result.validation, result_kind=result.result_kind
+            ),
             created_at=result.created_at,
         ),
         tool_calls=[

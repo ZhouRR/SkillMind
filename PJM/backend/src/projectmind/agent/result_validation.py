@@ -1,8 +1,9 @@
-"""Structured Result の Schema、Evidence、M0 business rule を検証する。"""
+"""凍結 Result Schema、全参照位置と保存済み effect 記録を主/子で共通検証する。"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Protocol
 from uuid import UUID
@@ -13,6 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from projectmind.agent.domain import RunContext
 from projectmind.agent.outcome import OUTCOME_ENVELOPE_SCHEMA
+from projectmind.agent.result_references import EffectSummaryLookup, collect_result_references
+from projectmind.artifacts.domain import ArtifactIntegrityError
+from projectmind.artifacts.repository import ArtifactRepository
 from projectmind.core.redaction import find_sensitive_key
 from projectmind.db.models import ChangeProposal, Evidence
 
@@ -56,6 +60,32 @@ class PostgresEvidenceLookup:
                 Evidence.evidence_ref.in_(refs),
             )
             return frozenset(await session.scalars(statement))
+
+
+class ArtifactLookup(Protocol):
+    """同 Run/原 Tool の保存済み byte まで検証する、主/子共用の read port。"""
+
+    async def verified_refs(self, run_id: UUID, refs: frozenset[str]) -> frozenset[str]:
+        """帰属・回执・実際の size/hash が一致する参照だけを返す。"""
+
+        ...
+
+
+class PostgresArtifactLookup:
+    """Download/checkpoint と同じ repository で保存時の Artifact 完全性を検証する。"""
+
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        """実行 lease でなく読取 session の生成元を保持する。"""
+
+        self._session_factory = session_factory
+
+    async def verified_refs(self, run_id: UUID, refs: frozenset[str]) -> frozenset[str]:
+        """元の workspace を再読込せず、不変 snapshot を有界に照合する。"""
+
+        if not refs:
+            return frozenset()
+        async with self._session_factory() as session:
+            return await ArtifactRepository(session).verified_refs(run_id, refs)
 
 
 class ProposalLookup(Protocol):
@@ -108,7 +138,7 @@ class PostgresProposalLookup:
 
 @dataclass(frozen=True, slots=True)
 class ValidatedResult:
-    """Schema と Evidence rule を通過した immutable Result payload。"""
+    """原候補から分離され、Schema と参照規則を通過した Result payload。"""
 
     data: dict[str, Any]
     result_kind: str
@@ -170,19 +200,24 @@ class GenericResultInterpreter:
 class ResultValidator:
     """SDK structured_output を Platform の成功条件で再検証する。
 
-    Schema 妥当性と Evidence 所有という通用不変条件だけを保証し、business path や task key に
-    よる追加 rule は持たない。
+    Schema・参照所有・保存済み effect の整合性を共通検証する。business path 固有の
+    判定や遠端の再検証は行わず、Artifact の保存事実を ID 外形から推測しない。
     """
 
     def __init__(
         self,
         evidence_lookup: EvidenceLookup,
         proposal_lookup: ProposalLookup | None = None,
+        *,
+        effect_lookup: EffectSummaryLookup | None = None,
+        artifact_lookup: ArtifactLookup | None = None,
     ) -> None:
-        """Evidence 所有確認 port と通用 result interpreter を保持する。"""
+        """参照/効果の読取 port と通用 interpreter を保持し、未装配は成功へ降格しない。"""
 
         self._evidence_lookup = evidence_lookup
         self._proposal_lookup = proposal_lookup
+        self._effect_lookup = effect_lookup
+        self._artifact_lookup = artifact_lookup
         self._generic = GenericResultInterpreter()
 
     async def validate_context(
@@ -230,6 +265,8 @@ class ResultValidator:
                 "structured_output_missing",
                 "Agent result did not contain a JSON object",
             )
+        # Lookup の await 中に producer が nested JSON を変えても、検証済み候補を差し替えさせない。
+        structured_output = deepcopy(structured_output)
         validation: dict[str, Any] = {
             "schema_ref": schema_ref,
             "schema_valid": True,
@@ -273,7 +310,10 @@ class ResultValidator:
                 "Agent result contained a sensitive field",
             )
 
-        refs = frozenset(_collect_evidence_refs(structured_output))
+        references = collect_result_references(
+            structured_output, outcome=result_kind == "OUTCOME_ENVELOPE",
+        )
+        refs = references.evidence
         existing = await self._evidence_lookup.existing_refs(run_id, refs)
         missing = refs - existing
         if missing:
@@ -282,8 +322,25 @@ class ResultValidator:
                 f"Agent result referenced {len(missing)} unavailable Evidence item(s)",
             )
 
-        artifact_refs = _string_refs(structured_output.get("artifact_refs"))
-        change_proposal_refs = _string_refs(structured_output.get("change_proposal_refs"))
+        artifact_refs = references.artifacts
+        if artifact_refs:
+            if self._artifact_lookup is None:
+                raise ResultValidationError(
+                    "artifact_reference_unavailable",
+                    "Agent result referenced Artifact items without a verifiable saved snapshot",
+                )
+            try:
+                verified = await self._artifact_lookup.verified_refs(run_id, artifact_refs)
+            except ArtifactIntegrityError:
+                raise ResultValidationError(
+                    "artifact_reference_invalid", "Agent result Artifact snapshot is invalid",
+                ) from None
+            if artifact_refs - verified:
+                raise ResultValidationError(
+                    "artifact_reference_invalid",
+                    "Agent result referenced unavailable Artifact items",
+                )
+        change_proposal_refs = references.proposals
         if change_proposal_refs:
             if self._proposal_lookup is None:
                 raise ResultValidationError(
@@ -308,6 +365,15 @@ class ResultValidator:
                     "an effect decision",
                 )
 
+        if references.effects and (
+            self._effect_lookup is None
+            or await self._effect_lookup.invalid_refs(run_id, references.effects)
+        ):
+            raise ResultValidationError(
+                "effect_summary_invalid",
+                "Agent result effect claims did not match the saved platform records",
+            )
+
         # 表示用 convention も全 task で同じ interpreter を通し、business path 分岐を作らない。
         self._generic.validate_findings(structured_output)
         interpretation = self._generic.interpret(structured_output)
@@ -325,8 +391,19 @@ class ResultValidator:
                 "evidence_refs_valid": True,
                 "evidence_count": len(refs),
                 "artifact_count": len(artifact_refs),
+                "artifact_refs_valid": True,
                 "change_proposal_count": len(change_proposal_refs),
                 "change_proposal_refs_valid": True,
+                "reference_checks": {
+                    "version": "projectmind.result-reference-checks/v2",
+                    "evidence": "RUN_OWNERSHIP",
+                    "proposals": "RUN_OWNERSHIP_AND_STATE",
+                    "effects": (
+                        "PLATFORM_RECORD_MATCH" if result_kind == "OUTCOME_ENVELOPE"
+                        else "NOT_APPLICABLE"
+                    ),
+                    "artifacts": "RUN_OWNERSHIP_AND_CONTENT",
+                },
             },
         )
 
@@ -351,29 +428,3 @@ class ResultValidator:
                 code,
                 f"Agent result did not match {label} Schema at {path}",
             )
-
-
-def _collect_evidence_refs(value: Any) -> set[str]:
-    """Result tree の source_ref/evidence_refs だけを再帰的に収集する。"""
-
-    refs: set[str] = set()
-    if isinstance(value, Mapping):
-        for key, nested in value.items():
-            if key == "source_ref" and isinstance(nested, str):
-                refs.add(nested)
-            elif key == "evidence_refs" and isinstance(nested, list):
-                refs.update(item for item in nested if isinstance(item, str))
-            else:
-                refs.update(_collect_evidence_refs(nested))
-    elif isinstance(value, list | tuple):
-        for nested in value:
-            refs.update(_collect_evidence_refs(nested))
-    return refs
-
-
-def _string_refs(value: Any) -> frozenset[str]:
-    """通用包絡の参照 list から string だけを immutable 集合へ変換する。"""
-
-    if not isinstance(value, list):
-        return frozenset()
-    return frozenset(item for item in value if isinstance(item, str))

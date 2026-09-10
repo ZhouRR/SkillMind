@@ -24,6 +24,7 @@ from projectmind.projects.domain import (
     StoredProject,
 )
 from projectmind.runs.domain import IdempotencyConflictError, TaskSourceSelectionError
+from projectmind.skills.domain import PublishedTaskNotFoundError
 from projectmind.users.domain import UserAccess
 
 _PATHS = ("lookup", "create", "missing_recheck", "invalid_recheck")
@@ -266,6 +267,26 @@ def test_creation_keeps_project_write_dependency_before_any_original_request_loo
     assert response.headers["Cache-Control"] == "no-store"
     lookup.assert_not_awaited()
     create.assert_not_awaited()
+
+
+def test_current_binding_rejection_after_resolution_keeps_task_problem_without_retry(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """解析後の保存 TX が Task 失効を確定しても、新しい版/要求で自動再作成しない。"""
+
+    lookup, create = install_creation(client, monkeypatch)
+    create.side_effect = PublishedTaskNotFoundError("Published task is not available")
+    url, body, headers = creation_request()
+    response = client.post(url, json=body, headers=headers)
+
+    assert response.status_code == 404
+    assert response.json()["code"] == "published_task_not_found"
+    assert response.json()["detail"] == "Published task is not available"
+    assert response.headers["Content-Type"] == "application/problem+json"
+    assert response.headers["Cache-Control"] == "no-store"
+    assert "Location" not in response.headers and "Idempotent-Replay" not in response.headers
+    lookup.assert_awaited_once()
+    create.assert_awaited_once()
 
 
 @pytest.mark.parametrize("path", _PATHS)

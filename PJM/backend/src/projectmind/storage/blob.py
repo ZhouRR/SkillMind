@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Protocol
+from uuid import UUID
 
 _KEY_MAX = 512
 _SEGMENT_MAX = 128
@@ -23,6 +25,35 @@ class BlobReadLimitExceededError(FileStorageError):
 
 
 @dataclass(frozen=True, slots=True)
+class StorageNamespace:
+    """Credential と独立した保存先世代。durable は実保存の回復保証を意味しない。"""
+
+    namespace_id: UUID
+    descriptor_checksum: str
+    durable: bool
+
+    def __post_init__(self) -> None:
+        """不完全な DB 値や bool の暗黙変換で別の保存先を許可しない。"""
+
+        if (
+            not isinstance(self.namespace_id, UUID)
+            or self.namespace_id.int == 0
+            or not isinstance(self.descriptor_checksum, str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", self.descriptor_checksum) is None
+            or type(self.durable) is not bool
+        ):
+            raise FileStorageError("Storage namespace is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class BlobReference:
+    """原 key と保存先を一緒に渡す内部参照。未関連の旧行は namespace=None。"""
+
+    key: str
+    namespace: StorageNamespace | None
+
+
+@dataclass(frozen=True, slots=True)
 class StoredBlob:
     """保存済み blob の識別子と metadata。正文そのものは保持しない。"""
 
@@ -34,6 +65,12 @@ class StoredBlob:
 
 class FileStorage(Protocol):
     """Project scoped blob の非同期 put/get/delete/stat 契約。実装は差し替え可能。"""
+
+    @property
+    def namespace(self) -> StorageNamespace | None:
+        """この client の固定保存先を返す。未設定から旧参照の所属を推測しない。"""
+
+        ...
 
     async def put(self, key: str, data: bytes, *, content_type: str) -> StoredBlob:
         """Blob を保存し、size/sha256 を含む metadata を返す。"""
@@ -49,12 +86,12 @@ class FileStorage(Protocol):
         ...
 
     async def delete(self, key: str) -> None:
-        """Blob を削除する。存在しなくてもエラーにしない。"""
+        """削除を試みる。明確な対象欠落は許容し、拒否や結果不明は成功にしない。"""
 
         ...
 
     async def exists(self, key: str) -> bool:
-        """Blob の存在有無を返す。"""
+        """対象の存在有無を返す。存否不明や bucket の欠落は FileStorageError。"""
 
         ...
 

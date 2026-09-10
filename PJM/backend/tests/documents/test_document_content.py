@@ -22,7 +22,7 @@ from projectmind.documents.repository import DocumentRepository
 from projectmind.documents.service import DocumentService
 from projectmind.documents.snapshot import DocumentSnapshotError
 from projectmind.documents.source import DatabaseProjectDocumentSource, read_frozen_document
-from projectmind.storage import FileStorageError, InMemoryFileStorage, UploadLimits
+from projectmind.storage import BlobReference, FileStorageError, InMemoryFileStorage, UploadLimits
 from tests.documents.fakes import document_content, document_snapshot, stored_document
 
 _ORIGINAL_KEY = "original/identity"
@@ -60,11 +60,15 @@ def _readers(storage: InMemoryFileStorage) -> tuple[DocumentService, DatabasePro
     )
 
 
-def _metadata(monkeypatch: pytest.MonkeyPatch, document: StoredDocument | None) -> AsyncMock:
-    """内部 key と metadata を返す既存 repository method の呼出し identity を検証する。"""
+def _metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    document: StoredDocument | None,
+    storage: InMemoryFileStorage,
+) -> AsyncMock:
+    """元 key/namespace と metadata を返し、repository の呼出し identity を検証する。"""
 
     lookup = AsyncMock(
-        return_value=(document, _ORIGINAL_KEY),
+        return_value=(document, BlobReference(_ORIGINAL_KEY, storage.namespace)),
         side_effect=DocumentNotFoundError("private metadata") if document is None else None,
     )
     monkeypatch.setattr(DocumentRepository, "get_for_download", lookup)
@@ -80,8 +84,8 @@ async def test_download_and_frozen_source_return_the_same_verified_bytes(
     project_id = uuid4()
     content = document_content(data)
     document = stored_document(project_id, content)
-    lookup = _metadata(monkeypatch, document)
     storage = InMemoryFileStorage()
+    lookup = _metadata(monkeypatch, document, storage)
     await storage.put(_ORIGINAL_KEY, data, content_type=content.mime)
     get = AsyncMock(wraps=storage.get)
     stat = AsyncMock(side_effect=AssertionError("No stat-before-get"))
@@ -125,9 +129,9 @@ async def test_download_and_frozen_source_fail_without_repairing_original_facts(
     project_id = uuid4()
     content = document_content(b"original")
     document = stored_document(project_id, content)
-    _metadata(monkeypatch, document)
     frozen = document_snapshot(project_id, [content]).documents[0]
     storage = InMemoryFileStorage()
+    _metadata(monkeypatch, document, storage)
     if case not in {"missing", "storage"}:
         actual = {"short": b"orig", "long": b"original extra", "same_size": b"modified"}[case]
         await storage.put(_ORIGINAL_KEY, actual, content_type=content.mime)
@@ -147,8 +151,8 @@ async def test_metadata_missing_never_reads_a_blob_or_looks_up_a_path(
 ) -> None:
     """元 metadata の欠落だけが download の 404 であり、同名の別 ID を探さない。"""
 
-    _metadata(monkeypatch, None)
     storage = InMemoryFileStorage()
+    _metadata(monkeypatch, None, storage)
     get = AsyncMock(side_effect=AssertionError("No blob without metadata"))
     monkeypatch.setattr(storage, "get", get)
     service, source = _readers(storage)
@@ -173,8 +177,8 @@ async def test_invalid_stored_integrity_metadata_fails_before_blob_read(
     else:
         assert field == "checksum" and isinstance(value, str)
         changed = replace(document, checksum=value)
-    _metadata(monkeypatch, changed)
     storage = InMemoryFileStorage()
+    _metadata(monkeypatch, changed, storage)
     get = AsyncMock(side_effect=AssertionError("No blob with invalid metadata"))
     monkeypatch.setattr(storage, "get", get)
     service, _ = _readers(storage)
@@ -191,8 +195,8 @@ async def test_new_current_metadata_cannot_replace_original_frozen_hash(
     project_id = uuid4()
     old = document_content(b"old")
     current = document_content(b"new", document_id=old.document_id)
-    _metadata(monkeypatch, stored_document(project_id, current))
     storage = InMemoryFileStorage()
+    _metadata(monkeypatch, stored_document(project_id, current), storage)
     await storage.put(_ORIGINAL_KEY, current.data, content_type=current.mime)
     _, source = _readers(storage)
     frozen = document_snapshot(project_id, [old]).documents[0]
@@ -208,8 +212,8 @@ async def test_read_cancellation_is_not_reported_as_confirmed_storage_failure(
 
     project_id = uuid4()
     content = document_content()
-    _metadata(monkeypatch, stored_document(project_id, content))
     storage = InMemoryFileStorage()
+    _metadata(monkeypatch, stored_document(project_id, content), storage)
     monkeypatch.setattr(storage, "get", AsyncMock(side_effect=asyncio.CancelledError))
     service, source = _readers(storage)
     with pytest.raises(asyncio.CancelledError):

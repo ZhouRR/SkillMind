@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 from projectmind.core.hashing import sha256_hex
 from projectmind.storage.blob import (
     BlobNotFoundError,
     BlobReadLimitExceededError,
+    StorageNamespace,
     StoredBlob,
     sanitize_object_key,
     validate_read_limit,
@@ -13,12 +16,24 @@ from projectmind.storage.blob import (
 
 
 class InMemoryFileStorage:
-    """MinIO/S3 を使わず blob を辞書に保持する決定的 backend。"""
+    """MinIO/S3 を使わず、instance の寿命だけ blob を辞書に保持する backend。"""
 
     def __init__(self) -> None:
         """key ごとの (正文, content_type) を保持する。"""
 
         self._blobs: dict[str, tuple[bytes, str]] = {}
+        # 新しい空 instance は旧辞書の回復先ではない。同じ内容でも所属を引き継がない。
+        self._namespace = StorageNamespace(
+            namespace_id=uuid4(),
+            descriptor_checksum=f"sha256:{sha256_hex(b'projectmind-memory-storage/v1')}",
+            durable=False,
+        )
+
+    @property
+    def namespace(self) -> StorageNamespace:
+        """辞書の寿命にだけ有効な非永続 namespace を返す。"""
+
+        return self._namespace
 
     async def put(self, key: str, data: bytes, *, content_type: str) -> StoredBlob:
         """Key を安全化して正文を保存し、metadata を返す。"""

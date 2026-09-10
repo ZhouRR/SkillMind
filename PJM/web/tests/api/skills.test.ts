@@ -4,6 +4,8 @@ import {
   API_BASE,
   ApiProblemError,
   adjustInterpretation,
+  createSkillVersionDraft,
+  deleteSkillVersion,
   deprecateSkillVersion,
   disableProjectSkillVersion,
   enableProjectSkillVersion,
@@ -11,6 +13,7 @@ import {
   listProjectSkillVersions,
   listSkillVersions,
   loadInterpretationExecution,
+  publishSkillVersion,
   uploadSkillFiles,
 } from '../../src/api/index'
 
@@ -429,6 +432,96 @@ describe('Skill interpretation API contract', () => {
 
 /** Organization library と Project 明示有効化 API の client 契約を検証する。 */
 describe('Skill library scope API contract', () => {
+  // 全版管理入口が同じ HTTP/Problem 境界を守り、資格拒否から暗黙再送しないことを調べる。
+  const mutations = {
+    draft: () => createSkillVersionDraft(INTERPRETATION_ID, CSRF),
+    publish: () => publishSkillVersion(VERSION.skill_version_id, [], CSRF),
+    deprecate: () => deprecateSkillVersion(VERSION.skill_version_id, CSRF),
+    delete: () => deleteSkillVersion(VERSION.skill_version_id, CSRF),
+    enable: () => enableProjectSkillVersion(PROJECT_ID, VERSION.skill_version_id, CSRF),
+    disable: () => disableProjectSkillVersion(PROJECT_ID, VERSION.skill_version_id, CSRF),
+  }
+
+  it.each(['draft', 'publish'] as const)(
+    '%s sends the original CSRF with a same-origin cookie and no caller-supplied actor',
+    async (operation) => {
+      const fetchMock = jsonFetch(VERSION, operation === 'draft' ? 201 : 200)
+      vi.stubGlobal('fetch', fetchMock)
+      const controller = new AbortController()
+
+      const stored = operation === 'draft'
+        ? await createSkillVersionDraft(INTERPRETATION_ID, CSRF, controller.signal)
+        : await publishSkillVersion(VERSION.skill_version_id, ['review_required'], CSRF, controller.signal)
+
+      expect(stored.skill_version_id).toBe(VERSION.skill_version_id)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      const call = fetchMock.mock.calls[0]
+      if (!call) throw new Error('Expected one fetch call')
+      expect(call[0]).toBe(operation === 'draft'
+        ? `${API_BASE}/skill-interpretations/${INTERPRETATION_ID}/draft`
+        : `${API_BASE}/skill-versions/${VERSION.skill_version_id}/publish`)
+      expect(call[1]).toMatchObject({ method: 'POST', credentials: 'same-origin', signal: controller.signal })
+      expect(call[1]?.headers).toMatchObject({ 'X-CSRF-Token': CSRF })
+      expect(call[1]?.body).toBe(operation === 'draft'
+        ? undefined : JSON.stringify({ accepted_warnings: ['review_required'] }))
+    },
+  )
+
+  describe.each(['draft', 'publish', 'deprecate', 'delete', 'enable', 'disable'] as const)(
+    '%s business authorization', (operation) => {
+      it.each([
+        [401, 'authentication_required'],
+        [403, 'csrf_rejected'],
+        [403, 'administrator_required'],
+      ] as const)('preserves %s %s without retrying the mutation', async (status, code) => {
+        const detail = 'Synthetic business authorization rejection'
+        const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(
+          JSON.stringify({ status, code, detail }),
+          { status, headers: { 'Content-Type': 'application/problem+json' } },
+        ))
+        vi.stubGlobal('fetch', fetchMock)
+
+        const request = mutations[operation]()
+        await expect(request).rejects.toMatchObject({ name: 'ApiProblemError', status, code, message: detail })
+        // 新しい資格を取得して原操作を暗黙再送しない。再開は画面の明示判断に委ねる。
+        expect(fetchMock).toHaveBeenCalledTimes(1)
+      })
+    },
+  )
+
+  it.each([
+    ['enable', 404, 'project_not_found'],
+    ['disable', 404, 'project_not_found'],
+    ['enable', 409, 'project_archived'],
+    ['disable', 409, 'project_archived'],
+    ['enable', 409, 'project_skill_version_rejected'],
+    ['disable', 409, 'project_skill_version_rejected'],
+    ['delete', 409, 'skill_version_delete_blocked'],
+    ['delete', 404, 'skill_version_not_found'],
+  ] as const)('%s retains %s %s without switching the target or retrying', async (operation, status, code) => {
+    const fetchMock = jsonFetch({ status, code, detail: 'Synthetic lifecycle rejection' }, status)
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(mutations[operation]()).rejects.toMatchObject({ name: 'ApiProblemError', status, code })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('deletes an exact organization version with an empty receipt and the original credentials', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const controller = new AbortController()
+
+    await expect(deleteSkillVersion(VERSION.skill_version_id, CSRF, controller.signal)).resolves.toBeUndefined()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(`${API_BASE}/skill-versions/${VERSION.skill_version_id}`)
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: 'DELETE', credentials: 'same-origin', signal: controller.signal,
+      headers: { 'X-CSRF-Token': CSRF },
+    })
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBeUndefined()
+  })
+
   it('loads organization versions without requiring a project', async () => {
     const fetchMock = jsonFetch({ skill_versions: [VERSION] }, 200)
     vi.stubGlobal('fetch', fetchMock)
@@ -458,14 +551,17 @@ describe('Skill library scope API contract', () => {
     const fetchMock = jsonFetch(ENABLEMENT, 200)
     vi.stubGlobal('fetch', fetchMock)
 
-    const stored = await mutate(PROJECT_ID, VERSION.skill_version_id, CSRF)
+    const controller = new AbortController()
+    const stored = await mutate(PROJECT_ID, VERSION.skill_version_id, CSRF, controller.signal)
 
     expect(stored.project_id).toBe(PROJECT_ID)
     const call = fetchMock.mock.calls[0]
     if (!call) throw new Error('Expected one fetch call')
     expect(call[0]).toBe(`${API_BASE}/projects/${PROJECT_ID}/skill-versions/${VERSION.skill_version_id}`)
-    expect(call[1]?.method).toBe(method)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(call[1]).toMatchObject({ method, credentials: 'same-origin', signal: controller.signal })
     expect(call[1]?.headers).toMatchObject({ 'X-CSRF-Token': CSRF })
+    expect(call[1]?.body).toBeUndefined()
   })
 
   it('deprecates a version at organization scope', async () => {
@@ -473,12 +569,16 @@ describe('Skill library scope API contract', () => {
     const fetchMock = jsonFetch(deprecated, 200)
     vi.stubGlobal('fetch', fetchMock)
 
-    const stored = await deprecateSkillVersion(VERSION.skill_version_id, CSRF)
+    const controller = new AbortController()
+    const stored = await deprecateSkillVersion(VERSION.skill_version_id, CSRF, controller.signal)
 
     expect(stored.status).toBe('DEPRECATED')
     const call = fetchMock.mock.calls[0]
     if (!call) throw new Error('Expected one fetch call')
     expect(call[0]).toBe(`${API_BASE}/skill-versions/${VERSION.skill_version_id}/deprecate`)
-    expect(call[1]?.method).toBe('POST')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(call[1]).toMatchObject({ method: 'POST', credentials: 'same-origin', signal: controller.signal })
+    expect(call[1]?.headers).toMatchObject({ 'X-CSRF-Token': CSRF })
+    expect(call[1]?.body).toBeUndefined()
   })
 })

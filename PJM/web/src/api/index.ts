@@ -1,6 +1,8 @@
 /** API client の公開契約を資源別 module から再輸出する barrel。画面はここからだけ import する。 */
 
 export { API_BASE, ApiProblemError } from './http'
+export { ARTIFACT_MAX_BYTES, loadRunArtifacts, loadRunArtifactContent } from './artifacts'
+export type { RunArtifactRecord } from './artifacts'
 export { META_ENDPOINT, loadMeta } from './meta'
 export type { ProjectMindMeta } from './meta'
 export { loadAuthSession, login, logout } from './auth'
@@ -60,6 +62,10 @@ export type {
   UserInteractionDetail,
 } from './runs'
 export { loadProjectTasks } from './tasks'
+export { loadTaskFlowPreview, isValidTaskFlowTarget } from './taskFlowPreview'
+export type { TaskFlowPreviewRecord, TaskFlowPreviewTarget, TaskFlowPlan, TaskFlowShared, TaskFlowTask, TaskFlowNote, TaskFlowResource, TaskFlowResourceReference, TaskFlowInteraction, TaskFlowEffect, TaskFlowDeliverable, TaskFlowSourceTrace } from './taskFlowPreview'
+export { isResultReferenceChecks, isRunResultValidation } from './resultValidation'
+export type { ResultReferenceChecks, RunResultValidation } from './resultValidation'
 export type { DocumentSnapshotRecord, FrozenDocumentRecord, RunDocumentSnapshotRecord, RunSourceSummaries, RunSourceSummary } from './runResources'
 export type {
   PublishedTaskRecord,
@@ -73,6 +79,8 @@ export type {
 export { subscribeRunEvents } from './events'
 export type { RunEventRecord, RunEventSubscription } from './events'
 export { createEvaluation, loadEvaluations } from './evaluations'
+export { submitEvaluation, loadEvaluationSubmission, loadEvaluationPage, compareEvaluations } from './evaluationSubmissions'
+export type { EvaluationSubmissionInput, EvaluationSubmissionReceipt, EvaluationPage } from './evaluationSubmissions'
 export type {
   CreateEvaluationInput,
   EvaluationRecord,
@@ -129,10 +137,14 @@ export {
   loadProjectDocuments,
   loadProjectDocument,
   loadProjectDocumentText,
+  loadDocumentUpload,
+  withInferredContentType,
   projectDocumentContentHref,
   uploadProjectDocument,
 } from './documents'
-export type { DocumentListRecord, ProjectDocumentRecord } from './documents'
+export type { DocumentListRecord, ProjectDocumentRecord, DocumentUploadBody, DocumentUploadRecord } from './documents'
+export { closeDocumentUpload, loadDocumentUploadClosure } from './documentUploadClosures'
+export type { DocumentUploadClosureReceipt } from './documentUploadClosures'
 export {
   createIntegration,
   createSecretReference,

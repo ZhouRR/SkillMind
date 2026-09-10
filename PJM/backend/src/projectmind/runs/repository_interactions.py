@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -70,6 +71,8 @@ class InteractionOperationsMixin(_RunRepositoryBase):
     ) -> UUID:
         """公開質問と checkpoint を保存して lease を手放し、Run を待機へ移す。"""
 
+        # Artifact の読取 await 中も原 checkpoint/prompt を差替えさせない。
+        request = deepcopy(request)
         run, segment, attempt = await self._lock_claimed_execution(claimed)
         if segment is None:
             raise LeaseValidationError("UserInteraction requires an explicit RunSegment")
@@ -95,6 +98,7 @@ class InteractionOperationsMixin(_RunRepositoryBase):
         if existing_open is not None:
             raise InteractionConflictError("Run already has an open interaction")
         await self._validate_checkpoint_refs(run.id, request.checkpoint)
+        self._validate_claimed_lease(attempt, claimed, now=datetime.now(UTC))
         agent_session = await self._ensure_agent_session(
             claimed,
             sdk_session_id=UUID(event.agent_session_id),

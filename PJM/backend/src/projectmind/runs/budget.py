@@ -63,6 +63,16 @@ def budget_key(value: str) -> str:
     return value
 
 
+def budget_start_owner_hash(token: str) -> str:
+    """原調整者だけが持つ乱数を専用 hash にし、実行記述子の hash を変更しない。"""
+
+    if not isinstance(token, str) or re.fullmatch(r"[A-Za-z0-9_-]{43}", token) is None:
+        raise BudgetError("Invalid budget start owner")
+    return "sha256:" + sha256_hex(
+        canonical_json({"version": "projectmind.budget-start-owner/v1", "token": token})
+    )
+
+
 def budget_units(value: int, *, positive: bool = False) -> int:
     """bool、負数、DB 整数を超える値を計量として受理しない。"""
 

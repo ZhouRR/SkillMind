@@ -24,11 +24,13 @@ from projectmind.db.models import (
     OutboxMessage,
     Project,
     ProjectMember,
+    ProjectSkillVersion,
     ResourceBinding,
     Run,
     RunEvent,
     RunSegment,
     RunSkillSnapshot,
+    SkillVersion,
     User,
 )
 from projectmind.projects.domain import ProjectArchivedError, ProjectNotFoundError
@@ -172,13 +174,27 @@ async def test_creation_uses_shared_lock_order_and_refreshes_loaded_identities()
     queries = [
         query for query in db.statements if getattr(query, "_for_update_arg", None) is not None
     ]
-    expected = [Organization, User, AuthSession, Project, ProjectMember]
+    expected = [
+        Organization,
+        User,
+        AuthSession,
+        Project,
+        ProjectMember,
+        SkillVersion,
+        ProjectSkillVersion,
+    ]
     assert [query.column_descriptions[0]["entity"] for query in queries] == expected
     dialect_factory: Callable[..., Dialect] = postgresql.dialect
     for query, entity in zip(queries, expected, strict=True):
         sql = str(query.compile(dialect=dialect_factory()))
+        if entity is SkillVersion:
+            assert sql.endswith("FOR SHARE OF skill_versions")
+            assert query.get_execution_options()["populate_existing"] is True
+            continue
         assert sql.endswith(
-            "FOR SHARE" if entity in {User, Project, ProjectMember} else "FOR UPDATE"
+            "FOR SHARE"
+            if entity in {User, Project, ProjectMember, ProjectSkillVersion}
+            else "FOR UPDATE"
         )
         if entity is not Organization:
             assert query.get_execution_options()["populate_existing"] is True

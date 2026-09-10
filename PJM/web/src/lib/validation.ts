@@ -4,6 +4,11 @@ export function isUuid(value: unknown): value is string {
     && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(value)
 }
 
+/** 原要求 identity として意味を持たない nil UUID を形の検証と区別して拒否する。 */
+export function isNonNilUuid(value: unknown): value is string {
+  return isUuid(value) && value !== '00000000-0000-0000-0000-000000000000'
+}
+
 /** 検証済み UUID の表記差だけを無視し、原 request や key は書き換えない。 */
 export function sameUuid(left: string, right: string): boolean {
   return left.toLowerCase() === right.toLowerCase()

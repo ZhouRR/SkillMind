@@ -24,7 +24,8 @@ from projectmind.agent.context_builder import (
     ProductionRunContextBuilder,
     create_run_tool_registry,
 )
-from projectmind.agent.engine import ClaudeAgentSdkEngine
+from projectmind.agent.domain import RunContext
+from projectmind.agent.engine import ClaudeAgentSdkEngine, RunMcpRuntime
 from projectmind.agent.evidence import PostgresToolAuditWriter
 from projectmind.agent.redmine_provider import RedmineIssueReadProvider
 from projectmind.agent.repository_client import (
@@ -32,7 +33,9 @@ from projectmind.agent.repository_client import (
     SvnCommandRepositoryClient,
 )
 from projectmind.agent.repository_source import IntegrationRepositorySnapshotSource
+from projectmind.agent.result_references import PostgresEffectSummaryLookup
 from projectmind.agent.result_validation import (
+    PostgresArtifactLookup,
     PostgresEvidenceLookup,
     PostgresProposalLookup,
     ResultValidator,
@@ -95,6 +98,7 @@ from projectmind.skills.wiring import build_skill_interpreter
 from projectmind.storage.factory import create_file_storage
 from projectmind.worker.effects import ApprovedEffectExecutor
 from projectmind.worker.executor import AgentRunExecutor, RunExecutor
+from projectmind.worker.tool_authority import require_tool_authority
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +165,8 @@ async def startup(ctx: dict[str, Any]) -> None:
     result_validator = ResultValidator(
         PostgresEvidenceLookup(ctx["database_session_factory"]),
         PostgresProposalLookup(ctx["database_session_factory"]),
+        effect_lookup=PostgresEffectSummaryLookup(ctx["database_session_factory"]),
+        artifact_lookup=PostgresArtifactLookup(ctx["database_session_factory"]),
     )
     registry = create_run_tool_registry(
         contracts,
@@ -178,7 +184,18 @@ async def startup(ctx: dict[str, Any]) -> None:
         ),
         repository_source=repository_source,
     )
-    audit_writer = PostgresToolAuditWriter(ctx["database_session_factory"])
+    def create_authorized_runtime(context: RunContext) -> RunMcpRuntime:
+        """現在の Worker claim を一度だけ捕捉し、別 Run の audit writer を共有しない。"""
+
+        authority = require_tool_authority(context)
+        return registry.build_runtime(
+            context,
+            audit_writer=PostgresToolAuditWriter(
+                ctx["database_session_factory"], claimed_run=authority.claimed,
+                authority_check=authority.require_active,
+            ),
+        )
+
     runtime_configuration = ClaudeRuntimeConfiguration.from_environ()
     context_builder = ProductionRunContextBuilder(
         workspace_manager=WorkspaceManager(settings.run_workspace_root),
@@ -187,9 +204,7 @@ async def startup(ctx: dict[str, Any]) -> None:
         materializer=materializer,
     )
     engine = ClaudeAgentSdkEngine(
-        mcp_server_factory=lambda context: registry.build_runtime(
-            context, audit_writer=audit_writer
-        ),
+        mcp_server_factory=create_authorized_runtime,
         configuration=runtime_configuration,
         session_store=ctx["session_store"],
     )

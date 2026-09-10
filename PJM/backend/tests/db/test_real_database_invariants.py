@@ -16,6 +16,7 @@ import subprocess
 import sys
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
+from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -40,6 +41,7 @@ from projectmind.compositions.domain import (
     UpdateModuleCommand,
 )
 from projectmind.compositions.repository import CompositionRepository
+from projectmind.core.hashing import canonical_json, sha256_hex
 from projectmind.core.secret_crypto import load_secret_cipher
 from projectmind.db.models import (
     AgentSession,
@@ -56,6 +58,7 @@ from projectmind.db.models import (
     RunAttempt,
     RunEvent,
     RunSegment,
+    RunSkillSnapshot,
     RuntimeManifest,
     Skill,
     SkillComposition,
@@ -64,6 +67,7 @@ from projectmind.db.models import (
     SkillSource,
     SkillVersion,
     TaskSchedule,
+    TaskScheduleOccurrence,
     User,
     UserInteraction,
 )
@@ -77,12 +81,14 @@ from projectmind.integrations.domain import (
 from projectmind.integrations.repository import IntegrationRepository
 from projectmind.integrations.secrets import DeploymentSecretResolver
 from projectmind.runs.creation_request import TaskRunIntent
-from projectmind.runs.domain import CreatedRun
+from projectmind.runs.domain import CreatedRun, CreateRunCommand, lease_token_hash
 from projectmind.runs.repository import RunRepository
-from projectmind.schedules.domain import ScheduleNotFoundError
+from projectmind.schedules.domain import ClaimedSchedule, ScheduleNotFoundError
 from projectmind.schedules.repository import ScheduleRepository
+from projectmind.schedules.repository_occurrences import occurrence_snapshot
 from projectmind.skills.domain import (
     CreateSkillVersionDraftCommand,
+    PublishedTaskNotFoundError,
     SaveModelInterpretationCommand,
     SkillInterpretationNotFoundError,
     SkillInterpretationStatus,
@@ -1013,7 +1019,10 @@ async def test_create_version_draft_inserts_manifest_after_version(
             interpretation_diff={},
         )
         async with factory() as session, session.begin():
-            stored = await SkillRepository(session).create_version_draft(command)
+            # この低層テストは FK 順序だけを扱い、原会話の再認証は service 回帰で検証する。
+            stored = await SkillRepository(session).create_version_draft(
+                command, authorize=lambda: datetime.now(UTC)
+            )
 
         # RuntimeManifest が実際に永続化され、version を親として読めることを確認する。
         async with factory() as session:
@@ -1031,7 +1040,10 @@ async def test_create_version_draft_inserts_manifest_after_version(
 async def test_project_skill_version_controls_new_run_visibility(
     migrated_database_url: str,
 ) -> None:
-    """未有効化・停用済みの精確版を Run 解決から同じ 404 相当へ隠す。"""
+    """未有効化・停用済みの精確版を Run 解決から同じ 404 相当へ隠す。
+
+    低層 callback は可視性と保存状態だけを検証し、原会話の再認証は service 回帰で扱う。
+    """
 
     async with _session_factory(migrated_database_url) as factory:
         now = datetime.now(UTC)
@@ -1107,6 +1119,7 @@ async def test_project_skill_version_controls_new_run_visibility(
                 project_id=project_a.id,
                 skill_version_id=version.id,
                 enabled_by=uuid4(),
+                authorize=lambda: datetime.now(UTC),
             )
 
         async with factory() as session:
@@ -1127,6 +1140,7 @@ async def test_project_skill_version_controls_new_run_visibility(
                 organization_id=organization.id,
                 project_id=project_a.id,
                 skill_version_id=version.id,
+                authorize=lambda: datetime.now(UTC),
             )
 
         async with factory() as session:
@@ -1650,13 +1664,12 @@ async def test_run_binding_revalidation_rejects_post_creation_changes(
 
 
 @pytest.mark.asyncio
-async def test_schedule_claim_lets_only_one_worker_win_the_same_occurrence(
+async def test_schedule_claim_due_preserves_one_pending_occurrence_for_original_candidate(
     migrated_database_url: str,
 ) -> None:
-    """0025 実機 schema 上で `next_run_at` の CAS 認領が一度しか成功しないことを確認する。
+    """0036 以降の認領で、同じ候補を読む二人目が原 PENDING を置換できないと確認する。
 
-    調度は複数 Worker が同時に tick する前提なので、同じ発火を二人が掴めると Run が二重に
-    走る。実 DB の UPDATE 影響行数でしか確認できない性質のため、ここで固定する。
+    逐次 transaction の CAS と原 snapshot を検証し、実並行競争や Run 作成成功は主張しない。
     """
 
     async with _session_factory(migrated_database_url) as factory:
@@ -1731,6 +1744,8 @@ async def test_schedule_claim_lets_only_one_worker_win_the_same_occurrence(
             missed_count=0,
             created_by=owner.id,
             row_version=1,
+            configuration_version=1,
+            occurrence_protocol=1,
             created_at=now,
             updated_at=now,
         )
@@ -1738,34 +1753,62 @@ async def test_schedule_claim_lets_only_one_worker_win_the_same_occurrence(
             # relationship の無い FK 親子は追加直後に flush して INSERT 順を固定する。
             session.add(organization)
             await session.flush()
-            session.add_all([project, owner, source, interpretation, skill])
+            session.add_all([project, owner, source, skill])
+            await session.flush()
+            session.add(interpretation)
             await session.flush()
             session.add(version)
             await session.flush()
             session.add(schedule)
 
         following = datetime(2026, 7, 26, 10, 0, tzinfo=UTC)
+        async with factory() as session:
+            candidate = await ScheduleRepository(session).get(
+                project_id=project.id, schedule_id=schedule.id
+            )
 
-        async def _claim() -> bool:
-            """期待発火時刻で schedule の認領を試みる。"""
+        async def _claim(worker_id: str, token: str) -> ClaimedSchedule | None:
+            """二人とも同じ元候補を使い、lock 内で現在の世代と発火時刻を再検証する。"""
 
             async with factory() as session, session.begin():
-                return await ScheduleRepository(session).claim(
-                    schedule_id=schedule.id,
-                    expected_next_run_at=occurrence,
-                    next_run_at=following,
-                    missed=0,
+                return await ScheduleRepository(session).claim_due(
+                    candidate,
+                    now=occurrence,
+                    worker_id=worker_id,
+                    token=token,
                 )
 
-        assert await _claim() is True
-        # 二人目は同じ発火時刻を期待して外れる。
-        assert await _claim() is False
+        first = await _claim("original-worker", "synthetic-original-token")
+        assert isinstance(first, ClaimedSchedule)
+        assert await _claim("second-worker", "synthetic-second-token") is None
 
         async with factory() as session:
             record = await ScheduleRepository(session).get(
                 project_id=project.id, schedule_id=schedule.id
             )
+            pending = (
+                await session.scalars(
+                    select(TaskScheduleOccurrence).where(
+                        TaskScheduleOccurrence.schedule_id == schedule.id
+                    )
+                )
+            ).one()
+            snapshot = occurrence_snapshot(pending)
+        assert pending.id == first.occurrence_id
+        assert pending.status == "PENDING" and pending.run_id is None
+        assert pending.outcome is None and pending.settled_at is None
+        assert pending.worker_id == first.worker_id == "original-worker"
+        assert pending.lease_token_hash == lease_token_hash("synthetic-original-token")
+        assert pending.lease_generation == first.lease_generation == 1
+        assert pending.attempt_count == 1
+        assert snapshot.schedule_id == schedule.id and snapshot.occurrence_at == occurrence
+        assert snapshot.configuration_version == 1 and snapshot.claim_row_version == 2
+        assert snapshot.intent.project_id == project.id and snapshot.intent.actor_id == owner.id
+        assert snapshot.intent.skill_version_id == version.id
+        assert snapshot.intent.task_key == "analyze"
+        assert snapshot.intent.input_json == {} and snapshot.intent.sources == {}
         assert record.next_run_at == following
+        assert record.run_count == 0 and record.row_version == 2
 
         # 別 Project から同じ schedule は読めない (越境は不存在と同じ扱い)。
         async with factory() as session:
@@ -1794,6 +1837,156 @@ async def _creation_project(factory: async_sessionmaker[AsyncSession]) -> TaskRu
     async with factory() as session, session.begin():
         await _insert_in_order(session, organization, project)
     return intent
+
+
+async def _creation_with_enabled_skill(
+    factory: async_sessionmaker[AsyncSession], intent: TaskRunIntent
+) -> tuple[CreateRunCommand, UUID]:
+    """実 gate 用の非空 snapshot を、同組織の公開版/原 Manifest/明示有効化で構成する。
+
+    既存の純幂等 fixture は変えず、新しい試験だけで可用性の親行を実 DB へ保存する。
+    """
+    async with factory() as session:
+        project = await session.get(Project, intent.project_id)
+        assert project is not None
+        organization_id = project.organization_id
+    now = datetime.now(UTC)
+    source = _skill_source(organization_id)
+    interpretation = _interpretation(source, checksum="sha256:" + "ac" * 32)
+    skill = Skill(
+        id=uuid4(),
+        organization_id=organization_id,
+        key=f"db-create-skill-{uuid4().hex[:8]}",
+        name="Creation binding guard",
+        description="",
+        status="PUBLISHED",
+        created_at=now,
+        updated_at=now,
+    )
+    version = SkillVersion(
+        id=intent.skill_version_id,
+        skill_id=skill.id,
+        version="1.0.0",
+        skill_source_id=source.id,
+        interpretation_id=interpretation.id,
+        status="PUBLISHED",
+        gate_report_json={"passed": True, "findings": []},
+        published_by=intent.actor_id,
+        published_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+    manifest_payload = {"manifest_version": "projectmind/v1alpha1", "tasks": []}
+    checksum = "sha256:" + sha256_hex(canonical_json(manifest_payload))
+    manifest = RuntimeManifest(
+        id=uuid4(),
+        interpretation_id=interpretation.id,
+        skill_version_id=version.id,
+        manifest_version="projectmind/v1alpha1",
+        manifest_json=manifest_payload,
+        checksum=checksum,
+        created_at=now,
+    )
+    binding = ProjectSkillVersion(
+        id=uuid4(),
+        project_id=intent.project_id,
+        skill_version_id=version.id,
+        enabled_by=intent.actor_id,
+        enabled_at=now,
+        disabled_at=None,
+    )
+    async with factory() as session, session.begin():
+        await _insert_in_order(session, source, interpretation, skill, version, manifest, binding)
+    snapshot = {
+        "skill_version_id": str(version.id),
+        "sort_order": 0,
+        "manifest_checksum": checksum,
+        "manifest": manifest_payload,
+        "config_snapshot": {},
+    }
+    command = creation_command(intent)
+    return (
+        replace(
+            command,
+            skill_snapshots_json=(snapshot,),
+            task_snapshot_json={**command.task_snapshot_json, "skill_snapshots": [snapshot]},
+        ),
+        organization_id,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["disable", "deprecate"])
+async def test_current_skill_binding_rejects_new_run_but_preserves_original_replay(
+    migrated_database_url: str, operation: str
+) -> None:
+    """非空 snapshot の初回保存後、下架した版の新鍵だけを拒否して原 Run を保全する。
+
+    本試験は直列に commit した可用性/rollback を検査する。低層の authorize callback は
+    原会話の資格証明ではなく、実 DB の同時取鎖競争も別の受入試験を必要とする。
+    """
+    async with _session_factory(migrated_database_url) as factory:
+        intent = await _creation_project(factory)
+        command, organization_id = await _creation_with_enabled_skill(factory, intent)
+        async with factory() as session, session.begin():
+            first = await RunRepository(session).create_idempotent(command)
+        assert not first.idempotent_replay
+        async with factory() as session:
+            original = await session.get(Run, first.run_id)
+            assert original is not None
+            original_task = deepcopy(original.task_snapshot_json)
+            original_hash = original.request_hash
+        async with factory() as session, session.begin():
+            repository = SkillRepository(session)
+            if operation == "disable":
+                await repository.disable_project_skill_version(
+                    organization_id=organization_id,
+                    project_id=intent.project_id,
+                    skill_version_id=intent.skill_version_id,
+                    authorize=lambda: datetime.now(UTC),
+                )
+            else:
+                await repository.deprecate_skill_version(
+                    organization_id=organization_id,
+                    skill_version_id=intent.skill_version_id,
+                    authorize=lambda: datetime.now(UTC),
+                )
+        with pytest.raises(PublishedTaskNotFoundError, match="Published task is not available"):
+            async with factory() as session, session.begin():
+                await RunRepository(session).create_idempotent(
+                    replace(command, idempotency_key="after-lifecycle-change")
+                )
+        async with factory() as session, session.begin():
+            runs = RunRepository(session)
+            confirmed = await runs.find_task_run_replay(
+                intent=intent, idempotency_key=command.idempotency_key
+            )
+            replay = await runs.create_idempotent(command)
+        assert confirmed is not None and confirmed.run_id == first.run_id
+        assert replay.run_id == first.run_id and replay.idempotent_replay
+        async with factory() as session:
+            saved = await session.get(Run, first.run_id)
+            assert saved is not None
+            assert saved.task_snapshot_json == original_task
+            assert saved.request_hash == original_hash
+            assert (
+                await session.scalar(
+                    select(func.count()).select_from(Run).where(Run.project_id == intent.project_id)
+                )
+                == 1
+            )
+            for model, column in (
+                (RunSegment, RunSegment.run_id),
+                (RunSkillSnapshot, RunSkillSnapshot.run_id),
+                (RunEvent, RunEvent.run_id),
+                (OutboxMessage, OutboxMessage.aggregate_id),
+            ):
+                assert (
+                    await session.scalar(
+                        select(func.count()).select_from(model).where(column == first.run_id)
+                    )
+                    == 1
+                )
 
 
 @pytest.mark.asyncio

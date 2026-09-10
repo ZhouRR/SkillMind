@@ -82,9 +82,14 @@ class _RunRepositoryBase:
             )
             if int(found or 0) != len(proposal_refs):
                 raise ValueError("Checkpoint contains foreign ChangeProposal refs")
-        # Artifact の正本は未導入なので所有権を検証不能な参照は引き続き拒否する。
-        if checkpoint.get("artifact_refs"):
-            raise ValueError("Interaction checkpoint references an unavailable Artifact")
+        artifact_refs = frozenset(checkpoint.get("artifact_refs", []))
+        if artifact_refs:
+            # Result/download と同じ原 byte 照合を使い、可変 output path で補签しない。
+            from projectmind.artifacts.repository import ArtifactRepository
+
+            verified = await ArtifactRepository(self._session).verified_refs(run_id, artifact_refs)
+            if verified != artifact_refs:
+                raise ValueError("Interaction checkpoint references an unavailable Artifact")
 
     async def _reject_cancelled_execution(self, run_id: UUID) -> None:
         """Run lock/lease/identity 検証後、取消済み実行の追加書込を採番より前に拒否する。

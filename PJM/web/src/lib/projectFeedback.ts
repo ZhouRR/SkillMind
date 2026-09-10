@@ -6,7 +6,7 @@ import type { UiMessages } from './i18n/messages'
 export interface ProjectFailure {
   key: 'sessionExpired' | 'csrfRejected' | 'adminRequired' | 'notFound' | 'invalidRequest'
     | 'keyConflict' | 'versionConflict' | 'versionExhausted' | 'needsArchive'
-    | 'blockedByRuns' | 'blockedBySchedules' | 'blockedByMemberAudit' | 'unknown' | 'loadFailed'
+    | 'blockedByRuns' | 'blockedBySchedules' | 'blockedByMemberAudit' | 'blockedByDocumentUploads' | 'unknown' | 'loadFailed'
 }
 
 /** 409 の理由を区別し、読取失敗を write の rollback と解釈しない。 */
@@ -26,6 +26,7 @@ export function projectFailure(error: unknown, mutation: boolean): ProjectFailur
       if (code === 'project_delete_blocked_by_runs') return { key: 'blockedByRuns' }
       if (code === 'project_delete_blocked_by_schedules') return { key: 'blockedBySchedules' }
       if (code === 'project_delete_blocked_by_member_audit') return { key: 'blockedByMemberAudit' }
+      if (code === 'project_delete_blocked_by_document_uploads') return { key: 'blockedByDocumentUploads' }
     }
   }
   return { key: mutation ? 'unknown' : 'loadFailed' }

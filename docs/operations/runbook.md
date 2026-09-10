@@ -57,26 +57,33 @@ v2 同 session 的 GET 不轮换 CSRF，但可能更新 idle；login-context 占
 | --- | --- |
 | 移出成员后仍可访问 | 系统 ADMIN 不依赖 membership，成员移除不是账户降权 |
 | 归档后仍有 Run/Effect | 归档不是取消或全局停写，按原对象停止协议处理 |
-| 无 Run 但 DELETE 失败 | TaskSchedule 或成员审计仍会阻止删除；原版本冲突须核对，不拆外键、删历史或循环 DELETE |
+| 无 Run 但 DELETE 失败 | TaskSchedule、成员审计、文档/上传意图/清理记录仍会阻止删除；原版本冲突须核对，不拆外键、删历史或循环 DELETE |
 | 204 后仍有附件/备份 | 只证明所列元数据删除，不证明字节清理；不递归删目录 |
 
 写入修复先确认权限、目标和可恢复性；正本见[项目生命周期](../design/project-lifecycle.md)。
 
 ## 文档保存与删除的只读分诊
 
-保留原 Project/document ID、时点、status/code 与版本；未返回 ID 的上传保留受控本地路径，不把正文/内部 key 放入报告。
+保留原 Project/document ID、upload key、时点、status/code 与版本；未返回文档 ID 时用原 upload key 查询，受控本地文件另行保全，不把正文/内部 storage key 放入报告。
 
 | 症状 | 核对与停止条件 |
 | --- | --- |
-| 同名 409 且占用增加 | blob 先于 metadata 约束写入，可能有孤立对象；不重复上传验证 |
+| 同名 409 | 当前目录或 PENDING 路径占用会在新 PUT 前拒绝；旧 writer/历史孤立对象另查，不重复上传验证 |
+| 上传 409 document_upload_pending / document_upload_key_conflict | 原 key 未确认发布 / 已绑定另一输入；人工 GET 原 key，不换 key 或自动重传 |
+| 原上传 GET PENDING / 404 | 分别是已有预约未确认发布 / 当前未查到；都不证明旧 POST 不会继续，不释放占用 |
+| 原上传 GET PUBLISHED，但目录无文档 | 是原发布回执，元数据可能后来已删；不补建目录，仍按原 ID 区分当前事实 |
 | 上传 413 document_upload_too_large | 文件实际字节或 multipart 总量超限，未进入本次存储；缩小文件/请求，不以伪报 Content-Length 绕过 |
 | 上传 422 invalid_document_upload | 检查单 file、可选 UTF-8 folder、重复字段/参数及完整结束边界；不导出上传正文或解析器细节 |
-| 目录仅部分完成 | 逐文件分清确认与未知；done 不是成功数，不重传整批 |
+| 上传 422 invalid_document_upload_key | 新协议要求单个非 nil UUID header；核对 Web/API 版本，不自动生成新 key 重试旧未知请求 |
+| 目录仅部分完成 | 分清已发布/确定拒绝/未知/未发送；未知暂停后续，GET 原回执确认后人工继续，不重传整批 |
 | DELETE 报错后 ID 消失 | metadata 可能已提交；404 不恢复清理，不循环删或改删同路径新 ID |
 | 删除 409 引用冲突 | document_in_use 保留原引用；document_references_unavailable 表示历史无法核实。核对原 Run/调度/保留 occurrence，不删审计、改 hash 或换同名 ID 绕过 |
-| 204 后对象仍在 | S3 适配器可能吞权限等错误，授权存储负责人核对原对象，不清 Project 前缀 |
+| 204 后对象仍在 | 核对响应版本与原对象；当前 204 不证明旧版本、在途 PUT 或全部字节已清理，不清 Project 前缀 |
 | 下载 409 document_content_missing / document_content_invalid | 分别表示原 blob 缺失或内容不符；保留原 ID/hash，按获准恢复点核对，不改 checksum 或用同名文件掩盖损坏 |
-| 下载 503 document_storage_unavailable | 核对获准存储的可达性与权限，不当作文件缺失或删除成功；不导出内部 key/SDK 正文 |
+| 文档 503 document_storage_unavailable | 先核对 namespace 配置/原归属及获准存储的可达性和权限；上传/删除仍可能已写入，不当作缺失、回滚或清理成功 |
+| 原上传/删除 503 document_upload_unavailable | 原意图/发布回执或占用无法核实；保全原身份，不删记录或补造成功 |
+| 删除后配额未减少 | 新意图 size 始终保留；旧元数据占用同事务转入0039清理记录。当前未接精确清理结算，不以 204 或对象查无手工扣减 |
+| 升级/切存储后旧附件不可读 | 0037 不自动绑定旧行；保留原 ID/key/hash，按[归属边界](../design/document-lifecycle.md#存储归属与配置切换)核验，不填当前摘要或复用旧 UUID 绕过。不导出内部连接/key/SDK 正文 |
 | 预览超限或样式/图片消失 | 实际 byte 超限会停止读取；HTML 只保留静态结构，主动内容/资源不展示。可下载原文件，但下载后打开的安全性另行判断 |
 
 没有通用孤立对象清理/配额修复 CLI；[文档生命周期](../design/document-lifecycle.md)定义修正边界。冻结输入不能靠同名重传修复。

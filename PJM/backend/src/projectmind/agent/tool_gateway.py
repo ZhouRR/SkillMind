@@ -6,9 +6,10 @@ import asyncio
 import time
 from collections import defaultdict, deque
 from collections.abc import Mapping
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, replace
 from typing import Any, Protocol
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server, tool
 from jsonschema import Draft202012Validator, FormatChecker
@@ -23,6 +24,7 @@ from projectmind.agent.evidence import (
     ToolInvocation,
     invocation_fingerprint,
     new_evidence_ref,
+    validate_artifact_publication,
 )
 from projectmind.agent.tool_policy import ToolExecutionPolicy, capability_to_sdk_name
 from projectmind.core.hashing import canonical_json
@@ -42,9 +44,8 @@ class RunToolContext:
     user_id: UUID
     tool: RegisteredTool
     workspace: RunWorkspace
-    # 凍結された Run snapshot 本体。扇出 Provider が受限の子 context を派生させるために要る
-    # (計画 §23 D7)。Provider は frozen dataclass しか受け取らないため、ここから権限や上限を
-    # 広げることはできない——`replace()` で狭める方向にしか使えない。
+    # 子 context の派生元であり、実行権そのものではない。frozen dataclass の入れ子は可変なので、
+    # 権限縮小は共有 resolver、監査の提交権は Worker-private scope と DB lease で検証する。
     run: RunContext | None = None
 
 
@@ -62,7 +63,7 @@ class ToolProvider(Protocol):
     async def execute(
         self, context: RunToolContext, arguments: Mapping[str, Any]
     ) -> ProviderToolResult:
-        """検証済み引数で read-only Provider を実行する。"""
+        """検証済み引数で登録された scope 内の Provider を実行する。"""
 
         ...
 
@@ -145,6 +146,8 @@ class ToolInvocationCoordinator:
     ) -> None:
         """PreToolUse で再検証し、AUTO_ALLOW 後に FIFO queue へ登録する。"""
 
+        # Hook caller の入れ子を await 前に切り離し、許可した内容と fingerprint を固定する。
+        arguments = deepcopy(dict(arguments))
         registered = self._policy.authorize(tool_name, arguments)
         invocation = self._invocation(
             registered, arguments, tool_use_id=tool_use_id, session_id=session_id
@@ -152,7 +155,7 @@ class ToolInvocationCoordinator:
         lease = await self._audit_writer.start_authorized(invocation)
         key = (tool_name, invocation.request_fingerprint)
         async with self._lock:
-            self._pending[key].append(lease)
+            self._pending[key].append(deepcopy(lease))
 
     async def register_denied(
         self,
@@ -209,8 +212,8 @@ class ToolInvocationCoordinator:
             run_attempt_id=self._context.run_attempt_id,
             agent_session_id=UUID(session_id),
             sdk_tool_use_id=tool_use_id,
-            tool=registered,
-            arguments=dict(arguments),
+            tool=deepcopy(registered),
+            arguments=deepcopy(dict(arguments)),
             request_fingerprint=invocation_fingerprint(registered.sdk_name, arguments),
         )
 
@@ -231,13 +234,14 @@ class ToolGateway:
         self._bindings = dict(bindings)
         self._coordinator = coordinator
         self._audit_writer = audit_writer
+        self._dispatched: set[UUID] = set()
 
     async def invoke_mcp(self, tool_name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         """MCP SDK が要求する content/is_error 形式へ結果を変換する。"""
 
         binding = self._bindings[tool_name]
         try:
-            response = await self._invoke(binding, arguments)
+            response = await self._invoke(binding, deepcopy(dict(arguments)))
             return {"content": [{"type": "text", "text": _compact_json(response)}]}
         except ToolGatewayError as error:
             payload = {
@@ -264,11 +268,32 @@ class ToolGateway:
     async def _invoke(
         self, binding: _ResolvedBinding, arguments: Mapping[str, Any]
     ) -> dict[str, Any]:
-        """監査 lease を取得し、成功時だけ Evidence と response を確定する。"""
+        """初回の実行権だけを消費し、既存の未決/失敗を再実行しない。"""
 
         lease = await self._coordinator.claim(binding.registered.sdk_name, arguments)
-        if lease.status == "SUCCEEDED" and lease.result is not None:
-            return dict(lease.result)
+        replay = lease.status == "SUCCEEDED" and lease.result is not None
+        replay_result = deepcopy(lease.result) if replay else None
+        if not replay:
+            if (
+                lease.status != "RUNNING"
+                or not lease.is_new
+                or lease.tool_call_id in self._dispatched
+            ):
+                raise ToolGatewayError(
+                    "unavailable", "Tool invocation cannot be executed again", retryable=False
+                )
+            # 次の await より先に一度だけ消費する。確認が失敗しても自動的に実行権を返さない。
+            self._dispatched.add(lease.tool_call_id)
+        try:
+            # PreToolUse の許可と MCP 到着は別時点。新規と成功再読取の両方で現在の原権限を確認する。
+            await self._audit_writer.verify_dispatch(lease)
+        except Exception as error:
+            raise ToolGatewayError(
+                "unavailable", "Tool execution authority could not be verified", retryable=False
+            ) from error
+        if replay:
+            assert replay_result is not None
+            return self._checked_response(binding, replay_result)
         started = time.monotonic()
         try:
             result = await binding.provider.execute(
@@ -285,31 +310,40 @@ class ToolGateway:
             )
             if not result.evidence:
                 raise ToolGatewayError("unavailable", "Tool returned no evidence", retryable=False)
-            if "evidence_refs" in result.response:
+            if "evidence_refs" in result.response or "artifact_refs" in result.response:
                 raise ToolGatewayError(
                     "unavailable",
-                    "Provider must not assign evidence references",
+                    "Provider must not assign platform references",
                     retryable=False,
                 )
             records = tuple(
-                EvidenceRecord(evidence_ref=new_evidence_ref(), draft=draft)
+                EvidenceRecord(
+                    evidence_ref=new_evidence_ref(),
+                    draft=replace(
+                        draft,
+                        source_locator=deepcopy(dict(draft.source_locator)),
+                        metadata=deepcopy(dict(draft.metadata or {})),
+                        artifact=replace(draft.artifact) if draft.artifact else None,
+                    ),
+                    artifact_ref=f"art_{uuid4().hex}" if draft.artifact else None,
+                )
                 for draft in result.evidence
             )
-            response = dict(result.response)
+            response = deepcopy(dict(result.response))
             response["evidence_refs"] = [record.evidence_ref for record in records]
-            _reject_sensitive_response_keys(response)
-            _validate_response(binding.definition.response_schema, response)
-            if len(_compact_json(response).encode("utf-8")) > self._context.limits.max_output_bytes:
-                raise ToolGatewayError("too_large", "Tool response is too large", retryable=False)
-            duration_ms = _duration_ms(started)
-            return await self._audit_writer.complete(
-                lease,
-                result=response,
-                evidence=records,
-                duration_ms=duration_ms,
-            )
+            if binding.registered.capability == "workspace.write/v2":
+                response["artifact_refs"] = [
+                    record.artifact_ref for record in records if record.artifact_ref is not None
+                ]
+            if binding.registered.capability == "workspace.write/v2" or any(
+                record.artifact_ref is not None for record in records
+            ):
+                if lease.invocation is None:
+                    raise ValueError("Artifact publication requires the original invocation")
+                validate_artifact_publication(lease.invocation, result=response, evidence=records)
+            response = self._checked_response(binding, response)
         except ToolProviderError as error:
-            await self._audit_writer.fail(
+            await self._record_failure(
                 lease,
                 code=error.code,
                 retryable=error.retryable,
@@ -317,7 +351,7 @@ class ToolGateway:
             )
             raise ToolGatewayError(error.code, error.message, retryable=error.retryable) from None
         except ToolGatewayError as error:
-            await self._audit_writer.fail(
+            await self._record_failure(
                 lease,
                 code=error.code,
                 retryable=error.retryable,
@@ -325,7 +359,7 @@ class ToolGateway:
             )
             raise
         except Exception as error:
-            await self._audit_writer.fail(
+            await self._record_failure(
                 lease,
                 code="unavailable",
                 retryable=False,
@@ -333,6 +367,51 @@ class ToolGateway:
             )
             raise ToolGatewayError(
                 "unavailable", "Tool execution failed", retryable=False
+            ) from error
+        try:
+            return await self._audit_writer.complete(
+                lease,
+                result=response,
+                evidence=records,
+                duration_ms=_duration_ms(started),
+            )
+        except Exception as error:
+            # commit 応答喪失は rollback の証拠ではない。fail 更新や Provider 再実行をせず、
+            # 次の原 invocation 照会で保存済み成功か未決かを判定する。
+            raise ToolGatewayError(
+                "unavailable", "Tool result audit could not be confirmed", retryable=False
+            ) from error
+
+    def _checked_response(
+        self, binding: _ResolvedBinding, response: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """新規/保存済み応答を同じ契約と出力上限で検証し、元の JSON を変更しない。"""
+
+        candidate = deepcopy(dict(response))
+        _reject_sensitive_response_keys(candidate)
+        _validate_response(binding.definition.response_schema, candidate)
+        try:
+            size = len(_compact_json(candidate).encode("utf-8"))
+        except (TypeError, ValueError, UnicodeError) as error:
+            raise ToolGatewayError(
+                "unavailable", "Tool response is not valid JSON", retryable=False
+            ) from error
+        if size > self._context.limits.max_output_bytes:
+            raise ToolGatewayError("too_large", "Tool response is too large", retryable=False)
+        return candidate
+
+    async def _record_failure(
+        self, lease: ToolAuditLease, *, code: str, retryable: bool, duration_ms: int
+    ) -> None:
+        """失敗監査も原実行権に従い、DB 詳細を公開 Tool 応答へ出さない。"""
+
+        try:
+            await self._audit_writer.fail(
+                lease, code=code, retryable=retryable, duration_ms=duration_ms
+            )
+        except Exception as error:
+            raise ToolGatewayError(
+                "unavailable", "Tool failure audit could not be confirmed", retryable=False
             ) from error
 
 

@@ -171,9 +171,30 @@ class ProjectsApi(AccountsApi):
                     Path(__file__).resolve().parents[3] / "contracts/examples/run-detail.v1.json"
                 ).read_text()
             )
-            result.update(self.run())
+            # 概要だけの idempotent_replay を厳密な detail response に混ぜない。
+            result.update({key: value for key, value in self.run().items() if key in result})
         elif self.with_run and suffix == f"projects/{ARCHIVED}/runs/{RUN}/evaluations":
             result = {"evaluations": []}
+        elif len(parts) == 5 and parts[2] == "runs" and parts[4] == "artifacts":
+            # 原 Run の公開索引は既存 fixture では合法な空。モデル ref を公開済みへ補わない。
+            result = []
+        elif len(parts) == 6 and parts[2] == "runs" and parts[4:] == ["evaluations", "page"]:
+            # 新評価 UI の空履歴も元 Result に結び、旧一括 GET へ fallback させない。
+            detail = getattr(self, "body", None)
+            if detail is None:
+                detail = json.loads(
+                    (
+                        Path(__file__).resolve().parents[3]
+                        / "contracts/examples/run-detail.v1.json"
+                    ).read_text()
+                )
+            result = {
+                "project_id": parts[1],
+                "run_id": parts[3],
+                "result_id": detail["result"]["result_id"],
+                "items": [],
+                "next_cursor": None,
+            }
         if result is None and failure is None:
             self.unexpected.append(f"Unknown Project read: {suffix}")
             await route.abort()

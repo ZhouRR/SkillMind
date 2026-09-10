@@ -61,9 +61,19 @@ def test_budget_migration_matches_the_three_persistent_models(
         migrated = sa.Table(name, metadata, *elements)
         expected = _contract(models[name])
         if name == "run_budget_reservations":
-            # 0030 を後続版の DDL に書き換えず、0035 が追加する差分だけを明示で除く。
-            for column in ("invocation_id", "invocation_json", "invocation_checksum"):
+            # 旧 DDL を書き換えず、0035 の束縛と 0043 の開始 owner だけを除く。
+            for column in (
+                "invocation_id",
+                "invocation_json",
+                "invocation_checksum",
+                "invocation_start_owner_hash",
+            ):
                 del expected["columns"][column]
+            owner_checks = {
+                check for check in expected["checks"] if "invocation_start_owner_hash" in check
+            }
+            assert len(owner_checks) == 1
+            expected["checks"] -= owner_checks
             expected["unique"] -= {("invocation_id",), ("id", "invocation_id")}
             expected["checks"].remove(
                 "(invocation_id IS NULL AND invocation_json IS NULL "

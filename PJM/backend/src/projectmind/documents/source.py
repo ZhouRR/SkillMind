@@ -95,13 +95,13 @@ class DatabaseProjectDocumentSource:
 
         async with self._session_factory() as session:
             try:
-                document, storage_key = await DocumentRepository(session).get_for_download(
+                document, reference = await DocumentRepository(session).get_for_download(
                     project_id=project_id, document_id=document_id
                 )
             except DocumentNotFoundError:
                 return None
         data = await read_document_bytes(
-            self._file_storage, storage_key=storage_key, document=document
+            self._file_storage, reference=reference, document=document
         )
         return ProjectDocumentContent(
             document_id=document.document_id,

@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import pytest
 from fakes import FakeDocumentService
 from fastapi.testclient import TestClient
+
+from projectmind.documents.domain import DocumentStorageUnavailableError
+from projectmind.storage import FileStorageError
 
 
 def test_upload_document_returns_created_metadata(client: TestClient) -> None:
@@ -16,6 +21,7 @@ def test_upload_document_returns_created_metadata(client: TestClient) -> None:
     project_id = uuid4()
     response = client.post(
         f"/api/v1/projects/{project_id}/documents",
+        headers={"Idempotency-Key": str(uuid4())},
         data={"folder": "specs"},
         files={"file": ("overview.md", b"# Overview\n", "text/markdown")},
     )
@@ -26,6 +32,10 @@ def test_upload_document_returns_created_metadata(client: TestClient) -> None:
     assert body["name"] == "overview.md"
     assert body["folder"] == "specs"
     assert "storage_key" not in body  # 内部 key は公開しない。
+    assert set(body) == {
+        "document_id", "project_id", "folder", "name", "size", "mime", "checksum",
+        "uploaded_by", "created_at",
+    }
     assert fake.uploaded == [("specs", "overview.md", b"# Overview\n")]
 
 
@@ -89,6 +99,7 @@ def test_upload_over_quota_returns_unprocessable(client: TestClient) -> None:
     client.app.state.document_service = FakeDocumentService(quota_exceeded=True)
     response = client.post(
         f"/api/v1/projects/{uuid4()}/documents",
+        headers={"Idempotency-Key": str(uuid4())},
         files={"file": ("big.txt", b"x" * 32, "text/plain")},
     )
 
@@ -102,8 +113,32 @@ def test_upload_duplicate_name_returns_conflict(client: TestClient) -> None:
     client.app.state.document_service = FakeDocumentService(conflict=True)
     response = client.post(
         f"/api/v1/projects/{uuid4()}/documents",
+        headers={"Idempotency-Key": str(uuid4())},
         files={"file": ("overview.md", b"# Overview\n", "text/markdown")},
     )
 
     assert response.status_code == 409
     assert response.json()["code"] == "document_conflict"
+
+
+@pytest.mark.parametrize("error_type", [DocumentStorageUnavailableError, FileStorageError])
+def test_upload_storage_refusal_or_unknown_uses_static_no_store_problem(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, error_type: type[Exception],
+) -> None:
+    """未設定/別保存先と PUT 不明を同じ 503 に閉じ、原 key や SDK 本文を返さない。"""
+
+    fake = FakeDocumentService()
+    operation = AsyncMock(side_effect=error_type("private namespace key and endpoint"))
+    monkeypatch.setattr(fake, "upload_document", operation)
+    client.app.state.document_service = fake
+    response = client.post(
+        f"/api/v1/projects/{uuid4()}/documents",
+        headers={"Idempotency-Key": str(uuid4())},
+        files={"file": ("note.txt", b"note", "text/plain")},
+    )
+    assert response.status_code == 503
+    assert response.json()["code"] == "document_storage_unavailable"
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert "private" not in response.text and "endpoint" not in response.text
+    operation.assert_awaited_once()

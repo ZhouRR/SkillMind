@@ -103,6 +103,8 @@ SkillVersion 属 Organization，Project 复用精确版并独立计算 readiness
 
 硬门禁：来源/hash/解释 identity 一致，蓝图合法，trace 指向真实文件，Tool requirement 版本格式正确，无 credential/路径逃逸/任意宿主命令授权/远程可执行引用，效果正确区分 observe/propose/apply，Manifest checksum/lineage/发布者有效。
 
+来源检查覆盖全部 Manifest/Blueprint Task 的 key/capability 对应，不只验证当前选中的任务。Blueprint target 必须能在原蓝图解析；Blueprint 与动态契约 trace 的文件/行均核对保存的原索引及可用文本，证明范围见[来源核验](task-flow.md#身份来源与失败)。契约 trace 的 field_path 保留现行 Schema 与原文，不将尚未定义的业务字段定位语义当作已经验证，也不据此断言模型理解正确。
+
 未知业务概念、缺可选 Schema/ViewSpec/fixture、Project 未配资源、推荐步骤不完整或 assisted 标签本身不构成 hard error；必要配置仍须创建前补齐，warning 必须明确接受。
 
 蓝图只由 Interpreter 生成；parse Draft 可为 null，发布报 capability_blueprint_missing。Manifest Schema 容纳 Draft 不等于免发布 gate，不能从旧 workflow/data_sources 反推蓝图。
@@ -129,9 +131,13 @@ SkillVersion 属 Organization，Project 复用精确版并独立计算 readiness
 | 项目启用 | 本组织精确 PUBLISHED；活动关系重复启用读原行 |
 | 项目停用 | 保留记录，禁止新发现/创建，不取消或修改旧 Run |
 | 同版重新启用 | 当前拒绝恢复已停用关系，不是普通开关 |
-| 删除废弃版 | 独立入口检查 Run/Proposal/Composition 引用，不作升级/回滚步骤 |
+| 删除废弃版 | 独立入口检查执行/配置引用，不作升级/回滚步骤 |
 
 当前不能将已停用 v1 直接重新启用；只能选仍合法可用的精确版，或重新解释发布新版本，后者不是恢复原身份。不删关系/直接改 DB 绕过。组合不复活废弃版，Run/Schedule 不跟随 latest。
+
+删除保护覆盖 RunSkillSnapshot、ChangeProposal、SkillCompositionItem、TaskSchedule、TaskScheduleOccurrence 和 FrontendModuleVersion，状态不影响保留。任一引用存在即 409；仅无引用的废弃版连同其 Manifest/项目启用关系一起删除，不删除来源、解释、资源或审计来解除拒绝。外键 RESTRICT 与版本锁保留，真实并发仍需验收。
+
+版本管理复核[业务事务中的原 ADMIN 会话](skill-interpretation.md#版本管理的授权事务)。新建 Run 和调度保存/恢复在各自事务固定精确版本及启用关系；锁外曾解析成功不保证保存时仍可用。原 Run 确认、调度暂停/归档不因此要求版本重新可用。
 
 ### 可审计的重新启用与回滚
 

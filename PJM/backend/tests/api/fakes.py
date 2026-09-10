@@ -27,6 +27,16 @@ from projectmind.documents import (
     DocumentNotFoundError,
     StoredDocument,
 )
+from projectmind.documents.domain import (
+    DocumentUploadAlreadyPublishedError,
+    DocumentUploadClosedError,
+    DocumentUploadClosureNotFoundError,
+    DocumentUploadKeyConflictError,
+    DocumentUploadNotFoundError,
+    DocumentUploadPendingError,
+    StoredDocumentUpload,
+    StoredDocumentUploadClosure,
+)
 from projectmind.effects import (
     ApprovalDecision,
     ApprovalSource,
@@ -45,6 +55,15 @@ from projectmind.evaluations import (
     InvalidEvaluationRevisionError,
     StoredEvaluation,
     StoredEvaluationRevision,
+)
+from projectmind.evaluations.domain import (
+    EvaluationResultMismatchError,
+    EvaluationSubmissionConflictError,
+    EvaluationSubmissionNotFoundError,
+    InvalidEvaluationCursorError,
+    StoredEvaluationPage,
+    StoredEvaluationSubmission,
+    evaluation_request_hash,
 )
 from projectmind.integrations import (
     CreateIntegrationCommand,
@@ -1261,12 +1280,12 @@ class FakeSkillService:
         return self.stored
 
     async def create_version_draft(
-        self, *, organization_id: UUID, interpretation_id: UUID
+        self, *, access: UserAccess, interpretation_id: UUID
     ) -> StoredSkillVersion:
         """Assisted の明示 acceptance warning を持つ固定 DRAFT を返す。"""
 
         return self._skill_version(
-            organization_id=organization_id,
+            organization_id=access.actor.organization_id,
             interpretation_id=interpretation_id,
             status=SkillVersionStatus.DRAFT,
         )
@@ -1327,27 +1346,29 @@ class FakeSkillService:
             skill_version_id=skill_version_id,
         )
 
-    async def publish_skill_version(self, **kwargs: object) -> StoredSkillVersion:
+    async def publish_skill_version(
+        self, *, access: UserAccess, skill_version_id: UUID, accepted_warnings: frozenset[str]
+    ) -> StoredSkillVersion:
         """未受理 warning を API が 409 へ変換できるよう拒否する。"""
 
-        del kwargs
+        del access, skill_version_id, accepted_warnings
         raise SkillPublishGateError("unresolved findings")
 
     async def deprecate_skill_version(
-        self, *, organization_id: UUID, skill_version_id: UUID
+        self, *, access: UserAccess, skill_version_id: UUID
     ) -> StoredSkillVersion:
         """指定 version を DEPRECATED とした固定結果を返す。"""
 
         return self._skill_version(
-            organization_id=organization_id,
+            organization_id=access.actor.organization_id,
             skill_version_id=skill_version_id,
             status=SkillVersionStatus.DEPRECATED,
         )
 
-    async def delete_skill_version(self, *, organization_id: UUID, skill_version_id: UUID) -> None:
+    async def delete_skill_version(self, *, access: UserAccess, skill_version_id: UUID) -> None:
         """削除要求を記録し、参照ありを模す version だけ 409 経路へ落とす。"""
 
-        del organization_id
+        del access
         if skill_version_id == self.blocked_delete_version_id:
             raise SkillVersionDeleteBlockedError(
                 "SkillVersion is still referenced by run or composition records"
@@ -1357,31 +1378,30 @@ class FakeSkillService:
     async def enable_project_skill_version(
         self,
         *,
-        organization_id: UUID,
+        access: UserAccess,
         project_id: UUID,
         skill_version_id: UUID,
-        enabled_by: UUID,
     ) -> StoredProjectSkillVersion:
         """Project へ精確版を有効化した固定監査結果を返す。"""
 
         return self._project_skill_version(
-            organization_id=organization_id,
+            organization_id=access.actor.organization_id,
             project_id=project_id,
             skill_version_id=skill_version_id,
-            enabled_by=enabled_by,
+            enabled_by=access.actor.user_id,
         )
 
     async def disable_project_skill_version(
         self,
         *,
-        organization_id: UUID,
+        access: UserAccess,
         project_id: UUID,
         skill_version_id: UUID,
     ) -> StoredProjectSkillVersion:
         """Project の有効化を停用した固定監査結果を返す。"""
 
         return self._project_skill_version(
-            organization_id=organization_id,
+            organization_id=access.actor.organization_id,
             project_id=project_id,
             skill_version_id=skill_version_id,
             enabled_by=uuid4(),
@@ -1689,9 +1709,23 @@ class FakeEvaluationService:
         self.invalid_revision = invalid_revision
         self.items: list[StoredEvaluation] = []
         self.received: CreateEvaluationCommand | None = None
+        self.result_id = uuid4()
+        self.scope: tuple[UUID, UUID] | None = None
+        self.accesses: list[UserAccess] = []
+        self.failure: Exception | None = None
+        self.submissions: dict[tuple[UUID, UUID], tuple[str, StoredEvaluation]] = {}
 
-    async def create(self, command: CreateEvaluationCommand) -> StoredEvaluation:
+    async def create(
+        self, command: CreateEvaluationCommand, *, access: UserAccess,
+    ) -> StoredEvaluation:
         """Request command を記録し、原値補完済みの固定評価を追加する。"""
+
+        self._access(access, project_id=command.project_id, run_id=command.run_id)
+        assert command.user_id == access.actor.user_id
+        return self._append(command)
+
+    def _append(self, command: CreateEvaluationCommand) -> StoredEvaluation:
+        """従来追加と新原要求の初回で同じ保存応答を使用する。"""
 
         if self.invalid_revision:
             raise InvalidEvaluationRevisionError("Revision pointer does not exist")
@@ -1699,7 +1733,7 @@ class FakeEvaluationService:
         now = datetime(2026, 7, 3, 12, 0, tzinfo=UTC)
         evaluation = StoredEvaluation(
             evaluation_id=uuid4(),
-            result_id=uuid4(),
+            result_id=self.result_id,
             run_id=command.run_id,
             user_id=command.user_id,
             rating=command.rating,
@@ -1719,11 +1753,93 @@ class FakeEvaluationService:
         self.items.append(evaluation)
         return evaluation
 
-    async def list_for_run(self, *, project_id: UUID, run_id: UUID) -> tuple[StoredEvaluation, ...]:
+    async def list_for_run(
+        self, *, project_id: UUID, run_id: UUID, access: UserAccess,
+    ) -> tuple[StoredEvaluation, ...]:
         """指定 Run に追加済みの評価だけを作成順で返す。"""
 
-        assert project_id
+        self._access(access, project_id=project_id, run_id=run_id)
         return tuple(item for item in self.items if item.run_id == run_id)
+
+    async def submit(
+        self, command: CreateEvaluationCommand, *, submission_key: UUID, result_id: UUID,
+        access: UserAccess,
+    ) -> StoredEvaluationSubmission:
+        """共有原要求 hash で fixture の再送を区別し、DB の競争証明とは分ける。"""
+
+        self._access(access, project_id=command.project_id, run_id=command.run_id)
+        assert command.user_id == access.actor.user_id
+        self._result(result_id)
+        checksum = evaluation_request_hash(
+            command, result_id=result_id, submission_key=submission_key,
+        )
+        original = self.submissions.get((access.actor.user_id, submission_key))
+        if original is not None:
+            if checksum != original[0]:
+                raise EvaluationSubmissionConflictError("Original request differs")
+            return StoredEvaluationSubmission(
+                project_id=command.project_id, run_id=command.run_id,
+                submission_key=submission_key, evaluation=original[1], idempotent_replay=True,
+            )
+        evaluation = self._append(command)
+        self.submissions[(access.actor.user_id, submission_key)] = (checksum, evaluation)
+        return StoredEvaluationSubmission(
+            project_id=command.project_id, run_id=command.run_id,
+            submission_key=submission_key, evaluation=evaluation,
+        )
+
+    async def get_submission(
+        self, *, project_id: UUID, run_id: UUID, submission_key: UUID, result_id: UUID,
+        access: UserAccess,
+    ) -> StoredEvaluationSubmission:
+        """同じ actor の原要求だけを確認し、類似する履歴から成功を補わない。"""
+
+        self._access(access, project_id=project_id, run_id=run_id)
+        self._result(result_id)
+        original = self.submissions.get((access.actor.user_id, submission_key))
+        if original is None:
+            raise EvaluationSubmissionNotFoundError("Original request was not found")
+        return StoredEvaluationSubmission(
+            project_id=project_id, run_id=run_id, submission_key=submission_key,
+            evaluation=original[1], idempotent_replay=True,
+        )
+
+    async def list_page(
+        self, *, project_id: UUID, run_id: UUID, access: UserAccess, limit: int = 20,
+        after: UUID | None = None,
+    ) -> StoredEvaluationPage:
+        """同時刻も ID で安定順化し、未知/別 Result の cursor を固定拒否する。"""
+
+        self._access(access, project_id=project_id, run_id=run_id)
+        ordered = sorted(self.items, key=lambda item: (item.created_at, item.evaluation_id))
+        start = 0
+        if after is not None:
+            positions = [index for index, item in enumerate(ordered) if item.evaluation_id == after]
+            if not positions:
+                raise InvalidEvaluationCursorError("Invalid Evaluation cursor")
+            start = positions[0] + 1
+        items = tuple(ordered[start:start + limit])
+        return StoredEvaluationPage(
+            project_id=project_id, run_id=run_id, result_id=self.result_id, items=items,
+            next_cursor=items[-1].evaluation_id if start + limit < len(ordered) else None,
+        )
+
+    def _access(self, access: UserAccess, *, project_id: UUID, run_id: UUID) -> None:
+        """元 credential の伝達と URL の scope を観測し、資格失効を注入可能にする。"""
+
+        self.accesses.append(access)
+        if self.failure is not None:
+            raise self.failure
+        if self.scope is None:
+            self.scope = (project_id, run_id)
+        if self.scope != (project_id, run_id):
+            raise RunNotFoundError("synthetic-private-other-run")
+
+    def _result(self, result_id: UUID) -> None:
+        """表示対象を勝手に現在 Result へ置き換えない。"""
+
+        if result_id != self.result_id:
+            raise EvaluationResultMismatchError("synthetic-private-current-result")
 
 
 class FakeDocumentService:
@@ -1745,11 +1861,19 @@ class FakeDocumentService:
         self.deleted: list[UUID] = []
         self.content = b"document-body"
         self.max_upload_bytes = 25 * 1024 * 1024
+        self.uploads: dict[tuple[UUID, UUID, UUID], StoredDocumentUpload] = {}
+        self.upload_fingerprints: dict[tuple[UUID, UUID, UUID], tuple[str, str, bytes, str]] = {}
+        self.upload_queries: list[tuple[UUID, UUID, UserAccess]] = []
+        self.upload_targets: dict[tuple[UUID, UUID, UUID], UUID] = {}
+        self.upload_closures: dict[tuple[UUID, UUID, UUID], StoredDocumentUploadClosure] = {}
+        self.closure_requests: list[tuple[UUID, UUID, UserAccess]] = []
+        self.closure_queries: list[tuple[UUID, UUID, UserAccess]] = []
 
     async def upload_document(
         self,
         *,
         project_id: UUID,
+        upload_key: UUID,
         access: UserAccess,
         folder: str,
         name: str,
@@ -1758,14 +1882,75 @@ class FakeDocumentService:
     ) -> StoredDocument:
         """受信 upload を記録し、拒否 scenario では domain error を返す。"""
 
+        identity = (project_id, access.actor.user_id, upload_key)
+        fingerprint = (folder, name, data, content_type)
+        previous = self.uploads.get(identity)
+        if previous is not None:
+            if self.upload_fingerprints.get(identity) != fingerprint:
+                raise DocumentUploadKeyConflictError("private original fingerprint")
+            if identity in self.upload_closures:
+                raise DocumentUploadClosedError("private closed state")
+            if previous.document is None:
+                raise DocumentUploadPendingError("private pending state")
+            return previous.document
         if self.quota_exceeded:
             raise UploadRejectedError("project_quota_exceeded", "Project storage quota is exceeded")
         if self.conflict:
             raise DocumentConflictError(f"Document already exists: {folder}/{name}")
         self.uploaded.append((folder, name, data))
-        return _fake_document(
+        document = _fake_document(
             project_id, access.actor.user_id, folder, name, len(data), content_type
         )
+        self.uploads[identity] = StoredDocumentUpload(
+            upload_key=upload_key, project_id=project_id, state="PUBLISHED",
+            created_at=document.created_at, document=document,
+        )
+        self.upload_fingerprints[identity] = fingerprint
+        self.upload_targets[identity] = document.document_id
+        return document
+
+    async def get_upload(
+        self, *, project_id: UUID, upload_key: UUID, access: UserAccess,
+    ) -> StoredDocumentUpload:
+        """同じ actor/Project の原記録だけを読み、削除後も元の公開 metadata を保持する。"""
+
+        self.upload_queries.append((project_id, upload_key, access))
+        upload = self.uploads.get((project_id, access.actor.user_id, upload_key))
+        if upload is None:
+            raise DocumentUploadNotFoundError("private upload key")
+        return upload
+
+    async def close_upload(
+        self, *, project_id: UUID, upload_key: UUID, access: UserAccess,
+    ) -> tuple[StoredDocumentUploadClosure, bool]:
+        """fixture の原対象だけに独立回执を作る。競争・transaction は実 service 側で検証する。"""
+
+        self.closure_requests.append((project_id, upload_key, access))
+        identity = (project_id, access.actor.user_id, upload_key)
+        original = self.uploads.get(identity)
+        if original is None:
+            raise DocumentUploadNotFoundError("private upload key")
+        if original.state == "PUBLISHED":
+            raise DocumentUploadAlreadyPublishedError("private published receipt")
+        if identity in self.upload_closures:
+            return self.upload_closures[identity], False
+        closure = StoredDocumentUploadClosure(
+            upload_key=upload_key, project_id=project_id,
+            document_id=self.upload_targets[identity], closed_at=datetime.now(UTC),
+        )
+        self.upload_closures[identity] = closure
+        return closure, True
+
+    async def get_upload_closure(
+        self, *, project_id: UUID, upload_key: UUID, access: UserAccess,
+    ) -> StoredDocumentUploadClosure:
+        """同じ原作者の閉鎖回执だけを取得し、書込 fake は呼ばない。"""
+
+        self.closure_queries.append((project_id, upload_key, access))
+        closure = self.upload_closures.get((project_id, access.actor.user_id, upload_key))
+        if closure is None:
+            raise DocumentUploadClosureNotFoundError("private closure key")
+        return closure
 
     async def list_documents(self, *, project_id: UUID) -> list[StoredDocument]:
         """固定の一件を Project 反映で返す。"""

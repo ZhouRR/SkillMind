@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import io
 from urllib.parse import urlparse
+from uuid import UUID
 
 from minio import Minio
 from minio.error import MinioException, S3Error
@@ -19,10 +20,12 @@ from projectmind.storage.blob import (
     BlobNotFoundError,
     BlobReadLimitExceededError,
     FileStorageError,
+    StorageNamespace,
     StoredBlob,
     sanitize_object_key,
     validate_read_limit,
 )
+from projectmind.storage.namespace import canonical_s3_endpoint, make_s3_namespace
 
 _SHA256_METADATA_KEY = "sha256"
 _READ_CHUNK_BYTES = 64 * 1024
@@ -31,33 +34,50 @@ _READ_CHUNK_BYTES = 64 * 1024
 class S3FileStorage:
     """単一 bucket に blob を保存する MinIO/S3 backend。"""
 
-    def __init__(self, *, endpoint: str, bucket: str, access_key: str, secret_key: str) -> None:
-        """Endpoint の scheme から secure 可否を決め、遅延接続の client を保持する。"""
+    def __init__(
+        self, *, endpoint: str, bucket: str, access_key: str, secret_key: str,
+        namespace_id: UUID | None = None,
+    ) -> None:
+        """検証済み endpoint と非 credential の namespace を遅延接続 client に固定する。"""
 
-        parsed = urlparse(endpoint)
+        canonical = canonical_s3_endpoint(endpoint)
+        parsed = urlparse(canonical)
         self._bucket = bucket
+        self._namespace = make_s3_namespace(
+            namespace_id=namespace_id, endpoint=canonical, bucket=bucket
+        ) if namespace_id is not None else None
         self._client = Minio(
-            parsed.netloc or parsed.path,
+            parsed.netloc,
             access_key=access_key,
             secret_key=secret_key,
             secure=parsed.scheme == "https",
         )
 
+    @property
+    def namespace(self) -> StorageNamespace | None:
+        """旧未設定を新配置に推測で結び付けず、構築時の immutable な識別を返す。"""
+
+        return self._namespace
+
     async def put(self, key: str, data: bytes, *, content_type: str) -> StoredBlob:
-        """Blob を保存し、sha256 を metadata へ書き込んで返す。"""
+        """成功した PUT だけに保存結果を返し、失敗から未保存や補償削除を推測しない。"""
 
         safe = sanitize_object_key(key)
         payload = bytes(data)
         digest = f"sha256:{sha256_hex(payload)}"
-        await asyncio.to_thread(
-            self._client.put_object,
-            self._bucket,
-            safe,
-            io.BytesIO(payload),
-            len(payload),
-            content_type=content_type,
-            metadata={_SHA256_METADATA_KEY: digest},
-        )
+        try:
+            await asyncio.to_thread(
+                self._client.put_object,
+                self._bucket,
+                safe,
+                io.BytesIO(payload),
+                len(payload),
+                content_type=content_type,
+                metadata={_SHA256_METADATA_KEY: digest},
+            )
+        except (MinioException, HTTPError, OSError) as error:
+            # 失敗応答や await の取消は遠端 PUT の停止・未保存を証明しない。
+            raise FileStorageError("Blob storage is unavailable") from error
         return StoredBlob(key=safe, size=len(payload), content_type=content_type, sha256=digest)
 
     async def get(self, key: str, *, max_bytes: int | None = None) -> bytes:
@@ -99,32 +119,44 @@ class S3FileStorage:
             raise FileStorageError("Blob storage is unavailable") from error
 
     async def delete(self, key: str) -> None:
-        """存在しなくてもエラーにせず削除する。"""
+        """元 object の明確な不存在だけを冪等成功とし、拒否や通信未知を隠さない。"""
 
         safe = sanitize_object_key(key)
         try:
             await asyncio.to_thread(self._client.remove_object, self._bucket, safe)
-        except S3Error:
-            return
+        except S3Error as error:
+            if error.code in {"NoSuchKey", "NoSuchObject"}:
+                return
+            raise FileStorageError("Blob storage is unavailable") from error
+        except (MinioException, HTTPError, OSError) as error:
+            raise FileStorageError("Blob storage is unavailable") from error
 
     async def exists(self, key: str) -> bool:
-        """Stat 成否で存在有無を返す。"""
+        """元 object の明確な不存在だけを False とし、存否不明は例外に保つ。"""
 
         safe = sanitize_object_key(key)
         try:
             await asyncio.to_thread(self._client.stat_object, self._bucket, safe)
-        except S3Error:
-            return False
+        except S3Error as error:
+            if error.code in {"NoSuchKey", "NoSuchObject"}:
+                return False
+            raise FileStorageError("Blob storage is unavailable") from error
+        except (MinioException, HTTPError, OSError) as error:
+            raise FileStorageError("Blob storage is unavailable") from error
         return True
 
     async def stat(self, key: str) -> StoredBlob:
-        """Metadata を返し、無ければ BlobNotFoundError を送出する。"""
+        """Metadata と正確な object 不存在を区別し、内部 key や SDK 詳細を公開しない。"""
 
         safe = sanitize_object_key(key)
         try:
             info = await asyncio.to_thread(self._client.stat_object, self._bucket, safe)
         except S3Error as error:
-            raise BlobNotFoundError(f"Blob not found: {key}") from error
+            if error.code in {"NoSuchKey", "NoSuchObject"}:
+                raise BlobNotFoundError("Blob content is not available") from error
+            raise FileStorageError("Blob storage is unavailable") from error
+        except (MinioException, HTTPError, OSError) as error:
+            raise FileStorageError("Blob storage is unavailable") from error
         metadata = getattr(info, "metadata", None) or {}
         digest = metadata.get(f"x-amz-meta-{_SHA256_METADATA_KEY}") or metadata.get(
             _SHA256_METADATA_KEY, ""

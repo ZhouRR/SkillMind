@@ -1,4 +1,4 @@
-import { isApiTimestamp, isUuid, sameUuid } from '../lib/validation'
+import { apiTimestampMicroseconds, isApiTimestamp, isNonNilUuid, isUuid, sameUuid } from '../lib/validation'
 import { DOCUMENT_PREVIEW_MAX_BYTES } from '../lib/documentPreview'
 import {
   API_BASE,
@@ -25,6 +25,45 @@ export interface ProjectDocumentRecord {
 /** Project 内で参照可能な文書の一覧 response。 */
 export interface DocumentListRecord {
   documents: ProjectDocumentRecord[]
+}
+
+/** 原 upload の multipart 内容。選択時に固定し、再描画後の File path を読み直さない。 */
+export interface DocumentUploadBody {
+  readonly file: File
+  readonly name: string
+  readonly folder: string
+}
+
+/** 現在目录とは独立した原 upload の公開受理記録。削除済み document も原 metadata を持つ。 */
+export type DocumentUploadRecord = {
+  upload_key: string
+  project_id: string
+  created_at: string
+} & ({ state: 'PENDING'; document: null } | { state: 'PUBLISHED'; document: ProjectDocumentRecord })
+
+/** 原 key を read-only で照合する。404 は将来の受理を否定せず、client は再送しない。 */
+export async function loadDocumentUpload(
+  projectId: string, uploadKey: string, signal?: AbortSignal,
+): Promise<DocumentUploadRecord> {
+  if (!isNonNilUuid(uploadKey)) throw new Error('A valid original upload key is required')
+  const value = await requestApiJson(
+    `${API_BASE}/projects/${encodeURIComponent(projectId)}/document-uploads/${encodeURIComponent(uploadKey)}`,
+    { signal, cache: 'no-store' }, 200,
+  )
+  if (!isRecord(value) || Object.keys(value).length !== 5
+    || !isUuid(value.upload_key) || !sameUuid(value.upload_key, uploadKey)
+    || !isUuid(value.project_id) || !sameUuid(value.project_id, projectId)
+    || !isApiTimestamp(value.created_at)) throw new Error('Upload receipt did not match its contract')
+  const identity = { upload_key: value.upload_key, project_id: value.project_id, created_at: value.created_at }
+  if (value.state === 'PENDING' && value.document === null) return { ...identity, state: 'PENDING', document: null }
+  if (value.state === 'PUBLISHED') {
+    const document = parseDocument(value.document, projectId)
+    if (apiTimestampMicroseconds(document.created_at) < apiTimestampMicroseconds(identity.created_at)) {
+      throw new Error('Publication predates the original upload')
+    }
+    return { ...identity, state: 'PUBLISHED', document }
+  }
+  throw new Error('Upload receipt did not match its state')
 }
 
 /** Project 所有の文書 metadata 一覧を取得する。 */
@@ -75,32 +114,33 @@ export function withInferredContentType(file: File, name: string): File {
   return inferred ? new File([file], name, { type: inferred }) : file
 }
 
-/** ProjectWriteActor の CSRF token 付きで 1 file を multipart upload する。folder は相対 path から導く。 */
+/** 呼出元の原 key と固定 multipart だけを送信し、内部で key 生成や再送を行わない。 */
 export async function uploadProjectDocument(
   projectId: string,
-  file: File,
+  uploadKey: string,
+  body: DocumentUploadBody,
   csrfToken: string,
   signal?: AbortSignal,
 ): Promise<ProjectDocumentRecord> {
-  const relativePath = file.webkitRelativePath || file.name
-  const segments = relativePath.split('/').filter((segment) => segment.length > 0)
-  const name = segments.at(-1) ?? file.name
-  const folder = segments.slice(0, -1).join('/')
+  if (!isNonNilUuid(uploadKey)) throw new Error('A valid original upload key is required')
   const form = new FormData()
   // filename は単一 segment にし、親 path は folder field で渡す (server は name に path segment を許可しない)。
-  form.append('file', withInferredContentType(file, name), name)
-  form.append('folder', folder)
-  return parseDocument(await requestApiJson(
+  form.append('file', body.file, body.name)
+  form.append('folder', body.folder)
+  const document = parseDocument(await requestApiJson(
     `${API_BASE}/projects/${encodeURIComponent(projectId)}/documents`,
     {
       // Content-Type は設定しない。browser が multipart boundary 付きで付与する。
       method: 'POST',
-      headers: { 'X-CSRF-Token': csrfToken },
+      headers: { 'X-CSRF-Token': csrfToken, 'Idempotency-Key': uploadKey },
       body: form,
       signal,
+      cache: 'no-store',
     },
     201,
   ), projectId)
+  if (document.size !== body.file.size) throw new Error('Upload response size does not match the original file')
+  return document
 }
 
 /** 原 ID の metadata 削除 204 のみを受け入れ、blob の完全清理とは解釈しない。 */

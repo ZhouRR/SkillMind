@@ -249,7 +249,8 @@ async def test_prepared_existing_start_does_not_connect_again(tmp_path: Path) ->
     events: list[AgentEvent] = []
     with pytest.raises(BudgetUnavailableError):
         await _collect(engine.execute(repeated), events)
-    assert len(case.sessions.sessions) == 7
+    # 別所有者は束縛確認で拒否され、B の transaction にも進まない。
+    assert len(case.sessions.sessions) == 6
     assert len(case.factory.clients) == len(case.database.observations) == 1
     assert not events
     assert case.database.reservations[0].invocation_id == prepared.invocation_id

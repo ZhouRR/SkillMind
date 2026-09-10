@@ -16,7 +16,9 @@ from projectmind.agent.domain import (
     AgentEvent,
     AgentEventType,
     AgentSessionRef,
+    EngineHealth,
     ForkContext,
+    ResumeContext,
     RunContext,
     RunLimits,
     RunWorkspace,
@@ -116,7 +118,31 @@ class ContextBuilder:
         )
 
 
-class HangingEngine:
+class _UnsupportedEngineOperations:
+    """個別 fake の責務外の SDK 操作を、Protocol の欠落ではなく明示失敗として扱う。"""
+
+    def resume(self, context: ResumeContext) -> AsyncIterator[AgentEvent]:
+        """RESUME を実装しない fixture で再開経路が選ばれた場合に失敗させる。"""
+
+        raise AssertionError("Unexpected resume")
+
+    def fork(self, context: ForkContext) -> AsyncIterator[AgentEvent]:
+        """FORK 専用 fixture 以外で分岐経路が選ばれた場合に失敗させる。"""
+
+        raise AssertionError("Unexpected fork")
+
+    async def interrupt(self, session_ref: AgentSessionRef) -> None:
+        """中断を実装しない fixture が意図せず取消を受け入れないようにする。"""
+
+        raise AssertionError("Unexpected interruption")
+
+    async def health(self) -> EngineHealth:
+        """実行 fixture から外部 Engine の診断へ進む経路を許可しない。"""
+
+        raise AssertionError("Unexpected health check")
+
+
+class HangingEngine(_UnsupportedEngineOperations):
     """最初の event の後、terminal event を返さず待機し続ける test AgentEngine。"""
 
     def __init__(self, first_event: AgentEvent) -> None:
@@ -131,7 +157,7 @@ class HangingEngine:
         await asyncio.sleep(3600)
 
 
-class SequenceEngine:
+class SequenceEngine(_UnsupportedEngineOperations):
     """固定 AgentEvent 列を返す test AgentEngine。"""
 
     def __init__(self, events: list[AgentEvent], *, delay: float = 0) -> None:
@@ -154,7 +180,7 @@ class SequenceEngine:
         raise AssertionError(f"Unexpected interrupt: {session}")
 
 
-class ForkingEngine:
+class ForkingEngine(_UnsupportedEngineOperations):
     """前 Session を parent として fork し、固定 event 列を返す test engine。"""
 
     def __init__(self, events: list[AgentEvent]) -> None:
@@ -183,7 +209,7 @@ class ForkingEngine:
         raise AssertionError(f"Unexpected interrupt: {session}")
 
 
-class InterruptibleEngine:
+class InterruptibleEngine(_UnsupportedEngineOperations):
     """Interrupt 呼出し後に SESSION_INTERRUPTED を返す test engine。"""
 
     def __init__(self, started: AgentEvent, interrupted: AgentEvent) -> None:
@@ -443,7 +469,7 @@ async def test_durable_cancel_intent_interrupts_active_session(tmp_path: Path) -
         """実際に最初の Session event が保存された後だけ取消 intent を見せる。"""
 
         assert run_id == claimed.run_id
-        return service.append_agent_event.await_count > 0
+        return bool(service.append_agent_event.await_count > 0)
 
     service.is_cancellation_requested = AsyncMock(side_effect=cancellation_requested)
     engine = InterruptibleEngine(

@@ -130,7 +130,17 @@
       "total_cost_usd": 0.01
     },
     "validation": {
-      "schema_valid": true
+      "schema_valid": true,
+      "evidence_refs_valid": true,
+      "change_proposal_refs_valid": true,
+      "outcome_envelope_valid": true,
+      "reference_checks": {
+        "version": "projectmind.result-reference-checks/v1",
+        "evidence": "RUN_OWNERSHIP",
+        "proposals": "RUN_OWNERSHIP_AND_STATE",
+        "effects": "PLATFORM_RECORD_MATCH",
+        "artifacts": "NOT_VERIFIED"
+      }
     },
     "created_at": "2026-07-02T13:01:00Z"
   },

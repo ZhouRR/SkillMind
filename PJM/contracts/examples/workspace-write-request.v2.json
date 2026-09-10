@@ -1,0 +1,5 @@
+{
+  "path": "output/empty-report.txt",
+  "content": "",
+  "purpose": "Save an explicitly empty report as an immutable Artifact."
+}

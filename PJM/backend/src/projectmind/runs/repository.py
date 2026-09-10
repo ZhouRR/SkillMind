@@ -22,6 +22,7 @@ from projectmind.db.models import (
     Evidence,
     InteractionResponse,
     OutboxMessage,
+    Project,
     Run,
     RunAttempt,
     RunEvent,
@@ -84,6 +85,8 @@ from projectmind.runs.domain import (
 from projectmind.runs.execution_outcome import user_cancellation_event
 from projectmind.runs.repository_effects import EffectOperationsMixin
 from projectmind.runs.repository_interactions import InteractionOperationsMixin
+from projectmind.skills.domain import PublishedTaskNotFoundError
+from projectmind.skills.repository import SkillRepository
 
 
 class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
@@ -155,7 +158,9 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
                 )
             return self._to_created_run(existing, idempotent_replay=True)
 
-        validated_skills = await self._validate_skill_snapshots(command.skill_snapshots_json)
+        validated_skills = await self._validate_skill_snapshots(
+            command.skill_snapshots_json, project_id=command.project_id
+        )
 
         segment_id = uuid4()
         initial_segment = RunSegment(
@@ -1051,11 +1056,19 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
         )
 
     async def _validate_skill_snapshots(
-        self, snapshots: tuple[dict[str, Any], ...]
+        self, snapshots: tuple[dict[str, Any], ...], *, project_id: UUID
     ) -> tuple[dict[str, Any], ...]:
-        """Run 作成前に精確な published Version と frozen Manifest checksum を検証する。"""
+        """新規 INSERT のみ、現在の有効化と frozen Manifest checksum を同じ TX で固定する。"""
 
         validated: list[dict[str, Any]] = []
+        if not snapshots:
+            return ()
+        # 上位 use case が資格と Project を固定済み。原 Run の重放には今日の可用性を課さない。
+        organization_id = await self._session.scalar(
+            select(Project.organization_id).where(Project.id == project_id)
+        )
+        if not isinstance(organization_id, UUID):
+            raise PublishedTaskNotFoundError("Published task is not available")
         for snapshot in snapshots:
             try:
                 skill_version_id = UUID(str(snapshot["skill_version_id"]))
@@ -1065,9 +1078,11 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
                 config_snapshot = snapshot.get("config_snapshot", {})
             except (KeyError, TypeError, ValueError) as error:
                 raise ValueError("Run skill snapshot is invalid") from error
-            version = await self._session.get(SkillVersion, skill_version_id)
-            if version is None or version.status != "PUBLISHED":
-                raise ValueError("Run requires an explicit published SkillVersion")
+            await SkillRepository(self._session).require_current_task_binding(
+                organization_id=organization_id,
+                project_id=project_id,
+                skill_version_id=skill_version_id,
+            )
             manifest = (
                 await self._session.scalars(
                     select(RuntimeManifest).where(

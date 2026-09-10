@@ -1,0 +1,11 @@
+{
+  "status": "success",
+  "provider": "workspace",
+  "path": "output/empty-report.txt",
+  "content_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "bytes_written": 0,
+  "created": true,
+  "evidence_refs": ["ev_empty_report"],
+  "artifact_refs": ["art_empty_report"],
+  "warnings": []
+}

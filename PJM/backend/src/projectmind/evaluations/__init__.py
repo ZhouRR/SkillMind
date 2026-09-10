@@ -2,22 +2,38 @@
 
 from projectmind.evaluations.domain import (
     CreateEvaluationCommand,
+    EvaluationIntegrityError,
+    EvaluationResultMismatchError,
     EvaluationResultNotFoundError,
     EvaluationRevisionProposal,
+    EvaluationSubmissionConflictError,
+    EvaluationSubmissionNotFoundError,
     EvaluationVerdict,
+    InvalidEvaluationCommandError,
+    InvalidEvaluationCursorError,
     InvalidEvaluationRevisionError,
     StoredEvaluation,
+    StoredEvaluationPage,
     StoredEvaluationRevision,
+    StoredEvaluationSubmission,
 )
 from projectmind.evaluations.service import EvaluationService
 
 __all__ = [
     "CreateEvaluationCommand",
+    "EvaluationIntegrityError",
+    "EvaluationResultMismatchError",
     "EvaluationResultNotFoundError",
     "EvaluationRevisionProposal",
     "EvaluationService",
+    "EvaluationSubmissionConflictError",
+    "EvaluationSubmissionNotFoundError",
     "EvaluationVerdict",
+    "InvalidEvaluationCommandError",
+    "InvalidEvaluationCursorError",
     "InvalidEvaluationRevisionError",
     "StoredEvaluation",
+    "StoredEvaluationPage",
     "StoredEvaluationRevision",
+    "StoredEvaluationSubmission",
 ]

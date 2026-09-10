@@ -108,17 +108,21 @@ Preflight 显示精确 SkillVersion/task、输入、资源与 readiness；服务
 
 摘要、交付、Findings、Evidence、限制、Proposal/Effect、Evaluation 分区。confidence 不是正确率，Artifact ref 不是已验证下载对象。
 
+附件区读取同 Project/Run 的发布索引，区分结果采用与未采用；原引用没有对应保存记录时不可下载。保存时 v1/v2 验证范围保持原义，下载的实际字节校验、期限及旧响应隔离见[可信附件](results-evaluation.md#可信附件的发布与读取)。
+
 RunDocumentSnapshots 独立展示冻结槽位/模式/成员，即使尚无 Result；FROZEN 不代表已物化或仍可下载。缺失/历史不可用/校验失败与合法空数组区分，不查今天目录补旧事实，长 ID/hash 局部换行或滚动。
 
 ### Evaluation
 
 AI 原值、修订建议、理由与历史并列；多建议不自动合并，不续行。精确指针/包络规则见[结果设计](results-evaluation.md)。
 
-当前表单一次一条修订、历史无分页、POST 无原请求幂等，state/abort 未闭合全部竞态；未知不套 Run 创建的重放协议，按[评价界面责任](results-evaluation.md#提交未知与界面责任)接续。
+评价区独立保留草稿、已发送原键/内容和服务端分页历史；同次可提交多条修订，合法 null 与指针不存在分开显示。提交未知时只读核对原回执，或人工沿原键/原内容重发；历史相似记录不解除未知。归档仅可读取，换身份/结果不迁移原动作，具体门禁见[评价界面责任](results-evaluation.md#提交未知与界面责任)。
 
 ## Task Center
 
 列表使用服务端 task_id/latest_run 与精确版本，不由 UUID 或最近 N 条历史推导。已有选择任务、立即执行、创建/暂停/恢复/归档 Schedule；没有任意任务编辑/复制、对话建 Task 或结果比较。
+
+只读[任务流程预览](task-flow.md#只读任务预览)按精确版本展开单个 Task，将任务声明、Skill 共享规则/确认/效果、原来源与当前全蓝图 readiness 分开。未评估不显示“无需资源”，预览不启动 Run、不推测步骤完成；Skill 页默认流程、冻结 Run 与事件联动仍按 R03 接续。
 
 ScheduleDialog 共用实际输入/文档字段；创建关闭销毁未保存草稿，换 actor/Project 不接收旧结果。独立调度管理页不依赖可见任务卡片，分页/状态/字面搜索在服务端执行；归档和失效精确任务仍有只读入口，不跟随 latest。
 

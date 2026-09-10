@@ -13,7 +13,7 @@
 | EffectExecution | APPLIED 是已保存 Provider 完成结果；FAILED 不证明远端未变，VERIFICATION_FAILED 属于此对象 |
 | Run / Evidence | 分别是分析流程与审计依据，不代替远端执行事实 |
 
-Effect attempt_no 不是 RunAttempt。before_ref/after_ref 可空，仓库 before Evidence 仅定位基线，不保证逆向补丁。Result 中模型 effects 摘要尚未逐项核验，不能替代平台记录，见[结果引用](results-evaluation.md#引用可信性的修正要求)。
+Effect attempt_no 不是 RunAttempt。before_ref/after_ref 可空，仓库 before Evidence 仅定位基线，不保证逆向补丁。新 Result 的模型 effects 已逐项核对保存的批准/执行/回读记录；这不证明原远端执行身份或修复下述可靠性缺口，范围与历史兼容见[结果引用](results-evaluation.md#效果摘要核对到哪一步)。
 
 ## 调用与批准链路
 

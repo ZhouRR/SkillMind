@@ -85,6 +85,10 @@ function lastRun(overrides: Partial<TaskLastRunRecord> = {}): TaskLastRunRecord 
 }
 
 describe('buildRows', () => {
+  it('retains unknown resource count when readiness has not been assessed', () => {
+    const value = task({ readiness: null })
+    expect(buildRows([value], { tasks: [value], schedules: [] })[0]?.requirementCount).toBeNull()
+  })
   it('takes the last run from the descriptor instead of a history window', () => {
     // 以前はここで Run 履歴の先頭 N 件と突き合わせていたため、N 件より古い task が
     // 「未実行」と表示された——欠落ではなく誤った値。件数上限に依存しない形は server 側の投影だけ。

@@ -1,0 +1,17 @@
+.evaluationSection fieldset { min-width: 0; margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 10px; }
+.evaluationSection fieldset > * + * { margin-top: 12px; }
+.evaluationSection legend { padding: 0 6px; }
+.evaluationSection input, .evaluationSection textarea, .evaluationSection select { min-width: 0; max-width: 100%; }
+.evaluationSection .evaluationForm, .evaluationLookup, .evaluationHistory { margin-top: 20px; }
+.evaluationSection .evaluationSubmission { padding: 14px; border: 1px solid var(--border); border-radius: 10px; }
+.evaluationSection .formRow { flex-wrap: wrap; }
+.evaluationSection .formRow > label { min-width: 0; flex: 1 1 140px; }
+.evaluationSection .formRow button { white-space: normal; }
+.evaluationSection pre, .evaluationSection code { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.evaluationSection .evaluationRevision > div > div { min-width: 0; }
+.evaluationSection .evaluationRevision span, .evaluationOriginal span { display: block; color: var(--text-muted); }
+.evaluationSection fieldset:disabled { opacity: .72; }
+@media (max-width: 600px) {
+  .evaluationSection .evaluationRevision > div { grid-template-columns: minmax(0, 1fr); }
+  .evaluationSection .evaluationItem > div { flex-wrap: wrap; }
+}

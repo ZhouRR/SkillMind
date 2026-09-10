@@ -4,22 +4,19 @@ import {
   loadProjectDocuments,
   loadProjectDocumentText,
   projectDocumentContentHref,
-  uploadProjectDocument,
   type ProjectDocumentRecord,
 } from '../api'
 import { useMessages } from '../i18n'
 import { useDocumentDeletion } from '../hooks/useDocumentDeletion'
+import { useDocumentUpload } from '../hooks/useDocumentUpload'
+import { useDocumentUploadClosure } from '../hooks/useDocumentUploadClosure'
 import { useResourceQuery, type SessionEnded } from '../hooks/useResourceRequest'
-import { DOCUMENT_REQUEST_POLICY, documentUploadFailure } from '../lib/documentFeedback'
+import { DOCUMENT_REQUEST_POLICY } from '../lib/documentFeedback'
 import { DOCUMENT_PREVIEW_MAX_BYTES as PREVIEW_MAX_BYTES, documentPreviewHtml } from '../lib/documentPreview'
 import { formatByteSize, formatLocalTimestamp } from '../lib/presentation'
 import { EmptyState, LoadingSkeleton, ModalDialog, useConfirmDialog } from './PageElements'
-
-/** 多 file/目録 upload の非同期状態。 */
-type UploadState =
-  | { status: 'idle' }
-  | { status: 'uploading'; done: number; total: number }
-  | { status: 'error'; message: string }
+import { DocumentUploadStatus } from './DocumentUploadStatus'
+import { DocumentUploadClosure } from './DocumentUploadClosure'
 
 /** 画面内 preview の描画種別。拡張子登録で excel 等の viewer を後付けする拡張点。 */
 export type DocumentPreviewKind = 'text' | 'html'
@@ -78,13 +75,11 @@ export function DocumentManagerPanel(props: DocumentManagerProps) {
 }
 
 /** 現在の文書目录と原削除意図を分けて所有する。 */
-function DocumentManagerBody({ projectId, csrfToken, readOnly, onSessionEnded }: DocumentManagerProps) {
+function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessionEnded }: DocumentManagerProps) {
   const messages = useMessages()
-  const [uploadState, setUploadState] = useState<UploadState>({ status: 'idle' })
   const [preview, setPreview] = useState<PreviewRequest | null>(null)
   const [revision, setRevision] = useState(0)
   const { confirm, confirmDialog } = useConfirmDialog()
-  const uploadController = useRef<AbortController | null>(null)
   const previewRequest = useRef<PreviewRequest | null>(null)
   const previewSequence = useRef(0)
   const mounted = useRef(false)
@@ -93,58 +88,42 @@ function DocumentManagerBody({ projectId, csrfToken, readOnly, onSessionEnded }:
   const refresh = useCallback(() => setRevision((current) => current + 1), [])
   const deletion = useDocumentDeletion({ projectId, csrfToken, readOnly, onSessionEnded, onDeleted: refresh })
   const { observeFailure } = deletion
-  const loader = useCallback(async (signal: AbortSignal) => {
-    try { return await loadProjectDocuments(projectId, signal) }
-    catch (error: unknown) { if (!signal.aborted) observeFailure(error); throw error }
-  }, [projectId, observeFailure])
-  const list = useResourceQuery(`${projectId}:${revision}`, loader, onSessionEnded, DOCUMENT_REQUEST_POLICY)
+  const closureGate = useRef<() => boolean>(() => false)
+  const closeClosureLookup = useRef<() => void>(() => undefined)
+  const upload = useDocumentUpload({ actorId, projectId, csrfToken, readOnly: readOnly || !!deletion.denied,
+    canWrite: () => deletion.canWrite() && !confirmPending.current && !closureGate.current(),
+    canRead: () => deletion.canRead() && !confirmPending.current,
+    onDenied: deletion.observeDenial, onPublished: refresh, beforeBatchAction: () => closeClosureLookup.current() })
+  const closure = useDocumentUploadClosure({ actorId, projectId, csrfToken,
+    readOnly: readOnly || !!deletion.denied || !!upload.denied,
+    canRead: () => upload.canRead(), canWrite: () => deletion.canWrite() && !confirmPending.current && !upload.denied,
+    claim: upload.claimClosure, claimRecovery: upload.claimRecoveredClosure,
+    release: upload.releaseClosure, accept: upload.acceptClosure, acceptRecovery: upload.acceptRecoveredClosure,
+    beforeAction: upload.closeRecovery,
+    onDenied: upload.observeDenial })
+  closureGate.current = closure.locked
+  closeClosureLookup.current = closure.recovery.close
+  const loader = useCallback((signal: AbortSignal) => loadProjectDocuments(projectId, signal), [projectId])
+  const list = useResourceQuery(`${projectId}:${revision}`, loader, () => undefined, DOCUMENT_REQUEST_POLICY,
+    true, observeFailure)
   const documentsState = list.failure ? { status: 'error' as const, message: messages.documentsPanel.failures[list.failure.key] }
     : list.data ? { status: 'ready' as const, documents: list.data } : { status: 'loading' as const }
-  const blocked = readOnly || !!deletion.denied || deletion.phase !== 'idle' || confirming || uploadState.status === 'uploading'
+  const blocked = readOnly || !!deletion.denied || deletion.phase !== 'idle' || confirming || upload.isLocked() || closure.locked()
   const busyId = deletion.phase === 'sending' ? deletion.intent?.document_id ?? '__blocked__' : blocked ? '__blocked__' : null
 
   useLayoutEffect(() => {
     mounted.current = true
     return () => {
       mounted.current = false
-      uploadController.current?.abort()
       previewRequest.current = null
     }
   }, [])
 
-  /** 選択した file/目録を 1 件ずつ multipart upload し、失敗した file だけを報告する。 */
-  async function handleUpload(files: File[]): Promise<void> {
-    if (files.length === 0 || !mounted.current || !deletion.canWrite() || confirmPending.current || uploadController.current) return
-    const controller = new AbortController()
-    uploadController.current = controller
-    setUploadState({ status: 'uploading', done: 0, total: files.length })
-    const failures: string[] = []
-    for (const [index, file] of files.entries()) {
-      try {
-        await uploadProjectDocument(projectId, file, csrfToken, controller.signal)
-        if (controller.signal.aborted || !mounted.current) return
-      } catch (caught: unknown) {
-        if (controller.signal.aborted) return
-        const label = file.webkitRelativePath || file.name
-        observeFailure(caught)
-        const failure = documentUploadFailure(caught)
-        failures.push(`${label}: ${messages.documentsPanel.failures[failure.key]}`)
-        if (['sessionExpired', 'denied', 'archived'].includes(failure.key)) break
-      }
-      setUploadState({ status: 'uploading', done: index + 1, total: files.length })
-    }
-    if (controller.signal.aborted) return
-    uploadController.current = null
-    setUploadState(
-      failures.length === 0 ? { status: 'idle' } : { status: 'error', message: failures.join(messages.documentsPanel.failureJoin) },
-    )
-    // 一部成功でも一覧を確定 state から取り直す。
-    setRevision((current) => current + 1)
-  }
-
   /** 所有確認は backend に委ね、UI では明示確認の上で 1 件を削除する。 */
   async function handleDelete(document: ProjectDocumentRecord): Promise<void> {
-    if (!mounted.current || !deletion.canWrite() || confirmPending.current || uploadController.current) return
+    if (!mounted.current || !deletion.canWrite() || confirmPending.current || upload.isLocked() || closure.locked()) return
+    closure.recovery.close()
+    upload.closeRecovery()
     confirmPending.current = true
     setConfirming(true)
     const confirmed = await confirm({
@@ -198,7 +177,7 @@ function DocumentManagerBody({ projectId, csrfToken, readOnly, onSessionEnded }:
             onChange={(event) => {
               const selected = event.currentTarget.files ? Array.from(event.currentTarget.files) : []
               event.currentTarget.value = ''
-              void handleUpload(selected)
+              upload.start(selected)
             }}
           />
         </label>
@@ -213,15 +192,13 @@ function DocumentManagerBody({ projectId, csrfToken, readOnly, onSessionEnded }:
             onChange={(event) => {
               const selected = event.currentTarget.files ? Array.from(event.currentTarget.files) : []
               event.currentTarget.value = ''
-              void handleUpload(selected)
+              upload.start(selected)
             }}
           />
         </label>
       </div>
-      {uploadState.status === 'uploading' && (
-        <p className="hint" role="status">{messages.documentsPanel.uploading(uploadState.done, uploadState.total)}</p>
-      )}
-      {uploadState.status === 'error' && <p className="error" role="alert">{uploadState.message}</p>}
+      <DocumentUploadStatus upload={upload} canRead={deletion.canRead() && !confirming} />
+      <DocumentUploadClosure upload={upload} closure={closure} />
       {readOnly && <p className="hint">{messages.documentsPanel.failures.archived}</p>}
       {(deletion.denied || deletion.failure) && <p className="error" role="alert">
         {messages.documentsPanel.failures[(deletion.denied ?? deletion.failure)!.key]}
@@ -230,13 +207,13 @@ function DocumentManagerBody({ projectId, csrfToken, readOnly, onSessionEnded }:
         <h3>{messages.documentsPanel.unknownTitle}</h3>
         <p>{deletion.intent.name}</p><p className="hint">{deletion.intent.document_id}</p>
         <p>{messages.documentsPanel.factsOnly}</p>
-        <button type="button" className="secondaryButton" disabled={deletion.checking || !!deletion.denied}
+        <button type="button" className="secondaryButton" disabled={deletion.checking || deletion.readDenied}
           onClick={deletion.checkOriginal}>{messages.documentsPanel.checkOriginal}</button>
         {deletion.checking && <p role="status">{messages.documentsPanel.checking}</p>}
         {deletion.checkFailure && <p role="alert">{messages.documentsPanel.failures[deletion.checkFailure.key]}</p>}
         {deletion.facts && <>
           <p role="status">{deletion.facts.status === 'present' ? messages.documentsPanel.present : messages.documentsPanel.absent}</p>
-          <button type="button" className="secondaryButton" disabled={!!deletion.denied}
+          <button type="button" className="secondaryButton" disabled={deletion.readDenied}
             onClick={deletion.release}>{messages.documentsPanel.release}</button>
         </>}
       </section>}

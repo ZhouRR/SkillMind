@@ -7,17 +7,17 @@ import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
-from uuid import UUID
 
 from jsonschema import Draft202012Validator, FormatChecker
 from jsonschema.exceptions import ValidationError
 
-from projectmind.skills.capability_blueprint import (
-    CapabilityBlueprintError,
-    CapabilityBlueprintValidator,
+from projectmind.core.hashing import canonical_json
+from projectmind.skills.design_validation import (
+    SkillDesignInvalidError,
+    SkillDesignSource,
+    validate_skill_design,
 )
 from projectmind.skills.domain import InlineSkillFile, ManifestGateFinding
-from projectmind.skills.runtime_defaults import normalize_runtime_manifest
 from projectmind.skills.task_contract import (
     TaskContractCompilationError,
     compile_task_contract,
@@ -41,6 +41,7 @@ _RUN_SCOPED_PLATFORM_CAPABILITIES = frozenset(
         "workspace.read/v1",
         "workspace.search/v1",
         "workspace.write/v1",
+        "workspace.write/v2",
     }
 )
 
@@ -54,9 +55,7 @@ _EFFECT_ONLY_CAPABILITIES = frozenset({"issue.update/v1", "repository.write/v1"}
 # 先行の lookbehind は scheme や path 途中からの部分一致を禁じ、`https://x.example.com/v1`
 # のような URL を除く。scheme を持たない裸の host 断片は能力識別子と構文上同形のため残るが、
 # 接続情報は手順に現れてはならない以上、その報告は境界違反の指摘として妥当である。
-_CAPABILITY_REFERENCE_PATTERN = re.compile(
-    r"(?<![\w./-])[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+/v[0-9]+"
-)
+_CAPABILITY_REFERENCE_PATTERN = re.compile(r"(?<![\w./-])[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+/v[0-9]+")
 
 # Guidance の note list。順序は pointer をそのまま source trace の target と揃えるため保つ。
 _GUIDANCE_NOTE_FIELDS = (
@@ -82,9 +81,10 @@ class ManifestValidator:
         self._manifest_schema = self._load_json("runtime-manifest/v1alpha1.schema.json")
         self._view_schema = self._load_json("view-spec/v1alpha1.schema.json")
         self._registered_capabilities = (
-            registered_capabilities or self._load_registered_capabilities()
+            registered_capabilities
+            if registered_capabilities is not None
+            else self._load_registered_capabilities()
         )
-        self._blueprint_validator = CapabilityBlueprintValidator(self._contracts_dir)
         Draft202012Validator.check_schema(self._manifest_schema)
         Draft202012Validator.check_schema(self._view_schema)
 
@@ -100,42 +100,24 @@ class ManifestValidator:
 
     def evaluate(
         self,
-        manifest: Mapping[str, Any],
-        *,
-        source_hash: str,
-        interpretation_id: UUID,
-        source_files: Sequence[InlineSkillFile] = (),
+        source: SkillDesignSource,
     ) -> tuple[bool, tuple[ManifestGateFinding, ...]]:
-        """Frozen Manifest を全 hard gate へ通し、安定順 finding を返す。"""
+        """原 source と凍結 Manifest を検査し、変更せず発行判断を返す。
 
-        normalized = normalize_runtime_manifest(manifest)
+        不完全な DRAFT は保存できる finding に変換する。source を欠く構文検査だけでは
+        発行可能にせず、既存版を normalizer で補修して通過させることもしない。
+        """
+
+        try:
+            design = validate_skill_design(source=source, contracts_dir=self._contracts_dir)
+        except SkillDesignInvalidError as error:
+            return False, (self._error(error.code, str(error), None),)
+        manifest = design.manifest
+        blueprint = design.blueprint
+        assert blueprint is not None
         findings: list[ManifestGateFinding] = []
-        validator = Draft202012Validator(self._manifest_schema, format_checker=FormatChecker())
-        for error in sorted(
-            validator.iter_errors(normalized), key=lambda item: list(item.path)
-        ):
-            findings.append(
-                self._error("manifest_schema_invalid", error.message, _json_path(error.path))
-            )
-        identity = _mapping(normalized, "identity")
-        if identity.get("source_hash") != source_hash:
-            findings.append(
-                self._error(
-                    "source_hash_mismatch",
-                    "Manifest source hash differs from SkillSource",
-                    "/identity/source_hash",
-                )
-            )
-        if identity.get("interpretation_id") != str(interpretation_id):
-            findings.append(
-                self._error(
-                    "interpretation_binding_mismatch",
-                    "Manifest is not bound to this Interpretation",
-                    "/identity/interpretation_id",
-                )
-            )
 
-        compatibility = _mapping(normalized, "compatibility")
+        compatibility = _mapping(manifest, "compatibility")
         if compatibility.get("level") == "assisted":
             findings.append(
                 ManifestGateFinding(
@@ -154,9 +136,7 @@ class ManifestValidator:
                 code = diagnostic.get("code")
                 if severity in {"error", "warning"} and isinstance(code, str):
                     effective_severity = (
-                        "warning"
-                        if code in _OPTIONAL_INTERPRETATION_DIAGNOSTICS
-                        else severity
+                        "warning" if code in _OPTIONAL_INTERPRETATION_DIAGNOSTICS else severity
                     )
                     findings.append(
                         ManifestGateFinding(
@@ -166,54 +146,20 @@ class ManifestValidator:
                         )
                     )
 
-        self._check_bindings(normalized, findings)
-        self._check_generated_contracts(normalized, findings)
-        self._check_capability_blueprint(normalized, findings)
-        self._check_optional_assets(normalized, findings, source_files=source_files)
-        passed = not any(finding.severity == "error" for finding in findings)
-        return passed, tuple(findings)
-
-    def _check_capability_blueprint(
-        self, manifest: Mapping[str, Any], findings: list[ManifestGateFinding]
-    ) -> None:
-        """能力蓝图の存在を必須とし、専用 contract と決定的規則で検査する。
-
-        蓝图は利用者が審査する主産物であり、Run へ渡す guidance の正本でもある。無いまま発行
-        できると、目標も必須規則も持たない version が実行経路へ入ってしまう。Manifest contract
-        側は蓝图を任意の object としか縛れないため、形状と決定的規則はここで強制する。
-        """
-
-        blueprint = manifest.get("capability_blueprint")
-        if blueprint is None:
-            findings.append(
-                self._error(
-                    "capability_blueprint_missing",
-                    "RuntimeManifest must declare a CapabilityBlueprint",
-                    "/capability_blueprint",
-                )
-            )
-            return
-        if not isinstance(blueprint, dict):
-            findings.append(
-                self._error(
-                    "capability_blueprint_invalid",
-                    "CapabilityBlueprint must be an object",
-                    "/capability_blueprint",
-                )
-            )
-            return
-        try:
-            self._blueprint_validator.validate(blueprint)
-        except CapabilityBlueprintError as error:
-            findings.append(
-                self._error(
-                    f"capability_blueprint:{error.code}",
-                    error.message,
-                    f"/capability_blueprint{error.path}",
-                )
-            )
+        self._check_bindings(manifest, findings)
+        self._check_generated_contracts(manifest, findings)
         self._check_blueprint_discloses_manifest_resources(manifest, blueprint, findings)
         self._check_step_capability_references(blueprint, findings)
+        self._check_optional_assets(
+            manifest,
+            findings,
+            source_files=tuple(
+                InlineSkillFile(path=item["path"], content=item["content"])
+                for item in source.source_snapshot
+            ),
+        )
+        passed = not any(finding.severity == "error" for finding in findings)
+        return passed, tuple(findings)
 
     def _check_step_capability_references(
         self, blueprint: Mapping[str, Any], findings: list[ManifestGateFinding]
@@ -329,10 +275,7 @@ class ManifestValidator:
                 )
         for item in _object_list(manifest.get("tools")):
             capability = item.get("capability")
-            if (
-                isinstance(capability, str)
-                and capability not in self._registered_capabilities
-            ):
+            if isinstance(capability, str) and capability not in self._registered_capabilities:
                 findings.append(
                     self._error(
                         "tool_capability_unregistered",
@@ -408,9 +351,7 @@ class ManifestValidator:
                     if isinstance(view_key, str):
                         resolved_view_keys.add(view_key)
                 except (ValidationError, ValueError) as error:
-                    findings.append(
-                        self._warning("optional_asset_invalid", str(error), reference)
-                    )
+                    findings.append(self._warning("optional_asset_invalid", str(error), reference))
         required_view_keys = {
             task.get("view")
             for task in _object_list(manifest.get("tasks"))
@@ -467,7 +408,9 @@ class ManifestValidator:
                 checksum_key = f"{contract_name}_schema_checksum"
                 raw_schema = task.get(schema_key)
                 raw_checksum = task.get(checksum_key)
-                if not isinstance(raw_schema, Mapping) or dict(raw_schema) != compiled.schema:
+                if not isinstance(raw_schema, Mapping) or canonical_json(
+                    dict(raw_schema)
+                ) != canonical_json(compiled.schema):
                     findings.append(
                         self._error(
                             "task_contract_schema_mismatch",
@@ -532,8 +475,7 @@ class ManifestValidator:
         return frozenset(
             capability
             for item in capabilities
-            if isinstance(item, dict)
-            and isinstance((capability := item.get("capability")), str)
+            if isinstance(item, dict) and isinstance((capability := item.get("capability")), str)
         )
 
     @staticmethod
@@ -564,9 +506,3 @@ def _object_list(value: Any) -> list[dict[str, Any]]:
         if isinstance(value, list) and all(isinstance(item, dict) for item in value)
         else []
     )
-
-
-def _json_path(path: Any) -> str:
-    """jsonschema error path を JSON Pointer 風の診断 path へ変換する。"""
-
-    return "/" + "/".join(str(item) for item in path)

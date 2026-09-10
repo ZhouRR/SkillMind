@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hmac
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -89,6 +90,8 @@ class EffectOperationsMixin(_RunRepositoryBase):
     ) -> UUID:
         """Proposal を保存し、既定 approval または exact preauthorization へ分岐する。"""
 
+        # 出力 snapshot を読む間もモデル候補の nested checkpoint を元の内容へ固定する。
+        draft = deepcopy(draft)
         run, segment, attempt = await self._lock_claimed_execution(claimed)
         if segment is None:
             raise LeaseValidationError("ChangeProposal requires an explicit RunSegment")
@@ -118,6 +121,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
             draft=draft,
         )
         await self._validate_checkpoint_refs(run.id, draft.checkpoint)
+        self._validate_claimed_lease(attempt, claimed, now=datetime.now(UTC))
         await self._validate_evidence_refs(run.id, draft.evidence_refs)
         agent_session = await self._ensure_agent_session(
             claimed,

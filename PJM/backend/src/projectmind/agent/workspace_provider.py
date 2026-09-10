@@ -26,9 +26,10 @@ from projectmind.agent.tool_gateway import (
     RunToolContext,
     ToolProviderError,
 )
+from projectmind.artifacts.domain import MAX_ARTIFACT_BYTES, ArtifactDraft
 from projectmind.core.hashing import sha256_hex
 
-_MAX_FILE_BYTES = 1_048_576
+_MAX_FILE_BYTES = MAX_ARTIFACT_BYTES
 _MAX_SEARCH_FILES = 500
 _MAX_SEARCH_BYTES = 10_485_760
 _MAX_SEARCH_ENTRIES = 5_000
@@ -238,7 +239,12 @@ class WorkspaceWriteProvider:
             raise ToolProviderError(
                 "invalid_request", "Workspace content is invalid", retryable=False
             )
-        data = content.encode("utf-8")
+        try:
+            data = content.encode("utf-8")
+        except UnicodeError:
+            raise ToolProviderError(
+                "invalid_request", "Workspace content must be UTF-8", retryable=False
+            ) from None
         if len(data) > _MAX_FILE_BYTES:
             raise ToolProviderError(
                 "too_large", "Workspace content exceeds the write limit", retryable=False
@@ -246,10 +252,26 @@ class WorkspaceWriteProvider:
         relative, _, target = await asyncio.to_thread(
             _resolve_writable_path, context, arguments.get("path")
         )
+        # v1 と凍結済み権限の意味は変えない。v2 の output のみ書込前の原 byte を封じる。
+        artifact = (
+            ArtifactDraft(path=relative, content=data)
+            if context.tool.capability == "workspace.write/v2" and relative.startswith("output/")
+            else None
+        )
+        checksum = f"sha256:{sha256_hex(data)}"
+        # 既知の監査形式エラーは file 変更前に拒否する。DB quota/commit は別の後段境界である。
+        evidence = EvidenceDraft(
+            evidence_type="workspace-write",
+            source_uri=_workspace_uri(context, relative),
+            source_locator={"path": relative, "bytes": len(data)},
+            content_hash=checksum,
+            excerpt=content[:2_000],
+            metadata={"scope": "run-workspace", "read_only": False},
+            artifact=artifact,
+        )
         created = await asyncio.to_thread(
             _write_workspace_file, context.workspace.root, target, data
         )
-        checksum = f"sha256:{sha256_hex(data)}"
         return ProviderToolResult(
             response={
                 "status": "success",
@@ -260,16 +282,7 @@ class WorkspaceWriteProvider:
                 "created": created,
                 "warnings": [],
             },
-            evidence=(
-                EvidenceDraft(
-                    evidence_type="workspace-write",
-                    source_uri=_workspace_uri(context, relative),
-                    source_locator={"path": relative, "bytes": len(data)},
-                    content_hash=checksum,
-                    excerpt=content[:2_000],
-                    metadata={"scope": "run-workspace", "read_only": False},
-                ),
-            ),
+            evidence=(evidence,),
         )
 
 

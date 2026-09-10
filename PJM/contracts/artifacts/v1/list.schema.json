@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.projectmind.local/artifacts/v1/list.schema.json",
+  "title": "Saved Run Artifact metadata v1",
+  "type": "array",
+  "maxItems": 100,
+  "items": { "$ref": "#/$defs/artifact" },
+  "$defs": {
+    "artifact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["artifact_ref", "project_id", "run_id", "tool_call_id", "evidence_ref", "path", "size_bytes", "mime_type", "checksum", "created_at"],
+      "properties": {
+        "artifact_ref": { "type": "string", "maxLength": 64, "pattern": "^art_[a-zA-Z0-9_-]+$" },
+        "project_id": { "type": "string", "format": "uuid" },
+        "run_id": { "type": "string", "format": "uuid" },
+        "tool_call_id": { "type": "string", "format": "uuid" },
+        "evidence_ref": { "type": "string", "maxLength": 64, "pattern": "^ev_[a-zA-Z0-9_-]+$" },
+        "path": { "type": "string", "minLength": 8, "maxLength": 4096, "pattern": "^output/" },
+        "size_bytes": { "type": "integer", "minimum": 0, "maximum": 1048576 },
+        "mime_type": { "const": "text/plain" },
+        "checksum": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "created_at": { "type": "string", "format": "date-time", "pattern": "(?:Z|[+-]\\d{2}:\\d{2})$" }
+      }
+    }
+  }
+}

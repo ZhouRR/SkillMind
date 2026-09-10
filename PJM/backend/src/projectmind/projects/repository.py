@@ -20,6 +20,8 @@ from projectmind.db.models import (
     Project,
     ProjectComposition,
     ProjectDocument,
+    ProjectDocumentCleanup,
+    ProjectDocumentUpload,
     ProjectMember,
     ProjectMemberEvent,
     ProjectSkillVersion,
@@ -56,7 +58,6 @@ _PROJECT_OWNED_MODELS = (
     ResourceBinding,
     ProjectSkillVersion,
     ProjectComposition,
-    ProjectDocument,
     ProjectMember,
     Integration,
     SecretReference,
@@ -144,6 +145,14 @@ class ProjectRepository:
     def require_active_write_access(locked: LockedProjectAccess) -> None:
         """所属の 404 境界を先に検査し、認可済み Project の帰档だけを 409 にする。"""
 
+        ProjectRepository.require_read_access(locked)
+        if locked.project.status != ProjectStatus.ACTIVE.value:
+            raise ProjectArchivedError("Archived projects cannot be modified")
+
+    @staticmethod
+    def require_read_access(locked: LockedProjectAccess) -> None:
+        """原要求の読取にも現在の組織と所属を要求し、帰档は履歴閲覧を妨げない。"""
+
         user, project, member = locked.user, locked.project, locked.member
         if project.organization_id != user.organization_id or (
             user.system_role != "ADMIN"
@@ -155,8 +164,6 @@ class ProjectRepository:
             )
         ):
             raise ProjectNotFoundError("Project not found")
-        if project.status != ProjectStatus.ACTIVE.value:
-            raise ProjectArchivedError("Archived projects cannot be modified")
 
     async def get_preference(self, *, actor: AuthenticatedActor) -> StoredProjectPreference:
         """保存済み preference が現在も認可済み ACTIVE Project の場合だけ返す。"""
@@ -287,11 +294,11 @@ class ProjectRepository:
         return self._to_stored(project)
 
     async def delete(self, *, project: Project, expected_row_version: int) -> None:
-        """Run/Schedule/所属監査を持たない ARCHIVED Project と設定 row を物理削除する。
+        """実行参照・所属監査・原 upload を持たない ARCHIVED Project と設定を削除する。
 
         key の一意制約は status を区別しないため、archive しただけでは key を再利用できない。
         ここは「作成し直したい」用途のための唯一の解放手段であり、Run または所属監査が
-        一件でもあれば削除しない。未発火や認領中の Schedule も将来の実行参照なので残す。
+        一件でもあれば削除しない。未発火/認領中の Schedule と原 upload の占用も残す。
         設定削除は全ての検査後に同一 transaction で行い、FK RESTRICT を最後の防壁に保つ。
         """
 
@@ -328,6 +335,15 @@ class ProjectRepository:
                 f"Project still has membership audit history: {project_id}",
                 blockers=("member_audit_exists",),
             )
+        # 新旧目録と清理/原 upload の監査は設定ではない。どれか一件でもあれば保全する。
+        for document_model in (ProjectDocumentUpload, ProjectDocumentCleanup, ProjectDocument):
+            if await self._session.scalar(select(exists().where(
+                document_model.project_id == project_id,
+            ))):
+                raise ProjectDeleteBlockedError(
+                    "Project still has document assets or upload/cleanup records",
+                    blockers=("document_upload_exists",),
+                )
         # 同じ gate の User だけを更新する。組織外の壊れた旧参照は FK RESTRICT で拒否する。
         await self._session.execute(
             update(User)

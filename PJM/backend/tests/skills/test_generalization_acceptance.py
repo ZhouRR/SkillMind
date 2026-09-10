@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
@@ -31,6 +31,7 @@ from projectmind.skills.task_catalog import (
     project_published_tasks,
     resolve_task_run_from_manifest,
 )
+from tests.skills.manifest_gate_fixtures import directory_gate_source
 
 ROOT = Path(__file__).resolve().parents[3]
 CONTRACTS = ROOT / "contracts"
@@ -77,9 +78,7 @@ def test_generic_native_manifest_passes_gate_and_projects_task() -> None:
     identity = manifest["identity"]
     assert isinstance(identity, dict)
     passed, findings = ManifestValidator(CONTRACTS).evaluate(
-        manifest,
-        source_hash=str(identity["source_hash"]),
-        interpretation_id=UUID(str(identity["interpretation_id"])),
+        directory_gate_source(manifest, GENERIC_SKILL, bind_source_hash=True)
     )
 
     assert passed is True
@@ -129,9 +128,7 @@ def test_generic_adapted_source_becomes_publishable_after_interpretation() -> No
     assert isinstance(manifest, dict)
 
     passed, findings = ManifestValidator(CONTRACTS).evaluate(
-        manifest,
-        source_hash=str(_load(RESPONSE)["source_hash"]),
-        interpretation_id=UUID("00000000-0000-4000-8000-000000000301"),
+        directory_gate_source(manifest, GENERIC_SKILL)
     )
     assert passed is True
     assert findings == ()

@@ -40,6 +40,7 @@ from projectmind.runs.execution_outcome import user_cancellation_event
 from projectmind.runs.interaction import parse_interaction_request
 from projectmind.runs.realtime import RunRealtimePublisher
 from projectmind.runs.service import RunService
+from projectmind.worker.tool_authority import bind_tool_authority
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +145,10 @@ class AgentRunExecutor:
             if not await self._run_service.verify_execution_start(claimed):
                 await self._finalize_cancelled(claimed)
                 return
-            await self._consume_engine(claimed, context, done, session_ref, cancellation)
+            # SDK は anext ごとに別 task から駆動され、子分析も同じ Engine を使う。
+            # 親の消費/close 全体にだけ束縛し、公開 RunContext へ lease を持ち込まない。
+            with bind_tool_authority(claimed):
+                await self._consume_engine(claimed, context, done, session_ref, cancellation)
         finally:
             done.set()
 

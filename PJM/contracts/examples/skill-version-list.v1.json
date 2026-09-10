@@ -8,6 +8,7 @@
       "organization_id": "00000000-0000-4000-8000-0000000000a1",
       "skill_key": "ticket-reviewer",
       "name": "Ticket Reviewer",
+      "description": "Synthetic ticket review skill for contract examples.",
       "version": "1.0.0",
       "status": "PUBLISHED",
       "manifest_checksum": "sha256:3333333333333333333333333333333333333333333333333333333333333333",

@@ -470,7 +470,7 @@ function renderPage(
     case 'resources':
       return <ResourcesPage csrfToken={session.csrf_token} projectId={projectId} />
     case 'tasks':
-      return <TasksPage key={`${session.user.user_id}:${projectId}`} csrfToken={session.csrf_token} moduleId={activeModuleId} projectId={projectId}
+      return <TasksPage key={`${session.user.user_id}:${projectId}`} csrfToken={session.csrf_token} actorId={session.user.user_id} onSessionEnded={onSessionEnded} moduleId={activeModuleId} projectId={projectId}
         projectReadOnly={currentProject?.status !== 'ACTIVE'} />
     case 'schedules':
       return <SchedulesPage projectId={projectId} actorId={session.user.user_id} csrfToken={session.csrf_token}
@@ -479,6 +479,7 @@ function renderPage(
       return <WorkspacePage
         key={`${session.user.user_id}:${projectId}`}
         actorId={session.user.user_id}
+        projectReadOnly={currentProject?.status !== 'ACTIVE'}
         csrfToken={session.csrf_token}
         initialRunId={initialRunId}
         initialTaskId={initialTaskId}

@@ -97,7 +97,7 @@ output/                      可写报告/补丁
 
 这是 Tool 逻辑路径。实际 input_dir 是 Run 根下 .projectmind-inputs/&lt;snapshot_id&gt;/，由平台映射，不开放世代目录或用 symlink 切换；旧 input/ 不搬迁补签。PreparedInput 的新 workspace/resources 必须由 Brief、read/search、Evidence 全部消费。
 
-只经 workspace.write 写 workspace/output；input 与 Project 文档库不自由覆盖。xlsx/xlsm/docx 经[统一转换器](../../PJM/backend/src/projectmind/agent/binary_text.py)生成文本，保留源 hash/位置；PDF 未支持。凭据不进入文件、manifest、Evidence 或上下文。
+只经 workspace.write 写 workspace/output；input 与 Project 文档库不自由覆盖。v2 的 output 写入另将原 UTF-8 字节发布为[不可变附件](results-evaluation.md#可信附件的发布与读取)，覆盖文件不改变已发布字节；v1 和 workspace 中间文件不自动成为附件。xlsx/xlsm/docx 经[统一转换器](../../PJM/backend/src/projectmind/agent/binary_text.py)生成文本，保留源 hash/位置；PDF 未支持。凭据不进入文件、manifest、Evidence 或上下文。
 
 ## 输入准备与可信缓存
 

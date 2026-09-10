@@ -5,12 +5,12 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import dialect
+from alembic.migration import MigrationContext
 
 from projectmind.db.models import RunInputSnapshot
 
@@ -29,13 +29,14 @@ def _migration() -> ModuleType:
 def _contract(table: sa.Table) -> dict[str, Any]:
     """Python default と列の宣言順を除き、PostgreSQL 上の制約と型を比較する。"""
 
+    dialect = MigrationContext.configure(dialect_name="postgresql").dialect
     return {
         "columns": {
             column.name: (
-                column.type.compile(dialect=dialect()),
+                column.type.compile(dialect=dialect),
                 column.nullable,
                 column.primary_key,
-                str(column.server_default.arg) if column.server_default else None,
+                _server_default(column),
             )
             for column in table.columns
         },
@@ -55,6 +56,16 @@ def _contract(table: sa.Table) -> dict[str, Any]:
     }
 
 
+def _server_default(column: sa.Column[object]) -> str | None:
+    """DDL の明示 default だけを比較し、不明な server 生成値を空値へ隠さない。"""
+
+    value = column.server_default
+    if value is None:
+        return None
+    assert isinstance(value, sa.DefaultClause)
+    return str(value.arg)
+
+
 def test_input_receipt_migration_and_model_have_the_same_database_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -67,7 +78,7 @@ def test_input_receipt_migration_and_model_have_the_same_database_contract(
     create.assert_called_once()
     name, *elements = create.call_args.args
     assert name == "run_input_snapshots"
-    actual = RunInputSnapshot.__table__
+    actual = cast(sa.Table, RunInputSnapshot.__table__)
     metadata = sa.MetaData(naming_convention=actual.metadata.naming_convention)
     for parent in ("runs", "projects", "run_attempts"):
         sa.Table(parent, metadata, sa.Column("id", sa.Uuid(), primary_key=True))

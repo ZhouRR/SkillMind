@@ -64,7 +64,7 @@ preference 只是上次选择，不是授权。服务端只返回当前可访问
 | Run 取消 | WriteActor + Run 项目访问，无 ACTIVE 门槛；取消受理不证明进程停止 |
 | ADMIN 维护 | 编辑、归档/恢复、删除、移除成员走独立用例；新增成员要求 ACTIVE，否则 404 |
 | Schedule 保存 | 创建/编辑/状态修改在业务事务固定原会话、当前 Project/成员并复核归档；锁与未知结果见[调度管理](task-scheduling.md#管理写入的授权事务) |
-| 单文档上传/删除 | 上传在锁外 PUT 前后复核原会话/成员/归档，删除将原授权与引用同事务复核；持久上传、配额预留与 blob 清理仍待补，见[文档门禁](document-lifecycle.md) |
+| 单文档上传/删除 | PUT 前持久预约、前后复核原会话/成员/归档；删除将原授权/引用/清理要求同事务保存，字节清理与结算仍待补。原上传查询允许授权归档读取，见[文档门禁](document-lifecycle.md) |
 | Schedule 触发 | 普通创建/原 Run 关联事务内锁定当前创建者、Project/成员并复查 ACTIVE；项目归档不等于 Schedule 立即 PAUSED，真实并发仍待验 |
 
 ### 并发修改不能只看有无行锁
@@ -85,7 +85,7 @@ preference 只是上次选择，不是授权。服务端只返回当前可访问
 
 ## 删除与数据保留
 
-当前 ADMIN 按上述业务事务锁定原会话与 Project，先验原版本，再要求 ARCHIVED 且无 Run/TaskSchedule/成员审计；清理 preference 与列举配置后删除项目，成功 204。拒绝发生在任何关系删除之前：
+当前 ADMIN 按上述业务事务锁定原会话与 Project，先验原版本，再要求 ARCHIVED 且无 Run/TaskSchedule/成员审计/文档资产；清理 preference 与列举配置后删除项目，成功 204。拒绝发生在任何关系删除之前：
 
 | 阻止条件 | Problem code |
 | --- | --- |
@@ -93,13 +93,14 @@ preference 只是上次选择，不是授权。服务端只返回当前可访问
 | 存在 Run | project_delete_blocked_by_runs |
 | 存在任意状态/发火/认领阶段的 Schedule | project_delete_blocked_by_schedules |
 | 存在成员变更审计 | project_delete_blocked_by_member_audit |
+| 存在文档、上传意图或清理记录（含已删元数据） | project_delete_blocked_by_document_uploads |
 
 不为释放 key 删除审计或放宽 FK RESTRICT；这些前置不是完整可删证明，也不是回收站。
 
 | 已知缺口 | 风险 |
 | --- | --- |
 | 现有 Run/Schedule 检查不是完整引用证明 | 冻结输入、在途认领与并发新增仍须按统一提交协议验证 |
-| 删 ProjectDocument 行不清 blob | 204 不证明附件、Run 副本或备份清除 |
+| 持久清理要求尚无可靠结算 | 文档已从批量配置删除中移出，新旧文档均经单文件清理协议；不能删除要求或占用换取项目可删 |
 | retention_days 仅配置 | 不保证自动清理、恢复或保留期定时器 |
 | 引用检查与新增引用不同协议 | 归档/认领/创建/删除竞争尚需真实事务验证 |
 

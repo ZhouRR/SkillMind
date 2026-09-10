@@ -90,11 +90,23 @@ python3 tests/browser/check_run_submission.py \
   --url http://127.0.0.1:5189/projectmind/tests/browser/run-submission.html
 python3 tests/browser/check_interaction_responses.py \
   --url http://127.0.0.1:5189/projectmind/tests/browser/run-submission.html
+python3 tests/browser/check_result_references.py \
+  --url http://127.0.0.1:5189/projectmind/tests/browser/projects.html \
+  --output /tmp/projectmind-result-reference-browser
+python3 tests/browser/check_artifacts.py \
+  --url http://127.0.0.1:5189/projectmind/tests/browser/projects.html \
+  --output /tmp/projectmind-artifact-browser
+python3 tests/browser/check_evaluation_submissions.py \
+  --url http://127.0.0.1:5189/projectmind/tests/browser/projects.html \
+  --output /tmp/projectmind-evaluation-browser
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=../backend/src \
   python3 tests/browser/check_document_sources.py \
   --url http://127.0.0.1:5189/projectmind/tests/browser/run-submission.html
 python3 tests/browser/check_schedule_times.py \
   --url http://127.0.0.1:5189/projectmind/tests/browser/run-submission.html
+python3 tests/browser/check_task_flow.py \
+  --url http://127.0.0.1:5189/projectmind/tests/browser/projects.html \
+  --output /tmp/projectmind-task-flow-browser
 python3 tests/browser/check_schedule_management.py \
   --url http://127.0.0.1:5189/projectmind/tests/browser/projects.html
 python3 tests/browser/check_document_management.py \
@@ -106,6 +118,12 @@ python3 tests/browser/check_document_preview.py \
 python3 tests/browser/check_document_upload.py \
   --url http://127.0.0.1:5189/projectmind/tests/browser/projects.html \
   --output /tmp/projectmind-document-upload-browser
+python3 tests/browser/check_document_upload_receipts.py \
+  --url http://127.0.0.1:5189/projectmind/tests/browser/projects.html \
+  --output /tmp/projectmind-document-upload-receipts-browser
+python3 tests/browser/check_document_upload_closures.py \
+  --url http://127.0.0.1:5189/projectmind/tests/browser/projects.html \
+  --output /tmp/projectmind-document-upload-closures-browser
 ```
 
 | runner | 検証する範囲と限界 |
@@ -117,14 +135,33 @@ python3 tests/browser/check_document_upload.py \
 | project_management | 実 App の作成/編集/帰档/復元/削除、原版比較・未知照合・初回選択・対象/会話切替、三語/keyboard/狭幅。API は全 mock、実 DB の CAS/rollback、0034 と HTTPS は別 |
 | run_submission | 実 Workspace の応答喪失、同 key/body 確認、明示的新規、actor/Project 切替・refresh。実 transaction/唯一制約は別 |
 | interaction_responses | 実 Workspace の普通答復、原要求確認、競合/期限、同 tick/30 秒/旧応答、会話/対象切替、詳細/SSE/表示 tab 更新と三語。API は全 mock、実答復/過期 transaction・撤権競争と model 停止は別 |
+| result_references | 実 Workspace の保存時検証範囲、旧欠損/壊れた新 field、flag 矛盾、モデル効果と platform 記録の区別、三語/狭幅。全 API は mock；実 DB 参照照合、Artifact 保存や遠端 write の証明ではない |
+| artifacts | 実 App の公開索引/結果採用、v1/v2/旧欠損、原 size/hash/UTF-8 と実 stream 上限、拒否/同 tick/期限/旧応答/対象切替、実 download と三語。全 API は mock；実 DB の同時保存/0040/権限競争と備份恢复は別 |
+| evaluation_submissions | 実 App の複数修正案/原値、原要求の保存/読取専用確認/明示再送、cursor ページ、期限/取消/旧応答/対象切替、帰档と三語。全 API は mock；実 DB の同キー競争、0041/commit/撤権と復元は別 |
 | document_sources | 即時/調度入力、清単、CSRF と凍結表示。Backend 依存と純 parser は使うが、実 blob、物化、調度編集/時区/認領 crash は別 |
-| document_management | 実 App の削除防重、参照拒否、原 ID の未知核対/人工解除、遅延/切替/期限、帰档と三語/狭幅。全面 mock API で、実 DB 参照競争・blob 清理は別 |
+| document_management | 実 App の削除防重、参照拒否、原 ID の未知照合/人工解除、読取拒否・絶対期限後の失効応答、切替、帰档と三語/狭幅。全面 mock API で、実 DB 参照競争・blob 清理は別 |
 | document_preview | 実 App の静的 HTML/CSP/sandbox、実 stream byte 上限、拒否/期限/旧応答/同 tick 切替、三語/狭幅。HTTP は mock、byte は合成 stream；実 S3・Proxy・他 browser engine は別 |
-| document_upload | 実 App の multipart field/CSRF と 413/422/資格拒否/異常成功の三語表示、私的 detail 非表示。全 HTTP は mock；実 body 上限、DB/PUT、持続意図と完全な未知回復は別 |
+| document_upload | 実 App の multipart/CSRF、サイズ等の確定拒否、未知の成功応答、資格拒否と三語。全 HTTP は mock；実 DB/PUT/清理は別 |
+| document_upload_receipts | 実 App の原 key、部分拒否/未知の batch pause、原 key GET と明示継続、独立した手動照会の終了/取消/別 key、File 保持、防重/期限/切替と三語。全 HTTP は mock；実 DB/PUT/再起動・清理と完全な跨刷新 batch 回復は別 |
+| document_upload_closures | 実 App の原 key の明示停止、独立回执/未知核対、元 batch の明示継続、手入力の独立回復、三語/狭幅。全 HTTP は mock；実 DB 競争/0042/旧 PUT 停止・清理・quota 結算は別 |
 | schedule_times | 実 TasksPage/ScheduleDialog の時区/offset、DST、現在の preview 確認、防重・遅延・期限と対象切替、三語/狭幅。全 API は mock、実 cron 発火・認領/Run transaction・DB/複数 Worker は別 |
+| task_flow | 実 App/TasksPage の精確 Task 読取、Task/Skill 共有範囲、原参照・未評価・欠落/損傷、期限と旧応答隔離、三語/keyboard/狭幅。数値は下記の実 serializer wire を渡して別途検証する。全 API は mock；実 DB 授権競争、元 source/blob、モデルの意味保真と Run Flow は別 |
 | schedule_management | 実 App の独立調度一覧/検索/全ページ、原配置編集/版衝突/未知と対象切替、在途の旧形式/空/期限/認領上限・独立読取拒否、三語/狭幅。全 API は mock、実 DB の CAS/撤権/多 Worker と発火は別 |
 
 初回導入は download を伴う。外部依存は PYTHONPATH、browser は PLAYWRIGHT_BROWSERS_PATH で指定でき、document_sources では Backend src と両方を含める。`--output` は明示した新しい工作区外 directory に screenshot を保存する。port が使用中なら奪わず別 port と URL を使い、終了時は自分の Vite だけを停止する。
+
+Task Flow の数値検証は Backend 依存も使用する。`PJM/web/` で合成 fixture を実 projector/route/serializer に通し、その原 byte を渡す。実 DB/model は使わず、途中で JavaScript の JSON parse/stringify を挟まない：
+
+```bash
+task_flow_wire=$(mktemp /tmp/projectmind-flow-wire.XXXXXXXX.json)
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=../backend/src:../backend \
+  python3 -c 'import sys; from tests.skills.task_flow_numeric_fixtures import numeric_flow_wire; sys.stdout.buffer.write(numeric_flow_wire())' > "$task_flow_wire"
+python3 tests/browser/check_task_flow.py \
+  --url http://127.0.0.1:5189/projectmind/tests/browser/projects.html \
+  --numeric-wire "$task_flow_wire" --output /tmp/projectmind-task-flow-numeric-browser
+```
+
+両原契約の大整数・浮動小数・負零と再帰表示、型・重複・逆転範囲の拒否を検証する。`--numeric-wire` 省略時は当該 case を実行せず、その事実を runner が報告する。
 
 ## 変更に応じた検証
 

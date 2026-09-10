@@ -13,10 +13,18 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = ROOT / "contracts"
 
 EXAMPLE_CONTRACTS = {
+    "examples/task-flow-preview.v1.json": "tasks/flow-preview/v1.schema.json",
+    "examples/task-flow-preview-not-declared.v1.json": "tasks/flow-preview/v1.schema.json",
     "examples/agent-task-brief.v1.json": "agent-task-brief/v1.schema.json",
     "examples/capability-blueprint.v1.json": "capability-blueprint/v1.schema.json",
     "examples/create-project-request.v1.json": "projects/v1/create-request.schema.json",
     "examples/document.v1.json": "documents/v1/document.schema.json",
+    "examples/document-upload-pending.v1.json": "documents/v1/upload.schema.json",
+    "examples/document-upload-published.v1.json": "documents/v1/upload.schema.json",
+    "examples/document-upload-closure.v1.json": "documents/v1/upload-closure.schema.json",
+    "examples/document-upload-closure-request.v1.json": (
+        "documents/v1/upload-closure-request.schema.json"
+    ),
     "examples/document-read-request.v1.json": "tools/document.read/v1/request.schema.json",
     "examples/document-read-response.v1.json": "tools/document.read/v1/response.schema.json",
     "examples/login-context.v1.json": "auth/v1/login-context.schema.json",
@@ -135,6 +143,18 @@ EXAMPLE_CONTRACTS = {
     "examples/workspace-search-response.v1.json": "tools/workspace.search/v1/response.schema.json",
     "examples/workspace-write-request.v1.json": "tools/workspace.write/v1/request.schema.json",
     "examples/workspace-write-response.v1.json": "tools/workspace.write/v1/response.schema.json",
+    "examples/workspace-write-request.v2.json": "tools/workspace.write/v2/request.schema.json",
+    "examples/workspace-write-response.v2.json": "tools/workspace.write/v2/response.schema.json",
+    "examples/workspace-write-draft-response.v2.json": (
+        "tools/workspace.write/v2/response.schema.json"
+    ),
+    "examples/artifact-list.v1.json": "artifacts/v1/list.schema.json",
+    "examples/run-detail-artifacts.v1.json": "runs/detail/v1.schema.json",
+    "examples/evaluation-submission-request.v1.json": (
+        "evaluations/v1/submission-request.schema.json"
+    ),
+    "examples/evaluation-submission.v1.json": "evaluations/v1/submission.schema.json",
+    "examples/evaluation-page.v1.json": "evaluations/v1/page.schema.json",
 }
 
 
@@ -169,7 +189,8 @@ def validate() -> None:
     format_checker = FormatChecker()
     for example_name, schema_name in EXAMPLE_CONTRACTS.items():
         schema = load_json(CONTRACTS / schema_name)
-        example = load_json(CONTRACTS / example_name)
+        # 公開 list endpoint は JSON array を返す。Schema 本体の object 制約とは区別する。
+        example = json.loads((CONTRACTS / example_name).read_text(encoding="utf-8"))
         validator = validator_for(schema)(schema, format_checker=format_checker)
         validator.validate(example)
 

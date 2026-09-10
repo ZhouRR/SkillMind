@@ -38,7 +38,7 @@
 
 整数、缺失和无效值分开；有限非负成本 float 只保存其 binary64 hex 表示，不转换为精确 USD/nano-USD。该观察不是 `BudgetUsageReport`，不声明累计范围、final 或 stopped。流关闭、未收到 Result、观察提交不明也不补零或退款。
 
-原始观察已有独立持久入口，绑定和启动规则见[原调用绑定](#原调用绑定与启动)。当前 startup 尚未注入该服务；接入前仍须由可信协调方验证计量 profile、构建版本和实际局部强制，再归一化到现有报告。不能从 trace、Session 或 invocation ID 补造预算身份，这个入口本身不代表共享限额生效。
+原始观察已有独立持久入口，绑定和启动规则见[原调用绑定](#原调用绑定与启动)。当前 startup 尚未注入该服务；接入前仍须由可信协调方验证计量 profile、构建版本和实际局部强制，再归一化到现有报告。离线 compatibility probe 只核对包的版本标记和接口；SDK 可回退到系统 CLI，不能据此证明实际启动的二进制、resume 用量范围或硬上界。不能从 trace、Session 或 invocation ID 补造预算身份，这个入口本身不代表共享限额生效。
 
 ### 现有计时器的覆盖范围
 
@@ -104,7 +104,7 @@ B 的 3 不因 lease 过期退还，新执行最多用 6；若不能证明 B 仍
 
 ### 持久账本的当前载体
 
-[budget_store](../../PJM/backend/src/projectmind/runs/budget_store.py)与 [repository_budgets](../../PJM/backend/src/projectmind/runs/repository_budgets.py)复用 [0030](../../PJM/backend/migrations/versions/0030_run_budget_ledger.py) 的三张账本表；[0035](../../PJM/backend/migrations/versions/0035_budget_invocations.py)追加调用绑定和原始观察：
+[budget_store](../../PJM/backend/src/projectmind/runs/budget_store.py)与 [repository_budgets](../../PJM/backend/src/projectmind/runs/repository_budgets.py)复用 [0030](../../PJM/backend/migrations/versions/0030_run_budget_ledger.py) 的三张账本表；[0035](../../PJM/backend/migrations/versions/0035_budget_invocations.py)追加调用绑定和原始观察，[0043](../../PJM/backend/migrations/versions/0043_budget_start_owner.py)追加启动所有权：
 
 | 表 | 责任 |
 | --- | --- |
@@ -131,7 +131,23 @@ new_budget_account 仅构造未保存/未开始且限额匹配的新账户；未
 
 [BudgetInvocationRecorder](../../PJM/backend/src/projectmind/runs/budget_execution.py)把绑定、严格启动和观察保存接到 Engine 的 `before_connect` / `usage_observer`。两者成对装配；只有明确的 `True` 才创建 client，拒绝、提交未知或取消不得继续启动。依赖收尾捕获取消也不能据此获得下一副作用的许可；client 已创建后由同一执行负责清理。
 
-可信协调方可传 `prepared_invocation` 固定原 SDK Session/调用身份；Engine 从实际 prompt/options/模式重建后逐字段核对，不把原描述子本身当许可。读到 RESERVED 也不能证明此前没有尝试 B：新协调方不得凭它重试结果未知的启动。跨协调方恢复仍须核对原启动尝试，当前单次 recorder 不承担该完整恢复协议。
+可信协调方可传 `prepared_invocation` 固定原 SDK Session/调用身份；Engine 从实际 prompt/options/模式重建后逐字段核对，不把原描述子本身当许可。读到 RESERVED 也不能证明此前没有尝试 B。
+
+### 启动所有权与协调方更替
+
+原调用描述回答“是哪次执行”，启动所有权回答“哪个存活的协调器可以尝试 B”，两者分开。每个 recorder 自行生成随机 token，在首次 await 前从实例取走并关闭复用；局部变量仅供本次绑定/B 调用。首次绑定事务同时保存独立用途的 token hash。token 不进入调用描述、返回 DTO、SDK options、观察或公开接口，也不从 Worker lease、Session 或 invocation ID 推导。
+
+| 恢复场景 | 必须保持的判定 |
+| --- | --- |
+| 原绑定事务响应丢失 | 只用原描述与原 token 确认，未保存时不补写 |
+| 原 recorder 的 B 成功 | 仍须首次明确 commit 才允许 client；本地许可只使用一次 |
+| B 结果未知，行仍是 RESERVED | 原 recorder 不重试；新 recorder 的 token 不匹配，不能重新取得许可 |
+| 已有 START_INTENT | 读回不许可再次启动；换协调方也不能继承原 token |
+| 旧绑定没有所有权 | 保留原值并拒绝启动，不为旧调用补造 owner |
+
+所有权检查与原 lease、actor、绑定和父调用检查一起执行，不替代任何一项。它阻止重新装配 recorder 把未知启动变为新许可，不证明模型已开始/停止或费用已结清，也不防止任意受信代码复制内存 token 后绕过 recorder。store/repository 仅供受信装配；未完成的独立核对服务不能直接开放这些入口。
+
+丢失 token 后仍保留占用；独立核对方依据原执行事实处理未启动关闭或停止/计量，不把核对 lease 当启动权。0043 对旧行保持空值，任何 owner 痕迹都在排他锁内阻止降级；旧预算调用方不检查此列，须隔离。恢复到较早的数据库状态也不能证明后来没有启动。
 
 ### 内部状态不能当作运行证明
 

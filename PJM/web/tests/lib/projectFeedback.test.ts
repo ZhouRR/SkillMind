@@ -12,6 +12,7 @@ describe('projectFailure', () => {
     [409, 'project_version_exhausted', 'versionExhausted'], [409, 'project_delete_requires_archive', 'needsArchive'],
     [409, 'project_delete_blocked_by_runs', 'blockedByRuns'], [409, 'project_delete_blocked_by_schedules', 'blockedBySchedules'],
     [409, 'project_delete_blocked_by_member_audit', 'blockedByMemberAudit'],
+    [409, 'project_delete_blocked_by_document_uploads', 'blockedByDocumentUploads'],
   ])('recognizes only the documented rejection %s / %s', (status, code, key) => {
     expect(projectFailure(new ApiProblemError('private server body', status, code), true)).toEqual({ key })
   })

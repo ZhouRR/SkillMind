@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Any
 from uuid import uuid4
 
@@ -16,7 +16,14 @@ from sqlalchemy.exc import IntegrityError
 from projectmind.auth.domain import generate_session_credentials
 from projectmind.auth.sessions import CsrfRejectedError, UnauthorizedSessionError
 from projectmind.core.hashing import sha256_hex
-from projectmind.db.models import AuthSession, Organization, Project, ProjectMember, User
+from projectmind.db.models import (
+    AuthSession,
+    Organization,
+    Project,
+    ProjectDocumentUpload,
+    ProjectMember,
+    User,
+)
 from projectmind.documents.domain import DocumentConflictError
 from projectmind.projects.domain import ProjectArchivedError, ProjectNotFoundError
 from projectmind.storage import FileStorageError, StoredBlob, UploadLimits, UploadRejectedError
@@ -85,7 +92,9 @@ async def test_upload_rechecks_original_access_in_two_short_transactions() -> No
 
     db = UploadDatabase()
     stored = await db.upload()
-    assert db.lock_events == [Organization, User, AuthSession, Project, ProjectMember] * 2
+    assert db.lock_events == [
+        Organization, User, AuthSession, Project, ProjectMember, ProjectDocumentUpload,
+    ] * 2
     assert db.commits == 2 and db.rollbacks == 0 and db.usage_reads == 2
     assert stored.uploaded_by == db.access.actor.user_id
     assert stored.checksum == f"sha256:{sha256_hex(b'hello')}"
@@ -101,7 +110,7 @@ async def test_current_admin_does_not_require_project_membership() -> None:
     db.access = replace(db.access, actor=replace(db.access.actor, system_role="ADMIN"))
     db.member = None
     await db.upload()
-    assert db.lock_events == [Organization, User, AuthSession, Project] * 2
+    assert db.lock_events == [Organization, User, AuthSession, Project, ProjectDocumentUpload] * 2
     assert db.commits == 2
 
 
@@ -135,6 +144,8 @@ async def test_stale_qualification_never_publishes_metadata(reason: str, after_p
         await db.upload()
     assert not db.documents and db.rollbacks == 1
     assert db.commits == int(after_put)
+    assert len(db.intents) == int(after_put)
+    assert all(intent.state == "PENDING" and intent.size == 5 for intent in db.intents)
     if after_put:
         db.storage.put.assert_awaited_once()
         assert await db.blobs.get(db.storage.put.call_args.args[0]) == b"hello"
@@ -215,6 +226,7 @@ async def test_expiry_during_each_lock_wait_rolls_back(
     with pytest.raises(UnauthorizedSessionError):
         await db.upload()
     assert not db.documents and db.commits == transaction - 1 and db.rollbacks == 1
+    assert len(db.intents) == transaction - 1
     assert db.storage.put.await_count == transaction - 1
     db.storage.delete.assert_not_awaited()
 
@@ -241,6 +253,7 @@ async def test_expiry_after_usage_or_final_flush_rolls_back(
     with pytest.raises(UnauthorizedSessionError):
         await db.upload()
     assert not db.documents and db.commits == transaction - 1 and db.rollbacks == 1
+    assert len(db.intents) == transaction - 1
     assert db.storage.put.await_count == transaction - 1
     db.storage.delete.assert_not_awaited()
 
@@ -281,7 +294,7 @@ async def test_expired_session_takes_priority_over_missing_project(transaction: 
 async def test_final_quota_uses_metadata_published_during_put(
     competing_size: int, accepted: bool,
 ) -> None:
-    """未予約 PUT 同士の競争は残るが、最終 lock 内の最新合計で公開 quota を守る。"""
+    """元予約を再加算せず、PUT 中に旧 writer が追加した metadata も最新占用へ含める。"""
 
     db = UploadDatabase(limits=UploadLimits(10, 10, frozenset({"text/plain"})))
     db.document.size = competing_size
@@ -357,6 +370,7 @@ async def test_mismatched_storage_acknowledgement_never_publishes_or_deletes(
     with pytest.raises(FileStorageError, match="acknowledgement"):
         await db.upload(data=b"x" if value is True else b"hello")
     assert not db.documents and db.transactions == 1 and db.commits == 1
+    assert len(db.intents) == 1 and db.intents[0].state == "PENDING"
     assert await db.blobs.exists(db.storage.put.call_args.args[0])
     db.storage.delete.assert_not_awaited()
 
@@ -424,6 +438,51 @@ async def test_only_exact_document_path_constraint_becomes_conflict(constraint: 
     if expected is IntegrityError:
         assert caught.value is error
     assert not db.documents and db.commits == 1 and db.rollbacks == 1
+    db.storage.delete.assert_not_awaited()
+
+
+@pytest.mark.parametrize("constraint", ["uq_project_documents_project_folder_name", "other", None])
+async def test_failed_publish_flush_rechecks_fixed_session_expiry_using_new_clock(
+    monkeypatch: pytest.MonkeyPatch, constraint: str | None,
+) -> None:
+    """元 expiry を改変せず、失敗 flush 待機で進んだ現在時刻を確定拒否の前に再評価する。"""
+
+    db = UploadDatabase()
+    original_expiry = db.auth_session.idle_expires_at
+    after_expiry = original_expiry + timedelta(seconds=1)
+    original = ConstraintFailure("uq_project_documents_project_folder_name")
+    original.constraint_name = constraint
+    failure = IntegrityError("Synthetic failed flush", {}, original)
+
+    class AfterWaitClock(datetime):
+        """service の時計だけを進め、認可元 row の凍結した expiry を維持する。"""
+
+        @classmethod
+        def now(cls, tz: tzinfo | None = None) -> AfterWaitClock:
+            """実 sleep や session field 書換えなしで、待機後の新時刻を返す。"""
+
+            return cls.fromtimestamp(after_expiry.timestamp(), tz=tz)
+
+    def fail_after_wait() -> None:
+        """TX B の flush だけを DB 拒否にし、応答分類時には元会話が期限切れとなる。"""
+
+        if db.transactions == 2:
+            monkeypatch.setattr("projectmind.documents.service.datetime", AfterWaitClock)
+            raise failure
+
+    db.on_flush = fail_after_wait
+    expected = (
+        UnauthorizedSessionError
+        if constraint == "uq_project_documents_project_folder_name" else IntegrityError
+    )
+    with pytest.raises(expected) as caught:
+        await db.upload()
+    if expected is IntegrityError:
+        assert caught.value is failure
+    assert db.auth_session.idle_expires_at == original_expiry
+    assert not db.documents and len(db.intents) == 1 and db.intents[0].state == "PENDING"
+    assert not db.cleanups and db.commits == 1 and db.rollbacks == 1
+    db.storage.put.assert_awaited_once()
     db.storage.delete.assert_not_awaited()
 
 
@@ -521,7 +580,7 @@ async def test_upload_cannot_accept_forged_uploader_or_missing_access(
     with pytest.raises(TypeError):
         await db.document_service.upload_document(
             project_id=db.project.id, folder="", name="note.txt", data=b"hello",
-            content_type="text/plain", **access_arguments,
+            content_type="text/plain", upload_key=uuid4(), **access_arguments,
         )
     assert db.transactions == 0
     db.storage.put.assert_not_awaited()

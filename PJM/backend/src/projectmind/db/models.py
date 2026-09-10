@@ -10,6 +10,7 @@ from uuid import UUID
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -867,6 +868,13 @@ class RunBudgetReservation(IdentityMixin, TimestampMixin, Base):
             name="budget_invocation_binding",
         ),
         CheckConstraint(
+            "invocation_start_owner_hash IS NULL OR "
+            "(invocation_id IS NOT NULL AND invocation_json IS NOT NULL "
+            "AND invocation_checksum IS NOT NULL "
+            "AND invocation_start_owner_hash ~ '^sha256:[0-9a-f]{64}$')",
+            name="budget_invocation_start_owner",
+        ),
+        CheckConstraint(
             "status IN ('RESERVED', 'START_INTENT', 'SETTLED', 'RELEASED')",
             name="budget_reservation_status",
         ),
@@ -922,6 +930,8 @@ class RunBudgetReservation(IdentityMixin, TimestampMixin, Base):
         JSON(none_as_null=True), nullable=True
     )
     invocation_checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # 旧束縛へ所有者を補造せず、raw token は調整者の一回限りの局部変数に留める。
+    invocation_start_owner_hash: Mapped[str | None] = mapped_column(String(71), nullable=True)
     parent_reservation_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("run_budget_reservations.id", ondelete="RESTRICT")
     )
@@ -1130,6 +1140,32 @@ class Evidence(IdentityMixin, Base):
     """Tool が取得した事実を再定位できる追加式 Evidence index。"""
 
     __tablename__ = "evidence"
+    __table_args__ = (
+        Index(
+            "uq_evidence_artifact_ref", "artifact_ref", unique=True,
+            postgresql_where=text("artifact_ref IS NOT NULL"),
+        ),
+        CheckConstraint(
+            "(artifact_ref IS NULL AND artifact_bytes IS NULL AND artifact_size IS NULL "
+            "AND artifact_mime_type IS NULL AND artifact_path IS NULL) OR "
+            "(artifact_ref IS NOT NULL AND artifact_bytes IS NOT NULL "
+            "AND artifact_size IS NOT NULL AND artifact_mime_type IS NOT NULL "
+            "AND artifact_path IS NOT NULL AND tool_call_id IS NOT NULL "
+            "AND artifact_ref ~ '^art_[a-zA-Z0-9_-]+$' "
+            "AND evidence_ref ~ '^ev_[a-zA-Z0-9_-]+$' "
+            "AND artifact_size BETWEEN 0 AND 1048576 "
+            "AND octet_length(artifact_bytes) = artifact_size "
+            "AND artifact_mime_type = 'text/plain' "
+            "AND content_hash ~ '^sha256:[0-9a-f]{64}$' "
+            "AND char_length(artifact_path) BETWEEN 8 AND 4096 "
+            "AND artifact_path LIKE 'output/%' AND artifact_path NOT LIKE '%/' "
+            "AND artifact_path NOT LIKE '%//%' "
+            r"AND artifact_path !~ '(^|/)(\.|\.\.)(/|$)' "
+            "AND position(chr(92) in artifact_path) = 0 "
+            "AND artifact_path !~ '[[:cntrl:]]')",
+            name="artifact_binding",
+        ),
+    )
 
     evidence_ref: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="RESTRICT"), index=True)
@@ -1143,6 +1179,14 @@ class Evidence(IdentityMixin, Base):
     snapshot_uri: Mapped[str | None] = mapped_column(String(2048))
     excerpt: Mapped[str | None] = mapped_column(Text)
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    artifact_ref: Mapped[str | None] = mapped_column(String(64))
+    # 通常 detail/effect の Evidence SELECT は添付本文を取得せず、偶発的な lazy load も拒む。
+    artifact_bytes: Mapped[bytes | None] = mapped_column(
+        LargeBinary, deferred=True, deferred_raiseload=True,
+    )
+    artifact_size: Mapped[int | None] = mapped_column(Integer)
+    artifact_mime_type: Mapped[str | None] = mapped_column(String(255))
+    artifact_path: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
@@ -1496,6 +1540,17 @@ class Evaluation(IdentityMixin, Base):
             "verdict IN ('accurate', 'partially_accurate', 'inaccurate', 'uncertain')",
             name="verdict_value",
         ),
+        CheckConstraint(
+            "(submission_key IS NULL AND request_hash IS NULL) OR "
+            "(submission_key IS NOT NULL AND request_hash IS NOT NULL "
+            "AND submission_key <> '00000000-0000-0000-0000-000000000000' "
+            "AND request_hash ~ '^sha256:[0-9a-f]{64}$')",
+            name="submission_binding",
+        ),
+        UniqueConstraint(
+            "result_id", "user_id", "submission_key", name="uq_evaluations_submission",
+        ),
+        Index("ix_evaluations_result_created_id", "result_id", "created_at", "id"),
     )
 
     result_id: Mapped[UUID] = mapped_column(
@@ -1506,6 +1561,234 @@ class Evaluation(IdentityMixin, Base):
     verdict: Mapped[str] = mapped_column(String(32), nullable=False)
     comment: Mapped[str] = mapped_column(Text, nullable=False)
     revision_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    submission_key: Mapped[UUID | None] = mapped_column(nullable=True)
+    request_hash: Mapped[str | None] = mapped_column(String(71), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ProjectDocumentUpload(IdentityMixin, Base):
+    """PUT 前の原要求と占用を保存し、公開後や清理要求後も帰属と課金量を保持する。
+
+    PENDING は遠端 write の成功/失敗を断定しない。UNCONDITIONAL_V1 は一回の application
+    dispatch だけを表し、SDK の wire retry や遅延 PUT の停止を保証しない。
+    """
+
+    __tablename__ = "document_upload_intents"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id", "project_id", "actor_id", "upload_key",
+            name="uq_document_upload_intent_request",
+        ),
+        UniqueConstraint("document_id", name="uq_document_upload_intent_document"),
+        UniqueConstraint(
+            "storage_namespace_id", "storage_key", name="uq_document_upload_intent_object",
+        ),
+        UniqueConstraint(
+            "id", "document_id", "project_id", name="uq_document_upload_intent_binding",
+        ),
+        Index(
+            "uq_document_upload_intent_pending_path", "project_id", "folder", "name",
+            unique=True, postgresql_where=text(
+                "state = 'PENDING' AND publication_closed_at IS NULL",
+            ),
+        ),
+        CheckConstraint(
+            "upload_key <> '00000000-0000-0000-0000-000000000000' AND "
+            "original_request_id <> '00000000-0000-0000-0000-000000000000' AND "
+            "original_session_id <> '00000000-0000-0000-0000-000000000000' AND "
+            "document_id <> '00000000-0000-0000-0000-000000000000' AND "
+            "storage_namespace_id <> '00000000-0000-0000-0000-000000000000'",
+            name="non_nil_identities",
+        ),
+        CheckConstraint("protocol_version = 1", name="protocol_version"),
+        CheckConstraint("request_checksum ~ '^sha256:[0-9a-f]{64}$'", name="request_checksum"),
+        CheckConstraint(
+            "storage_descriptor_checksum ~ '^sha256:[0-9a-f]{64}$'",
+            name="storage_descriptor_checksum",
+        ),
+        CheckConstraint("checksum ~ '^sha256:[0-9a-f]{64}$'", name="checksum"),
+        CheckConstraint("name <> '' AND storage_key <> '' AND mime <> ''", name="nonempty_fields"),
+        CheckConstraint("write_protocol = 'UNCONDITIONAL_V1'", name="write_protocol"),
+        CheckConstraint("size > 0", name="positive_size"),
+        CheckConstraint("state IN ('PENDING', 'PUBLISHED')", name="state"),
+        CheckConstraint(
+            "(state = 'PENDING' AND published_at IS NULL AND cleanup_requested_at IS NULL) OR "
+            "(state = 'PUBLISHED' AND published_at IS NOT NULL AND published_at >= created_at "
+            "AND (cleanup_requested_at IS NULL OR cleanup_requested_at >= published_at))",
+            name="publication",
+        ),
+        CheckConstraint(
+            "publication_closed_at IS NULL OR (state = 'PENDING' AND published_at IS NULL "
+            "AND publication_closed_at >= created_at)",
+            name="publication_closure",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False,
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True,
+    )
+    actor_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False,
+    )
+    upload_key: Mapped[UUID] = mapped_column(nullable=False)
+    original_request_id: Mapped[UUID] = mapped_column(nullable=False)
+    # Session 保留期間と意図の監査保持を分離し、元の ID だけを凍結する。
+    original_session_id: Mapped[UUID] = mapped_column(nullable=False)
+    protocol_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    request_checksum: Mapped[str] = mapped_column(String(71), nullable=False)
+    document_id: Mapped[UUID] = mapped_column(nullable=False)
+    folder: Mapped[str] = mapped_column(String(200), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    storage_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    storage_namespace_id: Mapped[UUID] = mapped_column(nullable=False)
+    storage_descriptor_checksum: Mapped[str] = mapped_column(String(71), nullable=False)
+    storage_is_durable: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    write_protocol: Mapped[str] = mapped_column(String(32), nullable=False)
+    # metadata 削除や一度の object 不在では占用を解放しない。精確な清理証明は別 protocol とする。
+    size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    mime: Mapped[str] = mapped_column(String(128), nullable=False)
+    checksum: Mapped[str] = mapped_column(String(71), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cleanup_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    # 旧 writer も公開へ進めない制約で守り、占用や原 PENDING 回答は書き換えない。
+    publication_closed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+
+
+class ProjectDocumentUploadClosure(IdentityMixin, Base):
+    """原 PENDING の公開停止だけを記録し、遠端 PUT の停止や占用解放を表さない。
+
+    原対象は RESTRICT 関連先に保持し、その全事実と今回の要求を別 checksum で固定する。
+    """
+
+    __tablename__ = "document_upload_closures"
+    __table_args__ = (
+        UniqueConstraint("upload_intent_id", name="uq_document_upload_closure_intent"),
+        ForeignKeyConstraint(
+            ["upload_intent_id", "document_id", "project_id"],
+            [
+                "document_upload_intents.id", "document_upload_intents.document_id",
+                "document_upload_intents.project_id",
+            ],
+            name="fk_document_upload_closures_upload_intent", ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "id <> '00000000-0000-0000-0000-000000000000' AND "
+            "upload_intent_id <> '00000000-0000-0000-0000-000000000000' AND "
+            "organization_id <> '00000000-0000-0000-0000-000000000000' AND "
+            "project_id <> '00000000-0000-0000-0000-000000000000' AND "
+            "actor_id <> '00000000-0000-0000-0000-000000000000' AND "
+            "upload_key <> '00000000-0000-0000-0000-000000000000' AND "
+            "document_id <> '00000000-0000-0000-0000-000000000000' AND "
+            "requested_by <> '00000000-0000-0000-0000-000000000000' AND "
+            "request_id <> '00000000-0000-0000-0000-000000000000' AND "
+            "session_id <> '00000000-0000-0000-0000-000000000000'",
+            name="non_nil_identities",
+        ),
+        CheckConstraint("protocol_version = 1", name="protocol_version"),
+        CheckConstraint("actor_id = requested_by", name="original_actor"),
+        CheckConstraint("binding_checksum ~ '^sha256:[0-9a-f]{64}$'", name="binding_checksum"),
+    )
+
+    upload_intent_id: Mapped[UUID] = mapped_column(nullable=False)
+    organization_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False,
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True,
+    )
+    actor_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False,
+    )
+    upload_key: Mapped[UUID] = mapped_column(nullable=False)
+    document_id: Mapped[UUID] = mapped_column(nullable=False)
+    protocol_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    binding_checksum: Mapped[str] = mapped_column(String(71), nullable=False)
+    requested_by: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False,
+    )
+    # Session の保留規則で原閉鎖要求を消さず、秘密ではない元 ID だけを保持する。
+    request_id: Mapped[UUID] = mapped_column(nullable=False)
+    session_id: Mapped[UUID] = mapped_column(nullable=False)
+    closed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ProjectDocumentCleanup(IdentityMixin, Base):
+    """目録削除と同じ transaction で原 object と占用を保持する独立清理要求。
+
+    旧文書に upload 履歴を補造しない。DELETE 応答や一度の不在観察を清理完了/解放としない。
+    """
+
+    __tablename__ = "document_blob_cleanups"
+    __table_args__ = (
+        UniqueConstraint("document_id", name="uq_document_blob_cleanup_document"),
+        ForeignKeyConstraint(
+            ["upload_intent_id", "document_id", "project_id"],
+            [
+                "document_upload_intents.id", "document_upload_intents.document_id",
+                "document_upload_intents.project_id",
+            ],
+            name="fk_document_blob_cleanups_upload_intent", ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "document_id <> '00000000-0000-0000-0000-000000000000' AND "
+            "request_id <> '00000000-0000-0000-0000-000000000000' AND "
+            "session_id <> '00000000-0000-0000-0000-000000000000' AND "
+            "uploaded_by <> '00000000-0000-0000-0000-000000000000' AND "
+            "storage_namespace_id <> '00000000-0000-0000-0000-000000000000'",
+            name="non_nil_identities",
+        ),
+        CheckConstraint("protocol_version = 1", name="protocol_version"),
+        CheckConstraint(
+            "(upload_intent_id IS NOT NULL AND source_protocol = 'UPLOAD_INTENT_V1') OR "
+            "(upload_intent_id IS NULL AND source_protocol = 'LEGACY_UNVERIFIED')",
+            name="source_protocol",
+        ),
+        CheckConstraint("name <> '' AND storage_key <> '' AND mime <> ''", name="nonempty_fields"),
+        CheckConstraint("size > 0", name="positive_size"),
+        CheckConstraint("checksum ~ '^sha256:[0-9a-f]{64}$'", name="checksum"),
+        CheckConstraint(
+            "storage_descriptor_checksum ~ '^sha256:[0-9a-f]{64}$'",
+            name="storage_descriptor_checksum",
+        ),
+        CheckConstraint("created_at >= document_created_at", name="created_at_order"),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False,
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True,
+    )
+    requested_by: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False,
+    )
+    # 目録や旧 Session を消しても清理の帰属を失わないよう、原 ID は独立して保持する。
+    document_id: Mapped[UUID] = mapped_column(nullable=False)
+    request_id: Mapped[UUID] = mapped_column(nullable=False)
+    session_id: Mapped[UUID] = mapped_column(nullable=False)
+    upload_intent_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    protocol_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_protocol: Mapped[str] = mapped_column(String(32), nullable=False)
+    folder: Mapped[str] = mapped_column(String(200), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    mime: Mapped[str] = mapped_column(String(128), nullable=False)
+    checksum: Mapped[str] = mapped_column(String(71), nullable=False)
+    uploaded_by: Mapped[UUID] = mapped_column(nullable=False)
+    document_created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    storage_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    storage_namespace_id: Mapped[UUID] = mapped_column(nullable=False)
+    storage_descriptor_checksum: Mapped[str] = mapped_column(String(71), nullable=False)
+    storage_is_durable: Mapped[bool] = mapped_column(Boolean, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
@@ -1513,7 +1796,7 @@ class ProjectDocument(IdentityMixin, Base):
     """Project 内にアップロードした文書の metadata。blob 正文は object storage に置く。
 
     正本 metadata は PostgreSQL、正文は storage_key の指す object storage に分離する。
-    同一 folder 内での name 重複は一意制約で拒否し、配額は size 合計で判定する。
+    同一 folder 内での name 重複は一意制約で拒否する。新文書の占用は upload intent に残す。
     """
 
     __tablename__ = "project_documents"
@@ -1524,12 +1807,35 @@ class ProjectDocument(IdentityMixin, Base):
             "name",
             name="uq_project_documents_project_folder_name",
         ),
+        ForeignKeyConstraint(
+            ["upload_intent_id", "id", "project_id"],
+            [
+                "document_upload_intents.id", "document_upload_intents.document_id",
+                "document_upload_intents.project_id",
+            ],
+            name="fk_project_documents_upload_intent", ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "(storage_namespace_id IS NULL AND storage_descriptor_checksum IS NULL "
+            "AND storage_is_durable IS NULL) OR "
+            "(storage_namespace_id IS NOT NULL AND storage_descriptor_checksum IS NOT NULL "
+            "AND storage_is_durable IS NOT NULL "
+            "AND storage_namespace_id <> '00000000-0000-0000-0000-000000000000' "
+            "AND storage_descriptor_checksum ~ '^sha256:[0-9a-f]{64}$')",
+            name="storage_namespace_binding",
+        ),
     )
 
     project_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    # 旧文書へ架空の原要求を補造せず、新方式の公開文書だけを正確な intent と結ぶ。
+    upload_intent_id: Mapped[UUID | None] = mapped_column(nullable=True)
     folder: Mapped[str] = mapped_column(String(200), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     storage_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    # 旧文書は三列とも NULL のまま保ち、現在の接続先から過去の帰属を推測しない。
+    storage_namespace_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    storage_descriptor_checksum: Mapped[str | None] = mapped_column(String(71), nullable=True)
+    storage_is_durable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     mime: Mapped[str] = mapped_column(String(128), nullable=False)
     checksum: Mapped[str] = mapped_column(String(71), nullable=False)
