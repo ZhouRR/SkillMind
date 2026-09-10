@@ -2016,6 +2016,7 @@ class FakeCompositionService:
         self.created: list[tuple[str, list[UUID]]] = []
         self.updated: list[tuple[UUID, str, list[UUID]]] = []
         self.deleted: list[UUID] = []
+        self.accesses: list[UserAccess] = []
 
     async def list_modules(self, *, project_id: UUID) -> list[StoredModule]:
         """固定の 1 module を返す。"""
@@ -2025,14 +2026,15 @@ class FakeCompositionService:
     async def create_module(
         self,
         *,
+        access: UserAccess,
         project_id: UUID,
-        created_by: UUID,
         name: str,
         description: str,
         skill_version_ids: list[UUID],
     ) -> StoredModule:
         """作成 command を記録し、echo した read model を返す。"""
 
+        self.accesses.append(access)
         if self.invalid_skill:
             raise ModuleSkillInvalidError("Skill versions are not published in this project")
         self.created.append((name, list(skill_version_ids)))
@@ -2046,6 +2048,7 @@ class FakeCompositionService:
     async def update_module(
         self,
         *,
+        access: UserAccess,
         project_id: UUID,
         module_id: UUID,
         name: str,
@@ -2054,8 +2057,11 @@ class FakeCompositionService:
     ) -> StoredModule:
         """更新 command を記録し、echo した read model を返す。"""
 
+        self.accesses.append(access)
         if self.not_found:
             raise ModuleNotFoundError(f"Module not found: {module_id}")
+        if self.invalid_skill:
+            raise ModuleSkillInvalidError("Skill versions are not published in this project")
         self.updated.append((module_id, name, list(skill_version_ids)))
         return make_stored_module(
             project_id=project_id,
@@ -2065,9 +2071,12 @@ class FakeCompositionService:
             skill_version_ids=skill_version_ids,
         )
 
-    async def delete_module(self, *, project_id: UUID, module_id: UUID) -> None:
+    async def delete_module(
+        self, *, access: UserAccess, project_id: UUID, module_id: UUID
+    ) -> None:
         """削除対象を記録する。"""
 
+        self.accesses.append(access)
         if self.not_found:
             raise ModuleNotFoundError(f"Module not found: {module_id}")
         self.deleted.append(module_id)

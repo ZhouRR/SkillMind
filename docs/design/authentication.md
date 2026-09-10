@@ -111,6 +111,8 @@ Run 创建冻结 actor、成员资格及 Skill/Tool 权限上限，不随后来�
 
 [Skill 版本管理](skill-interpretation.md#版本管理的授权事务)在草稿、发布、废弃、删除及项目启停事务中锁定原 User/会话，业务等待后、写入前和最终 flush 后复核当前 ADMIN。组织资产不加 Project 门禁，项目启停另锁精确 ACTIVE Project；重复操作仍需有效资格，保留原审计值。导入与解释写入不由此推导已覆盖。
 
+[组合管理](skill-contract.md#组合保存的授权事务)三写同样复核原 ADMIN 与当前 ACTIVE Project，随后锁同组织组合/关联和精确可用版本；共享对象更新不等于项目私有配置。
+
 [调度管理写入](task-scheduling.md#管理写入的授权事务)同样复核原会话、当前成员与归档，使用兼容 occurrence 外键的只读 User 锁；Worker 发火仍是独立的当前创建者授权协议。[单文档删除](document-lifecycle.md#删除事务与引用判定)固定原资格后检查历史引用；[文档上传](document-lifecycle.md#上传的授权事务)在锁外 PUT 前后分别复核原资格，入口授权先于 multipart 正文接收。原 upload key 查询也复核当前会话/成员，允许同 actor 新有效会话和授权归档读取；这不授权新会话接管旧 PUT。其他业务仍须按各自设计闭合授权竞争，不能由这些链路推导全系统立即停权或已有 Run 停止。
 
 ## 开发接续与验收

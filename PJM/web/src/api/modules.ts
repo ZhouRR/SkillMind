@@ -7,7 +7,7 @@ import {
   requestApiJson,
 } from './http'
 
-/** Module に束縛された PUBLISHED SkillVersion の公開投影。 */
+/** 保存時に束縛された精確版の公開投影。現在も有効/実行可能とは限らない。 */
 export interface ModuleSkillRecord {
   skill_version_id: string
   skill_id: string
@@ -43,11 +43,12 @@ export async function loadProjectModules(
   const value = await requestApiJson(
     `${API_BASE}/projects/${encodeURIComponent(projectId)}/modules`,
     { signal },
+    200,
   )
   return parseItemList(
     value,
     'modules',
-    isModule,
+    (item): item is ProjectModuleRecord => isModule(item) && item.project_id === projectId,
     'Module list response did not match its contract',
   )
 }
@@ -67,7 +68,8 @@ export async function createProjectModule(
       body: JSON.stringify(input),
       signal,
     },
-  ))
+    201,
+  ), projectId)
 }
 
 /** ADMIN の CSRF token 付きで module の名称/説明/束縛集合を置き換える。 */
@@ -86,7 +88,8 @@ export async function updateProjectModule(
       body: JSON.stringify(input),
       signal,
     },
-  ))
+    200,
+  ), projectId, moduleId)
 }
 
 /** ADMIN の CSRF token 付きで Project の module を削除する。 */
@@ -99,12 +102,17 @@ export async function deleteProjectModule(
   await requestApiEmpty(
     `${API_BASE}/projects/${encodeURIComponent(projectId)}/modules/${encodeURIComponent(moduleId)}`,
     { method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken }, signal },
+    204,
   )
 }
 
 /** Unknown JSON を単一 module record の公開 contract へ制限する。 */
-function parseModule(value: unknown): ProjectModuleRecord {
-  if (!isModule(value)) throw new Error('Module response did not match its contract')
+function parseModule(value: unknown, projectId: string, moduleId?: string): ProjectModuleRecord {
+  if (!isModule(value) || value.project_id !== projectId
+    || (moduleId !== undefined && value.module_id !== moduleId)) {
+    // 成功 status でも別対象の回执を原操作の成功にしない。DB の rollback は推測しない。
+    throw new Error('Module response did not match its contract')
+  }
   return value
 }
 

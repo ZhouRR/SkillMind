@@ -11,9 +11,16 @@ from pydantic import BaseModel, Field
 from projectmind.api.auth_dependencies import (
     AdminWriteActor,
     ProjectReadActor,
+    administrator_required_problem,
+    authentication_required_problem,
     authorize_project_access,
+    csrf_rejected_problem,
+    project_archived_problem,
+    project_not_found_problem,
+    user_access,
 )
-from projectmind.api.problems import ProblemException
+from projectmind.api.problems import ProblemException, problem_openapi_response
+from projectmind.auth.sessions import CsrfRejectedError, UnauthorizedSessionError
 from projectmind.compositions import (
     CompositionService,
     ModuleNotFoundError,
@@ -21,12 +28,14 @@ from projectmind.compositions import (
     ModuleValidationError,
     StoredModule,
 )
+from projectmind.projects.domain import ProjectArchivedError, ProjectNotFoundError
+from projectmind.users.domain import UserAdministrationDeniedError
 
 router = APIRouter()
 
 
 class ModuleSkillResponse(BaseModel):
-    """Module に束縛された PUBLISHED SkillVersion の公開投影。"""
+    """保存時に束縛した精確版の投影であり、現在も公開/有効であることは保証しない。"""
 
     skill_version_id: UUID
     skill_id: UUID
@@ -84,7 +93,13 @@ async def list_modules(
     "/projects/{project_id}/modules",
     response_model=ModuleResponse,
     status_code=status.HTTP_201_CREATED,
-    responses={422: {"description": "Name or skill bindings failed validation"}},
+    responses={
+        401: problem_openapi_response("The original session is no longer valid"),
+        403: problem_openapi_response("Administrator access or session CSRF was rejected"),
+        404: problem_openapi_response("Project not found or inaccessible"),
+        409: problem_openapi_response("Project is archived"),
+        422: problem_openapi_response("Request or module bindings failed validation"),
+    },
     tags=["modules"],
 )
 async def create_module(
@@ -99,21 +114,37 @@ async def create_module(
     service: CompositionService = request.app.state.composition_service
     try:
         module = await service.create_module(
+            access=user_access(request, actor),
             project_id=project_id,
-            created_by=actor.user_id,
             name=body.name,
             description=body.description,
             skill_version_ids=body.skill_version_ids,
         )
+    except UnauthorizedSessionError as error:
+        raise authentication_required_problem() from error
+    except CsrfRejectedError as error:
+        raise csrf_rejected_problem() from error
+    except UserAdministrationDeniedError as error:
+        raise administrator_required_problem() from error
+    except ProjectNotFoundError as error:
+        raise project_not_found_problem() from error
+    except ProjectArchivedError as error:
+        raise project_archived_problem() from error
     except (ModuleValidationError, ModuleSkillInvalidError) as error:
-        raise _module_rejected(error) from error
+        raise _module_rejected() from error
     return _module_response(module)
 
 
 @router.put(
     "/projects/{project_id}/modules/{module_id}",
     response_model=ModuleResponse,
-    responses={404: {"description": "Module not found in project"}},
+    responses={
+        401: problem_openapi_response("The original session is no longer valid"),
+        403: problem_openapi_response("Administrator access or session CSRF was rejected"),
+        404: problem_openapi_response("Module or Project not found or inaccessible"),
+        409: problem_openapi_response("Project is archived"),
+        422: problem_openapi_response("Request or module bindings failed validation"),
+    },
     tags=["modules"],
 )
 async def update_module(
@@ -129,23 +160,40 @@ async def update_module(
     service: CompositionService = request.app.state.composition_service
     try:
         module = await service.update_module(
+            access=user_access(request, actor),
             project_id=project_id,
             module_id=module_id,
             name=body.name,
             description=body.description,
             skill_version_ids=body.skill_version_ids,
         )
+    except UnauthorizedSessionError as error:
+        raise authentication_required_problem() from error
+    except CsrfRejectedError as error:
+        raise csrf_rejected_problem() from error
+    except UserAdministrationDeniedError as error:
+        raise administrator_required_problem() from error
+    except ProjectNotFoundError as error:
+        raise project_not_found_problem() from error
+    except ProjectArchivedError as error:
+        raise project_archived_problem() from error
     except ModuleNotFoundError as error:
-        raise _module_not_found(error) from error
+        raise _module_not_found() from error
     except (ModuleValidationError, ModuleSkillInvalidError) as error:
-        raise _module_rejected(error) from error
+        raise _module_rejected() from error
     return _module_response(module)
 
 
 @router.delete(
     "/projects/{project_id}/modules/{module_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    responses={404: {"description": "Module not found in project"}},
+    responses={
+        401: problem_openapi_response("The original session is no longer valid"),
+        403: problem_openapi_response("Administrator access or session CSRF was rejected"),
+        404: problem_openapi_response("Module or Project not found or inaccessible"),
+        409: problem_openapi_response("Project is archived"),
+        422: problem_openapi_response("Request did not satisfy the API contract"),
+    },
     tags=["modules"],
 )
 async def delete_module(
@@ -159,9 +207,21 @@ async def delete_module(
     await authorize_project_access(request, actor, project_id, require_active=True)
     service: CompositionService = request.app.state.composition_service
     try:
-        await service.delete_module(project_id=project_id, module_id=module_id)
+        await service.delete_module(
+            access=user_access(request, actor), project_id=project_id, module_id=module_id
+        )
+    except UnauthorizedSessionError as error:
+        raise authentication_required_problem() from error
+    except CsrfRejectedError as error:
+        raise csrf_rejected_problem() from error
+    except UserAdministrationDeniedError as error:
+        raise administrator_required_problem() from error
+    except ProjectNotFoundError as error:
+        raise project_not_found_problem() from error
+    except ProjectArchivedError as error:
+        raise project_archived_problem() from error
     except ModuleNotFoundError as error:
-        raise _module_not_found(error) from error
+        raise _module_not_found() from error
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -189,24 +249,23 @@ def _module_response(module: StoredModule) -> ModuleResponse:
     )
 
 
-def _module_not_found(error: Exception) -> ProblemException:
+def _module_not_found() -> ProblemException:
     """Module の不存在/越権を安定した 404 Problem へ変換する。"""
 
     return ProblemException(
         status=404,
         title="Module not found",
-        detail=str(error),
+        detail="The requested module resource was not found.",
         code="module_not_found",
     )
 
 
-def _module_rejected(error: Exception) -> ProblemException:
+def _module_rejected() -> ProblemException:
     """名称・束縛の検証失敗を安定した 422 Problem へ変換する。"""
 
     return ProblemException(
         status=422,
         title="Module rejected",
-        detail=str(error),
+        detail="The module name or skill bindings were rejected.",
         code="module_rejected",
     )
-

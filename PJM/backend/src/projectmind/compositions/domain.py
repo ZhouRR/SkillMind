@@ -21,7 +21,7 @@ class ModuleValidationError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class ModuleSkillBinding:
-    """Module に束縛された PUBLISHED SkillVersion の表示用投影。"""
+    """保存時に有効だった精確版を表示し、後日の停用・廃止で設定を補修しない。"""
 
     skill_version_id: UUID
     skill_id: UUID

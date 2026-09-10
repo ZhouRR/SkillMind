@@ -1155,7 +1155,7 @@ async def test_project_skill_version_controls_new_run_visibility(
 async def test_module_composition_round_trip_with_project_isolation(
     migrated_database_url: str,
 ) -> None:
-    """0015 実機 schema 上で module の作成/一覧/更新/削除と Project 隔離を往復検証する。"""
+    """実 schema の組合/Project 隔離を往復し、固定 callback は原会話の認可を証明しない。"""
 
     async with _session_factory(migrated_database_url) as factory:
         now = datetime.now(UTC)
@@ -1229,7 +1229,9 @@ async def test_module_composition_round_trip_with_project_isolation(
                     name="品质分析",
                     description="round trip module",
                     skill_version_ids=(published.id,),
-                )
+                ),
+                organization_id=organization.id,
+                authorize=lambda: now,
             )
         assert created.skills[0].skill_name == "DB Verify Skill"
 
@@ -1250,7 +1252,9 @@ async def test_module_composition_round_trip_with_project_isolation(
                         name="更名",
                         description="",
                         skill_version_ids=(uuid4(),),
-                    )
+                    ),
+                    organization_id=organization.id,
+                    authorize=lambda: now,
                 )
 
         async with factory() as session, session.begin():
@@ -1261,7 +1265,9 @@ async def test_module_composition_round_trip_with_project_isolation(
                     name="更名后的模块",
                     description="renamed",
                     skill_version_ids=(published.id,),
-                )
+                ),
+                organization_id=organization.id,
+                authorize=lambda: now,
             )
         assert updated.name == "更名后的模块"
 
@@ -1269,11 +1275,17 @@ async def test_module_composition_round_trip_with_project_isolation(
         async with factory() as session, session.begin():
             with pytest.raises(ModuleNotFoundError):
                 await CompositionRepository(session).delete(
-                    project_id=uuid4(), module_id=created.module_id
+                    project_id=uuid4(),
+                    module_id=created.module_id,
+                    organization_id=organization.id,
+                    authorize=lambda: now,
                 )
         async with factory() as session, session.begin():
             await CompositionRepository(session).delete(
-                project_id=project.id, module_id=created.module_id
+                project_id=project.id,
+                module_id=created.module_id,
+                organization_id=organization.id,
+                authorize=lambda: now,
             )
         async with factory() as session:
             remaining = await CompositionRepository(session).list_for_project(project.id)

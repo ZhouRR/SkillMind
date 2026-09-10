@@ -1,52 +1,112 @@
-"""Module 束縛の拒否理由が対処別に区別されることを検証する。"""
+"""共有精確版 gate と読取組織条件を実 repository の SQL で検証する。"""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from typing import cast
 from uuid import uuid4
 
-from projectmind.compositions.repository import _binding_rejection, _is_bindable
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from projectmind.compositions.domain import ModuleSkillInvalidError
+from projectmind.compositions.repository import CompositionRepository
+from tests.compositions.composition_authorization_harness import CompositionSession
+from tests.skills.test_skill_publication_authorization import NOW
 
 
-def test_published_and_enabled_version_is_bindable() -> None:
-    """PUBLISHED かつ Project 有効化済み(未無効化)だけが束縛可能。"""
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case",
+    [
+        "valid",
+        "unknown",
+        "deprecated",
+        "no-binding",
+        "disabled",
+        "foreign-source",
+        "foreign-skill",
+    ],
+)
+async def test_current_version_binding_refuses_with_one_static_reason(case: str) -> None:
+    """他組織の有効状態を理由文字列で漏らさず、本番共有 gate を実 SQL で消費する。"""
+    session = CompositionSession("update")
+    target = session.version.id
+    if case == "unknown":
+        target = uuid4()
+    elif case == "deprecated":
+        session.version.status = "DEPRECATED"
+    elif case == "no-binding":
+        session.bindings.clear()
+    elif case == "disabled":
+        session.bindings[0].disabled_at = NOW
+    elif case == "foreign-source":
+        session.source.organization_id = uuid4()
+    elif case == "foreign-skill":
+        session.skill.organization_id = uuid4()
+    repository = CompositionRepository(cast(AsyncSession, session))
+    before = session.frozen_values()
 
-    assert _is_bindable(("PUBLISHED", uuid4(), None)) is True
+    async def check() -> None:
+        """親 transaction の資格 callback を渡し、業務 version gate 自体は差し替えない。"""
+        await repository._require_published_versions(
+            organization_id=session.organization_id,
+            project_id=session.project.id,
+            skill_version_ids=(target,),
+            authorize=lambda: NOW,
+        )
+
+    if case == "valid":
+        await check()
+        assert session.timeline == ["version:1", "binding:1"]
+    else:
+        with pytest.raises(
+            ModuleSkillInvalidError,
+            match=r"^Skill versions are not available for this project$",
+        ):
+            await check()
+    assert session.frozen_values() == before and session.mutations == []
 
 
-def test_unknown_version_reports_missing_asset() -> None:
-    """Organization に存在しない version は「見つからない」と伝える。"""
-
-    assert _is_bindable(None) is False
-    assert "not found" in _binding_rejection(None)
-
-
-def test_unpublished_version_reports_its_actual_status() -> None:
-    """未発行は現在 status を添えて返し、利用者が発行操作へ向かえるようにする。
-
-    廃止済み版本を束縛したままの module 更新がここへ来る。旧文言は "not published" 一択で、
-    実際には「廃止済み」でも「未有効化」でも同じ表示になり原因が判らなかった。
-    """
-
-    rejection = _binding_rejection(("DEPRECATED", uuid4(), None))
-
-    assert "not PUBLISHED" in rejection
-    assert "DEPRECATED" in rejection
-
-
-def test_version_without_enablement_row_reports_project_enablement() -> None:
-    """PUBLISHED でも Project へ未有効化なら、Skill library での有効化を促す。"""
-
-    rejection = _binding_rejection(("PUBLISHED", None, None))
-
-    assert rejection == "not enabled for this project"
-
-
-def test_disabled_enablement_is_distinguished_from_never_enabled() -> None:
-    """一度有効化して無効化した版は「未有効化」と区別する。"""
-
-    rejection = _binding_rejection(
-        ("PUBLISHED", uuid4(), datetime(2026, 7, 21, tzinfo=UTC))
-    )
-
-    assert rejection == "disabled for this project"
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case",
+    [
+        "valid",
+        "foreign-parent",
+        "foreign-project",
+        "foreign-skill",
+        "foreign-source",
+        "deprecated",
+        "disabled",
+    ],
+)
+async def test_listing_scopes_parent_and_project_and_hides_foreign_names(case: str) -> None:
+    """旧設定の廃止/停止版は表示できるが、別組織の名前や共有父行を投影しない。"""
+    session = CompositionSession("update")
+    assert session.composition is not None
+    if case == "foreign-parent":
+        session.composition.organization_id = uuid4()
+    elif case == "foreign-project":
+        session.project.organization_id = uuid4()
+    elif case == "foreign-skill":
+        session.skill.organization_id = uuid4()
+    elif case == "foreign-source":
+        session.source.organization_id = uuid4()
+    elif case == "deprecated":
+        session.version.status = "DEPRECATED"
+    elif case == "disabled":
+        session.bindings[0].disabled_at = NOW
+    before = session.frozen_values()
+    records = await session.service().list_modules(project_id=session.project.id)
+    if case in {"foreign-parent", "foreign-project"}:
+        assert records == []
+    else:
+        assert len(records) == 1
+        record = records[0]
+        assert record.module_id == session.module_id and record.project_id == session.project.id
+        assert len(record.skills) == 1
+        expected = "unknown" if case in {"foreign-skill", "foreign-source"} else session.skill.key
+        assert record.skills[0].skill_key == expected
+    assert session.frozen_values() == before
+    assert session.transactions == 0 and session.mutations == []
+    assert not any("FOR UPDATE" in query or "FOR SHARE" in query for query in session.queries)

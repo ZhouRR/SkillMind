@@ -104,7 +104,7 @@ identity/hash/trace/结构错误拒绝；新领域 capability 允许，实际 To
 
 [resource_binding](../../PJM/backend/src/projectmind/skills/resource_binding.py)先查精确项目启用，再算任务 readiness 与 requirement AVAILABLE/UNAVAILABLE/UNSUPPORTED；依据真实已安装 Provider。候选可用不是选择或实际连通，选择创建前冻结，运行中 CHOICE 不换绑。旧注释若相反按[冻结规则](resource-snapshots.md)修正。
 
-新建 Run、保存调度及恢复 ACTIVE 在写入事务经共享 `require_current_task_binding` 复核精确 PUBLISHED 版和未停用关系。先锁 SkillVersion SHARE，再锁 ProjectSkillVersion SHARE；兼容 occurrence 外键 KEY SHARE，同时与启停/废弃写锁协调。它只固定当前可用性，不重解 Manifest/资源，也不用于[原 Run 确认](run-creation.md#目标创建流程)。
+新建 Run、保存调度及恢复 ACTIVE、[组合保存](skill-contract.md#组合保存的授权事务)在写入事务经共享 `require_current_task_binding` 复核精确 PUBLISHED 版和未停用关系。先锁 SkillVersion SHARE，再锁 ProjectSkillVersion SHARE；兼容 occurrence 外键 KEY SHARE，同时与启停/废弃写锁协调。它只固定当前可用性，不重解 Manifest/资源，也不用于[原 Run 确认](run-creation.md#目标创建流程)。
 
 同版停用后不可恢复，发布不可复活 DEPRECATED；目标审计恢复由[生命周期](skill-contract.md#可审计的重新启用与回滚)维护。
 

@@ -763,13 +763,19 @@ class SkillRepository:
         return tuple(descriptors)
 
     async def require_current_task_binding(
-        self, *, organization_id: UUID, project_id: UUID, skill_version_id: UUID
+        self,
+        *,
+        organization_id: UUID,
+        project_id: UUID,
+        skill_version_id: UUID,
+        authorize: Callable[[], datetime] | None = None,
     ) -> None:
-        """新規 Run/調度だけで、鎖外解析した精確版の現行可用性を保存 transaction に固定する。
+        """新規 Run/調度/組合で、精確版の現行可用性を保存 transaction に固定する。
 
         呼出元は現在の資格/Project を先に固定する。SkillVersion → 有効化の順を二つの
         SELECT で保証し、Schedule 認領が必要とする外鍵 KEY SHARE と互換な SHARE を使う。
         原 Run の重放では呼ばず、Manifest の再生成や resource/Provider 解決も行わない。
+        原会話の再検証 callback があれば各 row 待機直後、対象拒否より先に呼ぶ。
         """
 
         version = await self._session.scalar(
@@ -787,6 +793,8 @@ class SkillRepository:
             .with_for_update(read=True, of=SkillVersion)
             .execution_options(populate_existing=True)
         )
+        if authorize is not None:
+            authorize()
         if version is None:
             raise PublishedTaskNotFoundError("Published task is not available")
         binding = await self._session.scalar(
@@ -798,6 +806,8 @@ class SkillRepository:
             .with_for_update(read=True)
             .execution_options(populate_existing=True)
         )
+        if authorize is not None:
+            authorize()
         if binding is None or binding.disabled_at is not None:
             raise PublishedTaskNotFoundError("Published task is not available")
 
