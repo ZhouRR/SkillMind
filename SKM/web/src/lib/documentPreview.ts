@@ -1,3 +1,5 @@
+import { marked } from 'marked'
+
 /** 一覧 metadata と実 HTTP stream に適用する同じ preview byte 上限。 */
 export const DOCUMENT_PREVIEW_MAX_BYTES = 1_000_000
 
@@ -30,6 +32,11 @@ const DROP_CONTENTS = new Set([
   'script', 'template', 'noscript', 'iframe', 'object', 'embed', 'math', 'title',
   'link', 'meta', 'base', 'input', 'button', 'select', 'textarea', 'video', 'audio',
 ])
+
+/** Markdown の構造を解析した後、HTML と同じ静的 allowlist/CSP に通す。 */
+export function documentMarkdownHtml(source: string): string {
+  return documentPreviewHtml(envelope(marked.parse(source, { async: false, gfm: true })))
+}
 
 /** 埋め込み CSS と静的 SVG は保持し、能動要素を除いた専用 document を sandbox へ渡す。 */
 export function documentPreviewHtml(source: string): string {

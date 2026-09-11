@@ -55,6 +55,7 @@ from skillmind.integrations.domain import ResourceBindingLevel, binding_checksum
 from skillmind.runs.domain import ClaimedRun
 from skillmind.runs.interaction import INTERACTION_REQUEST_CAPABILITY
 from skillmind.skills.capability_blueprint import resolve_capability_blueprint
+from skillmind.skills.resource_binding import is_deferred_execution_capability
 
 
 class ContractStore:
@@ -87,11 +88,36 @@ def _read_tool_definitions(
     contracts: ContractStore,
     *,
     redmine_issue_provider: ToolProvider | None = None,
+    database_provider: ToolProvider | None = None,
+    mcp_provider: ToolProvider | None = None,
     repository_source: RepositorySnapshotSource | None = None,
 ) -> tuple[ToolDefinition, ...]:
     """注入済みの実 Provider だけを公開し、未設定の資源を合成 data で補わない。"""
 
     definitions: list[ToolDefinition] = []
+    if mcp_provider is not None:
+        definitions.append(ToolDefinition(
+            capability="mcp.read/v1",
+            description="Read text or Base64 content from one allowed MCP resource URI",
+            request_schema=contracts.load("tools/mcp.read/v1/request.schema.json"),
+            response_schema=contracts.load("tools/mcp.read/v1/response.schema.json"),
+            error_schema=contracts.load("tools/mcp.read/v1/error.schema.json"),
+            providers={"mcp": mcp_provider},
+        ))
+    if database_provider is not None:
+        definitions.append(
+            ToolDefinition(
+                capability="database.read/v1",
+                description=(
+                    "Read allowed PostgreSQL tables with columns, equality filters "
+                    "and bounded rows; no SQL input"
+                ),
+                request_schema=contracts.load("tools/database.read/v1/request.schema.json"),
+                response_schema=contracts.load("tools/database.read/v1/response.schema.json"),
+                error_schema=contracts.load("tools/database.read/v1/error.schema.json"),
+                providers={"postgres": database_provider},
+            )
+        )
     if redmine_issue_provider is not None:
         definitions.append(ToolDefinition(
             capability="issue.read/v1",
@@ -134,8 +160,11 @@ def create_run_tool_registry(
     *,
     document_source: ProjectDocumentSource,
     redmine_issue_provider: ToolProvider | None = None,
+    database_provider: ToolProvider | None = None,
+    mcp_provider: ToolProvider | None = None,
     repository_source: RepositorySnapshotSource | None = None,
     subagent_provider: ToolProvider | None = None,
+    deferred_features_enabled: bool = True,
 ) -> ToolRegistry:
     """Project 文書、実 Integration と platform 能力を registry へ登録する。"""
 
@@ -144,13 +173,16 @@ def create_run_tool_registry(
             *_read_tool_definitions(
                 contracts,
                 redmine_issue_provider=redmine_issue_provider,
+                database_provider=database_provider,
+                mcp_provider=mcp_provider,
                 repository_source=repository_source,
             ),
             document_read_tool_definition(contracts, document_source),
             *_workspace_tool_definitions(contracts),
             _interaction_tool_definition(contracts),
-            _change_propose_tool_definition(contracts),
-            *_subagent_tool_definitions(contracts, subagent_provider),
+            *((_change_propose_tool_definition(contracts),) if deferred_features_enabled else ()),
+            *(_subagent_tool_definitions(contracts, subagent_provider)
+              if deferred_features_enabled else ()),
         )
     )
 
@@ -313,6 +345,7 @@ class ProductionRunContextBuilder:
         tool_registry: ToolRegistry,
         model: str | None,
         materializer: WorkspaceMaterializer | None = None,
+        deferred_features_enabled: bool = True,
     ) -> None:
         """Workspace、Tool と model の Worker 起動時 snapshot を保持する。
 
@@ -324,6 +357,7 @@ class ProductionRunContextBuilder:
         self._tool_registry = tool_registry
         self._model = model
         self._materializer = materializer
+        self._deferred_features_enabled = deferred_features_enabled
 
     async def build(self, claimed_run: ClaimedRun, *, sequence_start: int) -> RunContext:
         """Input/Schema/Source/Permission を再検証し、最小 Tool 付き context を返す。"""
@@ -344,6 +378,12 @@ class ProductionRunContextBuilder:
         allowed = permission.get("allowed_capabilities")
         if not isinstance(allowed, list) or not all(isinstance(item, str) for item in allowed):
             raise ValueError("Permission snapshot contains invalid capabilities")
+        # 旧権限を削って別 Run として実行せず、物化・モデル起動の前に拒否する。
+        if not self._deferred_features_enabled and any(
+            is_deferred_execution_capability(capability)
+            for capability in allowed
+        ):
+            raise ValueError("Run snapshot requires disabled execution features")
 
         # 不変 SkillVersion snapshot を先に確定してから、その Manifest を根拠に Tool を解決する。
         # 業務固有 task に依存せず、任意 published task の Run を同一経路で実行する。

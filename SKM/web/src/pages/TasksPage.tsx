@@ -43,6 +43,7 @@ export interface TasksPageProps {
   csrfToken: string
   moduleId: string
   projectReadOnly?: boolean
+  deferredFeaturesEnabled?: boolean
   actorId?: string
   onSessionEnded?: SessionEnded
 }
@@ -56,7 +57,7 @@ export function TasksPage(props: TasksPageProps) {
 }
 
 /** Task 一覧と独立した read-only preview を同じ精確 Project の中へ置く。 */
-function TaskCenter({ projectId, csrfToken, moduleId, projectReadOnly = false, actorId = '', onSessionEnded = retainSession }: TasksPageProps) {
+function TaskCenter({ projectId, csrfToken, moduleId, projectReadOnly = false, deferredFeaturesEnabled = true, actorId = '', onSessionEnded = retainSession }: TasksPageProps) {
   const messages = useMessages()
   const [state, setState] = useState<LoadState>({ status: 'loading' })
   const [modules, setModules] = useState<ProjectModuleRecord[]>([])
@@ -81,7 +82,7 @@ function TaskCenter({ projectId, csrfToken, moduleId, projectReadOnly = false, a
     setState({ status: 'loading' })
     void Promise.all([
       loadProjectTasks(projectId, active.signal),
-      loadProjectSchedules(projectId, active.signal),
+      deferredFeaturesEnabled ? loadProjectSchedules(projectId, active.signal) : Promise.resolve([]),
       loadProjectModules(projectId, active.signal).catch(() => [] as ProjectModuleRecord[]),
     ])
       .then(([tasks, schedules, projectModules]) => {
@@ -97,7 +98,7 @@ function TaskCenter({ projectId, csrfToken, moduleId, projectReadOnly = false, a
         })
       })
     return () => active.abort()
-  }, [projectId, revision])
+  }, [projectId, revision, deferredFeaturesEnabled])
 
   useEffect(() => () => controller.current?.abort(), [])
 
@@ -162,6 +163,7 @@ function TaskCenter({ projectId, csrfToken, moduleId, projectReadOnly = false, a
                 previewSelected={flow.target?.skill_version_id === row.task.skill_version_id && flow.target?.task_key === row.task.task_key}
                 projectId={projectId}
                 projectReadOnly={projectReadOnly}
+                deferredFeaturesEnabled={deferredFeaturesEnabled}
                 row={row}
               />
             ))}
@@ -181,7 +183,7 @@ function TaskCenter({ projectId, csrfToken, moduleId, projectReadOnly = false, a
       </section>}
       {/* 定时执行は task に属する設定なので、設定入口も一覧の行に置く。工作空间の左 rail に
           置いていたときは「今の下書き」に紐づいていて、どの task の予定なのかが読めなかった。 */}
-      {scheduleFor !== null && !projectReadOnly && <ScheduleDialog
+      {scheduleFor !== null && !projectReadOnly && deferredFeaturesEnabled && <ScheduleDialog
         key={`${projectId}:${taskCatalogId(scheduleFor)}`}
         csrfToken={csrfToken}
         onClose={() => setScheduleFor(null)}
@@ -219,11 +221,12 @@ export function buildRows(tasks: PublishedTaskRecord[], data: TaskCenterState): 
 }
 
 /** 一つの task を、就緒度・資源・定时・操作の四点で示す card。 */
-function TaskCard({ row, projectId, csrfToken, projectReadOnly, onSchedule, onScheduleChanged, onScheduleError, onPreview, previewAllowed, previewSelected }: {
+function TaskCard({ row, projectId, csrfToken, projectReadOnly, deferredFeaturesEnabled, onSchedule, onScheduleChanged, onScheduleError, onPreview, previewAllowed, previewSelected }: {
   row: TaskRow
   projectId: string
   csrfToken: string
   projectReadOnly: boolean
+  deferredFeaturesEnabled: boolean
   onSchedule: () => void
   onScheduleChanged: () => void
   onScheduleError: (message: string) => void
@@ -260,12 +263,12 @@ function TaskCard({ row, projectId, csrfToken, projectReadOnly, onSchedule, onSc
             ? messages.workspace.noResourceNeeded
             : messages.tasks.requirementCount(row.requirementCount)}</dd>
         </div>
-        <div>
+        {deferredFeaturesEnabled && <div>
           <dt>{messages.tasks.scheduleLabel}</dt>
           <dd>{activeSchedules.length === 0
             ? messages.tasks.noSchedule
             : messages.tasks.scheduleCount(activeSchedules.length)}</dd>
-        </div>
+        </div>}
         {activeSchedules.length > 0 && <div>
           <dt>{messages.tasks.nextRunLabel}</dt>
           <dd>{nextSchedule ? formatScheduleTimestamp(nextSchedule.next_run_at!, nextSchedule.timezone) : messages.schedules.noNextRun}</dd>
@@ -287,14 +290,14 @@ function TaskCard({ row, projectId, csrfToken, projectReadOnly, onSchedule, onSc
         <a className="primaryButton compactButton" href={routeHref('workspace', projectId, { taskId: taskCatalogId(row.task) })}>
           {messages.tasks.runNow}
         </a>
-        <button
+        {deferredFeaturesEnabled && <button
           className="secondaryButton compactButton"
           disabled={projectReadOnly || level === 'GUIDANCE_ONLY'}
           type="button"
           onClick={onSchedule}
         >
           {messages.tasks.addSchedule}
-        </button>
+        </button>}
       </div>
       {!isValidTaskFlowTarget(row.task) && <p className="hint" data-flow-invalid-target>{messages.taskFlow.failures.invalid}</p>}
       {row.schedules.length > 0 && (

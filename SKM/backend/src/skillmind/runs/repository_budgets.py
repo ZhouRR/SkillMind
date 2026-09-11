@@ -165,6 +165,51 @@ class RunBudgetRepository(_RunRepositoryBase):
         await self._reject_cancelled_execution(run.id)
         self._validate_claimed_lease(attempt, claimed, now=datetime.now(UTC))
 
+    async def reserve_primary(
+        self,
+        claimed: ClaimedRun,
+        *,
+        expected_policy: BudgetPolicy,
+        confirm_only: bool = False,
+    ) -> BudgetExecutionRecord:
+        """主 Attempt の残額を原子的に預留し、重放は初回授与量を保つ。
+
+        呼出し元は対応 adapter を検証した policy を渡す。ここで profile の信頼性や
+        停止を補造しない。旧占用を引いた残額だけを使い、取消/lease を再検証する。
+        """
+        group_key = f"primary:{claimed.run_attempt_id}"
+        run, _, _ = await self._lock_claimed_execution(claimed)
+        account, policy, rows = await self._ledger(run)
+        if policy != expected_policy:
+            raise BudgetUnavailableError("Run budget policy does not match the primary adapter")
+        original = [row for row in rows if row.group_key == group_key]
+        if original:
+            if len(original) != 1 or original[0].execution_key != group_key:
+                raise BudgetConflictError("Primary reservation has an invalid original group")
+            row = original[0]
+            request = BudgetReservationRequest(
+                group_key,
+                _stored_units(row.granted_turns),
+                _stored_units(row.granted_cost_nanos)
+                if row.granted_cost_nanos is not None else None,
+            )
+        else:
+            if confirm_only:
+                raise BudgetUnavailableError("Primary reservation commit was not confirmed")
+            balance = self._account(account, policy)
+            if balance.remaining_turns <= 0 or (
+                balance.remaining_cost_nanos is not None and balance.remaining_cost_nanos <= 0
+            ):
+                raise BudgetExhaustedError("Run has no uncommitted primary execution budget")
+            request = BudgetReservationRequest(
+                group_key, balance.remaining_turns, balance.remaining_cost_nanos
+            )
+        # 同 transaction の原 lock を保持したまま、共通の組 checksum/授与/fencing を使う。
+        records = await self.reserve_group(
+            claimed, group_key=group_key, requests=(request,), confirm_only=confirm_only
+        )
+        return records[0]
+
     async def reserve_group(
         self,
         claimed: ClaimedRun,

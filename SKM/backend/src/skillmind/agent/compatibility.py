@@ -15,6 +15,7 @@ from claude_agent_sdk._cli_version import __cli_version__
 from claude_agent_sdk._version import __version__
 
 from skillmind.agent.claude import CLAUDE_AGENT_SDK_VERSION, CLAUDE_CODE_CLI_VERSION
+from skillmind.agent.claude_build import bundled_claude_build
 
 _REQUIRED_OPTION_FIELDS = frozenset(
     {
@@ -35,6 +36,7 @@ _REQUIRED_OPTION_FIELDS = frozenset(
         "resume",
         "fork_session",
         "session_store",
+        "cli_path",
     }
 )
 
@@ -49,6 +51,7 @@ class SdkCompatibilityReport:
     interrupt_supported: bool
     in_process_mcp_supported: bool
     session_store_protocol_supported: bool
+    bundled_cli_checksum: str
 
 
 def probe_claude_agent_sdk() -> SdkCompatibilityReport:
@@ -93,4 +96,5 @@ def probe_claude_agent_sdk() -> SdkCompatibilityReport:
         interrupt_supported=interrupt_supported,
         in_process_mcp_supported=in_process_mcp_supported,
         session_store_protocol_supported=session_store_protocol_supported,
+        bundled_cli_checksum=bundled_claude_build().cli_checksum,
     )

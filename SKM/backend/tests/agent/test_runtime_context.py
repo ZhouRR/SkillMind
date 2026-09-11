@@ -38,11 +38,18 @@ CONTRACTS = ROOT / "contracts"
 
 @pytest.mark.parametrize(
     ("capability", "provider"),
-    [("issue.read/v1", "csv"), ("issue.read/v1", "redmine"),
-     ("repository.read/v1", "git"), ("repository.read/v1", "svn")],
+    [
+        ("issue.read/v1", "csv"),
+        ("issue.read/v1", "redmine"),
+        ("repository.read/v1", "git"),
+        ("repository.read/v1", "svn"),
+        ("database.read/v1", "postgres"),
+        ("mcp.read/v1", "mcp"),
+    ],
 )
 def test_production_registry_requires_explicit_read_clients(
-    capability: str, provider: str,
+    capability: str,
+    provider: str,
 ) -> None:
     """Client 未設定の起動は可能だが、合成 data を利用する能力は公開しない。"""
 
@@ -207,6 +214,29 @@ async def test_context_builder_resolves_fixture_tools_and_workspace(tmp_path: Pa
     assert "Return ONLY one JSON object" in context.prompt
     assert "Do not use Markdown" in context.prompt
     assert '"summary"' in context.prompt
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "capability", ["subagent.dispatch/v1", "change.propose/v1", "issue.update/v1"]
+)
+async def test_readonly_deployment_rejects_legacy_permissions_before_io(
+    tmp_path: Path, capability: str
+) -> None:
+    """任意 Tool の欠落を黙って無視せず、旧 permission 全体を物化前に拒否する。"""
+    materializer = Mock()
+    builder = ProductionRunContextBuilder(
+        workspace_manager=WorkspaceManager((tmp_path / "runs").resolve()),
+        tool_registry=create_fixture_tool_registry(ContractStore(CONTRACTS)),
+        model="claude-test",
+        materializer=materializer,
+        deferred_features_enabled=False,
+    )
+    claimed = _generic_claimed(selected_sources={}, allowed=(capability,))
+    with pytest.raises(ValueError, match="disabled execution features"):
+        await builder.build(claimed, sequence_start=1)
+    materializer.materialize.assert_not_called()
+    assert not (tmp_path / "runs").exists()
 
 
 @pytest.mark.asyncio
@@ -429,6 +459,45 @@ def _generic_builder(tmp_path: Path) -> ProductionRunContextBuilder:
         tool_registry=create_fixture_tool_registry(contracts),
         model="claude-test",
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("capability,provider_name,provider_keyword", [
+    ("database.read/v1", "postgres", "database_provider"),
+    ("mcp.read/v1", "mcp", "mcp_provider"),
+])
+async def test_context_builder_resolves_readonly_other_resource(
+    tmp_path: Path, capability: str, provider_name: str, provider_keyword: str,
+) -> None:
+    """公開 other 資源から読取 Tool を原 binding に束縛し、暗黙 I/O は行わない。"""
+    manifest = _generic_manifest(required=True)
+    manifest["tools"] = [{"capability": capability, "required": True}]
+    manifest["capability_blueprint"]["resource_requirements"] = [{
+        "key": "reports", "kind": "other", "required": True, "access": "read",
+        "capabilities": [capability], "accepted_providers": [provider_name],
+    }]
+    claimed = _generic_claimed(
+        selected_sources={"reports": {"capability": capability, "provider": provider_name}},
+        allowed=(capability,),
+        manifest=manifest,
+    )
+    provider = Mock()
+    builder = ProductionRunContextBuilder(
+        workspace_manager=WorkspaceManager((tmp_path / "runs").resolve()),
+        tool_registry=create_run_tool_registry(
+            ContractStore(CONTRACTS), document_source=_NoopDocumentSource(),
+            **{provider_keyword: provider},
+        ),
+        model="claude-test",
+    )
+    context = await builder.build(claimed, sequence_start=1)
+    assert len(context.tools) == 1
+    tool = context.tools[0]
+    selected = claimed.selected_sources_json["reports"]
+    assert (tool.capability, tool.provider) == (capability, provider_name)
+    assert str(tool.integration_id) == selected["integration_id"]
+    assert str(tool.binding_id) == selected["binding_id"]
+    provider.execute.assert_not_called()
 
 
 @pytest.mark.asyncio

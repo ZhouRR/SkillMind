@@ -19,6 +19,7 @@ export interface SchedulesPageProps {
   csrfToken: string
   currentProject: ProjectRecord | null
   onSessionEnded?: SessionEnded
+  deferredFeaturesEnabled?: boolean
 }
 
 /** 単独利用でも 401 後の業務成功を補造しない。通常 App は原会話の終了を受け持つ。 */
@@ -33,7 +34,7 @@ export function SchedulesPage(props: SchedulesPageProps) {
 }
 
 /** 行選択・一覧読取と原編集 owner を分離し、refresh で未決書込を消さない。 */
-function ScheduleManager({ projectId, currentProject, csrfToken, onSessionEnded = retainSession }: SchedulesPageProps) {
+function ScheduleManager({ projectId, currentProject, csrfToken, deferredFeaturesEnabled = true, onSessionEnded = retainSession }: SchedulesPageProps) {
   const messages = useMessages()
   const labels = messages.scheduleManager
   const authorized = Boolean(currentProject && sameUuid(currentProject.project_id, projectId))
@@ -86,6 +87,7 @@ function ScheduleManager({ projectId, currentProject, csrfToken, onSessionEnded 
     <PageHeader title={messages.routes.schedules.label} description={messages.routes.schedules.description} />
     {!authorized ? <section className="panel"><EmptyState text={labels.needProject} /></section> : <>
       {readonly && <p className="scheduleNotice" role="status">{labels.readOnlyProject}</p>}
+      {!deferredFeaturesEnabled && <p className="scheduleNotice" role="status">{labels.deferredDisabled}</p>}
       {state.readDenied && <p className="error" role="alert" data-schedule-read-denied>{labels.failures[state.readDenied.key]}</p>}
       <div className="scheduleManagerLayout">
         <section className="panel scheduleManagerList" aria-label={labels.listTitle}>
@@ -154,9 +156,10 @@ function ScheduleManager({ projectId, currentProject, csrfToken, onSessionEnded 
               <ScheduleDetails schedule={state.record} />
               <div className="formRow">
                 <button className="primaryButton compactButton" type="button" data-schedule-edit
-                  disabled={readonly || !state.canWrite || statusPending || editorPending
+                  disabled={!deferredFeaturesEnabled || readonly || !state.canWrite || statusPending || editorPending
                     || ['COMPLETED', 'ARCHIVED'].includes(state.record.status)} onClick={edit}>{labels.edit}</button>
                 <ScheduleStatusActions key={state.selection.revision} schedule={state.record} projectId={projectId} csrfToken={csrfToken}
+                  allowResume={deferredFeaturesEnabled}
                   disabled={readonly || !state.canWrite || editorOpen || editorPending}
                   isWriteAllowed={() => !editorLock.current && state.canEdit()}
                   onSessionEnded={onSessionEnded} onPendingChange={(pending) => { statusLock.current = pending; setStatusPending(pending) }}
@@ -174,7 +177,7 @@ function ScheduleManager({ projectId, currentProject, csrfToken, onSessionEnded 
           <button className="secondaryButton compactButton" type="button" data-schedule-reopen
             onClick={() => { editorLock.current = true; editorOpenRef.current = true; setEditorOpen(true) }}>{labels.reopenEditor}</button></div>}
         <ScheduleEditDialog key={`${editor.schedule.schedule_id}:${editor.revision}`} schedule={editor.schedule} task={editor.task}
-          projectId={projectId} csrfToken={csrfToken} open={editorOpen} disabled={readonly || statusPending || !state.canWrite}
+          projectId={projectId} csrfToken={csrfToken} open={editorOpen} disabled={!deferredFeaturesEnabled || readonly || statusPending || !state.canWrite}
           isWriteAllowed={() => !statusLock.current && state.canEdit()}
           onSessionEnded={onSessionEnded} onPendingChange={(pending) => {
             editorPendingRef.current = pending; editorLock.current = editorOpenRef.current || pending; setEditorPending(pending)

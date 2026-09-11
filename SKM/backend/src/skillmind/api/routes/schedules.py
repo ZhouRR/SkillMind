@@ -27,6 +27,7 @@ from skillmind.api.problems import (
     ProblemException,
     problem_openapi_response,
 )
+from skillmind.api.release_features import require_deferred_features
 from skillmind.auth.sessions import CsrfRejectedError, UnauthorizedSessionError
 from skillmind.projects.domain import ProjectArchivedError, ProjectNotFoundError
 from skillmind.schedules import (
@@ -314,7 +315,10 @@ async def preview_schedule(
     responses={
         **_WRITE_ACCESS_PROBLEMS,
         201: {"headers": NO_STORE_PROBLEM_HEADERS},
-        409: problem_openapi_response("Project is archived", headers=NO_STORE_PROBLEM_HEADERS),
+        409: problem_openapi_response(
+            "Project is archived or scheduled execution is disabled",
+            headers=NO_STORE_PROBLEM_HEADERS,
+        ),
         422: problem_openapi_response(
             "Schedule definition or task configuration is invalid", headers=NO_STORE_PROBLEM_HEADERS
         ),
@@ -329,6 +333,7 @@ async def create_schedule(
 ) -> ScheduleResponse:
     """定義・task・資源選択をすべて検証してから schedule を作成する。"""
 
+    require_deferred_features(request)
     service: ScheduleService = request.app.state.schedule_service
     definition = _definition(body.definition)
     try:
@@ -385,7 +390,7 @@ async def get_schedule(
         **_WRITE_ACCESS_PROBLEMS,
         200: {"headers": NO_STORE_PROBLEM_HEADERS},
         409: problem_openapi_response(
-            "Project is archived or schedule was modified by another request",
+            "Project is archived, schedule changed, or scheduled execution is disabled",
             headers=NO_STORE_PROBLEM_HEADERS,
         ),
         422: problem_openapi_response(
@@ -403,6 +408,7 @@ async def update_schedule(
 ) -> ScheduleResponse:
     """定義と凍結入力を差し替える。楽観ロックの不一致は 409 にする。"""
 
+    require_deferred_features(request)
     service: ScheduleService = request.app.state.schedule_service
     definition = _definition(body.definition)
     try:
@@ -481,7 +487,8 @@ async def get_schedule_activity(
         **_WRITE_ACCESS_PROBLEMS,
         200: {"headers": NO_STORE_PROBLEM_HEADERS},
         409: problem_openapi_response(
-            "Project is archived, schedule changed, or transition is not allowed",
+            "Project is archived, schedule changed, transition is not allowed, "
+            "or execution is disabled",
             headers=NO_STORE_PROBLEM_HEADERS,
         ),
         422: problem_openapi_response(
@@ -500,6 +507,8 @@ async def change_schedule_status(
 ) -> ScheduleResponse:
     """暂停・恢复・归档を状態機経由で適用する。"""
 
+    if body.status is ScheduleStatus.ACTIVE:
+        require_deferred_features(request)
     service: ScheduleService = request.app.state.schedule_service
     try:
         record = await service.change_status(

@@ -13,6 +13,7 @@ from uuid import uuid4
 import pytest
 from claude_agent_sdk import ClaudeAgentOptions
 
+from skillmind.agent.claude_build import bundled_claude_build
 from skillmind.agent.claude_metering import capture_invocation
 from skillmind.agent.metering import (
     AgentInvocation,
@@ -68,6 +69,7 @@ def invocation(tmp_path: Path) -> AgentInvocation:
         session_id=session_id,
         prompt="Frozen synthetic instruction",
         options=ClaudeAgentOptions(
+            cli_path=bundled_claude_build().cli_path,
             session_id=session_id,
             max_turns=5,
             max_budget_usd=0.1,
@@ -221,3 +223,22 @@ def test_raw_observation_has_its_own_version_and_no_settlement_fields(tmp_path: 
     assert InvocationOptions.from_json(original.options.to_json()) == original.options
     with pytest.raises(ValueError):
         replace(observed, turns=UsageValue(UsageValueKind.BINARY64, (3.0).hex()))
+
+
+def test_legacy_invocation_keeps_original_json_and_checksum(tmp_path: Path) -> None:
+    """旧記録へ現在の binary hash/null を補い、原 invocation を変更しない。"""
+    payload = invocation(tmp_path).to_json()
+    del payload["options"]["cli_checksum"]
+    restored = AgentInvocation.from_json(payload)
+    assert restored.options.cli_checksum is None
+    assert restored.to_json() == payload
+    assert restored.checksum == sha256_hex(canonical_json(payload))
+
+
+@pytest.mark.parametrize("checksum", [None, "bad", 123])
+def test_present_cli_checksum_must_be_valid(tmp_path: Path, checksum: object) -> None:
+    """省略と明示 null を混同せず、未知の file identity を保存させない。"""
+    payload = invocation(tmp_path).to_json()
+    payload["options"]["cli_checksum"] = checksum
+    with pytest.raises(ValueError):
+        AgentInvocation.from_json(payload)

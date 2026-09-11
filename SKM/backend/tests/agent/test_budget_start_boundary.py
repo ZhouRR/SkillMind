@@ -429,7 +429,9 @@ async def test_pending_cancellation_is_checked_at_synchronous_start_boundaries(
 
 
 @pytest.mark.parametrize(
-    "field", ["model", "max_turns", "max_budget_usd", "session_id", "resume", "output_format"]
+    "field", [
+        "model", "max_turns", "max_budget_usd", "session_id", "resume", "output_format", "cli_path"
+    ]
 )
 async def test_factory_cannot_change_previously_authorized_options(
     tmp_path: Path, field: str
@@ -452,6 +454,7 @@ async def test_factory_cannot_change_previously_authorized_options(
                 "max_budget_usd": 0.25,
                 "session_id": str(uuid4()),
                 "resume": str(uuid4()),
+                "cli_path": "/unconfigured/claude",
             }
             setattr(options, field, values[field])
 

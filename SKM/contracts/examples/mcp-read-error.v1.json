@@ -1,0 +1,6 @@
+{
+  "status": "error",
+  "code": "scope_denied",
+  "message": "MCP resource is outside the frozen scope",
+  "retryable": false
+}

@@ -62,7 +62,10 @@ async def test_schedule_tick_reports_each_outcome_separately() -> None:
     result = await trigger_due_schedules(
         {
             "schedule_service": service,
-            "settings": type("S", (), {"outbox_batch_size": 25})(),
+            "settings": type("S", (), {
+                "outbox_batch_size": 25, "deferred_features_enabled": True,
+                "worker_dispatch_enabled": True,
+            })(),
             "worker_id": "worker-1",
         }
     )

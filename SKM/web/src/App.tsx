@@ -467,13 +467,14 @@ function renderPage(
       return <DocumentsPage csrfToken={session.csrf_token} projectId={projectId}
         actorId={session.user.user_id} readOnly={currentProject?.status !== 'ACTIVE'} onSessionEnded={onSessionEnded} />
     case 'resources':
-      return <ResourcesPage csrfToken={session.csrf_token} projectId={projectId} />
+      return <ResourcesPage csrfToken={session.csrf_token} projectId={projectId}
+        deferredFeaturesEnabled={session.deferred_features_enabled === true} />
     case 'tasks':
       return <TasksPage key={`${session.user.user_id}:${projectId}`} csrfToken={session.csrf_token} actorId={session.user.user_id} onSessionEnded={onSessionEnded} moduleId={activeModuleId} projectId={projectId}
-        projectReadOnly={currentProject?.status !== 'ACTIVE'} />
+        projectReadOnly={currentProject?.status !== 'ACTIVE'} deferredFeaturesEnabled={session.deferred_features_enabled === true} />
     case 'schedules':
       return <SchedulesPage projectId={projectId} actorId={session.user.user_id} csrfToken={session.csrf_token}
-        currentProject={currentProject} onSessionEnded={onSessionEnded} />
+        currentProject={currentProject} onSessionEnded={onSessionEnded} deferredFeaturesEnabled={session.deferred_features_enabled === true} />
     case 'workspace':
       return <WorkspacePage
         key={`${session.user.user_id}:${projectId}`}

@@ -18,6 +18,22 @@ function item(phase: DocumentUploadItem['phase']): DocumentUploadItem {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('immutable original document uploads', () => {
+  it('prefixes the chosen destination while retaining a selected directory hierarchy', () => {
+    const file = new File(['fixed'], 'note.md')
+    Object.defineProperty(file, 'webkitRelativePath', { value: 'bundle/nested/note.md' })
+    const original = freezeDocumentUpload(ACTOR, PROJECT, file, ' docs/review/ ')
+    expect(original.body).toMatchObject({ folder: 'docs/review/bundle/nested', name: 'note.md' })
+    expect(original.label).toBe('docs/review/bundle/nested/note.md')
+    expect(freezeDocumentUpload(ACTOR, PROJECT, new File(['x'], 'a.md'), 'new/folder').body?.folder)
+      .toBe('new/folder')
+  })
+
+  it.each(['/absolute', '../outside', 'docs/../outside', 'docs/./file', 'docs\\file', 'docs\u0000file'])(
+    'rejects an unsafe upload destination %s before creating an intent', (folder) => {
+      expect(() => freezeDocumentUpload(ACTOR, PROJECT, new File(['x'], 'a.md'), folder)).toThrow()
+    },
+  )
+
   it('freezes actual bytes, MIME, directory, key and owner before the original File changes', async () => {
     const input = new Uint8Array([65, 66])
     const file = new File([input], 'note.md')

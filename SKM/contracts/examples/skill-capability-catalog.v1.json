@@ -1,6 +1,6 @@
 {
   "catalog_version": "skillmind.tool-catalog/1",
-  "checksum": "sha256:8b541cb757e6520c6237a7c5dca1557bde562196bb10fcbf75e4c7e103231ce3",
+  "checksum": "sha256:9f826f7cef5890f6d67fdceb11ab3cf555c9b28f9d3af857408ea8cc0bbef801",
   "capabilities": [
     {
       "capability": "change.propose/v1",
@@ -10,6 +10,16 @@
       "error_schema": "tools/change.propose/v1/error.schema.json",
       "providers": [
         "platform"
+      ]
+    },
+    {
+      "capability": "database.read/v1",
+      "description": "Read bounded rows from an explicitly scoped PostgreSQL table using columns, equality filters and pagination; arbitrary SQL is not accepted.",
+      "request_schema": "tools/database.read/v1/request.schema.json",
+      "response_schema": "tools/database.read/v1/response.schema.json",
+      "error_schema": "tools/database.read/v1/error.schema.json",
+      "providers": [
+        "postgres"
       ]
     },
     {
@@ -50,6 +60,16 @@
       "error_schema": "tools/issue.update/v1/error.schema.json",
       "providers": [
         "redmine"
+      ]
+    },
+    {
+      "capability": "mcp.read/v1",
+      "description": "Read text or Base64 contents from one explicitly scoped MCP resource URI. Remote tools, sampling, elicitation and local roots are not available.",
+      "request_schema": "tools/mcp.read/v1/request.schema.json",
+      "response_schema": "tools/mcp.read/v1/response.schema.json",
+      "error_schema": "tools/mcp.read/v1/error.schema.json",
+      "providers": [
+        "mcp"
       ]
     },
     {

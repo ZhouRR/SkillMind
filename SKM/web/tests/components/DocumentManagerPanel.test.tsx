@@ -65,7 +65,7 @@ describe('buildDocumentTree', () => {
 
 describe('documentPreviewKind', () => {
   it('maps registered extensions and rejects everything else', () => {
-    expect(documentPreviewKind('readme.md')).toBe('text')
+    expect(documentPreviewKind('readme.md')).toBe('markdown')
     expect(documentPreviewKind('notes.TXT')).toBe('text')
     expect(documentPreviewKind('report.html')).toBe('html')
     expect(documentPreviewKind('archive.zip')).toBeNull()

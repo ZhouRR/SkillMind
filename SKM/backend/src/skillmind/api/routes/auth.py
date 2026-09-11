@@ -78,6 +78,7 @@ class SessionResponse(BaseModel):
     user: AuthenticatedUserResponse
     csrf_token: str
     absolute_expires_at: datetime
+    deferred_features_enabled: bool = False
 
 
 @router.get(
@@ -161,7 +162,7 @@ async def login(
         path="/",
     )
     response.delete_cookie(LOGIN_CSRF_COOKIE, path="/")
-    return _session_response(result)
+    return _session_response(result, settings.deferred_features_enabled)
 
 
 @router.get("/session", response_model=SessionResponse, responses={401: _AUTHENTICATION_RESPONSE})
@@ -175,7 +176,7 @@ async def current_session(request: Request) -> SessionResponse:
         result = await service.get_session(token)
     except UnauthorizedSessionError as error:
         raise authentication_required_problem() from error
-    return _session_response(result)
+    return _session_response(result, settings.deferred_features_enabled)
 
 
 @router.post(
@@ -203,7 +204,9 @@ async def logout(
     response.delete_cookie(settings.auth_session_cookie_name, path="/")
 
 
-def _session_response(result: LoginResult | SessionResult) -> SessionResponse:
+def _session_response(
+    result: LoginResult | SessionResult, deferred_features_enabled: bool,
+) -> SessionResponse:
     """Domain result を field allowlist の公開 response へ変換する。"""
 
     return SessionResponse(
@@ -216,4 +219,5 @@ def _session_response(result: LoginResult | SessionResult) -> SessionResponse:
         ),
         csrf_token=result.csrf_token,
         absolute_expires_at=result.absolute_expires_at,
+        deferred_features_enabled=deferred_features_enabled,
     )

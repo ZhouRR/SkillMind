@@ -49,6 +49,18 @@ beforeEach(() => {
 afterEach(() => { unmountHooks(); vi.restoreAllMocks(); vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals() })
 
 describe('document deletion ownership and original read', () => {
+  it.each([401, 409, 500])('reports a stopped batch for DELETE %s without authorizing a retry', async (status) => {
+    const settled = vi.fn()
+    vi.mocked(deleteProjectDocument).mockRejectedValueOnce(new ApiProblemError('private', status,
+      status === 401 ? 'authentication_required' : status === 409 ? 'document_in_use' : 'server_error'))
+    render(); commitHooks()
+    render().submit(document(), settled)
+    await settle()
+    expect(settled).toHaveBeenCalledExactlyOnceWith(false)
+    expect(deleteProjectDocument).toHaveBeenCalledTimes(1)
+    if (status === 500) expect(render().canWrite()).toBe(false)
+  })
+
   it('accepts one DELETE synchronously and freezes the original ID before rerender', async () => {
     const response = deferred<void>()
     vi.mocked(deleteProjectDocument).mockReturnValue(response.promise)

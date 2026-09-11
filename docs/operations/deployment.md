@@ -28,7 +28,7 @@ skm/
 - **已有环境更新**：先关闭新业务入口、核清在途调用/远端未知效果，停止全部写入者并取得[一致恢复点](backup-recovery.md#一致恢复点包含什么)。不并发部署或改写镜像/tag、配置；重命名不迁移旧数据。
 - **数据恢复/故障对账**：走[恢复流程](backup-recovery.md)，不执行会自动启动 Worker 的 `make deploy`。
 
-`make deploy` 停止当前 project 应用服务，再初始化基建、迁移并启动 API/Web/Worker；执行即允许恢复后台工作，可能立即消费队列、调度和恢复任务。SKILLMIND_WORKER_DISPATCH_ENABLED=false 不是维护模式。Makefile 不控制其他实例、orphan、其他 daemon 或远端写入，不能代替全局停写确认。
+`make deploy` 停止当前 project 应用服务，再初始化基建、迁移并启动 API/Web/Worker；执行即允许恢复后台工作，可能立即消费队列和恢复任务。首版保持 `SKILLMIND_DEFERRED_FEATURES_ENABLED=false`，API/Worker 使用同一值，外部写入、调度发火和子 Agent 不开放；扩展开发环境才显式启用。`SKILLMIND_WORKER_DISPATCH_ENABLED=false` 阻止新的 Run/Effect job 执行，不取消已在运行的调用，也不是维护模式。Makefile 不控制其他实例、orphan、其他 daemon 或远端写入，不能代替全局停写确认。
 
 ### Windows 构建与移送
 

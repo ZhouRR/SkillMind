@@ -8,8 +8,12 @@ from unittest.mock import MagicMock
 import pytest
 from arq.worker import Function
 
+from skillmind.agent.database_provider import DatabaseReadProvider
 from skillmind.agent.engine import ClaudeAgentSdkEngine, RunMcpRuntime
 from skillmind.agent.evidence import PostgresToolAuditWriter
+from skillmind.agent.mcp_provider import McpReadProvider
+from skillmind.agent.mcp_source import StreamableHttpMcpSource
+from skillmind.agent.postgres_source import PostgresDatabaseSource
 from skillmind.agent.result_references import PostgresEffectSummaryLookup
 from skillmind.agent.result_validation import PostgresArtifactLookup, ResultValidator
 from skillmind.agent.subagent_provider import SubagentDispatchProvider
@@ -24,9 +28,11 @@ from tests.worker.test_agent_run_executor import _claimed, _context
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("deferred_enabled", [False, True])
 async def test_startup_injects_required_receipt_and_preparation_limits(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    deferred_enabled: bool,
 ) -> None:
     """呼出しを記録しつつ実 constructor を通し、必須依存の渡し忘れを隠さない。"""
 
@@ -38,6 +44,7 @@ async def test_startup_injects_required_receipt_and_preparation_limits(
         workspace_materialize_total_max_bytes=7_654_321,
         workspace_materialize_total_max_files=432,
         managed_secret_kek=None,
+        deferred_features_enabled=deferred_enabled,
     )
     sessions = MagicMock()
     monkeypatch.setattr(worker, "get_settings", lambda: settings)
@@ -63,6 +70,8 @@ async def test_startup_injects_required_receipt_and_preparation_limits(
     subagent = MagicMock(wraps=SubagentDispatchProvider)
     engine = MagicMock(wraps=ClaudeAgentSdkEngine)
     audit_writer = MagicMock(wraps=PostgresToolAuditWriter)
+    registry = MagicMock(wraps=worker.create_run_tool_registry)
+    monkeypatch.setattr(worker, "create_run_tool_registry", registry)
     monkeypatch.setattr(worker, "WorkspaceMaterializer", materializer)
     monkeypatch.setattr(worker, "AgentRunExecutor", executor)
     monkeypatch.setattr(worker, "ResultValidator", validator)
@@ -73,6 +82,21 @@ async def test_startup_injects_required_receipt_and_preparation_limits(
 
     await worker.startup(context)
 
+    postgres = registry.call_args.kwargs["database_provider"]
+    assert isinstance(postgres, DatabaseReadProvider)
+    assert isinstance(postgres._source, PostgresDatabaseSource)
+    mcp = registry.call_args.kwargs["mcp_provider"]
+    assert isinstance(mcp, McpReadProvider)
+    assert isinstance(mcp._source, StreamableHttpMcpSource)
+    assert registry.call_args.kwargs["deferred_features_enabled"] is deferred_enabled
+    assert subagent.called is deferred_enabled
+    assert ("effect_executor" in context) is deferred_enabled
+    assert context["run_service"]._deferred_features_enabled is deferred_enabled
+    assert (
+        executor.call_args.kwargs["context_builder"]._deferred_features_enabled
+        is deferred_enabled
+    )
+
     values = materializer.call_args.kwargs
     assert isinstance(values["input_snapshots"], PostgresInputSnapshotStore)
     assert values["max_total_bytes"] == 7_654_321 and values["max_total_files"] == 432
@@ -81,9 +105,11 @@ async def test_startup_injects_required_receipt_and_preparation_limits(
     assert isinstance(validator.call_args.kwargs["effect_lookup"], PostgresEffectSummaryLookup)
     assert isinstance(validator.call_args.kwargs["artifact_lookup"], PostgresArtifactLookup)
     assert isinstance(executor.call_args.kwargs["result_validator"], ResultValidator)
-    assert executor.call_args.kwargs["result_validator"] is subagent.call_args.kwargs[
-        "result_validator"
-    ]
+    if deferred_enabled:
+        assert (
+            executor.call_args.kwargs["result_validator"]
+            is subagent.call_args.kwargs["result_validator"]
+        )
     factory = engine.call_args.kwargs["mcp_server_factory"]
     claimed = _claimed()
     run_context = _context(claimed, tmp_path, 1)

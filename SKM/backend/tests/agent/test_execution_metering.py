@@ -25,6 +25,7 @@ from skillmind.agent.claude import (
     CLAUDE_CODE_CLI_VERSION,
     ClaudeRuntimeConfiguration,
 )
+from skillmind.agent.claude_build import bundled_claude_build
 from skillmind.agent.claude_metering import capture_invocation
 from skillmind.agent.domain import (
     AgentEvent,
@@ -525,7 +526,9 @@ def test_invocation_mode_cannot_disagree_with_actual_session_options(
     """resume/fork を新規実行とラベルし直して、歴史を除外した計量へ見せない。"""
 
     session_id = str(uuid4())
-    options = ClaudeAgentOptions(max_turns=5, session_id=session_id)
+    options = ClaudeAgentOptions(
+        max_turns=5, session_id=session_id, cli_path=bundled_claude_build().cli_path
+    )
     if option_mode == "resume":
         options.session_id = None
         options.resume = session_id

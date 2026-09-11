@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from skillmind.runs.budget import (
     BudgetExecutionRecord,
     BudgetInvocationBinding,
+    BudgetPolicy,
     BudgetReceiptResult,
     BudgetReconciliationClaim,
     BudgetReservationRequest,
@@ -31,6 +32,25 @@ class PostgresRunBudgetStore:
         """それぞれの提交で独立した session を確保する。"""
 
         self._session_factory = session_factory
+
+    async def reserve_primary(
+        self, claimed: ClaimedRun, *, expected_policy: BudgetPolicy
+    ) -> BudgetExecutionRecord:
+        """主 A の応答喪失は原 Attempt の授与を確認し、残額から再預留しない。"""
+        record: BudgetExecutionRecord | None = None
+        try:
+            async with self._session_factory() as session, session.begin():
+                record = await RunBudgetRepository(session).reserve_primary(
+                    claimed, expected_policy=expected_policy
+                )
+        except (DBAPIError, TimeoutError, ConnectionError):
+            if record is None:
+                raise
+            async with self._session_factory() as session, session.begin():
+                return await RunBudgetRepository(session).reserve_primary(
+                    claimed, expected_policy=expected_policy, confirm_only=True
+                )
+        return record
 
     async def reserve_group(
         self,

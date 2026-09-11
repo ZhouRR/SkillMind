@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 from claude_agent_sdk import ClaudeAgentOptions
 from claude_agent_sdk.types import ResultMessage
 
-from skillmind.agent.claude import CLAUDE_AGENT_SDK_VERSION, CLAUDE_CODE_CLI_VERSION
+from skillmind.agent.claude_build import require_bundled_cli
 from skillmind.agent.domain import RunContext
 from skillmind.agent.metering import (
     AgentInvocation,
@@ -30,6 +30,7 @@ def capture_invocation(
 ) -> AgentInvocation:
     """execute/resume/fork の最終 options から観測範囲を固定し、父の hash を流用しない。"""
 
+    build = require_bundled_cli(options.cli_path)
     return AgentInvocation(
         invocation_id=invocation_id if invocation_id is not None else uuid4(),
         project_id=context.project_id,
@@ -49,9 +50,10 @@ def capture_invocation(
             fork_session=options.fork_session,
             continue_conversation=options.continue_conversation,
             output_format_checksum=sha256_hex(canonical_json(options.output_format)),
+            cli_checksum=build.cli_checksum,
         ),
-        sdk_version=CLAUDE_AGENT_SDK_VERSION,
-        cli_version=CLAUDE_CODE_CLI_VERSION,
+        sdk_version=build.sdk_version,
+        cli_version=build.cli_version,
     )
 
 

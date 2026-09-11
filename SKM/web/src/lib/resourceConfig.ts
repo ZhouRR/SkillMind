@@ -9,7 +9,7 @@ import type { PublishedTaskRecord } from '../api'
  */
 
 /** Platform が認識する接続先の種類。backend の Provider registry と一致させる。 */
-export type ResourceProvider = 'redmine' | 'git' | 'svn'
+export type ResourceProvider = 'redmine' | 'git' | 'svn' | 'postgres' | 'mcp'
 
 /** Scope list の予約 token。管理者が明示的に付与した「全許可」を表す(backend と同値)。 */
 export const SCOPE_WILDCARD = '*'
@@ -20,7 +20,7 @@ export type ResourceAccess = 'read' | 'read_write'
 /** Provider ごとの固定 form 仕様。capability と kind は利用者に入力させない。 */
 export interface ProviderFormDefinition {
   provider: ResourceProvider
-  kind: 'issue' | 'repository'
+  kind: 'issue' | 'repository' | 'other'
   readCapability: string
   writeCapability: string | null
   requiresSecret: boolean
@@ -32,6 +32,14 @@ export interface ProviderFormDefinition {
 
 /** Backend PROVIDER_DEFINITIONS の UI mirror。ここ以外に capability 文字列を書かない。 */
 export const PROVIDER_FORMS: Record<ResourceProvider, ProviderFormDefinition> = {
+  postgres: {
+    provider: 'postgres', kind: 'other', readCapability: 'database.read/v1', writeCapability: null,
+    requiresSecret: true, environmentLocatorExample: 'POSTGRES_PASSWORD', fileLocatorExample: '/run/secrets/postgres-password',
+  },
+  mcp: {
+    provider: 'mcp', kind: 'other', readCapability: 'mcp.read/v1', writeCapability: null,
+    requiresSecret: false, environmentLocatorExample: 'MCP_ACCESS_TOKEN', fileLocatorExample: '/run/secrets/mcp-access-token',
+  },
   redmine: {
     provider: 'redmine',
     kind: 'issue',
@@ -63,7 +71,7 @@ export const PROVIDER_FORMS: Record<ResourceProvider, ProviderFormDefinition> = 
 }
 
 /** 画面に並べる Provider の安定順。 */
-export const RESOURCE_PROVIDERS: readonly ResourceProvider[] = ['redmine', 'git', 'svn']
+export const RESOURCE_PROVIDERS: readonly ResourceProvider[] = ['redmine', 'git', 'svn', 'postgres', 'mcp']
 
 /** Redmine write 時に checkbox で提示する代表的な標準 field。自由追記で補える。 */
 export const COMMON_REDMINE_FIELD_KEYS: readonly string[] = [
@@ -78,7 +86,7 @@ export const COMMON_REDMINE_FIELD_KEYS: readonly string[] = [
 
 /** Unknown 文字列を Provider へ絞る。list 表示で契約外値を安全に扱うための narrowing。 */
 export function asResourceProvider(value: string): ResourceProvider | null {
-  return value === 'redmine' || value === 'git' || value === 'svn' ? value : null
+  return value === 'redmine' || value === 'git' || value === 'svn' || value === 'postgres' || value === 'mcp' ? value : null
 }
 
 /** 改行・カンマ区切りの自由入力を重複なしの値 list へ変換する。 */
@@ -118,8 +126,10 @@ export function accessForCapabilities(capabilities: readonly string[]): Resource
 /** 構造化入力から server の scope allowlist 形へ組み立てる。形は Provider ごとに固定。 */
 export function buildIntegrationScope(
   provider: ResourceProvider,
-  input: { issueIds: string[]; fieldKeys: string[]; paths: string[]; revisions: string[] },
+  input: { issueIds: string[]; fieldKeys: string[]; paths: string[]; revisions: string[]; tables?: string[]; resourceUris?: string[] },
 ): Record<string, string[]> {
+  if (provider === 'postgres') return { tables: input.tables ?? [] }
+  if (provider === 'mcp') return { resource_uris: input.resourceUris ?? [] }
   if (provider === 'redmine') {
     return { issue_ids: input.issueIds, field_keys: input.fieldKeys }
   }
@@ -149,9 +159,18 @@ export function buildIntegrationConfig(
     baseUrl: string
     repositoryUri: string
     defaultRevision: string
+    host?: string
+    port?: string
+    database?: string
+    username?: string
+    sslmode?: string
+    serverUrl?: string
     write?: RepositoryWriteInput
   },
-): Record<string, string> {
+): Record<string, string | number> {
+  if (provider === 'postgres') return { host: input.host?.trim() ?? '', port: Number(input.port ?? '5432'),
+    database: input.database?.trim() ?? '', username: input.username?.trim() ?? '', sslmode: input.sslmode ?? 'verify-full' }
+  if (provider === 'mcp') return { server_url: input.serverUrl?.trim() ?? '', transport: 'streamable_http' }
   if (provider === 'redmine') {
     return { base_url: input.baseUrl.trim() }
   }
@@ -214,7 +233,7 @@ export function findWriteConfigIssue(
 export const REPOSITORY_WRITE_BRANCH_PREFIX = 'skillmind/'
 
 /** Server が確実に拒否する scope を送信前に検出する。null は「送ってよい」。 */
-export type ScopeIssue = 'issue_ids_required' | 'field_keys_required' | 'paths_required'
+export type ScopeIssue = 'issue_ids_required' | 'field_keys_required' | 'paths_required' | 'tables_required' | 'resource_uris_required'
 
 /** Backend normalize_provider_scope の必須条件 mirror。write は明示 field 列を要求する。 */
 export function findScopeIssue(
@@ -222,6 +241,8 @@ export function findScopeIssue(
   scope: Record<string, string[]>,
   writeEnabled: boolean,
 ): ScopeIssue | null {
+  if (provider === 'postgres') return scope.tables?.length ? null : 'tables_required'
+  if (provider === 'mcp') return scope.resource_uris?.length ? null : 'resource_uris_required'
   if (provider === 'redmine') {
     if ((scope.issue_ids ?? []).length === 0) return 'issue_ids_required'
     if (writeEnabled && (scope.field_keys ?? []).length === 0) return 'field_keys_required'

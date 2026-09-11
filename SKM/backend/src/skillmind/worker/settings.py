@@ -24,9 +24,13 @@ from skillmind.agent.context_builder import (
     ProductionRunContextBuilder,
     create_run_tool_registry,
 )
+from skillmind.agent.database_provider import DatabaseReadProvider
 from skillmind.agent.domain import RunContext
 from skillmind.agent.engine import ClaudeAgentSdkEngine, RunMcpRuntime
 from skillmind.agent.evidence import PostgresToolAuditWriter
+from skillmind.agent.mcp_provider import McpReadProvider
+from skillmind.agent.mcp_source import StreamableHttpMcpSource
+from skillmind.agent.postgres_source import PostgresDatabaseSource
 from skillmind.agent.redmine_provider import RedmineIssueReadProvider
 from skillmind.agent.repository_client import (
     GitCommandRepositoryClient,
@@ -47,7 +51,7 @@ from skillmind.agent.workspace import WorkspaceManager
 from skillmind.agent.workspace_materializer import WorkspaceMaterializer
 from skillmind.core.logging import configure_logging, log_event
 from skillmind.core.secret_crypto import load_secret_cipher
-from skillmind.core.settings import get_settings
+from skillmind.core.settings import Settings, get_settings
 from skillmind.db.resources import create_database_engine, create_session_factory
 from skillmind.documents.source import (
     DatabaseProjectDocumentInventory,
@@ -115,7 +119,10 @@ async def startup(ctx: dict[str, Any]) -> None:
     ctx["session_store"] = PostgresSessionStore.from_session_factory(
         ctx["database_session_factory"]
     )
-    ctx["run_service"] = RunService(ctx["database_session_factory"])
+    ctx["run_service"] = RunService(
+        ctx["database_session_factory"],
+        deferred_features_enabled=settings.deferred_features_enabled,
+    )
     ctx["effect_service"] = EffectService(ctx["database_session_factory"])
     ctx["outbox_relay"] = OutboxRelay(
         ctx["database_session_factory"], batch_size=settings.outbox_batch_size
@@ -170,13 +177,22 @@ async def startup(ctx: dict[str, Any]) -> None:
     )
     registry = create_run_tool_registry(
         contracts,
+        deferred_features_enabled=settings.deferred_features_enabled,
         subagent_provider=SubagentDispatchProvider(
             engine=lambda: engine_holder["engine"],
             branch_timeout_seconds=settings.subagent_branch_timeout_seconds,
             session_recorder=PostgresSubagentSessionRecorder(ctx["database_session_factory"]),
             result_validator=result_validator,
-        ),
+        ) if settings.deferred_features_enabled else None,
         document_source=document_source,
+        mcp_provider=McpReadProvider(
+            ctx["database_session_factory"], source=StreamableHttpMcpSource(),
+            secret_resolver=DeploymentSecretResolver(cipher=secret_cipher),
+        ),
+        database_provider=DatabaseReadProvider(
+            ctx["database_session_factory"], source=PostgresDatabaseSource(),
+            secret_resolver=DeploymentSecretResolver(cipher=secret_cipher),
+        ),
         redmine_issue_provider=RedmineIssueReadProvider(
             ctx["database_session_factory"],
             transport=UrllibRedmineTransport(),
@@ -202,6 +218,7 @@ async def startup(ctx: dict[str, Any]) -> None:
         tool_registry=registry,
         model=runtime_configuration.primary_model,
         materializer=materializer,
+        deferred_features_enabled=settings.deferred_features_enabled,
     )
     engine = ClaudeAgentSdkEngine(
         mcp_server_factory=create_authorized_runtime,
@@ -218,44 +235,45 @@ async def startup(ctx: dict[str, Any]) -> None:
         preparation_timeout_seconds=settings.run_preparation_timeout_seconds,
         realtime_publisher=RedisRunRealtimePublisher(cast(RedisPublisher, ctx["redis"])),
     )
-    ctx["effect_executor"] = ApprovedEffectExecutor(
-        effect_service=ctx["effect_service"],
-        provider_registry=EffectProviderRegistry(
-            (
-                EffectProviderDefinition(
-                    capability_version=ISSUE_UPDATE_CAPABILITY,
-                    provider="redmine",
-                    provider_version=ISSUE_UPDATE_PROVIDER_VERSION,
-                    implementation=create_redmine_effect_provider(),
-                    requires_secret=True,
-                ),
-                EffectProviderDefinition(
-                    capability_version=REPOSITORY_WRITE_CAPABILITY,
-                    provider="svn",
-                    provider_version=REPOSITORY_WRITE_SVN_PROVIDER_VERSION,
-                    implementation=SvnRepositoryWriteProvider(svn_client),
-                    requires_secret=True,
-                ),
-                EffectProviderDefinition(
-                    capability_version=REPOSITORY_WRITE_CAPABILITY,
-                    provider="git",
-                    provider_version=REPOSITORY_WRITE_PROVIDER_VERSION,
-                    implementation=GitRepositoryWriteProvider(
-                        git_client, forge_transport=UrllibForgeTransport()
+    if settings.deferred_features_enabled:
+        ctx["effect_executor"] = ApprovedEffectExecutor(
+            effect_service=ctx["effect_service"],
+            provider_registry=EffectProviderRegistry(
+                (
+                    EffectProviderDefinition(
+                        capability_version=ISSUE_UPDATE_CAPABILITY,
+                        provider="redmine",
+                        provider_version=ISSUE_UPDATE_PROVIDER_VERSION,
+                        implementation=create_redmine_effect_provider(),
+                        requires_secret=True,
                     ),
-                    # push は凭据必須。読取が匿名 clone で足りる (git の requires_secret=False)
-                    # のと非対称なのは意図的で、判断は capability 粒度で持つ (計画 §20 R3)。
-                    requires_secret=True,
-                ),
-            )
-        ),
-        # 承認済み apply も MANAGED 凭据を使うため、読取 Provider と同じ KEK cipher を渡す。
-        # 渡し漏れると「読めるのに承認後の書き込みだけ失敗する」非対称な障害になる。
-        secret_resolver=DeploymentSecretResolver(cipher=secret_cipher),
-        worker_id=ctx["worker_id"],
-        lease_seconds=settings.run_lease_seconds,
-        max_attempts=settings.run_max_attempts,
-    )
+                    EffectProviderDefinition(
+                        capability_version=REPOSITORY_WRITE_CAPABILITY,
+                        provider="svn",
+                        provider_version=REPOSITORY_WRITE_SVN_PROVIDER_VERSION,
+                        implementation=SvnRepositoryWriteProvider(svn_client),
+                        requires_secret=True,
+                    ),
+                    EffectProviderDefinition(
+                        capability_version=REPOSITORY_WRITE_CAPABILITY,
+                        provider="git",
+                        provider_version=REPOSITORY_WRITE_PROVIDER_VERSION,
+                        implementation=GitRepositoryWriteProvider(
+                            git_client, forge_transport=UrllibForgeTransport()
+                        ),
+                        # push は凭据必須。読取が匿名 clone で足りる (git の requires_secret=False)
+                        # のと非対称なのは意図的で、判断は capability 粒度で持つ (計画 §20 R3)。
+                        requires_secret=True,
+                    ),
+                )
+            ),
+            # 承認済み apply も MANAGED 凭据を使うため、読取 Provider と同じ KEK cipher を渡す。
+            # 渡し漏れると「読めるのに承認後の書き込みだけ失敗する」非対称な障害になる。
+            secret_resolver=DeploymentSecretResolver(cipher=secret_cipher),
+            worker_id=ctx["worker_id"],
+            lease_seconds=settings.run_lease_seconds,
+            max_attempts=settings.run_max_attempts,
+        )
     # Skill interpret を Worker 側で実行する。model への egress は Worker だけが持つ。
     interpreter, catalog, identity, default_model = build_skill_interpreter(settings)
     ctx["skill_service"] = SkillService(
@@ -299,7 +317,10 @@ async def relay_outbox(ctx: dict[str, Any]) -> dict[str, int | str]:
     relay: OutboxRelay = ctx["outbox_relay"]
     topics = {"run.lifecycle.changed/v1"}
     run_dispatch_ready = settings.worker_dispatch_enabled and "run_executor" in ctx
-    effect_dispatch_ready = settings.worker_dispatch_enabled and "effect_executor" in ctx
+    effect_dispatch_ready = (
+        settings.worker_dispatch_enabled and settings.deferred_features_enabled
+        and "effect_executor" in ctx
+    )
     if run_dispatch_ready:
         topics.add("run.dispatch.requested/v1")
     if effect_dispatch_ready:
@@ -361,6 +382,8 @@ async def execute_run(ctx: dict[str, Any], run_id: str) -> dict[str, str | int]:
 
     service: RunService = ctx["run_service"]
     settings = ctx["settings"]
+    if not settings.worker_dispatch_enabled:
+        return {"status": "disabled", "reason": "run_dispatch_disabled"}
     claimed = await service.claim_run(
         UUID(run_id),
         worker_id=ctx["worker_id"],
@@ -424,6 +447,9 @@ async def execute_run(ctx: dict[str, Any], run_id: str) -> dict[str, str | int]:
 async def execute_effect(ctx: dict[str, Any], effect_execution_id: str) -> dict[str, str]:
     """Queue job を effect 専用 executor へ引き渡し、Agent Tool path と混在させない。"""
 
+    settings: Settings = ctx["settings"]
+    if not settings.worker_dispatch_enabled or not settings.deferred_features_enabled:
+        return {"status": "disabled", "reason": "effect_execution_disabled"}
     executor = cast(ApprovedEffectExecutor | None, ctx.get("effect_executor"))
     if executor is None:
         raise RuntimeError("EffectExecutor is not configured")
@@ -549,10 +575,10 @@ async def recover_expired_leases(ctx: dict[str, Any]) -> dict[str, str | int]:
     recovered_effects = await effect_service.recover_expired_effects(
         limit=settings.outbox_batch_size,
         max_attempts=settings.run_max_attempts,
-    )
+    ) if settings.deferred_features_enabled else 0
     recovered_proposals = await effect_service.recover_expired_proposals(
         limit=settings.outbox_batch_size,
-    )
+    ) if settings.deferred_features_enabled else 0
     recovered = recovered_runs + recovered_interactions + recovered_effects + recovered_proposals
     log_event(
         logger,
@@ -585,6 +611,8 @@ async def trigger_due_schedules(ctx: dict[str, Any]) -> dict[str, str | int]:
 
     service: ScheduleService = ctx["schedule_service"]
     settings = ctx["settings"]
+    if not settings.deferred_features_enabled or not settings.worker_dispatch_enabled:
+        return {"status": "disabled", "reason": "scheduling_disabled"}
     report = await service.run_due_schedules(limit=settings.outbox_batch_size)
     log_event(
         logger,

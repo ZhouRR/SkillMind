@@ -75,9 +75,10 @@ import {
     接続(凭据 + Integration)を一つの form に束ね、binding と事前許可は既定不要の
     高度設定として折り畳む。scope/config の裸 JSON 入力は構造化入力へ置き換え、
     検証の最終権威は server 側に置いたまま「確実に弾かれる入力」だけを送信前に知らせる。 */
-export function ResourcesPage({ projectId, csrfToken }: {
+export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = true }: {
   projectId: string
   csrfToken: string
+  deferredFeaturesEnabled?: boolean
 }) {
   const messages = useMessages()
   const [secrets, setSecrets] = useState<SecretReferenceRecord[]>([])
@@ -97,6 +98,15 @@ export function ResourcesPage({ projectId, csrfToken }: {
   const [error, setError] = useState<string | null>(null)
   const loadController = useRef<AbortController | null>(null)
   const mutationController = useRef<AbortController | null>(null)
+
+  // 配備状態の再取得で後置機能が閉じた場合、非表示 tab に取り残さない。
+  useEffect(() => {
+    if (!deferredFeaturesEnabled) {
+      setResourceTab((current) => current === 'policy' ? 'connect' : current)
+      setOpenDialog((current) => current === 'policy' ? null : current)
+      setConnectDraft((current) => ({ ...current, access: 'read' }))
+    }
+  }, [deferredFeaturesEnabled])
 
   useEffect(() => () => {
     loadController.current?.abort()
@@ -118,13 +128,14 @@ export function ResourcesPage({ projectId, csrfToken }: {
       loadSecretReferences(projectId, controller.signal),
       loadIntegrations(projectId, controller.signal),
       loadResourceBindings(projectId, controller.signal),
-      loadEffectPreauthorizations(projectId, controller.signal),
+      deferredFeaturesEnabled ? loadEffectPreauthorizations(projectId, controller.signal) : Promise.resolve([]),
       // Task catalog は binding form の下拉候補という補助情報のため、
       // 取得失敗で管理画面全体を失敗させず自由入力へ退化させる。
       loadProjectTasks(projectId, controller.signal)
         .then((catalog) => catalog.tasks)
         .catch(() => [] as PublishedTaskRecord[]),
     ]).then(([nextSecrets, nextIntegrations, nextBindings, nextPolicies, nextTasks]) => {
+      if (controller.signal.aborted) return
       setSecrets(nextSecrets)
       setIntegrations(nextIntegrations)
       setBindings(nextBindings)
@@ -138,7 +149,7 @@ export function ResourcesPage({ projectId, csrfToken }: {
       if (!controller.signal.aborted) setLoading(false)
     })
     return () => controller.abort()
-  }, [projectId, revision])
+  }, [projectId, revision, deferredFeaturesEnabled])
 
   /** 一つの mutation を直列化し、成功時に全 projection を読み直す。 */
   async function mutate(
@@ -168,6 +179,8 @@ export function ResourcesPage({ projectId, csrfToken }: {
   function scopeIssueText(issue: ScopeIssue): string {
     if (issue === 'issue_ids_required') return messages.resources.issueIdsRequired
     if (issue === 'field_keys_required') return messages.resources.fieldKeysRequired
+    if (issue === 'tables_required') return messages.resources.tablesRequired
+    if (issue === 'resource_uris_required') return messages.resources.resourceUrisRequired
     return messages.resources.pathsRequired
   }
 
@@ -182,7 +195,7 @@ export function ResourcesPage({ projectId, csrfToken }: {
     event.preventDefault()
     const draft = connectDraft
     const form = PROVIDER_FORMS[draft.provider]
-    const access: ResourceAccess = form.writeCapability === null ? 'read' : draft.access
+    const access: ResourceAccess = !deferredFeaturesEnabled || form.writeCapability === null ? 'read' : draft.access
     // 既定は明示 wildcard(不限)。field は「変更できる集合」を write 時だけ列挙でき、
     // 読取だけの integration は全 field 読取(承認境界は issue 側)とする。
     const scope = buildIntegrationScope(draft.provider, {
@@ -194,6 +207,8 @@ export function ResourcesPage({ projectId, csrfToken }: {
         : [SCOPE_WILDCARD],
       paths: parseListInput(draft.paths),
       revisions: parseListInput(draft.revisions),
+      tables: parseListInput(draft.tables),
+      resourceUris: parseListInput(draft.resourceUris),
     })
     const issue = findScopeIssue(draft.provider, scope, access === 'read_write')
     if (issue !== null) {
@@ -407,7 +422,7 @@ export function ResourcesPage({ projectId, csrfToken }: {
             <ResourceTabButton current={resourceTab} tab="connect" onSelect={setResourceTab}>{messages.resources.tabConnect}</ResourceTabButton>
             <ResourceTabButton current={resourceTab} tab="secret" onSelect={setResourceTab}>{messages.resources.tabSecret}</ResourceTabButton>
             <ResourceTabButton current={resourceTab} tab="binding" onSelect={setResourceTab}>{messages.resources.tabBinding}</ResourceTabButton>
-            <ResourceTabButton current={resourceTab} tab="policy" onSelect={setResourceTab}>{messages.resources.tabPolicy}</ResourceTabButton>
+            {deferredFeaturesEnabled && <ResourceTabButton current={resourceTab} tab="policy" onSelect={setResourceTab}>{messages.resources.tabPolicy}</ResourceTabButton>}
           </div>
           {/* 各区分は「設定済み一覧」を主役にし、新規作成 form は弹窗へ切り離す。 */}
           <section className="resourceTabPanel tabPanel" role="tabpanel" hidden={resourceTab !== 'connect'}>
@@ -467,7 +482,28 @@ export function ResourcesPage({ projectId, csrfToken }: {
                   onChange={(event) => setConnectDraft((value) => ({ ...value, name: event.target.value }))}
                 />
               </label>
-              {connectDraft.provider === 'redmine' ? (
+              {connectDraft.provider === 'postgres' ? (
+                <>
+                  <label>{messages.resources.databaseHost}<input required maxLength={253} value={connectDraft.host}
+                    onChange={(event) => setConnectDraft((value) => ({ ...value, host: event.target.value }))} /></label>
+                  <label>{messages.resources.databasePort}<input required type="number" min={1} max={65535} value={connectDraft.port}
+                    onChange={(event) => setConnectDraft((value) => ({ ...value, port: event.target.value }))} /></label>
+                  <label>{messages.resources.databaseName}<input required maxLength={253} value={connectDraft.database}
+                    onChange={(event) => setConnectDraft((value) => ({ ...value, database: event.target.value }))} /></label>
+                  <label>{messages.resources.databaseUser}<input required maxLength={253} value={connectDraft.username}
+                    onChange={(event) => setConnectDraft((value) => ({ ...value, username: event.target.value }))} /></label>
+                  <label>{messages.resources.databaseTls}<select value={connectDraft.sslmode}
+                    onChange={(event) => setConnectDraft((value) => ({ ...value, sslmode: event.target.value }))}>
+                    <option value="verify-full">{messages.resources.tlsVerifyFull}</option>
+                    <option value="require">{messages.resources.tlsRequire}</option>
+                    <option value="disable">{messages.resources.tlsDisable}</option>
+                  </select></label>
+                </>
+              ) : connectDraft.provider === 'mcp' ? (
+                <label>{messages.resources.mcpServerUrl}<input type="url" required maxLength={2048}
+                  placeholder="https://mcp.example.com/mcp" value={connectDraft.serverUrl}
+                  onChange={(event) => setConnectDraft((value) => ({ ...value, serverUrl: event.target.value }))} /></label>
+              ) : connectDraft.provider === 'redmine' ? (
                 <label>{messages.resources.baseUrlLabel}
                   <input
                     className="mono"
@@ -588,7 +624,7 @@ export function ResourcesPage({ projectId, csrfToken }: {
                   <p className="hint resourceWarning">{connectDraft.resolver === 'MANAGED' ? messages.resources.secretValueHint : messages.resources.secretHint}</p>
                 </>
               )}
-              {connectForm.writeCapability !== null && (
+              {deferredFeaturesEnabled && connectForm.writeCapability !== null && (
                 <fieldset className="scopePicker">
                   <legend>{messages.resources.accessLabel}</legend>
                   <label className="scopeOption">
@@ -612,7 +648,17 @@ export function ResourcesPage({ projectId, csrfToken }: {
                   <p className="hint">{messages.resources.accessHint}</p>
                 </fieldset>
               )}
-              {connectDraft.provider === 'redmine' ? (
+              {connectDraft.provider === 'postgres' ? (
+                <label>{messages.resources.databaseTables}<textarea required className="mono compactTextarea"
+                  placeholder={'public.reports\npublic.items'} value={connectDraft.tables}
+                  onChange={(event) => setConnectDraft((value) => ({ ...value, tables: event.target.value }))} />
+                  <span className="hint">{messages.resources.databaseReadHint}</span></label>
+              ) : connectDraft.provider === 'mcp' ? (
+                <label>{messages.resources.mcpResourceUris}<textarea required className="mono compactTextarea"
+                  placeholder="resource://reports/current" value={connectDraft.resourceUris}
+                  onChange={(event) => setConnectDraft((value) => ({ ...value, resourceUris: event.target.value }))} />
+                  <span className="hint">{messages.resources.mcpReadHint}</span></label>
+              ) : connectDraft.provider === 'redmine' ? (
                 <>
                   <fieldset className="scopePicker">
                     <legend>{messages.resources.issueScopeLabel}</legend>
@@ -956,7 +1002,7 @@ export function ResourcesPage({ projectId, csrfToken }: {
             </form>
           </ModalDialog>
 
-          <section className="resourceTabPanel tabPanel" role="tabpanel" hidden={resourceTab !== 'policy'}>
+          <section className="resourceTabPanel tabPanel" role="tabpanel" hidden={!deferredFeaturesEnabled || resourceTab !== 'policy'}>
             <section className="panel">
               <div className="panelHeader">
                 <h2>{messages.resources.policyTitle}</h2>
@@ -988,7 +1034,7 @@ export function ResourcesPage({ projectId, csrfToken }: {
           </section>
 
           <ModalDialog
-            open={openDialog === 'policy'}
+            open={deferredFeaturesEnabled && openDialog === 'policy'}
             drawer
             title={messages.resources.policyTitle}
             wide

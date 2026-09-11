@@ -11,11 +11,18 @@ from typing import Any, cast
 from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
 from claude_agent_sdk.types import HookInput, HookJSONOutput, SessionStore
 
+from skillmind.agent.claude_build import (
+    CLAUDE_AGENT_SDK_VERSION as CLAUDE_AGENT_SDK_VERSION,
+)
+from skillmind.agent.claude_build import (
+    CLAUDE_CODE_CLI_VERSION as CLAUDE_CODE_CLI_VERSION,
+)
+from skillmind.agent.claude_build import (
+    bundled_claude_build,
+)
 from skillmind.agent.domain import RunContext
 from skillmind.agent.tool_policy import DENIED_BUILTIN_TOOLS, ToolExecutionPolicy
 
-CLAUDE_AGENT_SDK_VERSION = "0.2.110"
-CLAUDE_CODE_CLI_VERSION = "2.1.191"
 ToolAuthorizationCallback = Callable[[str, Mapping[str, Any], str, str], Awaitable[None]]
 ToolDenialCallback = Callable[[str, Mapping[str, Any], str, str, str], Awaitable[None]]
 _AGENT_ENVIRONMENT_KEYS = (
@@ -223,6 +230,7 @@ def build_claude_agent_options(
     agent_environment["CLAUDE_CONFIG_DIR"] = str(context.workspace.root / "claude-config")
 
     return ClaudeAgentOptions(
+        cli_path=bundled_claude_build().cli_path,
         tools=[],
         skills=[],
         allowed_tools=list(policy.allowed_sdk_names),

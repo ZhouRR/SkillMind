@@ -36,6 +36,7 @@ from skillmind.db.models import (
     ProjectSkillVersion,
     ResourceBinding,
     Run,
+    RunBudgetAccount,
     RunEvent,
     RunSegment,
     RunSkillSnapshot,
@@ -506,11 +507,12 @@ class CreationAuthorizationHarness:
         return result
 
     def add(self, row: object) -> None:
-        """初期 Segment/event/outbox/SkillSnapshot と凍結 binding 以外を黙認しない。"""
+        """初期 Segment/event/outbox/SkillSnapshot、予算と凍結 binding だけを受理する。"""
 
         assert self.active
         assert isinstance(
             row, RunSegment | RunEvent | OutboxMessage | RunSkillSnapshot | ResourceBinding
+            | RunBudgetAccount
         )
         self.staged.append(row)
 

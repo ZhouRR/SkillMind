@@ -73,6 +73,7 @@ def session(user_id: str = ACTOR, role: str = "USER") -> dict:
             "organization_id": "00000000-0000-4000-8000-000000000002",
         },
         "csrf_token": CSRF,
+        "deferred_features_enabled": True,
         "absolute_expires_at": "2099-01-01T00:00:00Z",
     }
 

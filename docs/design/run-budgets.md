@@ -1,6 +1,6 @@
 # Run 预算与执行限额
 
-当前只有局部执行限制，Run 账本尚未接入普通执行；目标是主/子执行、Segment 续行和 Attempt 重试共用账户。本文不是预算 API，首版接线范围见[计划 R02](../planning/roadmap.md#开发任务)。
+主 Run 的账户创建、剩余额度预留与 Executor/Engine 回调已有可装配路径，生产 startup 尚未启用；可信计量、停止与结算仍待闭合。目标是主/子执行、Segment 续行和 Attempt 重试共用账户。本文不是预算 API，首版接线范围见[计划 R02](../planning/roadmap.md#开发任务)。
 
 ## 先区分上限、分配与消耗
 
@@ -17,7 +17,7 @@
 | RUN_MAX_ATTEMPTS | 当前 Segment 的技术重试次数，不限制全部业务续行或 Run 成本 |
 | 输入文件数量/字节 | 逐根及跨根最终存量，规则见[资源总量](resource-snapshots.md#跨根总量) |
 
-父 20 turns 连续两次 dispatch 两支，每次仍各分 10，并非全 Run 20。创建、主 Executor、子 Provider、startup 尚未调用账本。
+父 20 turns 连续两次 dispatch 两支，每次仍各分 10，并非全 Run 20。生产 startup 与子 Provider 尚未接入账本；主路径的装配规则见下文。
 
 ### 用量现在流向哪里
 
@@ -34,11 +34,11 @@
 
 [Engine](../../SKM/backend/src/skillmind/agent/engine.py)的可选 `usage_observer` 在原 SDK Result 展示前同步处理；普通 usage/rate-limit 不进入。失败阻止成功/等待输出，取消传播，不后台补写。
 
-[观察](../../SKM/backend/src/skillmind/agent/metering.py)固定 invocation、Project/Run/Attempt/actor、SDK Session、续行模式、SDK/CLI 构建版本与实际 prompt checksum。options 仅记录实际模型、局部限额、Session/续行/输出格式摘要，不含凭据/结果，不冒充完整 options 审计。同 invocation 固定观察键，异内容不得换键；再次 resume 是新 invocation。
+[观察](../../SKM/backend/src/skillmind/agent/metering.py)固定 invocation、Project/Run/Attempt/actor、SDK Session、续行模式、SDK/CLI 构建版本与实际 prompt checksum。options 仅记录实际模型、局部限额、Session/续行/输出格式摘要及已核对随包 CLI 的 `cli_checksum`，不含路径、凭据或结果，不冒充完整 options 审计。同 invocation 固定观察键，异内容不得换键；再次 resume 是新 invocation。旧记录缺少 CLI checksum 时保留原 JSON/hash，不补入当前文件身份，也不据此恢复旧启动许可。
 
 整数、缺失、无效分开；有限非负 float 成本只存 binary64 hex，不转换为精确金额。观察不是 BudgetUsageReport，不声明累计范围/final/stopped；无 Result、流关闭、提交未知均不补零退款。
 
-接入前，可信协调方须验证计量 profile、实际构建和局部强制再归一化。离线 probe 只验版本标记/接口；SDK 可回退系统 CLI，故不证明实际二进制、resume 范围或硬上界。预算身份须经[绑定](#原调用绑定与启动)，不从 trace/Session/invocation ID 补造。
+接入前，可信协调方须验证计量 profile、实际构建和局部强制再归一化。Run 与 Skill 解释显式指定固定 SDK 的随包 CLI，并核对实际 import 归属、分发版本、RECORD 中的文件大小及 SHA-256；缺失或漂移时拒绝，不回退系统 CLI。离线 probe 也检查文件身份，但不执行 CLI，不证明进程实际开始/停止、resume 范围或硬上界。依赖分发记录属于受信安装链，不是签名或远程证明；运行期间须保持 package 不可变。预算身份须经[绑定](#原调用绑定与启动)，不从 trace/Session/invocation ID 补造。
 
 ### 现有计时器的覆盖范围
 
@@ -114,6 +114,14 @@ B 的 3 不因 lease 过期退还，新执行最多用 6；若不能证明 B 仍
 内部 run-budget/v1 定义 turns/可选 nano-USD，非 HTTP。DTO 为整数，列 Numeric(38,0)，计算用整数、存储用 Decimal；拒绝 float/不足最小单位，不舍入，旧值需版本化转换。
 
 new_budget_account 只构造未保存/未开始、限额匹配的账户，须与 Run 按 FK 顺序同事务保存；迁移不回填旧 Run，执行端不补零。
+
+### 主 Run 装配边界
+
+受信装配向 RunService 注入已验证的 BudgetPolicy 时，新 Run 的 limits snapshot 同时冻结 `budget_policy` 与 turns 上限；仅 INSERT 胜者在同事务增加账户。重复请求返回原 Run，不能为旧 Run 补零账户。普通生产创建仍未注入 policy；当前主协调器拒绝启用费用维度，不能以只限制 turns 冒充费用上限。
+
+[主协调器](../../SKM/backend/src/skillmind/worker/primary_budget.py)须同时装配到 Executor 与同一个 Engine 的启动/观察回调；回调不匹配在构造时拒绝，新版 Worker 缺少协调器也拒绝带预算标记的 Run。预留按原 Attempt 固定键，在 Run/账户锁内扣除已用及未决占用；确认提交只读回原授予量，不按新的余额重建。旧主执行未确认停止时不启动下一个主执行。
+
+实际 SDK turns 上限收窄到授予量，Run 与 Segment Brief 的冻结授权上限保持原值；实际局部上限进入 Session options 审计与 invocation。一次启动、原观察保存和未知保留沿用下文协议。当前不把 Result、成功、等待、取消或流关闭转换为可信结算/停止，不自动释放未用额度；生产启用仍须满足计量及真实事务门禁，内部装配测试不证明它们。
 
 ### 原调用绑定与启动
 

@@ -179,11 +179,11 @@ export function useDocumentUpload(options: UploadOptions) {
   }
 
   /** 選択時に全原 request を固定し、二度目の change が同 tick でも batch を上書きしない。 */
-  function start(files: File[]): boolean {
+  function start(files: File[], targetFolder = ''): boolean {
     if (!files.length || !canStart()) return false
     let items: DocumentUploadItem[]
     try {
-      items = files.map((file) => ({ original: freezeDocumentUpload(options.actorId, options.projectId, file),
+      items = files.map((file) => ({ original: freezeDocumentUpload(options.actorId, options.projectId, file, targetFolder),
         phase: 'queued', document: null, failure: null }))
     } catch {
       setNotice({ key: 'uploadPreparationFailed' }); return false

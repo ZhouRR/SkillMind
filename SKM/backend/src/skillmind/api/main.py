@@ -94,7 +94,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.database_session_factory,
         secret_cipher=load_secret_cipher(settings.managed_secret_kek),
     )
-    app.state.run_service = RunService(app.state.database_session_factory)
+    app.state.run_service = RunService(
+        app.state.database_session_factory,
+        deferred_features_enabled=settings.deferred_features_enabled,
+    )
     app.state.artifact_service = ArtifactService(app.state.database_session_factory)
     app.state.evaluation_service = EvaluationService(app.state.database_session_factory)
     app.state.effect_service = EffectService(app.state.database_session_factory)
@@ -116,7 +119,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 IntegrationResourceCatalog(app.state.database_session_factory),
             )
         ),
-        registered_write_capabilities=REGISTERED_WRITE_CAPABILITIES,
+        registered_write_capabilities=(REGISTERED_WRITE_CAPABILITIES
+                                       if settings.deferred_features_enabled else frozenset()),
         # Integration Provider の installed 索引に、Integration 外だが常に配線済みの
         # document Provider を合流させる (計画 §19 W1)。就緒度が候補の provider を実行可能性まで
         # 検査できるようにする唯一の注入点。

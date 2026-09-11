@@ -23,6 +23,7 @@ from skillmind.agent.claude import (
     ClaudeRuntimeConfiguration,
     sanitized_agent_environment,
 )
+from skillmind.agent.claude_build import bundled_claude_build
 from skillmind.agent.engine import extract_text_delta
 from skillmind.agent.tool_policy import DENIED_BUILTIN_TOOLS
 from skillmind.skills.model_interpreter import (
@@ -58,6 +59,7 @@ class ClaudeCompletionClient:
 
         del parameters  # M0 interpreter は温度など追加生成 parameter を使わない。
         options = ClaudeAgentOptions(
+            cli_path=bundled_claude_build().cli_path,
             system_prompt=system_prompt,
             model=model,
             tools=[],

@@ -95,7 +95,9 @@ async def test_effect_dispatch_requires_executor_and_uses_own_job_identity() -> 
     redis.publish = AsyncMock(return_value=1)
     redis.enqueue_job = AsyncMock(return_value=MagicMock())
     ctx = {
-        "settings": Settings(worker_dispatch_enabled=True, _env_file=None),
+        "settings": Settings(
+            worker_dispatch_enabled=True, deferred_features_enabled=True, _env_file=None,
+        ),
         "redis": redis,
         "outbox_relay": relay,
         "effect_executor": MagicMock(),
@@ -148,7 +150,7 @@ async def test_execute_run_claims_and_hands_off_snapshot() -> None:
     ctx = {
         "run_executor": executor,
         "run_service": service,
-        "settings": Settings(run_lease_seconds=60, _env_file=None),
+        "settings": Settings(run_lease_seconds=60, worker_dispatch_enabled=True, _env_file=None),
         "worker_id": "worker-1",
     }
 

@@ -12,6 +12,15 @@
 
 分别记录三个时点：document 用创建清单，repository 首次打开解析版本；issue 按 binding live 读取形成 Evidence，不物化文件树。
 
+## PostgreSQL 与 MCP 接入
+
+资源管理支持注册 `postgres` 和 `mcp` Provider、凭据引用和明确读取范围，沿用公开资源分类 `other`；凭据正文仅经 SecretReference 管理，公开列表仅返回配置 key。连接状态 ACTIVE 表示配置未停用，不证明远端可达；Provider 只有装配到 Worker 后才可标为 installed。
+
+- PostgreSQL 配置主机、整数端口、数据库、只读用户名和 TLS 模式；密码必须引用 SecretReference。范围逐项指定 `schema.table`，不接受任意 SQL、空列表或通配符。[`database.read/v1`](../../SKM/contracts/tools/database.read/v1/request.schema.json) 接受显式表名、列名、等值筛选、排序和有界分页，不接受 SQL 正文。Worker 使用原凭据、只读事务和 PostgreSQL statement/lock timeout，返回最多 100 行、1 MiB JSON。连接目标由项目 ADMIN 预先配置，模型不能指定主机、端口、凭据或扩大表范围；目标数据库及自定义类型/函数属于管理员信任边界。连接前和返回前复验原 binding，取消关闭当前连接，不以本地取消声称数据库故障已恢复。每次读取得到独立 live 结果，以内容 hash 和读取时间生成 Evidence，不承诺跨调用的分页处于同一快照。
+- MCP 配置 HTTP(S) Streamable HTTP endpoint、可选 Bearer 凭据引用和明确资源 URI；URL 不含凭据、query 或 fragment，不接受 stdio 命令配置。`mcp.read/v1` 只发起已冻结 URI 的 `resources/read`，不调用远端 tools，不开放 sampling、elicitation 或本地 roots；服务工具调用的需求及授权范围仍待确认。URI 在配置时按 SDK URI 类型规范化，执行时须逐字匹配冻结值，返回其他 URI 的内容拒绝发布。连接目标与服务实现属于项目 ADMIN 信任边界；模型不能传 endpoint/凭据或改变协议方法，远端正文仅作为数据，不取得指令权限。
+- MCP 每次读取独立会话，用 SDK 处理初始化与 JSON/SSE；传输层限定原 endpoint、禁跳转和压缩、至多 16 次 HTTP 请求、单响应 1 MiB、累计响应 3 MiB，初始化与读取共用 20 秒 deadline。取消关闭本地会话/连接，不由 disconnect 推断远端已停止；不自动重放资源读取。文本或 Base64 内容最多 20 项、合计 1 MiB，超限整次失败，不静默截断。I/O 前后复验原 binding/凭据，记录读取时间、内容 hash 和 Evidence；第三方传输日志不输出 URL、会话 ID 或正文。
+- [`mcp.read/v1`](../../SKM/contracts/tools/mcp.read/v1/request.schema.json) 与 PostgreSQL 一样，经能力目录、可信 Provider、原 binding/撤权检查、Evidence 和 Worker 装配进入 Run；不得把远端 MCP 配置直接交给模型 SDK，或依据远端声明自动授予工具权限。配置或本机合成服务验证不代表真实业务 DB/MCP 验收。
+
 ## 文档选择与冻结设计
 
 ### 用户选择的是范围，不是 Provider 名称

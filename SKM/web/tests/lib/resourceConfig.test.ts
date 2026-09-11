@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { PublishedTaskRecord } from '../../src/api'
 import {
+  asResourceProvider,
   accessForCapabilities,
   buildIntegrationConfig,
   buildIntegrationScope,
@@ -20,6 +21,31 @@ import {
   taskOptionLabel,
   taskScopeKey,
 } from '../../src/lib/resourceConfig'
+import { emptyConnectDraft } from '../../src/lib/resourceDrafts'
+
+describe('PostgreSQL and MCP connection configuration', () => {
+  it('builds structured PostgreSQL metadata with a numeric port and explicit tables', () => {
+    const draft = { ...emptyConnectDraft('postgres'), host: ' db.example.test ', database: 'reports', username: 'reader' }
+    expect(buildIntegrationConfig('postgres', draft)).toEqual({ host: 'db.example.test', port: 5432,
+      database: 'reports', username: 'reader', sslmode: 'verify-full' })
+    expect(buildIntegrationScope('postgres', { issueIds: [], fieldKeys: [], paths: [], revisions: [], tables: ['public.reports'] }))
+      .toEqual({ tables: ['public.reports'] })
+    expect(findScopeIssue('postgres', { tables: [] }, false)).toBe('tables_required')
+  })
+
+  it('builds MCP Streamable HTTP metadata and requires explicit resource URIs', () => {
+    expect(buildIntegrationConfig('mcp', { ...emptyConnectDraft('mcp'), serverUrl: ' https://mcp.example.test/mcp ' }))
+      .toEqual({ server_url: 'https://mcp.example.test/mcp', transport: 'streamable_http' })
+    expect(buildIntegrationScope('mcp', { issueIds: [], fieldKeys: [], paths: [], revisions: [], resourceUris: ['resource://reports/current'] }))
+      .toEqual({ resource_uris: ['resource://reports/current'] })
+    expect(findScopeIssue('mcp', { resource_uris: [] }, false)).toBe('resource_uris_required')
+  })
+
+  it.each(['postgres', 'mcp'] as const)('recognizes %s without granting a write capability', (provider) => {
+    expect(asResourceProvider(provider)).toBe(provider)
+    expect(capabilitiesForAccess(provider, 'read_write')).toEqual(capabilitiesForAccess(provider, 'read'))
+  })
+})
 
 /** テスト用の published task descriptor を生成する。 */
 function task(overrides: Partial<PublishedTaskRecord> = {}): PublishedTaskRecord {

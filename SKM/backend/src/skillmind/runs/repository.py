@@ -38,6 +38,7 @@ from skillmind.effects.domain import (
     ChangeProposalStatus,
     EffectExecutionStatus,
 )
+from skillmind.runs.budget import BudgetError
 from skillmind.runs.creation_replay import validate_creation_replay
 from skillmind.runs.creation_request import CREATION_REQUEST_FIELD, TaskRunIntent
 from skillmind.runs.domain import (
@@ -83,6 +84,7 @@ from skillmind.runs.domain import (
     request_hash,
 )
 from skillmind.runs.execution_outcome import user_cancellation_event
+from skillmind.runs.repository_budgets import new_budget_account
 from skillmind.runs.repository_effects import EffectOperationsMixin
 from skillmind.runs.repository_interactions import InteractionOperationsMixin
 from skillmind.skills.domain import PublishedTaskNotFoundError
@@ -161,6 +163,19 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
         validated_skills = await self._validate_skill_snapshots(
             command.skill_snapshots_json, project_id=command.project_id
         )
+
+        if command.budget_policy is not None:
+            if command.limits_snapshot_json.get("budget_policy") != command.budget_policy.to_json():
+                raise BudgetError("New Run requires its frozen budget policy marker")
+            # INSERT 勝者の同じ transaction にだけ帳簿を追加する。新行の transient 表現を
+            # 工場へ渡し、既存 Run の重放/復旧でゼロ帳簿を補造しない。
+            new_run = Run(
+                id=inserted_id,
+                status=RunStatus.QUEUED.value,
+                started_at=None,
+                limits_snapshot_json=command.limits_snapshot_json,
+            )
+            self._session.add(new_budget_account(new_run, command.budget_policy))
 
         segment_id = uuid4()
         initial_segment = RunSegment(

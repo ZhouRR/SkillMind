@@ -4,9 +4,56 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
-
+from skillmind.integrations.domain import (
+    CreateIntegrationCommand,
+    StoredIntegration,
+    normalize_integration_command,
+)
 from tests.api.fakes import FakeIntegrationService
+
+
+@pytest.mark.parametrize("provider", ["postgres", "mcp"])
+def test_readonly_resource_registration_validates_and_hides_connection_config(
+    client: TestClient,
+    provider: str,
+) -> None:
+    """実 domain 検証を route と共有し、公開応答には config key のみを残す。"""
+    from tests.integrations.test_readonly_resources import command
+
+    class ValidatingService(FakeIntegrationService):
+        """DB を使わず、本番と同じ登録時の domain 境界を通す。"""
+
+        async def create_integration(self, value: CreateIntegrationCommand) -> StoredIntegration:
+            """公開 command を正規化して既存 read model fake に渡す。"""
+            return await super().create_integration(normalize_integration_command(value))
+
+    service = ValidatingService()
+    client.app.state.integration_service = service
+    value = command(provider)
+    body = {
+        "name": value.name,
+        "kind": value.kind,
+        "provider": provider,
+        "capabilities": list(value.capabilities),
+        "scope": value.scope,
+        "config": value.config,
+        "secret_reference_id": str(value.secret_reference_id)
+        if value.secret_reference_id
+        else None,
+    }
+    response = client.post(f"/api/v1/projects/{value.project_id}/integrations", json=body)
+    assert response.status_code == 201
+    assert response.json()["provider"] == provider
+    assert response.json()["scope"] == value.scope
+    assert response.json()["config_keys"] == sorted(value.config)
+    assert "config" not in response.json()
+    refused = client.post(
+        f"/api/v1/projects/{value.project_id}/integrations",
+        json={**body, "config": {**value.config, "password": "fixture"}},
+    )
+    assert refused.status_code == 422
 
 
 def test_admin_manages_secret_integration_and_exact_binding(client: TestClient) -> None:

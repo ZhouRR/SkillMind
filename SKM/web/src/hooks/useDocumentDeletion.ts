@@ -19,6 +19,7 @@ export function useDocumentDeletion({ projectId, csrfToken, readOnly, onSessionE
   const expiryNotified = useRef(false)
   const [intent, setIntent] = useState<ProjectDocumentRecord | null>(null)
   const intentRef = useRef<ProjectDocumentRecord | null>(null)
+  const settled = useRef<((deleted: boolean) => void) | undefined>(undefined)
   const [phase, setPhase] = useState<'idle' | 'sending' | 'unknown'>('idle')
   const phaseRef = useRef(phase)
   const [denied, setDenied] = useState<DocumentFailure | null>(null)
@@ -32,6 +33,7 @@ export function useDocumentDeletion({ projectId, csrfToken, readOnly, onSessionE
     phaseRef.current = 'idle'; intentRef.current = null
     setPhase('idle'); setIntent(null)
     observeDenial({ key: 'sessionExpired' })
+    settled.current?.(false)
   }, DOCUMENT_REQUEST_POLICY)
 
   useLayoutEffect(() => {
@@ -88,7 +90,7 @@ export function useDocumentDeletion({ projectId, csrfToken, readOnly, onSessionE
     return mounted.current && !blocksRead(deniedRef.current) && phaseRef.current === 'idle'
   }
   /** original は一覧更新や同名再 upload に置き換えない。 */
-  function submit(document: ProjectDocumentRecord): boolean {
+  function submit(document: ProjectDocumentRecord, onSettled?: (deleted: boolean) => void): boolean {
     if (!canWrite()) return false
     const original = { ...document }
     const accepted = mutation.submit(
@@ -96,6 +98,7 @@ export function useDocumentDeletion({ projectId, csrfToken, readOnly, onSessionE
       () => {
         phaseRef.current = 'idle'; intentRef.current = null
         setPhase('idle'); setIntent(null); onDeleted()
+        onSettled?.(true)
       },
       (failure) => {
         const unknown = failure.key === 'unknown'
@@ -103,9 +106,11 @@ export function useDocumentDeletion({ projectId, csrfToken, readOnly, onSessionE
         setPhase(phaseRef.current)
         if (!unknown) { intentRef.current = null; setIntent(null) }
         observeDenial(failure)
+        onSettled?.(false)
       },
     )
     if (accepted) {
+      settled.current = onSettled
       intentRef.current = original; setIntent(original)
       phaseRef.current = 'sending'; setPhase('sending')
       ticketRef.current = null; setTicket(null)

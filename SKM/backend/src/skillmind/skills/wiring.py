@@ -18,6 +18,7 @@ from skillmind.skills.interpreter import (
 )
 from skillmind.skills.interpreter_execution import SkillInterpreter
 from skillmind.skills.model_interpreter import ModelSkillInterpreter
+from skillmind.skills.resource_binding import is_deferred_execution_capability
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,15 @@ def build_skill_interpreter(
             generation_schema=response_schema,
         )
         catalog = load_capability_catalog(catalog_path)
+        if not settings.deferred_features_enabled:
+            # 配備で使えない能力を Interpreter に提示せず、絞込後の checksum を凍結する。
+            catalog = CapabilityCatalogSnapshot.build(
+                catalog_version=catalog.catalog_version,
+                capabilities=tuple(
+                    entry for entry in catalog.capabilities
+                    if not is_deferred_execution_capability(entry.capability)
+                ),
+            )
         configuration = ClaudeRuntimeConfiguration.from_environ(fallback=environment_fallback)
     except (OSError, ValueError) as error:
         log_event(

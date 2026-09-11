@@ -7,7 +7,7 @@ import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
 
 from skillmind.core.hashing import canonical_json, sha256_hex
@@ -119,6 +119,7 @@ class InvocationOptions:
     fork_session: bool
     continue_conversation: bool
     output_format_checksum: str
+    cli_checksum: str | None = None
 
     def __post_init__(self) -> None:
         """履歴の暗黙継続・無効な局部 turns を持つ実行記述子を保存させない。"""
@@ -142,11 +143,13 @@ class InvocationOptions:
         _session(self.session_id)
         _session(self.resume)
         _checksum(self.output_format_checksum)
+        if self.cli_checksum is not None:
+            _checksum(self.cli_checksum)
 
     def to_json(self) -> dict[str, Any]:
         """Credential、prompt、hook、MCP instance や任意設定を含めず比較する。"""
 
-        return {
+        result = {
             "model": self.model,
             "max_turns": self.max_turns,
             "max_budget_usd": self.max_budget_usd.to_json(),
@@ -156,6 +159,10 @@ class InvocationOptions:
             "continue_conversation": self.continue_conversation,
             "output_format_checksum": self.output_format_checksum,
         }
+        # 旧保存値には null を後付けせず、従来 checksum のまま読戻せるようにする。
+        if self.cli_checksum is not None:
+            result["cli_checksum"] = self.cli_checksum
+        return result
 
     @property
     def checksum(self) -> str:
@@ -178,8 +185,12 @@ class InvocationOptions:
                 "fork_session",
                 "continue_conversation",
                 "output_format_checksum",
-            },
+            } | (
+                {"cli_checksum"} if isinstance(value, dict) and "cli_checksum" in value else set()
+            ),
         )
+        if "cli_checksum" in data:
+            _checksum(data["cli_checksum"])
         return cls(
             model=data["model"],
             max_turns=data["max_turns"],
@@ -189,6 +200,7 @@ class InvocationOptions:
             fork_session=data["fork_session"],
             continue_conversation=data["continue_conversation"],
             output_format_checksum=data["output_format_checksum"],
+            cli_checksum=data.get("cli_checksum"),
         )
 
 
@@ -366,3 +378,14 @@ ExecutionUsageObserver = Callable[[ResultUsageObservation], Awaitable[None]]
 
 # 受信サービスが原束縛と初回 START_INTENT commit を検証する。True 以外は起動しない。
 BeforeInvocationConnect = Callable[[AgentInvocation], Awaitable[bool]]
+
+
+@runtime_checkable
+class InvocationControlledEngine(Protocol):
+    """予算装配の取り違えを SDK 型なしで確認する adapter port。"""
+
+    def has_invocation_callbacks(
+        self, before_connect: BeforeInvocationConnect, observer: ExecutionUsageObserver
+    ) -> bool:
+        """実 client の起動と観測へ、指定された同じ callback が装配されているか返す。"""
+        ...

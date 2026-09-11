@@ -1,0 +1,17 @@
+{
+  "status": "success",
+  "provider": "mcp",
+  "uri": "resource://reports/current",
+  "contents": [
+    {
+      "uri": "resource://reports/current",
+      "mime_type": "text/plain",
+      "text": "Example report"
+    }
+  ],
+  "read_at": "2026-09-11T10:00:00Z",
+  "content_hash": "sha256:3ccca977798a033808314dea1c307402524ac1965976cbccc41cf3cc13e7b848",
+  "evidence_refs": [
+    "ev_mcp_example"
+  ]
+}

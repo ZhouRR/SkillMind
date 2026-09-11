@@ -426,6 +426,21 @@ export interface UiMessages {
   }
   /** 資源と統合の管理画面(ResourcesPage)。 */
   resources: {
+    databaseHost: string
+    databasePort: string
+    databaseName: string
+    databaseUser: string
+    databaseTls: string
+    tlsVerifyFull: string
+    tlsRequire: string
+    tlsDisable: string
+    mcpServerUrl: string
+    databaseTables: string
+    databaseReadHint: string
+    mcpResourceUris: string
+    mcpReadHint: string
+    tablesRequired: string
+    resourceUrisRequired: string
     title: string
     description: string
     scopeBadge: string
@@ -541,6 +556,18 @@ export interface UiMessages {
   }
   /** 項目文書 panel(DocumentManagerPanel)。 */
   documentsPanel: {
+    targetFolder: string
+    rootFolder: string
+    uploadHere: string
+    selectAll: string
+    selectedCount: (count: number) => string
+    selectFile: (name: string) => string
+    deleteSelected: string
+    clearSelection: string
+    deleteSelectedConfirm: (count: number) => string
+    batchDeleted: (deleted: number, total: number) => string
+    batchStopped: string
+    viewSource: string
     uploadHelp: string
     unknownTitle: string
     factsOnly: string
@@ -937,7 +964,7 @@ export interface UiMessages {
   }
   /** Project 全体の調度一覧と原詳細。編集の文案は独立した namespace に置く。 */
   scheduleManager: {
-    manageAll: string; tasksLink: string; needProject: string; readOnlyProject: string; scopeHint: string
+    manageAll: string; tasksLink: string; needProject: string; readOnlyProject: string; deferredDisabled: string; scopeHint: string
     listTitle: string; searchLabel: string; searchPlaceholder: string; invalidSearch: string; search: string; statusLabel: string; allStates: string
     refresh: string; loading: string; empty: string; total: (total: number) => string
     pagination: string; previous: string; next: string; page: (offset: number, limit: number, total: number) => string

@@ -130,7 +130,7 @@ class RunWorkspace:
 
 @dataclass(frozen=True, slots=True)
 class RunLimits:
-    """Agent loop に適用する Run 作成時点の resource 上限。"""
+    """Agent loop の局部上限。Run の凍結上限と本実行の予算授与を超えない。"""
 
     max_turns: int
     wall_timeout_seconds: int

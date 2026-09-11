@@ -9,6 +9,16 @@ import { documentTask } from '../fixtures/documentTask'
 import { scheduleFixture } from '../fixtures/schedule'
 
 describe.each(['zh', 'ja', 'en'] as const)('schedule confirmation in %s', (language) => {
+  it('retains archive but omits resume when scheduled execution is disabled', () => {
+    const schedule = scheduleFixture({ status: 'PAUSED' })
+    const html = renderToStaticMarkup(<LanguageProvider language={language}><ScheduleStatusActions
+      schedule={schedule} projectId={schedule.project_id} csrfToken="fixture" allowResume={false}
+      onChanged={() => {}} onError={() => {}} /></LanguageProvider>)
+    expect(html).not.toContain('data-schedule-status="ACTIVE"')
+    expect(html).toContain('data-schedule-status="ARCHIVED"')
+    expect(html).not.toContain('data-schedule-status="ARCHIVED" disabled')
+  })
+
   it('names the browser input zone independently of the rule zone', () => {
     const html = renderToStaticMarkup(<LanguageProvider language={language}><ScheduleDialog open
       projectId="00000000-0000-4000-8000-000000000020" csrfToken="fixture"

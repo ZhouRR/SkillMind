@@ -14,6 +14,7 @@ from skillmind.effects.domain import (
     StoredChangeProposal,
     StoredEffectExecution,
 )
+from skillmind.runs.budget import BudgetPolicy
 from skillmind.runs.creation_request import CREATION_REQUEST_FIELD, TaskRunIntent
 
 
@@ -216,6 +217,7 @@ class CreateRunCommand:
     limits_snapshot_json: dict[str, Any]
     trace_id: str | None
     skill_snapshots_json: tuple[dict[str, Any], ...] = ()
+    budget_policy: BudgetPolicy | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -617,6 +619,8 @@ def request_hash(command: CreateRunCommand) -> str:
         "limits_snapshot": command.limits_snapshot_json,
         "skill_snapshots": command.skill_snapshots_json,
     }
+    if command.budget_policy is not None:
+        payload["budget_policy"] = command.budget_policy.to_json()
     return sha256_hex(canonical_json(payload))
 
 

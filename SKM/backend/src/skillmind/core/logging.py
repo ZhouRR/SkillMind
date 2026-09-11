@@ -53,6 +53,10 @@ class JsonLogFormatter(logging.Formatter):
             "logger": record.name,
             "event": getattr(record, "skillmind_event", record.getMessage()),
         }
+        # 外部 transport の診断は URL・Session ID・本文を含み得る。level/name だけを残す。
+        if record.name.split(".", 1)[0] in {"mcp", "httpx", "httpcore"}:
+            payload["event"] = "external_transport.diagnostic"
+            return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
         context = getattr(record, "skillmind_context", {})
         if isinstance(context, dict):
             payload.update(context)

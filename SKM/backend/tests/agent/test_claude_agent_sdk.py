@@ -11,6 +11,7 @@ from uuid import uuid4
 import pytest
 
 from skillmind.agent.claude import ClaudeRuntimeConfiguration, build_claude_agent_options
+from skillmind.agent.claude_build import bundled_claude_build
 from skillmind.agent.compatibility import probe_claude_agent_sdk
 from skillmind.agent.domain import RegisteredTool, RunContext, RunLimits, RunWorkspace
 from skillmind.agent.tool_policy import DENIED_BUILTIN_TOOLS
@@ -76,6 +77,7 @@ def test_sdk_probe_matches_pinned_sdk_and_bundled_cli() -> None:
     assert report.interrupt_supported
     assert report.in_process_mcp_supported
     assert report.session_store_protocol_supported
+    assert report.bundled_cli_checksum == bundled_claude_build().cli_checksum
 
 
 def test_options_disable_builtin_tools_and_local_configuration(tmp_path: Path) -> None:
@@ -90,6 +92,7 @@ def test_options_disable_builtin_tools_and_local_configuration(tmp_path: Path) -
     )
 
     assert options.tools == []
+    assert options.cli_path == bundled_claude_build().cli_path
     assert options.skills == []
     assert options.setting_sources == []
     assert options.strict_mcp_config is True

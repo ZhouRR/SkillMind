@@ -152,7 +152,7 @@ observe → Evidence → propose → 精确批准/允许的预授权 → 独立 
 
 ## Claude Agent SDK 实现要求
 
-锁定 SDK/CLI 版本并记录模型/options checksum，SessionStore 镜像 transcript。Hook 执行平台策略，SDK allowed tools 与 structured output 不替代参数和结果校验。人工等待须收束收费进程，不长期占 Worker。
+锁定 SDK/CLI 版本并记录模型/options checksum，SessionStore 镜像 transcript。Run 与 Skill 解释显式选用固定 SDK 的随包 CLI；[文件身份校验](../../SKM/backend/src/skillmind/agent/claude_build.py)核对安装归属及 RECORD 的大小/SHA-256，拒绝缺失、替换或系统 CLI 回退。配布目录在进程生命周期内须保持不可变；此校验不等于计量或停止证明。Hook 执行平台策略，SDK allowed tools 与 structured output 不替代参数和结果校验。人工等待须收束收费进程，不长期占 Worker。
 
 升级或新增引擎先验消息映射、resume/fork/interrupt、旧 Session 恢复、Tool 拒绝/MCP、等待与错误分类；使用同一 conformance suite。
 

@@ -13,6 +13,8 @@ export const PROVIDER_LABELS: Record<ResourceProvider, string> = {
   redmine: 'Redmine',
   git: 'Git',
   svn: 'SVN',
+  postgres: 'PostgreSQL',
+  mcp: 'MCP',
 }
 
 /** 「凭据を新規登録する」select 値。既存 SecretReference の UUID と衝突しない前綴を使う。 */
@@ -34,6 +36,14 @@ export interface ConnectDraft {
   baseUrl: string
   repositoryUri: string
   defaultRevision: string
+  host: string
+  port: string
+  database: string
+  username: string
+  sslmode: string
+  serverUrl: string
+  tables: string
+  resourceUris: string
   credentialChoice: string
   resolver: SecretResolver
   locator: string
@@ -94,6 +104,8 @@ export function emptyConnectDraft(provider: ResourceProvider): ConnectDraft {
     baseUrl: '',
     repositoryUri: '',
     defaultRevision: 'HEAD',
+    host: '', port: '5432', database: '', username: '', sslmode: 'verify-full',
+    serverUrl: '', tables: '', resourceUris: '',
     credentialChoice: PROVIDER_FORMS[provider].requiresSecret ? NEW_CREDENTIAL : '',
     // 自助接入の黄金路径として、既定は平台托管(直接入力)。ENVIRONMENT/FILE は選択で残す。
     resolver: 'MANAGED',

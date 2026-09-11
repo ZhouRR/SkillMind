@@ -20,6 +20,16 @@ afterEach(() => {
 })
 
 describe('auth API client', () => {
+  it.each([true, false, undefined])('accepts the deployment feature flag %s', async (enabled) => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ ...SESSION, deferred_features_enabled: enabled })))
+    expect((await loadAuthSession())?.deferred_features_enabled).toBe(enabled)
+  })
+
+  it('rejects a non-boolean deployment feature flag', async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ ...SESSION, deferred_features_enabled: 'true' })))
+    await expect(loadAuthSession()).rejects.toThrow()
+  })
+
   it('treats authentication_required as an anonymous session', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(
       { detail: 'A valid session is required.', code: 'authentication_required' },

@@ -1,0 +1,18 @@
+{
+  "status": "success",
+  "provider": "postgres",
+  "table": "public.reports",
+  "rows": [
+    {
+      "id": 1,
+      "title": "Example report"
+    }
+  ],
+  "read_at": "2026-09-11T00:00:00Z",
+  "truncated": false,
+  "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "evidence_refs": [
+    "ev_example_report"
+  ],
+  "warnings": []
+}

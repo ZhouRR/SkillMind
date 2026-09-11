@@ -6,7 +6,7 @@ import asyncio
 import logging
 import math
 from collections.abc import AsyncIterator, Mapping
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -21,11 +21,13 @@ from skillmind.agent.domain import (
     ResumeContext,
     RunContext,
 )
+from skillmind.agent.metering import InvocationControlledEngine
 from skillmind.agent.result_validation import ResultValidationError, ResultValidator
 from skillmind.agent.stream_lifecycle import close_async_stream
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.core.logging import log_event
 from skillmind.effects.proposal import parse_change_proposal_request
+from skillmind.runs.budget import BudgetError, BudgetExhaustedError, BudgetUnavailableError
 from skillmind.runs.domain import (
     AgentSessionMetadata,
     ClaimedRun,
@@ -40,6 +42,7 @@ from skillmind.runs.execution_outcome import user_cancellation_event
 from skillmind.runs.interaction import parse_interaction_request
 from skillmind.runs.realtime import RunRealtimePublisher
 from skillmind.runs.service import RunService
+from skillmind.worker.primary_budget import PrimaryBudgetCoordinator
 from skillmind.worker.tool_authority import bind_tool_authority
 
 logger = logging.getLogger(__name__)
@@ -77,6 +80,7 @@ class AgentRunExecutor:
         preparation_timeout_seconds: float = 300,
         heartbeat_interval_seconds: float | None = None,
         realtime_publisher: RunRealtimePublisher | None = None,
+        budget_coordinator: PrimaryBudgetCoordinator | None = None,
     ) -> None:
         """実行依存と heartbeat 間隔を固定する。"""
 
@@ -95,6 +99,14 @@ class AgentRunExecutor:
         self._heartbeat_interval_seconds = interval
         self._preparation_timeout_seconds = preparation_timeout_seconds
         self._realtime_publisher = realtime_publisher
+        if budget_coordinator is not None and (
+            not isinstance(engine, InvocationControlledEngine)
+            or not engine.has_invocation_callbacks(
+                budget_coordinator.before_connect, budget_coordinator.observe_result
+            )
+        ):
+            raise ValueError("Primary budget requires matching Engine invocation callbacks")
+        self._budget_coordinator = budget_coordinator
 
     async def execute(self, claimed_run: ClaimedRun) -> None:
         """準備から実行終了まで監督し、実行権を失った Worker は書き込まず退く。"""
@@ -134,6 +146,11 @@ class AgentRunExecutor:
         """準備・Brief・開始 gate と engine を同じ heartbeat の寿命に収める。"""
 
         try:
+            if (
+                "budget_policy" in claimed.limits_snapshot_json
+                and self._budget_coordinator is None
+            ):
+                raise BudgetUnavailableError("Run requires a configured primary budget coordinator")
             prepared = await self._run_service.prepare_execution(claimed)
             context = await self._prepare_context(
                 claimed, sequence_start=prepared.next_sequence, cancellation=cancellation
@@ -147,8 +164,27 @@ class AgentRunExecutor:
                 return
             # SDK は anext ごとに別 task から駆動され、子分析も同じ Engine を使う。
             # 親の消費/close 全体にだけ束縛し、公開 RunContext へ lease を持ち込まない。
-            with bind_tool_authority(claimed):
+            coordinator = self._budget_coordinator
+            budget = (
+                await coordinator.prepare(claimed, context) if coordinator is not None else None
+            )
+            if budget is not None:
+                context = budget.context
+            with (
+                coordinator.bind(budget)
+                if coordinator is not None and budget is not None else nullcontext()
+            ), bind_tool_authority(claimed):
                 await self._consume_engine(claimed, context, done, session_ref, cancellation)
+        except BudgetError as error:
+            if await self._run_service.is_cancellation_requested(claimed.run_id):
+                await self._finalize_cancelled(claimed)
+            else:
+                await self._finalize_without_event(
+                    claimed,
+                    code="run_budget_exhausted"
+                    if isinstance(error, BudgetExhaustedError) else "run_budget_unavailable",
+                    error_type=type(error).__name__,
+                )
         finally:
             done.set()
 

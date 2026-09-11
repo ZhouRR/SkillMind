@@ -43,6 +43,7 @@ from skillmind.agent.claude import (
     ToolDenialCallback,
     build_claude_agent_options,
 )
+from skillmind.agent.claude_build import require_bundled_cli
 from skillmind.agent.claude_metering import capture_invocation, capture_result_usage
 from skillmind.agent.compatibility import probe_claude_agent_sdk
 from skillmind.agent.domain import (
@@ -111,6 +112,7 @@ class RunMcpRuntime:
 def _default_client_factory(options: ClaudeAgentOptions) -> ClaudeClient:
     """Production 用 ClaudeSDKClient を共有 protocol として生成する。"""
 
+    require_bundled_cli(options.cli_path)
     return ClaudeSDKClient(options)
 
 
@@ -433,6 +435,12 @@ class ClaudeAgentSdkEngine:
         self._before_connect = before_connect
         self._active: dict[AgentSessionRef, _ActiveExecution] = {}
         self._active_lock = asyncio.Lock()
+
+    def has_invocation_callbacks(
+        self, before_connect: BeforeInvocationConnect, observer: ExecutionUsageObserver
+    ) -> bool:
+        """Executor の預留だけを接いで Engine gate を忘れる装配を検出する。"""
+        return self._before_connect == before_connect and self._usage_observer == observer
 
     async def execute(self, context: RunContext) -> AsyncIterator[AgentEvent]:
         """事前採番した UUID で新規 session を開始する。"""

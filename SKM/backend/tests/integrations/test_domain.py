@@ -192,11 +192,13 @@ def test_git_direct_write_requires_an_explicit_default_branch() -> None:
 
 
 def test_registered_providers_are_installed() -> None:
-    """§19 W4 で svn client を配線したため、宣言済み Provider は全て installed である。"""
+    """実 client を配線済みの Provider だけを installed として公開する。"""
 
     assert PROVIDER_DEFINITIONS["svn"].installed is True
     assert PROVIDER_DEFINITIONS["git"].installed is True
     assert PROVIDER_DEFINITIONS["redmine"].installed is True
+    assert PROVIDER_DEFINITIONS["postgres"].installed is True
+    assert PROVIDER_DEFINITIONS["mcp"].installed is True
 
 
 def test_installed_provider_index_binds_capabilities_to_wired_providers() -> None:
@@ -204,11 +206,11 @@ def test_installed_provider_index_binds_capabilities_to_wired_providers() -> Non
 
     assert INSTALLED_PROVIDER_CAPABILITIES["repository.read/v1"] == frozenset({"git", "svn"})
     assert INSTALLED_PROVIDER_CAPABILITIES["issue.read/v1"] == frozenset({"redmine"})
+    assert INSTALLED_PROVIDER_CAPABILITIES["database.read/v1"] == frozenset({"postgres"})
+    assert INSTALLED_PROVIDER_CAPABILITIES["mcp.read/v1"] == frozenset({"mcp"})
     # 全ての値が実際に installed な Provider 名だけで構成される。
     installed_names = {
-        definition.provider
-        for definition in PROVIDER_DEFINITIONS.values()
-        if definition.installed
+        definition.provider for definition in PROVIDER_DEFINITIONS.values() if definition.installed
     }
     for providers in INSTALLED_PROVIDER_CAPABILITIES.values():
         assert providers <= installed_names

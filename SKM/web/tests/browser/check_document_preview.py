@@ -15,7 +15,24 @@ from playwright.async_api import Browser, Page, Route, async_playwright, expect
 
 PRIVATE = "Preview fixture internal detail must not be shown"
 SECOND_TEXT = "Second document is the current preview."
-MARKDOWN = "# Original Markdown\n\n**Unrendered emphasis** <img src='/preview-probe/markdown'>"
+MARKDOWN = """# Original Markdown
+
+**Rendered emphasis** <img src='/preview-probe/markdown'>
+
+| Field | Value |
+| --- | --- |
+| State | Ready |
+
+```html
+<script>literal code</script>
+```
+
+- First item
+  - Nested item
+
+[Readable link](https://preview.invalid/markdown)
+<script>parent.document.body.dataset.previewMutated='yes'</script>
+"""
 DELAYED_TIMERS = ("timeout-delayed-timer-401", "timeout-delayed-timer-403")
 LATE_RESPONSES = ("close-late", "project-late", "actor-late", "timeout", *DELAYED_TIMERS)
 MALICIOUS = """<!doctype html><html><head>
@@ -237,19 +254,19 @@ async def static_html(page: Page) -> None:
     }""")
     await expect(frame.locator("#static-diagram text")).to_have_text("Static diagram")
     await expect(frame.locator('#static-diagram use[href="#shape"]')).to_have_count(1)
-    assert await frame.locator(".preview-grid").evaluate(
-        "el => getComputedStyle(el).display"
-    ) == "grid"
-    assert await frame.locator("#styled-card").evaluate(
-        "el => getComputedStyle(el).backgroundColor"
-    ) == "rgb(224, 236, 248)"
+    assert (
+        await frame.locator(".preview-grid").evaluate("el => getComputedStyle(el).display")
+        == "grid"
+    )
+    assert (
+        await frame.locator("#styled-card").evaluate("el => getComputedStyle(el).backgroundColor")
+        == "rgb(224, 236, 248)"
+    )
     # CSS の原文は保持し、@import/url の通信は CSP と probe 検査で拒否を実証する。
     assert await frame.locator("style").evaluate_all(
         "elements => elements.some(el => el.textContent.includes('@import'))"
     )
-    assert await frame.locator(
-        "body"
-    ).evaluate("""element => [...element.querySelectorAll('*')]
+    assert await frame.locator("body").evaluate("""element => [...element.querySelectorAll('*')]
       .every(node => [...node.attributes].every(attribute =>
         !/^(on|src|action$|formaction$|poster$|background$)/i.test(attribute.name)
         && (!/href$/i.test(attribute.name) || attribute.value.startsWith('#'))))""")
@@ -368,9 +385,27 @@ async def scenario(
             elif mode == "malicious":
                 await static_html(page)
                 await expect(page.get_by_text(labels["previewNotice"], exact=True)).to_be_visible()
-            elif mode in ("markdown", "same-tick"):
-                expected = MARKDOWN if mode == "markdown" else SECOND_TEXT
-                await expect(page.locator(".previewText")).to_have_text(expected)
+            elif mode == "markdown":
+                frame = page.frame_locator("iframe.previewFrame")
+                await expect(frame.get_by_role("heading", name="Original Markdown")).to_be_visible()
+                await expect(frame.locator("strong")).to_have_text("Rendered emphasis")
+                await expect(frame.get_by_role("cell", name="Ready")).to_be_visible()
+                await expect(frame.locator("pre code")).to_have_text(
+                    "<script>literal code</script>\n"
+                )
+                await expect(frame.locator("li li")).to_have_text("Nested item")
+                await expect(frame.locator("script, img, a[href]")).to_have_count(0)
+                await page.get_by_role("button", name=labels["viewSource"], exact=True).click()
+                await expect(page.locator(".previewText")).to_have_text(MARKDOWN)
+                await expect(page.locator("iframe.previewFrame")).to_have_count(0)
+                await (
+                    page.get_by_role("dialog")
+                    .get_by_role("button", name=labels["previewButton"], exact=True)
+                    .click()
+                )
+                await expect(frame.get_by_role("heading", name="Original Markdown")).to_be_visible()
+            elif mode == "same-tick":
+                await expect(page.locator(".previewText")).to_have_text(SECOND_TEXT)
                 await expect(page.locator("iframe.previewFrame")).to_have_count(0)
                 if mode == "same-tick":
                     assert api.content_calls == [(PROJECT, SECOND)]

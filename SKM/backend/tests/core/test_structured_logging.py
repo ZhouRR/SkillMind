@@ -7,7 +7,27 @@ import json
 import logging
 from uuid import uuid4
 
+import pytest
+
 from skillmind.core.logging import JsonLogFormatter, log_event
+
+
+@pytest.mark.parametrize("name", ["mcp.client.streamable_http", "httpx", "httpcore.connection"])
+def test_transport_diagnostics_never_publish_remote_values(name: str) -> None:
+    """SDK 診断の URL・Session ID・本文を、通常/例外 level とも出力しない。"""
+    record = logging.LogRecord(
+        name,
+        logging.ERROR,
+        "",
+        0,
+        "Remote detail %s",
+        ("fixture-private-value",),
+        None,
+    )
+    payload = json.loads(JsonLogFormatter().format(record))
+    assert payload["event"] == "external_transport.diagnostic"
+    assert payload["logger"] == name and payload["level"] == "ERROR"
+    assert "fixture-private-value" not in str(payload)
 
 
 def test_log_event_emits_correlation_ids_without_payload_or_credentials() -> None:

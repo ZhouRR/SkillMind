@@ -301,6 +301,7 @@ interface ScheduleStatusProps {
   onChanged: (schedule: ScheduleRecord) => void
   onError: (message: string) => void
   disabled?: boolean
+  allowResume?: boolean
   onPendingChange?: (pending: boolean) => void
   onSessionEnded?: SessionEnded
   isWriteAllowed?: () => boolean
@@ -318,7 +319,7 @@ export function ScheduleStatusActions(props: ScheduleStatusProps) {
 
 /** 同じ同期 mutation/期限/比較境界を編集と共用し、未知結果から自動で次の状態へ進まない。 */
 function ScheduleStatusOwner({ schedule, projectId, csrfToken, onChanged, onError,
-  disabled = false, onPendingChange, onSessionEnded, isWriteAllowed, isCurrent }: ScheduleStatusProps & { isCurrent: () => boolean }) {
+  disabled = false, allowResume = true, onPendingChange, onSessionEnded, isWriteAllowed, isCurrent }: ScheduleStatusProps & { isCurrent: () => boolean }) {
   const messages = useMessages()
   const revision = useScheduleRevision({ schedule, projectId, csrfToken, isCurrent, disabled, syncLatestWhenIdle: true, onSessionEnded, isWriteAllowed })
   const callback = useRef(onPendingChange)
@@ -327,6 +328,7 @@ function ScheduleStatusOwner({ schedule, projectId, csrfToken, onChanged, onErro
   const current = revision.base!
   /** 元版を伴う一回の明示操作。採用後は改めてボタンを選ぶまで送信しない。 */
   function apply(status: ScheduleStatus): void {
+    if (status === 'ACTIVE' && !allowResume) return
     if (revision.submit({ kind: 'status', status }, onChanged,
       (failure) => onError(messages.scheduleEditor.failures[failure.key]))) callback.current?.(true)
   }
@@ -334,7 +336,7 @@ function ScheduleStatusOwner({ schedule, projectId, csrfToken, onChanged, onErro
     <span className="scheduleActions" aria-busy={revision.phase === 'sending'}>
       {current.status === 'ACTIVE' && <button className="secondaryButton compactButton" data-schedule-status="PAUSED"
         disabled={revision.locked} type="button" onClick={() => apply('PAUSED')}>{messages.schedules.pause}</button>}
-      {(current.status === 'PAUSED' || current.status === 'ERROR') && <button className="secondaryButton compactButton" data-schedule-status="ACTIVE"
+      {allowResume && (current.status === 'PAUSED' || current.status === 'ERROR') && <button className="secondaryButton compactButton" data-schedule-status="ACTIVE"
         disabled={revision.locked} type="button" onClick={() => apply('ACTIVE')}>{messages.schedules.resume}</button>}
       {current.status !== 'ARCHIVED' && <button className="secondaryButton compactButton" data-schedule-status="ARCHIVED"
         disabled={revision.locked} type="button" onClick={() => apply('ARCHIVED')}>{messages.schedules.archive}</button>}

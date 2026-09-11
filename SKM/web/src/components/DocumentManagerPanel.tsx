@@ -12,20 +12,20 @@ import { useDocumentUpload } from '../hooks/useDocumentUpload'
 import { useDocumentUploadClosure } from '../hooks/useDocumentUploadClosure'
 import { useResourceQuery, type SessionEnded } from '../hooks/useResourceRequest'
 import { DOCUMENT_REQUEST_POLICY } from '../lib/documentFeedback'
-import { DOCUMENT_PREVIEW_MAX_BYTES as PREVIEW_MAX_BYTES, documentPreviewHtml } from '../lib/documentPreview'
+import { DOCUMENT_PREVIEW_MAX_BYTES as PREVIEW_MAX_BYTES, documentPreviewHtml, documentMarkdownHtml } from '../lib/documentPreview'
 import { formatByteSize, formatLocalTimestamp } from '../lib/presentation'
 import { EmptyState, LoadingSkeleton, ModalDialog, useConfirmDialog } from './PageElements'
 import { DocumentUploadStatus, DocumentUploadRecovery } from './DocumentUploadStatus'
 import { DocumentUploadClosure, DocumentUploadClosureRecovery } from './DocumentUploadClosure'
 
 /** 画面内 preview の描画種別。拡張子登録で excel 等の viewer を後付けする拡張点。 */
-export type DocumentPreviewKind = 'text' | 'html'
+export type DocumentPreviewKind = 'text' | 'html' | 'markdown'
 
 /** 拡張子 → preview 種別の登録表。未登録拡張子は preview 対象外(download のみ)。 */
 const DOCUMENT_PREVIEWERS: Record<string, DocumentPreviewKind> = {
   txt: 'text',
-  md: 'text',
-  markdown: 'text',
+  md: 'markdown',
+  markdown: 'markdown',
   html: 'html',
   htm: 'html',
 }
@@ -85,18 +85,22 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
   const mounted = useRef(false)
   const confirmPending = useRef(false)
   const [confirming, setConfirming] = useState(false)
+  const [targetFolder, setTargetFolder] = useState('')
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
+  const batchActive = useRef(false)
+  const [batchProgress, setBatchProgress] = useState<{ deleted: number; total: number; running: boolean } | null>(null)
   const refresh = useCallback(() => setRevision((current) => current + 1), [])
   const deletion = useDocumentDeletion({ projectId, csrfToken, readOnly, onSessionEnded, onDeleted: refresh })
   const { observeFailure } = deletion
   const closureGate = useRef<() => boolean>(() => false)
   const closeClosureLookup = useRef<() => void>(() => undefined)
   const upload = useDocumentUpload({ actorId, projectId, csrfToken, readOnly: readOnly || !!deletion.denied,
-    canWrite: () => deletion.canWrite() && !confirmPending.current && !closureGate.current(),
+    canWrite: () => deletion.canWrite() && !confirmPending.current && !batchActive.current && !closureGate.current(),
     canRead: () => deletion.canRead() && !confirmPending.current,
     onDenied: deletion.observeDenial, onPublished: refresh, beforeBatchAction: () => closeClosureLookup.current() })
   const closure = useDocumentUploadClosure({ actorId, projectId, csrfToken,
     readOnly: readOnly || !!deletion.denied || !!upload.denied,
-    canRead: () => upload.canRead(), canWrite: () => deletion.canWrite() && !confirmPending.current && !upload.denied,
+    canRead: () => upload.canRead(), canWrite: () => deletion.canWrite() && !confirmPending.current && !batchActive.current && !upload.denied,
     claim: upload.claimClosure, claimRecovery: upload.claimRecoveredClosure,
     release: upload.releaseClosure, accept: upload.acceptClosure, acceptRecovery: upload.acceptRecoveredClosure,
     beforeAction: upload.closeRecovery,
@@ -108,7 +112,7 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
     true, observeFailure)
   const documentsState = list.failure ? { status: 'error' as const, message: messages.documentsPanel.failures[list.failure.key] }
     : list.data ? { status: 'ready' as const, documents: list.data } : { status: 'loading' as const }
-  const blocked = readOnly || !!deletion.denied || deletion.phase !== 'idle' || confirming || upload.isLocked() || closure.locked()
+  const blocked = readOnly || !!deletion.denied || deletion.phase !== 'idle' || confirming || batchActive.current || upload.isLocked() || closure.locked()
   const busyId = deletion.phase === 'sending' ? deletion.intent?.document_id ?? '__blocked__' : blocked ? '__blocked__' : null
 
   useLayoutEffect(() => {
@@ -121,7 +125,7 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
 
   /** 所有確認は backend に委ね、UI では明示確認の上で 1 件を削除する。 */
   async function handleDelete(document: ProjectDocumentRecord): Promise<void> {
-    if (!mounted.current || !deletion.canWrite() || confirmPending.current || upload.isLocked() || closure.locked()) return
+    if (!mounted.current || !deletion.canWrite() || confirmPending.current || batchActive.current || upload.isLocked() || closure.locked()) return
     closure.recovery.close()
     upload.closeRecovery()
     confirmPending.current = true
@@ -136,6 +140,43 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
     if (!mounted.current) return
     setConfirming(false)
     if (confirmed) deletion.submit(document)
+  }
+
+  /** 一括確認した原 ID を直列削除する。拒否・未知では残りを送らず選択を残す。 */
+  async function handleDeleteSelected(): Promise<void> {
+    if (!deletion.canWrite() || confirmPending.current || batchActive.current || upload.isLocked() || closure.locked()) return
+    const originals = documents.filter((item) => selectedIds.has(item.document_id)).map((item) => ({ ...item }))
+    if (!originals.length) return
+    closure.recovery.close()
+    upload.closeRecovery()
+    confirmPending.current = true
+    setConfirming(true)
+    const confirmed = await confirm({ title: messages.documentsPanel.deleteSelected,
+      message: messages.documentsPanel.deleteSelectedConfirm(originals.length),
+      confirmLabel: messages.documentsPanel.remove, destructive: true })
+    confirmPending.current = false
+    if (!mounted.current) return
+    setConfirming(false)
+    if (!confirmed || !deletion.canWrite()) return
+    batchActive.current = true
+    let deleted = 0
+    const publish = (): void => setBatchProgress({ deleted, total: originals.length, running: batchActive.current })
+    const next = (): void => {
+      if (!mounted.current) return
+      const original = originals[deleted]
+      if (!original) { batchActive.current = false; publish(); return }
+      const accepted = deletion.submit(original, (success) => {
+        if (!mounted.current) return
+        if (!success) { batchActive.current = false; publish(); return }
+        deleted += 1
+        setSelectedIds((current) => { const remaining = new Set(current); remaining.delete(original.document_id); return remaining })
+        publish()
+        next()
+      })
+      if (!accepted) batchActive.current = false
+      publish()
+    }
+    next()
   }
 
   /** HTTP 待機は共通 query に委ね、クリックと同時に前 request の所有権を閉じる。 */
@@ -156,6 +197,20 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
   }
 
   const documents = documentsState.status === 'ready' ? documentsState.documents : []
+  const selectedDocuments = documents.filter((item) => selectedIds.has(item.document_id))
+  const tree = buildDocumentTree(documents)
+  const folders = new Set<string>()
+  for (const item of documents) {
+    const segments = item.folder.split('/').filter(Boolean)
+    while (segments.length) { folders.add(segments.join('/')); segments.pop() }
+  }
+  const selection: DocumentTreeSelection = { selectedIds, disabled: blocked,
+    toggle: (id, checked) => setSelectedIds((current) => {
+      const next = new Set(current)
+      if (checked) next.add(id)
+      else next.delete(id)
+      return next
+    }), onFolder: setTargetFolder }
   return (
     <section className="panel documentPanel" aria-label={messages.documentsPanel.panelAria}>
       {/* 画面見出し(项目文档)との二重表示を避け、panel は一覧の性格を示す。 */}
@@ -164,6 +219,11 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
         {documentsState.status === 'ready' && <span className="eventCount">{documents.length}</span>}
       </div>
       <div className="documentUpload documentToolbar">
+        <label className="documentTargetFolder">{messages.documentsPanel.targetFolder}
+          <input type="text" list="document-upload-folders" value={targetFolder} maxLength={200} disabled={blocked}
+            placeholder={messages.documentsPanel.rootFolder} onChange={(event) => setTargetFolder(event.target.value)} />
+          <datalist id="document-upload-folders">{[...folders].sort().map((folder) => <option key={folder} value={folder} />)}</datalist>
+        </label>
         <label className="primaryButton fileUploadButton">
           {messages.documentsPanel.chooseFiles}
           <input
@@ -174,7 +234,7 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
             onChange={(event) => {
               const selected = event.currentTarget.files ? Array.from(event.currentTarget.files) : []
               event.currentTarget.value = ''
-              upload.start(selected)
+              upload.start(selected, targetFolder)
             }}
           />
         </label>
@@ -189,7 +249,7 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
             onChange={(event) => {
               const selected = event.currentTarget.files ? Array.from(event.currentTarget.files) : []
               event.currentTarget.value = ''
-              upload.start(selected)
+              upload.start(selected, targetFolder)
             }}
           />
         </label>
@@ -197,6 +257,19 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
           {messages.documentsPanel.refresh}
         </button>
       </div>
+      {documents.length > 0 && <div className="documentSelectionToolbar">
+        <label><input type="checkbox" disabled={blocked} checked={selectedDocuments.length === documents.length}
+          ref={(element) => { if (element) element.indeterminate = selectedDocuments.length > 0 && selectedDocuments.length < documents.length }}
+          onChange={(event) => setSelectedIds(event.target.checked ? new Set(documents.map((item) => item.document_id)) : new Set())} />
+          {messages.documentsPanel.selectAll}</label>
+        <span role="status">{messages.documentsPanel.selectedCount(selectedDocuments.length)}</span>
+        <button type="button" className="secondaryButton compactButton" disabled={blocked || selectedDocuments.length === 0}
+          onClick={() => void handleDeleteSelected()}>{messages.documentsPanel.deleteSelected}</button>
+        <button type="button" className="secondaryButton compactButton" disabled={blocked || selectedDocuments.length === 0}
+          onClick={() => setSelectedIds(new Set())}>{messages.documentsPanel.clearSelection}</button>
+      </div>}
+      {batchProgress && <p role="status">{messages.documentsPanel.batchDeleted(batchProgress.deleted, batchProgress.total)}
+        {!batchProgress.running && batchProgress.deleted < batchProgress.total && ` ${messages.documentsPanel.batchStopped}`}</p>}
       <DocumentUploadStatus upload={upload} canRead={deletion.canRead() && !confirming} />
       <DocumentUploadClosure upload={upload} closure={closure} />
       {readOnly && <p className="hint">{messages.documentsPanel.failures.archived}</p>}
@@ -224,9 +297,10 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
       )}
       {documentsState.status === 'ready' && documents.length > 0 && (
         <DocumentTree
-          root={buildDocumentTree(documents)}
+          root={tree}
           projectId={projectId}
           busyId={busyId}
+          selection={selection}
           onDelete={(document) => void handleDelete(document)}
           onPreview={(document, kind) => void handlePreview(document, kind)}
         />
@@ -273,11 +347,20 @@ function DocumentPreviewLoader({ request, projectId, isCurrent, observeFailure, 
   return <DocumentPreviewDialog preview={preview} projectId={projectId} onClose={onClose} />
 }
 
+/** 文書 tree の選択と upload 先を親 owner へ返す操作。 */
+interface DocumentTreeSelection {
+  selectedIds: ReadonlySet<string>
+  disabled: boolean
+  toggle: (id: string, checked: boolean) => void
+  onFolder: (path: string) => void
+}
+
 /** 文書一覧を folder path の実階層で表示する presentational tree。folder 先行・file 後続で安定表示する。 */
-export function DocumentTree({ root, projectId, busyId, onDelete, onPreview }: {
+export function DocumentTree({ root, projectId, busyId, onDelete, onPreview, selection }: {
   root: DocumentTreeNode
   projectId: string
   busyId: string | null
+  selection?: DocumentTreeSelection
   onDelete: (document: ProjectDocumentRecord) => void
   onPreview: (document: ProjectDocumentRecord, kind: DocumentPreviewKind) => void
 }) {
@@ -290,6 +373,7 @@ export function DocumentTree({ root, projectId, busyId, onDelete, onPreview }: {
           depth={0}
           projectId={projectId}
           busyId={busyId}
+          selection={selection}
           onDelete={onDelete}
           onPreview={onPreview}
         />
@@ -302,6 +386,7 @@ export function DocumentTree({ root, projectId, busyId, onDelete, onPreview }: {
               document={document}
               projectId={projectId}
               busyId={busyId}
+              selection={selection}
               onDelete={onDelete}
               onPreview={onPreview}
             />
@@ -313,14 +398,16 @@ export function DocumentTree({ root, projectId, busyId, onDelete, onPreview }: {
 }
 
 /** 一つの folder を開閉可能な節として描画し、子 folder → file の順で内容を並べる。 */
-function FolderNode({ folder, depth, projectId, busyId, onDelete, onPreview }: {
+function FolderNode({ folder, depth, projectId, busyId, onDelete, onPreview, selection }: {
   folder: DocumentTreeNode
   depth: number
   projectId: string
   busyId: string | null
+  selection?: DocumentTreeSelection
   onDelete: (document: ProjectDocumentRecord) => void
   onPreview: (document: ProjectDocumentRecord, kind: DocumentPreviewKind) => void
 }) {
+  const messages = useMessages()
   return (
     <details className="docFolder" open={depth === 0}>
       <summary>
@@ -331,6 +418,8 @@ function FolderNode({ folder, depth, projectId, busyId, onDelete, onPreview }: {
         <span className="docFolderCount">{countDocuments(folder)}</span>
       </summary>
       <div className="docFolderBody">
+        {selection && <button type="button" className="secondaryButton compactButton" disabled={selection.disabled}
+          onClick={() => selection.onFolder(folder.path)}>{messages.documentsPanel.uploadHere}</button>}
         {folder.folders.map((child) => (
           <FolderNode
             key={child.path}
@@ -338,6 +427,7 @@ function FolderNode({ folder, depth, projectId, busyId, onDelete, onPreview }: {
             depth={depth + 1}
             projectId={projectId}
             busyId={busyId}
+            selection={selection}
             onDelete={onDelete}
             onPreview={onPreview}
           />
@@ -350,6 +440,7 @@ function FolderNode({ folder, depth, projectId, busyId, onDelete, onPreview }: {
                 document={document}
                 projectId={projectId}
                 busyId={busyId}
+                selection={selection}
                 onDelete={onDelete}
                 onPreview={onPreview}
               />
@@ -362,10 +453,11 @@ function FolderNode({ folder, depth, projectId, busyId, onDelete, onPreview }: {
 }
 
 /** 一つの文書 row。preview は登録拡張子かつ上限内のときだけ有効化する。 */
-function FileRow({ document, projectId, busyId, onDelete, onPreview }: {
+function FileRow({ document, projectId, busyId, onDelete, onPreview, selection }: {
   document: ProjectDocumentRecord
   projectId: string
   busyId: string | null
+  selection?: DocumentTreeSelection
   onDelete: (document: ProjectDocumentRecord) => void
   onPreview: (document: ProjectDocumentRecord, kind: DocumentPreviewKind) => void
 }) {
@@ -374,6 +466,9 @@ function FileRow({ document, projectId, busyId, onDelete, onPreview }: {
   const oversized = document.size > PREVIEW_MAX_BYTES
   return (
     <li className="documentItem">
+      {selection && <input type="checkbox" checked={selection.selectedIds.has(document.document_id)} disabled={selection.disabled}
+        aria-label={messages.documentsPanel.selectFile(document.name)}
+        onChange={(event) => selection.toggle(document.document_id, event.target.checked)} />}
       <div className="documentInfo">
         <strong>{document.name}</strong>
         <span>
@@ -424,8 +519,10 @@ export function DocumentPreviewDialog({ preview, projectId, onClose }: {
 }) {
   const messages = useMessages()
   const { document } = preview
-  const html = useMemo(() => preview.status === 'ready' && preview.kind === 'html'
-    ? documentPreviewHtml(preview.content) : '', [preview])
+  const [showSource, setShowSource] = useState(false)
+  const html = useMemo(() => preview.status !== 'ready' ? ''
+    : preview.kind === 'markdown' ? documentMarkdownHtml(preview.content)
+      : preview.kind === 'html' ? documentPreviewHtml(preview.content) : '', [preview])
   return (
     <ModalDialog
       open
@@ -445,10 +542,13 @@ export function DocumentPreviewDialog({ preview, projectId, onClose }: {
     >
       {preview.status === 'loading' && <LoadingSkeleton label={messages.documentsPanel.loadingPreview} rows={3} />}
       {preview.status === 'error' && <p className="error" role="alert">{preview.message}</p>}
-      {preview.status === 'ready' && preview.kind === 'text' && (
+      {preview.status === 'ready' && preview.kind === 'markdown' && <button type="button"
+        className="secondaryButton compactButton" aria-pressed={showSource} onClick={() => setShowSource((current) => !current)}>
+        {showSource ? messages.documentsPanel.previewButton : messages.documentsPanel.viewSource}</button>}
+      {preview.status === 'ready' && (preview.kind === 'text' || preview.kind === 'markdown' && showSource) && (
         <pre className="previewText">{preview.content}</pre>
       )}
-      {preview.status === 'ready' && preview.kind === 'html' && (
+      {preview.status === 'ready' && (preview.kind === 'html' || preview.kind === 'markdown' && !showSource) && (
         <>
           <p className="hint">{messages.documentsPanel.previewNotice}</p>
           <iframe className="previewFrame" sandbox="" referrerPolicy="no-referrer" srcDoc={html} title={document.name} />

@@ -1,0 +1,16 @@
+{
+  "table": "public.reports",
+  "columns": [
+    "id",
+    "title"
+  ],
+  "filters": {
+    "status": "ready"
+  },
+  "order_by": [
+    "id"
+  ],
+  "limit": 10,
+  "offset": 0,
+  "purpose": "Read the approved reports"
+}

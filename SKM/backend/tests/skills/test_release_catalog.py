@@ -1,0 +1,41 @@
+"""Interpreter に渡す配備 catalog と共通 checksum を、モデル起動なしで検証する。"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from skillmind.core.settings import Settings
+from skillmind.skills.interpreter import CapabilityCatalogSnapshot, load_capability_catalog
+from skillmind.skills.wiring import build_skill_interpreter
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_interpreter_catalog_respects_deployment_features(enabled: bool) -> None:
+    """読み取り/ローカル出力を保持し、後置能力を別 checksum の候補から除外する。"""
+    contracts = Path(__file__).resolve().parents[3] / "contracts"
+    settings = Settings(  # type: ignore[call-arg]  # BaseSettings の環境読取を止める。
+        _env_file=None, contracts_dir=contracts, deferred_features_enabled=enabled
+    )
+    interpreter, catalog, identity, _ = build_skill_interpreter(
+        settings, environment_fallback={"ANTHROPIC_MODEL": "claude-test"}
+    )
+    assert interpreter is not None and catalog is not None and identity is not None
+    capabilities = {entry.capability for entry in catalog.capabilities}
+    assert {"database.read/v1", "mcp.read/v1", "workspace.write/v1"} <= capabilities
+    deferred = {
+        "change.propose/v1",
+        "subagent.dispatch/v1",
+        "issue.update/v1",
+        "repository.write/v1",
+    }
+    assert deferred <= capabilities if enabled else not deferred & capabilities
+    original = load_capability_catalog(contracts / "examples/skill-capability-catalog.v1.json")
+    assert (catalog.checksum == original.checksum) is enabled
+    assert (
+        CapabilityCatalogSnapshot.build(
+            catalog_version=catalog.catalog_version, capabilities=catalog.capabilities
+        ).checksum
+        == catalog.checksum
+    )

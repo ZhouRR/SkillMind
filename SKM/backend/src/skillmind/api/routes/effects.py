@@ -15,7 +15,12 @@ from skillmind.api.auth_dependencies import (
     ProjectWriteActor,
     authorize_project_access,
 )
-from skillmind.api.problems import ProblemException
+from skillmind.api.problems import (
+    NO_STORE_PROBLEM_HEADERS,
+    ProblemException,
+    problem_openapi_response,
+)
+from skillmind.api.release_features import require_deferred_features
 from skillmind.effects import (
     ApprovalDecision,
     ApprovalSource,
@@ -190,6 +195,10 @@ class PreauthorizationListResponse(BaseModel):
     "/projects/{project_id}/runs/{run_id}/proposals/{proposal_id}/decision",
     response_model=ProposalDecisionResponse,
     tags=["effects"],
+    responses={409: problem_openapi_response(
+        "Approval is disabled, expired, or conflicts with the stored proposal",
+        headers=NO_STORE_PROBLEM_HEADERS,
+    )},
 )
 async def decide_change_proposal(
     request: Request,
@@ -204,6 +213,8 @@ async def decide_change_proposal(
 ) -> ProposalDecisionResponse:
     """Project actor が表示中の exact Proposal version を批准または拒否する。"""
 
+    if body.decision.value == "APPROVED":
+        require_deferred_features(request)
     service: RunService = request.app.state.run_service
     try:
         result = await service.decide_change_proposal(
@@ -239,6 +250,9 @@ async def decide_change_proposal(
     response_model=PreauthorizationResponse,
     status_code=status.HTTP_201_CREATED,
     tags=["effects"],
+    responses={409: problem_openapi_response(
+        "Deferred execution features are disabled", headers=NO_STORE_PROBLEM_HEADERS
+    )},
 )
 async def create_preauthorization(
     request: Request,
@@ -249,6 +263,7 @@ async def create_preauthorization(
     """ADMIN が LOW risk の exact scope だけを事前許可する。"""
 
     await authorize_project_access(request, actor, project_id, require_active=True)
+    require_deferred_features(request)
     if body.risk_level is not EffectRiskLevel.LOW:
         raise _proposal_rejected(ValueError("Only LOW risk may be preauthorized"))
     try:

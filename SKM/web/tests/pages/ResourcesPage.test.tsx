@@ -12,6 +12,13 @@ function page(projectId: string = PROJECT.project_id): string {
 }
 
 describe('ResourcesPage guided layout', () => {
+  it('omits write access and the policy tab when deferred features are disabled', () => {
+    const html = renderToStaticMarkup(<ResourcesPage csrfToken="fixture" projectId={PROJECT.project_id} deferredFeaturesEnabled={false} />)
+    expect(html).toContain('接入外部系统')
+    expect(html).not.toContain('name="connect-access"')
+    expect(html).not.toMatch(/role="tab"[^>]*>预授权</)
+  })
+
   it('asks for a project before showing any configuration', () => {
     const html = page('')
 

@@ -35,6 +35,7 @@ from skillmind.integrations.domain import (
 from skillmind.integrations.repository import IntegrationRepository
 from skillmind.projects.domain import ProjectNotFoundError
 from skillmind.projects.repository import ProjectRepository
+from skillmind.runs.budget import BudgetPolicy, BudgetUnavailableError
 from skillmind.runs.creation_participation import RunCreationAuthority, RunCreationParticipant
 from skillmind.runs.creation_request import CREATION_REQUEST_FIELD, TaskRunIntent
 from skillmind.runs.domain import (
@@ -65,7 +66,7 @@ from skillmind.runs.interaction import (
 from skillmind.runs.repository import RunRepository
 from skillmind.skills.capability_blueprint import resolve_capability_blueprint
 from skillmind.skills.domain import PublishedTaskNotFoundError
-from skillmind.skills.resource_binding import is_write_capability
+from skillmind.skills.resource_binding import is_deferred_execution_capability, is_write_capability
 from skillmind.skills.task_catalog import ResolvedTaskRun
 from skillmind.users.access import authorize_user_access, validate_user_access
 from skillmind.users.domain import UserAccess
@@ -85,10 +86,18 @@ M0_LIMITS_SNAPSHOT = {
 class RunService:
     """Transaction 境界を所有して Run use case を実行する。"""
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
-        """Database session factory を保持する。"""
+    def __init__(
+        self, session_factory: async_sessionmaker[AsyncSession], *,
+        deferred_features_enabled: bool = True,
+        budget_policy: BudgetPolicy | None = None,
+    ) -> None:
+        """既存内部呼出しの互換性を保ち、API/Worker は配備 policy を必ず注入する。"""
 
         self._session_factory = session_factory
+        self._deferred_features_enabled = deferred_features_enabled
+        if budget_policy is not None and budget_policy.max_cost_nanos is not None:
+            raise BudgetUnavailableError("Primary execution cost adapter is not configured")
+        self._budget_policy = budget_policy
 
     async def create_task_run(
         self,
@@ -146,6 +155,22 @@ class RunService:
                 isinstance(effect, dict) and effect.get("mode") == "apply"
                 for effect in blueprint.get("effect_intents", [])
             )
+            if not self._deferred_features_enabled:
+                if not isinstance(authorization, UserAccess):
+                    raise TaskSourceSelectionError(
+                        "Scheduled execution is disabled in this deployment"
+                    )
+                if has_apply_intent or any(
+                    is_deferred_execution_capability(capability)
+                    for capability in resolved.allowed_capabilities
+                ) or any(
+                    isinstance(tool, dict) and tool.get("required") is True
+                    and tool.get("capability") in {
+                        CHANGE_PROPOSE_CAPABILITY, SUBAGENT_DISPATCH_CAPABILITY,
+                    }
+                    for tool in manifest.get("tools", [])
+                ):
+                    raise TaskSourceSelectionError("This task requires disabled execution features")
             integration_repository = IntegrationRepository(session)
             try:
                 selected_sources, run_bindings = await _resolve_selected_sources(
@@ -196,24 +221,26 @@ class RunService:
                     "actor_system_role": authority.actor_system_role,
                     "project_membership": authority.project_membership,
                     "execution_profile": execution_profile,
-                    # 構造化質問と扇出は外部資源への権限ではなく platform control capability。
-                    # 新規 Run にだけ固定し、歴史 snapshot へ後付けしない。扇出を無条件に付ける
-                    # のは、並行させるかどうかが実行時の判断であり blueprint の語義ではないため
-                    # (計画 §23 D2)。子は Run 予算を分け合うだけで上限を増やさない (D4)。
+                    # 新規 Run だけに配備上限を固定する。旧 snapshot の権限を削って再利用しない。
                     "allowed_capabilities": sorted(
                         {
-                            *resolved.allowed_capabilities,
+                            *(capability for capability in resolved.allowed_capabilities
+                              if self._deferred_features_enabled or capability not in {
+                                  SUBAGENT_DISPATCH_CAPABILITY, CHANGE_PROPOSE_CAPABILITY,
+                              }),
                             INTERACTION_REQUEST_CAPABILITY,
-                            SUBAGENT_DISPATCH_CAPABILITY,
+                            *({SUBAGENT_DISPATCH_CAPABILITY}
+                              if self._deferred_features_enabled else set()),
                             *({CHANGE_PROPOSE_CAPABILITY} if has_apply_intent else set()),
                         }
                     ),
                     "denied_builtin_tools": list(M0_DENIED_BUILTIN_TOOLS),
                 },
                 selected_sources_json=selected_sources,
-                limits_snapshot_json=dict(M0_LIMITS_SNAPSHOT),
+                limits_snapshot_json=_creation_limits(self._budget_policy),
                 trace_id=trace_id,
                 skill_snapshots_json=(resolved.skill_snapshot,),
+                budget_policy=self._budget_policy,
             )
             created = await repository.create_idempotent(command)
             if created.idempotent_replay:
@@ -724,6 +751,15 @@ class RunService:
             return await RunRepository(session).recover_expired_interactions(
                 now=datetime.now(UTC), limit=limit
             )
+
+
+def _creation_limits(policy: BudgetPolicy | None) -> dict[str, Any]:
+    """信頼した配備 policy の上限を初回作成時だけ固定する。重放は元 snapshot を返す。"""
+    limits: dict[str, Any] = dict(M0_LIMITS_SNAPSHOT)
+    if policy is not None:
+        limits["max_turns"] = policy.max_turns
+        limits["budget_policy"] = policy.to_json()
+    return limits
 
 
 def _require_creation_namespace(

@@ -19,6 +19,7 @@
       }
     },
     "csrf_token": { "type": "string", "minLength": 32 },
-    "absolute_expires_at": { "type": "string", "format": "date-time" }
+    "absolute_expires_at": { "type": "string", "format": "date-time" },
+    "deferred_features_enabled": { "type": "boolean", "default": false }
   }
 }

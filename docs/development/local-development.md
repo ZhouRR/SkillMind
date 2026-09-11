@@ -100,6 +100,7 @@ python3 tests/browser/check_projects.py \
 | run_submission / interaction_responses | run-submission.html | 原 key/内容の確認、答復、期限 |
 | result_references / artifacts / evaluation_submissions | projects.html | 結果範囲、原 byte download、評価回执/履歴 |
 | document_sources / schedule_times | run-submission.html | 入力清単、時区/DST、preview |
+| document_batches / resource_connections | projects.html | 文書一括削除・指定 directory upload、PostgreSQL/MCP 接続 form（`--output` 必須） |
 | document_management / document_preview / document_upload | projects.html | 削除未知、静的隔離、有界 upload |
 | document_upload_receipts / document_upload_closures | projects.html | 原 key 確認、batch pause、明示停止 |
 | task_flow / schedule_management | projects.html | 読取専用 Flow、調度編集/未知/在途投影 |

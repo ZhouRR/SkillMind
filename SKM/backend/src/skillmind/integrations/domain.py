@@ -12,6 +12,8 @@ from typing import Any
 from urllib.parse import urlsplit
 from uuid import UUID
 
+from pydantic import AnyUrl
+
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.core.redaction import find_sensitive_key
 from skillmind.core.secret_crypto import EncryptedSecret
@@ -117,6 +119,22 @@ class ProviderDefinition:
 
 
 PROVIDER_DEFINITIONS: dict[str, ProviderDefinition] = {
+    "postgres": ProviderDefinition(
+        kind="other",
+        provider="postgres",
+        capabilities=frozenset({"database.read/v1"}),
+        write_capabilities=frozenset(),
+        requires_secret=True,
+        installed=True,
+    ),
+    "mcp": ProviderDefinition(
+        kind="other",
+        provider="mcp",
+        capabilities=frozenset({"mcp.read/v1"}),
+        write_capabilities=frozenset(),
+        requires_secret=False,
+        installed=True,  # resource 読取 Provider のみ。遠端 tools の実行権は付与しない。
+    ),
     "redmine": ProviderDefinition(
         kind="issue",
         provider="redmine",
@@ -433,6 +451,36 @@ def normalize_provider_scope(
     引き続き承認または explicit 事前許可(wildcard 不可)で gate される。
     """
 
+    if provider in {"postgres", "mcp"}:
+        key = "tables" if provider == "postgres" else "resource_uris"
+        if set(scope) != {key} or write_enabled:
+            raise IntegrationValidationError("Read-only resource scope contains unknown fields")
+        values = _unique_strings(
+            scope[key], maximum=200, key_pattern=False,
+            maximum_length=2048 if provider == "mcp" else 256,
+        )
+        if not values or SCOPE_WILDCARD in values:
+            raise IntegrationValidationError("Read-only resource scope requires explicit values")
+        if provider == "postgres" and any(
+            re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_$]{0,62}\.[a-zA-Z_][a-zA-Z0-9_$]{0,62}", value)
+            is None for value in values
+        ):
+            raise IntegrationValidationError("PostgreSQL tables require schema.table names")
+        if provider == "mcp":
+            normalized_uris: list[str] = []
+            for value in values:
+                try:
+                    uri = urlsplit(value)
+                    normalized = str(AnyUrl(value))
+                except ValueError as error:
+                    raise IntegrationValidationError("MCP resource URI is invalid") from error
+                if not uri.scheme or uri.username or uri.password or len(normalized) > 2048:
+                    raise IntegrationValidationError(
+                        "MCP resources require credential-free absolute URIs"
+                    )
+                normalized_uris.append(normalized)
+            values = sorted(set(normalized_uris))
+        return {key: values}
     if provider == "redmine":
         if set(scope) - {"issue_ids", "field_keys"}:
             raise IntegrationValidationError("Redmine scope contains unknown fields")
@@ -559,6 +607,42 @@ def binding_checksum(
 def _validate_provider_config(provider: str, config: dict[str, Any]) -> dict[str, Any]:
     """Provider の非機密 connection metadata を最小 allowlist で検証する。"""
 
+    if provider == "postgres":
+        if set(config) != {"host", "port", "database", "username", "sslmode"}:
+            raise IntegrationValidationError("PostgreSQL config contains invalid fields")
+        for key in ("host", "database", "username"):
+            value = config[key]
+            if not isinstance(value, str) or not 1 <= len(value) <= 253 or any(
+                character.isspace() or ord(character) < 32 for character in value
+            ):
+                raise IntegrationValidationError("PostgreSQL connection field is invalid")
+        if any(character in config["host"] for character in "/\\@?#"):
+            raise IntegrationValidationError("PostgreSQL host must not contain a connection URI")
+        port = config["port"]
+        if type(port) is not int or not 1 <= port <= 65535:
+            raise IntegrationValidationError("PostgreSQL port is invalid")
+        if not isinstance(config["sslmode"], str) or config["sslmode"] not in {
+            "disable", "require", "verify-full",
+        }:
+            raise IntegrationValidationError("PostgreSQL TLS mode is invalid")
+        return dict(config)
+    if provider == "mcp":
+        if set(config) != {"server_url", "transport"} or config["transport"] != "streamable_http":
+            raise IntegrationValidationError("MCP requires Streamable HTTP connection fields")
+        value = config["server_url"]
+        if not isinstance(value, str) or not 1 <= len(value) <= 2048:
+            raise IntegrationValidationError("MCP server URL is invalid")
+        try:
+            parsed = urlsplit(value)
+            # 不正な port は属性を読む時点で ValueError になる。
+            _ = parsed.port
+        except ValueError as error:
+            raise IntegrationValidationError("MCP server URL is invalid") from error
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname or any(
+            (parsed.username, parsed.password, parsed.query, parsed.fragment)
+        ) or any(character.isspace() or ord(character) < 32 for character in value):
+            raise IntegrationValidationError("MCP server URL contains forbidden components")
+        return {"server_url": value, "transport": "streamable_http"}
     if provider == "redmine":
         if set(config) != {"base_url"}:
             raise IntegrationValidationError("Redmine config requires only base_url")
@@ -687,14 +771,16 @@ def _scope_values(value: Any, *, maximum: int, key_pattern: bool) -> list[str]:
     return _unique_strings(value, maximum=maximum, key_pattern=key_pattern)
 
 
-def _unique_strings(value: Any, *, maximum: int, key_pattern: bool) -> list[str]:
+def _unique_strings(
+    value: Any, *, maximum: int, key_pattern: bool, maximum_length: int = 256,
+) -> list[str]:
     """Bounded string allowlist を重複なしの安定順へ正規化する。"""
 
     if not isinstance(value, list) or len(value) > maximum:
         raise IntegrationValidationError("Integration scope list is invalid")
     if any(
         not isinstance(item, str)
-        or not 1 <= len(item) <= 256
+        or not 1 <= len(item) <= maximum_length
         or any(ord(character) < 32 for character in item)
         or (key_pattern and _KEY_PATTERN.fullmatch(item) is None)
         for item in value

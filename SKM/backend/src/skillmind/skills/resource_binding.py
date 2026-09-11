@@ -120,6 +120,13 @@ def evaluate_blueprint_readiness(
     )
 
 
+def is_deferred_execution_capability(capability: str) -> bool:
+    """首版の配備上限を catalog、新規 Run、旧 snapshot で同じ基準にする。"""
+    return capability in {"subagent.dispatch/v1", "change.propose/v1"} or (
+        is_write_capability(capability) and not capability.startswith("workspace.")
+    )
+
+
 def is_write_capability(capability: str) -> bool:
     """登録済み effect naming から write capability を分類する単一判定。
 

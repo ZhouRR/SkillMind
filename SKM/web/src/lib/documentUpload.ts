@@ -36,8 +36,11 @@ export interface DocumentUploadRecovery {
 }
 
 /** File 本文は Blob の不変 snapshot とし、path/MIME/name も選択時に一度だけ固定する。 */
-export function freezeDocumentUpload(actorId: string, projectId: string, file: File): OriginalDocumentUpload {
-  const label = file.webkitRelativePath || file.name
+export function freezeDocumentUpload(actorId: string, projectId: string, file: File, targetFolder = ''): OriginalDocumentUpload {
+  const folder = targetFolder.trim().replace(/\/+$/, '')
+  if (folder.startsWith('/') || folder.includes('\\') || folder.split('/').some((part) => part === '.' || part === '..')
+    || /[\u0000-\u001f\u007f]/.test(folder)) throw new Error('Invalid upload folder')
+  const label = [folder, file.webkitRelativePath || file.name].filter(Boolean).join('/')
   const segments = label.split('/').filter((part) => part.length > 0)
   const name = segments.at(-1) ?? file.name
   const copy = new File([file], name, { type: file.type, lastModified: file.lastModified })
