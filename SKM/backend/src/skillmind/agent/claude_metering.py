@@ -13,6 +13,7 @@ from skillmind.agent.metering import (
     AgentInvocation,
     AgentInvocationMode,
     InvocationOptions,
+    ResultTermination,
     ResultUsageObservation,
     UsageValue,
 )
@@ -68,4 +69,8 @@ def capture_result_usage(
         invocation=invocation,
         turns=UsageValue.capture(message.num_turns),
         cost_usd=UsageValue.capture(message.total_cost_usd, allow_binary64=True),
+        termination=ResultTermination(
+            message.subtype, message.is_error, message.stop_reason,
+            message.structured_output is not None,
+        ),
     )

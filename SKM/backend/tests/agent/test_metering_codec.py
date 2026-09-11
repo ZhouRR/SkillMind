@@ -242,3 +242,52 @@ def test_present_cli_checksum_must_be_valid(tmp_path: Path, checksum: object) ->
     payload["options"]["cli_checksum"] = checksum
     with pytest.raises(ValueError):
         AgentInvocation.from_json(payload)
+
+
+@pytest.mark.parametrize(
+    "termination", [
+        None, {
+            "subtype": "error_max_turns", "is_error": True, "stop_reason": "tool_use",
+            "has_structured_output": False,
+        }
+    ]
+)
+def test_result_observation_round_trip_preserves_optional_termination(
+    tmp_path: Path, termination
+) -> None:
+    """旧観測に停止ラベルを補造せず、新観測も turns を補正せず読戻す。"""
+    observed = ResultUsageObservation(
+        invocation(tmp_path), UsageValue.capture(3), UsageValue.capture(None)
+    )
+    payload = observed.to_json()
+    if termination is not None:
+        payload["termination"] = termination
+    restored = ResultUsageObservation.from_json(payload)
+    assert restored.to_json() == payload
+    assert restored.turns.value == 3
+
+
+@pytest.mark.parametrize("termination", [
+    None, {}, {
+        "subtype": "success", "is_error": "false", "stop_reason": None,
+        "has_structured_output": False,
+    },
+    {
+        "subtype": "success", "is_error": False, "stop_reason": None,
+        "has_structured_output": "false",
+    },
+    {
+        "subtype": "success", "is_error": False, "stop_reason": None,
+        "has_structured_output": False, "stopped": True,
+    },
+])
+def test_invalid_termination_cannot_become_stopping_evidence(
+    tmp_path: Path, termination
+) -> None:
+    """明示 null、不正型、停止の自己宣言を原観測へ混入させない。"""
+    payload = ResultUsageObservation(
+        invocation(tmp_path), UsageValue.capture(1), UsageValue.capture(None)
+    ).to_json()
+    payload["termination"] = termination
+    with pytest.raises(ValueError):
+        ResultUsageObservation.from_json(payload)

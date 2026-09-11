@@ -136,7 +136,10 @@ python3 tests/browser/check_task_flow.py \
 | 契約 | SKM/：`python3 scripts/validate_contracts.py`。[OpenAPI 一致性](contract-workflow.md#遇到未接齐的交付链)も確認 |
 | Compose / 工具 | SKM/：変更した工具の unittest。Compose 変更は `python3 scripts/validate_compose.py`、配備工具を横断する変更は `python3 -m unittest discover -s scripts/tests -v` |
 | SDK 接続/更新 | SKM/：`PYTHONPATH=backend/src python3 scripts/probe_claude_agent_sdk.py` と対象 Adapter test（offline） |
+| CLI 計量 | Linux の SKM/：`PYTHONPATH=backend/src python3 scripts/probe_claude_metering.py`。実随包 CLI + 合成 loopback API；実モデル不使用、`--output` は任意の観測 JSON 保存先 |
 | 文書 | SKM/：[build/check と閲覧検証](documentation.md) |
+
+CLI 計量 probe は親の資格情報を継承せず、一時 config/cwd と固定合成応答を使う。[非必須通信の無効化](https://code.claude.com/docs/en/env-vars)と loopback の拒否 proxy を設定するが、OS network 隔離の証明ではない。実 model 課金や停止の証拠と区別し、[観測範囲](../design/run-budgets.md#实-cli-合成-api-探针)を確認する。
 
 配備工具 test は実 GNU make と合成 file/fake Docker を使い、四 file 配備の順序・失敗停止・Worker 起動を検査する。PowerShell 実行回帰は SKM_TEST_PWSH に実行 file を指定する（未指定なら skip）。archive export/Force の検査も Windows/Rancher・実 image の証拠ではない。
 実環境の `make config` は Docker と確認済み対象が必要で、通常 config 出力には Secret が含まれ得る。

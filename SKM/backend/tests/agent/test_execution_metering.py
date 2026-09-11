@@ -136,8 +136,39 @@ async def test_observation_binds_actual_final_options_and_prompt(tmp_path: Path,
         sha256_hex(canonical_json(options.output_format))
     )
     assert item.observation_key == f"claude-result/{invocation.invocation_id}"
+    assert item.termination is not None
+    assert item.termination.to_json() == {
+        "subtype": "success", "is_error": False, "stop_reason": None,
+        "has_structured_output": True,
+    }
     assert invocation.options.checksum == sha256_hex(canonical_json(invocation.options.to_json()))
     assert client.disconnected
+
+
+async def test_max_turns_result_preserves_raw_counter_and_termination(tmp_path: Path) -> None:
+    """CLI の限額 sentinel を保存し、観測層で一律の減算や final 判定をしない。"""
+
+    def messages(options: ClaudeAgentOptions) -> list[Message]:
+        """実 CLI probe と同じ、上限二回に対する原 Result 三 turns を返す。"""
+
+        return [replace(
+            _result(_session_id(options)), num_turns=3, subtype="error_max_turns",
+            is_error=True, stop_reason="tool_use", structured_output=None,
+        )]
+
+    context = _run_context(tmp_path)
+    context = replace(context, limits=replace(context.limits, max_turns=2))
+    observed = Observations()
+    await _collect(_engine(ClientFactory(messages), observed).execute(context))
+    assert len(observed.items) == 1
+    item = observed.items[0]
+    assert item.invocation.options.max_turns == 2
+    assert item.turns.value == 3
+    assert item.termination is not None
+    assert item.termination.to_json() == {
+        "subtype": "error_max_turns", "is_error": True, "stop_reason": "tool_use",
+        "has_structured_output": False,
+    }
 
 
 async def test_resume_same_session_and_attempt_still_has_distinct_invocation(

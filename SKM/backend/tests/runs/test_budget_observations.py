@@ -11,7 +11,12 @@ from uuid import uuid4
 
 import pytest
 
-from skillmind.agent.metering import AgentInvocation, ResultUsageObservation, UsageValue
+from skillmind.agent.metering import (
+    AgentInvocation,
+    ResultTermination,
+    ResultUsageObservation,
+    UsageValue,
+)
 from skillmind.core.hashing import canonical_json
 from skillmind.runs import repository_budgets
 from skillmind.runs.budget import BudgetConflictError, BudgetUnavailableError
@@ -93,6 +98,29 @@ async def test_raw_observations_preserve_unknown_or_binary_values_without_accoun
     assert "private" not in str(row.payload_json)
     assert (await db.repository.record_observation(claim, observation)).disposition == "REPLAY"
     assert len(db.observations) == 1 and balances(db) == original_balances
+
+
+async def test_termination_is_saved_and_conflicts_without_settling_usage() -> None:
+    """終了ラベルだけの異内容も同じ原観測の衝突であり、停止や返金へ変換しない。"""
+
+    db = BudgetDatabase()
+    await db.reserve()
+    await db.start()
+    claim = await db.reconciler()
+    original = replace(
+        raw_observation(db),
+        termination=ResultTermination("error_max_turns", True, "tool_use", False),
+    )
+    baseline = balances(db)
+    assert (await db.repository.record_observation(claim, original)).disposition == "OBSERVED"
+    saved = deepcopy(db.observations[0].payload_json)
+    assert ResultUsageObservation.from_json(saved) == original
+    assert (await db.repository.record_observation(claim, original)).disposition == "REPLAY"
+    changed = replace(original, termination=ResultTermination("success", False, "end_turn", False))
+    assert (await db.repository.record_observation(claim, changed)).disposition == "CONFLICT"
+    assert db.account.block_code == "observation_conflict"
+    assert len(db.observations) == 1 and db.observations[0].payload_json == saved
+    assert balances(db) == baseline
 
 
 async def test_changed_same_slot_appends_one_conflict_audit_and_keeps_original_raw_value() -> None:

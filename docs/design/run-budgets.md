@@ -36,9 +36,25 @@
 
 [观察](../../SKM/backend/src/skillmind/agent/metering.py)固定 invocation、Project/Run/Attempt/actor、SDK Session、续行模式、SDK/CLI 构建版本与实际 prompt checksum。options 仅记录实际模型、局部限额、Session/续行/输出格式摘要及已核对随包 CLI 的 `cli_checksum`，不含路径、凭据或结果，不冒充完整 options 审计。同 invocation 固定观察键，异内容不得换键；再次 resume 是新 invocation。旧记录缺少 CLI checksum 时保留原 JSON/hash，不补入当前文件身份，也不据此恢复旧启动许可。
 
-整数、缺失、无效分开；有限非负 float 成本只存 binary64 hex，不转换为精确金额。观察不是 BudgetUsageReport，不声明累计范围/final/stopped；无 Result、流关闭、提交未知均不补零退款。
+整数、缺失、无效分开；有限非负 float 成本只存 binary64 hex，不转换为精确金额。可选 `termination` 原样保存有界的 `subtype`、`is_error`、`stop_reason` 和结构化结果存在标记 `has_structured_output`，用于区分终止计数，不保存结果或错误正文；存在标记不证明结果通过业务 Schema。缺字段的旧观察保留原 JSON/hash，显式 null 或未知字段拒绝；部署须隔离不识别新字段的旧消费者。观察不是 BudgetUsageReport，不声明累计范围/final/stopped；无 Result、流关闭、提交未知均不补零退款。
 
 接入前，可信协调方须验证计量 profile、实际构建和局部强制再归一化。Run 与 Skill 解释显式指定固定 SDK 的随包 CLI，并核对实际 import 归属、分发版本、RECORD 中的文件大小及 SHA-256；缺失或漂移时拒绝，不回退系统 CLI。离线 probe 也检查文件身份，但不执行 CLI，不证明进程实际开始/停止、resume 范围或硬上界。依赖分发记录属于受信安装链，不是签名或远程证明；运行期间须保持 package 不可变。预算身份须经[绑定](#原调用绑定与启动)，不从 trace/Session/invocation ID 补造。
+
+### 实 CLI 合成 API 探针
+
+[计量探针](../../SKM/scripts/probe_claude_metering.py)启动固定随包 CLI，使用临时配置、合成 loopback Messages API 和无副作用 MCP Tool；不使用真实模型或业务资源。[执行方式](../development/local-development.md#変更に応じた検証)与离线兼容检查分开。报告绑定 SDK/CLI 版本、文件 checksum、平台和原始计数，不能只按版本号推广到其他构建。
+
+SDK 0.2.110 / CLI 2.1.191 的 Linux x86_64 构建 `1038dba88bdf1b80941dc3e383e93b088325b00497329ac50da460c8786d5bee` 在该探针中的行为：
+
+| 场景 | 观测及约束 |
+| --- | --- |
+| 首次 / 同 client 再查 | 各新增一次 API 请求且 num_turns=1；第二次成本含第一次，不能逐 Result 直接相加 |
+| 新进程 resume / fork | 恢复历史，但本次 num_turns=1、成本重新计数，不能沿用旧进程成本水位 |
+| 连续 Tool 调用，上限 N=1/2/3 | 各发出 N 次请求和 Tool 调用；终止 num_turns=N+1、subtype=error_max_turns、stop_reason=tool_use，原 turns 不等于已发出的请求数 |
+| 结构化输出，上限 2，仅返回文本 | 两次请求、num_turns=2、subtype=success，但没有 structured_output；SDK 成功不证明业务结果完整 |
+| 结构化输出，上限 2，返回合法 / 非法 Tool 参数 | 合法时一次请求、num_turns=2、success 且含结构化结果；非法时两次请求、num_turns=3、error_max_turns 且没有结构化结果 |
+
+这些结果只证明上述合成场景，不能只按 success/error 修正 turns，或推定精确费用。其他修复/重试分支、API 错误、取消及进程停止仍须独立验证；本探针不启用归一化、停止回执或预算结算。
 
 ### 现有计时器的覆盖范围
 

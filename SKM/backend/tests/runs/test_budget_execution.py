@@ -11,7 +11,12 @@ import pytest
 from claude_agent_sdk import ClaudeAgentOptions
 
 from skillmind.agent.domain import AgentEvent, AgentEventType
-from skillmind.agent.metering import AgentInvocation, ResultUsageObservation, UsageValue
+from skillmind.agent.metering import (
+    AgentInvocation,
+    ResultTermination,
+    ResultUsageObservation,
+    UsageValue,
+)
 from skillmind.runs.budget import (
     BudgetConflictError,
     BudgetReservationRequest,
@@ -106,6 +111,7 @@ class LedgerExecution:
             AgentInvocation.from_json(self.database.reservations[0].invocation_json),
             UsageValue.capture(turns),
             UsageValue.capture(0.01, allow_binary64=True),
+            ResultTermination("success", False, None, True),
         )
 
     def assert_held(self) -> None:

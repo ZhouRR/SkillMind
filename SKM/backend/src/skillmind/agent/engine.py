@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
 from contextlib import aclosing
 from dataclasses import dataclass, field, replace
@@ -422,8 +423,11 @@ class ClaudeAgentSdkEngine:
         観測先の有無は共有予算の許可ではなく、未設定なら既存の表示 event 経路を保つ。
         """
 
-        if interrupt_drain_timeout_seconds <= 0:
-            raise ValueError("Interrupt drain timeout must be positive")
+        if (
+            not math.isfinite(interrupt_drain_timeout_seconds)
+            or interrupt_drain_timeout_seconds <= 0
+        ):
+            raise ValueError("Interrupt drain timeout must be finite and positive")
         if before_connect is not None and usage_observer is None:
             raise ValueError("A budget start gate requires its usage observer")
         self._mcp_server_factory = mcp_server_factory
@@ -501,16 +505,25 @@ class ClaudeAgentSdkEngine:
             if active is None:
                 raise LookupError("Agent session is not active in this engine process")
             active.interrupt_requested = True
-        await active.client.interrupt()
         try:
-            await asyncio.wait_for(
-                asyncio.shield(active.done.wait()),
-                timeout=self._interrupt_drain_timeout_seconds,
-            )
-        except TimeoutError:
-            # Result が届かない subprocess は強制 close し、lease 回収可能な失敗へ戻す。
-            await active.client.disconnect()
-            raise TimeoutError("Claude SDK interrupt drain timed out") from None
+            # Control 応答が止まる場合も同じ期限へ含める。done waiter を shield した
+            # 背景 task にせず、timeout/呼出し側取消しでこの待機自体を閉じる。
+            async with asyncio.timeout(self._interrupt_drain_timeout_seconds):
+                try:
+                    await active.client.interrupt()
+                finally:
+                    await check_pending_cancellation()
+                await active.done.wait()
+        except Exception as error:
+            # 制御要求の失敗も close を試みる。Worker が監視側の例外を抑制しても、
+            # 元 query を放置しない。close の返却は停止証明や未決使用量の解放ではない。
+            try:
+                await active.client.disconnect()
+            finally:
+                await check_pending_cancellation()
+            if isinstance(error, TimeoutError):
+                raise TimeoutError("Claude SDK interrupt drain timed out") from None
+            raise
 
     async def health(self) -> EngineHealth:
         """Model を呼ばず、固定 SDK/CLI interface の互換性を返す。"""

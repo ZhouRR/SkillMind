@@ -34,8 +34,10 @@
 | --- | --- |
 | ContextBuilder 准备 | 取消 builder task，等待退出，不再冻结 Brief/启动模型 |
 | 最终 gate 后、首事件前 | _first_engine_event 同时等首次事件与取消；由拥有 await 的 task 取消 connect/receive，不依赖 Session ID |
-| 已有首事件 | 以 session_ref interrupt，消费侧继续处理终端/等待/deadline；interrupt 失败不是停止证明 |
+| 已有首事件 | 以 session_ref interrupt，中断请求和 drain 共用有限正数期限（默认 30 秒）；超时或请求失败尝试 disconnect |
 | 子执行中 | TaskGroup 取消并等待全组，某支完成不再次打断兄弟清理 |
+
+中断期限从发送请求前起算，不因收到控制响应而重置。调用者取消继续传播，即使 SDK 捕获取消后返回也不改成成功或普通 timeout。兜底关闭仍可能失败或等待；不会设置停止证明、释放预算或据此确认进程退出。
 
 以上依赖协作取消/清理，deadline 不承诺硬杀，见[计时器](run-budgets.md#现有计时器的覆盖范围)。线程 I/O 可晚返回，但不得再提交 READY/Brief 或启动；[输入现场](resource-snapshots.md#准备中断与再次使用)保留。启动 gate 与模型调用不原子，仍需运行监督和 DB fencing。
 

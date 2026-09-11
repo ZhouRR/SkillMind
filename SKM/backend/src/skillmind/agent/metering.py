@@ -338,12 +338,50 @@ class AgentInvocation:
 
 
 @dataclass(frozen=True, slots=True)
+class ResultTermination:
+    """SDK Result の終了ラベル。使用量の完全性や process 停止の証明ではない。"""
+
+    subtype: str
+    is_error: bool
+    stop_reason: str | None
+    has_structured_output: bool
+
+    def __post_init__(self) -> None:
+        """本文や任意 error を保存せず、有界な機械ラベルだけ受理する。"""
+        if (
+            type(self.is_error) is not bool or type(self.has_structured_output) is not bool
+            or not isinstance(self.subtype, str)
+        ):
+            raise ValueError("Invalid Result termination labels")
+        for label in (self.subtype, self.stop_reason):
+            if label is None:
+                continue
+            if not isinstance(label, str) or re.fullmatch(r"[a-z][a-z0-9_]{0,127}", label) is None:
+                raise ValueError("Invalid Result termination labels")
+
+    def to_json(self) -> dict[str, Any]:
+        """観測した終了 metadata だけを返し、最終消費や停止確認を補わない。"""
+        return {
+            "subtype": self.subtype, "is_error": self.is_error, "stop_reason": self.stop_reason,
+            "has_structured_output": self.has_structured_output,
+        }
+
+    @classmethod
+    def from_json(cls, value: object) -> ResultTermination:
+        """未知 field や停止の自己宣言を含む記録を受理しない。"""
+        return cls(**_fields(value, {
+            "subtype", "is_error", "stop_reason", "has_structured_output",
+        }))
+
+
+@dataclass(frozen=True, slots=True)
 class ResultUsageObservation:
     """原 SDK Result の限定観測。累積範囲・最終用量・停止を自己宣言させない。"""
 
     invocation: AgentInvocation
     turns: UsageValue
     cost_usd: UsageValue
+    termination: ResultTermination | None = None
 
     def __post_init__(self) -> None:
         """原観測に任意 object や float turns を直接混ぜる入口を閉じる。"""
@@ -353,6 +391,9 @@ class ResultUsageObservation:
             or not isinstance(self.turns, UsageValue)
             or not isinstance(self.cost_usd, UsageValue)
             or self.turns.kind is UsageValueKind.BINARY64
+            or (
+                self.termination is not None and not isinstance(self.termination, ResultTermination)
+            )
         ):
             raise ValueError("Invalid Result usage observation")
 
@@ -365,12 +406,30 @@ class ResultUsageObservation:
     def to_json(self) -> dict[str, Any]:
         """独立保存できる原観測だけを返し、final や停止回执を追加しない。"""
 
-        return {
+        result = {
             "version": "sdk-result-observation/v1",
             "invocation": self.invocation.to_json(),
             "turns": self.turns.to_json(),
             "cost_usd": self.cost_usd.to_json(),
         }
+        if self.termination is not None:
+            result["termination"] = self.termination.to_json()
+        return result
+
+    @classmethod
+    def from_json(cls, value: object) -> ResultUsageObservation:
+        """旧記録に終了ラベルを補造せず、原観測をそのまま復元する。"""
+        optional = {"termination"} if isinstance(value, dict) and "termination" in value else set()
+        data = _fields(value, {"version", "invocation", "turns", "cost_usd"} | optional)
+        if data["version"] != "sdk-result-observation/v1":
+            raise ValueError("Unsupported Result observation version")
+        return cls(
+            invocation=AgentInvocation.from_json(data["invocation"]),
+            turns=UsageValue.from_json(data["turns"]),
+            cost_usd=UsageValue.from_json(data["cost_usd"]),
+            termination=ResultTermination.from_json(data["termination"])
+            if "termination" in data else None,
+        )
 
 
 # サービス組立て専用の port。Tool 引数、RunEvent、公開 API から呼出し権を与えない。
