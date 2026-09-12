@@ -702,6 +702,10 @@
         "status": {
           "const": "APPLIED"
         },
+        "before_ref": {
+          "type": "string",
+          "pattern": "^ev_[a-zA-Z0-9_-]+$"
+        },
         "after_ref": {
           "type": "string",
           "pattern": "^ev_[a-zA-Z0-9_-]+$"

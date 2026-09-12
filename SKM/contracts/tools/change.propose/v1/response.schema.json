@@ -7,6 +7,21 @@
   "required": ["status", "deferred"],
   "properties": {
     "status": { "const": "success" },
-    "deferred": { "const": true }
-  }
+    "deferred": { "type": "boolean" },
+    "proposal_ref": { "type": "string", "pattern": "^cp_[a-zA-Z0-9_-]+$" },
+    "outcome": { "enum": ["APPLIED", "REJECTED", "EXPIRED", "STALE", "FAILED", "VERIFICATION_FAILED"] },
+    "continuation_prompt": { "type": "string", "minLength": 1 },
+    "task_brief_checksum": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "evidence_refs": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^ev_[a-zA-Z0-9_-]+$" }
+    }
+  },
+  "oneOf": [
+    { "properties": { "deferred": { "const": true } }, "maxProperties": 2 },
+    {
+      "properties": { "deferred": { "const": false } },
+      "required": ["proposal_ref", "outcome", "continuation_prompt", "task_brief_checksum", "evidence_refs"]
+    }
+  ]
 }

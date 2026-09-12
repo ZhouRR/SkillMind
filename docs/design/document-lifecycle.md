@@ -129,11 +129,11 @@ S3 同一次 GET 最多读取声明 size + 1 bytes，不先 stat；连接/读取
 
 附件带 no-store、nosniff、安全 Content-Disposition；合法 MIME 保留，非法降 octet-stream。文件名用单段 ASCII fallback + UTF-8 filename*，不拼原引号/控制字符，不改 DB 原名。
 
-Web 预览仅 txt/md/markdown/htm/html，最多 1,000,000 实际 bytes，只接受 200，错误正文也有界。列表 size 仅作按钮提示，Content-Length 不可信；超限停止并提示下载，不显示截断片段，UTF-8 错误明确拒绝。
+Web 将 txt/json/jsonl/csv/tsv/log/yaml/yml/xml 按原文预览，md/markdown 与 htm/html 使用各自的静态查看器。最多 1,000,000 实际 bytes，只接受 200，错误正文也有界。列表 size 仅作按钮提示，Content-Length 不可信；超限停止并提示下载，不显示截断片段，UTF-8 错误明确拒绝。
 
 文本保留原文；Markdown 用 Marked 解析标题、列表、表格、代码块等结构，默认显示渲染结果并可切换原文。解析结果与 HTML 共用以下静态隔离规则。HTML 在无浏览上下文的独立 document 解析，重建静态 HTML/SVG，保留内嵌 CSS、class/id、布局属性、渐变/滤镜和 SVG 同文档引用，不逐条改写 CSS。脚本、事件、表单/frame、SVG 动画/foreignObject、外部资源属性和页面跳转不开放；图片留 alt、链接留文本。超过 20,000 节点安全显示原文，不递归截断。
 
-srcDoc 的 head 最前设置[默认拒绝 CSP](https://www.w3.org/TR/CSP3/#meta-element)，仅允许内嵌 CSS，CSS 的外部 import/url 仍受拒绝；iframe sandbox=""、no-referrer，不允许脚本或访问主页面。预览弹窗使用可用视口，PC 四边留 24px、窄屏留 10px，正文占剩余高度。页面说明展示保留与禁用范围、原文件仍可下载；这不是 generated Host，也不保证其他应用打开原文件安全。
+srcDoc 的 head 最前设置[默认拒绝 CSP](https://www.w3.org/TR/CSP3/#meta-element)，仅允许内嵌 CSS，CSS 的外部 import/url 仍受拒绝；iframe sandbox=""、no-referrer，不允许脚本或访问主页面。预览弹窗使用可用视口，PC 四边留 24px、窄屏留 10px，正文占剩余高度，提供原文件下载；这不是 generated Host，也不保证其他应用打开原文件安全。
 
 预览读取期限 30 秒；关闭/同 tick 换文件、换 actor/会话/Project 立即作废旧请求，晚到正文/401 不影响新上下文。当前 401/403/Project 404 关闭写资格，列表刷新不重开，预览不解除未知删除。
 

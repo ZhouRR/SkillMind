@@ -43,6 +43,10 @@ export type RunDocumentSnapshotRecord = {
 const SUMMARY_FIELDS = ['provider', 'capability', 'resource_kind', 'access'] as const
 const DOCUMENT_FIELDS = ['document_id', 'folder', 'name', 'mime', 'size', 'content_hash'] as const
 const SNAPSHOT_FIELDS = ['snapshot_version', 'project_id', 'requirement_key', 'selection_mode', 'documents', 'checksum']
+// Backend の documents/snapshot.py と同じ、入力文書集合を凍結する能力だけを許す。
+const DOCUMENT_INPUT_CAPABILITIES = new Set([
+  'document.read/v1', 'document.convert/v1', 'document.inspect/v1', 'document.list/v1',
+])
 
 /** 公開許可リスト外の内部 field を型 assertion で受け流さない。 */
 export function isRunSourceSummaries(value: unknown): value is RunSourceSummaries {
@@ -73,7 +77,7 @@ export function isRunDocumentSnapshots(
     if (entry.status !== 'FROZEN' || !isDocumentSnapshot(entry.snapshot, projectId, entry.requirement_key)) return false
     const source = sources[entry.requirement_key]
     if (typeof source !== 'object' || !source || source.provider !== 'project-documents'
-      || source.capability !== 'document.read/v1') return false
+      || typeof source.capability !== 'string' || !DOCUMENT_INPUT_CAPABILITIES.has(source.capability)) return false
     for (const document of entry.snapshot.documents) {
       const previous = documents.get(document.document_id)
       const path = document.folder ? `${document.folder}/${document.name}` : document.name

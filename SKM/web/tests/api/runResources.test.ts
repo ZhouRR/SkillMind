@@ -26,6 +26,28 @@ describe('frozen document public projection', () => {
     expect(isRunDocumentSnapshots([], fixture.project_id, fixture.selected_sources)).toBe(true)
   })
 
+  it.each(['document.read/v1', 'document.convert/v1', 'document.inspect/v1', 'document.list/v1'])(
+    'loads complete Run detail with a frozen input selected through %s', async (capability) => {
+      // 按需取得でも同じ凍結集合を使う。read/v1 だけへの固定で承認画面全体を落とさない。
+      const body = structuredClone(fixture)
+      const key = body.document_snapshots[0]!.requirement_key
+      Object.assign(body.selected_sources[key as keyof typeof body.selected_sources], { capability })
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 200 })))
+      const result = await loadRunDetail(body.project_id, body.run_id)
+      expect(result.document_snapshots).toEqual(body.document_snapshots)
+    },
+  )
+
+  it.each(['document.write/v1', 'document.readiness/v1', 'document.list/v2', 'database.read/v1'])(
+    'rejects capabilities that do not bind a frozen document input: %s', (capability) => {
+      // 出力保存や状態照会を入力集合の binding と取り違えない。
+      const body = structuredClone(fixture)
+      const key = body.document_snapshots[0]!.requirement_key
+      Object.assign(body.selected_sources[key as keyof typeof body.selected_sources], { capability })
+      expect(isRunDocumentSnapshots(body.document_snapshots, body.project_id, body.selected_sources)).toBe(false)
+    },
+  )
+
   it.each(['provider', 'scope', 'secret_locator', 'document_snapshot'])('rejects internal or mistyped summary data: %s', (key) => {
     const value = { documents: { provider: 'project-documents', [key]: { private: true } } }
     expect(isRunSourceSummaries(value)).toBe(false)

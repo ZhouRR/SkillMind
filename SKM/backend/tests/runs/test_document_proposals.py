@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+
 from skillmind.artifacts.domain import ArtifactContent, ArtifactMetadata
 from skillmind.artifacts.repository import ArtifactRepository
 from skillmind.core.hashing import sha256_hex
@@ -96,7 +97,6 @@ async def document_proposal(monkeypatch, *, revision="2"):
         idempotency_key=h.draft.idempotency_key,
         request_fingerprint=h.draft.request_fingerprint,
     )
-    h.run.permission_snapshot_json["allowed_capabilities"] = ["document.write/v1"]
     p = h.proposal
     p.integration_id, p.target_binding_id = None, h.binding.id
     p.skill_version_id, p.effect_intent_key = uuid4(), h.draft.effect_intent_key
@@ -145,6 +145,7 @@ async def document_proposal(monkeypatch, *, revision="2"):
     h.repository._execution_features = ExecutionFeatures(document_writes=True)
     del h.repository._validate_proposal_row
     h.repository._validate_evidence_refs = AsyncMock()
+    h.freeze_skill_snapshot()
     return h
 
 
@@ -157,6 +158,9 @@ async def test_approved_library_uses_original_artifact_without_an_integration(mo
     )
     assert authority.organization_id == h.actor.organization_id
     assert authority.actor_id == h.actor.id
+    assert h.run.permission_snapshot_json["allowed_capabilities"] == [
+        "change.propose/v1", "document.read/v1"
+    ]
     h.read_artifact.assert_awaited_once_with(
         project_id=h.run.project_id, run_id=h.run.id, artifact_ref="art_fixture"
     )

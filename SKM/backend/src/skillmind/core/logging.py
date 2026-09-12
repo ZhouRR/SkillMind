@@ -28,6 +28,7 @@ _CONTEXT_FIELDS = frozenset({
     "attempt",
     "provider_error_kind",
     "provider_result_subtype",
+    "provider_api_error_status",
     "provider_exit_code",
     # Agent へ渡した指示の監査値。Brief 正文は Skill guidance と業務入力を含むため、
     # 出力するのは checksum と profile 名だけに留める。

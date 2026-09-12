@@ -14,6 +14,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from skillmind.agent.context_builder import (
     ContractStore,
     ProductionRunContextBuilder,
+    _change_propose_tool_definition,
     _read_tool_definitions,
     create_run_tool_registry,
 )
@@ -1035,6 +1036,18 @@ async def test_database_apply_context_exposes_observe_and_propose_only(
             "database.read/v1",
             "change.propose/v1",
         }
+        proposal = _change_propose_tool_definition(ContractStore(CONTRACTS))
+        for capability in ("database.write/v1", "document.write/v1"):
+            payload = ContractStore(CONTRACTS).load(f"tools/{capability}/request.schema.json")
+            assert payload["description"] in proposal.description
+        assert "complete primary key" in proposal.description
+        assert "row_hashes" in proposal.description
+        assert "including all primary-key, generated/identity and null-valued fields" in (
+            proposal.description
+        )
+        assert "omit generated/identity columns from values only" in proposal.description
+        assert "Keep primary-key fields only in key" not in proposal.description
+        assert '"resource_key":"records"' in context.prompt
     else:
         with pytest.raises(ValueError, match="disabled execution features"):
             await builder.build(claimed, sequence_start=1)

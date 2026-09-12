@@ -19,3 +19,22 @@ def strip_code_fence(text: str) -> str:
 
     match = _CODE_FENCE_PATTERN.match(text)
     return match.group(1) if match else text
+
+
+def strip_json_object_preamble(text: str) -> str:
+    """独立行の JSON object 前にある短い平文だけを除き、曖昧な候補を選ばない。
+
+    本文中の object、array、code fence をまたいだ探索はしない。返却値全体の JSON
+    decode と Schema 検証は呼出側で必須とし、後置本文や複数 object はそこで拒否する。
+    """
+
+    start = text.find("{")
+    if start <= 0:
+        return text
+    prefix = text[:start]
+    if len(prefix) > 4096 or any(token in prefix for token in ("[", "]", "}", "```")):
+        return text
+    lines = prefix.rsplit("\n", 1)
+    if len(lines) != 2 or lines[1].strip():
+        return text
+    return text[start:]

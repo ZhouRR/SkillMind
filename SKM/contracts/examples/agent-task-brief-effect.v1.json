@@ -190,6 +190,7 @@
       "proposal_ref": "cp_fixture_saved",
       "capability_version": "document.write/v1",
       "status": "APPLIED",
+      "before_ref": "ev_fixture_before",
       "after_ref": "ev_fixture_saved",
       "after_content_hash": "sha256:2b3aadb758940039d36411531853e423fe5d1eea1125e3620f81922dfa6bc7ea",
       "after": {

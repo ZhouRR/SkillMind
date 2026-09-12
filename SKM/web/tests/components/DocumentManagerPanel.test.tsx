@@ -74,6 +74,15 @@ describe('documentPreviewKind', () => {
 })
 
 describe('DocumentTree display', () => {
+  it('offers raw text preview for JSON results and common text documents', () => {
+    for (const name of ['rv-result.JSON', 'events.jsonl', 'data.csv', 'data.tsv', 'worker.log', 'config.yaml', 'config.yml', 'report.xml']) {
+      const html = renderTree([document({ name, mime: 'application/octet-stream' })])
+      expect(html).toContain('预览')
+      expect(html).not.toContain('disabled')
+    }
+    expect(renderTree([document({ name: 'large.json', size: 1_000_001 })])).toContain('disabled')
+  })
+
   it('renders nested folders as collapsible nodes with file rows and actions', () => {
     const html = renderTree([
       document({ document_id: 'doc-root', name: 'readme.md', folder: '', size: 2048, mime: 'text/markdown' }),
@@ -119,6 +128,21 @@ describe('DocumentTree display', () => {
 })
 
 describe('DocumentPreviewDialog', () => {
+  it('preserves JSON numbers and displays embedded markup as literal text', () => {
+    const record = document({ name: 'rv-result.json', mime: 'application/json' })
+    const kind = documentPreviewKind(record.name)
+    if (kind === null) throw new Error('JSON preview unavailable')
+    const html = renderToStaticMarkup(<DocumentPreviewDialog
+      preview={{ status: 'ready', document: record, kind,
+        content: '{\n  "id": 9007199254740993,\n  "note": "<script>alert(1)</script>"\n}' }}
+      projectId={PROJECT_ID} onClose={vi.fn()} />)
+    expect(html).toContain('class="previewText"')
+    expect(html).toContain('9007199254740993')
+    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
+    expect(html).not.toContain('<script>')
+    expect(html).not.toContain('<iframe')
+  })
+
   it('renders text content inside an accessible dialog with download and close', () => {
     const html = renderToStaticMarkup(
       <DocumentPreviewDialog

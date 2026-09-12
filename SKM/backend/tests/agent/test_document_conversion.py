@@ -13,6 +13,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
 from openpyxl import Workbook
+
 from skillmind.agent import binary_text
 from skillmind.agent.binary_text import BinaryTextError, convert_excel_to_markdown
 from skillmind.agent.context_builder import ContractStore
@@ -70,6 +71,34 @@ async def test_real_converter_preserves_sheets_and_japanese_rows(
     assert "## Cases" in result.markdown and "## Boundaries" in result.markdown
     assert "| TC-1 | 正常終了 |" in result.markdown
     assert "| TC-2 | 入力エラー |" in result.markdown
+
+
+async def test_real_converter_preserves_literal_values_and_empty_cells() -> None:
+    """欠損値・数値の型推論で仕様内の文字列を別の値に変換しない。"""
+
+    book = Workbook()
+    sheet = book.active
+    assert sheet is not None
+    sheet.title = "Literals"
+    sheet.append(["ID", "Value", "Mixed"])
+    for index, value in enumerate(("null", "NULL", "NA", "N/A", "NaN", "001", "1.0")):
+        sheet.append([f"L-{index}", value, "1" if index == 0 else "null"])
+    sheet.append(["blank", None, "2"])
+    numeric = book.create_sheet("Numeric text")
+    numeric.append(["Integer", "Decimal", "Identifier"])
+    numeric.append(["1", "1.0", "001"])
+    numeric.append(["null", "null", "002"])
+    stream = BytesIO()
+    book.save(stream)
+
+    result = await convert_excel_to_markdown("literals.xlsx", stream.getvalue())
+
+    for index, value in enumerate(("null", "NULL", "NA", "N/A", "NaN", "001", "1.0")):
+        mixed = "1" if index == 0 else "null"
+        assert f"| L-{index} | {value} | {mixed} |" in result.markdown
+    assert "| blank |  | 2 |" in result.markdown
+    assert "| 1 | 1.0 | 001 |" in result.markdown
+    assert "| null | null | 002 |" in result.markdown
 
 
 @pytest.mark.parametrize("observed", [False, True])

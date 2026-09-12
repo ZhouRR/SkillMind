@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = ROOT / "contracts"
 
 EXAMPLE_CONTRACTS = {
+    "examples/change-propose-response.v1.json": "tools/change.propose/v1/response.schema.json",
     "examples/task-flow-preview.v1.json": "tasks/flow-preview/v1.schema.json",
     "examples/task-flow-preview-not-declared.v1.json": "tasks/flow-preview/v1.schema.json",
     "examples/agent-task-brief.v1.json": "agent-task-brief/v1.schema.json",

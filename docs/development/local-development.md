@@ -44,6 +44,10 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m pytest --import-mode=importlib -p no:cachep
 
 新しい fixture 利用先も確認する。除外は全 test の無副作用保証ではなく、Redis 等の process は別に確認する。
 
+### Proposal 的隔离 CLI 续行验证
+
+Proposal 的原 SDK 暂停/续行可在 `SKM/backend/` 运行 `SKILLMIND_NATIVE_CLI_TESTS=1 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -p no:cacheprovider -o addopts= -q tests/agent/test_proposal_resume_native.py`。该检查使用固定随包 CLI、生产 Engine/MCP/Gateway 和 loopback 合成模型响应，验证原 tool ID、最新 Brief 交付、只读回复审计、新提案再次暂停及已回复后的恢复；不调用外部模型或业务库，不能代替真实批准事务和业务验收。
+
 ### PostgreSQL 写入的隔离 SQL 探测
 
 [probe_postgres_write.py](../../SKM/scripts/probe_postgres_write.py) は PGlite のメモリ DB だけに合成 table/role を作り、本番の SQL 生成・一行変更・回执保存処理を実行する。実 DB 接続・既存 Project への書込は行わない。INSERT/UPDATE、JSON/日時、generated 列、原回执、原状態競合、取消前の失権 rollback と回执 role の制限を確認する。PGlite/stdio adapter は asyncpg の実接続や多 Worker の競争を証明しない。

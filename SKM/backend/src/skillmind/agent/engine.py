@@ -64,8 +64,9 @@ from skillmind.agent.metering import (
     BeforeInvocationConnect,
     ExecutionUsageObserver,
 )
+from skillmind.agent.proposal_resume import prepare_proposal_resume
 from skillmind.core.cancellation import check_pending_cancellation
-from skillmind.core.json_text import strip_code_fence
+from skillmind.core.json_text import strip_code_fence, strip_json_object_preamble
 from skillmind.effects.proposal import CHANGE_PROPOSE_SDK_NAME
 from skillmind.runs.budget import BudgetUnavailableError
 from skillmind.runs.interaction import INTERACTION_REQUEST_SDK_NAME
@@ -334,6 +335,10 @@ class ClaudeMessageMapper:
         }
         if interrupted:
             mapped.append(self._event(AgentEventType.SESSION_INTERRUPTED, common))
+        elif message.stop_reason == "tool_deferred_unavailable":
+            # SDK の復元不能は新しい提案ではない。元要求を再登録してはならない。
+            common["reason"] = "deferred_tool_unavailable"
+            mapped.append(self._event(AgentEventType.ENGINE_FAILED, common))
         elif message.deferred_tool_use is not None:
             common["deferred_tool"] = {
                 "tool_use_id": message.deferred_tool_use.id,
@@ -386,21 +391,29 @@ class ClaudeMessageMapper:
 def _structured_output(message: ResultMessage) -> tuple[Any, str | None]:
     """SDK structured output を優先し、raw result は厳密な JSON object だけを採用する。
 
-    Prompt 契約に反して model が JSON を単一の code fence で包む場合があるため、
-    fence の除去だけは決定的な前処理として許可する。Markdown 本文の推測変換は行わない。
+    単一 code fence、または独立行の object 前の曖昧でない短い平文は除去できる。
+    JSON の修復や本文からの値の推測は行わず、候補は通常の結果検証へ渡す。
     """
 
     if message.structured_output is not None:
         return message.structured_output, "sdk_output_format"
     if not isinstance(message.result, str):
         return None, None
+    source = "result_json_fallback"
     try:
         parsed = json.loads(strip_code_fence(message.result))
     except json.JSONDecodeError:
-        return None, None
+        candidate = strip_json_object_preamble(message.result)
+        if candidate == message.result:
+            return None, None
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            return None, None
+        source = "result_json_preamble_fallback"
     if not isinstance(parsed, dict):
         return None, None
-    return parsed, "result_json_fallback"
+    return parsed, source
 
 
 @dataclass(slots=True)
@@ -475,11 +488,13 @@ class ClaudeAgentSdkEngine:
         """同一 Run の保存済み session を新しい Attempt で再開する。"""
 
         _validate_parent_session(context.run, context.session)
-        options = replace(self._base_options(context.run), resume=context.session.session_id)
+        run, replaying_proposal = await prepare_proposal_resume(context.run, self._session_store)
+        options = replace(self._base_options(run), resume=context.session.session_id)
         prompt = context.input_text or _DEFAULT_RESUME_PROMPT
         async with aclosing(
             self._run(
-                context.run, context.session.session_id, prompt, options, AgentInvocationMode.RESUME
+                run, context.session.session_id, prompt, options, AgentInvocationMode.RESUME,
+                replaying_proposal=replaying_proposal,
             )
         ) as stream:
             async for event in stream:
@@ -587,6 +602,8 @@ class ClaudeAgentSdkEngine:
         prompt: str,
         options: ClaudeAgentOptions,
         mode: AgentInvocationMode,
+        *,
+        replaying_proposal: bool = False,
     ) -> AsyncGenerator[AgentEvent, None]:
         """Connect、message drain、disconnect を一つの所有範囲で完結させる。"""
 
@@ -645,7 +662,9 @@ class ClaudeAgentSdkEngine:
                     raise BudgetUnavailableError("Client factory changed the bound invocation")
             await self._register(active)
             await check_pending_cancellation()
-            await client.connect(prompt)
+            # 解決済み control replay は CLI 自身が model turn を開始する。
+            # 現 Brief は Tool 応答で先に届くため、別 user turn を二重に enqueue しない。
+            await client.connect(None if replaying_proposal else prompt)
             await check_pending_cancellation()
             async for message in client.receive_response():
                 # SDK が取消しを捕えて message を返しても、観測/表示を続行させない。

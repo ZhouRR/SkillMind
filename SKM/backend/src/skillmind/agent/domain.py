@@ -15,6 +15,7 @@ from skillmind.runs.input_snapshot import InputFileSeal
 
 if TYPE_CHECKING:
     from skillmind.agent.metering import AgentInvocation
+    from skillmind.runs.proposal_continuation import ResolvedProposal
 
 
 class AgentEventType(StrEnum):
@@ -186,6 +187,8 @@ class RunContext:
     task_brief_checksum: str = ""
     # 受信調整者が原束縛から再読取した記述子。trace やモデル入力から復元しない。
     prepared_invocation: AgentInvocation | None = field(default=None, repr=False)
+    # 現 Segment の原 trigger/回执から得た読取専用 descriptor。モデルに設定させない。
+    resolved_proposal: ResolvedProposal | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         """Attempt を跨ぐ event 採番の開始値が正数であることを保証する。"""

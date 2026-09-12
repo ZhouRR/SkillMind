@@ -129,22 +129,31 @@ async def _exchange_markdown(process: asyncio.subprocess.Process, data: bytes) -
 
 
 def render_excel_markdown(suffix: str, data: bytes) -> str:
-    """専用子 process から固定 Excel converter だけを呼び、URL 自動判定を使わない。"""
+    """セル値を保持して固定 MarkItDown で表を変換し、URL 自動判定を使わない。"""
 
     from importlib.metadata import version
 
-    from markitdown import StreamInfo
-    from markitdown.converters import XlsConverter, XlsxConverter
+    import pandas as pd
+    from markitdown.converters import HtmlConverter
 
     if version("markitdown") != MARKITDOWN_VERSION:
         raise BinaryTextError("MarkItDown version does not match the Worker contract")
     if suffix not in {".xlsx", ".xls"}:
         raise BinaryTextError("Unsupported Excel format")
-    # 固定版の公開 constructor は型 annotation を持たない。
-    converter = (
-        XlsxConverter() if suffix == ".xlsx" else XlsConverter()  # type: ignore[no-untyped-call]
+    # 0.1.7 の Excel converter は pandas の既定推論で null/NA を欠損値にし、
+    # 文字列の 001 や 1 を数値へ変える。同じ表変換経路を使い、読取だけを固定する。
+    # 出力後の NaN 置換では、原文の NaN と変換による欠損を区別できない。
+    sheets = pd.read_excel(
+        BytesIO(data), sheet_name=None,
+        engine="openpyxl" if suffix == ".xlsx" else "xlrd",
+        dtype=str, keep_default_na=False,
     )
-    markdown: str = converter.convert(BytesIO(data), StreamInfo(extension=suffix)).markdown
+    converter = HtmlConverter()
+    sections = [
+        f"## {name}\n{converter.convert_string(sheet.to_html(index=False)).markdown.strip()}"
+        for name, sheet in sheets.items()
+    ]
+    markdown = "\n\n".join(sections).strip()
     if len(markdown.encode("utf-8")) > MAX_MARKDOWN_BYTES:
         raise BinaryTextError("Converted Markdown exceeds the output limit")
     return markdown

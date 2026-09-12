@@ -74,7 +74,11 @@ from skillmind.effects.outcomes import (
     effect_requires_reconciliation,
 )
 from skillmind.effects.policy_repository import EffectPolicyRepository
-from skillmind.effects.proposal import proposal_checksum, proposal_content
+from skillmind.effects.proposal import (
+    CHANGE_PROPOSE_CAPABILITY,
+    proposal_checksum,
+    proposal_content,
+)
 from skillmind.effects.reconciliation_domain import EffectReconciliationTarget
 from skillmind.integrations.domain import (
     IntegrationStatus,
@@ -99,6 +103,7 @@ from skillmind.runs.domain import (
 )
 from skillmind.runs.repository_base import _RunRepositoryBase
 from skillmind.skills.capability_blueprint import resolve_capability_blueprint
+from skillmind.skills.frozen_manifest import verified_run_manifest
 from skillmind.users.repository import lock_organization
 
 
@@ -647,6 +652,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 trigger_ref=approval.id,
                 outcome="REJECTED",
                 now=now,
+                rejection_reason=approval.reason,
             )
             transition = plan_run_transition(
                 current=RunStatus.WAITING_FOR_APPROVAL,
@@ -1183,7 +1189,8 @@ class EffectOperationsMixin(_RunRepositoryBase):
             or run.status != RunStatus.WAITING_FOR_APPROVAL.value
             or segment.status != RunSegmentStatus.WAITING.value
             or run.permission_snapshot_json.get("actor_id") != str(actor_id)
-            or claimed.capability_version
+            # Agent は提案だけを許可され、apply 能力は独立した凍結意図/束縛/批准で検証する。
+            or CHANGE_PROPOSE_CAPABILITY
             not in run.permission_snapshot_json.get("allowed_capabilities", [])
             or proposal.status != ChangeProposalStatus.APPLYING.value
             or proposal.expires_at <= now
@@ -1222,6 +1229,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
         if (binding is None or agent_session is None
             or (proposal.integration_id is not None and integration is None)):
             raise EffectLeaseValidationError("Effect snapshot is unavailable")
+        self._validate_frozen_effect_authority(run, proposal, binding)
         await self._validate_proposal_row(proposal, run=run)
         expected = {
             "proposal_ref": proposal.proposal_ref,
@@ -1263,6 +1271,39 @@ class EffectOperationsMixin(_RunRepositoryBase):
         if proposal.expires_at <= now:
             raise EffectLeaseValidationError("Effect proposal expired during authorization")
         return EffectStepAuthority(organization_id=organization_id, actor_id=actor_id)
+
+    @classmethod
+    def _validate_frozen_effect_authority(
+        cls, run: Run, proposal: ChangeProposal, binding: ResourceBinding,
+    ) -> None:
+        """Agent の直接 Tool 許可と分離して、原版の apply 意図と write slot を再検証する。"""
+
+        try:
+            task = run.task_snapshot_json
+            manifest = verified_run_manifest(task.get("skill_snapshots", []), task)
+            if task.get("skill_version_id") != str(proposal.skill_version_id):
+                raise ValueError("Proposal SkillVersion changed")
+            blueprint = resolve_capability_blueprint(manifest)
+            if blueprint is None:
+                raise ValueError("Frozen effect Blueprint is unavailable")
+            cls._validate_effect_intent(
+                blueprint, effect_intent_key=proposal.effect_intent_key,
+                resource_key=binding.requirement_key, operation=proposal.operation,
+                risk_level=proposal.risk_level,
+            )
+            resources = [
+                item for item in blueprint.get("resource_requirements", [])
+                if isinstance(item, dict) and item.get("key") == binding.requirement_key
+            ]
+            if (
+                len(resources) != 1 or resources[0].get("access") != "write"
+                or proposal.capability_version not in resources[0].get("capabilities", [])
+            ):
+                raise ValueError("Frozen resource does not declare the effect capability")
+        except (ValueError, TypeError, KeyError, AttributeError) as error:
+            raise EffectLeaseValidationError(
+                "Effect does not match frozen Skill authority"
+            ) from error
 
     async def heartbeat_effect_execution(
         self, claimed: ClaimedEffectExecution, *, provider_version: str, lease_seconds: int,
@@ -1455,6 +1496,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 "proposal_ref": proposal.proposal_ref,
                 "capability_version": proposal.capability_version,
                 "status": "APPLIED",
+                "before_ref": before_ref,
                 "after_ref": after_ref,
                 "after_content_hash": after.content_hash,
                 "after": after.metadata_json["snapshot"],
@@ -2190,23 +2232,10 @@ class EffectOperationsMixin(_RunRepositoryBase):
         blueprint = resolve_capability_blueprint(manifest)
         if blueprint is None:
             raise ChangeProposalValidationError("Run CapabilityBlueprint is unavailable")
-        intents = {
-            str(item["key"]): item
-            for item in blueprint.get("effect_intents", [])
-            if isinstance(item, dict) and isinstance(item.get("key"), str)
-        }
-        intent = intents.get(draft.effect_intent_key)
-        if intent is None or intent.get("mode") != "apply":
-            raise ChangeProposalValidationError(
-                "ChangeProposal does not match a declared apply effect intent"
-            )
-        if intent.get("resource_key") != draft.resource_key:
-            raise ChangeProposalValidationError("ChangeProposal targets another resource")
-        if intent.get("operation") != draft.operation:
-            raise ChangeProposalValidationError("ChangeProposal operation changed from Blueprint")
-        declared_risk = str(intent.get("risk", "")).upper()
-        if declared_risk != draft.risk_level.value:
-            raise ChangeProposalValidationError("ChangeProposal risk changed from Blueprint")
+        intent = self._validate_effect_intent(
+            blueprint, effect_intent_key=draft.effect_intent_key, resource_key=draft.resource_key,
+            operation=draft.operation, risk_level=draft.risk_level.value,
+        )
         binding = (
             await self._session.scalars(
                 select(ResourceBinding).where(
@@ -2232,6 +2261,30 @@ class EffectOperationsMixin(_RunRepositoryBase):
         await self._validate_database_observation(draft, binding=binding, payload=provider_payload)
         await self._validate_effect_artifact(run=run, draft=draft, payload=provider_payload)
         return intent, binding, integration, provider_payload
+
+    @staticmethod
+    def _validate_effect_intent(
+        blueprint: dict[str, Any], *, effect_intent_key: str, resource_key: str,
+        operation: str, risk_level: str,
+    ) -> dict[str, Any]:
+        """初回提案と段階認可で同じ apply 意図/対象/操作/リスク境界を使う。"""
+
+        intents = [
+            item for item in blueprint.get("effect_intents", [])
+            if isinstance(item, dict) and item.get("key") == effect_intent_key
+        ]
+        if len(intents) != 1 or intents[0].get("mode") != "apply":
+            raise ChangeProposalValidationError(
+                "ChangeProposal does not match a declared apply effect intent"
+            )
+        intent = intents[0]
+        if intent.get("resource_key") != resource_key:
+            raise ChangeProposalValidationError("ChangeProposal targets another resource")
+        if intent.get("operation") != operation:
+            raise ChangeProposalValidationError("ChangeProposal operation changed from Blueprint")
+        if str(intent.get("risk", "")).upper() != risk_level:
+            raise ChangeProposalValidationError("ChangeProposal risk changed from Blueprint")
+        return intent
 
     @staticmethod
     def _new_effect_execution(
@@ -2359,6 +2412,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
         now: datetime,
         evidence_refs: tuple[str, ...] = (),
         effect_result: dict[str, Any] | None = None,
+        rejection_reason: str | None = None,
         trigger_type: RunSegmentTrigger = RunSegmentTrigger.APPROVAL_RESPONSE,
     ) -> RunSegment:
         """Effect outcome を checkpoint へ追加し、同じ Run の次 Segment を作成する。"""
@@ -2378,6 +2432,14 @@ class EffectOperationsMixin(_RunRepositoryBase):
         facts.append(
             f"ChangeProposal {proposal.proposal_ref} reached controlled effect outcome {outcome}."
         )
+        if rejection_reason is not None:
+            if outcome != "REJECTED":
+                raise ValueError("Only a rejection can carry rejection feedback")
+            # 原批准の理由をデータとして引用し、次の書込許可や新たな業務事実にしない。
+            facts.append(
+                f"User rejection feedback for ChangeProposal {proposal.proposal_ref} "
+                f"(not write permission): {canonical_json(rejection_reason)}"
+            )
         checkpoint["confirmed_facts"] = facts
         merged_evidence = [
             str(item)

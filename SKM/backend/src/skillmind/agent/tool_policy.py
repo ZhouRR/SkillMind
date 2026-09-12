@@ -9,6 +9,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from skillmind.agent.domain import RegisteredTool
+from skillmind.effects.proposal import CHANGE_PROPOSE_CAPABILITY
 
 DENIED_BUILTIN_TOOLS = frozenset(
     {"Read", "Glob", "Grep", "Bash", "Write", "Edit", "WebFetch", "WebSearch"}
@@ -78,7 +79,11 @@ class ToolExecutionPolicy:
         tool = self._tools.get(tool_name)
         if tool is None:
             raise ToolPolicyViolation(f"Tool is not registered for this run: {tool_name}")
-        boundary_fields = _find_boundary_fields(tool_input)
+        boundary_input = (
+            _proposal_control_arguments(tool_input)
+            if tool.capability == CHANGE_PROPOSE_CAPABILITY else tool_input
+        )
+        boundary_fields = _find_boundary_fields(boundary_input)
         if boundary_fields:
             fields = ", ".join(sorted(boundary_fields))
             raise ToolPolicyViolation(f"Tool input attempts to change run boundary: {fields}")
@@ -89,6 +94,26 @@ class ToolExecutionPolicy:
         if errors:
             raise ToolPolicyViolation("Tool input does not match registered schema")
         return tool
+
+
+def _proposal_control_arguments(arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """提案の changes[].value は業務データとして扱い、制御引数の境界検査と分離する。
+
+    例えば DB の列名は Run の接続や権限を変更しない。原入力は書き換えず、全体 Schema、
+    提案の敏感情報検査と Provider の payload/scope/binding 検査へそのまま渡す。
+    """
+
+    changes = arguments.get("changes")
+    if not isinstance(changes, list):
+        return arguments
+    return {
+        **arguments,
+        "changes": [
+            {key: value for key, value in change.items() if key != "value"}
+            if isinstance(change, Mapping) else change
+            for change in changes
+        ],
+    }
 
 
 def _find_boundary_fields(value: Any) -> set[str]:

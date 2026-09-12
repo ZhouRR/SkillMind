@@ -8,15 +8,21 @@ from uuid import uuid4
 
 import pytest
 
+from skillmind.core.hashing import canonical_json, sha256_hex
+from skillmind.effects.document_write import DOCUMENT_WRITE_PROVIDER_VERSION
 from skillmind.effects.domain import EffectLeaseValidationError
 from skillmind.projects.domain import ProjectArchivedError, ProjectNotFoundError
 from tests.runs.effect_authorization_harness import AuthorizationHarness
+from tests.runs.test_document_proposals import document_proposal
 
 
 async def test_authorization_checks_current_membership_before_run_locks() -> None:
     """現在の user/project を元 Run より先に固定し、批准検証を通す制御を観測する。"""
 
     h = AuthorizationHarness()
+    assert h.run.permission_snapshot_json["allowed_capabilities"] == [
+        "change.propose/v1", "database.read/v1"
+    ]
     await h.authorize()
     assert h.locks == [
         "Organization",
@@ -29,6 +35,62 @@ async def test_authorization_checks_current_membership_before_run_locks() -> Non
         "EffectExecution",
     ]
     h.repository._validate_proposal_row.assert_awaited_once()
+
+
+@pytest.mark.parametrize("document", [False, True])
+@pytest.mark.parametrize("mutation", [
+    "checksum", "version", "proposal_version", "multiple_snapshots", "intent_missing",
+    "intent_mode", "intent_resource", "intent_operation", "intent_risk", "resource_access",
+    "resource_capability", "binding_slot",
+])
+async def test_frozen_apply_authority_drift_is_rejected_without_agent_write_permission(
+    monkeypatch, document, mutation,
+) -> None:
+    """PG/文書庫とも Agent の apply 許可に頼らず、原版と精確意図の逸脱を拒否する。"""
+
+    h = await document_proposal(monkeypatch) if document else AuthorizationHarness()
+    task = h.run.task_snapshot_json
+    snapshot = task["skill_snapshots"][0]
+    blueprint = snapshot["manifest"]["capability_blueprint"]
+    intent = blueprint["effect_intents"][0]
+    resource = blueprint["resource_requirements"][0]
+    if mutation == "checksum":
+        snapshot["manifest_checksum"] = "sha256:" + "0" * 64
+    elif mutation == "version":
+        task["skill_version_id"] = str(uuid4())
+    elif mutation == "proposal_version":
+        h.proposal.skill_version_id = uuid4()
+    elif mutation == "multiple_snapshots":
+        task["skill_snapshots"].append(snapshot)
+    elif mutation == "intent_missing":
+        blueprint["effect_intents"] = []
+    elif mutation == "intent_mode":
+        intent["mode"] = "observe"
+    elif mutation == "intent_resource":
+        intent["resource_key"] = "other_slot"
+    elif mutation == "intent_operation":
+        intent["operation"] = "UPDATE"
+    elif mutation == "intent_risk":
+        intent["risk"] = "high"
+    elif mutation == "resource_access":
+        resource["access"] = "read"
+    elif mutation == "resource_capability":
+        resource["capabilities"] = []
+    else:
+        h.binding.requirement_key = "other_slot"
+    if mutation.startswith(("intent_", "resource_")):
+        # 個々の意図照合も検証するため、構文上有効な別宣言の checksum は一致させる。
+        checksum = f"sha256:{sha256_hex(canonical_json(snapshot['manifest']))}"
+        task["manifest_checksum"] = snapshot["manifest_checksum"] = checksum
+    allowed = h.run.permission_snapshot_json["allowed_capabilities"]
+    assert h.claimed.capability_version not in allowed
+    with pytest.raises(EffectLeaseValidationError, match="frozen Skill authority"):
+        if document:
+            await h.repository.authorize_effect_step(
+                h.claimed, provider_version=DOCUMENT_WRITE_PROVIDER_VERSION
+            )
+        else:
+            await h.authorize()
 
 
 @pytest.mark.parametrize(

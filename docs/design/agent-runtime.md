@@ -35,9 +35,13 @@ Skill、Ticket、代码或模型建议都是输入，不是授权。业务规则
 
 Brief 保留必需指导，不含凭据、连接配置或跨 Project 数据；已绑定项目文档库的最小登记引用遵循[资源投影](resource-snapshots.md#公开选择与读取投影的实施契约)。Checkpoint 可压缩上下文，但须保留原 transcript/source trace，不改用户事实或批准范围。
 
-Effect 成功确认为 APPLIED 时，同事务生成的下一 Segment checkpoint 带可选 `effect_result`：原 Effect/Proposal、after Evidence 引用及摘要、完整回读内容和 verification。Brief 保留并渲染这份原执行事实，不靠模型从引用或批准内容重建返回值；正文作为数据，不作为指令、当前外部状态或新写入权限。对象保存回执可含后续登记所需的 bucket/key/version/ETag，不含连接 endpoint 或凭据。该字段仅由平台 finalize 写入，模型的 propose/interaction checkpoint 不接受；失败续行不沿用上次回执，结果未知仍按效果协议停止。
+Effect 成功确认为 APPLIED 时，同事务生成的下一 Segment checkpoint 带可选 `effect_result`：原 Effect/Proposal、before/after Evidence 引用、after 摘要、完整回读内容和 verification。Brief 保留并渲染这份原执行事实，不靠模型从引用或批准内容重建返回值；正文作为数据，不作为指令、当前外部状态或新写入权限。最终 effects 的引用须来自对应原回执，不能用提案前的查询 Evidence 替代 before_ref；旧回执缺少该可选字段时保持原值并省略摘要中的 before_ref，仍由结果校验核对原执行的两份证据。对象保存回执可含后续登记所需的 bucket/key/version/ETag，不含连接 endpoint 或凭据。该字段仅由平台 finalize 写入，模型的 propose/interaction checkpoint 不接受；失败续行不沿用上次回执，结果未知仍按效果协议停止。
 
 回执采用规范 JSON、2 MiB 字节上限、原 Evidence hash 和共享敏感字段校验；超限或损坏拒绝交给 Agent，不截断为成功。每次仅携带本次回执，后续 checkpoint 通过既有事实和引用字段保存所需上下文。旧 checkpoint 缺少字段时保持原形，不补造历史值；无 summary 但有事实或引用时也必须渲染。API/Worker 须同步升级，旧 Worker 会丢弃新增字段，不能用于依赖返回值的完整业务验收。
+
+`change.propose/v1` 暂停后的 RESUME 先只读核对当前 Segment 的 trigger、原 Proposal/Effect 或拒绝/过期记录，再以原请求 fingerprint、SDK Session 和 transcript 中的 tool ID 匹配原调用。只有这个已处理调用通过普通 Tool 审计读取结果；新提案仍 defer，不经该路径创建 Proposal 或调用外部写入 Provider。未知效果、缺失或不匹配的回执拒绝恢复。原 transcript 保持不变，旧 `{status: "success", deferred: true}` 响应形状继续有效。
+
+固定 CLI 会在 deferred replay 后自动开始模型 turn，因此已处理调用返回 `deferred: false`、实际 outcome 和当前完整任务提示（含已冻结 Brief/回执），不再排队发送第二份 user prompt。原 tool_result 已保存的技术重试则使用通常 prompt 续行；缺少可核对的 transcript 不补造完成记录。此控制回复有独立 Evidence，仍受 Gateway 的敏感字段和大小限制。SDK 的 `tool_deferred_unavailable` 是引擎恢复失败，不能作为新提案再次入库。
 
 ## 自主执行等级
 
@@ -78,6 +82,8 @@ Skill 可推荐等级，system ADMIN 设置项目上限，发起人只能收窄�
 hook、Gateway、binding/Provider 和 Effect Worker 分担检查：注册 capability 与 Skill/Project/Run 权限、binding/scope/revision、参数与敏感字段、局部限额、apply 的批准。Run 累计限额仍待[共享预算](run-budgets.md)。
 
 固定 CLI 的 `StructuredOutput` 单独作为结果传输通道：hook 按冻结的结果 Schema 校验，只解析本地 Schema 引用；不授予资源或文件操作权限，也不创建资源 Tool 授权/审计。它的内部调用不投影为资源 Tool 事件，用量、最终结果和失败仍保留。结果仍是候选，须由 Worker 完成[业务 Schema、引用与结果校验](results-evaluation.md)后才能提交成功；其他内置或未注册 Tool 不因这个通道获准。
+
+兼容端点未返回 SDK structured output 时，Run 可将最终文本中的完整 JSON object 作为候选：允许整个对象被单个代码围栏包裹，或独立行对象前存在至多 4,096 字符且不含 JSON 容器符号、代码围栏的说明文字。带前言的路径记录为 `result_json_preamble_fallback`；不修复 JSON、不从说明中补字段，也不搜索嵌套对象来凑合通过。多个对象、数组、截断、后置正文或有歧义的前言均拒绝。候选仍经同一结果校验，历史失败 Run 不自动重写或重发外部操作；Skill 解释器的独立配置与解析规则保持不变。
 
 Provider 前校验请求，返回后校验 Schema/敏感信息/大小；失败内容不交 Agent，只留脱敏审计，禁止 bypassPermissions。另按[调用提交与重放](run-supervision.md#tool-调用的提交与重放)验证原 Worker 权限：首次许可一次消费，未决/失败不重跑，成功只读重放。
 

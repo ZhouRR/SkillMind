@@ -29,7 +29,7 @@
 
 新建 Run 的转换、单份元数据观察或目录分页来源明确冻结 `preparation_policy: on-demand/v1`，由完整来源摘要保护。准备阶段只将这些文档的原 ID、相对路径和 hash 写入 v2 文档 manifest 的 `deferred` 清单及索引，不下载或转换本文；同一文档与普通读取槽位重叠时，按需规则优先。Brief 的可选 `deferred_files` 与提示区分未取得、读取失败及不存在，实际取得仍须使用已授权 Tool 并验证原 bytes。没有该策略的旧来源和 v1 manifest 保持原物化方式；不在重试时补策略、改写 READY 或重取原集合。未知策略拒绝，按需清单仍受总量、当前执行权及完整文件回执校验。
 
-转换仅接收已冻结文档的 `.xlsx` / `.xls` 原 bytes，输入至多 8 MiB、Markdown 至多 1 MiB；ZIP 展开上限沿用共享解析器。Worker 固定 MarkItDown 0.1.7 的 Excel converter，不使用 URL 自动判定、远端服务或插件。专用子 process 不继承凭据环境，限制 CPU/地址空间，拒绝 socket 与再次启动子 process；30 秒期限或取消后终止并回收。该 process 边界用于资源与停止控制，不代表通用不可信代码沙箱。失败及超限整次报错，不静默截断。返回完整 Markdown、原文 hash、Markdown hash、转换器版本和 Evidence，并说明表格结构、图形及公式可能丢失，不推测原 Excel 坐标。
+转换仅接收已冻结文档的 `.xlsx` / `.xls` 原 bytes，输入至多 8 MiB、Markdown 至多 1 MiB；ZIP 展开上限沿用共享解析器。Worker 固定 MarkItDown 0.1.7，沿其 Excel 的表格转换方式生成 Markdown；共享适配器明确以文本读取单元格并关闭 pandas 默认缺失值识别，保留 `null`、`NA`、前导零和数值文本，避免将转换改写误判为规格缺陷。表格 Markdown 仍由 MarkItDown 生成，不在输出后猜测替换 `NaN`，也不使用 URL 自动判定、远端服务或插件。专用子 process 不继承凭据环境，限制 CPU/地址空间，拒绝 socket 与再次启动子 process；30 秒期限或取消后终止并回收。该 process 边界用于资源与停止控制，不代表通用不可信代码沙箱。失败及超限整次报错，不静默截断。返回完整 Markdown、原文 hash、Markdown hash、转换器版本和 Evidence，并说明表格结构、图形及公式可能丢失，不推测原 Excel 坐标。历史转换成果与 hash 保持不变，修正只作用于新的转换。
 
 需要保存转换原文时显式设置 `publish_artifact=true`，沿[可信附件发布](results-evaluation.md#可信附件的发布与读取)将同一 Markdown 字节留作备份来源；响应中的原 Artifact 引用、size/hash 供受控保存提案使用，模型不必重新写入全文。普通转换与输入前置条件不变，选项不意味着 MinIO 备份已完成。
 

@@ -19,6 +19,7 @@ from skillmind.agent.domain import (
     RunContext,
     RunLimits,
 )
+from skillmind.agent.evidence import EvidenceDraft
 from skillmind.agent.repository_provider import RepositoryReadProvider
 from skillmind.agent.repository_source import (
     RepositoryBindingRef,
@@ -45,6 +46,7 @@ from skillmind.agent.workspace_provider import (
     WorkspaceSearchProvider,
     WorkspaceWriteProvider,
 )
+from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.documents.library import (
     DOCUMENT_LIBRARY_REVISION,
     DOCUMENT_WRITE_CAPABILITY,
@@ -69,6 +71,7 @@ from skillmind.effects.release import ExecutionFeatures
 from skillmind.integrations.domain import ResourceBindingLevel, binding_checksum
 from skillmind.runs.domain import ClaimedRun
 from skillmind.runs.interaction import INTERACTION_REQUEST_CAPABILITY
+from skillmind.runs.proposal_continuation import ProposalContinuationReader
 from skillmind.skills.capability_blueprint import resolve_capability_blueprint
 from skillmind.skills.document_prerequisites import (
     DOCUMENT_READINESS_CAPABILITY,
@@ -312,14 +315,44 @@ class DeferredInteractionProvider:
 
 
 class DeferredChangeProposalProvider:
-    """Proposal control Tool が Provider 経由で effect を起こさないよう fail closed にする。"""
+    """新提案は拒否し、処理済みの原 control 呼出しだけを読取完了する。"""
 
     async def execute(
         self, context: RunToolContext, arguments: Mapping[str, Any]
     ) -> ProviderToolResult:
-        """Proposal は Worker transaction だけが保存できるため直接実行を拒否する。"""
+        """原要求へ最新 Brief を返す。Proposal 作成や外部 Provider 呼出しはしない。"""
 
-        del context, arguments
+        run = context.run
+        resolved = run.resolved_proposal if run is not None else None
+        if (
+            run is not None and resolved is not None
+            and context.run_id == run.run_id
+            and context.run_attempt_id == run.run_attempt_id
+            and context.project_id == run.project_id
+            and context.user_id == run.user_id
+            and context.tool.capability == CHANGE_PROPOSE_CAPABILITY
+            and resolved.matches(arguments, resolved.sdk_session_id)
+        ):
+            # CLI は deferred replay 後、queued user prompt より先に自動で再開する。
+            # その最初の model turn に確定回执と現 Brief を届け、古い段階の指示を使わせない。
+            response = {
+                "status": "success", "deferred": False,
+                "proposal_ref": resolved.proposal_ref, "outcome": resolved.outcome,
+                "continuation_prompt": run.prompt,
+                "task_brief_checksum": run.task_brief_checksum,
+            }
+            return ProviderToolResult(
+                response=response,
+                evidence=(EvidenceDraft(
+                    evidence_type="proposal_continuation",
+                    source_uri=f"run://{run.run_id}/proposals/{resolved.proposal_ref}",
+                    source_locator={"proposal_ref": resolved.proposal_ref},
+                    content_hash="sha256:" + sha256_hex(canonical_json(response)),
+                    metadata={"outcome": resolved.outcome,
+                              "task_brief_checksum": run.task_brief_checksum},
+                    excerpt="Read the original proposal outcome; no change was applied here.",
+                ),),
+            )
         raise ToolProviderError(
             "unavailable",
             "ChangeProposal request must be deferred by Skillmind",
@@ -377,11 +410,28 @@ def _interaction_tool_definition(contracts: ContractStore) -> ToolDefinition:
 def _change_propose_tool_definition(contracts: ContractStore) -> ToolDefinition:
     """Agent の提案を外部 write から切り離して Worker へ defer する control Tool。"""
 
+    # 直接登録しない Effect の payload 契約も、提案者が知る必要がある。
+    # Provider 側と別の形式を発明せず、既存契約の Agent 向け説明を再利用する。
+    payload_guidance = "\n".join(
+        str(contracts.load(f"tools/{capability}/request.schema.json")["description"])
+        for capability in ("database.write/v1", "document.write/v1")
+    )
     return ToolDefinition(
         capability=CHANGE_PROPOSE_CAPABILITY,
         description=(
             "Create a structured external change proposal; this never applies the change and "
-            "Skillmind independently validates approval and scope"
+            "Skillmind independently validates approval and scope. Use the exact intent key, "
+            "resource slot key, operation and declared risk from the task brief. "
+            "For database writes, first read using filters equal to the complete primary key, "
+            "columns=[] and offset=0; the result must be untruncated. INSERT requires no rows, "
+            "expected=null and revision=absent. UPDATE requires the complete observed row as "
+            "expected and its row_hashes entry as revision (not the response content_hash). "
+            "For UPDATE, copy the entire observed row unchanged into expected, including all "
+            "primary-key, generated/identity and null-valued fields. expected is a read-only "
+            "comparison snapshot, not the columns to write. Put primary-key fields in key "
+            "and exclude them from values; omit generated/identity columns from values only. "
+            "Include that exact read's Evidence reference. Rollback text does not authorize "
+            "DELETE or any other compensation.\n" + payload_guidance
         ),
         request_schema=contracts.load("tools/change.propose/v1/request.schema.json"),
         response_schema=contracts.load("tools/change.propose/v1/response.schema.json"),
@@ -457,6 +507,7 @@ class ProductionRunContextBuilder:
         database_writes_enabled: bool = False,
         document_writes_enabled: bool = False,
         document_library_target: DocumentLibraryTarget | None = None,
+        proposal_continuations: ProposalContinuationReader | None = None,
     ) -> None:
         """Workspace、Tool と model の Worker 起動時 snapshot を保持する。
 
@@ -469,6 +520,7 @@ class ProductionRunContextBuilder:
         self._model = model
         self._materializer = materializer
         self._document_library_target = document_library_target
+        self._proposal_continuations = proposal_continuations
         self._execution_features = ExecutionFeatures(
             deferred_features_enabled, database_writes_enabled, document_writes_enabled
         )
@@ -616,6 +668,10 @@ class ProductionRunContextBuilder:
             },
             task_brief=brief.brief,
             task_brief_checksum=brief.checksum,
+            resolved_proposal=(
+                await self._proposal_continuations.load(claimed_run)
+                if self._proposal_continuations is not None else None
+            ),
         )
 
 
@@ -670,9 +726,9 @@ def _resolve_source_tools(
     """Blueprint の resource_requirements と選択済み source から最小 Tool 集合を解決する。
 
     業務固有 capability には依存せず、blueprint の宣言順に要求を走査する。必須要求が未選択
-    なら fail closed とし、解決した capability は必ず permission snapshot の
-    allowed_capabilities に含まれていなければならない (Interpreter/Manifest が権限を拡大
-    できない不変条件を Runtime 側でも守る)。
+    なら fail closed とし、直接公開する Tool は必ず permission snapshot の
+    allowed_capabilities に含まれていなければならない。文書保存先は検証済み binding と
+    提案権限だけを要求し、apply capability を Agent 権限へ追加しない。
 
     併せて repository 種別の凍結 binding を requirement_key ごとに返す。物化 (計画 §19 W4) は
     この検証済み結果だけを入力とし、Run snapshot を再解釈しない。
@@ -703,13 +759,13 @@ def _resolve_source_tools(
                 raise ValueError("Required data source has no selected provider")
             continue
         capability, provider, integration_id, binding_id = selected_source
-        if capability not in allowed:
-            raise ValueError("Resolved Tool is not allowed by the permission snapshot")
         if capability == DOCUMENT_WRITE_CAPABILITY:
             # 保存先には読取 Tool がない。原 slot を検証しても直接 write 権限は渡さない。
             if CHANGE_PROPOSE_CAPABILITY not in allowed:
                 raise ValueError("Document library requires proposal permission")
             continue
+        if capability not in allowed:
+            raise ValueError("Resolved Tool is not allowed by the permission snapshot")
         if capability in EFFECT_CAPABILITIES:
             raise ValueError("Write capability cannot be exposed as a direct Agent Tool")
         requirement_key = requirement.get("key")

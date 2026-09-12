@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.db.models import (
     AgentSession,
     ChangeApproval,
@@ -26,6 +27,7 @@ from skillmind.effects.database_write import DATABASE_WRITE_PROVIDER_VERSION
 from skillmind.effects.release import ExecutionFeatures
 from skillmind.runs.domain import lease_token_hash
 from skillmind.runs.repository import RunRepository
+from skillmind.skills.task_catalog import _allowed_capabilities
 from tests.effects.database_fixtures import database_execution
 
 
@@ -50,7 +52,7 @@ class AuthorizationHarness:
             status="WAITING_FOR_APPROVAL",
             permission_snapshot_json={
                 "actor_id": str(actor_id),
-                "allowed_capabilities": [c.capability_version],
+                "allowed_capabilities": [],
             },
         )
         self.segment = SimpleNamespace(id=c.run_segment_id, run_id=c.run_id, status="WAITING")
@@ -69,6 +71,9 @@ class AuthorizationHarness:
             target_binding_id=c.binding_id,
             integration_id=c.integration_id,
             capability_version=c.capability_version,
+            skill_version_id=uuid4(),
+            effect_intent_key="save_record",
+            risk_level="MEDIUM",
             operation=c.operation,
             target_json=deepcopy(c.target),
             preview_json={"changes": deepcopy(list(c.changes))},
@@ -101,7 +106,9 @@ class AuthorizationHarness:
             lease_token_hash=lease_token_hash(c.lease_token),
             lease_expires_at=c.lease_expires_at,
         )
-        self.binding = SimpleNamespace(id=c.binding_id, scope_json=deepcopy(c.integration_scope))
+        self.binding = SimpleNamespace(
+            id=c.binding_id, requirement_key="records", scope_json=deepcopy(c.integration_scope)
+        )
         self.integration = SimpleNamespace(
             id=c.integration_id,
             provider=c.provider,
@@ -135,8 +142,43 @@ class AuthorizationHarness:
         self.repository._lock_run_row = AsyncMock(side_effect=self.lock_run)
         self.repository._lock_segment_row = AsyncMock(side_effect=self.lock_segment)
         self.repository.is_cancellation_requested = AsyncMock(return_value=False)
-        # 既存の checksum/Blueprint validator は別の回帰対象。本検証は追加した段階判定に限定。
+        # 既存の checksum/binding validator は別の回帰対象。本検証は段階判定に限定。
         self.repository._validate_proposal_row = AsyncMock()
+        self.freeze_skill_snapshot()
+
+    def freeze_skill_snapshot(self):
+        """本番 catalog から Agent 許可を導出し、apply を含まない原版 snapshot を固定する。"""
+
+        p = self.proposal
+        read_capability = p.capability_version.replace(".write/", ".read/")
+        manifest = {
+            "tools": [
+                {"capability": "change.propose/v1", "required": True},
+                {"capability": read_capability, "required": True},
+            ],
+            "capability_blueprint": {
+                "resource_requirements": [{
+                    "key": self.binding.requirement_key, "kind": "other", "access": "write",
+                    "capabilities": [p.capability_version],
+                }],
+                "effect_intents": [{
+                    "key": p.effect_intent_key, "mode": "apply", "approval_mode": "ask",
+                    "resource_key": self.binding.requirement_key, "operation": p.operation,
+                    "risk": p.risk_level.lower(),
+                }],
+            },
+        }
+        checksum = f"sha256:{sha256_hex(canonical_json(manifest))}"
+        self.run.task_snapshot_json = {
+            "skill_version_id": str(p.skill_version_id), "manifest_checksum": checksum,
+            "skill_snapshots": [{
+                "skill_version_id": str(p.skill_version_id), "manifest_checksum": checksum,
+                "manifest": manifest,
+            }],
+        }
+        self.run.permission_snapshot_json["allowed_capabilities"] = list(
+            _allowed_capabilities(manifest)
+        )
 
     async def get(self, entity, identity, **kwargs):
         """原 identity を変更せず現在の model double を取得する。"""

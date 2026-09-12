@@ -10,7 +10,11 @@ from uuid import uuid4
 
 import pytest
 
-from skillmind.agent.claude import ClaudeRuntimeConfiguration, build_claude_agent_options
+from skillmind.agent.claude import (
+    _AGENT_ENVIRONMENT_KEYS,
+    ClaudeRuntimeConfiguration,
+    build_claude_agent_options,
+)
 from skillmind.agent.claude_build import bundled_claude_build
 from skillmind.agent.compatibility import probe_claude_agent_sdk
 from skillmind.agent.domain import RegisteredTool, RunContext, RunLimits, RunWorkspace
@@ -208,6 +212,43 @@ def test_runtime_environment_does_not_forward_unlisted_values(
 
     assert configuration.environment["ANTHROPIC_AUTH_TOKEN"] == "test-token"
     assert "SKILLMIND_DATABASE_URL" not in configuration.environment
+
+
+@pytest.mark.parametrize("environment_value,fallback_value,expected", [
+    ("64000", "32000", "64000"),
+    (None, "64000", "64000"),
+    ("", "64000", None),
+    (None, None, None),
+])
+def test_output_token_limit_reaches_run_without_restoring_blank_or_unlisted_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    environment_value: str | None, fallback_value: str | None, expected: str | None,
+) -> None:
+    """明示環境を fallback より優先し、単一応答上限だけを Run の隔離環境へ通す。"""
+
+    key = "CLAUDE_CODE_MAX_OUTPUT_TOKENS"
+    for allowed_key in _AGENT_ENVIRONMENT_KEYS:
+        monkeypatch.delenv(allowed_key, raising=False)
+    if environment_value is not None:
+        monkeypatch.setenv(key, environment_value)
+    monkeypatch.setenv("SKILLMIND_DATABASE_URL", "fixture-private-connection")
+    monkeypatch.setenv("CLAUDE_CODE_MAX_RETRIES", "99")
+    configuration = ClaudeRuntimeConfiguration.from_environ(
+        fallback={key: fallback_value, "SKILLMIND_DATABASE_URL": "fixture-private-fallback"}
+    )
+    assert configuration.environment == ({key: expected} if expected is not None else {})
+    options = build_claude_agent_options(
+        _run_context(tmp_path),
+        mcp_server={"type": "sdk", "name": "skillmind", "instance": object()},
+        configuration=configuration,
+    )
+    if expected is None:
+        assert not options.env.get(key)
+    else:
+        assert options.env[key] == expected
+    assert options.env["SKILLMIND_DATABASE_URL"] == ""
+    assert options.env["CLAUDE_CODE_MAX_RETRIES"] == ""
+    assert "fixture-private" not in str(options.env)
 
 
 def test_anthropic_model_is_the_primary_model_source(

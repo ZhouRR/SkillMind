@@ -10,6 +10,8 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.exc import OperationalError
+
 from skillmind.effects.database_write import (
     build_database_write,
     database_row_revision,
@@ -23,7 +25,6 @@ from skillmind.effects.postgres_write import (
     lookup_database_write,
 )
 from skillmind.effects.proposal import parse_change_proposal_request
-from sqlalchemy.exc import OperationalError
 
 
 def command(**overrides):
@@ -60,7 +61,9 @@ def test_public_proposal_parser_preserves_database_row_and_checkpoint(operation:
         Path(__file__).resolve().parents[3] / "contracts/examples/change-propose-request.v1.json"
     )
     request = json.loads(example.read_text())
-    expected = None if operation == "INSERT" else {"id": "record-1", "status": "RUNNING"}
+    expected = None if operation == "INSERT" else {
+        "id": "record-1", "status": "RUNNING", "generated_state": None,
+    }
     original = command(operation=operation, expected=expected)
     request.update(
         effect_intent_key="save_record",
@@ -89,6 +92,7 @@ def test_public_proposal_parser_preserves_database_row_and_checkpoint(operation:
     )
     assert payload["expected"] == expected
     assert payload["key"] == original.key
+    assert "generated_state" not in payload["values"]
     assert draft.checkpoint == request["checkpoint"]
 
 
@@ -109,6 +113,7 @@ def test_public_proposal_parser_preserves_database_row_and_checkpoint(operation:
         {"values": {"result": float("nan")}},
         {"values": {"status": "x" * 1_048_576}},
         {"operation": "UPDATE", "expected": None},
+        {"operation": "UPDATE", "expected": {"status": "RUNNING", "generated_state": None}},
         {"expected": {"id": "record-1"}},
         {
             "scope": {

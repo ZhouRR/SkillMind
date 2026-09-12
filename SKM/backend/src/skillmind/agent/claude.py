@@ -41,6 +41,7 @@ _AGENT_ENVIRONMENT_KEYS = (
     "ANTHROPIC_DEFAULT_HAIKU_MODEL",
     "CLAUDE_CODE_SUBAGENT_MODEL",
     "CLAUDE_CODE_EFFORT_LEVEL",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
 )
 _SAFE_INHERITED_ENVIRONMENT_KEYS = frozenset(
     {
@@ -210,7 +211,18 @@ def build_claude_agent_options(
                 }
             }
         tool_name = str(input_data.get("tool_name", ""))
-        if tool_name in deferred_tool_names:
+        resolved = context.resolved_proposal
+        resolved_proposal = (
+            tool_name == "mcp__skillmind__change_propose_v1"
+            and resolved is not None
+            and resolved.tool_use_id is not None
+            and resolved.tool_use_id == (input_data.get("tool_use_id") or _tool_use_id)
+            and resolved.matches(
+                cast(dict[str, Any], input_data.get("tool_input", {})),
+                str(input_data.get("session_id", "")),
+            )
+        )
+        if tool_name in deferred_tool_names and not resolved_proposal:
             # Interaction 等の control Tool は Provider を実行せず、SDK Result に検証済み入力を
             # 引き渡して Worker transaction で待機状態へ確定する。
             return {

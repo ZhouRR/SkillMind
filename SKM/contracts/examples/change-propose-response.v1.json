@@ -1,0 +1,9 @@
+{
+  "status": "success",
+  "deferred": false,
+  "proposal_ref": "cp_reviewed_change",
+  "outcome": "REJECTED",
+  "continuation_prompt": "The original proposal was rejected. Continue within the frozen task scope; no external change was applied.",
+  "task_brief_checksum": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "evidence_refs": ["ev_original_proposal_outcome"]
+}

@@ -214,6 +214,7 @@ def _build(
     blueprint: dict[str, Any] | None = None,
     materialized: Sequence[MaterializedResource] = (),
     checkpoint: dict[str, Any] | None = None,
+    segment_no: int = 1,
 ) -> Any:
     """既定の Run snapshot から Brief を組み立てる。"""
 
@@ -227,6 +228,7 @@ def _build(
         limits=_limits(),
         materialized=materialized,
         checkpoint=checkpoint,
+        segment_no=segment_no,
     )
 
 
@@ -300,6 +302,22 @@ def test_brief_freezes_identity_of_the_interpretation_it_came_from() -> None:
     assert identity["blueprint_checksum"] == blueprint_checksum
 
 
+def test_prompt_distinguishes_new_run_from_its_later_segments() -> None:
+    """凍結段番号を描画し、対象一致による他 Run の ID 再利用を防ぐ。"""
+    first = _build()
+    initial = render_task_brief_prompt(first.brief, input_json={}, output_schema={})
+    resumed = render_task_brief_prompt(_build(segment_no=2).brief, input_json={}, output_schema={})
+    assert str(RUN_ID) in initial
+    assert '"segment_no":1' in initial
+    assert "initial segment of this Run" in initial
+    assert "Do not adopt another execution's IDs" in initial
+    assert '"segment_no":2' in resumed
+    assert "later segment of the same Run" in resumed
+    assert "preserving its business execution IDs" in resumed
+    assert "initial segment" not in resumed
+    assert first.checksum == "sha256:" + sha256_hex(canonical_json(first.brief))
+
+
 def test_brief_separates_safe_proposal_from_external_apply() -> None:
     """Propose は成果物まで許可し、apply 宣言を外部 write 権限にしない。
 
@@ -333,6 +351,23 @@ def test_brief_binds_only_resources_the_run_selected() -> None:
         "binding_source": "RUN_PREFLIGHT",
     }
     assert resources["review_tracker"]["binding"] is None
+
+
+def test_prompt_preserves_exact_effect_identity_and_resource_slots() -> None:
+    """Brief に保存した提案の識別子を prompt で操作名だけへ縮約しない。"""
+    compiled = _build()
+    prompt = render_task_brief_prompt(compiled.brief, input_json={}, output_schema={})
+    decoder = json.JSONDecoder()
+    intents, _ = decoder.raw_decode(prompt.split("Frozen apply intent declarations (JSON): ")[1])
+    assert intents == [{
+        "key": "update-tracker", "resource_key": "review_tracker",
+        "operation": "Record the review outcome on the tracked issue.", "risk": "medium",
+    }]
+    resources, _ = decoder.raw_decode(prompt.split("Frozen resource slots (JSON): ")[1])
+    assert resources == compiled.brief["resources"]
+    assert resources[1]["binding"] is None
+    assert "risk_level is the declared risk in uppercase" in prompt
+    assert "never a permission or an approval" in prompt
 
 
 def test_brief_lists_only_tools_resolved_for_the_run() -> None:

@@ -62,6 +62,8 @@ async def test_finalized_original_readback_reaches_next_segment_prompt(capabilit
     assert confirmed["effect_execution_id"] == str(h.execution.id)
     assert confirmed["proposal_ref"] == h.proposal.proposal_ref
     assert confirmed["capability_version"] == capability
+    assert confirmed["before_ref"] == h.execution.before_ref
+    assert confirmed["before_ref"] != confirmed["after_ref"]
     assert confirmed["after_ref"] == after.evidence_ref
     assert confirmed["after"] == after.metadata_json["snapshot"] == content
     assert confirmed["after_content_hash"] == after.content_hash
@@ -71,6 +73,7 @@ async def test_finalized_original_readback_reaches_next_segment_prompt(capabilit
     prompt = render_task_brief_prompt(brief, input_json={}, output_schema={})
     assert canonical_json(confirmed) in prompt
     assert "not the current remote state" in prompt
+    assert "is not its before_ref, even if the row contents are identical" in prompt
     assert h.proposal.checkpoint_json == original_checkpoint
     content[next(iter(content))]["changed"] = "after-finalization"
     assert confirmed["after"] == original_content
@@ -108,6 +111,47 @@ def test_unsuccessful_continuation_does_not_reuse_previous_receipt(outcome):
     assert "effect_result" not in segment.checkpoint_json
 
 
+def test_rejection_feedback_reaches_next_brief_without_mutating_proposal():
+    """却下理由を元提案と結んで伝え、拒否を全工程中断や新規許可へ読み替えない。"""
+    h = harness()
+    del h.repository._next_effect_segment
+    h.proposal.checkpoint_json = {"summary": "Proposed final update.", "confirmed_facts": []}
+    h.proposal.continuation_mode = "resume"
+    original = deepcopy(h.proposal.checkpoint_json)
+    reason = 'Finish the required saved report first.\nKeep the existing record.'
+    approval_id = uuid4()
+    segment = h.repository._next_effect_segment(
+        run=h.run, segment=h.segment, proposal=h.proposal,
+        trigger_ref=approval_id, outcome="REJECTED", now=datetime.now(UTC),
+        rejection_reason=reason,
+    )
+    assert segment.trigger_ref == approval_id
+    assert "effect_result" not in segment.checkpoint_json
+    assert h.proposal.checkpoint_json == original
+    brief = _build(checkpoint=segment.checkpoint_json).brief
+    Draft202012Validator(_brief_schema(), format_checker=FormatChecker()).validate(brief)
+    prompt = render_task_brief_prompt(brief, input_json={}, output_schema={})
+    facts = brief["checkpoint"]["confirmed_facts"]
+    assert facts[-1] == (
+        f"User rejection feedback for ChangeProposal {h.proposal.proposal_ref} "
+        f"(not write permission): {canonical_json(reason)}"
+    )
+    assert canonical_json(brief["checkpoint"]) in prompt
+
+
+def test_non_rejection_cannot_carry_rejection_feedback():
+    """失効や失敗の checkpoint に別の拒否理由を混入させない。"""
+    h = harness()
+    del h.repository._next_effect_segment
+    h.proposal.checkpoint_json = {}
+    with pytest.raises(ValueError, match="Only a rejection"):
+        h.repository._next_effect_segment(
+            run=h.run, segment=h.segment, proposal=h.proposal,
+            trigger_ref=uuid4(), outcome="STALE", now=datetime.now(UTC),
+            rejection_reason="Feedback for another outcome",
+        )
+
+
 @pytest.mark.parametrize("field,value", [
     ("confirmed_facts", ["Original record was saved."]),
     ("evidence_refs", ["ev_saved"]),
@@ -139,6 +183,18 @@ def test_effect_result_contract_matches_runtime_and_legacy_checkpoint_omits_fiel
     """公開 contract と同一規則を使い、旧 checkpoint の値/checksum を増補しない。"""
     assert _brief_schema()["$defs"]["effectResult"] == EFFECT_RESULT_SCHEMA
     assert "effect_result" not in _checkpoint({})
+
+
+def test_legacy_receipt_without_before_ref_is_preserved():
+    """旧回执の checksum を変えず、未知の前態参照を補造しない。"""
+    legacy = receipt()
+    legacy.pop("before_ref")
+    assert validated_effect_result(legacy) == legacy
+    assert _checkpoint({"effect_result": legacy})["effect_result"] == legacy
+    brief = _build(checkpoint={"effect_result": legacy}).brief
+    Draft202012Validator(_brief_schema(), format_checker=FormatChecker()).validate(brief)
+    prompt = render_task_brief_prompt(brief, input_json={}, output_schema={})
+    assert "If an older receipt omits before_ref, omit that optional field" in prompt
 
 
 @pytest.mark.parametrize("invalid", ["hash", "sensitive", "oversize", "status", "shape"])

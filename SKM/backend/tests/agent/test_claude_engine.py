@@ -316,7 +316,7 @@ def test_message_mapper_promotes_single_fenced_json_result(tmp_path: Path) -> No
 
 
 def test_message_mapper_does_not_promote_markdown_result(tmp_path: Path) -> None:
-    """fence 除去以外の Markdown 推測変換は行わず、validator が失敗を報告できる形を保つ。"""
+    """JSON にできない本文は推測変換せず、validator が失敗を報告できる形を保つ。"""
 
     context = _run_context(tmp_path)
     session_id = str(uuid4())
@@ -327,6 +327,11 @@ def test_message_mapper_does_not_promote_markdown_result(tmp_path: Path) -> None
         "```python\nprint('hello')\n```",
         # 前後に本文が付く fence は「単一 fence が全体を包む」条件を満たさない。
         '結果は以下です。\n```json\n{"issue": {}}\n```',
+        'First candidate: {}\n{"issue": {}}',
+        'Results: [\n{"issue": {}}\n]',
+        'Done.\n{"issue": {}}\n{"issue": {}}',
+        'Done.\n{"issue": {}}\nMore commentary.',
+        'Done.\n{"issue": {"incomplete":',
     ):
         message = _result(session_id)
         message.structured_output = None
@@ -337,6 +342,25 @@ def test_message_mapper_does_not_promote_markdown_result(tmp_path: Path) -> None
         assert result.payload["structured_output"] is None
         assert result.payload["result"] == raw
     assert "structured_output_source" not in result.payload
+
+
+def test_message_mapper_accepts_json_after_unambiguous_progress_text(tmp_path: Path) -> None:
+    """原 JSON object を変更せず昇格し、前言を除いた経路を監査に残す。"""
+
+    context = _run_context(tmp_path)
+    session_id = str(uuid4())
+    mapper = ClaudeMessageMapper(context, session_id)
+    message = _result(session_id)
+    message.structured_output = None
+    expected = {"issue": {"id": "fixture-001", "detail": "literal { braces }"}}
+    message.result = "All controlled effects are APPLIED. Returning the outcome.\n\n" + (
+        json.dumps(expected)
+    )
+
+    result = mapper.map(message)[-1]
+
+    assert result.payload["structured_output"] == expected
+    assert result.payload["structured_output_source"] == "result_json_preamble_fallback"
 
 
 @pytest.mark.asyncio

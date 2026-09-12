@@ -24,6 +24,14 @@ export type DocumentPreviewKind = 'text' | 'html' | 'markdown'
 /** 拡張子 → preview 種別の登録表。未登録拡張子は preview 対象外(download のみ)。 */
 const DOCUMENT_PREVIEWERS: Record<string, DocumentPreviewKind> = {
   txt: 'text',
+  json: 'text',
+  jsonl: 'text',
+  csv: 'text',
+  tsv: 'text',
+  log: 'text',
+  yaml: 'text',
+  yml: 'text',
+  xml: 'text',
   md: 'markdown',
   markdown: 'markdown',
   html: 'html',

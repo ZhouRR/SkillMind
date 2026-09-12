@@ -92,11 +92,23 @@ class ClaudeCompletionClient:
             include_partial_messages=on_text_delta is not None,
         )
         text_parts: list[str] = []
+        text_message_id: str | None = None
         structured: Mapping[str, Any] | None = None
         truncated = False
+        last_assistant_error: object = None
         try:
             async for message in query(prompt=user_message, options=options):
                 if isinstance(message, AssistantMessage):
+                    # CLI の max_output_tokens は SDK の古い Literal 型に未登録だが、parser は保持。
+                    last_assistant_error = message.error
+                    message_id = message.message_id
+                    if not isinstance(message_id, str) or not message_id.strip():
+                        message_id = None
+                    # 同じ API 応答の block だけを結合する。再生成の thinking 首 block でも
+                    # 旧本文を捨て、ID 不明の message は毎回独立させて打切り本文を混ぜない。
+                    if message_id is None or message_id != text_message_id:
+                        text_parts.clear()
+                    text_message_id = message_id
                     text_parts.extend(
                         block.text for block in message.content if isinstance(block, TextBlock)
                     )
@@ -106,16 +118,26 @@ class ClaudeCompletionClient:
                         await on_text_delta(delta)
                 elif isinstance(message, ResultMessage):
                     if message.subtype in _STRUCTURED_OUTPUT_FAILURE_SUBTYPES:
-                        _log_result_failure(message.subtype, "structured_output_unavailable")
+                        _log_result_failure(message, "structured_output_unavailable")
                         raise ModelStructuredOutputError(str(message.subtype))
-                    if message.is_error and message.subtype not in _TRUNCATED_SUBTYPES:
-                        _log_result_failure(message.subtype, "provider_error")
-                        raise ModelProviderError(str(message.subtype))
-                    if (
+                    # SDK 内の途中打切りを最終失敗と混同せず、HTTP/他の失敗を優先する。
+                    result_truncated = message.api_error_status is None and (
                         message.subtype in _TRUNCATED_SUBTYPES
-                        or message.stop_reason in _TRUNCATED_STOP_REASONS
-                    ):
-                        _log_result_failure(message.subtype, "truncated_output")
+                        or (
+                            message.subtype == "success"
+                            and (
+                                message.stop_reason in _TRUNCATED_STOP_REASONS
+                                or (
+                                    message.is_error and last_assistant_error == "max_output_tokens"
+                                )
+                            )
+                        )
+                    )
+                    if message.is_error and not result_truncated:
+                        _log_result_failure(message, "provider_error")
+                        raise ModelProviderError(str(message.subtype))
+                    if result_truncated:
+                        _log_result_failure(message, "truncated_output")
                         truncated = True
                     structured = _structured_output(message)
         except ClaudeSDKError as error:
@@ -140,13 +162,20 @@ class ClaudeCompletionClient:
         )
 
 
-def _log_result_failure(subtype: str, error_code: str) -> None:
-    """既知 enum だけを診断に使い、未登録 subtype や result/errors 本文を出力しない。"""
+def _log_result_failure(message: ResultMessage, error_code: str) -> None:
+    """既知 enum と有効な HTTP 状態だけを使い、result/errors 本文を出力しない。"""
+
+    subtype = message.subtype
+    api_error_status = message.api_error_status
 
     log_event(
         logger, logging.WARNING, "skill.interpret.completion_diagnostic",
         error_code=error_code,
         provider_result_subtype=subtype if subtype in _KNOWN_ERROR_SUBTYPES else "unrecognized",
+        provider_api_error_status=(
+            api_error_status
+            if type(api_error_status) is int and 100 <= api_error_status <= 599 else None
+        ),
     )
 
 

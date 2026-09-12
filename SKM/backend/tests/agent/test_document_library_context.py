@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
+
 from skillmind.agent.context_builder import (
     ContractStore,
     ProductionRunContextBuilder,
@@ -20,6 +21,7 @@ from skillmind.agent.workspace import WorkspaceManager
 from skillmind.agent.workspace_materializer import WorkspaceMaterializer
 from skillmind.core.hashing import canonical_json
 from skillmind.documents.library import FrozenDocumentLibraryBinding
+from skillmind.skills.task_catalog import _allowed_capabilities
 from tests.agent.input_fakes import MemoryInputSnapshots
 from tests.agent.test_runtime_context import (
     CONTRACTS,
@@ -36,7 +38,7 @@ def library_run(*, with_input=False, requirement_changes=None, operation="CREATE
     """Skill 固有の内容を使わず、原 Run/Project に結び付いた保存 slot を作る。"""
 
     manifest = _document_manifest()
-    capabilities = ["document.write/v1", "change.propose/v1"]
+    capabilities = ["change.propose/v1"]
     if with_input:
         capabilities.append("document.read/v1")
     else:
@@ -62,7 +64,10 @@ def library_run(*, with_input=False, requirement_changes=None, operation="CREATE
             "risk": "low",
         }
     ]
-    claimed = _generic_claimed(manifest=manifest, allowed=tuple(capabilities), selected_sources={})
+    # 実 catalog と同じく apply は Agent 権限へ含めず、保存 slot にだけ宣言する。
+    claimed = _generic_claimed(
+        manifest=manifest, allowed=_allowed_capabilities(manifest), selected_sources={}
+    )
     library = target()
     claimed.selected_sources_json["outputs"] = FrozenDocumentLibraryBinding(
         claimed.project_id, claimed.run_id, uuid4(), "outputs", library
@@ -93,6 +98,7 @@ async def test_library_only_context_exposes_proposal_without_reading_documents(t
     """空文書庫でも保存先を解決し、読取/直接 write/子 Agent を登録しない。"""
 
     claimed, library = library_run()
+    assert claimed.permission_snapshot_json["allowed_capabilities"] == ["change.propose/v1"]
     source = AsyncMock()
     inventory = _FakeInventory([document_content()])
     materializer = WorkspaceMaterializer(
@@ -179,6 +185,7 @@ async def test_input_and_library_context_materializes_only_selected_input(tmp_pa
         "extra-slot",
         "missing-selection",
         "no-proposal",
+        "unknown-capability",
     ],
 )
 async def test_invalid_library_context_stops_before_materialization(tmp_path: Path, mutation):
@@ -210,6 +217,8 @@ async def test_invalid_library_context_stops_before_materialization(tmp_path: Pa
         claimed.selected_sources_json.clear()
     elif mutation == "no-proposal":
         claimed.permission_snapshot_json["allowed_capabilities"].remove("change.propose/v1")
+    elif mutation == "unknown-capability":
+        claimed.selected_sources_json["outputs"]["capability"] = "document.unknown/v1"
     materializer = AsyncMock(spec=WorkspaceMaterializer)
     with pytest.raises(ValueError):
         await builder(tmp_path, library, enabled=enabled, materializer=materializer).build(

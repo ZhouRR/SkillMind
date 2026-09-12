@@ -26,6 +26,7 @@ EFFECT_RESULT_SCHEMA: dict[str, Any] = {
             "type": "string", "pattern": "^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$",
         },
         "status": {"const": "APPLIED"},
+        "before_ref": {"type": "string", "pattern": "^ev_[a-zA-Z0-9_-]+$"},
         "after_ref": {"type": "string", "pattern": "^ev_[a-zA-Z0-9_-]+$"},
         "after_content_hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
         "after": {"type": "object"},

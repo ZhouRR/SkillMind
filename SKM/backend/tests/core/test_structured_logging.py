@@ -8,6 +8,7 @@ import logging
 from uuid import uuid4
 
 import pytest
+
 from skillmind.core.logging import JsonLogFormatter, log_event
 
 
@@ -113,6 +114,7 @@ def test_interpretation_diagnostics_keep_correlation_without_unregistered_conten
             **identity, execution_key="sha256:" + "a" * 64, attempt=1,
             error_code="invalid_json", provider_error_kind="ProcessError",
             provider_exit_code=17, provider_result_subtype="error_during_execution",
+            provider_api_error_status=429,
             stderr="fixture-private-stderr", errors=["fixture-private-error"],
             result="fixture-private-result", password="fixture-private-password",
         )
@@ -125,4 +127,5 @@ def test_interpretation_diagnostics_keep_correlation_without_unregistered_conten
     assert payload["provider_error_kind"] == "ProcessError"
     assert payload["provider_exit_code"] == 17
     assert payload["provider_result_subtype"] == "error_during_execution"
+    assert payload["provider_api_error_status"] == 429
     assert "fixture-private" not in serialized

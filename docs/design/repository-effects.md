@@ -25,7 +25,7 @@ observe → Evidence → change.propose → 精确批准/允许的预授权
   → TX 3：结果 / Evidence / 事件 / 后续调度
 ```
 
-锁序 Run → Segment → Proposal → Effect，远端 I/O 在锁外，无跨 DB/仓库/forge 原子性。拒绝不产生可执行 Effect；批准后 Run 可仍 WAITING_FOR_APPROVAL，Effect Worker 独立执行。
+锁序 Run → Segment → Proposal → Effect，远端 I/O 在锁外，无跨 DB/仓库/forge 原子性。拒绝不产生可执行 Effect；同事务生成的下一 Segment 将原批准记录的拒绝理由连同提案引用传入 Brief，作为用户反馈，不作为新的写入许可或业务事实。旧检查点不补写理由。批准后 Run 可仍 WAITING_FOR_APPROVAL，Effect Worker 独立执行。
 
 有效 finalize 的结果/不可重试失败交新 Segment，临时失败沿原 Segment/Proposal/Effect 重调度。Agent 仅提案；[catalog](../../SKM/backend/src/skillmind/effects/catalog.py)统一 Provider/validator/预授权资格。
 

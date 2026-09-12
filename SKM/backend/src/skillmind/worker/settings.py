@@ -78,6 +78,7 @@ from skillmind.effects.wiring import create_effect_provider_registry
 from skillmind.integrations.secrets import DeploymentSecretResolver
 from skillmind.runs.domain import PendingOutboxMessage
 from skillmind.runs.outbox import OutboxRelay
+from skillmind.runs.proposal_continuation import ProposalContinuationReader
 from skillmind.runs.realtime import RedisPublisher, RedisRunRealtimePublisher
 from skillmind.runs.repository_inputs import PostgresInputSnapshotStore
 from skillmind.runs.service import RunService
@@ -254,6 +255,7 @@ async def startup(ctx: dict[str, Any]) -> None:
         database_writes_enabled=features.database_writes,
         document_writes_enabled=features.document_writes,
         document_library_target=document_library_target,
+        proposal_continuations=ProposalContinuationReader(ctx["database_session_factory"]),
     )
     engine = ClaudeAgentSdkEngine(
         mcp_server_factory=create_authorized_runtime,
