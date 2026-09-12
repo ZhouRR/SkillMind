@@ -21,6 +21,7 @@ from skillmind.db.models import (
     ProjectComposition,
     ProjectDocument,
     ProjectDocumentCleanup,
+    ProjectDocumentEffectUpload,
     ProjectDocumentUpload,
     ProjectMember,
     ProjectMemberEvent,
@@ -336,7 +337,10 @@ class ProjectRepository:
                 blockers=("member_audit_exists",),
             )
         # 新旧目録と清理/原 upload の監査は設定ではない。どれか一件でもあれば保全する。
-        for document_model in (ProjectDocumentUpload, ProjectDocumentCleanup, ProjectDocument):
+        for document_model in (
+            ProjectDocumentUpload, ProjectDocumentCleanup,
+            ProjectDocument, ProjectDocumentEffectUpload,
+        ):
             if await self._session.scalar(select(exists().where(
                 document_model.project_id == project_id,
             ))):

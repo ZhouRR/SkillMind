@@ -1,0 +1,4 @@
+{
+  "path": "specs/cases.xlsx",
+  "purpose": "Observe storage modification time before selecting review inputs."
+}

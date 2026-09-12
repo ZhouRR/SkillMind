@@ -27,7 +27,10 @@ def source(snapshot: Any) -> dict[str, Any]:
 
 
 @pytest.mark.parametrize("mode", ["SINGLE", "SET", "ALL"])
-def test_projection_uses_only_original_metadata_and_does_not_mutate_it(mode: str) -> None:
+@pytest.mark.parametrize("capability", ["document.read/v1", "document.convert/v1"])
+def test_projection_uses_only_original_metadata_and_does_not_mutate_it(
+    mode: str, capability: str,
+) -> None:
     """清単の公開は source の照会・hash 書換え・歴史補填を行わない。"""
 
     project = uuid4()
@@ -35,7 +38,7 @@ def test_projection_uses_only_original_metadata_and_does_not_mutate_it(mode: str
     if mode != "SINGLE":
         items.append(document_content(name="second.md"))
     snapshot = replace(document_snapshot(project, items), selection_mode=mode)
-    sources = {"config": source(snapshot.to_json())}
+    sources = {"config": {**source(snapshot.to_json()), "capability": capability}}
     before = deepcopy(sources)
     result = document_snapshots(sources, project_id=project)
     assert result[0].status == "FROZEN"

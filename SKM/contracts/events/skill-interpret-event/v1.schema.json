@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.skillmind.local/events/skill-interpret-event/v1.schema.json",
   "title": "Skillmind SkillInterpretEvent v1",
-  "description": "Skill interpret/adjust の非永続な進行 event。SSE 表示専用で正本は skill_interpretations。",
+  "description": "Skill 解釈の進行通知。要求/結果の正本は DB。SSE 終態は原要求から再確認し、disconnected は持久 FAILED を意味しない。",
   "type": "object",
   "additionalProperties": false,
   "required": ["event", "execution_key", "occurred_at", "data"],
@@ -14,7 +14,9 @@
         "interpret.prompt",
         "interpret.delta",
         "interpret.completed",
-        "interpret.failed"
+        "interpret.failed",
+        "interpret.unknown",
+        "interpret.disconnected"
       ]
     },
     "execution_key": {

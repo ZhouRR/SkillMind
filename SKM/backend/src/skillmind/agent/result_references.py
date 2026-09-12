@@ -22,6 +22,7 @@ from skillmind.db.models import (
     ToolCall,
 )
 from skillmind.effects.catalog import EFFECT_CAPABILITIES
+from skillmind.effects.outcomes import effect_requires_reconciliation
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,7 +180,8 @@ def _matches_claim(
         "APPLIED": {"APPLIED"}, "STALE": {"STALE"},
         "FAILED": {"FAILED", "VERIFICATION_FAILED"},
     }.get(proposal.status, set())
-    if execution.status not in expected_execution:
+    if (execution.status not in expected_execution
+        or effect_requires_reconciliation(execution.error_json)):
         return False
     if (claim.before_ref is not None and claim.before_ref != execution.before_ref) or (
         claim.after_ref is not None and claim.after_ref != execution.after_ref

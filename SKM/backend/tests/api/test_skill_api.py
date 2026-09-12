@@ -167,8 +167,8 @@ def test_assisted_skill_draft_requires_warning_acceptance(client: TestClient) ->
     assert publish.json()["code"] == "skill_publish_gate_failed"
 
 
-def test_interpret_skill_source_queues_worker_job(client: TestClient) -> None:
-    """保存済み source の interpret が Worker job を投入し、queued 受理を返す。"""
+def test_interpret_skill_source_accepts_original_request(client: TestClient) -> None:
+    """保存済み source の interpret が 原要求を受理し、API から Queue を直接操作しない。"""
 
     service = FakeSkillService()
     client.app.state.skill_service = service
@@ -176,20 +176,23 @@ def test_interpret_skill_source_queues_worker_job(client: TestClient) -> None:
     client.app.state.arq_pool = pool
     source_id = service.stored.skill_source_id
     response = client.post(
-        f"/api/v1/skill-sources/{source_id}/interpret"
+        f"/api/v1/skill-sources/{source_id}/interpretation-requests",
+        json={"request_id": str(uuid4())},
     )
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["status"] == "queued"
+    assert payload["status"] == "QUEUED"
     assert payload["execution_key"].startswith("sha256:")
-    assert payload["execution"] is None
-    # Model への egress を持つ Worker が実行するよう、interpret job が投入される。
-    assert pool.jobs[0][0] == "interpret_skill_source_job"
+    assert payload["interpretation_id"] is None
+    # 配送は持久 Outbox が担い、route は Redis job を直接生成しない。
+    assert pool.jobs == []
+    assert service.interpretation_access is not None
+    assert UUID(payload["request_id"]) in service.interpretation_requests
 
 
 def test_interpret_skill_source_returns_stored_when_reused(client: TestClient) -> None:
-    """再利用/unsafe 相当は job を投入せず、確定 execution を同封して返す。"""
+    """再利用相当は job を投入せず、確定結果 ID と持久状態を返す。"""
 
     service = FakeSkillService(launch_stored=True)
     client.app.state.skill_service = service
@@ -197,18 +200,19 @@ def test_interpret_skill_source_returns_stored_when_reused(client: TestClient) -
     client.app.state.arq_pool = pool
     source_id = service.stored.skill_source_id
     response = client.post(
-        f"/api/v1/skill-sources/{source_id}/interpret"
+        f"/api/v1/skill-sources/{source_id}/interpretation-requests",
+        json={"request_id": str(uuid4())},
     )
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["status"] == "stored"
-    assert payload["execution"]["status"] == "PREVIEW_READY"
+    assert payload["status"] == "SUCCEEDED"
+    assert payload["interpretation_id"] == str(service.stored.interpretation_id)
     assert pool.jobs == []
 
 
 def test_interpret_skill_source_can_explicitly_force_regeneration(client: TestClient) -> None:
-    """明示 query だけが既存 identity の再利用を迂回する job を投入する。"""
+    """body の明示再生成だけが既存 identity の再利用を迂回する。"""
 
     service = FakeSkillService(launch_stored=True)
     client.app.state.skill_service = service
@@ -217,15 +221,14 @@ def test_interpret_skill_source_can_explicitly_force_regeneration(client: TestCl
     source_id = service.stored.skill_source_id
 
     response = client.post(
-        f"/api/v1/skill-sources/{source_id}/interpret"
-        "?force_regenerate=true"
+        f"/api/v1/skill-sources/{source_id}/interpretation-requests",
+        json={"request_id": str(uuid4()), "force_regenerate": True}
     )
 
     assert response.status_code == 200
-    assert response.json()["status"] == "queued"
+    assert response.json()["status"] == "QUEUED"
     assert response.json()["execution_key"] == "sha256:" + ("f" * 64)
-    assert pool.jobs[0][1]["force_regenerate"] is True
-    assert pool.jobs[0][1]["regeneration_nonce"] == "forced"
+    assert pool.jobs == []
 
 
 def test_interpret_skill_source_returns_404_when_source_missing(client: TestClient) -> None:
@@ -234,7 +237,8 @@ def test_interpret_skill_source_returns_404_when_source_missing(client: TestClie
     client.app.state.skill_service = FakeSkillService(source_missing=True)
     client.app.state.arq_pool = FakeArqPool()
     response = client.post(
-        f"/api/v1/skill-sources/{uuid4()}/interpret"
+        f"/api/v1/skill-sources/{uuid4()}/interpretation-requests",
+        json={"request_id": str(uuid4())},
     )
 
     assert response.status_code == 404
@@ -247,7 +251,8 @@ def test_interpret_skill_source_returns_503_when_unconfigured(client: TestClient
     client.app.state.skill_service = FakeSkillService(interpreter_unavailable=True)
     client.app.state.arq_pool = FakeArqPool()
     response = client.post(
-        f"/api/v1/skill-sources/{uuid4()}/interpret"
+        f"/api/v1/skill-sources/{uuid4()}/interpretation-requests",
+        json={"request_id": str(uuid4())},
     )
 
     assert response.status_code == 503
@@ -261,15 +266,18 @@ def test_interpret_skill_source_returns_409_when_source_integrity_fails(
 
     service = FakeSkillService(source_integrity_failed=True)
     client.app.state.skill_service = service
-    response = client.post(f"/api/v1/skill-sources/{service.stored.skill_source_id}/interpret")
+    response = client.post(
+        f"/api/v1/skill-sources/{service.stored.skill_source_id}/interpretation-requests",
+        json={"request_id": str(uuid4())},
+    )
 
     assert response.status_code == 409
     assert response.headers["content-type"].startswith("application/problem+json")
     assert response.json()["code"] == "skill_source_integrity_failed"
 
 
-def test_adjust_interpretation_queues_worker_job(client: TestClient) -> None:
-    """調整指示が adjust Worker job を投入し、queued 受理を返す。"""
+def test_adjust_interpretation_accepts_original_request(client: TestClient) -> None:
+    """調整指示が adjust 原要求を受理し、API から Queue を直接操作しない。"""
 
     service = FakeSkillService()
     client.app.state.skill_service = service
@@ -277,18 +285,16 @@ def test_adjust_interpretation_queues_worker_job(client: TestClient) -> None:
     client.app.state.arq_pool = pool
     parent_id = service.stored.interpretation_id
     response = client.post(
-        f"/api/v1/skill-interpretations/{parent_id}/adjust",
-        json={"instruction": "Focus on one file."},
+        f"/api/v1/skill-interpretations/{parent_id}/adjustment-requests",
+        json={"request_id": str(uuid4()), "instruction": "Focus on one file."},
     )
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["status"] == "queued"
+    assert payload["status"] == "QUEUED"
     assert service.adjustment_instruction == "Focus on one file."
-    assert pool.jobs[0][0] == "adjust_skill_interpretation_job"
-    # 親と instruction は job kwargs へ引き渡され、Worker が同じ service 経路で再実行する。
-    assert pool.jobs[0][1]["interpretation_id"] == str(parent_id)
-    assert pool.jobs[0][1]["instruction"] == "Focus on one file."
+    assert pool.jobs == []
+    assert UUID(payload["request_id"]) in service.interpretation_requests
 
 
 def test_adjust_interpretation_returns_409_when_parent_not_ready(client: TestClient) -> None:
@@ -297,22 +303,21 @@ def test_adjust_interpretation_returns_409_when_parent_not_ready(client: TestCli
     client.app.state.skill_service = FakeSkillService(not_ready=True)
     client.app.state.arq_pool = FakeArqPool()
     response = client.post(
-        f"/api/v1/skill-interpretations/{uuid4()}/adjust",
-        json={"instruction": "x"},
+        f"/api/v1/skill-interpretations/{uuid4()}/adjustment-requests",
+        json={"request_id": str(uuid4()), "instruction": "x"},
     )
 
     assert response.status_code == 409
     assert response.json()["code"] == "skill_interpretation_not_ready"
 
 
-def test_interpret_stream_rejects_malformed_execution_key(client: TestClient) -> None:
-    """Channel 名へ自由文字列を通さないため、不正な execution key を 422 で弾く。"""
+def test_interpret_stream_rejects_malformed_request_id(client: TestClient) -> None:
+    """原要求 ID は UUID だけを受理し、自由文字列を channel 名へ渡さない。"""
 
     client.app.state.skill_service = FakeSkillService()
-    response = client.get("/api/v1/skill-interpretations/stream/not-a-key")
+    response = client.get("/api/v1/skill-interpretation-requests/not-a-uuid/events")
 
     assert response.status_code == 422
-    assert response.json()["code"] == "invalid_execution_key"
 
 
 def test_get_interpretation_execution_returns_detail(client: TestClient) -> None:

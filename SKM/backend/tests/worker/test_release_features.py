@@ -10,6 +10,8 @@ import pytest
 
 from skillmind.agent.context_builder import ContractStore, create_run_tool_registry
 from skillmind.core.settings import Settings
+from skillmind.effects.release import ExecutionFeatures
+from skillmind.worker import settings as worker
 from skillmind.worker.settings import (
     execute_effect,
     execute_run,
@@ -110,3 +112,64 @@ def test_readonly_registry_omits_deferred_tools_even_when_provider_is_injected(c
         ).capability
         == "interaction.request/v1"
     )
+
+
+async def test_database_only_dispatch_keeps_schedules_and_subagents_disabled():
+    """DB job の入口を開いても scheduler と子 Tool の入口を開かない。"""
+    effects, schedules = AsyncMock(), AsyncMock()
+    effects.execute.return_value = 'APPLIED'
+    context = {
+        'settings': Settings(_env_file=None, worker_dispatch_enabled=True,
+                             deferred_features_enabled=False, database_writes_enabled=True),
+        'effect_executor': effects, 'schedule_service': schedules,
+    }
+    assert (await execute_effect(context, str(uuid4())))['status'] == 'APPLIED'
+    assert (await trigger_due_schedules(context))['status'] == 'disabled'
+    schedules.run_due_schedules.assert_not_called()
+    registry = create_run_tool_registry(
+        ContractStore(Path(__file__).resolve().parents[3] / 'contracts'),
+        document_source=Mock(), database_provider=Mock(), subagent_provider=Mock(),
+        deferred_features_enabled=False, database_writes_enabled=True,
+    )
+    assert registry.resolve_unbound('change.propose/v1', execution_profile='SUPERVISED')
+    for capability in ('subagent.dispatch/v1', 'database.write/v1'):
+        with pytest.raises(LookupError):
+            registry.resolve_unbound(capability, execution_profile='SUPERVISED')
+
+
+@pytest.mark.parametrize("document,dispatch", [(False, True), (True, False), (True, True)])
+async def test_document_gate_reaches_relay_job_and_recovery_without_opening_schedules(
+    monkeypatch, document, dispatch,
+):
+    """配備門禁だけを合成し、実 relay/job/recovery の各分岐で同じ方針を使用する。"""
+    monkeypatch.setattr(
+        worker, "configured_execution_features",
+        lambda settings: ExecutionFeatures(document_writes=document),
+    )
+    effects, runs, executor, schedules = AsyncMock(), AsyncMock(), AsyncMock(), AsyncMock()
+    executor.execute.return_value = "APPLIED"
+    runs.recover_expired_attempts.return_value = 1
+    runs.recover_expired_interactions.return_value = 0
+    effects.recover_expired_effects.return_value = 2
+    effects.recover_expired_proposals.return_value = 3
+    relay = CapturingRelay()
+    context = {
+        "settings": Settings(
+            _env_file=None, worker_dispatch_enabled=dispatch,
+            deferred_features_enabled=False, database_writes_enabled=False,
+        ),
+        "run_service": runs, "effect_service": effects, "effect_executor": executor,
+        "schedule_service": schedules, "redis": AsyncMock(), "outbox_relay": relay,
+        "worker_id": "fixture-worker",
+    }
+    await relay_outbox(context)
+    assert ("effect.apply.requested/v1" in relay.topics) is (document and dispatch)
+    result = await execute_effect(context, str(uuid4()))
+    assert result["status"] == ("APPLIED" if document and dispatch else "disabled")
+    assert executor.execute.await_count == int(document and dispatch)
+    report = await recover_expired_leases(context)
+    assert report["recovered_effects"] == (2 if document else 0)
+    assert report["recovered_proposals"] == (3 if document else 0)
+    assert effects.recover_expired_effects.await_count == int(document)
+    assert (await trigger_due_schedules(context))["status"] == "disabled"
+    schedules.run_due_schedules.assert_not_called()

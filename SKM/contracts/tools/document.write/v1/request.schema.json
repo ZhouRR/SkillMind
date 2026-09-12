@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/document.write/v1/request.schema.json",
+  "title": "document.write/v1 approved payload",
+  "description": "Effect-only CREATE of an existing Run Artifact into the project document library. Agent proposes target.locator=relative path and one /document SET with artifact_ref, content_hash, size_bytes, mime_type; precondition revision=absent and READ_BACK /document. object_key is derived by the platform from the frozen project library, never accepted from an Agent proposal. No directly callable Agent Tool.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "object_key",
+    "artifact_ref",
+    "content_hash",
+    "size_bytes",
+    "mime_type"
+  ],
+  "properties": {
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 401
+    },
+    "object_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "artifact_ref": {
+      "type": "string",
+      "pattern": "^art_[a-zA-Z0-9_-]{1,60}$"
+    },
+    "content_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "size_bytes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1048576
+    },
+    "mime_type": {
+      "enum": [
+        "text/plain",
+        "text/markdown",
+        "application/json"
+      ]
+    }
+  }
+}

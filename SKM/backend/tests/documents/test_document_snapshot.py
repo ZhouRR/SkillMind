@@ -158,18 +158,28 @@ class _DocumentRepository:
         return found
 
 
-async def test_all_selection_freezes_membership_before_later_uploads() -> None:
+@pytest.mark.parametrize(
+    "capability", [
+        "document.read/v1", "document.convert/v1", "document.inspect/v1", "document.list/v1",
+    ]
+)
+async def test_all_selection_freezes_membership_before_later_uploads(capability: str) -> None:
     """ALL は将来の追加文書への動的権限ではない。"""
 
     project_id = uuid4()
     first = stored_document(project_id, document_content())
     repository = _DocumentRepository([first])
     binding = await resolve_document_binding(
-        repository, project_id=project_id, requirement_key="config", token=ALL_DOCUMENTS_SELECTION
+        repository, project_id=project_id, requirement_key="config", token=ALL_DOCUMENTS_SELECTION,
+        capability=capability,
     )  # type: ignore[arg-type]
     repository.documents.append(stored_document(project_id, document_content(name="later.md")))
     frozen = selected_document_snapshots({"config": binding}, project_id=project_id)
     assert [item.document_id for item in snapshot_documents(frozen)] == [first.document_id]
+    if capability in {"document.convert/v1", "document.inspect/v1", "document.list/v1"}:
+        assert binding["preparation_policy"] == "on-demand/v1"
+    else:
+        assert "preparation_policy" not in binding
 
 
 class _ContentSource:

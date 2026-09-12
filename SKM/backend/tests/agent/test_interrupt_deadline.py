@@ -14,7 +14,8 @@ from skillmind.agent.engine import ClaudeAgentSdkEngine, ClaudeClient, _ActiveEx
 
 
 async def active_engine(
-    *, timeout: float = 0.02,
+    *,
+    timeout: float = 0.02,
 ) -> tuple[ClaudeAgentSdkEngine, _ActiveExecution, MagicMock]:
     """受信 loop の進み方に依存せず、登録した一 client の中断期限だけを検査する。"""
     engine = ClaudeAgentSdkEngine(

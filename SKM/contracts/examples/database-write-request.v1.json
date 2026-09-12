@@ -1,0 +1,11 @@
+{
+  "table": "example.records",
+  "operation": "INSERT",
+  "key": {
+    "id": "record-1"
+  },
+  "values": {
+    "status": "RUNNING"
+  },
+  "expected": null
+}

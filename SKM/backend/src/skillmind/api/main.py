@@ -8,7 +8,6 @@ from contextlib import asynccontextmanager
 from time import monotonic
 from uuid import uuid4
 
-from arq.connections import RedisSettings, create_pool
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import Response
@@ -37,17 +36,23 @@ from skillmind.db.resources import (
     create_redis_client,
     create_session_factory,
 )
+from skillmind.documents.library import (
+    DOCUMENT_LIBRARY_PROVIDER,
+    DOCUMENT_WRITE_CAPABILITY,
+    configured_document_library,
+)
 from skillmind.documents.resource_catalog import DocumentResourceCatalog
 from skillmind.documents.service import DocumentService
 from skillmind.documents.snapshot import (
+    DOCUMENT_CAPABILITIES,
     DOCUMENT_PROVIDER,
-    DOCUMENT_READ_CAPABILITY,
 )
+from skillmind.effects.reconciliation_request_service import ReconciliationRequestService
+from skillmind.effects.release import configured_execution_features
 from skillmind.effects.service import EffectService
 from skillmind.evaluations import EvaluationService
 from skillmind.integrations import (
     INSTALLED_PROVIDER_CAPABILITIES,
-    REGISTERED_WRITE_CAPABILITIES,
     IntegrationService,
 )
 from skillmind.integrations.resource_catalog import (
@@ -58,6 +63,7 @@ from skillmind.projects import ProjectService
 from skillmind.runs.service import RunService
 from skillmind.schedules import ScheduleService
 from skillmind.skills import SkillService
+from skillmind.skills.document_prerequisites import DOCUMENT_READINESS_CAPABILITY
 from skillmind.skills.wiring import build_skill_interpreter
 from skillmind.storage.factory import create_document_upload_limits, create_file_storage
 from skillmind.users.service import UserService
@@ -94,16 +100,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.database_session_factory,
         secret_cipher=load_secret_cipher(settings.managed_secret_kek),
     )
+    # 遅延接続の MinIO/S3 client。Skill upload と文書層が同じ保存先を共有する。
+    app.state.file_storage = create_file_storage(settings)
+    document_library_target = configured_document_library(
+        app.state.file_storage, bucket=settings.object_storage_bucket
+    )
+    features = configured_execution_features(settings)
     app.state.run_service = RunService(
         app.state.database_session_factory,
-        deferred_features_enabled=settings.deferred_features_enabled,
+        deferred_features_enabled=features.deferred,
+        database_writes_enabled=features.database_writes,
+        document_writes_enabled=features.document_writes,
+        document_library_target=document_library_target,
     )
     app.state.artifact_service = ArtifactService(app.state.database_session_factory)
     app.state.evaluation_service = EvaluationService(app.state.database_session_factory)
-    app.state.effect_service = EffectService(app.state.database_session_factory)
+    app.state.effect_service = EffectService(
+        app.state.database_session_factory,
+        document_library_target=document_library_target,
+        execution_features=features,
+    )
+    app.state.reconciliation_requests = ReconciliationRequestService(
+        app.state.database_session_factory, document_library_target=document_library_target,
+    )
     interpreter, catalog, identity, default_model = build_skill_interpreter(settings)
-    # 遅延接続の MinIO/S3 client。Skill upload と文書層が共有する単一 instance。
-    app.state.file_storage = create_file_storage(settings)
     app.state.skill_service = SkillService(
         app.state.database_session_factory,
         settings.contracts_dir,
@@ -115,18 +135,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         storage_bucket=settings.object_storage_bucket,
         resource_catalog=CompositeProjectResourceCatalog(
             (
-                DocumentResourceCatalog(app.state.database_session_factory),
+                DocumentResourceCatalog(
+                    app.state.database_session_factory, library_target=document_library_target
+                ),
                 IntegrationResourceCatalog(app.state.database_session_factory),
             )
         ),
-        registered_write_capabilities=(REGISTERED_WRITE_CAPABILITIES
-                                       if settings.deferred_features_enabled else frozenset()),
+        registered_write_capabilities=features.write_capabilities,
         # Integration Provider の installed 索引に、Integration 外だが常に配線済みの
         # document Provider を合流させる (計画 §19 W1)。就緒度が候補の provider を実行可能性まで
         # 検査できるようにする唯一の注入点。
         installed_provider_capabilities={
             **INSTALLED_PROVIDER_CAPABILITIES,
-            DOCUMENT_READ_CAPABILITY: frozenset({DOCUMENT_PROVIDER}),
+            DOCUMENT_READINESS_CAPABILITY: frozenset({"platform"}),
+            **{item: frozenset({DOCUMENT_PROVIDER}) for item in DOCUMENT_CAPABILITIES},
+            **({DOCUMENT_WRITE_CAPABILITY: frozenset({DOCUMENT_LIBRARY_PROVIDER})}
+               if features.document_writes and document_library_target is not None else {}),
         },
     )
     app.state.document_service = DocumentService(
@@ -142,11 +166,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         skill_service=app.state.skill_service,
         run_service=app.state.run_service,
     )
-    # Interpret job の投入専用 queue client。model への egress を持つ Worker 側だけが実行する。
-    app.state.arq_pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     yield
     # Application 終了時に共有 connection pool を閉じ、再配備時の resource leak を防ぐ。
-    await app.state.arq_pool.aclose()
     await app.state.redis.aclose()
     await app.state.database_engine.dispose()
 

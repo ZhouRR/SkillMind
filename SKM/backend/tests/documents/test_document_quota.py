@@ -36,11 +36,13 @@ def _tables(connection: sqlite3.Connection) -> None:
     """集計の関係だけを用意する。migration/FK/PG concurrency は別の回帰が担当する。"""
 
     connection.execute(
-        "CREATE TABLE project_documents (project_id TEXT, upload_intent_id TEXT, size INTEGER)"
+        "CREATE TABLE project_documents (project_id TEXT, upload_intent_id TEXT, "
+        "size INTEGER, effect_upload_id TEXT)"
     )
     connection.execute(
         "CREATE TABLE document_upload_intents (project_id TEXT, size INTEGER, state TEXT)"
     )
+    connection.execute("CREATE TABLE document_effect_uploads (project_id TEXT, size INTEGER)")
     connection.execute(
         "CREATE TABLE document_blob_cleanups (project_id TEXT, upload_intent_id TEXT, size INTEGER)"
     )
@@ -52,7 +54,7 @@ def _document(
     """旧目録と原予約に関連済み目録を明示して合算へ渡す。"""
 
     connection.execute(
-        "INSERT INTO project_documents VALUES (?, ?, ?)",
+        "INSERT INTO project_documents (project_id, upload_intent_id, size) VALUES (?, ?, ?)",
         (project_id.hex, uuid4().hex if linked else None, size),
     )
 

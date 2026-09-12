@@ -52,6 +52,7 @@ async def test_recovery_cron_counts_all_durable_timeouts() -> None:
             "effect_service": MemoryEffectRecovery(),
             "settings": SimpleNamespace(
                 outbox_batch_size=25, run_max_attempts=3, deferred_features_enabled=True,
+                database_writes_enabled=False,
             ),
             "worker_id": "worker-test",
         }

@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/document.list/v1/request.schema.json",
+  "title": "document.list/v1 request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "directory",
+    "purpose"
+  ],
+  "properties": {
+    "directory": {
+      "type": "string",
+      "maxLength": 512,
+      "description": "Project-relative directory; empty string selects root. Only original Run membership is scanned."
+    },
+    "recursive": {
+      "type": "boolean",
+      "default": true
+    },
+    "extensions": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^\\.[a-zA-Z0-9]{1,12}$"
+      }
+    },
+    "exclude_directories": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "maxLength": 512,
+        "description": "Project-relative directory; empty string selects root. Only original Run membership is scanned.",
+        "minLength": 1
+      }
+    },
+    "exclude_name_prefixes": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "modified_on": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "date",
+        "timezone",
+        "not_after"
+      ],
+      "properties": {
+        "date": {
+          "type": "string",
+          "format": "date"
+        },
+        "timezone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "not_after": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 64
+        }
+      }
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50,
+      "default": 50
+    },
+    "cursor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "query_checksum",
+        "offset"
+      ],
+      "properties": {
+        "query_checksum": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4999
+        }
+      }
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    }
+  }
+}

@@ -15,25 +15,52 @@
     "source_traces"
   ],
   "properties": {
-    "blueprint_version": { "const": "skillmind.capability-blueprint/v1" },
+    "blueprint_version": {
+      "const": "skillmind.capability-blueprint/v1"
+    },
     "identity": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["skill_key", "source_hash", "interpretation_id", "interpreter_version"],
+      "required": [
+        "skill_key",
+        "source_hash",
+        "interpretation_id",
+        "interpreter_version"
+      ],
       "properties": {
-        "skill_key": { "$ref": "#/$defs/key" },
-        "source_hash": { "$ref": "#/$defs/sha256" },
-        "interpretation_id": { "type": "string", "format": "uuid" },
-        "interpreter_version": { "type": "string", "minLength": 1 }
+        "skill_key": {
+          "$ref": "#/$defs/key"
+        },
+        "source_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "interpretation_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "interpreter_version": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "compatibility": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["level"],
+      "required": [
+        "level"
+      ],
       "properties": {
-        "level": { "enum": ["native", "adapted", "assisted"] },
-        "confidence": { "$ref": "#/$defs/confidence" }
+        "level": {
+          "enum": [
+            "native",
+            "adapted",
+            "assisted"
+          ]
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        }
       }
     },
     "capabilities": {
@@ -43,16 +70,29 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["key", "title"],
+        "required": [
+          "key",
+          "title"
+        ],
         "properties": {
-          "key": { "$ref": "#/$defs/key" },
-          "title": { "type": "string", "minLength": 1, "maxLength": 200 },
-          "summary": { "$ref": "#/$defs/text" },
+          "key": {
+            "$ref": "#/$defs/key"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "summary": {
+            "$ref": "#/$defs/text"
+          },
           "intents": {
             "type": "array",
             "maxItems": 50,
             "uniqueItems": true,
-            "items": { "$ref": "#/$defs/text" }
+            "items": {
+              "$ref": "#/$defs/text"
+            }
           }
         }
       }
@@ -64,21 +104,35 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["key", "capability", "objective"],
+        "required": [
+          "key",
+          "capability",
+          "objective"
+        ],
         "properties": {
-          "key": { "$ref": "#/$defs/key" },
-          "capability": { "$ref": "#/$defs/key" },
-          "objective": { "$ref": "#/$defs/text" },
+          "key": {
+            "$ref": "#/$defs/key"
+          },
+          "capability": {
+            "$ref": "#/$defs/key"
+          },
+          "objective": {
+            "$ref": "#/$defs/text"
+          },
           "success_criteria": {
             "type": "array",
             "maxItems": 50,
-            "items": { "$ref": "#/$defs/note" }
+            "items": {
+              "$ref": "#/$defs/note"
+            }
           },
           "resource_keys": {
             "type": "array",
             "maxItems": 50,
             "uniqueItems": true,
-            "items": { "$ref": "#/$defs/key" }
+            "items": {
+              "$ref": "#/$defs/key"
+            }
           },
           "deliverables": {
             "type": "array",
@@ -86,16 +140,42 @@
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["key", "kind", "description"],
+              "required": [
+                "key",
+                "kind",
+                "description"
+              ],
               "properties": {
-                "key": { "$ref": "#/$defs/key" },
-                "kind": { "$ref": "#/$defs/deliverableKind" },
-                "description": { "$ref": "#/$defs/text" }
+                "key": {
+                  "$ref": "#/$defs/key"
+                },
+                "kind": {
+                  "$ref": "#/$defs/deliverableKind"
+                },
+                "description": {
+                  "$ref": "#/$defs/text"
+                }
               }
             }
           },
-          "parameter_contract": { "$ref": "#/$defs/taskContractDraft" },
-          "result_contract": { "$ref": "#/$defs/taskContractDraft" }
+          "parameter_contract": {
+            "$ref": "#/$defs/taskContractDraft"
+          },
+          "result_contract": {
+            "$ref": "#/$defs/taskContractDraft"
+          },
+          "document_prerequisites": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_.-]*$",
+              "maxLength": 128
+            },
+            "description": "All named apply effect intents must be confirmed in this Run before any document read, inspect, list or conversion. Requires document.readiness/v1 as a required runtime Tool and on-demand input preparation; never a permission grant."
+          }
         }
       }
     },
@@ -105,25 +185,47 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["key", "kind", "required", "access"],
+        "required": [
+          "key",
+          "kind",
+          "required",
+          "access"
+        ],
         "properties": {
-          "key": { "$ref": "#/$defs/key" },
-          "kind": { "$ref": "#/$defs/resourceKind" },
-          "required": { "type": "boolean" },
-          "access": { "enum": ["read", "write"] },
+          "key": {
+            "$ref": "#/$defs/key"
+          },
+          "kind": {
+            "$ref": "#/$defs/resourceKind"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "access": {
+            "enum": [
+              "read",
+              "write"
+            ]
+          },
           "capabilities": {
             "type": "array",
             "maxItems": 20,
             "uniqueItems": true,
-            "items": { "$ref": "#/$defs/versionedCapability" }
+            "items": {
+              "$ref": "#/$defs/versionedCapability"
+            }
           },
           "accepted_providers": {
             "type": "array",
             "maxItems": 20,
             "uniqueItems": true,
-            "items": { "$ref": "#/$defs/key" }
+            "items": {
+              "$ref": "#/$defs/key"
+            }
           },
-          "selection_guidance": { "$ref": "#/$defs/text" }
+          "selection_guidance": {
+            "$ref": "#/$defs/text"
+          }
         }
       }
     },
@@ -132,10 +234,18 @@
       "additionalProperties": false,
       "required": [],
       "properties": {
-        "required_rules": { "$ref": "#/$defs/noteList" },
-        "recommended_steps": { "$ref": "#/$defs/noteList" },
-        "quality_criteria": { "$ref": "#/$defs/noteList" },
-        "prohibited_actions": { "$ref": "#/$defs/noteList" }
+        "required_rules": {
+          "$ref": "#/$defs/noteList"
+        },
+        "recommended_steps": {
+          "$ref": "#/$defs/noteList"
+        },
+        "quality_criteria": {
+          "$ref": "#/$defs/noteList"
+        },
+        "prohibited_actions": {
+          "$ref": "#/$defs/noteList"
+        }
       }
     },
     "interaction_points": {
@@ -144,12 +254,29 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["key", "type", "condition"],
+        "required": [
+          "key",
+          "type",
+          "condition"
+        ],
         "properties": {
-          "key": { "$ref": "#/$defs/key" },
-          "type": { "enum": ["CLARIFICATION", "CHOICE", "REVIEW", "EFFECT_APPROVAL"] },
-          "condition": { "$ref": "#/$defs/text" },
-          "prompt": { "$ref": "#/$defs/text" }
+          "key": {
+            "$ref": "#/$defs/key"
+          },
+          "type": {
+            "enum": [
+              "CLARIFICATION",
+              "CHOICE",
+              "REVIEW",
+              "EFFECT_APPROVAL"
+            ]
+          },
+          "condition": {
+            "$ref": "#/$defs/text"
+          },
+          "prompt": {
+            "$ref": "#/$defs/text"
+          }
         }
       }
     },
@@ -159,14 +286,39 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["key", "mode", "operation", "risk"],
+        "required": [
+          "key",
+          "mode",
+          "operation",
+          "risk"
+        ],
         "properties": {
-          "key": { "$ref": "#/$defs/key" },
-          "mode": { "enum": ["observe", "propose", "apply"] },
-          "resource_key": { "$ref": "#/$defs/key" },
-          "operation": { "$ref": "#/$defs/text" },
-          "risk": { "enum": ["low", "medium", "high"] },
-          "approval_mode": { "const": "ask" }
+          "key": {
+            "$ref": "#/$defs/key"
+          },
+          "mode": {
+            "enum": [
+              "observe",
+              "propose",
+              "apply"
+            ]
+          },
+          "resource_key": {
+            "$ref": "#/$defs/key"
+          },
+          "operation": {
+            "$ref": "#/$defs/text"
+          },
+          "risk": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "approval_mode": {
+            "const": "ask"
+          }
         }
       }
     },
@@ -175,9 +327,19 @@
       "additionalProperties": false,
       "required": [],
       "properties": {
-        "recommended_profile": { "enum": ["GUIDED", "SUPERVISED", "DELEGATED"] },
-        "session_split_hints": { "$ref": "#/$defs/noteList" },
-        "stop_conditions": { "$ref": "#/$defs/noteList" }
+        "recommended_profile": {
+          "enum": [
+            "GUIDED",
+            "SUPERVISED",
+            "DELEGATED"
+          ]
+        },
+        "session_split_hints": {
+          "$ref": "#/$defs/noteList"
+        },
+        "stop_conditions": {
+          "$ref": "#/$defs/noteList"
+        }
       }
     },
     "source_traces": {
@@ -187,136 +349,310 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["target", "path", "line", "reason"],
+        "required": [
+          "target",
+          "path",
+          "line",
+          "reason"
+        ],
         "properties": {
-          "target": { "type": "string", "pattern": "^/", "maxLength": 512 },
-          "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
-          "line": { "type": ["integer", "null"], "minimum": 1 },
-          "reason": { "$ref": "#/$defs/text" }
+          "target": {
+            "type": "string",
+            "pattern": "^/",
+            "maxLength": 512
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "line": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          },
+          "reason": {
+            "$ref": "#/$defs/text"
+          }
         }
       }
     },
-    "assumptions": { "$ref": "#/$defs/noteList" },
+    "assumptions": {
+      "$ref": "#/$defs/noteList"
+    },
     "questions": {
       "type": "array",
       "maxItems": 50,
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["key", "text", "required"],
+        "required": [
+          "key",
+          "text",
+          "required"
+        ],
         "properties": {
-          "key": { "$ref": "#/$defs/key" },
-          "text": { "$ref": "#/$defs/text" },
-          "required": { "type": "boolean" }
+          "key": {
+            "$ref": "#/$defs/key"
+          },
+          "text": {
+            "$ref": "#/$defs/text"
+          },
+          "required": {
+            "type": "boolean"
+          }
         }
       }
     }
   },
   "$defs": {
-    "key": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$", "maxLength": 128 },
-    "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "key": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "maxLength": 128
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
     "versionedCapability": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$"
     },
-    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
-    "text": { "type": "string", "minLength": 1, "maxLength": 1000 },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
     "note": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["key", "text"],
+      "required": [
+        "key",
+        "text"
+      ],
       "properties": {
-        "key": { "$ref": "#/$defs/key" },
-        "text": { "$ref": "#/$defs/text" }
+        "key": {
+          "$ref": "#/$defs/key"
+        },
+        "text": {
+          "$ref": "#/$defs/text"
+        }
       }
     },
     "noteList": {
       "type": "array",
       "maxItems": 100,
-      "items": { "$ref": "#/$defs/note" }
+      "items": {
+        "$ref": "#/$defs/note"
+      }
     },
     "deliverableKind": {
-      "enum": ["report", "structured_data", "patch", "change_proposal", "artifact"]
+      "enum": [
+        "report",
+        "structured_data",
+        "patch",
+        "change_proposal",
+        "artifact"
+      ]
     },
     "resourceKind": {
-      "enum": ["issue", "repository", "document", "file", "knowledge", "other"]
+      "enum": [
+        "issue",
+        "repository",
+        "document",
+        "file",
+        "knowledge",
+        "other"
+      ]
     },
     "contractValueType": {
-      "enum": ["object", "array", "string", "integer", "number", "boolean"]
+      "enum": [
+        "object",
+        "array",
+        "string",
+        "integer",
+        "number",
+        "boolean"
+      ]
     },
-    "contractDescription": { "type": "string", "minLength": 1, "maxLength": 500 },
-    "contractStringLength": { "type": "integer", "minimum": 0, "maximum": 100000 },
+    "contractDescription": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "contractStringLength": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000
+    },
     "contractEnumValues": {
       "type": "array",
       "minItems": 1,
       "maxItems": 50,
       "uniqueItems": true,
-      "items": { "type": ["string", "integer", "number", "boolean"] }
+      "items": {
+        "type": [
+          "string",
+          "integer",
+          "number",
+          "boolean"
+        ]
+      }
     },
     "taskContractDraft": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["contract_version", "type"],
+      "required": [
+        "contract_version",
+        "type"
+      ],
       "properties": {
-        "contract_version": { "const": "skillmind.task-contract-draft/v1" },
-        "type": { "$ref": "#/$defs/contractValueType" },
-        "description": { "$ref": "#/$defs/contractDescription" },
-        "enum": { "$ref": "#/$defs/contractEnumValues" },
+        "contract_version": {
+          "const": "skillmind.task-contract-draft/v1"
+        },
+        "type": {
+          "$ref": "#/$defs/contractValueType"
+        },
+        "description": {
+          "$ref": "#/$defs/contractDescription"
+        },
+        "enum": {
+          "$ref": "#/$defs/contractEnumValues"
+        },
         "fields": {
           "type": "array",
           "maxItems": 100,
-          "items": { "$ref": "#/$defs/contractField" }
+          "items": {
+            "$ref": "#/$defs/contractField"
+          }
         },
-        "items": { "$ref": "#/$defs/contractItem" },
-        "min_length": { "$ref": "#/$defs/contractStringLength" },
-        "max_length": { "$ref": "#/$defs/contractStringLength" },
-        "pattern": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "minimum": { "type": "number" },
-        "maximum": { "type": "number" }
+        "items": {
+          "$ref": "#/$defs/contractItem"
+        },
+        "min_length": {
+          "$ref": "#/$defs/contractStringLength"
+        },
+        "max_length": {
+          "$ref": "#/$defs/contractStringLength"
+        },
+        "pattern": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "minimum": {
+          "type": "number"
+        },
+        "maximum": {
+          "type": "number"
+        }
       }
     },
     "contractField": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["key", "type", "required"],
+      "required": [
+        "key",
+        "type",
+        "required"
+      ],
       "properties": {
-        "key": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
-        "type": { "$ref": "#/$defs/contractValueType" },
-        "required": { "type": "boolean" },
-        "description": { "$ref": "#/$defs/contractDescription" },
-        "enum": { "$ref": "#/$defs/contractEnumValues" },
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "type": {
+          "$ref": "#/$defs/contractValueType"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "description": {
+          "$ref": "#/$defs/contractDescription"
+        },
+        "enum": {
+          "$ref": "#/$defs/contractEnumValues"
+        },
         "fields": {
           "type": "array",
           "maxItems": 100,
-          "items": { "$ref": "#/$defs/contractField" }
+          "items": {
+            "$ref": "#/$defs/contractField"
+          }
         },
-        "items": { "$ref": "#/$defs/contractItem" },
-        "min_length": { "$ref": "#/$defs/contractStringLength" },
-        "max_length": { "$ref": "#/$defs/contractStringLength" },
-        "pattern": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "minimum": { "type": "number" },
-        "maximum": { "type": "number" }
+        "items": {
+          "$ref": "#/$defs/contractItem"
+        },
+        "min_length": {
+          "$ref": "#/$defs/contractStringLength"
+        },
+        "max_length": {
+          "$ref": "#/$defs/contractStringLength"
+        },
+        "pattern": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "minimum": {
+          "type": "number"
+        },
+        "maximum": {
+          "type": "number"
+        }
       }
     },
     "contractItem": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type"],
+      "required": [
+        "type"
+      ],
       "properties": {
-        "type": { "$ref": "#/$defs/contractValueType" },
-        "description": { "$ref": "#/$defs/contractDescription" },
-        "enum": { "$ref": "#/$defs/contractEnumValues" },
+        "type": {
+          "$ref": "#/$defs/contractValueType"
+        },
+        "description": {
+          "$ref": "#/$defs/contractDescription"
+        },
+        "enum": {
+          "$ref": "#/$defs/contractEnumValues"
+        },
         "fields": {
           "type": "array",
           "maxItems": 100,
-          "items": { "$ref": "#/$defs/contractField" }
+          "items": {
+            "$ref": "#/$defs/contractField"
+          }
         },
-        "items": { "$ref": "#/$defs/contractItem" },
-        "min_length": { "$ref": "#/$defs/contractStringLength" },
-        "max_length": { "$ref": "#/$defs/contractStringLength" },
-        "pattern": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "minimum": { "type": "number" },
-        "maximum": { "type": "number" }
+        "items": {
+          "$ref": "#/$defs/contractItem"
+        },
+        "min_length": {
+          "$ref": "#/$defs/contractStringLength"
+        },
+        "max_length": {
+          "$ref": "#/$defs/contractStringLength"
+        },
+        "pattern": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "minimum": {
+          "type": "number"
+        },
+        "maximum": {
+          "type": "number"
+        }
       }
     }
   }

@@ -15,7 +15,7 @@ export interface TaskFlowDeliverable { key: string; kind: 'report' | 'structured
 /** 元 Task の省略 field は省略のまま保持する。 */
 export interface TaskFlowTask {
   key: string; capability: string; objective: string; success_criteria?: TaskFlowNote[]
-  resource_keys?: string[]; deliverables?: TaskFlowDeliverable[]
+  resource_keys?: string[]; document_prerequisites?: string[]; deliverables?: TaskFlowDeliverable[]
   parameter_contract?: Record<string, unknown>; result_contract?: Record<string, unknown>
 }
 /** Skill/Task の宣言要求。現在の binding 候補とは別の計画である。 */
@@ -117,9 +117,10 @@ function contract(value: unknown, kind: 'root' | 'field' | 'item' = 'root', dept
 }
 /** 原 Task に後付けの成功や任意 action を混ぜない。 */
 function task(value: unknown): value is TaskFlowTask {
-  return fields(value, ['key', 'capability', 'objective'], ['success_criteria', 'resource_keys', 'deliverables', 'parameter_contract', 'result_contract'])
+  return fields(value, ['key', 'capability', 'objective'], ['success_criteria', 'resource_keys', 'document_prerequisites', 'deliverables', 'parameter_contract', 'result_contract'])
     && key(value.key) && key(value.capability) && text(value.objective, 1000)
     && optional(value, 'resource_keys', keys)
+    && optional(value, 'document_prerequisites', (item) => keys(item) && item.length > 0)
     && optional(value, 'success_criteria', (item) => keyed(item, 50, note))
     && optional(value, 'deliverables', (item) => keyed(item, 50, (entry): entry is TaskFlowDeliverable => fields(entry, ['key', 'kind', 'description'])
       && key(entry.key) && member(entry.kind, ['report', 'structured_data', 'patch', 'change_proposal', 'artifact']) && text(entry.description, 1000)))

@@ -14,6 +14,7 @@ from skillmind.skills.interpreter import (
     load_interpreter_system_skill,
 )
 from skillmind.skills.interpreter_execution import (
+    InterpreterCallControl,
     InterpreterErrorCode,
     InterpreterExecutionError,
     InterpretProgressCallback,
@@ -90,6 +91,7 @@ class ModelSkillInterpreter:
         parameters: Mapping[str, Any],
         validation_feedback: str | None = None,
         on_event: InterpretProgressCallback | None = None,
+        control: InterpreterCallControl | None = None,
     ) -> dict[str, Any]:
         """Request identity を検証し、model completion を構造化 dict へ復元する。"""
 
@@ -122,23 +124,34 @@ class ModelSkillInterpreter:
             if on_event is not None:
                 await on_event("interpret.delta", {"text": text})
 
+        if control is not None:
+            # Redis の prompt 通知が待機しても、古い開始資格で model を呼ばない。
+            await control.before_call(feedback=validation_feedback)
         try:
-            completion = await self._client.complete(
-                system_prompt=prompt_text,
-                user_message=user_message,
-                response_schema=self._response_schema,
-                model=model,
-                parameters=parameters,
-                on_text_delta=forward_delta if on_event is not None else None,
-            )
-        except TimeoutError as error:
-            raise InterpreterExecutionError(InterpreterErrorCode.TIMEOUT) from error
-        except ModelStructuredOutputError as error:
-            raise InterpreterExecutionError(
-                InterpreterErrorCode.STRUCTURED_OUTPUT_UNAVAILABLE
-            ) from error
-        except ModelProviderError as error:
-            raise InterpreterExecutionError(InterpreterErrorCode.PROVIDER_ERROR) from error
+            try:
+                completion = await self._client.complete(
+                    system_prompt=prompt_text,
+                    user_message=user_message,
+                    response_schema=self._response_schema,
+                    model=model,
+                    parameters=parameters,
+                    on_text_delta=forward_delta if on_event is not None else None,
+                )
+            except TimeoutError as error:
+                raise InterpreterExecutionError(InterpreterErrorCode.TIMEOUT) from error
+            except ModelStructuredOutputError as error:
+                raise InterpreterExecutionError(
+                    InterpreterErrorCode.STRUCTURED_OUTPUT_UNAVAILABLE
+                ) from error
+            except ModelProviderError as error:
+                raise InterpreterExecutionError(InterpreterErrorCode.PROVIDER_ERROR) from error
+        except InterpreterExecutionError:
+            if control is not None:
+                await control.returned()
+            raise
+        else:
+            if control is not None:
+                await control.returned()
         if completion.truncated:
             raise InterpreterExecutionError(InterpreterErrorCode.TRUNCATED_OUTPUT)
         return self._decode(completion)

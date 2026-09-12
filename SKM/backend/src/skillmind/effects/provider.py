@@ -29,6 +29,7 @@ class EffectProviderDefinition:
     provider_version: str
     implementation: EffectProvider
     requires_secret: bool
+    supervised: bool = False
 
 
 class EffectProviderRegistry:

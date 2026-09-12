@@ -15,6 +15,18 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from skillmind.documents.library import DOCUMENT_WRITE_CAPABILITY
+from skillmind.effects.database_write import (
+    DATABASE_WRITE_CAPABILITY,
+    DATABASE_WRITE_PROVIDER_VERSION,
+    database_write_scope_from_payload,
+    validate_database_write_proposal,
+)
+from skillmind.effects.document_write import (
+    DOCUMENT_WRITE_PROVIDER_VERSION,
+    document_write_scope_from_payload,
+    validate_document_write_proposal,
+)
 from skillmind.effects.domain import ChangeProposalDraft, ChangeProposalValidationError
 from skillmind.effects.issue_update import (
     ISSUE_UPDATE_CAPABILITY,
@@ -48,6 +60,8 @@ class EffectCapabilityDefinition:
         [ChangeProposalDraft, Mapping[str, Any], Mapping[str, Any]], dict[str, Any]
     ]
     requested_scope: Callable[[Mapping[str, Any]], dict[str, Any]]
+    # 共有 actor/批准/lease の段階検査を実装した Provider だけを贯穿監督する。
+    staged_authorization: bool = False
 
     @property
     def providers(self) -> frozenset[str]:
@@ -57,6 +71,26 @@ class EffectCapabilityDefinition:
 
 
 EFFECT_CAPABILITIES: Mapping[str, EffectCapabilityDefinition] = {
+    DOCUMENT_WRITE_CAPABILITY: EffectCapabilityDefinition(
+        capability_version=DOCUMENT_WRITE_CAPABILITY,
+        provider_versions={"project-library": DOCUMENT_WRITE_PROVIDER_VERSION},
+        preauthorizable=False,
+        validate=lambda draft, scope, config: validate_document_write_proposal(
+            draft, binding_scope=scope
+        ),
+        requested_scope=document_write_scope_from_payload,
+        staged_authorization=True,
+    ),
+    DATABASE_WRITE_CAPABILITY: EffectCapabilityDefinition(
+        capability_version=DATABASE_WRITE_CAPABILITY,
+        provider_versions={"postgres": DATABASE_WRITE_PROVIDER_VERSION},
+        preauthorizable=False,
+        validate=lambda draft, scope, config: validate_database_write_proposal(
+            draft, binding_scope=scope
+        ),
+        requested_scope=database_write_scope_from_payload,
+        staged_authorization=True,
+    ),
     ISSUE_UPDATE_CAPABILITY: EffectCapabilityDefinition(
         capability_version=ISSUE_UPDATE_CAPABILITY,
         provider_versions={"redmine": ISSUE_UPDATE_PROVIDER_VERSION},

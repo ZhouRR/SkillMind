@@ -121,7 +121,6 @@ from skillmind.schedules import (
 )
 from skillmind.skills import (
     InlineSkillFile,
-    InterpretationLaunch,
     ManifestGateFinding,
     PublishedTaskDescriptor,
     PublishedTaskNotFoundError,
@@ -144,6 +143,10 @@ from skillmind.skills import (
     TaskInputInvalidError,
     TaskToolRequirement,
     UploadSkillFile,
+)
+from skillmind.skills.interpretation_requests import (
+    InterpretationRequestNotFoundError,
+    InterpretationRequestSnapshot,
 )
 from skillmind.skills.resource_binding import (
     RequirementBinding,
@@ -793,11 +796,12 @@ class FakeProposalDecisionService:
         self.received: DecideProposalCommand | None = None
 
     async def decide_change_proposal(
-        self, command: DecideProposalCommand
+        self, command: DecideProposalCommand, *, access: UserAccess
     ) -> ProposalDecisionResult:
         """受信した exact version/checksum を固定 response として返す。"""
 
         self.received = command
+        self.received_access = access
         now = datetime(2026, 7, 18, 14, 0, tzinfo=UTC)
         proposal = StoredChangeProposal(
             proposal_id=command.proposal_id,
@@ -1180,6 +1184,8 @@ class FakeSkillService:
         self.source_integrity_failed = source_integrity_failed
         # launch_stored=True は再利用/unsafe 相当の同期確定 launch を再現する。
         self.launch_stored = launch_stored
+        self.interpretation_requests: dict[UUID, InterpretationRequestSnapshot] = {}
+        self.interpretation_access: UserAccess | None = None
         self.terminal = terminal
         self.adjustment_instruction: str | None = None
         # catalog が返す task は instance 内で不変にする。Run 履歴との突き合わせ検証で使う。
@@ -1569,79 +1575,48 @@ class FakeSkillService:
             skill_snapshot={"skill_version_id": str(skill_version_id), "sort_order": 0},
         )
 
-    async def begin_interpret(
-        self, *, organization_id: UUID, skill_source_id: UUID, force_regenerate: bool = False
-    ) -> InterpretationLaunch:
-        """Model を呼ばずに interpret 受理結果を返す。source/interpreter scenario を再現する。"""
+    async def accept_interpretation_request(
+        self, *, access: UserAccess, request_id: UUID, skill_source_id: UUID | None = None,
+        parent_interpretation_id: UUID | None = None, instruction: str | None = None,
+        force_regenerate: bool = False,
+    ) -> InterpretationRequestSnapshot:
+        """HTTP の原資格/UUID と明示入力を観測し、Queue 操作を模倣せず返す。"""
 
+        self.interpretation_access = access
         if self.source_missing:
-            raise SkillSourceNotFoundError(f"SkillSource not found: {skill_source_id}")
+            raise SkillSourceNotFoundError("SkillSource not found")
         if self.interpreter_unavailable:
-            raise SkillInterpreterUnavailableError("Skill model interpreter is not configured")
+            raise SkillInterpreterUnavailableError("Skill interpreter is not configured")
         if self.source_integrity_failed:
             raise SkillSourceIntegrityError("Stored SkillSource content hash drifted")
-        key = "sha256:" + (("f" if force_regenerate else "e") * 64)
-        if self.launch_stored and not force_regenerate:
-            return InterpretationLaunch(
-                status="stored",
-                execution_key=key,
-                stored=self._execution(organization_id=organization_id),
-                job_name="",
-                job_kwargs={},
-            )
-        return InterpretationLaunch(
-            status="queued",
-            execution_key=key,
-            stored=None,
-            job_name="interpret_skill_source_job",
-            job_kwargs={
-                "organization_id": str(organization_id),
-                "skill_source_id": str(skill_source_id),
-                "model": "claude-opus-4-8",
-                "parameters": {},
-                "execution_key": key,
-                "force_regenerate": force_regenerate,
-                "regeneration_nonce": "forced" if force_regenerate else None,
-            },
+        if parent_interpretation_id is not None:
+            if self.missing:
+                raise SkillInterpretationNotFoundError("SkillInterpretation not found")
+            if self.not_ready:
+                raise SkillInterpretationNotReadyError("SkillInterpretation is not ready")
+            self.adjustment_instruction = instruction
+        terminal = self.launch_stored and not force_regenerate
+        result = InterpretationRequestSnapshot(
+            request_id=request_id, organization_id=access.actor.organization_id,
+            actor_id=access.actor.user_id, auth_session_id=uuid4(),
+            skill_source_id=skill_source_id or self.stored.skill_source_id,
+            execution_key="sha256:" + (("f" if force_regenerate else "e") * 64),
+            input_checksum="sha256:" + "a" * 64, input={},
+            status="SUCCEEDED" if terminal else "QUEUED", created_at=datetime.now(UTC),
+            interpretation_id=self.stored.interpretation_id if terminal else None, error_code=None,
         )
+        self.interpretation_requests[request_id] = result
+        return result
 
-    async def begin_adjust(
-        self,
-        *,
-        organization_id: UUID,
-        interpretation_id: UUID,
-        instruction: str,
-        actor_id: UUID,
-    ) -> InterpretationLaunch:
-        """Model を呼ばずに adjust 受理結果を返す。404/409 は同期のまま返す。"""
+    async def confirm_interpretation_request(
+        self, *, access: UserAccess, request_id: UUID
+    ) -> InterpretationRequestSnapshot:
+        """確認は組織内の実在する fake 原要求だけを返す。"""
 
-        if self.missing:
-            raise SkillInterpretationNotFoundError(
-                f"SkillInterpretation not found: {interpretation_id}"
-            )
-        if self.not_ready:
-            raise SkillInterpretationNotReadyError(
-                f"SkillInterpretation is not preview-ready: {interpretation_id}"
-            )
-        if self.interpreter_unavailable:
-            raise SkillInterpreterUnavailableError("Skill model interpreter is not configured")
-        self.adjustment_instruction = instruction
-        key = "sha256:" + ("f" * 64)
-        return InterpretationLaunch(
-            status="queued",
-            execution_key=key,
-            stored=None,
-            job_name="adjust_skill_interpretation_job",
-            job_kwargs={
-                "organization_id": str(organization_id),
-                "interpretation_id": str(interpretation_id),
-                "instruction": instruction,
-                "actor_id": str(actor_id),
-                "model": "claude-opus-4-8",
-                "parameters": {},
-                "execution_key": key,
-            },
-        )
+        value = self.interpretation_requests.get(request_id)
+        if value is None or value.organization_id != access.actor.organization_id:
+            raise InterpretationRequestNotFoundError("Interpretation request not found")
+        return value
 
     async def find_terminal_execution(
         self, *, organization_id: UUID, execution_key: str

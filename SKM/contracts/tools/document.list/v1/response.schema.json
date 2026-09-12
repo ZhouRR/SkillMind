@@ -1,0 +1,307 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/document.list/v1/response.schema.json",
+  "title": "document.list/v1 response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "provider",
+    "scope",
+    "query",
+    "query_checksum",
+    "limit",
+    "frozen_count",
+    "candidate_count",
+    "scan_start",
+    "scan_end",
+    "next_cursor",
+    "entries",
+    "evidence_refs",
+    "warnings"
+  ],
+  "properties": {
+    "status": {
+      "const": "success"
+    },
+    "provider": {
+      "const": "project"
+    },
+    "scope": {
+      "const": "run_frozen_documents"
+    },
+    "query": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "directory",
+        "recursive",
+        "extensions",
+        "exclude_directories",
+        "exclude_name_prefixes",
+        "modified_on"
+      ],
+      "properties": {
+        "directory": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "Project-relative directory; empty string selects root. Only original Run membership is scanned."
+        },
+        "recursive": {
+          "type": "boolean",
+          "default": true
+        },
+        "extensions": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^\\.[a-zA-Z0-9]{1,12}$"
+          }
+        },
+        "exclude_directories": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "maxLength": 512,
+            "description": "Project-relative directory; empty string selects root. Only original Run membership is scanned.",
+            "minLength": 1
+          }
+        },
+        "exclude_name_prefixes": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "modified_on": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "date",
+                "timezone",
+                "not_after"
+              ],
+              "properties": {
+                "date": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "timezone": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "not_after": {
+                  "type": "string",
+                  "format": "date-time",
+                  "maxLength": 64
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "query_checksum": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50,
+      "default": 50
+    },
+    "frozen_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5000
+    },
+    "candidate_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5000
+    },
+    "scan_start": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5000
+    },
+    "scan_end": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5000
+    },
+    "next_cursor": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "query_checksum",
+            "offset"
+          ],
+          "properties": {
+            "query_checksum": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4999
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "entries": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "document",
+          "storage",
+          "observed_at",
+          "content_verified",
+          "observation_checksum",
+          "matches_filter",
+          "evidence_index"
+        ],
+        "properties": {
+          "document": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "document_id",
+              "folder",
+              "name",
+              "mime",
+              "size",
+              "content_hash"
+            ],
+            "properties": {
+              "document_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "folder": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "mime": {
+                "type": "string",
+                "minLength": 1
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "content_hash": {
+                "type": "string",
+                "pattern": "^sha256:[a-f0-9]{64}$",
+                "description": "Declared frozen document hash; not verified by inspection."
+              }
+            }
+          },
+          "storage": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "last_modified",
+              "version_id",
+              "etag",
+              "size",
+              "content_type"
+            ],
+            "properties": {
+              "last_modified": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "version_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "etag": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "content_type": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            }
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "content_verified": {
+            "const": false
+          },
+          "observation_checksum": {
+            "type": "string",
+            "pattern": "^sha256:[a-f0-9]{64}$"
+          },
+          "matches_filter": {
+            "type": "boolean"
+          },
+          "evidence_index": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Index into this response evidence_refs; pass that reference to document.convert/v1 observation_ref."
+          }
+        }
+      }
+    },
+    "evidence_refs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^ev_[a-zA-Z0-9_-]+$"
+      },
+      "maxItems": 51
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

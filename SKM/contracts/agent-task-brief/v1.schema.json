@@ -62,6 +62,10 @@
         },
         "result_schema_checksum": {
           "$ref": "#/$defs/sha256"
+        },
+        "project_id": {
+          "type": "string",
+          "format": "uuid"
         }
       }
     },
@@ -138,6 +142,17 @@
         },
         "session_split_hints": {
           "$ref": "#/$defs/noteList"
+        },
+        "document_prerequisites": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "maxLength": 128
+          }
         }
       }
     },
@@ -254,10 +269,69 @@
               "skipped_files": {
                 "type": "integer",
                 "minimum": 0
+              },
+              "deferred_files": {
+                "description": "Frozen sources listed for explicit tool acquisition; their bytes have not been materialized.",
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          "document_library": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "document_library_id",
+              "project_id",
+              "bucket"
+            ],
+            "properties": {
+              "document_library_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "project_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "bucket": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 63
               }
             }
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "document_library"
+              ]
+            },
+            "then": {
+              "properties": {
+                "kind": {
+                  "const": "document"
+                },
+                "access": {
+                  "const": "write"
+                },
+                "binding": {
+                  "type": "object",
+                  "properties": {
+                    "provider": {
+                      "const": "project-library"
+                    },
+                    "capability": {
+                      "const": "document.write/v1"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
       }
     },
     "allowed_tools": {
@@ -474,6 +548,9 @@
             "type": "string",
             "pattern": "^cp_[a-zA-Z0-9_-]+$"
           }
+        },
+        "effect_result": {
+          "$ref": "#/$defs/effectResult"
         }
       }
     },
@@ -594,6 +671,51 @@
       "maxItems": 100,
       "items": {
         "$ref": "#/$defs/note"
+      }
+    },
+    "effectResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "effect_execution_id",
+        "proposal_ref",
+        "capability_version",
+        "status",
+        "after_ref",
+        "after_content_hash",
+        "after",
+        "verification"
+      ],
+      "properties": {
+        "effect_execution_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "proposal_ref": {
+          "type": "string",
+          "pattern": "^cp_[a-zA-Z0-9_-]+$"
+        },
+        "capability_version": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$"
+        },
+        "status": {
+          "const": "APPLIED"
+        },
+        "after_ref": {
+          "type": "string",
+          "pattern": "^ev_[a-zA-Z0-9_-]+$"
+        },
+        "after_content_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "after": {
+          "type": "object"
+        },
+        "verification": {
+          "type": "object"
+        }
       }
     }
   }

@@ -4,19 +4,21 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from sqlalchemy import URL, text
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
+
+from skillmind.agent.postgres_schema import identifier as identifier
+from skillmind.agent.postgres_schema import read_table_schema
+from skillmind.core.hashing import canonical_json
 
 MAX_DATABASE_BYTES = 1_048_576
 MAX_DATABASE_ROWS = 100
-_IDENTIFIER = re.compile(r"[a-zA-Z_][a-zA-Z0-9_$]{0,62}\Z")
 
 
 class DatabaseReadError(RuntimeError):
@@ -33,6 +35,7 @@ class DatabaseQuery:
     order_by: tuple[str, ...]
     limit: int
     offset: int
+    include_schema: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +44,7 @@ class DatabaseRows:
 
     rows: tuple[dict[str, Any], ...]
     truncated: bool
+    table_schema: dict[str, Any] | None = None
 
 
 class DatabaseSource(Protocol):
@@ -56,16 +60,11 @@ class DatabaseSource(Protocol):
         ...
 
 
-def identifier(value: str) -> str:
-    """SQL 識別子は固定文法で検証し、常に引用する。値は別途 bind する。"""
-    if not isinstance(value, str) or not _IDENTIFIER.fullmatch(value):
-        raise ValueError("Invalid database identifier")
-    return f'"{value}"'
-
-
 def build_database_query(arguments: Mapping[str, Any]) -> DatabaseQuery:
     """Gateway 外から呼ばれても SQL 断片や無限取得を受け付けない。"""
-    if set(arguments) - {"table", "columns", "filters", "order_by", "limit", "offset", "purpose"}:
+    if set(arguments) - {
+        "table", "columns", "filters", "order_by", "limit", "offset", "purpose", "include_schema"
+    }:
         raise ValueError("Unknown database read field")
     table = arguments.get("table")
     if not isinstance(table, str) or len(table.split(".")) != 2:
@@ -95,17 +94,24 @@ def build_database_query(arguments: Mapping[str, Any]) -> DatabaseQuery:
         raise ValueError("Invalid database row limit")
     if type(offset) is not int or not 0 <= offset <= 10_000:
         raise ValueError("Invalid database offset")
-    return DatabaseQuery(table, tuple(columns), dict(filters), tuple(order_by), limit, offset)
+    include_schema = arguments.get("include_schema", False)
+    if type(include_schema) is not bool:
+        raise ValueError("Invalid database schema option")
+    return DatabaseQuery(
+        table, tuple(columns), dict(filters), tuple(order_by), limit, offset, include_schema
+    )
 
 
-def database_statement(query: DatabaseQuery) -> tuple[str, dict[str, Any]]:
+def database_statement(
+    query: DatabaseQuery, *, byte_limit: int = MAX_DATABASE_BYTES,
+) -> tuple[str, dict[str, Any]]:
     """識別子と値を分離し、巨大行は wire に出す前に NULL へ置換する。"""
     table = ".".join(identifier(part) for part in query.table.split("."))
     columns = ", ".join(identifier(column) for column in query.columns) or "*"
     params: dict[str, Any] = {
         "row_limit": query.limit + 1,
         "row_offset": query.offset,
-        "byte_limit": MAX_DATABASE_BYTES,
+        "byte_limit": byte_limit,
     }
     predicates = []
     for index, (column, value) in enumerate(query.filters.items()):
@@ -126,9 +132,11 @@ def database_statement(query: DatabaseQuery) -> tuple[str, dict[str, Any]]:
     return sql, params
 
 
-async def read_database_rows(connection: AsyncConnection, query: DatabaseQuery) -> DatabaseRows:
+async def read_database_rows(
+    connection: AsyncConnection, query: DatabaseQuery, *, byte_limit: int = MAX_DATABASE_BYTES,
+) -> DatabaseRows:
     """一件ずつ消費し、100 行/合計 byte のいずれかで停止する。"""
-    sql, params = database_statement(query)
+    sql, params = database_statement(query, byte_limit=byte_limit)
     rows: list[dict[str, Any]] = []
     size = 0
     async with connection.stream(text(sql), params, execution_options={"yield_per": 1}) as result:
@@ -137,7 +145,7 @@ async def read_database_rows(connection: AsyncConnection, query: DatabaseQuery) 
                 return DatabaseRows(tuple(rows), True)
             payload = row["payload"]
             size += len(payload.encode("utf-8"))
-            if size > MAX_DATABASE_BYTES:
+            if size > byte_limit:
                 return DatabaseRows(tuple(rows), True)
             value = json.loads(payload)
             if not isinstance(value, dict):
@@ -156,35 +164,52 @@ class PostgresDatabaseSource:
         query: DatabaseQuery,
     ) -> DatabaseRows:
         """短い専用接続と read-only transaction を閉じ、失敗理由を外部に反射しない。"""
-        engine = create_async_engine(
-            URL.create(
-                "postgresql+asyncpg",
-                username=config["username"],
-                password=password,
-                host=config["host"],
-                port=config["port"],
-                database=config["database"],
-            ),
-            poolclass=NullPool,
-            hide_parameters=True,
-            connect_args={
-                "ssl": config["sslmode"],
-                "timeout": 5,
-                "command_timeout": 7,
-                "server_settings": {
-                    "default_transaction_read_only": "on",
-                    "statement_timeout": "5000",
-                    "lock_timeout": "2000",
-                },
-            },
-        )
+        engine = create_database_engine(config, password, read_only=True)
         try:
             async with asyncio.timeout(15), engine.connect() as connection, connection.begin():
                 await connection.exec_driver_sql(
                     "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"
                 )
+                if query.include_schema:
+                    table = ".".join(identifier(part) for part in query.table.split("."))
+                    # 列観測と行読取の間に DDL が入り、異なる table 版を混ぜない。
+                    await connection.exec_driver_sql(f"LOCK TABLE {table} IN ACCESS SHARE MODE")
+                    table_schema = await read_table_schema(connection, quoted_table=table)
+                    schema_bytes = len(canonical_json(table_schema).encode("utf-8"))
+                    remaining = MAX_DATABASE_BYTES - schema_bytes
+                    rows = await read_database_rows(connection, query, byte_limit=remaining)
+                    return DatabaseRows(rows.rows, rows.truncated, table_schema)
                 return await read_database_rows(connection, query)
         except (SQLAlchemyError, OSError, TimeoutError, ValueError) as error:
             raise DatabaseReadError("Database read could not be completed") from error
         finally:
             await engine.dispose()
+
+
+def create_database_engine(
+    config: Mapping[str, Any], password: str, *, read_only: bool,
+) -> AsyncEngine:
+    """接続情報と timeout を共通化し、読取/承認済み書込の既定 transaction を分離する。"""
+
+    return create_async_engine(
+        URL.create(
+            "postgresql+asyncpg",
+            username=config["username"],
+            password=password,
+            host=config["host"],
+            port=config["port"],
+            database=config["database"],
+        ),
+        poolclass=NullPool,
+        hide_parameters=True,
+        connect_args={
+            "ssl": config["sslmode"],
+            "timeout": 5,
+            "command_timeout": 7,
+            "server_settings": {
+                "default_transaction_read_only": "on" if read_only else "off",
+                "statement_timeout": "5000",
+                "lock_timeout": "2000",
+            },
+        },
+    )

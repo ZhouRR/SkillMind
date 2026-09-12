@@ -8,8 +8,13 @@ from uuid import UUID
 from skillmind.documents.domain import DocumentNotFoundError
 from skillmind.documents.repository import DocumentRepository
 from skillmind.documents.snapshot import (
+    DOCUMENT_CAPABILITIES,
+    DOCUMENT_CONVERT_CAPABILITY,
+    DOCUMENT_INSPECT_CAPABILITY,
+    DOCUMENT_LIST_CAPABILITY,
     DOCUMENT_PROVIDER,
     DOCUMENT_READ_CAPABILITY,
+    ON_DEMAND_DOCUMENT_PREPARATION,
     DocumentSnapshotError,
     freeze_document_snapshot,
     is_document_source,
@@ -18,10 +23,13 @@ from skillmind.documents.snapshot import (
 
 
 async def resolve_document_binding(
-    repository: DocumentRepository, *, project_id: UUID, requirement_key: str, token: str
+    repository: DocumentRepository, *, project_id: UUID, requirement_key: str, token: str,
+    capability: str = DOCUMENT_READ_CAPABILITY,
 ) -> dict[str, Any]:
     """全集も明示選択だけを受理し、Project 所有権と具体 ID を作成時に固定する。"""
 
+    if capability not in DOCUMENT_CAPABILITIES:
+        raise DocumentSnapshotError("Document capability is not supported")
     selection = parse_document_selection(token)
     try:
         if selection.mode == "ALL":
@@ -39,8 +47,8 @@ async def resolve_document_binding(
         selection=selection,
         documents=documents,
     )
-    return {
-        "capability": DOCUMENT_READ_CAPABILITY,
+    binding: dict[str, Any] = {
+        "capability": capability,
         "provider": DOCUMENT_PROVIDER,
         "candidate_key": token,
         "resource_kind": "document",
@@ -48,6 +56,11 @@ async def resolve_document_binding(
         "access": "read",
         "document_snapshot": snapshot.to_json(),
     }
+    if capability in {
+        DOCUMENT_CONVERT_CAPABILITY, DOCUMENT_INSPECT_CAPABILITY, DOCUMENT_LIST_CAPABILITY,
+    }:
+        binding["preparation_policy"] = ON_DEMAND_DOCUMENT_PREPARATION
+    return binding
 
 
 async def revalidate_document_choices(

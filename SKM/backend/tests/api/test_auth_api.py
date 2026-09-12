@@ -30,11 +30,17 @@ def assert_declared_problem(client: TestClient, response: Response) -> None:
         Draft202012Validator(header["schema"]).validate(response.headers[name])
 
 
-def test_login_context_login_session_and_logout_use_secure_contract(client: TestClient) -> None:
+@pytest.mark.parametrize("deferred", [False, True])
+@pytest.mark.parametrize("database", [False, True])
+def test_login_context_login_session_and_logout_use_secure_contract(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, deferred: bool, database: bool
+) -> None:
     """Login CSRF、opaque cookie、session refresh、logout が同じ認証契約を共有する。"""
 
     service = FakeAuthService()
     client.app.state.auth_service = service
+    monkeypatch.setattr(client.app.state.settings, "deferred_features_enabled", deferred)
+    monkeypatch.setattr(client.app.state.settings, "database_writes_enabled", database)
 
     context = client.get("/api/v1/auth/login-context")
     assert context.status_code == 200
@@ -51,12 +57,16 @@ def test_login_context_login_session_and_logout_use_secure_contract(client: Test
     assert login.status_code == 200
     assert login.json()["user"]["system_role"] == "ADMIN"
     assert login.json()["csrf_token"] == service.csrf_token
+    assert login.json()["deferred_features_enabled"] is deferred
+    assert login.json()["database_writes_enabled"] is database
     assert "skillmind_session=" in login.headers["set-cookie"]
     assert login.headers["cache-control"] == "no-store"
 
     current = client.get("/api/v1/auth/session")
     assert current.status_code == 200
     assert current.json()["user"]["email"] == "admin@example.com"
+    assert current.json()["deferred_features_enabled"] is deferred
+    assert current.json()["database_writes_enabled"] is database
     assert current.headers["cache-control"] == "no-store"
 
     logout = client.post(

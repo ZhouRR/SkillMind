@@ -8,10 +8,14 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID, uuid4
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from skillmind.db.models import ProjectDocumentUpload, ProjectDocumentUploadClosure
+from skillmind.db.models import (
+    ProjectDocumentEffectUpload,
+    ProjectDocumentUpload,
+    ProjectDocumentUploadClosure,
+)
 from skillmind.documents.domain import (
     DocumentCleanupActor,
     DocumentUploadAlreadyPublishedError,
@@ -70,13 +74,17 @@ class DocumentUploadRepository:
     async def path_reserved(self, *, project_id: UUID, folder: str, name: str) -> bool:
         """未公開原要求が占有する展示 path を、次の PUT より前に保護する。"""
 
-        return bool(await self._session.scalar(select(exists().where(
+        return bool(await self._session.scalar(select(or_(exists().where(
             ProjectDocumentUpload.project_id == project_id,
             ProjectDocumentUpload.folder == folder,
             ProjectDocumentUpload.name == name,
             ProjectDocumentUpload.state == "PENDING",
             ProjectDocumentUpload.publication_closed_at.is_(None),
-        ))))
+        ), exists().where(
+            ProjectDocumentEffectUpload.project_id == project_id,
+            ProjectDocumentEffectUpload.folder == folder,
+            ProjectDocumentEffectUpload.name == name,
+        )))))
 
     def reserve(
         self, *, upload_key: UUID, organization_id: UUID,

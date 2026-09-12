@@ -86,6 +86,26 @@ describe('Run Result view', () => {
     expect(render(detail(null))).toContain('尚未生成通过校验的结果')
   })
 
+  it.each(['FAILED', 'CANCELLED'] as const)('shows unresolved writes outside collapsed audit for %s', (status) => {
+    /** Run の停止/取消を遠端の未実行と誤認せず、結果がなくても確認事項を隠さない。 */
+    const record = detail(null)
+    record.status = status
+    record.effect_executions = [{
+      effect_execution_id: '00000000-0000-4000-8000-000000000126',
+      proposal_id: '00000000-0000-4000-8000-000000000124', run_id: record.run_id,
+      approval_id: '00000000-0000-4000-8000-000000000125', tool_call_id: null,
+      status: 'FAILED', provider: 'postgres', provider_version: 'postgres-receipt/v1',
+      before_ref: null, after_ref: null, verification: {},
+      error: { code: 'effect_result_unknown', reason_code: 'retry_exhausted', retryable: false },
+      attempt_no: 3, executed_at: null, created_at: record.created_at, updated_at: record.created_at,
+    }]
+    const html = render(record)
+    expect(html).toContain('写入结果待核对')
+    expect(html).toContain('停止或取消不代表远端未写入')
+    expect(html.indexOf('写入结果待核对')).toBeLessThan(html.indexOf('<details'))
+    expect(html).not.toContain('postgres · 失败')
+  })
+
   it('renders an open choice interaction beside the segment timeline', () => {
     /** WAITING Run が Result 不在でも選択肢と継続操作を失わない。 */
     const waiting = detail(null)

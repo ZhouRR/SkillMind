@@ -2,11 +2,77 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import replace
+from pathlib import Path
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
+from jsonschema import Draft202012Validator
+from pydantic import ValidationError
 
+from skillmind.api.routes.effects import ChangeProposalResponse
 from tests.api.fakes import FakeEffectService, FakeProposalDecisionService
+
+
+async def _library_decision(service, command, *, access):
+    """承認ロジックは mock に限定し、実 response projection に内部文書庫の形を渡す。"""
+
+    result = await FakeProposalDecisionService.decide_change_proposal(
+        service, command, access=access
+    )
+    return replace(
+        result,
+        proposal=replace(
+            result.proposal,
+            integration_id=None,
+            capability_version="document.write/v1",
+            operation="CREATE",
+            target={"locator": "rv/fixture/source.md"},
+            summary="Save the original Artifact",
+        ),
+    )
+
+
+def test_document_proposal_response_preserves_null_and_rejects_other_null_targets(
+    client, monkeypatch
+):
+    """実 HTTP serializer、response model と共有 detail Schema が同じ NULL 境界を持つ。"""
+
+    service = FakeProposalDecisionService()
+    monkeypatch.setattr(
+        service,
+        "decide_change_proposal",
+        lambda command, access: _library_decision(service, command, access=access),
+    )
+    client.app.state.run_service = service
+    response = client.post(
+        f"/api/v1/projects/{uuid4()}/runs/{uuid4()}/proposals/{uuid4()}/decision",
+        headers={"Idempotency-Key": "library-response"},
+        json={
+            "decision": "APPROVED",
+            "proposal_version": 1,
+            "proposal_checksum": "sha256:" + "a" * 64,
+            "reason": "Reviewed",
+        },
+    )
+    assert response.status_code == 200
+    value = response.json()["proposal"]
+    assert value["integration_id"] is None
+    path = Path(__file__).resolve().parents[3] / "contracts/runs/detail/v1.schema.json"
+    schema = Draft202012Validator(
+        json.loads(path.read_text())["properties"]["change_proposals"]["items"]
+    )
+    assert schema.is_valid(value)
+    for changes in (
+        {"capability_version": "database.write/v1"},
+        {"integration_id": str(uuid4())},
+        {"operation": "UPDATE"},
+    ):
+        with pytest.raises(ValidationError):
+            ChangeProposalResponse.model_validate({**value, **changes})
+        assert not schema.is_valid({**value, **changes})
 
 
 def test_admin_decision_freezes_proposal_version_checksum_and_idempotency(
@@ -38,6 +104,7 @@ def test_admin_decision_freezes_proposal_version_checksum_and_idempotency(
     assert response.json()["proposal"]["status"] == "APPROVED"
     assert response.json()["approval"]["proposal_checksum"] == checksum
     assert service.received is not None
+    assert service.received_access.actor.user_id == service.received.actor_id
     assert service.received.actor_is_administrator is True
     assert service.received.proposal_version == 4
     assert service.received.proposal_checksum == checksum

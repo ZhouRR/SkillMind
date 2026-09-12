@@ -82,6 +82,34 @@ class UserRepository:
 
         self._session = session
 
+    async def lock_session_reference(
+        self, *, organization_id: UUID, user_id: UUID, session_id: UUID
+    ) -> LockedUsers:
+        """受理済み非同期要求の参照を Org → User SHARE → Session UPDATE で固定する。
+
+        ID は DB の原要求から取得し、Queue や新しい HTTP actor から補わない。
+        Cookie/CSRF を保存せず、期限延長・別会話への差替えも行わない。
+        """
+
+        await lock_organization(self._session, organization_id)
+        actor = await self._session.scalar(
+            select(User)
+            .where(User.id == user_id, User.organization_id == organization_id)
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
+        )
+        if actor is None:
+            raise UnauthorizedSessionError("Authentication is required")
+        current = await self._session.scalar(
+            select(AuthSession)
+            .where(AuthSession.id == session_id, AuthSession.user_id == user_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if current is None:
+            raise UnauthorizedSessionError("Authentication is required")
+        return LockedUsers(actor, None, current, (current,))
+
     async def lock_users(
         self,
         *,

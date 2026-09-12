@@ -535,6 +535,11 @@
         "type": "object",
         "additionalProperties": false,
         "required": ["proposal_id", "proposal_ref", "project_id", "run_id", "run_segment_id", "agent_session_id", "target_binding_id", "integration_id", "effect_intent_key", "capability_version", "operation", "target", "summary", "changes", "precondition", "evidence_refs", "risk_level", "reversible", "rollback", "verification", "status", "version", "checksum", "expires_at", "created_at", "updated_at"],
+        "allOf": [{
+          "if": { "properties": { "capability_version": { "const": "document.write/v1" } } },
+          "then": { "properties": { "integration_id": { "type": "null" }, "operation": { "const": "CREATE" } } },
+          "else": { "properties": { "integration_id": { "type": "string" } } }
+        }],
         "properties": {
           "proposal_id": { "type": "string", "format": "uuid" },
           "proposal_ref": { "type": "string", "pattern": "^cp_[a-zA-Z0-9_-]+$" },
@@ -543,7 +548,7 @@
           "run_segment_id": { "type": "string", "format": "uuid" },
           "agent_session_id": { "type": "string", "format": "uuid" },
           "target_binding_id": { "type": "string", "format": "uuid" },
-          "integration_id": { "type": "string", "format": "uuid" },
+          "integration_id": { "type": ["string", "null"], "format": "uuid" },
           "effect_intent_key": { "type": "string", "minLength": 1 },
           "capability_version": { "type": "string", "minLength": 1 },
           "operation": { "type": "string", "minLength": 1 },

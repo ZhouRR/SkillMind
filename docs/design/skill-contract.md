@@ -113,6 +113,8 @@ GUIDANCE_ONLY：指导/人工清单；CONFIGURATION_REQUIRED：待参数/资源�
 
 [Schema](../../SKM/contracts/runtime-manifest/v1alpha1.schema.json)固定 manifest_version=skillmind/v1alpha1。Manifest 冻结蓝图/任务、Tool/资源、规则、建议、效果及可选 Schema，不增平行语义摘要。
 
+任务可声明 `document_prerequisites`：引用原蓝图的 apply intent keys，须有对应 `/tasks/<index>/document_prerequisites` 原文 trace，并必需声明 `document.readiness/v1`。Interpreter 只从“文档处理前必须成功保存”的无条件规则提取，不把建议顺序或条件步骤改成强制前置；原条件保留在 Task、Brief 和审阅投影中，运行与旧 Worker 边界见[资源快照](resource-snapshots.md#excel-取得与转换的扩展边界)。它只增加执行限制，不代替批准或证明业务内容正确。
+
 DRAFT 起内容/checksum 不变；发布状态、actor/时间、warning 接受属于版本/gate metadata。资源只声明于 capability_blueprint.resource_requirements，无顶层 data_sources，不含 Integration/Secret。
 
 ## Skill 组合

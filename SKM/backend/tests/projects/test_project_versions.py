@@ -181,7 +181,8 @@ async def test_all_project_writes_recheck_original_session_in_their_transaction(
     if operation == "delete":
         members.project.status = "ARCHIVED"
     query_results = (
-        [None] if operation == "create" else [members.project, 0, False, False, False, False, False]
+        [None] if operation == "create"
+        else [members.project, 0, False, False, False, False, False, False]
     )
     if stage == "initial_lock":
         members.locked.current_session.revoked_at = datetime.now(UTC)
@@ -236,7 +237,7 @@ async def test_delete_uses_common_user_gate_before_project_and_retains_max_versi
     members.lock_users.side_effect = locked
     members.project.status = "ARCHIVED"
     members.project.row_version = MAX_PROJECT_VERSION
-    responses = [members.project, 0, False, False, False, False, False]
+    responses = [members.project, 0, False, False, False, False, False, False]
 
     async def scalar(statement: object) -> object:
         """Project lock が共通 lock より前に呼ばれないことを記録する。"""

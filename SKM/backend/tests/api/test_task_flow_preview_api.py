@@ -539,3 +539,23 @@ async def test_cancelled_error_is_not_converted_to_storage_problem(client: TestC
             cast(FastAPI, client.app).state.auth_service.actor,
             "explain",
         )
+
+
+def test_document_prerequisites_survive_the_real_http_projection(client: TestClient):
+    """原 Task の gate と trace を route/DTO/serializer で落とさず公開する。"""
+    service = _install(client)
+    blueprint = service.source.manifest["capability_blueprint"]
+    blueprint["tasks"][1]["document_prerequisites"] = ["update"]
+    blueprint["source_traces"].append({"target": "/tasks/1/document_prerequisites",
+        "path": "説明/SKILL.md", "line": 2, "reason": "Synthetic prerequisite declaration"})
+    service.source.manifest["tools"].append({
+        "capability": "document.readiness/v1", "required": True,
+    })
+    service.source = replace(service.source,
+        manifest_checksum="sha256:" + sha256_hex(canonical_json(service.source.manifest)))
+    service.preview = project_task_flow_preview(
+        source=service.source, task_key="explain", contracts_dir=CONTRACTS
+    )
+    response = client.get(service.path())
+    assert response.status_code == 200
+    assert response.json()["plan"]["task"]["value"]["document_prerequisites"] == ["update"]

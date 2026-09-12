@@ -4,22 +4,64 @@
   "title": "Skillmind Authenticated Session v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["user", "csrf_token", "absolute_expires_at"],
+  "required": [
+    "user",
+    "csrf_token",
+    "absolute_expires_at"
+  ],
   "properties": {
     "user": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["user_id", "organization_id", "email", "display_name", "system_role"],
+      "required": [
+        "user_id",
+        "organization_id",
+        "email",
+        "display_name",
+        "system_role"
+      ],
       "properties": {
-        "user_id": { "type": "string", "format": "uuid" },
-        "organization_id": { "type": "string", "format": "uuid" },
-        "email": { "type": "string", "minLength": 3, "maxLength": 320 },
-        "display_name": { "type": "string", "minLength": 1, "maxLength": 200 },
-        "system_role": { "enum": ["ADMIN", "USER"] }
+        "user_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "organization_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "email": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 320
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "system_role": {
+          "enum": [
+            "ADMIN",
+            "USER"
+          ]
+        }
       }
     },
-    "csrf_token": { "type": "string", "minLength": 32 },
-    "absolute_expires_at": { "type": "string", "format": "date-time" },
-    "deferred_features_enabled": { "type": "boolean", "default": false }
+    "csrf_token": {
+      "type": "string",
+      "minLength": 32
+    },
+    "absolute_expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "deferred_features_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "database_writes_enabled": {
+      "type": "boolean",
+      "default": false
+    }
   }
 }

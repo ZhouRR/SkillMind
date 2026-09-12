@@ -10,6 +10,7 @@ from sqlalchemy import Select, func, or_, select
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from skillmind.artifacts.conversion import conversion_artifact, conversion_artifact_description
 from skillmind.artifacts.domain import (
     MAX_ARTIFACT_BYTES,
     MAX_RUN_ARTIFACT_BYTES,
@@ -143,7 +144,17 @@ def _metadata(
         value.run_id != run_id or (project_id is not None and value.project_id != project_id)
         or row["tool_identity"] != value.tool_call_id or row["tool_run_id"] != value.run_id
         or row["attempt_run_id"] != value.run_id or row["status"] != "SUCCEEDED"
-        or row["capability_version"] != "workspace.write/v2" or row["provider"] != "workspace"
+        or row["has_content"] is not True or type(row["content_size"]) is not int
+        or row["content_size"] != value.size_bytes or not isinstance(response, dict)
+        or response.get("status") != "success"
+        or response.get("artifact_refs") != [value.artifact_ref]
+    ):
+        raise _invalid()
+    if row["capability_version"] == "document.convert/v1":
+        _validate_conversion_row(row, value, response)
+        return value
+    if (
+        row["capability_version"] != "workspace.write/v2" or row["provider"] != "workspace"
         or row["tool_name"] != "mcp__skillmind__workspace_write_v2"
         or row["integration_id"] is not None or row["evidence_type"] != "workspace-write"
         or row["source_uri"] != f"workspace://runs/{run_id}/{quote(value.path, safe='/')}"
@@ -152,17 +163,40 @@ def _metadata(
         or locator != {"path": value.path, "bytes": value.size_bytes}
         or not isinstance(metadata, dict) or metadata.get("read_only") is not False
         or metadata != {"scope": "run-workspace", "read_only": False}
-        or row["has_content"] is not True or type(row["content_size"]) is not int
-        or row["content_size"] != value.size_bytes or not isinstance(response, dict)
-        or response.get("status") != "success" or response.get("provider") != "workspace"
+        or response.get("provider") != "workspace"
         or response.get("path") != value.path or response.get("content_hash") != value.checksum
         or type(response.get("bytes_written")) is not int
         or response["bytes_written"] != value.size_bytes
-        or response.get("artifact_refs") != [value.artifact_ref]
         or response.get("evidence_refs") != [value.evidence_ref]
     ):
         raise _invalid()
     return value
+
+
+def _validate_conversion_row(
+    row: RowMapping, value: ArtifactMetadata, response: dict[str, Any],
+) -> None:
+    """原変換 Tool と二つの Evidence 参照を照合し、別 producer の保存行を流用しない。"""
+
+    try:
+        artifact, fields = conversion_artifact(response, run_id=value.run_id)
+    except (ValueError, TypeError, KeyError) as error:
+        raise _invalid() from error
+    refs = response.get("evidence_refs")
+    if (
+        row["provider"] != "project-documents" or row["integration_id"] is not None
+        or row["tool_name"] != "mcp__skillmind__document_convert_v1"
+        or response.get("provider") != "project"
+        or not isinstance(refs, list) or len(refs) != 2 or refs[1] != value.evidence_ref
+        or not isinstance(refs[0], str) or not refs[0].startswith("ev_") or refs[0] == refs[1]
+        or artifact.path != value.path or artifact.checksum != value.checksum
+        or len(artifact.content) != value.size_bytes or artifact.mime_type != value.mime_type
+        or response.get("artifact") != conversion_artifact_description(artifact)
+        or any(row["metadata_json" if key == "metadata" else key] != expected
+               for key, expected in fields.items())
+        or type(row["source_locator"].get("bytes")) is not int
+    ):
+        raise _invalid()
 
 
 def _validate_total(values: tuple[ArtifactMetadata, ...]) -> None:

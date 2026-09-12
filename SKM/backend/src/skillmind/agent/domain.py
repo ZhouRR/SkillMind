@@ -99,6 +99,7 @@ class MaterializedResource:
     revision: str | None
     files: int
     skipped: int
+    deferred: int = 0
 
 
 @dataclass(frozen=True, slots=True)

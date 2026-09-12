@@ -48,7 +48,7 @@ describe.each(['zh', 'ja', 'en'] as const)('schedule confirmation in %s', (langu
   })
 
   it('retains an unavailable original source instead of displaying a new sole choice as selected', () => {
-    const requirement = { key: 'issues', kind: 'issue', required: true,
+    const requirement = { key: 'issues', kind: 'issue', access: 'read', required: true,
       options: [{ value: 'integration:new', label: 'New candidate' }] }
     const html = renderToStaticMarkup(<LanguageProvider language={language}><SourceRequirementField
       requirement={requirement} value="integration:original" onChange={() => {}} /></LanguageProvider>)
@@ -60,7 +60,7 @@ describe.each(['zh', 'ja', 'en'] as const)('schedule confirmation in %s', (langu
 
   it('shows an explicit source selector even when its retained source has no current candidates', () => {
     const html = renderToStaticMarkup(<LanguageProvider language={language}><SourceRequirementField
-      requirement={{ key: 'issues', kind: 'issue', required: true, options: [] }}
+      requirement={{ key: 'issues', kind: 'issue', access: 'read', required: true, options: [] }}
       value="integration:original" onChange={() => {}} /></LanguageProvider>)
     expect(html).toContain('value="integration:original" disabled="" selected=""')
   })

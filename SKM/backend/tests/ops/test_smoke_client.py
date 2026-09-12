@@ -160,6 +160,7 @@ class FakeAcceptanceClient:
         self.warning = warning
         self.requests: list[tuple[str, str, dict[str, Any] | None]] = []
         self.wait_count = 0
+        self.receipts: dict[str, dict[str, Any]] = {}
 
     def request_json(
         self,
@@ -175,20 +176,35 @@ class FakeAcceptanceClient:
         self.requests.append((method, path, body))
         if path.endswith("/skill-imports"):
             return {"skill_source_id": self.source_id}
-        if path.endswith("?force_regenerate=true"):
-            return {"status": "queued", "execution_key": "sha256:" + "a" * 64}
-        if path.endswith(f"/{self.parent_id}/adjust"):
-            return {"status": "queued", "execution_key": "sha256:" + "b" * 64}
+        if path.endswith(("/interpretation-requests", "/adjustment-requests")):
+            assert body is not None
+            request_id = body["request_id"]
+            adjusted = path.endswith("/adjustment-requests")
+            receipt = {
+                "request_id": request_id, "skill_source_id": self.source_id,
+                "status": "SUCCEEDED", "execution_key": "sha256:" + ("b" if adjusted else "a") * 64,
+                "interpretation_id": self.adjusted_id if adjusted else self.parent_id,
+                "error_code": None,
+            }
+            self.receipts[request_id] = receipt
+            return {**receipt, "status": "QUEUED", "interpretation_id": None}
+        if path.startswith("/api/v1/skill-interpretation-requests/"):
+            assert method == "GET"
+            return self.receipts[path.rsplit("/", 1)[-1]]
         if path.endswith(f"/{self.parent_id}/execution"):
             return {
                 "status": "PREVIEW_READY",
                 "interpretation_id": self.parent_id,
+                "skill_source_id": self.source_id,
+                "execution_key": "sha256:" + "a" * 64,
                 "parent_interpretation_id": None,
             }
         if path.endswith(f"/{self.adjusted_id}/execution"):
             return {
                 "status": "PREVIEW_READY",
                 "interpretation_id": self.adjusted_id,
+                "skill_source_id": self.source_id,
+                "execution_key": "sha256:" + "b" * 64,
                 "parent_interpretation_id": self.parent_id,
             }
         if path.endswith(f"/{self.adjusted_id}/draft"):
@@ -256,9 +272,14 @@ class FakeAcceptanceClient:
     ) -> dict[str, Any]:
         """Interpret と adjust の順に終端 event を返す。"""
 
-        del path, deadline
+        del deadline
+        assert path.startswith("/api/v1/skill-interpretation-requests/")
+        assert path.endswith("/events")
         assert event_field == "event"
-        assert event_names == frozenset({"interpret.completed", "interpret.failed"})
+        assert event_names == frozenset({
+            "interpret.completed", "interpret.failed",
+            "interpret.unknown", "interpret.disconnected",
+        })
         interpretation_id = self.parent_id if self.wait_count == 0 else self.adjusted_id
         self.wait_count += 1
         return {
@@ -315,12 +336,14 @@ def test_accept_scenario_runs_complete_public_api_lifecycle(
     )
 
     assert client.wait_count == 2
+    original, adjusted_request = client.receipts
     assert [path for _, path, _ in client.requests] == [
         "/api/v1/skill-imports",
-        f"/api/v1/skill-sources/{client.source_id}/interpret"
-        "?force_regenerate=true",
+        f"/api/v1/skill-sources/{client.source_id}/interpretation-requests",
+        f"/api/v1/skill-interpretation-requests/{original}",
         f"/api/v1/skill-interpretations/{client.parent_id}/execution",
-        f"/api/v1/skill-interpretations/{client.parent_id}/adjust",
+        f"/api/v1/skill-interpretations/{client.parent_id}/adjustment-requests",
+        f"/api/v1/skill-interpretation-requests/{adjusted_request}",
         f"/api/v1/skill-interpretations/{client.adjusted_id}/execution",
         f"/api/v1/skill-interpretations/{client.adjusted_id}/draft",
         f"/api/v1/skill-versions/{client.version_id}/publish",

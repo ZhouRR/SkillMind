@@ -33,6 +33,17 @@ describe('PostgreSQL and MCP connection configuration', () => {
     expect(findScopeIssue('postgres', { tables: [] }, false)).toBe('tables_required')
   })
 
+  it('requires explicit database columns and operations for read/write access', () => {
+    expect(capabilitiesForAccess('postgres', 'read_write')).toEqual(['database.read/v1', 'database.write/v1'])
+    expect(capabilitiesForAccess('postgres', 'read')).toEqual(['database.read/v1'])
+    const scope = buildIntegrationScope('postgres', { issueIds: [], fieldKeys: [], paths: [], revisions: [],
+      tables: ['public.reports'], writeEnabled: true, writeColumns: ['public.reports.status'], operations: ['UPDATE'] })
+    expect(scope).toEqual({ tables: ['public.reports'], write_columns: ['public.reports.status'], operations: ['UPDATE'] })
+    expect(findScopeIssue('postgres', scope, true)).toBeNull()
+    expect(findScopeIssue('postgres', { ...scope, write_columns: [] }, true)).toBe('write_columns_required')
+    expect(findScopeIssue('postgres', { ...scope, operations: [] }, true)).toBe('database_operations_required')
+  })
+
   it('builds MCP Streamable HTTP metadata and requires explicit resource URIs', () => {
     expect(buildIntegrationConfig('mcp', { ...emptyConnectDraft('mcp'), serverUrl: ' https://mcp.example.test/mcp ' }))
       .toEqual({ server_url: 'https://mcp.example.test/mcp', transport: 'streamable_http' })
@@ -41,7 +52,7 @@ describe('PostgreSQL and MCP connection configuration', () => {
     expect(findScopeIssue('mcp', { resource_uris: [] }, false)).toBe('resource_uris_required')
   })
 
-  it.each(['postgres', 'mcp'] as const)('recognizes %s without granting a write capability', (provider) => {
+  it.each(['mcp'] as const)('recognizes %s without granting a write capability', (provider) => {
     expect(asResourceProvider(provider)).toBe(provider)
     expect(capabilitiesForAccess(provider, 'read_write')).toEqual(capabilitiesForAccess(provider, 'read'))
   })

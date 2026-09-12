@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock, call
@@ -14,8 +15,10 @@ from pydantic_settings import SettingsConfigDict
 from skillmind.agent.claude import ClaudeRuntimeConfiguration
 from skillmind.api import main
 from skillmind.core.settings import Settings
+from skillmind.documents.library import configured_document_library
 from skillmind.documents.service import DocumentService
 from skillmind.documents.source import DatabaseProjectDocumentSource
+from skillmind.effects.release import configured_execution_features
 from skillmind.skills.service import SkillService
 from skillmind.storage import FileStorage
 from skillmind.storage.factory import create_file_storage
@@ -48,9 +51,12 @@ def _settings(tmp_path: Path, namespace_id: UUID | None) -> Settings:
     )
 
 
-@pytest.mark.parametrize("namespace_id", [None, _NAMESPACE])
+@pytest.mark.parametrize("namespace_id,document_enabled", [
+    (None, False), (_NAMESPACE, False), (_NAMESPACE, True),
+])
 async def test_api_and_worker_inject_same_factory_namespace_into_real_consumers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, namespace_id: UUID | None,
+    document_enabled: bool,
 ) -> None:
     """DB/SDK/queue を完全に止めたまま、公開 upload と Worker source/Skill の実装配を通す。"""
 
@@ -60,13 +66,10 @@ async def test_api_and_worker_inject_same_factory_namespace_into_real_consumers(
     engine.dispose = AsyncMock()
     redis = MagicMock()
     redis.aclose = AsyncMock()
-    queue = MagicMock()
-    queue.aclose = AsyncMock()
     sdk = Mock(spec=["put_object", "get_object", "remove_object", "stat_object"])
     sdk_constructor = Mock(return_value=sdk)
     monkeypatch.setattr("skillmind.storage.s3.Minio", sdk_constructor)
     monkeypatch.setattr(main, "create_redis_client", lambda _: redis)
-    monkeypatch.setattr(main, "create_pool", AsyncMock(return_value=queue))
     monkeypatch.setattr(
         ClaudeRuntimeConfiguration, "from_environ",
         lambda: ClaudeRuntimeConfiguration(environment={}),
@@ -82,6 +85,13 @@ async def test_api_and_worker_inject_same_factory_namespace_into_real_consumers(
         return storage
 
     for module in (main, worker):
+        if document_enabled:
+            monkeypatch.setattr(
+                module, "configured_execution_features",
+                lambda settings: replace(
+                    configured_execution_features(settings), document_writes=True
+                ),
+            )
         monkeypatch.setattr(module, "get_settings", lambda: settings)
         monkeypatch.setattr(module, "configure_logging", lambda _: None)
         monkeypatch.setattr(module, "create_database_engine", lambda _: engine)
@@ -115,6 +125,20 @@ async def test_api_and_worker_inject_same_factory_namespace_into_real_consumers(
             assert api_skill.call_args.kwargs["file_storage"] is storages[0]
             assert worker_document.call_args.kwargs["file_storage"] is storages[1]
             assert worker_skill.call_args.kwargs["file_storage"] is storages[2]
+            expected_library = configured_document_library(
+                storages[0], bucket=settings.object_storage_bucket
+            )
+            assert app.state.run_service._document_library_target == expected_library
+            assert context["run_service"]._document_library_target == expected_library
+            assert app.state.run_service._execution_features.document_writes is document_enabled
+            assert context["run_service"]._execution_features.document_writes is document_enabled
+            assert (
+                "document.write/v1" in app.state.skill_service._registered_write_capabilities
+            ) is document_enabled
+            installed = app.state.skill_service._installed_provider_capabilities
+            assert installed.get("document.write/v1", frozenset()) == (
+                frozenset({"project-library"}) if document_enabled else frozenset()
+            )
             assert isinstance(app.state.document_service, DocumentService)
             assert isinstance(context["skill_service"], SkillService)
         finally:
@@ -127,7 +151,6 @@ async def test_api_and_worker_inject_same_factory_namespace_into_real_consumers(
     ] * 3
     assert not sdk.method_calls
     sessions.assert_not_called()
-    queue.aclose.assert_awaited_once()
     redis.aclose.assert_awaited_once()
     assert engine.dispose.await_count == 2
 

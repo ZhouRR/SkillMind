@@ -4,20 +4,27 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from skillmind.documents.content import read_document_bytes, verify_document_bytes
+from skillmind.core.hashing import canonical_json, sha256_hex
+from skillmind.documents.content import (
+    inspect_document_content,
+    read_document_content,
+    verify_document_bytes,
+)
 from skillmind.documents.domain import (
     DocumentContentError,
     DocumentContentInvalidError,
     DocumentNotFoundError,
+    StoredDocument,
 )
 from skillmind.documents.repository import DocumentRepository
 from skillmind.documents.snapshot import DocumentSnapshotError, FrozenDocument
-from skillmind.storage import FileStorage, FileStorageError
+from skillmind.storage import BlobReference, FileStorage, FileStorageError
+from skillmind.storage.observation import BlobObservation
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +38,36 @@ class ProjectDocumentContent:
     checksum: str
     size: int
     data: bytes
+    observation: BlobObservation | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectDocumentObservation:
+    """本文未取得の観測を元 Project/文書 metadata と結び付ける内部参照。"""
+
+    project_id: UUID
+    document: FrozenDocument
+    observation: BlobObservation
+    reference_checksum: str
+
+
+@runtime_checkable
+class InspectableProjectDocumentSource(Protocol):
+    """選択用 metadata のみの観測と、元観測に固定した取得を提供する port。"""
+
+    async def inspect(
+        self, *, project_id: UUID, document_id: UUID
+    ) -> ProjectDocumentObservation | None:
+        """同じ Project の原 ID を観測し、本文や変換結果を取得しない。"""
+
+        ...
+
+    async def fetch_observed(
+        self, *, project_id: UUID, observed: ProjectDocumentObservation
+    ) -> ProjectDocumentContent | None:
+        """元観測に固定した byte を取得し、現在の別文書へ差し替えない。"""
+
+        ...
 
 
 class ProjectDocumentSource(Protocol):
@@ -93,15 +130,66 @@ class DatabaseProjectDocumentSource:
     async def fetch(self, *, project_id: UUID, document_id: UUID) -> ProjectDocumentContent | None:
         """Project と ID の一致を確認して blob を読み、同名の別文書へ切り替えない。"""
 
+        return await self._fetch(project_id=project_id, document_id=document_id)
+
+    async def inspect(
+        self, *, project_id: UUID, document_id: UUID
+    ) -> ProjectDocumentObservation | None:
+        """DB の所在を原 namespace で HEAD し、本文取得済みとは扱わない。"""
+
+        resolved = await self._resolve(project_id=project_id, document_id=document_id)
+        if resolved is None:
+            return None
+        document, reference = resolved
+        observation = await inspect_document_content(
+            self._file_storage, reference=reference, document=document
+        )
+        return ProjectDocumentObservation(
+            project_id, _frozen_metadata(document), observation, _reference_checksum(reference)
+        )
+
+    async def fetch_observed(
+        self, *, project_id: UUID, observed: ProjectDocumentObservation
+    ) -> ProjectDocumentContent | None:
+        """元 Project・ID・metadata と storage 観測を再確認して同じ内容だけを取得する。"""
+
+        if observed.project_id != project_id:
+            raise DocumentSnapshotError("Document observation does not belong to this project")
+        return await self._fetch(
+            project_id=project_id, document_id=observed.document.document_id, observed=observed
+        )
+
+    async def _resolve(
+        self, *, project_id: UUID, document_id: UUID
+    ) -> tuple[StoredDocument, BlobReference] | None:
+        """三つの取得経路で原 Project/ID 解決を共有し、DB session 内で I/O しない。"""
+
         async with self._session_factory() as session:
             try:
-                document, reference = await DocumentRepository(session).get_for_download(
+                return await DocumentRepository(session).get_for_download(
                     project_id=project_id, document_id=document_id
                 )
             except DocumentNotFoundError:
                 return None
-        data = await read_document_bytes(
-            self._file_storage, reference=reference, document=document
+
+    async def _fetch(
+        self, *, project_id: UUID, document_id: UUID,
+        observed: ProjectDocumentObservation | None = None,
+    ) -> ProjectDocumentContent | None:
+        """原所在と byte/hash 検証を共有し、前の観測があれば現在版に読み替えない。"""
+
+        resolved = await self._resolve(project_id=project_id, document_id=document_id)
+        if resolved is None:
+            return None
+        document, reference = resolved
+        if observed is not None and (
+            _frozen_metadata(document) != observed.document
+            or _reference_checksum(reference) != observed.reference_checksum
+        ):
+            raise DocumentSnapshotError("Document no longer matches its observed metadata")
+        data, observation = await read_document_content(
+            self._file_storage, reference=reference, document=document,
+            expected=observed.observation if observed is not None else None,
         )
         return ProjectDocumentContent(
             document_id=document.document_id,
@@ -111,7 +199,31 @@ class DatabaseProjectDocumentSource:
             checksum=document.checksum,
             size=document.size,
             data=data,
+            observation=observation,
         )
+
+
+def _frozen_metadata(document: StoredDocument) -> FrozenDocument:
+    """本文 hash を推測せず、DB の原文書 metadata を比較可能な同じ型へ投影する。"""
+
+    return FrozenDocument(
+        document.document_id, document.folder, document.name, document.mime,
+        document.size, document.checksum,
+    )
+
+
+def _reference_checksum(reference: BlobReference) -> str:
+    """元所在の変更を検出する digest を作り、bucket/key を公開記録へ運ばない。"""
+
+    namespace = reference.namespace
+    if namespace is None:
+        raise DocumentSnapshotError("Document storage reference is unavailable")
+    return f"sha256:{sha256_hex(canonical_json({
+        'version': 'v1', 'key': reference.key,
+        'namespace_id': str(namespace.namespace_id),
+        'namespace_checksum': namespace.descriptor_checksum,
+        'durable': namespace.durable,
+    }))}"
 
 
 async def read_frozen_document(

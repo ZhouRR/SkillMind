@@ -72,6 +72,11 @@ export function TaskFlowPreview({ preview }: { preview: TaskFlowPreviewRecord })
           <small><code>{originalTask.key}</code> · <code>{originalTask.capability}</code></small>
           <FlowItemSources reference={`${plan.task.blueprint_ref}/objective`} traces={preview.source_traces} />
         </section>
+        {originalTask.document_prerequisites && <section className="taskFlowSection">
+          <h4>{messages.skills.documentPrerequisites}</h4>
+          <p>{originalTask.document_prerequisites.join(' · ')}</p>
+          <FlowItemSources reference={`${plan.task.blueprint_ref}/document_prerequisites`} traces={preview.source_traces} />
+        </section>}
         <FlowResources title={labels.taskResources} resources={plan.task_resources} traces={preview.source_traces} task />
         <FlowNotes title={labels.success} notes={originalTask.success_criteria} referenceBase={`${plan.task.blueprint_ref}/success_criteria`} traces={preview.source_traces} />
         <section className="taskFlowSection"><h4>{labels.deliverables}</h4><p className="hint">{labels.deliverableHint}</p>

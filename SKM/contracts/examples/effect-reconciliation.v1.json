@@ -1,0 +1,13 @@
+{
+  "request_id": "03a20b5f-eae2-49c5-9102-2c9f15d1d269",
+  "project_id": "9b6bca89-986c-4b30-a819-cfc5e1a8a238",
+  "run_id": "4c6c95df-df2b-4680-85ec-7ca0fc8311c0",
+  "effect_execution_id": "8b84148d-2780-4a42-a60e-f1df4a1a701b",
+  "kind": "DATABASE_TRANSACTION",
+  "status": "SUCCEEDED",
+  "created_at": "2026-09-11T12:00:00Z",
+  "finished_at": "2026-09-11T12:00:03Z",
+  "observation_status": "NOT_OBSERVED",
+  "observed_at": "2026-09-11T12:00:02Z",
+  "error_code": null
+}

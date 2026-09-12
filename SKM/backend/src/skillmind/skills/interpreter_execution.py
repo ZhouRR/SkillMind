@@ -13,6 +13,20 @@ from skillmind.core.hashing import canonical_json, sha256_hex
 InterpretProgressCallback = Callable[[str, Mapping[str, Any]], Awaitable[None]]
 
 
+class InterpreterCallControl(Protocol):
+    """表示通知とは独立し、実 completion の直前と return 観測を管理する。"""
+
+    async def before_call(self, *, feedback: str | None) -> None:
+        """全 prompt 準備/通知後に、今回だけの開始資格を取得する。"""
+
+        ...
+
+    async def returned(self) -> None:
+        """Transport の return を記録し、停止や結果採用とは区別する。"""
+
+        ...
+
+
 class InterpreterErrorCode(StrEnum):
     """Interpreter 実行失敗の安定した分類。監査に使い Secret や来源本文は含めない。"""
 
@@ -69,10 +83,12 @@ class SkillInterpreter(Protocol):
         parameters: Mapping[str, Any],
         validation_feedback: str | None = None,
         on_event: InterpretProgressCallback | None = None,
+        control: InterpreterCallControl | None = None,
     ) -> dict[str, Any]:
         """構造化 response mapping を返すか InterpreterExecutionError を送出する。
 
         on_event は進行の可視化専用で、成功/失敗の判定や永続化内容を変えてはならない。
+        control がある場合は completion 直前に必ず認可し、拒否後は model を呼ばない。
         """
 
         ...

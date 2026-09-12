@@ -75,10 +75,11 @@ import {
     接続(凭据 + Integration)を一つの form に束ね、binding と事前許可は既定不要の
     高度設定として折り畳む。scope/config の裸 JSON 入力は構造化入力へ置き換え、
     検証の最終権威は server 側に置いたまま「確実に弾かれる入力」だけを送信前に知らせる。 */
-export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = true }: {
+export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = true, databaseWritesEnabled = false }: {
   projectId: string
   csrfToken: string
   deferredFeaturesEnabled?: boolean
+  databaseWritesEnabled?: boolean
 }) {
   const messages = useMessages()
   const [secrets, setSecrets] = useState<SecretReferenceRecord[]>([])
@@ -104,9 +105,10 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
     if (!deferredFeaturesEnabled) {
       setResourceTab((current) => current === 'policy' ? 'connect' : current)
       setOpenDialog((current) => current === 'policy' ? null : current)
-      setConnectDraft((current) => ({ ...current, access: 'read' }))
     }
-  }, [deferredFeaturesEnabled])
+    setConnectDraft((current) => (current.provider === 'postgres' ? databaseWritesEnabled : deferredFeaturesEnabled)
+      ? current : { ...current, access: 'read' })
+  }, [deferredFeaturesEnabled, databaseWritesEnabled])
 
   useEffect(() => () => {
     loadController.current?.abort()
@@ -179,6 +181,8 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
   function scopeIssueText(issue: ScopeIssue): string {
     if (issue === 'issue_ids_required') return messages.resources.issueIdsRequired
     if (issue === 'field_keys_required') return messages.resources.fieldKeysRequired
+    if (issue === 'write_columns_required') return messages.resources.databaseWriteColumnsRequired
+    if (issue === 'database_operations_required') return messages.resources.databaseOperationsRequired
     if (issue === 'tables_required') return messages.resources.tablesRequired
     if (issue === 'resource_uris_required') return messages.resources.resourceUrisRequired
     return messages.resources.pathsRequired
@@ -195,7 +199,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
     event.preventDefault()
     const draft = connectDraft
     const form = PROVIDER_FORMS[draft.provider]
-    const access: ResourceAccess = !deferredFeaturesEnabled || form.writeCapability === null ? 'read' : draft.access
+    const access: ResourceAccess = !connectWriteEnabled || form.writeCapability === null ? 'read' : draft.access
     // 既定は明示 wildcard(不限)。field は「変更できる集合」を write 時だけ列挙でき、
     // 読取だけの integration は全 field 読取(承認境界は issue 側)とする。
     const scope = buildIntegrationScope(draft.provider, {
@@ -208,6 +212,9 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
       paths: parseListInput(draft.paths),
       revisions: parseListInput(draft.revisions),
       tables: parseListInput(draft.tables),
+      writeEnabled: access === 'read_write',
+      writeColumns: parseListInput(draft.writeColumns),
+      operations: draft.databaseOperations,
       resourceUris: parseListInput(draft.resourceUris),
     })
     const issue = findScopeIssue(draft.provider, scope, access === 'read_write')
@@ -395,6 +402,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
     }
   }
 
+  const connectWriteEnabled = connectDraft.provider === 'postgres' ? databaseWritesEnabled : deferredFeaturesEnabled
   const connectForm = PROVIDER_FORMS[connectDraft.provider]
   const connectSecrets = secrets.filter(
     (item) => item.status === 'ACTIVE' && item.provider === connectDraft.provider,
@@ -624,7 +632,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                   <p className="hint resourceWarning">{connectDraft.resolver === 'MANAGED' ? messages.resources.secretValueHint : messages.resources.secretHint}</p>
                 </>
               )}
-              {deferredFeaturesEnabled && connectForm.writeCapability !== null && (
+              {connectWriteEnabled && connectForm.writeCapability !== null && (
                 <fieldset className="scopePicker">
                   <legend>{messages.resources.accessLabel}</legend>
                   <label className="scopeOption">
@@ -649,10 +657,24 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                 </fieldset>
               )}
               {connectDraft.provider === 'postgres' ? (
-                <label>{messages.resources.databaseTables}<textarea required className="mono compactTextarea"
+                <><label>{messages.resources.databaseTables}<textarea required className="mono compactTextarea"
                   placeholder={'public.reports\npublic.items'} value={connectDraft.tables}
                   onChange={(event) => setConnectDraft((value) => ({ ...value, tables: event.target.value }))} />
-                  <span className="hint">{messages.resources.databaseReadHint}</span></label>
+                  <span className="hint">{connectWriteEnabled && connectDraft.access === 'read_write'
+                    ? messages.resources.databaseWriteHint : messages.resources.databaseReadHint}</span></label>
+                {connectWriteEnabled && connectDraft.access === 'read_write' && <>
+                  <label>{messages.resources.databaseWriteColumns}<textarea required className="mono compactTextarea"
+                    placeholder={'public.reports.id\npublic.reports.status'} value={connectDraft.writeColumns}
+                    onChange={(event) => setConnectDraft((value) => ({ ...value, writeColumns: event.target.value }))} /></label>
+                  <fieldset className="scopePicker"><legend>{messages.resources.databaseOperations}</legend>
+                    {['INSERT', 'UPDATE'].map((operation) => <label className="scopeOption" key={operation}>
+                      <input type="checkbox" checked={connectDraft.databaseOperations.includes(operation)}
+                        onChange={(event) => setConnectDraft((value) => ({ ...value, databaseOperations: event.target.checked
+                          ? [...value.databaseOperations, operation] : value.databaseOperations.filter((item) => item !== operation) }))} />
+                      <span>{operation}</span>
+                    </label>)}
+                  </fieldset>
+                </>}</>
               ) : connectDraft.provider === 'mcp' ? (
                 <label>{messages.resources.mcpResourceUris}<textarea required className="mono compactTextarea"
                   placeholder="resource://reports/current" value={connectDraft.resourceUris}

@@ -6,6 +6,7 @@ import {
   loadSecretReferences,
   type ChangeProposalRecord,
 } from '../../src/api/index'
+import { isChangeProposal } from '../../src/api/effects'
 
 const PROJECT_ID = '00000000-0000-4000-8000-000000000001'
 const RUN_ID = '00000000-0000-4000-8000-000000000002'
@@ -43,6 +44,15 @@ const PROPOSAL: ChangeProposalRecord = {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('controlled effect API client', () => {
+  it('accepts null Integration only for the project library CREATE proposal', () => {
+    const document = { ...PROPOSAL, capability_version: 'document.write/v1', operation: 'CREATE', integration_id: null }
+    expect(isChangeProposal(document)).toBe(true)
+    expect(isChangeProposal({ ...document, integration_id: PROPOSAL.integration_id })).toBe(false)
+    expect(isChangeProposal({ ...document, operation: 'UPDATE' })).toBe(false)
+    expect(isChangeProposal({ ...PROPOSAL, integration_id: null })).toBe(false)
+    expect(isChangeProposal({ ...document, integration_id: undefined })).toBe(false)
+  })
+
   it('binds a user decision to the displayed proposal version and checksum', async () => {
     const response = {
       proposal: { ...PROPOSAL, status: 'APPROVED' },

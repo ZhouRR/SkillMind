@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import hmac
 from copy import deepcopy
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from skillmind.agent.domain import AgentEvent, AgentEventType
 from skillmind.agent.evidence import new_evidence_ref
+from skillmind.artifacts.repository import ArtifactRepository
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.db.models import (
     AgentSession,
@@ -26,9 +27,22 @@ from skillmind.db.models import (
     RunEvent,
     RunSegment,
     ToolCall,
+    User,
     UserInteraction,
 )
+from skillmind.documents.library import (
+    DOCUMENT_WRITE_CAPABILITY,
+    DocumentLibraryBindingRepository,
+    parse_document_library_source,
+)
 from skillmind.effects.catalog import resolve_effect_capability
+from skillmind.effects.continuation import validated_effect_result
+from skillmind.effects.database_write import (
+    DATABASE_WRITE_CAPABILITY,
+    build_database_write,
+    database_observation_matches,
+)
+from skillmind.effects.document_command import load_document_effect_command
 from skillmind.effects.domain import (
     ApprovalDecision,
     ApprovalSource,
@@ -46,18 +60,26 @@ from skillmind.effects.domain import (
     EffectLeaseValidationError,
     EffectProviderResult,
     EffectRiskLevel,
+    EffectStepAuthority,
     ProposalDecisionResult,
     StoredChangeApproval,
     StoredChangeProposal,
     StoredEffectExecution,
 )
+from skillmind.effects.outcomes import (
+    UNKNOWN_EFFECT_CODE,
+    effect_failure_record,
+    effect_requires_reconciliation,
+)
 from skillmind.effects.policy_repository import EffectPolicyRepository
 from skillmind.effects.proposal import proposal_checksum, proposal_content
+from skillmind.effects.reconciliation_domain import EffectReconciliationTarget
 from skillmind.integrations.domain import (
     IntegrationStatus,
     ResourceBindingLevel,
     binding_checksum,
 )
+from skillmind.projects.repository import ProjectRepository
 from skillmind.runs.domain import (
     AgentSessionMetadata,
     ClaimedRun,
@@ -75,6 +97,7 @@ from skillmind.runs.domain import (
 )
 from skillmind.runs.repository_base import _RunRepositoryBase
 from skillmind.skills.capability_blueprint import resolve_capability_blueprint
+from skillmind.users.repository import lock_organization
 
 
 class EffectOperationsMixin(_RunRepositoryBase):
@@ -92,6 +115,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
 
         # 出力 snapshot を読む間もモデル候補の nested checkpoint を元の内容へ固定する。
         draft = deepcopy(draft)
+        self._execution_features.require_effect(draft.capability_version, draft.operation)
         run, segment, attempt = await self._lock_claimed_execution(claimed)
         if segment is None:
             raise LeaseValidationError("ChangeProposal requires an explicit RunSegment")
@@ -115,7 +139,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
         if existing_open is not None:
             raise ChangeProposalConflictError("Run already has an open interaction")
 
-        _intent, binding, integration, provider_payload = await self._validate_proposal_draft(
+        _intent, binding, _integration, provider_payload = await self._validate_proposal_draft(
             claimed,
             run=run,
             draft=draft,
@@ -153,7 +177,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
             agent_session_id=agent_session.id,
             skill_version_id=skill_version_id,
             target_binding_id=binding.id,
-            integration_id=integration.id,
+            integration_id=binding.integration_id,
             draft=draft,
         )
         checksum = proposal_checksum(content)
@@ -164,14 +188,14 @@ class EffectOperationsMixin(_RunRepositoryBase):
         preauthorization = (
             await EffectPolicyRepository(self._session).match(
                 project_id=run.project_id,
-                integration_id=integration.id,
+                integration_id=binding.integration_id,
                 capability_version=draft.capability_version,
                 operation=draft.operation,
                 risk_level=draft.risk_level,
                 requested_scope=requested_scope,
                 now=now,
             )
-            if capability.preauthorizable
+            if capability.preauthorizable and binding.integration_id is not None
             else None
         )
         status = (
@@ -189,7 +213,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
             agent_session_id=agent_session.id,
             skill_version_id=skill_version_id,
             target_binding_id=binding.id,
-            integration_id=integration.id,
+            integration_id=binding.integration_id,
             effect_intent_key=draft.effect_intent_key,
             capability_version=draft.capability_version,
             operation=draft.operation,
@@ -248,7 +272,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
             execution = self._new_effect_execution(
                 proposal=proposal,
                 approval=approval,
-                provider=integration.provider,
+                provider=binding.provider,
                 now=now,
             )
         else:
@@ -470,6 +494,8 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 .with_for_update()
             )
         ).one()
+        if command.decision is ApprovalDecision.APPROVED:
+            self._execution_features.require_effect(proposal.capability_version, proposal.operation)
         fingerprint = sha256_hex(
             canonical_json(
                 {
@@ -568,15 +594,15 @@ class EffectOperationsMixin(_RunRepositoryBase):
         sequence = await self._next_sequence(run.id)
         effect: EffectExecution | None = None
         if command.decision is ApprovalDecision.APPROVED:
-            integration = await self._session.get(Integration, proposal.integration_id)
-            if integration is None:
-                raise ChangeProposalValidationError("Proposal Integration is unavailable")
+            binding = await self._session.get(ResourceBinding, proposal.target_binding_id)
+            if binding is None:
+                raise ChangeProposalValidationError("Proposal binding is unavailable")
             proposal.status = ChangeProposalStatus.APPROVED.value
             proposal.updated_at = now
             effect = self._new_effect_execution(
                 proposal=proposal,
                 approval=approval,
-                provider=integration.provider,
+                provider=binding.provider,
                 now=now,
             )
             approved_event = RunEvent(
@@ -840,13 +866,13 @@ class EffectOperationsMixin(_RunRepositoryBase):
         worker_id: str,
         lease_token: str,
         lease_token_hash_value: str,
-        lease_expires_at: datetime,
+        lease_seconds: int,
         max_attempts: int,
     ) -> ClaimedEffectExecution | None:
         """Approved effect を Run → Segment → Effect の lock 順で idempotent に claim する。"""
 
-        if max_attempts <= 0:
-            raise ValueError("Effect max attempts must be positive")
+        if max_attempts <= 0 or type(lease_seconds) is not int or lease_seconds <= 0:
+            raise ValueError("Effect lease and max attempts must be positive")
         observed = await self._session.get(EffectExecution, effect_execution_id)
         if observed is None:
             raise LookupError("EffectExecution not found")
@@ -882,6 +908,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
             EffectExecutionStatus.VERIFICATION_FAILED.value,
         }:
             return None
+        self._execution_features.require_effect(proposal.capability_version, proposal.operation)
         now = datetime.now(UTC)
         if (
             execution.status in {
@@ -933,9 +960,11 @@ class EffectOperationsMixin(_RunRepositoryBase):
             raise EffectLeaseValidationError("Effect approval does not match Proposal version")
         await self._validate_proposal_row(proposal, run=run)
         binding = await self._session.get(ResourceBinding, proposal.target_binding_id)
-        integration = await self._session.get(Integration, proposal.integration_id)
+        integration = (await self._session.get(Integration, proposal.integration_id)
+                       if proposal.integration_id is not None else None)
         agent_session = await self._session.get(AgentSession, proposal.agent_session_id)
-        if binding is None or integration is None or agent_session is None:
+        if (binding is None or agent_session is None
+            or (proposal.integration_id is not None and integration is None)):
             raise EffectLeaseValidationError("Effect execution snapshot is incomplete")
         # 効果は主 Session からしか起こせない (計画 §23 D1) ので、ここへ来る session は必ず
         # PRIMARY = SDK session 有り。扇出の子は SDK 未起動なら NULL を持つため、型上は
@@ -968,10 +997,11 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 agent_session_id=agent_session.sdk_session_id,
                 sdk_tool_use_id=f"effect:{execution.id}",
                 request_fingerprint=execution.request_fingerprint,
-                tool_name="effect__issue_update_v1",
+                tool_name=("effect__"
+                           + proposal.capability_version.replace(".", "_").replace("/", "_")),
                 capability_version=proposal.capability_version,
                 provider=execution.provider,
-                integration_id=integration.id,
+                integration_id=binding.integration_id,
                 arguments_summary={
                     "target_keys": sorted(proposal.target_json),
                     "change_paths": [
@@ -1015,7 +1045,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
         elif (
             tool_call.request_fingerprint != execution.request_fingerprint
             or tool_call.capability_version != proposal.capability_version
-            or tool_call.integration_id != integration.id
+            or tool_call.integration_id != binding.integration_id
         ):
             raise EffectLeaseValidationError("Effect ToolCall snapshot changed")
         else:
@@ -1023,6 +1053,15 @@ class EffectOperationsMixin(_RunRepositoryBase):
             tool_call.error_json = None
             tool_call.updated_at = now
 
+        # lock/Artifact/ToolCall flush の待機後に lease を開始する。取鎖前の期限を流用しない。
+        now = datetime.now(UTC)
+        if proposal.expires_at <= now:
+            await self._close_effect_before_provider(
+                run=run, segment=segment, proposal=proposal, execution=execution,
+                status=EffectExecutionStatus.STALE, code="proposal_expired", now=now,
+            )
+            return None
+        lease_expires_at = min(now + timedelta(seconds=lease_seconds), proposal.expires_at)
         execution.status = EffectExecutionStatus.APPLYING.value
         execution.worker_id = worker_id
         execution.lease_token_hash = lease_token_hash_value
@@ -1044,7 +1083,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
             run_attempt_id=proposal.run_attempt_id,
             agent_session_id=agent_session.sdk_session_id,
             project_id=run.project_id,
-            integration_id=integration.id,
+            integration_id=binding.integration_id,
             binding_id=binding.id,
             capability_version=proposal.capability_version,
             operation=proposal.operation,
@@ -1058,14 +1097,262 @@ class EffectOperationsMixin(_RunRepositoryBase):
             verification=dict(proposal.verification_json),
             idempotency_key=proposal.idempotency_key,
             request_fingerprint=proposal.request_fingerprint,
-            provider=integration.provider,
-            integration_revision=integration.revision,
+            provider=integration.provider if integration is not None else binding.provider,
+            integration_revision=(
+                integration.revision if integration is not None else int(binding.revision)
+            ),
             integration_scope=dict(binding.scope_json),
-            integration_config=dict(integration.config_json),
-            secret_reference_id=integration.secret_reference_id,
+            integration_config=dict(integration.config_json) if integration is not None else {},
+            secret_reference_id=(
+                integration.secret_reference_id if integration is not None else None
+            ),
             lease_token=lease_token,
             lease_expires_at=lease_expires_at,
             attempt_no=next_attempt,
+        )
+
+    async def authorize_effect_step(
+        self, claimed: ClaimedEffectExecution, *, provider_version: str
+    ) -> EffectStepAuthority:
+        """遠端段階の直前に、現在 actor・元批准・snapshot・lease を同じ TX で復験する。"""
+
+        self._execution_features.require_effect(claimed.capability_version, claimed.operation)
+        # 永続批准の Worker は browser credential を再作成しない。現在の発起人と承認者の
+        # 有効性を要求し、Org→User→Project→Run の順序で管理操作と整合させる。
+        observed_run = await self._session.get(Run, claimed.run_id)
+        observed_approval = await self._session.get(ChangeApproval, claimed.approval_id)
+        if observed_run is None or observed_approval is None:
+            raise EffectLeaseValidationError("Effect authority is unavailable")
+        actor_value = observed_run.permission_snapshot_json.get("actor_id")
+        try:
+            actor_id = UUID(str(actor_value))
+        except (ValueError, TypeError) as error:
+            raise EffectLeaseValidationError("Effect initiating actor is unavailable") from error
+        approval_actor_id = observed_approval.actor_id
+        if approval_actor_id is None or observed_approval.source != ApprovalSource.USER.value:
+            raise EffectLeaseValidationError("Effect requires an exact user approval")
+        observed_user = await self._session.get(User, actor_id)
+        if observed_user is None:
+            raise EffectLeaseValidationError("Effect initiating actor is unavailable")
+        organization_id = observed_user.organization_id
+        await lock_organization(self._session, organization_id)
+        users = {}
+        for user_id in sorted({actor_id, approval_actor_id}, key=str):
+            user = await self._session.scalar(
+                select(User)
+                .where(User.id == user_id)
+                .with_for_update(read=True)
+                .execution_options(populate_existing=True)
+            )
+            if user is None or user.status != "ACTIVE" or user.organization_id != organization_id:
+                raise EffectLeaseValidationError("Effect actor authority was revoked")
+            users[user_id] = user
+        if approval_actor_id != actor_id and users[approval_actor_id].system_role != "ADMIN":
+            raise EffectLeaseValidationError("Effect approver authority was revoked")
+        projects = ProjectRepository(self._session)
+        for user in users.values():
+            access = await projects.lock_write_access(user=user, project_id=claimed.project_id)
+            projects.require_active_write_access(access)
+
+        run = await self._lock_run_row(claimed.run_id, project_id=claimed.project_id)
+        segment = await self._lock_segment_row(claimed.run_segment_id, run_id=claimed.run_id)
+        proposal = await self._session.scalar(
+            select(ChangeProposal)
+            .where(ChangeProposal.id == claimed.proposal_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        execution = await self._session.scalar(
+            select(EffectExecution)
+            .where(EffectExecution.id == claimed.effect_execution_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        approval = await self._session.get(
+            ChangeApproval, claimed.approval_id, populate_existing=True
+        )
+        now = datetime.now(UTC)
+        if (
+            run is None
+            or segment is None
+            or proposal is None
+            or execution is None
+            or approval is None
+            or run.status != RunStatus.WAITING_FOR_APPROVAL.value
+            or segment.status != RunSegmentStatus.WAITING.value
+            or run.permission_snapshot_json.get("actor_id") != str(actor_id)
+            or claimed.capability_version
+            not in run.permission_snapshot_json.get("allowed_capabilities", [])
+            or proposal.status != ChangeProposalStatus.APPLYING.value
+            or proposal.expires_at <= now
+            or proposal.run_id != run.id
+            or proposal.project_id != run.project_id
+            or proposal.run_segment_id != segment.id
+            or execution.run_id != run.id
+            or execution.proposal_id != proposal.id
+            or execution.approval_id != approval.id
+            or execution.provider != claimed.provider
+            or execution.provider_version != provider_version
+            or execution.attempt_no != claimed.attempt_no
+            or execution.request_fingerprint != claimed.request_fingerprint
+            or execution.idempotency_key != claimed.idempotency_key
+            or approval.run_id != run.id
+            or approval.proposal_id != proposal.id
+            or approval.actor_id != approval_actor_id
+            or approval.source != ApprovalSource.USER.value
+            or approval.decision != ApprovalDecision.APPROVED.value
+            or approval.proposal_version != proposal.version
+            or not hmac.compare_digest(approval.proposal_checksum, proposal.checksum)
+        ):
+            raise EffectLeaseValidationError("Effect authority changed after claim")
+        self._validate_effect_lease(execution, claimed, now=now)
+        if await self.is_cancellation_requested(run.id):
+            raise EffectLeaseValidationError("Effect Run was cancelled")
+        binding = await self._session.get(
+            ResourceBinding, claimed.binding_id, populate_existing=True
+        )
+        integration = (await self._session.get(
+            Integration, claimed.integration_id, populate_existing=True
+        ) if claimed.integration_id is not None else None)
+        agent_session = await self._session.get(
+            AgentSession, proposal.agent_session_id, populate_existing=True
+        )
+        if (binding is None or agent_session is None
+            or (proposal.integration_id is not None and integration is None)):
+            raise EffectLeaseValidationError("Effect snapshot is unavailable")
+        await self._validate_proposal_row(proposal, run=run)
+        expected = {
+            "proposal_ref": proposal.proposal_ref,
+            "run_attempt_id": proposal.run_attempt_id,
+            "agent_session_id": agent_session.sdk_session_id,
+            "binding_id": proposal.target_binding_id,
+            "integration_id": proposal.integration_id,
+            "capability_version": proposal.capability_version,
+            "operation": proposal.operation,
+            "target": proposal.target_json,
+            "changes": tuple(proposal.preview_json["changes"]),
+            "precondition": proposal.precondition_json,
+            "verification": proposal.verification_json,
+            "idempotency_key": proposal.idempotency_key,
+            "request_fingerprint": proposal.request_fingerprint,
+            "provider": integration.provider if integration is not None else binding.provider,
+            "integration_revision": (
+                integration.revision if integration is not None else int(binding.revision)
+            ),
+            "integration_scope": binding.scope_json,
+            "integration_config": integration.config_json if integration is not None else {},
+            "secret_reference_id": (
+                integration.secret_reference_id if integration is not None else None
+            ),
+        }
+        json_fields = {
+            "target", "changes", "precondition", "verification", "integration_scope",
+            "integration_config",
+        }
+        if any(
+            canonical_json(getattr(claimed, key)) != canonical_json(value)
+            if key in json_fields else getattr(claimed, key) != value
+            for key, value in expected.items()
+        ):
+            raise EffectLeaseValidationError("Claimed effect differs from its approved snapshot")
+        # 追加の DB 検証待ちも lease の寿命を消費するため、返却直前の時計で再確認する。
+        now = datetime.now(UTC)
+        self._validate_effect_lease(execution, claimed, now=now)
+        if proposal.expires_at <= now:
+            raise EffectLeaseValidationError("Effect proposal expired during authorization")
+        return EffectStepAuthority(organization_id=organization_id, actor_id=actor_id)
+
+    async def heartbeat_effect_execution(
+        self, claimed: ClaimedEffectExecution, *, provider_version: str, lease_seconds: int,
+    ) -> datetime:
+        """元批准/実行権が今も有効な場合だけ、取鎖後の時計で lease を延長する。"""
+
+        if type(lease_seconds) is not int or lease_seconds <= 0:
+            raise ValueError("Effect lease duration must be positive")
+        capability = resolve_effect_capability(claimed.capability_version)
+        if not capability.staged_authorization:
+            raise ValueError("Effect Provider does not support staged supervision")
+        await self.authorize_effect_step(claimed, provider_version=provider_version)
+        execution = await self._session.get(EffectExecution, claimed.effect_execution_id)
+        proposal = await self._session.get(ChangeProposal, claimed.proposal_id)
+        if execution is None or proposal is None:
+            raise EffectLeaseValidationError("Effect heartbeat target is unavailable")
+        now = datetime.now(UTC)
+        self._validate_effect_lease(execution, claimed, now=now)
+        if proposal.expires_at <= now:
+            raise EffectLeaseValidationError("Effect approval expired during heartbeat")
+        expires_at = min(now + timedelta(seconds=lease_seconds), proposal.expires_at)
+        execution.lease_expires_at = expires_at
+        execution.heartbeat_at = now
+        execution.updated_at = now
+        return expires_at
+
+    async def load_effect_reconciliation_target(
+        self, *, project_id: UUID, run_id: UUID, effect_execution_id: UUID,
+    ) -> EffectReconciliationTarget:
+        """現在の参照認可を得た caller が、失効済み write lease に頼らず原要求を再構築する。"""
+
+        run = await self._lock_run_row(run_id, project_id=project_id)
+        observed = await self._session.get(EffectExecution, effect_execution_id)
+        if run is None or observed is None or observed.run_id != run.id:
+            raise LookupError("Original effect was not found")
+        proposal = await self._session.scalar(
+            select(ChangeProposal).where(ChangeProposal.id == observed.proposal_id)
+            .with_for_update(read=True).execution_options(populate_existing=True)
+        )
+        execution = await self._session.scalar(
+            select(EffectExecution).where(EffectExecution.id == effect_execution_id)
+            .with_for_update(read=True).execution_options(populate_existing=True)
+        )
+        if (proposal is None or execution is None or proposal.project_id != project_id
+            or proposal.run_id != run.id or execution.run_id != run.id
+            or execution.proposal_id != proposal.id or execution.attempt_no < 1
+            or not effect_requires_reconciliation(execution.error_json)):
+            raise ValueError("Original effect does not require reconciliation")
+        capability = resolve_effect_capability(proposal.capability_version)
+        approval = await self._session.get(ChangeApproval, execution.approval_id)
+        if (not capability.staged_authorization
+            or capability.provider_versions.get(execution.provider) != execution.provider_version
+            or execution.idempotency_key != proposal.idempotency_key
+            or execution.request_fingerprint != proposal.request_fingerprint
+            or approval is None or approval.run_id != run.id or approval.proposal_id != proposal.id
+            or approval.source != ApprovalSource.USER.value
+            or approval.decision != ApprovalDecision.APPROVED.value
+            or approval.proposal_version != proposal.version
+            or approval.proposal_checksum != proposal.checksum):
+            raise ValueError("Original effect approval does not match")
+        # 元批准の期限/発起人の会話失効は新書込を禁じる。現在の照会者による只読とは別判定。
+        payload = await self._validate_proposal_row(proposal, run=run)
+        binding = await self._session.get(ResourceBinding, proposal.target_binding_id)
+        if binding is None:
+            raise ValueError("Original effect binding is unavailable")
+        if proposal.capability_version == DATABASE_WRITE_CAPABILITY:
+            if proposal.integration_id is None:
+                raise ValueError("Original database effect has no Integration")
+            integration = await self._session.get(Integration, proposal.integration_id)
+            if integration is None:
+                raise ValueError("Original database Integration is unavailable")
+            command = build_database_write(
+                effect_id=execution.id, project_id=project_id, run_id=run_id,
+                integration_id=integration.id, scope=binding.scope_json, **payload,
+            )
+            return EffectReconciliationTarget(
+                proposal.id, binding.id, proposal.checksum,
+                execution.provider, execution.provider_version,
+                command, canonical_json(integration.config_json), integration.secret_reference_id,
+            )
+        if proposal.capability_version != DOCUMENT_WRITE_CAPABILITY:
+            raise ValueError("Original effect Provider does not support reconciliation")
+        if self._document_library_target is None:
+            raise ValueError("Original document storage is unavailable")
+        object_command = await load_document_effect_command(
+            self._session, effect_id=execution.id, project_id=project_id, run_id=run_id,
+            payload=payload, target=self._document_library_target,
+        )
+        return EffectReconciliationTarget(
+            proposal.id, binding.id, proposal.checksum,
+            execution.provider, execution.provider_version,
+            object_command, "{}", None,
         )
 
     async def finalize_effect_execution(
@@ -1127,6 +1414,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
             raise EffectLeaseValidationError("Effect ToolCall is unavailable")
 
         evidence_refs: tuple[str, ...] = ()
+        effect_result: dict[str, Any] | None = None
         if result is not None:
             before_ref = new_evidence_ref()
             after_ref = new_evidence_ref()
@@ -1144,6 +1432,16 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 draft=result.after,
                 now=now,
             )
+            effect_result = validated_effect_result({
+                "effect_execution_id": str(execution.id),
+                "proposal_ref": proposal.proposal_ref,
+                "capability_version": proposal.capability_version,
+                "status": "APPLIED",
+                "after_ref": after_ref,
+                "after_content_hash": after.content_hash,
+                "after": after.metadata_json["snapshot"],
+                "verification": dict(result.verification),
+            })
             self._session.add_all([before, after])
             execution.status = EffectExecutionStatus.APPLIED.value
             execution.before_ref = before_ref
@@ -1168,10 +1466,10 @@ class EffectOperationsMixin(_RunRepositoryBase):
         else:
             assert failure is not None
             execution.status = failure.status.value
-            execution.error_json = {
-                "code": failure.code,
-                "retryable": failure.retryable,
-            }
+            execution.error_json = effect_failure_record(
+                capability=proposal.capability_version, attempt_no=execution.attempt_no,
+                code=failure.code, retryable=failure.retryable, previous=execution.error_json,
+            )
             proposal.status = (
                 ChangeProposalStatus.STALE.value
                 if failure.status is EffectExecutionStatus.STALE
@@ -1180,7 +1478,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
             tool_call.status = "FAILED"
             tool_call.result_json = None
             tool_call.error_json = _effect_tool_error(
-                code=failure.code,
+                code=execution.error_json["code"],
                 retryable=failure.retryable,
             )
             outcome = failure.status.value
@@ -1199,6 +1497,13 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 RunEvent.event_type == "RUN_CANCEL_REQUESTED",
             )
         )
+        if (failure is not None and effect_requires_reconciliation(execution.error_json)
+            and (cancellation_requested is not None or not failure.retryable)):
+            await self._stop_run_for_unknown_effect(
+                run=run, segment=segment, proposal=proposal, execution=execution,
+                cancelled=cancellation_requested is not None, now=now, trace_id=trace_id,
+            )
+            return self._stored_effect_execution(execution)
         if cancellation_requested is not None:
             # Provider 呼び出し中の cancel は外部結果の監査を捨てない。Effect event を先に保存し、
             # terminal RUN_SNAPSHOT を必ず最後に置いて Run を再 dispatch せず閉じる。
@@ -1311,6 +1616,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
             trigger_ref=execution.id,
             outcome=outcome,
             evidence_refs=evidence_refs,
+            effect_result=effect_result,
             now=now,
         )
         transition = plan_run_transition(
@@ -1420,7 +1726,10 @@ class EffectOperationsMixin(_RunRepositoryBase):
 
         if status not in {EffectExecutionStatus.STALE, EffectExecutionStatus.FAILED}:
             raise ValueError("Pre-provider effect outcome must be STALE or FAILED")
-        error = {"code": code, "retryable": False}
+        error = effect_failure_record(
+            capability=proposal.capability_version, attempt_no=execution.attempt_no,
+            code=code, retryable=False, previous=execution.error_json,
+        )
         execution.status = status.value
         execution.error_json = error
         execution.worker_id = None
@@ -1443,10 +1752,16 @@ class EffectOperationsMixin(_RunRepositoryBase):
         if tool_call is not None:
             tool_call.status = "FAILED"
             tool_call.result_json = None
-            tool_call.error_json = _effect_tool_error(code=code, retryable=False)
+            tool_call.error_json = _effect_tool_error(code=error["code"], retryable=False)
             tool_call.updated_at = now
 
         cancellation_requested = await self.is_cancellation_requested(run.id)
+        if effect_requires_reconciliation(error):
+            await self._stop_run_for_unknown_effect(
+                run=run, segment=segment, proposal=proposal, execution=execution,
+                cancelled=cancellation_requested, now=now,
+            )
+            return
         sequence = await self._next_sequence(run.id)
         effect_event = RunEvent(
             id=uuid4(),
@@ -1590,6 +1905,63 @@ class EffectOperationsMixin(_RunRepositoryBase):
             ]
         )
 
+    async def _stop_run_for_unknown_effect(
+        self, *, run: Run, segment: RunSegment, proposal: ChangeProposal,
+        execution: EffectExecution, cancelled: bool, now: datetime,
+        trace_id: str | None = None,
+    ) -> None:
+        """未確定の遠端事実を残して主処理を止め、新 Segment/新書込を自動生成しない。"""
+
+        transition = plan_run_transition(
+            current=RunStatus.WAITING_FOR_APPROVAL,
+            target=RunStatus.CANCELLED if cancelled else RunStatus.FAILED,
+            row_version=run.row_version, started_at=run.started_at,
+            finished_at=run.finished_at, now=now,
+        )
+        segment.status = (
+            RunSegmentStatus.CANCELLED if cancelled else RunSegmentStatus.FAILED
+        ).value
+        segment.finished_at = now
+        segment.updated_at = now
+        run.status = transition.status.value
+        run.row_version = transition.row_version
+        run.finished_at = transition.finished_at
+        run.error_json = {
+            "code": UNKNOWN_EFFECT_CODE,
+            "message": "Original external write result requires reconciliation",
+            "effect_execution_id": str(execution.id),
+            "retryable": False,
+        }
+        run.updated_at = now
+        sequence = await self._next_sequence(run.id)
+        effect_event = RunEvent(
+            id=uuid4(), run_id=run.id, run_attempt_id=None, agent_session_id=None,
+            sequence=sequence, event_type=AgentEventType.EFFECT_FAILED.value,
+            payload_json={
+                "proposal_id": str(proposal.id), "proposal_ref": proposal.proposal_ref,
+                "effect_execution_id": str(execution.id), "status": execution.status,
+                "before_ref": execution.before_ref, "after_ref": execution.after_ref,
+                "cancel_requested": cancelled, "error": execution.error_json,
+            },
+            occurred_at=now, trace_id=trace_id,
+            summary="Controlled effect stopped with original write result unresolved",
+        )
+        snapshot = self._snapshot_event(
+            run.id, sequence=sequence + 1,
+            payload={
+                "status": run.status, "row_version": run.row_version,
+                "run_segment_id": str(segment.id), "segment_no": segment.segment_no,
+                "proposal_id": str(proposal.id), "effect_execution_id": str(execution.id),
+                "error": run.error_json,
+            },
+            summary="Run stopped pending original external write reconciliation",
+            occurred_at=now, trace_id=trace_id,
+        )
+        self._session.add_all([
+            effect_event, self._event_outbox(effect_event, status=run.status),
+            snapshot, self._event_outbox(snapshot, status=run.status),
+        ])
+
     @staticmethod
     def _validate_effect_lease(
         execution: EffectExecution,
@@ -1653,13 +2025,125 @@ class EffectOperationsMixin(_RunRepositoryBase):
         if int(found or 0) != len(evidence_refs):
             raise ChangeProposalValidationError("ChangeProposal references foreign Evidence")
 
+    async def _validate_database_observation(
+        self, draft: ChangeProposalDraft, *, binding: ResourceBinding, payload: dict[str, Any]
+    ) -> None:
+        """DB 提案は同じ Run/binding の成功した read Tool 証拠に束縛し、自己申告を拒否する。"""
+
+        if draft.capability_version != DATABASE_WRITE_CAPABILITY:
+            return
+        evidence = (
+            await self._session.scalars(
+                select(Evidence)
+                .join(ToolCall, ToolCall.id == Evidence.tool_call_id)
+                .where(
+                    Evidence.run_id == binding.run_id,
+                    Evidence.evidence_ref.in_(draft.evidence_refs),
+                    Evidence.evidence_type == "database",
+                    ToolCall.run_id == binding.run_id,
+                    ToolCall.integration_id == binding.integration_id,
+                    ToolCall.provider == "postgres",
+                    ToolCall.capability_version == "database.read/v1",
+                    ToolCall.status == "SUCCEEDED",
+                )
+            )
+        ).all()
+        if binding.integration_id is None or not any(
+            item.metadata_json.get("binding_checksum") == binding.checksum
+            and database_observation_matches(
+                item.source_locator, payload, integration_id=binding.integration_id
+            )
+            for item in evidence
+        ):
+            raise ChangeProposalValidationError("Database proposal requires exact read Evidence")
+
+    async def _validate_effect_binding(
+        self, *, run: Run, binding: ResourceBinding, capability_version: str
+    ) -> Integration | None:
+        """提案/批准/claim/段階認可で同じ束縛を検証し、文書庫だけを内部資源として扱う。"""
+
+        if capability_version == DOCUMENT_WRITE_CAPABILITY:
+            if self._document_library_target is None:
+                raise ChangeProposalValidationError("Document library is not configured")
+            try:
+                DocumentLibraryBindingRepository(
+                    self._session, target=self._document_library_target
+                ).validate(
+                    binding, project_id=run.project_id, run_id=run.id,
+                    requirement_key=binding.requirement_key,
+                )
+                frozen = parse_document_library_source(
+                    run.selected_sources_json[binding.requirement_key],
+                    project_id=run.project_id, run_id=run.id,
+                    requirement_key=binding.requirement_key,
+                )
+                if (
+                    frozen.binding_id != binding.id
+                    or frozen.target != self._document_library_target
+                ):
+                    raise ValueError("Original document library binding changed")
+            except (ValueError, TypeError, KeyError) as error:
+                raise ChangeProposalValidationError("Document library binding changed") from error
+            return None
+        if (
+            binding.integration_id is None or binding.run_id != run.id
+            or binding.project_id != run.project_id
+            or binding.scope_level != ResourceBindingLevel.RUN.value
+            or binding.scope_key != str(run.id) or binding.disabled_at is not None
+            or binding.capability_version != capability_version
+        ):
+            raise ChangeProposalValidationError("Frozen Integration binding is invalid")
+        expected = binding_checksum(
+            project_id=binding.project_id, scope_level=ResourceBindingLevel.RUN,
+            scope_key=binding.scope_key, requirement_key=binding.requirement_key,
+            resource_kind=binding.resource_kind, integration_id=binding.integration_id,
+            provider=binding.provider, capability_version=binding.capability_version,
+            revision=binding.revision, scope=dict(binding.scope_json),
+        )
+        integration = await self._session.get(Integration, binding.integration_id)
+        if (
+            integration is None or integration.project_id != run.project_id
+            or integration.status != IntegrationStatus.ACTIVE.value
+            or str(integration.revision) != binding.revision
+            or integration.provider != binding.provider
+            or capability_version not in integration.capabilities_json
+            or binding.checksum != expected
+        ):
+            raise ChangeProposalValidationError("Integration changed after Run binding")
+        return integration
+
+    async def _validate_effect_artifact(
+        self, *, run: Run, draft: ChangeProposalDraft, payload: dict[str, Any]
+    ) -> None:
+        """文書保存では原 Run の検証済み byte を必須とし、提案の自己申告だけで批准しない。"""
+
+        if draft.capability_version != DOCUMENT_WRITE_CAPABILITY:
+            return
+        try:
+            artifact = await ArtifactRepository(self._session).get_content(
+                project_id=run.project_id, run_id=run.id, artifact_ref=payload["artifact_ref"]
+            )
+            if artifact is None or any(
+                getattr(artifact.metadata, name) != payload[key]
+                for name, key in (
+                    ("checksum", "content_hash"), ("size_bytes", "size_bytes"),
+                )
+            ):
+                raise ValueError("Original Artifact does not match the proposed content")
+            # Artifact は現行 producer の text/plain。保存 MIME は批准した配信形式であり、
+            # Markdown/JSON へのラベル指定で元 byte を変換・置換しない。
+        except ValueError as error:
+            raise ChangeProposalValidationError(
+                "Document Artifact is unavailable or changed"
+            ) from error
+
     async def _validate_proposal_draft(
         self,
         claimed: ClaimedRun,
         *,
         run: Run,
         draft: ChangeProposalDraft,
-    ) -> tuple[dict[str, Any], ResourceBinding, Integration, dict[str, Any]]:
+    ) -> tuple[dict[str, Any], ResourceBinding, Integration | None, dict[str, Any]]:
         """Blueprint intent、Run binding、Integration scope と Provider payload を再検証する。"""
 
         existing = (
@@ -1711,41 +2195,20 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 )
             )
         ).one_or_none()
-        if binding is None or binding.integration_id is None:
-            raise ChangeProposalValidationError("ChangeProposal has no frozen Integration binding")
-        expected_binding_checksum = binding_checksum(
-            project_id=binding.project_id,
-            scope_level=ResourceBindingLevel.RUN,
-            scope_key=binding.scope_key,
-            requirement_key=binding.requirement_key,
-            resource_kind=binding.resource_kind,
-            integration_id=binding.integration_id,
-            provider=binding.provider,
-            capability_version=binding.capability_version,
-            revision=binding.revision,
-            scope=dict(binding.scope_json),
+        if binding is None:
+            raise ChangeProposalValidationError("ChangeProposal has no frozen resource binding")
+        integration = await self._validate_effect_binding(
+            run=run, binding=binding, capability_version=draft.capability_version
         )
-        if (
-            binding.checksum != expected_binding_checksum
-            or binding.capability_version != draft.capability_version
-        ):
-            raise ChangeProposalValidationError("Frozen ResourceBinding is invalid")
-        integration = await self._session.get(Integration, binding.integration_id)
-        if (
-            integration is None
-            or integration.project_id != run.project_id
-            or integration.status != IntegrationStatus.ACTIVE.value
-            or str(integration.revision) != binding.revision
-            or integration.provider != binding.provider
-            or draft.capability_version not in integration.capabilities_json
-        ):
-            raise ChangeProposalValidationError("Integration changed after Run binding")
         capability = resolve_effect_capability(draft.capability_version)
-        if integration.provider not in capability.providers:
+        if binding.provider not in capability.providers:
             raise ChangeProposalValidationError("Effect capability does not match the Provider")
         provider_payload = capability.validate(
-            draft, dict(binding.scope_json), dict(integration.config_json)
+            draft, dict(binding.scope_json),
+            dict(integration.config_json) if integration is not None else {}
         )
+        await self._validate_database_observation(draft, binding=binding, payload=provider_payload)
+        await self._validate_effect_artifact(run=run, draft=draft, payload=provider_payload)
         return intent, binding, integration, provider_payload
 
     @staticmethod
@@ -1789,42 +2252,15 @@ class EffectOperationsMixin(_RunRepositoryBase):
 
     async def _validate_proposal_row(
         self, proposal: ChangeProposal, *, run: Run
-    ) -> None:
+    ) -> dict[str, Any]:
         """Approval 時に Proposal と binding、Integration、Evidence ownership を再検証する。"""
 
         binding = await self._session.get(ResourceBinding, proposal.target_binding_id)
-        integration = await self._session.get(Integration, proposal.integration_id)
-        expected_binding_checksum = (
-            binding_checksum(
-                project_id=binding.project_id,
-                scope_level=ResourceBindingLevel.RUN,
-                scope_key=binding.scope_key,
-                requirement_key=binding.requirement_key,
-                resource_kind=binding.resource_kind,
-                integration_id=binding.integration_id,
-                provider=binding.provider,
-                capability_version=binding.capability_version,
-                revision=binding.revision,
-                scope=dict(binding.scope_json),
-            )
-            if binding is not None
-            else None
-        )
-        if (
-            binding is None
-            or binding.run_id != run.id
-            or binding.project_id != run.project_id
-            or binding.integration_id != proposal.integration_id
-            or integration is None
-            or integration.project_id != run.project_id
-            or integration.status != IntegrationStatus.ACTIVE.value
-            or integration.provider != binding.provider
-            or str(integration.revision) != binding.revision
-            or binding.capability_version != proposal.capability_version
-            or proposal.capability_version not in integration.capabilities_json
-            or binding.checksum != expected_binding_checksum
-        ):
+        if binding is None or binding.integration_id != proposal.integration_id:
             raise ChangeProposalValidationError("Proposal target changed after creation")
+        integration = await self._validate_effect_binding(
+            run=run, binding=binding, capability_version=proposal.capability_version
+        )
         changes = proposal.preview_json.get("changes")
         if not isinstance(changes, list) or not all(isinstance(item, dict) for item in changes):
             raise ChangeProposalValidationError("Proposal preview snapshot is invalid")
@@ -1835,7 +2271,9 @@ class EffectOperationsMixin(_RunRepositoryBase):
             "agent_session_id": str(proposal.agent_session_id),
             "skill_version_id": str(proposal.skill_version_id),
             "target_binding_id": str(proposal.target_binding_id),
-            "integration_id": str(proposal.integration_id),
+            "integration_id": (
+                str(proposal.integration_id) if proposal.integration_id is not None else None
+            ),
             "effect_intent_key": proposal.effect_intent_key,
             "resource_key": binding.requirement_key,
             "capability_version": proposal.capability_version,
@@ -1877,10 +2315,14 @@ class EffectOperationsMixin(_RunRepositoryBase):
             checkpoint=dict(proposal.checkpoint_json),
             checkpoint_checksum=proposal.checkpoint_checksum,
         )
-        resolve_effect_capability(proposal.capability_version).validate(
-            draft, dict(binding.scope_json), dict(integration.config_json)
+        payload = resolve_effect_capability(proposal.capability_version).validate(
+            draft, dict(binding.scope_json),
+            dict(integration.config_json) if integration is not None else {}
         )
+        await self._validate_database_observation(draft, binding=binding, payload=payload)
+        await self._validate_effect_artifact(run=run, draft=draft, payload=payload)
         await self._validate_evidence_refs(run.id, tuple(proposal.evidence_refs_json))
+        return payload
 
     @staticmethod
     def _next_effect_segment(
@@ -1892,11 +2334,18 @@ class EffectOperationsMixin(_RunRepositoryBase):
         outcome: str,
         now: datetime,
         evidence_refs: tuple[str, ...] = (),
+        effect_result: dict[str, Any] | None = None,
         trigger_type: RunSegmentTrigger = RunSegmentTrigger.APPROVAL_RESPONSE,
     ) -> RunSegment:
         """Effect outcome を checkpoint へ追加し、同じ Run の次 Segment を作成する。"""
 
         checkpoint = dict(proposal.checkpoint_json)
+        # 前回の回执や入力由来の同名値を、今回の結果として引き継がない。
+        checkpoint.pop("effect_result", None)
+        if effect_result is not None:
+            if outcome != "APPLIED":
+                raise ValueError("Only an applied Effect can supply a continuation result")
+            checkpoint["effect_result"] = validated_effect_result(effect_result)
         facts = [
             str(item)
             for item in checkpoint.get("confirmed_facts", [])
@@ -2032,7 +2481,11 @@ class EffectOperationsMixin(_RunRepositoryBase):
             (
                 await self._session.scalars(
                     select(EffectExecution)
+                    .join(ChangeProposal, ChangeProposal.id == EffectExecution.proposal_id)
                     .where(
+                        ChangeProposal.capability_version.in_(self._execution_features.write_capabilities),
+                        or_(ChangeProposal.capability_version != DATABASE_WRITE_CAPABILITY,
+                            ChangeProposal.operation.in_(["INSERT", "UPDATE"])),
                         EffectExecution.status.in_(
                             {
                                 EffectExecutionStatus.LEASED.value,
@@ -2077,6 +2530,10 @@ class EffectOperationsMixin(_RunRepositoryBase):
                     .with_for_update()
                 )
             ).one()
+            if not self._execution_features.effect_enabled(
+                proposal.capability_version, proposal.operation
+            ):
+                continue
             if (
                 execution.status
                 not in {
@@ -2090,10 +2547,11 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 continue
             if RunStatus(run.status) is not RunStatus.WAITING_FOR_APPROVAL:
                 execution.status = EffectExecutionStatus.FAILED.value
-                execution.error_json = {
-                    "code": "run_left_effect_waiting_state",
-                    "retryable": False,
-                }
+                execution.error_json = effect_failure_record(
+                    capability=proposal.capability_version, attempt_no=execution.attempt_no,
+                    code="run_left_effect_waiting_state", retryable=False,
+                    previous=execution.error_json,
+                )
                 execution.worker_id = None
                 execution.lease_token_hash = None
                 execution.lease_expires_at = None
@@ -2101,6 +2559,20 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 execution.updated_at = now
                 proposal.status = ChangeProposalStatus.FAILED.value
                 proposal.updated_at = now
+                if (effect_requires_reconciliation(execution.error_json)
+                    and execution.tool_call_id is not None):
+                    tool_call = await self._session.get(
+                        ToolCall, execution.tool_call_id, with_for_update=True,
+                    )
+                    if tool_call is not None:
+                        tool_call.status = "FAILED"
+                        tool_call.result_json = None
+                        tool_call.error_json = _effect_tool_error(
+                            code=UNKNOWN_EFFECT_CODE, retryable=False,
+                        )
+                        tool_call.updated_at = now
+                    # Run の終局 snapshot 後に event を加えない。原 Effect/Tool の更新は
+                    # 履歴 detail の再読取で確認でき、Run の結果を上書きしない。
                 recovered += 1
                 continue
             if await self.is_cancellation_requested(run.id):
@@ -2139,7 +2611,10 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 execution.lease_token_hash = None
                 execution.lease_expires_at = None
                 execution.heartbeat_at = now
-                execution.error_json = {"code": "lease_expired", "retryable": True}
+                execution.error_json = effect_failure_record(
+                    capability=proposal.capability_version, attempt_no=execution.attempt_no,
+                    code="lease_expired", retryable=True, previous=execution.error_json,
+                )
                 execution.updated_at = now
                 proposal.status = ChangeProposalStatus.APPROVED.value
                 proposal.updated_at = now
@@ -2151,7 +2626,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
                         tool_call.status = "FAILED"
                         tool_call.result_json = None
                         tool_call.error_json = _effect_tool_error(
-                            code="lease_expired",
+                            code=execution.error_json["code"],
                             retryable=True,
                         )
                         tool_call.updated_at = now
@@ -2171,6 +2646,9 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 await self._session.scalars(
                     select(ChangeProposal)
                     .where(
+                        ChangeProposal.capability_version.in_(self._execution_features.write_capabilities),
+                        or_(ChangeProposal.capability_version != DATABASE_WRITE_CAPABILITY,
+                            ChangeProposal.operation.in_(["INSERT", "UPDATE"])),
                         ChangeProposal.status
                         == ChangeProposalStatus.PENDING_APPROVAL.value,
                         ChangeProposal.expires_at <= now,
@@ -2197,6 +2675,10 @@ class EffectOperationsMixin(_RunRepositoryBase):
                     .with_for_update()
                 )
             ).one()
+            if not self._execution_features.effect_enabled(
+                proposal.capability_version, proposal.operation
+            ):
+                continue
             if (
                 proposal.status != ChangeProposalStatus.PENDING_APPROVAL.value
                 or proposal.expires_at > now
@@ -2247,6 +2729,9 @@ def _effect_tool_error(*, code: str, retryable: bool) -> dict[str, Any]:
     return {
         "status": "error",
         "code": code,
-        "message": "Controlled effect could not be completed",
+        "message": (
+            "Original external write result requires reconciliation"
+            if code == UNKNOWN_EFFECT_CODE else "Controlled effect could not be completed"
+        ),
         "retryable": retryable,
     }

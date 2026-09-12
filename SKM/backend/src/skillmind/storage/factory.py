@@ -8,6 +8,7 @@ from __future__ import annotations
 from skillmind.core.settings import Settings
 from skillmind.storage.blob import FileStorage
 from skillmind.storage.s3 import S3FileStorage
+from skillmind.storage.s3_effect import S3ObjectWriteSource
 from skillmind.storage.validation import UploadLimits
 
 
@@ -31,3 +32,22 @@ def create_document_upload_limits(settings: Settings) -> UploadLimits:
         project_quota_bytes=settings.project_document_quota_bytes,
         allowed_content_types=frozenset(settings.document_allowed_content_types),
     )
+
+
+def create_document_write_source(
+    settings: Settings, *, storage: FileStorage
+) -> S3ObjectWriteSource:
+    """既存文書庫と同じ設定を使い、未所属/別世代の成果 writer は接続前に拒否する。"""
+
+    if settings.object_storage_namespace_id is None:
+        raise ValueError("Document writes require the configured storage namespace")
+    source = S3ObjectWriteSource(
+        endpoint=settings.object_storage_endpoint,
+        bucket=settings.object_storage_bucket,
+        namespace_id=settings.object_storage_namespace_id,
+        access_key=settings.object_storage_access_key,
+        secret_key=settings.object_storage_secret_key,
+    )
+    if source.namespace != storage.namespace:
+        raise ValueError("Document writer does not match the configured project library")
+    return source

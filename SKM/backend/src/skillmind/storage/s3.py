@@ -14,6 +14,7 @@ from uuid import UUID
 from minio import Minio
 from minio.error import MinioException, S3Error
 from urllib3.exceptions import HTTPError
+from urllib3.response import BaseHTTPResponse
 
 from skillmind.core.hashing import sha256_hex
 from skillmind.storage.blob import (
@@ -26,6 +27,8 @@ from skillmind.storage.blob import (
     validate_read_limit,
 )
 from skillmind.storage.namespace import canonical_s3_endpoint, make_s3_namespace
+from skillmind.storage.observation import BlobObservation, ObservedBlob
+from skillmind.storage.s3_observation import observation_from_headers
 
 _SHA256_METADATA_KEY = "sha256"
 _READ_CHUNK_BYTES = 64 * 1024
@@ -94,18 +97,7 @@ class S3FileStorage:
         try:
             response = self._client.get_object(self._bucket, key)
             try:
-                if max_bytes is None:
-                    return bytes(response.read(decode_content=False))
-                payload = bytearray()
-                while len(payload) <= max_bytes:
-                    chunk = response.read(
-                        min(_READ_CHUNK_BYTES, max_bytes + 1 - len(payload)),
-                        decode_content=False,
-                    )
-                    if not chunk:
-                        return bytes(payload)
-                    payload.extend(chunk)
-                raise BlobReadLimitExceededError("Blob content exceeds the read limit")
+                return _read_response(response, max_bytes)
             finally:
                 try:
                     response.close()
@@ -113,6 +105,79 @@ class S3FileStorage:
                     response.release_conn()
         except S3Error as error:
             if error.code in {"NoSuchKey", "NoSuchObject"}:
+                raise BlobNotFoundError("Blob content is not available") from error
+            raise FileStorageError("Blob storage is unavailable") from error
+        except (MinioException, HTTPError, OSError) as error:
+            raise FileStorageError("Blob storage is unavailable") from error
+
+    async def inspect(self, key: str) -> BlobObservation:
+        """本文を開かず実 HEAD だけを行い、取得前の選択基準に使う metadata を返す。"""
+
+        return await asyncio.to_thread(self._inspect, sanitize_object_key(key))
+
+    def _inspect(self, key: str) -> BlobObservation:
+        """欠落だけを不存在に分類し、SDK 補完値から観測を作らない。"""
+
+        try:
+            return observation_from_headers(self._client.stat_object(self._bucket, key).metadata)
+        except S3Error as error:
+            if error.code in {"NoSuchKey", "NoSuchObject"}:
+                raise BlobNotFoundError("Blob content is not available") from error
+            raise FileStorageError("Blob storage is unavailable") from error
+        except (MinioException, HTTPError, OSError) as error:
+            raise FileStorageError("Blob storage is unavailable") from error
+
+    async def get_observed(
+        self, key: str, *, max_bytes: int, expected: BlobObservation | None = None
+    ) -> ObservedBlob:
+        """有界取得の前後を照合し、別 version の本文や時刻を混在させない。"""
+
+        validate_read_limit(max_bytes)
+        if max_bytes is None:
+            raise FileStorageError("Blob read limit must be a non-negative integer")
+        if expected is not None and not isinstance(expected, BlobObservation):
+            raise FileStorageError("Blob observation is invalid")
+        return await asyncio.to_thread(
+            self._read_observed, sanitize_object_key(key), max_bytes, expected
+        )
+
+    def _read_observed(
+        self, key: str, max_bytes: int, expected: BlobObservation | None
+    ) -> ObservedBlob:
+        """version 固定または HEAD/GET/HEAD の一致を要求し、置換を再試行しない。"""
+
+        try:
+            # 先の選択で固定された version は現行 HEAD に読み替えない。
+            before = (
+                expected if expected is not None and expected.version_pinned else self._inspect(key)
+            )
+            if expected is not None and before != expected:
+                raise FileStorageError("Blob changed since inspection")
+            if before.size > max_bytes:
+                raise BlobReadLimitExceededError("Blob content exceeds the read limit")
+            response = self._client.get_object(
+                self._bucket, key,
+                version_id=before.version_id if before.version_pinned else None,
+            )
+            try:
+                acquired = observation_from_headers(response.headers)
+                if acquired != before:
+                    raise FileStorageError("Blob changed during acquisition")
+                data = _read_response(response, max_bytes)
+                if len(data) != acquired.size:
+                    raise FileStorageError("Blob content does not match its observation")
+            finally:
+                try:
+                    response.close()
+                finally:
+                    response.release_conn()
+            if not before.version_pinned:
+                after = self._inspect(key)
+                if after != acquired:
+                    raise FileStorageError("Blob changed during acquisition")
+            return ObservedBlob(data=data, observation=acquired)
+        except S3Error as error:
+            if error.code in {"NoSuchKey", "NoSuchObject", "NoSuchVersion"}:
                 raise BlobNotFoundError("Blob content is not available") from error
             raise FileStorageError("Blob storage is unavailable") from error
         except (MinioException, HTTPError, OSError) as error:
@@ -167,3 +232,19 @@ class S3FileStorage:
             content_type=str(getattr(info, "content_type", "") or "application/octet-stream"),
             sha256=str(digest),
         )
+
+
+def _read_response(response: BaseHTTPResponse, max_bytes: int | None) -> bytes:
+    """通常 GET と metadata 付き GET が同じ上限 + 1 の実 byte 検出を使う。"""
+
+    if max_bytes is None:
+        return bytes(response.read(decode_content=False))
+    payload = bytearray()
+    while len(payload) <= max_bytes:
+        chunk = response.read(
+            min(_READ_CHUNK_BYTES, max_bytes + 1 - len(payload)), decode_content=False,
+        )
+        if not chunk:
+            return bytes(payload)
+        payload.extend(chunk)
+    raise BlobReadLimitExceededError("Blob content exceeds the read limit")

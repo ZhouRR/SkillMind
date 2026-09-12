@@ -124,3 +124,29 @@ def test_mcp_connection_rejects_credential_urls_and_non_http_targets(url: str) -
         normalize_integration_command(
             replace(original, config={**original.config, "server_url": url})
         )
+
+
+def test_database_write_requires_read_and_explicit_flat_column_scope():
+    """読み取り設定をそのまま書込み許可へ拡張せず、列と操作を明示する。"""
+    original = command("postgres")
+    capabilities = ("database.read/v1", "database.write/v1")
+    scope = {
+        "tables": ["public.reports"],
+        "write_columns": ["public.reports.id", "public.reports.status"],
+        "operations": ["INSERT", "UPDATE"],
+    }
+    writable = replace(original, capabilities=capabilities, scope=scope)
+    assert normalize_integration_command(writable).scope == scope
+    with pytest.raises(IntegrationValidationError):
+        normalize_integration_command(replace(writable, capabilities=("database.write/v1",)))
+    for altered in (
+        original.scope,
+        {**scope, "write_columns": ["other.reports.id"]},
+        {**scope, "write_columns": ["*"]},
+        {**scope, "operations": ["DELETE"]},
+        {**scope, "write_columns": []},
+        {**scope, "operations": []},
+        {**scope, "tables": ["skillmind_effects.execution_receipts"]},
+    ):
+        with pytest.raises(IntegrationValidationError):
+            normalize_integration_command(replace(writable, scope=altered))

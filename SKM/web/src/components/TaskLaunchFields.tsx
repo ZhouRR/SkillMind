@@ -1,7 +1,7 @@
 import type { PublishedTaskRecord, TaskReadinessRecord } from '../api'
 import { useMessages } from '../i18n'
-import { parseInputObject, sourceRequirements, type SourceRequirementChoice } from '../lib/taskDraft'
-import { ALL_DOCUMENTS_SELECTION } from '../lib/documentSelection'
+import { parseInputObject, sourceRequirements, usesDocumentSelection, type SourceRequirementChoice } from '../lib/taskDraft'
+import { ALL_DOCUMENTS_SELECTION, PROJECT_DOCUMENT_LIBRARY_SELECTION } from '../lib/documentSelection'
 import { DocumentSourceField } from './DocumentSourceField'
 import { SchemaTaskInput } from './SchemaTaskInput'
 
@@ -17,15 +17,19 @@ export function SourceRequirementField({ requirement, value, onChange }: {
   onChange: (value: string) => void
 }) {
   const messages = useMessages()
-  if (requirement.kind === 'document') return <DocumentSourceField requirement={requirement} value={value} onChange={onChange} />
-  const label = messages.workspace.resourceKind[requirement.kind] ?? requirement.key
+  if (usesDocumentSelection(requirement)) return <DocumentSourceField requirement={requirement} value={value} onChange={onChange} />
+  const label = requirement.kind === 'document' && requirement.access === 'write'
+    ? messages.workspace.documentSelection.library
+    : messages.workspace.resourceKind[requirement.kind] ?? requirement.key
+  const optionLabel = (option: { value: string; label: string }) => option.value === PROJECT_DOCUMENT_LIBRARY_SELECTION
+    ? messages.workspace.documentSelection.library : option.label
   const soleOption = requirement.options[0]
   const unavailable = !!value && !requirement.options.some((option) => option.value === value)
   if (requirement.required && requirement.options.length === 1 && soleOption !== undefined && value === soleOption.value) {
     return (
       <div className="sourceField" title={requirement.key}>
         <span className="sourceFieldLabel">{label}</span>
-        <span className="sourceFieldStatic">{messages.workspace.willUseSource(soleOption.label)}</span>
+        <span className="sourceFieldStatic">{messages.workspace.willUseSource(optionLabel(soleOption))}</span>
       </div>
     )
   }
@@ -47,7 +51,7 @@ export function SourceRequirementField({ requirement, value, onChange }: {
         <option value="">{requirement.required ? messages.workspace.selectConfiguredResource : messages.workspace.notUsed}</option>
         {unavailable && <option value={value} disabled>{messages.scheduleEditor.retainedSource(value)}</option>}
         {requirement.options.map((option) => (
-          <option key={option.value} value={option.value}>{option.label}</option>
+          <option key={option.value} value={option.value}>{optionLabel(option)}</option>
         ))}
       </select>
       {unavailable && <small>{messages.scheduleEditor.sourceUnavailable}</small>}
@@ -85,7 +89,9 @@ export function TaskReadinessPanel({ readiness }: { readiness: TaskReadinessReco
                 {' — '}
                 {messages.workspace.requirementReason[requirement.status] ?? ''}
                 {requirement.candidates.length > 0
-                  ? messages.workspace.candidatesLine(requirement.candidates.map((item) => item.key === ALL_DOCUMENTS_SELECTION ? messages.workspace.documentSelection.all : item.label))
+                  ? messages.workspace.candidatesLine(requirement.candidates.map((item) => item.key === ALL_DOCUMENTS_SELECTION
+                    ? messages.workspace.documentSelection.all : item.key === PROJECT_DOCUMENT_LIBRARY_SELECTION
+                      ? messages.workspace.documentSelection.library : item.label))
                   : ''}
               </span>
               {/* 選択指針は Skill 原文由来でレポート言語に従うため、平台文言とは行を分ける。 */}

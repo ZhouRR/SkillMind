@@ -145,6 +145,7 @@ describe('SourceRequirementField', () => {
     return {
       key: 'issue_provider',
       kind: 'issue',
+      access: 'read',
       required: true,
       options: [{ value: 'integration:abc', label: '我的 Redmine · redmine' }],
       ...overrides,

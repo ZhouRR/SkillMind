@@ -17,6 +17,7 @@ from skillmind.skills.design_validation import (
     SkillDesignSource,
     validate_skill_design,
 )
+from skillmind.skills.document_prerequisites import document_prerequisites
 from skillmind.skills.domain import InlineSkillFile, ManifestGateFinding
 from skillmind.skills.task_contract import (
     TaskContractCompilationError,
@@ -42,6 +43,7 @@ _RUN_SCOPED_PLATFORM_CAPABILITIES = frozenset(
         "workspace.search/v1",
         "workspace.write/v1",
         "workspace.write/v2",
+        "document.readiness/v1",
     }
 )
 
@@ -116,6 +118,16 @@ class ManifestValidator:
         blueprint = design.blueprint
         assert blueprint is not None
         findings: list[ManifestGateFinding] = []
+        for task in _object_list(blueprint.get("tasks")):
+            try:
+                document_prerequisites(manifest, str(task.get("key", "")))
+            except ValueError:
+                findings.append(self._error(
+                    "document_prerequisites_invalid",
+                    "Document prerequisites require a supported readiness Tool and apply intents",
+                    "/capability_blueprint/tasks",
+                ))
+
 
         compatibility = _mapping(manifest, "compatibility")
         if compatibility.get("level") == "assisted":

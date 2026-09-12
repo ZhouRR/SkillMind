@@ -16,7 +16,7 @@ export interface ChangeProposalRecord {
   run_segment_id: string
   agent_session_id: string
   target_binding_id: string
-  integration_id: string
+  integration_id: string | null
   effect_intent_key: string
   capability_version: string
   operation: string
@@ -210,10 +210,13 @@ export function isChangeProposal(value: unknown): value is ChangeProposalRecord 
   return isRecord(value)
     && hasStrings(value, [
       'proposal_id', 'proposal_ref', 'project_id', 'run_id', 'run_segment_id',
-      'agent_session_id', 'target_binding_id', 'integration_id', 'effect_intent_key',
+      'agent_session_id', 'target_binding_id', 'effect_intent_key',
       'capability_version', 'operation', 'summary', 'risk_level', 'status', 'checksum',
       'expires_at', 'created_at', 'updated_at',
     ])
+    && (value.capability_version === 'document.write/v1'
+      ? value.integration_id === null && value.operation === 'CREATE'
+      : typeof value.integration_id === 'string')
     && isRecord(value.target)
     && Array.isArray(value.changes)
     && value.changes.every(isRecord)

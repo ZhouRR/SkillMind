@@ -22,6 +22,8 @@ from skillmind.db.models import (
     RunEvent,
     RunSegment,
 )
+from skillmind.documents.library import DocumentLibraryTarget
+from skillmind.effects.release import ExecutionFeatures
 from skillmind.runs.domain import (
     AgentSessionKind,
     AgentSessionMetadata,
@@ -43,10 +45,16 @@ class _RunRepositoryBase:
     取得し、RunEvent の sequence 採番と Outbox 生成をここへ集約する。
     """
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self, session: AsyncSession, *,
+        execution_features: ExecutionFeatures | None = None,
+        document_library_target: DocumentLibraryTarget | None = None,
+    ) -> None:
         """Repository が利用する transaction-scoped session を保持する。"""
 
         self._session = session
+        self._execution_features = execution_features or ExecutionFeatures(deferred=True)
+        self._document_library_target = document_library_target
 
     async def is_cancellation_requested(self, run_id: UUID) -> bool:
         """Worker が durable な取消 intent を polling できるよう存在だけを返す。"""

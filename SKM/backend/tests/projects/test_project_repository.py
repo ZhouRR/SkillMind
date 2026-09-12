@@ -16,6 +16,7 @@ from skillmind.db.models import (
     Project,
     ProjectDocument,
     ProjectDocumentCleanup,
+    ProjectDocumentEffectUpload,
     ProjectDocumentUpload,
     ProjectMember,
     ProjectMemberEvent,
@@ -413,7 +414,7 @@ async def test_delete_clears_preference_and_owned_configuration_rows() -> None:
     actor = _actor(role="ADMIN")
     project = _project(organization_id=actor.organization_id, status="ARCHIVED")
     session = MagicMock(spec=AsyncSession)
-    session.scalar = AsyncMock(side_effect=[0, False, False, False, False, False])
+    session.scalar = AsyncMock(side_effect=[0, False, False, False, False, False, False])
     session.execute = AsyncMock()
     session.delete = AsyncMock()
 
@@ -444,7 +445,9 @@ async def test_member_audit_blocks_delete_before_any_writes() -> None:
     session.delete.assert_not_called()
 
 
-@pytest.mark.parametrize("model", [ProjectDocumentUpload, ProjectDocumentCleanup, ProjectDocument])
+@pytest.mark.parametrize("model", [
+    ProjectDocumentUpload, ProjectDocumentCleanup, ProjectDocument, ProjectDocumentEffectUpload,
+])
 async def test_document_assets_block_project_delete_without_state_or_cleanup_exclusions(
     model: type[ProjectDocumentUpload] | type[ProjectDocumentCleanup] | type[ProjectDocument],
 ) -> None:
@@ -453,7 +456,9 @@ async def test_document_assets_block_project_delete_without_state_or_cleanup_exc
     actor = _actor(role="ADMIN")
     project = _project(organization_id=actor.organization_id, status="ARCHIVED")
     session = MagicMock(spec=AsyncSession)
-    order = [ProjectDocumentUpload, ProjectDocumentCleanup, ProjectDocument].index(model)
+    order = [
+        ProjectDocumentUpload, ProjectDocumentCleanup, ProjectDocument, ProjectDocumentEffectUpload,
+    ].index(model)
     session.scalar = AsyncMock(side_effect=[0, False, False] + [False] * order + [True])
     with pytest.raises(ProjectDeleteBlockedError) as raised:
         await ProjectRepository(session).delete(project=project, expected_row_version=1)

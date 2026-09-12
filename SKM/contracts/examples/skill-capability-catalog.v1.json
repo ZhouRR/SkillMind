@@ -1,6 +1,6 @@
 {
   "catalog_version": "skillmind.tool-catalog/1",
-  "checksum": "sha256:9f826f7cef5890f6d67fdceb11ab3cf555c9b28f9d3af857408ea8cc0bbef801",
+  "checksum": "sha256:03a4818288e8e0b11958f466dd49ad69ad25f644b7732e62920e9bd33ce2cfa0",
   "capabilities": [
     {
       "capability": "change.propose/v1",
@@ -14,12 +14,52 @@
     },
     {
       "capability": "database.read/v1",
-      "description": "Read bounded rows from an explicitly scoped PostgreSQL table using columns, equality filters and pagination; arbitrary SQL is not accepted.",
+      "description": "Read bounded rows from an explicitly scoped PostgreSQL table; optional include_schema returns complete column attributes and ordered primary keys even for empty tables before proposing writes. Equality filters and pagination only; arbitrary SQL is not accepted.",
       "request_schema": "tools/database.read/v1/request.schema.json",
       "response_schema": "tools/database.read/v1/response.schema.json",
       "error_schema": "tools/database.read/v1/error.schema.json",
       "providers": [
         "postgres"
+      ]
+    },
+    {
+      "capability": "database.write/v1",
+      "description": "Effect-only payload. Agent uses change.propose/v1: target.locator=table, operation, one /row SET value={key,values,expected}, precondition.revision from full-row database.read evidence or absent; verification READ_BACK /row. Never a directly callable Agent Tool.",
+      "request_schema": "tools/database.write/v1/request.schema.json",
+      "response_schema": "tools/database.write/v1/response.schema.json",
+      "error_schema": "tools/database.write/v1/error.schema.json",
+      "providers": [
+        "postgres"
+      ]
+    },
+    {
+      "capability": "document.convert/v1",
+      "description": "Convert frozen XLSX/XLS with Worker MarkItDown; return full Markdown, source/output hashes, version and conversion warnings. observation_ref pins acquisition to same-Run inspect/list Evidence; mismatches fail. For exact backup, publish_artifact=true persists the returned Markdown as a Run Artifact. Use artifact_refs and artifact size/hash in an approved document.write proposal; do not retype Markdown. Conversion does not upload to MinIO.",
+      "request_schema": "tools/document.convert/v1/request.schema.json",
+      "response_schema": "tools/document.convert/v1/response.schema.json",
+      "error_schema": "tools/document.convert/v1/error.schema.json",
+      "providers": [
+        "project-documents"
+      ]
+    },
+    {
+      "capability": "document.inspect/v1",
+      "description": "Observe storage LastModified, Version ID, opaque ETag and metadata for one exactly selected frozen document without downloading bytes. Requires explicit permission; metadata Evidence does not verify the declared source content hash or bind a subsequent conversion automatically; pass its evidence_ref as document.convert/v1 observation_ref to bind that acquisition.",
+      "request_schema": "tools/document.inspect/v1/request.schema.json",
+      "response_schema": "tools/document.inspect/v1/response.schema.json",
+      "error_schema": "tools/document.inspect/v1/error.schema.json",
+      "providers": [
+        "project-documents"
+      ]
+    },
+    {
+      "capability": "document.list/v1",
+      "description": "Page through the original Run frozen document selection by relative directory, extensions and exclusions. Observe actual storage LastModified with explicit calendar date, IANA timezone and inclusive cutoff. Follow every next_cursor including pages without matches; scope is frozen membership, not a live bucket listing. To convert a matching entry at its observed version, pass evidence_refs[entry.evidence_index] as document.convert/v1 observation_ref. No bytes are downloaded or verified.",
+      "request_schema": "tools/document.list/v1/request.schema.json",
+      "response_schema": "tools/document.list/v1/response.schema.json",
+      "error_schema": "tools/document.list/v1/error.schema.json",
+      "providers": [
+        "project-documents"
       ]
     },
     {
@@ -30,6 +70,26 @@
       "error_schema": "tools/document.read/v1/error.schema.json",
       "providers": [
         "project"
+      ]
+    },
+    {
+      "capability": "document.readiness/v1",
+      "description": "Read this Run task document_prerequisites and the matching confirmed controlled effects. No external I/O or permission grant. Tasks declaring document_prerequisites must require this Tool; document read, inspect, list and conversion stay blocked until all named original-Run apply intents are APPLIED with matching approval, ToolCall and Evidence.",
+      "request_schema": "tools/document.readiness/v1/request.schema.json",
+      "response_schema": "tools/document.readiness/v1/response.schema.json",
+      "error_schema": "tools/document.readiness/v1/error.schema.json",
+      "providers": [
+        "platform"
+      ]
+    },
+    {
+      "capability": "document.write/v1",
+      "description": "Effect-only project library CREATE. Agent uses change.propose/v1: select a separate document/write resource slot; target.locator is the relative output path; one /document SET value={artifact_ref,content_hash,size_bytes,mime_type} from a committed same-Run workspace.write/v2 Artifact; precondition.revision=absent; verification READ_BACK /document. Always requires approval; never a direct Agent Tool.",
+      "request_schema": "tools/document.write/v1/request.schema.json",
+      "response_schema": "tools/document.write/v1/response.schema.json",
+      "error_schema": "tools/document.write/v1/error.schema.json",
+      "providers": [
+        "project-library"
       ]
     },
     {

@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "provider",
+    "ready",
+    "required_effect_intents",
+    "applied_effect_intents",
+    "evidence_refs"
+  ],
+  "properties": {
+    "status": {
+      "const": "success"
+    },
+    "provider": {
+      "const": "platform"
+    },
+    "ready": {
+      "type": "boolean"
+    },
+    "required_effect_intents": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 50,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_.-]*$",
+        "maxLength": 128
+      }
+    },
+    "applied_effect_intents": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 50,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_.-]*$",
+        "maxLength": 128
+      }
+    },
+    "evidence_refs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "type": "string",
+        "pattern": "^ev_[a-zA-Z0-9_-]+$"
+      }
+    }
+  },
+  "$id": "https://schemas.skillmind.local/tools/document.readiness/v1/response.schema.json",
+  "title": "document.readiness/v1 response"
+}

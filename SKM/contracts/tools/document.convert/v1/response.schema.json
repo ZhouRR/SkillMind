@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/document.convert/v1/response.schema.json",
+  "title": "document.convert/v1 response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "provider",
+    "document",
+    "converter",
+    "markdown",
+    "markdown_checksum",
+    "evidence_refs",
+    "warnings"
+  ],
+  "properties": {
+    "status": {
+      "const": "success"
+    },
+    "provider": {
+      "enum": [
+        "project"
+      ]
+    },
+    "document": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "folder",
+        "name",
+        "mime",
+        "checksum",
+        "size",
+        "document_id"
+      ],
+      "properties": {
+        "folder": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mime": {
+          "type": "string",
+          "minLength": 1
+        },
+        "checksum": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "document_id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    },
+    "evidence_refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "pattern": "^ev_[a-zA-Z0-9_-]+$"
+      },
+      "uniqueItems": true
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "converter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "const": "markitdown"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      }
+    },
+    "markdown": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1048576
+    },
+    "markdown_checksum": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "artifact_refs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "type": "string",
+        "pattern": "^art_[a-zA-Z0-9_-]+$"
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "size_bytes",
+        "content_hash",
+        "mime_type"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^output/document-conversions/",
+          "maxLength": 4096
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1048576
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "mime_type": {
+          "const": "text/plain"
+        }
+      }
+    }
+  },
+  "dependentRequired": {
+    "artifact": [
+      "artifact_refs"
+    ],
+    "artifact_refs": [
+      "artifact"
+    ]
+  }
+}

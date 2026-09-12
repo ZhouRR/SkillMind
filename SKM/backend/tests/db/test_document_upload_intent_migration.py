@@ -115,6 +115,15 @@ def test_0038_and_complete_document_migration_chain_match_model(
                 "AND publication_closed_at >= created_at)",
             )
             constraint_names.remove("ck_document_upload_intents_publication_closure")
+        else:
+            # 0045 の独立成果 origin は別回帰で検証し、0038 自体は不変に保つ。
+            model_contract["columns"].pop("effect_upload_id")
+            model_contract["checks"].remove("upload_intent_id IS NULL OR effect_upload_id IS NULL")
+            model_contract["foreign_keys"] = {key for key in model_contract["foreign_keys"]
+                                               if not key[1].startswith("document_effect_uploads.")}
+            constraint_names -= {
+                "fk_project_documents_effect_upload", "ck_project_documents_single_upload_origin",
+            }
         assert _contract(migrated) == model_contract
         assert {str(item.name) for item in migrated.constraints} == constraint_names
         assert all(len(str(item.name)) <= 63 for item in migrated.constraints)
@@ -196,6 +205,10 @@ def database() -> Iterator[sqlite3.Connection]:
                 f"INSERT INTO {table} VALUES (?)",
                 [(str(UUID(int=value)),) for value in identifiers],
             )
+        connection.execute(
+            "CREATE TABLE document_effect_uploads "
+            "(id TEXT, document_id TEXT, project_id TEXT, UNIQUE(id, document_id, project_id))"
+        )
         for model in (_INTENTS, _DOCUMENTS):
             ddl = str(CreateTable(model).compile(dialect=sqlite.dialect()))
             ddl = ddl.replace(" ~ ", " REGEXP ")

@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from skillmind.agent.domain import RegisteredTool
+from skillmind.artifacts.conversion import conversion_artifact, conversion_artifact_description
 from skillmind.artifacts.domain import MAX_RUN_ARTIFACT_BYTES, MAX_RUN_ARTIFACTS, ArtifactDraft
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.core.redaction import find_sensitive_key
@@ -171,6 +172,7 @@ class PostgresToolAuditWriter:
         invocation = self._snapshot_invocation(invocation)
         async with self._session_factory() as session, session.begin():
             gate, locked = await self._lock_execution(session)
+            await self._check_document_readiness(session, locked[0], invocation)
             existing = await self._find(session, invocation, lock=True)
             if existing is not None:
                 await self._verify_tool_identity(session, existing, invocation)
@@ -244,16 +246,22 @@ class PostgresToolAuditWriter:
         async with self._session_factory() as session, session.begin():
             gate, locked = await self._lock_execution(session)
             tool_call = await self._lock_tool(session, lease, invocation)
+            await self._check_document_readiness(session, locked[0], invocation)
             if tool_call.status == "SUCCEEDED":
                 if lease.status != "SUCCEEDED" or (
                     _copy_optional(tool_call.result_json) != lease.result
                     or tool_call.result_json is None
                 ):
                     raise ValueError("Tool replay does not match its saved result")
-                if invocation.tool.capability == "workspace.write/v2":
+                if invocation.tool.capability == "workspace.write/v2" or (
+                    invocation.tool.capability == "document.convert/v1"
+                    and invocation.arguments.get("publish_artifact") is True
+                ):
                     from skillmind.artifacts.repository import ArtifactRepository
 
                     refs = frozenset((lease.result or {}).get("artifact_refs", []))
+                    if invocation.tool.capability == "document.convert/v1" and len(refs) != 1:
+                        raise ValueError("Conversion replay requires its original Artifact")
                     verified = await ArtifactRepository(session).verified_refs(
                         invocation.run_id, refs,
                     )
@@ -280,6 +288,7 @@ class PostgresToolAuditWriter:
         async with self._session_factory() as session, session.begin():
             gate, locked = await self._lock_execution(session)
             tool_call = await self._lock_tool(session, lease, invocation)
+            await self._check_document_readiness(session, locked[0], invocation)
             await gate.validate(self._claimed, locked)
             if tool_call.status == "SUCCEEDED" and tool_call.result_json is not None:
                 await self._finish(session, gate, locked)
@@ -386,6 +395,15 @@ class PostgresToolAuditWriter:
             statement = statement.with_for_update()
         statement = statement.execution_options(populate_existing=True)
         return (await session.scalars(statement)).one_or_none()
+
+    @staticmethod
+    async def _check_document_readiness(
+        session: AsyncSession, run: Run, invocation: ToolInvocation,
+    ) -> None:
+        """登録・実行直前・成功保存で同じ正本 gate を使い、Provider の呼び方に依存しない。"""
+        from skillmind.runs.document_prerequisites import require_document_readiness
+
+        await require_document_readiness(session, run, invocation.tool.capability)
 
     async def _lock_execution(
         self, session: AsyncSession,
@@ -521,6 +539,12 @@ def validate_artifact_publication(
 ) -> None:
     """新 Tool だけが元の UTF-8 出力を発行でき、保存回执と応答を同一内容に固定する。"""
 
+    if (
+        invocation.tool.capability == "document.convert/v1"
+        and invocation.arguments.get("publish_artifact") is True
+    ):
+        _validate_conversion_publication(invocation, result=result, evidence=evidence)
+        return
     if invocation.tool.capability != "workspace.write/v2":
         if "artifact_refs" in result or any(
             item.artifact_ref is not None or item.draft.artifact is not None for item in evidence
@@ -566,6 +590,39 @@ def validate_artifact_publication(
         or result.get("artifact_refs") != []
     ):
         raise ValueError("Workspace intermediate files are not Artifact publications")
+
+
+def _validate_conversion_publication(
+    invocation: ToolInvocation, *, result: Mapping[str, Any], evidence: tuple[EvidenceRecord, ...],
+) -> None:
+    """原本 Evidence と変換 byte を同一 Tool transaction に保存し、参照の欠落を拒否する。"""
+
+    if (
+        invocation.tool.provider != "project-documents"
+        or invocation.tool.integration_id is not None
+        or len(evidence) != 2 or result.get("status") != "success"
+        or result.get("provider") != "project"
+    ):
+        raise ValueError("Conversion Artifact publication identity is invalid")
+    artifact, fields = conversion_artifact(result, run_id=invocation.run_id)
+    source, converted = evidence
+    if (
+        source.draft.evidence_type != "document"
+        or source.draft.content_hash != fields["source_locator"]["source_checksum"]
+        or source.draft.source_locator.get("document_id") != fields["source_locator"]["document_id"]
+        or (source.draft.metadata or {}).get("markdown_checksum") != artifact.checksum
+        or (source.draft.metadata or {}).get("converter") != fields["metadata"]["converter"]
+        or source.artifact_ref is not None or source.draft.artifact is not None
+        or converted.draft.artifact != artifact
+        or any(getattr(converted.draft, name) != value for name, value in fields.items())
+        or not isinstance(converted.artifact_ref, str)
+        or re.fullmatch(r"art_[a-f0-9]{32}", converted.artifact_ref) is None
+        or result.get("artifact") != conversion_artifact_description(artifact)
+        or result.get("artifact_refs") != [converted.artifact_ref]
+        or result.get("evidence_refs") != [source.evidence_ref, converted.evidence_ref]
+        or source.evidence_ref == converted.evidence_ref
+    ):
+        raise ValueError("Conversion Artifact does not match its original Markdown")
 
 
 def _validate_duration(duration_ms: int) -> None:

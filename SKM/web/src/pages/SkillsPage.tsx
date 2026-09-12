@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'rea
 import {
   ApiProblemError,
   adjustInterpretation,
+  confirmInterpretationRequest,
   createSkillVersionDraft,
   deleteSkillVersion,
   deprecateSkillVersion,
@@ -38,6 +39,8 @@ import type { UiMessages } from '../lib/i18n/messages'
 import { formatByteSize } from '../lib/presentation'
 import { isNearBottom } from '../lib/scroll'
 import { normalizedSkillUploadPaths } from '../lib/skillUpload'
+import { clearInterpretationReceipt, loadInterpretationReceipt, saveInterpretationReceipt } from '../lib/interpretationReceipt'
+import { sameUuid } from '../lib/validation'
 
 /** 上传目录の読取専用 preview entry。text は内容を持ち、binary/過大は種別だけ示す。 */
 export interface UploadedSourceFile {
@@ -93,6 +96,7 @@ type SkillSaveState =
 /** Model interpret/reinterpret の非同期状態。 */
 type InterpretState =
   | { status: 'idle' }
+  | { status: 'unknown'; message: string }
   | { status: 'interpreting'; prompt: string; output: string; attempt: number }
   | { status: 'ready'; execution: InterpretationExecutionRecord }
   | { status: 'error'; message: string }
@@ -152,6 +156,23 @@ export function SkillsPage({ projectId, csrfToken }: {
   const enablementController = useRef<AbortController | null>(null)
   const libraryMutationController = useRef<AbortController | null>(null)
   const interpretStream = useRef<InterpretEventSubscription | null>(null)
+  const pendingInterpretation = useRef<string | null>(null)
+  const [pendingRequestId, setPendingRequestId] = useState<string | null>(null)
+
+  useEffect(() => {
+    try {
+      const originalId = loadInterpretationReceipt()
+      if (originalId !== null) {
+        pendingInterpretation.current = originalId
+        setPendingRequestId(originalId)
+        setPageTab('workbench')
+        void confirmPendingInterpretation()
+      }
+    } catch {
+      setPageTab('workbench')
+      setInterpretState({ status: 'unknown', message: messages.skills.interpretStorageFailure })
+    }
+  }, [])
 
   useEffect(() => () => {
     parseController.current?.abort()
@@ -227,7 +248,12 @@ export function SkillsPage({ projectId, csrfToken }: {
 
   /** 後続 state を idle へ戻し、古い解釈/版本を残さないようにする。 */
   function resetDownstream(): void {
-    setInterpretState({ status: 'idle' })
+    interpretController.current?.abort()
+    interpretStream.current?.close()
+    interpretStream.current = null
+    setInterpretState(pendingInterpretation.current === null
+      ? { status: 'idle' }
+      : { status: 'unknown', message: messages.skills.interpretUnknown })
     setAdjustState({ status: 'idle' })
     setVersionState({ status: 'idle' })
   }
@@ -297,111 +323,176 @@ export function SkillsPage({ projectId, csrfToken }: {
     }
   }
 
-  /** launch 受理後、queued なら SSE 進行を購読し、終端で最終 execution を取得する。 */
-  function driveLaunch(launch: InterpretationLaunchRecord): void {
-    interpretStream.current?.close()
-    if (launch.status === 'stored' && launch.execution !== null) {
-      setInterpretState({ status: 'ready', execution: launch.execution })
-      return
-    }
-    // Worker 実行待ち。prompt と出力 delta を SSE で累積表示する。
-    setInterpretState({ status: 'interpreting', prompt: '', output: '', attempt: 0 })
-    const subscription = subscribeInterpretEvents(
-      launch.execution_key,
-      (event) => { void handleInterpretEvent(event) },
-      () => {
-        // 接続 error は表示品質の劣化に留め、終端は最終 execution 取得側で確定させる。
-      },
-    )
-    interpretStream.current = subscription
+  /** 実行中の observer だけを更新し、旧対象/旧 controller の遅延通知を捨てる。 */
+  function currentInterpretation(controller: AbortController): boolean {
+    return interpretController.current === controller && !controller.signal.aborted
   }
 
-  /** SSE 進行 event を状態へ反映し、終端 event で最終結果を取得する。 */
-  async function handleInterpretEvent(event: InterpretEventRecord): Promise<void> {
+  /** 原 UUID は送信より先に保持し、重複内容の応答では元の UUID に付け替える。 */
+  function rememberInterpretation(requestId: string): void {
+    pendingInterpretation.current = requestId
+    setPendingRequestId(requestId)
+    saveInterpretationReceipt(requestId)
+  }
+
+  /** 通信不明は元 UUID の確認だけを許し、FAILED として再生成ボタンへ流さない。 */
+  function interpretationUnknown(message = messages.skills.interpretUnknown): void {
+    interpretStream.current?.close()
+    interpretStream.current = null
+    setAdjustState({ status: 'idle' })
+    setInterpretState({ status: 'unknown', message })
+  }
+
+  /** 確認済み終態か明示した観測終了でのみ手元の原 UUID を片付ける。 */
+  function forgetInterpretation(): void {
+    clearInterpretationReceipt()
+    pendingInterpretation.current = null
+    setPendingRequestId(null)
+  }
+
+  /** 元要求の read で進行を再確認し、書込や nonce 生成は行わない。 */
+  async function confirmPendingInterpretation(): Promise<void> {
+    const originalId = pendingInterpretation.current
+    if (originalId === null) return
+    interpretController.current?.abort()
+    interpretStream.current?.close()
+    const controller = new AbortController()
+    interpretController.current = controller
+    setInterpretState({ status: 'interpreting', prompt: '', output: '', attempt: 0 })
+    try {
+      const state = await confirmInterpretationRequest(originalId, controller.signal)
+      if (currentInterpretation(controller)) await driveLaunch(state, controller)
+    } catch (error: unknown) {
+      if (currentInterpretation(controller)) interpretationUnknown(
+        `${messages.skills.interpretUnknown} ${apiErrorMessage(error, '', messages)}`,
+      )
+    }
+  }
+
+  /** 元要求から observer を外すだけで、model の取消や失敗は宣言しない。 */
+  function dismissInterpretation(): void {
+    interpretController.current?.abort()
+    interpretStream.current?.close()
+    interpretStream.current = null
+    try {
+      forgetInterpretation()
+      setInterpretState({ status: 'idle' })
+      setAdjustState({ status: 'idle' })
+    } catch {
+      interpretationUnknown(messages.skills.interpretStorageFailure)
+    }
+  }
+
+  /** 持久状態を唯一の終態根拠にし、SSE は prompt/delta の表示だけに使う。 */
+  async function driveLaunch(launch: InterpretationLaunchRecord, controller: AbortController): Promise<void> {
+    if (!currentInterpretation(controller)) return
+    interpretStream.current?.close()
+    interpretStream.current = null
+    rememberInterpretation(launch.request_id)
+    if (launch.status === 'SUCCEEDED' || (launch.status === 'FAILED' && launch.interpretation_id !== null)) {
+      if (launch.interpretation_id === null) throw new Error('Missing interpretation result')
+      const execution = await loadInterpretationExecution(launch.interpretation_id, controller.signal)
+      if (!currentInterpretation(controller)) return
+      if (!sameUuid(execution.interpretation_id, launch.interpretation_id)
+        || !sameUuid(execution.skill_source_id, launch.skill_source_id)
+        || execution.execution_key !== launch.execution_key
+        || execution.status !== (launch.status === 'SUCCEEDED' ? 'PREVIEW_READY' : 'FAILED')) {
+        throw new Error('Interpretation result did not match')
+      }
+      forgetInterpretation()
+      setAdjustState({ status: 'idle' })
+      setInterpretState({ status: 'ready', execution })
+      return
+    }
+    if (launch.status === 'FAILED' || launch.status === 'REVOKED') {
+      forgetInterpretation()
+      setAdjustState({ status: 'idle' })
+      setInterpretState({ status: 'error', message: messages.skills.interpretFailedCode(launch.error_code ?? 'unknown') })
+      return
+    }
+    if (launch.status === 'UNKNOWN') {
+      interpretationUnknown()
+      return
+    }
+    setAdjustState({ status: 'idle' })
+    setInterpretState({ status: 'interpreting', prompt: '', output: '', attempt: 0 })
+    interpretStream.current = subscribeInterpretEvents(
+      launch.request_id, launch.execution_key,
+      (event) => {
+        if (currentInterpretation(controller) && pendingInterpretation.current === launch.request_id) {
+          handleInterpretEvent(event)
+        }
+      },
+      () => { if (currentInterpretation(controller)) interpretationUnknown() },
+    )
+  }
+
+  /** 終端通知も元要求を GET して確認し、通知の result ID を直接採用しない。 */
+  function handleInterpretEvent(event: InterpretEventRecord): void {
     if (event.event === 'interpret.prompt') {
       const system = typeof event.data.system_prompt === 'string' ? event.data.system_prompt : ''
       const user = typeof event.data.user_message === 'string' ? event.data.user_message : ''
-      // 各 attempt の冒頭で prompt を差し替え、前 attempt の出力を消し、試行回数を進める(retry を可視化)。
       setInterpretState((current) => current.status === 'interpreting'
         ? { ...current, prompt: `${system}\n\n---\n\n${user}`, output: '', attempt: current.attempt + 1 }
         : current)
-      return
-    }
-    if (event.event === 'interpret.delta') {
+    } else if (event.event === 'interpret.delta') {
       const text = typeof event.data.text === 'string' ? event.data.text : ''
       setInterpretState((current) => current.status === 'interpreting'
-        ? { ...current, output: current.output + text }
-        : current)
-      return
-    }
-    if (event.event === 'interpret.completed' || event.event === 'interpret.failed') {
-      interpretStream.current?.close()
-      interpretStream.current = null
-      const interpretationId = event.data.interpretation_id
-      if (event.event === 'interpret.failed' || typeof interpretationId !== 'string') {
-        const code = typeof event.data.error_code === 'string' ? event.data.error_code : 'unknown'
-        setInterpretState({ status: 'error', message: messages.skills.interpretFailedCode(code) })
-        return
-      }
-      try {
-        const execution = await loadInterpretationExecution(interpretationId)
-        setInterpretState({ status: 'ready', execution })
-      } catch (error: unknown) {
-        setInterpretState({ status: 'error', message: apiErrorMessage(error, 'Unknown interpret error', messages) })
-      }
+        ? { ...current, output: current.output + text } : current)
+    } else if (event.event === 'interpret.completed' || event.event === 'interpret.failed') {
+      void confirmPendingInterpretation()
+    } else if (event.event === 'interpret.unknown' || event.event === 'interpret.disconnected') {
+      interpretationUnknown()
     }
   }
 
-  /** 保存済み source の model 解釈を受理し、進行を SSE で観測する。 */
-  async function handleInterpret(
-    skillSourceId: string,
-    forceRegenerate = false,
-  ): Promise<void> {
+  /** 新しい明示要求だけに UUID を生成し、保留中の要求を上書きしない。 */
+  async function handleInterpret(skillSourceId: string, forceRegenerate = false): Promise<void> {
+    if (pendingInterpretation.current !== null || interpretState.status === 'unknown') return
     interpretController.current?.abort()
     const controller = new AbortController()
     interpretController.current = controller
+    const requestId = crypto.randomUUID()
+    try { rememberInterpretation(requestId) } catch {
+      interpretationUnknown(messages.skills.interpretStorageFailure)
+      return
+    }
     setInterpretState({ status: 'interpreting', prompt: '', output: '', attempt: 0 })
     setAdjustState({ status: 'idle' })
     setVersionState({ status: 'idle' })
     try {
-      const launch = await interpretSkillSource(
-        skillSourceId,
-        csrfToken,
-        controller.signal,
-        forceRegenerate,
-      )
-      if (!controller.signal.aborted) driveLaunch(launch)
+      const launch = await interpretSkillSource(skillSourceId, requestId, csrfToken, controller.signal, forceRegenerate)
+      if (currentInterpretation(controller)) await driveLaunch(launch, controller)
     } catch (error: unknown) {
-      if (!controller.signal.aborted) {
-        setInterpretState({ status: 'error', message: apiErrorMessage(error, 'Unknown interpret error', messages) })
-      }
+      if (currentInterpretation(controller)) interpretationUnknown(
+        `${messages.skills.interpretUnknown} ${apiErrorMessage(error, '', messages)}`,
+      )
     }
   }
 
-  /** 親解釈へ追加調整を適用し、進行を SSE で観測する。 */
+  /** 調整も先に元 UUID を保持し、不明な応答を自動再送しない。 */
   async function handleAdjust(interpretationId: string): Promise<void> {
     const text = instruction.trim()
-    if (!text) return
+    if (!text || pendingInterpretation.current !== null || interpretState.status === 'unknown') return
     interpretController.current?.abort()
     const controller = new AbortController()
     interpretController.current = controller
+    const requestId = crypto.randomUUID()
+    try { rememberInterpretation(requestId) } catch {
+      interpretationUnknown(messages.skills.interpretStorageFailure)
+      return
+    }
     setAdjustState({ status: 'adjusting' })
     setVersionState({ status: 'idle' })
     try {
-      const launch = await adjustInterpretation(
-        interpretationId,
-        text,
-        csrfToken,
-        controller.signal,
-      )
-      if (controller.signal.aborted) return
+      const launch = await adjustInterpretation(interpretationId, text, requestId, csrfToken, controller.signal)
+      if (!currentInterpretation(controller)) return
       setInstruction('')
-      setAdjustState({ status: 'idle' })
-      driveLaunch(launch)
+      await driveLaunch(launch, controller)
     } catch (error: unknown) {
-      if (!controller.signal.aborted) {
-        setAdjustState({ status: 'error', message: apiErrorMessage(error, 'Unknown adjust error', messages) })
-      }
+      if (currentInterpretation(controller)) interpretationUnknown(
+        `${messages.skills.interpretUnknown} ${apiErrorMessage(error, '', messages)}`,
+      )
     }
   }
 
@@ -652,7 +743,7 @@ export function SkillsPage({ projectId, csrfToken }: {
             <h2>{messages.skills.parseResult}</h2>
             {parseState.status === 'ready' && <span className="scopeBadge">{parseState.result.runtime_manifest_draft.compatibility.level}</span>}
           </div>
-          {parseState.status === 'idle' && saveState.status === 'idle' && <EmptyState text={messages.skills.parseEmptyIdle} />}
+          {parseState.status === 'idle' && saveState.status === 'idle' && interpretState.status === 'idle' && <EmptyState text={messages.skills.parseEmptyIdle} />}
           {parseState.status === 'parsing' && <EmptyState text={messages.skills.parseRunning} />}
           {parseState.status === 'error' && <p className="error" role="alert">{parseState.message}</p>}
           {parseState.status === 'ready' && (
@@ -668,29 +759,38 @@ export function SkillsPage({ projectId, csrfToken }: {
             <>
               <SavedSkillIdentity stored={saveState.stored} />
               <div className="skillActions">
-                <button className="secondaryButton" disabled={interpretState.status === 'interpreting'} type="button" onClick={() => void handleInterpret(saveState.stored.skill_source_id, interpretState.status === 'error')}>{interpretState.status === 'interpreting' ? messages.skills.interpreting : interpretState.status === 'error' ? messages.skills.forceRegenerate : messages.skills.interpretAction}</button>
+                <button className="secondaryButton" disabled={pendingRequestId !== null || interpretState.status === 'unknown' || interpretState.status === 'interpreting'} type="button" onClick={() => void handleInterpret(saveState.stored.skill_source_id, interpretState.status === 'error')}>{interpretState.status === 'interpreting' ? messages.skills.interpreting : interpretState.status === 'error' ? messages.skills.forceRegenerate : messages.skills.interpretAction}</button>
                 <button className="secondaryButton" disabled={versionState.status === 'loading'} type="button" onClick={() => void handleCreateDraft(saveState.stored.interpretation_id)}>{messages.skills.createDraftFromAssisted}</button>
               </div>
-              {interpretState.status === 'interpreting' && (
-                <InterpretStreamView prompt={interpretState.prompt} output={interpretState.output} attempt={interpretState.attempt} />
-              )}
-              {interpretState.status === 'error' && <p className="error" role="alert">{interpretState.message}</p>}
-              {interpretState.status === 'ready' && (
-                <InterpretationExecutionView
-                  execution={interpretState.execution}
-                  instruction={instruction}
-                  onInstructionChange={setInstruction}
-                  onAdjust={() => void handleAdjust(interpretState.execution.interpretation_id)}
-                  onRegenerate={() => void handleInterpret(saveState.stored.skill_source_id, true)}
-                  onCreateDraft={() => void handleCreateDraft(interpretState.execution.interpretation_id)}
-                  adjustState={adjustState}
-                  versionBusy={versionState.status === 'loading'}
-                />
-              )}
-              {versionState.status === 'error' && <p className="error" role="alert">{versionState.message}</p>}
-              {versionState.status === 'ready' && <SkillVersionDetail version={versionState.version} onPublish={() => void handlePublish(versionState.version)} />}
             </>
           )}
+          {interpretState.status === 'unknown' && (
+            <div role="status" className="notice">
+              <p>{interpretState.message}</p>
+              <div className="skillActions">
+                <button className="secondaryButton" type="button" disabled={pendingRequestId === null} onClick={() => void confirmPendingInterpretation()}>{messages.skills.confirmInterpretation}</button>
+                <button className="secondaryButton" type="button" onClick={dismissInterpretation}>{messages.skills.dismissInterpretation}</button>
+              </div>
+            </div>
+          )}
+          {interpretState.status === 'interpreting' && (
+            <InterpretStreamView prompt={interpretState.prompt} output={interpretState.output} attempt={interpretState.attempt} />
+          )}
+          {interpretState.status === 'error' && <p className="error" role="alert">{interpretState.message}</p>}
+          {interpretState.status === 'ready' && (
+            <InterpretationExecutionView
+              execution={interpretState.execution}
+              instruction={instruction}
+              onInstructionChange={setInstruction}
+              onAdjust={() => void handleAdjust(interpretState.execution.interpretation_id)}
+              onRegenerate={() => void handleInterpret(interpretState.execution.skill_source_id, true)}
+              onCreateDraft={() => void handleCreateDraft(interpretState.execution.interpretation_id)}
+              adjustState={adjustState}
+              versionBusy={versionState.status === 'loading'}
+            />
+          )}
+          {versionState.status === 'error' && <p className="error" role="alert">{versionState.message}</p>}
+          {versionState.status === 'ready' && <SkillVersionDetail version={versionState.version} onPublish={() => void handlePublish(versionState.version)} />}
         </section>
       </section>
       </div>
@@ -1074,6 +1174,11 @@ function CapabilityBlueprintPreview({ blueprint }: { blueprint: CapabilityBluepr
         <section key={task.key}>
           <strong>{messages.skills.objectivePrefix(task.key)}</strong>
           <p className="hint">{task.objective}</p>
+          {(task.document_prerequisites ?? []).length > 0 && (
+            <p className="hint">
+              {messages.skills.documentPrerequisites}: {task.document_prerequisites?.join(', ')}
+            </p>
+          )}
           <BlueprintNoteList title={messages.skills.successCriteria} notes={task.success_criteria ?? []} />
           {(task.deliverables ?? []).length > 0 && (
             <ul className="noteList">

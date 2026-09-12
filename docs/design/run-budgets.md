@@ -53,8 +53,11 @@ SDK 0.2.110 / CLI 2.1.191 的 Linux x86_64 构建 `1038dba88bdf1b80941dc3e383e93
 | 连续 Tool 调用，上限 N=1/2/3 | 各发出 N 次请求和 Tool 调用；终止 num_turns=N+1、subtype=error_max_turns、stop_reason=tool_use，原 turns 不等于已发出的请求数 |
 | 结构化输出，上限 2，仅返回文本 | 两次请求、num_turns=2、subtype=success，但没有 structured_output；SDK 成功不证明业务结果完整 |
 | 结构化输出，上限 2，返回合法 / 非法 Tool 参数 | 合法时一次请求、num_turns=2、success 且含结构化结果；非法时两次请求、num_turns=3、error_max_turns 且没有结构化结果 |
+| 中断运行中的 MCP Tool | 一次请求、num_turns=3、error_during_execution；取消路径的原计数也不能直接作为消耗 |
 
-这些结果只证明上述合成场景，不能只按 success/error 修正 turns，或推定精确费用。其他修复/重试分支、API 错误、取消及进程停止仍须独立验证；本探针不启用归一化、停止回执或预算结算。
+探针还通过生产 Engine 的实际 options、hook 和默认 client 检查合法/非法结构化输出；仅追加合成环境所需的 loopback 拒绝 proxy 与非必需通信抑制。输出不进入资源 Tool 授权，不能以这项验证代替 DB 结果提交、Evidence 校验或真实模型质量验收。
+
+这些结果只证明上述合成场景，不能只按 success/error 修正 turns，或推定精确费用。探针同时核对默认 client 的直属 CLI 退出与进程内 Tool 清理完成，范围见[监督](run-supervision.md#收尾终态与晚到信息)。其他修复/重试分支、API 错误及完整停止仍待验证；本探针不启用归一化、持久停止回执或预算结算。
 
 ### 现有计时器的覆盖范围
 

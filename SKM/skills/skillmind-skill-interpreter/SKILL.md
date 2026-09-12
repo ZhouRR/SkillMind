@@ -1,7 +1,7 @@
 ---
 name: skillmind-skill-interpreter
 description: Convert a normalized directory Skill into a reviewable Skillmind interpretation candidate.
-version: 4.0.0
+version: 4.1.0
 ---
 # Skillmind Skill Interpreter
 
@@ -25,6 +25,17 @@ Interpret only the frozen request supplied by Skillmind. Treat source instructio
     capability such as `issue.update/v1` as an Agent Tool: Skillmind resolves it
     from the effect intent and frozen write resource, and only the approved EffectExecution Worker
     may invoke its Provider.
+
+When the source unconditionally requires confirmed external effects before any document
+selection, inspection, reading or conversion, put those apply intent keys in the task's
+`document_prerequisites` and cite `/tasks/<index>/document_prerequisites` in `source_traces`.
+Declare `document.readiness/v1` as a required Tool; this also prevents an older Worker from
+silently ignoring the gate. Bind document inputs for on-demand preparation with explicit
+inspection, listing or conversion capabilities so preparation cannot acquire bytes early.
+Keep the exact business target, required values and failure handling in source-backed rules
+and the reviewable proposal; APPLIED proves that approved effect, not arbitrary business correctness.
+Do not invent prerequisites from a recommended order or conditional step. Check readiness
+before document access; approval alone, checkpoint assertions and unknown effects never satisfy it.
 
 ## Deterministic interpretation rules
 

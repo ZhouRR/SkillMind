@@ -43,7 +43,7 @@ effects/artifact_ref 只解释包络明确位置，不把业务同名字段/URL 
 | 声明 | 必须匹配的保存事实 |
 | --- | --- |
 | PROPOSED / REJECTED | 分别为无批准/执行的 DRAFT，或原 version/checksum 的拒绝批准且无执行；不得附加虚构 before/after |
-| STALE / FAILED | 匹配原提案和执行的终局；批准前失效可以没有执行，VERIFICATION_FAILED 只映射 FAILED，不表示远端未变 |
+| STALE / FAILED | 匹配原提案和执行的终局；批准前失效可以没有执行，VERIFICATION_FAILED 只映射 FAILED，不表示远端未变。带 effect_result_unknown 的待核对执行不匹配确定失败摘要 |
 | APPLIED | 原批准、Provider/version、请求身份、成功 ToolCall、精确 before/after、Evidence snapshot 的实际 hash，以及 READ_BACK 的完整匹配路径一致 |
 
 模型 before/after 必须精确匹配原执行，省略也须核对 APPLIED 两份证据；Tool 摘要与执行一致。lookup 缺失、跨 Run/Project、坏关联或事实矛盾均为 effect_summary_invalid，不保存成功，也不泄露原引用/正文。
@@ -67,6 +67,10 @@ validation.reference_checks 使用 skillmind.result-reference-checks/v2：Eviden
 ## 可信附件的发布与读取
 
 [workspace.write/v2](../../SKM/contracts/tools/workspace.write/v2/response.schema.json)仅受控 UTF-8：workspace/ 是中间文件、artifact_refs 为空；output/ 每次产生新附件。v1 仅存 Evidence，不自动升级；Interpreter 可生成 v2 声明，旧 SkillVersion/Run 权限/hash 不改。
+
+`document.convert/v1` 的显式 `publish_artifact=true` 是另一种附件来源：Worker 将返回的完整 Markdown UTF-8 原字节作为 Run Artifact 保存，不经过模型抄写或可变工作区文件。原 Excel Evidence 与 Markdown Artifact Evidence 分开，分别保留原文及转换后 hash；响应附带 `artifact` 的 path/size/hash 和提交后签发的 `artifact_refs`。默认省略或 false 保持普通转换响应且不占附件配额。此选项仅保存内部审计附件，不直接上传 MinIO，也不授予 `document.write`；备份仍使用该原 Artifact 经精确批准执行，保存 MIME 可按 Markdown 提案，原字节不转换。
+
+Gateway 与 audit 同时核对显式选项、原转换 Tool、来源 ID/hash、转换器、两份 Evidence、全文字节和响应；缺失、暗中附带或不一致的候选不得签发。读取和成功重放沿原 Tool/Artifact 验证，无需重新取得或转换 Excel。Artifact 的 `output/document-conversions/…/source.md` 是元数据中的逻辑名称，不表示已写入工作区或文档库。新增选项与响应需要同步 Worker/契约版本；旧调用和旧成功记录不补造附件。
 
 ```text
 原调用获准、保留原字节

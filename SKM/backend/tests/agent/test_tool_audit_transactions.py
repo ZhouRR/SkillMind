@@ -758,3 +758,42 @@ async def test_gateway_rejects_malformed_saved_success_without_provider_repair(
     )
     assert response["is_error"] is True and provider.calls == 0
     assert saved.result_json == original and saved.status == "SUCCEEDED"
+
+
+@pytest.mark.parametrize("stage", ["start", "verify_dispatch", "complete"])
+async def test_document_prerequisites_are_checked_at_each_dispatch_boundary(monkeypatch, stage):
+    """同じ本番 gate を三つの境界で呼び、未達なら Provider/成功証拠へ進めない。"""
+    from skillmind.runs.document_prerequisites import DocumentReadiness
+
+    database = AuditDatabase(monkeypatch)
+    database.invocation = replace(
+        database.invocation,
+        tool=replace(database.invocation.tool, capability="document.convert/v1"),
+    )
+    ready = stage != "start"
+    calls = []
+
+    async def readiness(session, run):
+        """SQL 来歴は別途実 JOIN で検証し、ここでは original Run と呼出順を検証する。"""
+        assert run.id == database.run.id
+        calls.append(run.id)
+        return DocumentReadiness(("register-run",), ("register-run",) if ready else ())
+
+    monkeypatch.setattr("skillmind.runs.document_prerequisites.load_document_readiness", readiness)
+    if stage == "start":
+        with pytest.raises(PermissionError):
+            await database.start()
+        assert not database.rows(ToolCall)
+        return
+    lease = await database.start()
+    if stage == "complete":
+        await database.writer.verify_dispatch(lease)
+    ready = False
+    with pytest.raises(PermissionError):
+        if stage == "verify_dispatch":
+            await database.writer.verify_dispatch(lease)
+        else:
+            await database.complete(lease)
+    assert len(calls) == (2 if stage == "verify_dispatch" else 3)
+    assert database.rows(ToolCall)[0].status == "RUNNING"
+    assert not database.rows(Evidence)

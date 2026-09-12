@@ -1,0 +1,6 @@
+{
+  "path": "specs/sample.xlsx",
+  "purpose": "Convert the frozen specification for review",
+  "observation_ref": "ev_metadata_001",
+  "publish_artifact": true
+}

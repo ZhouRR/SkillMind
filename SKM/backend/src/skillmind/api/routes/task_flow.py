@@ -6,7 +6,7 @@ from typing import Annotated, Any, Literal, Self
 from uuid import UUID
 
 from fastapi import APIRouter, Path, Request, Response
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 from sqlalchemy.exc import SQLAlchemyError
 
 from skillmind.api.auth_dependencies import ProjectReadActor
@@ -175,9 +175,20 @@ class FlowTaskResponse(_FlowModel):
     objective: Text
     success_criteria: Annotated[list[FlowNoteResponse], Field(max_length=50)] | None = None
     resource_keys: Annotated[list[Key], Field(max_length=50)] | None = None
+    document_prerequisites: Annotated[
+        list[Key], Field(min_length=1, max_length=50, json_schema_extra={"uniqueItems": True})
+    ] | None = None
     deliverables: Annotated[list[FlowDeliverableResponse], Field(max_length=50)] | None = None
     parameter_contract: FlowContractResponse | None = None
     result_contract: FlowContractResponse | None = None
+
+    @field_validator("document_prerequisites")
+    @classmethod
+    def unique_document_prerequisites(cls, value: list[str] | None) -> list[str] | None:
+        """前置条件の重複を補正して別宣言にせず拒否する。"""
+        if value is not None and len(set(value)) != len(value):
+            raise ValueError("Document prerequisites are duplicated")
+        return value
 
 
 class FlowResourceResponse(_FlowModel):

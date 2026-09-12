@@ -7,7 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from skillmind.db.models import Run
-from skillmind.documents.snapshot import DOCUMENT_READ_CAPABILITY
+from skillmind.documents.snapshot import DOCUMENT_CAPABILITIES
 from skillmind.runs.creation_request import CREATION_REQUEST_FIELD, TaskRunIntent
 from skillmind.runs.domain import (
     CreateRunCommand,
@@ -101,7 +101,7 @@ def _legacy_intent(run: Run, command: CreateRunCommand) -> TaskRunIntent:
     for key, value in command.selected_sources_json.items():
         if not isinstance(value, dict):
             raise ValueError("Legacy resource choice is ambiguous")
-        if value.get("capability") == DOCUMENT_READ_CAPABILITY:
+        if value.get("capability") in DOCUMENT_CAPABILITIES:
             sources[key] = _string(value, "candidate_key")
         elif "integration_id" in value and "source_binding_id" in value:
             source_binding = value["source_binding_id"]

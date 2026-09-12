@@ -1,4 +1,4 @@
-"""固定した実 CLI の turns/再開を、合成 loopback API で観測する。実モデルは使わない。"""
+"""固定した実 CLI の計量・中断清理を、合成 loopback API で観測する。実モデルは使わない。"""
 
 from __future__ import annotations
 
@@ -179,12 +179,19 @@ async def probe() -> dict[str, Any]:
         create_sdk_mcp_server,
         tool,
     )
+    from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
     from claude_agent_sdk.types import ResultMessage
     from skillmind.agent.claude_build import bundled_claude_build
+    from skillmind.agent.claude_client import DrainingClaudeClient
 
     build = bundled_claude_build()
     api = FixtureApi()
     records: list[dict[str, Any]] = []
+    lifecycle = {}
+    startup_lifecycle = []
+    engine_results = []
+    tool_entered = asyncio.Event()
+    tool_cleaned = asyncio.Event()
     with tempfile.TemporaryDirectory(prefix="skillmind-cli-metering-") as root:
         os.environ["CLAUDE_CONFIG_DIR"] = root + "/config"
         server = ThreadingHTTPServer(("127.0.0.1", 0), handler(api))
@@ -227,6 +234,13 @@ async def probe() -> dict[str, Any]:
         async def step(_args: Any) -> dict[str, Any]:
             """副作用のない応答と呼出し数だけを返す。"""
             api.tool_calls.append(api.scenario)
+            if api.scenario == "interrupt-tool":
+                tool_entered.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    await asyncio.sleep(0.05)
+                    tool_cleaned.set()
             return {"content": [{"type": "text", "text": "fixture step complete"}]}
 
         async def receive(client: ClaudeSDKClient, scenario: str) -> dict[str, Any]:
@@ -257,6 +271,147 @@ async def probe() -> dict[str, Any]:
             }
             records.append(record)
             return record
+
+        async def check_startup_cleanup(cancel: bool) -> dict[str, Any]:
+            """Query 作成前の実 CLI 起動を失敗/取消しで止め、元 process の終了を調べる。"""
+            entered = asyncio.Event()
+            process = None
+
+            class InterruptedStartup(SubprocessCLITransport):
+                """実 subprocess を作成した直後で制御を保留する合成障害点。"""
+
+                async def connect(self) -> None:
+                    """SDK が transport を所有しているが Query は未作成の窓を固定する。"""
+                    nonlocal process
+                    await super().connect()
+                    process = self._process
+                    entered.set()
+                    if cancel:
+                        await asyncio.Event().wait()
+                    raise RuntimeError("Synthetic startup failure")
+
+            starting_options = replace(options, session_id=str(uuid4()))
+            transport = InterruptedStartup("", starting_options)
+            client = DrainingClaudeClient(starting_options, transport=transport)
+            connecting = asyncio.create_task(client.connect())
+            requests_before = len(api.requests)
+            try:
+                async with asyncio.timeout(15):
+                    await entered.wait()
+                    if cancel:
+                        connecting.cancel()
+                    try:
+                        await connecting
+                    except asyncio.CancelledError:
+                        assert cancel
+                    except RuntimeError as error:
+                        assert not cancel and str(error) == "Synthetic startup failure"
+                    else:
+                        raise AssertionError("Expected startup interruption")
+                assert process is not None and process.returncode is not None
+                assert client._transport is None
+                assert len(api.requests) == requests_before
+                return {
+                    "scenario": "startup-cancel" if cancel else "startup-failure",
+                    "direct_cli_returncode": process.returncode,
+                    "requests": len(api.requests) - requests_before,
+                }
+            finally:
+                if not connecting.done():
+                    connecting.cancel()
+                    await asyncio.gather(connecting, return_exceptions=True)
+                # 検証失敗時も probe 自身が作った process だけを回収する。
+                await transport.close()
+
+        async def check_engine_output(valid: bool) -> dict[str, Any]:
+            """実 Engine の生成 options/hook と既定 client を合成出力で検証する。"""
+            from skillmind.agent.claude import ClaudeRuntimeConfiguration
+            from skillmind.agent.domain import RunContext, RunLimits, RunWorkspace
+            from skillmind.agent.engine import (
+                ClaudeAgentSdkEngine,
+                RunMcpRuntime,
+                _default_client_factory,
+            )
+
+            workspace_root = Path(root) / ("engine-valid" if valid else "engine-invalid")
+            for folder in ("workspace", "input", "output", "temp"):
+                (workspace_root / folder).mkdir(parents=True, exist_ok=True)
+            context = RunContext(
+                run_id=uuid4(),
+                run_attempt_id=uuid4(),
+                project_id=uuid4(),
+                user_id=uuid4(),
+                prompt="Return the synthetic fixture answer.",
+                task_snapshot={},
+                skill_snapshots=(),
+                resolved_sources={},
+                permission_snapshot={"mode": "auto_read_only", "allowed_capabilities": []},
+                workspace=RunWorkspace(
+                    root=workspace_root,
+                    cwd=workspace_root / "workspace",
+                    input_dir=workspace_root / "input",
+                    output_dir=workspace_root / "output",
+                    temp_dir=workspace_root / "temp",
+                ),
+                limits=RunLimits(max_turns=2, wall_timeout_seconds=30, max_output_bytes=4096),
+                result_schema={
+                    "type": "object",
+                    "properties": {"answer": {"type": "string"}},
+                    "required": ["answer"],
+                    "additionalProperties": False,
+                },
+                tools=(),
+                model="claude-sonnet-4-6",
+            )
+            authorized, denied = [], []
+
+            async def record_authorized(name: str, *_args: Any) -> None:
+                """結果出力を資源呼出しの監査へ流していないことを記録する。"""
+                authorized.append(name)
+
+            async def record_denied(name: str, *_args: Any) -> None:
+                """資源 Tool の拒否通知だけを数え、引数本文を保存しない。"""
+                denied.append(name)
+
+            def fixture_client(actual_options: ClaudeAgentOptions):
+                """合成接続先を確認し、probe 専用の拒否 proxy/通信抑止だけを加える。"""
+                assert actual_options.env["ANTHROPIC_BASE_URL"] == endpoint
+                actual_options.env.update(proxy)
+                actual_options.env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+                return _default_client_factory(actual_options)
+
+            engine = ClaudeAgentSdkEngine(
+                mcp_server_factory=lambda _context: RunMcpRuntime(
+                    server=create_sdk_mcp_server(name="skillmind", tools=[]),
+                    on_tool_authorized=record_authorized,
+                    on_tool_denied=record_denied,
+                ),
+                configuration=ClaudeRuntimeConfiguration(
+                    environment={
+                        "ANTHROPIC_API_KEY": "fixture-only",
+                        "ANTHROPIC_BASE_URL": endpoint,
+                    }
+                ),
+                client_factory=fixture_client,
+            )
+            api.scenario = "structured-valid" if valid else "structured-invalid"
+            events = [event async for event in engine.execute(context)]
+            outputs = [
+                event.payload["structured_output"]
+                for event in events
+                if event.payload.get("structured_output") is not None
+            ]
+            expected = "RESULT_COMPLETED" if valid else "ENGINE_FAILED"
+            assert events[-1].event_type.value == expected
+            assert outputs == ([{"answer": "fixture"}] if valid else [])
+            assert not authorized and not denied
+            assert not any(event.event_type.value.startswith("TOOL_") for event in events)
+            return {
+                "scenario": "engine-valid-output" if valid else "engine-invalid-output",
+                "terminal_event": expected,
+                "has_structured_output": bool(outputs),
+                "resource_authorizations": len(authorized),
+            }
 
         try:
             async with asyncio.timeout(90):
@@ -336,6 +491,47 @@ async def probe() -> dict[str, Any]:
                     first["cost_binary64"]
                 )
                 assert first["cost_binary64"] == resume["cost_binary64"] == fork["cost_binary64"]
+                cancellation_options = replace(
+                    options,
+                    session_id=str(uuid4()),
+                    max_turns=2,
+                    mcp_servers={"fixture": create_sdk_mcp_server(name="fixture", tools=[step])},
+                    allowed_tools=["mcp__fixture__step"],
+                )
+                transport = SubprocessCLITransport("", cancellation_options)
+                client = DrainingClaudeClient(cancellation_options, transport=transport)
+                await client.connect()
+                process = transport._process
+                assert process is not None
+                receiving = asyncio.create_task(receive(client, "interrupt-tool"))
+                try:
+                    async with asyncio.timeout(10):
+                        await tool_entered.wait()
+                        await client.interrupt()
+                        cancelled_result = await receiving
+                        await client.disconnect()
+                    lifecycle = {
+                        "result": cancelled_result,
+                        "direct_cli_returncode": process.returncode,
+                        "tool_cleaned_at_disconnect": tool_cleaned.is_set(),
+                    }
+                    try:
+                        async with asyncio.timeout(1):
+                            await tool_cleaned.wait()
+                    except TimeoutError:
+                        pass
+                    lifecycle["tool_cleaned_after_wait"] = tool_cleaned.is_set()
+                    assert lifecycle["direct_cli_returncode"] is not None
+                    assert lifecycle["tool_cleaned_at_disconnect"] is True
+                finally:
+                    if not receiving.done():
+                        receiving.cancel()
+                        await asyncio.gather(receiving, return_exceptions=True)
+                    await client.disconnect()
+                for cancel in (False, True):
+                    startup_lifecycle.append(await check_startup_cleanup(cancel))
+                for valid in (True, False):
+                    engine_results.append(await check_engine_output(valid))
                 assert not api.errors, api.errors
         finally:
             server.shutdown()
@@ -348,6 +544,9 @@ async def probe() -> dict[str, Any]:
         "system": platform.system(),
         "machine": platform.machine(),
         "api": "synthetic-loopback",
+        "lifecycle": lifecycle,
+        "startup_lifecycle": startup_lifecycle,
+        "engine_results": engine_results,
         "records": records,
         "request_history_lengths": [row["messages"] for row in api.requests],
     }

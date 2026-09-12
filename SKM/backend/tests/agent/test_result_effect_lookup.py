@@ -460,6 +460,17 @@ async def test_terminal_failure_with_matching_failed_tool_remains_valid(status: 
 
 
 @pytest.mark.parametrize("status", ["STALE", "FAILED", "VERIFICATION_FAILED"])
+async def test_unknown_write_is_not_verified_as_a_terminal_failure_summary(status: str) -> None:
+    """停止済み status が一致しても、未照合の原書込を確定した outcome へ昇格しない。"""
+    graph = _failure_graph(status)
+    graph.execution.error_json = {"code": "effect_result_unknown", "retryable": False}
+    lookup, _, _ = _lookup(graph.joined(omit=frozenset({"before", "after"})))
+    assert await lookup.invalid_refs(graph.proposal.run_id, (graph.claim(),)) == frozenset({
+        graph.proposal.proposal_ref,
+    })
+
+
+@pytest.mark.parametrize("status", ["STALE", "FAILED", "VERIFICATION_FAILED"])
 @pytest.mark.parametrize(("field", "value"), [
     ("id", uuid4()),
     ("run_id", uuid4()),

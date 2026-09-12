@@ -1,6 +1,4 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.skillmind.local/tasks/flow-preview/v1.schema.json",
   "$defs": {
     "FlowAssessmentResponse": {
       "additionalProperties": false,
@@ -46,14 +44,14 @@
           "title": "Kind",
           "type": "string"
         },
-        "provider": {
-          "minLength": 1,
-          "title": "Provider",
-          "type": "string"
-        },
         "label": {
           "minLength": 1,
           "title": "Label",
+          "type": "string"
+        },
+        "provider": {
+          "minLength": 1,
+          "title": "Provider",
           "type": "string"
         }
       },
@@ -70,18 +68,6 @@
       "additionalProperties": false,
       "description": "入力・出力 field の原 required を保持し、画面側の既定値で増やさない。",
       "properties": {
-        "type": {
-          "enum": [
-            "object",
-            "array",
-            "string",
-            "integer",
-            "number",
-            "boolean"
-          ],
-          "title": "Type",
-          "type": "string"
-        },
         "description": {
           "maxLength": 500,
           "minLength": 1,
@@ -122,34 +108,16 @@
         "items": {
           "$ref": "#/$defs/FlowContractItemResponse"
         },
-        "min_length": {
-          "maximum": 100000,
-          "minimum": 0,
-          "title": "Min Length",
-          "type": "integer"
+        "key": {
+          "pattern": "^[a-z][a-z0-9_]{0,63}$",
+          "title": "Key",
+          "type": "string"
         },
         "max_length": {
           "maximum": 100000,
           "minimum": 0,
           "title": "Max Length",
           "type": "integer"
-        },
-        "pattern": {
-          "maxLength": 128,
-          "minLength": 1,
-          "title": "Pattern",
-          "type": "string"
-        },
-        "minimum": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "number"
-            }
-          ],
-          "title": "Minimum"
         },
         "maximum": {
           "anyOf": [
@@ -162,14 +130,44 @@
           ],
           "title": "Maximum"
         },
-        "key": {
-          "pattern": "^[a-z][a-z0-9_]{0,63}$",
-          "title": "Key",
+        "min_length": {
+          "maximum": 100000,
+          "minimum": 0,
+          "title": "Min Length",
+          "type": "integer"
+        },
+        "minimum": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Minimum"
+        },
+        "pattern": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Pattern",
           "type": "string"
         },
         "required": {
           "title": "Required",
           "type": "boolean"
+        },
+        "type": {
+          "enum": [
+            "object",
+            "array",
+            "string",
+            "integer",
+            "number",
+            "boolean"
+          ],
+          "title": "Type",
+          "type": "string"
         }
       },
       "required": [
@@ -184,18 +182,6 @@
       "additionalProperties": false,
       "description": "既存 TaskContractDraft の再帰値を明示 field だけへ写す。",
       "properties": {
-        "type": {
-          "enum": [
-            "object",
-            "array",
-            "string",
-            "integer",
-            "number",
-            "boolean"
-          ],
-          "title": "Type",
-          "type": "string"
-        },
         "description": {
           "maxLength": 500,
           "minLength": 1,
@@ -236,23 +222,28 @@
         "items": {
           "$ref": "#/$defs/FlowContractItemResponse"
         },
-        "min_length": {
-          "maximum": 100000,
-          "minimum": 0,
-          "title": "Min Length",
-          "type": "integer"
-        },
         "max_length": {
           "maximum": 100000,
           "minimum": 0,
           "title": "Max Length",
           "type": "integer"
         },
-        "pattern": {
-          "maxLength": 128,
-          "minLength": 1,
-          "title": "Pattern",
-          "type": "string"
+        "maximum": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Maximum"
+        },
+        "min_length": {
+          "maximum": 100000,
+          "minimum": 0,
+          "title": "Min Length",
+          "type": "integer"
         },
         "minimum": {
           "anyOf": [
@@ -265,16 +256,23 @@
           ],
           "title": "Minimum"
         },
-        "maximum": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "number"
-            }
+        "pattern": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Pattern",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "object",
+            "array",
+            "string",
+            "integer",
+            "number",
+            "boolean"
           ],
-          "title": "Maximum"
+          "title": "Type",
+          "type": "string"
         }
       },
       "required": [
@@ -287,16 +285,9 @@
       "additionalProperties": false,
       "description": "保存された任意業務契約の版を明記し、公開 task 専用 Schema を補造しない。",
       "properties": {
-        "type": {
-          "enum": [
-            "object",
-            "array",
-            "string",
-            "integer",
-            "number",
-            "boolean"
-          ],
-          "title": "Type",
+        "contract_version": {
+          "const": "skillmind.task-contract-draft/v1",
+          "title": "Contract Version",
           "type": "string"
         },
         "description": {
@@ -339,34 +330,11 @@
         "items": {
           "$ref": "#/$defs/FlowContractItemResponse"
         },
-        "min_length": {
-          "maximum": 100000,
-          "minimum": 0,
-          "title": "Min Length",
-          "type": "integer"
-        },
         "max_length": {
           "maximum": 100000,
           "minimum": 0,
           "title": "Max Length",
           "type": "integer"
-        },
-        "pattern": {
-          "maxLength": 128,
-          "minLength": 1,
-          "title": "Pattern",
-          "type": "string"
-        },
-        "minimum": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "number"
-            }
-          ],
-          "title": "Minimum"
         },
         "maximum": {
           "anyOf": [
@@ -379,9 +347,39 @@
           ],
           "title": "Maximum"
         },
-        "contract_version": {
-          "const": "skillmind.task-contract-draft/v1",
-          "title": "Contract Version",
+        "min_length": {
+          "maximum": 100000,
+          "minimum": 0,
+          "title": "Min Length",
+          "type": "integer"
+        },
+        "minimum": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Minimum"
+        },
+        "pattern": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Pattern",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "object",
+            "array",
+            "string",
+            "integer",
+            "number",
+            "boolean"
+          ],
+          "title": "Type",
           "type": "string"
         }
       },
@@ -396,6 +394,12 @@
       "additionalProperties": false,
       "description": "予定交付物だけを表示し、Artifact の保存やダウンロード成功を示さない。",
       "properties": {
+        "description": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
         "key": {
           "maxLength": 128,
           "pattern": "^[a-z][a-z0-9_.-]*$",
@@ -412,12 +416,6 @@
           ],
           "title": "Kind",
           "type": "string"
-        },
-        "description": {
-          "maxLength": 1000,
-          "minLength": 1,
-          "title": "Description",
-          "type": "string"
         }
       },
       "required": [
@@ -432,6 +430,11 @@
       "additionalProperties": false,
       "description": "原効果意図を表示し、承認や外部 apply の成功に変換しない。",
       "properties": {
+        "approval_mode": {
+          "const": "ask",
+          "title": "Approval Mode",
+          "type": "string"
+        },
         "key": {
           "maxLength": 128,
           "pattern": "^[a-z][a-z0-9_.-]*$",
@@ -447,16 +450,16 @@
           "title": "Mode",
           "type": "string"
         },
-        "resource_key": {
-          "maxLength": 128,
-          "pattern": "^[a-z][a-z0-9_.-]*$",
-          "title": "Resource Key",
-          "type": "string"
-        },
         "operation": {
           "maxLength": 1000,
           "minLength": 1,
           "title": "Operation",
+          "type": "string"
+        },
+        "resource_key": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Resource Key",
           "type": "string"
         },
         "risk": {
@@ -466,11 +469,6 @@
             "high"
           ],
           "title": "Risk",
-          "type": "string"
-        },
-        "approval_mode": {
-          "const": "ask",
-          "title": "Approval Mode",
           "type": "string"
         }
       },
@@ -520,20 +518,12 @@
       "additionalProperties": false,
       "description": "必須・推奨・品質・禁止を混ぜず、Skill 共通の原 guidance を表示する。",
       "properties": {
-        "required_rules": {
+        "prohibited_actions": {
           "items": {
             "$ref": "#/$defs/FlowNoteResponse"
           },
           "maxItems": 100,
-          "title": "Required Rules",
-          "type": "array"
-        },
-        "recommended_steps": {
-          "items": {
-            "$ref": "#/$defs/FlowNoteResponse"
-          },
-          "maxItems": 100,
-          "title": "Recommended Steps",
+          "title": "Prohibited Actions",
           "type": "array"
         },
         "quality_criteria": {
@@ -544,12 +534,20 @@
           "title": "Quality Criteria",
           "type": "array"
         },
-        "prohibited_actions": {
+        "recommended_steps": {
           "items": {
             "$ref": "#/$defs/FlowNoteResponse"
           },
           "maxItems": 100,
-          "title": "Prohibited Actions",
+          "title": "Recommended Steps",
+          "type": "array"
+        },
+        "required_rules": {
+          "items": {
+            "$ref": "#/$defs/FlowNoteResponse"
+          },
+          "maxItems": 100,
+          "title": "Required Rules",
           "type": "array"
         }
       },
@@ -560,6 +558,11 @@
       "additionalProperties": false,
       "description": "表示対象を原 Project・SkillVersion・Task・Manifest へ精確に固定する。",
       "properties": {
+        "manifest_checksum": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Manifest Checksum",
+          "type": "string"
+        },
         "project_id": {
           "format": "uuid",
           "title": "Project Id",
@@ -568,6 +571,12 @@
         "skill_id": {
           "format": "uuid",
           "title": "Skill Id",
+          "type": "string"
+        },
+        "skill_key": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Skill Key",
           "type": "string"
         },
         "skill_version_id": {
@@ -586,21 +595,10 @@
           "title": "Task Key",
           "type": "string"
         },
-        "skill_key": {
-          "maxLength": 128,
-          "pattern": "^[a-z][a-z0-9_.-]*$",
-          "title": "Skill Key",
-          "type": "string"
-        },
         "version": {
           "maxLength": 32,
           "minLength": 1,
           "title": "Version",
-          "type": "string"
-        },
-        "manifest_checksum": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Manifest Checksum",
           "type": "string"
         }
       },
@@ -621,10 +619,22 @@
       "additionalProperties": false,
       "description": "予定確認点だけを表示し、OPEN や受理済みなどの持久待办を作らない。",
       "properties": {
+        "condition": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Condition",
+          "type": "string"
+        },
         "key": {
           "maxLength": 128,
           "pattern": "^[a-z][a-z0-9_.-]*$",
           "title": "Key",
+          "type": "string"
+        },
+        "prompt": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Prompt",
           "type": "string"
         },
         "type": {
@@ -635,18 +645,6 @@
             "EFFECT_APPROVAL"
           ],
           "title": "Type",
-          "type": "string"
-        },
-        "condition": {
-          "maxLength": 1000,
-          "minLength": 1,
-          "title": "Condition",
-          "type": "string"
-        },
-        "prompt": {
-          "maxLength": 1000,
-          "minLength": 1,
-          "title": "Prompt",
           "type": "string"
         }
       },
@@ -686,6 +684,9 @@
       "additionalProperties": false,
       "description": "既存 Blueprint の read-only 構造であり、新たな DAG やノード実行器ではない。",
       "properties": {
+        "shared": {
+          "$ref": "#/$defs/FlowSharedResponse"
+        },
         "task": {
           "$ref": "#/$defs/FlowTaskEntryResponse"
         },
@@ -696,9 +697,6 @@
           "maxItems": 50,
           "title": "Task Resources",
           "type": "array"
-        },
-        "shared": {
-          "$ref": "#/$defs/FlowSharedResponse"
         }
       },
       "required": [
@@ -719,15 +717,15 @@
           "title": "Key",
           "type": "string"
         },
+        "required": {
+          "title": "Required",
+          "type": "boolean"
+        },
         "text": {
           "maxLength": 1000,
           "minLength": 1,
           "title": "Text",
           "type": "string"
-        },
-        "required": {
-          "title": "Required",
-          "type": "boolean"
         }
       },
       "required": [
@@ -742,11 +740,6 @@
       "additionalProperties": false,
       "description": "未配線なら null のままにし、計画 checksum と現在の候補を分離する。",
       "properties": {
-        "scope": {
-          "const": "SKILL_BLUEPRINT",
-          "title": "Scope",
-          "type": "string"
-        },
         "assessment": {
           "anyOf": [
             {
@@ -756,6 +749,11 @@
               "type": "null"
             }
           ]
+        },
+        "scope": {
+          "const": "SKILL_BLUEPRINT",
+          "title": "Scope",
+          "type": "string"
         }
       },
       "required": [
@@ -769,6 +767,30 @@
       "additionalProperties": false,
       "description": "候補と不足理由を現時点の資源照合として返し、実行済みとは表示しない。",
       "properties": {
+        "access": {
+          "enum": [
+            "read",
+            "write"
+          ],
+          "title": "Access",
+          "type": "string"
+        },
+        "candidates": {
+          "items": {
+            "$ref": "#/$defs/FlowCandidateResponse"
+          },
+          "title": "Candidates",
+          "type": "array"
+        },
+        "capabilities": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Capabilities",
+          "type": "array"
+        },
         "key": {
           "maxLength": 128,
           "pattern": "^[a-z][a-z0-9_.-]*$",
@@ -787,40 +809,14 @@
           "title": "Kind",
           "type": "string"
         },
-        "required": {
-          "title": "Required",
-          "type": "boolean"
-        },
-        "access": {
-          "enum": [
-            "read",
-            "write"
-          ],
-          "title": "Access",
-          "type": "string"
-        },
-        "status": {
-          "enum": [
-            "AVAILABLE",
-            "UNAVAILABLE",
-            "UNSUPPORTED"
-          ],
-          "title": "Status",
-          "type": "string"
-        },
         "reason": {
           "minLength": 1,
           "title": "Reason",
           "type": "string"
         },
-        "capabilities": {
-          "items": {
-            "pattern": "^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$",
-            "type": "string"
-          },
-          "maxItems": 20,
-          "title": "Capabilities",
-          "type": "array"
+        "required": {
+          "title": "Required",
+          "type": "boolean"
         },
         "selection_guidance": {
           "anyOf": [
@@ -835,12 +831,14 @@
           ],
           "title": "Selection Guidance"
         },
-        "candidates": {
-          "items": {
-            "$ref": "#/$defs/FlowCandidateResponse"
-          },
-          "title": "Candidates",
-          "type": "array"
+        "status": {
+          "enum": [
+            "AVAILABLE",
+            "UNAVAILABLE",
+            "UNSUPPORTED"
+          ],
+          "title": "Status",
+          "type": "string"
         }
       },
       "required": [
@@ -861,17 +859,17 @@
       "additionalProperties": false,
       "description": "資源要求の原位置と Task/Skill 適用範囲を保持する。",
       "properties": {
+        "blueprint_ref": {
+          "pattern": "^/resource_requirements/(0|[1-9][0-9]*)$",
+          "title": "Blueprint Ref",
+          "type": "string"
+        },
         "scope": {
           "enum": [
             "TASK",
             "SKILL"
           ],
           "title": "Scope",
-          "type": "string"
-        },
-        "blueprint_ref": {
-          "pattern": "^/resource_requirements/(0|[1-9][0-9]*)$",
-          "title": "Blueprint Ref",
           "type": "string"
         },
         "value": {
@@ -890,6 +888,33 @@
       "additionalProperties": false,
       "description": "原資源要求は要求として表示し、候補選択やアクセス済み事実に読み替えない。",
       "properties": {
+        "accepted_providers": {
+          "items": {
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Accepted Providers",
+          "type": "array"
+        },
+        "access": {
+          "enum": [
+            "read",
+            "write"
+          ],
+          "title": "Access",
+          "type": "string"
+        },
+        "capabilities": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Capabilities",
+          "type": "array"
+        },
         "key": {
           "maxLength": 128,
           "pattern": "^[a-z][a-z0-9_.-]*$",
@@ -911,33 +936,6 @@
         "required": {
           "title": "Required",
           "type": "boolean"
-        },
-        "access": {
-          "enum": [
-            "read",
-            "write"
-          ],
-          "title": "Access",
-          "type": "string"
-        },
-        "capabilities": {
-          "items": {
-            "pattern": "^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$",
-            "type": "string"
-          },
-          "maxItems": 20,
-          "title": "Capabilities",
-          "type": "array"
-        },
-        "accepted_providers": {
-          "items": {
-            "maxLength": 128,
-            "pattern": "^[a-z][a-z0-9_.-]*$",
-            "type": "string"
-          },
-          "maxItems": 20,
-          "title": "Accepted Providers",
-          "type": "array"
         },
         "selection_guidance": {
           "maxLength": 1000,
@@ -959,18 +957,45 @@
       "additionalProperties": false,
       "description": "Task 専用と偽らず、全 Skill の共通規則・確認・効果を別区画に残す。",
       "properties": {
-        "scope": {
-          "const": "SKILL",
-          "title": "Scope",
-          "type": "string"
+        "assumptions": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/FlowNoteResponse"
+              },
+              "maxItems": 100,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Assumptions"
         },
-        "resource_requirements": {
-          "items": {
-            "$ref": "#/$defs/FlowResourceEntryResponse"
-          },
-          "maxItems": 50,
-          "title": "Resource Requirements",
-          "type": "array"
+        "effect_intents": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/FlowEffectResponse"
+              },
+              "maxItems": 50,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Effect Intents"
+        },
+        "execution_preferences": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FlowExecutionPreferencesResponse"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "guidance": {
           "anyOf": [
@@ -997,36 +1022,6 @@
           ],
           "title": "Interaction Points"
         },
-        "effect_intents": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/$defs/FlowEffectResponse"
-              },
-              "maxItems": 50,
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Effect Intents"
-        },
-        "assumptions": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/$defs/FlowNoteResponse"
-              },
-              "maxItems": 100,
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Assumptions"
-        },
         "questions": {
           "anyOf": [
             {
@@ -1042,15 +1037,18 @@
           ],
           "title": "Questions"
         },
-        "execution_preferences": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/FlowExecutionPreferencesResponse"
-            },
-            {
-              "type": "null"
-            }
-          ]
+        "resource_requirements": {
+          "items": {
+            "$ref": "#/$defs/FlowResourceEntryResponse"
+          },
+          "maxItems": 50,
+          "title": "Resource Requirements",
+          "type": "array"
+        },
+        "scope": {
+          "const": "SKILL",
+          "title": "Scope",
+          "type": "string"
         }
       },
       "required": [
@@ -1070,14 +1068,14 @@
       "additionalProperties": false,
       "description": "選択 Task と原 Blueprint 内の位置を明示する。",
       "properties": {
-        "scope": {
-          "const": "TASK",
-          "title": "Scope",
-          "type": "string"
-        },
         "blueprint_ref": {
           "pattern": "^/tasks/(0|[1-9][0-9]*)$",
           "title": "Blueprint Ref",
+          "type": "string"
+        },
+        "scope": {
+          "const": "TASK",
+          "title": "Scope",
           "type": "string"
         },
         "value": {
@@ -1096,16 +1094,36 @@
       "additionalProperties": false,
       "description": "選択した原 Task の field を保持し、欠けた任意項目は補完しない。",
       "properties": {
-        "key": {
-          "maxLength": 128,
-          "pattern": "^[a-z][a-z0-9_.-]*$",
-          "title": "Key",
-          "type": "string"
-        },
         "capability": {
           "maxLength": 128,
           "pattern": "^[a-z][a-z0-9_.-]*$",
           "title": "Capability",
+          "type": "string"
+        },
+        "deliverables": {
+          "items": {
+            "$ref": "#/$defs/FlowDeliverableResponse"
+          },
+          "maxItems": 50,
+          "title": "Deliverables",
+          "type": "array"
+        },
+        "document_prerequisites": {
+          "items": {
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "type": "string"
+          },
+          "maxItems": 50,
+          "minItems": 1,
+          "title": "Document Prerequisites",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "key": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Key",
           "type": "string"
         },
         "objective": {
@@ -1114,13 +1132,8 @@
           "title": "Objective",
           "type": "string"
         },
-        "success_criteria": {
-          "items": {
-            "$ref": "#/$defs/FlowNoteResponse"
-          },
-          "maxItems": 50,
-          "title": "Success Criteria",
-          "type": "array"
+        "parameter_contract": {
+          "$ref": "#/$defs/FlowContractResponse"
         },
         "resource_keys": {
           "items": {
@@ -1132,19 +1145,16 @@
           "title": "Resource Keys",
           "type": "array"
         },
-        "deliverables": {
-          "items": {
-            "$ref": "#/$defs/FlowDeliverableResponse"
-          },
-          "maxItems": 50,
-          "title": "Deliverables",
-          "type": "array"
-        },
-        "parameter_contract": {
-          "$ref": "#/$defs/FlowContractResponse"
-        },
         "result_contract": {
           "$ref": "#/$defs/FlowContractResponse"
+        },
+        "success_criteria": {
+          "items": {
+            "$ref": "#/$defs/FlowNoteResponse"
+          },
+          "maxItems": 50,
+          "title": "Success Criteria",
+          "type": "array"
         }
       },
       "required": [
@@ -1180,18 +1190,6 @@
       ],
       "description": "検証範囲を持つ原 trace を返し、binary 取得や意味的な正しさは主張しない。",
       "properties": {
-        "target": {
-          "maxLength": 512,
-          "pattern": "^/",
-          "title": "Target",
-          "type": "string"
-        },
-        "path": {
-          "maxLength": 1024,
-          "minLength": 1,
-          "title": "Path",
-          "type": "string"
-        },
         "line": {
           "anyOf": [
             {
@@ -1204,10 +1202,22 @@
           ],
           "title": "Line"
         },
+        "path": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
         "reason": {
           "maxLength": 1000,
           "minLength": 1,
           "title": "Reason",
+          "type": "string"
+        },
+        "target": {
+          "maxLength": 512,
+          "pattern": "^/",
+          "title": "Target",
           "type": "string"
         },
         "verification": {
@@ -1230,19 +1240,18 @@
       "type": "object"
     }
   },
+  "$id": "https://schemas.skillmind.local/tasks/flow-preview/v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "allOf": [
     {
       "else": {
         "properties": {
-          "plan": {
-            "type": "null"
-          },
           "blueprint_checksum": {
             "type": "null"
           },
-          "source_traces": {
-            "maxItems": 0
+          "plan": {
+            "type": "null"
           },
           "readiness": {
             "properties": {
@@ -1250,6 +1259,9 @@
                 "type": "null"
               }
             }
+          },
+          "source_traces": {
+            "maxItems": 0
           }
         }
       },
@@ -1265,11 +1277,11 @@
       },
       "then": {
         "properties": {
-          "plan": {
-            "type": "object"
-          },
           "blueprint_checksum": {
             "type": "string"
+          },
+          "plan": {
+            "type": "object"
           },
           "source_traces": {
             "minItems": 1
@@ -1280,22 +1292,6 @@
   ],
   "description": "新しい read-only preview の完全な公開 shape。Run の frozen plan ではない。",
   "properties": {
-    "preview_version": {
-      "const": "skillmind.task-flow-preview/v1",
-      "title": "Preview Version",
-      "type": "string"
-    },
-    "identity": {
-      "$ref": "#/$defs/FlowIdentityResponse"
-    },
-    "status": {
-      "enum": [
-        "AVAILABLE",
-        "NOT_DECLARED"
-      ],
-      "title": "Status",
-      "type": "string"
-    },
     "blueprint_checksum": {
       "anyOf": [
         {
@@ -1308,10 +1304,8 @@
       ],
       "title": "Blueprint Checksum"
     },
-    "preview_checksum": {
-      "pattern": "^sha256:[0-9a-f]{64}$",
-      "title": "Preview Checksum",
-      "type": "string"
+    "identity": {
+      "$ref": "#/$defs/FlowIdentityResponse"
     },
     "plan": {
       "anyOf": [
@@ -1323,6 +1317,19 @@
         }
       ]
     },
+    "preview_checksum": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Preview Checksum",
+      "type": "string"
+    },
+    "preview_version": {
+      "const": "skillmind.task-flow-preview/v1",
+      "title": "Preview Version",
+      "type": "string"
+    },
+    "readiness": {
+      "$ref": "#/$defs/FlowReadinessResponse"
+    },
     "source_traces": {
       "items": {
         "$ref": "#/$defs/FlowTraceResponse"
@@ -1331,8 +1338,13 @@
       "title": "Source Traces",
       "type": "array"
     },
-    "readiness": {
-      "$ref": "#/$defs/FlowReadinessResponse"
+    "status": {
+      "enum": [
+        "AVAILABLE",
+        "NOT_DECLARED"
+      ],
+      "title": "Status",
+      "type": "string"
     }
   },
   "required": [

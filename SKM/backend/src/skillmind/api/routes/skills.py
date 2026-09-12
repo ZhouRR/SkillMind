@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 from time import monotonic
-from typing import Any, cast
+from typing import Any, Literal, cast
 from uuid import UUID
 
-from arq.connections import ArqRedis
 from fastapi import APIRouter, Request, Response, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
@@ -37,7 +35,6 @@ from skillmind.runs.domain import RunStatus, TaskLastRun
 from skillmind.runs.service import RunService
 from skillmind.skills import (
     InlineSkillFile,
-    InterpretationLaunch,
     PublishedTaskDescriptor,
     SkillImportError,
     SkillInterpretationNotFoundError,
@@ -61,6 +58,11 @@ from skillmind.skills import (
 from skillmind.skills.capability_blueprint import resolve_capability_blueprint
 from skillmind.skills.domain import SkillPreview
 from skillmind.skills.importer import HTTP_SKILL_IMPORT_LIMITS
+from skillmind.skills.interpretation_requests import (
+    InterpretationRequestConflictError,
+    InterpretationRequestNotFoundError,
+    InterpretationRequestSnapshot,
+)
 from skillmind.skills.realtime import (
     INTERPRET_EVENT_NAMES,
     interpret_channel,
@@ -70,9 +72,6 @@ from skillmind.skills.resource_binding import TaskReadiness
 from skillmind.users.domain import UserAdministrationDeniedError
 
 router = APIRouter()
-
-# Execution key は compute_execution_key が返す固定形式に限る(自由文字列を channel 名へ入れない)。
-_EXECUTION_KEY_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 # Interpret job の ARQ timeout(worker 側 1200 秒)より長い SSE 上限。超過は stream 側の打ち切り。
 _INTERPRET_STREAM_MAX_SECONDS = 1500.0
@@ -151,21 +150,41 @@ class InterpretationExecutionResponse(BaseModel):
 
 
 class InterpretationLaunchResponse(BaseModel):
-    """Interpret/adjust 要求の受理結果。
+    """受理/確認が共有する原要求の公開投影。資格参照や凍結本文は公開しない。"""
 
-    stored は既存の確定 record(再利用・unsafe 失敗)を同封し、queued は Worker 実行待ちで
-    execution_key の SSE stream から進行を観測できることを表す。
-    """
-
-    status: str
+    request_id: UUID
+    skill_source_id: UUID
+    status: Literal["QUEUED", "RUNNING", "UNKNOWN", "SUCCEEDED", "FAILED", "REVOKED"]
     execution_key: str
-    execution: InterpretationExecutionResponse | None
+    interpretation_id: UUID | None
+    error_code: str | None
 
 
-class AdjustInterpretationRequest(BaseModel):
-    """親 interpretation へ適用する append-only な調整指示。"""
+class InterpretationRequestIdentity(BaseModel):
+    """送信前に client が保持する非ゼロ UUID を原要求へ束縛する。"""
 
     model_config = ConfigDict(extra="forbid")
+
+    request_id: UUID
+
+    @field_validator("request_id")
+    @classmethod
+    def nonzero_request_id(cls, value: UUID) -> UUID:
+        """零 UUID を有効な再確認キーとして受理しない。"""
+
+        if value.int == 0:
+            raise ValueError("A nonzero request UUID is required")
+        return value
+
+
+class InterpretSkillRequest(InterpretationRequestIdentity):
+    """明示再生成の nonce は同じ原要求 ID から決定し、再送で変えない。"""
+
+    force_regenerate: bool = False
+
+
+class AdjustInterpretationRequest(InterpretationRequestIdentity):
+    """親 interpretation へ適用する append-only な調整指示。"""
 
     instruction: str = Field(min_length=1, max_length=4000)
 
@@ -492,54 +511,40 @@ async def get_skill_interpretation(
 
 
 @router.post(
-    "/skill-sources/{skill_source_id}/interpret",
+    "/skill-sources/{skill_source_id}/interpretation-requests",
     response_model=InterpretationLaunchResponse,
     responses={
-        404: {"description": "Skill source not found in organization"},
-        409: {"description": "Stored SkillSource integrity check failed"},
-        503: {"description": "Skill interpreter is not configured"},
+        401: problem_openapi_response("The original session is no longer valid"),
+        403: problem_openapi_response("Administrator access or CSRF was rejected"),
+        404: problem_openapi_response("Skill source or request not found"),
+        409: problem_openapi_response("Request identity or source integrity conflicts"),
+        503: problem_openapi_response("Skill interpreter is not configured"),
     },
     tags=["skills"],
 )
 async def interpret_skill_source(
     request: Request,
     skill_source_id: UUID,
+    body: InterpretSkillRequest,
     actor: AdminWriteActor,
-    force_regenerate: bool = False,
 ) -> InterpretationLaunchResponse:
-    """ADMIN の Organization 内 source の model 解釈を Worker job として受理する。
+    """原要求と Outbox を受理し、API 容器から model や Redis job を直接起動しない。"""
 
-    Model への egress は Worker だけが持つため、API は再利用/unsafe の同期確定と
-    job 投入だけを行い、実行と streaming は Worker + SSE が担う。同一 identity は既定で
-    再利用し、force_regenerate の明示時だけ新しい nonce を一回生成する。
-    """
-
-    service: SkillService = request.app.state.skill_service
-    try:
-        launch = await service.begin_interpret(
-            organization_id=actor.organization_id,
-            skill_source_id=skill_source_id,
-            force_regenerate=force_regenerate,
-        )
-    except SkillSourceNotFoundError as error:
-        raise _skill_source_not_found(error) from error
-    except SkillInterpreterUnavailableError as error:
-        raise _interpreter_unavailable(error) from error
-    except SkillStorageUnavailableError as error:
-        raise _storage_unavailable(error) from error
-    except SkillSourceIntegrityError as error:
-        raise _source_integrity_failed(error) from error
-    await _enqueue_launch(request, launch)
-    return _launch_response(launch)
+    return await _accept_interpretation_request(
+        request, actor, request_id=body.request_id, skill_source_id=skill_source_id,
+        force_regenerate=body.force_regenerate,
+    )
 
 
 @router.post(
-    "/skill-interpretations/{interpretation_id}/adjust",
+    "/skill-interpretations/{interpretation_id}/adjustment-requests",
     response_model=InterpretationLaunchResponse,
     responses={
-        404: {"description": "Skill interpretation not found in organization"},
-        409: {"description": "Skill interpretation is not preview-ready"},
-        503: {"description": "Skill interpreter is not configured"},
+        401: problem_openapi_response("The original session is no longer valid"),
+        403: problem_openapi_response("Administrator access or CSRF was rejected"),
+        404: problem_openapi_response("Skill interpretation or request not found"),
+        409: problem_openapi_response("Request identity or parent interpretation conflicts"),
+        503: problem_openapi_response("Skill interpreter is not configured"),
     },
     tags=["skills"],
 )
@@ -549,16 +554,49 @@ async def adjust_skill_interpretation(
     body: AdjustInterpretationRequest,
     actor: AdminWriteActor,
 ) -> InterpretationLaunchResponse:
-    """ADMIN の調整指示を親に折り込み、reinterpretation を Worker job として受理する。"""
+    """調整も原会話と親を凍結し、同じ持久要求の Worker 経路へ引き渡す。"""
+
+    return await _accept_interpretation_request(
+        request, actor, request_id=body.request_id,
+        parent_interpretation_id=interpretation_id, instruction=body.instruction,
+    )
+
+
+async def _accept_interpretation_request(
+    request: Request,
+    actor: AdminWriteActor,
+    *,
+    request_id: UUID,
+    skill_source_id: UUID | None = None,
+    parent_interpretation_id: UUID | None = None,
+    instruction: str | None = None,
+    force_regenerate: bool = False,
+) -> InterpretationLaunchResponse:
+    """二つの入口で同じ業務呼出しと認証/所有拒否の HTTP 写像を使う。"""
 
     service: SkillService = request.app.state.skill_service
     try:
-        launch = await service.begin_adjust(
-            organization_id=actor.organization_id,
-            interpretation_id=interpretation_id,
-            instruction=body.instruction,
-            actor_id=actor.user_id,
-        )
+        try:
+            accepted = await service.accept_interpretation_request(
+                access=user_access(request, actor), request_id=request_id,
+                skill_source_id=skill_source_id, parent_interpretation_id=parent_interpretation_id,
+                instruction=instruction, force_regenerate=force_regenerate,
+            )
+        except InterpretationRequestConflictError as error:
+            if error.existing_request_id is None:
+                raise
+            # 同じ内容は旧原要求を読み取るだけで、会話や開始 owner を差し替えない。
+            accepted = await service.confirm_interpretation_request(
+                access=user_access(request, actor), request_id=error.existing_request_id
+            )
+    except UnauthorizedSessionError as error:
+        raise authentication_required_problem() from error
+    except CsrfRejectedError as error:
+        raise csrf_rejected_problem() from error
+    except UserAdministrationDeniedError as error:
+        raise administrator_required_problem() from error
+    except SkillSourceNotFoundError as error:
+        raise _skill_source_not_found(error) from error
     except SkillInterpretationNotFoundError as error:
         raise _skill_interpretation_not_found(error) from error
     except SkillInterpretationNotReadyError as error:
@@ -569,73 +607,148 @@ async def adjust_skill_interpretation(
         raise _storage_unavailable(error) from error
     except SkillSourceIntegrityError as error:
         raise _source_integrity_failed(error) from error
-    await _enqueue_launch(request, launch)
-    return _launch_response(launch)
+    except InterpretationRequestNotFoundError as error:
+        raise _interpretation_request_not_found() from error
+    except InterpretationRequestConflictError as error:
+        raise ProblemException(
+            status=409, title="Interpretation request conflict",
+            detail="The original request cannot be assigned different input or credentials.",
+            code="interpretation_request_conflict",
+        ) from error
+    return _request_response(accepted)
 
 
 @router.get(
-    "/skill-interpretations/stream/{execution_key}",
+    "/skill-interpretation-requests/{request_id}",
+    response_model=InterpretationLaunchResponse,
+    responses={
+        401: problem_openapi_response("The current session is no longer valid"),
+        403: problem_openapi_response("Administrator access is required"),
+        404: problem_openapi_response("Interpretation request not found in organization"),
+    },
+    tags=["skills"],
+)
+async def confirm_interpretation_request(
+    request: Request, response: Response, request_id: UUID, actor: AdminReadActor
+) -> InterpretationLaunchResponse:
+    """応答喪失・再接続は元 ID の read で確認し、model を再実行しない。"""
+
+    response.headers["Cache-Control"] = "no-store"
+    return _request_response(await _confirm_interpretation_request(request, actor, request_id))
+
+
+async def _confirm_interpretation_request(
+    request: Request, actor: AdminReadActor, request_id: UUID
+) -> InterpretationRequestSnapshot:
+    """SSE の接続時/各配信時も同じ現在会話と組織帰属を再検証する。"""
+
+    service: SkillService = request.app.state.skill_service
+    try:
+        return await service.confirm_interpretation_request(
+            access=user_access(request, actor), request_id=request_id
+        )
+    except UnauthorizedSessionError as error:
+        raise authentication_required_problem() from error
+    except UserAdministrationDeniedError as error:
+        raise administrator_required_problem() from error
+    except InterpretationRequestNotFoundError as error:
+        raise _interpretation_request_not_found() from error
+
+
+def _interpretation_request_not_found() -> ProblemException:
+    """原要求の不存在と組織外を同じ 404 にする。"""
+
+    return ProblemException(
+        status=404, title="Interpretation request not found",
+        detail="The interpretation request is not available in this organization.",
+        code="interpretation_request_not_found",
+    )
+
+
+def _request_response(value: InterpretationRequestSnapshot) -> InterpretationLaunchResponse:
+    """台帳から公開可能な状態だけを allowlist で写す。"""
+
+    return InterpretationLaunchResponse.model_validate({
+        "request_id": value.request_id, "skill_source_id": value.skill_source_id,
+        "status": value.status, "execution_key": value.execution_key,
+        "interpretation_id": value.interpretation_id, "error_code": value.error_code,
+    })
+
+
+def _request_terminal_event(value: InterpretationRequestSnapshot) -> dict[str, Any] | None:
+    """DB の確定/不明状態を通知へ写し、Pub/Sub の自己申告を終態としない。"""
+
+    if value.status in {"QUEUED", "RUNNING"}:
+        return None
+    name = (
+        "interpret.completed" if value.status == "SUCCEEDED"
+        else "interpret.unknown" if value.status == "UNKNOWN" else "interpret.failed"
+    )
+    return interpret_event_data(
+        event=name, execution_key=value.execution_key,
+        data={
+            "request_id": str(value.request_id), "request_status": value.status,
+            "interpretation_id": str(value.interpretation_id) if value.interpretation_id else None,
+            "status": "PREVIEW_READY" if value.status == "SUCCEEDED" else None,
+            "error_code": value.error_code,
+        },
+    )
+
+
+@router.get(
+    "/skill-interpretation-requests/{request_id}/events",
+    responses={
+        401: problem_openapi_response("The current session is no longer valid"),
+        403: problem_openapi_response("Administrator access is required"),
+        404: problem_openapi_response("Interpretation request not found in organization"),
+    },
     tags=["skills"],
 )
 async def stream_interpretation_events(
-    request: Request,
-    execution_key: str,
-    actor: AdminReadActor,
+    request: Request, request_id: UUID, actor: AdminReadActor,
 ) -> StreamingResponse:
-    """Interpret job の進行 event(prompt/delta/終端)を SSE で配信する。
+    """原要求の所有確認後に購読し、各配信前にも現会話と持久状態を確認する。"""
 
-    確定済み execution は接続直後に終端 event を即時回放し、未確定は Redis Pub/Sub を
-    転送する。正本は skill_interpretations の永続 record で、stream は表示専用。
-    """
-
-    if not _EXECUTION_KEY_PATTERN.fullmatch(execution_key):
-        raise ProblemException(
-            status=422,
-            title="Invalid execution key",
-            detail="The execution key does not match the expected format.",
-            code="invalid_execution_key",
-        )
-    service: SkillService = request.app.state.skill_service
+    accepted = await _confirm_interpretation_request(request, actor, request_id)
+    execution_key = accepted.execution_key
     redis: Redis = request.app.state.redis
     heartbeat: float = request.app.state.settings.sse_heartbeat_seconds
 
     async def stream() -> Any:
-        """終端の即時回放 → Pub/Sub 転送 → 上限打ち切りの順で配信する。"""
+        """帰属確認済み channel を購読して再確認し、通知欠落も DB の read で補う。"""
 
-        pubsub = redis.pubsub()
+        pubsub = None
         try:
             try:
-                # DB 確認より先に subscribe し、確定直前の event 取りこぼし窓を閉じる。
+                current = await _confirm_interpretation_request(request, actor, request_id)
+            except ProblemException:
+                return
+            if current.execution_key != execution_key:
+                return
+            terminal = _request_terminal_event(current)
+            if terminal is not None:
+                yield _interpret_sse_message(terminal)
+                return
+            try:
+                pubsub = redis.pubsub()
                 await pubsub.subscribe(interpret_channel(execution_key))
             except RedisError:
                 yield _interpret_sse_message(_stream_failure(execution_key, "stream_unavailable"))
-                return
-            terminal = await service.find_terminal_execution(
-                organization_id=actor.organization_id,
-                execution_key=execution_key,
-            )
-            if terminal is not None:
-                interpretation_id, status_value, error_code = terminal
-                name = (
-                    "interpret.completed" if status_value == "PREVIEW_READY" else "interpret.failed"
-                )
-                yield _interpret_sse_message(
-                    interpret_event_data(
-                        event=name,
-                        execution_key=execution_key,
-                        data={
-                            "interpretation_id": str(interpretation_id),
-                            "status": status_value,
-                            "error_code": error_code,
-                            "reused": True,
-                        },
-                    )
-                )
                 return
             deadline = monotonic() + _INTERPRET_STREAM_MAX_SECONDS
             last_activity = monotonic()
             while monotonic() < deadline:
                 if await request.is_disconnected():
+                    return
+                try:
+                    current = await _confirm_interpretation_request(request, actor, request_id)
+                except ProblemException:
+                    return
+                if current.execution_key != execution_key:
+                    return
+                terminal = _request_terminal_event(current)
+                if terminal is not None:
+                    yield _interpret_sse_message(terminal)
                     return
                 try:
                     message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
@@ -644,60 +757,42 @@ async def stream_interpretation_events(
                         _stream_failure(execution_key, "stream_unavailable")
                     )
                     return
+                # Redis 待ちの間に失効した会話へ prompt/delta を配信しない。
+                try:
+                    current = await _confirm_interpretation_request(request, actor, request_id)
+                except ProblemException:
+                    return
+                if current.execution_key != execution_key:
+                    return
+                terminal = _request_terminal_event(current)
+                if terminal is not None:
+                    yield _interpret_sse_message(terminal)
+                    return
                 if message is None:
                     if monotonic() - last_activity >= heartbeat:
                         last_activity = monotonic()
                         yield f": heartbeat {datetime.now(UTC).isoformat()}\n\n"
                     continue
                 value = _parse_interpret_event(message.get("data"), execution_key=execution_key)
-                if value is None:
+                if value is None or value["event"] in {
+                    "interpret.completed", "interpret.failed",
+                    "interpret.unknown", "interpret.disconnected",
+                }:
                     continue
                 last_activity = monotonic()
                 yield _interpret_sse_message(value)
-                if value["event"] in {"interpret.completed", "interpret.failed"}:
-                    return
-            # Worker の job timeout を超えても終端が来ない場合は client 側で再試行させる。
             yield _interpret_sse_message(_stream_failure(execution_key, "stream_timeout"))
         finally:
-            close_pubsub = cast(Callable[[], Awaitable[None]], pubsub.aclose)
-            await close_pubsub()
+            if pubsub is not None:
+                close_pubsub = cast(Callable[[], Awaitable[None]], pubsub.aclose)
+                await close_pubsub()
 
     return StreamingResponse(
-        stream(),
-        media_type="text/event-stream",
+        stream(), media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive", "X-Accel-Buffering": "no",
         },
-    )
-
-
-async def _enqueue_launch(request: Request, launch: InterpretationLaunch) -> None:
-    """Queued な受理結果を ARQ job として投入する。
-
-    job_id は execution key で固定し、多重 click を queue 側でも重複排除する。既に同じ
-    job が存在する場合の enqueue は None を返すが、その実行が終端 event を配信する。
-    """
-
-    if launch.status != "queued":
-        return
-    pool = cast(ArqRedis, request.app.state.arq_pool)
-    await pool.enqueue_job(
-        launch.job_name,
-        launch.job_kwargs,
-        _job_id=f"interpret:{launch.execution_key}",
-        _queue_name=request.app.state.settings.queue_name,
-    )
-
-
-def _launch_response(launch: InterpretationLaunch) -> InterpretationLaunchResponse:
-    """受理結果を公開 response へ変換する。"""
-
-    return InterpretationLaunchResponse(
-        status=launch.status,
-        execution_key=launch.execution_key,
-        execution=_execution_response(launch.stored) if launch.stored is not None else None,
     )
 
 
@@ -730,10 +825,10 @@ def _parse_interpret_event(raw: Any, *, execution_key: str) -> dict[str, Any] | 
 
 
 def _stream_failure(execution_key: str, code: str) -> dict[str, Any]:
-    """Stream 側の打ち切りを終端 failed event として表現する(永続 record は変更しない)。"""
+    """Stream 停止を通知し、持久 FAILED や model 未開始を補造しない。"""
 
     return interpret_event_data(
-        event="interpret.failed",
+        event="interpret.disconnected",
         execution_key=execution_key,
         data={"interpretation_id": None, "status": None, "error_code": code, "reused": False},
     )

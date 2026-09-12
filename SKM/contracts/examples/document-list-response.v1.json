@@ -1,0 +1,62 @@
+{
+  "status": "success",
+  "provider": "project",
+  "scope": "run_frozen_documents",
+  "query": {
+    "directory": "specs",
+    "recursive": true,
+    "extensions": [
+      ".xls",
+      ".xlsx"
+    ],
+    "exclude_directories": [
+      "rv"
+    ],
+    "exclude_name_prefixes": [
+      "~$"
+    ],
+    "modified_on": {
+      "date": "2026-09-11",
+      "timezone": "Asia/Tokyo",
+      "not_after": "2026-09-11T03:00:00+00:00"
+    }
+  },
+  "query_checksum": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "limit": 50,
+  "frozen_count": 1,
+  "candidate_count": 1,
+  "scan_start": 0,
+  "scan_end": 1,
+  "next_cursor": null,
+  "entries": [
+    {
+      "document": {
+        "document_id": "11111111-1111-4111-8111-111111111111",
+        "folder": "specs",
+        "name": "cases.xlsx",
+        "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "size": 1234,
+        "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "storage": {
+        "last_modified": "2026-09-11T01:00:00+00:00",
+        "version_id": "original-version",
+        "etag": "opaque-etag",
+        "size": 1234,
+        "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      },
+      "observed_at": "2026-09-11T02:00:00+00:00",
+      "content_verified": false,
+      "observation_checksum": "sha256:ea2d9cd6396332948f84fd8d0ec242bcf6741917c5706bdae4485d221f9377bd",
+      "matches_filter": true,
+      "evidence_index": 1
+    }
+  ],
+  "evidence_refs": [
+    "ev_listing_001",
+    "ev_metadata_001"
+  ],
+  "warnings": [
+    "Only the frozen Run selection is covered; document bytes are not verified."
+  ]
+}

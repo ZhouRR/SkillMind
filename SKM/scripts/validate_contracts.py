@@ -16,6 +16,7 @@ EXAMPLE_CONTRACTS = {
     "examples/task-flow-preview.v1.json": "tasks/flow-preview/v1.schema.json",
     "examples/task-flow-preview-not-declared.v1.json": "tasks/flow-preview/v1.schema.json",
     "examples/agent-task-brief.v1.json": "agent-task-brief/v1.schema.json",
+    "examples/agent-task-brief-effect.v1.json": "agent-task-brief/v1.schema.json",
     "examples/capability-blueprint.v1.json": "capability-blueprint/v1.schema.json",
     "examples/create-project-request.v1.json": "projects/v1/create-request.schema.json",
     "examples/document.v1.json": "documents/v1/document.schema.json",
@@ -25,6 +26,24 @@ EXAMPLE_CONTRACTS = {
     "examples/document-upload-closure-request.v1.json": (
         "documents/v1/upload-closure-request.schema.json"
     ),
+    "examples/document-convert-request.v1.json": "tools/document.convert/v1/request.schema.json",
+    "examples/document-convert-artifact-request.v1.json": (
+        "tools/document.convert/v1/request.schema.json"
+    ),
+    "examples/document-convert-response.v1.json": "tools/document.convert/v1/response.schema.json",
+    "examples/document-convert-artifact-response.v1.json": (
+        "tools/document.convert/v1/response.schema.json"
+    ),
+    "examples/document-inspect-request.v1.json": "tools/document.inspect/v1/request.schema.json",
+    "examples/document-list-request.v1.json": "tools/document.list/v1/request.schema.json",
+    "examples/document-readiness-request.v1.json": (
+        "tools/document.readiness/v1/request.schema.json"
+    ),
+    "examples/document-readiness-response.v1.json": (
+        "tools/document.readiness/v1/response.schema.json"
+    ),
+    "examples/document-list-response.v1.json": "tools/document.list/v1/response.schema.json",
+    "examples/document-inspect-response.v1.json": "tools/document.inspect/v1/response.schema.json",
     "examples/document-read-request.v1.json": "tools/document.read/v1/request.schema.json",
     "examples/document-read-response.v1.json": "tools/document.read/v1/response.schema.json",
     "examples/login-context.v1.json": "auth/v1/login-context.schema.json",
@@ -53,9 +72,17 @@ EXAMPLE_CONTRACTS = {
     "examples/evidence.v1.json": "evidence/v1.schema.json",
     "examples/generated-task-manifest.v1alpha1.json": "runtime-manifest/v1alpha1.schema.json",
     "examples/generic-native-manifest.v1alpha1.json": "runtime-manifest/v1alpha1.schema.json",
+    "examples/database-write-request.v1.json": "tools/database.write/v1/request.schema.json",
+    "examples/database-write-response.v1.json": "tools/database.write/v1/response.schema.json",
+    "examples/database-write-error.v1.json": "tools/database.write/v1/error.schema.json",
+    "examples/document-write-request.v1.json": "tools/document.write/v1/request.schema.json",
+    "examples/document-write-response.v1.json": "tools/document.write/v1/response.schema.json",
+    "examples/document-write-error.v1.json": "tools/document.write/v1/error.schema.json",
     "examples/database-read-request.v1.json": "tools/database.read/v1/request.schema.json",
     "examples/database-read-response.v1.json": "tools/database.read/v1/response.schema.json",
     "examples/database-read-error.v1.json": "tools/database.read/v1/error.schema.json",
+    "examples/database-read-schema-request.v1.json": "tools/database.read/v1/request.schema.json",
+    "examples/database-read-schema-response.v1.json": "tools/database.read/v1/response.schema.json",
     "examples/mcp-read-request.v1.json": "tools/mcp.read/v1/request.schema.json",
     "examples/mcp-read-response.v1.json": "tools/mcp.read/v1/response.schema.json",
     "examples/mcp-read-error.v1.json": "tools/mcp.read/v1/error.schema.json",
@@ -134,6 +161,7 @@ EXAMPLE_CONTRACTS = {
     "examples/skill-interpretation-report.v1.json": (
         "skills/interpreter/v1/interpretation-report.schema.json"
     ),
+    "examples/effect-reconciliation.v1.json": "effects/reconciliation/v1.schema.json",
     "examples/skill-interpreter-request.v1.json": "skills/interpreter/v1/request.schema.json",
     "examples/skill-interpreter-response.v1.json": "skills/interpreter/v1/response.schema.json",
     "examples/task-contract-draft.v1.json": "task-contract-draft/v1.schema.json",

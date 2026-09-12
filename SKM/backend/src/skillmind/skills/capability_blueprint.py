@@ -12,6 +12,7 @@ from typing import Any, cast
 from jsonschema import Draft202012Validator, FormatChecker
 
 from skillmind.core.hashing import canonical_json, sha256_hex
+from skillmind.skills.document_prerequisites import document_prerequisites
 from skillmind.skills.task_contract import (
     TaskContractCompilationError,
     compile_task_contract,
@@ -157,10 +158,30 @@ class CapabilityBlueprintValidator:
         self._validate_references(normalized)
         self._validate_effect_intents(normalized)
         self._validate_required_rule_traces(normalized)
+        self._validate_document_prerequisites(normalized)
         return CompiledCapabilityBlueprint(
             blueprint=normalized,
             checksum=f"sha256:{sha256_hex(canonical_json(normalized))}",
         )
+
+    def _validate_document_prerequisites(self, blueprint: Mapping[str, Any]) -> None:
+        """前置条件は既存 apply intent と原文 trace に対応する場合だけ受理する。"""
+        targets = {item.get("target") for item in _object_list(blueprint.get("source_traces"))}
+        for index, task in enumerate(_object_list(blueprint.get("tasks"))):
+            if "document_prerequisites" not in task:
+                continue
+            path = f"/tasks/{index}/document_prerequisites"
+            try:
+                document_prerequisites(
+                    {"capability_blueprint": blueprint}, str(task.get("key", "")),
+                    check_runtime_capability=False,
+                )
+                if path not in targets:
+                    raise ValueError("Document prerequisites require source evidence")
+            except ValueError as error:
+                raise CapabilityBlueprintError(
+                    "document_prerequisites_invalid", path, str(error)
+                ) from error
 
     def _validate_schema(self, blueprint: Mapping[str, Any]) -> None:
         """通用 contract に対する形状違反を path 順の先頭で報告する。"""

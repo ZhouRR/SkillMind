@@ -30,20 +30,33 @@ def validate_session_credentials(
 ) -> None:
     """全 lock 待ち後の時刻で owner、両 hash、版、role と期限を一度に検証する。"""
 
+    validate_session_state(auth_session, user, now=now)
     try:
         expected_csrf_hash = hash_session_secret(derive_session_csrf(session_token))
     except ValueError as error:
         raise UnauthorizedSessionError("Authentication is required") from error
     if (
+        not hmac.compare_digest(auth_session.token_hash, hash_session_secret(session_token))
+        or not hmac.compare_digest(auth_session.csrf_token_hash, expected_csrf_hash)
+    ):
+        raise UnauthorizedSessionError("Authentication is required")
+
+
+def validate_session_state(auth_session: AuthSession, user: User, *, now: datetime) -> None:
+    """検証済み原要求の会話参照にも同じ失効条件を適用し、期限は延長しない。
+
+    Credential の本人確認は行わない。HTTP 入口では必ず credentials/CSRF 検証を使い、
+    Worker はその検証と同じ transaction に保存した会話 ID だけをここへ渡す。
+    """
+
+    if (
         auth_session.user_id != user.id
-        or not hmac.compare_digest(auth_session.token_hash, hash_session_secret(session_token))
         or auth_session.revoked_at is not None
         or auth_session.idle_expires_at <= now
         or auth_session.absolute_expires_at <= now
         or user.status != "ACTIVE"
         or auth_session.credential_version != SESSION_CREDENTIAL_VERSION
         or auth_session.system_role_at_login != user.system_role
-        or not hmac.compare_digest(auth_session.csrf_token_hash, expected_csrf_hash)
     ):
         raise UnauthorizedSessionError("Authentication is required")
 

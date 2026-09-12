@@ -53,13 +53,30 @@ S3 的 SKILLMIND_OBJECT_STORAGE_NAMESPACE_ID 是存储世代 UUID：同原存储
 
 | 校验 | 保证范围 |
 | --- | --- |
-| 默认单文件 25 MiB、Project 500 MiB | 占用 = 全部上传意图 + 未关联旧元数据 + 未关联旧清理记录 size，不是 bucket 实际字节 |
+| 默认单文件 25 MiB、Project 500 MiB | 占用 = 全部浏览器上传意图 + 全部成果上传记录 + 未关联旧元数据 + 未关联旧清理记录 size，不是 bucket 实际字节 |
 | 名称/folder 最多 200 字符 | 名称另受共享 key 单段 128 限制；129–200 在 PUT 前 422 invalid_document_name，不截断 |
 | MIME allowlist、指定文本凭据扫描 | 仅申报类型/指定文本，不证明真实格式、病毒安全或任意二进制脱敏 |
 | 组织 gate | PUT 前预约，发布不双计；旧负 size 拒绝不抵扣，PENDING 路径阻止同名新 PUT |
 | 唯一约束 | 仅精确路径冲突映射 document_conflict；其他 DB 异常不冒充同名，PUT 后失败保留意图与可能对象 |
 
 UNCONDITIONAL_V1 的一次 application PUT 不等于一次 wire PUT，仍可能 SDK 重试/multipart/迟到写。拒绝、取消、存储错误、commit 未知均不补偿删除或释放占用。
+
+### Run 成果的保存与发布
+
+0045 的 `document_effect_uploads` 独立保存原 Effect、Project/Run、Artifact、原字节摘要、目标文档 ID、展示路径、namespace/bucket/key、配额占用及阶段时间。`DocumentEffectRepository` 只在调用方持有 Organization UPDATE 和有效 Effect 授权的事务内工作，不自行授予权限、提交事务或调用存储。[DocumentEffectService](../../SKM/backend/src/skillmind/effects/document_service.py) 在同事务内先调用共享阶段授权，使用锁内确认的组织与发起人核验原预约，完成操作及 flush 后再次检查执行权与期限，确认 commit 后才返回。
+
+| 阶段 | 持久事实与恢复 |
+| --- | --- |
+| RESERVED | 核验同 Run 的已存 Artifact、精确路径及共享上传限制后占用配额；同 Effect 重入保留原文档 ID 与内容 |
+| SENT | 首次记录发送所有者与时间；仅获得首次开始结果且确认事务 commit 的调用可发送一次，重入不再次发送 |
+| VERIFIED | 原条件客户端核对出的 Effect/请求摘要、实际内容、ETag/Version ID 已保存；不存在观察不能进入此状态 |
+| PUBLISHED | 文档元数据及原发布时间同事务提交；回滚保留事务前的阶段，重放返回原元数据，不重建已消失的目录项 |
+
+Provider 在锁外调用对象存储；核对回执与发布由 Service 在同事务中保存，失败回滚后从原 SENT 或已存回执继续。发送标记提交响应未知时不发送 PUT，恢复只 GET；发布提交响应未知时读取原回执，不重传。保存过的回执只证明原核对与公开事实，不证明对象当前仍存在。
+
+成果 key 固定在 `projects/{projectId}/documents/effects/{folder}/{name}`，展示仍为项目文档库内的 folder/name。路径须保持规范原值；成果记录持续保留路径和占用，与浏览器上传共同拒绝同名冲突。文档的可空 `effect_upload_id` 通过原文档/Project 复合外键关联，不能同时关联浏览器上传意图；公开字段保持原契约。发布后仍只计原占用，旧文档不补造成果历史。
+
+这些成果由保留的 Effect 回执引用，普通删除返回 `document_in_use`，不转交旧无条件 blob DELETE 或创建假浏览器清理来源。任意成果记录均阻止整项目配置删除；降级在排他锁下拒绝删除非空台账。SENT 不证明请求已到达或停止，核对缺失不释放配额；MinIO 条件创建和结果未知边界见[受控写入](repository-effects.md#minio-条件创建与原结果核对)。
 
 路径冲突返回前复核期限；failed flush 只以锁内授权副本作拒绝分类，禁止失效 ORM 隐式查询或凭副本续写。上述门禁限本版 writer，不覆盖任意 SQL/旧实例。
 

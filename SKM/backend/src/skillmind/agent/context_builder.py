@@ -10,7 +10,9 @@ from uuid import UUID
 
 from jsonschema import Draft202012Validator, FormatChecker
 
-from skillmind.agent.document_provider import DocumentProvider
+from skillmind.agent.document_inspection import DocumentInspectProvider
+from skillmind.agent.document_listing import DocumentListProvider
+from skillmind.agent.document_provider import DocumentConvertProvider, DocumentProvider
 from skillmind.agent.domain import (
     MaterializedResource,
     RegisteredTool,
@@ -43,19 +45,35 @@ from skillmind.agent.workspace_provider import (
     WorkspaceSearchProvider,
     WorkspaceWriteProvider,
 )
-from skillmind.core.hashing import canonical_json, sha256_hex
+from skillmind.documents.library import (
+    DOCUMENT_WRITE_CAPABILITY,
+    DocumentLibraryTarget,
+    is_document_library_source,
+    parse_document_library_source,
+)
+from skillmind.documents.observation_repository import DocumentObservationLookup
 from skillmind.documents.snapshot import (
+    DOCUMENT_CAPABILITIES,
+    DOCUMENT_CONVERT_CAPABILITY,
+    DOCUMENT_INSPECT_CAPABILITY,
+    DOCUMENT_LIST_CAPABILITY,
     DOCUMENT_PROVIDER,
-    DOCUMENT_READ_CAPABILITY,
+    document_preparation_policy,
     selected_document_snapshots,
 )
 from skillmind.documents.source import ProjectDocumentSource
+from skillmind.effects.catalog import EFFECT_CAPABILITIES
 from skillmind.effects.proposal import CHANGE_PROPOSE_CAPABILITY
+from skillmind.effects.release import ExecutionFeatures
 from skillmind.integrations.domain import ResourceBindingLevel, binding_checksum
 from skillmind.runs.domain import ClaimedRun
 from skillmind.runs.interaction import INTERACTION_REQUEST_CAPABILITY
 from skillmind.skills.capability_blueprint import resolve_capability_blueprint
-from skillmind.skills.resource_binding import is_deferred_execution_capability
+from skillmind.skills.document_prerequisites import (
+    DOCUMENT_READINESS_CAPABILITY,
+    document_prerequisites,
+)
+from skillmind.skills.frozen_manifest import verified_run_manifest
 
 
 class ContractStore:
@@ -110,7 +128,8 @@ def _read_tool_definitions(
                 capability="database.read/v1",
                 description=(
                     "Read allowed PostgreSQL tables with columns, equality filters "
-                    "and bounded rows; no SQL input"
+                    "and bounded rows; use include_schema to inspect columns and primary keys "
+                    "even for empty tables before proposing a write; no SQL input"
                 ),
                 request_schema=contracts.load("tools/database.read/v1/request.schema.json"),
                 response_schema=contracts.load("tools/database.read/v1/response.schema.json"),
@@ -155,16 +174,76 @@ def document_read_tool_definition(
     )
 
 
+def document_convert_tool_definition(
+    contracts: ContractStore, source: ProjectDocumentSource,
+    *, observations: DocumentObservationLookup | None = None,
+) -> ToolDefinition:
+    """凍結 Excel を Worker 内で明示変換する Tool を登録する。"""
+
+    return ToolDefinition(
+        capability=DOCUMENT_CONVERT_CAPABILITY,
+        description=(
+            "Convert one frozen Excel using Worker MarkItDown. Set publish_artifact=true to "
+            "save the exact Markdown as a Run Artifact for approved document backup; use its "
+            "artifact_refs and artifact size/hash instead of rewriting the Markdown."
+        ),
+        request_schema=contracts.load("tools/document.convert/v1/request.schema.json"),
+        response_schema=contracts.load("tools/document.convert/v1/response.schema.json"),
+        error_schema=contracts.load("tools/document.convert/v1/error.schema.json"),
+        providers={DOCUMENT_PROVIDER: DocumentConvertProvider(source, observations=observations)},
+    )
+
+
+def document_inspect_tool_definition(
+    contracts: ContractStore, source: ProjectDocumentSource
+) -> ToolDefinition:
+    """凍結範囲の実 storage metadata だけを観測する Tool を登録する。"""
+
+    return ToolDefinition(
+        capability=DOCUMENT_INSPECT_CAPABILITY,
+        description=(
+            "Inspect storage LastModified, Version ID and ETag of one frozen document "
+            "without downloading its bytes"
+        ),
+        request_schema=contracts.load("tools/document.inspect/v1/request.schema.json"),
+        response_schema=contracts.load("tools/document.inspect/v1/response.schema.json"),
+        error_schema=contracts.load("tools/document.inspect/v1/error.schema.json"),
+        providers={DOCUMENT_PROVIDER: DocumentInspectProvider(source)},
+    )
+
+
+def document_list_tool_definition(
+    contracts: ContractStore, source: ProjectDocumentSource
+) -> ToolDefinition:
+    """凍結集合の directory 分頁・実 metadata 条件を明示能力として登録する。"""
+
+    return ToolDefinition(
+        capability=DOCUMENT_LIST_CAPABILITY,
+        description=(
+            "Page through frozen authorized documents by directory and storage LastModified; "
+            "follow every next_cursor and convert matches using each entry's observation Evidence"
+        ),
+        request_schema=contracts.load("tools/document.list/v1/request.schema.json"),
+        response_schema=contracts.load("tools/document.list/v1/response.schema.json"),
+        error_schema=contracts.load("tools/document.list/v1/error.schema.json"),
+        providers={DOCUMENT_PROVIDER: DocumentListProvider(source)},
+    )
+
+
 def create_run_tool_registry(
     contracts: ContractStore,
     *,
     document_source: ProjectDocumentSource,
+    document_observations: DocumentObservationLookup | None = None,
+    document_readiness_provider: ToolProvider | None = None,
     redmine_issue_provider: ToolProvider | None = None,
     database_provider: ToolProvider | None = None,
     mcp_provider: ToolProvider | None = None,
     repository_source: RepositorySnapshotSource | None = None,
     subagent_provider: ToolProvider | None = None,
     deferred_features_enabled: bool = True,
+    database_writes_enabled: bool = False,
+    document_writes_enabled: bool = False,
 ) -> ToolRegistry:
     """Project 文書、実 Integration と platform 能力を registry へ登録する。"""
 
@@ -178,13 +257,41 @@ def create_run_tool_registry(
                 repository_source=repository_source,
             ),
             document_read_tool_definition(contracts, document_source),
+            document_convert_tool_definition(
+                contracts, document_source, observations=document_observations
+            ),
+            document_inspect_tool_definition(contracts, document_source),
+            document_list_tool_definition(contracts, document_source),
+            ToolDefinition(
+                capability=DOCUMENT_READINESS_CAPABILITY,
+                description="Check original Run controlled effects required before document access",
+                request_schema=contracts.load("tools/document.readiness/v1/request.schema.json"),
+                response_schema=contracts.load("tools/document.readiness/v1/response.schema.json"),
+                error_schema=contracts.load("tools/document.readiness/v1/error.schema.json"),
+                providers={
+                    "platform": document_readiness_provider or UnavailableDocumentReadiness()
+                },
+                unbound_provider="platform",
+            ),
             *_workspace_tool_definitions(contracts),
             _interaction_tool_definition(contracts),
-            *((_change_propose_tool_definition(contracts),) if deferred_features_enabled else ()),
+            *((_change_propose_tool_definition(contracts),)
+              if deferred_features_enabled or database_writes_enabled
+              or document_writes_enabled else ()),
             *(_subagent_tool_definitions(contracts, subagent_provider)
               if deferred_features_enabled else ()),
         )
     )
+
+
+class UnavailableDocumentReadiness:
+    """正本照会が未装配なら、前置条件を ready と推測しない。"""
+
+    async def execute(
+        self, context: RunToolContext, arguments: Mapping[str, Any]
+    ) -> ProviderToolResult:
+        """接続不足を安定した unavailable として扱う。"""
+        raise ToolProviderError("unavailable", "Document readiness is unavailable", retryable=False)
 
 
 class DeferredInteractionProvider:
@@ -346,6 +453,9 @@ class ProductionRunContextBuilder:
         model: str | None,
         materializer: WorkspaceMaterializer | None = None,
         deferred_features_enabled: bool = True,
+        database_writes_enabled: bool = False,
+        document_writes_enabled: bool = False,
+        document_library_target: DocumentLibraryTarget | None = None,
     ) -> None:
         """Workspace、Tool と model の Worker 起動時 snapshot を保持する。
 
@@ -357,7 +467,10 @@ class ProductionRunContextBuilder:
         self._tool_registry = tool_registry
         self._model = model
         self._materializer = materializer
-        self._deferred_features_enabled = deferred_features_enabled
+        self._document_library_target = document_library_target
+        self._execution_features = ExecutionFeatures(
+            deferred_features_enabled, database_writes_enabled, document_writes_enabled
+        )
 
     async def build(self, claimed_run: ClaimedRun, *, sequence_start: int) -> RunContext:
         """Input/Schema/Source/Permission を再検証し、最小 Tool 付き context を返す。"""
@@ -379,8 +492,8 @@ class ProductionRunContextBuilder:
         if not isinstance(allowed, list) or not all(isinstance(item, str) for item in allowed):
             raise ValueError("Permission snapshot contains invalid capabilities")
         # 旧権限を削って別 Run として実行せず、物化・モデル起動の前に拒否する。
-        if not self._deferred_features_enabled and any(
-            is_deferred_execution_capability(capability)
+        if any(
+            not self._execution_features.capability_enabled(capability)
             for capability in allowed
         ):
             raise ValueError("Run snapshot requires disabled execution features")
@@ -391,6 +504,25 @@ class ProductionRunContextBuilder:
         blueprint = resolve_capability_blueprint(manifest)
         if blueprint is None:
             raise ValueError("Run SkillVersion Manifest does not declare a CapabilityBlueprint")
+        if not self._execution_features.blueprint_enabled(blueprint):
+            raise ValueError("Run Blueprint requires disabled execution features")
+        prerequisites = document_prerequisites(manifest, str(task.get("task_key", "")))
+        if prerequisites:
+            if DOCUMENT_READINESS_CAPABILITY not in allowed:
+                raise ValueError("Document prerequisites require readiness permission")
+            snapshots = selected_document_snapshots(
+                claimed_run.selected_sources_json, project_id=claimed_run.project_id
+            )
+            deferred_ids = {
+                document.document_id for snapshot in snapshots
+                if document_preparation_policy(
+                    claimed_run.selected_sources_json[snapshot.requirement_key]
+                )
+                for document in snapshot.documents
+            }
+            if any(document.document_id not in deferred_ids
+                   for snapshot in snapshots for document in snapshot.documents):
+                raise ValueError("Document prerequisites require on-demand preparation")
         execution_profile = resolve_execution_profile(blueprint).profile.value
         snapshot_profile = permission.get("execution_profile")
         declares_workspace = any(
@@ -410,6 +542,7 @@ class ProductionRunContextBuilder:
             self._tool_registry,
             allowed,
             execution_profile=execution_profile,
+            document_library_target=self._document_library_target,
         )
         document_snapshots = selected_document_snapshots(
             claimed_run.selected_sources_json, project_id=claimed_run.project_id
@@ -442,6 +575,7 @@ class ProductionRunContextBuilder:
         # 確定させてから組み立て、Brief が許可されていない能力を語らないようにする。
         brief = build_agent_task_brief(
             run_id=claimed_run.run_id,
+            project_id=claimed_run.project_id,
             task_snapshot=task,
             manifest=manifest,
             selected_sources=claimed_run.selected_sources_json,
@@ -520,19 +654,7 @@ def _verified_manifest(claimed_run: ClaimedRun, task: Mapping[str, Any]) -> Mapp
     ずれているとみなして fail closed とする。実行に使う Manifest 契約の唯一の入口。
     """
 
-    if len(claimed_run.skill_snapshots_json) != 1:
-        raise ValueError("Run must bind exactly one SkillVersion snapshot")
-    skill_snapshot = claimed_run.skill_snapshots_json[0]
-    manifest = skill_snapshot.get("manifest")
-    checksum = skill_snapshot.get("manifest_checksum")
-    if not isinstance(manifest, dict) or not isinstance(checksum, str):
-        raise ValueError("Run SkillVersion snapshot is incomplete")
-    actual_checksum = f"sha256:{sha256_hex(canonical_json(manifest))}"
-    if checksum != actual_checksum or task.get("manifest_checksum") != checksum:
-        raise ValueError("Run SkillVersion Manifest checksum does not match frozen content")
-    if task.get("skill_version_id") != skill_snapshot.get("skill_version_id"):
-        raise ValueError("Task and SkillVersion snapshot identity do not match")
-    return manifest
+    return verified_run_manifest(claimed_run.skill_snapshots_json, task)
 
 
 def _resolve_source_tools(
@@ -542,6 +664,7 @@ def _resolve_source_tools(
     allowed: Sequence[str],
     *,
     execution_profile: str,
+    document_library_target: DocumentLibraryTarget | None = None,
 ) -> tuple[list[RegisteredTool], dict[str, RepositoryBindingRef]]:
     """Blueprint の resource_requirements と選択済み source から最小 Tool 集合を解決する。
 
@@ -560,10 +683,20 @@ def _resolve_source_tools(
     requirements = (
         _sequence(blueprint.get("resource_requirements")) if isinstance(blueprint, Mapping) else []
     )
+    requirement_keys = {
+        item.get("key") for item in requirements if isinstance(item, Mapping)
+    }
+    if any(
+        key not in requirement_keys and is_document_library_source(value)
+        for key, value in claimed_run.selected_sources_json.items()
+    ):
+        raise ValueError("Document library selection has no resource requirement")
     for requirement in requirements:
         if not isinstance(requirement, Mapping):
             continue
-        selected_source = _selected_source(requirement, claimed_run)
+        selected_source = _selected_source(
+            requirement, claimed_run, document_library_target=document_library_target
+        )
         if selected_source is None:
             if bool(requirement.get("required", False)):
                 raise ValueError("Required data source has no selected provider")
@@ -571,6 +704,13 @@ def _resolve_source_tools(
         capability, provider, integration_id, binding_id = selected_source
         if capability not in allowed:
             raise ValueError("Resolved Tool is not allowed by the permission snapshot")
+        if capability == DOCUMENT_WRITE_CAPABILITY:
+            # 保存先には読取 Tool がない。原 slot を検証しても直接 write 権限は渡さない。
+            if CHANGE_PROPOSE_CAPABILITY not in allowed:
+                raise ValueError("Document library requires proposal permission")
+            continue
+        if capability in EFFECT_CAPABILITIES:
+            raise ValueError("Write capability cannot be exposed as a direct Agent Tool")
         requirement_key = requirement.get("key")
         if (
             requirement.get("kind") == "repository"
@@ -590,7 +730,7 @@ def _resolve_source_tools(
             binding_id=binding_id,
             execution_profile=execution_profile,
         )
-        if capability == DOCUMENT_READ_CAPABILITY and any(
+        if capability in DOCUMENT_CAPABILITIES and any(
             tool.capability == capability for tool in tools
         ):
             # 複数の文書 slot は同じ Run 集合を読む。SDK 名を重複登録しない。
@@ -607,11 +747,22 @@ def _resolve_source_tools(
             if bool(tool_requirement.get("required", False)):
                 raise ValueError("Resolved Tool is not allowed by the permission snapshot")
             continue
+        # effect 宣言は別 registry/批准で処理し、必須指定でも直接 Tool に昇格させない。
+        if tool_capability in EFFECT_CAPABILITIES:
+            continue
         try:
-            resolved = registry.resolve_unbound(
-                tool_capability,
-                execution_profile=execution_profile,
-            )
+            if tool_capability in DOCUMENT_CAPABILITIES:
+                if not any(tool.capability in DOCUMENT_CAPABILITIES for tool in tools):
+                    raise LookupError("Document Tool requires a frozen document selection")
+                resolved = registry.resolve(
+                    tool_capability, provider=DOCUMENT_PROVIDER, integration_id=None,
+                    execution_profile=execution_profile,
+                )
+            else:
+                resolved = registry.resolve_unbound(
+                    tool_capability,
+                    execution_profile=execution_profile,
+                )
         except LookupError:
             if bool(tool_requirement.get("required", False)):
                 raise
@@ -642,7 +793,8 @@ def _resolve_source_tools(
 
 
 def _selected_source(
-    requirement: Mapping[str, Any], claimed_run: ClaimedRun
+    requirement: Mapping[str, Any], claimed_run: ClaimedRun,
+    *, document_library_target: DocumentLibraryTarget | None = None,
 ) -> tuple[str, str, UUID | None, UUID | None] | None:
     """構造化 snapshot を再検証し、capability・provider と frozen Integration identity を返す。
 
@@ -669,9 +821,24 @@ def _selected_source(
     provider = value.get("provider")
     if not isinstance(provider, str):
         raise ValueError("Selected data source provider is invalid")
+    if is_document_library_source(value):
+        if (
+            requirement.get("kind") != "document"
+            or requirement.get("access") != "write"
+            or declared != {DOCUMENT_WRITE_CAPABILITY}
+            or document_library_target is None
+        ):
+            raise ValueError("Selected document library is unavailable or invalid")
+        frozen = parse_document_library_source(
+            value, project_id=claimed_run.project_id, run_id=claimed_run.run_id,
+            requirement_key=requirement_key,
+        )
+        if frozen.target != document_library_target:
+            raise ValueError("Document library changed after Run creation")
+        return capability, provider, None, frozen.binding_id
     if requirement.get("kind") == "document":
         if (
-            capability != DOCUMENT_READ_CAPABILITY
+            capability not in DOCUMENT_CAPABILITIES
             or provider != DOCUMENT_PROVIDER
             or requirement.get("access", "read") != "read"
         ):

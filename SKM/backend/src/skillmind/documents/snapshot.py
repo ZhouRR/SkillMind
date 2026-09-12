@@ -14,6 +14,14 @@ from skillmind.documents.domain import StoredDocument
 
 DOCUMENT_PROVIDER = "project-documents"
 DOCUMENT_READ_CAPABILITY = "document.read/v1"
+DOCUMENT_CONVERT_CAPABILITY = "document.convert/v1"
+DOCUMENT_INSPECT_CAPABILITY = "document.inspect/v1"
+DOCUMENT_LIST_CAPABILITY = "document.list/v1"
+DOCUMENT_CAPABILITIES = (
+    DOCUMENT_READ_CAPABILITY, DOCUMENT_CONVERT_CAPABILITY,
+    DOCUMENT_INSPECT_CAPABILITY, DOCUMENT_LIST_CAPABILITY,
+)
+ON_DEMAND_DOCUMENT_PREPARATION = "on-demand/v1"
 ALL_DOCUMENTS_SELECTION = "project-documents:all"
 MAX_SELECTED_DOCUMENTS = 5_000
 DocumentSelectionMode = Literal["SINGLE", "SET", "ALL"]
@@ -91,7 +99,7 @@ def is_document_source(source: object) -> bool:
             ("document:", "documents:", "project-documents:")
         )
     return isinstance(source, Mapping) and (
-        source.get("capability") == DOCUMENT_READ_CAPABILITY
+        source.get("capability") in DOCUMENT_CAPABILITIES
         or source.get("resource_kind") == "document"
         or source.get("provider") == DOCUMENT_PROVIDER
         or "document_snapshot" in source
@@ -202,13 +210,31 @@ def selected_document_snapshots(
 
     snapshots: list[DocumentSnapshot] = []
     for key, source in sorted(selected_sources.items()):
-        if not isinstance(source, Mapping) or source.get("capability") != DOCUMENT_READ_CAPABILITY:
+        if not isinstance(source, Mapping) or source.get("capability") not in DOCUMENT_CAPABILITIES:
             continue
         value = source.get("document_snapshot")
         if source.get("provider") != DOCUMENT_PROVIDER or not isinstance(value, Mapping):
             raise DocumentSnapshotError("Run has no frozen document selection; create a new Run")
+        document_preparation_policy(source)
         snapshots.append(parse_document_snapshot(value, project_id=project_id, requirement_key=key))
     return tuple(snapshots)
+
+
+def document_preparation_policy(source: Mapping[str, Any]) -> str | None:
+    """新規変換 source の明示 policy だけを受理し、旧 Run へ推測で遡及適用しない。"""
+
+    if "preparation_policy" not in source:
+        return None
+    policy = source["preparation_policy"]
+    if (
+        policy != ON_DEMAND_DOCUMENT_PREPARATION
+        or source.get("capability") not in {
+            DOCUMENT_CONVERT_CAPABILITY, DOCUMENT_INSPECT_CAPABILITY, DOCUMENT_LIST_CAPABILITY,
+        }
+        or source.get("provider") != DOCUMENT_PROVIDER
+    ):
+        raise DocumentSnapshotError("Document preparation policy is invalid")
+    return ON_DEMAND_DOCUMENT_PREPARATION
 
 
 def snapshot_documents(snapshots: Sequence[DocumentSnapshot]) -> tuple[FrozenDocument, ...]:

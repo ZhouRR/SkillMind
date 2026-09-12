@@ -19,6 +19,7 @@ export interface SourceRequirementChoice {
   key: string
   /** 資源種別(issue/repository/document)。友好名の索引に使う。 */
   kind: string
+  access: string
   required: boolean
   options: Array<{ value: string; label: string }>
 }
@@ -37,12 +38,18 @@ export function sourceRequirements(task: PublishedTaskRecord): SourceRequirement
   return (task.readiness?.requirements ?? []).map((requirement) => ({
     key: requirement.key,
     kind: requirement.kind,
+    access: requirement.access,
     required: requirement.required,
     options: requirement.candidates.map((candidate) => ({
       value: candidate.key,
       label: requirement.kind === 'document' ? candidate.label : `${candidate.label} · ${candidate.provider}`,
     })),
   }))
+}
+
+/** 入力文書だけに単体/集合/全集を使う。成果保存先を入力の全集へ変換しない。 */
+export function usesDocumentSelection(requirement: Pick<SourceRequirementChoice, 'kind' | 'access'>): boolean {
+  return requirement.kind === 'document' && requirement.access === 'read'
 }
 
 /** 文書は候補が一件でも同意を省略しない。従来の必須 Integration 既定だけを維持する。 */
@@ -93,8 +100,13 @@ export function buildTaskDraft(
   if (!task) return null
   const input = parseInputObject(inputText)
   if (input === null) return null
-  if (sourceRequirements(task).some((requirement) => requirement.kind === 'document'
-    && !validDocumentSelection(sourceProviders[requirement.key] ?? '', requirement))) return null
+  if (sourceRequirements(task).some((requirement) => {
+    if (requirement.kind !== 'document') return false
+    const value = sourceProviders[requirement.key] ?? ''
+    if (usesDocumentSelection(requirement)) return !validDocumentSelection(value, requirement)
+    if (requirement.access !== 'write') return true
+    return value === '' ? requirement.required : !requirement.options.some((option) => option.value === value)
+  })) return null
   return {
     skillVersionId: task.skill_version_id,
     taskKey: task.task_key,

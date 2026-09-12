@@ -6,6 +6,7 @@ import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import Any
@@ -19,8 +20,16 @@ from skillmind.agent.task_brief import resolve_execution_profile
 from skillmind.agent.tool_policy import DENIED_BUILTIN_TOOLS
 from skillmind.auth.sessions import UnauthorizedSessionError
 from skillmind.documents.binding import resolve_document_binding
+from skillmind.documents.library import (
+    DOCUMENT_LIBRARY_SELECTION,
+    DOCUMENT_WRITE_CAPABILITY,
+    DocumentLibraryBindingRepository,
+    DocumentLibraryTarget,
+    FrozenDocumentLibraryBinding,
+    ResolvedDocumentLibraryBinding,
+)
 from skillmind.documents.repository import DocumentRepository
-from skillmind.documents.snapshot import DOCUMENT_READ_CAPABILITY, DocumentSnapshotError
+from skillmind.documents.snapshot import DOCUMENT_CAPABILITIES, DocumentSnapshotError
 from skillmind.effects.domain import (
     ChangeProposalDraft,
     ChangeProposalExpiredError,
@@ -28,6 +37,7 @@ from skillmind.effects.domain import (
     ProposalDecisionResult,
 )
 from skillmind.effects.proposal import CHANGE_PROPOSE_CAPABILITY
+from skillmind.effects.release import ExecutionFeatures
 from skillmind.integrations.domain import (
     IntegrationStatus,
     ResolvedRunBinding,
@@ -66,7 +76,7 @@ from skillmind.runs.interaction import (
 from skillmind.runs.repository import RunRepository
 from skillmind.skills.capability_blueprint import resolve_capability_blueprint
 from skillmind.skills.domain import PublishedTaskNotFoundError
-from skillmind.skills.resource_binding import is_deferred_execution_capability, is_write_capability
+from skillmind.skills.resource_binding import is_write_capability
 from skillmind.skills.task_catalog import ResolvedTaskRun
 from skillmind.users.access import authorize_user_access, validate_user_access
 from skillmind.users.domain import UserAccess
@@ -89,15 +99,22 @@ class RunService:
     def __init__(
         self, session_factory: async_sessionmaker[AsyncSession], *,
         deferred_features_enabled: bool = True,
+        database_writes_enabled: bool = False,
+        document_writes_enabled: bool = False,
         budget_policy: BudgetPolicy | None = None,
+        document_library_target: DocumentLibraryTarget | None = None,
     ) -> None:
         """既存内部呼出しの互換性を保ち、API/Worker は配備 policy を必ず注入する。"""
 
         self._session_factory = session_factory
         self._deferred_features_enabled = deferred_features_enabled
+        self._execution_features = ExecutionFeatures(
+            deferred_features_enabled, database_writes_enabled, document_writes_enabled
+        )
         if budget_policy is not None and budget_policy.max_cost_nanos is not None:
             raise BudgetUnavailableError("Primary execution cost adapter is not configured")
         self._budget_policy = budget_policy
+        self._document_library_target = document_library_target
 
     async def create_task_run(
         self,
@@ -155,22 +172,22 @@ class RunService:
                 isinstance(effect, dict) and effect.get("mode") == "apply"
                 for effect in blueprint.get("effect_intents", [])
             )
-            if not self._deferred_features_enabled:
-                if not isinstance(authorization, UserAccess):
-                    raise TaskSourceSelectionError(
-                        "Scheduled execution is disabled in this deployment"
-                    )
-                if has_apply_intent or any(
-                    is_deferred_execution_capability(capability)
+            if not self._deferred_features_enabled and not isinstance(authorization, UserAccess):
+                raise TaskSourceSelectionError("Scheduled execution is disabled in this deployment")
+            if (
+                not self._execution_features.blueprint_enabled(blueprint)
+                or any(
+                    not self._execution_features.capability_enabled(capability)
                     for capability in resolved.allowed_capabilities
-                ) or any(
-                    isinstance(tool, dict) and tool.get("required") is True
-                    and tool.get("capability") in {
-                        CHANGE_PROPOSE_CAPABILITY, SUBAGENT_DISPATCH_CAPABILITY,
-                    }
+                )
+                or any(
+                    isinstance(tool, dict)
+                    and tool.get("required") is True
+                    and not self._execution_features.capability_enabled(str(tool.get("capability")))
                     for tool in manifest.get("tools", [])
-                ):
-                    raise TaskSourceSelectionError("This task requires disabled execution features")
+                )
+            ):
+                raise TaskSourceSelectionError("This task requires disabled execution features")
             integration_repository = IntegrationRepository(session)
             try:
                 selected_sources, run_bindings = await _resolve_selected_sources(
@@ -180,7 +197,17 @@ class RunService:
                     project_id=project_id,
                     integration_repository=integration_repository,
                     document_repository=DocumentRepository(session),
+                    document_library_target=self._document_library_target,
                 )
+                # 保存先候補があっても未登録/配備停止中の write は Run 作成権限にならない。
+                if any(
+                    isinstance(item, ResolvedDocumentLibraryBinding) for item in run_bindings
+                ) and not self._execution_features.effect_enabled(
+                    DOCUMENT_WRITE_CAPABILITY, "CREATE"
+                ):
+                    raise TaskSourceSelectionError(
+                        "Document saving is not enabled in this deployment"
+                    )
             except TaskSourceSelectionError:
                 # 解析中に同一要求の勝者が commit した場合、その凍結事実を返す。不存在なら
                 # 元の前提失効を保持し、現在の資源を代用して新しい Run を作らない。
@@ -225,9 +252,7 @@ class RunService:
                     "allowed_capabilities": sorted(
                         {
                             *(capability for capability in resolved.allowed_capabilities
-                              if self._deferred_features_enabled or capability not in {
-                                  SUBAGENT_DISPATCH_CAPABILITY, CHANGE_PROPOSE_CAPABILITY,
-                              }),
+                              if self._execution_features.capability_enabled(capability)),
                             INTERACTION_REQUEST_CAPABILITY,
                             *({SUBAGENT_DISPATCH_CAPABILITY}
                               if self._deferred_features_enabled else set()),
@@ -248,6 +273,18 @@ class RunService:
                 return created
             frozen_sources = deepcopy(selected_sources)
             for binding in run_bindings:
+                if isinstance(binding, ResolvedDocumentLibraryBinding):
+                    frozen_library = await DocumentLibraryBindingRepository(
+                        session, target=binding.target
+                    ).freeze(
+                        run_id=created.run_id, project_id=project_id, actor_id=actor_id,
+                        requirement_key=binding.requirement_key,
+                    )
+                    frozen_sources[binding.requirement_key] = FrozenDocumentLibraryBinding(
+                        project_id, created.run_id, frozen_library.id,
+                        binding.requirement_key, binding.target,
+                    ).to_json()
+                    continue
                 frozen = await integration_repository.freeze_run_binding(
                     run_id=created.run_id,
                     project_id=project_id,
@@ -624,7 +661,10 @@ class RunService:
         """Agent の Proposal candidate を検証し approval/effect 待機へ確定する。"""
 
         async with self._session_factory() as session, session.begin():
-            return await RunRepository(session).suspend_for_proposal(
+            return await RunRepository(
+                    session, execution_features=self._execution_features,
+                    document_library_target=self._document_library_target,
+                ).suspend_for_proposal(
                 claimed,
                 event=event,
                 session_metadata=session_metadata,
@@ -692,20 +732,42 @@ class RunService:
         return result
 
     async def decide_change_proposal(
-        self, command: DecideProposalCommand
+        self, command: DecideProposalCommand, *, access: UserAccess
     ) -> ProposalDecisionResult:
         """Proposal の user decision を apply dispatch または Run continuation へ反映する。"""
 
+        validate_user_access(access)
+        if command.actor_id != access.actor.user_id:
+            raise UnauthorizedSessionError("Authentication is required")
         expired: ChangeProposalExpiredError | None = None
         result: ProposalDecisionResult | None = None
         async with self._session_factory() as session, session.begin():
+            users = await UserRepository(session).lock_users(
+                access=access, target_id=None, include_target_sessions=False,
+            )
+            authorize_user_access(access, users, now=datetime.now(UTC), admin=False, write=True)
+            projects = ProjectRepository(session)
+            project = await projects.lock_write_access(
+                user=users.actor, project_id=command.project_id
+            )
+            authorize_user_access(access, users, now=datetime.now(UTC), admin=False, write=True)
+            projects.require_active_write_access(project)
+            # Request 開始時の ADMIN flag で、lock 待機後の role を上書きしない。
+            command = replace(command, actor_is_administrator=users.actor.system_role == "ADMIN")
             try:
-                result = await RunRepository(session).decide_change_proposal(command)
+                result = await RunRepository(
+                    session, execution_features=self._execution_features,
+                    document_library_target=self._document_library_target,
+                ).decide_change_proposal(command)
             except ChangeProposalExpiredError as error:
                 # Repository は expiry の監査 event と次 Segment を同 transaction に保存する。
                 # 例外を transaction 内で捕捉して commit 後に再送出し、409 応答のために
                 # 状態変更まで rollback されることを防ぐ。
                 expired = error
+            # 元判断の replay と expiry continuation も、失効時は同じ TX ごと rollback する。
+            await session.flush()
+            authorize_user_access(access, users, now=datetime.now(UTC), admin=False, write=True)
+            projects.require_active_write_access(project)
         if expired is not None:
             raise expired
         if result is None:
@@ -812,7 +874,8 @@ async def _resolve_selected_sources(
     project_id: UUID,
     integration_repository: IntegrationRepository,
     document_repository: DocumentRepository | None = None,
-) -> tuple[dict[str, Any], tuple[ResolvedRunBinding, ...]]:
+    document_library_target: DocumentLibraryTarget | None = None,
+) -> tuple[dict[str, Any], tuple[ResolvedRunBinding | ResolvedDocumentLibraryBinding, ...]]:
     """三層 binding と Run override を解決し、provider/revision/scope を凍結準備する。
 
     資源要求の唯一の宣言元は blueprint の `resource_requirements` である。以前は manifest の
@@ -824,7 +887,7 @@ async def _resolve_selected_sources(
 
     provided = dict(sources)
     selected: dict[str, Any] = {}
-    bindings: list[ResolvedRunBinding] = []
+    bindings: list[ResolvedRunBinding | ResolvedDocumentLibraryBinding] = []
     blueprint_requirements = {
         str(item["key"]): item
         for item in _object_list(blueprint.get("resource_requirements"))
@@ -852,10 +915,23 @@ async def _resolve_selected_sources(
         )
         access = str(blueprint_requirement.get("access") or "read")
         if blueprint_requirement.get("kind") == "document":
+            if access == "write":
+                if (
+                    document_library_target is None
+                    or selected_token != DOCUMENT_LIBRARY_SELECTION
+                    or declared != (DOCUMENT_WRITE_CAPABILITY,)
+                ):
+                    raise TaskSourceSelectionError(
+                        f"Document library binding is not supported: {key}"
+                    )
+                library_binding = ResolvedDocumentLibraryBinding(key, document_library_target)
+                selected[key] = library_binding.source(project_id=project_id)
+                bindings.append(library_binding)
+                continue
             if (
                 document_repository is None
                 or access != "read"
-                or DOCUMENT_READ_CAPABILITY not in declared
+                or not any(item in DOCUMENT_CAPABILITIES for item in declared)
             ):
                 raise TaskSourceSelectionError(f"Document read binding is not supported: {key}")
             try:
@@ -864,11 +940,12 @@ async def _resolve_selected_sources(
                     project_id=project_id,
                     requirement_key=key,
                     token=selected_token,
+                    capability=next(item for item in declared if item in DOCUMENT_CAPABILITIES),
                 )
             except DocumentSnapshotError as error:
                 raise TaskSourceSelectionError(str(error)) from error
             continue
-        # 要求が宣言した capability のうち access に対応するものが、この要求の観測 capability。
+        # write の binding は効果に束縛し、Agent Tool は同じ要求の読取宣言だけを使う。
         observe_capability = _declared_capability(declared, access=access)
         if not selected_token.startswith("integration:"):
             raise TaskSourceSelectionError(
@@ -960,17 +1037,13 @@ def _select_binding_capability(
 
 
 def _declared_capability(capabilities: tuple[str, ...], *, access: str) -> str | None:
-    """要求が宣言した capability から access に対応する一つを決定的に選ぶ。
+    """write binding でも Agent には宣言済みの観測 capability だけを公開する。"""
 
-    以前は manifest の `data_sources[].capability` が単一値を持っていたが、要求宣言を
-    blueprint へ一本化したため、宣言集合と access からここで導出する。同じ access に複数
-    宣言があるときは辞書順先頭に固定し、Run ごとに揺れないようにする。
-    """
-
-    wants_write = access == "write"
     matching = sorted(
-        capability for capability in capabilities if is_write_capability(capability) == wants_write
+        capability for capability in capabilities if not is_write_capability(capability)
     )
+    if not matching and access == "write":
+        raise TaskSourceSelectionError("Write resource requires an explicit observe capability")
     return matching[0] if matching else None
 
 

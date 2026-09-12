@@ -817,6 +817,51 @@ async def test_context_builder_resolves_project_document_source(tmp_path: Path) 
     assert context.tools[0].provider == "project-documents"
 
 
+@pytest.mark.parametrize("convert_only", [False, True])
+@pytest.mark.parametrize(
+    "capability", ["document.convert/v1", "document.inspect/v1", "document.list/v1"]
+)
+async def test_context_resolves_explicit_document_conversion(
+    tmp_path: Path, convert_only: bool, capability: str,
+) -> None:
+    """観測/変換専用 binding と read 併用を明示権限で本番 registry へ接続する。"""
+
+    manifest = _document_manifest()
+    capabilities = [capability] if convert_only else [
+        "document.read/v1", capability
+    ]
+    manifest["tools"] = [{"capability": item, "required": True} for item in capabilities]
+    manifest["capability_blueprint"]["resource_requirements"][0]["capabilities"] = capabilities
+    claimed = _generic_claimed(manifest=manifest, allowed=tuple(capabilities), selected_sources={})
+    claimed.selected_sources_json["project-doc"] = {
+        "capability": capabilities[0],
+        "provider": "project-documents",
+        "document_snapshot": document_snapshot(
+            claimed.project_id, [document_content()], key="project-doc"
+        ).to_json(),
+    }
+    context = await _document_builder(tmp_path).build(claimed, sequence_start=1)
+    assert [tool.capability for tool in context.tools] == capabilities
+
+
+async def test_required_conversion_without_permission_fails_closed(tmp_path: Path) -> None:
+    """Manifest の変換宣言だけでは旧 Run の許可上限を広げない。"""
+
+    manifest = _document_manifest()
+    manifest["tools"].append({"capability": "document.convert/v1", "required": True})
+    claimed = _generic_claimed(
+        manifest=manifest, allowed=("document.read/v1",), selected_sources={}
+    )
+    claimed.selected_sources_json["project-doc"] = {
+        "capability": "document.read/v1", "provider": "project-documents",
+        "document_snapshot": document_snapshot(
+            claimed.project_id, [document_content()], key="project-doc"
+        ).to_json(),
+    }
+    with pytest.raises(ValueError, match="not allowed"):
+        await _document_builder(tmp_path).build(claimed, sequence_start=1)
+
+
 async def test_legacy_document_context_cannot_implicitly_authorize_all(tmp_path: Path) -> None:
     """旧 provider 名だけの Run を Project 全文書の認可へ昇格させない。"""
 
@@ -919,3 +964,115 @@ async def test_context_builder_rejects_provider_without_frozen_binding(tmp_path:
     claimed.selected_sources_json["primary-issues"].pop("integration_id")
     with pytest.raises(ValueError, match="requires a frozen Integration binding"):
         await builder.build(claimed, sequence_start=1)
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_database_apply_context_exposes_observe_and_propose_only(
+    tmp_path: Path, enabled: bool
+):
+    """実 context 準備で write binding と必須 effect 宣言を直接 Tool に変換しない。"""
+    manifest = _generic_manifest()
+    capabilities = ("database.read/v1", "database.write/v1", "change.propose/v1")
+    manifest["tools"] = [
+        {"capability": capability, "required": True} for capability in capabilities
+    ]
+    blueprint = manifest["capability_blueprint"]
+    blueprint["resource_requirements"] = [
+        {
+            "key": "records",
+            "kind": "other",
+            "required": True,
+            "access": "write",
+            "capabilities": list(capabilities[:2]),
+            "accepted_providers": ["postgres"],
+        }
+    ]
+    blueprint["effect_intents"] = [
+        {
+            "key": "insert",
+            "resource_key": "records",
+            "mode": "apply",
+            "operation": "INSERT",
+            "risk": "low",
+        }
+    ]
+    claimed = _generic_claimed(
+        selected_sources={"records": {"capability": "database.read/v1", "provider": "postgres"}},
+        allowed=capabilities,
+        manifest=manifest,
+    )
+    source = claimed.selected_sources_json["records"]
+    source.update(binding_capability="database.write/v1", access="write")
+    source["binding_checksum"] = binding_checksum(
+        project_id=claimed.project_id,
+        scope_level=ResourceBindingLevel.RUN,
+        scope_key=str(claimed.run_id),
+        requirement_key="records",
+        resource_kind="other",
+        integration_id=UUID(source["integration_id"]),
+        provider="postgres",
+        capability_version="database.write/v1",
+        revision="1",
+        scope={},
+    )
+    provider = Mock()
+    builder = ProductionRunContextBuilder(
+        workspace_manager=WorkspaceManager((tmp_path / "runs").resolve()),
+        tool_registry=create_run_tool_registry(
+            ContractStore(CONTRACTS),
+            document_source=_NoopDocumentSource(),
+            database_provider=provider,
+            deferred_features_enabled=False,
+            database_writes_enabled=enabled,
+        ),
+        model="claude-test",
+        deferred_features_enabled=False,
+        database_writes_enabled=enabled,
+    )
+    if enabled:
+        context = await builder.build(claimed, sequence_start=1)
+        assert {tool.capability for tool in context.tools} == {
+            "database.read/v1",
+            "change.propose/v1",
+        }
+    else:
+        with pytest.raises(ValueError, match="disabled execution features"):
+            await builder.build(claimed, sequence_start=1)
+    provider.execute.assert_not_called()
+
+
+@pytest.mark.parametrize("on_demand", [False, True])
+async def test_document_effect_prerequisites_reject_eager_input_preparation(tmp_path, on_demand):
+    """元 gate と required readiness Tool を登録し、DB 前の本文物化経路を拒否する。"""
+    manifest = _document_manifest()
+    blueprint = manifest["capability_blueprint"]
+    blueprint["tasks"][0]["document_prerequisites"] = ["register-run"]
+    blueprint["resource_requirements"].append({
+        "key": "records", "kind": "issue", "access": "write", "required": False,
+        "capabilities": ["issue.update/v1"],
+    })
+    blueprint["effect_intents"] = [{"key": "register-run", "mode": "apply",
+        "resource_key": "records", "operation": "UPDATE", "risk": "medium", "approval_mode": "ask"}]
+    capability = "document.list/v1" if on_demand else "document.read/v1"
+    blueprint["resource_requirements"][0]["capabilities"] = [capability]
+    manifest["tools"] = [{"capability": c, "required": True} for c in (
+        capability, "document.readiness/v1", "change.propose/v1",
+    )]
+    claimed = _generic_claimed(manifest=manifest,
+        allowed=(capability, "document.readiness/v1", "change.propose/v1"), selected_sources={})
+    claimed.selected_sources_json["project-doc"] = {
+        "capability": capability, "provider": "project-documents",
+        "document_snapshot": document_snapshot(
+            claimed.project_id, [document_content()], key="project-doc"
+        ).to_json(),
+        **({"preparation_policy": "on-demand/v1"} if on_demand else {}),
+    }
+    builder = _document_builder(tmp_path)
+    if not on_demand:
+        with pytest.raises(ValueError, match="on-demand preparation"):
+            await builder.build(claimed, sequence_start=1)
+        assert not (tmp_path / "runs").exists()
+    else:
+        context = await builder.build(claimed, sequence_start=1)
+        assert "document.readiness/v1" in {tool.capability for tool in context.tools}
+        assert context.task_brief["execution"]["document_prerequisites"] == ["register-run"]

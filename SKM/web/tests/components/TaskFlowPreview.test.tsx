@@ -83,3 +83,16 @@ describe('read-only original task flow rendering', () => {
     expect(stringifyLosslessJson(preview.plan!.task.value.parameter_contract)).toBe(contract)
   })
 })
+
+it.each(['zh', 'ja', 'en'] as UiLanguage[])('shows source-backed document prerequisites in %s', (language) => {
+  const preview = flowPreview()
+  preview.plan!.task.value.document_prerequisites = ['register-run']
+  preview.source_traces.push({
+    target: `${preview.plan!.task.blueprint_ref}/document_prerequisites`, path: 'SKILL.md', line: 3,
+    reason: 'Save the initial record before document access.', verification: 'TEXT_SNAPSHOT',
+  })
+  const html = renderToStaticMarkup(<LanguageProvider language={language}><TaskFlowPreview preview={preview} /></LanguageProvider>)
+  expect(html).toContain(MESSAGES[language].skills.documentPrerequisites)
+  expect(html).toContain('register-run')
+  expect(html).toContain(`data-flow-item-sources="${preview.plan!.task.blueprint_ref}/document_prerequisites"`)
+})

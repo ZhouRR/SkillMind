@@ -5,16 +5,21 @@ Agent には text だけを見せる。原本を生のまま物化しても `wor
 この sheet のこの cell」「この段落」という参照を Evidence として指せるようにするためで、単なる
 本文抽出ではその追跡性が失われる。
 
-対応形式は xlsx/xlsm (表) と docx (文書)。いずれも OPC (ZIP + XML) であり、標準 library だけで
-必要な範囲を読めるため**外部依存を増やさない**。PDF は構造上 parser 実装か新依存が必要で、
-費用対効果が変わるため対象外のままとする (読めない binary は従来どおり `skipped` に残る)。
+既存の位置付き text 化は xlsx/xlsm と docx に対応する。明示的な Excel Markdown 変換は
+別入口から Worker の固定版 MarkItDown を呼び、既存の物化内容・版を変更しない。
 """
 
 from __future__ import annotations
 
+import asyncio
+import os
+import sys
 import zipfile
 from collections.abc import Iterator
+from dataclasses import dataclass
 from io import BytesIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from xml.etree import ElementTree
 
 # 変換対象の拡張子。xlsm は容器構造が xlsx と同一のため同じ経路で読める (macro は解釈しない)。
@@ -32,6 +37,10 @@ _MAX_UNCOMPRESSED_BYTES = 33_554_432
 _MAX_ZIP_ENTRIES = 512
 # 1 entry あたりの展開上限。sharedStrings や大 sheet の XML はこの範囲に収まる想定。
 _MAX_ENTRY_BYTES = 16_777_216
+MAX_EXCEL_INPUT_BYTES = 8_388_608
+MAX_MARKDOWN_BYTES = 1_048_576
+MARKITDOWN_VERSION = "0.1.7"
+_CONVERSION_TIMEOUT_SECONDS = 30
 
 
 class BinaryTextError(RuntimeError):
@@ -40,6 +49,105 @@ class BinaryTextError(RuntimeError):
 
 # 旧名。既存の呼び出し・テストを壊さずに済ませるための別名 (意味は同一)。
 SpreadsheetTextError = BinaryTextError
+
+
+@dataclass(frozen=True, slots=True)
+class MarkdownConversion:
+    """同一原本から得た全 Markdown と変換器の固定版を返す。"""
+
+    markdown: str
+    converter_version: str = MARKITDOWN_VERSION
+
+
+async def convert_excel_to_markdown(path: str, data: bytes) -> MarkdownConversion:
+    """有界の子 process で Excel を変換し、取消・期限超過では停止を回収する。"""
+
+    suffix = Path(path).suffix.lower()
+    if suffix not in {".xlsx", ".xls"}:
+        raise BinaryTextError("Only .xlsx and .xls documents can be converted")
+    if not data or len(data) > MAX_EXCEL_INPUT_BYTES:
+        raise BinaryTextError("Excel input is empty or exceeds the conversion limit")
+    if suffix == ".xlsx":
+        try:
+            with zipfile.ZipFile(BytesIO(data)) as archive:
+                _ensure_safe_archive(archive)
+        except zipfile.BadZipFile as error:
+            raise BinaryTextError("Excel document could not be read") from error
+    elif not data.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+        raise BinaryTextError("Excel document could not be read")
+    # sys.path は Worker 起動時の trusted package 設定。Run/input の path は渡さない。
+    environment = {
+        "PYTHONPATH": os.pathsep.join(str(Path(item).resolve()) for item in sys.path if item),
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "OMP_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+    }
+    try:
+        with TemporaryDirectory(prefix="skillmind-excel-") as temporary:
+            process = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", "skillmind.agent.markitdown_worker", suffix,
+                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL, cwd=temporary, env=environment,
+            )
+            try:
+                async with asyncio.timeout(_CONVERSION_TIMEOUT_SECONDS):
+                    markdown = await _exchange_markdown(process, data)
+            finally:
+                if process.returncode is None:
+                    process.kill()
+                await process.wait()
+    except (OSError, TimeoutError) as error:
+        raise BinaryTextError(
+            "Excel conversion was unavailable or exceeded its deadline"
+        ) from error
+    return MarkdownConversion(markdown)
+
+
+async def _exchange_markdown(process: asyncio.subprocess.Process, data: bytes) -> str:
+    """入力と出力を有界に交換し、子 process のエラー正文を公開しない。"""
+
+    assert process.stdin is not None and process.stdout is not None
+    try:
+        process.stdin.write(data)
+        await process.stdin.drain()
+        process.stdin.close()
+        await process.stdin.wait_closed()
+        chunks = bytearray()
+        while chunk := await process.stdout.read(min(65_536, MAX_MARKDOWN_BYTES + 1 - len(chunks))):
+            chunks.extend(chunk)
+            if len(chunks) > MAX_MARKDOWN_BYTES:
+                raise BinaryTextError("Converted Markdown exceeds the output limit")
+        if await process.wait() != 0:
+            raise BinaryTextError("Excel conversion failed")
+        markdown = chunks.decode("utf-8")
+        if not markdown.strip():
+            raise BinaryTextError("Excel conversion produced no readable text")
+        return markdown
+    except (BrokenPipeError, ConnectionResetError, UnicodeDecodeError) as error:
+        raise BinaryTextError("Excel conversion failed") from error
+
+
+def render_excel_markdown(suffix: str, data: bytes) -> str:
+    """専用子 process から固定 Excel converter だけを呼び、URL 自動判定を使わない。"""
+
+    from importlib.metadata import version
+
+    from markitdown import StreamInfo
+    from markitdown.converters import XlsConverter, XlsxConverter
+
+    if version("markitdown") != MARKITDOWN_VERSION:
+        raise BinaryTextError("MarkItDown version does not match the Worker contract")
+    if suffix not in {".xlsx", ".xls"}:
+        raise BinaryTextError("Unsupported Excel format")
+    # 固定版の公開 constructor は型 annotation を持たない。
+    converter = (
+        XlsxConverter() if suffix == ".xlsx" else XlsConverter()  # type: ignore[no-untyped-call]
+    )
+    markdown: str = converter.convert(BytesIO(data), StreamInfo(extension=suffix)).markdown
+    if len(markdown.encode("utf-8")) > MAX_MARKDOWN_BYTES:
+        raise BinaryTextError("Converted Markdown exceeds the output limit")
+    return markdown
 
 
 def is_textualizable(path: str) -> bool:

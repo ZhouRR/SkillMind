@@ -1,0 +1,17 @@
+{
+  "status": "success",
+  "provider": "postgres",
+  "proposal_ref": "cp_database001",
+  "before_ref": "ev_before001",
+  "after_ref": "ev_after001",
+  "verification": {
+    "method": "READ_BACK",
+    "matched_paths": [
+      "/row"
+    ],
+    "replayed": false,
+    "effect_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "request_checksum": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "replayed": false
+}

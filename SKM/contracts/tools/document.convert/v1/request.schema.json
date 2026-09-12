@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/document.convert/v1/request.schema.json",
+  "title": "document.convert/v1 request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "purpose"
+  ],
+  "properties": {
+    "observation_ref": {
+      "description": "Optional successful document.inspect/v1 or per-entry document.list/v1 Evidence from this Run; fixes acquisition to the observed document and storage version. Invalid or missing evidence fails without ordinary-read fallback.",
+      "type": "string",
+      "pattern": "^ev_[a-zA-Z0-9_-]+$",
+      "maxLength": 64
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "publish_artifact": {
+      "type": "boolean",
+      "default": false,
+      "description": "Explicitly persist the exact converted UTF-8 Markdown as an immutable Run Artifact for later approved document.write. Uses existing Artifact quotas; no workspace or MinIO write. Default conversion behavior remains unchanged."
+    }
+  }
+}

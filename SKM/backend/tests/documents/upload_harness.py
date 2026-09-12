@@ -13,7 +13,8 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import Select, and_
 from sqlalchemy.dialects import sqlite
-from sqlalchemy.sql.elements import Case
+from sqlalchemy.sql import operators
+from sqlalchemy.sql.elements import BooleanClauseList, Case
 from sqlalchemy.sql.selectable import Exists
 
 from skillmind.db.models import (
@@ -21,6 +22,7 @@ from skillmind.db.models import (
     Organization,
     Project,
     ProjectDocument,
+    ProjectDocumentEffectUpload,
     ProjectDocumentUpload,
     ProjectDocumentUploadClosure,
     ProjectMember,
@@ -53,6 +55,7 @@ class UploadDatabase(DeletionDatabase):
         self.usage_reads = 0
         self.last_upload_key: UUID | None = None
         self.closures: list[ProjectDocumentUploadClosure] = []
+        self.effects: list[ProjectDocumentEffectUpload] = []
         self.transaction_gate = asyncio.Lock()
         self.on_closure_read: Callable[[], None] | None = None
         self.lock_transaction = 0
@@ -111,6 +114,9 @@ class UploadDatabase(DeletionDatabase):
             )
         if isinstance(expression, Exists):
             return self.path_exists(statement, expression)
+        if isinstance(expression, BooleanClauseList):
+            assert expression.operator is operators.or_
+            return any(self.path_exists(Select(clause), clause) for clause in expression.clauses)
         if not isinstance(expression, Case):
             return await super().scalar(statement)
         assert self.in_transaction and statement._for_update_arg is None
@@ -122,20 +128,24 @@ class UploadDatabase(DeletionDatabase):
         with closing(sqlite3.connect(":memory:")) as database:
             database.execute(
                 "CREATE TABLE project_documents "
-                "(project_id TEXT, size INTEGER, upload_intent_id TEXT)"
+                "(project_id TEXT, size INTEGER, upload_intent_id TEXT, effect_upload_id TEXT)"
             )
             database.execute("CREATE TABLE document_upload_intents (project_id TEXT, size INTEGER)")
+            database.execute("CREATE TABLE document_effect_uploads (project_id TEXT, size INTEGER)")
+            database.executemany("INSERT INTO document_effect_uploads VALUES (?, ?)",
+                                 [(row.project_id.hex, row.size) for row in self.effects])
             database.execute(
                 "CREATE TABLE document_blob_cleanups "
                 "(project_id TEXT, size INTEGER, upload_intent_id TEXT)"
             )
             database.executemany(
-                "INSERT INTO project_documents VALUES (?, ?, ?)",
+                "INSERT INTO project_documents VALUES (?, ?, ?, ?)",
                 [
                     (
                         row.project_id.hex,
                         row.size,
                         (None if row.upload_intent_id is None else row.upload_intent_id.hex),
+                        (None if row.effect_upload_id is None else row.effect_upload_id.hex),
                     )
                     for row in self.documents
                 ],
@@ -177,6 +187,9 @@ class UploadDatabase(DeletionDatabase):
         rows: Sequence[ProjectDocument | ProjectDocumentUpload]
         if table == "project_documents":
             model, rows = ProjectDocument, self.documents
+            assert set(params) == {"project_id_1", "folder_1", "name_1"}
+        elif table == "document_effect_uploads":
+            model, rows = ProjectDocumentEffectUpload, self.effects
             assert set(params) == {"project_id_1", "folder_1", "name_1"}
         else:
             assert table == "document_upload_intents"

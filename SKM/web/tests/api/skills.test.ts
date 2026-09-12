@@ -4,6 +4,7 @@ import {
   API_BASE,
   ApiProblemError,
   adjustInterpretation,
+  confirmInterpretationRequest,
   createSkillVersionDraft,
   deleteSkillVersion,
   deprecateSkillVersion,
@@ -23,6 +24,11 @@ const PROJECT_ID = '00000000-0000-4000-8000-000000000020'
 const SOURCE_ID = '00000000-0000-4000-8000-000000000040'
 const INTERPRETATION_ID = '00000000-0000-4000-8000-000000000050'
 const CHILD_INTERPRETATION_ID = '00000000-0000-4000-8000-000000000051'
+const REQUEST_ID = '00000000-0000-4000-8000-000000000061'
+const REQUEST_RESPONSE = {
+  request_id: REQUEST_ID, skill_source_id: SOURCE_ID, status: 'QUEUED' as const,
+  execution_key: `sha256:${'a'.repeat(64)}`, interpretation_id: null, error_code: null,
+}
 
 // 汎用 repository-review Skill を interpret 契約テストの素材にする。
 const PREVIEW = {
@@ -226,53 +232,52 @@ afterEach(() => vi.unstubAllGlobals())
 describe('Skill interpretation API contract', () => {
   it('queues a worker interpret job and returns the launch envelope', async () => {
     const fetchMock = jsonFetch(
-      { status: 'queued', execution_key: `sha256:${'a'.repeat(64)}`, execution: null },
+      REQUEST_RESPONSE,
       200,
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const launch = await interpretSkillSource(SOURCE_ID, CSRF)
+    const launch = await interpretSkillSource(SOURCE_ID, REQUEST_ID, CSRF)
 
-    // Model への egress を持つ Worker が実行するため、同期 execution は返らず queued になる。
-    expect(launch.status).toBe('queued')
-    expect(launch.execution).toBeNull()
+    // API は原要求の状態だけを返し、本文は結果の read API が返す。
+    expect(launch.status).toBe('QUEUED')
+    expect(launch.interpretation_id).toBeNull()
+    expect(launch.request_id).toBe(REQUEST_ID)
     expect(launch.execution_key).toMatch(/^sha256:/)
     const call = fetchMock.mock.calls[0]
     if (!call) throw new Error('Expected one fetch call')
-    expect(call[0]).toBe(`${API_BASE}/skill-sources/${SOURCE_ID}/interpret`)
+    expect(call[0]).toBe(`${API_BASE}/skill-sources/${SOURCE_ID}/interpretation-requests`)
     expect(call[1]?.method).toBe('POST')
     expect(call[1]?.headers).toMatchObject({ 'X-CSRF-Token': CSRF })
   })
 
-  it('parses a reused stored execution embedded in the launch envelope', async () => {
+  it('accepts a terminal request with a result pointer', async () => {
     vi.stubGlobal('fetch', jsonFetch(
-      { status: 'stored', execution_key: `sha256:${'a'.repeat(64)}`, execution: INTERPRET_RESPONSE },
+      { ...REQUEST_RESPONSE, status: 'SUCCEEDED', interpretation_id: CHILD_INTERPRETATION_ID },
       200,
     ))
 
-    const launch = await interpretSkillSource(SOURCE_ID, CSRF)
+    const launch = await interpretSkillSource(SOURCE_ID, REQUEST_ID, CSRF)
 
-    expect(launch.status).toBe('stored')
-    expect(launch.execution?.report?.confidence.capabilities).toBe(0.8)
-    expect(launch.execution?.preview.normalized_package.source.detected_adapter)
-      .toBe('directory-skill/v1')
+    expect(launch.status).toBe('SUCCEEDED')
+    expect(launch.interpretation_id).toBe(CHILD_INTERPRETATION_ID)
   })
 
-  it('adds the explicit regeneration query only when requested', async () => {
+  it('binds explicit regeneration to the original request in the body', async () => {
     const fetchMock = jsonFetch(
-      { status: 'queued', execution_key: `sha256:${'b'.repeat(64)}`, execution: null },
+      { ...REQUEST_RESPONSE, execution_key: `sha256:${'b'.repeat(64)}` },
       200,
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await interpretSkillSource(SOURCE_ID, CSRF, undefined, true)
+    await interpretSkillSource(SOURCE_ID, REQUEST_ID, CSRF, undefined, true)
 
     const call = fetchMock.mock.calls[0]
     if (!call) throw new Error('Expected one fetch call')
     expect(call[0]).toBe(
-      `${API_BASE}/skill-sources/${SOURCE_ID}/interpret`
-      + '?force_regenerate=true',
+      `${API_BASE}/skill-sources/${SOURCE_ID}/interpretation-requests`,
     )
+    expect(JSON.parse(String(call[1]?.body))).toEqual({ request_id: REQUEST_ID, force_regenerate: true })
   })
 
   it('uploads directory files as multipart with relative-path filenames and CSRF', async () => {
@@ -316,7 +321,7 @@ describe('Skill interpretation API contract', () => {
 
   it('queues an append-only adjustment job with the instruction and CSRF', async () => {
     const fetchMock = jsonFetch(
-      { status: 'queued', execution_key: `sha256:${'b'.repeat(64)}`, execution: null },
+      { ...REQUEST_RESPONSE, execution_key: `sha256:${'b'.repeat(64)}` },
       200,
     )
     vi.stubGlobal('fetch', fetchMock)
@@ -324,18 +329,18 @@ describe('Skill interpretation API contract', () => {
     const launch = await adjustInterpretation(
       INTERPRETATION_ID,
       'Only review a single file and stress unresolved risk.',
-      CSRF,
+      REQUEST_ID, CSRF,
     )
 
-    expect(launch.status).toBe('queued')
+    expect(launch.status).toBe('QUEUED')
     const call = fetchMock.mock.calls[0]
     if (!call) throw new Error('Expected one fetch call')
     expect(call[0]).toBe(
-      `${API_BASE}/skill-interpretations/${INTERPRETATION_ID}/adjust`,
+      `${API_BASE}/skill-interpretations/${INTERPRETATION_ID}/adjustment-requests`,
     )
     expect(call[1]?.method).toBe('POST')
     expect(JSON.parse(String(call[1]?.body))).toEqual({
-      instruction: 'Only review a single file and stress unresolved risk.',
+      request_id: REQUEST_ID, instruction: 'Only review a single file and stress unresolved risk.',
     })
   })
 
@@ -409,12 +414,22 @@ describe('Skill interpretation API contract', () => {
 
   it('rejects a launch envelope with an unknown status', async () => {
     vi.stubGlobal('fetch', jsonFetch(
-      { status: 'running', execution_key: `sha256:${'a'.repeat(64)}`, execution: null },
+      { ...REQUEST_RESPONSE, status: 'QUEUING' },
       200,
     ))
 
-    await expect(interpretSkillSource(SOURCE_ID, CSRF))
-      .rejects.toThrow('Interpretation launch response did not match its contract')
+    await expect(interpretSkillSource(SOURCE_ID, REQUEST_ID, CSRF))
+      .rejects.toThrow('Interpretation request response did not match its contract')
+  })
+
+  it('checks an unknown original request with GET and rejects a different identity', async () => {
+    const fetchMock = jsonFetch({ ...REQUEST_RESPONSE, status: 'UNKNOWN' }, 200)
+    vi.stubGlobal('fetch', fetchMock)
+    expect((await confirmInterpretationRequest(REQUEST_ID)).status).toBe('UNKNOWN')
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(`${API_BASE}/skill-interpretation-requests/${REQUEST_ID}`)
+    expect(fetchMock.mock.calls[0]?.[1]?.method).not.toBe('POST')
+    vi.stubGlobal('fetch', jsonFetch({ ...REQUEST_RESPONSE, request_id: SOURCE_ID }, 200))
+    await expect(confirmInterpretationRequest(REQUEST_ID)).rejects.toThrow('Interpretation request did not match')
   })
 
   it('surfaces an unavailable interpreter as a typed 503 problem', async () => {
@@ -423,7 +438,7 @@ describe('Skill interpretation API contract', () => {
       503,
     ))
 
-    const error = await interpretSkillSource(SOURCE_ID, CSRF).catch((caught: unknown) => caught)
+    const error = await interpretSkillSource(SOURCE_ID, REQUEST_ID, CSRF).catch((caught: unknown) => caught)
     expect(error).toBeInstanceOf(ApiProblemError)
     expect((error as ApiProblemError).status).toBe(503)
     expect((error as ApiProblemError).code).toBe('skill_interpreter_unavailable')
@@ -580,5 +595,27 @@ describe('Skill library scope API contract', () => {
     expect(call[1]).toMatchObject({ method: 'POST', credentials: 'same-origin', signal: controller.signal })
     expect(call[1]?.headers).toMatchObject({ 'X-CSRF-Token': CSRF })
     expect(call[1]?.body).toBeUndefined()
+  })
+})
+
+/** 新しい前置条件を暗黙に省略せず、公開 preview の境界で型を検証する。 */
+describe('document effect prerequisites', () => {
+  it.each([null, [], ['register-run', 'register-run'], [12], 'register-run'])(
+    'rejects malformed declared prerequisites %j', async (value) => {
+      const response = structuredClone(INTERPRET_RESPONSE)
+      Object.assign(response.preview.capability_blueprint.tasks[0]!, { document_prerequisites: value })
+      vi.stubGlobal('fetch', jsonFetch(response, 200))
+      await expect(loadInterpretationExecution(INTERPRETATION_ID)).rejects.toThrow()
+    },
+  )
+
+  it('keeps a valid original prerequisite in the reviewable preview', async () => {
+    const response = structuredClone(INTERPRET_RESPONSE)
+    Object.assign(response.preview.capability_blueprint.tasks[0]!, {
+      document_prerequisites: ['register-run'],
+    })
+    vi.stubGlobal('fetch', jsonFetch(response, 200))
+    const execution = await loadInterpretationExecution(INTERPRETATION_ID)
+    expect(execution.preview.capability_blueprint?.tasks[0]?.document_prerequisites).toEqual(['register-run'])
   })
 })

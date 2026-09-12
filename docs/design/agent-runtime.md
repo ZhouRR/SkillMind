@@ -28,12 +28,16 @@ Skill、Ticket、代码或模型建议都是输入，不是授权。业务规则
 
 | 内容 | 必须说明什么 |
 | --- | --- |
-| 身份与目标 | Run、Segment、Task、精确 SkillVersion/checksum，目标和成功条件 |
+| 身份与目标 | Run、Project、Segment、Task、精确 SkillVersion/checksum，目标和成功条件 |
 | 指导与资源 | Skill 必需规则、建议步骤、质量要求与禁止事项；合法 binding、来源与路径 |
 | 策略 | capability/参数/scope、限额、交互和效果批准边界 |
 | 输出与续行 | 交付要求、可选 Schema、checkpoint、已确认事实及 Evidence/Proposal 引用 |
 
-Brief 保留必需指导，不含凭据、内部配置或跨 Project 数据。Checkpoint 可压缩上下文，但须保留原 transcript/source trace，不改用户事实或批准范围。
+Brief 保留必需指导，不含凭据、连接配置或跨 Project 数据；已绑定项目文档库的最小登记引用遵循[资源投影](resource-snapshots.md#公开选择与读取投影的实施契约)。Checkpoint 可压缩上下文，但须保留原 transcript/source trace，不改用户事实或批准范围。
+
+Effect 成功确认为 APPLIED 时，同事务生成的下一 Segment checkpoint 带可选 `effect_result`：原 Effect/Proposal、after Evidence 引用及摘要、完整回读内容和 verification。Brief 保留并渲染这份原执行事实，不靠模型从引用或批准内容重建返回值；正文作为数据，不作为指令、当前外部状态或新写入权限。对象保存回执可含后续登记所需的 bucket/key/version/ETag，不含连接 endpoint 或凭据。该字段仅由平台 finalize 写入，模型的 propose/interaction checkpoint 不接受；失败续行不沿用上次回执，结果未知仍按效果协议停止。
+
+回执采用规范 JSON、2 MiB 字节上限、原 Evidence hash 和共享敏感字段校验；超限或损坏拒绝交给 Agent，不截断为成功。每次仅携带本次回执，后续 checkpoint 通过既有事实和引用字段保存所需上下文。旧 checkpoint 缺少字段时保持原形，不补造历史值；无 summary 但有事实或引用时也必须渲染。API/Worker 须同步升级，旧 Worker 会丢弃新增字段，不能用于依赖返回值的完整业务验收。
 
 ## 自主执行等级
 
@@ -72,6 +76,8 @@ Skill 可推荐等级，system ADMIN 设置项目上限，发起人只能收窄�
 ### PreToolUse 判定
 
 hook、Gateway、binding/Provider 和 Effect Worker 分担检查：注册 capability 与 Skill/Project/Run 权限、binding/scope/revision、参数与敏感字段、局部限额、apply 的批准。Run 累计限额仍待[共享预算](run-budgets.md)。
+
+固定 CLI 的 `StructuredOutput` 单独作为结果传输通道：hook 按冻结的结果 Schema 校验，只解析本地 Schema 引用；不授予资源或文件操作权限，也不创建资源 Tool 授权/审计。它的内部调用不投影为资源 Tool 事件，用量、最终结果和失败仍保留。结果仍是候选，须由 Worker 完成[业务 Schema、引用与结果校验](results-evaluation.md)后才能提交成功；其他内置或未注册 Tool 不因这个通道获准。
 
 Provider 前校验请求，返回后校验 Schema/敏感信息/大小；失败内容不交 Agent，只留脱敏审计，禁止 bypassPermissions。另按[调用提交与重放](run-supervision.md#tool-调用的提交与重放)验证原 Worker 权限：首次许可一次消费，未决/失败不重跑，成功只读重放。
 

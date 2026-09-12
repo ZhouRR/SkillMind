@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Self, cast
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -23,6 +24,7 @@ from skillmind.documents.service import DocumentService
 from skillmind.documents.snapshot import DocumentSnapshotError
 from skillmind.documents.source import DatabaseProjectDocumentSource, read_frozen_document
 from skillmind.storage import BlobReference, FileStorageError, InMemoryFileStorage, UploadLimits
+from skillmind.storage.observation import BlobObservation, ObservedBlob
 from tests.documents.fakes import document_content, document_snapshot, stored_document
 
 _ORIGINAL_KEY = "original/identity"
@@ -224,3 +226,119 @@ async def test_read_cancellation_is_not_reported_as_confirmed_storage_failure(
             project_id=project_id,
             document=document_snapshot(project_id, [content]).documents[0],
         )
+
+
+@pytest.mark.parametrize("failure", [None, "changed", "hash", "size", "namespace"])
+async def test_source_preserves_observation_only_with_original_verified_bytes(
+    monkeypatch: pytest.MonkeyPatch, failure: str | None,
+) -> None:
+    """取得 metadata と原 hash/namespace を同時に検証し、失敗時に通常 GET へ降格しない。"""
+
+    project_id = uuid4()
+    content = document_content(b"abc")
+    storage = InMemoryFileStorage()
+    _metadata(monkeypatch, stored_document(project_id, content), storage)
+    observation = BlobObservation(
+        last_modified=datetime(2026, 9, 11, tzinfo=UTC), etag="opaque",
+        version_id="v1", size=2 if failure == "size" else 3, content_type=content.mime,
+    )
+
+    async def acquire(key: str, *, max_bytes: int) -> ObservedBlob:
+        """原 key/上限を確認し、SDK 失敗・本文差替え・取得中の保存先変更を模倣する。"""
+
+        assert key == _ORIGINAL_KEY and max_bytes == 3
+        if failure == "changed":
+            raise FileStorageError("Blob changed during acquisition")
+        if failure == "namespace":
+            monkeypatch.setattr(storage, "_namespace", InMemoryFileStorage().namespace)
+        return ObservedBlob(b"xyz" if failure == "hash" else content.data, observation)
+
+    observed = AsyncMock(side_effect=acquire)
+    get = AsyncMock(side_effect=AssertionError("No downgrade to plain GET"))
+    monkeypatch.setattr(storage, "get_observed", observed, raising=False)
+    monkeypatch.setattr(storage, "get", get)
+    _, source = _readers(storage)
+    frozen = document_snapshot(project_id, [content]).documents[0]
+    if failure is not None:
+        with pytest.raises(DocumentSnapshotError, match="unavailable"):
+            await read_frozen_document(source, project_id=project_id, document=frozen)
+    else:
+        acquired = await read_frozen_document(source, project_id=project_id, document=frozen)
+        assert acquired == replace(content, observation=observation)
+    observed.assert_awaited_once()
+    get.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "failure", [None, "project", "metadata", "hash", "observation", "key", "namespace"]
+)
+async def test_document_inspection_and_later_acquisition_keep_original_identity(
+    monkeypatch: pytest.MonkeyPatch, failure: str | None,
+) -> None:
+    """本文なしの観測から原 Project/文書/metadata/hash を維持して後日取得する。"""
+
+    project_id = uuid4()
+    content = document_content(b"abc")
+    document = stored_document(project_id, content)
+    storage = InMemoryFileStorage()
+    lookup = _metadata(monkeypatch, document, storage)
+    observation = BlobObservation(
+        last_modified=datetime(2026, 9, 11, tzinfo=UTC), etag="opaque",
+        version_id="original-version", size=3, content_type=content.mime,
+    )
+    inspect = AsyncMock(return_value=observation)
+    get = AsyncMock(side_effect=AssertionError("No ordinary GET"))
+    acquired_observation = (
+        replace(observation, etag="changed") if failure == "observation" else observation
+    )
+    acquired = AsyncMock(return_value=ObservedBlob(
+        b"xyz" if failure == "hash" else content.data, acquired_observation
+    ))
+    monkeypatch.setattr(storage, "inspect", inspect, raising=False)
+    monkeypatch.setattr(storage, "get_observed", acquired, raising=False)
+    monkeypatch.setattr(storage, "get", get)
+    _, source = _readers(storage)
+    observed = await source.inspect(project_id=project_id, document_id=content.document_id)
+    assert observed is not None and observed.document.content_hash == content.checksum
+    assert observed.observation == observation
+    inspect.assert_awaited_once_with(_ORIGINAL_KEY)
+    acquired.assert_not_called()
+    if failure == "metadata":
+        lookup.return_value = (
+            replace(document, name="replaced.md"), BlobReference(_ORIGINAL_KEY, storage.namespace)
+        )
+    elif failure == "key":
+        lookup.return_value = (document, BlobReference("replaced/key", storage.namespace))
+    elif failure == "namespace":
+        monkeypatch.setattr(storage, "_namespace", InMemoryFileStorage().namespace)
+        lookup.return_value = (document, BlobReference(_ORIGINAL_KEY, storage.namespace))
+    if failure is not None:
+        with pytest.raises((DocumentSnapshotError, DocumentContentInvalidError)):
+            await source.fetch_observed(
+                project_id=uuid4() if failure == "project" else project_id, observed=observed
+            )
+    else:
+        result = await source.fetch_observed(project_id=project_id, observed=observed)
+        assert result == replace(content, observation=observation)
+    if failure in {"project", "metadata", "key", "namespace"}:
+        acquired.assert_not_called()
+    else:
+        acquired.assert_awaited_once_with(_ORIGINAL_KEY, max_bytes=3, expected=observation)
+    get.assert_not_called()
+
+
+async def test_nonobserving_storage_cannot_fabricate_inspection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """metadata 非対応 backend では本文取得に逃げず、観測不能を明示する。"""
+
+    project_id = uuid4()
+    content = document_content(b"abc")
+    storage = InMemoryFileStorage()
+    _metadata(monkeypatch, stored_document(project_id, content), storage)
+    get = AsyncMock(side_effect=AssertionError("No GET to fabricate observation"))
+    monkeypatch.setattr(storage, "get", get)
+    _, source = _readers(storage)
+    with pytest.raises(DocumentStorageUnavailableError, match="observation is unavailable"):
+        await source.inspect(project_id=project_id, document_id=content.document_id)
+    get.assert_not_called()

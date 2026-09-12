@@ -59,6 +59,7 @@ from skillmind.documents.snapshot import (
     DocumentSnapshot,
     DocumentSnapshotError,
     FrozenDocument,
+    document_preparation_policy,
     parse_document_snapshot,
     selected_document_snapshots,
     snapshot_documents,
@@ -182,6 +183,15 @@ class WorkspaceMaterializer:
             )
         ]:
             raise MaterializationError("Prepared documents do not match the frozen Run sources")
+        # 同一文書を別 read slot でも選んだ場合は、明示された遅延取得を優先する。
+        deferred_ids = frozenset(
+            document.document_id
+            for snapshot in snapshots
+            if document_preparation_policy(
+                claimed_run.selected_sources_json[snapshot.requirement_key]
+            ) is not None
+            for document in snapshot.documents
+        )
         bindings = repository_bindings or {}
         repository_metadata = await self._inspect_bindings(claimed_run, blueprint, bindings)
         # 旧 input には独立回执がない。現在の内容へ補签せず、現場を保存して拒否する。
@@ -224,7 +234,8 @@ class WorkspaceMaterializer:
             self._ensure_total_budget(receipt.files)
             await asyncio.to_thread(verify_input, verified)
             resources = await asyncio.to_thread(
-                self._reuse, verified, project_id, run_id, snapshots, bindings, repository_metadata
+                self._reuse, verified, project_id, run_id, snapshots, bindings,
+                repository_metadata, deferred_ids,
             )
             return PreparedInput(verified, resources)
         materialized: list[MaterializedResource] = []
@@ -236,6 +247,7 @@ class WorkspaceMaterializer:
                 run_id=run_id,
                 snapshots=snapshots,
                 previous_files=files,
+                deferred_ids=deferred_ids,
             )
             materialized.append(prepared.resource)
             files.extend(prepared.files)
@@ -323,6 +335,7 @@ class WorkspaceMaterializer:
         snapshots: Sequence[DocumentSnapshot],
         bindings: Mapping[str, RepositoryBindingRef],
         metadata: Mapping[str, RepositorySnapshotBinding],
+        deferred_ids: frozenset[UUID],
     ) -> tuple[MaterializedResource, ...]:
         """READY の実 byte からだけ案内を再構成し、Project や remote を再取得しない。"""
 
@@ -336,8 +349,11 @@ class WorkspaceMaterializer:
                     _verify_materialized(
                         workspace,
                         _DOCUMENTS_KEY,
-                        expected=_document_identity(project_id, run_id, snapshots, documents),
+                        expected=_document_identity(
+                            project_id, run_id, snapshots, documents, deferred_ids
+                        ),
                         documents=documents,
+                        deferred_ids=deferred_ids,
                     )
                 )
             )
@@ -367,6 +383,7 @@ class WorkspaceMaterializer:
         run_id: UUID,
         snapshots: Sequence[DocumentSnapshot],
         previous_files: Sequence[InputFileSeal],
+        deferred_ids: frozenset[UUID],
     ) -> _PreparedRoot:
         """各 slot の凍結集合の和だけを物化し、未選択文書は取得しない。"""
 
@@ -374,16 +391,20 @@ class WorkspaceMaterializer:
             documents = snapshot_documents(snapshots)
         except DocumentSnapshotError as error:
             raise MaterializationError(str(error)) from error
-        identity = _document_identity(project_id, run_id, snapshots, documents)
+        identity = _document_identity(project_id, run_id, snapshots, documents, deferred_ids)
+        eager = tuple(item for item in documents if item.document_id not in deferred_ids)
         try:
-            contents = await self._document_inventory.list_contents(
-                project_id=project_id, documents=documents
+            contents = (
+                await self._document_inventory.list_contents(project_id=project_id, documents=eager)
+                if eager else ()
             )
-            _verify_document_contents(documents, contents)
+            _verify_document_contents(eager, contents)
         except DocumentSnapshotError as error:
             raise MaterializationError(str(error)) from error
         accepted, skipped = await asyncio.to_thread(self._classify_documents, contents)
-        generated = [_file_index(_DOCUMENTS_KEY, accepted, skipped)]
+        generated = [_file_index(
+            _DOCUMENTS_KEY, accepted, skipped, deferred=identity.get("deferred", ())
+        )]
         manifest = {
             **identity,
             **_materialization_summary(accepted, skipped, generated),
@@ -621,11 +642,12 @@ def _document_identity(
     run_id: UUID,
     snapshots: Sequence[DocumentSnapshot],
     documents: Sequence[FrozenDocument],
+    deferred_ids: frozenset[UUID] = frozenset(),
 ) -> dict[str, Any]:
     """新規生成と再利用で同じ凍結選択・変換形式を要求する。"""
 
-    return {
-        "manifest_version": "v1",
+    identity: dict[str, Any] = {
+        "manifest_version": "v2" if deferred_ids else "v1",
         "preparation_version": "v2",
         "text_converter_version": "v1",
         "project_id": str(project_id),
@@ -638,6 +660,17 @@ def _document_identity(
             "requirements": {item.requirement_key: item.to_json() for item in snapshots},
         },
     }
+    if deferred_ids:
+        identity["deferred"] = [
+            {
+                "path": f"{_DOCUMENTS_KEY}/{item.path}",
+                "document_id": str(item.document_id),
+                "content_hash": item.content_hash,
+                "reason": "on_demand",
+            }
+            for item in documents if item.document_id in deferred_ids
+        ]
+    return identity
 
 
 def _repository_identity(
@@ -700,6 +733,7 @@ def _file_index(
     root_name: str,
     accepted: Sequence[_AcceptedFile],
     skipped: Sequence[dict[str, str]],
+    *, deferred: Sequence[Mapping[str, str]] = (),
 ) -> _AcceptedFile:
     """物化物と skip の索引 file を作る (計画 §19 W5)。
 
@@ -714,6 +748,15 @@ def _file_index(
         f"# skipped\t{_relative_to_root(item['path'], root_name)}\t{item['reason']}"
         for item in sorted(skipped, key=lambda item: item["path"])
     )
+    if deferred:
+        lines.append(
+            "# on-demand sources: not downloaded or converted; use the authorized document tool "
+            "with the project-relative path after the Skill's prerequisites succeed"
+        )
+        lines.extend(
+            f"# deferred\t{_relative_to_root(item['path'], root_name)}\t{item['content_hash']}"
+            for item in sorted(deferred, key=lambda item: item["path"])
+        )
     data = ("\n".join(lines) + "\n").encode("utf-8")
     return _AcceptedFile(
         path=f"{root_name}/{_FILE_INDEX_RELATIVE}",
@@ -834,6 +877,7 @@ def _describe(manifest: Mapping[str, Any]) -> MaterializedResource:
         revision=str(revision) if isinstance(revision, str) else None,
         files=int(files["files"]) if isinstance(files, Mapping) and "files" in files else 0,
         skipped=len(manifest["skipped"]) if isinstance(manifest.get("skipped"), list) else 0,
+        deferred=len(manifest["deferred"]) if isinstance(manifest.get("deferred"), list) else 0,
     )
 
 
@@ -843,6 +887,7 @@ def _verify_materialized(
     *,
     expected: Mapping[str, Any],
     documents: Sequence[FrozenDocument] | None = None,
+    deferred_ids: frozenset[UUID] = frozenset(),
 ) -> Mapping[str, Any]:
     """既存物化物が manifest どおりかを検証し、その manifest を返す (docs/06 §6.4 の幂等要件)。
 
@@ -859,7 +904,7 @@ def _verify_materialized(
         raise MaterializationError("Materialized manifest could not be read") from error
     if not isinstance(manifest, dict) or any(
         manifest.get(key) != value for key, value in expected.items()
-    ):
+    ) or ("deferred" in manifest) != ("deferred" in expected):
         raise MaterializationError("Materialized manifest does not belong to this Run selection")
     files, generated, skipped = (manifest.get(key) for key in ("files", "generated", "skipped"))
     if (
@@ -876,7 +921,7 @@ def _verify_materialized(
     ):
         raise MaterializationError("Materialized skipped entries are invalid")
     if documents is not None:
-        _verify_document_members(manifest, documents)
+        _verify_document_members(manifest, documents, deferred_ids=deferred_ids)
     # 資源内容と生成物はどちらも個別 hash で確認するが、digest は資源内容だけから作る
     # (索引や履歴は資源の同一性ではない)。
     verified = [_verified_entry(workspace, root_name, item) for item in files]
@@ -895,7 +940,7 @@ def _verify_materialized(
             *("/".join(relative_parts(path)[1:]) for path in paths),
         },
     )
-    index = _file_index(root_name, verified, skipped)
+    index = _file_index(root_name, verified, skipped, deferred=expected.get("deferred", ()))
     if next(item for item in artifacts if item.path == index.path).data != index.data:
         raise MaterializationError("Materialized index does not describe its files")
     if manifest.get("materialized") != {
@@ -962,7 +1007,7 @@ def _materialization_root(requirement_key: str) -> str:
 def _validated_document_snapshots(
     blueprint: Mapping[str, Any], project_id: UUID, snapshots: Sequence[DocumentSnapshot]
 ) -> tuple[DocumentSnapshot, ...]:
-    """必須 slot の欠落、未宣言 slot、別 Project と不正 metadata を取得前に拒否する。"""
+    """読取 slot の清単だけを検証し、保存先への入力流用や必須入力の欠落を拒否する。"""
 
     requirements = blueprint.get("resource_requirements", [])
     if not isinstance(requirements, list):
@@ -972,6 +1017,7 @@ def _validated_document_snapshots(
         for item in requirements
         if isinstance(item, Mapping)
         and item.get("kind") == "document"
+        and item.get("access", "read") == "read"
         and isinstance(item.get("key"), str)
     }
     keys = {item.requirement_key for item in snapshots}
@@ -1005,11 +1051,16 @@ def _verify_document_contents(
 
 
 def _verify_document_members(
-    manifest: Mapping[str, Any], documents: Sequence[FrozenDocument]
+    manifest: Mapping[str, Any], documents: Sequence[FrozenDocument],
+    *, deferred_ids: frozenset[UUID] = frozenset(),
 ) -> None:
     """manifest が凍結集合を過不足なく説明し、原文 hash と変換元が一致するか確認する。"""
 
-    expected = {f"{_DOCUMENTS_KEY}/{item.path}": item for item in documents}
+    # deferred 清単は identity と完全一致済み。本文・skipped に混ぜて先行取得を補署しない。
+    expected = {
+        f"{_DOCUMENTS_KEY}/{item.path}": item
+        for item in documents if item.document_id not in deferred_ids
+    }
     seen: set[str] = set()
     for item in manifest["files"]:
         if not isinstance(item, dict):

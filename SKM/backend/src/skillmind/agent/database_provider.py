@@ -10,6 +10,7 @@ from urllib.parse import quote
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from skillmind.agent.evidence import EvidenceDraft
+from skillmind.agent.postgres_schema import validate_table_schema
 from skillmind.agent.postgres_source import (
     MAX_DATABASE_BYTES,
     DatabaseReadError,
@@ -24,6 +25,7 @@ from skillmind.agent.run_binding import (
 )
 from skillmind.agent.tool_gateway import ProviderToolResult, RunToolContext, ToolProviderError
 from skillmind.core.hashing import canonical_json, sha256_hex
+from skillmind.effects.database_write import database_row_revision
 from skillmind.integrations.secrets import DeploymentSecretResolver
 
 
@@ -101,21 +103,33 @@ class DatabaseReadProvider:
             raise ToolProviderError(
                 "unavailable", "Database binding changed during read", retryable=False
             )
+        table_schema = None
+        if query.include_schema:
+            try:
+                table_schema = validate_table_schema(rows.table_schema)
+            except ValueError:
+                raise ToolProviderError(
+                    "unavailable", "Database schema could not be confirmed", retryable=False
+                ) from None
+        schema_bytes = len(canonical_json(table_schema).encode("utf-8")) if table_schema else 0
         # SQL の出力制限とは別に、注入 source からの結果も公開前に有界性を検証する。
         if (
             len(rows.rows) > query.limit
-            or len(canonical_json(rows.rows).encode("utf-8")) > MAX_DATABASE_BYTES
+            or len(canonical_json(rows.rows).encode("utf-8")) + schema_bytes > MAX_DATABASE_BYTES
         ):
             raise ToolProviderError(
                 "unavailable", "Database result exceeds the read limit", retryable=False
             )
         read_at = datetime.now(UTC).isoformat()
-        content = {
+        row_hashes = [database_row_revision(row) for row in rows.rows]
+        content: dict[str, Any] = {
             "table": query.table,
             "rows": list(rows.rows),
             "read_at": read_at,
             "truncated": rows.truncated,
         }
+        if table_schema is not None:
+            content["table_schema"] = table_schema
         checksum = f"sha256:{sha256_hex(canonical_json(content))}"
         return ProviderToolResult(
             response={
@@ -123,6 +137,7 @@ class DatabaseReadProvider:
                 "provider": "postgres",
                 **content,
                 "content_hash": checksum,
+                "row_hashes": row_hashes,
                 "warnings": ["More rows may be available; this result is a bounded live read."]
                 if rows.truncated
                 else [],
@@ -140,6 +155,10 @@ class DatabaseReadProvider:
                         "read_at": read_at,
                         "offset": query.offset,
                         "row_count": len(rows.rows),
+                        "filters": dict(query.filters),
+                        "columns": list(query.columns),
+                        "row_hashes": row_hashes,
+                        "truncated": rows.truncated,
                     },
                     content_hash=checksum,
                     metadata={"provider": "postgres", "binding_checksum": bound.checksum},

@@ -17,7 +17,7 @@ from skillmind.effects.domain import (
     DecideProposalCommand,
 )
 from skillmind.runs.repository import RunRepository
-from skillmind.runs.service import RunService
+from tests.runs.test_interaction_authorization import AuthorizationDatabase
 
 
 class RecordingTransaction:
@@ -90,7 +90,7 @@ class SessionFactory:
 async def test_expiry_state_is_committed_before_api_error_is_raised() -> None:
     """Expiry event/continuation を rollback せず、commit 後に 409 用例外を再送出する。"""
 
-    factory = SessionFactory()
+    database = AuthorizationDatabase()
 
     async def expire(
         self: RunRepository, command: DecideProposalCommand
@@ -101,10 +101,10 @@ async def test_expiry_state_is_committed_before_api_error_is_raised() -> None:
         raise ChangeProposalExpiredError("approval expired")
 
     command = DecideProposalCommand(
-        project_id=uuid4(),
-        run_id=uuid4(),
+        project_id=database.project.id,
+        run_id=database.run.id,
         proposal_id=uuid4(),
-        actor_id=uuid4(),
+        actor_id=database.user.id,
         actor_is_administrator=False,
         decision=ApprovalDecision.APPROVED,
         proposal_version=1,
@@ -118,9 +118,9 @@ async def test_expiry_state_is_committed_before_api_error_is_raised() -> None:
         patch.object(RunRepository, "decide_change_proposal", new=expire),
         pytest.raises(ChangeProposalExpiredError),
     ):
-        await RunService(factory).decide_change_proposal(command)  # type: ignore[arg-type]
+        await database.service.decide_change_proposal(command, access=database.access)
 
-    assert factory.session.transaction.exception_type is None
+    assert database.transaction.committed
 
 
 @pytest.mark.asyncio

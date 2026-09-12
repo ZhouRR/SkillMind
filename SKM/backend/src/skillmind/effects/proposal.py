@@ -252,7 +252,7 @@ def proposal_content(
         "agent_session_id": str(agent_session_id),
         "skill_version_id": str(skill_version_id),
         "target_binding_id": str(target_binding_id),
-        "integration_id": str(integration_id),
+        "integration_id": str(integration_id) if integration_id is not None else None,
         "effect_intent_key": draft.effect_intent_key,
         "resource_key": draft.resource_key,
         "capability_version": draft.capability_version,
@@ -289,4 +289,3 @@ def _contains_sensitive_text(value: Any) -> bool:
     if isinstance(value, list | tuple):
         return any(_contains_sensitive_text(item) for item in value)
     return False
-

@@ -7,9 +7,13 @@ from dataclasses import dataclass, replace
 from typing import Any, Literal
 from uuid import UUID
 
+from skillmind.documents.library import (
+    is_document_library_source,
+    parse_document_library_source,
+)
 from skillmind.documents.snapshot import (
+    DOCUMENT_CAPABILITIES,
     DOCUMENT_PROVIDER,
-    DOCUMENT_READ_CAPABILITY,
     DocumentSnapshot,
     DocumentSnapshotError,
     is_document_source,
@@ -52,6 +56,13 @@ def document_snapshots(
 
     result: list[RunDocumentSnapshot] = []
     for key, source in sorted(sources.items()):
+        if is_document_library_source(source):
+            try:
+                parse_document_library_source(source, project_id=project_id, requirement_key=key)
+            except ValueError:
+                result.append(RunDocumentSnapshot(key, "INVALID", None))
+            # 保存先は入力文書清単ではない。偽装/破損だけを INVALID として残す。
+            continue
         if not is_document_source(source):
             continue
         if not isinstance(source, Mapping) or "document_snapshot" not in source:
@@ -61,7 +72,7 @@ def document_snapshots(
         if (
             not isinstance(value, Mapping)
             or source.get("provider") != DOCUMENT_PROVIDER
-            or source.get("capability") != DOCUMENT_READ_CAPABILITY
+            or source.get("capability") not in DOCUMENT_CAPABILITIES
             or source.get("resource_kind", "document") != "document"
         ):
             result.append(RunDocumentSnapshot(key, "INVALID", None))

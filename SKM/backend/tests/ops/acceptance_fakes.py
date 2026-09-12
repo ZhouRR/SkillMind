@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from jsonschema import Draft202012Validator
 
@@ -16,7 +16,9 @@ from skillmind.ops.smoke import (
     _run_happy_path,
 )
 
-_TERMINAL_INTERPRET_EVENTS = frozenset({"interpret.completed", "interpret.failed"})
+_TERMINAL_INTERPRET_EVENTS = frozenset({
+    "interpret.completed", "interpret.failed", "interpret.unknown", "interpret.disconnected",
+})
 _ADJUSTMENT_INSTRUCTION = (
     "Preserve every source-derived task, contract field, required flag, tool, data source, "
     "workflow, and permission boundary unchanged. Re-evaluate the interpretation without "
@@ -72,35 +74,31 @@ def _wait_for_interpretation(
     *,
     deadline: float,
 ) -> dict[str, Any]:
-    """Stored/queued の双方を正本 execution detail へ収束させる。"""
+    """原要求の GET で終態を確認し、SSE が提示する結果 ID は採用しない。"""
 
-    execution = launch.get("execution")
-    if launch.get("status") == "stored" and isinstance(execution, dict):
-        interpretation_id = _required_string(
-            execution, "interpretation_id", label="Stored interpretation"
+    request_id = _required_string(launch, "request_id", label="Interpret request")
+    if UUID(request_id).int == 0:
+        raise RuntimeError("Interpret request identity is invalid")
+    path = f"/api/v1/skill-interpretation-requests/{request_id}"
+    if launch.get("status") in {"QUEUED", "RUNNING"}:
+        client.wait_for_sse_event(
+            path + "/events", event_field="event",
+            event_names=_TERMINAL_INTERPRET_EVENTS, deadline=deadline,
         )
-    elif launch.get("status") == "queued":
-        execution_key = _required_string(launch, "execution_key", label="Interpret launch")
-        terminal = client.wait_for_sse_event(
-            f"/api/v1/skill-interpretations/stream/{execution_key}",
-            event_field="event",
-            event_names=_TERMINAL_INTERPRET_EVENTS,
-            deadline=deadline,
-        )
-        data = terminal.get("data")
-        if not isinstance(data, dict) or terminal.get("event") != "interpret.completed":
-            error_code = data.get("error_code") if isinstance(data, dict) else None
-            raise RuntimeError(f"Interpretation did not complete: {error_code or 'unknown'}")
-        interpretation_id = _required_string(
-            data, "interpretation_id", label="Interpret terminal event"
-        )
-    else:
-        raise RuntimeError("Interpret launch did not match stored/queued contract")
+    confirmed = client.request_json(path)
+    if confirmed.get("request_id") != request_id or confirmed.get("status") != "SUCCEEDED":
+        raise RuntimeError("Original interpretation request did not complete")
+    interpretation_id = _required_string(
+        confirmed, "interpretation_id", label="Confirmed interpretation"
+    )
     detail = client.request_json(
         f"/api/v1/skill-interpretations/{interpretation_id}/execution"
     )
-    if detail.get("status") != "PREVIEW_READY":
-        raise RuntimeError(f"Interpretation is not preview-ready: {detail.get('status')}")
+    if (detail.get("status") != "PREVIEW_READY"
+        or detail.get("interpretation_id") != interpretation_id
+        or detail.get("skill_source_id") != confirmed.get("skill_source_id")
+        or detail.get("execution_key") != confirmed.get("execution_key")):
+        raise RuntimeError("Interpretation did not match the confirmed request")
     return detail
 
 
@@ -235,16 +233,16 @@ def _accept_scenario(
     )
     source_id = _required_string(imported, "skill_source_id", label="Skill import")
     launch = client.request_json(
-        f"/api/v1/skill-sources/{source_id}/interpret"
-        "?force_regenerate=true",
+        f"/api/v1/skill-sources/{source_id}/interpretation-requests",
         method="POST",
+        body={"request_id": str(uuid4()), "force_regenerate": True},
     )
     interpreted = _wait_for_interpretation(client, launch, deadline=deadline)
     parent_id = _required_string(interpreted, "interpretation_id", label="Interpretation")
     adjusted_launch = client.request_json(
-        f"/api/v1/skill-interpretations/{parent_id}/adjust",
+        f"/api/v1/skill-interpretations/{parent_id}/adjustment-requests",
         method="POST",
-        body={"instruction": _ADJUSTMENT_INSTRUCTION},
+        body={"request_id": str(uuid4()), "instruction": _ADJUSTMENT_INSTRUCTION},
     )
     adjusted = _wait_for_interpretation(client, adjusted_launch, deadline=deadline)
     if adjusted.get("parent_interpretation_id") != parent_id:

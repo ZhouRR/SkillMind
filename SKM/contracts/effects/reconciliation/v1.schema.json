@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skillmind.local/contracts/effects/reconciliation/v1.schema.json",
+  "title": "Effect reconciliation observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["request_id", "project_id", "run_id", "effect_execution_id", "kind", "status", "created_at", "finished_at", "observation_status", "observed_at", "error_code"],
+  "properties": {
+    "request_id": {"type": "string", "format": "uuid"},
+    "project_id": {"type": "string", "format": "uuid"},
+    "run_id": {"type": "string", "format": "uuid"},
+    "effect_execution_id": {"type": "string", "format": "uuid"},
+    "kind": {"enum": ["DATABASE_TRANSACTION", "DOCUMENT_OBJECT"]},
+    "status": {"enum": ["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "REVOKED"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "finished_at": {"type": ["string", "null"], "format": "date-time"},
+    "observation_status": {"enum": ["CONFIRMED", "NOT_OBSERVED", "CONFLICT", null]},
+    "observed_at": {"type": ["string", "null"], "format": "date-time"},
+    "error_code": {"enum": ["lookup_unavailable", "lookup_interrupted", "authorization_revoked", "target_changed", null]}
+  },
+  "allOf": [
+    {"if": {"properties": {"status": {"enum": ["QUEUED", "RUNNING"]}}}, "then": {"properties": {"finished_at": {"type": "null"}, "observed_at": {"type": "null"}, "observation_status": {"type": "null"}, "error_code": {"type": "null"}}}},
+    {"if": {"properties": {"status": {"const": "SUCCEEDED"}}}, "then": {"properties": {"finished_at": {"type": "string"}, "observed_at": {"type": "string"}, "observation_status": {"type": "string"}, "error_code": {"type": "null"}}}},
+    {"if": {"properties": {"status": {"enum": ["FAILED", "REVOKED"]}}}, "then": {"properties": {"finished_at": {"type": "string"}, "observed_at": {"type": "null"}, "observation_status": {"type": "null"}, "error_code": {"type": "string"}}}}
+  ]
+}

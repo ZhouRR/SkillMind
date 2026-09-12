@@ -101,13 +101,19 @@ def test_0037_matches_original_0014_plus_nullable_columns_without_history_rewrit
     # 後続の意図関連を除く。0037 の DDL 自体を新しい ORM に合わせて改変しない。
     expected = _contract(_TABLE)
     expected["columns"].pop("upload_intent_id")
+    expected["columns"].pop("effect_upload_id")
+    expected["checks"].remove("upload_intent_id IS NULL OR effect_upload_id IS NULL")
     expected["foreign_keys"] = {
-        key for key in expected["foreign_keys"] if not key[1].startswith("document_upload_intents.")
+        key for key in expected["foreign_keys"]
+        if not key[1].startswith(("document_upload_intents.", "document_effect_uploads."))
     }
     assert _contract(migrated) == expected
     assert {str(item.name) for item in migrated.constraints} == {
         str(item.name) for item in _TABLE.constraints
-        if item.name != "fk_project_documents_upload_intent"
+        if item.name not in {
+            "fk_project_documents_upload_intent", "fk_project_documents_effect_upload",
+            "ck_project_documents_single_upload_origin",
+        }
     }
     assert {
         (str(item.name), tuple(column.name for column in item.columns)) for item in _TABLE.indexes

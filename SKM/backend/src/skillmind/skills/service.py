@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import errno
 import json
 import logging
@@ -27,7 +28,6 @@ from skillmind.projects.repository import LockedProjectAccess, ProjectRepository
 from skillmind.skills.domain import (
     CreateSkillVersionDraftCommand,
     InlineSkillFile,
-    InterpretationLaunch,
     PublishedTaskNotFoundError,
     SaveModelInterpretationCommand,
     SaveSkillPreviewCommand,
@@ -38,6 +38,7 @@ from skillmind.skills.domain import (
     SkillPreview,
     SkillPublishGateError,
     SkillSourceIntegrityError,
+    SkillSourceNotFoundError,
     SkillStorageUnavailableError,
     SkillVersionDeleteBlockedError,
     SkillVersionEnablementConflictError,
@@ -60,6 +61,10 @@ from skillmind.skills.importer import (
     SkillPackageParser,
 )
 from skillmind.skills.interpretation_diff import diff_interpretations
+from skillmind.skills.interpretation_requests import (
+    InterpretationRequestDeniedError,
+    InterpretationRequestSnapshot,
+)
 from skillmind.skills.interpreter import (
     CapabilityCatalogSnapshot,
     InterpreterFixtureRunner,
@@ -71,6 +76,7 @@ from skillmind.skills.interpreter import (
     load_inline_text_files,
 )
 from skillmind.skills.interpreter_execution import (
+    InterpreterCallControl,
     InterpreterErrorCode,
     InterpreterExecutionError,
     InterpretProgressCallback,
@@ -80,6 +86,8 @@ from skillmind.skills.interpreter_execution import (
 )
 from skillmind.skills.manifest_gate import ManifestValidator
 from skillmind.skills.repository import SkillRepository
+from skillmind.skills.request_execution import RequestCallControl
+from skillmind.skills.request_service import InterpretationRequestService
 from skillmind.skills.resource_binding import (
     ProjectResourceCatalog,
     TaskReadiness,
@@ -101,6 +109,13 @@ logger = logging.getLogger(__name__)
 
 # Model 候補の decode または platform validation が落ちた場合、一度だけ完全再生成する。
 _MAX_CANDIDATE_REPAIR_ATTEMPTS = 1
+
+InterpretationFinalizer = Callable[
+    [SaveModelInterpretationCommand], Awaitable[StoredInterpretationExecution]
+]
+InterpretationReuse = Callable[
+    [StoredInterpretationExecution], Awaitable[StoredInterpretationExecution]
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -335,60 +350,181 @@ class SkillService:
             on_event=on_event,
         )
 
-    async def begin_interpret(
+    async def accept_interpretation_request(
         self,
         *,
-        organization_id: UUID,
-        skill_source_id: UUID,
+        access: UserAccess,
+        request_id: UUID,
+        skill_source_id: UUID | None = None,
+        parent_interpretation_id: UUID | None = None,
+        instruction: str | None = None,
         model: str | None = None,
         parameters: Mapping[str, Any] | None = None,
         force_regenerate: bool = False,
-    ) -> InterpretationLaunch:
-        """Model を呼ばずに interpret 要求を受理する。
+    ) -> InterpretationRequestSnapshot:
+        """原資格で入力を読み、モデルを起動せず凍結要求と Outbox を受理する。"""
 
-        再利用・unsafe 失敗は同期で確定 record を返し、それ以外は Worker job への
-        引き渡し引数を返す。API 容器は model への egress を持たない配備が正であるため、
-        model 呼び出し自体は必ず Worker 側の interpret() が行う。
-        """
-
+        access = deepcopy(access)
+        if (skill_source_id is None) == (parent_interpretation_id is None):
+            raise ValueError("Exactly one interpretation source is required")
+        if parent_interpretation_id is None and instruction is not None:
+            raise ValueError("An adjustment requires a parent interpretation")
+        if parent_interpretation_id is not None and (not instruction or force_regenerate):
+            raise ValueError("An adjustment requires an instruction and no regeneration flag")
         _, catalog, identity = self._require_interpreter()
         resolved_model = self._resolve_model(model)
-        resolved = dict(parameters or {})
-        regeneration_nonce = uuid4().hex if force_regenerate else None
-        async with self._session_factory() as session:
-            source = await SkillRepository(session).get_source(
+        resolved_parameters = deepcopy(dict(parameters or {}))
+        previous: dict[str, Any] | None = None
+        adjustment: dict[str, Any] | None = None
+        async with self._admin_transaction(access) as (repository, locked, _authorize):
+            organization_id = locked.actor.organization_id
+            if parent_interpretation_id is not None:
+                parent = await repository.get_model_interpretation(
+                    organization_id=organization_id, interpretation_id=parent_interpretation_id
+                )
+                if parent.status is not SkillInterpretationStatus.PREVIEW_READY:
+                    raise SkillInterpretationNotReadyError("Parent interpretation is not ready")
+                skill_source_id = parent.skill_source_id
+                previous = self._previous_interpretation_summary(parent)
+                adjustment = {
+                    "instruction": instruction, "actor_id": str(locked.actor.id),
+                    "parent_interpretation_id": str(parent_interpretation_id),
+                }
+            assert skill_source_id is not None
+            source = await repository.get_source(
                 organization_id=organization_id, skill_source_id=skill_source_id
             )
-        stored, key, _prepared = await self._prepare_launch(
-            source=source,
-            catalog=catalog,
-            identity=identity,
-            model=resolved_model,
-            parameters=resolved,
-            previous=None,
-            adjustment=None,
-            parent_id=None,
-            regeneration_nonce=regeneration_nonce,
+        # Storage の読取と解析中は資格 lock を保持しない。受理 transaction で再検証する。
+        package, analysis, request = await self._prepare_request(
+            source, catalog, identity, previous=previous, adjustment=adjustment
         )
-        if stored is not None:
-            return InterpretationLaunch(
-                status="stored", execution_key=key, stored=stored, job_name="", job_kwargs={}
+        nonce = str(request_id) if force_regenerate else None
+        key = (
+            compute_execution_key(
+                request, model=resolved_model, parameters=resolved_parameters,
+                scope_id=str(organization_id), nonce=nonce,
+            ) if request is not None else self._blocked_execution_key(
+                organization_id, package, analysis, catalog, identity,
+                resolved_model, resolved_parameters,
             )
-        return InterpretationLaunch(
-            status="queued",
-            execution_key=key,
-            stored=None,
-            job_name="interpret_skill_source_job",
-            job_kwargs={
-                "organization_id": str(organization_id),
-                "skill_source_id": str(skill_source_id),
-                "model": resolved_model,
-                "parameters": resolved,
-                "execution_key": key,
-                "force_regenerate": force_regenerate,
-                "regeneration_nonce": regeneration_nonce,
-            },
         )
+        frozen = _interpretation_request_input(
+            prepared=_PreparedRequest(package, analysis, request),
+            catalog=catalog, identity=identity,
+            model=resolved_model, parameters=resolved_parameters, previous=previous,
+            adjustment=adjustment, parent_id=parent_interpretation_id, nonce=nonce,
+        )
+        return await InterpretationRequestService(self._session_factory).accept(
+            access=access, request_id=request_id, skill_source_id=skill_source_id,
+            execution_key=key, frozen_input=frozen,
+        )
+
+    async def confirm_interpretation_request(
+        self, *, access: UserAccess, request_id: UUID
+    ) -> InterpretationRequestSnapshot:
+        """HTTP/SSE の現会話で組織帰属を再確認し、原要求を変更せず返す。"""
+
+        return await InterpretationRequestService(self._session_factory).confirm(
+            access=access, request_id=request_id
+        )
+
+    async def execute_interpretation_request(
+        self, request_id: UUID, *, on_event: InterpretProgressCallback | None = None,
+        event_factory: Callable[[str], InterpretProgressCallback] | None = None,
+    ) -> StoredInterpretationExecution | None:
+        """持久 ID から一度だけ認領し、原入力・逐次開始・成果採用を同じ台帳へ接続する。"""
+
+        if on_event is not None and event_factory is not None:
+            raise ValueError("Interpretation progress must have one publisher")
+        ledger = InterpretationRequestService(self._session_factory)
+        owner = await ledger.claim(request_id)
+        if owner is None:
+            return None
+        try:
+            if event_factory is not None:
+                on_event = event_factory(owner.request.execution_key)
+            interpreter, catalog, identity = self._require_interpreter()
+            frozen = owner.request.input
+            model, parameters = frozen.get("model"), frozen.get("parameters")
+            previous, adjustment = frozen.get("previous"), frozen.get("adjustment")
+            nonce, raw_parent = frozen.get("nonce"), frozen.get("parent_id")
+            if (
+                not isinstance(model, str) or not model or not isinstance(parameters, dict)
+                or (previous is not None and not isinstance(previous, dict))
+                or (adjustment is not None and not isinstance(adjustment, dict))
+                or (nonce is not None and not isinstance(nonce, str))
+                or (raw_parent is not None and not isinstance(raw_parent, str))
+            ):
+                raise SkillSourceIntegrityError("Frozen interpretation input is invalid")
+            parent_id = UUID(raw_parent) if raw_parent is not None else None
+            async with self._session_factory() as session:
+                source = await SkillRepository(session).get_source(
+                    organization_id=owner.request.organization_id,
+                    skill_source_id=owner.request.skill_source_id,
+                )
+            package, analysis, request = await self._prepare_request(
+                source, catalog, identity, previous=previous, adjustment=adjustment
+            )
+            prepared = _PreparedRequest(package, analysis, request)
+            expected = _interpretation_request_input(
+                prepared=prepared, catalog=catalog, identity=identity,
+                model=model, parameters=parameters,
+                previous=previous, adjustment=adjustment, parent_id=parent_id, nonce=nonce,
+            )
+            if canonical_json(expected) != canonical_json(frozen):
+                raise SkillSourceIntegrityError("Frozen interpretation input no longer matches")
+            execution_key = (
+                compute_execution_key(
+                    request, model=model, parameters=parameters,
+                    scope_id=str(source.organization_id), nonce=nonce,
+                ) if request is not None else self._blocked_execution_key(
+                    source.organization_id, package, analysis, catalog, identity, model, parameters
+                )
+            )
+            if execution_key != owner.request.execution_key:
+                raise SkillSourceIntegrityError(
+                    "Frozen interpretation execution key does not match"
+                )
+
+            async def finalize(
+                command: SaveModelInterpretationCommand,
+            ) -> StoredInterpretationExecution:
+                """元 owner の資格と候補を同時に検証・保存する。"""
+
+                return await self._attach_diff(await ledger.finish(owner, command))
+
+            async def reuse(stored: StoredInterpretationExecution) -> StoredInterpretationExecution:
+                """旧確定結果の復用も要求終態と同じ原資格で採用する。"""
+
+                return await ledger.finish(owner, None, existing_id=stored.interpretation_id)
+
+            return await self._run_interpretation(
+                source=source, interpreter=interpreter, catalog=catalog, identity=identity,
+                model=model, parameters=parameters, previous=previous, adjustment=adjustment,
+                parent_id=parent_id, regeneration_nonce=nonce, on_event=on_event,
+                control=RequestCallControl(ledger, owner), prepared=prepared,
+                finalize=finalize, reuse=reuse,
+            )
+        except InterpretationRequestDeniedError:
+            await ledger.mark_unknown(owner)
+            return None
+        except (
+            SkillSourceIntegrityError, SkillSourceNotFoundError,
+            SkillStorageUnavailableError, SkillInterpreterUnavailableError,
+        ) as error:
+            code = (
+                "input_integrity" if isinstance(error, SkillSourceIntegrityError)
+                else "interpreter_unavailable"
+                if isinstance(error, SkillInterpreterUnavailableError)
+                else "source_unavailable"
+            )
+            if not await ledger.fail_before_call(owner, error_code=code):
+                await ledger.mark_unknown(owner)
+            raise
+        except (Exception, asyncio.CancelledError):
+            # Worker 境界で未知を残す。Queue の再配送に model 再実行を委ねない。
+            await ledger.mark_unknown(owner)
+            raise
 
     async def adjust_interpretation(
         self,
@@ -429,58 +565,6 @@ class SkillService:
             on_event=on_event,
         )
 
-    async def begin_adjust(
-        self,
-        *,
-        organization_id: UUID,
-        interpretation_id: UUID,
-        instruction: str,
-        actor_id: UUID,
-        model: str | None = None,
-        parameters: Mapping[str, Any] | None = None,
-    ) -> InterpretationLaunch:
-        """Model を呼ばずに adjust 要求を受理する。404/409 は同期のまま返す。"""
-
-        _, catalog, identity = self._require_interpreter()
-        resolved_model = self._resolve_model(model)
-        resolved = dict(parameters or {})
-        parent, source, adjustment = await self._load_adjust_context(
-            organization_id=organization_id,
-            interpretation_id=interpretation_id,
-            instruction=instruction,
-            actor_id=actor_id,
-        )
-        stored, key, _prepared = await self._prepare_launch(
-            source=source,
-            catalog=catalog,
-            identity=identity,
-            model=resolved_model,
-            parameters=resolved,
-            previous=self._previous_interpretation_summary(parent),
-            adjustment=adjustment,
-            parent_id=interpretation_id,
-            regeneration_nonce=None,
-        )
-        if stored is not None:
-            return InterpretationLaunch(
-                status="stored", execution_key=key, stored=stored, job_name="", job_kwargs={}
-            )
-        return InterpretationLaunch(
-            status="queued",
-            execution_key=key,
-            stored=None,
-            job_name="adjust_skill_interpretation_job",
-            job_kwargs={
-                "organization_id": str(organization_id),
-                "interpretation_id": str(interpretation_id),
-                "instruction": instruction,
-                "actor_id": str(actor_id),
-                "model": resolved_model,
-                "parameters": resolved,
-                "execution_key": key,
-            },
-        )
-
     async def _load_adjust_context(
         self,
         *,
@@ -489,7 +573,7 @@ class SkillService:
         instruction: str,
         actor_id: UUID,
     ) -> tuple[StoredInterpretationExecution, StoredSkillSource, dict[str, Any]]:
-        """Adjust の親検証・source 取得・adjustment 構築を begin/実行で共有する。"""
+        """同期解釈用の親検証・source 取得・adjustment 構築をまとめる。"""
 
         async with self._session_factory() as session:
             parent = await SkillRepository(session).get_model_interpretation(
@@ -543,6 +627,9 @@ class SkillService:
         adjustment: Mapping[str, Any] | None,
         parent_id: UUID | None,
         regeneration_nonce: str | None,
+        prepared: _PreparedRequest | None = None,
+        finalize: InterpretationFinalizer | None = None,
+        reuse: InterpretationReuse | None = None,
     ) -> tuple[StoredInterpretationExecution | None, str, _PreparedRequest]:
         """Model を呼ばない受理段階。unsafe は同期で FAILED を確定し、再利用は既存を返す。
 
@@ -550,10 +637,13 @@ class SkillService:
         prepared は model 実行と失敗記録に必要な決定的成果物一式。
         """
 
-        package, analysis, request = await self._prepare_request(
-            source, catalog, identity, previous=previous, adjustment=adjustment
-        )
-        prepared = _PreparedRequest(package=package, analysis=analysis, request=request)
+        if prepared is None:
+            package, analysis, request = await self._prepare_request(
+                source, catalog, identity, previous=previous, adjustment=adjustment
+            )
+            prepared = _PreparedRequest(package=package, analysis=analysis, request=request)
+        package, analysis, request = prepared.package, prepared.analysis, prepared.request
+        finalize = finalize or self._finalize
         adjustment_value = dict(adjustment) if adjustment is not None else None
         if request is None:
             key = self._blocked_execution_key(
@@ -565,7 +655,7 @@ class SkillService:
                 model,
                 parameters,
             )
-            stored = await self._finalize(
+            stored = await finalize(
                 self._failure_command(
                     source,
                     package,
@@ -599,6 +689,8 @@ class SkillService:
                     execution_key=key,
                 )
             if existing is not None:
+                if reuse is not None:
+                    existing = replace(await reuse(existing), reused=True)
                 return await self._attach_diff(existing), key, prepared
         return None, key, prepared
 
@@ -616,9 +708,17 @@ class SkillService:
         parent_id: UUID | None,
         regeneration_nonce: str | None,
         on_event: InterpretProgressCallback | None = None,
+        control: InterpreterCallControl | None = None,
+        prepared: _PreparedRequest | None = None,
+        finalize: InterpretationFinalizer | None = None,
+        reuse: InterpretationReuse | None = None,
     ) -> StoredInterpretationExecution:
         """初回 interpret と reinterpretation が共有する実行・検証・永続化の中核。"""
 
+        configured = (control is not None, finalize is not None, reuse is not None)
+        if any(configured) and not all(configured):
+            raise ValueError("Controlled interpretation requires call, result, and reuse gates")
+        finalize = finalize or self._finalize
         # 受理段階(unsafe 確定・再利用)は begin_* と同じ単一実装を通す。
         stored_early, key, prepared = await self._prepare_launch(
             source=source,
@@ -630,6 +730,9 @@ class SkillService:
             adjustment=adjustment,
             parent_id=parent_id,
             regeneration_nonce=regeneration_nonce,
+            prepared=prepared,
+            finalize=finalize,
+            reuse=reuse,
         )
         if stored_early is not None:
             await _emit_terminal(on_event, stored_early)
@@ -652,13 +755,16 @@ class SkillService:
         validated: dict[str, Any] | None = None
         for attempt in range(_MAX_CANDIDATE_REPAIR_ATTEMPTS + 1):
             try:
-                response = await interpreter.interpret(
-                    request,
-                    model=model,
-                    parameters=parameters,
-                    validation_feedback=validation_feedback,
-                    on_event=on_event,
-                )
+                if control is None:
+                    response = await interpreter.interpret(
+                        request, model=model, parameters=parameters,
+                        validation_feedback=validation_feedback, on_event=on_event,
+                    )
+                else:
+                    response = await interpreter.interpret(
+                        request, model=model, parameters=parameters,
+                        validation_feedback=validation_feedback, on_event=on_event, control=control,
+                    )
             except InterpreterExecutionError as error:
                 repair_feedback = candidate_repair_feedback(error.code)
                 if repair_feedback is not None and attempt < _MAX_CANDIDATE_REPAIR_ATTEMPTS:
@@ -677,7 +783,7 @@ class SkillService:
                     continue
                 # structured_output_unavailable / timeout / provider 等は同一 request の再生成で
                 # 直る根拠がなく、障害分類を保つため fail-fast とする。
-                stored = await self._finalize(
+                stored = await finalize(
                     self._failure_command(
                         source,
                         package,
@@ -716,7 +822,7 @@ class SkillService:
                 if attempt < _MAX_CANDIDATE_REPAIR_ATTEMPTS:
                     validation_feedback = detail
                     continue
-                stored = await self._finalize(
+                stored = await finalize(
                     self._failure_command(
                         source,
                         package,
@@ -737,7 +843,7 @@ class SkillService:
                 return stored
         if validated is None:  # pragma: no cover - loop always returns or assigns.
             raise RuntimeError("Interpreter validation loop ended without a result")
-        stored = await self._finalize(
+        stored = await finalize(
             self._success_command(
                 source,
                 package,
@@ -1116,6 +1222,7 @@ class SkillService:
             except (
                 ProjectNotFoundError,
                 ProjectArchivedError,
+                SkillSourceNotFoundError,
                 SkillInterpretationNotFoundError,
                 SkillInterpretationNotReadyError,
                 SkillVersionNotFoundError,
@@ -1522,6 +1629,31 @@ class _PreparedRequest:
     package: NormalizedSkillPackage
     analysis: SkillStaticAnalysis
     request: dict[str, Any] | None
+
+
+def _interpretation_request_input(
+    *,
+    prepared: _PreparedRequest,
+    catalog: CapabilityCatalogSnapshot,
+    identity: InterpreterSystemSkillIdentity,
+    model: str,
+    parameters: Mapping[str, Any],
+    previous: Mapping[str, Any] | None,
+    adjustment: Mapping[str, Any] | None,
+    parent_id: UUID | None,
+    nonce: str | None,
+) -> dict[str, Any]:
+    """受理と実行で同じ完全入力を比較し、再構築による暗黙の差替えを防ぐ。"""
+
+    return deepcopy({
+        "format_version": 1, "model": model, "parameters": dict(parameters),
+        "previous": dict(previous) if previous is not None else None,
+        "adjustment": dict(adjustment) if adjustment is not None else None,
+        "parent_id": str(parent_id) if parent_id is not None else None, "nonce": nonce,
+        "catalog": catalog.to_dict(), "interpreter": identity.to_dict(),
+        "package": prepared.package.to_dict(), "analysis": prepared.analysis.to_dict(),
+        "request": prepared.request,
+    })
 
 
 def _schema_failure_detail(error: Exception) -> str:

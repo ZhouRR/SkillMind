@@ -5,11 +5,15 @@ from __future__ import annotations
 import os
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, cast
 
 from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
 from claude_agent_sdk.types import HookInput, HookJSONOutput, SessionStore
+from jsonschema import Draft202012Validator, FormatChecker
+from referencing import Registry
+from referencing.exceptions import Unresolvable
 
 from skillmind.agent.claude_build import (
     CLAUDE_AGENT_SDK_VERSION as CLAUDE_AGENT_SDK_VERSION,
@@ -22,6 +26,8 @@ from skillmind.agent.claude_build import (
 )
 from skillmind.agent.domain import RunContext
 from skillmind.agent.tool_policy import DENIED_BUILTIN_TOOLS, ToolExecutionPolicy
+
+STRUCTURED_OUTPUT_TOOL_NAME = "StructuredOutput"
 
 ToolAuthorizationCallback = Callable[[str, Mapping[str, Any], str, str], Awaitable[None]]
 ToolDenialCallback = Callable[[str, Mapping[str, Any], str, str, str], Awaitable[None]]
@@ -144,6 +150,13 @@ def build_claude_agent_options(
         allowed_capabilities=frozenset(raw_capabilities),
     )
 
+    output_schema = deepcopy(dict(context.result_schema))
+    Draft202012Validator.check_schema(output_schema)
+    # 結果 Schema の参照は同梱内容だけで解決し、hook から外部 Schema を取得しない。
+    output_validator = Draft202012Validator(
+        output_schema, registry=Registry(), format_checker=FormatChecker(),
+    )
+
     async def enforce_tool_boundary(
         input_data: HookInput, _tool_use_id: str | None, _hook_context: Mapping[str, Any]
     ) -> HookJSONOutput:
@@ -151,6 +164,22 @@ def build_claude_agent_options(
 
         if input_data.get("hook_event_name") != "PreToolUse":
             return {}
+        if input_data.get("tool_name") == STRUCTURED_OUTPUT_TOOL_NAME:
+            # 固定 CLI の結果搬送専用 Tool。resource capability/ToolAudit を与えず、
+            # 凍結した結果 Schema だけを受理する。業務結果の最終検証は Worker に残す。
+            value = input_data.get("tool_input")
+            try:
+                valid = isinstance(value, dict) and output_validator.is_valid(value)
+            except (Unresolvable, RecursionError):
+                valid = False
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "allow" if valid else "deny",
+                    "permissionDecisionReason": "Frozen Skillmind result schema"
+                    if valid else "Structured output does not match frozen result schema",
+                }
+            }
         try:
             policy.authorize(
                 str(input_data.get("tool_name", "")),
@@ -250,7 +279,7 @@ def build_claude_agent_options(
         max_turns=context.limits.max_turns,
         max_budget_usd=context.limits.max_budget_usd,
         model=context.model,
-        output_format={"type": "json_schema", "schema": dict(context.result_schema)},
+        output_format={"type": "json_schema", "schema": output_schema},
         enable_file_checkpointing=False,
         session_store=session_store,
         session_store_flush="batched",

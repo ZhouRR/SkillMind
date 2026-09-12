@@ -11,7 +11,7 @@ from tests.api.fakes import FakeEffectService, FakeScheduleService
 
 
 @pytest.mark.parametrize(
-    "operation", ["schedule-create", "schedule-edit", "schedule-enable", "policy", "approve"]
+    "operation", ["schedule-create", "schedule-edit", "schedule-enable", "policy"]
 )
 def test_readonly_api_rejects_deferred_mutations_before_service(client, operation):
     """同じ Project の ADMIN と有効 CSRF でも、配備上限を越えた mutation は実行しない。"""
@@ -47,14 +47,6 @@ def test_readonly_api_rejects_deferred_mutations_before_service(client, operatio
             "risk_level": "LOW",
             "scope": {"issue_ids": ["1"], "field_keys": ["status_id"]},
             "expires_at": "2099-01-01T00:00:00Z",
-        }
-    elif operation == "approve":
-        path = f"/api/v1/projects/{project}/runs/{uuid4()}/proposals/{record}/decision"
-        body = {
-            "decision": "APPROVED",
-            "proposal_version": 1,
-            "proposal_checksum": "sha256:" + "a" * 64,
-            "reason": "Reviewed fixture",
         }
     response = client.request(
         method, path, json=body, headers={"Idempotency-Key": "fixture-release"}

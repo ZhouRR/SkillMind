@@ -122,8 +122,8 @@ PROVIDER_DEFINITIONS: dict[str, ProviderDefinition] = {
     "postgres": ProviderDefinition(
         kind="other",
         provider="postgres",
-        capabilities=frozenset({"database.read/v1"}),
-        write_capabilities=frozenset(),
+        capabilities=frozenset({"database.read/v1", "database.write/v1"}),
+        write_capabilities=frozenset({"database.write/v1"}),
         requires_secret=True,
         installed=True,
     ),
@@ -423,6 +423,9 @@ def normalize_integration_command(command: CreateIntegrationCommand) -> CreateIn
         # 要求する。既定 mode が direct なので、この取りこぼしは「repository_uri だけ設定した
         # git Integration」で必ず起きる——登録段階で閉じる。読取専用 Integration は対象外。
         raise IntegrationValidationError("Direct write requires an explicit default branch name")
+    if (command.provider == "postgres" and "database.write/v1" in capabilities
+            and "database.read/v1" not in capabilities):
+        raise IntegrationValidationError("Database write requires its observe capability")
     scope = normalize_provider_scope(
         command.provider,
         command.scope,
@@ -451,6 +454,34 @@ def normalize_provider_scope(
     引き続き承認または explicit 事前許可(wildcard 不可)で gate される。
     """
 
+    if provider == "postgres" and write_enabled:
+        if set(scope) != {"tables", "write_columns", "operations"}:
+            raise IntegrationValidationError(
+                "Database write scope requires explicit tables, columns and operations"
+            )
+        tables = normalize_provider_scope(
+            provider, {"tables": scope["tables"]}, write_enabled=False
+        )["tables"]
+        columns = _unique_strings(
+            scope["write_columns"], maximum=1000, key_pattern=False, maximum_length=256
+        )
+        operations = _unique_strings(scope["operations"], maximum=2, key_pattern=False)
+        if (
+            not columns
+            or not operations
+            or set(operations) - {"INSERT", "UPDATE"}
+            or any(table.startswith("skillmind_effects.") for table in tables)
+            or any(
+                len(column.split(".")) != 3
+                or ".".join(column.split(".")[:2]) not in tables
+                or re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_$]{0,62}", column.split(".")[-1]) is None
+                for column in columns
+            )
+        ):
+            raise IntegrationValidationError(
+                "Database write scope exceeds explicit table/column/operation limits"
+            )
+        return {"tables": tables, "write_columns": columns, "operations": operations}
     if provider in {"postgres", "mcp"}:
         key = "tables" if provider == "postgres" else "resource_uris"
         if set(scope) != {key} or write_enabled:

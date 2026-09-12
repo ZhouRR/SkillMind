@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -212,6 +213,7 @@ def _build(
     *,
     blueprint: dict[str, Any] | None = None,
     materialized: Sequence[MaterializedResource] = (),
+    checkpoint: dict[str, Any] | None = None,
 ) -> Any:
     """既定の Run snapshot から Brief を組み立てる。"""
 
@@ -220,10 +222,11 @@ def _build(
         run_id=RUN_ID,
         task_snapshot=_task_snapshot(manifest),
         manifest=manifest,
-        selected_sources={"primary-issues": {"capability": "issue.read/v1", "provider": "csv"}},
+        selected_sources={"target_repository": {"capability": "issue.read/v1", "provider": "csv"}},
         tools=_tools(),
         limits=_limits(),
         materialized=materialized,
+        checkpoint=checkpoint,
     )
 
 
@@ -471,6 +474,29 @@ def test_brief_omits_materialization_when_nothing_was_materialized() -> None:
     assert all("materialization" not in item for item in compiled.brief["resources"])
 
 
+def test_brief_distinguishes_deferred_documents_from_read_failures() -> None:
+    """按需清単は未取得と案内し、既存 Brief 契約も追加 field 無しで有効に保つ。"""
+
+    blueprint = _blueprint()
+    blueprint["resource_requirements"][0]["kind"] = "document"
+    resource = replace(
+        _materialized_repository(), kind="document", provider="project-documents",
+        requirement_key="documents", root="input/documents",
+        manifest_path="input/documents/.skillmind/manifest.json",
+        index_path="input/documents/.skillmind/files.txt", history_path=None, revision=None,
+        files=0, skipped=0, deferred=2,
+    )
+    compiled = _build(blueprint=blueprint, materialized=[resource])
+    Draft202012Validator(_brief_schema(), format_checker=FormatChecker()).validate(compiled.brief)
+    placement = compiled.brief["resources"][0]["materialization"]
+    assert placement["deferred_files"] == 2
+    assert placement["skipped_files"] == placement["materialized_files"] == 0
+    prompt = render_task_brief_prompt(compiled.brief, input_json={}, output_schema={})
+    assert "bytes have not been downloaded or converted" in prompt
+    assert "After the Skill's prerequisites succeed" in prompt
+    assert "Deferred is not missing or a read failure" in prompt
+
+
 def test_prompt_points_the_agent_at_the_materialized_tree_and_skipped_meaning() -> None:
     """prompt が落点・索引・履歴と `skipped` の意味を明示する (計画 §19 W6)。"""
 
@@ -499,3 +525,15 @@ def test_prompt_has_no_materialization_section_without_materialized_resources() 
     )
 
     assert "Materialized resources" not in prompt
+
+
+def test_document_prerequisites_are_frozen_in_brief_and_explained_to_agent():
+    """前置条件を通常の guidance と別に保持し、文字による自己申告では解除できないと示す。"""
+    blueprint = _blueprint()
+    blueprint["tasks"][0]["document_prerequisites"] = ["register-run"]
+    compiled = _build(blueprint=blueprint)
+    Draft202012Validator(_brief_schema(), format_checker=FormatChecker()).validate(compiled.brief)
+    assert compiled.brief["execution"]["document_prerequisites"] == ["register-run"]
+    prompt = render_task_brief_prompt(compiled.brief, input_json={}, output_schema={})
+    assert "document.readiness/v1" in prompt
+    assert "failed or unknown effects do not unlock" in prompt

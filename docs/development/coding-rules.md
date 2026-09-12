@@ -19,7 +19,7 @@ route 只做认证/入出参，业务在 domain/service，查询/锁/持久化�
 | binding / Secret | agent/run_binding.py：load_bound_run_resource / resolve_binding_secret；检查 checksum、Integration 状态、provider/revision/capability |
 | 外部 repository | agent/repository_client.py / repository_source.py；物化/read/write 共用，不另写 subprocess/凭据解析 |
 | 可 apply effect | effects/catalog.py：EFFECT_CAPABILITIES，创建/执行/审批共用 |
-| Binary 转文字 | agent/binary_text.py：render_text，不在 Provider 复制 |
+| Binary 转文字 | agent/binary_text.py：render_text / convert_excel_to_markdown，不在 Provider 复制 |
 
 documents/__init__.py 只导出 domain 类型，service/repository/source 显式导入，避免 DB → Run → 文档循环。
 

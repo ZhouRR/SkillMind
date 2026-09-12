@@ -138,22 +138,6 @@ class StoredInterpretationExecution:
 
 
 @dataclass(frozen=True, slots=True)
-class InterpretationLaunch:
-    """Interpret/adjust 要求の受理結果。
-
-    stored が入る場合は既存(reuse または unsafe 失敗)の確定 record を即時返し、
-    queued の場合は Worker job へ引き渡す引数一式を運ぶ。API は job_kwargs を
-    そのまま queue へ渡し、Worker は同じ service 経路を on_event 付きで再実行する。
-    """
-
-    status: str  # 'stored' | 'queued'
-    execution_key: str
-    stored: StoredInterpretationExecution | None
-    job_name: str
-    job_kwargs: dict[str, Any]
-
-
-@dataclass(frozen=True, slots=True)
 class StoredSkillPreview:
     """保存済み SkillSource と SkillInterpretation の公開 read model。"""
 

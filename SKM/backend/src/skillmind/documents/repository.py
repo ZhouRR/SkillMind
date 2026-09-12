@@ -8,10 +8,16 @@ from uuid import UUID
 from sqlalchemy import BigInteger, case, cast, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from skillmind.db.models import ProjectDocument, ProjectDocumentCleanup, ProjectDocumentUpload
+from skillmind.db.models import (
+    ProjectDocument,
+    ProjectDocumentCleanup,
+    ProjectDocumentEffectUpload,
+    ProjectDocumentUpload,
+)
 from skillmind.documents.cleanup_repository import DocumentCleanupRepository
 from skillmind.documents.domain import (
     DocumentCleanupActor,
+    DocumentInUseError,
     DocumentNotFoundError,
     DocumentStorageUnavailableError,
     DocumentUploadInvalidError,
@@ -36,12 +42,16 @@ class DocumentRepository:
         legacy_scope = (
             ProjectDocument.project_id == project_id,
             ProjectDocument.upload_intent_id.is_(None),
+            ProjectDocument.effect_upload_id.is_(None),
         )
         legacy = select(func.coalesce(func.sum(ProjectDocument.size), 0)).where(
             *legacy_scope,
         ).scalar_subquery()
         reserved = select(func.coalesce(func.sum(ProjectDocumentUpload.size), 0)).where(
             ProjectDocumentUpload.project_id == project_id,
+        ).scalar_subquery()
+        effects = select(func.coalesce(func.sum(ProjectDocumentEffectUpload.size), 0)).where(
+            ProjectDocumentEffectUpload.project_id == project_id,
         ).scalar_subquery()
         legacy_cleanup = select(func.coalesce(func.sum(ProjectDocumentCleanup.size), 0)).where(
             ProjectDocumentCleanup.project_id == project_id,
@@ -50,7 +60,7 @@ class DocumentRepository:
         # 壊れた旧負数で新規枠を作らず、PG の numeric SUM を小数切捨てにも依存しない。
         statement = select(case(
             (exists().where(*legacy_scope, ProjectDocument.size < 0), None),
-            else_=cast(legacy + reserved + legacy_cleanup, BigInteger),
+            else_=cast(legacy + reserved + effects + legacy_cleanup, BigInteger),
         ))
         value = await self._session.scalar(statement)
         if type(value) is not int or value < 0:
@@ -133,6 +143,8 @@ class DocumentRepository:
         """service の原会話・文書 lock と無参照確認後に、同一 transaction で行を除く。"""
 
         document = await self._require(project_id=project_id, document_id=document_id)
+        if document.effect_upload_id is not None:
+            raise DocumentInUseError("Document is referenced by a retained effect receipt")
         reference = _blob_reference(document)
         if document.upload_intent_id is not None:
             await DocumentUploadRepository(self._session).request_cleanup(

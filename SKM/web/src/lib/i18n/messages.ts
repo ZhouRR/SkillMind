@@ -437,6 +437,11 @@ export interface UiMessages {
     mcpServerUrl: string
     databaseTables: string
     databaseReadHint: string
+    databaseWriteColumns: string
+    databaseOperations: string
+    databaseWriteHint: string
+    databaseWriteColumnsRequired: string
+    databaseOperationsRequired: string
     mcpResourceUris: string
     mcpReadHint: string
     tablesRequired: string
@@ -732,6 +737,16 @@ export interface UiMessages {
     }
     modelEffectsHint: string
     platformEffectsHint: string
+    effectResultUnknown: string
+    effectReconciliationHint: string
+    reconciliation: {
+      hint: string; latest: string; loading: string; empty: string; pending: string; storageError: string
+      start: string; retry: string; sending: string; refresh: string; objectOnly: string; observedAt: string
+      statuses: Record<'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'REVOKED', string>
+      observations: Record<'CONFIRMED' | 'NOT_OBSERVED' | 'CONFLICT', string>
+      errors: Record<'lookup_unavailable' | 'lookup_interrupted' | 'authorization_revoked' | 'target_changed', string>
+      failures: Record<'sessionExpired' | 'denied' | 'unavailable' | 'conflict' | 'unknown', string>
+    }
     /** 公開索引・保存時の検証・今回の取得結果を分けて表示する。 */
     artifacts: {
       title: string; hint: string; loading: string; empty: string; referenced: string; unreferenced: string
@@ -886,6 +901,7 @@ export interface UiMessages {
     freezeHint: string
     /** 即時実行・調度が共用する文書範囲の選択と失効案内。 */
     documentSelection: {
+      library: string
       mode: string
       choose: string
       single: string
@@ -1150,6 +1166,10 @@ export interface UiMessages {
     textTooLarge: string
     interpretRunning: string
     interpretRunningHint: string
+    interpretUnknown: string
+    interpretStorageFailure: string
+    confirmInterpretation: string
+    dismissInterpretation: string
     attemptLine: (attempt: number) => string
     promptSent: string
     modelOutput: string
@@ -1162,6 +1182,7 @@ export interface UiMessages {
     requiredAnswerSuffix: string
     objectivePrefix: (key: string) => string
     successCriteria: string
+    documentPrerequisites: string
     deliverablePrefix: (kind: string) => string
     resourcePrereq: string
     requiredLabel: string

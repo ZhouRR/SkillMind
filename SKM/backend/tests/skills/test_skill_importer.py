@@ -341,7 +341,13 @@ def test_capability_catalog_is_sorted_unique_and_checksum_bound() -> None:
     assert [item.capability for item in loaded.capabilities] == [
         "change.propose/v1",
         "database.read/v1",
+        "database.write/v1",
+        "document.convert/v1",
+        "document.inspect/v1",
+        "document.list/v1",
         "document.read/v1",
+        "document.readiness/v1",
+        "document.write/v1",
         "interaction.request/v1",
         "issue.read/v1",
         "issue.update/v1",
@@ -362,7 +368,7 @@ def test_capability_catalog_is_sorted_unique_and_checksum_bound() -> None:
         if definition.installed and issue.capability in definition.capabilities
     }
     assert loaded.checksum == (
-        "sha256:9f826f7cef5890f6d67fdceb11ab3cf555c9b28f9d3af857408ea8cc0bbef801"
+        "sha256:03a4818288e8e0b11958f466dd49ad69ad25f644b7732e62920e9bd33ce2cfa0"
     )
     duplicate = CapabilityCatalogEntry(
         capability="issue.read/v1",
@@ -384,8 +390,8 @@ def test_system_skill_identity_is_versioned_and_matches_fixture_contract() -> No
     identity = load_interpreter_system_skill(SYSTEM_SKILL)
     example = _load_contract("examples/skill-interpreter-request.v1.json")["interpreter"]
 
-    assert identity.version == "4.0.0"
-    assert identity.interpreter_version == "skillmind-skill-interpreter/4.0.0"
+    assert identity.version == "4.1.0"
+    assert identity.interpreter_version == "skillmind-skill-interpreter/4.1.0"
     assert identity.to_dict() == example
 
 
@@ -533,7 +539,7 @@ def test_bind_identity_stamps_platform_identity_on_model_output() -> None:
     response["runtime_manifest_draft"]["tasks"] = [task]  # type: ignore[index]
     validated = InterpreterFixtureRunner(CONTRACTS).run(request, response, bind_identity=True)
     identity = validated["runtime_manifest_draft"]["identity"]
-    assert identity["interpreter_version"] == "skillmind-skill-interpreter/4.0.0"
+    assert identity["interpreter_version"] == "skillmind-skill-interpreter/4.1.0"
     assert identity["source_hash"] == request["source"]["content_hash"]  # type: ignore[index]
     # 蓝图は同じ解釈の一部であり、manifest と別の identity/互換 level を持ってはならない。
     blueprint = validated["runtime_manifest_draft"]["capability_blueprint"]
@@ -663,3 +669,14 @@ def test_system_skill_maps_independent_aspects_onto_bounded_fan_out() -> None:
     assert "cannot write, cannot ask the user" in prompt
     # 依存のある手順は順次のまま。
     assert "those stay sequential" in prompt
+
+
+def test_system_skill_preserves_mandatory_effect_before_document_access():
+    """原文依拠の gate、旧 Worker 拒否、按需準備と不明結果の扱いを prompt に固定する。"""
+    text = (SYSTEM_SKILL / "SKILL.md").read_text("utf-8")
+    for required in (
+        "document_prerequisites", "/tasks/<index>/document_prerequisites",
+        "document.readiness/v1", "on-demand preparation", "unknown effects never satisfy it",
+        "Do not invent prerequisites",
+    ):
+        assert required in text

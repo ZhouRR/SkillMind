@@ -12,6 +12,7 @@ export interface DocumentSelection {
 
 export const MAX_SELECTED_DOCUMENTS = 5000
 export const ALL_DOCUMENTS_SELECTION = 'project-documents:all'
+export const PROJECT_DOCUMENT_LIBRARY_SELECTION = 'project-library:documents'
 
 /** API の文書 UUID を shape として確認するだけで、所有権は server が検証する。 */
 export function isDocumentId(value: unknown): value is string {

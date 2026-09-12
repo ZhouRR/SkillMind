@@ -105,6 +105,10 @@ ToolAuditLease 是调用回执，不是 Worker lease。Executor 在主 stream �
 
 当前主执行先存 Result/终态再关 stream，子执行先关流/验结果再存 Session/Tool；首事件前取消/超时先收束 await。主 _close_stream 吞普通关闭异常，disconnect 失败也移除 active 注册，不能据“无活动 Session”证明退出。
 
+生产 Engine 的[默认 client](../../SKM/backend/src/skillmind/agent/claude_client.py)在 Query 创建前失败/取消时也关闭已持有的 transport；Query 关闭后，等待原进程内 Tool/control task 结束，再释放 SessionStore 临时输入。并发 disconnect 串行执行，已收到的取消在清理后传播，不提前跳过输入释放；清理中新到的取消或关闭失败保留原引用，不重新启动模型。取消等待不再次取消正在清理的子任务，保留原 handle 供同一 client 后续关闭继续等待；子清理失败不转换成成功。该适配依赖固定 SDK 的内部任务接口，升级须重验。
+
+[合成 API 探针](../../SKM/scripts/probe_claude_metering.py)覆盖运行中 MCP Tool 被中断，以及已启动 transport、尚未创建 Query 时的失败/取消；分别观察直属 CLI 退出码、API 请求数及 disconnect 返回时的 Tool 清理完成标记。它不证明全部后代进程、线程 I/O 或远端调用停止，也不是持久停止回执；关闭失败或调用者退出后仍保留未决语义。
+
 待完善的停止协议必须满足：
 
 1. 准备/等待/清理/提交各有唯一所有者；不重复取消兄弟清理，真实进程有界停止并核对，wait_for 不是硬杀。

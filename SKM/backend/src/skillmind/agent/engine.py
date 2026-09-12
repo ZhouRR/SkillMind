@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
-from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
+from claude_agent_sdk import ClaudeAgentOptions
 from claude_agent_sdk.types import (
     TERMINAL_TASK_STATUSES,
     AssistantMessage,
@@ -39,12 +39,14 @@ from claude_agent_sdk.types import (
 from skillmind.agent.claude import (
     CLAUDE_AGENT_SDK_VERSION,
     CLAUDE_CODE_CLI_VERSION,
+    STRUCTURED_OUTPUT_TOOL_NAME,
     ClaudeRuntimeConfiguration,
     ToolAuthorizationCallback,
     ToolDenialCallback,
     build_claude_agent_options,
 )
 from skillmind.agent.claude_build import require_bundled_cli
+from skillmind.agent.claude_client import DrainingClaudeClient
 from skillmind.agent.claude_metering import capture_invocation, capture_result_usage
 from skillmind.agent.compatibility import probe_claude_agent_sdk
 from skillmind.agent.domain import (
@@ -114,7 +116,7 @@ def _default_client_factory(options: ClaudeAgentOptions) -> ClaudeClient:
     """Production 用 ClaudeSDKClient を共有 protocol として生成する。"""
 
     require_bundled_cli(options.cli_path)
-    return ClaudeSDKClient(options)
+    return DrainingClaudeClient(options)
 
 
 class ClaudeMessageMapper:
@@ -126,6 +128,7 @@ class ClaudeMessageMapper:
         self._context = context
         self._session_id = _validated_session_id(session_id)
         self._next_sequence = context.sequence_start
+        self._structured_output_calls: set[str] = set()
 
     def map(self, message: Message, *, interrupted: bool = False) -> tuple[AgentEvent, ...]:
         """一つの SDK message からゼロ個以上の正規化 event を生成する。"""
@@ -260,6 +263,11 @@ class ClaudeMessageMapper:
             if isinstance(block, TextBlock):
                 mapped.append(self._event(AgentEventType.TEXT_COMPLETED, {"text": block.text}))
             elif isinstance(block, ToolUseBlock):
+                if block.name == STRUCTURED_OUTPUT_TOOL_NAME:
+                    # 結果搬送を資源 Tool として UI に見せない。usage/最終 Result は別途保存する。
+                    self._structured_output_calls.add(block.id)
+                    continue
+                self._structured_output_calls.discard(block.id)
                 mapped.append(
                     self._event(
                         AgentEventType.TOOL_REQUESTED,
@@ -271,6 +279,8 @@ class ClaudeMessageMapper:
                     )
                 )
             elif isinstance(block, ToolResultBlock):
+                if block.tool_use_id in self._structured_output_calls:
+                    continue
                 mapped.append(
                     self._event(
                         AgentEventType.TOOL_FAILED

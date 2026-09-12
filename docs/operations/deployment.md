@@ -28,7 +28,7 @@ skm/
 - **已有环境更新**：先关闭新业务入口、核清在途调用/远端未知效果，停止全部写入者并取得[一致恢复点](backup-recovery.md#一致恢复点包含什么)。不并发部署或改写镜像/tag、配置；重命名不迁移旧数据。
 - **数据恢复/故障对账**：走[恢复流程](backup-recovery.md)，不执行会自动启动 Worker 的 `make deploy`。
 
-`make deploy` 停止当前 project 应用服务，再初始化基建、迁移并启动 API/Web/Worker；执行即允许恢复后台工作，可能立即消费队列和恢复任务。首版保持 `SKILLMIND_DEFERRED_FEATURES_ENABLED=false`，API/Worker 使用同一值，外部写入、调度发火和子 Agent 不开放；扩展开发环境才显式启用。`SKILLMIND_WORKER_DISPATCH_ENABLED=false` 阻止新的 Run/Effect job 执行，不取消已在运行的调用，也不是维护模式。Makefile 不控制其他实例、orphan、其他 daemon 或远端写入，不能代替全局停写确认。
+`make deploy` 停止当前 project 应用服务，再初始化基建、迁移并启动 API/Web/Worker；执行即允许恢复后台工作，可能立即消费队列和恢复任务。默认保持 `SKILLMIND_DEFERRED_FEATURES_ENABLED=false` 和 `SKILLMIND_DATABASE_WRITES_ENABLED=false`，两个值分别在 API/Worker 保持一致。前者控制既有外部写入、调度发火和子 Agent；后者仅开放 PostgreSQL INSERT/UPDATE 的提案与人工批准执行，不互相放行。数据库启用前须配置明确表/列/操作范围，并按[回执权限要求](../design/repository-effects.md#postgresql-单行事务与原执行回执)安装目标库回执表。`SKILLMIND_WORKER_DISPATCH_ENABLED=false` 阻止新的 Run/Effect/解释 job 执行，不取消已在运行的调用，也不是维护模式。Makefile 不控制其他实例、orphan、其他 daemon 或远端写入，不能代替全局停写确认。
 
 ### Windows 构建与移送
 
@@ -113,6 +113,7 @@ revision 不识别、多个 head、连接失败或迁移错误均需核对实际
 | 0041 评价原请求 | 原键/hash 同事务保存，旧行空值；任一绑定非空拒绝丢列。API/新 Web 配套提交/确认/分页，旧接口无新增重放保证，不删评价绕回退 |
 | 0042 停止待发布 | 关闭标记/独立审计同存，不改原回执/占用；任一存在拒绝降级。API/Web 配套；DB CHECK 拒绝旧 SQL 发布已关闭项，但不阻止旧 PUT 或替代停写/对账 |
 | 0043 预算启动所有权 | 旧行不造 owner，新绑定存 token hash；任一 owner 痕迹拒绝丢列。旧调用方不混跑，hash/迁移不证明模型未启动、停止或计量完整 |
+| 0044 解释原请求 | 只建新台账、不补旧会话；任何请求/调用记录阻止降级。Web/API/Worker 配套切换，旧解释/调整 URI 关闭，旧队列任务明确拒绝；停止旧 API/Worker 后迁移，不从旧 job 补造作者或重放未知模型调用 |
 
 有表/旧页面可读不证明功能接齐或非终态可续行；预算另过[混合 Worker 门禁](../design/run-budgets.md#上线门禁与接线顺序)。兼容未知保持停写，按[回退](backup-recovery.md#应用版本回退)处理，不删审计/快照/未决占用凑条件。
 

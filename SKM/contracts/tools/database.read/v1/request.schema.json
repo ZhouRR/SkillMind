@@ -60,6 +60,11 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 500
+    },
+    "include_schema": {
+      "type": "boolean",
+      "default": false,
+      "description": "Also return complete column attributes and ordered primary keys for the bound ordinary or partitioned table, even if empty. Requires table SELECT privilege; failure is an error, not a partial schema."
     }
   },
   "$id": "https://schemas.skillmind.local/tools/database.read/v1/request.schema.json",

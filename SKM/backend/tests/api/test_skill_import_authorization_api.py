@@ -8,6 +8,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Literal
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI
@@ -513,14 +514,17 @@ def test_import_storage_problem_factory_remains_static_for_existing_consumers(
     fake = FakeSkillService()
     marker = "Synthetic private storage connection detail"
     writer = AsyncMock(side_effect=SkillStorageUnavailableError(marker))
-    monkeypatch.setattr(fake, f"begin_{operation}", writer)
+    monkeypatch.setattr(fake, "accept_interpretation_request", writer)
     application(client).state.skill_service = fake
     if operation == "interpret":
-        response = client.post(f"/api/v1/skill-sources/{fake.stored.skill_source_id}/interpret")
+        response = client.post(
+            f"/api/v1/skill-sources/{fake.stored.skill_source_id}/interpretation-requests",
+            json={"request_id": str(uuid4())},
+        )
     else:
         response = client.post(
-            f"/api/v1/skill-interpretations/{fake.stored.interpretation_id}/adjust",
-            json={"instruction": "Synthetic adjustment"},
+            f"/api/v1/skill-interpretations/{fake.stored.interpretation_id}/adjustment-requests",
+            json={"request_id": str(uuid4()), "instruction": "Synthetic adjustment"},
         )
     assert response.status_code == 503
     assert response.json()["code"] == "skill_storage_unavailable"

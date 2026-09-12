@@ -127,7 +127,7 @@ class StoredChangeProposal:
     run_segment_id: UUID
     agent_session_id: UUID
     target_binding_id: UUID
-    integration_id: UUID
+    integration_id: UUID | None
     effect_intent_key: str
     capability_version: str
     operation: str
@@ -265,7 +265,7 @@ class ClaimedEffectExecution:
     run_attempt_id: UUID
     agent_session_id: UUID
     project_id: UUID
-    integration_id: UUID
+    integration_id: UUID | None
     binding_id: UUID
     capability_version: str
     operation: str
@@ -283,6 +283,14 @@ class ClaimedEffectExecution:
     lease_token: str
     lease_expires_at: datetime
     attempt_no: int
+
+
+@dataclass(frozen=True, slots=True)
+class EffectStepAuthority:
+    """共有段階認可の lock 下で確認した発起人。transaction 外の許可証としては使わない。"""
+
+    organization_id: UUID
+    actor_id: UUID
 
 
 @dataclass(frozen=True, slots=True)

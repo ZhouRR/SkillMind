@@ -49,12 +49,20 @@ parse 不调用模型，初始 Draft 可无蓝图、不可直接发布。ZIP/TAR
 
 ### 异步解释的交接要求
 
-当前解释/调整只传组织/参数入队，无持久原请求授权；Worker 重建输入，终态唯一键不能阻止重复模型调用。修正异步授权链路时须一起处理以下边界，不把单点修复当作链路闭合：
+解释/调整通过持久原请求交接；API 受理与 dispatch Outbox 同事务，Worker 从数据库取得原授权与冻结输入。边界如下：
 
-1. 原请求 ID 与内容 execution key 分开；短事务绑定原 actor/会话引用、冻结输入/Interpreter/model 身份及 dispatch Outbox。队列只传持久 ID，不传 cookie/CSRF。
-2. Worker 复用原会话资格校验，锁外模型调用前和结果提交时复核；每次初次/修复调用分别取得原 Worker 一次启动许可。未知启动不由重投/新会话接管。
+1. 原请求 ID 与内容 execution key 分开；短事务绑定原 actor/会话引用、冻结输入/Interpreter/model 身份及 dispatch Outbox。队列只传持久 ID，不传 cookie/CSRF。同组织同 execution key 绑定一个原请求；复用/确认读取该请求，显式重新生成才使用新 nonce，不能换请求 ID 重启未知执行。
+2. Worker 复用原会话资格校验，锁外模型调用前和结果提交时复核；每次初次/修复调用分别取得原 Worker 一次启动许可。认领取得的随机 owner 只在原 Worker 内存持有，DB 仅存 hash；重投不返回旧 owner，修复须已观察初次调用返回且原请求仍为 RUNNING。return 记录不等于进程停止证明，UNKNOWN 只允许原 owner 核对迟到结果，不再授予模型调用。
 3. 原请求只读确认、撤权审计、旧队列拒绝、迁移/恢复一起实现，不补造旧作者/执行事实。
-4. SSE 先按持久身份验组织归属，再订阅并复查终态/长连接资格。当前仅把组织写入 key、查不到终态仍转 Pub/Sub 不满足授权；超时/断连不证明持久 FAILED 或模型未运行，页面不能据此自动换身份生成。
+4. SSE 先按持久身份验组织归属，再订阅并复查终态/长连接资格。不能仅把组织写入 key 或凭通知判断终态；超时/断连不证明持久 FAILED 或模型未运行，页面不能据此自动换身份生成。
+
+内部台账入口为 `skills/request_service.py` / `request_repository.py`，原会话资格复用 `auth/sessions.py`；migration `0044_interpretation_requests` 只建新请求/调用表，不补造历史事实，存在任何请求时拒绝删表降级。候选与请求终态在同一授权事务提交；最终 flush 后失效须整体回滚候选，再保存撤权状态。
+
+`SkillService.accept_interpretation_request` / `execute_interpretation_request` 已连接冻结输入核对、逐次许可、复用与结果提交；`ModelSkillInterpreter` 在 prompt 准备/异步预览之后、实际 completion 之前调用 `RequestCallControl`。许可或 return 提交结果未知时，同一 controller 不再申请许可。已确认无任何调用许可的准备失败可记 FAILED；存在许可则保留 UNKNOWN，不补造 return 或停止。控制路径须同时装配调用、成果保存和复用门禁。生产 API/Worker 使用该路径；旧 actor/参数队列任务明确拒绝，API 不再直接入队。过期 RUNNING 经原资格和锁内状态复核后转 UNKNOWN 或 REVOKED；恢复不创建调用许可或新 Outbox。
+
+受理入口是 `POST /skill-sources/{id}/interpretation-requests` 与 `POST /skill-interpretations/{id}/adjustment-requests`，body 必填非零 `request_id`。同内容的新 ID 返回原请求只读状态，不接管原会话。`GET /skill-interpretation-requests/{request_id}` 只返回状态、来源、execution key、结果指针及错误码；冻结输入、actor/session 引用与 owner 不公开。SSE 使用该请求的 `/events`，每次等待后重验当前会话；终态从 DB 读取，Pub/Sub 只提供进度。
+
+页面在 POST 前于 tab 保存原 UUID；断连、超时、404 或不可读回执保留未知状态，人工确认和刷新只做原 GET。停止查看不取消模型；已确认终态才清理回执，结果再核来源/执行键/状态。接口路径与旧版分离，版本切换和存量队列见[部署兼容](../operations/deployment.md#迁移与回退审查)。
 
 ### 从候选到项目任务的接线
 

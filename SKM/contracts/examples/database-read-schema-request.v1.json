@@ -1,0 +1,6 @@
+{
+  "table": "public.reports",
+  "include_schema": true,
+  "limit": 1,
+  "purpose": "Inspect the empty table before observing an exact primary key for a proposal"
+}

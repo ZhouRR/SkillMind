@@ -89,6 +89,7 @@ export type {
 } from './evaluations'
 export {
   adjustInterpretation,
+  confirmInterpretationRequest,
   createSkillVersionDraft,
   deleteSkillVersion,
   deprecateSkillVersion,
@@ -170,6 +171,8 @@ export {
   disableEffectPreauthorization,
   loadEffectPreauthorizations,
 } from './effects'
+export { loadLatestReconciliation, confirmReconciliation, requestReconciliation } from './reconciliation'
+export type { ReconciliationRecord, ReconciliationScope } from './reconciliation'
 export type {
   ChangeApprovalRecord,
   ChangeProposalRecord,

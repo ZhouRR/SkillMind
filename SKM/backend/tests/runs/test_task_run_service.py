@@ -546,3 +546,45 @@ async def test_public_replay_entry_uses_the_same_repository_identity_check() -> 
     assert replay is not None and replay.run_id == row.id
     assert database.transactions == database.commits == 1
     database.session.flush.assert_awaited_once()
+
+
+@pytest.mark.parametrize("kind,provider,read,write", [
+    ("database", "postgres", "database.read/v1", "database.write/v1"),
+    ("repository", "git", "repository.read/v1", "repository.write/v1"),
+    ("issue", "redmine", "issue.read/v1", "issue.update/v1"),
+])
+async def test_write_resource_exposes_observe_tool_and_retains_write_binding(
+    kind, provider, read, write,
+) -> None:
+    """Agent の直接 Tool と批准先 binding を分け、write を通常 Tool に昇格させない。"""
+
+    project_id = uuid4()
+    requirement = {"key": "target", "kind": kind, "required": True,
+                   "access": "write", "capabilities": [write, read]}
+    resolved = _resolved((requirement,))
+    integration = ResolvedIntegration(
+        integration_id=uuid4(), project_id=project_id, name="Synthetic target", kind=kind,
+        provider=provider, status=IntegrationStatus.ACTIVE, revision=1,
+        capabilities=(read, write), scope={}, config={}, secret_reference_id=None,
+    )
+    repository = Mock(spec=IntegrationRepository)
+    repository.get_integration = AsyncMock(return_value=integration)
+    selected, bindings = await _resolve_selected_sources(
+        resolved, {"target": f"integration:{integration.integration_id}"},
+        blueprint=resolved.skill_snapshot["manifest"]["capability_blueprint"],
+        project_id=project_id, integration_repository=repository,
+    )
+    assert selected["target"]["capability"] == read
+    assert selected["target"]["access"] == "write"
+    assert bindings[0].capability_version == write
+
+
+async def test_write_only_declaration_cannot_become_a_direct_tool() -> None:
+    """観測宣言のない write 要求を、暗黙の Tool や未宣言の読取へ置き換えない。"""
+
+    requirement = {**_REPOSITORY_SOURCE, "access": "write",
+                   "capabilities": ["repository.write/v1"]}
+    with pytest.raises(TaskSourceSelectionError, match="observe capability"):
+        await _resolve_without_bindings(
+            _resolved((requirement,)), {"repository-source": f"integration:{uuid4()}"}
+        )

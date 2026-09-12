@@ -471,6 +471,93 @@ class SkillInterpretation(IdentityMixin, Base):
     skill_source: Mapped[SkillSource] = relationship(back_populates="interpretations")
 
 
+class SkillInterpretationRequest(IdentityMixin, Base):
+    """原 ADMIN 会話、凍結入力と開始 owner を保持する非同期解釈要求。"""
+
+    __tablename__ = "skill_interpretation_requests"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id", "execution_key", name="uq_interpret_request_execution"
+        ),
+        CheckConstraint(
+            "status IN ('QUEUED', 'RUNNING', 'UNKNOWN', 'SUCCEEDED', 'FAILED', 'REVOKED')",
+            name="interpret_request_status",
+        ),
+        CheckConstraint(
+            "input_checksum ~ '^sha256:[0-9a-f]{64}$' AND "
+            "execution_key ~ '^sha256:[0-9a-f]{64}$'",
+            name="interpret_request_hashes",
+        ),
+        CheckConstraint(
+            "(owner_hash IS NULL AND claimed_at IS NULL) OR "
+            "(owner_hash IS NOT NULL AND owner_hash ~ '^sha256:[0-9a-f]{64}$' "
+            "AND claimed_at IS NOT NULL)",
+            name="interpret_request_owner",
+        ),
+        CheckConstraint(
+            "(status = 'QUEUED' AND owner_hash IS NULL AND finished_at IS NULL "
+            "AND interpretation_id IS NULL AND error_code IS NULL) OR "
+            "(status IN ('RUNNING', 'UNKNOWN') AND owner_hash IS NOT NULL "
+            "AND finished_at IS NULL AND interpretation_id IS NULL AND error_code IS NULL) OR "
+            "(status = 'SUCCEEDED' AND finished_at IS NOT NULL "
+            "AND interpretation_id IS NOT NULL AND error_code IS NULL) OR "
+            "(status IN ('FAILED', 'REVOKED') AND finished_at IS NOT NULL "
+            "AND error_code IS NOT NULL)",
+            name="interpret_request_terminal",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    actor_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    auth_session_id: Mapped[UUID] = mapped_column(
+        ForeignKey("auth_sessions.id", ondelete="RESTRICT"), nullable=False
+    )
+    accepted_http_request_id: Mapped[UUID] = mapped_column(nullable=False)
+    skill_source_id: Mapped[UUID] = mapped_column(
+        ForeignKey("skill_sources.id", ondelete="RESTRICT"), nullable=False
+    )
+    execution_key: Mapped[str] = mapped_column(String(71), nullable=False, index=True)
+    input_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    input_checksum: Mapped[str] = mapped_column(String(71), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    owner_hash: Mapped[str | None] = mapped_column(String(71))
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    interpretation_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("skill_interpretations.id", ondelete="RESTRICT")
+    )
+    error_code: Mapped[str | None] = mapped_column(String(64))
+
+
+class SkillInterpretationCall(IdentityMixin, Base):
+    """初回/修復ごとの一度限りの開始許可と return 観測を保持する。"""
+
+    __tablename__ = "skill_interpretation_calls"
+    __table_args__ = (
+        UniqueConstraint("request_id", "ordinal", name="uq_interpret_call_request_ordinal"),
+        CheckConstraint(
+            "(ordinal = 0 AND feedback IS NULL) OR (ordinal = 1 AND feedback IS NOT NULL)",
+            name="interpret_call_ordinal",
+        ),
+        CheckConstraint(
+            "returned_at IS NULL OR returned_at >= granted_at", name="interpret_call_return"
+        ),
+    )
+
+    request_id: Mapped[UUID] = mapped_column(
+        ForeignKey("skill_interpretation_requests.id", ondelete="RESTRICT"), nullable=False
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    feedback: Mapped[str | None] = mapped_column(Text)
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    returned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class Skill(IdentityMixin, TimestampMixin, Base):
     """公開 version を束ねる組織内で一意な Skill identity。"""
 
@@ -1333,6 +1420,12 @@ class ChangeProposal(IdentityMixin, TimestampMixin, Base):
 
     __tablename__ = "change_proposals"
     __table_args__ = (
+        CheckConstraint(
+            "(capability_version = 'document.write/v1' AND operation = 'CREATE' "
+            "AND integration_id IS NULL) OR "
+            "(capability_version <> 'document.write/v1' AND integration_id IS NOT NULL)",
+            name="document_library_integration",
+        ),
         UniqueConstraint("proposal_ref", name="uq_change_proposals_ref"),
         UniqueConstraint(
             "run_id", "idempotency_key", name="uq_change_proposals_run_idempotency"
@@ -1369,8 +1462,8 @@ class ChangeProposal(IdentityMixin, TimestampMixin, Base):
     target_binding_id: Mapped[UUID] = mapped_column(
         ForeignKey("resource_bindings.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    integration_id: Mapped[UUID] = mapped_column(
-        ForeignKey("integrations.id", ondelete="RESTRICT"), nullable=False, index=True
+    integration_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("integrations.id", ondelete="RESTRICT"), nullable=True, index=True
     )
     effect_intent_key: Mapped[str] = mapped_column(String(128), nullable=False)
     capability_version: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -1478,6 +1571,84 @@ class EffectExecution(IdentityMixin, TimestampMixin, Base):
     attempt_no: Mapped[int] = mapped_column(Integer, nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class EffectReconciliationRequest(IdentityMixin, Base):
+    """原会話と Effect に束縛した只読核対要求。書込台帳や Run 終局を置き換えない。"""
+
+    __tablename__ = "effect_reconciliation_requests"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'REVOKED')",
+            name="effect_reconciliation_status",
+        ),
+        CheckConstraint(
+            "kind IN ('DATABASE_TRANSACTION', 'DOCUMENT_OBJECT')",
+            name="effect_reconciliation_kind",
+        ),
+        CheckConstraint(
+            "target_checksum ~ '^sha256:[0-9a-f]{64}$' AND "
+            "command_checksum ~ '^sha256:[0-9a-f]{64}$'",
+            name="effect_reconciliation_hashes",
+        ),
+        CheckConstraint(
+            "(owner_hash IS NULL AND claimed_at IS NULL AND lease_expires_at IS NULL) OR "
+            "(owner_hash IS NOT NULL AND owner_hash ~ '^[0-9a-f]{64}$' "
+            "AND claimed_at IS NOT NULL AND claimed_at >= created_at "
+            "AND lease_expires_at IS NOT NULL AND lease_expires_at > claimed_at)",
+            name="effect_reconciliation_owner",
+        ),
+        CheckConstraint(
+            "(status = 'QUEUED' AND owner_hash IS NULL AND finished_at IS NULL "
+            "AND observation_status IS NULL AND observed_at IS NULL "
+            "AND receipt_json IS NULL AND error_code IS NULL) OR "
+            "(status = 'RUNNING' AND owner_hash IS NOT NULL AND finished_at IS NULL "
+            "AND observation_status IS NULL AND observed_at IS NULL "
+            "AND receipt_json IS NULL AND error_code IS NULL) OR "
+            "(status = 'SUCCEEDED' AND owner_hash IS NOT NULL AND finished_at IS NOT NULL "
+            "AND finished_at >= observed_at AND finished_at < lease_expires_at "
+            "AND observed_at IS NOT NULL AND observed_at >= claimed_at AND error_code IS NULL "
+            "AND observation_status IS NOT NULL "
+            "AND ((observation_status = 'CONFIRMED' AND receipt_json IS NOT NULL) OR "
+            "(observation_status IN ('NOT_OBSERVED', 'CONFLICT') AND receipt_json IS NULL))) OR "
+            "(status IN ('FAILED', 'REVOKED') AND finished_at IS NOT NULL "
+            "AND finished_at >= created_at AND observation_status IS NULL "
+            "AND observed_at IS NULL AND receipt_json IS NULL AND error_code IS NOT NULL)",
+            name="effect_reconciliation_state",
+        ),
+        Index(
+            "uq_effect_reconciliation_active", "effect_execution_id", unique=True,
+            postgresql_where=text("status IN ('QUEUED', 'RUNNING')"),
+            sqlite_where=text("status IN ('QUEUED', 'RUNNING')"),
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False,
+    )
+    actor_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    auth_session_id: Mapped[UUID] = mapped_column(
+        ForeignKey("auth_sessions.id", ondelete="RESTRICT"),
+    )
+    accepted_http_request_id: Mapped[UUID] = mapped_column(nullable=False)
+    project_id: Mapped[UUID] = mapped_column(ForeignKey("projects.id", ondelete="RESTRICT"))
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="RESTRICT"))
+    effect_execution_id: Mapped[UUID] = mapped_column(
+        ForeignKey("effect_executions.id", ondelete="RESTRICT"), nullable=False,
+    )
+    target_checksum: Mapped[str] = mapped_column(String(71), nullable=False)
+    command_checksum: Mapped[str] = mapped_column(String(71), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    owner_hash: Mapped[str | None] = mapped_column(String(64))
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    observation_status: Mapped[str | None] = mapped_column(String(16))
+    observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    receipt_json: Mapped[dict[str, Any] | None] = mapped_column(JSON(none_as_null=True))
+    error_code: Mapped[str | None] = mapped_column(String(64))
 
 
 class InteractionResponse(IdentityMixin, Base):
@@ -1792,6 +1963,92 @@ class ProjectDocumentCleanup(IdentityMixin, Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class ProjectDocumentEffectUpload(IdentityMixin, Base):
+    """批准 Effect の原 Artifact・占用・一度の送信・公開回执を保存する。"""
+
+    __tablename__ = "document_effect_uploads"
+    __table_args__ = (
+        UniqueConstraint("effect_id", name="uq_document_effect_upload_effect"),
+        UniqueConstraint("document_id", name="uq_document_effect_upload_document"),
+        UniqueConstraint(
+            "id", "document_id", "project_id", name="uq_document_effect_upload_binding"
+        ),
+        UniqueConstraint(
+            "storage_namespace_id", "storage_key", name="uq_document_effect_upload_object"
+        ),
+        UniqueConstraint("project_id", "folder", "name", name="uq_document_effect_upload_path"),
+        CheckConstraint("protocol_version = 1", name="protocol_version"),
+        CheckConstraint("size > 0 AND size <= 1048576", name="size"),
+        CheckConstraint("storage_is_durable", name="durable"),
+        CheckConstraint("request_checksum ~ '^sha256:[0-9a-f]{64}$'", name="request_checksum"),
+        CheckConstraint("checksum ~ '^sha256:[0-9a-f]{64}$'", name="checksum"),
+        CheckConstraint(
+            "storage_descriptor_checksum ~ '^sha256:[0-9a-f]{64}$'",
+            name="storage_descriptor_checksum",
+        ),
+        CheckConstraint("artifact_ref ~ '^art_[a-zA-Z0-9_-]+$'", name="artifact_ref"),
+        CheckConstraint(
+            "name <> '' AND storage_key <> '' AND bucket <> ''", name="nonempty_fields"
+        ),
+        CheckConstraint("mime IN ('text/plain', 'text/markdown', 'application/json')", name="mime"),
+        CheckConstraint(
+            "(state = 'RESERVED' AND sent_at IS NULL AND verified_at IS NULL AND "
+            "published_at IS NULL AND put_owner_id IS NULL) OR "
+            "(state = 'SENT' AND sent_at IS NOT NULL AND sent_at >= created_at AND "
+            "verified_at IS NULL AND published_at IS NULL AND put_owner_id IS NOT "
+            "NULL) OR "
+            "(state = 'VERIFIED' AND sent_at IS NOT NULL AND verified_at IS NOT NULL "
+            "AND sent_at >= created_at AND verified_at >= sent_at AND published_at IS "
+            "NULL AND put_owner_id IS NOT NULL) OR "
+            "(state = 'PUBLISHED' AND sent_at IS NOT NULL AND verified_at IS NOT NULL "
+            "AND published_at IS NOT NULL AND sent_at >= created_at AND verified_at >="
+            " sent_at AND published_at >= verified_at AND put_owner_id IS NOT NULL)",
+            name="state_times",
+        ),
+        CheckConstraint(
+            "(state IN ('RESERVED', 'SENT') AND etag IS NULL AND version_id IS NULL) OR "
+            "(state IN ('VERIFIED', 'PUBLISHED') AND etag IS NOT NULL AND etag <> '')",
+            name="receipt",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="RESTRICT"), nullable=False)
+    effect_id: Mapped[UUID] = mapped_column(
+        ForeignKey("effect_executions.id", ondelete="RESTRICT"), nullable=False
+    )
+    actor_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    artifact_ref: Mapped[str] = mapped_column(String(64), nullable=False)
+    document_id: Mapped[UUID] = mapped_column(nullable=False)
+    protocol_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    request_checksum: Mapped[str] = mapped_column(String(71), nullable=False)
+    folder: Mapped[str] = mapped_column(String(200), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    bucket: Mapped[str] = mapped_column(String(63), nullable=False)
+    storage_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    storage_namespace_id: Mapped[UUID] = mapped_column(nullable=False)
+    storage_descriptor_checksum: Mapped[str] = mapped_column(String(71), nullable=False)
+    storage_is_durable: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    mime: Mapped[str] = mapped_column(String(128), nullable=False)
+    checksum: Mapped[str] = mapped_column(String(71), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    put_owner_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    etag: Mapped[str | None] = mapped_column(String(258), nullable=True)
+    version_id: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class ProjectDocument(IdentityMixin, Base):
     """Project 内にアップロードした文書の metadata。blob 正文は object storage に置く。
 
@@ -1801,6 +2058,17 @@ class ProjectDocument(IdentityMixin, Base):
 
     __tablename__ = "project_documents"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["effect_upload_id", "id", "project_id"],
+            [
+                "document_effect_uploads.id", "document_effect_uploads.document_id",
+                "document_effect_uploads.project_id",
+            ],
+            name="fk_project_documents_effect_upload", ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "upload_intent_id IS NULL OR effect_upload_id IS NULL", name="single_upload_origin",
+        ),
         UniqueConstraint(
             "project_id",
             "folder",
@@ -1829,6 +2097,7 @@ class ProjectDocument(IdentityMixin, Base):
     project_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
     # 旧文書へ架空の原要求を補造せず、新方式の公開文書だけを正確な intent と結ぶ。
     upload_intent_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    effect_upload_id: Mapped[UUID | None] = mapped_column(nullable=True)
     folder: Mapped[str] = mapped_column(String(200), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     storage_key: Mapped[str] = mapped_column(String(512), nullable=False)

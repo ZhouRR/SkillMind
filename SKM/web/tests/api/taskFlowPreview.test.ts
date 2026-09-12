@@ -178,3 +178,14 @@ describe('lossless numeric declarations through the real JSON HTTP boundary', ()
     }
   })
 })
+
+it.each([null, [], ['register-run', 'register-run'], 'register-run'])(
+  'rejects malformed document prerequisites %j in exact task preview', (value) => {
+    expect(() => parseTaskFlowPreview(changed('plan.task.value.document_prerequisites', value), FLOW_PROJECT, FLOW_TARGET)).toThrow()
+  },
+)
+
+it('preserves document prerequisites in the original task projection', () => {
+  const preview = parseTaskFlowPreview(changed('plan.task.value.document_prerequisites', ['register-run']), FLOW_PROJECT, FLOW_TARGET)
+  expect(preview.plan!.task.value.document_prerequisites).toEqual(['register-run'])
+})

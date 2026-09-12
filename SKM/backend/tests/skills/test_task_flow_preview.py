@@ -611,3 +611,24 @@ def test_invalid_error_is_static_and_does_not_chain_raw_validator_payload() -> N
     assert str(caught.value) == "The saved task flow preview is invalid."
     assert caught.value.__cause__ is None and caught.value.__suppress_context__ is True
     assert "secret-example" not in repr(caught.value)
+
+
+def test_exact_task_projection_keeps_document_prerequisites_and_source_trace():
+    """新しい前置条件を Task 投影から落とさず、原配列と source pointer を保持する。"""
+    from jsonschema import Draft202012Validator, FormatChecker
+
+    source = _source()
+    blueprint = source.manifest["capability_blueprint"]
+    blueprint["tasks"][1]["document_prerequisites"] = ["update"]
+    blueprint["source_traces"].append({"target": "/tasks/1/document_prerequisites",
+        "path": "説明/SKILL.md", "line": 2, "reason": "Synthetic prerequisite declaration"})
+    source.manifest["tools"].append({"capability": "document.readiness/v1", "required": True})
+    result = _project(_rehashed(source)).to_json()
+    schema = json.loads((CONTRACTS / "tasks/flow-preview/v1.schema.json").read_text())
+    Draft202012Validator(schema, format_checker=FormatChecker()).validate({
+        **result, "readiness": {"scope": "SKILL_BLUEPRINT", "assessment": None}
+    })
+    assert result["plan"]["task"]["value"]["document_prerequisites"] == ["update"]
+    assert any(
+        item["target"] == "/tasks/1/document_prerequisites" for item in result["source_traces"]
+    )

@@ -7,9 +7,14 @@ from uuid import UUID
 
 from skillmind.db.models import Run, TaskSchedule, TaskScheduleOccurrence
 from skillmind.documents.domain import DocumentReferencesUnavailableError
+from skillmind.documents.library import (
+    DOCUMENT_LIBRARY_SELECTION,
+    is_document_library_source,
+    parse_document_library_source,
+)
 from skillmind.documents.snapshot import (
+    DOCUMENT_CAPABILITIES,
     DOCUMENT_PROVIDER,
-    DOCUMENT_READ_CAPABILITY,
     DocumentSnapshot,
     is_document_source,
     parse_document_selection,
@@ -29,6 +34,9 @@ def choice_document_ids(sources: object) -> frozenset[UUID]:
     for key, token in sources.items():
         if not isinstance(key, str) or not key or not isinstance(token, str) or not token:
             raise ValueError("Stored source choice is invalid")
+        if token == DOCUMENT_LIBRARY_SELECTION:
+            # 保存先の明示選択は既存入力の参照を持たない。prefix の類似だけでは採用しない。
+            continue
         if is_document_source(token):
             result.update(parse_document_selection(token).document_ids)
         elif token.startswith("integration:"):
@@ -45,15 +53,30 @@ def run_document_ids(run: Run) -> frozenset[UUID]:
     original = stored_creation_intent(run)
     frozen: list[DocumentSnapshot] = []
     document_keys = {key for key, token in original.sources.items() if is_document_source(token)}
+    library_keys = {
+        key for key, token in original.sources.items() if token == DOCUMENT_LIBRARY_SELECTION
+    }
+    actual_library_keys: set[str] = set()
     actual_keys: set[str] = set()
     for key, source in run.selected_sources_json.items():
         if not isinstance(key, str) or not key or not isinstance(source, Mapping):
             raise ValueError("Stored Run source is not verifiable")
+        if is_document_library_source(source):
+            parse_document_library_source(
+                source, project_id=run.project_id, run_id=run.id, requirement_key=key
+            )
+            if key not in library_keys:
+                raise ValueError("Document library does not match the original choice")
+            actual_library_keys.add(key)
+            continue
         if not is_document_source(source) and not is_document_source(source.get("candidate_key")):
             capability = source.get("capability")
             if (
                 not isinstance(capability, str)
-                or not capability.startswith(("issue.", "repository."))
+                or (
+                    not capability.startswith(("issue.", "repository."))
+                    and capability not in {"database.read/v1", "mcp.read/v1"}
+                )
                 or not isinstance(source.get("provider"), str)
                 or not source["provider"]
             ):
@@ -63,7 +86,7 @@ def run_document_ids(run: Run) -> frozenset[UUID]:
         value = source.get("document_snapshot")
         if (
             source.get("provider") != DOCUMENT_PROVIDER
-            or source.get("capability") != DOCUMENT_READ_CAPABILITY
+            or source.get("capability") not in DOCUMENT_CAPABILITIES
             or source.get("resource_kind", "document") != "document"
             or not isinstance(value, Mapping)
             or key not in document_keys
@@ -85,7 +108,7 @@ def run_document_ids(run: Run) -> frozenset[UUID]:
         ):
             raise ValueError("Frozen documents do not match their original selection")
         frozen.append(snapshot)
-    if actual_keys != document_keys:
+    if actual_keys != document_keys or actual_library_keys != library_keys:
         raise ValueError("Original document selection has no trusted snapshot")
     return frozenset(item.document_id for item in snapshot_documents(frozen))
 

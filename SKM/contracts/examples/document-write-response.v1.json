@@ -1,0 +1,17 @@
+{
+  "status": "success",
+  "provider": "project-library",
+  "proposal_ref": "cp_document001",
+  "before_ref": "ev_before001",
+  "after_ref": "ev_after001",
+  "verification": {
+    "method": "READ_BACK",
+    "matched_paths": [
+      "/document"
+    ],
+    "replayed": false,
+    "effect_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "request_checksum": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "replayed": false
+}

@@ -7,6 +7,7 @@ import {
   requestApiJson,
 } from './http'
 import { normalizedSkillUploadPaths } from '../lib/skillUpload'
+import { isNonNilUuid, sameUuid } from '../lib/validation'
 
 /** Browser から送る Skill source の text file。 */
 export interface SkillSourceFile {
@@ -85,6 +86,7 @@ export interface BlueprintTask {
   capability: string
   objective: string
   success_criteria?: BlueprintNote[]
+  document_prerequisites?: string[]
   resource_keys?: string[]
   deliverables?: Array<{ key: string; kind: string; description: string }>
 }
@@ -546,6 +548,14 @@ function isCapabilityBlueprint(value: unknown): value is CapabilityBlueprintView
   return (
     Array.isArray(value.capabilities)
     && Array.isArray(value.tasks)
+    && value.tasks.every((task) => isRecord(task) && (
+      !('document_prerequisites' in task) || (
+        isStringArray(task.document_prerequisites)
+        && task.document_prerequisites.length > 0 && task.document_prerequisites.length <= 50
+        && new Set(task.document_prerequisites).size === task.document_prerequisites.length
+        && task.document_prerequisites.every((key) => /^[a-z][a-z0-9_.-]{0,127}$/.test(key))
+      )
+    ))
     && Array.isArray(value.resource_requirements)
     && isRecord(guidance)
     && Array.isArray(guidance.required_rules)
@@ -608,43 +618,65 @@ export interface InterpretationExecutionRecord {
   diff: Record<string, unknown>
 }
 
-/** Interpret/adjust 受理結果。queued は Worker 実行待ちで execution_key の stream を観測する。 */
+/** 原要求の持久状態。UNKNOWN は FAILED や model 未開始とは区別する。 */
 export interface InterpretationLaunchRecord {
-  status: 'stored' | 'queued'
+  request_id: string
+  skill_source_id: string
+  status: 'QUEUED' | 'RUNNING' | 'UNKNOWN' | 'SUCCEEDED' | 'FAILED' | 'REVOKED'
   execution_key: string
-  execution: InterpretationExecutionRecord | null
+  interpretation_id: string | null
+  error_code: string | null
 }
 
-/** ADMIN の CSRF token 付きで interpret を受理させる。model 実行は Worker が行う。 */
+/** 送信前から保持した原 UUID で受理させ、旧 API の即時 Queue 入口は使わない。 */
 export async function interpretSkillSource(
   skillSourceId: string,
+  requestId: string,
   csrfToken: string,
   signal?: AbortSignal,
   forceRegenerate = false,
 ): Promise<InterpretationLaunchRecord> {
-  const query = forceRegenerate ? '?force_regenerate=true' : ''
-  return parseInterpretationLaunch(await requestApiJson(
-    `${API_BASE}/skill-sources/${encodeURIComponent(skillSourceId)}/interpret${query}`,
-    { method: 'POST', headers: { 'X-CSRF-Token': csrfToken }, signal },
+  if (!isNonNilUuid(requestId)) throw new Error('Invalid interpretation request identity')
+  const result = parseInterpretationLaunch(await requestApiJson(
+    `${API_BASE}/skill-sources/${encodeURIComponent(skillSourceId)}/interpretation-requests`,
+    {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+      body: JSON.stringify({ request_id: requestId, force_regenerate: forceRegenerate }), signal,
+    },
   ))
+  if (!sameUuid(result.skill_source_id, skillSourceId)) throw new Error('Interpretation source did not match')
+  return result
 }
 
-/** ADMIN の調整指示を親 interpretation に折り込み、reinterpretation を Worker job で受理させる。 */
+/** 調整の原 UUID と指示を凍結する。通信失敗時に別 UUID で再送しない。 */
 export async function adjustInterpretation(
   interpretationId: string,
   instruction: string,
+  requestId: string,
   csrfToken: string,
   signal?: AbortSignal,
 ): Promise<InterpretationLaunchRecord> {
+  if (!isNonNilUuid(requestId)) throw new Error('Invalid interpretation request identity')
   return parseInterpretationLaunch(await requestApiJson(
-    `${API_BASE}/skill-interpretations/${encodeURIComponent(interpretationId)}/adjust`,
+    `${API_BASE}/skill-interpretations/${encodeURIComponent(interpretationId)}/adjustment-requests`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-      body: JSON.stringify({ instruction }),
-      signal,
+      body: JSON.stringify({ request_id: requestId, instruction }), signal,
     },
   ))
+}
+
+/** 原要求の確認は GET だけで行い、新しい解釈を起動しない。 */
+export async function confirmInterpretationRequest(
+  requestId: string, signal?: AbortSignal,
+): Promise<InterpretationLaunchRecord> {
+  if (!isNonNilUuid(requestId)) throw new Error('Invalid interpretation request identity')
+  const result = parseInterpretationLaunch(await requestApiJson(
+    `${API_BASE}/skill-interpretation-requests/${encodeURIComponent(requestId)}`, { signal },
+  ))
+  if (!sameUuid(result.request_id, requestId)) throw new Error('Interpretation request did not match')
+  return result
 }
 
 /** Interpret job の進行 event(prompt/delta/終端)。 */
@@ -668,42 +700,63 @@ const INTERPRET_EVENT_NAMES = [
   'interpret.delta',
   'interpret.completed',
   'interpret.failed',
+  'interpret.unknown',
+  'interpret.disconnected',
 ] as const
 
-/** execution_key の interpret 進行 event を SSE で購読する。 */
+/** 原要求の所有確認済み stream を購読し、異なる execution の通知を拒否する。 */
 export function subscribeInterpretEvents(
+  requestId: string,
   executionKey: string,
   onEvent: (event: InterpretEventRecord) => void,
   onConnectionError: () => void,
 ): InterpretEventSubscription {
-  const endpoint = `${API_BASE}/skill-interpretations/stream/${encodeURIComponent(executionKey)}`
+  const endpoint = `${API_BASE}/skill-interpretation-requests/${encodeURIComponent(requestId)}/events`
   const source = new EventSource(endpoint, { withCredentials: true })
   const listener = (event: Event): void => {
     if (!(event instanceof MessageEvent) || typeof event.data !== 'string') return
     try {
-      onEvent(parseInterpretEvent(JSON.parse(event.data) as unknown))
+      const value = parseInterpretEvent(JSON.parse(event.data) as unknown)
+      if (value.execution_key !== executionKey || value.event !== event.type) {
+        throw new Error('Interpretation event did not match')
+      }
+      onEvent(value)
     } catch {
+      source.close()
       onConnectionError()
     }
   }
   for (const eventName of INTERPRET_EVENT_NAMES) source.addEventListener(eventName, listener)
-  source.onerror = onConnectionError
+  source.onerror = () => {
+    source.close()
+    onConnectionError()
+  }
   return { close: () => source.close() }
 }
 
 /** Unknown JSON を launch 受理 contract へ制限する。 */
 function parseInterpretationLaunch(value: unknown): InterpretationLaunchRecord {
   if (
-    !isRecord(value)
-    || (value.status !== 'stored' && value.status !== 'queued')
-    || typeof value.execution_key !== 'string'
-  ) {
-    throw new Error('Interpretation launch response did not match its contract')
+    !isRecord(value) || !isNonNilUuid(value.request_id) || !isNonNilUuid(value.skill_source_id)
+    || !isInterpretationRequestStatus(value.status)
+    || typeof value.execution_key !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(value.execution_key)
+    || (value.interpretation_id !== null && !isNonNilUuid(value.interpretation_id))
+    || !isNullableString(value.error_code)
+    || (value.status === 'SUCCEEDED' && (value.interpretation_id === null || value.error_code !== null))
+    || (['QUEUED', 'RUNNING', 'UNKNOWN'].includes(value.status)
+      && (value.interpretation_id !== null || value.error_code !== null))
+    || (['FAILED', 'REVOKED'].includes(value.status) && !value.error_code)
+  ) throw new Error('Interpretation request response did not match its contract')
+  return {
+    request_id: value.request_id, skill_source_id: value.skill_source_id, status: value.status,
+    execution_key: value.execution_key, interpretation_id: value.interpretation_id,
+    error_code: value.error_code,
   }
-  const execution = value.execution === null || value.execution === undefined
-    ? null
-    : parseInterpretationExecution(value.execution)
-  return { status: value.status, execution_key: value.execution_key, execution }
+}
+
+/** 台帳で定義された状態だけを公開 request として受け付ける。 */
+function isInterpretationRequestStatus(value: unknown): value is InterpretationLaunchRecord['status'] {
+  return ['QUEUED', 'RUNNING', 'UNKNOWN', 'SUCCEEDED', 'FAILED', 'REVOKED'].some((status) => status === value)
 }
 
 /** Unknown SSE JSON を interpret 進行 event へ制限する。 */
@@ -711,6 +764,7 @@ function parseInterpretEvent(value: unknown): InterpretEventRecord {
   if (
     !isRecord(value)
     || !hasStrings(value, ['event', 'execution_key', 'occurred_at'])
+    || !INTERPRET_EVENT_NAMES.some((name) => name === value.event)
     || !isRecord(value.data)
   ) {
     throw new Error('Interpret event did not match its contract')

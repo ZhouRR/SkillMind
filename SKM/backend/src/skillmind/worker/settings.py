@@ -7,7 +7,7 @@ import logging
 import os
 import socket
 from collections.abc import Awaitable, Callable, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar, cast
 from uuid import UUID
 
@@ -25,6 +25,7 @@ from skillmind.agent.context_builder import (
     create_run_tool_registry,
 )
 from skillmind.agent.database_provider import DatabaseReadProvider
+from skillmind.agent.document_readiness import DocumentReadinessProvider
 from skillmind.agent.domain import RunContext
 from skillmind.agent.engine import ClaudeAgentSdkEngine, RunMcpRuntime
 from skillmind.agent.evidence import PostgresToolAuditWriter
@@ -53,33 +54,27 @@ from skillmind.core.logging import configure_logging, log_event
 from skillmind.core.secret_crypto import load_secret_cipher
 from skillmind.core.settings import Settings, get_settings
 from skillmind.db.resources import create_database_engine, create_session_factory
+from skillmind.documents.library import configured_document_library
+from skillmind.documents.observation_repository import PostgresDocumentObservationLookup
 from skillmind.documents.source import (
     DatabaseProjectDocumentInventory,
     DatabaseProjectDocumentSource,
 )
-from skillmind.effects.forge import UrllibForgeTransport
-from skillmind.effects.issue_update import (
-    ISSUE_UPDATE_CAPABILITY,
-    ISSUE_UPDATE_PROVIDER_VERSION,
+from skillmind.effects.document_service import DocumentEffectService
+from skillmind.effects.postgres_write import PostgresDatabaseWriteSource
+from skillmind.effects.reconciliation_execution import EffectReconciliationExecutor
+from skillmind.effects.reconciliation_request_service import ReconciliationRequestService
+from skillmind.effects.reconciliation_requests import (
+    RECONCILIATION_DISPATCH_TOPIC,
+    ReconciliationRequestNotFoundError,
 )
-from skillmind.effects.provider import (
-    EffectProviderDefinition,
-    EffectProviderRegistry,
-)
+from skillmind.effects.reconciliation_service import EffectReconciliationService
 from skillmind.effects.redmine import (
     UrllibRedmineTransport,
-    create_redmine_effect_provider,
 )
-from skillmind.effects.repository_effect import (
-    GitRepositoryWriteProvider,
-    SvnRepositoryWriteProvider,
-)
-from skillmind.effects.repository_write import (
-    REPOSITORY_WRITE_CAPABILITY,
-    REPOSITORY_WRITE_PROVIDER_VERSION,
-    REPOSITORY_WRITE_SVN_PROVIDER_VERSION,
-)
+from skillmind.effects.release import configured_execution_features
 from skillmind.effects.service import EffectService
+from skillmind.effects.wiring import create_effect_provider_registry
 from skillmind.integrations.secrets import DeploymentSecretResolver
 from skillmind.runs.domain import PendingOutboxMessage
 from skillmind.runs.outbox import OutboxRelay
@@ -88,18 +83,21 @@ from skillmind.runs.repository_inputs import PostgresInputSnapshotStore
 from skillmind.runs.service import RunService
 from skillmind.schedules import ScheduleService
 from skillmind.skills import (
-    SkillInterpretationNotFoundError,
-    SkillInterpretationNotReadyError,
-    SkillInterpreterUnavailableError,
     SkillService,
-    SkillSourceIntegrityError,
-    SkillSourceNotFoundError,
-    SkillStorageUnavailableError,
 )
+from skillmind.skills.interpretation_requests import InterpretationRequestNotFoundError
 from skillmind.skills.interpreter_execution import InterpretProgressCallback
 from skillmind.skills.realtime import RedisInterpretEventPublisher
+from skillmind.skills.request_service import (
+    INTERPRETATION_DISPATCH_TOPIC,
+    InterpretationRequestService,
+)
 from skillmind.skills.wiring import build_skill_interpreter
-from skillmind.storage.factory import create_file_storage
+from skillmind.storage.factory import (
+    create_document_upload_limits,
+    create_document_write_source,
+    create_file_storage,
+)
 from skillmind.worker.effects import ApprovedEffectExecutor
 from skillmind.worker.executor import AgentRunExecutor, RunExecutor
 from skillmind.worker.tool_authority import require_tool_authority
@@ -111,6 +109,7 @@ async def startup(ctx: dict[str, Any]) -> None:
     """Worker process で共有する Database engine を初期化する。"""
 
     settings = get_settings()
+    features = configured_execution_features(settings)
     configure_logging(settings.log_level)
     # MANAGED SecretReference 復号用の KEK cipher。未設定なら MANAGED は fail closed で解決不能。
     secret_cipher = load_secret_cipher(settings.managed_secret_kek)
@@ -119,11 +118,40 @@ async def startup(ctx: dict[str, Any]) -> None:
     ctx["session_store"] = PostgresSessionStore.from_session_factory(
         ctx["database_session_factory"]
     )
+    file_storage = create_file_storage(settings)
+    document_library_target = configured_document_library(
+        file_storage, bucket=settings.object_storage_bucket
+    )
     ctx["run_service"] = RunService(
         ctx["database_session_factory"],
-        deferred_features_enabled=settings.deferred_features_enabled,
+        deferred_features_enabled=features.deferred,
+        database_writes_enabled=features.database_writes,
+        document_writes_enabled=features.document_writes,
+        document_library_target=document_library_target,
     )
-    ctx["effect_service"] = EffectService(ctx["database_session_factory"])
+    ctx["effect_service"] = EffectService(
+        ctx["database_session_factory"],
+        document_library_target=document_library_target,
+        execution_features=features,
+    )
+    # 停写後も原結果を只読で核対できる。writer gate は借りず、外部 port は lookup だけ使う。
+    ctx["reconciliation_requests"] = ReconciliationRequestService(
+        ctx["database_session_factory"], document_library_target=document_library_target,
+    )
+    document_receipt_source = (
+        create_document_write_source(settings, storage=file_storage)
+        if document_library_target is not None else None
+    )
+    ctx["reconciliation_executor"] = EffectReconciliationExecutor(
+        requests=ctx["reconciliation_requests"],
+        reader=EffectReconciliationService(
+            ctx["database_session_factory"],
+            secret_resolver=DeploymentSecretResolver(cipher=secret_cipher),
+            database_reader=PostgresDatabaseWriteSource(),
+            document_reader=document_receipt_source,
+            document_library_target=document_library_target,
+        ),
+    )
     ctx["outbox_relay"] = OutboxRelay(
         ctx["database_session_factory"], batch_size=settings.outbox_batch_size
     )
@@ -138,7 +166,7 @@ async def startup(ctx: dict[str, Any]) -> None:
     contracts = ContractStore(settings.contracts_dir)
     document_source = DatabaseProjectDocumentSource(
         ctx["database_session_factory"],
-        file_storage=create_file_storage(settings),
+        file_storage=file_storage,
     )
     # 実 git/svn client。物化器と repository.read/v1 Provider が同じ source を共有し、
     # 凭据解決と scope 裁剪を一箇所に閉じ込める (計画 §19 W4)。承認済み書き込み (§20) も
@@ -177,7 +205,9 @@ async def startup(ctx: dict[str, Any]) -> None:
     )
     registry = create_run_tool_registry(
         contracts,
-        deferred_features_enabled=settings.deferred_features_enabled,
+        deferred_features_enabled=features.deferred,
+        database_writes_enabled=features.database_writes,
+        document_writes_enabled=features.document_writes,
         subagent_provider=SubagentDispatchProvider(
             engine=lambda: engine_holder["engine"],
             branch_timeout_seconds=settings.subagent_branch_timeout_seconds,
@@ -185,6 +215,8 @@ async def startup(ctx: dict[str, Any]) -> None:
             result_validator=result_validator,
         ) if settings.deferred_features_enabled else None,
         document_source=document_source,
+        document_observations=PostgresDocumentObservationLookup(ctx["database_session_factory"]),
+        document_readiness_provider=DocumentReadinessProvider(ctx["database_session_factory"]),
         mcp_provider=McpReadProvider(
             ctx["database_session_factory"], source=StreamableHttpMcpSource(),
             secret_resolver=DeploymentSecretResolver(cipher=secret_cipher),
@@ -218,7 +250,10 @@ async def startup(ctx: dict[str, Any]) -> None:
         tool_registry=registry,
         model=runtime_configuration.primary_model,
         materializer=materializer,
-        deferred_features_enabled=settings.deferred_features_enabled,
+        deferred_features_enabled=features.deferred,
+        database_writes_enabled=features.database_writes,
+        document_writes_enabled=features.document_writes,
+        document_library_target=document_library_target,
     )
     engine = ClaudeAgentSdkEngine(
         mcp_server_factory=create_authorized_runtime,
@@ -235,37 +270,27 @@ async def startup(ctx: dict[str, Any]) -> None:
         preparation_timeout_seconds=settings.run_preparation_timeout_seconds,
         realtime_publisher=RedisRunRealtimePublisher(cast(RedisPublisher, ctx["redis"])),
     )
-    if settings.deferred_features_enabled:
+    if features.effects_enabled:
+        document_effect_service = None
+        document_effect_source = None
+        if features.document_writes:
+            if document_library_target is None:
+                raise ValueError("Document effect requires the configured project library")
+            document_effect_source = document_receipt_source
+            document_effect_service = DocumentEffectService(
+                ctx["database_session_factory"], features=features, target=document_library_target,
+                limits=create_document_upload_limits(settings),
+            )
         ctx["effect_executor"] = ApprovedEffectExecutor(
             effect_service=ctx["effect_service"],
-            provider_registry=EffectProviderRegistry(
-                (
-                    EffectProviderDefinition(
-                        capability_version=ISSUE_UPDATE_CAPABILITY,
-                        provider="redmine",
-                        provider_version=ISSUE_UPDATE_PROVIDER_VERSION,
-                        implementation=create_redmine_effect_provider(),
-                        requires_secret=True,
-                    ),
-                    EffectProviderDefinition(
-                        capability_version=REPOSITORY_WRITE_CAPABILITY,
-                        provider="svn",
-                        provider_version=REPOSITORY_WRITE_SVN_PROVIDER_VERSION,
-                        implementation=SvnRepositoryWriteProvider(svn_client),
-                        requires_secret=True,
-                    ),
-                    EffectProviderDefinition(
-                        capability_version=REPOSITORY_WRITE_CAPABILITY,
-                        provider="git",
-                        provider_version=REPOSITORY_WRITE_PROVIDER_VERSION,
-                        implementation=GitRepositoryWriteProvider(
-                            git_client, forge_transport=UrllibForgeTransport()
-                        ),
-                        # push は凭据必須。読取が匿名 clone で足りる (git の requires_secret=False)
-                        # のと非対称なのは意図的で、判断は capability 粒度で持つ (計画 §20 R3)。
-                        requires_secret=True,
-                    ),
-                )
+            provider_registry=create_effect_provider_registry(
+                features=features,
+                effect_service=ctx["effect_service"],
+                secret_resolver=DeploymentSecretResolver(cipher=secret_cipher),
+                git_client=git_client,
+                svn_client=svn_client,
+                document_service=document_effect_service,
+                document_source=document_effect_source,
             ),
             # 承認済み apply も MANAGED 凭据を使うため、読取 Provider と同じ KEK cipher を渡す。
             # 渡し漏れると「読めるのに承認後の書き込みだけ失敗する」非対称な障害になる。
@@ -318,18 +343,44 @@ async def relay_outbox(ctx: dict[str, Any]) -> dict[str, int | str]:
     topics = {"run.lifecycle.changed/v1"}
     run_dispatch_ready = settings.worker_dispatch_enabled and "run_executor" in ctx
     effect_dispatch_ready = (
-        settings.worker_dispatch_enabled and settings.deferred_features_enabled
+        settings.worker_dispatch_enabled
+        and configured_execution_features(settings).effects_enabled
         and "effect_executor" in ctx
     )
     if run_dispatch_ready:
         topics.add("run.dispatch.requested/v1")
     if effect_dispatch_ready:
         topics.add("effect.apply.requested/v1")
-    dispatch_ready = run_dispatch_ready or effect_dispatch_ready
+    interpretation_dispatch_ready = settings.worker_dispatch_enabled and "skill_service" in ctx
+    if interpretation_dispatch_ready:
+        topics.add(INTERPRETATION_DISPATCH_TOPIC)
+    reconciliation_dispatch_ready = (
+        settings.worker_dispatch_enabled and "reconciliation_executor" in ctx
+    )
+    if reconciliation_dispatch_ready:
+        topics.add(RECONCILIATION_DISPATCH_TOPIC)
+    dispatch_ready = (
+        run_dispatch_ready or effect_dispatch_ready or interpretation_dispatch_ready
+        or reconciliation_dispatch_ready
+    )
 
     async def publish(message: PendingOutboxMessage) -> None:
         """Topic ごとの外部配送を idempotent key 付きで実行する。"""
 
+        if message.topic == RECONCILIATION_DISPATCH_TOPIC:
+            await redis.enqueue_job(
+                "execute_reconciliation_request_job", str(message.aggregate_id),
+                _job_id=f"reconciliation-dispatch:{message.message_id}",
+                _queue_name=settings.queue_name,
+            )
+            return
+        if message.topic == INTERPRETATION_DISPATCH_TOPIC:
+            await redis.enqueue_job(
+                "execute_interpretation_request_job", str(message.aggregate_id),
+                _job_id=f"interpret-dispatch:{message.message_id}",
+                _queue_name=settings.queue_name,
+            )
+            return
         if message.topic == "run.dispatch.requested/v1":
             await redis.enqueue_job(
                 "execute_run",
@@ -448,7 +499,10 @@ async def execute_effect(ctx: dict[str, Any], effect_execution_id: str) -> dict[
     """Queue job を effect 専用 executor へ引き渡し、Agent Tool path と混在させない。"""
 
     settings: Settings = ctx["settings"]
-    if not settings.worker_dispatch_enabled or not settings.deferred_features_enabled:
+    if (
+        not settings.worker_dispatch_enabled
+        or not configured_execution_features(settings).effects_enabled
+    ):
         return {"status": "disabled", "reason": "effect_execution_disabled"}
     executor = cast(ApprovedEffectExecutor | None, ctx.get("effect_executor"))
     if executor is None:
@@ -470,96 +524,91 @@ def _interpret_progress(ctx: dict[str, Any], execution_key: str) -> InterpretPro
     return on_event
 
 
-async def interpret_skill_source_job(
-    ctx: dict[str, Any],
-    kwargs: dict[str, Any],
+async def execute_interpretation_request_job(
+    ctx: dict[str, Any], request_id: str,
 ) -> dict[str, str]:
-    """Worker 上で保存済み source を model 解釈し、進行を execution key channel へ流す。"""
+    """Queue は原要求 ID だけを運び、入力・資格・通知先は持久要求から取得する。"""
 
-    service: SkillService = ctx["skill_service"]
-    execution_key = str(kwargs["execution_key"])
+    settings: Settings = ctx["settings"]
+    if not settings.worker_dispatch_enabled:
+        return {"status": "disabled", "reason": "worker_dispatch_disabled"}
     try:
-        stored = await service.interpret(
-            organization_id=UUID(str(kwargs["organization_id"])),
-            skill_source_id=UUID(str(kwargs["skill_source_id"])),
-            model=kwargs.get("model"),
-            parameters=kwargs.get("parameters") or {},
-            force_regenerate=bool(kwargs.get("force_regenerate", False)),
-            regeneration_nonce=(
-                str(kwargs["regeneration_nonce"])
-                if kwargs.get("regeneration_nonce") is not None
-                else None
-            ),
-            on_event=_interpret_progress(ctx, execution_key),
+        if not isinstance(request_id, str):
+            raise ValueError("Invalid request ID")
+        identity = UUID(request_id)
+        if identity.int == 0:
+            raise ValueError("Invalid request ID")
+    except ValueError:
+        return {"status": "rejected", "reason": "invalid_interpretation_request"}
+    service: SkillService = ctx["skill_service"]
+    try:
+        stored = await service.execute_interpretation_request(
+            identity, event_factory=lambda key: _interpret_progress(ctx, key)
         )
-    except (
-        SkillSourceNotFoundError,
-        SkillInterpreterUnavailableError,
-        SkillSourceIntegrityError,
-        SkillStorageUnavailableError,
-    ) as error:
-        # 受理段階を通過済みのため通常は起きないが、job の可観測性のため型名だけ記録する。
-        log_event(
-            logger,
-            logging.ERROR,
-            "skill.interpret.job.failed",
-            execution_key=execution_key,
-            error_code=type(error).__name__,
-        )
-        raise
-    log_event(
-        logger,
-        logging.INFO,
-        "skill.interpret.job.completed",
-        execution_key=execution_key,
-        interpretation_id=str(stored.interpretation_id),
-        status=stored.status.value,
-    )
+    except InterpretationRequestNotFoundError:
+        return {"status": "rejected", "reason": "interpretation_request_not_found"}
+    if stored is None:
+        return {"status": "no_result", "request_id": str(identity)}
     return {"status": "ok", "interpretation_id": str(stored.interpretation_id)}
+
+
+async def execute_reconciliation_request_job(
+    ctx: dict[str, Any], request_id: str,
+) -> dict[str, str]:
+    """原要求 ID だけを executor に渡し、Queue の actor/接続/観測を信用しない。"""
+    if not ctx["settings"].worker_dispatch_enabled:
+        return {"status": "disabled", "reason": "worker_dispatch_disabled"}
+    try:
+        if not isinstance(request_id, str):
+            raise ValueError("Invalid reconciliation request")
+        identity = UUID(request_id)
+        if identity.int == 0:
+            raise ValueError("Invalid reconciliation request")
+    except ValueError:
+        return {"status": "rejected", "reason": "invalid_reconciliation_request"}
+    executor = cast(EffectReconciliationExecutor | None, ctx.get("reconciliation_executor"))
+    if executor is None:
+        return {"status": "disabled", "reason": "reconciliation_unavailable"}
+    try:
+        status = await executor.execute(identity)
+    except ReconciliationRequestNotFoundError:
+        return {"status": "rejected", "reason": "reconciliation_request_not_found"}
+    return {"status": status, "request_id": str(identity)}
+
+
+async def recover_reconciliation_requests(ctx: dict[str, Any]) -> dict[str, int]:
+    """旧 owner の期限を閉じるだけで、read/write の再 dispatch はしない。"""
+    ledger: ReconciliationRequestService = ctx["reconciliation_requests"]
+    return {"changed": await ledger.recover_expired(limit=ctx["settings"].outbox_batch_size)}
+
+
+async def interpret_skill_source_job(
+    ctx: dict[str, Any], kwargs: dict[str, Any],
+) -> dict[str, str]:
+    """旧 Queue に原会話を補造せず、新しい Worker では実行を明示拒否する。"""
+
+    del ctx, kwargs
+    return {"status": "rejected", "reason": "legacy_interpretation_job"}
 
 
 async def adjust_skill_interpretation_job(
-    ctx: dict[str, Any],
-    kwargs: dict[str, Any],
+    ctx: dict[str, Any], kwargs: dict[str, Any],
 ) -> dict[str, str]:
-    """Worker 上で親 interpretation に調整を適用し、進行を channel へ流す。"""
+    """旧調整 job も actor ID だけを認可として使わず、model を起動しない。"""
 
-    service: SkillService = ctx["skill_service"]
-    execution_key = str(kwargs["execution_key"])
-    try:
-        stored = await service.adjust_interpretation(
-            organization_id=UUID(str(kwargs["organization_id"])),
-            interpretation_id=UUID(str(kwargs["interpretation_id"])),
-            instruction=str(kwargs["instruction"]),
-            actor_id=UUID(str(kwargs["actor_id"])),
-            model=kwargs.get("model"),
-            parameters=kwargs.get("parameters") or {},
-            on_event=_interpret_progress(ctx, execution_key),
-        )
-    except (
-        SkillInterpretationNotFoundError,
-        SkillInterpretationNotReadyError,
-        SkillInterpreterUnavailableError,
-        SkillSourceIntegrityError,
-        SkillStorageUnavailableError,
-    ) as error:
-        log_event(
-            logger,
-            logging.ERROR,
-            "skill.adjust.job.failed",
-            execution_key=execution_key,
-            error_code=type(error).__name__,
-        )
-        raise
-    log_event(
-        logger,
-        logging.INFO,
-        "skill.adjust.job.completed",
-        execution_key=execution_key,
-        interpretation_id=str(stored.interpretation_id),
-        status=stored.status.value,
+    del ctx, kwargs
+    return {"status": "rejected", "reason": "legacy_interpretation_job"}
+
+
+async def recover_interpretation_requests(ctx: dict[str, Any]) -> dict[str, int]:
+    """停止事実を持たない古い RUNNING を UNKNOWN にし、再 dispatch しない。"""
+
+    ledger = InterpretationRequestService(ctx["database_session_factory"])
+    changed = await ledger.recover_unknown(
+        before=datetime.now(UTC) - timedelta(seconds=1200),
+        limit=ctx["settings"].outbox_batch_size,
     )
-    return {"status": "ok", "interpretation_id": str(stored.interpretation_id)}
+    return {"changed": changed}
 
 
 async def recover_expired_leases(ctx: dict[str, Any]) -> dict[str, str | int]:
@@ -575,10 +624,10 @@ async def recover_expired_leases(ctx: dict[str, Any]) -> dict[str, str | int]:
     recovered_effects = await effect_service.recover_expired_effects(
         limit=settings.outbox_batch_size,
         max_attempts=settings.run_max_attempts,
-    ) if settings.deferred_features_enabled else 0
+    ) if configured_execution_features(settings).effects_enabled else 0
     recovered_proposals = await effect_service.recover_expired_proposals(
         limit=settings.outbox_batch_size,
-    ) if settings.deferred_features_enabled else 0
+    ) if configured_execution_features(settings).effects_enabled else 0
     recovered = recovered_runs + recovered_interactions + recovered_effects + recovered_proposals
     log_event(
         logger,
@@ -642,10 +691,20 @@ class WorkerSettings:
         # 資源準備を追加しても従来のモデル実行/終態化の余白を削らない。別 job は延長しない。
         arq_function(execute_run, timeout=1200 + _settings.run_preparation_timeout_seconds),
         execute_effect,
+        execute_interpretation_request_job,
+        execute_reconciliation_request_job,
         interpret_skill_source_job,
         adjust_skill_interpretation_job,
     )
     cron_jobs: ClassVar[tuple[CronJob, ...]] = (
+        cron(
+            recover_reconciliation_requests, second={11, 26, 41, 56},
+            run_at_startup=True, unique=True, timeout=30,
+        ),
+        cron(
+            recover_interpretation_requests, second={14, 29, 44, 59},
+            run_at_startup=True, unique=True, timeout=30,
+        ),
         cron(
             relay_outbox,
             second=set(range(0, 60, 5)),

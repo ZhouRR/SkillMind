@@ -27,7 +27,7 @@ def test_parse_interpret_event_rejects_cross_execution_and_unknown_events() -> N
     other = {**valid, "execution_key": "sha256:" + ("1" * 64)}
     assert _parse_interpret_event(json.dumps(other), execution_key=key) is None
     # 未登録 event 名は弾く。
-    unknown = {**valid, "event": "interpret.unknown"}
+    unknown = {**valid, "event": "interpret.unregistered"}
     assert _parse_interpret_event(json.dumps(unknown), execution_key=key) is None
     # data 欠落・非 JSON も弾く。
     assert _parse_interpret_event(json.dumps({**valid, "data": None}), execution_key=key) is None
@@ -52,13 +52,13 @@ def test_interpret_sse_message_uses_named_event_frame() -> None:
     assert json.loads(payload)["data"]["status"] == "PREVIEW_READY"
 
 
-def test_stream_failure_is_a_terminal_failed_event_without_record() -> None:
-    """Stream 側の打ち切りは永続 record を持たない failed 終端 event になる。"""
+def test_stream_failure_does_not_claim_a_persistent_failure() -> None:
+    """Stream 停止は model 未開始や持久 FAILED を意味しない。"""
 
     key = "sha256:" + ("0" * 64)
     failure = _stream_failure(key, "stream_timeout")
 
-    assert failure["event"] == "interpret.failed"
+    assert failure["event"] == "interpret.disconnected"
     assert failure["execution_key"] == key
     assert failure["data"]["error_code"] == "stream_timeout"
     assert failure["data"]["interpretation_id"] is None

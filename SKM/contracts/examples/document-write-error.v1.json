@@ -1,0 +1,6 @@
+{
+  "status": "error",
+  "code": "document_effect_uncertain",
+  "message": "Original object write must be reconciled before continuing.",
+  "retryable": true
+}

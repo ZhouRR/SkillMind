@@ -33,7 +33,7 @@ export interface ProviderFormDefinition {
 /** Backend PROVIDER_DEFINITIONS の UI mirror。ここ以外に capability 文字列を書かない。 */
 export const PROVIDER_FORMS: Record<ResourceProvider, ProviderFormDefinition> = {
   postgres: {
-    provider: 'postgres', kind: 'other', readCapability: 'database.read/v1', writeCapability: null,
+    provider: 'postgres', kind: 'other', readCapability: 'database.read/v1', writeCapability: 'database.write/v1',
     requiresSecret: true, environmentLocatorExample: 'POSTGRES_PASSWORD', fileLocatorExample: '/run/secrets/postgres-password',
   },
   mcp: {
@@ -126,9 +126,11 @@ export function accessForCapabilities(capabilities: readonly string[]): Resource
 /** 構造化入力から server の scope allowlist 形へ組み立てる。形は Provider ごとに固定。 */
 export function buildIntegrationScope(
   provider: ResourceProvider,
-  input: { issueIds: string[]; fieldKeys: string[]; paths: string[]; revisions: string[]; tables?: string[]; resourceUris?: string[] },
+  input: { issueIds: string[]; fieldKeys: string[]; paths: string[]; revisions: string[]; tables?: string[]; resourceUris?: string[]; writeEnabled?: boolean; writeColumns?: string[]; operations?: string[] },
 ): Record<string, string[]> {
-  if (provider === 'postgres') return { tables: input.tables ?? [] }
+  if (provider === 'postgres') return input.writeEnabled
+    ? { tables: input.tables ?? [], write_columns: input.writeColumns ?? [], operations: input.operations ?? [] }
+    : { tables: input.tables ?? [] }
   if (provider === 'mcp') return { resource_uris: input.resourceUris ?? [] }
   if (provider === 'redmine') {
     return { issue_ids: input.issueIds, field_keys: input.fieldKeys }
@@ -233,7 +235,7 @@ export function findWriteConfigIssue(
 export const REPOSITORY_WRITE_BRANCH_PREFIX = 'skillmind/'
 
 /** Server が確実に拒否する scope を送信前に検出する。null は「送ってよい」。 */
-export type ScopeIssue = 'issue_ids_required' | 'field_keys_required' | 'paths_required' | 'tables_required' | 'resource_uris_required'
+export type ScopeIssue = 'issue_ids_required' | 'field_keys_required' | 'paths_required' | 'tables_required' | 'resource_uris_required' | 'write_columns_required' | 'database_operations_required'
 
 /** Backend normalize_provider_scope の必須条件 mirror。write は明示 field 列を要求する。 */
 export function findScopeIssue(
@@ -241,7 +243,12 @@ export function findScopeIssue(
   scope: Record<string, string[]>,
   writeEnabled: boolean,
 ): ScopeIssue | null {
-  if (provider === 'postgres') return scope.tables?.length ? null : 'tables_required'
+  if (provider === 'postgres') {
+    if (!scope.tables?.length) return 'tables_required'
+    if (writeEnabled && !scope.write_columns?.length) return 'write_columns_required'
+    if (writeEnabled && !scope.operations?.length) return 'database_operations_required'
+    return null
+  }
   if (provider === 'mcp') return scope.resource_uris?.length ? null : 'resource_uris_required'
   if (provider === 'redmine') {
     if ((scope.issue_ids ?? []).length === 0) return 'issue_ids_required'

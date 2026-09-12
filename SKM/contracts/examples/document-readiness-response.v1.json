@@ -1,0 +1,12 @@
+{
+  "status": "success",
+  "provider": "platform",
+  "ready": false,
+  "required_effect_intents": [
+    "register-run"
+  ],
+  "applied_effect_intents": [],
+  "evidence_refs": [
+    "ev_readiness_001"
+  ]
+}

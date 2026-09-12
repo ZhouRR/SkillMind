@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/database.write/v1/request.schema.json",
+  "title": "database.write/v1 approved payload",
+  "description": "Effect-only payload. Agent uses change.propose/v1: target.locator=table, operation, one /row SET value={key,values,expected}, precondition.revision from full-row database.read evidence or absent; verification READ_BACK /row. Never a directly callable Agent Tool.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "table",
+    "operation",
+    "key",
+    "values",
+    "expected"
+  ],
+  "properties": {
+    "table": {
+      "type": "string",
+      "pattern": "^[a-zA-Z_][a-zA-Z0-9_$]{0,62}\\.[a-zA-Z_][a-zA-Z0-9_$]{0,62}$"
+    },
+    "operation": {
+      "enum": [
+        "INSERT",
+        "UPDATE"
+      ]
+    },
+    "key": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 20,
+      "propertyNames": {
+        "pattern": "^[a-zA-Z_][a-zA-Z0-9_$]{0,62}$"
+      },
+      "additionalProperties": {
+        "type": [
+          "string",
+          "integer",
+          "boolean"
+        ]
+      }
+    },
+    "values": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 100,
+      "propertyNames": {
+        "pattern": "^[a-zA-Z_][a-zA-Z0-9_$]{0,62}$"
+      }
+    },
+    "expected": {
+      "type": [
+        "object",
+        "null"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "INSERT"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "expected": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "expected": {
+            "type": "object",
+            "minProperties": 1
+          }
+        }
+      }
+    }
+  ]
+}

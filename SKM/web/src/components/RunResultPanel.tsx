@@ -17,6 +17,7 @@ import { EmptyState, ModalDialog } from './PageElements'
 import { RunDocumentSnapshots } from './RunDocumentSnapshots'
 import { ResultValidationScope } from './ResultValidationScope'
 import { RunArtifacts } from './RunArtifacts'
+import { EffectReconciliation } from './EffectReconciliation'
 import { RunInteractions } from './RunInteractions'
 import { RunEvaluations } from './EvaluationSection'
 import type { SessionEnded } from '../hooks/useResourceRequest'
@@ -71,7 +72,7 @@ function RunResultContent({ state, csrfToken, onProposalDecided, artifactOwner, 
   csrfToken: string
   onProposalDecided?: () => void
   artifactOwner: string
-  artifactScope: { projectId: string; runId: string }
+  artifactScope: { actorId: string; projectId: string; runId: string }
   onSessionExpired: SessionEnded
   onEvaluate: () => void
 }) {
@@ -94,6 +95,19 @@ function RunResultContent({ state, csrfToken, onProposalDecided, artifactOwner, 
   const dispatches = collectSubagentDispatches(detail.evidence)
   return (
     <div className="resultView">
+      {detail.effect_executions.some((effect) => effect.error?.code === 'effect_result_unknown') && (
+        <section className="resultSection" role="status">
+          <strong>{messages.runResult.effectResultUnknown}</strong>
+          <p>{messages.runResult.effectReconciliationHint}</p>
+          {detail.effect_executions.filter((effect) => effect.error?.code === 'effect_result_unknown').map((effect) => (
+            <div key={effect.effect_execution_id}>
+              <strong>{effect.provider}</strong>
+              <EffectReconciliation scope={{ projectId: detail.project_id, runId: detail.run_id, effectId: effect.effect_execution_id }}
+                actorId={artifactScope.actorId} csrfToken={csrfToken} onSessionExpired={onSessionExpired} />
+            </div>
+          ))}
+        </section>
+      )}
       <PendingActionsSection
         csrfToken={csrfToken}
         detail={detail}
@@ -393,7 +407,9 @@ function ControlledEffectsSection({ detail, proposals, csrfToken, onDecided }: {
             return (
               <li key={effect.effect_execution_id}>
                 <div className="segmentHeading">
-                  <strong>{effect.provider} · {messages.enums.effectStatus[effect.status] ?? effect.status}</strong>
+                  <strong>{effect.provider} · {effect.error?.code === 'effect_result_unknown'
+                    ? messages.runResult.effectResultUnknown
+                    : (messages.enums.effectStatus[effect.status] ?? effect.status)}</strong>
                   <span>{messages.runResult.attemptNo(effect.attempt_no)}</span>
                 </div>
                 <p>

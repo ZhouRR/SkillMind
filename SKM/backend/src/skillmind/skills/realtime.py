@@ -23,6 +23,8 @@ INTERPRET_EVENT_NAMES = frozenset({
     "interpret.delta",
     "interpret.completed",
     "interpret.failed",
+    "interpret.unknown",
+    "interpret.disconnected",
 })
 
 

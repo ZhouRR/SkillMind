@@ -44,6 +44,24 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m pytest --import-mode=importlib -p no:cachep
 
 新しい fixture 利用先も確認する。除外は全 test の無副作用保証ではなく、Redis 等の process は別に確認する。
 
+### PostgreSQL 写入的隔离 SQL 探测
+
+[probe_postgres_write.py](../../SKM/scripts/probe_postgres_write.py) は PGlite のメモリ DB だけに合成 table/role を作り、本番の SQL 生成・一行変更・回执保存処理を実行する。実 DB 接続・既存 Project への書込は行わない。INSERT/UPDATE、JSON/日時、generated 列、原回执、原状態競合、取消前の失権 rollback と回执 role の制限を確認する。PGlite/stdio adapter は asyncpg の実接続や多 Worker の競争を証明しない。
+
+通常 Backend 依存に PGlite は含めない。Node.js と Backend 依存がある環境で、専用の外部 package directory へインストールし、`SKM/` から実行する：
+
+```bash
+npm install --prefix /tmp/skillmind-pglite --cache /tmp/skillmind-npm-cache --no-audit --no-fund @electric-sql/pglite@0.5.8
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=backend/src python3 scripts/probe_postgres_write.py \
+  --pglite-root /tmp/skillmind-pglite
+```
+
+Backend 依存を外置した環境ではその path も PYTHONPATH に加える。実 PostgreSQL の検証は前節の承認済み server/account で別途行う。
+
+同じ probe に `--rv-reviewer` を付けると、[RV 業務 DDL](../../SKM/scripts/sql/rv-reviewer-schema.sql) と[列権限](../../SKM/scripts/sql/rv-reviewer-grants.sql)もメモリ DB に適用する。空 table の列/複合主キー/生成列を本番の構造 query で取得し、本番の単行 writer で RUNNING 登録、文書/成果、PASS/FAIL、RV 後の異常と NO_TARGETS、原回执を確認し、結果/ID の不一致や権限外変更を拒否する。MinIO、Excel 変換、model、実会話は使用しない。
+
+実環境の初期化は対象と独立 owner が確定してから行う。`psql --set=ON_ERROR_STOP=on` で業務 DDL、既存の回执 DDL、列権限の順に適用し、最後の script には `--set=rv_writer=<既存実行 role>` を指定する。接続情報は既存の安全な psql 設定で渡し、password を command に書かない。script は login を作らず、既存 schema では停止する。列権限の付与は既存の強い権限を除去しないため、専用の非 owner role を使う。リソースには三つの `test_automation` table、INSERT/UPDATE と明示列を設定する。列名は権限 script の INSERT 欄を `schema.table.column` にしたものとし、generated の `spec_status` や server 既定の成果作成時刻を含めない。成果表 UPDATE は DB 権限で拒否する。
+
 ### 隔离 Redis 登录防护验证
 
 信頼できる入手元/checksum を確認した Redis 8.2 系を使う。fixture は TCP/永続化なしの専用 process・Unix socket を作り、自分の process だけを停止する。既存 Redis や system service は使わない。
@@ -99,10 +117,11 @@ python3 tests/browser/check_projects.py \
 | projects / project_members / project_management | projects.html | 精確 Project、成員、CRUD、版衝突 |
 | run_submission / interaction_responses | run-submission.html | 原 key/内容の確認、答復、期限 |
 | result_references / artifacts / evaluation_submissions | projects.html | 結果範囲、原 byte download、評価回执/履歴 |
-| document_sources / schedule_times | run-submission.html | 入力清単、時区/DST、preview |
+| document_sources / document_library / schedule_times | run-submission.html | 入力清単と成果保存先の区別、時区/DST、preview |
 | document_batches / resource_connections | projects.html | 文書一括削除・指定 directory upload、PostgreSQL/MCP 接続 form（`--output` 必須） |
 | document_management / document_preview / document_upload | projects.html | 削除未知、静的隔離、有界 upload |
 | document_upload_receipts / document_upload_closures | projects.html | 原 key 確認、batch pause、明示停止 |
+| interpretation_requests | projects.html | 解釈の原 UUID、応答喪失/SSE 切断、只読確認と刷新後の結果復元（`--output` 必須） |
 | task_flow / schedule_management | projects.html | 読取専用 Flow、調度編集/未知/在途投影 |
 
 各 runner の遅延・切替・防重・三語/keyboard/狭幅の範囲は test を参照する。
@@ -136,7 +155,7 @@ python3 tests/browser/check_task_flow.py \
 | 契約 | SKM/：`python3 scripts/validate_contracts.py`。[OpenAPI 一致性](contract-workflow.md#遇到未接齐的交付链)も確認 |
 | Compose / 工具 | SKM/：変更した工具の unittest。Compose 変更は `python3 scripts/validate_compose.py`、配備工具を横断する変更は `python3 -m unittest discover -s scripts/tests -v` |
 | SDK 接続/更新 | SKM/：`PYTHONPATH=backend/src python3 scripts/probe_claude_agent_sdk.py` と対象 Adapter test（offline） |
-| CLI 計量 | Linux の SKM/：`PYTHONPATH=backend/src python3 scripts/probe_claude_metering.py`。実随包 CLI + 合成 loopback API；実モデル不使用、`--output` は任意の観測 JSON 保存先 |
+| CLI 計量/中断清理 | Linux の SKM/：`PYTHONPATH=backend/src python3 scripts/probe_claude_metering.py`。実随包 CLI + 合成 loopback API；実モデル不使用、`--output` は任意の観測 JSON 保存先 |
 | 文書 | SKM/：[build/check と閲覧検証](documentation.md) |
 
 CLI 計量 probe は親の資格情報を継承せず、一時 config/cwd と固定合成応答を使う。[非必須通信の無効化](https://code.claude.com/docs/en/env-vars)と loopback の拒否 proxy を設定するが、OS network 隔離の証明ではない。実 model 課金や停止の証拠と区別し、[観測範囲](../design/run-budgets.md#实-cli-合成-api-探针)を確認する。

@@ -1,0 +1,6 @@
+{
+  "status": "error",
+  "code": "database_effect_uncertain",
+  "message": "Original transaction receipt must be checked.",
+  "retryable": true
+}
