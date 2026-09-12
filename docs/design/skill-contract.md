@@ -150,11 +150,11 @@ SkillComposition（Module）仅归组精确版本任务，ProjectComposition 控
 | 发布/废弃 | DRAFT → PUBLISHED → DEPRECATED；重复发布读原行，废弃不复活 |
 | 项目启用/停用 | 精确 PUBLISHED；活动关系重启用读原行，停用保留记录、不改旧 Run |
 | 同版重新启用 | 当前拒绝恢复已停用关系，不是普通开关 |
-| 删除废弃版 | 独立引用检查，不作升级/回滚步骤 |
+| 删除草稿/废弃版 | 独立引用检查，不作升级/回滚步骤 |
 
 停用 v1 不能直接复活；选择仍合法精确版或解释发布新版本，后者不是恢复原身份。不删关系/改 DB 绕过，组合不复活废弃版，Run/Schedule 不跟随 latest。
 
-删除保护全部状态的 RunSkillSnapshot、ChangeProposal、SkillCompositionItem、TaskSchedule、TaskScheduleOccurrence、FrontendModuleVersion；任一引用 409。仅无引用废弃版可连同 Manifest/启用关系删除，不删来源/解释/资源/审计解除拒绝，保留 RESTRICT/版本锁。
+删除保护全部状态的 RunSkillSnapshot、ChangeProposal、SkillCompositionItem、TaskSchedule、TaskScheduleOccurrence、FrontendModuleVersion；任一引用 409。仅无引用草稿或废弃版可连同 Manifest/启用关系删除，不删来源/解释/资源/审计解除拒绝，保留 RESTRICT/版本锁。
 
 版本六操作须[重验原 ADMIN](skill-interpretation.md#版本管理的授权事务)。新 Run、调度保存/恢复在事务固定精确版/启用关系；原 Run 确认、调度暂停/归档不要求版本重新可用。
 

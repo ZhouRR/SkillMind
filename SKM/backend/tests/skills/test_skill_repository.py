@@ -15,6 +15,8 @@ from uuid import UUID, uuid4
 
 import pytest
 from jsonschema import Draft202012Validator
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from skillmind.db.models import ProjectSkillVersion, SkillInterpretation, SkillSource
 from skillmind.skills.capability_blueprint import CapabilityBlueprintError
 from skillmind.skills.domain import (
@@ -37,7 +39,6 @@ from skillmind.skills.domain import (
 from skillmind.skills.manifest_gate import ManifestValidator
 from skillmind.skills.repository import SkillRepository
 from skillmind.skills.service import _schema_failure_detail
-from sqlalchemy.ext.asyncio import AsyncSession
 
 ORGANIZATION_ID = UUID("00000000-0000-4000-8000-0000000000a1")
 
@@ -718,7 +719,7 @@ async def test_publish_does_not_reactivate_deprecated_version() -> None:
 
 
 @pytest.mark.asyncio
-async def test_delete_skill_version_rejects_versions_that_are_not_deprecated() -> None:
+async def test_delete_skill_version_rejects_published_versions() -> None:
     """PUBLISHED 版の削除を拒否し、廃止手順を経ない除去経路を塞ぐ。"""
 
     organization_id = uuid4()
@@ -737,11 +738,16 @@ async def test_delete_skill_version_rejects_versions_that_are_not_deprecated() -
 
 
 @pytest.mark.asyncio
-async def test_delete_skill_version_rejects_versions_referenced_by_runs() -> None:
+@pytest.mark.parametrize(
+    "version_status", [SkillVersionStatus.DRAFT, SkillVersionStatus.DEPRECATED]
+)
+async def test_delete_skill_version_rejects_versions_referenced_by_runs(
+    version_status: SkillVersionStatus,
+) -> None:
     """Run snapshot が指す frozen Manifest を消させず、監査の説明可能性を守る。"""
 
     organization_id = uuid4()
-    aggregate = _version_aggregate(organization_id, status=SkillVersionStatus.DEPRECATED)
+    aggregate = _version_aggregate(organization_id, status=version_status)
     session = MagicMock(spec=AsyncSession)
     session.scalar = AsyncMock(return_value=1)
     repository = SkillRepository(session)
@@ -757,12 +763,17 @@ async def test_delete_skill_version_rejects_versions_referenced_by_runs() -> Non
 
 
 @pytest.mark.asyncio
-async def test_delete_skill_version_removes_manifest_and_project_visibility() -> None:
-    """参照のない廃止版は Manifest と Project 可視性設定ごと取り除く。"""
+@pytest.mark.parametrize(
+    "version_status", [SkillVersionStatus.DRAFT, SkillVersionStatus.DEPRECATED]
+)
+async def test_delete_skill_version_removes_manifest_and_project_visibility(
+    version_status: SkillVersionStatus,
+) -> None:
+    """参照のない草稿/廃止版は Manifest と Project 可視性設定ごと取り除く。"""
 
     organization_id = uuid4()
     skill, version, manifest = _version_aggregate(
-        organization_id, status=SkillVersionStatus.DEPRECATED
+        organization_id, status=version_status
     )
     session = MagicMock(spec=AsyncSession)
     session.scalar = AsyncMock(return_value=0)

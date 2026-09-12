@@ -1256,7 +1256,7 @@ class SkillService:
             )
 
     async def delete_skill_version(self, *, access: UserAccess, skill_version_id: UUID) -> None:
-        """監査参照のない DEPRECATED 版を library から物理削除する。"""
+        """監査参照のない DRAFT / DEPRECATED 版を library から物理削除する。"""
 
         access = deepcopy(access)
         async with self._admin_transaction(access) as (repository, locked, authorize):

@@ -1052,7 +1052,9 @@ async def deprecate_skill_version(
         401: problem_openapi_response("The original session is no longer valid"),
         403: problem_openapi_response("Administrator access or session CSRF was rejected"),
         404: problem_openapi_response("Skill version not found in organization"),
-        409: problem_openapi_response("Skill version is still referenced or not deprecated"),
+        409: problem_openapi_response(
+            "Skill version is still referenced or neither draft nor deprecated"
+        ),
     },
     tags=["skills"],
 )
@@ -1061,7 +1063,7 @@ async def delete_skill_version(
     skill_version_id: UUID,
     actor: AdminWriteActor,
 ) -> Response:
-    """ADMIN が監査参照のない DEPRECATED 版を library から取り除く。
+    """ADMIN が監査参照のない DRAFT / DEPRECATED 版を library から取り除く。
 
     廃止しただけでは一覧から消えないため、二度と使わない版が増え続ける。監査の正本を守る
     ため、Run snapshot・ChangeProposal・Composition・Schedule/Occurrence・FrontendModule

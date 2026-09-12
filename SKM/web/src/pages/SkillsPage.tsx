@@ -582,13 +582,13 @@ export function SkillsPage({ projectId, csrfToken }: {
     }
   }
 
-  /** 監査参照のない DEPRECATED 版を organization library から取り除く。
+  /** 監査参照のない DRAFT / DEPRECATED 版を organization library から取り除く。
    *
    * Run snapshot や composition から参照されている版は backend が 409 で拒否する。
    * その場合は「なぜ消せないか」を一覧の error 欄へ出し、利用者が諦め方を判断できるようにする。
    */
   async function handleDelete(version: SkillVersionRecord): Promise<void> {
-    if (version.status !== 'DEPRECATED') return
+    if (version.status !== 'DRAFT' && version.status !== 'DEPRECATED') return
     if (!await confirm({
       title: messages.skills.deleteVersion,
       message: messages.skills.deleteConfirm(version.name, version.version),
@@ -924,7 +924,7 @@ export function SkillLibraryPanel({
                   )}
                   {/* 廃止しただけでは行が残り続けるため、監査参照のない版に限り片付け経路を出す。
                       参照が残る版は backend が 409 で拒否し、その理由を一覧の error 欄へ出す。 */}
-                  {version.status === 'DEPRECATED' && (
+                  {(version.status === 'DRAFT' || version.status === 'DEPRECATED') && (
                     <button className="dangerButton" type="button" disabled={busy} onClick={() => onDelete(version)}>
                       {busy ? messages.elements.processing : messages.skills.deleteVersion}
                     </button>

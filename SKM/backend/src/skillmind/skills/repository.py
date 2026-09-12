@@ -595,7 +595,7 @@ class SkillRepository:
         skill_version_id: UUID,
         authorize: Callable[[], datetime],
     ) -> None:
-        """監査参照のない DEPRECATED 版と、その付随 row を物理削除する。
+        """監査参照のない DRAFT / DEPRECATED 版と、その付随 row を物理削除する。
 
         Run snapshot/Proposal、Composition、Schedule/occurrence、生成 module は精確版を
         指す実行・構成の正本なので、状態を問わず一件でも参照があれば削除しない。
@@ -613,8 +613,12 @@ class SkillRepository:
             ),
         )
         authorize()
-        if SkillVersionStatus(version.status) is not SkillVersionStatus.DEPRECATED:
-            raise SkillVersionDeleteBlockedError("Only a deprecated SkillVersion can be deleted")
+        if SkillVersionStatus(version.status) not in {
+            SkillVersionStatus.DRAFT, SkillVersionStatus.DEPRECATED,
+        }:
+            raise SkillVersionDeleteBlockedError(
+                "Only a draft or deprecated SkillVersion can be deleted"
+            )
         for model in (
             RunSkillSnapshot,
             ChangeProposal,

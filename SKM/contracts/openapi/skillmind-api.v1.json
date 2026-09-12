@@ -35142,7 +35142,7 @@
     },
     "/api/v1/skill-versions/{skill_version_id}": {
       "delete": {
-        "description": "ADMIN が監査参照のない DEPRECATED 版を library から取り除く。\n\n廃止しただけでは一覧から消えないため、二度と使わない版が増え続ける。監査の正本を守る\nため、Run snapshot・ChangeProposal・Composition・Schedule/Occurrence・FrontendModule\nから参照されている版は、参照の状態に関係なく 409 で拒否する。",
+        "description": "ADMIN が監査参照のない DRAFT / DEPRECATED 版を library から取り除く。\n\n廃止しただけでは一覧から消えないため、二度と使わない版が増え続ける。監査の正本を守る\nため、Run snapshot・ChangeProposal・Composition・Schedule/Occurrence・FrontendModule\nから参照されている版は、参照の状態に関係なく 409 で拒否する。",
         "operationId": "delete_skill_version_api_v1_skill_versions__skill_version_id__delete",
         "parameters": [
           {
@@ -35494,7 +35494,7 @@
                 }
               }
             },
-            "description": "Skill version is still referenced or not deprecated",
+            "description": "Skill version is still referenced or neither draft nor deprecated",
             "headers": {}
           },
           "422": {

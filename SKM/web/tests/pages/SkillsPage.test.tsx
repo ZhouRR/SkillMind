@@ -567,10 +567,10 @@ describe('SkillLibraryPanel version identity and cleanup', () => {
     expect(html).not.toContain(version().skill_version_id)
   })
 
-  it('offers cleanup only for deprecated versions', () => {
-    /** 廃止済みは行が残り続けて一覧が伸びる。片付け経路は廃止後にだけ出す。 */
+  it('offers cleanup for drafts and deprecated versions', () => {
+    /** 廃止済みは行が残り続けて一覧が伸びる。草稿と廃止版に片付け経路を出す。 */
     expect(renderLibrary('DEPRECATED')).toContain('彻底删除')
     expect(renderLibrary('PUBLISHED')).not.toContain('彻底删除')
-    expect(renderLibrary('DRAFT')).not.toContain('彻底删除')
+    expect(renderLibrary('DRAFT')).toContain('彻底删除')
   })
 })

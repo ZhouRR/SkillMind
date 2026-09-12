@@ -365,11 +365,13 @@ async def test_disable_never_uses_another_project_or_version_binding(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("reference_model", REFERENCE_MODELS)
+@pytest.mark.parametrize("version_status", ["DRAFT", "DEPRECATED"])
 async def test_delete_keeps_each_existing_audit_reference_before_deleting_anything(
-    monkeypatch: pytest.MonkeyPatch, reference_model: type
+    monkeypatch: pytest.MonkeyPatch, reference_model: type, version_status: str
 ) -> None:
     """六種類の実行/構成参照は状態で除外せず、現在 ADMIN でも削除できない。"""
     session = await prepare(monkeypatch, "delete", "new")
+    session.version.status = version_status
     session.references[reference_model].add(session.version.id)
     before = session.frozen_values()
     with pytest.raises(SkillVersionDeleteBlockedError):
