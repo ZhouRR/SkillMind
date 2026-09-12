@@ -7,7 +7,6 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-
 from skillmind.agent.context_builder import ContractStore, document_convert_tool_definition
 from skillmind.agent.document_provider import DocumentConvertProvider
 from skillmind.agent.tool_gateway import ToolRegistry
@@ -24,7 +23,7 @@ from tests.documents.fakes import document_content
 CAPABILITY = "document.convert/v1"
 
 
-def case(monkeypatch):
+def case(monkeypatch, *, source_key=None):
     """合成 XLS を、実 Tool/Audit と元の Project/Run/Attempt に接続する。"""
     db = ArtifactDatabase(monkeypatch)
     manifest = _document_manifest()
@@ -38,7 +37,7 @@ def case(monkeypatch):
         **frozen.task_snapshot_json, "skill_snapshots": list(frozen.skill_snapshots_json),
     }
     data = (Path(__file__).parents[1] / "fixtures/documents/conversion-sample.xls").read_bytes()
-    content = document_content(data, name="cases.xls")
+    content = replace(document_content(data, name="cases.xls"), source_object_key=source_key)
     original = _context(db.claimed.project_id, content=content).run
     source = _FakeSource(project_id=db.claimed.project_id, content=content)
     definition = document_convert_tool_definition(ContractStore(CONTRACTS), source)
@@ -66,9 +65,12 @@ async def invoke(runtime, tool, *, publish=True, use_id="convert-original"):
     return await runtime.gateway.invoke_mcp(tool.sdk_name, args)
 
 
-async def test_native_markdown_is_published_once_and_read_as_original_artifact(monkeypatch):
+@pytest.mark.parametrize("source_key", [None, "original/source/cases.xls"])
+async def test_native_markdown_is_published_once_and_read_as_original_artifact(
+    monkeypatch, source_key
+):
     """全文の byte/hash・日本語・原証拠を保ち、成功重放は取得/変換を再実行しない。"""
-    db, runtime, tool, source = case(monkeypatch)
+    db, runtime, tool, source = case(monkeypatch, source_key=source_key)
     reply = await invoke(runtime, tool)
     assert not reply.get("is_error"), reply
     response = _payload(reply)
@@ -92,6 +94,9 @@ async def test_native_markdown_is_published_once_and_read_as_original_artifact(m
     assert len(source.calls) == 1 and len(db.rows(Evidence)) == 2
     assert db.rows(Evidence)[0].artifact_bytes is None
     assert db.rows(Evidence)[0].content_hash == response["document"]["checksum"]
+    if source_key is not None:
+        assert response["source_object_key"] == source_key
+        assert db.rows(Evidence)[0].metadata_json["source_object_key"] == source_key
 
 
 @pytest.mark.parametrize("publish", [None, False])

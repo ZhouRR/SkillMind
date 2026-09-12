@@ -16,6 +16,7 @@ from playwright.async_api import Route, async_playwright, expect
 SOURCE = "00000000-0000-4000-8000-000000000040"
 RESULT = "00000000-0000-4000-8000-000000000050"
 KEY = "sha256:" + "a" * 64
+ADJUSTMENT = "Clarify the synthetic review criteria."
 RECEIPT = "skillmind:interpretation-request:v1"
 PREVIEW = {
     "normalized_package": {
@@ -72,6 +73,7 @@ class InterpretationApi(ProjectsApi):
         self.mode = mode
         self.original: str | None = None
         self.posts = 0
+        self.adjustments = 0
         self.reads: list[str] = []
         self.state = "UNKNOWN"
 
@@ -94,13 +96,26 @@ class InterpretationApi(ProjectsApi):
             assert request.headers.get("x-csrf-token") == CSRF
             body = request.post_data_json
             assert set(body) == {"request_id", "force_regenerate"}
-            assert body["force_regenerate"] is False and UUID(body["request_id"]).int != 0
+            assert body["force_regenerate"] is False
+            assert UUID(body["request_id"]).int != 0 and UUID(body["request_id"]).version == 4
             self.original = body["request_id"]
             self.posts += 1
             if self.mode == "lost-response":
                 await route.abort("failed")
             else:
                 await route.fulfill(json=self.receipt("RUNNING"))
+        elif suffix == f"skill-interpretations/{RESULT}/adjustment-requests":
+            assert request.method == "POST" and self.adjustments == 0
+            assert request.headers.get("x-csrf-token") == CSRF
+            body = request.post_data_json
+            assert set(body) == {"request_id", "instruction"}
+            assert body["instruction"] == ADJUSTMENT
+            assert UUID(body["request_id"]).int != 0 and UUID(body["request_id"]).version == 4
+            assert body["request_id"] != self.original
+            self.original = body["request_id"]
+            self.adjustments += 1
+            self.state = "UNKNOWN"
+            await route.abort("failed")
         elif suffix == f"skill-interpretation-requests/{self.original}/events":
             assert request.method == "GET" and not address.query
             event = {
@@ -151,7 +166,7 @@ class InterpretationApi(ProjectsApi):
 
 
 async def check(url: str, output: Path) -> None:
-    """三語と PC/狭幅で一回の POST、原 GET、native reload の結果復元を確認する。"""
+    """randomUUID 非公開でも三語の解釈/調整が一度だけ送信され、原 GET で復元する。"""
     output.mkdir(parents=True, exist_ok=True)
     fixture = output / "synthetic-skill"
     fixture.mkdir(exist_ok=True)
@@ -166,6 +181,11 @@ async def check(url: str, output: Path) -> None:
                     (1440, "failed-result"),
                 ):
                     context = await browser.new_context(viewport={"width": width, "height": 900})
+                    # HTTP origin と同じ API 欠落を再現し、getRandomValues は実 browser を使う。
+                    await context.add_init_script(
+                        "Object.defineProperty(globalThis.crypto, 'randomUUID', "
+                        "{ value: undefined, configurable: true })"
+                    )
                     api = InterpretationApi(url, language, mode)
                     await context.route("**/*", api.route)
                     page = await context.new_page()
@@ -174,6 +194,10 @@ async def check(url: str, output: Path) -> None:
                     name = f"{language}-{width}-{mode}"
                     try:
                         await page.goto(f"{url}#/skills?project={PROJECT}")
+                        assert await page.evaluate(
+                            "typeof crypto.randomUUID === 'undefined' "
+                            "&& typeof crypto.getRandomValues === 'function'"
+                        )
                         labels = (await messages(page, language))["skills"]
                         await page.get_by_role(
                             "tab", name=labels["tabWorkbench"], exact=True
@@ -221,6 +245,25 @@ async def check(url: str, output: Path) -> None:
                         await page.screenshot(
                             path=str(output / f"{name}-result.png"), full_page=True
                         )
+                        if mode != "failed-result":
+                            original = api.original
+                            await page.locator(".adjustForm textarea").fill(ADJUSTMENT)
+                            await page.locator('.adjustForm button[type="submit"]').click()
+                            await expect(confirm).to_be_visible()
+                            assert api.posts == 1 and api.adjustments == 1
+                            assert api.original != original
+                            assert (
+                                await page.evaluate("key => sessionStorage.getItem(key)", RECEIPT)
+                                == api.original
+                            )
+                            await confirm.click()
+                            await expect(confirm).to_be_visible()
+                            assert api.reads[-1] == api.original
+                            await page.reload()
+                            await expect(confirm).to_be_visible()
+                            assert api.posts == 1 and api.adjustments == 1
+                            assert api.reads[-1] == api.original
+                            assert not api.failures and not api.unexpected and not errors
                         print(f"PASS {name}", flush=True)
                     finally:
                         if api.failures or api.unexpected or errors:

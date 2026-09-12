@@ -62,6 +62,10 @@
     "database_writes_enabled": {
       "type": "boolean",
       "default": false
+    },
+    "document_writes_enabled": {
+      "type": "boolean",
+      "default": false
     }
   }
 }

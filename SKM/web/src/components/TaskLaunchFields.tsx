@@ -143,7 +143,6 @@ export function TaskLaunchFields({ task, inputText, sourceProviders, onInputText
         onChange={(value) => onInputTextChange(JSON.stringify(value, null, 2))}
         onRawChange={onInputTextChange}
       />
-      <p className="hint">{messages.workspace.inputValidatedHint}</p>
     </>
   )
 }

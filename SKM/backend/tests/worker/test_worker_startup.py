@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
 from arq.worker import Function
-
 from skillmind.agent.database_provider import DatabaseReadProvider
 from skillmind.agent.engine import ClaudeAgentSdkEngine, RunMcpRuntime
 from skillmind.agent.evidence import PostgresToolAuditWriter
@@ -23,7 +21,6 @@ from skillmind.agent.workspace_materializer import WorkspaceMaterializer
 from skillmind.core.settings import Settings
 from skillmind.documents.library import configured_document_library
 from skillmind.effects.document_provider import DocumentWriteProvider
-from skillmind.effects.release import configured_execution_features
 from skillmind.runs.domain import LeaseValidationError
 from skillmind.runs.repository_inputs import PostgresInputSnapshotStore
 from skillmind.storage import InMemoryFileStorage
@@ -57,6 +54,7 @@ async def test_startup_injects_required_receipt_and_preparation_limits(
         workspace_materialize_total_max_files=432,
         managed_secret_kek=None,
         deferred_features_enabled=deferred_enabled,
+        document_writes_enabled=document_enabled,
         object_storage_endpoint="https://storage.example.test",
         object_storage_bucket="fixture-documents",
         object_storage_access_key="fixture-access",
@@ -72,12 +70,6 @@ async def test_startup_injects_required_receipt_and_preparation_limits(
     monkeypatch.setattr(worker, "create_session_factory", lambda _: sessions)
     storage = create_file_storage(settings) if library_configured else InMemoryFileStorage()
     monkeypatch.setattr(worker, "create_file_storage", lambda _: storage)
-    if document_enabled:
-        # 配備開放は合成し、constructor/現在 storage 照合と依存注入は本番実装を使う。
-        monkeypatch.setattr(
-            worker, "configured_execution_features",
-            lambda settings: replace(configured_execution_features(settings), document_writes=True),
-        )
     writer_factory = MagicMock(wraps=worker.create_document_write_source)
     monkeypatch.setattr(worker, "create_document_write_source", writer_factory)
     monkeypatch.setattr(

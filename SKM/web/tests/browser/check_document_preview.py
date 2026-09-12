@@ -384,7 +384,6 @@ async def scenario(
                     await expect(page.get_by_role("dialog").get_by_role("alert")).to_be_visible()
             elif mode == "malicious":
                 await static_html(page)
-                await expect(page.get_by_text(labels["previewNotice"], exact=True)).to_be_visible()
             elif mode == "markdown":
                 frame = page.frame_locator("iframe.previewFrame")
                 await expect(frame.get_by_role("heading", name="Original Markdown")).to_be_visible()

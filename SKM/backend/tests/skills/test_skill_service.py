@@ -11,7 +11,6 @@ from typing import Any, Self
 from uuid import uuid4
 
 import pytest
-
 from skillmind.db.models import SkillInterpretation, SkillSource
 from skillmind.skills import (
     InlineSkillFile,
@@ -437,6 +436,8 @@ async def test_interpret_records_schema_failure_without_publishable_manifest() -
     detail = interpretation.execution_json["detail"]
     assert isinstance(detail, str) and detail
     assert len(interpretation.execution_json["validation_attempts"]) == 2
+    assert stored.validation_attempts == ("/: required", "/: required")
+    assert all("wrong" not in attempt for attempt in stored.validation_attempts)
 
 
 @pytest.mark.asyncio

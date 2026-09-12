@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
+from jsonschema import Draft202012Validator
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from skillmind.core.redaction import contains_sensitive_content
 from skillmind.db.models import (
     ChangeProposal,
     FrontendModuleVersion,
@@ -55,6 +58,65 @@ from skillmind.skills.domain import (
 )
 from skillmind.skills.task_catalog import PublishedTaskDescriptor, project_published_tasks
 from skillmind.skills.task_flow_preview import TaskFlowPreviewInvalidError, TaskFlowPreviewSource
+
+_VALIDATION_LOCATION = re.compile(
+    r"(?P<path>/(?:[A-Za-z0-9_.-]{1,64}/)*[A-Za-z0-9_.-]{0,64}): "
+    r"(?P<code>[A-Za-z][A-Za-z0-9_]{0,63})(?: .*)?"
+)
+# 公開契約の構造 field だけを許可する。candidate が作る map key は文字種だけで信用しない。
+_VALIDATION_PATH_FIELDS = frozenset({
+    "response_version", "source_hash", "interpreter", "skill_key", "version", "prompt_checksum",
+    "normalized_package", "runtime_manifest_draft", "report", "capability_blueprint", "identity",
+    "compatibility", "tasks", "capabilities", "tools", "resource_requirements", "guidance",
+    "required_rules", "recommended_steps", "quality_criteria", "prohibited_actions", "assumptions",
+    "questions", "diagnostics", "source_traces", "effect_intents", "interaction_points",
+    "input_contract", "output_contract", "parameter_contract", "result_contract", "fields",
+    "items", "key", "type", "required", "enum", "description", "contract_version", "minLength",
+    "maxLength", "min_length", "max_length", "minimum", "maximum", "pattern", "capability",
+    "resource_keys", "resource_key", "operation", "risk", "contract_source_trace", "workflows",
+    "steps",
+    "document_prerequisites", "mode", "approval_mode", "access", "kind", "source", "target",
+    "path", "line_start", "line_end", "file_path", "field_path", "reference", "title", "summary",
+    "confidence", "level", "name", "provider", "providers", "request_schema", "response_schema",
+    "error_schema", "input_schema", "output_schema", "input_schema_checksum",
+    "output_schema_checksum",
+    "workflow", "view", "default_view", "permissions", "execution", "ui", "extensions",
+})
+_VALIDATION_ARRAY_FIELDS = frozenset({
+    "tasks", "capabilities", "tools", "resource_requirements", "required_rules",
+    "recommended_steps",
+    "quality_criteria", "prohibited_actions", "assumptions", "questions", "diagnostics",
+    "source_traces", "effect_intents", "interaction_points", "fields", "enum", "resource_keys",
+    "document_prerequisites", "providers", "workflows", "steps",
+})
+_CONTRACT_VALIDATION_CODES = frozenset({
+    "contract_constraint_invalid", "contract_constraint_out_of_range", "contract_depth_exceeded",
+    "contract_description_invalid", "contract_description_too_long", "contract_enum_duplicate",
+    "contract_enum_invalid", "contract_enum_limit_exceeded", "contract_enum_type_mismatch",
+    "contract_field_duplicate", "contract_field_invalid", "contract_field_key_invalid",
+    "contract_field_limit_exceeded", "contract_fields_invalid", "contract_items_missing",
+    "contract_keyword_inapplicable", "contract_keyword_unknown", "contract_number_range_invalid",
+    "contract_pattern_invalid", "contract_pattern_unsafe", "contract_required_invalid",
+    "contract_string_range_invalid", "contract_type_invalid", "contract_version_invalid",
+})
+# 汎用 ValueError の本文は instance を含み得る。値を埋め込まない既知 message だけを許可する。
+_STATIC_VALIDATION_DIAGNOSTICS = frozenset({
+    "RuntimeManifest tasks must be an array",
+    "Model RuntimeManifest tasks must define input_contract",
+    "Model RuntimeManifest output_contract must be an object",
+    "Task capability is not declared in capabilities",
+    "Task resource key is not declared in resource_requirements",
+    "Effect resource key is not declared in resource_requirements",
+    "An apply effect intent must reference a resource requirement",
+    "An apply effect intent must reference a write resource requirement",
+    "An apply effect intent must keep the ask approval mode",
+    "A required rule must cite a source trace",
+    "Document prerequisites require source evidence",
+    "Task contract draft must be an object",
+    "candidate_generation:empty_response",
+    "candidate_generation:invalid_json",
+    "candidate_generation:truncated_output",
+})
 
 
 class SkillRepository:
@@ -1053,7 +1115,9 @@ class SkillRepository:
     ) -> StoredInterpretationExecution:
         """Model interpretation 行を API 非依存の実行結果 read model へ変換する。"""
 
-        execution = interpretation.execution_json or {}
+        execution = (
+            interpretation.execution_json if isinstance(interpretation.execution_json, dict) else {}
+        )
         error_code = execution.get("error_code")
         return StoredInterpretationExecution(
             interpretation_id=interpretation.id,
@@ -1077,6 +1141,7 @@ class SkillRepository:
             reused=reused,
             parent_interpretation_id=interpretation.parent_interpretation_id,
             adjustment=interpretation.adjustment_json,
+            validation_attempts=_validation_attempts(execution),
         )
 
     @staticmethod
@@ -1172,6 +1237,54 @@ def _design_source(
         interpretation_id=interpretation.id,
         interpreter_version=interpretation.interpreter_version,
     )
+
+
+def _validation_attempts(execution: dict[str, Any]) -> tuple[str, ...]:
+    """保存済みの脱敏診断だけを有界投影し、異常値や内部 execution 全体を公開しない。"""
+
+    if "validation_attempts" in execution:
+        values = execution["validation_attempts"]
+    elif execution.get("error_code") == "schema_validation_failed" and "detail" in execution:
+        # 旧 writer の単一診断を読み取るだけで、原 record の補記・上書きはしない。
+        values = [execution["detail"]]
+    else:
+        return ()
+    if not isinstance(values, list) or len(values) > 2:
+        return ()
+    if any(
+        not isinstance(value, str) or not value.strip() or len(value) > 4096
+        or any(ord(char) < 32 or ord(char) == 127 for char in value)
+        or contains_sensitive_content(value)
+        for value in values
+    ):
+        return ()
+    projected = tuple(_public_validation_diagnostic(value) for value in values)
+    if any(value is None for value in projected):
+        return ()
+    return tuple(value for value in projected if value is not None)
+
+
+def _public_validation_diagnostic(value: str) -> str | None:
+    """識別できる path/code だけを残し、enum/const/追加 key 等の自由な尾部を出さない。"""
+
+    if value in _STATIC_VALIDATION_DIAGNOSTICS:
+        return value
+    match = _VALIDATION_LOCATION.fullmatch(value)
+    if match is None:
+        return None
+    parts = match["path"].strip("/").split("/")
+    for index, part in enumerate(parts):
+        if not part or part in _VALIDATION_PATH_FIELDS:
+            continue
+        if not (
+            part.isdecimal() and len(part) <= 5 and index > 0
+            and parts[index - 1] in _VALIDATION_ARRAY_FIELDS
+        ):
+            return None
+    code = match["code"]
+    if code not in Draft202012Validator.VALIDATORS and code not in _CONTRACT_VALIDATION_CODES:
+        return None
+    return f"{match['path']}: {code}"
 
 
 def _next_patch_version(versions: list[str]) -> str:

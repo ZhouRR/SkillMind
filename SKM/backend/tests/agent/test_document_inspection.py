@@ -12,7 +12,6 @@ from uuid import uuid4
 
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
-
 from skillmind.agent.context_builder import ContractStore, document_inspect_tool_definition
 from skillmind.agent.document_inspection import DocumentInspectProvider
 from skillmind.agent.tool_gateway import ToolProviderError, ToolRegistry
@@ -69,13 +68,17 @@ def _case(monkeypatch: pytest.MonkeyPatch, *, version: str | None = "original-ve
 
 
 @pytest.mark.parametrize("version", [None, "null", "original-version"])
+@pytest.mark.parametrize("source_key", [None, "projects/original/documents/frozen-source.xlsx"])
 async def test_metadata_response_matches_contract_without_claiming_content_verification(
     monkeypatch: pytest.MonkeyPatch,
     version: str | None,
+    source_key: str | None,
 ) -> None:
     """LastModified は source の実観測であり、hash は観測 JSON と元本文を区別する。"""
 
     context, source, inspect, observed = _case(monkeypatch, version=version)
+    observed = replace(observed, source_object_key=source_key)
+    inspect.return_value = observed
     result = await DocumentInspectProvider(source).execute(context, {"path": "specs/cases.xlsx"})
     response = {**result.response, "evidence_refs": ["ev_metadata_001"]}
     schema = ContractStore(CONTRACTS).load("tools/document.inspect/v1/response.schema.json")
@@ -90,7 +93,14 @@ async def test_metadata_response_matches_contract_without_claiming_content_verif
     assert result.evidence[0].content_hash != observed.document.content_hash
     assert result.evidence[0].metadata["source_reference_checksum"] == observed.reference_checksum
     assert "source_reference_checksum" not in response
-    assert "bucket" not in canonical_json(response) and "object_key" not in canonical_json(response)
+    assert "bucket" not in canonical_json(response)
+    if source_key is None:
+        assert "source_object_key" not in response
+        assert result.evidence[0].metadata["observation_version"] == "v1"
+    else:
+        assert response["source_object_key"] == source_key != observed.document.path
+        assert observation["source_object_key"] == source_key
+        assert result.evidence[0].metadata["observation_version"] == "v2"
     inspect.assert_awaited_once_with(
         project_id=context.project_id, document_id=observed.document.document_id
     )
@@ -207,12 +217,15 @@ async def test_cancellation_propagates_after_owned_coroutine_cleanup(
     assert cleaned.is_set()
 
 
+@pytest.mark.parametrize("source_key", [None, "original/frozen-source.xlsx"])
 async def test_gateway_commits_metadata_evidence_and_replays_the_same_observation(
     monkeypatch: pytest.MonkeyPatch,
+    source_key: str | None,
 ) -> None:
     """実 Gateway 契約と監査 port を通し、同じ成功済み呼出しは再 HEAD しない。"""
 
-    context, source, inspect, _ = _case(monkeypatch)
+    context, source, inspect, observed = _case(monkeypatch)
+    inspect.return_value = replace(observed, source_object_key=source_key)
     registry = ToolRegistry((document_inspect_tool_definition(ContractStore(CONTRACTS), source),))
     registered = registry.resolve(
         "document.inspect/v1", provider="project-documents", integration_id=None

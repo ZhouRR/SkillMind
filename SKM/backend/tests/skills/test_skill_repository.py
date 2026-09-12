@@ -6,6 +6,7 @@ transaction 内の再検証は実 UserRepository を使う service/API 回帰で
 
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,9 +14,9 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
-
+from jsonschema import Draft202012Validator
 from skillmind.db.models import ProjectSkillVersion, SkillInterpretation, SkillSource
+from skillmind.skills.capability_blueprint import CapabilityBlueprintError
 from skillmind.skills.domain import (
     CreateSkillVersionDraftCommand,
     InlineSkillFile,
@@ -35,6 +36,8 @@ from skillmind.skills.domain import (
 )
 from skillmind.skills.manifest_gate import ManifestValidator
 from skillmind.skills.repository import SkillRepository
+from skillmind.skills.service import _schema_failure_detail
+from sqlalchemy.ext.asyncio import AsyncSession
 
 ORGANIZATION_ID = UUID("00000000-0000-4000-8000-0000000000a1")
 
@@ -288,6 +291,110 @@ async def test_save_model_interpretation_reuses_same_execution_key() -> None:
     assert stored.reused is True
     assert stored.interpretation_id == existing.id
     assert stored.error_code == "timeout"
+
+
+def _stored_schema_diagnostic(instance, schema, *, wrapped=False):
+    """実 validator/writer の診断を使い、candidate 値の脱落を読取境界で確認する。"""
+
+    error = next(Draft202012Validator(schema).iter_errors(instance))
+    if wrapped:
+        error = CapabilityBlueprintError("blueprint_schema_invalid", "/", error.message)
+    return _schema_failure_detail(error)
+
+
+@pytest.mark.parametrize(
+    "execution,expected",
+    [
+        ({"validation_attempts": ["/tasks/0: required", "/tasks/0: type"]},
+         ("/tasks/0: required", "/tasks/0: type")),
+        ({"validation_attempts": []}, ()),
+        ({"error_code": "schema_validation_failed", "detail": "/tasks/0: required"},
+         ("/tasks/0: required",)),
+        ({"error_code": "provider_error", "detail": "private upstream response"}, ()),
+        ({}, ()),
+        ({"validation_attempts": ["/tasks/0: enum " + "x" * 4081]}, ("/tasks/0: enum",)),
+        ({"validation_attempts": ["/fields/0/min_length: contract_constraint_invalid"]},
+         ("/fields/0/min_length: contract_constraint_invalid",)),
+        ({"validation_attempts": ["/runtime_manifest_draft/tools/0/operation: enum"]},
+         ("/runtime_manifest_draft/tools/0/operation: enum",)),
+        ({"validation_attempts": ["/tasks/0: const 'synthetic-private-instance'"]},
+         ("/tasks/0: const",)),
+        ({"validation_attempts": ["/: additionalProperties unexpected=['private-field']"]},
+         ("/: additionalProperties",)),
+        ({"validation_attempts": ["/fields/0/: contract_field_invalid"]},
+         ("/fields/0/: contract_field_invalid",)),
+        ({"validation_attempts": ["candidate_generation:invalid_json"]},
+         ("candidate_generation:invalid_json",)),
+        ({"validation_attempts": ["A required rule must cite a source trace"]},
+         ("A required rule must cite a source trace",)),
+        ({"validation_attempts": ["'private-instance' is not one of ['allowed']"]}, ()),
+        ({"validation_attempts": ["Duplicate key: private-instance"]}, ()),
+        ({"validation_attempts": ["/tasks/0: private_instance"]}, ()),
+        ({"validation_attempts": ["/private field: enum"]}, ()),
+        ({"validation_attempts": ["/report/confidence/1234: enum"]}, ()),
+        ({"validation_attempts": ["/: contract_private_instance"]}, ()),
+        ({"validation_attempts": [_stored_schema_diagnostic(
+            {"SyntheticOpaqueCredential927Z": "unused"}, {"additionalProperties": False}
+        )]}, ("/: additionalProperties",)),
+        ({"validation_attempts": [_stored_schema_diagnostic(
+            {"SyntheticOpaqueCredential927Z": "private"},
+            {"additionalProperties": {"type": "integer"}},
+        )]}, ()),
+        ({"validation_attempts": [_stored_schema_diagnostic(
+            "private-instance", {"enum": ["allowed"]}, wrapped=True,
+        )]}, ()),
+        ({"validation_attempts": ["x" * 4097]}, ()),
+        ({"validation_attempts": ["first", "second", "third"]}, ()),
+        ({"validation_attempts": None, "detail": "not a fallback"}, ()),
+        ({"validation_attempts": "/tasks/0: required"}, ()),
+        ({"validation_attempts": {"raw_candidate": "private"}}, ()),
+        ({"validation_attempts": ["safe", 1]}, ()),
+        ({"validation_attempts": [""]}, ()),
+        ({"validation_attempts": ["   "]}, ()),
+        ({"validation_attempts": ["line\nprivate"]}, ()),
+        ({"validation_attempts": ["line\x7fprivate"]}, ()),
+        ({"validation_attempts": ["unexpected=['password=synthetic-secret']"]}, ()),
+        ({"validation_attempts": ["-----BEGIN PRIVATE KEY-----"]}, ()),
+    ],
+)
+async def test_execution_diagnostics_only_project_bounded_stored_strings(execution, expected):
+    """旧診断も原 JSON を変えず読み、内部 payload・異常文字列は公開しない。"""
+
+    organization_id, source_id = uuid4(), uuid4()
+    source = _source(organization_id, source_id)
+    original = {"parameters": {"private": "synthetic"}, "raw_candidate": "private", **execution}
+    row = SkillInterpretation(
+        id=uuid4(), skill_source_id=source_id, origin="model", model="test-model",
+        interpreter_version="skillmind-skill-interpreter/1.0.0", status="FAILED",
+        compatibility_level="assisted", confidence=0.0, summary="Failed",
+        normalized_package_json={}, manifest_draft_json={}, report_json=None,
+        execution_json=deepcopy(original), created_at=datetime(2026, 9, 12, tzinfo=UTC),
+    )
+    session = MagicMock(spec=AsyncSession)
+    session.get = AsyncMock(side_effect=[row, source])
+    stored = await SkillRepository(session).get_model_interpretation(
+        organization_id=organization_id, interpretation_id=row.id
+    )
+    assert stored.validation_attempts == expected
+    assert row.execution_json == original
+    session.add.assert_not_called()
+    session.flush.assert_not_called()
+
+
+async def test_execution_diagnostics_cannot_be_read_from_another_organization():
+    """診断を持つ行でも原 source の Organization 不一致は同じ 404 境界を守る。"""
+
+    source = _source(uuid4(), uuid4())
+    row = SkillInterpretation(
+        id=uuid4(), skill_source_id=source.id, execution_json={"validation_attempts": ["private"]}
+    )
+    session = MagicMock(spec=AsyncSession)
+    session.get = AsyncMock(side_effect=[row, source])
+    with pytest.raises(SkillInterpretationNotFoundError):
+        await SkillRepository(session).get_model_interpretation(
+            organization_id=uuid4(), interpretation_id=row.id
+        )
+    session.add.assert_not_called()
 
 
 @pytest.mark.asyncio

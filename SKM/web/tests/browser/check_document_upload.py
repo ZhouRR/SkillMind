@@ -143,6 +143,7 @@ class UploadApi(UploadMockApi):
         status, code = {
             "oversize": (413, "document_upload_too_large"),
             "invalid": (422, "invalid_document_upload"),
+            "format-not-allowed": (422, "content_type_not_allowed"),
             "unknown-413": (413, "unrecognized_gateway_response"),
             "expired": (401, "authentication_required"),
             "denied": (403, "csrf_rejected"),
@@ -161,7 +162,8 @@ class UploadApi(UploadMockApi):
 
 
 async def scenario(
-    browser: Browser, url: str, mode: str, language: str, width: int, output: Path
+    browser: Browser, url: str, mode: str, language: str, width: int, output: Path,
+    theme: str = "light",
 ) -> None:
     """実 file input・API client・共有文案を使い、確定拒否と未知を混同しない。"""
     api = UploadApi(url, language, mode)
@@ -170,10 +172,11 @@ async def scenario(
         locale=language,
         service_workers="block",
     )
+    await context.add_init_script(f"localStorage.setItem('skillmind.theme', '{theme}')")
     await context.route("**/*", api.route)
     page = await context.new_page()
     audit = UploadBrowserAudit(page, api)
-    name = f"{mode}-{language}-{width}"
+    name = f"{mode}-{language}-{width}-{theme}"
     try:
         await page.goto(f"{url}#/documents?project={PROJECT}")
         labels = (await messages(page, language))["documentsPanel"]
@@ -193,6 +196,7 @@ async def scenario(
             key = {
                 "oversize": "uploadTooLarge",
                 "invalid": "invalid",
+                "format-not-allowed": "uploadTypeNotAllowed",
                 "unknown-413": "uploadUnknown",
                 "invalid-success": "uploadUnknown",
                 "denied": "denied",
@@ -210,7 +214,7 @@ async def scenario(
             await settle(page)
             if mode in ("denied", "project-missing", "archived"):
                 await expect(panel.locator('input[type="file"]').first).to_be_disabled()
-            elif mode in ("oversize", "invalid"):
+            elif mode in ("oversize", "invalid", "format-not-allowed"):
                 await expect(panel.locator('input[type="file"]').first).to_be_enabled()
         await settle(page)
         assert api.uploads == 1 and not api.delete_calls
@@ -244,6 +248,10 @@ async def check(url: str, output: Path) -> None:
             for language in ("zh", "ja", "en"):
                 for mode in ("oversize", "invalid", "unknown-413"):
                     await scenario(browser, url, mode, language, 390, output)
+                for theme in ("light", "dark"):
+                    await scenario(
+                        browser, url, "format-not-allowed", language, 1440, output, theme
+                    )
             for mode in (
                 "oversize",
                 "invalid-success",

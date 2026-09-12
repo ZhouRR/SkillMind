@@ -3608,6 +3608,23 @@
           "summary": {
             "title": "Summary",
             "type": "string"
+          },
+          "validation_attempts": {
+            "description": "Read-only projection of persisted validation diagnostics in attempt order. Only recognized paths/codes or fixed platform messages are exposed. Optional for older responses; empty when unavailable. Candidate values and execution data are excluded.",
+            "examples": [
+              [
+                "/runtime_manifest_draft/tasks/0: required"
+              ]
+            ],
+            "items": {
+              "maxLength": 4096,
+              "minLength": 1,
+              "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            },
+            "maxItems": 2,
+            "title": "Validation Attempts",
+            "type": "array"
           }
         },
         "required": [
@@ -7170,6 +7187,11 @@
           "deferred_features_enabled": {
             "default": false,
             "title": "Deferred Features Enabled",
+            "type": "boolean"
+          },
+          "document_writes_enabled": {
+            "default": false,
+            "title": "Document Writes Enabled",
             "type": "boolean"
           },
           "user": {

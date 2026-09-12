@@ -11,9 +11,9 @@ from uuid import uuid4
 
 import httpx
 import pytest
-
 from skillmind.artifacts.domain import ArtifactContent, ArtifactMetadata
-from skillmind.core.hashing import sha256_hex
+from skillmind.core.hashing import canonical_json, sha256_hex
+from skillmind.documents.paths import document_effect_prefix
 from skillmind.storage.effect_write import (
     ObjectWriteConflictError,
     ObjectWriteUncertainError,
@@ -22,7 +22,10 @@ from skillmind.storage.effect_write import (
 from skillmind.storage.s3_effect import S3ObjectWriteSource
 
 
-def fixture(*, handler=None, content=b"# Reviewed\n", object_key="results/review/source.md"):
+def fixture(
+    *, handler=None, content=b"# Reviewed\n", logical_path="results/review/source.md",
+    object_key=None, protocol_version=2,
+):
     """実接続・業務 ID・Secret を含まない Artifact と client を作る。"""
 
     source = S3ObjectWriteSource(
@@ -57,8 +60,10 @@ def fixture(*, handler=None, content=b"# Reviewed\n", object_key="results/review
         namespace=source.namespace,
         bucket="fixture-library",
         object_key=object_key,
-        allowed_prefix="results/",
+        logical_path=logical_path,
+        allowed_prefix=document_effect_prefix(project_id, revision=str(protocol_version)),
         content_type="text/markdown",
+        protocol_version=protocol_version,
     )
     return source, build_object_write(**arguments), arguments
 
@@ -134,9 +139,114 @@ def test_original_run_artifact_and_all_identities_are_bound():
         "content_type": "application/json",
         "artifact_ref": "art_different",
     }.items():
-        with pytest.raises(ValueError, match="checksum"):
+        with pytest.raises(ValueError, match=r"identity|checksum"):
             replace(command, **{name: value}).validate()
     assert "Reviewed" not in repr(command)
+
+
+@pytest.mark.parametrize("field", ["effect", "path", "artifact", "body", "mime", "namespace"])
+def test_v2_object_key_changes_with_each_immutable_identity(field):
+    """同じ表示名でも異なる原要求を同一物理 key に束縛しない。"""
+
+    _, command, arguments = fixture()
+    changed = dict(arguments)
+    if field == "effect":
+        changed["effect_id"] = uuid4()
+    elif field == "path":
+        changed["logical_path"] = "results/other/source.md"
+    elif field == "artifact":
+        changed["artifact"] = replace(
+            arguments["artifact"],
+            metadata=replace(arguments["artifact"].metadata, artifact_ref="art_other"),
+        )
+    elif field == "body":
+        content = b"# Other result\n"
+        changed["artifact"] = ArtifactContent(
+            replace(arguments["artifact"].metadata,
+                    checksum=f"sha256:{sha256_hex(content)}", size_bytes=len(content)),
+            content,
+        )
+    elif field == "mime":
+        changed["content_type"] = "text/plain"
+    else:
+        changed["namespace"] = replace(command.namespace, namespace_id=uuid4())
+    other = build_object_write(**changed)
+    assert other.object_key != command.object_key
+    assert other.request_checksum != command.request_checksum
+    assert command.object_key.startswith(
+        f"projects/{command.project_id}/documents/effects-v2/{command.effect_id}/"
+    )
+
+
+async def test_different_effects_do_not_overwrite_when_storage_ignores_condition_header():
+    """条件を常に無視する server でも、別 Effect の遅着 PUT は原 object を変更しない。"""
+
+    objects, puts = {}, []
+
+    def handler(request):
+        """CAS を実装せず全 PUT で上書きする adversarial storage を模す。"""
+        key = request.url.path
+        if request.method == "PUT":
+            puts.append(key)
+            objects[key] = (request.content, {
+                name: value for name, value in request.headers.items()
+                if name.startswith("x-amz-meta-") or name == "content-type"
+            })
+        content, headers = objects[key]
+        return httpx.Response(
+            200, stream=Stream([content if request.method == "GET" else b""]),
+            headers={**headers, "ETag": '"same-opaque-validator"'},
+        )
+
+    source, original, arguments = fixture(handler=handler)
+    content = b"# A different approved result\n"
+    other = build_object_write(**{
+        **arguments, "effect_id": uuid4(),
+        "artifact": ArtifactContent(
+            replace(arguments["artifact"].metadata,
+                    checksum=f"sha256:{sha256_hex(content)}", size_bytes=len(content)), content,
+        ),
+    })
+    assert original.logical_path == other.logical_path
+    await source.create_once(other, authorize=AsyncMock())
+    await source.create_once(original, authorize=AsyncMock())
+    assert len(set(puts)) == 2 and len(objects) == 2
+    for command in (other, original):
+        receipt = await source.lookup(command, authorize=AsyncMock())
+        assert receipt.content_checksum == command.content_checksum
+
+
+async def test_legacy_lookup_keeps_original_v1_checksum_metadata_and_key_without_put():
+    """旧 checksum 式を独立再現し、原 metadata の GET だけが成功することを確認する。"""
+
+    methods = []
+
+    def handler(request):
+        """v1 保存済み object の原 headers を返し、v2 metadata へ読み替えない。"""
+        methods.append(request.method)
+        assert request.method == "GET"
+        assert request.url.path == f"/fixture-library/{legacy.object_key}"
+        return response(legacy, headers={"x-amz-meta-skm-protocol": "artifact-object-create/v1"})
+
+    source, legacy, _ = fixture(handler=handler, protocol_version=1)
+    original_identity = {
+        "protocol": "artifact-object-create/v1", "effect_id": str(legacy.effect_id),
+        "project_id": str(legacy.project_id), "run_id": str(legacy.run_id),
+        "artifact_ref": legacy.artifact_ref, "namespace_id": str(legacy.namespace.namespace_id),
+        "descriptor_checksum": legacy.namespace.descriptor_checksum, "bucket": legacy.bucket,
+        "object_key": legacy.object_key, "content_type": legacy.content_type,
+        "size": len(legacy.content), "content_checksum": legacy.content_checksum,
+    }
+    assert legacy.request_checksum == "sha256:" + sha256_hex(canonical_json(original_identity))
+    assert legacy.object_key == (
+        f"projects/{legacy.project_id}/documents/effects/results/review/source.md"
+    )
+    authorize = AsyncMock()
+    with pytest.raises(ValueError, match="read-only"):
+        await source.create_once(legacy, authorize=authorize)
+    authorize.assert_not_called()
+    receipt = await source.lookup(legacy, authorize=authorize)
+    assert receipt.request_checksum == legacy.request_checksum and methods == ["GET"]
 
 
 async def test_one_signed_conditional_put_reads_back_the_exact_returned_version():
@@ -162,10 +272,10 @@ async def test_one_signed_conditional_put_reads_back_the_exact_returned_version(
                 stream=Stream([]),
             )
         assert request.url.params["versionId"] == "original/version+1"
-        assert request.url.path.endswith("/結果/source.md")
+        assert request.url.path == f"/fixture-library/{command.object_key}"
         return response(command)
 
-    source, command, _ = fixture(handler=handler, object_key="results/結果/source.md")
+    source, command, _ = fixture(handler=handler, logical_path="results/結果/source.md")
     authorize = AsyncMock()
     receipt = await source.create_once(command, authorize=authorize)
     assert [request.method for request in requests] == ["PUT", "GET"]
@@ -362,7 +472,7 @@ async def test_namespace_change_and_tampering_fail_before_authorization():
     )
     with pytest.raises(ValueError, match="namespace"):
         await source.create_once(changed, authorize=authorize)
-    with pytest.raises(ValueError, match="checksum"):
+    with pytest.raises(ValueError, match=r"identity|checksum"):
         await source.lookup(replace(command, content=b"changed"), authorize=authorize)
     authorize.assert_not_called()
 
@@ -384,7 +494,7 @@ async def test_real_loopback_http_lost_response_recovers_original_bytes():
             method, target, _ = first.split(" ")
             headers = dict(line.lower().split(": ", 1) for line in lines)
             methods.append(method)
-            assert urlsplit(target).path == "/fixture-library/results/review/source.md"
+            assert urlsplit(target).path == f"/fixture-library/{command.object_key}"
             assert headers["authorization"].startswith("aws4-hmac-sha256 ")
             if method == "PUT":
                 assert headers["if-none-match"] == "*" and not saved

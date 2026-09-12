@@ -7,11 +7,8 @@ from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
-
 from skillmind.agent.context_builder import ContractStore, create_run_tool_registry
 from skillmind.core.settings import Settings
-from skillmind.effects.release import ExecutionFeatures
-from skillmind.worker import settings as worker
 from skillmind.worker.settings import (
     execute_effect,
     execute_run,
@@ -139,13 +136,9 @@ async def test_database_only_dispatch_keeps_schedules_and_subagents_disabled():
 
 @pytest.mark.parametrize("document,dispatch", [(False, True), (True, False), (True, True)])
 async def test_document_gate_reaches_relay_job_and_recovery_without_opening_schedules(
-    monkeypatch, document, dispatch,
+    document, dispatch,
 ):
-    """配備門禁だけを合成し、実 relay/job/recovery の各分岐で同じ方針を使用する。"""
-    monkeypatch.setattr(
-        worker, "configured_execution_features",
-        lambda settings: ExecutionFeatures(document_writes=document),
-    )
+    """実 Settings の独立 switch を relay/job/recovery まで一貫して伝える。"""
     effects, runs, executor, schedules = AsyncMock(), AsyncMock(), AsyncMock(), AsyncMock()
     executor.execute.return_value = "APPLIED"
     runs.recover_expired_attempts.return_value = 1
@@ -157,6 +150,7 @@ async def test_document_gate_reaches_relay_job_and_recovery_without_opening_sche
         "settings": Settings(
             _env_file=None, worker_dispatch_enabled=dispatch,
             deferred_features_enabled=False, database_writes_enabled=False,
+            document_writes_enabled=document,
         ),
         "run_service": runs, "effect_service": effects, "effect_executor": executor,
         "schedule_service": schedules, "redis": AsyncMock(), "outbox_relay": relay,

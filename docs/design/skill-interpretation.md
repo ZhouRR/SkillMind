@@ -31,6 +31,8 @@ parse 不调用模型，初始 Draft 可无蓝图、不可直接发布。ZIP/TAR
 
 系统 [Interpreter Skill](../../SKM/skills/skillmind-skill-interpreter/SKILL.md)是执行资产；改正文/references 须同步 package hash、prompt identity、版本/example/回归，不当普通文档搬迁。
 
+模型生成 Schema 的四处 TaskContractDraft 共用编译器的深度上限：根节点计 1，每个对象字段或数组 items 加 1，最多 5 层，标量叶节点也计数。生成时使用有界定义，避免模型先生成无限嵌套、编译时才拒绝；公开 Schema、既有 Manifest 和编译门禁不因本次生成约束重写。任务表单只承载来源要求的调用参数，深层 JSON 成果可按原结构交付 Artifact，并保留完整规则与 trace；不能为适应表单限制裁掉必需内容。
+
 ### 导入保存与上传授权
 
 内联/上传必填原 UserAccess，组织/导入者从事务锁定的当前 ADMIN 取得，不另传 UUID。解析无模型/DB 锁；首次 await 前冻结原会话和文件。保存采用 Organization → User SHARE → 原 AuthSession UPDATE，无 Project 门禁；查询、父行 flush、写前/最终 flush 后取新时间复核，Source/静态 Interpretation 原子保存。
@@ -63,6 +65,8 @@ parse 不调用模型，初始 Draft 可无蓝图、不可直接发布。ZIP/TAR
 受理入口是 `POST /skill-sources/{id}/interpretation-requests` 与 `POST /skill-interpretations/{id}/adjustment-requests`，body 必填非零 `request_id`。同内容的新 ID 返回原请求只读状态，不接管原会话。`GET /skill-interpretation-requests/{request_id}` 只返回状态、来源、execution key、结果指针及错误码；冻结输入、actor/session 引用与 owner 不公开。SSE 使用该请求的 `/events`，每次等待后重验当前会话；终态从 DB 读取，Pub/Sub 只提供进度。
 
 页面在 POST 前于 tab 保存原 UUID；断连、超时、404 或不可读回执保留未知状态，人工确认和刷新只做原 GET。停止查看不取消模型；已确认终态才清理回执，结果再核来源/执行键/状态。接口路径与旧版分离，版本切换和存量队列见[部署兼容](../operations/deployment.md#迁移与回退审查)。
+
+ADMIN 可通过原组织归属的 `GET /skill-interpretations/{id}/execution` 读取可选 `validation_attempts`。它仅投影已存诊断，最多两条、每条最多 4096 字符；公开结构只保留静态契约字段路径和已知 validator/code，或明确固定的平台消息，去掉约束值、额外 key 等自由尾部。未知 map key、任意异常正文、控制字符及可疑凭据文本不公开，仍以原 `error_code` 表示失败；不返回内部 execution、参数、prompt 或原模型候选。历史记录缺少该数组且属于 Schema 校验失败时，可将原 `detail` 经相同白名单投影为一条，不补写历史数据；旧 API 缺字段仍兼容。失败面板只在有可用诊断时显示默认折叠的错误详情，并按纯文本呈现。
 
 ### 从候选到项目任务的接线
 

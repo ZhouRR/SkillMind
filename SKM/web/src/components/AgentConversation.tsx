@@ -111,7 +111,6 @@ function StructuredResultMessage({ digest }: { digest: StructuredResultDigest })
     <div className="structuredDigest">
       <p>{messages.conversation.structuredDone}</p>
       {facts.length > 0 && <ul className="digestFacts">{facts.map((fact) => <li key={fact}>{fact}</li>)}</ul>}
-      <p className="digestHint">{messages.conversation.digestHint}</p>
     </div>
   )
 }

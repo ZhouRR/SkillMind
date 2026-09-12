@@ -84,7 +84,7 @@ function ScheduleManager({ projectId, currentProject, csrfToken, deferredFeature
   }
 
   return <div data-schedule-manager>
-    <PageHeader title={messages.routes.schedules.label} description={messages.routes.schedules.description} />
+    <PageHeader title={messages.routes.schedules.label} />
     {!authorized ? <section className="panel"><EmptyState text={labels.needProject} /></section> : <>
       {readonly && <p className="scheduleNotice" role="status">{labels.readOnlyProject}</p>}
       {!deferredFeaturesEnabled && <p className="scheduleNotice" role="status">{labels.deferredDisabled}</p>}

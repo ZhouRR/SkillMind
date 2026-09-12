@@ -33,6 +33,7 @@ from skillmind.db.models import (
 from skillmind.documents.library import (
     DOCUMENT_WRITE_CAPABILITY,
     DocumentLibraryBindingRepository,
+    document_library_revision,
     parse_document_library_source,
 )
 from skillmind.effects.catalog import resolve_effect_capability
@@ -43,6 +44,7 @@ from skillmind.effects.database_write import (
     database_observation_matches,
 )
 from skillmind.effects.document_command import load_document_effect_command
+from skillmind.effects.document_write import LEGACY_DOCUMENT_WRITE_PROVIDER_VERSION
 from skillmind.effects.domain import (
     ApprovalDecision,
     ApprovalSource,
@@ -1311,8 +1313,14 @@ class EffectOperationsMixin(_RunRepositoryBase):
             raise ValueError("Original effect does not require reconciliation")
         capability = resolve_effect_capability(proposal.capability_version)
         approval = await self._session.get(ChangeApproval, execution.approval_id)
+        legacy_document = (
+            proposal.capability_version == DOCUMENT_WRITE_CAPABILITY
+            and execution.provider == "project-library"
+            and execution.provider_version == LEGACY_DOCUMENT_WRITE_PROVIDER_VERSION
+        )
         if (not capability.staged_authorization
-            or capability.provider_versions.get(execution.provider) != execution.provider_version
+            or (capability.provider_versions.get(execution.provider) != execution.provider_version
+                and not legacy_document)
             or execution.idempotency_key != proposal.idempotency_key
             or execution.request_fingerprint != proposal.request_fingerprint
             or approval is None or approval.run_id != run.id or approval.proposal_id != proposal.id
@@ -1322,7 +1330,13 @@ class EffectOperationsMixin(_RunRepositoryBase):
             or approval.proposal_checksum != proposal.checksum):
             raise ValueError("Original effect approval does not match")
         # 元批准の期限/発起人の会話失効は新書込を禁じる。現在の照会者による只読とは別判定。
-        payload = await self._validate_proposal_row(proposal, run=run)
+        if proposal.capability_version == DOCUMENT_WRITE_CAPABILITY:
+            # 旧版はここだけで原批准/束縛を読む。新批准・claim・PUT の版上限は緩めない。
+            payload = await self._validate_proposal_row(
+                proposal, run=run, allow_legacy_document_read=True
+            )
+        else:
+            payload = await self._validate_proposal_row(proposal, run=run)
         binding = await self._session.get(ResourceBinding, proposal.target_binding_id)
         if binding is None:
             raise ValueError("Original effect binding is unavailable")
@@ -1345,9 +1359,13 @@ class EffectOperationsMixin(_RunRepositoryBase):
             raise ValueError("Original effect Provider does not support reconciliation")
         if self._document_library_target is None:
             raise ValueError("Original document storage is unavailable")
+        revision = document_library_revision(binding.scope_json)
+        if (revision == "1") != legacy_document:
+            raise ValueError("Original document protocol does not match its binding")
         object_command = await load_document_effect_command(
             self._session, effect_id=execution.id, project_id=project_id, run_id=run_id,
             payload=payload, target=self._document_library_target,
+            protocol_version=int(revision),
         )
         return EffectReconciliationTarget(
             proposal.id, binding.id, proposal.checksum,
@@ -2058,7 +2076,8 @@ class EffectOperationsMixin(_RunRepositoryBase):
             raise ChangeProposalValidationError("Database proposal requires exact read Evidence")
 
     async def _validate_effect_binding(
-        self, *, run: Run, binding: ResourceBinding, capability_version: str
+        self, *, run: Run, binding: ResourceBinding, capability_version: str,
+        allow_legacy_document_read: bool = False,
     ) -> Integration | None:
         """提案/批准/claim/段階認可で同じ束縛を検証し、文書庫だけを内部資源として扱う。"""
 
@@ -2071,6 +2090,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 ).validate(
                     binding, project_id=run.project_id, run_id=run.id,
                     requirement_key=binding.requirement_key,
+                    allow_legacy_read=allow_legacy_document_read,
                 )
                 frozen = parse_document_library_source(
                     run.selected_sources_json[binding.requirement_key],
@@ -2080,6 +2100,8 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 if (
                     frozen.binding_id != binding.id
                     or frozen.target != self._document_library_target
+                    or frozen.revision != binding.revision
+                    or frozen.to_json()["binding_checksum"] != binding.checksum
                 ):
                     raise ValueError("Original document library binding changed")
             except (ValueError, TypeError, KeyError) as error:
@@ -2251,7 +2273,8 @@ class EffectOperationsMixin(_RunRepositoryBase):
         )
 
     async def _validate_proposal_row(
-        self, proposal: ChangeProposal, *, run: Run
+        self, proposal: ChangeProposal, *, run: Run,
+        allow_legacy_document_read: bool = False,
     ) -> dict[str, Any]:
         """Approval 時に Proposal と binding、Integration、Evidence ownership を再検証する。"""
 
@@ -2259,7 +2282,8 @@ class EffectOperationsMixin(_RunRepositoryBase):
         if binding is None or binding.integration_id != proposal.integration_id:
             raise ChangeProposalValidationError("Proposal target changed after creation")
         integration = await self._validate_effect_binding(
-            run=run, binding=binding, capability_version=proposal.capability_version
+            run=run, binding=binding, capability_version=proposal.capability_version,
+            allow_legacy_document_read=allow_legacy_document_read,
         )
         changes = proposal.preview_json.get("changes")
         if not isinstance(changes, list) or not all(isinstance(item, dict) for item in changes):

@@ -23,7 +23,7 @@ from skillmind.documents.domain import (
 )
 from skillmind.documents.repository import DocumentRepository
 from skillmind.documents.snapshot import DocumentSnapshotError, FrozenDocument
-from skillmind.storage import BlobReference, FileStorage, FileStorageError
+from skillmind.storage import BlobReference, FileStorage, FileStorageError, sanitize_object_key
 from skillmind.storage.observation import BlobObservation
 
 
@@ -39,6 +39,7 @@ class ProjectDocumentContent:
     size: int
     data: bytes
     observation: BlobObservation | None = None
+    source_object_key: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +50,7 @@ class ProjectDocumentObservation:
     document: FrozenDocument
     observation: BlobObservation
     reference_checksum: str
+    source_object_key: str | None = None
 
 
 @runtime_checkable
@@ -145,7 +147,8 @@ class DatabaseProjectDocumentSource:
             self._file_storage, reference=reference, document=document
         )
         return ProjectDocumentObservation(
-            project_id, _frozen_metadata(document), observation, _reference_checksum(reference)
+            project_id, _frozen_metadata(document), observation, _reference_checksum(reference),
+            validate_source_object_key(reference.key),
         )
 
     async def fetch_observed(
@@ -185,6 +188,8 @@ class DatabaseProjectDocumentSource:
         if observed is not None and (
             _frozen_metadata(document) != observed.document
             or _reference_checksum(reference) != observed.reference_checksum
+            or (observed.source_object_key is not None
+                and observed.source_object_key != reference.key)
         ):
             raise DocumentSnapshotError("Document no longer matches its observed metadata")
         data, observation = await read_document_content(
@@ -200,6 +205,7 @@ class DatabaseProjectDocumentSource:
             size=document.size,
             data=data,
             observation=observation,
+            source_object_key=validate_source_object_key(reference.key),
         )
 
 
@@ -213,7 +219,7 @@ def _frozen_metadata(document: StoredDocument) -> FrozenDocument:
 
 
 def _reference_checksum(reference: BlobReference) -> str:
-    """元所在の変更を検出する digest を作り、bucket/key を公開記録へ運ばない。"""
+    """元所在と世代を摘要へ束縛する。公開 key があってもこの原摘要を省略しない。"""
 
     namespace = reference.namespace
     if namespace is None:
@@ -226,10 +232,19 @@ def _reference_checksum(reference: BlobReference) -> str:
     }))}"
 
 
+def validate_source_object_key(value: object) -> str:
+    """認可済み source の原 key を正規化せず検証し、接続 URL や署名値を受け取らない。"""
+
+    if (not isinstance(value, str) or not 1 <= len(value) <= 512
+        or len(value.encode("utf-8")) > 1024 or sanitize_object_key(value) != value):
+        raise DocumentSnapshotError("Document source object key is invalid")
+    return value
+
+
 async def read_frozen_document(
     source: ProjectDocumentSource, *, project_id: UUID, document: FrozenDocument
 ) -> ProjectDocumentContent:
-    """Provider と物化器で ID/hash の確認を共有し、storage の内部情報を外へ出さない。"""
+    """Provider と物化器で ID/hash の確認を共有し、接続や資格情報は外へ出さない。"""
 
     try:
         content = await source.fetch(project_id=project_id, document_id=document.document_id)

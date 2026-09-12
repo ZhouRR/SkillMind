@@ -7,12 +7,17 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from skillmind.artifacts.domain import MAX_ARTIFACT_BYTES
-from skillmind.documents.library import DOCUMENT_WRITE_CAPABILITY, document_library_scope
-from skillmind.documents.paths import document_effect_storage_key
+from skillmind.documents.library import (
+    DOCUMENT_WRITE_CAPABILITY,
+    document_library_revision,
+    document_library_scope,
+)
+from skillmind.documents.paths import document_effect_storage_key, validate_document_path
 from skillmind.effects.domain import ChangeProposalDraft, ChangeProposalValidationError
 from skillmind.storage.blob import FileStorageError
 
-DOCUMENT_WRITE_PROVIDER_VERSION = "project-library-receipt/v1"
+DOCUMENT_WRITE_PROVIDER_VERSION = "project-library-receipt/v2"
+LEGACY_DOCUMENT_WRITE_PROVIDER_VERSION = "project-library-receipt/v1"
 
 
 def document_write_scope_from_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -78,9 +83,17 @@ def document_proposal_payload(
         if not isinstance(path, str) or not path or path.startswith("/"):
             raise ValueError("Invalid document target")
         folder, _, name = path.rpartition("/")
-        object_key = document_effect_storage_key(project_id, folder, name)
+        if validate_document_path(project_id=project_id, folder=folder, name=name) != (
+            folder, name
+        ):
+            raise ValueError("Document target is not canonical")
     except (ValueError, TypeError, KeyError, FileStorageError) as error:
         raise ChangeProposalValidationError(
             "Document proposal is outside the Artifact contract"
         ) from error
-    return {"path": path, "object_key": object_key, **dict(value)}
+    payload = {"path": path, **dict(value)}
+    # v1 回执の再構築だけが旧 key を必要とする。v2 の物理 key は批准後に確定する
+    # Effect ID と実 Artifact byte に束縛し、提案時には生成しない。
+    if document_library_revision(scope) == "1":
+        payload["object_key"] = document_effect_storage_key(project_id, folder, name)
+    return payload

@@ -1,7 +1,7 @@
 """原 Effect を識別する、無再送・単一 PUT の条件付き object 作成 client。
 
 これは低層 port であり、配額予約・提案批准・文書公開・停止証明ではない。
-MinIO の server 側条件保証を検証するまで production Provider へ登録しない。
+v2 の専用 key は原 Effect/内容に固定し、旧 protocol への PUT は禁止する。
 """
 
 from __future__ import annotations
@@ -84,6 +84,8 @@ class S3ObjectWriteSource:
         """条件 PUT を一回だけ送り、成功は原 object の実 byte 読取で確認する。"""
 
         self._validate(command)
+        if command.protocol_version != 2:
+            raise ValueError("Legacy document objects are read-only")
         await authorize()
         try:
             async with asyncio.timeout(_TIMEOUT_SECONDS), self._client() as client:

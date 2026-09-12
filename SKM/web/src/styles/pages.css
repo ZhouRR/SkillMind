@@ -310,11 +310,13 @@
 /* ---- 项目文档画面:現在 Project の文書管理器のみの単列 layout(Project 切替は sidebar) ---- */
 .documentsPage { display: grid; gap: 16px; align-content: start; max-width: 1080px; }
 
-/* ---- 资源管理:各 tab は「設定済み一覧」が主役。新規作成 form は共通弹窗(base.css の modal)へ ---- */
+/* ---- リソース管理:認証情報と権限を主画面に置き、個別管理は高度設定へ ---- */
 .resourceAdmin { display: grid; gap: 12px; }
 .resourceAdminError { margin: 0; }
 /* 一覧 panel が全幅に伸びて行が読みにくくならない程度に幅を抑える。 */
 .resourceTabPanel { max-width: 1080px; }
+.resourceAdvanced { max-width: 1080px; }
+.resourceAdvanced > .tabBar { margin-bottom: 16px; }
 .resourceForm { display: grid; gap: 11px; }
 .resourceForm textarea { min-height: 112px; }
 .resourceForm > .resourceList { margin-top: 4px; border-top: 1px solid var(--border); padding-top: 12px; }
@@ -442,8 +444,10 @@
 /* 文書の選択操作と upload 先を共通 toolbar の密度に揃える。 */
 .documentTargetFolder { display: grid; gap: 6px; min-width: 220px; flex: 1; }
 .documentToolbar { align-items: end; }
-.documentSelectionToolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 12px 0; }
-.documentSelectionToolbar label { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.documentSelectionToolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-height: 34px; margin: 16px 0; font-size: 13px; }
+/* フォーム label の下余白を持ち込まず、選択数と操作ボタンの中央を揃える。 */
+.documentSelectionToolbar label { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: inherit; line-height: 1.5; white-space: nowrap; }
+.documentSelectionToolbar > [role="status"] { color: var(--text-muted); line-height: 1.5; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .documentSelectionToolbar input[type="checkbox"], .documentItem > input[type="checkbox"] {
   flex: 0 0 auto; width: 16px; height: 16px; min-height: 0; margin: 0; padding: 0; accent-color: var(--accent-strong);
 }

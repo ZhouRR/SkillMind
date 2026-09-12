@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-
 from skillmind.auth.domain import SESSION_CREDENTIAL_VERSION
 from skillmind.effects.reconciliation_domain import (
     EffectReconciliationDeniedError,
@@ -64,7 +63,7 @@ def authority(monkeypatch):
         uuid4(),
         "sha256:" + "1" * 64,
         "project-library",
-        "project-library-receipt/v1",
+        "project-library-receipt/v2",
         command,
         "{}",
         None,

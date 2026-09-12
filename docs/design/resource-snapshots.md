@@ -37,7 +37,9 @@ S3 文档 source 可先只 HEAD，取得 LastModified、Version ID、opaque ETag
 
 未启用版本时只证明这些观测点一致，不保证期间未发生再改回原值的变化。版本读取需要存储端相应权限，失败不能降格普通 GET。普通下载保持原读法；不支持观测的 backend 不补造存储元数据，要求原观察的调用也不能退回无观察读取。
 
-[`document.inspect/v1`](../../SKM/contracts/tools/document.inspect/v1/request.schema.json) 按已冻结文档的相对路径完全匹配，只 HEAD，不读取正文；目录分隔不能通过 `.`、重复斜线、反斜线或尾斜线归一化补救。Manifest 和 Run 必须明确允许该能力，原 read/convert 权限不自动扩张。观察限定 20 秒，失败或取消不产生成功观察。响应给出真实存储 metadata、观察时间、观察摘要及 `content_verified: false`；声明的原文 hash 与观察 JSON 的摘要分开。Gateway 沿用先保存 Evidence 再返回及原成功调用重放，Evidence 保留观察和原存储位置的非明文摘要。单份观察成功不代表目录筛选完整。
+[`document.inspect/v1`](../../SKM/contracts/tools/document.inspect/v1/request.schema.json) 按已冻结文档的相对路径完全匹配，只 HEAD，不读取正文；目录分隔不能通过 `.`、重复斜线、反斜线或尾斜线归一化补救。Manifest 和 Run 必须明确允许该能力，原 read/convert 权限不自动扩张。观察限定 20 秒，失败或取消不产生成功观察。响应给出真实存储 metadata、观察时间、观察摘要及 `content_verified: false`；声明的原文 hash 与观察 JSON 的摘要分开。Gateway 沿用先保存 Evidence 再返回及原成功调用重放，Evidence 保留观察和原存储位置摘要。单份观察成功不代表目录筛选完整。
+
+inspect、list 的文档条目及 convert 响应可返回 `source_object_key`，值只取自原 Project/文档 ID 经授权解析且 namespace 核对通过的原存储引用，用于业务来源登记；逻辑目录、文件名、输出库或模型不能推导该值。它不是任意对象的读取授权，也不包含连接 URL、凭据或签名参数。含该字段的新观察 Evidence 使用 `observation_version: v2`，完整观察摘要覆盖 key，并继续保留原 key/namespace 的引用摘要；按观察取得时同时核对原引用摘要和原 key。旧 v1 观察仍按原字段与原摘要恢复，不补写 key、不升级历史记录；不提供该事实的旧 source 省略字段，业务需要时须明确处理缺失，不能将逻辑路径作为物理 key。
 
 [`document.list/v1`](../../SKM/contracts/tools/document.list/v1/request.schema.json) 在原 Run 已授权的冻结集合内，按相对目录边界、递归、扩展名和排除条件取得稳定路径顺序的候选；空目录参数表示项目根，目录末尾允许一个斜线。它不扫描未注册对象，也不加入创建后上传的文档；当前冻结范围与原 Skill 的实时 MinIO prefix 列举仍有差距，不能据此声称覆盖整个 bucket。每页最多观察 50 个候选，整页 30 秒期限；先分页再按真实 LastModified 筛选，返回明确的冻结数量、候选数量和 `[scan_start, scan_end)`。游标绑定原 Project/Run、完整成员、规范化条件和页宽；成功调用重放原观察，新的调用重新观察时可能得到不同存储状态。
 
@@ -45,7 +47,7 @@ S3 文档 source 可先只 HEAD，取得 LastModified、Version ID、opaque ETag
 
 转换请求可明确传入 `observation_ref`，由[共享只读查询](../../SKM/backend/src/skillmind/documents/observation_repository.py)连接原 Project/Run、成功的 inspect 或 list ToolCall 和 Evidence，核对原文档、工具成功响应、观察 JSON/hash、未验证标记及存储位置摘要。list 使用 `evidence_refs[entry.evidence_index]`，只接受与该 entry 严格对应的文档观察，不接受页摘要或另一条目的引用。确认后按该观察取得 bytes，并再次核对原内容 hash 和观察；存储位置、版本或内容不符、引用不成立或 DB 不可用均失败，不退回普通读取。查证和取得共用 20 秒期限，MarkItDown 另受既有转换期限控制；本地取消不证明 SDK thread 或远端已停止。转换 Evidence 记录 `observation_ref` 与实际取得信息。同 Run 的后续 Attempt 可以复用已确认观察；新 Run 不能借用。未提供引用的既有调用保持原读取方式，因此流程需要版本绑定时须明确传入引用，不由先前调用顺序推断。
 
-读取与转换的 Evidence 在 `storage_observation` 中记录取得事实和一致性方式，不公开 bucket、内部 object key 或连接；既有 v1 内容快照和 read/convert Tool 响应不改写。按需准备消除平台的提前下载/转换；任务的 `document_prerequisites` 可将已声明的 apply effect intent 设为所有文档读取、观察、分页及转换的前置条件，规则见下文。目录/文件名不能成为任意 URL、Shell 参数或越界路径；不执行 Excel 宏，不按不可信内容取其他资源。转换失败或信息缺失单独记录，不能冒充原文缺陷。
+读取与转换的 Evidence 在 `storage_observation` 中记录取得事实和一致性方式，并在 source 提供时以 `source_object_key` 保留原 key；不公开连接或凭据。既有 v1 内容快照和历史 Tool 记录不改写，`document.read/v1` 响应保持原形状。按需准备消除平台的提前下载/转换；任务的 `document_prerequisites` 可将已声明的 apply effect intent 设为所有文档读取、观察、分页及转换的前置条件，规则见下文。目录/文件名不能成为任意 URL、Shell 参数或越界路径；不执行 Excel 宏，不按不可信内容取其他资源。转换失败或信息缺失单独记录，不能冒充原文缺陷。
 
 任务前置条件须有原文 trace，并必需声明 [`document.readiness/v1`](../../SKM/contracts/tools/document.readiness/v1/request.schema.json)。旧任务省略时不补造条件，旧 Worker 因不能解析必需的新能力而拒绝该任务，不能静默忽略规则。新建 context 在准备前核验全部输入文档均按需取得；任何未覆盖的普通物化来源均拒绝，重叠槽位沿用既有按需优先规则。Task Brief、Skill 蓝图预览和精确 Task Flow 投影保留原条件。
 
@@ -83,7 +85,7 @@ sources 由客户端编码、服务端校验，界面显示名称与范围。
 
 selected_sources_json 保存 Project/requirement、模式、成员 ID/路径/MIME/size/hash 与服务端 checksum。Worker 按原 ID 验字节，后续 Segment/Attempt 不重新枚举；客户端 checksum 不提供信任。
 
-保存目标使用独立的 v1 snapshot，含原 Run/binding、存储 scope、共享 binding checksum 与覆盖完整 snapshot 的摘要；同创建事务写入，重放不从当前配置重建。历史投影只在完整验证后将保存目标排除出输入清单，损坏或混入 `document_snapshot` 的来源显示 INVALID；删除保护同时核对原选择、Project/Run/slot，不以 `project-library` 标记推断无引用。
+保存目标使用独立的 v1 snapshot；新 binding revision 2 固定 v2 对象前缀，旧 revision 1 历史解析仍使用原前缀。snapshot 含原 Run/binding、存储 scope、共享 binding checksum 与覆盖完整 snapshot 的摘要；同创建事务写入，重放不从当前配置重建。历史投影只在完整验证后将保存目标排除出输入清单，损坏或混入 `document_snapshot` 的来源显示 INVALID；删除保护同时核对原选择、Project/Run/slot，不以 `project-library` 标记推断无引用。
 
 ContextBuilder 在工作区准备前验证保存目标的声明、原 Project/Run/slot、完整摘要和 Worker 当前存储配置，同时检查独立能力门禁与提案权限。保存目标不注册直接写入或文档读取 Tool；输入准备器只要求读取槽位的冻结清单，保存目标不扩大输入范围。Brief 按 requirement key 匹配来源，不将同能力的另一槽位视为已选择，也不向保存目标附加输入目录；实际保存仍经[批准与 Effect Worker](repository-effects.md#minio-条件创建与原结果核对)。
 

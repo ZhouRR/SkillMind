@@ -10,8 +10,6 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
 from skillmind.documents.domain import (
     DocumentContentInvalidError,
     DocumentContentMissingError,
@@ -25,6 +23,7 @@ from skillmind.documents.snapshot import DocumentSnapshotError
 from skillmind.documents.source import DatabaseProjectDocumentSource, read_frozen_document
 from skillmind.storage import BlobReference, FileStorageError, InMemoryFileStorage, UploadLimits
 from skillmind.storage.observation import BlobObservation, ObservedBlob
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from tests.documents.fakes import document_content, document_snapshot, stored_document
 
 _ORIGINAL_KEY = "original/identity"
@@ -103,7 +102,7 @@ async def test_download_and_frozen_source_return_the_same_verified_bytes(
             project_id=project_id,
             document=document_snapshot(project_id, [content]).documents[0],
         )
-        == content
+        == replace(content, source_object_key=_ORIGINAL_KEY)
     )
     assert lookup.await_count == get.await_count == 2
     for call in lookup.await_args_list:
@@ -264,13 +263,16 @@ async def test_source_preserves_observation_only_with_original_verified_bytes(
             await read_frozen_document(source, project_id=project_id, document=frozen)
     else:
         acquired = await read_frozen_document(source, project_id=project_id, document=frozen)
-        assert acquired == replace(content, observation=observation)
+        assert acquired == replace(
+            content, observation=observation, source_object_key=_ORIGINAL_KEY
+        )
     observed.assert_awaited_once()
     get.assert_not_called()
 
 
 @pytest.mark.parametrize(
-    "failure", [None, "project", "metadata", "hash", "observation", "key", "namespace"]
+    "failure",
+    [None, "project", "metadata", "hash", "observation", "key", "reported_key", "namespace"],
 )
 async def test_document_inspection_and_later_acquisition_keep_original_identity(
     monkeypatch: pytest.MonkeyPatch, failure: str | None,
@@ -301,6 +303,7 @@ async def test_document_inspection_and_later_acquisition_keep_original_identity(
     observed = await source.inspect(project_id=project_id, document_id=content.document_id)
     assert observed is not None and observed.document.content_hash == content.checksum
     assert observed.observation == observation
+    assert observed.source_object_key == _ORIGINAL_KEY
     inspect.assert_awaited_once_with(_ORIGINAL_KEY)
     acquired.assert_not_called()
     if failure == "metadata":
@@ -309,6 +312,8 @@ async def test_document_inspection_and_later_acquisition_keep_original_identity(
         )
     elif failure == "key":
         lookup.return_value = (document, BlobReference("replaced/key", storage.namespace))
+    elif failure == "reported_key":
+        observed = replace(observed, source_object_key="different/original")
     elif failure == "namespace":
         monkeypatch.setattr(storage, "_namespace", InMemoryFileStorage().namespace)
         lookup.return_value = (document, BlobReference(_ORIGINAL_KEY, storage.namespace))
@@ -319,8 +324,8 @@ async def test_document_inspection_and_later_acquisition_keep_original_identity(
             )
     else:
         result = await source.fetch_observed(project_id=project_id, observed=observed)
-        assert result == replace(content, observation=observation)
-    if failure in {"project", "metadata", "key", "namespace"}:
+        assert result == replace(content, observation=observation, source_object_key=_ORIGINAL_KEY)
+    if failure in {"project", "metadata", "key", "reported_key", "namespace"}:
         acquired.assert_not_called()
     else:
         acquired.assert_awaited_once_with(_ORIGINAL_KEY, max_bytes=3, expected=observation)

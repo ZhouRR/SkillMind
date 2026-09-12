@@ -20,6 +20,7 @@ async def load_document_effect_command(
     run_id: UUID,
     payload: dict[str, Any],
     target: DocumentLibraryTarget,
+    protocol_version: int = 2,
 ) -> ObjectWriteCommand:
     """共有提案 validator の payload と、同 Run の保存済み実 byte だけを受け付ける。"""
 
@@ -40,7 +41,9 @@ async def load_document_effect_command(
         artifact=artifact,
         namespace=target.namespace,
         bucket=target.bucket,
-        object_key=payload["object_key"],
-        allowed_prefix=target.scope(project_id)["key_prefix"],
+        logical_path=payload["path"],
+        object_key=payload.get("object_key"),
+        allowed_prefix=target.scope(project_id, revision=str(protocol_version))["key_prefix"],
         content_type=payload["mime_type"],
+        protocol_version=protocol_version,
     )

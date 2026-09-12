@@ -10,8 +10,6 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.exc import OperationalError
-
 from skillmind.effects.database_write import (
     build_database_write,
     database_row_revision,
@@ -25,6 +23,7 @@ from skillmind.effects.postgres_write import (
     lookup_database_write,
 )
 from skillmind.effects.proposal import parse_change_proposal_request
+from sqlalchemy.exc import OperationalError
 
 
 def command(**overrides):
@@ -182,7 +181,7 @@ class Connection:
             raise OperationalError("private SQL", {}, RuntimeError("private endpoint"))
 
 
-def insert_responses(*, before=None, after=None, primary_key=True, generated=""):
+def insert_responses(*, before=None, after=None, primary_key=True, generated=False, identity=False):
     """INSERT と回読の合成 SQL 結果を作る。制約・lock の実動作は証明しない。"""
 
     return [
@@ -190,8 +189,9 @@ def insert_responses(*, before=None, after=None, primary_key=True, generated="")
         rows(),
         rows(
             all_rows=[
-                {"name": "id", "primary_key": primary_key, "generated": "", "identity": ""},
-                {"name": "status", "primary_key": False, "generated": generated, "identity": ""},
+                {"name": "id", "primary_key": primary_key,
+                 "generated": False, "identity": identity},
+                {"name": "status", "primary_key": False, "generated": generated, "identity": False},
             ]
         ),
         rows(before),
@@ -295,8 +295,10 @@ async def test_matching_checksum_does_not_hide_incomplete_receipt_facts(before, 
         await lookup_database_write(db, original)
 
 
-@pytest.mark.parametrize("options", [{"primary_key": False}, {"generated": "s"}])
-async def test_database_metadata_rejects_non_key_or_generated_columns(options) -> None:
+@pytest.mark.parametrize("options", [
+    {"primary_key": False}, {"generated": True}, {"identity": True},
+])
+async def test_database_metadata_rejects_non_key_generated_or_identity_columns(options) -> None:
     """table の実メタデータが提案を許さない場合、変更 SQL を発行しない。"""
 
     db = Connection(insert_responses(**options))

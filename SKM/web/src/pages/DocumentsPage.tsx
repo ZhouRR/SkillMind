@@ -16,7 +16,6 @@ export function DocumentsPage({ projectId, csrfToken, actorId, readOnly, onSessi
     <>
       <PageHeader
         title={messages.routes.documents.label}
-        description={messages.documentsPage.description}
         aside={<span className="scopeBadge">{messages.documentsPage.scopeBadge}</span>}
       />
       <section className="documentsPage" aria-label={messages.documentsPage.pageAria}>

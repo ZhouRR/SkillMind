@@ -31,7 +31,7 @@ function AccountsContent({ session, onSessionEnded, onAccountChanged }: {
     onAccountChanged(account)
   }
   return <>
-    <PageHeader title={messages.routes.accounts.label} description={messages.routes.accounts.description} />
+    <PageHeader title={messages.routes.accounts.label} />
     <div className="accountsLayout">
       <div data-account-own="">
         <UserAccountPanel userId={session.user.user_id} own session={session} revision={revision}

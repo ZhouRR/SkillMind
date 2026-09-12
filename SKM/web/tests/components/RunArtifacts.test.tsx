@@ -43,7 +43,7 @@ describe('published Artifact view', () => {
     state.data = [artifact('art_original'), artifact('art_other')]
     const labels = MESSAGES[language].runResult.artifacts
     const html = render(language)
-    for (const label of [labels.title, labels.hint, labels.referenced, labels.unreferenced, labels.download]) expect(html).toContain(label)
+    for (const label of [labels.title, labels.referenced, labels.unreferenced, labels.download]) expect(html).toContain(label)
     expect(html).not.toContain('href=')
     expect(html).not.toContain(MESSAGES[language].runResult.referenceChecks.artifactsVerified)
   })

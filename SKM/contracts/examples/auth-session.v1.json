@@ -9,5 +9,6 @@
   "csrf_token": "session-csrf-token-with-at-least-32-characters",
   "absolute_expires_at": "2026-07-04T12:00:00Z",
   "deferred_features_enabled": false,
-  "database_writes_enabled": false
+  "database_writes_enabled": false,
+  "document_writes_enabled": false
 }

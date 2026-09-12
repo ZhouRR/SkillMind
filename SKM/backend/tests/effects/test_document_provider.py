@@ -8,9 +8,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
 from skillmind.db.models import ProjectDocument, ProjectDocumentEffectUpload
 from skillmind.documents.library import DocumentLibraryTarget
 from skillmind.effects.document_provider import DocumentWriteProvider
@@ -22,6 +19,8 @@ from skillmind.effects.wiring import create_effect_provider_registry
 from skillmind.runs.repository import RunRepository
 from skillmind.storage.s3_effect import S3ObjectWriteSource
 from skillmind.worker.effects import ApprovedEffectExecutor
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 from tests.documents.test_document_effect_repository import SqlSession
 from tests.documents.test_document_effect_repository import database as database
 from tests.effects.database_fixtures import database_execution
@@ -52,7 +51,7 @@ class TransactionFactory:
         assert self.active == 1
         assert repository._session.session.in_transaction()
         assert repository._document_library_target.namespace == self.db.command.namespace
-        assert provider_version == "project-library-receipt/v1"
+        assert provider_version == "project-library-receipt/v2"
         assert execution.effect_execution_id == self.db.command.effect_id
         self.authorizations += 1
         if self.authorizations == self.revoke_at:

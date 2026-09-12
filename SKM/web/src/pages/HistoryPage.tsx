@@ -50,7 +50,6 @@ export function HistoryPage({ projectId }: { projectId: string }) {
     <>
       <PageHeader
         title={messages.routes.history.label}
-        description={messages.historyPage.description}
         aside={<span className="scopeBadge">{messages.historyPage.scopeBadge}</span>}
       />
       <section className="panel historyPage" aria-label={messages.historyPage.aria}>

@@ -8,9 +8,14 @@ from uuid import UUID
 
 from skillmind.artifacts.domain import MAX_ARTIFACT_BYTES, ArtifactContent
 from skillmind.core.hashing import canonical_json, sha256_hex
+from skillmind.documents.paths import (
+    document_effect_prefix,
+    document_effect_storage_key,
+    validate_document_path,
+)
 from skillmind.storage.blob import FileStorageError, StorageNamespace, sanitize_object_key
 
-OBJECT_WRITE_PROTOCOL = "artifact-object-create/v1"
+OBJECT_WRITE_PROTOCOL = "artifact-object-create/v2"
 _CONTENT_TYPES = frozenset({"text/plain", "text/markdown", "application/json"})
 
 
@@ -36,6 +41,8 @@ class ObjectWriteCommand:
     content_type: str
     content: bytes = field(repr=False)
     request_checksum: str
+    protocol_version: int
+    logical_path: str
 
     @property
     def content_checksum(self) -> str:
@@ -48,7 +55,7 @@ class ObjectWriteCommand:
         """本文の同値だけで原成功を推測しないための、署名対象となる原 identity。"""
 
         return {
-            "skm-protocol": OBJECT_WRITE_PROTOCOL,
+            "skm-protocol": f"artifact-object-create/v{self.protocol_version}",
             "skm-effect-id": str(self.effect_id),
             "skm-request-checksum": self.request_checksum,
             "skm-content-checksum": self.content_checksum,
@@ -78,7 +85,12 @@ class ObjectWriteCommand:
         ):
             raise ValueError("Object effect identity or content is invalid")
         _exact_key(self.object_key)
+        if type(self.protocol_version) is not int or self.protocol_version not in {1, 2}:
+            raise ValueError("Object effect protocol is invalid")
+        _logical_path(self.project_id, self.logical_path)
         self.content.decode("utf-8", errors="strict")
+        if self.object_key != _object_key(self):
+            raise ValueError("Object key does not match its immutable effect identity")
         if self.request_checksum != _checksum(self):
             raise ValueError("Object effect checksum does not match the original request")
 
@@ -148,9 +160,11 @@ def build_object_write(
     artifact: ArtifactContent,
     namespace: StorageNamespace,
     bucket: str,
-    object_key: str,
+    logical_path: str,
     allowed_prefix: str,
     content_type: str,
+    object_key: str | None = None,
+    protocol_version: int = 2,
 ) -> ObjectWriteCommand:
     """同 Run の保存済み Artifact と明示 prefix からだけ固定要求を作る。"""
 
@@ -161,9 +175,11 @@ def build_object_write(
     ):
         raise ValueError("Object artifact or prefix is outside the approved project")
     _exact_key(allowed_prefix[:-1])
-    _exact_key(object_key)
-    if not object_key.startswith(allowed_prefix):
+    if type(protocol_version) is not int or protocol_version not in {1, 2}:
+        raise ValueError("Object effect protocol is invalid")
+    if allowed_prefix != document_effect_prefix(project_id, revision=str(protocol_version)):
         raise ValueError("Object key is outside the approved prefix")
+    _logical_path(project_id, logical_path)
     # dataclass 自体を偽造した入力でも原字節/hash の整合を省略しない。
     ArtifactContent(artifact.metadata, artifact.content)
     command = ObjectWriteCommand(
@@ -173,11 +189,17 @@ def build_object_write(
         artifact.metadata.artifact_ref,
         namespace,
         bucket,
-        object_key,
+        "",
         content_type,
         bytes(artifact.content),
         "",
+        protocol_version,
+        logical_path,
     )
+    derived_key = _object_key(command)
+    if object_key is not None and object_key != derived_key:
+        raise ValueError("Object key does not match its immutable effect identity")
+    command = replace(command, object_key=derived_key)
     command = replace(command, request_checksum=_checksum(command))
     command.validate()
     return command
@@ -202,7 +224,7 @@ def _checksum(command: ObjectWriteCommand) -> str:
     """保存先世代、帰属、原 Artifact、key、MIME と内容を一つの原要求に束縛する。"""
 
     payload = {
-        "protocol": OBJECT_WRITE_PROTOCOL,
+        "protocol": f"artifact-object-create/v{command.protocol_version}",
         "effect_id": str(command.effect_id),
         "project_id": str(command.project_id),
         "run_id": str(command.run_id),
@@ -215,4 +237,28 @@ def _checksum(command: ObjectWriteCommand) -> str:
         "size": len(command.content),
         "content_checksum": command.content_checksum,
     }
+    if command.protocol_version == 2:
+        payload["logical_path"] = command.logical_path
     return f"sha256:{sha256_hex(canonical_json(payload))}"
+
+
+def _logical_path(project_id: UUID, value: str) -> None:
+    """承認済み表示 path は別 path に正規化せず、原値のまま検査する。"""
+
+    if not isinstance(value, str) or not value or value.startswith("/"):
+        raise ValueError("Object logical path is invalid")
+    folder, _, name = value.rpartition("/")
+    if validate_document_path(project_id=project_id, folder=folder, name=name) != (folder, name):
+        raise ValueError("Object logical path is not canonical")
+
+
+def _object_key(command: ObjectWriteCommand) -> str:
+    """v1 は原 key、v2 は Effect と全不変 identity の摘要からのみ保存 key を求める。"""
+
+    if command.protocol_version == 1:
+        folder, _, name = command.logical_path.rpartition("/")
+        return document_effect_storage_key(command.project_id, folder, name)
+    # key 自身を除く原 command の摘要により循環を避け、本文/MIME/論理 path の変更も
+    # 別 identity にする。論理同名の排他は DB 予約に残し、S3 条件判定だけへ依存しない。
+    digest = _checksum(replace(command, object_key=""))[7:]
+    return f"{document_effect_prefix(command.project_id)}{command.effect_id}/{digest}"

@@ -48,7 +48,7 @@ function ProjectsContent(props: ProjectsPageProps & { projectContextId: string }
     setPageTab(tab)
   }
   return <>
-    <PageHeader title={messages.routes.projects.label} description={messages.projects.description} />
+    <PageHeader title={messages.routes.projects.label} />
     <div className="tabBar" role="tablist" aria-label={messages.projects.pageTabsAria}>
       <ProjectsTabButton current={pageTab} tab="projects" onSelect={selectPageTab}>{messages.projects.tabProjects}<span className="eventCount">{projects.length}</span></ProjectsTabButton>
       {props.session.user.system_role === 'ADMIN' && <ProjectsTabButton current={pageTab} tab="archived" onSelect={selectPageTab}>{messages.projects.tabArchived}</ProjectsTabButton>}

@@ -28,7 +28,7 @@ def document_storage_key(project_id: UUID, document_id: UUID, name: str) -> str:
 
 
 def document_effect_storage_key(project_id: UUID, folder: str, name: str) -> str:
-    """成果の相対 path を Project 専用 prefix に固定し、既存 UUID upload と分離する。"""
+    """v1 の保存済み原 key を再現する。新規成果には使用しない。"""
 
     safe_folder, safe_name = validate_document_path(project_id=project_id, folder=folder, name=name)
     if (folder, name) != (safe_folder, safe_name):
@@ -36,15 +36,18 @@ def document_effect_storage_key(project_id: UUID, folder: str, name: str) -> str
             "invalid_document_folder", "Document effect path must be canonical"
         )
     relative = "/".join(part for part in (folder, name) if part)
-    return sanitize_object_key(f"{document_effect_prefix(project_id)}{relative}")
+    return sanitize_object_key(f"{document_effect_prefix(project_id, revision='1')}{relative}")
 
 
-def document_effect_prefix(project_id: UUID) -> str:
-    """成果 key と Run binding が同じ Project 専用 prefix を共有する。"""
+def document_effect_prefix(project_id: UUID, *, revision: str = "2") -> str:
+    """旧 key 空間と交差しない成果 root を版ごとに固定する。"""
 
     if not isinstance(project_id, UUID) or project_id.int == 0:
         raise ValueError("Document effect project is invalid")
-    return f"projects/{project_id}/documents/effects/"
+    if revision not in {"1", "2"}:
+        raise ValueError("Document library revision is invalid")
+    suffix = "effects" if revision == "1" else "effects-v2"
+    return f"projects/{project_id}/documents/{suffix}/"
 
 
 def _safe_name(value: str) -> str:

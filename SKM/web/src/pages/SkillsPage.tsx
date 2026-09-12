@@ -37,6 +37,7 @@ import { useMessages } from '../i18n'
 import { apiErrorMessage } from '../lib/apiFeedback'
 import type { UiMessages } from '../lib/i18n/messages'
 import { formatByteSize } from '../lib/presentation'
+import { createIdempotencyKey } from '../lib/idempotency'
 import { isNearBottom } from '../lib/scroll'
 import { normalizedSkillUploadPaths } from '../lib/skillUpload'
 import { clearInterpretationReceipt, loadInterpretationReceipt, saveInterpretationReceipt } from '../lib/interpretationReceipt'
@@ -452,7 +453,7 @@ export function SkillsPage({ projectId, csrfToken }: {
     interpretController.current?.abort()
     const controller = new AbortController()
     interpretController.current = controller
-    const requestId = crypto.randomUUID()
+    const requestId = createIdempotencyKey()
     try { rememberInterpretation(requestId) } catch {
       interpretationUnknown(messages.skills.interpretStorageFailure)
       return
@@ -477,7 +478,7 @@ export function SkillsPage({ projectId, csrfToken }: {
     interpretController.current?.abort()
     const controller = new AbortController()
     interpretController.current = controller
-    const requestId = crypto.randomUUID()
+    const requestId = createIdempotencyKey()
     try { rememberInterpretation(requestId) } catch {
       interpretationUnknown(messages.skills.interpretStorageFailure)
       return
@@ -681,7 +682,6 @@ export function SkillsPage({ projectId, csrfToken }: {
     <>
       <PageHeader
         title={messages.routes.skills.label}
-        description={messages.skills.description}
         aside={<span className="scopeBadge skillScopeBadge">
           {projectId ? messages.skills.scopeBadgeWithProject : messages.skills.scopeBadgeNoProject}
         </span>}
@@ -730,7 +730,6 @@ export function SkillsPage({ projectId, csrfToken }: {
                 <summary>{messages.skills.referencesLabel}</summary>
                 <label>{messages.skills.referencesLabel}<textarea placeholder={messages.skills.referencesPlaceholder} value={referenceMarkdown} onChange={(event) => setReferenceMarkdown(event.target.value)} spellCheck={false} /></label>
               </details>
-              <p className="hint">{messages.skills.parserHint}</p>
               <button className="primaryButton" disabled={parseState.status === 'parsing' || !skillMarkdown.trim()} type="submit">{parseState.status === 'parsing' ? messages.skills.parsing : messages.skills.parseSkill}</button>
             </details>
           ) : (
@@ -1043,6 +1042,7 @@ export function InterpretationExecutionView({ execution, instruction, onInstruct
   const [detailTab, setDetailTab] = useState<InterpretationDetailTab>('report')
   const report = execution.report
   const failed = execution.status !== 'PREVIEW_READY'
+  const validationAttempts = execution.status === 'FAILED' ? execution.validation_attempts : undefined
   const parentInstruction = readAdjustmentInstruction(execution.adjustment)
   const blueprint = execution.preview.capability_blueprint
   const hasBlueprint = blueprint !== null && (blueprint.capabilities.length > 0 || blueprint.tasks.length > 0)
@@ -1061,6 +1061,14 @@ export function InterpretationExecutionView({ execution, instruction, onInstruct
         <div><dt>{messages.skills.interpretationConfidenceLabel}</dt><dd>{execution.confidence.toFixed(2)}</dd></div>
       </dl>
       {failed && <p className="error" role="alert">{messages.skills.interpretationFailedLine(execution.error_code ?? 'unknown')}</p>}
+      {validationAttempts && validationAttempts.length > 0 && (
+        <details className="rawResult">
+          <summary>{messages.skills.validationErrorDetails}</summary>
+          <ol>
+            {validationAttempts.slice(0, 2).map((attempt, index) => <li key={index}><pre>{attempt}</pre></li>)}
+          </ol>
+        </details>
+      )}
       {execution.parent_interpretation_id && (
         <p className="hint">{messages.skills.parentPrefix}<code className="mono">{execution.parent_interpretation_id}</code>{parentInstruction ? messages.skills.adjustQuote(parentInstruction) : ''}</p>
       )}

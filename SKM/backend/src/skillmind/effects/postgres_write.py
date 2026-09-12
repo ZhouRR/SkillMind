@@ -262,7 +262,10 @@ async def _validate_table(connection: AsyncConnection, command: DatabaseWriteCom
 
     result = await connection.execute(
         text(
-            "SELECT a.attname AS name, a.attgenerated AS generated, a.attidentity AS identity, "
+            # pg_catalog の内部 char は asyncpg で bytes になり、空 marker も truthy になる。
+            # Server で boolean に変換し、通常列を generated/identity と誤判定させない。
+            "SELECT a.attname AS name, a.attgenerated <> '' AS generated, "
+            "a.attidentity <> '' AS identity, "
             "EXISTS (SELECT 1 FROM pg_catalog.pg_constraint k WHERE k.conrelid = c.oid "
             "AND k.contype = 'p' AND a.attnum = ANY(k.conkey)) AS primary_key "
             "FROM pg_catalog.pg_class c JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid "

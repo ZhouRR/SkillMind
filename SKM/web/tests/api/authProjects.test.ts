@@ -20,6 +20,16 @@ afterEach(() => {
 })
 
 describe('auth API client', () => {
+  it.each([true, false, undefined])('accepts or omits the independent document write flag %s', async (enabled) => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ ...SESSION, document_writes_enabled: enabled })))
+    expect((await loadAuthSession())?.document_writes_enabled).toBe(enabled)
+  })
+
+  it('rejects a non-boolean document write flag', async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ ...SESSION, document_writes_enabled: 'true' })))
+    await expect(loadAuthSession()).rejects.toThrow()
+  })
+
   it.each([true, false, undefined])('accepts the deployment feature flag %s', async (enabled) => {
     vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ ...SESSION, deferred_features_enabled: enabled })))
     expect((await loadAuthSession())?.deferred_features_enabled).toBe(enabled)

@@ -12,7 +12,6 @@ from uuid import uuid4
 
 import pytest
 from openpyxl import Workbook
-
 from skillmind.agent.document_provider import DocumentConvertProvider
 from skillmind.agent.tool_gateway import ToolProviderError
 from skillmind.documents.source import ProjectDocumentObservation
@@ -60,9 +59,22 @@ def _case(monkeypatch):
     )
 
 
-async def test_saved_observation_pins_real_conversion_and_is_linked_in_evidence(monkeypatch):
+@pytest.mark.parametrize(
+    "observation_key,source_key",
+    [
+        (None, None),
+        (None, "original/source/cases.xlsx"),
+        ("original/source/cases.xlsx", "original/source/cases.xlsx"),
+    ],
+)
+async def test_saved_observation_pins_real_conversion_and_is_linked_in_evidence(
+    monkeypatch, observation_key, source_key
+):
     """元観測と同じ bytes を native converter へ渡し、変換 Evidence に元参照を記録する。"""
     case = _case(monkeypatch)
+    case.observed = replace(case.observed, source_object_key=observation_key)
+    case.lookup.load.return_value = case.observed
+    case.acquire.return_value = replace(case.acquire.return_value, source_object_key=source_key)
     result = await case.provider.execute(
         case.context, {"path": "specs/cases.xlsx", "observation_ref": "ev_original"}
     )
@@ -80,6 +92,11 @@ async def test_saved_observation_pins_real_conversion_and_is_linked_in_evidence(
     assert result.response["document"]["checksum"] == case.content.checksum
     assert result.evidence[0].metadata["observation_ref"] == "ev_original"
     assert result.evidence[0].metadata["storage_observation"] == case.observed.observation.to_json()
+    if source_key is None:
+        assert "source_object_key" not in result.response
+    else:
+        assert result.response["source_object_key"] == source_key
+        assert result.evidence[0].metadata["source_object_key"] == source_key
     case.source.fetch.assert_not_called()
     case.source.inspect.assert_not_called()
 
@@ -121,7 +138,9 @@ async def test_unavailable_or_foreign_observation_fails_before_download(monkeypa
     case.source.fetch.assert_not_called()
 
 
-@pytest.mark.parametrize("case_name", ["missing", "changed_observation", "changed_bytes"])
+@pytest.mark.parametrize(
+    "case_name", ["missing", "changed_observation", "changed_bytes", "changed_key", "missing_key"]
+)
 async def test_acquisition_must_match_both_observation_and_original_bytes(monkeypatch, case_name):
     """取得後も同じ観測・原 hash を確認し、変更は変換前に拒否する。"""
     case = _case(monkeypatch)
@@ -130,6 +149,14 @@ async def test_acquisition_must_match_both_observation_and_original_bytes(monkey
     elif case_name == "changed_observation":
         case.acquire.return_value = replace(
             case.content, observation=replace(case.observed.observation, etag="changed")
+        )
+    elif case_name in {"changed_key", "missing_key"}:
+        case.lookup.load.return_value = replace(
+            case.observed, source_object_key="original/source/cases.xlsx"
+        )
+        case.acquire.return_value = replace(
+            case.acquire.return_value,
+            source_object_key="other/source/cases.xlsx" if case_name == "changed_key" else None,
         )
     else:
         case.acquire.return_value = replace(

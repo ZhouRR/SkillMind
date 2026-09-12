@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 from check_document_management import DOCUMENT, SECOND, document
 from check_document_upload import UploadMockApi, upload_request
 from check_projects import NEXT_PROJECT, PROJECT, messages, settle
-from playwright.async_api import Browser, Route, async_playwright, expect
+from playwright.async_api import Browser, Page, Route, async_playwright, expect
 
 THIRD = "00000000-0000-4000-8000-000000000093"
 
@@ -61,6 +61,21 @@ class BatchApi(UploadMockApi):
             await super().respond(route)
 
 
+async def selection_layout(page: Page, width: int) -> None:
+    """全選択と件数を中央揃えにし、PC では操作ボタンも同じ行に保つ。"""
+    toolbar = page.locator(".documentSelectionToolbar")
+    centers = await toolbar.evaluate("""element => {
+      const selectors = ['label', 'input[type="checkbox"]', '[role="status"]', 'button'];
+      return selectors.map(selector => {
+        const box = element.querySelector(selector).getBoundingClientRect();
+        return box.top + box.height / 2;
+      });
+    }""")
+    checked = centers if width >= 1366 else centers[:3]
+    assert max(checked) - min(checked) <= 1, centers
+    assert await toolbar.evaluate("el => el.scrollWidth <= el.clientWidth"), width
+
+
 async def scenario(
     browser: Browser, url: str, output: Path, language: str, width: int, theme: str, mode: str
 ) -> None:
@@ -80,6 +95,7 @@ async def scenario(
         await page.goto(f"{url}#/documents?project={PROJECT}")
         labels = (await messages(page, language))["documentsPanel"]
         await expect(page.locator(".documentItem")).to_have_count(3)
+        await selection_layout(page, width)
         if mode == "upload":
             await page.get_by_role("button", name=labels["uploadHere"], exact=True).click()
             destination = page.get_by_role("combobox", name=labels["targetFolder"], exact=True)
@@ -98,6 +114,7 @@ async def scenario(
         else:
             await page.get_by_role("checkbox", name=labels["selectAll"], exact=True).check()
             await expect(page.locator(".documentItem input:checked")).to_have_count(3)
+            await selection_layout(page, width)
             await page.get_by_role("button", name=labels["clearSelection"], exact=True).click()
             await expect(page.locator(".documentItem input:checked")).to_have_count(0)
             await page.get_by_role("checkbox", name=labels["selectAll"], exact=True).check()

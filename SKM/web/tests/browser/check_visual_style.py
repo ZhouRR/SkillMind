@@ -480,8 +480,12 @@ async def check(url: str, output: Path) -> None:
                                   - el.getBoundingClientRect().bottom""")
                                 assert spacing >= 16, spacing
                                 if width > 960:
-                                    controls = await page.locator(".documentToolbar").evaluate("""el =>
-                                      [...el.children].map(child => child.getBoundingClientRect().top)""")
+                                    # ラベル全体ではなく、入力欄とボタンの上辺を比較する。
+                                    controls = await page.locator(".documentToolbar").evaluate(
+                                        """el => [...el.children].map(child =>
+                                          (child.querySelector('input[type="text"]') ?? child)
+                                            .getBoundingClientRect().top)"""
+                                    )
                                     assert max(controls) - min(controls) <= 1, controls
                                     bounds = await page.locator(".documentTree").bounding_box()
                                     assert bounds and bounds["y"] < 500, bounds

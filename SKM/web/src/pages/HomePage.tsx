@@ -55,13 +55,12 @@ export function HomePage({ metaState, project, projectId }: {
     <div className="homePage">
       <PageHeader
         title={messages.routes.home.label}
-        description={messages.home.description}
       />
       <section className="homeHero" aria-label={messages.home.currentProject}>
         <div className="homeHeroBody">
           <span className="homeEyebrow">{messages.home.currentProject}</span>
           <h2 title={project?.project_id}>{project ? project.name : messages.home.notSelected}</h2>
-          <p>{project ? messages.home.startHint : messages.home.selectProjectHint}</p>
+          {!project && <p>{messages.home.selectProjectHint}</p>}
         </div>
         <div className="homeHeroAction">
           <span className="homeHeroGlyph" aria-hidden="true">{ROUTE_ICONS.tasks}</span>

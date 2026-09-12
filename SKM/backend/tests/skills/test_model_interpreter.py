@@ -25,11 +25,21 @@ from skillmind.skills.model_interpreter import (
     ModelStructuredOutputError,
     _compose_system_prompt,
 )
-from skillmind.skills.task_contract import TASK_CONTRACT_VERSION
+from skillmind.skills.task_contract import (
+    TASK_CONTRACT_VERSION,
+    TaskContractCompilationError,
+    compile_task_contract,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 CONTRACTS = ROOT / "contracts"
 SYSTEM_SKILL = ROOT / "skills" / "skillmind-skill-interpreter"
+_CONTRACT_TARGETS = (
+    ("manifest", "input_contract"),
+    ("manifest", "output_contract"),
+    ("blueprint", "parameter_contract"),
+    ("blueprint", "result_contract"),
+)
 
 
 class _FakeClient:
@@ -82,29 +92,9 @@ def _response_schema() -> dict[str, Any]:
     return build_interpreter_generation_schema(CONTRACTS)
 
 
-def test_generation_schema_constrains_report_and_manifest_recursively() -> None:
-    """SDK に渡す Schema が envelope だけでなく nested Report/Manifest も拘束する。"""
+def _generation_response() -> dict[str, Any]:
+    """公開 fixture から compiler 派生値と束縛値を除き、model の完全 response を作る。"""
 
-    schema = _response_schema()
-    properties = schema["properties"]
-    report = properties["report"]
-    manifest = properties["runtime_manifest_draft"]
-
-    assert "summary" in report["required"]
-    assert report["additionalProperties"] is False
-    assert "tasks" in manifest["required"]
-    task_schema = manifest["properties"]["tasks"]["items"]
-    assert task_schema["additionalProperties"] is False
-    assert task_schema["required"] == [
-        "key",
-        "input_contract",
-        "contract_source_trace",
-    ]
-    assert "input_schema" not in task_schema["properties"]
-    assert "output_schema_checksum" not in task_schema["properties"]
-    # TaskContractDraft の bounded recursion だけは自己完結 `$defs` として model Schema に残す。
-    assert "contractField" in manifest["$defs"]
-    assert '"$ref": "#/$defs/contractField"' in json.dumps(schema)
     fixture = json.loads(
         (CONTRACTS / "examples" / "skill-interpreter-response.v1.json").read_text(
             encoding="utf-8"
@@ -129,10 +119,160 @@ def test_generation_schema_constrains_report_and_manifest_recursively() -> None:
     blueprint = fixture["runtime_manifest_draft"]["capability_blueprint"]
     for key in ("identity", "compatibility"):
         blueprint.pop(key)
+    return fixture
+
+
+def _response_with_contract(
+    target: str, contract_field: str, contract: dict[str, Any]
+) -> dict[str, Any]:
+    """四つの model contract 配置先の一つだけを置き換えた完全 response を返す。"""
+
+    fixture = _generation_response()
+    manifest = fixture["runtime_manifest_draft"]
+    container = manifest if target == "manifest" else manifest["capability_blueprint"]
+    container["tasks"][0][contract_field] = contract
+    return fixture
+
+
+def _contract_at_depth(shape: str, depth: int, leaf: dict[str, Any]) -> dict[str, Any]:
+    """根を一層とし、fields/items ごとに一層増える単一枝の contract を作る。"""
+
+    edges = [
+        "fields" if shape == "object" or (shape == "mixed" and index % 2 == 0) else "items"
+        for index in range(depth - 1)
+    ]
+    node = dict(leaf)
+    for edge in reversed(edges):
+        if edge == "fields":
+            node = {"type": "object", "fields": [{"key": "nested", "required": True, **node}]}
+        else:
+            node = {"type": "array", "items": node}
+    return {"contract_version": TASK_CONTRACT_VERSION, **node}
+
+
+def test_generation_schema_constrains_report_and_manifest_recursively() -> None:
+    """SDK に渡す Schema が envelope だけでなく nested Report/Manifest も拘束する。"""
+
+    schema = _response_schema()
+    properties = schema["properties"]
+    report = properties["report"]
+    manifest = properties["runtime_manifest_draft"]
+
+    assert "summary" in report["required"]
+    assert report["additionalProperties"] is False
+    assert "tasks" in manifest["required"]
+    task_schema = manifest["properties"]["tasks"]["items"]
+    assert task_schema["additionalProperties"] is False
+    assert task_schema["required"] == [
+        "key",
+        "input_contract",
+        "contract_source_trace",
+    ]
+    assert "input_schema" not in task_schema["properties"]
+    assert "output_schema_checksum" not in task_schema["properties"]
+    fixture = _generation_response()
     Draft202012Validator(schema).validate(fixture)
     fixture["report"] = {}
     with pytest.raises(ValidationError):
         Draft202012Validator(schema).validate(fixture)
+
+
+@pytest.mark.parametrize(("target", "contract_field"), _CONTRACT_TARGETS)
+@pytest.mark.parametrize("nested_type", ["object", "array"])
+def test_generation_schema_resolves_nested_contracts_and_rejects_extra_keywords(
+    target: str, contract_field: str, nested_type: str
+) -> None:
+    """完全 response の各 contract で再帰参照を解決し、深部でも任意 Schema を拒否する。"""
+
+    fixture = _generation_response()
+    manifest = fixture["runtime_manifest_draft"]
+    container = manifest if target == "manifest" else manifest["capability_blueprint"]
+    path: list[str | int] = ["runtime_manifest_draft"]
+    if target == "blueprint":
+        path.append("capability_blueprint")
+    path.extend(["tasks", 0, contract_field, "fields", 0])
+
+    leaf: dict[str, Any] = {"type": "string"}
+    nested: dict[str, Any] = {"key": "outer", "type": nested_type, "required": True}
+    if nested_type == "object":
+        leaf.update({"key": "leaf", "required": True})
+        nested["fields"] = [leaf]
+        path.extend(["fields", 0])
+    else:
+        nested["items"] = {"type": "array", "items": leaf}
+        path.extend(["items", "items"])
+    container["tasks"][0][contract_field] = {
+        "contract_version": TASK_CONTRACT_VERSION,
+        "type": "object",
+        "fields": [nested],
+    }
+
+    validator = Draft202012Validator(_response_schema())
+    validator.validate(fixture)
+    leaf["$ref"] = "#/unexpected"
+    with pytest.raises(ValidationError) as excinfo:
+        validator.validate(fixture)
+    assert excinfo.value.validator == "additionalProperties"
+    assert list(excinfo.value.absolute_path) == path
+
+
+@pytest.mark.parametrize(("target", "contract_field"), _CONTRACT_TARGETS)
+@pytest.mark.parametrize("shape", ["object", "array", "mixed"])
+@pytest.mark.parametrize("depth", [5, 6])
+def test_generation_schema_enforces_the_compiler_contract_depth_limit(
+    target: str, contract_field: str, shape: str, depth: int
+) -> None:
+    """完全 response と compiler が同じ五層境界で受理・拒否することを検証する。"""
+
+    contract = _contract_at_depth(shape, depth, {"type": "string"})
+    fixture = _response_with_contract(target, contract_field, contract)
+    validator = Draft202012Validator(_response_schema())
+    if depth == 5:
+        compile_task_contract(contract)
+        validator.validate(fixture)
+    else:
+        with pytest.raises(TaskContractCompilationError) as excinfo:
+            compile_task_contract(contract)
+        assert excinfo.value.code == "contract_depth_exceeded"
+        if shape == "mixed":
+            assert excinfo.value.path == "/fields/0/items/fields/0/items/fields/0/"
+        with pytest.raises(ValidationError):
+            validator.validate(fixture)
+
+
+@pytest.mark.parametrize(("target", "contract_field"), _CONTRACT_TARGETS)
+@pytest.mark.parametrize("shape", ["object", "mixed"])
+@pytest.mark.parametrize("explicit_fields", [False, True])
+def test_generation_schema_preserves_empty_objects_at_the_last_contract_depth(
+    target: str, contract_field: str, shape: str, explicit_fields: bool
+) -> None:
+    """五層目の field/item が空 object なら、fields の省略と空配列をともに許可する。"""
+
+    leaf: dict[str, Any] = {"type": "object"}
+    if explicit_fields:
+        leaf["fields"] = []
+    contract = _contract_at_depth(shape, 5, leaf)
+    compile_task_contract(contract)
+    Draft202012Validator(_response_schema()).validate(
+        _response_with_contract(target, contract_field, contract)
+    )
+
+
+@pytest.mark.parametrize(("target", "contract_field"), _CONTRACT_TARGETS)
+@pytest.mark.parametrize("shape", ["object", "mixed"])
+def test_generation_schema_rejects_arrays_without_items_at_the_last_contract_depth(
+    target: str, contract_field: str, shape: str
+) -> None:
+    """五層目の array から items を省いて深さ制限を迂回する候補を拒否する。"""
+
+    contract = _contract_at_depth(shape, 5, {"type": "array"})
+    with pytest.raises(TaskContractCompilationError) as excinfo:
+        compile_task_contract(contract)
+    assert excinfo.value.code == "contract_items_missing"
+    with pytest.raises(ValidationError):
+        Draft202012Validator(_response_schema()).validate(
+            _response_with_contract(target, contract_field, contract)
+        )
 
 
 def test_generation_schema_requires_a_blueprint_without_platform_bound_identity() -> None:

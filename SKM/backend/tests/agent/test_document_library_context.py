@@ -10,7 +10,6 @@ from uuid import uuid4
 
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
-
 from skillmind.agent.context_builder import (
     ContractStore,
     ProductionRunContextBuilder,
@@ -175,6 +174,7 @@ async def test_input_and_library_context_materializes_only_selected_input(tmp_pa
         "foreign-run",
         "foreign-project",
         "binding",
+        "legacy-binding",
         "hidden-input",
         "extra-slot",
         "missing-selection",
@@ -196,6 +196,10 @@ async def test_invalid_library_context_stops_before_materialization(tmp_path: Pa
         claimed = replace(claimed, project_id=uuid4())
     elif mutation == "binding":
         claimed.selected_sources_json["outputs"]["binding_id"] = str(uuid4())
+    elif mutation == "legacy-binding":
+        claimed.selected_sources_json["outputs"] = FrozenDocumentLibraryBinding(
+            claimed.project_id, claimed.run_id, uuid4(), "outputs", library, revision="1"
+        ).to_json()
     elif mutation == "hidden-input":
         claimed.selected_sources_json["outputs"]["document_snapshot"] = {}
     elif mutation == "extra-slot":

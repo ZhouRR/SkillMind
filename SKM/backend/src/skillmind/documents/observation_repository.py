@@ -20,7 +20,7 @@ from skillmind.documents.snapshot import (
     DocumentSnapshotError,
     FrozenDocument,
 )
-from skillmind.documents.source import ProjectDocumentObservation
+from skillmind.documents.source import ProjectDocumentObservation, validate_source_object_key
 from skillmind.storage import FileStorageError
 from skillmind.storage.observation import BlobObservation
 
@@ -108,7 +108,7 @@ def _restore(
         or tool.error_json is not None
         or not isinstance(metadata, dict)
         or set(metadata) != {"observation_version", "observation", "source_reference_checksum"}
-        or metadata.get("observation_version") != "v1"
+        or metadata.get("observation_version") not in ("v1", "v2")
         or not isinstance(result, dict)
         or result.get("status") != "success"
         or result.get("provider") != "project"
@@ -117,11 +117,15 @@ def _restore(
         return None
     observation = metadata.get("observation")
     reference_checksum = metadata.get("source_reference_checksum")
+    expected_fields = {"document", "storage", "observed_at", "content_verified"}
+    if metadata["observation_version"] == "v2":
+        expected_fields.add("source_object_key")
     if (
         not isinstance(observation, dict)
-        or set(observation) != {"document", "storage", "observed_at", "content_verified"}
+        or set(observation) != expected_fields
         or observation.get("document") != document.to_json()
         or observation.get("content_verified") is not False
+        or ("source_object_key" in result) != (metadata["observation_version"] == "v2")
         or not isinstance(reference_checksum, str)
         or re.fullmatch(r"sha256:[0-9a-f]{64}", reference_checksum) is None
         or any(result.get(key) != value for key, value in observation.items())
@@ -157,7 +161,9 @@ def _restore(
         )
         if observed.size != document.size:
             return None
-        return ProjectDocumentObservation(project_id, document, observed, reference_checksum)
+        key = (validate_source_object_key(observation["source_object_key"])
+               if metadata["observation_version"] == "v2" else None)
+        return ProjectDocumentObservation(project_id, document, observed, reference_checksum, key)
     except (ValueError, TypeError, FileStorageError):
         return None
 
@@ -192,7 +198,7 @@ def _observation_response(tool: ToolCall, reference: str) -> dict[str, Any] | No
     for index, entry in enumerate(entries, start=1):
         if (
             not isinstance(entry, dict)
-            or set(entry)
+            or set(entry) - {"source_object_key"}
             != {
                 "document",
                 "storage",

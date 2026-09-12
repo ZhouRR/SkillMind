@@ -46,6 +46,7 @@ from skillmind.agent.workspace_provider import (
     WorkspaceWriteProvider,
 )
 from skillmind.documents.library import (
+    DOCUMENT_LIBRARY_REVISION,
     DOCUMENT_WRITE_CAPABILITY,
     DocumentLibraryTarget,
     is_document_library_source,
@@ -835,6 +836,9 @@ def _selected_source(
         )
         if frozen.target != document_library_target:
             raise ValueError("Document library changed after Run creation")
+        # 旧版は原結果の核対だけを許可し、完了できない保存 Run のモデル起動前に拒否する。
+        if frozen.revision != DOCUMENT_LIBRARY_REVISION:
+            raise ValueError("Legacy document library binding is read-only")
         return capability, provider, None, frozen.binding_id
     if requirement.get("kind") == "document":
         if (

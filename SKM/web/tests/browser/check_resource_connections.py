@@ -92,6 +92,9 @@ async def check(url: str, output: Path) -> None:
                 try:
                     await page.goto(f"{url}#/resources?project={PROJECT}")
                     labels = (await messages(page, language))["resources"]
+                    advanced = page.locator("details.resourceAdvanced")
+                    await expect(advanced).not_to_have_attribute("open", "")
+                    await expect(page.get_by_role("tab")).to_have_count(0)
                     for provider in ("postgres", "mcp"):
                         await page.get_by_role(
                             "button", name=labels["connectTitle"], exact=True
@@ -109,9 +112,13 @@ async def check(url: str, output: Path) -> None:
                                 ("databaseHost", "db.example.test"),
                                 ("databaseName", "reports"),
                                 ("databaseUser", "reader"),
-                                ("secretValueLabel", "fixture-only"),
                             ):
                                 await dialog.get_by_label(labels[key], exact=True).fill(value)
+                            password = dialog.get_by_label(
+                                labels["credentialValueLabels"]["password"], exact=True
+                            )
+                            await expect(password).to_have_attribute("type", "password")
+                            await password.fill("fixture-only")
                             await dialog.locator("textarea").fill("public.reports\npublic.items")
                         else:
                             await dialog.get_by_label(labels["mcpServerUrl"], exact=True).fill(
@@ -126,9 +133,9 @@ async def check(url: str, output: Path) -> None:
                         ).click()
                         await expect(dialog).to_have_count(0)
                         await expect(
-                            page.get_by_role("tabpanel").get_by_text(
-                                f"{provider} reports", exact=True
-                            )
+                            page.get_by_role(
+                                "region", name=labels["integrationListTitle"]
+                            ).get_by_text(f"{provider} reports", exact=True)
                         ).to_be_visible()
                     postgres, mcp = api.created
                     assert postgres["config"] == {
@@ -146,6 +153,16 @@ async def check(url: str, output: Path) -> None:
                     }
                     assert mcp["scope"] == {"resource_uris": ["resource://reports/current"]}
                     assert mcp["secret_reference_id"] is None
+                    await advanced.locator("summary").click()
+                    await page.get_by_role("tab", name=labels["tabBinding"], exact=True).click()
+                    await expect(
+                        page.get_by_role("heading", name=labels["bindingTitle"])
+                    ).to_be_visible()
+                    await advanced.locator("summary").click()
+                    await expect(page.get_by_role("tab")).to_have_count(0)
+                    await expect(
+                        page.get_by_role("button", name=labels["connectTitle"], exact=True)
+                    ).to_be_visible()
                     assert not errors and not api.failures and not api.unexpected, (
                         errors,
                         api.failures,

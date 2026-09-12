@@ -124,7 +124,7 @@ function TaskCenter({ projectId, csrfToken, moduleId, projectReadOnly = false, d
   if (!projectId) {
     return (
       <>
-        <PageHeader title={messages.routes.tasks.label} description={messages.tasks.description} />
+        <PageHeader title={messages.routes.tasks.label} />
         <section className="panel">
           <EmptyState text={messages.tasks.selectProjectFirst} />
         </section>
@@ -136,7 +136,7 @@ function TaskCenter({ projectId, csrfToken, moduleId, projectReadOnly = false, d
     <>
       <PageHeader
         title={activeModule ? messages.tasks.titleWithModule(activeModule.name) : messages.routes.tasks.label}
-        description={activeModule?.description || messages.tasks.description}
+        description={activeModule?.description || undefined}
         aside={<span className="scopeBadge">{messages.tasks.countBadge(rows.length)}</span>}
       />
       <section className="panel taskCatalog" aria-label={messages.routes.tasks.label}>

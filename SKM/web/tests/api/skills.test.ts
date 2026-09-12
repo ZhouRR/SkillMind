@@ -394,6 +394,41 @@ describe('Skill interpretation API contract', () => {
     expect(execution.status).toBe('FAILED')
     expect(execution.error_code).toBe('provider_timeout')
     expect(execution.report).toBeNull()
+    expect(execution).not.toHaveProperty('validation_attempts')
+  })
+
+  it.each([
+    { label: 'an empty list', attempts: [] },
+    { label: 'two ordered attempts', attempts: ['path=/report validator=required', 'path=/tasks validator=type'] },
+    { label: '4096 Unicode characters', attempts: ['🧪'.repeat(4096)] },
+  ])('preserves validation attempts containing $label', async ({ attempts }) => {
+    vi.stubGlobal('fetch', jsonFetch({ ...INTERPRET_RESPONSE, validation_attempts: attempts }, 200))
+
+    const execution = await loadInterpretationExecution(INTERPRETATION_ID)
+
+    expect(execution.validation_attempts).toEqual(attempts)
+  })
+
+  it.each([
+    { label: 'null', attempts: null },
+    { label: 'an object', attempts: {} },
+    { label: 'a string', attempts: 'path=/report validator=required' },
+    { label: 'mixed item types', attempts: ['path=/report validator=required', 1] },
+    { label: 'a null item', attempts: [null] },
+    { label: 'an empty item', attempts: [''] },
+    { label: 'a whitespace-only item', attempts: ['　 '] },
+    { label: 'three attempts', attempts: ['first', 'second', 'third'] },
+    { label: '4097 ASCII characters', attempts: ['a'.repeat(4097)] },
+    { label: '4097 Unicode characters', attempts: ['🧪'.repeat(4097)] },
+    ...['\u0000', '\t', '\n', '\r', '\u001f', '\u007f'].map((control) => ({
+      label: `control character ${control.codePointAt(0)}`,
+      attempts: [`path=/report${control}validator=required`],
+    })),
+  ])('rejects validation attempts containing $label', async ({ attempts }) => {
+    vi.stubGlobal('fetch', jsonFetch({ ...INTERPRET_RESPONSE, validation_attempts: attempts }, 200))
+
+    await expect(loadInterpretationExecution(INTERPRETATION_ID))
+      .rejects.toThrow('Interpretation execution response did not match its contract')
   })
 
   it('rejects an execution response that drops the diff contract', async () => {

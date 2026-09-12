@@ -549,10 +549,7 @@ export function DocumentPreviewDialog({ preview, projectId, onClose }: {
         <pre className="previewText">{preview.content}</pre>
       )}
       {preview.status === 'ready' && (preview.kind === 'html' || preview.kind === 'markdown' && !showSource) && (
-        <>
-          <p className="hint">{messages.documentsPanel.previewNotice}</p>
-          <iframe className="previewFrame" sandbox="" referrerPolicy="no-referrer" srcDoc={html} title={document.name} />
-        </>
+        <iframe className="previewFrame" sandbox="" referrerPolicy="no-referrer" srcDoc={html} title={document.name} />
       )}
     </ModalDialog>
   )

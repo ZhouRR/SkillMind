@@ -283,6 +283,12 @@
             "minimum": 1,
             "maximum": 50,
             "description": "Index into this response evidence_refs; pass that reference to document.convert/v1 observation_ref."
+          },
+          "source_object_key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "Exact source object key from the authorized project document storage reference. Not a user-supplied path, URL or permission. Absent from historical responses and sources that do not expose it. A new verified acquisition may return it even when using a legacy observation."
           }
         }
       }

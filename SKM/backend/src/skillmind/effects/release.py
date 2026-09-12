@@ -16,11 +16,12 @@ if TYPE_CHECKING:
 
 
 def configured_execution_features(settings: Settings) -> ExecutionFeatures:
-    """API/Worker/Interpreter の配備上限を一箇所で組む。文書 write は実環境検証まで閉じる。"""
+    """API/Worker/Interpreter の独立した配備上限を一箇所で組む。"""
 
     return ExecutionFeatures(
         deferred=settings.deferred_features_enabled,
         database_writes=settings.database_writes_enabled,
+        document_writes=settings.document_writes_enabled,
     )
 
 
@@ -34,7 +35,7 @@ class ExecutionFeatures:
 
     deferred: bool = False
     database_writes: bool = False
-    # Provider 装配の完成までは Settings/API に公開しない内部の独立上限。
+    # 文書庫 CREATE だけを開き、DB/後置機能の switch とは相互に放行しない。
     document_writes: bool = False
 
     @property

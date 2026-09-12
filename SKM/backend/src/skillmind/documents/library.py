@@ -21,7 +21,7 @@ from skillmind.storage.blob import FileStorage, FileStorageError, StorageNamespa
 
 DOCUMENT_LIBRARY_PROVIDER = "project-library"
 DOCUMENT_WRITE_CAPABILITY = "document.write/v1"
-DOCUMENT_LIBRARY_REVISION = "1"
+DOCUMENT_LIBRARY_REVISION = "2"
 DOCUMENT_LIBRARY_SELECTION = "project-library:documents"
 
 
@@ -42,7 +42,9 @@ class DocumentLibraryTarget:
         except (TypeError, ValueError) as error:
             raise ValueError("Document library bucket is invalid") from error
 
-    def scope(self, project_id: UUID) -> dict[str, str]:
+    def scope(
+        self, project_id: UUID, *, revision: str = DOCUMENT_LIBRARY_REVISION
+    ) -> dict[str, str]:
         """任意 prefix は受け取らず、同 Project の成果領域だけを共有 path 規則で導出する。"""
 
         if not isinstance(project_id, UUID) or project_id.int == 0:
@@ -52,7 +54,7 @@ class DocumentLibraryTarget:
             "namespace_id": str(self.namespace.namespace_id),
             "descriptor_checksum": self.namespace.descriptor_checksum,
             "bucket": self.bucket,
-            "key_prefix": document_effect_prefix(project_id),
+            "key_prefix": document_effect_prefix(project_id, revision=revision),
         }
 
     def reference(self, project_id: UUID) -> dict[str, str]:
@@ -92,6 +94,7 @@ class ResolvedDocumentLibraryBinding:
 
     requirement_key: str
     target: DocumentLibraryTarget
+    revision: str = DOCUMENT_LIBRARY_REVISION
 
     def source(self, *, project_id: UUID) -> dict[str, Any]:
         """まだ dispatch できない初期選択を返し、作成 transaction 内で元 binding を付加する。"""
@@ -102,8 +105,8 @@ class ResolvedDocumentLibraryBinding:
             "candidate_key": DOCUMENT_LIBRARY_SELECTION,
             "resource_kind": "document",
             "access": "write",
-            "revision": DOCUMENT_LIBRARY_REVISION,
-            "scope": self.target.scope(project_id),
+            "revision": self.revision,
+            "scope": self.target.scope(project_id, revision=self.revision),
         }
 
 
@@ -116,6 +119,7 @@ class FrozenDocumentLibraryBinding:
     binding_id: UUID
     requirement_key: str
     target: DocumentLibraryTarget
+    revision: str = DOCUMENT_LIBRARY_REVISION
 
     def to_json(self) -> dict[str, Any]:
         """原 binding と共通 checksum の完全な表現を返す。正文/Secret/入力清単は持たない。"""
@@ -129,7 +133,9 @@ class FrozenDocumentLibraryBinding:
             or re.fullmatch(r"[a-z][a-z0-9_.-]{0,127}", self.requirement_key) is None
         ):
             raise ValueError("Document library snapshot identity is invalid")
-        source = ResolvedDocumentLibraryBinding(self.requirement_key, self.target).source(
+        source = ResolvedDocumentLibraryBinding(
+            self.requirement_key, self.target, self.revision
+        ).source(
             project_id=self.project_id
         )
         payload = {
@@ -147,7 +153,7 @@ class FrozenDocumentLibraryBinding:
                 integration_id=None,
                 provider=DOCUMENT_LIBRARY_PROVIDER,
                 capability_version=DOCUMENT_WRITE_CAPABILITY,
-                revision=DOCUMENT_LIBRARY_REVISION,
+                revision=self.revision,
                 scope=source["scope"],
             ),
         }
@@ -172,7 +178,8 @@ def parse_document_library_source(
     try:
         scope_project, target = document_library_scope(value["scope"])
         snapshot = FrozenDocumentLibraryBinding(
-            project_id, UUID(value["run_id"]), UUID(value["binding_id"]), requirement_key, target
+            project_id, UUID(value["run_id"]), UUID(value["binding_id"]), requirement_key, target,
+            value["revision"],
         )
         if (
             scope_project != project_id
@@ -209,9 +216,23 @@ def document_library_scope(value: Mapping[str, Any]) -> tuple[UUID, DocumentLibr
         )
     except (ValueError, TypeError, FileStorageError) as error:
         raise ValueError("Document library scope is invalid") from error
-    if canonical_json(dict(value)) != canonical_json(target.scope(project_id)):
+    revision = document_library_revision(value)
+    if canonical_json(dict(value)) != canonical_json(target.scope(project_id, revision=revision)):
         raise ValueError("Document library scope does not match its project or storage")
     return project_id, target
+
+
+def document_library_revision(value: Mapping[str, Any]) -> str:
+    """保存済み scope の厳密な root から版を識別し、旧 checksum を新 prefix に補正しない。"""
+
+    try:
+        project_id = UUID(value["project_id"])
+        for revision in ("1", "2"):
+            if value["key_prefix"] == document_effect_prefix(project_id, revision=revision):
+                return revision
+    except (ValueError, TypeError, KeyError) as error:
+        raise ValueError("Document library revision is invalid") from error
+    raise ValueError("Document library revision is invalid")
 
 
 class DocumentLibraryBindingRepository:
@@ -305,6 +326,7 @@ class DocumentLibraryBindingRepository:
         project_id: UUID,
         run_id: UUID,
         requirement_key: str,
+        allow_legacy_read: bool = False,
     ) -> None:
         """原 binding の帰属・能力・scope/hash・失効と現在の保存先を一括照合する。"""
 
@@ -315,7 +337,8 @@ class DocumentLibraryBindingRepository:
             or re.fullmatch(r"[a-z][a-z0-9_.-]{0,127}", requirement_key) is None
         ):
             raise ValueError("Document library binding identity is invalid")
-        expected_scope = self._target.scope(project_id)
+        revision = binding.revision if allow_legacy_read else DOCUMENT_LIBRARY_REVISION
+        expected_scope = self._target.scope(project_id, revision=revision)
         expected_checksum = binding_checksum(
             project_id=project_id,
             scope_level=ResourceBindingLevel.RUN,
@@ -325,7 +348,7 @@ class DocumentLibraryBindingRepository:
             integration_id=None,
             provider=DOCUMENT_LIBRARY_PROVIDER,
             capability_version=DOCUMENT_WRITE_CAPABILITY,
-            revision=DOCUMENT_LIBRARY_REVISION,
+            revision=revision,
             scope=expected_scope,
         )
         if (
@@ -340,7 +363,7 @@ class DocumentLibraryBindingRepository:
             or binding.disabled_at is not None
             or binding.provider != DOCUMENT_LIBRARY_PROVIDER
             or binding.capability_version != DOCUMENT_WRITE_CAPABILITY
-            or binding.revision != DOCUMENT_LIBRARY_REVISION
+            or binding.revision != revision
             or canonical_json(binding.scope_json) != canonical_json(expected_scope)
             or binding.checksum != expected_checksum
         ):

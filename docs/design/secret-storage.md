@@ -20,6 +20,8 @@ FILE 当前只词法限制绝对路径/..，stat/read_text 不防 symlink/替换
 
 resolver 最多 65,536 UTF-8 bytes；FILE 去末尾 CR/LF，ENVIRONMENT 不去，MANAGED 创建另限 8,192 bytes。空值/超限拒绝、不截断。
 
+认证信息表单按系统类型显示密码（PostgreSQL/SVN）、API Key（Redmine）或 Token（Git/MCP），统一使用密码输入框；MANAGED 原样保存，包括首尾空格。切换系统类型清空未保存的认证值与引用位置。
+
 ## MANAGED 的实际加密结构
 
 [SecretCipher](../../SKM/backend/src/skillmind/core/secret_crypto.py)以 32-byte 主密钥直接 AES-256-GCM，加随机 nonce、Project/引用 AAD；无逐项 DEK，不称信封加密。SKILLMIND_MANAGED_SECRET_KEK 与 kek_version 名称保持兼容；DEK/KMS 另定版本/迁移，不因改名重写密文。

@@ -36,13 +36,13 @@ observe → Evidence → change.propose → 精确批准/允许的预授权
 | issue.update/v1 | Redmine CAS adapter；仅 system ADMIN 配置 LOW 风险精确 scope 可预授权，discovery → 前置 revision → 条件写入 → 回读 |
 | repository.write/v1 | Git/SVN，始终人工批准，不 force；精确 CAS/恢复仍有缺口 |
 | database.write/v1 | PostgreSQL 单行 INSERT/UPDATE，始终人工批准；独立部署开关、可信原行 Evidence、精确表/列范围与同事务回执 |
-| document.write/v1 | 项目文档库 CREATE，始终人工批准；Provider、阶段事务及 API/Worker/解释器装配已有，服务端保证与真实验收待补，保持独立关闭 |
+| document.write/v1 | 项目文档库 CREATE，始终人工批准；按原 Effect/内容隔离物理对象，独立部署开关默认关闭；真实完整流程验收待补 |
 
 标准 Redmine REST 不具本协议 CAS/幂等，须通过版本化 discovery 及真实竞争验收。批准复验 actor/Project/version/checksum/Integration/binding/scope；仅 Run 发起人或组织 system ADMIN 决策。HTTP 决策在共享事务内锁定当前账户、原 Session 和项目，复验 CSRF、当前角色及成员关系，提交前再次验证；不能沿用请求开始时缓存的管理员身份。
 
 ## 首版所需的存储和数据库写入
 
-rv-reviewer 的完整验收需要 PostgreSQL 执行/文档/成果记录和 MinIO 成果上传；数据库 Provider 已注册，MinIO 成果 Provider 已有但尚未在生产配置中开放。按通用能力实现，业务表、字段、PASS/FAIL 规则仍属于 Skill 与项目绑定，不能写入平台通用 Schema 或执行器。
+rv-reviewer 的完整验收需要 PostgreSQL 执行/文档/成果记录和 MinIO 成果上传；数据库与 MinIO 成果 Provider 均通过独立部署开关显式启用，默认关闭。按通用能力实现，业务表、字段、PASS/FAIL 规则仍属于 Skill 与项目绑定，不能写入平台通用 Schema 或执行器。
 
 数据库写入只接受显式表、列、值及精确行条件，范围来自冻结 binding；参数化执行，不接受模型 SQL 或连接信息。MinIO 写入固定 bucket、允许 prefix、对象 key、内容 hash 和原 Effect 身份，字节来自已冻结的 Run 成果；禁止无条件覆盖和越界路径。两者均沿 observe → propose → 精确批准 → apply → read-back，低风险自动批准须另有已实现的范围约束，不能由 Skill 指令、远端 tool 注解或全局扩展开关代替。
 
@@ -68,19 +68,19 @@ rv-reviewer 的完整验收需要 PostgreSQL 执行/文档/成果记录和 MinIO
 
 ### MinIO 条件创建与原结果核对
 
-[`library`](../../SKM/backend/src/skillmind/documents/library.py) 定义项目文档库的 Run binding：`project-library` Provider、`document.write/v1` 能力和空 Integration，冻结 Project、存储世代、bucket 与项目专用 prefix；使用时须与当前配置重新核对，不创建占位连接或凭据。API 候选与 API/Worker 的 Run 选择、同事务冻结已接入，复用既有 FileStorage 的持久存储归属；选择与历史投影见[资源快照](resource-snapshots.md#公开选择与读取投影的实施契约)。API、Worker、解释器共用配备能力转换；文档写入采用独立的内部门禁，现有数据库与后置开关均不能开启。Settings 尚不提供文档写入开关，生产解释器目录和 API 可用性索引仍排除此能力；完整目录中的 Effect 说明不等于开放，也不授予直接 Tool。
+[`library`](../../SKM/backend/src/skillmind/documents/library.py) 定义项目文档库的 Run binding：`project-library` Provider、`document.write/v1` 能力和空 Integration，冻结 Project、存储世代、bucket 与项目专用 prefix；使用时须与当前配置重新核对，不创建占位连接或凭据。API 候选与 API/Worker 的 Run 选择、同事务冻结已接入，复用既有 FileStorage 的持久存储归属；选择与历史投影见[资源快照](resource-snapshots.md#公开选择与读取投影的实施契约)。API、Worker、解释器共用配备能力转换；文档写入采用独立的 `SKILLMIND_DOCUMENT_WRITES_ENABLED`，默认关闭，数据库与后置开关均不能开启。API、Worker 配置一致后才向解释器目录和资源可用性索引提供该能力；会话响应公开该布尔状态，旧 API 省略按关闭处理。目录说明不授予直接 Tool。新 binding revision 2 使用独立物理前缀，revision 1 历史只读时保留原 scope/checksum。
 
 保存提案仅允许 `CREATE`、原目标 `absent` 及 `/document` 回读，内容为同 Run 已存 Artifact 的引用、摘要、字节数和批准的保存 MIME；相对路径来自提案，物理 key 由冻结的项目文档库推导。模型不能提供正文、bucket 或任意 object key。[document.write/v1 契约](../../SKM/contracts/tools/document.write/v1/request.schema.json) 与共享提案、批准、认领、阶段复验已接入：每次验证原 binding/snapshot、当前存储配置及 Artifact 实际字节的 size/hash。Artifact 当前由 producer 以 text/plain 保存；批准的 Markdown/JSON MIME 是输出格式，不转换或替换原字节。
 
 0046 仅允许文档库 CREATE 提案的 Integration 为空，其他 capability 仍要求有效 Integration；公开响应与 Web 同样限制此空值；开放前须同步升级 API/Web/Worker，旧 Web 无法读取此新提案形状。旧提案的非空 ID 和 checksum 不变，不补造历史关联，降级在排他锁下拒绝含文档库提案的数据库。文档库始终人工批准，阶段授权复用当前账户、项目、原批准和 lease 校验，使用当前配置的保存目标，不解析虚构的 Integration 凭据。[运行上下文](resource-snapshots.md#公开选择与读取投影的实施契约)支持保存槽位及其提案 Tool，这些校验不代表远端效果已执行。
 
-[`effect_write`](../../SKM/backend/src/skillmind/storage/effect_write.py) 将同 Project/Run 的已存 Artifact 字节、原 Effect、存储世代、bucket/key、MIME 与内容摘要固定为一个请求。路径须与批准 prefix 精确匹配，不从可变 workspace 重新取正文，也不把同名文件当原 Artifact。此内部命令不授予写权限；[`document_provider`](../../SKM/backend/src/skillmind/effects/document_provider.py) 通过[成果台账与发布事务](document-lifecycle.md#run-成果的保存与发布)取得一次发送结果，随后调用锁外存储客户端。共享 Effect 工厂仅在独立内部门禁及明确的 Service/存储客户端同时提供时注册，缺少依赖直接拒绝，不要求虚构的 Integration Secret。Worker 装配复用现有 MinIO 设置与文档上传限额，启动时将 writer 的规范化 endpoint、bucket 和 namespace 与同一 FileStorage 比对，未绑定或不一致直接拒绝；未开放时不构造 writer。Outbox、job 与恢复入口使用同一配备能力判断，普通 dispatch 开关仍控制新执行。
+[`effect_write`](../../SKM/backend/src/skillmind/storage/effect_write.py) 将同 Project/Run 的已存 Artifact 字节、原 Effect、存储世代、bucket/key、MIME 与内容摘要固定为一个请求。路径须与批准 prefix 精确匹配，不从可变 workspace 重新取正文，也不把同名文件当原 Artifact。此内部命令不授予写权限；[`document_provider`](../../SKM/backend/src/skillmind/effects/document_provider.py) 通过[成果台账与发布事务](document-lifecycle.md#run-成果的保存与发布)取得一次发送结果，随后调用锁外存储客户端。共享 Effect 工厂仅在独立部署开关及明确的 Service/存储客户端同时提供时注册，缺少依赖直接拒绝，不要求虚构的 Integration Secret。Worker 装配复用现有 MinIO 设置与文档上传限额，启动时将 writer 的规范化 endpoint、bucket 和 namespace 与同一 FileStorage 比对，未绑定或不一致直接拒绝；未开放时不构造 writer。Outbox、job 与恢复入口使用同一配备能力判断，普通 dispatch 开关仍控制新执行。
 
 [`s3_effect`](../../SKM/backend/src/skillmind/storage/s3_effect.py) 提供独立低层客户端，不改变现有文档上传的 UNCONDITIONAL_V1 行为。单次调用只发一个签名覆盖 `If-None-Match: *` 和原请求 metadata 的 PUT，不走 multipart、自动重试、redirect 或环境代理；固定已配置 namespace，正文限于 Artifact 上限，响应有界且整次网络操作限时。成功响应仍须 GET 核对原 metadata、MIME 和实际字节；有 Version ID 时读原版，不把 ETag 当内容摘要。412 只有核对出原请求才能返回原事实，同值但原 metadata 不同为冲突。
 
 连接/提交响应丢失、409、服务拒绝、保存后失权或回读不一致均保留未知，不自动再 PUT 或补偿 DELETE。独立 lookup 只 GET；仅明确 NoSuchKey 或指定版本的 NoSuchVersion 表示本次读未检出，bucket 缺失、权限拒绝和代理 404 不算对象不存在。核对未检出不证明旧 PUT 停止；取消关闭本地 coroutine 也不证明远端无写入。
 
-Provider 将获批的 `absent` 标为前置条件，不伪称已观察远端不存在；成功证据来自原对象回执及已提交的文档元数据。文档回读同时保留库内逻辑路径和原命令的 bucket/object key、原回执 version/ETag，经[续行回执](agent-runtime.md#agenttaskbrief)传给后续登记步骤；重放使用原保存事实，不重新查询当前对象或推测文档库 ID。条件 header 的[标准 S3 语义](https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html)不替代所部署 MinIO 的服务端保证；保护 marker、版本/权限隔离、迟到写和故障封闭要求仍见[文档存储边界](document-lifecycle.md#持久清理仍待补齐)。SQLite 事务、合成 HTTP 与本机 TCP 验证不证明真实 PostgreSQL 锁或 MinIO 的竞争、重建、故障行为；不得据此启用完整成果保存。
+Provider 将获批的 `absent` 标为前置条件，不伪称已观察远端不存在；成功证据来自原对象回执及已提交的文档元数据。文档回读同时保留库内逻辑路径和原命令的 bucket/object key、原回执 version/ETag，经[续行回执](agent-runtime.md#agenttaskbrief)传给后续登记步骤；重放使用原保存事实，不重新查询当前对象或推测文档库 ID。v2 在独立前缀中按原 Effect 和命令身份摘要分配物理 key，摘要绑定 Run、Artifact、逻辑路径、存储世代、bucket、MIME 和实际字节；不同 Effect 不共享物理 key，同 Effect 的修改由原台账/checksum 拒绝。逻辑路径 CREATE 仍由 PostgreSQL 原预约和唯一约束裁决，因此即使 MinIO 错误地放行条件 PUT，也不会覆盖平台另一 Effect 的对象。条件 header 的[标准 S3 语义](https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html)仍是附加保护，不能充当服务端故障保证。此协议允许在明确隔离范围内验收完整 RV；不证明持有存储写权限的外部进程无法篡改，也不关闭 bucket 重建、版本保护、清理结算与恢复欠账，见[文档存储边界](document-lifecycle.md#持久清理仍待补齐)。真实批准、存储回读和业务记录仍须逐项验证，合成测试不代替实际执行。
 
 ## 仓库写入模式
 

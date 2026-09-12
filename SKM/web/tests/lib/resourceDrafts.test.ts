@@ -9,6 +9,14 @@ import {
 } from '../../src/lib/resourceDrafts'
 
 describe('secretInputFromDraft', () => {
+  it('preserves password whitespace and punctuation for managed PostgreSQL credentials', () => {
+    const password = '  fixture-密碼:@/%+\\"  '
+    const input = secretInputFromDraft({ name: 'database-password', provider: 'postgres',
+      resolver: 'MANAGED', locator: '', secretValue: password, keyVersion: 'v1' })
+    expect(input.secret_value).toBe(password)
+    expect('locator' in input).toBe(false)
+  })
+
   it('sends the plaintext only for MANAGED and never a locator alongside it', () => {
     // MANAGED は明文を一度だけ渡し、server が即座に KEK 封入する。locator を同時に送ると
     // 「どちらが正なのか」が server 側で曖昧になる。

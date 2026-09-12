@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
-
 from skillmind.core.settings import Settings
-from skillmind.effects.release import configured_execution_features
-from skillmind.skills import wiring
 from skillmind.skills.interpreter import CapabilityCatalogSnapshot, load_capability_catalog
 from skillmind.skills.wiring import build_skill_interpreter
 
@@ -18,19 +14,15 @@ from skillmind.skills.wiring import build_skill_interpreter
 @pytest.mark.parametrize("database", [False, True])
 @pytest.mark.parametrize("document", [False, True])
 def test_interpreter_catalog_respects_deployment_features(
-    monkeypatch, enabled: bool, database: bool, document: bool,
+    enabled: bool, database: bool, document: bool,
 ) -> None:
     """読み取り/ローカル出力を保持し、後置能力を別 checksum の候補から除外する。"""
     contracts = Path(__file__).resolve().parents[3] / "contracts"
     settings = Settings(  # type: ignore[call-arg]  # BaseSettings の環境読取を止める。
         _env_file=None, contracts_dir=contracts,
         deferred_features_enabled=enabled, database_writes_enabled=database,
+        document_writes_enabled=document,
     )
-    if document:
-        monkeypatch.setattr(
-            wiring, "configured_execution_features",
-            lambda settings: replace(configured_execution_features(settings), document_writes=True),
-        )
     interpreter, catalog, identity, _ = build_skill_interpreter(
         settings, environment_fallback={"ANTHROPIC_MODEL": "claude-test"}
     )

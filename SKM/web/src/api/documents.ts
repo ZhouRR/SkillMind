@@ -100,6 +100,8 @@ const CONTENT_TYPE_BY_EXTENSION: Record<string, string> = {
   yaml: 'application/yaml',
   yml: 'application/yaml',
   pdf: 'application/pdf',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  xls: 'application/vnd.ms-excel',
   png: 'image/png',
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',

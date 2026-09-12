@@ -17,6 +17,7 @@ export interface AuthSessionRecord {
   /** 旧 API の省略は後置操作を公開する許可にならない。 */
   deferred_features_enabled?: boolean
   database_writes_enabled?: boolean
+  document_writes_enabled?: boolean
 }
 
 /** Password login form の入力。 */
@@ -86,6 +87,7 @@ function parseSession(value: unknown): AuthSessionRecord {
     || !hasStrings(value, ['csrf_token', 'absolute_expires_at'])
     || ('deferred_features_enabled' in value && typeof value.deferred_features_enabled !== 'boolean')
     || ('database_writes_enabled' in value && typeof value.database_writes_enabled !== 'boolean')
+    || ('document_writes_enabled' in value && typeof value.document_writes_enabled !== 'boolean')
     || !hasStrings(value.user, [
       'user_id', 'organization_id', 'email', 'display_name', 'system_role',
     ])

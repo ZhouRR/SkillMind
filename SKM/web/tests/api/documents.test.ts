@@ -195,6 +195,17 @@ describe('Project document API contract', () => {
 })
 
 describe('withInferredContentType', () => {
+  it.each([
+    ['spec.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+    ['SPEC.XLS', 'application/vnd.ms-excel'],
+  ])('fills the Excel MIME for %s without changing its bytes', async (name, mime) => {
+    const source = new File([new Uint8Array([0, 255, 80, 75])], name)
+    const inferred = withInferredContentType(source, name)
+    expect(inferred.type).toBe(mime)
+    expect(inferred.name).toBe(name)
+    expect(await inferred.arrayBuffer()).toEqual(await source.arrayBuffer())
+  })
+
   it('fills the MIME for extensions the OS leaves empty and keeps everything else', () => {
     // Windows は .md に MIME を登録しないことが多く、空 type のまま送ると allowlist で 422 になる。
     const emptyMd = withInferredContentType(new File(['x'], 'guide.md', { type: '' }), 'guide.md')

@@ -7,7 +7,6 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
-
 from skillmind.effects.domain import (
     EffectEvidenceDraft,
     EffectLeaseValidationError,
@@ -42,7 +41,7 @@ class SupervisedService(MemoryEffectService):
     async def heartbeat_effect_execution(self, claimed, *, provider_version, lease_seconds):
         """同じ claim/version/lease duration だけを受け付け、必要なら失権を返す。"""
         assert claimed is self.claimed
-        assert provider_version == "project-library-receipt/v1" and lease_seconds == 30
+        assert provider_version == "project-library-receipt/v2" and lease_seconds == 30
         self.heartbeats += 1
         self.renewed.set()
         if self.error:
@@ -99,7 +98,7 @@ def executor(service, provider, *, timeout=2):
                 EffectProviderDefinition(
                     "document.write/v1",
                     "project-library",
-                    "project-library-receipt/v1",
+                    "project-library-receipt/v2",
                     provider,
                     False,
                     supervised=True,

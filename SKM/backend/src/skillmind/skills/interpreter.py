@@ -21,7 +21,7 @@ from skillmind.skills.capability_blueprint import (
 from skillmind.skills.domain import InlineSkillFile
 from skillmind.skills.importer import NormalizedSkillPackage, SkillPackageParser
 from skillmind.skills.runtime_defaults import normalize_runtime_manifest
-from skillmind.skills.task_contract import compile_task_contract
+from skillmind.skills.task_contract import MAX_CONTRACT_DEPTH, compile_task_contract
 
 _VERSIONED_CAPABILITY = re.compile(r"^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$")
 _SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
@@ -422,13 +422,18 @@ def build_interpreter_generation_schema(contracts_dir: Path) -> dict[str, Any]:
         _load_json(root / "skills/interpreter/v1/response.schema.json")
     )
     report = _materialize_local_refs(
-        _load_json(root / "skills/interpreter/v1/interpretation-report.schema.json")
+        _load_json(root / "skills/interpreter/v1/interpretation-report.schema.json"),
+        reference_root="#/properties/report",
     )
     manifest = _materialize_local_refs(
-        _load_json(root / "runtime-manifest/v1alpha1.schema.json")
+        _load_json(root / "runtime-manifest/v1alpha1.schema.json"),
+        reference_root="#/properties/runtime_manifest_draft",
+        bound_task_contracts=True,
     )
     blueprint = _materialize_local_refs(
-        _load_json(root / "capability-blueprint/v1.schema.json")
+        _load_json(root / "capability-blueprint/v1.schema.json"),
+        reference_root="#/properties/runtime_manifest_draft/properties/capability_blueprint",
+        bound_task_contracts=True,
     )
     _restrict_manifest_to_model_contract_drafts(manifest)
     _restrict_blueprint_to_model_fields(blueprint)
@@ -749,17 +754,22 @@ def _load_json(path: Path) -> dict[str, Any]:
     return cast(dict[str, Any], value)
 
 
-def _materialize_local_refs(schema: Mapping[str, Any]) -> dict[str, Any]:
-    """Local ref を展開し、再帰定義だけは `$defs` と共に保持する。"""
+def _materialize_local_refs(
+    schema: Mapping[str, Any], *, reference_root: str = "#", bound_task_contracts: bool = False
+) -> dict[str, Any]:
+    """Local ref を展開し、有界 contract の共有定義を最終 response 内へ対応付ける。"""
 
     definitions = schema.get("$defs")
     defs = cast(dict[str, Any], definitions) if isinstance(definitions, dict) else {}
-    recursive_reference_found = False
+    retained_definitions: frozenset[str] = frozenset()
+    if bound_task_contracts:
+        defs, retained_definitions = _bounded_task_contract_definitions(defs)
+    definition_reference_found = False
 
     def resolve(value: Any, stack: tuple[str, ...] = ()) -> Any:
-        """非再帰 ref を展開し、bounded contract 用の再帰 ref はそのまま残す。"""
+        """通常 ref を展開し、共有 contract 定義と汎用の再帰参照はそのまま残す。"""
 
-        nonlocal recursive_reference_found
+        nonlocal definition_reference_found
 
         if isinstance(value, dict):
             reference = value.get("$ref")
@@ -767,10 +777,9 @@ def _materialize_local_refs(schema: Mapping[str, Any]) -> dict[str, Any]:
                 key = reference.removeprefix("#/$defs/")
                 if key not in defs:
                     raise ValueError("Interpreter generation Schema has an invalid local reference")
-                if key in stack:
-                    # TaskContractDraft は compiler 側で depth を制限する再帰型である。model Schema
-                    # から ref を消すと表現不能になるため、参照先 defs と合わせて保持する。
-                    recursive_reference_found = True
+                if key in retained_definitions or key in stack:
+                    # 同じ残深度の field/items を共有し、分岐ごとの指数的な展開を避ける。
+                    definition_reference_found = True
                     return copy.deepcopy(value)
                 resolved = resolve(defs[key], (*stack, key))
                 if not isinstance(resolved, dict):
@@ -792,9 +801,61 @@ def _materialize_local_refs(schema: Mapping[str, Any]) -> dict[str, Any]:
     materialized = resolve(dict(schema))
     if not isinstance(materialized, dict):  # pragma: no cover - root type is fixed above.
         raise ValueError("Interpreter generation Schema must be an object")
-    if recursive_reference_found:
+    if definition_reference_found:
         materialized["$defs"] = copy.deepcopy(defs)
+        _relocate_generation_refs(materialized, reference_root)
     return cast(dict[str, Any], materialized)
+
+
+def _bounded_task_contract_definitions(
+    definitions: Mapping[str, Any],
+) -> tuple[dict[str, Any], frozenset[str]]:
+    """根を 1、field/items を各 +1 として compiler と同じ最大深度の定義を共有する。"""
+
+    templates = {
+        key: _mapping(definitions, key)
+        for key in ("taskContractDraft", "contractField", "contractItem")
+    }
+    value_types = _mapping(definitions, "contractValueType").get("enum")
+    if not isinstance(value_types, list):
+        raise ValueError("Task contract generation types must be an enum")
+    bounded = {
+        key: copy.deepcopy(value) for key, value in definitions.items() if key not in templates
+    }
+    retained: set[str] = set()
+    for depth in range(1, MAX_CONTRACT_DEPTH + 1):
+        kinds = ("taskContractDraft",) if depth == 1 else ("contractField", "contractItem")
+        for kind in kinds:
+            node = copy.deepcopy(templates[kind])
+            properties = _mapping(node, "properties")
+            fields = _mapping(properties, "fields")
+            if depth == MAX_CONTRACT_DEPTH:
+                # 空 object はこの深度でも有効。array は必須 items が次の深度へ進むため不可。
+                fields["maxItems"] = 0
+                fields.pop("items", None)
+                properties.pop("items", None)
+                properties["type"] = {"enum": [value for value in value_types if value != "array"]}
+            else:
+                fields["items"] = {"$ref": f"#/$defs/contractFieldDepth{depth + 1}"}
+                properties["items"] = {"$ref": f"#/$defs/contractItemDepth{depth + 1}"}
+            name = kind if depth == 1 else f"{kind}Depth{depth}"
+            bounded[name] = node
+            retained.add(name)
+    return bounded, frozenset(retained)
+
+
+def _relocate_generation_refs(value: Any, reference_root: str) -> None:
+    """埋込先の `$defs` と内部参照を揃え、Manifest/Blueprint の同名定義を混在させない。"""
+
+    if isinstance(value, dict):
+        reference = value.get("$ref")
+        if isinstance(reference, str) and reference.startswith("#/$defs/"):
+            value["$ref"] = reference_root + reference[1:]
+        for item in value.values():
+            _relocate_generation_refs(item, reference_root)
+    elif isinstance(value, list):
+        for item in value:
+            _relocate_generation_refs(item, reference_root)
 
 
 def _restrict_manifest_to_model_contract_drafts(manifest: dict[str, Any]) -> None:

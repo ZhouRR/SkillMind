@@ -40,6 +40,25 @@ describe('document upload refusal boundaries', () => {
     expect(DOCUMENT_REQUEST_POLICY.blocks(documentFailure(error, true))).toBe(true)
   })
 
+  it('identifies a server format rejection only for the original upload request', () => {
+    const error = new ApiProblemError('Private upload internals', 422, 'content_type_not_allowed')
+    expect(documentUploadFailure(error)).toEqual({ key: 'uploadTypeNotAllowed' })
+    expect(documentUploadFailure(error, false)).toEqual({ key: 'invalid' })
+    expect(documentFailure(error, true)).toEqual({ key: 'invalid' })
+    expect(documentFailure(error, false)).toEqual({ key: 'invalid' })
+  })
+
+  it.each([
+    [401, 'sessionExpired'],
+    [403, 'denied'],
+    [404, 'denied'],
+    [409, 'uploadUnknown'],
+    [503, 'uploadUnknown'],
+  ] as const)('does not infer a format rejection from its code with status %s', (status, key) => {
+    expect(documentUploadFailure(new ApiProblemError('Private upload internals', status, 'content_type_not_allowed')))
+      .toEqual({ key })
+  })
+
   it.each([
     new ApiProblemError('Private upload internals', 413),
     new ApiProblemError('Private upload internals', 413, 'different_code'),
@@ -69,5 +88,10 @@ describe('document upload refusal boundaries', () => {
     expect(labels.uploadTooLarge).not.toContain(error.message)
     expect(labels.uploadUnknown).not.toBe(labels.unknown)
     expect(labels.uploadUnknown).not.toContain(error.message)
+    const formatError = new ApiProblemError('Private upload internals', 422, 'content_type_not_allowed')
+    expect(labels[documentUploadFailure(formatError).key]).toBe(labels.uploadTypeNotAllowed)
+    expect(labels.uploadTypeNotAllowed).not.toBe(labels.invalid)
+    expect(labels.uploadTypeNotAllowed).not.toContain(formatError.message)
+    expect(labels.uploadTypeNotAllowed).not.toContain(formatError.code)
   })
 })

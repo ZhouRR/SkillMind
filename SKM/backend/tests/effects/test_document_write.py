@@ -5,16 +5,20 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 from jsonschema import Draft202012Validator
-
+from skillmind.artifacts.repository import ArtifactRepository
+from skillmind.documents.library import DocumentLibraryTarget
+from skillmind.effects.document_command import load_document_effect_command
 from skillmind.effects.document_write import validate_document_write_proposal
 from skillmind.effects.domain import ChangeProposalValidationError
 from skillmind.effects.proposal import parse_change_proposal_request
 from skillmind.effects.release import ExecutionFeatures
 from tests.documents.test_document_library_binding import target
+from tests.storage.test_object_effect import fixture as object_fixture
 
 
 @pytest.mark.parametrize(
@@ -65,12 +69,20 @@ def request():
     return value
 
 
-def test_public_proposal_describes_original_artifact_without_model_body_or_storage_address():
+async def test_public_proposal_describes_original_artifact_without_model_body_or_storage_address(
+    monkeypatch,
+):
     """path/hash/size/MIME と原 Artifact を批准し、物理 key は Project binding から導出する。"""
-    project_id = uuid4()
-    scope = target().scope(project_id)
+    source, original, arguments = object_fixture()
+    project_id = original.project_id
+    library = DocumentLibraryTarget(source.namespace, original.bucket)
+    scope = library.scope(project_id)
+    value = request()
+    value["changes"][0]["value"].update(
+        content_hash=original.content_checksum, size_bytes=len(original.content)
+    )
     payload = validate_document_write_proposal(
-        parse_change_proposal_request(request()), binding_scope=scope
+        parse_change_proposal_request(value), binding_scope=scope
     )
     schema = json.loads(
         (
@@ -78,11 +90,19 @@ def test_public_proposal_describes_original_artifact_without_model_body_or_stora
             / "contracts/tools/document.write/v1/request.schema.json"
         ).read_text()
     )
-    Draft202012Validator(schema).validate(payload)
+    monkeypatch.setattr(
+        ArtifactRepository, "get_content", AsyncMock(return_value=arguments["artifact"])
+    )
+    command = await load_document_effect_command(
+        MagicMock(), effect_id=original.effect_id, project_id=project_id,
+        run_id=original.run_id, payload=payload, target=library,
+    )
+    # 物理 key は Effect ID 確定後の最終 payload だけに入る。公開 Schema はその形を保持する。
+    Draft202012Validator(schema).validate({**payload, "object_key": command.object_key})
+    assert command == original
     assert payload == {
         "path": "results/review/source.md",
-        "object_key": f"projects/{project_id}/documents/effects/results/review/source.md",
-        **request()["changes"][0]["value"],
+        **value["changes"][0]["value"],
     }
 
 

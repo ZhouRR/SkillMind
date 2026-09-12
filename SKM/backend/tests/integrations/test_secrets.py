@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import base64
 import os
+from dataclasses import replace
 from uuid import UUID, uuid4
 
 import pytest
-
+from skillmind.agent.postgres_source import create_database_engine
 from skillmind.core.secret_crypto import load_secret_cipher, managed_secret_aad
 from skillmind.integrations.domain import (
     IntegrationStatus,
@@ -63,6 +64,37 @@ def test_managed_resolution_decrypts_with_matching_aad() -> None:
     )
 
     assert resolver.resolve(reference) == "redmine-token"
+
+
+def test_managed_postgres_password_preserves_characters() -> None:
+    """DB パスワードの空白・記号・Unicode を復号から接続設定まで変更しない。"""
+    password = '  fixture-密碼:@/%+"  '
+    cipher = load_secret_cipher(_kek())
+    assert cipher is not None
+    project_id, reference_id = uuid4(), uuid4()
+    material = cipher.encrypt(
+        password,
+        aad=managed_secret_aad(project_id=project_id, secret_reference_id=reference_id),
+    )
+    reference = replace(
+        _managed_reference(
+            project_id=project_id,
+            reference_id=reference_id,
+            material=material,
+            status=IntegrationStatus.ACTIVE,
+        ),
+        provider="postgres",
+    )
+    resolved = DeploymentSecretResolver(cipher=cipher).resolve(reference)
+    engine = create_database_engine(
+        {"host": "db.example.test", "port": 5432, "database": "fixture",
+         "username": "fixture", "sslmode": "require"},
+        resolved,
+        read_only=True,
+    )
+    assert resolved == password
+    assert engine.url.password == password
+    assert password not in str(engine.url)
 
 
 def test_managed_resolution_without_cipher_fails_closed() -> None:

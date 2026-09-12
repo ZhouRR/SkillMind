@@ -135,6 +135,7 @@ class StoredInterpretationExecution:
     parent_interpretation_id: UUID | None = None
     adjustment: dict[str, Any] | None = None
     diff: dict[str, Any] = field(default_factory=dict)
+    validation_attempts: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

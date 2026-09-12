@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
-
+from jsonschema import Draft202012Validator
 from skillmind.runs.domain import CreatedRun, RunStatus, derive_task_id
 from skillmind.skills import InlineSkillFile, UploadSkillFile
+from skillmind.skills.domain import SkillInterpretationStatus
 from tests.api.fakes import FakeArqPool, FakeRunService, FakeSkillService
 
 
@@ -334,6 +337,51 @@ def test_get_interpretation_execution_returns_detail(client: TestClient) -> None
     payload = response.json()
     assert payload["status"] == "PREVIEW_READY"
     assert payload["diff"]["has_changes"] is False
+    assert payload["validation_attempts"] == []
+
+
+def test_execution_get_returns_only_stored_diagnostics_and_validated_openapi_example(
+    client: TestClient,
+) -> None:
+    """原 execution GET の許可リストと任意 Schema を通して脱敏済み失敗を表示する。"""
+
+    service = FakeSkillService()
+    organization_id = client.app.state.auth_service.actor.organization_id
+    original = service._execution(organization_id=organization_id)
+    stored = replace(
+        original, status=SkillInterpretationStatus.FAILED, report=None,
+        error_code="schema_validation_failed", validation_attempts=("/tasks/0: required",),
+    )
+    service.get_interpretation_execution = AsyncMock(return_value=stored)
+    client.app.state.skill_service = service
+    response = client.get(f"/api/v1/skill-interpretations/{stored.interpretation_id}/execution")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["validation_attempts"] == ["/tasks/0: required"]
+    assert not {
+        "execution", "execution_json", "parameters", "prompts", "raw_candidate"
+    } & set(payload)
+    service.get_interpretation_execution.assert_awaited_once_with(
+        organization_id=organization_id, interpretation_id=stored.interpretation_id
+    )
+    schema = client.app.openapi()["components"]["schemas"]["InterpretationExecutionResponse"]
+    assert "validation_attempts" not in schema["required"]
+    attempts_schema = schema["properties"]["validation_attempts"]
+    for example in attempts_schema["examples"]:
+        Draft202012Validator(attempts_schema).validate(example)
+
+
+def test_execution_diagnostics_still_require_administrator(client: TestClient) -> None:
+    """診断追加のために管理者専用 GET を通常ユーザーへ広げない。"""
+
+    auth = client.app.state.auth_service
+    auth.actor = replace(auth.actor, system_role="USER")
+    service = FakeSkillService()
+    service.get_interpretation_execution = AsyncMock()
+    client.app.state.skill_service = service
+    response = client.get(f"/api/v1/skill-interpretations/{uuid4()}/execution")
+    assert response.status_code == 403 and response.json()["code"] == "administrator_required"
+    service.get_interpretation_execution.assert_not_called()
 
 
 def test_get_interpretation_execution_returns_404_when_missing(client: TestClient) -> None:

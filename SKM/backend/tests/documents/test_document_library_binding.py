@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
-
 from skillmind.documents.library import (
     DOCUMENT_WRITE_CAPABILITY,
     DocumentLibraryBindingRepository,
@@ -82,7 +81,9 @@ async def test_freeze_and_require_use_real_resource_binding_without_fake_integra
     repository, session, row, identity = await binding()
     assert row.integration_id is None and row.source_binding_id is None
     assert row.capability_version == DOCUMENT_WRITE_CAPABILITY
-    assert row.scope_json["key_prefix"] == f"projects/{identity['project_id']}/documents/effects/"
+    assert row.scope_json["key_prefix"] == (
+        f"projects/{identity['project_id']}/documents/effects-v2/"
+    )
     assert await repository.require(**identity, binding_id=row.id) is row
     session.add.assert_called_once_with(row)
     session.flush.assert_awaited_once()
@@ -102,7 +103,7 @@ async def test_freeze_and_require_use_real_resource_binding_without_fake_integra
         ("resource_kind", "repository"),
         ("provider", "postgres"),
         ("capability_version", "database.write/v1"),
-        ("revision", "2"),
+        ("revision", "1"),
         ("disabled_at", datetime.now(UTC)),
         ("source_binding_id", uuid4()),
         ("checksum", "sha256:" + "a" * 64),

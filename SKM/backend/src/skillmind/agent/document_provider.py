@@ -37,6 +37,7 @@ from skillmind.documents.source import (
     ProjectDocumentContent,
     ProjectDocumentSource,
     read_frozen_document,
+    validate_source_object_key,
     verify_frozen_content,
 )
 from skillmind.storage import FileStorageError
@@ -178,6 +179,8 @@ class DocumentConvertProvider:
                 "converter": converter,
                 "markdown": converted.markdown,
                 "markdown_checksum": markdown_hash,
+                **({"source_object_key": validate_source_object_key(content.source_object_key)}
+                   if content.source_object_key is not None else {}),
                 "warnings": [
                     "Conversion may omit formatting, drawings, merged-cell structure and formulas. "
                     "Review conversion loss separately; do not infer original cell coordinates."
@@ -236,7 +239,9 @@ async def _load_observed_content(
             ):
                 raise DocumentSnapshotError("Stored document observation is unavailable")
             content = await source.fetch_observed(project_id=context.project_id, observed=observed)
-            if content is None or content.observation != observed.observation:
+            if (content is None or content.observation != observed.observation
+                or (observed.source_object_key is not None
+                    and content.source_object_key != observed.source_object_key)):
                 raise DocumentSnapshotError("Document no longer matches its observation")
             verify_frozen_content(document, content)
             if resolve_frozen_document(context, arguments) != document:
@@ -254,6 +259,8 @@ def _source_metadata(content: ProjectDocumentContent) -> dict[str, Any]:
     metadata: dict[str, Any] = {"reproducibility": "content_hash"}
     if content.observation is not None:
         metadata["storage_observation"] = content.observation.to_json()
+    if content.source_object_key is not None:
+        metadata["source_object_key"] = validate_source_object_key(content.source_object_key)
     return metadata
 
 

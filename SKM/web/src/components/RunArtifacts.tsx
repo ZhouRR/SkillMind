@@ -34,7 +34,7 @@ export function RunArtifacts({ projectId, runId, result, onSessionExpired }: {
   function close(): void { active.current = null; setRequest(null) }
 
   return <section className="resultSection runArtifacts" aria-label={labels.title}>
-    <h3>{labels.title}</h3><p className="hint">{labels.hint}</p>
+    <h3>{labels.title}</h3>
     {index.pending ? <p role="status">{labels.loading}</p> : index.failure
       ? <p className="error" role="alert">{labels.failures[index.failure.key]}</p>
       : <>

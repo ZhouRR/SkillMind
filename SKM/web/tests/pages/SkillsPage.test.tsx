@@ -2,6 +2,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { InterpretationExecutionRecord, SkillParseResult, SkillVersionRecord } from '../../src/api'
+import { LanguageProvider } from '../../src/i18n'
+import type { UiLanguage } from '../../src/lib/i18n/messages'
 import {
   InterpretStreamView,
   InterpretationExecutionView,
@@ -103,18 +105,20 @@ function execution(overrides: Partial<InterpretationExecutionRecord> = {}): Inte
 }
 
 /** InterpretationExecutionView を静的 markup へ描画する。 */
-function renderView(record: InterpretationExecutionRecord): string {
+function renderView(record: InterpretationExecutionRecord, language: UiLanguage = 'zh'): string {
   return renderToStaticMarkup(
-    <InterpretationExecutionView
-      execution={record}
-      instruction=""
-      onInstructionChange={vi.fn()}
-      onAdjust={vi.fn()}
-      onRegenerate={vi.fn()}
-      onCreateDraft={vi.fn()}
-      adjustState={{ status: 'idle' }}
-      versionBusy={false}
-    />,
+    <LanguageProvider language={language}>
+      <InterpretationExecutionView
+        execution={record}
+        instruction=""
+        onInstructionChange={vi.fn()}
+        onAdjust={vi.fn()}
+        onRegenerate={vi.fn()}
+        onCreateDraft={vi.fn()}
+        adjustState={{ status: 'idle' }}
+        versionBusy={false}
+      />
+    </LanguageProvider>,
   )
 }
 
@@ -313,6 +317,51 @@ describe('InterpretationExecutionView display', () => {
     // 失敗時は report 本文（summary・source trace・confidence）を一切描画しない。
     expect(html).not.toContain(REPORT.summary)
     expect(html).not.toContain('/capabilities/0')
+    expect(html).not.toContain('校验错误详情')
+  })
+
+  it.each([
+    ['zh', '校验错误详情'],
+    ['ja', '検証エラーの詳細'],
+    ['en', 'Validation error details'],
+  ] as const)('shows failed validation details collapsed by default in %s', (language, label) => {
+    const html = renderView(execution({
+      status: 'FAILED', error_code: 'schema_validation_failed', report: null,
+      validation_attempts: ['path=/report validator=required', 'path=/tasks validator=type'],
+    }), language)
+
+    expect(html).toContain(`<details class="rawResult"><summary>${label}</summary><ol>`)
+    expect(html).toContain('<li><pre>path=/report validator=required</pre></li><li><pre>path=/tasks validator=type</pre></li>')
+    expect(html.indexOf('schema_validation_failed')).toBeLessThan(html.indexOf(label))
+  })
+
+  it('renders validation diagnostics as escaped text in at most two ordered entries', () => {
+    const html = renderView(execution({
+      status: 'FAILED', error_code: 'schema_validation_failed', report: null,
+      validation_attempts: ['<script>alert("fixture")</script> & text', '[link](javascript:alert(1))', 'third-attempt-hidden'],
+    }))
+
+    expect(html).toContain('<pre>&lt;script&gt;alert(&quot;fixture&quot;)&lt;/script&gt; &amp; text</pre>')
+    expect(html).toContain('<pre>[link](javascript:alert(1))</pre>')
+    expect(html).not.toContain('<script>')
+    expect(html).not.toContain('<a href="javascript:')
+    expect(html).not.toContain('third-attempt-hidden')
+  })
+
+  it.each(['PREVIEW_READY', 'UNKNOWN', 'RUNNING'])('hides validation details for %s records', (status) => {
+    const html = renderView(execution({ status, validation_attempts: ['diagnostic-hidden'] }))
+
+    expect(html).not.toContain('校验错误详情')
+    expect(html).not.toContain('diagnostic-hidden')
+  })
+
+  it('does not invent diagnostics for an empty validation attempt list', () => {
+    const html = renderView(execution({
+      status: 'FAILED', error_code: 'schema_validation_failed', report: null, validation_attempts: [],
+    }))
+
+    expect(html).toContain('schema_validation_failed')
+    expect(html).not.toContain('校验错误详情')
   })
 
   it('shows the capability blueprint dimensions instead of only schema and gate', () => {
@@ -415,7 +464,7 @@ describe('SkillVersionDetail gate display', () => {
 
     expect(html).toContain('通过')
     expect(html).toContain('发布版本')
-    expect(html).not.toContain('存在阻断性检查未通过项')
+    expect(html).not.toContain('请先解决未通过的检查，再发布。')
   })
 
   it('renders gate findings and blocks publishing when a hard gate fails', () => {
@@ -435,7 +484,7 @@ describe('SkillVersionDetail gate display', () => {
     )
 
     expect(html).toContain('Declared tool is not in the registry.')
-    expect(html).toContain('存在阻断性检查未通过项')
+    expect(html).toContain('请先解决未通过的检查，再发布。')
     // gate 未通過の DRAFT は publish ボタンが disabled になる。
     expect(html).toContain('disabled')
   })

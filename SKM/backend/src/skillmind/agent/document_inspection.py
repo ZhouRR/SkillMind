@@ -18,6 +18,7 @@ from skillmind.documents.source import (
     InspectableProjectDocumentSource,
     ProjectDocumentObservation,
     ProjectDocumentSource,
+    validate_source_object_key,
 )
 from skillmind.storage import FileStorageError
 
@@ -95,6 +96,8 @@ def document_observation_result(
         "observed_at": datetime.now(UTC).isoformat(),
         "content_verified": False,
     }
+    if observed.source_object_key is not None:
+        observation["source_object_key"] = validate_source_object_key(observed.source_object_key)
     checksum = f"sha256:{sha256_hex(canonical_json(observation))}"
     return ProviderToolResult(
         response={
@@ -120,7 +123,7 @@ def document_observation_result(
                     "Storage metadata observation only; document bytes have not been verified."
                 ),
                 metadata={
-                    "observation_version": "v1",
+                    "observation_version": "v2" if observed.source_object_key is not None else "v1",
                     "observation": observation,
                     "source_reference_checksum": observed.reference_checksum,
                 },

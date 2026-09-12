@@ -261,7 +261,7 @@ async def check(url: str, output: Path | None) -> None:
                         )
                     await prepare(page, url, language)
                     await expect(page.locator(".authBrand img.brandMark")).to_have_attribute(
-                        "src", "/skillmind/favicon.svg"
+                        "src", "/skillmind/favicon.png"
                     )
                     await expect(page.locator(".authBrand strong")).to_have_text("Skillmind")
                     if name.endswith("-abort"):

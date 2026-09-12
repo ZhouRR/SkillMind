@@ -391,7 +391,7 @@ async def navigation(page: Page, api: ProjectsApi, labels: dict) -> None:
     await page.locator(".sidebarLogout").focus()
     await page.keyboard.press("Enter")
     await expect(page.locator('input[name="email"]')).to_be_visible()
-    await expect(page.locator(".authBrand img.brandMark")).to_have_attribute("src", "/skillmind/favicon.svg")
+    await expect(page.locator(".authBrand img.brandMark")).to_have_attribute("src", "/skillmind/favicon.png")
     await expect(page.locator(".authBrand strong")).to_have_text("Skillmind")
     assert any(call[1] == "auth/logout" for call in api.calls)
 

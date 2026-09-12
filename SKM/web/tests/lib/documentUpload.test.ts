@@ -94,6 +94,13 @@ describe('immutable original document uploads', () => {
     },
   )
 
+  it('keeps an explicit format rejection certain without changing its write gate', () => {
+    const failure = documentUploadFailure(new ApiProblemError('private', 422, 'content_type_not_allowed'))
+    expect(failure).toEqual({ key: 'uploadTypeNotAllowed' })
+    expect(uploadIsUncertain(failure)).toBe(false)
+    expect(DOCUMENT_UPLOAD_POLICY.blocks(failure)).toBe(false)
+  })
+
   it('does not mistake a missing original upload lookup for denied Project access', () => {
     const error = new ApiProblemError('private', 404, 'document_upload_not_found')
     expect(documentUploadFailure(error, false)).toEqual({ key: 'uploadNotFound' })

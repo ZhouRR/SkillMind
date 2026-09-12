@@ -20,6 +20,15 @@ _CONTEXT_FIELDS = frozenset({
     "proposal_id",
     "effect_execution_id",
     "worker_id",
+    # 解釈の原要求、確定結果と静的 Provider 診断を本文なしで対応付ける。
+    "execution_key",
+    "skill_source_id",
+    "interpretation_id",
+    "parent_interpretation_id",
+    "attempt",
+    "provider_error_kind",
+    "provider_result_subtype",
+    "provider_exit_code",
     # Agent へ渡した指示の監査値。Brief 正文は Skill guidance と業務入力を含むため、
     # 出力するのは checksum と profile 名だけに留める。
     "task_brief_checksum",

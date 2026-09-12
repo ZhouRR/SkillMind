@@ -24,6 +24,8 @@ export interface ProviderFormDefinition {
   readCapability: string
   writeCapability: string | null
   requiresSecret: boolean
+  /** 接続方式に対応する認証値。別の方式を選ばせて誤送信しない。 */
+  credentialKind: 'password' | 'apiKey' | 'token'
   /** ENVIRONMENT resolver の locator 入力例。 */
   environmentLocatorExample: string
   /** FILE resolver の locator 入力例。 */
@@ -34,11 +36,11 @@ export interface ProviderFormDefinition {
 export const PROVIDER_FORMS: Record<ResourceProvider, ProviderFormDefinition> = {
   postgres: {
     provider: 'postgres', kind: 'other', readCapability: 'database.read/v1', writeCapability: 'database.write/v1',
-    requiresSecret: true, environmentLocatorExample: 'POSTGRES_PASSWORD', fileLocatorExample: '/run/secrets/postgres-password',
+    requiresSecret: true, credentialKind: 'password', environmentLocatorExample: 'POSTGRES_PASSWORD', fileLocatorExample: '/run/secrets/postgres-password',
   },
   mcp: {
     provider: 'mcp', kind: 'other', readCapability: 'mcp.read/v1', writeCapability: null,
-    requiresSecret: false, environmentLocatorExample: 'MCP_ACCESS_TOKEN', fileLocatorExample: '/run/secrets/mcp-access-token',
+    requiresSecret: false, credentialKind: 'token', environmentLocatorExample: 'MCP_ACCESS_TOKEN', fileLocatorExample: '/run/secrets/mcp-access-token',
   },
   redmine: {
     provider: 'redmine',
@@ -46,6 +48,7 @@ export const PROVIDER_FORMS: Record<ResourceProvider, ProviderFormDefinition> = 
     readCapability: 'issue.read/v1',
     writeCapability: 'issue.update/v1',
     requiresSecret: true,
+    credentialKind: 'apiKey',
     environmentLocatorExample: 'REDMINE_API_KEY',
     fileLocatorExample: '/run/secrets/redmine-api-key',
   },
@@ -56,6 +59,7 @@ export const PROVIDER_FORMS: Record<ResourceProvider, ProviderFormDefinition> = 
     // §20 で登録された受控書き込み。宣言した Integration だけが承認済み変更の apply 先になる。
     writeCapability: 'repository.write/v1',
     requiresSecret: false,
+    credentialKind: 'token',
     environmentLocatorExample: 'GIT_ACCESS_TOKEN',
     fileLocatorExample: '/run/secrets/git-access-token',
   },
@@ -65,6 +69,7 @@ export const PROVIDER_FORMS: Record<ResourceProvider, ProviderFormDefinition> = 
     readCapability: 'repository.read/v1',
     writeCapability: 'repository.write/v1',
     requiresSecret: true,
+    credentialKind: 'password',
     environmentLocatorExample: 'SVN_PASSWORD',
     fileLocatorExample: '/run/secrets/svn-password',
   },

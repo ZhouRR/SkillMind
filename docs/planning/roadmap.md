@@ -19,7 +19,7 @@
 | 顺序 | 项目 / 设计 | 完成度 | 已有基础与关键缺口 | 首版范围 |
 | --- | --- | --- | --- | --- |
 | 1 | [R06 Skill 生命周期](../design/skill-contract.md) | 65% | 导入、解释、发布、启用及[异步原请求](../design/skill-interpretation.md)的 API/Worker/SSE、未知恢复与页面只读确认已接并经局部验证；真实事务/版本部署、候选绑定及导入回执/存储归属未闭合。 | 收口单 Skill 链路；共享组合、同版重新启用及跨 Skill 规则组合后置。 |
-| 2 | [R12 业务质量验收](../design/results-evaluation.md) | 15% | 已确定完整执行 rv-reviewer；Worker MarkItDown 显式转换及原 Markdown Artifact 保存已接入，MinIO 使用「JAF新ロードサービスシステム構築」项目文档库。首次业务登记所需的项目/文档库引用已传入 Brief；业务库初始化契约与列权限经隔离 SQL 验证，真实 PostgreSQL 尚未配置。受控保存、业务规则保真、证据和结果质量待验收。 | 围绕选定 Skill 明确验收范围和真实案例，持续人工核对。 |
+| 2 | [R12 业务质量验收](../design/results-evaluation.md) | 15% | 已确定完整执行 rv-reviewer；Worker MarkItDown 显式转换及原 Markdown Artifact 保存已接入，MinIO 使用「JAF新ロードサービスシステム構築」项目文档库。首次业务登记所需的项目/文档库引用已传入 Brief；真实 PostgreSQL 已登记，密码连接、现有表结构读取及提交前撤权回滚已实测；线上密码表单、合成 Excel 上传及下载内容校验已通过，独立预期与输入分开保存。完整 Run 的受控保存、业务规则保真、证据和结果质量待验收。 | 围绕选定 Skill 明确验收范围和真实案例，持续人工核对。 |
 | 3 | [R07 Run 与审计](../design/agent-runtime.md) | 75% | 执行、答复、结果、评价及进程内 Tool 清理等待已接，真实 CLI/Engine 的合成结果输出已验；[持久停止](../design/run-supervision.md)、Session 审计、撤权竞争与真实接管/恢复待补。 | 可靠取消、异常恢复和关键审计；复杂分支与审计界面后置。 |
 | 4 | [R01 资源冻结](../design/resource-snapshots.md) | 70% | 输入冻结与限额、PostgreSQL/MCP 读取已接，空表结构与复合主键可显式查询；单份/目录 metadata Tool、时区日期筛选、分页 Evidence、按需准备和观察引用固定转换经局部验证；文档处理的原效果前置门禁、就绪查询及预览已接，实时目录与业务记录保真待验。MCP 工具调用范围、[存储归属、封闭写入及精确清理结算](../design/document-lifecycle.md#持久清理仍待补齐)、真实业务资源/事务/恢复待补。 | 保障 rv-reviewer 的 Excel 读取/转换和版本一致性；写入遵循受控效果边界。 |
 | 5 | [R05 领域与身份安全](../design/authentication.md) | 80% | 登录、账户、成员、项目和运行授权已接；独立项目审计、完整删除、真实事务/Redis/HTTPS 及 Secret 恢复待验。 | 收口首版授权与撤权；完整业务删除及高级管理后置。 |
@@ -28,7 +28,7 @@
 | 8 | [R10 全部 Web 页面](../design/workspace.md) | 70% | 核心页面、文档选择批量删除/指定目录上传/Markdown 渲染、PostgreSQL/MCP 配置与双主题已有；管理操作未知确认、晚到响应隔离、全站分页和真实会话/存储验收待补。 | 先部署预览界面，再收口首版必需页面和异常交互；视觉改造不代替业务验收。 |
 | 9 | [R13 全量契约与最终审计](../development/contract-workflow.md) | 30% | 契约校验和局部回归已有；全项目逐需求核对与最终审计未完成。 | 验收本期需求对应的代码、契约、消费者和真实证据；全量审计后置。 |
 | 10 | [R09 调度](../design/task-scheduling.md) | 80% | ONCE/CRON、持久触发与原键恢复已有；真实撤权/多 Worker 事务、人工处置与迟到策略待补。 | 整体后置，服务端限制创建、触发和恢复入口。 |
-| 11 | [R08 外部效果](../design/repository-effects.md) | 55% | PostgreSQL/文档保存已有续租、限时与未知记录；只读核对的台账、Worker、超时回收、HTTP 和三语页面已接，原请求响应丢失与刷新经局部验证，人工处置及实际恢复待接。成果保存支持一次发送、原回执恢复及回读数据传入下一 Segment，生产文档写入独立关闭。MinIO 服务端保证和真实恢复待验。 | 纳入 rv-reviewer 所需的 PostgreSQL 记录和 MinIO 成果保存；其他写入后置。 |
+| 11 | [R08 外部效果](../design/repository-effects.md) | 55% | PostgreSQL/文档保存已有续租、限时与未知记录；只读核对的台账、Worker、超时回收、HTTP 和三语页面已接，原请求响应丢失与刷新经局部验证，人工处置及实际恢复待接。成果保存使用 Effect/内容隔离的 v2 对象、一次发送、原回执核对及回读数据传入下一 Segment，独立部署开关默认关闭；v1 保留原身份只读。真实 MinIO 保存、批准续行及恢复待验。 | 纳入 rv-reviewer 所需的 PostgreSQL 记录和 MinIO 成果保存；其他写入后置。 |
 | 12 | [R03 Task Flow 完整链路](../design/task-flow.md) | 30% | 精确任务只读预览已有；默认预览、版本化 Flow/DRAFT/diff、冻结、事件联动及响应总量控制待补。 | 保留现有只读预览；完整流程编辑与联动后置。 |
 | 13 | [R04 生成模块](../design/generated-modules.md) | 10% | 版本模型与静态前置已有；完整构建身份、builder、安全投放、Host、发布及展示回退未接。 | 整体后置，使用标准结果界面。 |
 
@@ -45,8 +45,8 @@
 ### 后置能力的边界
 
 - R03 / R04 / R09、子 Agent、高级组合及 R08 无关写入后置；R08 中本用例的 PostgreSQL/MinIO 写入纳入首版。
-- 默认关闭 `SKILLMIND_DEFERRED_FEATURES_ENABLED` 和独立的 `SKILLMIND_DATABASE_WRITES_ENABLED`：前者控制既有外部写入、调度和子 Agent，后者只控制 PostgreSQL INSERT/UPDATE；均与普通 Run 的 dispatch 分开。限制覆盖 API、能力目录、实际 Worker job 和恢复入口，已有队列也不能绕过；隐藏菜单或缺少凭据不是关闭证明。读取历史、取消 Run、停用调度/预授权继续保留。已有快照不删权限来冒充首版 Run，含禁用能力的执行须明确拒绝。
-- 当前默认总开关仍关闭外部写入；不能为 RV 一次性放开调度、子 Agent 或所有 Provider。新增写入须有精确 capability/operation 门禁和批准/幂等/回读协议，装配并验收后才单独开放，见[受控写入](../design/repository-effects.md#首版所需的存储和数据库写入)。
+- 默认关闭 `SKILLMIND_DEFERRED_FEATURES_ENABLED`、`SKILLMIND_DATABASE_WRITES_ENABLED` 和 `SKILLMIND_DOCUMENT_WRITES_ENABLED`：分别控制既有外部写入/调度/子 Agent、PostgreSQL INSERT/UPDATE、文档库 Artifact CREATE；均与普通 Run 的 dispatch 分开。限制覆盖 API、能力目录、实际 Worker job 和恢复入口，已有队列也不能绕过；隐藏菜单或缺少凭据不是关闭证明。读取历史、取消 Run、停用调度/预授权继续保留。已有快照不删权限来冒充首版 Run，含禁用能力的执行须明确拒绝。
+- RV 的数据库和文档写入按独立开关配置；不能为 RV 一次性放开调度、子 Agent 或所有 Provider。新增写入须有精确 capability/operation 门禁和批准/幂等/回读协议，装配并验收后才单独开放，见[受控写入](../design/repository-effects.md#首版所需的存储和数据库写入)。
 - Tasks/Resources 按会话返回的部署状态省略调度/预授权读取与后置操作入口；手动 Run、只读资源配置和已有调度历史保持可用。
 - 限定只读资源不能自动解决 Skill 导入存储风险。停止发布不等于远端 PUT 停止，业务取消不等于模型停止；未知调用、写入和费用不得盲目重试、退额或视为已结清，处置遵循所属设计。
 

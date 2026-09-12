@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
-
 from skillmind.core.settings import Settings
+from skillmind.storage.factory import create_document_upload_limits
 
 
 def test_context_path_accepts_nested_absolute_path() -> None:
@@ -30,6 +30,19 @@ def test_document_allowlist_covers_preview_formats() -> None:
     assert {"text/plain", "text/markdown", "text/html"} <= set(allowed)
     # 実行可能物の許可は別決定が要る。既定に紛れ込ませない。
     assert "application/x-sh" not in allowed
+
+
+@pytest.mark.parametrize("content_type", [
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel",
+])
+def test_default_upload_policy_accepts_excel_content_types(content_type: str) -> None:
+    """Excel の正規 MIME が既定の upload policy で拒否されないことを確認する。"""
+
+    limits = create_document_upload_limits(Settings(_env_file=None))
+    assert limits.validate(
+        size=4, content_type=content_type, content=b"test", project_usage_bytes=0,
+    ) == content_type
 
 
 def test_auth_cookie_uses_host_prefix_only_in_production() -> None:

@@ -45,7 +45,8 @@
 [data-page='resources'] .resourceInfo { gap: 8px; }
 [data-page='resources'] .resourceInfo strong { font-size: 15px; }
 [data-page='documents'] .documentUpload { padding: 0; margin-bottom: 16px; border: 0; }
-.documentToolbar { align-items: center; }
+.documentToolbar { align-items: end; }
+.documentToolbar .documentTargetFolder { margin: 0; }
 .documentToolbar .fileUploadButton { width: auto; margin: 0; }
 .documentToolbar .documentRefresh { margin: 0 0 0 auto; }
 [data-page='documents'] .documentHelp { margin-top: 24px; }

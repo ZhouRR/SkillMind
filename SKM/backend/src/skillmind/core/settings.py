@@ -50,9 +50,10 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     queue_name: str = "skillmind:runs"
     worker_dispatch_enabled: bool = False
-    # 後置の write/調度/子と RV の DB write は独立して明示有効化する。
+    # 後置の write/調度/子、RV の DB write、文書庫 CREATE を独立して明示有効化する。
     deferred_features_enabled: bool = False
     database_writes_enabled: bool = False
+    document_writes_enabled: bool = False
     outbox_batch_size: int = Field(default=20, ge=1, le=100)
     run_lease_seconds: int = Field(default=60, ge=30, le=300)
     run_max_attempts: int = Field(default=3, ge=1, le=10)
@@ -98,6 +99,9 @@ class Settings(BaseSettings):
         "application/json",
         "application/yaml",
         "application/pdf",
+        # Worker の固定 Excel converter が読む原本。upload 時に変換や macro 実行はしない。
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel",
         "image/png",
         "image/jpeg",
         "image/gif",

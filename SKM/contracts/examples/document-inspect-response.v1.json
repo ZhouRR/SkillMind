@@ -18,11 +18,12 @@
   },
   "observed_at": "2026-09-11T02:00:00+00:00",
   "content_verified": false,
-  "observation_checksum": "sha256:ea2d9cd6396332948f84fd8d0ec242bcf6741917c5706bdae4485d221f9377bd",
+  "observation_checksum": "sha256:d73413c04c66c3f3591d4207d88b4aa3286f945bdf12974171be5eb82229d34a",
   "evidence_refs": [
     "ev_metadata_001"
   ],
   "warnings": [
     "Storage metadata only; document bytes have not been verified."
-  ]
+  ],
+  "source_object_key": "projects/22222222-2222-4222-8222-222222222222/documents/11111111-1111-4111-8111-111111111111/cases.xlsx"
 }

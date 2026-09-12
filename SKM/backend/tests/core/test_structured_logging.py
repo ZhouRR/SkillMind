@@ -8,7 +8,6 @@ import logging
 from uuid import uuid4
 
 import pytest
-
 from skillmind.core.logging import JsonLogFormatter, log_event
 
 
@@ -100,3 +99,30 @@ def test_log_event_emits_agent_task_brief_audit_identity() -> None:
     assert payload["execution_profile"] == "SUPERVISED"
     assert "task_brief" not in payload
     assert "private rule body" not in stream.getvalue()
+
+
+def test_interpretation_diagnostics_keep_correlation_without_unregistered_content(caplog) -> None:
+    """既存の候補検証ログも実行キー/試行番号を失わず、診断本文は許可しない。"""
+
+    logger = logging.getLogger("skillmind.test.interpretation")
+    identity = {"request_id": uuid4(), "skill_source_id": uuid4(),
+                "parent_interpretation_id": uuid4(), "interpretation_id": uuid4()}
+    with caplog.at_level(logging.WARNING, logger=logger.name):
+        log_event(
+            logger, logging.WARNING, "skill.interpret.candidate_invalid",
+            **identity, execution_key="sha256:" + "a" * 64, attempt=1,
+            error_code="invalid_json", provider_error_kind="ProcessError",
+            provider_exit_code=17, provider_result_subtype="error_during_execution",
+            stderr="fixture-private-stderr", errors=["fixture-private-error"],
+            result="fixture-private-result", password="fixture-private-password",
+        )
+    serialized = JsonLogFormatter().format(caplog.records[-1])
+    payload = json.loads(serialized)
+    for key, value in identity.items():
+        assert payload[key] == str(value)
+    assert payload["execution_key"] == "sha256:" + "a" * 64
+    assert payload["attempt"] == 1
+    assert payload["provider_error_kind"] == "ProcessError"
+    assert payload["provider_exit_code"] == 17
+    assert payload["provider_result_subtype"] == "error_during_execution"
+    assert "fixture-private" not in serialized

@@ -8,7 +8,6 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-
 from skillmind.core.hashing import sha256_hex
 from skillmind.effects.database_write import build_database_write, database_proposal_payload
 from skillmind.effects.domain import ChangeProposalValidationError
@@ -18,9 +17,9 @@ from tests.runs.effect_authorization_harness import AuthorizationHarness
 from tests.runs.test_document_proposals import document_proposal
 
 
-async def stopped_document(monkeypatch):
+async def stopped_document(monkeypatch, *, revision="2"):
     """停止済み Run と失効 lease を持つ、変更しない原提案/承認を作る。"""
-    h = await document_proposal(monkeypatch)
+    h = await document_proposal(monkeypatch, revision=revision)
     h.run.status, h.execution.status = "CANCELLED", "FAILED"
     h.execution.error_json = {"code": "effect_result_unknown", "retryable": False}
     h.execution.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
@@ -155,4 +154,36 @@ async def test_read_cannot_switch_original_effect_request_or_bytes(monkeypatch, 
     else:
         h.execution.error_json = None
     with pytest.raises((ValueError, LookupError, ChangeProposalValidationError)):
+        await load(h)
+
+
+async def test_legacy_reconciliation_reconstructs_original_scope_key_and_metadata(monkeypatch):
+    """v1 原批准は新 key/checksum に置換せず、閉じた write gate のまま只読対象にする。"""
+
+    h = await stopped_document(monkeypatch, revision="1")
+    original = deepcopy(h.run.selected_sources_json)
+    target = await load(h)
+    command = target.command
+    assert command.protocol_version == 1
+    assert target.provider_version == "project-library-receipt/v1"
+    assert command.logical_path == h.draft.target["locator"]
+    assert command.object_key == (
+        f"projects/{h.run.project_id}/documents/effects/{h.draft.target['locator']}"
+    )
+    assert command.origin_metadata["skm-protocol"] == "artifact-object-create/v1"
+    assert command.origin_metadata["skm-request-checksum"] == command.request_checksum
+    assert h.run.selected_sources_json == original and h.binding.revision == "1"
+
+
+@pytest.mark.parametrize("revision,provider", [
+    ("1", "project-library-receipt/v2"), ("2", "project-library-receipt/v1"),
+])
+async def test_reconciliation_cannot_change_the_original_object_protocol(
+    monkeypatch, revision, provider,
+):
+    """Provider 版だけを差し替えて旧承認を新 key 空間へ向ける操作も拒否する。"""
+
+    h = await stopped_document(monkeypatch, revision=revision)
+    h.execution.provider_version = provider
+    with pytest.raises(ValueError, match="protocol"):
         await load(h)

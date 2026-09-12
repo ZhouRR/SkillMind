@@ -8,7 +8,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from skillmind.effects.database_write import (
     DATABASE_WRITE_PROVIDER_VERSION,
 )
@@ -59,16 +58,16 @@ async def test_library_stage_uses_configured_target_without_integration_secret(m
         document_library_target=library,
     )
     await service.authorize_effect_step(
-        claimed, None, provider_version="project-library-receipt/v1", secret_resolver=MagicMock()
+        claimed, None, provider_version="project-library-receipt/v2", secret_resolver=MagicMock()
     )
-    assert reached == ["project-library-receipt/v1"]
+    assert reached == ["project-library-receipt/v2"]
     load.assert_not_awaited()
     secret.assert_not_awaited()
     with pytest.raises(PermissionError):
         await service.authorize_effect_step(
             claimed,
             "unexpected",
-            provider_version="project-library-receipt/v1",
+            provider_version="project-library-receipt/v2",
             secret_resolver=MagicMock(),
         )
 

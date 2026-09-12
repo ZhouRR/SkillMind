@@ -30,6 +30,7 @@ from skillmind.skills import (
 )
 from skillmind.skills.interpreter_cli import run_fixture
 from skillmind.skills.manifest_gate import ManifestValidator
+from skillmind.skills.task_contract import MAX_CONTRACT_DEPTH
 from tests.skills.manifest_gate_fixtures import directory_gate_source
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -390,8 +391,8 @@ def test_system_skill_identity_is_versioned_and_matches_fixture_contract() -> No
     identity = load_interpreter_system_skill(SYSTEM_SKILL)
     example = _load_contract("examples/skill-interpreter-request.v1.json")["interpreter"]
 
-    assert identity.version == "4.1.0"
-    assert identity.interpreter_version == "skillmind-skill-interpreter/4.1.0"
+    assert identity.version == "4.1.2"
+    assert identity.interpreter_version == "skillmind-skill-interpreter/4.1.2"
     assert identity.to_dict() == example
 
 
@@ -408,6 +409,10 @@ def test_system_skill_instructs_output_language_to_follow_the_source() -> None:
 
     assert "same natural language as the Skill source" in prompt
     assert "stay lowercase ASCII" in prompt
+    assert "Business `enum` values are data" in prompt
+    assert "preserve the source's exact values, letter case, and JSON types" in prompt
+    assert "Platform-defined enum values must match their frozen contracts" in prompt
+    assert "contract field `key`, `enum` value" not in prompt
     assert "Add an `output_contract` only" in prompt
     assert "`change.propose/v1`" in prompt
     assert "For `mode=propose`" in prompt
@@ -483,6 +488,24 @@ def test_system_skill_maps_procedure_onto_the_capabilities_that_now_exist() -> N
     assert "a format the platform cannot textualize" in prompt
 
 
+def test_system_skill_distinguishes_on_demand_content_and_proposal_only_changes() -> None:
+    """未準備文書の先読みや未適用の変更を、別段落の説明で完了扱いさせない。"""
+
+    package = SkillPackageParser().parse_directory(SYSTEM_SKILL.resolve())
+    prompt = "\n".join(item.content for item in load_inline_text_files(SYSTEM_SKILL, package))
+
+    assert "document bindings initially contain metadata only" in prompt
+    assert "an index never proves that content was downloaded or converted" in prompt
+    assert "Preserve an explicitly" in prompt and "required converter" in prompt
+    assert "When a task declares\n       `document_prerequisites`" in prompt
+    assert "`document.readiness/v1` is an exception" in prompt
+    assert "platform-scoped\n   exceptions follow CapabilityBlueprint rule 8" in prompt
+    assert "follows the Git/SVN proposal-only rule above" in prompt
+    assert "a proposal does not prove it was applied" in prompt
+    assert "Every bound\n     `repository` and `document`" not in prompt
+    assert "Skillmind lands the approved change itself" not in prompt
+
+
 def test_output_contract_scopes_without_invention_to_business_content() -> None:
     """`without invention` は業務内容のみを縛り、手順の重表達を禁じないと明記する。"""
 
@@ -491,8 +514,31 @@ def test_output_contract_scopes_without_invention_to_business_content() -> None:
     assert "That rule binds business content" in contract
     assert "not procedure" in contract
     assert 'per `SKILL.md` "Procedural re-expression"' in contract
-    assert "in the frozen catalog *and* in some `resource_requirements`" in contract
+    assert "in the frozen catalog" in contract
+    assert (
+        "Integration-backed capabilities must also appear in some `resource_requirements`"
+        in contract
+    )
+    assert "platform-scoped exceptions follow `SKILL.md` CapabilityBlueprint rule 8" in contract
     assert "never appears in a step, rule, or deliverable" in contract
+
+
+def test_system_skill_bounds_contract_depth_without_changing_source_deliverables() -> None:
+    """Model に compiler と同じ深度を伝え、深い成果物をフォーム契約へ改変させない。"""
+
+    package = SkillPackageParser().parse_directory(SYSTEM_SKILL.resolve())
+    prompt = "\n".join(item.content for item in load_inline_text_files(SYSTEM_SKILL, package))
+
+    assert f"maximum nesting depth of {MAX_CONTRACT_DEPTH}" in prompt
+    assert "root as depth 1" in prompt
+    assert "each object field and each array `items` node adds 1, including scalar leaves" in prompt
+    assert "Manifest and Blueprint wrappers do not count" in prompt
+    for field in ("input_contract", "output_contract", "parameter_contract", "result_contract"):
+        assert f"`{field}`" in prompt
+    assert "caller-supplied parameters" in prompt
+    assert "an exact Artifact deliverable" in prompt
+    assert "Do not truncate, rename, or\nserialize required structures" in prompt
+    assert "preserve that limitation as an `assisted` diagnostic" in prompt
 
 
 def test_fixture_runner_validates_response_and_publishable_manifest() -> None:
@@ -539,7 +585,7 @@ def test_bind_identity_stamps_platform_identity_on_model_output() -> None:
     response["runtime_manifest_draft"]["tasks"] = [task]  # type: ignore[index]
     validated = InterpreterFixtureRunner(CONTRACTS).run(request, response, bind_identity=True)
     identity = validated["runtime_manifest_draft"]["identity"]
-    assert identity["interpreter_version"] == "skillmind-skill-interpreter/4.1.0"
+    assert identity["interpreter_version"] == "skillmind-skill-interpreter/4.1.2"
     assert identity["source_hash"] == request["source"]["content_hash"]  # type: ignore[index]
     # 蓝图は同じ解釈の一部であり、manifest と別の identity/互換 level を持ってはならない。
     blueprint = validated["runtime_manifest_draft"]["capability_blueprint"]

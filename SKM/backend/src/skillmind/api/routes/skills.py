@@ -6,7 +6,7 @@ import json
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 from time import monotonic
-from typing import Any, Literal, cast
+from typing import Annotated, Any, Literal, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Request, Response, status
@@ -147,6 +147,18 @@ class InterpretationExecutionResponse(BaseModel):
     parent_interpretation_id: UUID | None
     adjustment: dict[str, Any] | None
     diff: dict[str, Any]
+    validation_attempts: list[
+        Annotated[str, Field(min_length=1, max_length=4096, pattern=r"^[^\x00-\x1f\x7f]+$")]
+    ] = Field(
+        default_factory=list,
+        max_length=2,
+        description=(
+            "Read-only projection of persisted validation diagnostics in attempt order. Only "
+            "recognized paths/codes or fixed platform messages are exposed. Optional for older "
+            "responses; empty when unavailable. Candidate values and execution data are excluded."
+        ),
+        examples=[["/runtime_manifest_draft/tasks/0: required"]],
+    )
 
 
 class InterpretationLaunchResponse(BaseModel):
@@ -1319,6 +1331,7 @@ def _execution_response(
         parent_interpretation_id=stored.parent_interpretation_id,
         adjustment=stored.adjustment,
         diff=stored.diff,
+        validation_attempts=list(stored.validation_attempts),
     )
 
 

@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
-
 from skillmind.artifacts.domain import ArtifactContent, ArtifactMetadata
 from skillmind.artifacts.repository import ArtifactRepository
 from skillmind.core.hashing import sha256_hex
@@ -19,7 +18,10 @@ from skillmind.documents.library import (
     DocumentLibraryBindingRepository,
     FrozenDocumentLibraryBinding,
 )
-from skillmind.effects.document_write import DOCUMENT_WRITE_PROVIDER_VERSION
+from skillmind.effects.document_write import (
+    DOCUMENT_WRITE_PROVIDER_VERSION,
+    LEGACY_DOCUMENT_WRITE_PROVIDER_VERSION,
+)
 from skillmind.effects.domain import ChangeProposalValidationError, EffectLeaseValidationError
 from skillmind.effects.proposal import (
     parse_change_proposal_request,
@@ -33,7 +35,7 @@ from tests.effects.test_document_write import request
 from tests.runs.effect_authorization_harness import AuthorizationHarness
 
 
-async def document_proposal(monkeypatch):
+async def document_proposal(monkeypatch, *, revision="2"):
     """SQL/外部 I/O を double にし、原 checksum と Artifact byte の本番 validator を通す。"""
 
     h = AuthorizationHarness()
@@ -69,11 +71,13 @@ async def document_proposal(monkeypatch):
         actor_id=h.actor.id,
         requirement_key=h.draft.resource_key,
     )
-    h.run.selected_sources_json = {
-        h.draft.resource_key: FrozenDocumentLibraryBinding(
-            h.run.project_id, h.run.id, h.binding.id, h.draft.resource_key, h.target
-        ).to_json()
-    }
+    frozen = FrozenDocumentLibraryBinding(
+        h.run.project_id, h.run.id, h.binding.id, h.draft.resource_key, h.target, revision
+    ).to_json()
+    # 保存済み旧版はその版の元 scope/checksum を持つ。新 freeze は常に v2 のまま。
+    h.binding.revision, h.binding.scope_json = revision, frozen["scope"]
+    h.binding.checksum = frozen["binding_checksum"]
+    h.run.selected_sources_json = {h.draft.resource_key: frozen}
     h.claimed = replace(
         h.claimed,
         integration_id=None,
@@ -85,8 +89,8 @@ async def document_proposal(monkeypatch):
         precondition=deepcopy(h.draft.precondition),
         verification=deepcopy(h.draft.verification),
         provider="project-library",
-        integration_revision=1,
-        integration_scope=h.target.scope(h.run.project_id),
+        integration_revision=int(revision),
+        integration_scope=h.target.scope(h.run.project_id, revision=revision),
         integration_config={},
         secret_reference_id=None,
         idempotency_key=h.draft.idempotency_key,
@@ -129,7 +133,8 @@ async def document_proposal(monkeypatch):
     h.approval.proposal_checksum = p.checksum
     h.execution.provider, h.execution.provider_version = (
         "project-library",
-        DOCUMENT_WRITE_PROVIDER_VERSION,
+        (LEGACY_DOCUMENT_WRITE_PROVIDER_VERSION if revision == "1"
+         else DOCUMENT_WRITE_PROVIDER_VERSION),
     )
     h.execution.idempotency_key, h.execution.request_fingerprint = (
         p.idempotency_key,
@@ -278,7 +283,7 @@ async def test_initial_proposal_uses_the_same_library_and_artifact_checks(monkey
         claimed, run=h.run, draft=h.draft
     )
     assert binding.id == h.binding.id and integration is None
-    assert payload["object_key"].startswith(h.target.scope(h.run.project_id)["key_prefix"])
+    assert payload["path"] == h.draft.target["locator"] and "object_key" not in payload
     h.read_artifact.assert_awaited_once()
 
 
@@ -293,3 +298,36 @@ async def test_null_integration_is_not_an_escape_for_external_providers(monkeypa
         await h.repository._validate_effect_binding(
             run=h.run, binding=h.binding, capability_version=capability
         )
+
+
+@pytest.mark.parametrize("revision", ["1", "2"])
+@pytest.mark.parametrize("allow_legacy_read", [False, True])
+async def test_individually_valid_snapshot_and_binding_cannot_mix_revisions(
+    monkeypatch, revision, allow_legacy_read,
+):
+    """両方の checksum が正しくても、元 snapshot と保存行の版が違えば読み替えない。"""
+
+    h = await document_proposal(monkeypatch, revision=revision)
+    other = "2" if revision == "1" else "1"
+    h.run.selected_sources_json[h.draft.resource_key] = FrozenDocumentLibraryBinding(
+        h.run.project_id, h.run.id, h.binding.id, h.draft.resource_key, h.target, other
+    ).to_json()
+    with pytest.raises(ChangeProposalValidationError):
+        await h.repository._validate_effect_binding(
+            run=h.run, binding=h.binding, capability_version="document.write/v1",
+            allow_legacy_document_read=allow_legacy_read,
+        )
+
+
+async def test_legacy_pending_proposal_cannot_be_approved_or_authorized_for_new_write(monkeypatch):
+    """旧束縛を新 Provider に昇格せず、通常の批准/段階入口では原要求を拒否する。"""
+
+    h = await document_proposal(monkeypatch, revision="1")
+    original = deepcopy(h.run.selected_sources_json)
+    with pytest.raises(ChangeProposalValidationError):
+        await h.repository._validate_proposal_row(h.proposal, run=h.run)
+    with pytest.raises((ChangeProposalValidationError, EffectLeaseValidationError, ValueError)):
+        await h.repository.authorize_effect_step(
+            h.claimed, provider_version=DOCUMENT_WRITE_PROVIDER_VERSION
+        )
+    assert h.run.selected_sources_json == original and h.binding.revision == "1"

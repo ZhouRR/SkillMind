@@ -6,6 +6,7 @@ S3 が interpret service へ配線し、疎通は probe_claude_agent_sdk と実�
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
@@ -13,6 +14,7 @@ from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
     ClaudeSDKError,
+    ProcessError,
     ResultMessage,
     StreamEvent,
     TextBlock,
@@ -26,6 +28,7 @@ from skillmind.agent.claude import (
 from skillmind.agent.claude_build import bundled_claude_build
 from skillmind.agent.engine import extract_text_delta
 from skillmind.agent.tool_policy import DENIED_BUILTIN_TOOLS
+from skillmind.core.logging import log_event
 from skillmind.skills.model_interpreter import (
     ModelCompletion,
     ModelProviderError,
@@ -35,6 +38,15 @@ from skillmind.skills.model_interpreter import (
 _TRUNCATED_STOP_REASONS = frozenset({"max_tokens", "max_turns"})
 _TRUNCATED_SUBTYPES = frozenset({"error_max_turns"})
 _STRUCTURED_OUTPUT_FAILURE_SUBTYPES = frozenset({"error_max_structured_output_retries"})
+_KNOWN_ERROR_SUBTYPES = frozenset({
+    "success", "error_during_execution", "error_max_turns", "error_max_budget_usd",
+    "error_max_structured_output_retries",
+})
+_KNOWN_SDK_ERROR_KINDS = frozenset({
+    "ClaudeSDKError", "CLIConnectionError", "CLINotFoundError", "ProcessError",
+    "CLIJSONDecodeError", "MessageParseError",
+})
+logger = logging.getLogger(__name__)
 
 
 class ClaudeCompletionClient:
@@ -94,22 +106,48 @@ class ClaudeCompletionClient:
                         await on_text_delta(delta)
                 elif isinstance(message, ResultMessage):
                     if message.subtype in _STRUCTURED_OUTPUT_FAILURE_SUBTYPES:
+                        _log_result_failure(message.subtype, "structured_output_unavailable")
                         raise ModelStructuredOutputError(str(message.subtype))
                     if message.is_error and message.subtype not in _TRUNCATED_SUBTYPES:
+                        _log_result_failure(message.subtype, "provider_error")
                         raise ModelProviderError(str(message.subtype))
                     if (
                         message.subtype in _TRUNCATED_SUBTYPES
                         or message.stop_reason in _TRUNCATED_STOP_REASONS
                     ):
+                        _log_result_failure(message.subtype, "truncated_output")
                         truncated = True
                     structured = _structured_output(message)
         except ClaudeSDKError as error:
+            # 例外本文/CLI stderr は資格情報やモデル内容を含み得るため、分類だけを残す。
+            kind = type(error).__name__
+            log_event(
+                logger, logging.WARNING, "skill.interpret.completion_diagnostic",
+                error_code="provider_error",
+                provider_error_kind=(
+                    kind if kind in _KNOWN_SDK_ERROR_KINDS else "OtherClaudeSDKError"
+                ),
+                provider_exit_code=(
+                    error.exit_code
+                    if isinstance(error, ProcessError) and type(error.exit_code) is int else None
+                ),
+            )
             raise ModelProviderError(type(error).__name__) from error
         return ModelCompletion(
             structured_output=structured,
             text="".join(text_parts) if text_parts else None,
             truncated=truncated,
         )
+
+
+def _log_result_failure(subtype: str, error_code: str) -> None:
+    """既知 enum だけを診断に使い、未登録 subtype や result/errors 本文を出力しない。"""
+
+    log_event(
+        logger, logging.WARNING, "skill.interpret.completion_diagnostic",
+        error_code=error_code,
+        provider_result_subtype=subtype if subtype in _KNOWN_ERROR_SUBTYPES else "unrecognized",
+    )
 
 
 def _structured_output(message: ResultMessage) -> Mapping[str, Any] | None:

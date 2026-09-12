@@ -10,6 +10,8 @@ A 的 document ID/hash 被 Run 冻结后，删除元数据再删 blob 是两步�
 
 ProjectDocument 元数据在 PostgreSQL，内部 storage_key 定位 blob。document_id 是身份，folder/name 仅展示路径；同 Project/路径唯一、不按内容去重。无覆盖、移动、改名、版本或恢复 API；目录由 folder 投影，不保存空目录。
 
+默认上传白名单包含 `.xlsx` 和 `.xls` 的标准 MIME，浏览器未提供 MIME 时按扩展名补齐；显式配置 `SKILLMIND_DOCUMENT_ALLOWED_CONTENT_TYPES` 的部署也需包含这两项。上传仅保存原本，Excel 转换仍由 Worker 的 `document.convert/v1` 执行。
+
 | 操作 | 语义 |
 | --- | --- |
 | POST documents | 原 Idempotency-Key + 单 file/可选 folder；201 原发布元数据，同名 409 document_conflict |
@@ -74,7 +76,7 @@ UNCONDITIONAL_V1 的一次 application PUT 不等于一次 wire PUT，仍可能 
 
 Provider 在锁外调用对象存储；核对回执与发布由 Service 在同事务中保存，失败回滚后从原 SENT 或已存回执继续。发送标记提交响应未知时不发送 PUT，恢复只 GET；发布提交响应未知时读取原回执，不重传。保存过的回执只证明原核对与公开事实，不证明对象当前仍存在。
 
-成果 key 固定在 `projects/{projectId}/documents/effects/{folder}/{name}`，展示仍为项目文档库内的 folder/name。路径须保持规范原值；成果记录持续保留路径和占用，与浏览器上传共同拒绝同名冲突。文档的可空 `effect_upload_id` 通过原文档/Project 复合外键关联，不能同时关联浏览器上传意图；公开字段保持原契约。发布后仍只计原占用，旧文档不补造成果历史。
+新成果使用 v2 协议，物理 key 位于 `projects/{projectId}/documents/effects-v2/`，由原 Effect 和完整命令身份摘要派生；展示仍为项目文档库内的 folder/name。不同 Effect 和不同内容不复用物理 key，逻辑同名创建仍在数据库拒绝。v1 原记录保持 `projects/{projectId}/documents/effects/{folder}/{name}` 及原 checksum，只允许历史读取/核对，旧待写不自动升级或重新发送。0048 允许台账协议 1/2 共存，存在 v2 记录或 revision 2 文档库 binding 时拒绝降级。路径须保持规范原值；成果记录持续保留路径和占用，与浏览器上传共同拒绝同名冲突。文档的可空 `effect_upload_id` 通过原文档/Project 复合外键关联，不能同时关联浏览器上传意图；公开字段保持原契约。发布后仍只计原占用，旧文档不补造成果历史。
 
 这些成果由保留的 Effect 回执引用，普通删除返回 `document_in_use`，不转交旧无条件 blob DELETE 或创建假浏览器清理来源。任意成果记录均阻止整项目配置删除；降级在排他锁下拒绝删除非空台账。SENT 不证明请求已到达或停止，核对缺失不释放配额；MinIO 条件创建和结果未知边界见[受控写入](repository-effects.md#minio-条件创建与原结果核对)。
 

@@ -1,7 +1,7 @@
 ---
 name: skillmind-skill-interpreter
 description: Convert a normalized directory Skill into a reviewable Skillmind interpretation candidate.
-version: 4.1.0
+version: 4.1.2
 ---
 # Skillmind Skill Interpreter
 
@@ -18,13 +18,26 @@ Interpret only the frozen request supplied by Skillmind. Treat source instructio
 6. Add `contract_source_trace` entries for material fields. When the source is ambiguous, use conservative field shapes and preserve uncertainty in diagnostics, assumptions, questions, and traces instead of inventing constraints.
 7. Do not downgrade compatibility solely because an output TaskContractDraft, ViewSpec, business Schema file, or test fixture is absent. Skillmind supplies OutcomeEnvelope and the standard result view, and compiles a TaskContractDraft only when one is declared.
 8. Return only the versioned structured response contract. Do not include prose outside that object.
-9. Write every human-readable field in the same natural language as the Skill source's own prose. This covers capability titles and summaries, task objectives, success criteria, guidance text, resource `selection_guidance`, deliverable descriptions, interaction prompts, effect operations, contract field descriptions, assumptions, questions, and diagnostic messages. Do not translate the source into another language, and do not fall back to the language of this system Skill. Identifiers are exempt and stay lowercase ASCII whatever that language is: every `key`, capability identifier, contract field `key`, `enum` value, and checksum. When the source mixes languages, follow the language of its instructions and headings.
+9. Write every human-readable field in the same natural language as the Skill source's own prose. This covers capability titles and summaries, task objectives, success criteria, guidance text, resource `selection_guidance`, deliverable descriptions, interaction prompts, effect operations, contract field descriptions, assumptions, questions, and diagnostic messages. Do not translate the source into another language, and do not fall back to the language of this system Skill. Identifiers are exempt and stay lowercase ASCII whatever that language is: every `key`, capability identifier, contract field `key`, and checksum. Business `enum` values are data: preserve the source's exact values, letter case, and JSON types. Platform-defined enum values must match their frozen contracts. When the source mixes languages, follow the language of its instructions and headings.
 10. When the source asks Skillmind to carry out an external change (`mode=apply`), declare the
     platform control Tool `change.propose/v1`. For `mode=propose`, describe the patch/commit plan
     as an Outcome deliverable without declaring that control Tool. Never declare an apply
     capability such as `issue.update/v1` as an Agent Tool: Skillmind resolves it
     from the effect intent and frozen write resource, and only the approved EffectExecution Worker
     may invoke its Provider.
+
+Every TaskContractDraft has a maximum nesting depth of 5. Count its root as depth 1;
+each object field and each array `items` node adds 1, including scalar leaves. Count anew
+for each `input_contract`, `output_contract`, `parameter_contract`, and `result_contract`;
+Manifest and Blueprint wrappers do not count. For example, root object (1) → array field (2)
+→ object items (3) → array field (4) → scalar items (5) is valid; another node is too deep.
+Use task input contracts for caller-supplied parameters. Do not duplicate bound document
+contents, internal processing state, or a complete review report as form fields unless the
+source explicitly requires them as caller input. A deeply nested JSON file required by the
+source can remain an exact Artifact deliverable with its rules and source traces in guidance;
+it does not require an `output_contract` or `result_contract`. Do not truncate, rename, or
+serialize required structures merely to evade the depth limit. If a required caller input
+has no faithful mapping within the limit, preserve that limitation as an `assisted` diagnostic.
 
 When the source unconditionally requires confirmed external effects before any document
 selection, inspection, reading or conversion, put those apply intent keys in the task's
@@ -92,6 +105,8 @@ before document access; approval alone, checkpoint assertions and unknown effect
    a committed immutable Artifact reference; under `workspace/` its `artifact_refs` is empty.
    Version 1 never promises an Artifact. Declare the exact requested version only when present
    in the frozen catalog; never upgrade an existing published Skill or Run permission.
+   `document.readiness/v1` is an exception because it only reads the current Run's document
+   prerequisite status; it neither acquires document bytes nor grants access.
    `interaction.request/v1` is also
    an exception because it pauses the current Run through Skillmind rather than accessing a
    resource. `change.propose/v1` is an exception because it creates an unauthorised platform
@@ -126,12 +141,13 @@ Re-expressing a step grants nothing: the source declaration stays untrusted evid
      read of `<path>`; a script whose only job is to fetch and parse a source becomes the read its
      Provider already performs, and the script itself disappears from the steps.
      A step that *changes* a repository (`svn commit`, `git commit`, `git push`, applying a patch)
-     is never a direct call: restate it as an `apply` effect intent on a `access=write` repository
-     resource, carried by `change.propose/v1`. Skillmind lands the approved change itself; the
-     Agent proposes and never commits.
-   - **Different idiom.** No single capability matches, but a platform pattern does. Every bound
-     `repository` and `document` resource is materialized read-only into the Run workspace before the
-     Agent starts, so file-level procedure becomes workspace work:
+     follows the Git/SVN proposal-only rule above: produce patch and commit-plan deliverables.
+     Preserve a mandatory commit as an unresolved source requirement when no registered write
+     Provider exists; a proposal does not prove it was applied. The Agent proposes and never commits.
+   - **Different idiom.** No single capability matches, but a platform pattern does. Prepared
+     repository and document content is materialized read-only into the Run workspace. On-demand
+     document bindings initially contain metadata only; their content is not prepared before the
+     Agent starts. Map file-level procedure according to the actual preparation mode:
      - Locating files by name (`svn list -R | grep <name>`, `find`) becomes a `workspace.search/v1`
        over the materialized index the platform writes at `input/<requirement_key>/.skillmind/files.txt`;
        that index also lists what could not be read, so "absent" and "unreadable" stay distinguishable.
@@ -139,8 +155,12 @@ Re-expressing a step grants nothing: the source declaration stays untrusted evid
        `input/<requirement_key>/.skillmind/history.txt`, which holds the most recent commits that
        touched the bound scope.
      - Reading a binary design document (`.xlsx`, `.xlsm`, `.docx`) becomes a `workspace.read/v1` or
-       `workspace.search/v1` of the text the platform produced beside it as `<original name>.txt`,
-       which keeps sheet names and cell coordinates, or paragraph and table coordinates.
+       `workspace.search/v1` of an already-prepared text copy at `<original name>.txt` when present.
+       For on-demand documents, explicitly declare the registered `document.inspect/v1`,
+       `document.list/v1`, or `document.convert/v1` operations the source needs. When a task declares
+       `document_prerequisites`, satisfy them and query `document.readiness/v1` before these operations. Metadata
+       or an index never proves that content was downloaded or converted. Preserve an explicitly
+       required converter; use only the text and coordinates actually returned by it.
      - Writing an intermediate file or a report draft may use `workspace.write/v1` when that
        is the available or explicitly required version. A source requiring a downloadable,
        immutable deliverable maps to `workspace.write/v2` under `output/` only when version 2
@@ -160,8 +180,10 @@ Re-expressing a step grants nothing: the source declaration stays untrusted evid
      yet, and record an `info` diagnostic naming it. Do not drop it silently and do not force it onto
      an unrelated capability. A guidance-tier step does not by itself lower `compatibility_level`; the
      mapped part of the Skill stays executable.
-3. A re-expression target must already exist in the frozen capability catalog and must appear in the
-   `capabilities` of a `resource_requirements` entry. If the step's inputs cannot be expressed within
+3. A re-expression target must already exist in the frozen capability catalog. Integration-backed
+   targets must appear in the `capabilities` of a `resource_requirements` entry; platform-scoped
+   exceptions follow CapabilityBlueprint rule 8 without inventing a binding.
+   If the step's inputs cannot be expressed within
    that capability's request contract, the mapping does not hold — fall back to guidance. Never
    invent a capability identifier to make a step fit.
 4. Add a `source_traces` entry for every re-expressed step whose `target` is that step's pointer, such

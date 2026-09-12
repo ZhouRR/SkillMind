@@ -30,7 +30,7 @@ export function documentFailure(error: unknown, mutation: boolean): DocumentFail
 
 /** Upload の表示語彙は DELETE の門禁 policy に渡せない独立した型に限定する。 */
 export interface DocumentUploadFailure {
-  key: Exclude<DocumentFailure['key'], 'unknown'> | 'uploadTooLarge' | 'uploadUnknown'
+  key: Exclude<DocumentFailure['key'], 'unknown'> | 'uploadTooLarge' | 'uploadTypeNotAllowed' | 'uploadUnknown'
     | 'uploadPending' | 'uploadKeyConflict' | 'uploadConflict' | 'uploadNotFound'
     | 'uploadUnavailable' | 'uploadInvalidKey' | 'uploadPreparationFailed' | 'uploadClosed'
 }
@@ -38,6 +38,7 @@ export interface DocumentUploadFailure {
 /** Upload 固有の確定拒否を DELETE の未知判定と混同せず、本文も表示しない。 */
 export function documentUploadFailure(error: unknown, mutation = true): DocumentUploadFailure {
   if (error instanceof ApiProblemError) {
+    if (mutation && error.status === 422 && error.code === 'content_type_not_allowed') return { key: 'uploadTypeNotAllowed' }
     if (error.status === 409 && error.code === 'document_upload_closed') return { key: 'uploadClosed' }
     if (error.status === 409 && error.code === 'document_upload_pending') return { key: 'uploadPending' }
     if (error.status === 409 && error.code === 'document_upload_key_conflict') return { key: 'uploadKeyConflict' }

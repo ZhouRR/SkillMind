@@ -549,6 +549,16 @@ async def execute_interpretation_request_job(
         return {"status": "rejected", "reason": "interpretation_request_not_found"}
     if stored is None:
         return {"status": "no_result", "request_id": str(identity)}
+    # job の正常終了と解釈の成功は別の事実。保存済み終態を元要求へ対応付けて残す。
+    log_event(
+        logger, logging.INFO, "skill.interpret.request_completed",
+        request_id=identity,
+        execution_key=stored.execution_key,
+        skill_source_id=stored.skill_source_id,
+        interpretation_id=stored.interpretation_id,
+        status=stored.status.value,
+        error_code=stored.error_code,
+    )
     return {"status": "ok", "interpretation_id": str(stored.interpretation_id)}
 
 

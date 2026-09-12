@@ -13,7 +13,6 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
 from openpyxl import Workbook
-
 from skillmind.agent import binary_text
 from skillmind.agent.binary_text import BinaryTextError, convert_excel_to_markdown
 from skillmind.agent.context_builder import ContractStore
@@ -74,12 +73,15 @@ async def test_real_converter_preserves_sheets_and_japanese_rows(
 
 
 @pytest.mark.parametrize("observed", [False, True])
+@pytest.mark.parametrize("source_key", [None, "original/source/sample.xlsx"])
 async def test_provider_returns_complete_markdown_bound_to_original_hash(
-    excel_bytes: bytes, observed: bool,
+    excel_bytes: bytes, observed: bool, source_key: str | None,
 ) -> None:
     """公開契約・Evidence と原文/変換文 hash が同じ取得 bytes に結び付く。"""
 
-    content = document_content(excel_bytes, name="sample.xlsx")
+    content = replace(
+        document_content(excel_bytes, name="sample.xlsx"), source_object_key=source_key
+    )
     if observed:
         content = replace(content, observation=BlobObservation(
             last_modified=datetime(2026, 9, 11, tzinfo=UTC), etag="opaque",
@@ -99,6 +101,12 @@ async def test_provider_returns_complete_markdown_bound_to_original_hash(
     assert result.evidence[0].content_hash == content.checksum
     assert result.evidence[0].metadata["markdown_checksum"] == response["markdown_checksum"]
     assert result.evidence[0].metadata["converter"] == response["converter"]
+    if source_key is None:
+        assert "source_object_key" not in response
+        assert "source_object_key" not in result.evidence[0].metadata
+    else:
+        assert response["source_object_key"] == source_key
+        assert result.evidence[0].metadata["source_object_key"] == source_key
     if content.observation is not None:
         assert result.evidence[0].metadata["storage_observation"] == content.observation.to_json()
     else:

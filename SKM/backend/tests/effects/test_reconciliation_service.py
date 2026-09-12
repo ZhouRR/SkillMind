@@ -9,7 +9,6 @@ from uuid import uuid4
 
 import httpx
 import pytest
-
 from skillmind.core.hashing import canonical_json
 from skillmind.effects.postgres_write import PostgresDatabaseWriteSource
 from skillmind.effects.reconciliation_domain import (
@@ -126,7 +125,7 @@ async def test_object_query_uses_get_and_never_publishes_or_sends(outcome):
         uuid4(),
         "sha256:" + "1" * 64,
         "project-library",
-        "project-library-receipt/v1",
+        "project-library-receipt/v2",
         original,
         "{}",
         None,

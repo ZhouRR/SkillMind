@@ -464,7 +464,7 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
     <>
       <PageHeader
         title={activeModule ? messages.workspace.titleWithModule(activeModule.name) : messages.routes.workspace.label}
-        description={run ? undefined : activeModule?.description || messages.workspace.description}
+        description={run ? undefined : activeModule?.description || undefined}
         aside={<span className="scopeBadge">{activeModule?.name ?? messages.workspace.projectWideScope}</span>}
       />
       <section className={`workspace${run ? ' workspaceReading' : ''}`} aria-label={messages.workspace.taskExecutionAria}>
@@ -487,7 +487,7 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
               </p>
             )}
             {!run && visibleTasks.length > 0 && (
-              <p className="hint">{messages.workspace.newRunIntro} {messages.workspace.runnableCount(visibleTasks.length)}</p>
+              <p className="hint">{messages.workspace.runnableCount(visibleTasks.length)}</p>
             )}
             <button
               className={run ? 'secondaryButton' : 'primaryButton'}
@@ -507,7 +507,6 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
                 {messages.routes.history.label}
               </a>
             </div>
-            {!run && <p className="hint">{messages.historyPage.description}</p>}
           </section>
         </div>
 

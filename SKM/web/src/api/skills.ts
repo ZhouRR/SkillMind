@@ -606,6 +606,7 @@ export interface InterpretationExecutionRecord {
   interpreter_version: string
   execution_key: string | null
   error_code: string | null
+  validation_attempts?: string[]
   compatibility_level: string
   confidence: number
   summary: string
@@ -795,6 +796,7 @@ function parseInterpretationExecution(value: unknown): InterpretationExecutionRe
     || typeof value.reused !== 'boolean'
     || !isNullableString(value.model)
     || !isNullableString(value.error_code)
+    || ('validation_attempts' in value && !isValidationAttempts(value.validation_attempts))
     || !isNullableString(value.execution_key)
     || !isNullableString(value.parent_interpretation_id)
     || (!isRecord(value.adjustment) && value.adjustment !== null)
@@ -808,6 +810,16 @@ function parseInterpretationExecution(value: unknown): InterpretationExecutionRe
     preview: parseInterpretationPreview(value.preview),
     report: value.report === null ? null : parseInterpretationReport(value.report),
   } as unknown as InterpretationExecutionRecord
+}
+
+/** 保存済みの短い検証内訳だけを受理し、旧 response の省略はそのまま保つ。 */
+function isValidationAttempts(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length <= 2 && value.every((item: unknown) => (
+    typeof item === 'string'
+    && item.trim().length > 0
+    && Array.from(item).length <= 4096
+    && !/[\u0000-\u001f\u007f]/u.test(item)
+  ))
 }
 
 /** Model preview の normalized package と能力蓝图を厳密に、manifest を緩く検証する。 */

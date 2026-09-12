@@ -9,9 +9,6 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import Column, MetaData, Table, UniqueConstraint, create_engine, select
-from sqlalchemy.orm import Session
-
 from skillmind.artifacts.repository import ArtifactRepository
 from skillmind.db.models import (
     ProjectDocument,
@@ -25,11 +22,13 @@ from skillmind.documents.domain import (
     DocumentUploadInvalidError,
 )
 from skillmind.documents.effect_repository import DocumentEffectRepository
-from skillmind.documents.paths import document_effect_storage_key
+from skillmind.documents.paths import document_effect_prefix
 from skillmind.documents.repository import DocumentRepository
 from skillmind.documents.upload_repository import DocumentUploadRepository
 from skillmind.storage.effect_write import ObjectWriteReceipt, build_object_write
 from skillmind.storage.validation import UploadLimits, UploadRejectedError
+from sqlalchemy import Column, MetaData, Table, UniqueConstraint, create_engine, select
+from sqlalchemy.orm import Session
 from tests.storage.test_object_effect import fixture as object_fixture
 
 
@@ -92,12 +91,6 @@ def database(monkeypatch):
                 )
     metadata.create_all(engine)
     _, _, arguments = object_fixture()
-    arguments.update(
-        object_key=document_effect_storage_key(
-            arguments["project_id"], "results/review", "source.md"
-        ),
-        allowed_prefix=f"projects/{arguments['project_id']}/documents/effects/",
-    )
     command = build_object_write(**arguments)
     monkeypatch.setattr(
         ArtifactRepository, "get_content", AsyncMock(return_value=arguments["artifact"])
@@ -283,3 +276,77 @@ async def test_existing_document_path_is_not_overwritten(database):
         )
     with pytest.raises(DocumentConflictError), db.transaction() as session:
         await db.reserve(session)
+
+
+async def command_for(db, *, protocol_version=2, **overrides):
+    """同じ保存済み Artifact を使い、別 protocol/Effect の要求を明示的に構築する。"""
+
+    old = db.command
+    artifact = await ArtifactRepository(None).get_content(
+        project_id=old.project_id, run_id=old.run_id, artifact_ref=old.artifact_ref
+    )
+    return build_object_write(**{
+        "effect_id": old.effect_id, "project_id": old.project_id, "run_id": old.run_id,
+        "artifact": artifact, "namespace": old.namespace, "bucket": old.bucket,
+        "logical_path": old.logical_path, "content_type": old.content_type,
+        "allowed_prefix": document_effect_prefix(old.project_id, revision=str(protocol_version)),
+        "protocol_version": protocol_version, **overrides,
+    })
+
+
+async def test_different_effect_same_logical_path_is_refused_before_another_send(database):
+    """別物理 key を持っていても、旧予約を消して同名の新 Effect を開始しない。"""
+
+    db = database
+    original = db.command
+    with db.transaction() as session:
+        await db.reserve(session)
+        await DocumentEffectRepository(session).start_once(original, owner_id=uuid4(), now=db.now)
+    db.command = await command_for(db, effect_id=uuid4())
+    assert db.command.object_key != original.object_key
+    with pytest.raises(DocumentConflictError), db.transaction() as session:
+        await db.reserve(session)
+    with db.transaction() as session:
+        rows = session.session.scalars(select(ProjectDocumentEffectUpload)).all()
+        assert len(rows) == 1 and rows[0].effect_id == original.effect_id
+        assert rows[0].state == "SENT" and rows[0].storage_key == original.object_key
+
+
+@pytest.mark.parametrize("state", ["RESERVED", "SENT", "VERIFIED", "PUBLISHED"])
+async def test_legacy_ledger_is_readable_without_upgrade_send_or_publication(database, state):
+    """保存済み v1 を SQL fixture で再現し、原 key/hash/回执は読むが一切進めない。"""
+
+    db = database
+    legacy = await command_for(db, protocol_version=1)
+    with db.transaction() as session:
+        row = await db.reserve(session)
+        row.protocol_version = 1
+        row.storage_key, row.request_checksum = legacy.object_key, legacy.request_checksum
+        row.state = state
+        if state != "RESERVED":
+            row.sent_at, row.put_owner_id = db.now, uuid4()
+        if state in {"VERIFIED", "PUBLISHED"}:
+            row.verified_at, row.etag, row.version_id = db.now, '"legacy-etag"', "legacy-version"
+        if state == "PUBLISHED":
+            row.published_at = db.now
+        original = {column.name: getattr(row, column.name)
+                    for column in ProjectDocumentEffectUpload.__table__.columns}
+    with db.transaction() as session:
+        repo = DocumentEffectRepository(session)
+        row = await repo.require(legacy)
+        receipt = await repo.verified_receipt(legacy)
+        if receipt is not None:
+            assert receipt.object_key == legacy.object_key
+            assert receipt.request_checksum == legacy.request_checksum
+            assert receipt.version_id == "legacy-version"
+        with pytest.raises(DocumentUploadInvalidError):
+            await repo.start_once(legacy, owner_id=uuid4(), now=db.now)
+        if state == "PUBLISHED":
+            document = await repo.publish(legacy, now=db.now + timedelta(days=1))
+            assert document.document_id == row.document_id and document.created_at == db.now
+        else:
+            with pytest.raises(DocumentUploadInvalidError):
+                await repo.publish(legacy, now=db.now)
+        assert {column.name: getattr(row, column.name)
+                for column in ProjectDocumentEffectUpload.__table__.columns} == original
+        assert session.session.scalars(select(ProjectDocument)).all() == []

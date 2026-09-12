@@ -168,8 +168,6 @@ export interface UiMessages {
     footer: string
   }
   home: {
-    startHint: string
-    description: string
     statusSectionAria: string
     serviceStatus: string
     connectFailed: string
@@ -241,7 +239,6 @@ export interface UiMessages {
     factArrays: (count: number, items: number) => string
     factObjects: (count: number) => string
     factScalars: (count: number) => string
-    digestHint: string
   }
   /** Run 履歴一覧(RunHistoryPanel)。 */
   runHistory: {
@@ -255,7 +252,6 @@ export interface UiMessages {
   }
   /** Project 全体の実行記録を Workspace から切り離して閲覧する画面。 */
   historyPage: {
-    description: string
     hint: string
     scopeBadge: string
     openWorkspace: string
@@ -269,14 +265,12 @@ export interface UiMessages {
   }
   /** 項目文書画面(DocumentsPage)。 */
   documentsPage: {
-    description: string
     scopeBadge: string
     /** 画面全体の aria-label。 */
     pageAria: string
   }
   /** 項目管理画面(ProjectsPage)と module 設定区画。 */
   projects: {
-    description: string
     /** 管理対象別 tab。成員管理は ADMIN のみに追加する。 */
     pageTabsAria: string
     tabProjects: string
@@ -447,7 +441,6 @@ export interface UiMessages {
     tablesRequired: string
     resourceUrisRequired: string
     title: string
-    description: string
     scopeBadge: string
     selectProjectFirst: string
     loadFailed: string
@@ -455,7 +448,6 @@ export interface UiMessages {
     loadingConfig: string
     /** 接続 form:凭据登録と Integration 作成を一回の提交へ束ねる。 */
     connectTitle: string
-    connectHint: string
     nameLabel: string
     providerLabel: string
     baseUrlLabel: string
@@ -485,10 +477,12 @@ export interface UiMessages {
     resolverFileOption: string
     resolverManagedOption: string
     locatorFieldLabel: string
-    secretValueLabel: string
-    secretValuePlaceholder: string
+    credentialValueLabels: Record<'password' | 'apiKey' | 'token', string>
+    credentialValuePlaceholders: Record<'password' | 'apiKey' | 'token', string>
     secretValueHint: string
     tabsAria: string
+    advancedTitle: string
+    advancedHint: string
     tabConnect: string
     tabSecret: string
     tabBinding: string
@@ -585,7 +579,7 @@ export interface UiMessages {
     failures: Record<'sessionExpired' | 'denied' | 'archived' | 'notFound' | 'inUse'
       | 'referencesUnavailable' | 'invalid' | 'unknown' | 'loadFailed'
       | 'previewTooLarge' | 'contentMissing' | 'contentInvalid' | 'storageUnavailable'
-      | 'uploadTooLarge' | 'uploadUnknown' | 'uploadPending' | 'uploadKeyConflict' | 'uploadConflict'
+      | 'uploadTooLarge' | 'uploadTypeNotAllowed' | 'uploadUnknown' | 'uploadPending' | 'uploadKeyConflict' | 'uploadConflict'
       | 'uploadNotFound' | 'uploadUnavailable' | 'uploadInvalidKey' | 'uploadPreparationFailed' | 'uploadClosed', string>
     closure: {
       title: string
@@ -656,7 +650,6 @@ export interface UiMessages {
     remove: string
     close: string
     loadingPreview: string
-    previewNotice: string
     /** 文書 panel の aria-label。 */
     panelAria: string
   }
@@ -749,7 +742,7 @@ export interface UiMessages {
     }
     /** 公開索引・保存時の検証・今回の取得結果を分けて表示する。 */
     artifacts: {
-      title: string; hint: string; loading: string; empty: string; referenced: string; unreferenced: string
+      title: string; loading: string; empty: string; referenced: string; unreferenced: string
       unavailableRefs: string; download: string; refresh: string; preparing: string; delivered: string; cancel: string; close: string
       failures: Record<'sessionExpired' | 'denied' | 'notFound' | 'contentInvalid' | 'storageUnavailable' | 'tooLarge' | 'loadFailed' | 'timeout', string>
     }
@@ -879,11 +872,9 @@ export interface UiMessages {
   workspace: {
     selectProjectFirst: string
     titleWithModule: (moduleName: string) => string
-    description: string
     scopeBadge: (scopeName: string) => string
     newRun: string
     /** 左 rail の実行入口 card と弹窗導線。form 本体は modal に移した。 */
-    newRunIntro: string
     openNewRun: string
     runnableCount: (count: number) => string
     noPublishedTasks: string
@@ -916,7 +907,6 @@ export interface UiMessages {
       freezeHint: string
       incompleteDraft: string
     }
-    inputValidatedHint: string
     creating: string
     startRun: string
     /** 未確認作成と新しい草稿を混同させない、三語の案内と明示確認。 */
@@ -1016,7 +1006,6 @@ export interface UiMessages {
     failures: Record<'sessionExpired' | 'unavailable' | 'invalid' | 'loadFailed' | 'timeout', string>
   }
   tasks: {
-    description: string
     titleWithModule: (moduleName: string) => string
     countBadge: (count: number) => string
     selectProjectFirst: string
@@ -1108,7 +1097,6 @@ export interface UiMessages {
   }
   /** Skills 解析画面(SkillsPage)。 */
   skills: {
-    description: string
     scopeBadgeWithProject: string
     scopeBadgeNoProject: string
     loadLibraryFailed: string
@@ -1123,7 +1111,6 @@ export interface UiMessages {
     skillMdPlaceholder: string
     referencesLabel: string
     referencesPlaceholder: string
-    parserHint: string
     technicalDetails: string
     parsing: string
     parseSkill: string
@@ -1177,6 +1164,7 @@ export interface UiMessages {
     interpretationTitle: string
     reusedSuffix: string
     interpretationFailedLine: (code: string) => string
+    validationErrorDetails: string
     parentPrefix: string
     adjustQuote: (text: string) => string
     requiredAnswerSuffix: string

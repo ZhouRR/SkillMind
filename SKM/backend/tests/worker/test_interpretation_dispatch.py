@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import json
+import logging
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
-
+from skillmind.core.logging import JsonLogFormatter
 from skillmind.core.settings import Settings
+from skillmind.skills.domain import SkillInterpretationStatus
 from skillmind.worker.settings import (
     adjust_skill_interpretation_job,
     execute_interpretation_request_job,
@@ -88,3 +92,43 @@ async def test_disabled_dispatch_does_not_claim() -> None:
         str(uuid4()),
     )
     assert result["status"] == "disabled"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,error_code", [
+    (SkillInterpretationStatus.PREVIEW_READY, None),
+    (SkillInterpretationStatus.FAILED, "provider_error"),
+])
+async def test_job_logs_persisted_outcome_with_original_request_without_result_body(
+    caplog, status, error_code,
+) -> None:
+    """ARQ 正常終了と業務失敗を識別し、原要求/結果の ID だけを本番 formatter で残す。"""
+
+    request_id = uuid4()
+    stored = SimpleNamespace(
+        skill_source_id=uuid4(), interpretation_id=uuid4(), execution_key="sha256:" + "a" * 64,
+        status=status, error_code=error_code, summary="fixture-private-model-body",
+        report={"credential": "fixture-private-credential"},
+    )
+    service = MagicMock(execute_interpretation_request=AsyncMock(return_value=stored))
+    with caplog.at_level(logging.INFO, logger="skillmind.worker.settings"):
+        result = await execute_interpretation_request_job(
+            {"settings": Settings(worker_dispatch_enabled=True, _env_file=None),
+             "skill_service": service},
+            str(request_id),
+        )
+    # 失敗の保存ができた job を例外へ変換せず、従来の Queue 応答/再試行契約を維持する。
+    assert result == {"status": "ok", "interpretation_id": str(stored.interpretation_id)}
+    service.execute_interpretation_request.assert_awaited_once()
+    records = [record for record in caplog.records
+               if getattr(record, "skillmind_event", None) == "skill.interpret.request_completed"]
+    assert len(records) == 1
+    serialized = JsonLogFormatter().format(records[0])
+    payload = json.loads(serialized)
+    assert payload["request_id"] == str(request_id)
+    assert payload["execution_key"] == stored.execution_key
+    assert payload["skill_source_id"] == str(stored.skill_source_id)
+    assert payload["interpretation_id"] == str(stored.interpretation_id)
+    assert payload["status"] == status.value
+    assert payload.get("error_code") == error_code
+    assert "fixture-private" not in serialized

@@ -77,9 +77,11 @@ async def check(url: str, output: Path) -> None:
                         ("databaseHost", "db.example.test"),
                         ("databaseName", "reports"),
                         ("databaseUser", "writer"),
-                        ("secretValueLabel", "fixture-only"),
                     ]:
                         await dialog.get_by_label(labels[key], exact=True).fill(value)
+                    await dialog.get_by_label(
+                        labels["credentialValueLabels"]["password"], exact=True
+                    ).fill("fixture-only")
                     await dialog.locator("textarea").nth(0).fill("public.reports")
                     await (
                         dialog.locator("textarea")

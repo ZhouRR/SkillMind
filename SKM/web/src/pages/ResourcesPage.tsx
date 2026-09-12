@@ -72,7 +72,7 @@ import {
 
 /** Integration、SecretReference、ResourceBinding と effect policy を PostgreSQL で管理する。
 
-    接続(凭据 + Integration)を一つの form に束ね、binding と事前許可は既定不要の
+    認証情報・接続先・権限を一つの form に束ね、個別の Secret 管理・binding・事前許可は
     高度設定として折り畳む。scope/config の裸 JSON 入力は構造化入力へ置き換え、
     検証の最終権威は server 側に置いたまま「確実に弾かれる入力」だけを送信前に知らせる。 */
 export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = true, databaseWritesEnabled = false }: {
@@ -91,7 +91,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
   const [secretDraft, setSecretDraft] = useState<SecretDraft>(EMPTY_SECRET)
   const [bindingDraft, setBindingDraft] = useState<BindingDraft>(EMPTY_BINDING)
   const [policyDraft, setPolicyDraft] = useState<PolicyDraft>(EMPTY_POLICY)
-  const [resourceTab, setResourceTab] = useState<ResourceTab>('connect')
+  const [resourceTab, setResourceTab] = useState<ResourceTab>('secret')
   const [openDialog, setOpenDialog] = useState<ResourceDialog | null>(null)
   const [revision, setRevision] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -103,7 +103,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
   // 配備状態の再取得で後置機能が閉じた場合、非表示 tab に取り残さない。
   useEffect(() => {
     if (!deferredFeaturesEnabled) {
-      setResourceTab((current) => current === 'policy' ? 'connect' : current)
+      setResourceTab((current) => current === 'policy' ? 'secret' : current)
       setOpenDialog((current) => current === 'policy' ? null : current)
     }
     setConnectDraft((current) => (current.provider === 'postgres' ? databaseWritesEnabled : deferredFeaturesEnabled)
@@ -194,7 +194,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
     setOpenDialog(dialog)
   }
 
-  /** 凭据登録と Integration 作成を一回の提交で行う。Secret 本文は送らない。 */
+  /** 認証情報と Integration を一回の操作で登録し、値は専用 Secret API にだけ送る。 */
   async function submitConnect(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
     const draft = connectDraft
@@ -416,7 +416,6 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
     <>
       <PageHeader
         title={messages.resources.title}
-        description={messages.resources.description}
         aside={<span className="scopeBadge">{messages.resources.scopeBadge}</span>}
       />
       {!projectId && <EmptyState text={messages.resources.selectProjectFirst} />}
@@ -425,15 +424,8 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
           {/* 弹窗が開いている間の error は弹窗内に出す。ここは一覧上の操作(停用など)の失敗用。 */}
           {error && openDialog === null && <p className="error resourceAdminError" role="alert">{error}</p>}
           {loading && <LoadingSkeleton label={messages.resources.loadingConfig} rows={2} />}
-          {/* 連接/凭据/绑定/预授权を tab で切り替え、複数 form の縦積みを解消する。 */}
-          <div className="tabBar" role="tablist" aria-label={messages.resources.tabsAria}>
-            <ResourceTabButton current={resourceTab} tab="connect" onSelect={setResourceTab}>{messages.resources.tabConnect}</ResourceTabButton>
-            <ResourceTabButton current={resourceTab} tab="secret" onSelect={setResourceTab}>{messages.resources.tabSecret}</ResourceTabButton>
-            <ResourceTabButton current={resourceTab} tab="binding" onSelect={setResourceTab}>{messages.resources.tabBinding}</ResourceTabButton>
-            {deferredFeaturesEnabled && <ResourceTabButton current={resourceTab} tab="policy" onSelect={setResourceTab}>{messages.resources.tabPolicy}</ResourceTabButton>}
-          </div>
-          {/* 各区分は「設定済み一覧」を主役にし、新規作成 form は弹窗へ切り離す。 */}
-          <section className="resourceTabPanel tabPanel" role="tabpanel" hidden={resourceTab !== 'connect'}>
+          {/* 通常操作は認証情報と権限の一覧・追加だけで完結する。 */}
+          <section className="resourceTabPanel" aria-label={messages.resources.integrationListTitle}>
             <section className="panel">
               <div className="panelHeader">
                 <h2>{messages.resources.integrationListTitle}</h2>
@@ -469,7 +461,6 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
             onClose={() => setOpenDialog(null)}
           >
             <form className="resourceForm" onSubmit={(event) => void submitConnect(event)}>
-              <p className="hint">{messages.resources.connectHint}</p>
               <label>{messages.resources.providerLabel}
                 <select
                   value={connectDraft.provider}
@@ -620,6 +611,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
               {connectDraft.credentialChoice === NEW_CREDENTIAL && (
                 <>
                   <SecretResolverFields
+                    provider={connectDraft.provider}
                     resolver={connectDraft.resolver}
                     locator={connectDraft.locator}
                     secretValue={connectDraft.secretValue}
@@ -795,329 +787,339 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
             </form>
           </ModalDialog>
 
-          <section className="resourceTabPanel tabPanel" role="tabpanel" hidden={resourceTab !== 'secret'}>
-            <section className="panel">
-              <div className="panelHeader">
-                <h2>{messages.resources.secretTitle}</h2>
-                <div className="panelHeaderActions">
-                  <span className="eventCount">{secrets.length}</span>
-                  <button className="secondaryButton" type="button" onClick={() => showDialog('secret')}>
-                    {messages.resources.registerLocator}
-                  </button>
+          <details className="detailDisclosure resourceAdvanced">
+            <summary>{messages.resources.advancedTitle}</summary>
+            <p className="hint">{messages.resources.advancedHint}</p>
+            <div className="tabBar" role="tablist" aria-label={messages.resources.tabsAria}>
+              <ResourceTabButton current={resourceTab} tab="secret" onSelect={setResourceTab}>{messages.resources.tabSecret}</ResourceTabButton>
+              <ResourceTabButton current={resourceTab} tab="binding" onSelect={setResourceTab}>{messages.resources.tabBinding}</ResourceTabButton>
+              {deferredFeaturesEnabled && <ResourceTabButton current={resourceTab} tab="policy" onSelect={setResourceTab}>{messages.resources.tabPolicy}</ResourceTabButton>}
+            </div>
+            <section className="resourceTabPanel tabPanel" role="tabpanel" hidden={resourceTab !== 'secret'}>
+              <section className="panel">
+                <div className="panelHeader">
+                  <h2>{messages.resources.secretTitle}</h2>
+                  <div className="panelHeaderActions">
+                    <span className="eventCount">{secrets.length}</span>
+                    <button className="secondaryButton" type="button" onClick={() => showDialog('secret')}>
+                      {messages.resources.registerLocator}
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <p className="hint">{messages.resources.secretAdvancedHint}</p>
-              <ResourceList items={secrets.map((item) => ({
-                id: item.secret_reference_id,
-                title: item.name,
-                detail: `${item.provider} · ${item.resolver} · ${item.key_version}`,
-                status: item.status,
-                updatedAt: item.updated_at,
-                onDisable: item.status === 'ACTIVE' ? () => void mutate(`secret-${item.secret_reference_id}`, (signal) => disableSecretReference(projectId, item.secret_reference_id, csrfToken, signal)) : undefined,
-              }))} />
+                <p className="hint">{messages.resources.secretAdvancedHint}</p>
+                <ResourceList items={secrets.map((item) => ({
+                  id: item.secret_reference_id,
+                  title: item.name,
+                  detail: `${item.provider} · ${item.resolver} · ${item.key_version}`,
+                  status: item.status,
+                  updatedAt: item.updated_at,
+                  onDisable: item.status === 'ACTIVE' ? () => void mutate(`secret-${item.secret_reference_id}`, (signal) => disableSecretReference(projectId, item.secret_reference_id, csrfToken, signal)) : undefined,
+                }))} />
+              </section>
             </section>
-          </section>
 
-          <ModalDialog
-            open={openDialog === 'secret'}
-            drawer
-            title={messages.resources.registerLocator}
-            onClose={() => setOpenDialog(null)}
-          >
-            <form className="resourceForm" onSubmit={(event) => void submitSecret(event)}>
-                <label>{messages.resources.nameLabel}<input required value={secretDraft.name} onChange={(event) => setSecretDraft((value) => ({ ...value, name: event.target.value }))} /></label>
-                <label>{messages.resources.providerLabel}
-                  <select value={secretDraft.provider} onChange={(event) => setSecretDraft((value) => ({ ...value, provider: event.target.value as ResourceProvider }))}>
-                    {RESOURCE_PROVIDERS.map((provider) => (
-                      <option key={provider} value={provider}>{PROVIDER_LABELS[provider]}</option>
-                    ))}
-                  </select>
-                </label>
-                <SecretResolverFields
-                  resolver={secretDraft.resolver}
-                  locator={secretDraft.locator}
-                  secretValue={secretDraft.secret_value}
-                  envExample={PROVIDER_FORMS[secretDraft.provider].environmentLocatorExample}
-                  fileExample={PROVIDER_FORMS[secretDraft.provider].fileLocatorExample}
-                  onResolver={(resolver) => setSecretDraft((value) => ({ ...value, resolver }))}
-                  onLocator={(locator) => setSecretDraft((value) => ({ ...value, locator }))}
-                  onSecretValue={(secretValue) => setSecretDraft((value) => ({ ...value, secret_value: secretValue }))}
-                />
-                <label>{messages.resources.keyVersionLabel}<input value={secretDraft.key_version} onChange={(event) => setSecretDraft((value) => ({ ...value, key_version: event.target.value }))} /></label>
-                <p className="hint resourceWarning">{secretDraft.resolver === 'MANAGED' ? messages.resources.secretValueHint : messages.resources.secretHint}</p>
-                {error && openDialog === 'secret' && <p className="error" role="alert">{error}</p>}
-                <button className="primaryButton" disabled={busy !== null} type="submit">{messages.resources.registerLocator}</button>
-            </form>
-          </ModalDialog>
-
-          <section className="resourceTabPanel tabPanel" role="tabpanel" hidden={resourceTab !== 'binding'}>
-            <section className="panel">
-              <div className="panelHeader">
-                <h2>{messages.resources.bindingTitle}</h2>
-                <div className="panelHeaderActions">
-                  <span className="eventCount">{bindings.length}</span>
-                  <button className="secondaryButton" type="button" onClick={() => showDialog('binding')}>
-                    {messages.resources.newBinding}
-                  </button>
-                </div>
-              </div>
-              <p className="hint">{messages.resources.bindingHint}</p>
-              <ResourceList items={bindings.map((item) => ({
-                id: item.binding_id,
-                title: `${item.requirement_key} · ${bindingLevelText(item.scope_level)}`,
-                detail: `${item.provider} ${item.capability_version} · ${summarizeScope(item.scope, { wildcardLabel: messages.resources.scopeUnrestrictedLabel })}`,
-                status: item.run_id ? 'FROZEN' : 'ACTIVE',
-                updatedAt: item.updated_at,
-              }))} />
-            </section>
-          </section>
-
-          <ModalDialog
-            open={openDialog === 'binding'}
-            drawer
-            title={messages.resources.bindingTitle}
-            wide
-            onClose={() => setOpenDialog(null)}
-          >
-            <form className="resourceForm" onSubmit={(event) => void submitBinding(event)}>
-                <p className="hint">{messages.resources.bindingHint}</p>
-                <label>{messages.resources.levelLabel}
-                  <select
-                    value={bindingDraft.scope_level}
-                    onChange={(event) => setBindingDraft((value) => ({
-                      ...value,
-                      scope_level: event.target.value as BindingDraft['scope_level'],
-                      taskKey: '',
-                      requirementChoice: '',
-                    }))}
-                  >
-                    <option value="PROJECT_DEFAULT">{messages.resources.projectDefault}</option>
-                    <option value="TASK">{messages.resources.taskOverride}</option>
-                  </select>
-                </label>
-                {bindingDraft.scope_level === 'TASK' && (tasks.length > 0 ? (
-                  <label>{messages.resources.taskSelectLabel}
-                    <select
-                      required
-                      value={bindingDraft.taskKey}
-                      onChange={(event) => setBindingDraft((value) => ({ ...value, taskKey: event.target.value, requirementChoice: '' }))}
-                    >
-                      <option value="">{messages.resources.pleaseSelect}</option>
-                      {tasks.map((task) => (
-                        <option key={taskScopeKey(task)} value={taskScopeKey(task)}>{taskOptionLabel(task)}</option>
+            <ModalDialog
+              open={openDialog === 'secret'}
+              drawer
+              title={messages.resources.registerLocator}
+              onClose={() => setOpenDialog(null)}
+            >
+              <form className="resourceForm" onSubmit={(event) => void submitSecret(event)}>
+                  <label>{messages.resources.nameLabel}<input required value={secretDraft.name} onChange={(event) => setSecretDraft((value) => ({ ...value, name: event.target.value }))} /></label>
+                  <label>{messages.resources.providerLabel}
+                    <select value={secretDraft.provider} onChange={(event) => setSecretDraft((value) => ({ ...value, provider: event.target.value as ResourceProvider, secret_value: '', locator: '' }))}>
+                      {RESOURCE_PROVIDERS.map((provider) => (
+                        <option key={provider} value={provider}>{PROVIDER_LABELS[provider]}</option>
                       ))}
                     </select>
                   </label>
-                ) : (
-                  <label>{messages.resources.taskScopeKeyLabel}
-                    <input
-                      className="mono"
-                      required
-                      value={bindingDraft.taskKey}
-                      onChange={(event) => setBindingDraft((value) => ({ ...value, taskKey: event.target.value }))}
-                    />
-                  </label>
-                ))}
-                {requirementOptions.length > 0 && (
-                  <label>{messages.resources.requirementKeyLabel}
-                    <select
-                      required
-                      value={bindingDraft.requirementChoice}
-                      onChange={(event) => {
-                        const choice = event.target.value
-                        const option = requirementOptions.find((item) => item.key === choice)
-                        setBindingDraft((value) => {
-                          // Requirement の kind と合わない Integration 選択は残さない。
-                          const keepIntegration = option === undefined
-                            || option.kind === ''
-                            || activeIntegrations.some((item) => item.integration_id === value.integration_id && item.kind === option.kind)
-                          return {
-                            ...value,
-                            requirementChoice: choice,
-                            integration_id: keepIntegration ? value.integration_id : '',
-                            scopeDraft: keepIntegration ? value.scopeDraft : [],
-                          }
-                        })
-                      }}
-                    >
-                      <option value="">{messages.resources.pleaseSelect}</option>
-                      {requirementOptions.map((option) => (
-                        <option key={option.key} value={option.key}>
-                          {option.key} · {option.taskLabels.join(' / ')}
-                        </option>
-                      ))}
-                      <option value={CUSTOM_REQUIREMENT}>{messages.resources.requirementCustomOption}</option>
-                    </select>
-                  </label>
-                )}
-                {useCustomRequirement && (
-                  <label>{messages.resources.requirementKeyInputLabel}
-                    <input
-                      className="mono"
-                      pattern="[a-z][a-z0-9_.\-]*"
-                      required
-                      value={bindingDraft.requirementCustom}
-                      onChange={(event) => setBindingDraft((value) => ({ ...value, requirementCustom: event.target.value }))}
-                    />
-                  </label>
-                )}
-                <label>{messages.resources.integrationSelectLabel}
-                  <select
-                    required
-                    value={bindingDraft.integration_id}
-                    onChange={(event) => {
-                      const integration = activeIntegrations.find((item) => item.integration_id === event.target.value)
-                      setBindingDraft((value) => ({
-                        ...value,
-                        integration_id: event.target.value,
-                        capabilityFallback: '',
-                        scopeDraft: integration === undefined
-                          ? []
-                          : scopeDraftFromScope(integration.scope, { keepAll: true }),
-                      }))
-                    }}
-                  >
-                    <option value="">{messages.resources.pleaseSelect}</option>
-                    {bindingIntegrationOptions.map((item) => (
-                      <option key={item.integration_id} value={item.integration_id}>{item.name} · {item.provider}</option>
-                    ))}
-                  </select>
-                </label>
-                {bindingIntegration !== undefined && selectedRequirement !== undefined && (
-                  <p className="hint">
-                    {messages.resources.derivedCapabilityLabel}: <code>{bindingCapability ?? '—'}</code>
-                  </p>
-                )}
-                {bindingCapabilityMissing && (
-                  <p className="error" role="alert">{messages.resources.noCapabilityForRequirement}</p>
-                )}
-                {bindingIntegration !== undefined && useCustomRequirement && (
-                  <label>{messages.resources.capabilitySelectLabel}
-                    <select
-                      required
-                      value={bindingDraft.capabilityFallback}
-                      onChange={(event) => setBindingDraft((value) => ({ ...value, capabilityFallback: event.target.value }))}
-                    >
-                      <option value="">{messages.resources.pleaseSelect}</option>
-                      {bindingIntegration.capabilities.map((capability) => (
-                        <option key={capability} value={capability}>{capability}</option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-                {bindingIntegration !== undefined && (
-                  <ScopeSubsetPicker
-                    allowWildcard
-                    entries={bindingDraft.scopeDraft}
-                    legend={messages.resources.scopeSubsetLabel}
-                    onChange={(next) => setBindingDraft((value) => ({ ...value, scopeDraft: next }))}
+                  <SecretResolverFields
+                    provider={secretDraft.provider}
+                    resolver={secretDraft.resolver}
+                    locator={secretDraft.locator}
+                    secretValue={secretDraft.secret_value}
+                    envExample={PROVIDER_FORMS[secretDraft.provider].environmentLocatorExample}
+                    fileExample={PROVIDER_FORMS[secretDraft.provider].fileLocatorExample}
+                    onResolver={(resolver) => setSecretDraft((value) => ({ ...value, resolver }))}
+                    onLocator={(locator) => setSecretDraft((value) => ({ ...value, locator }))}
+                    onSecretValue={(secretValue) => setSecretDraft((value) => ({ ...value, secret_value: secretValue }))}
                   />
-                )}
-                {error && openDialog === 'binding' && <p className="error" role="alert">{error}</p>}
-                <button
-                  className="primaryButton"
-                  disabled={busy !== null || bindingCapabilityMissing}
-                  type="submit"
-                >
-                  {messages.resources.saveBinding}
-                </button>
-            </form>
-          </ModalDialog>
+                  <label>{messages.resources.keyVersionLabel}<input value={secretDraft.key_version} onChange={(event) => setSecretDraft((value) => ({ ...value, key_version: event.target.value }))} /></label>
+                  <p className="hint resourceWarning">{secretDraft.resolver === 'MANAGED' ? messages.resources.secretValueHint : messages.resources.secretHint}</p>
+                  {error && openDialog === 'secret' && <p className="error" role="alert">{error}</p>}
+                  <button className="primaryButton" disabled={busy !== null} type="submit">{messages.resources.registerLocator}</button>
+              </form>
+            </ModalDialog>
 
-          <section className="resourceTabPanel tabPanel" role="tabpanel" hidden={!deferredFeaturesEnabled || resourceTab !== 'policy'}>
-            <section className="panel">
-              <div className="panelHeader">
-                <h2>{messages.resources.policyTitle}</h2>
-                <div className="panelHeaderActions">
-                  <span className="eventCount">{policies.length}</span>
-                  <button
-                    className="secondaryButton"
-                    disabled={writableIntegrations.length === 0}
-                    type="button"
-                    onClick={() => showDialog('policy')}
-                  >
-                    {messages.resources.newPolicy}
-                  </button>
+            <section className="resourceTabPanel tabPanel" role="tabpanel" hidden={resourceTab !== 'binding'}>
+              <section className="panel">
+                <div className="panelHeader">
+                  <h2>{messages.resources.bindingTitle}</h2>
+                  <div className="panelHeaderActions">
+                    <span className="eventCount">{bindings.length}</span>
+                    <button className="secondaryButton" type="button" onClick={() => showDialog('binding')}>
+                      {messages.resources.newBinding}
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <p className="hint resourceWarning">{messages.resources.policyHint}</p>
-              {writableIntegrations.length === 0 && (
-                <p className="hint">{messages.resources.noWritableIntegration}</p>
-              )}
-              <ResourceList items={policies.map((item) => ({
-                id: item.preauthorization_id,
-                title: `${item.capability_version} · ${item.operation}`,
-                detail: `LOW · v${item.policy_version} · ${summarizeScope(item.scope, { wildcardLabel: messages.resources.scopeUnrestrictedLabel })}`,
-                status: item.status,
-                updatedAt: item.updated_at,
-                onDisable: item.status === 'ACTIVE' ? () => void mutate(`policy-${item.preauthorization_id}`, (signal) => disableEffectPreauthorization(projectId, item.preauthorization_id, item.policy_version, csrfToken, signal)) : undefined,
-              }))} />
+                <p className="hint">{messages.resources.bindingHint}</p>
+                <ResourceList items={bindings.map((item) => ({
+                  id: item.binding_id,
+                  title: `${item.requirement_key} · ${bindingLevelText(item.scope_level)}`,
+                  detail: `${item.provider} ${item.capability_version} · ${summarizeScope(item.scope, { wildcardLabel: messages.resources.scopeUnrestrictedLabel })}`,
+                  status: item.run_id ? 'FROZEN' : 'ACTIVE',
+                  updatedAt: item.updated_at,
+                }))} />
+              </section>
             </section>
-          </section>
 
-          <ModalDialog
-            open={deferredFeaturesEnabled && openDialog === 'policy'}
-            drawer
-            title={messages.resources.policyTitle}
-            wide
-            onClose={() => setOpenDialog(null)}
-          >
-            <form className="resourceForm" onSubmit={(event) => void submitPolicy(event)}>
-                <p className="hint resourceWarning">{messages.resources.policyHint}</p>
-                {writableIntegrations.length > 0 && (
-                  <>
-                    <label>{messages.resources.integrationSelectLabel}
+            <ModalDialog
+              open={openDialog === 'binding'}
+              drawer
+              title={messages.resources.bindingTitle}
+              wide
+              onClose={() => setOpenDialog(null)}
+            >
+              <form className="resourceForm" onSubmit={(event) => void submitBinding(event)}>
+                  <p className="hint">{messages.resources.bindingHint}</p>
+                  <label>{messages.resources.levelLabel}
+                    <select
+                      value={bindingDraft.scope_level}
+                      onChange={(event) => setBindingDraft((value) => ({
+                        ...value,
+                        scope_level: event.target.value as BindingDraft['scope_level'],
+                        taskKey: '',
+                        requirementChoice: '',
+                      }))}
+                    >
+                      <option value="PROJECT_DEFAULT">{messages.resources.projectDefault}</option>
+                      <option value="TASK">{messages.resources.taskOverride}</option>
+                    </select>
+                  </label>
+                  {bindingDraft.scope_level === 'TASK' && (tasks.length > 0 ? (
+                    <label>{messages.resources.taskSelectLabel}
                       <select
                         required
-                        value={policyDraft.integration_id}
-                        onChange={(event) => {
-                          const integration = writableIntegrations.find((item) => item.integration_id === event.target.value)
-                          setPolicyDraft((value) => ({
-                            ...value,
-                            integration_id: event.target.value,
-                            // 事前許可は explicit 必須のため、wildcard を維持する既定を与えない。
-                            scopeDraft: integration === undefined
-                              ? []
-                              : scopeDraftFromScope(integration.scope, { keepAll: false }),
-                          }))
-                        }}
+                        value={bindingDraft.taskKey}
+                        onChange={(event) => setBindingDraft((value) => ({ ...value, taskKey: event.target.value, requirementChoice: '' }))}
                       >
                         <option value="">{messages.resources.pleaseSelect}</option>
-                        {writableIntegrations.map((item) => (
-                          <option key={item.integration_id} value={item.integration_id}>{item.name}</option>
+                        {tasks.map((task) => (
+                          <option key={taskScopeKey(task)} value={taskScopeKey(task)}>{taskOptionLabel(task)}</option>
                         ))}
                       </select>
                     </label>
-                    <label>{messages.resources.operationLabel}
+                  ) : (
+                    <label>{messages.resources.taskScopeKeyLabel}
                       <input
                         className="mono"
                         required
-                        value={policyDraft.operation}
-                        onChange={(event) => setPolicyDraft((value) => ({ ...value, operation: event.target.value }))}
+                        value={bindingDraft.taskKey}
+                        onChange={(event) => setBindingDraft((value) => ({ ...value, taskKey: event.target.value }))}
                       />
                     </label>
-                    <p className="hint">{messages.resources.operationHint}</p>
-                    {policyIntegration !== undefined && (
-                      <ScopeSubsetPicker
-                        allowWildcard={false}
-                        entries={policyDraft.scopeDraft}
-                        legend={messages.resources.scopeSubsetLabel}
-                        onChange={(next) => setPolicyDraft((value) => ({ ...value, scopeDraft: next }))}
-                      />
-                    )}
-                    <label>{messages.resources.expiresLabel}
+                  ))}
+                  {requirementOptions.length > 0 && (
+                    <label>{messages.resources.requirementKeyLabel}
+                      <select
+                        required
+                        value={bindingDraft.requirementChoice}
+                        onChange={(event) => {
+                          const choice = event.target.value
+                          const option = requirementOptions.find((item) => item.key === choice)
+                          setBindingDraft((value) => {
+                            // Requirement の kind と合わない Integration 選択は残さない。
+                            const keepIntegration = option === undefined
+                              || option.kind === ''
+                              || activeIntegrations.some((item) => item.integration_id === value.integration_id && item.kind === option.kind)
+                            return {
+                              ...value,
+                              requirementChoice: choice,
+                              integration_id: keepIntegration ? value.integration_id : '',
+                              scopeDraft: keepIntegration ? value.scopeDraft : [],
+                            }
+                          })
+                        }}
+                      >
+                        <option value="">{messages.resources.pleaseSelect}</option>
+                        {requirementOptions.map((option) => (
+                          <option key={option.key} value={option.key}>
+                            {option.key} · {option.taskLabels.join(' / ')}
+                          </option>
+                        ))}
+                        <option value={CUSTOM_REQUIREMENT}>{messages.resources.requirementCustomOption}</option>
+                      </select>
+                    </label>
+                  )}
+                  {useCustomRequirement && (
+                    <label>{messages.resources.requirementKeyInputLabel}
                       <input
-                        type="datetime-local"
-                        value={policyDraft.expires_at}
-                        onChange={(event) => setPolicyDraft((value) => ({ ...value, expires_at: event.target.value }))}
+                        className="mono"
+                        pattern="[a-z][a-z0-9_.\-]*"
+                        required
+                        value={bindingDraft.requirementCustom}
+                        onChange={(event) => setBindingDraft((value) => ({ ...value, requirementCustom: event.target.value }))}
                       />
                     </label>
-                    {error && openDialog === 'policy' && <p className="error" role="alert">{error}</p>}
-                    <button className="primaryButton" disabled={busy !== null} type="submit">{messages.resources.createPolicy}</button>
-                  </>
+                  )}
+                  <label>{messages.resources.integrationSelectLabel}
+                    <select
+                      required
+                      value={bindingDraft.integration_id}
+                      onChange={(event) => {
+                        const integration = activeIntegrations.find((item) => item.integration_id === event.target.value)
+                        setBindingDraft((value) => ({
+                          ...value,
+                          integration_id: event.target.value,
+                          capabilityFallback: '',
+                          scopeDraft: integration === undefined
+                            ? []
+                            : scopeDraftFromScope(integration.scope, { keepAll: true }),
+                        }))
+                      }}
+                    >
+                      <option value="">{messages.resources.pleaseSelect}</option>
+                      {bindingIntegrationOptions.map((item) => (
+                        <option key={item.integration_id} value={item.integration_id}>{item.name} · {item.provider}</option>
+                      ))}
+                    </select>
+                  </label>
+                  {bindingIntegration !== undefined && selectedRequirement !== undefined && (
+                    <p className="hint">
+                      {messages.resources.derivedCapabilityLabel}: <code>{bindingCapability ?? '—'}</code>
+                    </p>
+                  )}
+                  {bindingCapabilityMissing && (
+                    <p className="error" role="alert">{messages.resources.noCapabilityForRequirement}</p>
+                  )}
+                  {bindingIntegration !== undefined && useCustomRequirement && (
+                    <label>{messages.resources.capabilitySelectLabel}
+                      <select
+                        required
+                        value={bindingDraft.capabilityFallback}
+                        onChange={(event) => setBindingDraft((value) => ({ ...value, capabilityFallback: event.target.value }))}
+                      >
+                        <option value="">{messages.resources.pleaseSelect}</option>
+                        {bindingIntegration.capabilities.map((capability) => (
+                          <option key={capability} value={capability}>{capability}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  {bindingIntegration !== undefined && (
+                    <ScopeSubsetPicker
+                      allowWildcard
+                      entries={bindingDraft.scopeDraft}
+                      legend={messages.resources.scopeSubsetLabel}
+                      onChange={(next) => setBindingDraft((value) => ({ ...value, scopeDraft: next }))}
+                    />
+                  )}
+                  {error && openDialog === 'binding' && <p className="error" role="alert">{error}</p>}
+                  <button
+                    className="primaryButton"
+                    disabled={busy !== null || bindingCapabilityMissing}
+                    type="submit"
+                  >
+                    {messages.resources.saveBinding}
+                  </button>
+              </form>
+            </ModalDialog>
+
+            <section className="resourceTabPanel tabPanel" role="tabpanel" hidden={!deferredFeaturesEnabled || resourceTab !== 'policy'}>
+              <section className="panel">
+                <div className="panelHeader">
+                  <h2>{messages.resources.policyTitle}</h2>
+                  <div className="panelHeaderActions">
+                    <span className="eventCount">{policies.length}</span>
+                    <button
+                      className="secondaryButton"
+                      disabled={writableIntegrations.length === 0}
+                      type="button"
+                      onClick={() => showDialog('policy')}
+                    >
+                      {messages.resources.newPolicy}
+                    </button>
+                  </div>
+                </div>
+                <p className="hint resourceWarning">{messages.resources.policyHint}</p>
+                {writableIntegrations.length === 0 && (
+                  <p className="hint">{messages.resources.noWritableIntegration}</p>
                 )}
-            </form>
-          </ModalDialog>
+                <ResourceList items={policies.map((item) => ({
+                  id: item.preauthorization_id,
+                  title: `${item.capability_version} · ${item.operation}`,
+                  detail: `LOW · v${item.policy_version} · ${summarizeScope(item.scope, { wildcardLabel: messages.resources.scopeUnrestrictedLabel })}`,
+                  status: item.status,
+                  updatedAt: item.updated_at,
+                  onDisable: item.status === 'ACTIVE' ? () => void mutate(`policy-${item.preauthorization_id}`, (signal) => disableEffectPreauthorization(projectId, item.preauthorization_id, item.policy_version, csrfToken, signal)) : undefined,
+                }))} />
+              </section>
+            </section>
+
+            <ModalDialog
+              open={deferredFeaturesEnabled && openDialog === 'policy'}
+              drawer
+              title={messages.resources.policyTitle}
+              wide
+              onClose={() => setOpenDialog(null)}
+            >
+              <form className="resourceForm" onSubmit={(event) => void submitPolicy(event)}>
+                  <p className="hint resourceWarning">{messages.resources.policyHint}</p>
+                  {writableIntegrations.length > 0 && (
+                    <>
+                      <label>{messages.resources.integrationSelectLabel}
+                        <select
+                          required
+                          value={policyDraft.integration_id}
+                          onChange={(event) => {
+                            const integration = writableIntegrations.find((item) => item.integration_id === event.target.value)
+                            setPolicyDraft((value) => ({
+                              ...value,
+                              integration_id: event.target.value,
+                              // 事前許可は explicit 必須のため、wildcard を維持する既定を与えない。
+                              scopeDraft: integration === undefined
+                                ? []
+                                : scopeDraftFromScope(integration.scope, { keepAll: false }),
+                            }))
+                          }}
+                        >
+                          <option value="">{messages.resources.pleaseSelect}</option>
+                          {writableIntegrations.map((item) => (
+                            <option key={item.integration_id} value={item.integration_id}>{item.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>{messages.resources.operationLabel}
+                        <input
+                          className="mono"
+                          required
+                          value={policyDraft.operation}
+                          onChange={(event) => setPolicyDraft((value) => ({ ...value, operation: event.target.value }))}
+                        />
+                      </label>
+                      <p className="hint">{messages.resources.operationHint}</p>
+                      {policyIntegration !== undefined && (
+                        <ScopeSubsetPicker
+                          allowWildcard={false}
+                          entries={policyDraft.scopeDraft}
+                          legend={messages.resources.scopeSubsetLabel}
+                          onChange={(next) => setPolicyDraft((value) => ({ ...value, scopeDraft: next }))}
+                        />
+                      )}
+                      <label>{messages.resources.expiresLabel}
+                        <input
+                          type="datetime-local"
+                          value={policyDraft.expires_at}
+                          onChange={(event) => setPolicyDraft((value) => ({ ...value, expires_at: event.target.value }))}
+                        />
+                      </label>
+                      {error && openDialog === 'policy' && <p className="error" role="alert">{error}</p>}
+                      <button className="primaryButton" disabled={busy !== null} type="submit">{messages.resources.createPolicy}</button>
+                    </>
+                  )}
+              </form>
+            </ModalDialog>
+          </details>
         </div>
       )}
     </>
@@ -1147,8 +1149,9 @@ function ResourceTabButton({ current, tab, onSelect, children }: {
 /** resolver 選択と、MANAGED の明文入力 / ENVIRONMENT・FILE の locator 入力を切り替える共通 field。
  *  接続 form と凭据 form の両方で使い、MANAGED 分岐の重複を一箇所へ集約する(hint は各 form 側が持つ)。 */
 function SecretResolverFields({
-  resolver, locator, secretValue, envExample, fileExample, onResolver, onLocator, onSecretValue,
+  provider, resolver, locator, secretValue, envExample, fileExample, onResolver, onLocator, onSecretValue,
 }: {
+  provider: ResourceProvider
   resolver: SecretResolver
   locator: string
   secretValue: string
@@ -1169,11 +1172,11 @@ function SecretResolverFields({
         </select>
       </label>
       {resolver === 'MANAGED' ? (
-        <label>{messages.resources.secretValueLabel}
+        <label>{messages.resources.credentialValueLabels[PROVIDER_FORMS[provider].credentialKind]}
           <input
             type="password"
             autoComplete="off"
-            placeholder={messages.resources.secretValuePlaceholder}
+            placeholder={messages.resources.credentialValuePlaceholders[PROVIDER_FORMS[provider].credentialKind]}
             required
             value={secretValue}
             onChange={(event) => onSecretValue(event.target.value)}

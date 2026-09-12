@@ -1977,7 +1977,7 @@ class ProjectDocumentEffectUpload(IdentityMixin, Base):
             "storage_namespace_id", "storage_key", name="uq_document_effect_upload_object"
         ),
         UniqueConstraint("project_id", "folder", "name", name="uq_document_effect_upload_path"),
-        CheckConstraint("protocol_version = 1", name="protocol_version"),
+        CheckConstraint("protocol_version IN (1, 2)", name="protocol_version"),
         CheckConstraint("size > 0 AND size <= 1048576", name="size"),
         CheckConstraint("storage_is_durable", name="durable"),
         CheckConstraint("request_checksum ~ '^sha256:[0-9a-f]{64}$'", name="request_checksum"),

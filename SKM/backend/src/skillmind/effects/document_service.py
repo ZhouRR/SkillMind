@@ -17,6 +17,7 @@ from skillmind.documents.library import (
     DOCUMENT_LIBRARY_PROVIDER,
     DOCUMENT_WRITE_CAPABILITY,
     DocumentLibraryTarget,
+    document_library_revision,
     document_library_scope,
 )
 from skillmind.effects.document_command import load_document_effect_command
@@ -175,5 +176,6 @@ class DocumentEffectService:
             or execution.integration_config != {}
             or project_id != execution.project_id
             or target != self._target
+            or document_library_revision(execution.integration_scope) != "2"
         ):
             raise ValueError("Document effect target is unavailable")

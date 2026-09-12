@@ -10,9 +10,6 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import Column, MetaData, Table, create_engine
-from sqlalchemy.orm import Session
-
 from skillmind.agent.document_inspection import DocumentInspectProvider
 from skillmind.agent.document_listing import DocumentListProvider
 from skillmind.core.hashing import canonical_json, sha256_hex
@@ -20,6 +17,8 @@ from skillmind.db.models import Evidence, Run, ToolCall
 from skillmind.documents.observation_repository import PostgresDocumentObservationLookup
 from skillmind.documents.source import ProjectDocumentObservation
 from skillmind.storage.observation import BlobObservation
+from sqlalchemy import Column, MetaData, Table, create_engine
+from sqlalchemy.orm import Session
 from tests.agent.test_document_provider import _context
 from tests.documents.fakes import document_content, document_snapshot
 
@@ -149,14 +148,16 @@ async def _load(saved, **changes):
 
 async def test_successful_original_inspection_can_be_restored_across_attempts(saved):
     """元観測の Attempt が現在と異なっても、同 Run の確定事実として復元する。"""
-    assert await _load(saved) == saved.observed
+    restored = await _load(saved)
+    assert restored == saved.observed
+    assert saved.evidence.metadata_json["observation_version"] == "v1"
+    assert "source_object_key" not in saved.evidence.metadata_json["observation"]
+    assert restored.source_object_key is None
 
 
-@pytest.mark.parametrize("capability", ["document.inspect/v1", "document.list/v1"])
-async def test_actual_inspection_provider_evidence_round_trips_through_sql_lookup(
-    saved, capability
-):
-    """本番 Provider の出力を実テーブルへ保存し、別 codec の fixture 模倣だけで合格させない。"""
+async def _save_provider_observation(saved, capability, source_object_key):
+    """本番 Provider の観測を SQL に保存し、本文取得を伴わない往復に利用する。"""
+    observed = replace(saved.observed, source_object_key=source_object_key)
     content = document_content(b"abc", name="cases.xlsx", document_id=saved.document.document_id)
     context = _context(saved.project_id, content=content)
     tool = replace(context.tool, capability=capability)
@@ -168,7 +169,7 @@ async def test_actual_inspection_provider_evidence_round_trips_through_sql_looku
     )
     context = replace(context, run_id=saved.run_id, run=run, tool=tool)
     source = SimpleNamespace(
-        inspect=AsyncMock(return_value=saved.observed),
+        inspect=AsyncMock(return_value=observed),
         fetch_observed=AsyncMock(),
         fetch=AsyncMock(),
     )
@@ -193,9 +194,128 @@ async def test_actual_inspection_provider_evidence_round_trips_through_sql_looku
         ),
     }
     saved.session.flush()
-    assert await _load(saved) == saved.observed
     source.fetch.assert_not_called()
     source.fetch_observed.assert_not_called()
+    return observed
+
+
+def _response_observation(saved, result):
+    """単一応答と一覧内の原 entry の観測 payload を選ぶ。"""
+    return result["entries"][0] if saved.tool.capability_version == "document.list/v1" else result
+
+
+def _save_changed_observation(saved, metadata, result, *, rehash=False):
+    """改変した記録を保存し、必要時だけ実 codec で両方の摘要を一致させる。"""
+    if rehash:
+        checksum = "sha256:" + sha256_hex(canonical_json(metadata["observation"]))
+        saved.evidence.content_hash = checksum
+        _response_observation(saved, result)["observation_checksum"] = checksum
+    saved.evidence.metadata_json = metadata
+    saved.tool.result_json = result
+    saved.session.flush()
+
+
+@pytest.mark.parametrize("capability", ["document.inspect/v1", "document.list/v1"])
+@pytest.mark.parametrize("source_object_key", [None, "projects/fixture/documents/original.xlsx"])
+async def test_actual_inspection_provider_evidence_round_trips_through_sql_lookup(
+    saved, capability, source_object_key
+):
+    """本番 Provider と SQL lookup で v1 の欠省と v2 の物理 key 保存を往復検証する。"""
+    observed = await _save_provider_observation(saved, capability, source_object_key)
+    metadata = saved.evidence.metadata_json
+    assert metadata["observation_version"] == ("v1" if source_object_key is None else "v2")
+    assert ("source_object_key" in metadata["observation"]) is (source_object_key is not None)
+    assert await _load(saved) == observed
+    assert metadata["observation"].get("source_object_key") == source_object_key
+
+
+@pytest.mark.parametrize("capability", ["document.inspect/v1", "document.list/v1"])
+@pytest.mark.parametrize("target", ["evidence", "response", "both"])
+async def test_changed_source_object_key_cannot_reuse_original_observation_hash(
+    saved, capability, target
+):
+    """応答との一致だけでなく、物理 key を含む原 hash の一致を要求する。"""
+    await _save_provider_observation(saved, capability, "projects/fixture/documents/original.xlsx")
+    metadata = deepcopy(saved.evidence.metadata_json)
+    result = deepcopy(saved.tool.result_json)
+    if target in {"evidence", "both"}:
+        metadata["observation"]["source_object_key"] = "projects/fixture/documents/changed.xlsx"
+    if target in {"response", "both"}:
+        _response_observation(saved, result)["source_object_key"] = (
+            "projects/fixture/documents/changed.xlsx"
+        )
+    _save_changed_observation(saved, metadata, result)
+    assert await _load(saved) is None
+
+
+@pytest.mark.parametrize("capability", ["document.inspect/v1", "document.list/v1"])
+@pytest.mark.parametrize(
+    "key",
+    [
+        None,
+        1,
+        "",
+        "/absolute.xlsx",
+        "../outside.xlsx",
+        "documents/./original.xlsx",
+        "documents//original.xlsx",
+        " documents/original.xlsx",
+        "documents/original.xlsx ",
+        "documents\\original.xlsx",
+        "documents/original\n.xlsx",
+    ],
+)
+async def test_noncanonical_source_object_key_is_rejected_even_with_recomputed_hash(
+    saved, capability, key
+):
+    """再計算済み摘要でも不正 key を正規化・推定せず拒否する。"""
+    await _save_provider_observation(saved, capability, "projects/fixture/documents/original.xlsx")
+    metadata = deepcopy(saved.evidence.metadata_json)
+    result = deepcopy(saved.tool.result_json)
+    metadata["observation"]["source_object_key"] = key
+    _response_observation(saved, result)["source_object_key"] = key
+    _save_changed_observation(saved, metadata, result, rehash=True)
+    assert await _load(saved) is None
+
+
+@pytest.mark.parametrize("capability", ["document.inspect/v1", "document.list/v1"])
+@pytest.mark.parametrize("target", ["observation", "response", "both"])
+async def test_v1_observation_cannot_carry_source_object_key(saved, capability, target):
+    """旧版へ物理 key を混入させても新版と誤認せず、成功応答だけの追加も拒否する。"""
+    await _save_provider_observation(saved, capability, None)
+    metadata = deepcopy(saved.evidence.metadata_json)
+    result = deepcopy(saved.tool.result_json)
+    key = "projects/fixture/documents/injected.xlsx"
+    if target in {"observation", "both"}:
+        metadata["observation"]["source_object_key"] = key
+    if target in {"response", "both"}:
+        _response_observation(saved, result)["source_object_key"] = key
+    _save_changed_observation(saved, metadata, result, rehash=True)
+    assert await _load(saved) is None
+
+
+@pytest.mark.parametrize("capability", ["document.inspect/v1", "document.list/v1"])
+@pytest.mark.parametrize(
+    "case", ["downgraded_version", "unknown_version", "missing_key", "extra_key"]
+)
+async def test_v2_observation_requires_exact_version_and_field_set(saved, capability, case):
+    """摘要と両記録が一致していても版や必要 field の不一致を受理しない。"""
+    await _save_provider_observation(saved, capability, "projects/fixture/documents/original.xlsx")
+    metadata = deepcopy(saved.evidence.metadata_json)
+    result = deepcopy(saved.tool.result_json)
+    response = _response_observation(saved, result)
+    if case == "downgraded_version":
+        metadata["observation_version"] = "v1"
+    elif case == "unknown_version":
+        metadata["observation_version"] = "v3"
+    elif case == "missing_key":
+        del metadata["observation"]["source_object_key"]
+        del response["source_object_key"]
+    else:
+        metadata["observation"]["extra"] = "unrecognized"
+        response["extra"] = "unrecognized"
+    _save_changed_observation(saved, metadata, result, rehash=True)
+    assert await _load(saved) is None
 
 
 @pytest.mark.parametrize("case", ["project", "run", "reference", "invalid_reference", "document"])

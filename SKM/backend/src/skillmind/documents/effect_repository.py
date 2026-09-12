@@ -19,7 +19,6 @@ from skillmind.documents.domain import (
     DocumentUploadInvalidError,
     StoredDocument,
 )
-from skillmind.documents.paths import document_effect_storage_key
 from skillmind.documents.repository import DocumentRepository
 from skillmind.documents.upload_repository import DocumentUploadRepository
 from skillmind.storage.effect_write import ObjectWriteCommand, ObjectWriteReceipt
@@ -54,7 +53,7 @@ class DocumentEffectRepository:
                 not isinstance(value, UUID) or value.int == 0
                 for value in (organization_id, actor_id)
             )
-            or command.object_key != document_effect_storage_key(command.project_id, folder, name)
+            or command.logical_path != "/".join(part for part in (folder, name) if part)
         ):
             raise _invalid()
         row = await self._find(command.effect_id)
@@ -68,6 +67,8 @@ class DocumentEffectRepository:
             ):
                 raise _invalid()
             return row
+        if command.protocol_version != 2:
+            raise _invalid()
         artifact = await ArtifactRepository(self._session).get_content(
             project_id=command.project_id,
             run_id=command.run_id,
@@ -99,7 +100,7 @@ class DocumentEffectRepository:
             actor_id=actor_id,
             artifact_ref=command.artifact_ref,
             document_id=uuid5(command.effect_id, "project-document"),
-            protocol_version=1,
+            protocol_version=command.protocol_version,
             request_checksum=command.request_checksum,
             folder=folder,
             name=name,
@@ -134,6 +135,8 @@ class DocumentEffectRepository:
         """初回だけ送信開始を記録する。True の transaction commit 確認前は送信不可。"""
 
         row = await self.require(command)
+        if command.protocol_version != 2:
+            raise _invalid()
         if (
             not isinstance(owner_id, UUID)
             or owner_id.int == 0
@@ -157,6 +160,8 @@ class DocumentEffectRepository:
         """原 client の核対済み事実だけを保存し、404/同名/申告 hash を回执にしない。"""
 
         row = await self.require(command)
+        if command.protocol_version != 2:
+            raise _invalid()
         if not _aware(now) or row.sent_at is None or now < row.sent_at:
             raise _invalid()
         if (
@@ -191,6 +196,8 @@ class DocumentEffectRepository:
         row = await self.require(command)
         if row.state == "PUBLISHED":
             return _document(row)
+        if command.protocol_version != 2:
+            raise _invalid()
         if (
             row.state != "VERIFIED"
             or not _aware(now)
@@ -312,9 +319,9 @@ def _validate(row: ProjectDocumentEffectUpload, command: ObjectWriteCommand) -> 
         raise _invalid()
     if (
         row.document_id != uuid5(command.effect_id, "project-document")
-        or row.storage_key != document_effect_storage_key(row.project_id, row.folder, row.name)
+        or command.logical_path != "/".join(part for part in (row.folder, row.name) if part)
         or type(row.protocol_version) is not int
-        or row.protocol_version != 1
+        or row.protocol_version != command.protocol_version
         or type(row.size) is not int
         or row.size <= 0
         or not _aware(row.created_at)
