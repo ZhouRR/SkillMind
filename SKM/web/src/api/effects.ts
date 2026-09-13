@@ -42,7 +42,7 @@ export interface ChangeApprovalRecord {
   approval_id: string
   proposal_id: string
   run_id: string
-  source: 'USER' | 'PREAUTHORIZATION'
+  source: 'USER' | 'PREAUTHORIZATION' | 'RUN_START'
   decision: 'APPROVED' | 'REJECTED'
   actor_id: string | null
   preauthorization_id: string | null
@@ -240,7 +240,7 @@ export function isChangeApproval(value: unknown): value is ChangeApprovalRecord 
     ])
     && (typeof value.actor_id === 'string' || value.actor_id === null)
     && (typeof value.preauthorization_id === 'string' || value.preauthorization_id === null)
-    && (value.source === 'USER' || value.source === 'PREAUTHORIZATION')
+    && (value.source === 'USER' || value.source === 'PREAUTHORIZATION' || value.source === 'RUN_START')
     && (value.decision === 'APPROVED' || value.decision === 'REJECTED')
     && Number.isInteger(value.proposal_version)
 }

@@ -5,7 +5,8 @@ capability ごとに答えが違う。これを呼び出し側の `if capability
 書き分けると、capability が増えるたびに 4 箇所を同時に直す必要が生じ、片方だけ緩む余地が残る。
 ここを唯一の判断表とし、上位層は表を引くだけにする。
 
-`preauthorizable=False` は「人手承認を迂回できない」ことを表す。repository への書き込みは
+`preauthorizable` は Project policy、`run_auto_approvable` は開始時の Run 限定同意を表す。
+repository への書き込みは
 後戻り費用が高く、PR/branch という可評審の形で残しても**承認そのものは省けない** (§20.2)。
 """
 
@@ -62,6 +63,8 @@ class EffectCapabilityDefinition:
     requested_scope: Callable[[Mapping[str, Any]], dict[str, Any]]
     # 共有 actor/批准/lease の段階検査を実装した Provider だけを贯穿監督する。
     staged_authorization: bool = False
+    # 開始者の現在権限を各段階で再検証できる保存 Provider だけを Run 限定同意に含める。
+    run_auto_approvable: bool = False
 
     @property
     def providers(self) -> frozenset[str]:
@@ -80,6 +83,7 @@ EFFECT_CAPABILITIES: Mapping[str, EffectCapabilityDefinition] = {
         ),
         requested_scope=document_write_scope_from_payload,
         staged_authorization=True,
+        run_auto_approvable=True,
     ),
     DATABASE_WRITE_CAPABILITY: EffectCapabilityDefinition(
         capability_version=DATABASE_WRITE_CAPABILITY,
@@ -90,6 +94,7 @@ EFFECT_CAPABILITIES: Mapping[str, EffectCapabilityDefinition] = {
         ),
         requested_scope=database_write_scope_from_payload,
         staged_authorization=True,
+        run_auto_approvable=True,
     ),
     ISSUE_UPDATE_CAPABILITY: EffectCapabilityDefinition(
         capability_version=ISSUE_UPDATE_CAPABILITY,

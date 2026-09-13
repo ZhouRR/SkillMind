@@ -80,6 +80,7 @@ from skillmind.effects.proposal import (
     proposal_content,
 )
 from skillmind.effects.reconciliation_domain import EffectReconciliationTarget
+from skillmind.effects.run_approval import has_actor_approval, run_auto_approval_actor
 from skillmind.integrations.domain import (
     IntegrationStatus,
     ResourceBindingLevel,
@@ -205,9 +206,10 @@ class EffectOperationsMixin(_RunRepositoryBase):
             if capability.preauthorizable and binding.integration_id is not None
             else None
         )
+        auto_actor = run_auto_approval_actor(run, draft.capability_version)
         status = (
             ChangeProposalStatus.APPROVED
-            if preauthorization is not None
+            if preauthorization is not None or auto_actor is not None
             else ChangeProposalStatus.PENDING_APPROVAL
         )
         proposal = ChangeProposal(
@@ -249,7 +251,25 @@ class EffectOperationsMixin(_RunRepositoryBase):
         approval: ChangeApproval | None = None
         execution: EffectExecution | None = None
         interaction: UserInteraction | None = None
-        if preauthorization is not None:
+        if auto_actor is not None:
+            # 開始時の同意を精確 Proposal へ投影し、独立 Worker が実行直前に現在権限を再検証する。
+            approval = ChangeApproval(
+                id=uuid4(), proposal_id=proposal_id, run_id=run.id,
+                source=ApprovalSource.RUN_START.value,
+                decision=ApprovalDecision.APPROVED.value, actor_id=auto_actor,
+                preauthorization_id=None, proposal_version=1, proposal_checksum=checksum,
+                idempotency_key=f"run-start:{run.id}:{proposal_id}",
+                request_hash=sha256_hex(canonical_json({
+                    "run_request_hash": run.request_hash, "proposal_id": str(proposal_id),
+                    "proposal_checksum": checksum, "actor_id": str(auto_actor),
+                })),
+                reason="Automatic approval selected by the initiating user at Run start",
+                created_at=now,
+            )
+            execution = self._new_effect_execution(
+                proposal=proposal, approval=approval, provider=binding.provider, now=now,
+            )
+        elif preauthorization is not None:
             approval = ChangeApproval(
                 id=uuid4(),
                 proposal_id=proposal_id,
@@ -373,19 +393,18 @@ class EffectOperationsMixin(_RunRepositoryBase):
             sequence=event.sequence + 1,
             event_type=(
                 AgentEventType.EFFECT_APPROVED.value
-                if preauthorization is not None
+                if approval is not None
                 else AgentEventType.INTERACTION_REQUESTED.value
             ),
             payload_json=(
                 {
                     "proposal_id": str(proposal_id),
                     "approval_id": str(approval.id) if approval is not None else None,
-                    "source": ApprovalSource.PREAUTHORIZATION.value,
-                    "preauthorization_id": str(
-                        preauthorization.preauthorization_id
-                    ),
+                    "source": approval.source,
+                    "preauthorization_id": (str(approval.preauthorization_id)
+                                             if approval.preauthorization_id else None),
                 }
-                if preauthorization is not None
+                if approval is not None
                 else {
                     "proposal_id": str(proposal_id),
                     "interaction_id": str(interaction.id) if interaction is not None else None,
@@ -398,8 +417,8 @@ class EffectOperationsMixin(_RunRepositoryBase):
             occurred_at=now,
             trace_id=None,
             summary=(
-                "Effect approved by preauthorization"
-                if preauthorization is not None
+                "Effect automatically approved"
+                if approval is not None
                 else "Effect approval requested"
             ),
         )
@@ -441,6 +460,13 @@ class EffectOperationsMixin(_RunRepositoryBase):
         if interaction is not None:
             rows.append(interaction)
         if approval is not None and execution is not None:
+            # relationship のない FK 親を先に確定し、同一 transaction 内の挿入順を保証する。
+            self._session.add(proposal)
+            await self._session.flush()
+            self._session.add(approval)
+            await self._session.flush()
+            self._session.add(execution)
+            await self._session.flush()
             rows.extend(
                 [
                     approval,
@@ -966,6 +992,10 @@ class EffectOperationsMixin(_RunRepositoryBase):
             or not hmac.compare_digest(approval.proposal_checksum, proposal.checksum)
         ):
             raise EffectLeaseValidationError("Effect approval does not match Proposal version")
+        if approval.source == ApprovalSource.RUN_START.value and not has_actor_approval(
+            run, approval, proposal.capability_version
+        ):
+            raise EffectLeaseValidationError("Run start approval does not match its frozen consent")
         await self._validate_proposal_row(proposal, run=run)
         binding = await self._session.get(ResourceBinding, proposal.target_binding_id)
         integration = (await self._session.get(Integration, proposal.integration_id)
@@ -1038,7 +1068,9 @@ class EffectOperationsMixin(_RunRepositoryBase):
                     reason=(
                         "Exact user approval"
                         if approval.source == ApprovalSource.USER.value
-                        else "Exact low-risk preauthorization"
+                        else ("Run start automatic approval"
+                              if approval.source == ApprovalSource.RUN_START.value
+                              else "Exact low-risk preauthorization")
                     ),
                     request_fingerprint=execution.request_fingerprint,
                     request_json={
@@ -1137,7 +1169,9 @@ class EffectOperationsMixin(_RunRepositoryBase):
         except (ValueError, TypeError) as error:
             raise EffectLeaseValidationError("Effect initiating actor is unavailable") from error
         approval_actor_id = observed_approval.actor_id
-        if approval_actor_id is None or observed_approval.source != ApprovalSource.USER.value:
+        if approval_actor_id is None or not has_actor_approval(
+            observed_run, observed_approval, claimed.capability_version
+        ):
             raise EffectLeaseValidationError("Effect requires an exact user approval")
         observed_user = await self._session.get(User, actor_id)
         if observed_user is None:
@@ -1208,7 +1242,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
             or approval.run_id != run.id
             or approval.proposal_id != proposal.id
             or approval.actor_id != approval_actor_id
-            or approval.source != ApprovalSource.USER.value
+            or not has_actor_approval(run, approval, proposal.capability_version)
             or approval.decision != ApprovalDecision.APPROVED.value
             or approval.proposal_version != proposal.version
             or not hmac.compare_digest(approval.proposal_checksum, proposal.checksum)
@@ -1365,7 +1399,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
             or execution.idempotency_key != proposal.idempotency_key
             or execution.request_fingerprint != proposal.request_fingerprint
             or approval is None or approval.run_id != run.id or approval.proposal_id != proposal.id
-            or approval.source != ApprovalSource.USER.value
+            or not has_actor_approval(run, approval, proposal.capability_version)
             or approval.decision != ApprovalDecision.APPROVED.value
             or approval.proposal_version != proposal.version
             or approval.proposal_checksum != proposal.checksum):

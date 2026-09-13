@@ -1491,7 +1491,7 @@ class ChangeProposal(IdentityMixin, TimestampMixin, Base):
 
 
 class ChangeApproval(IdentityMixin, Base):
-    """Proposal version に対する user または preauthorization の一回限りの判断。"""
+    """Proposal version に対する手動・Run 開始同意・Project policy の判断。"""
 
     __tablename__ = "change_approvals"
     __table_args__ = (
@@ -1500,7 +1500,7 @@ class ChangeApproval(IdentityMixin, Base):
             "run_id", "idempotency_key", name="uq_change_approvals_run_idempotency"
         ),
         CheckConstraint(
-            "source IN ('USER', 'PREAUTHORIZATION')", name="change_approvals_source"
+            "source IN ('USER', 'PREAUTHORIZATION', 'RUN_START')", name="change_approvals_source"
         ),
         CheckConstraint(
             "decision IN ('APPROVED', 'REJECTED')", name="change_approvals_decision"

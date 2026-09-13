@@ -114,9 +114,9 @@ type SkillVersionState =
 
 /** Organization Skill library 一覧の非同期状態。 */
 type SkillLibraryState =
-  | { status: 'loading' }
+  | { status: 'loading'; versions?: SkillVersionRecord[] }
   | { status: 'ready'; versions: SkillVersionRecord[] }
-  | { status: 'error'; message: string }
+  | { status: 'error'; message: string; versions?: SkillVersionRecord[] }
 
 /** 画面の 2 大区分。取込〜発行の作業台と、組織 library の管理を同時に一つだけ見せる。 */
 type SkillsPageTab = 'workbench' | 'library'
@@ -145,6 +145,7 @@ export function SkillsPage({ projectId, csrfToken }: {
   const [versionState, setVersionState] = useState<SkillVersionState>({ status: 'idle' })
   const [libraryState, setLibraryState] = useState<SkillLibraryState>({ status: 'loading' })
   const [enablementState, setEnablementState] = useState<ProjectEnablementState>({ status: 'idle' })
+  const [libraryActionError, setLibraryActionError] = useState<{ versionId: string; message: string } | null>(null)
   const [libraryBusyVersionId, setLibraryBusyVersionId] = useState<string | null>(null)
   const [pageTab, setPageTab] = useState<SkillsPageTab>('library')
   const { confirm, confirmDialog } = useConfirmDialog()
@@ -202,16 +203,16 @@ export function SkillsPage({ projectId, csrfToken }: {
     libraryController.current?.abort()
     const controller = new AbortController()
     libraryController.current = controller
-    setLibraryState({ status: 'loading' })
+    setLibraryState((current) => ({ status: 'loading', versions: current.versions }))
     try {
       const versions = await listSkillVersions(controller.signal)
       if (!controller.signal.aborted) setLibraryState({ status: 'ready', versions })
     } catch (error: unknown) {
       if (!controller.signal.aborted) {
-        setLibraryState({
-          status: 'error',
+        setLibraryState((current) => ({
+          status: 'error', versions: current.versions,
           message: apiErrorMessage(error, messages.skills.loadLibraryFailed, messages),
-        })
+        }))
       }
     }
   }
@@ -565,6 +566,7 @@ export function SkillsPage({ projectId, csrfToken }: {
     libraryMutationController.current?.abort()
     const controller = new AbortController()
     libraryMutationController.current = controller
+    setLibraryActionError(null)
     setLibraryBusyVersionId(version.skill_version_id)
     try {
       await deprecateSkillVersion(version.skill_version_id, csrfToken, controller.signal)
@@ -572,8 +574,8 @@ export function SkillsPage({ projectId, csrfToken }: {
       await refreshEnablements()
     } catch (error: unknown) {
       if (!controller.signal.aborted) {
-        setLibraryState({
-          status: 'error',
+        setLibraryActionError({
+          versionId: version.skill_version_id,
           message: apiErrorMessage(error, messages.skills.deprecateFailed, messages),
         })
       }
@@ -585,7 +587,7 @@ export function SkillsPage({ projectId, csrfToken }: {
   /** 監査参照のない DRAFT / DEPRECATED 版を organization library から取り除く。
    *
    * Run snapshot や composition から参照されている版は backend が 409 で拒否する。
-   * その場合は「なぜ消せないか」を一覧の error 欄へ出し、利用者が諦め方を判断できるようにする。
+   * 拒否理由は対象行へ出し、読取済みの一覧を操作エラーで置き換えない。
    */
   async function handleDelete(version: SkillVersionRecord): Promise<void> {
     if (version.status !== 'DRAFT' && version.status !== 'DEPRECATED') return
@@ -598,6 +600,7 @@ export function SkillsPage({ projectId, csrfToken }: {
     libraryMutationController.current?.abort()
     const controller = new AbortController()
     libraryMutationController.current = controller
+    setLibraryActionError(null)
     setLibraryBusyVersionId(version.skill_version_id)
     try {
       await deleteSkillVersion(version.skill_version_id, csrfToken, controller.signal)
@@ -605,8 +608,8 @@ export function SkillsPage({ projectId, csrfToken }: {
       await refreshEnablements()
     } catch (error: unknown) {
       if (!controller.signal.aborted) {
-        setLibraryState({
-          status: 'error',
+        setLibraryActionError({
+          versionId: version.skill_version_id,
           message: error instanceof ApiProblemError && error.code === 'skill_version_delete_blocked'
             ? messages.skills.deleteBlocked
             : apiErrorMessage(error, messages.skills.deleteFailed, messages),
@@ -623,6 +626,7 @@ export function SkillsPage({ projectId, csrfToken }: {
     libraryMutationController.current?.abort()
     const controller = new AbortController()
     libraryMutationController.current = controller
+    setLibraryActionError(null)
     setLibraryBusyVersionId(version.skill_version_id)
     try {
       await enableProjectSkillVersion(
@@ -650,6 +654,7 @@ export function SkillsPage({ projectId, csrfToken }: {
     libraryMutationController.current?.abort()
     const controller = new AbortController()
     libraryMutationController.current = controller
+    setLibraryActionError(null)
     setLibraryBusyVersionId(version.skill_version_id)
     try {
       await disableProjectSkillVersion(
@@ -796,6 +801,8 @@ export function SkillsPage({ projectId, csrfToken }: {
       <div className="tabPanel" role="tabpanel" hidden={pageTab !== 'library'}>
         <SkillLibraryPanel
           libraryState={libraryState}
+          actionError={libraryActionError}
+          onRefresh={() => { setLibraryActionError(null); void refreshLibrary() }}
           enablementState={enablementState}
           projectId={projectId}
           busyVersionId={libraryBusyVersionId}
@@ -833,6 +840,8 @@ function SkillsPageTabButton({ current, tab, onSelect, children }: {
 /** Organization version 一覧と選択 Project の明示有効化関係を同じ精確版単位で表示する。 */
 export function SkillLibraryPanel({
   libraryState,
+  actionError,
+  onRefresh,
   enablementState,
   projectId,
   busyVersionId,
@@ -842,6 +851,8 @@ export function SkillLibraryPanel({
   onDisable,
 }: {
   libraryState: SkillLibraryState
+  actionError?: { versionId: string; message: string } | null
+  onRefresh?: () => void
   enablementState: ProjectEnablementState
   projectId: string
   busyVersionId: string | null
@@ -851,6 +862,7 @@ export function SkillLibraryPanel({
   onDisable: (version: SkillVersionRecord) => void
 }) {
   const messages = useMessages()
+  const versions = libraryState.versions ?? []
   const enablements = enablementState.status === 'ready' ? enablementState.enablements : []
   const activeIds = new Set(enablements
     .filter(({ disabled_at }) => disabled_at === null)
@@ -873,22 +885,26 @@ export function SkillLibraryPanel({
       {!projectId && <p className="hint">{messages.skills.libraryNoProjectHint}</p>}
       {enablementState.status === 'error' && <p className="error" role="alert">{enablementState.message}</p>}
       {/* 読み込み中は「空(点線枠)」ではなく骨格行を出す。空態と loading の意味を取り違えさせない。 */}
-      {(libraryState.status === 'loading' || enablementState.status === 'loading') && (
+      {((libraryState.status === 'loading' && versions.length === 0) || enablementState.status === 'loading') && (
         <LoadingSkeleton
           label={libraryState.status === 'loading' ? messages.skills.loadingLibrary : messages.skills.loadingEnablements}
           rows={3}
         />
       )}
-      {libraryState.status === 'error' && <p className="error" role="alert">{libraryState.message}</p>}
+      {libraryState.status === 'error' && <div>
+        <p className="error" role="alert">{libraryState.message}</p>
+        {onRefresh && <button className="secondaryButton" type="button" onClick={onRefresh}>{messages.runHistory.retry}</button>}
+      </div>}
       {libraryState.status === 'ready' && libraryState.versions.length === 0 && (
         <EmptyState text={messages.skills.emptyLibrary} />
       )}
-      {libraryState.status === 'ready' && libraryState.versions.length > 0 && (
+      {versions.length > 0 && (
         <ul className="skillLibraryList">
-          {libraryState.versions.map((version) => {
+          {versions.map((version) => {
             const active = activeIds.has(version.skill_version_id)
             const disabled = disabledIds.has(version.skill_version_id)
             const busy = busyVersionId === version.skill_version_id
+            const unavailable = busyVersionId !== null || libraryState.status !== 'ready'
             return (
               <li key={version.skill_version_id}>
                 {/* 内部 UUID は利用者の判断材料にならないため出さない。読める識別は
@@ -897,6 +913,7 @@ export function SkillLibraryPanel({
                   <strong>{version.name} <span className="mono">v{version.version}</span></strong>
                   {version.description && <p className="skillLibraryDescription">{version.description}</p>}
                   <span className="mono">{version.skill_key}</span>
+                  {actionError?.versionId === version.skill_version_id && <p className="error" role="alert">{actionError.message}</p>}
                 </div>
                 <div className="skillLibraryStatus">
                   <span className="statusBadge">{messages.enums.skillVersionStatus[version.status] ?? version.status}</span>
@@ -905,12 +922,12 @@ export function SkillLibraryPanel({
                 </div>
                 <div className="skillActions">
                   {projectId && active && (
-                    <button className="secondaryButton" type="button" disabled={busy} onClick={() => onDisable(version)}>
+                    <button className="secondaryButton" type="button" disabled={unavailable} onClick={() => onDisable(version)}>
                       {busy ? messages.elements.processing : messages.skills.disableFromProject}
                     </button>
                   )}
                   {projectId && !active && !disabled && version.status === 'PUBLISHED' && (
-                    <button className="primaryButton" type="button" disabled={busy} onClick={() => onEnable(version)}>
+                    <button className="primaryButton" type="button" disabled={unavailable} onClick={() => onEnable(version)}>
                       {busy ? messages.elements.processing : messages.skills.enableForProject}
                     </button>
                   )}
@@ -918,14 +935,14 @@ export function SkillLibraryPanel({
                     <span className="hint">{messages.skills.disabledAuditHint}</span>
                   )}
                   {version.status === 'PUBLISHED' && (
-                    <button className="secondaryButton" type="button" disabled={busy} onClick={() => onDeprecate(version)}>
+                    <button className="secondaryButton" type="button" disabled={unavailable} onClick={() => onDeprecate(version)}>
                       {busy ? messages.elements.processing : messages.skills.deprecateVersion}
                     </button>
                   )}
                   {/* 廃止しただけでは行が残り続けるため、監査参照のない版に限り片付け経路を出す。
                       参照が残る版は backend が 409 で拒否し、その理由を一覧の error 欄へ出す。 */}
                   {(version.status === 'DRAFT' || version.status === 'DEPRECATED') && (
-                    <button className="dangerButton" type="button" disabled={busy} onClick={() => onDelete(version)}>
+                    <button className="dangerButton" type="button" disabled={unavailable} onClick={() => onDelete(version)}>
                       {busy ? messages.elements.processing : messages.skills.deleteVersion}
                     </button>
                   )}

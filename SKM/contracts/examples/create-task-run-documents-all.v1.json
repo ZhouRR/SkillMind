@@ -1,4 +1,5 @@
 {
+  "auto_approve": true,
   "skill_version_id": "00000000-0000-4000-8000-000000000061",
   "task_key": "analyze",
   "input": {

@@ -923,6 +923,7 @@ export const EN: UiMessages = {
       incompleteDraft: 'Enter a valid JSON object and complete all document selections. Optional scopes can be set to not used.',
     },
     creating: 'Creating…',
+    autoApprove: 'Automatically approve database writes and document saves',
     startRun: 'Start run',
     submission: {
       title: 'Confirm the previous submission',

@@ -115,6 +115,7 @@ def test_generic_adapted_source_becomes_publishable_after_interpretation() -> No
 
     request = build_interpreter_request(
         package=package,
+        source_files=load_inline_text_files(GENERIC_SKILL, package),
         analysis=analysis,
         catalog=load_capability_catalog(CATALOG),
         system_skill=load_interpreter_system_skill(SYSTEM_SKILL),
@@ -136,6 +137,7 @@ def test_same_fixture_interpretation_is_structurally_stable_three_times() -> Non
     package, analysis = _analyze(GENERIC_SKILL)
     request = build_interpreter_request(
         package=package,
+        source_files=load_inline_text_files(GENERIC_SKILL, package),
         analysis=analysis,
         catalog=load_capability_catalog(CATALOG),
         system_skill=load_interpreter_system_skill(SYSTEM_SKILL),
@@ -204,6 +206,7 @@ def test_unsafe_source_is_blocked_before_model_and_not_publishable() -> None:
     with pytest.raises(UnsafeSkillSourceError):
         build_interpreter_request(
             package=package,
+            source_files=load_inline_text_files(UNSAFE_CREDENTIAL, package),
             analysis=analysis,
             catalog=load_capability_catalog(CATALOG),
             system_skill=load_interpreter_system_skill(SYSTEM_SKILL),

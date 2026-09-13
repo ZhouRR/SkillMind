@@ -893,6 +893,7 @@ class FakeRunService:
         actor_id: UUID,
         idempotency_key: str,
         authorization: UserAccess | RunCreationParticipant,
+        auto_approve: bool = False,
     ) -> CreatedRun | None:
         """初回要求を先に確認し、再送では現在の task 解決を必要としない。"""
 
@@ -929,6 +930,7 @@ class FakeRunService:
         trace_id: str | None,
         actor_id: UUID,
         authorization: UserAccess | RunCreationParticipant,
+        auto_approve: bool = False,
     ) -> CreatedRun:
         """通用 Run を作成し、source 不正と conflict の scenario を再現する。"""
 

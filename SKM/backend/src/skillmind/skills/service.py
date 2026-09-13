@@ -1346,7 +1346,8 @@ class SkillService:
             root = Path(temporary).resolve()
             await self._materialize_source(source, root)
             package = self._parser.parse_directory(root)
-            analysis = SkillStaticAnalyzer().analyze(package, load_inline_text_files(root, package))
+            source_files = load_inline_text_files(root, package)
+            analysis = SkillStaticAnalyzer().analyze(package, source_files)
         if package.content_hash != source.source_hash:
             raise SkillSourceIntegrityError(
                 "Stored SkillSource content hash drifted from its snapshot"
@@ -1354,6 +1355,7 @@ class SkillService:
         try:
             request = build_interpreter_request(
                 package=package,
+                source_files=source_files,
                 analysis=analysis,
                 catalog=catalog,
                 system_skill=identity,

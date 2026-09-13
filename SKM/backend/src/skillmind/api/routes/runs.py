@@ -127,6 +127,7 @@ class CreateTaskRunRequest(BaseModel):
     task_key: str = Field(min_length=1, max_length=200)
     input: dict[str, Any] = Field(default_factory=dict)
     sources: dict[str, str] = Field(default_factory=dict, max_length=50)
+    auto_approve: bool = Field(default=False, strict=True)
 
 
 class RunResponse(BaseModel):
@@ -539,6 +540,7 @@ async def create_task_run(
         task_key=body.task_key,
         input_json=body.input,
         sources=body.sources,
+        auto_approve=body.auto_approve,
         actor_id=actor.user_id,
         idempotency_key=idempotency_key,
         authorization=authorization,
@@ -564,6 +566,7 @@ async def create_task_run(
                     resolved=resolved,
                     input_json=body.input,
                     sources=body.sources,
+                    auto_approve=body.auto_approve,
                     idempotency_key=idempotency_key,
                     trace_id=request.state.request_id,
                     actor_id=actor.user_id,

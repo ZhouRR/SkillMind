@@ -50,7 +50,7 @@ export function WorkspaceReports({ projectId, tasks, actorId, csrfToken, project
           {tasks.map((item) => <option key={item.task_id} value={item.task_id}>{item.title} · v{item.version}</option>)}
         </select>
       </label>
-      <button className="secondaryButton compactButton" type="button" disabled={query.pending || !taskId}
+      <button className="secondaryButton" type="button" disabled={query.pending || !taskId}
         onClick={query.refresh}>{messages.runHistory.retry}</button>
     </div>
     {!taskId ? <EmptyState text={messages.workspace.noModuleTasks} />

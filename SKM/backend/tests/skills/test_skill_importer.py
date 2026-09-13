@@ -251,6 +251,7 @@ def _interpreter_request() -> dict[str, object]:
     package, analysis = _package_and_analysis()
     return build_interpreter_request(
         package=package,
+        source_files=load_inline_text_files(GENERIC_SKILL, package),
         analysis=analysis,
         catalog=load_capability_catalog(
             CONTRACTS / "examples" / "skill-capability-catalog.v1.json"
@@ -293,6 +294,7 @@ def test_static_analysis_records_declared_builtin_tool_without_blocking() -> Non
     # 宣言だけでは model 呼び出し前に閉じない。
     request = build_interpreter_request(
         package=package,
+        source_files=load_inline_text_files(UNSAFE_SKILL, package),
         analysis=analysis,
         catalog=load_capability_catalog(
             CONTRACTS / "examples" / "skill-capability-catalog.v1.json"
@@ -316,6 +318,7 @@ def test_static_analysis_blocks_credential_source_before_model() -> None:
     with pytest.raises(UnsafeSkillSourceError):
         build_interpreter_request(
             package=package,
+            source_files=load_inline_text_files(UNSAFE_CREDENTIAL, package),
             analysis=analysis,
             catalog=load_capability_catalog(
                 CONTRACTS / "examples" / "skill-capability-catalog.v1.json"
@@ -391,8 +394,8 @@ def test_system_skill_identity_is_versioned_and_matches_fixture_contract() -> No
     identity = load_interpreter_system_skill(SYSTEM_SKILL)
     example = _load_contract("examples/skill-interpreter-request.v1.json")["interpreter"]
 
-    assert identity.version == "4.1.3"
-    assert identity.interpreter_version == "skillmind-skill-interpreter/4.1.3"
+    assert identity.version == "4.2.0"
+    assert identity.interpreter_version == "skillmind-skill-interpreter/4.2.0"
     assert identity.to_dict() == example
 
 
@@ -588,7 +591,7 @@ def test_bind_identity_stamps_platform_identity_on_model_output() -> None:
     response["runtime_manifest_draft"]["tasks"] = [task]  # type: ignore[index]
     validated = InterpreterFixtureRunner(CONTRACTS).run(request, response, bind_identity=True)
     identity = validated["runtime_manifest_draft"]["identity"]
-    assert identity["interpreter_version"] == "skillmind-skill-interpreter/4.1.3"
+    assert identity["interpreter_version"] == "skillmind-skill-interpreter/4.2.0"
     assert identity["source_hash"] == request["source"]["content_hash"]  # type: ignore[index]
     # 蓝图は同じ解釈の一部であり、manifest と別の identity/互換 level を持ってはならない。
     blueprint = validated["runtime_manifest_draft"]["capability_blueprint"]

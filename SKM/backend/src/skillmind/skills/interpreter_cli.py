@@ -38,6 +38,7 @@ def run_fixture(
     )
     request = build_interpreter_request(
         package=package,
+        source_files=load_inline_text_files(source, package),
         analysis=analysis,
         catalog=load_capability_catalog(capability_catalog),
         system_skill=load_interpreter_system_skill(system_skill),

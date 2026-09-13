@@ -35,16 +35,24 @@ observe → Evidence → change.propose → 精确批准/允许的预授权
 | --- | --- |
 | issue.update/v1 | Redmine CAS adapter；仅 system ADMIN 配置 LOW 风险精确 scope 可预授权，discovery → 前置 revision → 条件写入 → 回读 |
 | repository.write/v1 | Git/SVN，始终人工批准，不 force；精确 CAS/恢复仍有缺口 |
-| database.write/v1 | PostgreSQL 单行 INSERT/UPDATE，始终人工批准；独立部署开关、可信原行 Evidence、精确表/列范围与同事务回执 |
-| document.write/v1 | 项目文档库 CREATE，始终人工批准；按原 Effect/内容隔离物理对象，独立部署开关默认关闭；真实完整流程验收待补 |
+| database.write/v1 | PostgreSQL 单行 INSERT/UPDATE，逐次批准或 Run 启动同意；独立部署开关、可信原行 Evidence、精确表/列范围与同事务回执 |
+| document.write/v1 | 项目文档库 CREATE，逐次批准或 Run 启动同意；按原 Effect/内容隔离物理对象，独立部署开关默认关闭；真实完整流程验收待补 |
 
 标准 Redmine REST 不具本协议 CAS/幂等，须通过版本化 discovery 及真实竞争验收。批准复验 actor/Project/version/checksum/Integration/binding/scope；仅 Run 发起人或组织 system ADMIN 决策。HTTP 决策在共享事务内锁定当前账户、原 Session 和项目，复验 CSRF、当前角色及成员关系，提交前再次验证；不能沿用请求开始时缓存的管理员身份。
+
+### Run 启动时的自动批准
+
+手动启动页面提供默认勾选的「自動承認（データベースへの書込み・文書保存）」。提交的 `auto_approve` 与 actor、任务、输入和资源选择一起冻结；API 省略时为 false，旧 Run 和调度不自动授权，执行中不可修改。相同幂等键改变此选项返回冲突。问题答复仍由用户决定，repository.write 仍逐次人工批准，Redmine 沿原 Project policy。
+
+平台在提案通过原能力、Evidence、冻结 binding 和 scope 校验后，为精确 Proposal version/checksum 保存 `ChangeApproval.source=RUN_START`，actor 为原发起人。同事务保存 Effect 和 dispatch Outbox，不创建待答复 interaction；独立 Effect Worker 沿原 apply/read-back/续行协议运行。Run 在外部保存期间仍可短暂显示 WAITING_FOR_APPROVAL，此时没有人工待办。
+
+claim、阶段执行、续租及未知结果只读核对使用同一判断源校验；原请求 hash、actor 或同意不符即拒绝。每个写入步骤仍检查当前用户/项目资格、冻结绑定、撤权、取消、期限及精确批准，不新增 SQL、覆盖对象或越界写入权限。结果未知沿原回执核对，不重复生成批准或重做写入。部署须先迁移判断源 CHECK，并配套切换 API/Worker/Web；旧浏览器须刷新以识别新审批来源。
 
 ## 首版所需的存储和数据库写入
 
 rv-reviewer 的完整验收需要 PostgreSQL 执行/文档/成果记录和 MinIO 成果上传；数据库与 MinIO 成果 Provider 均通过独立部署开关显式启用，默认关闭。按通用能力实现，业务表、字段、PASS/FAIL 规则仍属于 Skill 与项目绑定，不能写入平台通用 Schema 或执行器。
 
-数据库写入只接受显式表、列、值及精确行条件，范围来自冻结 binding；参数化执行，不接受模型 SQL 或连接信息。MinIO 写入固定 bucket、允许 prefix、对象 key、内容 hash 和原 Effect 身份，字节来自已冻结的 Run 成果；禁止无条件覆盖和越界路径。两者均沿 observe → propose → 精确批准 → apply → read-back，低风险自动批准须另有已实现的范围约束，不能由 Skill 指令、远端 tool 注解或全局扩展开关代替。
+数据库写入只接受显式表、列、值及精确行条件，范围来自冻结 binding；参数化执行，不接受模型 SQL 或连接信息。MinIO 写入固定 bucket、允许 prefix、对象 key、内容 hash 和原 Effect 身份，字节来自已冻结的 Run 成果；禁止无条件覆盖和越界路径。两者均沿 observe → propose → 精确批准 → apply → read-back，自动批准仅由下述 Run 启动同意或已注册的 Project policy 产生，不能由 Skill 指令、远端 tool 注解或全局扩展开关代替。
 
 数据库和对象存储不跨系统原子提交。每次外部调用保存原身份和阶段回执，响应丢失先只读核对；同名/同值不能证明原写入，不换 ID 重做。取消保留已发生记录，恢复只补已证明未发生的步骤。引入新能力前同步公开契约、权限/预算、原凭据复验、独立门禁和 Worker 恢复；未经批准的操作、旧 Worker、目标漂移、部分成功及未知费用均须失败停止并可核对。
 
@@ -54,9 +62,9 @@ rv-reviewer 的完整验收需要 PostgreSQL 执行/文档/成果记录和 MinIO
 
 提案使用通用 `change.propose/v1` 的单个 `/row` SET，值仅包含 `key`、`values`、`expected`；目标是 `schema.table`，`precondition.revision` 是原行摘要或插入的 `absent`。`capability_version` 指实际写入能力，不能填提案 Tool 本身或读取能力。两个 SDK 在延期前复用 Effect 注册表及持久化侧的行形状、原行与 revision 一致性校验，将这类错误返回模型修正；这不代替保存时的配备、权限、scope 和 Evidence 检查。表和可写列可逐项指定（`schema.table` / `schema.table.column`），也可由管理员分别显式选择全部（`["*"]`）；全部列仅适用于已允许的表，包含后来新增且数据库账号有权操作的表和列。操作仍逐项限定 INSERT/UPDATE，`skillmind_effects` 回执 schema 仍禁止作为写入目标，不开放主键更新、generated/identity 列或预授权。通配范围使用原 binding 冻结与撤权校验，旧显式范围不自动扩大；API/Worker 均升级后才可保存新全许可配置。新建 Run 对写入资源仍只公开已声明的读取 Tool，冻结 binding 保留写入能力；缺少读取声明直接拒绝，不改写历史快照。
 
-创建及使用提案时复验 Evidence：须来自同一 Run、Integration 和冻结 binding 的成功 `database.read/v1` ToolCall，按完整主键精确过滤、无列投影、零 offset、未截断，且完整原行摘要或不存在结果与提案一致。读取响应附加 `row_hashes`，保留既有 content_hash 计算语义；旧 Evidence 缺少这些事实时须重新观察。数据库 effect 不是可直接调用的 Agent Tool，也不允许预授权。
+创建及使用提案时复验 Evidence：须来自同一 Run、Integration 和冻结 binding 的成功 `database.read/v1` ToolCall，按完整主键精确过滤、无列投影、零 offset、未截断，且完整原行摘要或不存在结果与提案一致。读取响应附加 `row_hashes`，保留既有 content_hash 计算语义；旧 Evidence 缺少这些事实时须重新观察。数据库 effect 不是可直接调用的 Agent Tool；不接受 Project 预授权，Run 启动同意遵循下节。
 
-客户端把 Project/Run/Integration/Effect、表、完整主键、操作、值和原行冻结到 checksum。只允许显式 `INSERT`/`UPDATE`：插入须原行不存在，更新须完整主键和观察到的原行一致；只写允许列，禁止主键更新和显式写 generated/identity 列。原执行权 callback 由共享 `EffectService.authorize_effect_step` 提供，连接前、等待/观察后及提交前复验，不能由模型提供。该入口先重新解析相同 binding/凭据，再按 Organization → User → Project → Run → Segment → Proposal → Effect 的锁序检查当前发起人、批准者、项目成员、取消、原批准 version/checksum、完整 claim 和 lease；所有等待后再次核对到期时间。后台沿持久人工批准检查当前账户和项目权限，不伪造浏览器会话；此入口不接受预授权，也尚未替换旧 Provider 的执行路径。
+客户端把 Project/Run/Integration/Effect、表、完整主键、操作、值和原行冻结到 checksum。只允许显式 `INSERT`/`UPDATE`：插入须原行不存在，更新须完整主键和观察到的原行一致；只写允许列，禁止主键更新和显式写 generated/identity 列。原执行权 callback 由共享 `EffectService.authorize_effect_step` 提供，连接前、等待/观察后及提交前复验，不能由模型提供。该入口先重新解析相同 binding/凭据，再按 Organization → User → Project → Run → Segment → Proposal → Effect 的锁序检查当前发起人、批准者、项目成员、取消、原批准 version/checksum、完整 claim 和 lease；所有等待后再次核对到期时间。后台沿持久批准检查当前账户和项目权限，不伪造浏览器会话；此入口接受人工批准或经原请求验证的 Run 启动同意，不接受 Project 预授权，也尚未替换旧 Provider 的执行路径。
 
 单次专用连接内，READ COMMITTED 事务按原 Effect 取得事务级 advisory lock，先查回执，再核对原值、参数化修改、回读并保存回执，一同提交。UPDATE 在原行观察时加锁；INSERT 用普通 SELECT 确认不存在，由完整主键的唯一约束拒绝并发插入，插入后沿同一事务的写锁回读，因此仅需 SELECT/INSERT 权限。值通过目标表类型转换，SQL 标识符独立验证并引用；命令及单行结果有 1 MiB 上限，连接/语句/锁等待/整次操作分别限时。已存在同 Effect 且 checksum 一致的回执返回原前后事实，即使目标行后来改变也不再写入；同值但无原回执不能认作成功。commit 或连接结果未知返回需核对状态，不生成新身份。Provider 再 claim 时先只读 lookup；原回执存在即返回，不再写入。未检出不能证明旧请求未到达，后续仍以同一命令取得原 Effect lock、重新查回执并核对原行，等待先行事务结束；不以一次未检出或今日同值绕过此协议。次数耗尽、取消及批准过期后的未知处置仍待闭合。
 

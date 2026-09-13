@@ -33,6 +33,14 @@ parse 不调用模型，初始 Draft 可无蓝图、不可直接发布。ZIP/TAR
 
 模型生成 Schema 的四处 TaskContractDraft 共用编译器的深度上限：根节点计 1，每个对象字段或数组 items 加 1，最多 5 层，标量叶节点也计数。生成时使用有界定义，避免模型先生成无限嵌套、编译时才拒绝；公开 Schema、既有 Manifest 和编译门禁不因本次生成约束重写。任务表单只承载来源要求的调用参数，深层 JSON 成果可按原结构交付 Artifact，并保留完整规则与 trace；不能为适应表单限制裁掉必需内容。
 
+### 原文保留
+
+解释请求的 `source.source_documents` 携带全部已校验文本文件（含引用附件）的路径、原文和 SHA-256；缺失、替换或超限拒绝，不截断。静态凭据检查仍在模型调用前执行。Interpreter 要求在指导中保留表名、列名、JSON 键、枚举、路径模板、条件及失败规则，不以泛化摘要代替。
+
+模型只生成蓝图；平台从冻结请求独立绑定 RuntimeManifest 的可选 `source_documents`，不采信模型复制的原文。发布门禁将全文与原 SkillSource/index 对照，Manifest/checksum 和 Run snapshot 一并冻结。此字段保全来源，不替代蓝图的能力声明、语义审查或授权。二进制附件仍只有原索引，不能据此宣称已读内容。
+
+API 与 Worker 必须同步升级后使用新解释。旧版本/Run 缺少该字段时保持原值，不在执行时从当前 Skill 补写；要获得原文保留，重新解释并发布新版本。模型重解析仍需检查结果，保存全文不保证模型一定正确理解。
+
 ### 导入保存与上传授权
 
 内联/上传必填原 UserAccess，组织/导入者从事务锁定的当前 ADMIN 取得，不另传 UUID。解析无模型/DB 锁；首次 await 前冻结原会话和文件。保存采用 Organization → User SHARE → 原 AuthSession UPDATE，无 Project 门禁；查询、父行 flush、写前/最终 flush 后取新时间复核，Source/静态 Interpretation 原子保存。

@@ -28,6 +28,15 @@ function original() {
 }
 
 describe('frozen Run submission', () => {
+  it.each([true, false])('preserves the original automatic approval choice %s on retry', (autoApprove) => {
+    const form = { ...draft(), autoApprove }
+    const saved = freezeRunSubmission(scope, form, 'analysis/v1', 'original-key')
+    form.autoApprove = !autoApprove
+    expect(submissionPayload(saved).auto_approve).toBe(autoApprove)
+    const failed = failedRunSubmission(sendingRunSubmission(saved), new TypeError('offline'))
+    expect(submissionPayload(failed.request).auto_approve).toBe(autoApprove)
+  })
+
   it('keeps the original request when the draft or a decoded copy is edited', () => {
     // 再送は現在の form も過去の API 呼出し object も読まない。
     const form = draft()

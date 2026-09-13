@@ -105,6 +105,7 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
   const [selectionRevision, setSelectionRevision] = useState(0)
   const [runDialogOpen, setRunDialogOpen] = useState(false)
   const [acknowledgePrevious, setAcknowledgePrevious] = useState(false)
+  const [autoApprove, setAutoApprove] = useState(true)
   const submission = useRunSubmission({ actorId, projectId, csrfToken, onConfirmed: handleRunConfirmed })
   const tasksController = useRef<AbortController | null>(null)
   const modulesController = useRef<AbortController | null>(null)
@@ -362,7 +363,7 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
     }
     setError(null)
     try {
-      submission.start(draft, selectedTask.capability, acknowledgePrevious)
+      submission.start({ ...draft, autoApprove }, selectedTask.capability, acknowledgePrevious)
     } catch {
       setError(messages.workspace.submission.unavailable)
     }
@@ -612,6 +613,11 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
                 sourceProviders={sourceProviders}
                 task={selectedTask}
               />
+              <label className="submissionAcknowledgement">
+                <input type="checkbox" checked={autoApprove}
+                  onChange={(event) => setAutoApprove(event.target.checked)} />
+                <span>{messages.workspace.autoApprove}</span>
+              </label>
               <button
                 className="primaryButton"
                 disabled={!selectedTask || (submission.pending !== null && (submission.pending.phase === 'sending' || !acknowledgePrevious))}

@@ -12,6 +12,7 @@ export interface TaskDraft {
   taskTitle: string
   input: Record<string, unknown>
   sources: Record<string, string>
+  autoApprove?: boolean
 }
 
 /** Run preflight selector に表示する requirement と具体候補。 */

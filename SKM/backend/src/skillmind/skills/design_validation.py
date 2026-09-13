@@ -19,6 +19,7 @@ from skillmind.skills.capability_blueprint import (
     CapabilityBlueprintValidator,
 )
 from skillmind.skills.importer import SkillImportLimits
+from skillmind.skills.source_documents import validate_source_documents
 
 _HASH = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _KEY = re.compile(r"[a-z][a-z0-9_.-]{0,127}\Z")
@@ -138,6 +139,11 @@ def _validate(
             in {task["capability"], f"{source.skill_key}.{task_key}"}
         )
     files = _source_files(source)
+    if "source_documents" in manifest:
+        documents = validate_source_documents(manifest["source_documents"])
+        _require({item["path"]: item["content"] for item in documents} == {
+            path: content for path, (_, content) in files.items() if content is not None
+        })
     traces = tuple(_trace(blueprint, trace, files) for trace in blueprint["source_traces"])
     _check_contract_traces(manifest, files)
     return ValidatedSkillDesign(manifest=manifest, blueprint=blueprint, source_traces=traces)

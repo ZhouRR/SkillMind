@@ -580,7 +580,7 @@
           "approval_id": { "type": "string", "format": "uuid" },
           "proposal_id": { "type": "string", "format": "uuid" },
           "run_id": { "type": "string", "format": "uuid" },
-          "source": { "enum": ["USER", "PREAUTHORIZATION"] },
+          "source": { "enum": ["USER", "PREAUTHORIZATION", "RUN_START"] },
           "decision": { "enum": ["APPROVED", "REJECTED"] },
           "actor_id": { "type": ["string", "null"], "format": "uuid" },
           "preauthorization_id": { "type": ["string", "null"], "format": "uuid" },

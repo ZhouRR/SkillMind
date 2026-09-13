@@ -6,7 +6,7 @@ import {
   loadSecretReferences,
   type ChangeProposalRecord,
 } from '../../src/api/index'
-import { isChangeProposal } from '../../src/api/effects'
+import { isChangeApproval, isChangeProposal } from '../../src/api/effects'
 
 const PROJECT_ID = '00000000-0000-4000-8000-000000000001'
 const RUN_ID = '00000000-0000-4000-8000-000000000002'
@@ -44,6 +44,18 @@ const PROPOSAL: ChangeProposalRecord = {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('controlled effect API client', () => {
+  it('accepts the distinct Run-start approval source without treating it as a manual decision', () => {
+    const approval = {
+      approval_id: '00000000-0000-4000-8000-000000000008',
+      proposal_id: PROPOSAL.proposal_id, run_id: RUN_ID, source: 'RUN_START', decision: 'APPROVED',
+      actor_id: '00000000-0000-4000-8000-000000000009', preauthorization_id: null,
+      proposal_version: PROPOSAL.version, proposal_checksum: PROPOSAL.checksum,
+      reason: 'Automatic approval selected at Run start', created_at: '2026-07-18T00:01:00Z',
+    }
+    expect(isChangeApproval(approval)).toBe(true)
+    expect(isChangeApproval({ ...approval, source: 'MODEL' })).toBe(false)
+  })
+
   it('accepts null Integration only for the project library CREATE proposal', () => {
     const document = { ...PROPOSAL, capability_version: 'document.write/v1', operation: 'CREATE', integration_id: null }
     expect(isChangeProposal(document)).toBe(true)

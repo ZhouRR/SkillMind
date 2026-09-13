@@ -112,6 +112,8 @@ class ApiFixture:
             await self.create(route)
         elif request.method == "GET" and url.path.endswith("/tasks"):
             await route.fulfill(json=task_catalog())
+        elif request.method == "GET" and url.path.endswith("/runs"):
+            await route.fulfill(json={"items": [], "limit": 10, "offset": 0, "has_more": False})
         elif request.method == "GET" and url.path.endswith("/modules"):
             await route.fulfill(json={"modules": []})
         elif request.method == "GET" and url.path.endswith("/detail"):
@@ -285,6 +287,22 @@ async def exercise(
     """原要求・草稿・認証 context・遅い応答の競争を、実 React event で再現する。"""
 
     await open_form(page, url)
+    if case in {"auto-approval", "manual-approval"}:
+        choice = page.get_by_role("checkbox", name="自动批准（数据库写入、文档保存）", exact=True)
+        await expect(choice).to_be_checked()
+        enabled = case == "auto-approval"
+        await choice.set_checked(enabled)
+        await start(page)
+        await pending(page)
+        assert json.loads(api.posts[0]["body"])["auto_approve"] is enabled
+        # 再送は原同意を使い、変更した草稿へ追随しない。
+        await choice.set_checked(not enabled)
+        await page.get_by_role("button", name="用原请求再次确认").click()
+        await confirmed(page)
+        assert api.posts[0]["body"] == api.posts[1]["body"]
+        assert api.posts[0]["key"] == api.posts[1]["key"]
+        assert len(api.runs) == 1
+        return
     if case == "timeout":
         await page.clock.install()
     await start(page)
@@ -353,7 +371,7 @@ async def exercise(
         return
     if case in {"new-intent", "conflict"}:
         await page.locator(".jsonInput").fill('{"query":"edited"}')
-        await page.get_by_role("checkbox").check()
+        await page.locator(".submissionNotice").get_by_role("checkbox").check()
         await start(page)
         await confirmed(page)
         assert api.posts[0]["key"] != api.posts[1]["key"]
@@ -381,10 +399,10 @@ async def exercise(
                 assert await page.evaluate(
                     "document.documentElement.scrollWidth <= innerWidth"
                 )
-                await page.get_by_role("checkbox").focus()
+                await page.locator(".submissionNotice").get_by_role("checkbox").focus()
                 await page.keyboard.press("Space")
-                await expect(page.get_by_role("checkbox")).to_be_checked()
-                focus = await page.get_by_role("checkbox").evaluate(
+                await expect(page.locator(".submissionNotice").get_by_role("checkbox")).to_be_checked()
+                focus = await page.locator(".submissionNotice").get_by_role("checkbox").evaluate(
                     """element => ({focused: document.activeElement === element,
                         active: document.activeElement?.outerHTML.slice(0, 300)})"""
                 )
@@ -421,6 +439,8 @@ async def check(url: str, output: Path | None, selected_case: str | None) -> Non
     if output is not None:
         output.mkdir(parents=True, exist_ok=True)
     cases = {
+        "auto-approval": ["drop"],
+        "manual-approval": ["drop"],
         "lost-response": ["drop"],
         "non-json": ["non-json"],
         "contract": ["contract"],

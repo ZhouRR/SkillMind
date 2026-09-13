@@ -21,6 +21,7 @@ from skillmind.skills.capability_blueprint import (
 from skillmind.skills.domain import InlineSkillFile
 from skillmind.skills.importer import NormalizedSkillPackage, SkillPackageParser
 from skillmind.skills.runtime_defaults import normalize_runtime_manifest
+from skillmind.skills.source_documents import build_source_documents, validate_source_documents
 from skillmind.skills.task_contract import MAX_CONTRACT_DEPTH, compile_task_contract
 
 _VERSIONED_CAPABILITY = re.compile(r"^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$")
@@ -450,6 +451,7 @@ def build_interpreter_generation_schema(contracts_dir: Path) -> dict[str, Any]:
 def build_interpreter_request(
     *,
     package: NormalizedSkillPackage,
+    source_files: Sequence[InlineSkillFile],
     analysis: SkillStaticAnalysis,
     catalog: CapabilityCatalogSnapshot,
     system_skill: InterpreterSystemSkillIdentity,
@@ -466,12 +468,14 @@ def build_interpreter_request(
         raise ValueError("Static analysis is not bound to the normalized package")
     if analysis.blocked:
         raise UnsafeSkillSourceError("Skill source is blocked before interpreter execution")
+    _validated_source_texts(package, source_files)
     return {
         "request_version": "skillmind.skill-interpreter.request/v1",
         "source": {
             "content_hash": package.content_hash,
             "detected_adapter": package.detected_adapter,
             "normalized_package": package.to_dict(),
+            "source_documents": build_source_documents(source_files),
         },
         "static_analysis": analysis.to_dict(),
         "capability_catalog": catalog.to_dict(),
@@ -597,6 +601,20 @@ class InterpreterFixtureRunner:
         if bind_identity:
             _bind_interpreter_identity(request_value, response_value, manifest)
             _compile_model_task_contracts(manifest)
+            # 原文は model に複刻させない。凍結 request の全 text を platform が束縛する。
+            documents = validate_source_documents(request_value["source"]["source_documents"])
+            index = request_value["source"]["normalized_package"]["source"]["files"]
+            expected = {
+                item["path"]: (item["sha256"], item["size"])
+                for item in index if not item["binary"]
+            }
+            actual = {
+                item["path"]: (item["sha256"], len(item["content"].encode("utf-8")))
+                for item in documents
+            }
+            if actual != expected:
+                raise ValueError("Frozen Skill source documents differ from the source index")
+            manifest["source_documents"] = documents
         manifest = normalize_runtime_manifest(manifest)
         response_value["runtime_manifest_draft"] = manifest
         Draft202012Validator(self._manifest_schema, format_checker=checker).validate(manifest)
@@ -868,6 +886,7 @@ def _restrict_manifest_to_model_contract_drafts(manifest: dict[str, Any]) -> Non
     properties = manifest.get("properties")
     if not isinstance(properties, dict):
         raise ValueError("RuntimeManifest generation Schema properties must be an object")
+    properties.pop("source_documents", None)
     tasks = properties.get("tasks")
     if not isinstance(tasks, dict):
         raise ValueError("RuntimeManifest generation Schema tasks must be an object")

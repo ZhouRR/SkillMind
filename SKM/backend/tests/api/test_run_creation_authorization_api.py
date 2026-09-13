@@ -140,6 +140,7 @@ def test_create_and_replay_forward_original_credentials_for_two_sessions_of_one_
             "task_key": body["task_key"],
             "input_json": body["input"],
             "sources": body["sources"],
+            "auto_approve": False,
             "actor_id": auth.actor.user_id,
             "idempotency_key": headers["Idempotency-Key"],
         }
@@ -344,7 +345,7 @@ def test_creation_public_request_shape_stays_closed_and_validation_is_not_cached
 def test_creation_openapi_keeps_public_body_and_declares_status_headers_and_problems(
     client: TestClient,
 ) -> None:
-    """新 field は公開せず、201/200 と既知拒否の media type/no-store を明示する。"""
+    """任意の開始同意と既知 status/header の公開契約を明示する。"""
 
     schema = application(client).openapi()
     operation = schema["paths"]["/api/v1/projects/{project_id}/task-runs"]["post"]
@@ -352,7 +353,13 @@ def test_creation_openapi_keeps_public_body_and_declares_status_headers_and_prob
         "$ref": "#/components/schemas/CreateTaskRunRequest"
     }
     body_schema = schema["components"]["schemas"]["CreateTaskRunRequest"]
-    assert set(body_schema["properties"]) == {"skill_version_id", "task_key", "input", "sources"}
+    assert set(body_schema["properties"]) == {
+        "skill_version_id",
+        "task_key",
+        "input",
+        "sources",
+        "auto_approve",
+    }
     assert body_schema["required"] == ["skill_version_id", "task_key"]
     assert body_schema["additionalProperties"] is False
     assert set(operation["responses"]) == {"200", "201", "401", "403", "404", "409", "422"}
@@ -373,3 +380,30 @@ def test_creation_openapi_keeps_public_body_and_declares_status_headers_and_prob
                 declaration["content"]["application/problem+json"]["schema"]
                 == PROBLEM_DETAILS_SCHEMA
             )
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_run_start_consent_reaches_both_creation_and_replay(client, monkeypatch, enabled):
+    """原要求確認と初回作成へ同じ明示選択を渡す。"""
+    lookup, create = install_creation(client, monkeypatch)
+    url, body, headers = creation_request()
+    body["auto_approve"] = enabled
+    auth = application(client).state.auth_service
+    response = client.post(url, json=body, headers={**headers, "X-CSRF-Token": auth.csrf_token})
+    assert response.status_code == 201
+    assert lookup.await_args.kwargs["auto_approve"] is enabled
+    assert create.await_args.kwargs["auto_approve"] is enabled
+
+
+@pytest.mark.parametrize("value", ["true", 1, None])
+def test_run_start_consent_rejects_non_boolean_values(client, value):
+    """文字列や数値を権限への同意として暗黙変換しない。"""
+    url, body, headers = creation_request()
+    body["auto_approve"] = value
+    auth = application(client).state.auth_service
+    assert (
+        client.post(
+            url, json=body, headers={**headers, "X-CSRF-Token": auth.csrf_token}
+        ).status_code
+        == 422
+    )

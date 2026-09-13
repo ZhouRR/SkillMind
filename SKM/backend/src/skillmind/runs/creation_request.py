@@ -57,6 +57,7 @@ class TaskRunIntent:
     actor_id: UUID
     input_json: dict[str, Any]
     sources: dict[str, str]
+    auto_approve: bool = False
 
     def __post_init__(self) -> None:
         """呼出し元の可変 dict を所有せず、生成時に表記と形を固定する。"""
@@ -70,6 +71,8 @@ class TaskRunIntent:
             raise ValueError("Creation request must identify an exact task")
         if not isinstance(self.input_json, dict) or not isinstance(self.sources, dict):
             raise ValueError("Creation input and sources must be objects")
+        if not isinstance(self.auto_approve, bool):
+            raise ValueError("Automatic approval must be a boolean")
         object.__setattr__(self, "input_json", deepcopy(self.input_json))
         object.__setattr__(self, "sources", normalize_source_choices(self.sources))
 
@@ -77,7 +80,9 @@ class TaskRunIntent:
         """内部 task snapshot に保存する、自己記述的な要求を返す。"""
 
         return {
-            "request_version": "v1",
+            # 手動承認は既存 v1 の identity を維持し、権限を追加する要求だけ v2 にする。
+            "request_version": "v2" if self.auto_approve else "v1",
+            **({"auto_approve": True} if self.auto_approve else {}),
             "project_id": str(self.project_id),
             "skill_version_id": str(self.skill_version_id),
             "task_key": self.task_key,
@@ -97,8 +102,12 @@ class TaskRunIntent:
 
         if (
             not isinstance(value, dict)
-            or set(value) != _REQUEST_FIELDS
-            or value.get("request_version") != "v1"
+            or not (
+                (set(value) == _REQUEST_FIELDS and value.get("request_version") == "v1")
+                or (set(value) == _REQUEST_FIELDS | {"auto_approve"}
+                    and value.get("request_version") == "v2"
+                    and value.get("auto_approve") is True)
+            )
         ):
             raise ValueError("Stored creation request has an unsupported format")
         if not all(
@@ -113,6 +122,7 @@ class TaskRunIntent:
             actor_id=UUID(value["actor_id"]),
             input_json=value["input"],
             sources=value["sources"],
+            auto_approve=value.get("auto_approve", False),
         )
         if canonical_json(intent.to_json()) != canonical_json(value):
             raise ValueError("Stored creation request is not canonical")

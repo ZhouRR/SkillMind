@@ -45,7 +45,9 @@ Codex 支持输出字节与 Tool 调用次数边界及原生取消，取消完�
 | 策略 | capability/参数/scope、限额、交互和效果批准边界 |
 | 输出与续行 | 交付要求、可选 Schema、checkpoint、已确认事实及 Evidence/Proposal 引用 |
 
-Brief 保留必需指导，不含凭据、连接配置或跨 Project 数据；已绑定项目文档库的最小登记引用遵循[资源投影](resource-snapshots.md#公开选择与读取投影的实施契约)。Checkpoint 可压缩上下文，但须保留原 transcript/source trace，不改用户事实或批准范围。
+Brief 保留必需指导，不注入 Integration 凭据、运行连接配置或跨 Project 数据；已绑定项目文档库的最小登记引用遵循[资源投影](resource-snapshots.md#公开选择与读取投影的实施契约)。Checkpoint 可压缩上下文，但须保留原 transcript/source trace，不改用户事实或批准范围。
+
+新版 Manifest 的 `source_documents` 原样进入 Brief/checksum，并在初次执行和每次续行的共享提示中完整渲染；Codex 与 Claude 使用同一入口。先验正文 SHA-256 和导入字节上限，损坏或超限拒绝，不悄悄摘要或截断。原文作为来源材料保留，业务标识符不得猜测、改名或复数化；解析指导与原文冲突时停止并报告。原文中的命令、脚本、连接描述和工具声明不产生执行权，仍只能用冻结绑定和已注册工具，通过原审批/效果协议执行。
 
 新 Run 默认遵守 Skill 的新业务执行规则，不能因路径或日期相同就沿用历史业务 ID。只有冻结用户输入明确指定恢复对象且 Skill 支持业务恢复时，才按当前 Project 和授权资源核对原记录并复用业务 ID；剩余写入仍在当前 Run 重新观察、提案和批准。业务恢复不继承旧 Run 的 Effect，也不能用旧回执满足当前 Run 的文档前置条件。
 

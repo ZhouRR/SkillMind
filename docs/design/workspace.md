@@ -117,6 +117,8 @@ Preflight 显示精确版本/Task、输入、资源与 readiness，创建时服�
 
 草稿与已发送 payload/key 分开；[创建未知](run-creation.md#提交结果未知时的界面责任)先确认原请求，关窗保留待确认项，刷新/离页不承诺恢复。创建后按 Run ID 读 detail/SSE，以持久 sequence 重放，TEXT_DELTA 不推进 cursor。
 
+启动弹窗的「自動承認」默认勾选，仅适用于本次执行的数据库写入和文档保存；取消勾选使用逐次审批。服务端冻结及权限边界见[Run 启动同意](repository-effects.md#run-启动时的自动批准)。
+
 [冻结资源](resource-snapshots.md)不能中途换绑，变化须新 Run；文档槽位物化为 Run 级并集，不是槽位私有目录。
 
 ## 结果与人工评价

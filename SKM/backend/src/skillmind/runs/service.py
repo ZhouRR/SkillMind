@@ -127,6 +127,7 @@ class RunService:
         trace_id: str | None,
         actor_id: UUID,
         authorization: UserAccess | RunCreationParticipant,
+        auto_approve: bool = False,
     ) -> CreatedRun:
         """解決済み PUBLISHED task と現在の資格から通用 Run を作成する。
 
@@ -144,6 +145,7 @@ class RunService:
             sources=sources,
             actor_id=actor_id,
             idempotency_key=idempotency_key,
+            auto_approve=auto_approve,
         ) as (session, intent, authority):
             # 精確 task の同一性は現在の権限や資源の変化から独立させる。
             task_id = derive_task_id(
@@ -320,6 +322,7 @@ class RunService:
         actor_id: UUID,
         idempotency_key: str,
         authorization: UserAccess | RunCreationParticipant,
+        auto_approve: bool = False,
     ) -> CreatedRun | None:
         """API と調度が現在の Project 授権後に、元の要求を先に確認する共通入口。"""
 
@@ -332,6 +335,7 @@ class RunService:
             sources=sources,
             actor_id=actor_id,
             idempotency_key=idempotency_key,
+            auto_approve=auto_approve,
         ) as (session, intent, _):
             replay = await RunRepository(session).find_task_run_replay(
                 intent=intent, idempotency_key=idempotency_key
@@ -354,6 +358,7 @@ class RunService:
         sources: dict[str, str],
         actor_id: UUID,
         idempotency_key: str,
+        auto_approve: bool = False,
     ) -> AsyncIterator[tuple[AsyncSession, TaskRunIntent, RunCreationAuthority]]:
         """普通要求の原会話と内部認領を区別し、すべての確認/作成出口を保護する。"""
 
@@ -363,6 +368,8 @@ class RunService:
                 raise UnauthorizedSessionError("Authentication is required")
         elif not isinstance(authorization, RunCreationParticipant):
             raise TypeError("Run creation requires user access or an internal claim participant")
+        if auto_approve and not isinstance(authorization, UserAccess):
+            raise TaskSourceSelectionError("Automatic approval requires an interactive Run start")
         make_intent = partial(
             _task_run_intent,
             project_id=project_id,
@@ -371,6 +378,7 @@ class RunService:
             input_json=deepcopy(input_json),
             sources=deepcopy(sources),
             actor_id=actor_id,
+            auto_approve=auto_approve,
         )
         async with self._session_factory() as session, session.begin():
             if not isinstance(authorization, UserAccess):
@@ -852,6 +860,7 @@ def _task_run_intent(
     input_json: dict[str, Any],
     sources: dict[str, str],
     actor_id: UUID,
+    auto_approve: bool = False,
 ) -> TaskRunIntent:
     """選択構文の失敗を公開 Problem へ変換できる domain error に統一する。"""
 
@@ -863,6 +872,7 @@ def _task_run_intent(
             input_json=input_json,
             sources=sources,
             actor_id=actor_id,
+            auto_approve=auto_approve,
         )
     except ValueError as error:
         raise TaskSourceSelectionError(str(error)) from error

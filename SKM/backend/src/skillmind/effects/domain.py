@@ -35,6 +35,7 @@ class ApprovalSource(StrEnum):
 
     USER = "USER"
     PREAUTHORIZATION = "PREAUTHORIZATION"
+    RUN_START = "RUN_START"
 
 
 class ApprovalDecision(StrEnum):

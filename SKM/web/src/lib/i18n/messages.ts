@@ -929,6 +929,7 @@ export interface UiMessages {
       incompleteDraft: string
     }
     creating: string
+    autoApprove: string
     startRun: string
     /** 未確認作成と新しい草稿を混同させない、三語の案内と明示確認。 */
     submission: {

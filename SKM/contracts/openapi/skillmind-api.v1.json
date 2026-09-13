@@ -187,7 +187,8 @@
         "description": "Proposal を許可/拒否した判断源。",
         "enum": [
           "USER",
-          "PREAUTHORIZATION"
+          "PREAUTHORIZATION",
+          "RUN_START"
         ],
         "title": "ApprovalSource",
         "type": "string"
@@ -1053,6 +1054,11 @@
         "additionalProperties": false,
         "description": "PUBLISHED task descriptor から通用 Run を作成する request body。",
         "properties": {
+          "auto_approve": {
+            "default": false,
+            "title": "Auto Approve",
+            "type": "boolean"
+          },
           "input": {
             "additionalProperties": true,
             "title": "Input",

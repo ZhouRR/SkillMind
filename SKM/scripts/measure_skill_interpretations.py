@@ -92,6 +92,7 @@ async def measure_source(
         raise UnsafeSkillSourceError("Blocked source cannot enter model stability measurement")
     request = build_interpreter_request(
         package=package,
+        source_files=load_inline_text_files(root, package),
         analysis=analysis,
         catalog=catalog,
         system_skill=identity,
