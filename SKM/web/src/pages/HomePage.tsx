@@ -111,7 +111,7 @@ function RecentRuns({ projectId, state }: { projectId: string; state: RecentRuns
         <li key={item.run_id}>
           <a className="homeRunItem" href={routeHref('workspace', projectId, { runId: item.run_id })}>
             <span className="homeRunTitle">
-              <strong>{runHistoryTitle(item.result_summary, item.run_id, messages.elements.runFallbackTitle)}</strong>
+              <strong>{runHistoryTitle(item, messages.elements.unnamedRunTitle)}</strong>
               <small>{formatLocalTimestamp(item.created_at)}</small>
             </span>
             <StatusBadge status={item.status} />

@@ -138,11 +138,16 @@ numpy==2.5.3
     #   pandas
 onnxruntime==1.30.0
     # via magika
+openai-codex==0.154.0
+    # via skillmind (pyproject.toml)
+openai-codex-cli-bin==0.154.0
+    # via openai-codex
 openpyxl==3.1.5
     # via markitdown
 packaging==26.2
     # via
     #   onnxruntime
+    #   openai-codex
     #   pytest
 pandas==3.0.5
     # via markitdown
@@ -160,6 +165,7 @@ pydantic==2.13.4
     # via
     #   fastapi
     #   mcp
+    #   openai-codex
     #   pydantic-settings
     #   skillmind (pyproject.toml)
 pydantic-core==2.46.4

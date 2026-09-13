@@ -285,7 +285,7 @@ async def scenario(
     await install_transport(page, mode)
     name = f"{mode}-{language}-{width}"
     try:
-        await page.goto(f"{url}#/workspace?project={PROJECT}&run={RUN}")
+        await page.goto(f"{url}#/history?project={PROJECT}&run={RUN}")
         catalog = await messages(page, language)
         labels = catalog["runResult"]["artifacts"]
         panel = page.locator(".runArtifacts")
@@ -342,7 +342,7 @@ async def scenario(
                         api.run_project = NEXT_PROJECT
                         await page.evaluate(
                             "target => location.hash = target",
-                            f"/workspace?project={NEXT_PROJECT}&run={NEXT_RUN}",
+                            f"/history?project={NEXT_PROJECT}&run={NEXT_RUN}",
                         )
                         await expect(
                             page.locator(".workspace .runFacts dd.mono")
@@ -353,7 +353,7 @@ async def scenario(
                     elif mode == "run-late":
                         await page.evaluate(
                             "target => location.hash = target",
-                            f"/workspace?project={PROJECT}&run={NEXT_RUN}",
+                            f"/history?project={PROJECT}&run={NEXT_RUN}",
                         )
                         await expect(
                             page.locator(".workspace .runFacts dd.mono")

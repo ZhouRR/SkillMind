@@ -544,6 +544,7 @@ class RunHistoryItem:
     result_summary: str | None
     result_confidence: float | None
     result_needs_review: bool | None
+    task_title: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

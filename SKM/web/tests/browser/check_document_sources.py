@@ -7,7 +7,7 @@ import asyncio
 import json
 from copy import deepcopy
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 from uuid import UUID, uuid4
 
 from playwright.async_api import Page, Route, async_playwright, expect
@@ -74,6 +74,12 @@ class DocumentApiFixture(ApiFixture):
             return
         if request.method == "GET" and url.path.endswith("/tasks"):
             await route.fulfill(json=self.catalog)
+        elif request.method == "GET" and url.path.endswith(f"/projects/{PROJECT}/runs"):
+            query = parse_qs(url.query)
+            await route.fulfill(json={
+                "items": [], "has_more": False, "limit": int(query.get("limit", ["10"])[0]),
+                "offset": int(query.get("offset", ["0"])[0]),
+            })
         elif request.method == "GET" and url.path.endswith("/schedules"):
             await route.fulfill(json={"schedules": [], "total": 0, "limit": 100, "offset": 0})
         elif request.method == "POST" and url.path.endswith("/schedules/preview"):
@@ -108,7 +114,7 @@ class DocumentApiFixture(ApiFixture):
 
 
 async def select_scope(page: Page, mode: str) -> dict[str, str]:
-    """検索しても隠れた選択を保持し、未完成集合の段階では保存しない。"""
+    """フォルダーを一度選び、配下の全候補を同じ契約で送信する。"""
 
     field = page.locator('.documentSourceField')
     await expect(field.locator('select').first).to_have_value('')
@@ -120,13 +126,8 @@ async def select_scope(page: Page, mode: str) -> dict[str, str]:
         await field.locator('select').nth(1).select_option(value)
         return {'docs': value}
     if mode == 'SET':
-        await field.get_by_role('checkbox', name=FROZEN.documents[0].path).check()
-        await page.locator('.runForm').evaluate("form => form.dispatchEvent(new Event('submit', {bubbles:true,cancelable:true}))")
-        await field.get_by_role('searchbox').fill('notes')
-        await field.get_by_role('checkbox', name=FROZEN.documents[1].path).focus()
-        await page.keyboard.press('Space')
-        await field.get_by_role('searchbox').fill('')
-        await expect(field.get_by_role('checkbox', name=FROZEN.documents[0].path)).to_be_checked()
+        await expect(field.get_by_role('checkbox')).to_have_count(0)
+        await field.locator('select').nth(1).select_option('guides')
         return {'docs': 'documents:' + ','.join(str(item.document_id) for item in FROZEN.documents)}
     return {'docs': 'project-documents:all'}
 
@@ -134,6 +135,7 @@ async def select_scope(page: Page, mode: str) -> dict[str, str]:
 async def show_frozen(page: Page, language: str, count: int) -> None:
     """結果と独立した入力事実を開き、元の path/hash と件数を確認する。"""
 
+    await page.evaluate('window.updateSubmissionTestContext({detailView: true})')
     title = {'zh': '结果与证据', 'ja': '結果と証拠', 'en': 'Result & evidence'}[language]
     await page.get_by_role('tab', name=title).click()
     await expect(page.locator('.resultView')).to_be_visible()
@@ -153,6 +155,50 @@ async def show_frozen(page: Page, language: str, count: int) -> None:
     await technical.locator(':scope > summary').click()
     await expect(technical.locator('code').first).to_have_text(str(FROZEN.documents[0].document_id))
     await expect(page.locator('.frozenDocuments')).to_contain_text(FROZEN.documents[0].content_hash)
+
+
+async def check_folder_boundaries(browser, url: str, origin: str) -> None:
+    """一件フォルダーの表示を保ち、祖先だけを再帰選択し、切替後の古い選択を残さない。"""
+
+    for path, ids in (
+        ('specs/login', [FROZEN.documents[0].document_id]),
+        ('specs', [item.document_id for item in FROZEN.documents]),
+    ):
+        fixture = DocumentApiFixture(origin, True)
+        candidates = fixture.catalog['tasks'][0]['readiness']['requirements'][0]['candidates']
+        candidates[1]['label'] = 'specs/login/first.md'
+        candidates[2]['label'] = 'specs/second.md'
+        candidates.append({
+            'key': f'document:{uuid4()}', 'kind': 'document', 'provider': 'project-documents',
+            'label': 'specs-old/other.md',
+        })
+        context = await browser.new_context(viewport={'width': 1440, 'height': 1000})
+        await context.route('**/*', fixture.route)
+        try:
+            page = await context.new_page()
+            await page.goto(url)
+            await page.locator('.runLauncher > button').click()
+            await page.get_by_label('Objective').fill('Confirm folder boundaries')
+            field = page.locator('.documentSourceField')
+            await field.locator('select').first.select_option('SET')
+            await field.locator('select').nth(1).select_option(path)
+            await expect(field.locator('select').first).to_have_value('SET')
+            await expect(field.locator('select').nth(1)).to_have_value(path)
+            await field.locator('select').first.select_option('SINGLE')
+            await expect(field.locator('select').nth(1)).to_have_value('document:')
+            await field.locator('select').first.select_option('SET')
+            await expect(field.locator('select').nth(1)).to_have_value('')
+            await field.locator('select').nth(1).select_option(path)
+            await page.locator('.runForm button[type="submit"]').click()
+            await confirmed(page)
+            assert len(fixture.posts) == 1
+            body = json.loads(fixture.posts[0]['body'])
+            prefix = 'document' if len(ids) == 1 else 'documents'
+            assert body['sources'] == {'docs': prefix + ':' + ','.join(map(str, ids))}
+            assert not fixture.unexpected, fixture.unexpected
+            print(f'folder/{path}: passed', flush=True)
+        finally:
+            await context.close()
 
 
 async def exercise(page: Page, api: DocumentApiFixture, url: str, screen: str, mode: str, language: str, output: Path | None) -> None:
@@ -214,6 +260,7 @@ async def check(url: str, output: Path | None) -> None:
         output.mkdir(parents=True, exist_ok=True)
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(headless=True, args=['--no-sandbox'])
+        await check_folder_boundaries(browser, url, f'{address.scheme}://{address.netloc}')
         for screen in ('workspace', 'tasks'):
             for mode in ('SINGLE', 'SET', 'ALL', 'NONE'):
                 for language in ('zh', 'ja', 'en'):

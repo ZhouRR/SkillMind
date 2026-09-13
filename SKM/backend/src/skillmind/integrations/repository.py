@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from skillmind.core.secret_crypto import (
@@ -15,6 +16,8 @@ from skillmind.core.secret_crypto import (
     managed_secret_aad,
 )
 from skillmind.db.models import (
+    ChangeProposal,
+    EffectPreauthorization,
     Integration,
     ManagedSecretMaterial,
     ResourceBinding,
@@ -39,6 +42,7 @@ from skillmind.integrations.domain import (
     StoredIntegration,
     StoredResourceBinding,
     StoredSecretReference,
+    UpdateSecretReferenceCommand,
     binding_checksum,
     normalize_integration_command,
     normalize_provider_scope,
@@ -187,6 +191,156 @@ class IntegrationRepository:
             row.disabled_at = now
             row.updated_at = now
         return _stored_secret(row)
+
+    async def update_secret_reference(
+        self, command: UpdateSecretReferenceCommand
+    ) -> StoredSecretReference:
+        """認証情報の metadata と任意の新しい値を同一 transaction で更新する。"""
+
+        row = await self._session.get(
+            SecretReference, command.secret_reference_id, with_for_update=True
+        )
+        if row is None or row.project_id != command.project_id:
+            raise SecretReferenceNotFoundError("SecretReference not found in project")
+        if row.updated_at != command.expected_updated_at:
+            raise IntegrationConflictError("SecretReference has changed; reload before editing")
+        await self._assert_unique_name(SecretReference, row, command.name.strip())
+        value = CreateSecretReferenceCommand(
+            project_id=row.project_id, name=command.name, provider=row.provider,
+            resolver=SecretResolver(row.resolver),
+            locator=row.locator if command.locator is None else command.locator,
+            key_version=command.key_version, created_by=row.created_by,
+            # 未変更の MANAGED 本文は復号せず、metadata 検証だけを既存 validator に通す。
+            secret_value=(command.secret_value if command.secret_value is not None
+                          else "unchanged" if row.resolver == "MANAGED" else None),
+        )
+        if row.resolver == "MANAGED" and command.locator is not None:
+            raise IntegrationValidationError("Managed SecretReference must not carry a locator")
+        validate_secret_reference(value)
+        if command.secret_value is not None:
+            if self._secret_cipher is None:
+                raise SecretCryptoError("Managed secret storage is not configured")
+            material = (await self._session.scalars(
+                select(ManagedSecretMaterial).where(
+                    ManagedSecretMaterial.secret_reference_id == row.id
+                ).with_for_update()
+            )).one_or_none()
+            if material is None:
+                raise SecretReferenceNotFoundError("Managed secret material not found")
+            encrypted = self._secret_cipher.encrypt(
+                command.secret_value,
+                aad=managed_secret_aad(project_id=row.project_id, secret_reference_id=row.id),
+            )
+            material.kek_version = encrypted.kek_version
+            material.nonce = encrypted.nonce
+            material.ciphertext = encrypted.ciphertext
+            material.updated_at = datetime.now(UTC)
+        row.name = value.name.strip()
+        row.key_version = value.key_version
+        row.locator = value.locator
+        row.updated_at = datetime.now(UTC)
+        await self._session.flush()
+        return _stored_secret(row)
+
+    async def delete_secret_reference(
+        self, *, project_id: UUID, secret_reference_id: UUID, expected_updated_at: datetime
+    ) -> None:
+        """接続から参照されない認証情報と密文だけを削除する。"""
+
+        row = await self._session.get(SecretReference, secret_reference_id, with_for_update=True)
+        if row is None or row.project_id != project_id:
+            raise SecretReferenceNotFoundError("SecretReference not found in project")
+        if row.updated_at != expected_updated_at:
+            raise IntegrationConflictError("SecretReference has changed; reload before deleting")
+        if await self._session.scalar(select(Integration.id).where(
+            Integration.secret_reference_id == row.id
+        ).limit(1)) is not None:
+            raise IntegrationConflictError("SecretReference is used by an Integration")
+        await self._session.execute(delete(ManagedSecretMaterial).where(
+            ManagedSecretMaterial.secret_reference_id == row.id
+        ))
+        await self._session.delete(row)
+        await self._session.flush()
+
+    async def get_integration_details(
+        self, *, project_id: UUID, integration_id: UUID
+    ) -> tuple[StoredIntegration, dict[str, Any]]:
+        """編集に必要な非機密設定だけを同じ行から取得する。"""
+
+        row = (await self._session.scalars(select(Integration).where(
+            Integration.id == integration_id, Integration.project_id == project_id
+        ))).one_or_none()
+        if row is None:
+            raise IntegrationNotFoundError("Integration not found in project")
+        return _stored_integration(row), dict(row.config_json)
+
+    async def update_integration(
+        self, command: CreateIntegrationCommand, *, integration_id: UUID, expected_revision: int
+    ) -> StoredIntegration:
+        """既存 Provider の接続先と権限を更新し、凍結済み binding は変更しない。"""
+
+        row = await self._lock_integration(command.project_id, integration_id, expected_revision)
+        normalized = normalize_integration_command(command)
+        if (row.provider, row.kind) != (normalized.provider, normalized.kind):
+            raise IntegrationValidationError("Integration provider and kind cannot be changed")
+        await self._assert_unique_name(Integration, row, normalized.name)
+        if normalized.secret_reference_id is not None:
+            secret = await self.resolve_secret_reference(
+                project_id=normalized.project_id,
+                secret_reference_id=normalized.secret_reference_id,
+            )
+            if secret.status is not IntegrationStatus.ACTIVE or secret.provider != row.provider:
+                raise IntegrationValidationError(
+                    "Integration SecretReference is inactive or belongs to another Provider"
+                )
+        row.name = normalized.name
+        row.capabilities_json = list(normalized.capabilities)
+        row.scope_json = normalized.scope
+        row.config_json = normalized.config
+        row.secret_reference_id = normalized.secret_reference_id
+        row.revision += 1
+        row.updated_at = datetime.now(UTC)
+        await self._session.flush()
+        return _stored_integration(row)
+
+    async def delete_integration(
+        self, *, project_id: UUID, integration_id: UUID, expected_revision: int
+    ) -> None:
+        """binding・批准・履歴に参照されない接続だけを削除する。"""
+
+        row = await self._lock_integration(project_id, integration_id, expected_revision)
+        for model in (ResourceBinding, EffectPreauthorization, ChangeProposal):
+            if await self._session.scalar(select(model.id).where(
+                model.integration_id == row.id
+            ).limit(1)) is not None:
+                raise IntegrationConflictError("Integration is referenced; disable it instead")
+        await self._session.delete(row)
+        await self._session.flush()
+
+    async def _lock_integration(
+        self, project_id: UUID, integration_id: UUID, expected_revision: int
+    ) -> Integration:
+        """編集・削除の所有権と optimistic revision を同じ行ロックで検査する。"""
+
+        row = (await self._session.scalars(select(Integration).where(
+            Integration.id == integration_id, Integration.project_id == project_id
+        ).with_for_update())).one_or_none()
+        if row is None:
+            raise IntegrationNotFoundError("Integration not found in project")
+        if row.revision != expected_revision:
+            raise IntegrationConflictError("Integration revision is stale")
+        return row
+
+    async def _assert_unique_name(
+        self, model: type[Integration] | type[SecretReference],
+        row: Integration | SecretReference, name: str,
+    ) -> None:
+        """自身を除いた Project 内の名前競合を安定した domain error にする。"""
+
+        if await self._session.scalar(select(model.id).where(
+            model.project_id == row.project_id, model.name == name, model.id != row.id
+        ).limit(1)) is not None:
+            raise IntegrationConflictError("Resource name is already in use")
 
     async def rotate_managed_material(self, cipher: SecretCipher) -> tuple[int, int]:
         """全 MANAGED 密文を active KEK へ再封入し、(rotated, skipped) を返す。

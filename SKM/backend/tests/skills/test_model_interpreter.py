@@ -20,6 +20,7 @@ from skillmind.skills.interpreter_execution import (
 )
 from skillmind.skills.model_interpreter import (
     ModelCompletion,
+    ModelInvalidOutputError,
     ModelProviderError,
     ModelSkillInterpreter,
     ModelStructuredOutputError,
@@ -443,6 +444,7 @@ async def test_identity_mismatch_fails_before_model_call() -> None:
             InterpreterErrorCode.STRUCTURED_OUTPUT_UNAVAILABLE,
         ),
         (None, ModelProviderError("provider"), InterpreterErrorCode.PROVIDER_ERROR),
+        (None, ModelInvalidOutputError("wire"), InterpreterErrorCode.INVALID_JSON),
     ],
 )
 async def test_failure_is_classified_into_stable_taxonomy(
@@ -558,3 +560,16 @@ def test_generation_schema_constrains_contract_drafts_nested_in_the_blueprint() 
     blueprint_task["parameter_contract"]["fields"][0]["$ref"] = "http://example.invalid/x"
     with pytest.raises(ValidationError):
         Draft202012Validator(schema).validate(response)
+
+
+@pytest.mark.asyncio
+async def test_provider_diagnostic_is_explicit_and_body_is_not_propagated() -> None:
+    """脱敏 detail のみを実行エラーへ伝え、Provider 例外本文を保持しない。"""
+
+    client = _FakeClient(error=ModelProviderError(
+        "private fixture content", detail="codex:invalid_json_schema; http_status=400"
+    ))
+    with pytest.raises(InterpreterExecutionError) as caught:
+        await _interpreter(client).interpret(_request(), model="m", parameters={})
+    assert caught.value.detail == "codex:invalid_json_schema; http_status=400"
+    assert str(caught.value) == "provider_error"

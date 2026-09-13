@@ -16,7 +16,7 @@
 
 资源管理支持注册 `postgres` 和 `mcp` Provider、凭据引用和明确读取范围，沿用公开资源分类 `other`；凭据正文仅经 SecretReference 管理，公开列表仅返回配置 key。连接状态 ACTIVE 表示配置未停用，不证明远端可达；Provider 只有装配到 Worker 后才可标为 installed。
 
-- PostgreSQL 配置主机、整数端口、数据库、连接用户名和 TLS 模式；密码必须引用 SecretReference。范围逐项指定 `schema.table`，不接受任意 SQL、空列表或通配符。[`database.read/v1`](../../SKM/contracts/tools/database.read/v1/request.schema.json) 接受显式表名、列名、等值筛选、排序和有界分页，不接受 SQL 正文。Worker 使用原凭据、只读事务和 PostgreSQL statement/lock timeout，返回最多 100 行、1 MiB JSON。连接目标由项目 ADMIN 预先配置，模型不能指定主机、端口、凭据或扩大表范围；目标数据库及自定义类型/函数属于管理员信任边界。连接前和返回前复验原 binding，取消关闭当前连接，不以本地取消声称数据库故障已恢复。每次读取得到独立 live 结果，以内容 hash 和读取时间生成 Evidence，不承诺跨调用的分页处于同一快照。
+- PostgreSQL 配置主机、整数端口、数据库、连接用户名和 TLS 模式；密码必须引用 SecretReference。范围可逐项指定 `schema.table`，或由管理员显式选择全部表（`tables: ["*"]`）；全部包含该连接数据库内后来新增且账号有权访问的表，不扩大数据库账号权限。空列表仍拒绝，不接受任意 SQL。[`database.read/v1`](../../SKM/contracts/tools/database.read/v1/request.schema.json) 接受显式表名、列名、等值筛选、排序和有界分页，不接受 SQL 正文。Worker 使用原凭据、只读事务和 PostgreSQL statement/lock timeout，返回最多 100 行、1 MiB JSON。连接目标由项目 ADMIN 预先配置，模型不能指定主机、端口、凭据或扩大表范围；目标数据库及自定义类型/函数属于管理员信任边界。连接前和返回前复验原 binding，取消关闭当前连接，不以本地取消声称数据库故障已恢复。每次读取得到独立 live 结果，以内容 hash 和读取时间生成 Evidence，不承诺跨调用的分页处于同一快照。
 - MCP 配置 HTTP(S) Streamable HTTP endpoint、可选 Bearer 凭据引用和明确资源 URI；URL 不含凭据、query 或 fragment，不接受 stdio 命令配置。`mcp.read/v1` 只发起已冻结 URI 的 `resources/read`，不调用远端 tools，不开放 sampling、elicitation 或本地 roots；服务工具调用尚未实现，不能由资源读取权自动取得。URI 在配置时按 SDK URI 类型规范化，执行时须逐字匹配冻结值，返回其他 URI 的内容拒绝发布。连接目标与服务实现属于项目 ADMIN 信任边界；模型不能传 endpoint/凭据或改变协议方法，远端正文仅作为数据，不取得指令权限。
 - MCP 每次读取独立会话，用 SDK 处理初始化与 JSON/SSE；传输层限定原 endpoint、禁跳转和压缩、至多 16 次 HTTP 请求、单响应 1 MiB、累计响应 3 MiB，初始化与读取共用 20 秒 deadline。取消关闭本地会话/连接，不由 disconnect 推断远端已停止；不自动重放资源读取。文本或 Base64 内容最多 20 项、合计 1 MiB，超限整次失败，不静默截断。I/O 前后复验原 binding/凭据，记录读取时间、内容 hash 和 Evidence；第三方传输日志不输出 URL、会话 ID 或正文。
 - PostgreSQL 读取可显式指定 `include_schema=true`，为普通表或分区表附带完整列名、SQL 类型、列级 NOT NULL 标记、默认值存在标记、generated/identity 属性和按定义顺序排列的主键，空表同样返回结构。只接受原 binding 内且当前账号拥有完整 SELECT 权限的表；先取得该表的 ACCESS SHARE 锁，再在同一 REPEATABLE READ、READ ONLY 事务内查询结构与数据，结构缺失、权限不足或超限均整次失败。结构最多 100 列、64 KiB，与行数据共用 1 MiB 上限，不返回默认表达式、CHECK/域约束或其他表信息。结构完整不代表行投影完整，也不授予写入权限或替代按精确主键取得的原行/不在场 Evidence。结构一并纳入响应和 Evidence 的内容 hash；省略或关闭此选项时保持旧响应形状和摘要算法，不补写历史结构。旧 Worker 不认识此选项时须拒绝请求，不能把缺失结构当成功。
@@ -81,7 +81,7 @@ sources 由客户端编码、服务端校验，界面显示名称与范围。
 
 成果保存使用独立的 `document`/`write` 槽位，显式选择 `project-library:documents`；它不是输入文档的单份、集合或全集。候选复用项目现有文档库，要求 FileStorage 有持久存储归属，空文档库也可列出；候选不公开 bucket、namespace 或连接。前端按 access 区分两种选择，保存目标不自动勾选，候选消失时拒绝原草稿，不替换成输入全集。能力就绪与批准边界见[受控写入](repository-effects.md#minio-条件创建与原结果核对)。
 
-即时执行/Schedule 共用组件，不自动选首份。候选变化保留草稿并要求修正，不改全集、替换 ID 或接受单成员集合；原请求确认不受草稿影响。
+即时执行/Schedule 共用组件，不自动选首份。目录入口使用完整就绪候选的相对路径，按目录边界包含子目录，选择时展开为明确 ID：一份使用单份编码，2–5000 份使用集合编码，超量不截断。目录只是选择入口，不保存实时目录绑定；之后新增文件不自动进入草稿或调度，旧自定义集合保留原成员。候选变化保留草稿并要求修正，不改全集、替换 ID 或接受单成员集合；原请求确认不受草稿影响。
 
 selected_sources_json 保存 Project/requirement、模式、成员 ID/路径/MIME/size/hash 与服务端 checksum。Worker 按原 ID 验字节，后续 Segment/Attempt 不重新枚举；客户端 checksum 不提供信任。
 

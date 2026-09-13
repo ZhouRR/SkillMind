@@ -4,7 +4,7 @@
 
 ## 设计结论
 
-Run 是持续业务线程，不是一次 SDK query、Session 或进程。默认引擎为 Claude Agent SDK，业务层只依赖 AgentEngine；平台控制资源、权限、交互、效果与终态，PostgreSQL 保存审计正本。
+Run 是持续业务线程，不是一次 SDK query、Session 或进程。默认引擎为 Codex SDK，可通过部署配置切换为 Claude Agent SDK；业务层只依赖 AgentEngine。平台控制资源、权限、交互、效果与终态，PostgreSQL 保存审计正本。模型和思考强度按配置原值传递，失败不自动切换引擎、模型或降低强度。
 
 ## 责任边界
 
@@ -22,6 +22,18 @@ Skill、Ticket、代码或模型建议都是输入，不是授权。业务规则
 
 每 Run 只允许一个活动 PRIMARY；SUBAGENT/BRANCH 共用父 RunAttempt，汇总到主 Session 的 ToolCall/Evidence，不另分 RunEvent sequence。详见[子分析](subagents.md)。
 
+### Codex Adapter
+
+Python SDK 与捆绑 CLI 固定为 0.154.0，启动时校验安装版本与 CLI 的 RECORD checksum。默认模型为 `gpt-5.6-terra`、思考强度 `max`；解释器与 Run 使用同一引擎选择。Worker 的专用持久目录保存 device login 与原生会话，不复用宿主 Codex 配置、登录或 Skills。操作入口见[部署配置](../operations/deployment.md#agent-sdk-与-device-code-登录)。
+
+解释器与 Run 共用 Codex 输出适配：为 `const`/`enum` 补齐类型，基本联合类型直接传输，可选 nullable 字段用存在标记区分省略与显式 null；自由 JSON、复合类型和深层结构以 JSON 字符串传输，并保留对象/数组类型约束，返回后恢复原值。原始 Schema、系统 Skill 身份及业务校验不变，传输格式不作为发布或执行通过的依据。恢复失败按无效候选处理，解释器沿用一次修复上限。Provider 错误只记录允许的分类和 SDK 实际返回的 HTTP 状态，不保存错误正文或请求信息。
+
+原生 shell、文件写入、浏览器、应用、插件和子 Agent 不开放。由于模型目录中的 Tool 模式可覆盖普通功能开关，Adapter 从固定 CLI 的内置模型目录派生平台配置，仅收窄 Tool 路由与附加能力；保留模型 ID、思考等级与上下文参数。模型的资源调用只连接本进程随机地址的 loopback MCP，逐次经过共享 ToolExecutionPolicy、授权 Gateway、Provider 校验和证据审计。原生批准请求拒绝；用户交互与外部写入仍走平台注册 Tool。
+
+`change.propose/v1` 和 `interaction.request/v1` 保存原调用后停止原生 turn，再交 Worker 持久化等待状态，不在模型进程执行效果。续行核对 Run、模型、原生 Session 和原请求回执，恢复同一原生会话，并传入当前冻结 Brief；新提案仍暂停。PostgreSQL 保存平台开始/暂停/终止记录与业务审计，Codex 专用卷保存原生历史。任一恢复依据缺失时失败，不拼造历史或隐式从头运行。下文 Claude 的 deferred replay 机制仅适用于 Claude Adapter。
+
+Codex 支持输出字节与 Tool 调用次数边界及原生取消，取消完成须等待所属 MCP 服务关闭。当前未接通美元预算预留/结算，带 `max_budget_usd` 或已准备计费调用的请求在启动模型前拒绝。局部消息/Tool 次数限制不等于完整 Run 的模型计费 turn 上限；共享预算与完整用量结算仍按[预算门禁](run-budgets.md)管理。
+
 ## AgentTaskBrief
 
 每个 Segment 启动前冻结一份 [AgentTaskBrief](../../SKM/contracts/agent-task-brief/v1.schema.json)：
@@ -34,6 +46,10 @@ Skill、Ticket、代码或模型建议都是输入，不是授权。业务规则
 | 输出与续行 | 交付要求、可选 Schema、checkpoint、已确认事实及 Evidence/Proposal 引用 |
 
 Brief 保留必需指导，不含凭据、连接配置或跨 Project 数据；已绑定项目文档库的最小登记引用遵循[资源投影](resource-snapshots.md#公开选择与读取投影的实施契约)。Checkpoint 可压缩上下文，但须保留原 transcript/source trace，不改用户事实或批准范围。
+
+新 Run 默认遵守 Skill 的新业务执行规则，不能因路径或日期相同就沿用历史业务 ID。只有冻结用户输入明确指定恢复对象且 Skill 支持业务恢复时，才按当前 Project 和授权资源核对原记录并复用业务 ID；剩余写入仍在当前 Run 重新观察、提案和批准。业务恢复不继承旧 Run 的 Effect，也不能用旧回执满足当前 Run 的文档前置条件。
+
+使用 OutcomeEnvelope 的任务在提交最终结果前，由共享提示要求 Agent 生成一份自包含 HTML 报告，放入 `kind=report` 交付项的 `content`。报告按请求语言呈现结论、已核实汇总、明细、证据与限制；区分业务判定和执行状态，不补造数量或成功效果。内嵌 CSS 可组织版面，禁止脚本、外部资源和导航。该展示要求不替代 Skill 的业务 JSON、成果保存或原效果回读，不引入额外外部写入，也不改变模型配置；自定义输出 Schema 不强加 HTML 字段。
 
 Effect 成功确认为 APPLIED 时，同事务生成的下一 Segment checkpoint 带可选 `effect_result`：原 Effect/Proposal、before/after Evidence 引用、after 摘要、完整回读内容和 verification。Brief 保留并渲染这份原执行事实，不靠模型从引用或批准内容重建返回值；正文作为数据，不作为指令、当前外部状态或新写入权限。最终 effects 的引用须来自对应原回执，不能用提案前的查询 Evidence 替代 before_ref；旧回执缺少该可选字段时保持原值并省略摘要中的 before_ref，仍由结果校验核对原执行的两份证据。对象保存回执可含后续登记所需的 bucket/key/version/ETag，不含连接 endpoint 或凭据。该字段仅由平台 finalize 写入，模型的 propose/interaction checkpoint 不接受；失败续行不沿用上次回执，结果未知仍按效果协议停止。
 

@@ -13,7 +13,7 @@ export const APP_ROUTES: ReadonlyArray<{
   scope: RouteScope
 }> = [
   { route: 'home', scope: 'platform' },
-  // 任务中心が「何を走らせるか」、工作空间が「今走っている一つを観る」。この二分が導航の要。
+  // 任务中心が実行対象、Workspace が作業と報告、履歴が一回の実行詳細を所有する。
   // 項目内の主画面は工作空间とし、先頭に置く:模块を選んだ直後に見たいのは実行台と履歴で、
   // 業務模块の子菜单もこの主画面へ入れ子にする。
   { route: 'workspace', scope: 'project' },

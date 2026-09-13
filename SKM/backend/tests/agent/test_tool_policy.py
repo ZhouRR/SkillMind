@@ -175,6 +175,91 @@ def test_business_primary_key_is_also_data() -> None:
     assert payload["key"] == {"project_id": "business-reference"}
 
 
+def test_invalid_database_row_is_correctable_before_deferred_proposal() -> None:
+    """余分な revision は Tool 段階で拒否し、修正後だけ既存の保存検証へ渡す。"""
+
+    arguments, scope, tool, policy = _database_proposal()
+    arguments["changes"][0]["value"]["revision"] = "absent"
+    original = deepcopy(arguments)
+    with pytest.raises(ToolPolicyViolation, match=r"put revision only in precondition\.revision"):
+        policy.authorize(tool.sdk_name, arguments)
+    assert arguments == original
+    del arguments["changes"][0]["value"]["revision"]
+    assert policy.authorize(tool.sdk_name, arguments) is tool
+    assert validate_database_write_proposal(
+        parse_change_proposal_request(arguments), binding_scope=scope,
+    )["operation"] == "INSERT"
+
+
+@pytest.mark.parametrize(
+    "capability", ["change.propose/v1", "database.read/v1", "unknown.write/v1"],
+)
+def test_non_effect_capability_is_correctable_before_deferred_proposal(capability: str) -> None:
+    """Tool 名や未登録能力を延期せず、同じ候補の明示的な修正だけを受理する。"""
+
+    arguments, _scope, tool, policy = _database_proposal()
+    arguments["capability_version"] = capability
+    original = deepcopy(arguments)
+    with pytest.raises(ToolPolicyViolation, match="capability_version must name"):
+        policy.authorize(tool.sdk_name, arguments)
+    assert arguments == original
+    arguments["capability_version"] = "database.write/v1"
+    assert policy.authorize(tool.sdk_name, arguments) is tool
+
+
+@pytest.mark.parametrize("operation", ["INSERT", "UPDATE"])
+def test_inconsistent_database_revision_is_correctable_before_deferral(operation: str) -> None:
+    """不在表記や行摘要の誤りを model に返し、原行から一致する候補だけを延期する。"""
+
+    arguments, scope, tool, policy = _database_proposal(operation=operation)
+    arguments["precondition"]["revision"] = "ABSENT"
+    with pytest.raises(ToolPolicyViolation, match="revision differs"):
+        policy.authorize(tool.sdk_name, arguments)
+    arguments["precondition"]["revision"] = database_row_revision(
+        arguments["changes"][0]["value"]["expected"],
+    )
+    assert policy.authorize(tool.sdk_name, arguments) is tool
+    assert validate_database_write_proposal(
+        parse_change_proposal_request(arguments), binding_scope=scope,
+    )["operation"] == operation
+
+
+@pytest.mark.asyncio
+async def test_claude_corrected_row_can_defer_after_validation_denial(tmp_path: Path) -> None:
+    """SDK hook は不正な提案で停止を要求せず、修正された同じ入力だけを延期する。"""
+
+    from skillmind.agent.claude import ClaudeRuntimeConfiguration, build_claude_agent_options
+    from tests.agent.test_claude_agent_sdk import _run_context
+
+    arguments, _scope, tool, _policy = _database_proposal()
+    context = replace(
+        _run_context(tmp_path), tools=(tool,),
+        permission_snapshot={
+            "mode": "auto_read_only", "allowed_capabilities": [CHANGE_PROPOSE_CAPABILITY],
+        },
+    )
+    options = build_claude_agent_options(
+        context,
+        mcp_server={"type": "sdk", "name": "skillmind", "instance": object()},
+        configuration=ClaudeRuntimeConfiguration(environment={}),
+        deferred_tool_names=frozenset({tool.sdk_name}),
+    )
+    assert options.hooks is not None
+    hook = options.hooks["PreToolUse"][0].hooks[0]
+    data = {
+        "hook_event_name": "PreToolUse", "session_id": "session-1",
+        "transcript_path": "/tmp/transcript", "cwd": str(options.cwd),
+        "tool_name": tool.sdk_name, "tool_input": arguments, "tool_use_id": "call-1",
+    }
+    arguments["changes"][0]["value"]["revision"] = "absent"
+    denied = await hook(data, "call-1", {"signal": None})  # type: ignore[arg-type]
+    assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "precondition.revision" in denied["hookSpecificOutput"]["permissionDecisionReason"]
+    del arguments["changes"][0]["value"]["revision"]
+    corrected = await hook(data, "call-2", {"signal": None})  # type: ignore[arg-type]
+    assert corrected["hookSpecificOutput"]["permissionDecision"] == "defer"
+
+
 @pytest.mark.parametrize("field", ["project_id", "integration_id", "provider", "cwd"])
 @pytest.mark.parametrize("location", [
     "root", "target", "precondition", "checkpoint", "change", "nested", "invalid_changes",

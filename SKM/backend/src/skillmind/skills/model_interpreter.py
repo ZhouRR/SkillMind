@@ -27,6 +27,22 @@ PROMPT_EVENT_MAX_CHARS = 65_536
 class ModelProviderError(Exception):
     """Model transport の provider 側失敗を表す。分類は adapter が行う。"""
 
+    def __init__(self, message: str, *, detail: str | None = None) -> None:
+        """Adapter が脱敏した診断だけを永続化候補として保持する。"""
+
+        super().__init__(message)
+        self.detail = detail
+
+
+class ModelInvalidOutputError(Exception):
+    """転送形式から元の JSON 候補へ復元できない生成失敗。"""
+
+    def __init__(self, message: str, *, detail: str | None = None) -> None:
+        """候補本文ではなく adapter の脱敏済み位置を保持する。"""
+
+        super().__init__(message)
+        self.detail = detail
+
 
 class ModelStructuredOutputError(Exception):
     """Provider/SDK が構造化出力を確定できなかったことを表す。"""
@@ -143,8 +159,14 @@ class ModelSkillInterpreter:
                 raise InterpreterExecutionError(
                     InterpreterErrorCode.STRUCTURED_OUTPUT_UNAVAILABLE
                 ) from error
+            except ModelInvalidOutputError as error:
+                raise InterpreterExecutionError(
+                    InterpreterErrorCode.INVALID_JSON, detail=error.detail
+                ) from error
             except ModelProviderError as error:
-                raise InterpreterExecutionError(InterpreterErrorCode.PROVIDER_ERROR) from error
+                raise InterpreterExecutionError(
+                    InterpreterErrorCode.PROVIDER_ERROR, detail=error.detail
+                ) from error
         except InterpreterExecutionError:
             if control is not None:
                 await control.returned()

@@ -22,6 +22,14 @@ resolver 最多 65,536 UTF-8 bytes；FILE 去末尾 CR/LF，ENVIRONMENT 不去�
 
 认证信息表单按系统类型显示密码（PostgreSQL/SVN）、API Key（Redmine）或 Token（Git/MCP），统一使用密码输入框；MANAGED 原样保存，包括首尾空格。切换系统类型清空未保存的认证值与引用位置。
 
+## 编辑与删除
+
+ADMIN 可在资源表单修改连接地址、凭据和权限。连接编辑专用详情返回非机密 config，列表仍只返回 config_keys；不回显凭据原值和 locator。Provider/kind 与凭据 resolver 保持原类型，换类型另建配置。凭据输入留空表示保留原值；新值按原 Project/引用 AAD 加密，更新与密文在同一事务提交。
+
+连接更新/删除核对原 revision，凭据更新/删除核对原 updated_at；过期视图返回冲突，不自动覆盖。连接更新增加 revision，已冻结 Run/binding 不随之改写，后续使用旧 revision 仍按运行边界拒绝。正在使用的凭据更换只影响后续解析，不撤回已发出的请求。
+
+未引用的连接和凭据可删除。连接仍被 binding、预授权或提案引用时返回 409；凭据仍被连接引用时也拒绝，保留历史并提供无效化操作。未引用凭据的密文随引用在同一事务删除，不连带删除其他资源。
+
 ## MANAGED 的实际加密结构
 
 [SecretCipher](../../SKM/backend/src/skillmind/core/secret_crypto.py)以 32-byte 主密钥直接 AES-256-GCM，加随机 nonce、Project/引用 AAD；无逐项 DEK，不称信封加密。SKILLMIND_MANAGED_SECRET_KEK 与 kek_version 名称保持兼容；DEK/KMS 另定版本/迁移，不因改名重写密文。

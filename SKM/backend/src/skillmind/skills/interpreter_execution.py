@@ -44,11 +44,14 @@ class InterpreterErrorCode(StrEnum):
 class InterpreterExecutionError(Exception):
     """安定 code を持つ分類済み Interpreter 失敗。message に来源値を入れない。"""
 
-    def __init__(self, code: InterpreterErrorCode, message: str | None = None) -> None:
+    def __init__(
+        self, code: InterpreterErrorCode, message: str | None = None, *, detail: str | None = None
+    ) -> None:
         """失敗 code と、source 値を含まない短い説明を保持する。"""
 
         super().__init__(message or code.value)
         self.code = code
+        self.detail = detail
 
 
 _REPAIRABLE_CANDIDATE_ERRORS = frozenset(

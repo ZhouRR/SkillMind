@@ -214,6 +214,7 @@ export interface UiMessages {
     eventTrace: string
     eventPayload: string
     /** 結果要約が無い Run の一覧見出し。短縮 ID を受け取って表示名を組み立てる。 */
+    unnamedRunTitle: string
     runFallbackTitle: (shortId: string) => string
     /** 共通 modal(ModalDialog)の閉じる操作。 */
     close: string
@@ -420,6 +421,13 @@ export interface UiMessages {
   }
   /** 資源と統合の管理画面(ResourcesPage)。 */
   resources: {
+    resourceInUse: string
+    edit: string
+    save: string
+    delete: string
+    cancel: string
+    deleteConfirm: string
+    keepSecret: string
     databaseHost: string
     databasePort: string
     databaseName: string
@@ -429,6 +437,10 @@ export interface UiMessages {
     tlsRequire: string
     tlsDisable: string
     mcpServerUrl: string
+    databaseAllTables: string
+    databaseAllColumns: string
+    scopeExplicitValues: string
+    databaseAllHint: string
     databaseTables: string
     databaseReadHint: string
     databaseWriteColumns: string
@@ -742,6 +754,7 @@ export interface UiMessages {
     }
     /** 公開索引・保存時の検証・今回の取得結果を分けて表示する。 */
     artifacts: {
+      preview: string
       title: string; loading: string; empty: string; referenced: string; unreferenced: string
       unavailableRefs: string; download: string; refresh: string; preparing: string; delivered: string; cancel: string; close: string
       failures: Record<'sessionExpired' | 'denied' | 'notFound' | 'contentInvalid' | 'storageUnavailable' | 'tooLarge' | 'loadFailed' | 'timeout', string>
@@ -870,6 +883,12 @@ export interface UiMessages {
   }
   /** 工作空間画面(WorkspacePage)。 */
   workspace: {
+    queueTitle: string
+    latestReport: string
+    latestReportEmpty: string
+    executionDetail: string
+    queue: { pending: string; running: string; reports: string }
+    queueEmpty: { pending: string; running: string; reports: string }
     selectProjectFirst: string
     titleWithModule: (moduleName: string) => string
     scopeBadge: (scopeName: string) => string
@@ -899,10 +918,12 @@ export interface UiMessages {
       set: string
       all: string
       invalid: string
-      search: string
       count: (count: number) => string
       setHint: string
-      noMatches: string
+      folder: string
+      rootFolder: string
+      savedSelection: string
+      memberCount: (count: number) => string
       allHint: string
       freezeHint: string
       incompleteDraft: string

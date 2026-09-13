@@ -393,6 +393,11 @@ describe('Run Result information order', () => {
 
     expect(html).not.toContain('待你处理')
     expect(html).toContain('需要确认的问题正文')
+    const report = renderToStaticMarkup(<RunResultPanel state={{ status: 'ready', detail: answered }} csrfToken="test" reportOnly />)
+    expect(report).toContain('class="runInteractions resultSection" hidden=""')
+    expect(report).toContain('需要确认的问题正文')
+    const pending = renderToStaticMarkup(<RunResultPanel state={{ status: 'ready', detail: waitingWithOpenQuestion() }} csrfToken="test" reportOnly />)
+    expect(pending).not.toContain('class="runInteractions resultSection" hidden=""')
   })
 
   it('collapses the reference material so the result is not buried under it', () => {

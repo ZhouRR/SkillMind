@@ -1,7 +1,7 @@
 /* 原要求と現在の事実は別枠にし、長い ID/本文でページ全体を押し広げない。 */
 .runInteractions, .interactionBody, .interactionIntent, .interactionReadback { display: grid; gap: 12px; min-width: 0; }
 .runInteractions { margin-bottom: 14px; }
-.interactionBody[hidden], .workspaceResultMount[hidden] { display: none; }
+.interactionBody[hidden], .workspaceResultMount[hidden], .runInteractions[hidden] { display: none; }
 .interactionIntent { border: 1px solid var(--accent-border); border-radius: var(--radius-small); padding: 12px; background: var(--surface); }
 .interactionIntent blockquote { margin: 0; border-left: 3px solid var(--accent); padding: 6px 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .interactionFacts { display: grid; gap: 8px; margin: 0; font-size: 12px; }

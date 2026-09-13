@@ -8,7 +8,7 @@ import { routeHref } from '../lib/routing'
 
 const HISTORY_PAGE_SIZE = 20
 
-/** Project 全体の実行記録を探し、選択した記録を観測用 Workspace へ渡す画面。 */
+/** Project 全体の実行記録を探し、選択した記録を同じ履歴画面の詳細 へ渡す画面。 */
 export function HistoryPage({ projectId }: { projectId: string }) {
   const messages = useMessages()
   const [state, setState] = useState<RunHistoryState>({ status: 'loading' })
@@ -26,7 +26,7 @@ export function HistoryPage({ projectId }: { projectId: string }) {
     controllerRef.current = controller
     setState((current) => current.status === 'ready' ? current : { status: 'loading' })
     void loadRunHistory(projectId, HISTORY_PAGE_SIZE, offset, controller.signal)
-      .then((page) => setState({ status: 'ready', page }))
+      .then((page) => { if (!controller.signal.aborted) setState({ status: 'ready', page }) })
       .catch((error: unknown) => {
         if (!controller.signal.aborted) {
           setState({
@@ -43,7 +43,7 @@ export function HistoryPage({ projectId }: { projectId: string }) {
   }, [projectId])
 
   const openRun = (item: RunHistoryItemRecord): void => {
-    window.location.hash = routeHref('workspace', projectId, { runId: item.run_id })
+    window.location.hash = routeHref('history', projectId, { runId: item.run_id })
   }
 
   return (

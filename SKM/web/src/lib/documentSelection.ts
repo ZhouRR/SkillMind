@@ -14,6 +14,31 @@ export const MAX_SELECTED_DOCUMENTS = 5000
 export const ALL_DOCUMENTS_SELECTION = 'project-documents:all'
 export const PROJECT_DOCUMENT_LIBRARY_SELECTION = 'project-library:documents'
 
+/** Catalog が返す全候補の相対パスから、祖先を含む選択可能なフォルダーを作る。 */
+export function documentFolders(options: Array<{ value: string; label: string }>): Array<{ path: string; ids: string[]; value: string }> {
+  const folders = new Map<string, string[]>()
+  for (const option of options) {
+    const selection = readDocumentSelection(option.value)
+    if (selection.mode !== 'SINGLE' || !selection.valid) continue
+    const parts = option.label.split('/')
+    for (let depth = 0; depth < parts.length; depth++) {
+      const path = depth === 0 ? '/' : parts.slice(0, depth).join('/')
+      const ids = folders.get(path) ?? []
+      ids.push(selection.ids[0]!)
+      folders.set(path, ids)
+    }
+  }
+  return [...folders].sort(([left], [right]) => left.localeCompare(right)).map(([path, ids]) => ({
+    path, ids, value: `${ids.length === 1 ? 'document' : 'documents'}:${ids.join(',')}`,
+  }))
+}
+
+/** 表示だけで集合を照合する。原 token の順序や草稿は書き換えない。 */
+export function sameDocumentMembers(left: string[], right: string[]): boolean {
+  const members = new Set(left.map((id) => id.toLowerCase()))
+  return left.length === right.length && right.every((id) => members.has(id.toLowerCase()))
+}
+
 /** API の文書 UUID を shape として確認するだけで、所有権は server が検証する。 */
 export function isDocumentId(value: unknown): value is string {
   return isUuid(value)

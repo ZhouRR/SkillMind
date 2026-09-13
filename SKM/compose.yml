@@ -117,6 +117,7 @@ services:
       - egress
     volumes:
       - run-data:/var/lib/skillmind/runs
+      - codex-data:/var/lib/skillmind/codex
 
   migrate:
     <<: *backend-runtime
@@ -224,3 +225,4 @@ volumes:
   redis-data: {}
   object-storage-data: {}
   run-data: {}
+  codex-data: {}

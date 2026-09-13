@@ -231,14 +231,20 @@ def render_task_brief_prompt(
         key: brief["identity"][key] for key in ("run_id", "project_id", "segment_no")
         if key in brief["identity"]
     }))
-    # 初回にも段番号を描画する。同じ対象の過去行を見つけただけで他 Run を再開させない。
+    # 初回にも段番号を描画する。明示された業務再開と、過去行からの無断流用を区別する。
     if brief["identity"]["segment_no"] == 1:
         sections.append(
             "This is the initial segment of this Run, not a continuation of another Run. "
-            "Follow the Skill's rules for a new execution and new business execution IDs. "
+            "Follow the Skill's rules for a new execution and new business execution IDs, "
+            "unless frozen user input explicitly identifies a business execution to resume "
+            "and the Skill supports that resumption. For an explicit business resumption, "
+            "verify the requested record against this Run's authorized project and resources "
+            "before using its business IDs; propose remaining writes through this Run's "
+            "normal approval and effect flow. "
             "Matching file paths, dates or parameters in existing records do not establish "
             "that those records belong to this Run. Do not adopt another execution's IDs "
-            "or claim its effects as this Run's prerequisites."
+            "from matching records alone. Never claim another Run's effects as this Run's "
+            "prerequisites, including during an explicit business resumption."
         )
     else:
         sections.append(
@@ -317,6 +323,34 @@ def render_task_brief_prompt(
             "and references using the checkpoint fields accepted by the Tool."
         )
     sections.append(f"Task input (JSON): {canonical_json(input_json)}")
+    properties = output_schema.get("properties", {})
+    outcome_version = properties.get("outcome_version") if isinstance(properties, Mapping) else None
+    if isinstance(outcome_version, Mapping) and outcome_version.get("const") == (
+        "skillmind.outcome-envelope/v1"
+    ):
+        sections.append(
+            "Final report presentation: after the task's work and required effect read-backs "
+            "are complete, compose one polished, self-contained HTML report in a deliverable "
+            "with kind=report and put the entire HTML document in its content string. Start "
+            "with <!doctype html><html lang=...> and embed CSS in <head>. Use the requested "
+            "report language; keep the result summary concise and meaningful, not an ID heading. "
+            "Design for comfortable reading: warm neutral background, restrained accent colors, "
+            "clear typography, generous spacing, a concise title and conclusion, a compact "
+            "summary of verified counts when applicable, readable detail tables and findings, "
+            "and concrete next steps. Distinguish business verdicts from execution status. "
+            "Include scope, document names and versions, actual artifact paths, evidence "
+            "references and limitations where relevant; keep technical IDs in a secondary "
+            "section. Reflect all confirmed effects and unresolved work accurately. Do not "
+            "invent metrics, evidence, saved files or successful writes for appearance. "
+            "For incomplete work, report the partial/blocked state explicitly. Use semantic "
+            "HTML, responsive CSS and print styles; tables may scroll locally. No scripts, "
+            "external assets/fonts, remote images, forms or navigation; static inline SVG "
+            "and CSS are sufficient. Escape source text inserted into HTML. This HTML is "
+            "presentation inside the original OutcomeEnvelope, not a replacement for required "
+            "business JSON, findings, references, effects or artifact saves. Do not perform "
+            "extra external writes to publish it. If the Skill requires a saved report, use "
+            "only its existing authorized artifact workflow. Return the enclosing JSON as usual."
+        )
     # 非公式 Anthropic 互換 endpoint が API-level output_format を無視しても、同じ Schema を
     # prompt に固定し、後段で決定的に JSON parse/validation できるようにする。
     sections.append(

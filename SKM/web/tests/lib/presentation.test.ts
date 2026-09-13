@@ -2,18 +2,18 @@ import { describe, expect, it } from 'vitest'
 
 import { formatByteSize, formatLocalTimestamp, runHistoryTitle } from '../../src/lib/presentation'
 
-/** 見出し組み立ての検証用に catalog の代替書式を模した固定関数。 */
-const fallbackTitle = (shortId: string): string => `执行 ${shortId}`
-
 describe('runHistoryTitle', () => {
-  it('uses the generic result summary', () => {
-    /** 業務 input field を推測せず、公開 read model の summary だけを見出しに使う。 */
-    expect(runHistoryTitle('Result summary', '0000', fallbackTitle)).toBe('Result summary')
+  it('keeps the frozen task name with and without a result', () => {
+    expect(runHistoryTitle({ task_title: '仕様書 RV 審査', result_summary: null }, 'タスク実行'))
+      .toBe('仕様書 RV 審査')
+    expect(runHistoryTitle({ task_title: '仕様書 RV 審査', result_summary: 'Completed' }, 'タスク実行'))
+      .toBe('仕様書 RV 審査')
   })
 
-  it('falls back to a short run id before a result exists', () => {
-    /** 実行中でも input を表示せず、catalog の書式で短い Run ID 見出しを組み立てる。 */
-    expect(runHistoryTitle(null, 'abcdef01-2345', fallbackTitle)).toBe('执行 abcdef01')
+  it('supports old API records without putting identifiers in titles', () => {
+    expect(runHistoryTitle({ result_summary: 'Result summary' }, '任务执行')).toBe('Result summary')
+    expect(runHistoryTitle({ result_summary: null }, '任务执行')).toBe('任务执行')
+    expect(runHistoryTitle({ task_title: ' ', result_summary: ' ' }, 'Task execution')).toBe('Task execution')
   })
 })
 

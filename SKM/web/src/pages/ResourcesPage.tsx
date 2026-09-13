@@ -3,6 +3,11 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 import {
   createEffectPreauthorization,
   createIntegration,
+  loadIntegrationDetails,
+  updateIntegration,
+  updateSecretReference,
+  deleteIntegration,
+  deleteSecretReference,
   createSecretReference,
   disableEffectPreauthorization,
   disableIntegration,
@@ -61,6 +66,7 @@ import {
   NEW_CREDENTIAL,
   PROVIDER_LABELS,
   emptyConnectDraft,
+  connectDraftFromIntegration,
   secretInputFromDraft,
   type BindingDraft,
   type ConnectDraft,
@@ -93,12 +99,21 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
   const [policyDraft, setPolicyDraft] = useState<PolicyDraft>(EMPTY_POLICY)
   const [resourceTab, setResourceTab] = useState<ResourceTab>('secret')
   const [openDialog, setOpenDialog] = useState<ResourceDialog | null>(null)
+  const [editingIntegration, setEditingIntegration] = useState<IntegrationRecord | null>(null)
+  const [editingSecret, setEditingSecret] = useState<SecretReferenceRecord | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<IntegrationRecord | SecretReferenceRecord | null>(null)
   const [revision, setRevision] = useState(0)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const loadController = useRef<AbortController | null>(null)
   const mutationController = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    mutationController.current?.abort()
+    setOpenDialog(null); setDeleteTarget(null); setEditingIntegration(null); setEditingSecret(null)
+    setConnectDraft(emptyConnectDraft('redmine')); setSecretDraft(EMPTY_SECRET); setBusy(null)
+  }, [projectId])
 
   // 配備状態の再取得で後置機能が閉じた場合、非表示 tab に取り残さない。
   useEffect(() => {
@@ -165,6 +180,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
     setError(null)
     try {
       await action(controller.signal)
+      if (controller.signal.aborted) return false
       setRevision((current) => current + 1)
       return true
     } catch (caught: unknown) {
@@ -190,8 +206,41 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
 
   /** 新規作成弹窗を開く。前回操作の error を持ち越さない(草稿は保持する)。 */
   function showDialog(dialog: ResourceDialog): void {
+    if (busy !== null) return
     setError(null)
+    setEditingIntegration(null); setEditingSecret(null)
+    setConnectDraft(emptyConnectDraft(connectDraft.provider)); setSecretDraft(EMPTY_SECRET)
     setOpenDialog(dialog)
+  }
+
+  /** 最新の revision と非機密設定を読み、同じ接続 form で編集する。 */
+  async function editIntegration(item: IntegrationRecord): Promise<void> {
+    await mutate('load-edit', async (signal) => {
+      const detail = await loadIntegrationDetails(projectId, item.integration_id, signal)
+      if (signal.aborted) return
+      setEditingIntegration(detail.integration)
+      setConnectDraft(connectDraftFromIntegration(detail.integration, detail.config))
+      setOpenDialog('connect')
+    })
+  }
+
+  /** 原値を取得せず、認証情報の metadata と任意の差し替え入力を開く。 */
+  function editSecret(item: SecretReferenceRecord): void {
+    const provider = asResourceProvider(item.provider)
+    if (provider === null) return
+    setEditingSecret(item)
+    setSecretDraft({ ...EMPTY_SECRET, name: item.name, provider, resolver: item.resolver, key_version: item.key_version })
+    setError(null); setOpenDialog('secret')
+  }
+
+  /** 確認した対象の version で一度だけ削除する。 */
+  async function removeResource(): Promise<void> {
+    const item = deleteTarget
+    if (item === null) return
+    const done = await mutate('delete', (signal) => 'integration_id' in item
+      ? deleteIntegration(projectId, item.integration_id, item.revision, csrfToken, signal)
+      : deleteSecretReference(projectId, item.secret_reference_id, item.updated_at, csrfToken, signal))
+    if (done) setDeleteTarget(null)
   }
 
   /** 認証情報と Integration を一回の操作で登録し、値は専用 Secret API にだけ送る。 */
@@ -252,10 +301,25 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
           keyVersion: 'v1',
         }), csrfToken, signal)
         secretReferenceId = secret.secret_reference_id
+        if (signal.aborted) return
+        setSecrets((items) => [...items, secret])
+        setConnectDraft((current) => ({ ...current, credentialChoice: secret.secret_reference_id, secretValue: '', locator: '' }))
       } else if (draft.credentialChoice !== '') {
         secretReferenceId = draft.credentialChoice
+        const current = secrets.find((item) => item.secret_reference_id === secretReferenceId)
+        if (current && (draft.secretValue !== '' || draft.locator !== '')) {
+          const updated = await updateSecretReference(projectId, current.secret_reference_id, {
+            name: current.name, key_version: current.key_version, expected_updated_at: current.updated_at,
+            ...(draft.secretValue === '' ? {} : { secret_value: draft.secretValue }),
+            ...(draft.locator === '' ? {} : { locator: draft.locator }),
+          }, csrfToken, signal)
+          if (signal.aborted) return
+          setSecrets((items) => items.map((item) => item.secret_reference_id === updated.secret_reference_id ? updated : item))
+          setConnectDraft((value) => ({ ...value, secretValue: '', locator: '' }))
+        }
       }
-      await createIntegration(projectId, {
+      if (signal.aborted) return
+      const input = {
         name: draft.name,
         kind: form.kind,
         provider: draft.provider,
@@ -263,9 +327,13 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
         scope,
         config: buildIntegrationConfig(draft.provider, { ...draft, write: writeInput }),
         secret_reference_id: secretReferenceId,
-      }, csrfToken, signal)
+      }
+      if (editingIntegration === null) await createIntegration(projectId, input, csrfToken, signal)
+      else await updateIntegration(projectId, editingIntegration.integration_id,
+        { ...input, expected_revision: editingIntegration.revision }, csrfToken, signal)
     })
     if (succeeded) {
+      setEditingIntegration(null)
       setConnectDraft(emptyConnectDraft(draft.provider))
       setOpenDialog(null)
     }
@@ -274,7 +342,14 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
   /** Secret 本文を送らず resolver locator だけを事前登録する(高度設定)。 */
   async function submitSecret(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
-    const succeeded = await mutate('secret', (signal) => createSecretReference(
+    const succeeded = await mutate('secret', (signal) => editingSecret !== null
+      ? updateSecretReference(projectId, editingSecret.secret_reference_id, {
+        name: secretDraft.name, key_version: secretDraft.key_version,
+        expected_updated_at: editingSecret.updated_at,
+        ...(secretDraft.locator === '' ? {} : { locator: secretDraft.locator }),
+        ...(secretDraft.secret_value === '' ? {} : { secret_value: secretDraft.secret_value }),
+      }, csrfToken, signal)
+      : createSecretReference(
       projectId,
       secretInputFromDraft({
         name: secretDraft.name,
@@ -289,6 +364,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
     ))
     if (succeeded) {
       setSecretDraft(EMPTY_SECRET)
+      setEditingSecret(null)
       setOpenDialog(null)
     }
   }
@@ -407,6 +483,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
   const connectSecrets = secrets.filter(
     (item) => item.status === 'ACTIVE' && item.provider === connectDraft.provider,
   )
+  const selectedConnectSecret = secrets.find((item) => item.secret_reference_id === connectDraft.credentialChoice)
   const bindingLevelText = (level: ResourceBindingRecord['scope_level']): string => (
     level === 'PROJECT_DEFAULT'
       ? messages.resources.projectDefault
@@ -436,7 +513,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                   </button>
                 </div>
               </div>
-              <ResourceList emptyText={messages.resources.connectGuide} items={integrations.map((item) => {
+              <ResourceList busy={busy !== null} emptyText={messages.resources.connectGuide} items={integrations.map((item) => {
                 const provider = asResourceProvider(item.provider)
                 const accessText = accessForCapabilities(item.capabilities) === 'read_write'
                   ? messages.resources.accessBadgeReadWrite
@@ -447,22 +524,34 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                   detail: `${provider === null ? item.provider : PROVIDER_LABELS[provider]} · ${accessText} · ${summarizeScope(item.scope, { wildcardLabel: messages.resources.scopeUnrestrictedLabel })}`,
                   status: item.status,
                   updatedAt: item.updated_at,
+                  onEdit: () => void editIntegration(item),
+                  onDelete: () => { setError(null); setDeleteTarget(item) },
                   onDisable: item.status === 'ACTIVE' ? () => void mutate(`integration-${item.integration_id}`, (signal) => disableIntegration(projectId, item.integration_id, item.revision, csrfToken, signal)) : undefined,
                 }
               })} />
             </section>
           </section>
 
+          <ModalDialog open={deleteTarget !== null} title={messages.resources.deleteConfirm}
+            onClose={() => { if (busy === null) setDeleteTarget(null) }}>
+            <p>{deleteTarget?.name}</p>
+            {error && <p className="error" role="alert">{error}</p>}
+            <div className="panelHeaderActions">
+              <button className="secondaryButton" disabled={busy !== null} onClick={() => setDeleteTarget(null)} type="button">{messages.resources.cancel}</button>
+              <button className="dangerButton" disabled={busy !== null} onClick={() => void removeResource()} type="button">{messages.resources.delete}</button>
+            </div>
+          </ModalDialog>
           <ModalDialog
             open={openDialog === 'connect'}
             drawer
-            title={messages.resources.connectTitle}
+            title={editingIntegration === null ? messages.resources.connectTitle : messages.resources.edit}
             wide
-            onClose={() => setOpenDialog(null)}
+            onClose={() => { if (busy === null) setOpenDialog(null) }}
           >
             <form className="resourceForm" onSubmit={(event) => void submitConnect(event)}>
               <label>{messages.resources.providerLabel}
                 <select
+                  disabled={editingIntegration !== null}
                   value={connectDraft.provider}
                   onChange={(event) => setConnectDraft(
                     emptyConnectDraft(event.target.value as ResourceProvider),
@@ -599,7 +688,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
               <label>{messages.resources.credentialLabel}
                 <select
                   value={connectDraft.credentialChoice}
-                  onChange={(event) => setConnectDraft((value) => ({ ...value, credentialChoice: event.target.value }))}
+                  onChange={(event) => setConnectDraft((value) => ({ ...value, credentialChoice: event.target.value, secretValue: '', locator: '' }))}
                 >
                   {!connectForm.requiresSecret && <option value="">{messages.resources.notUsed}</option>}
                   <option value={NEW_CREDENTIAL}>{messages.resources.credentialNew}</option>
@@ -608,6 +697,16 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                   ))}
                 </select>
               </label>
+              {selectedConnectSecret && (
+                <SecretResolverFields editing provider={connectDraft.provider}
+                  resolver={selectedConnectSecret.resolver} locator={connectDraft.locator}
+                  secretValue={connectDraft.secretValue}
+                  envExample={connectForm.environmentLocatorExample} fileExample={connectForm.fileLocatorExample}
+                  onResolver={() => undefined}
+                  onLocator={(locator) => setConnectDraft((value) => ({ ...value, locator }))}
+                  onSecretValue={(secretValue) => setConnectDraft((value) => ({ ...value, secretValue }))}
+                />
+              )}
               {connectDraft.credentialChoice === NEW_CREDENTIAL && (
                 <>
                   <SecretResolverFields
@@ -649,15 +748,33 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                 </fieldset>
               )}
               {connectDraft.provider === 'postgres' ? (
-                <><label>{messages.resources.databaseTables}<textarea required className="mono compactTextarea"
-                  placeholder={'public.reports\npublic.items'} value={connectDraft.tables}
-                  onChange={(event) => setConnectDraft((value) => ({ ...value, tables: event.target.value }))} />
-                  <span className="hint">{connectWriteEnabled && connectDraft.access === 'read_write'
-                    ? messages.resources.databaseWriteHint : messages.resources.databaseReadHint}</span></label>
+                <><fieldset className="scopePicker"><legend>{messages.resources.databaseTables}</legend>
+                  <label className="scopeOption"><input type="checkbox"
+                    checked={connectDraft.tables === SCOPE_WILDCARD}
+                    onChange={(event) => setConnectDraft((value) => ({ ...value, tables: event.target.checked ? SCOPE_WILDCARD : '' }))} />
+                    <span>{messages.resources.databaseAllTables}</span>
+                  </label>
+                  {connectDraft.tables !== SCOPE_WILDCARD && <label>{messages.resources.scopeExplicitValues}
+                    <textarea required className="mono compactTextarea"
+                      placeholder={'public.reports\npublic.items'} value={connectDraft.tables}
+                      onChange={(event) => setConnectDraft((value) => ({ ...value, tables: event.target.value }))} />
+                  </label>}
+                  <span className="hint">{connectDraft.tables === SCOPE_WILDCARD || connectDraft.writeColumns === SCOPE_WILDCARD
+                    ? messages.resources.databaseAllHint : connectWriteEnabled && connectDraft.access === 'read_write'
+                    ? messages.resources.databaseWriteHint : messages.resources.databaseReadHint}</span></fieldset>
                 {connectWriteEnabled && connectDraft.access === 'read_write' && <>
-                  <label>{messages.resources.databaseWriteColumns}<textarea required className="mono compactTextarea"
-                    placeholder={'public.reports.id\npublic.reports.status'} value={connectDraft.writeColumns}
-                    onChange={(event) => setConnectDraft((value) => ({ ...value, writeColumns: event.target.value }))} /></label>
+                  <fieldset className="scopePicker"><legend>{messages.resources.databaseWriteColumns}</legend>
+                    <label className="scopeOption"><input type="checkbox"
+                      checked={connectDraft.writeColumns === SCOPE_WILDCARD}
+                      onChange={(event) => setConnectDraft((value) => ({ ...value, writeColumns: event.target.checked ? SCOPE_WILDCARD : '' }))} />
+                      <span>{messages.resources.databaseAllColumns}</span>
+                    </label>
+                    {connectDraft.writeColumns !== SCOPE_WILDCARD && <label>{messages.resources.scopeExplicitValues}
+                      <textarea required className="mono compactTextarea"
+                        placeholder={'public.reports.id\npublic.reports.status'} value={connectDraft.writeColumns}
+                        onChange={(event) => setConnectDraft((value) => ({ ...value, writeColumns: event.target.value }))} />
+                    </label>}
+                  </fieldset>
                   <fieldset className="scopePicker"><legend>{messages.resources.databaseOperations}</legend>
                     {['INSERT', 'UPDATE'].map((operation) => <label className="scopeOption" key={operation}>
                       <input type="checkbox" checked={connectDraft.databaseOperations.includes(operation)}
@@ -782,7 +899,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
               )}
               {error && openDialog === 'connect' && <p className="error" role="alert">{error}</p>}
               <button className="primaryButton" disabled={busy !== null} type="submit">
-                {messages.resources.connectSubmit}
+                {editingIntegration === null ? messages.resources.connectSubmit : messages.resources.save}
               </button>
             </form>
           </ModalDialog>
@@ -807,12 +924,14 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                   </div>
                 </div>
                 <p className="hint">{messages.resources.secretAdvancedHint}</p>
-                <ResourceList items={secrets.map((item) => ({
+                <ResourceList busy={busy !== null} items={secrets.map((item) => ({
                   id: item.secret_reference_id,
                   title: item.name,
                   detail: `${item.provider} · ${item.resolver} · ${item.key_version}`,
                   status: item.status,
                   updatedAt: item.updated_at,
+                  onEdit: () => editSecret(item),
+                  onDelete: () => { setError(null); setDeleteTarget(item) },
                   onDisable: item.status === 'ACTIVE' ? () => void mutate(`secret-${item.secret_reference_id}`, (signal) => disableSecretReference(projectId, item.secret_reference_id, csrfToken, signal)) : undefined,
                 }))} />
               </section>
@@ -821,19 +940,20 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
             <ModalDialog
               open={openDialog === 'secret'}
               drawer
-              title={messages.resources.registerLocator}
-              onClose={() => setOpenDialog(null)}
+              title={editingSecret === null ? messages.resources.registerLocator : messages.resources.edit}
+              onClose={() => { if (busy === null) setOpenDialog(null) }}
             >
               <form className="resourceForm" onSubmit={(event) => void submitSecret(event)}>
                   <label>{messages.resources.nameLabel}<input required value={secretDraft.name} onChange={(event) => setSecretDraft((value) => ({ ...value, name: event.target.value }))} /></label>
                   <label>{messages.resources.providerLabel}
-                    <select value={secretDraft.provider} onChange={(event) => setSecretDraft((value) => ({ ...value, provider: event.target.value as ResourceProvider, secret_value: '', locator: '' }))}>
+                    <select disabled={editingSecret !== null} value={secretDraft.provider} onChange={(event) => setSecretDraft((value) => ({ ...value, provider: event.target.value as ResourceProvider, secret_value: '', locator: '' }))}>
                       {RESOURCE_PROVIDERS.map((provider) => (
                         <option key={provider} value={provider}>{PROVIDER_LABELS[provider]}</option>
                       ))}
                     </select>
                   </label>
                   <SecretResolverFields
+                    editing={editingSecret !== null}
                     provider={secretDraft.provider}
                     resolver={secretDraft.resolver}
                     locator={secretDraft.locator}
@@ -847,7 +967,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                   <label>{messages.resources.keyVersionLabel}<input value={secretDraft.key_version} onChange={(event) => setSecretDraft((value) => ({ ...value, key_version: event.target.value }))} /></label>
                   <p className="hint resourceWarning">{secretDraft.resolver === 'MANAGED' ? messages.resources.secretValueHint : messages.resources.secretHint}</p>
                   {error && openDialog === 'secret' && <p className="error" role="alert">{error}</p>}
-                  <button className="primaryButton" disabled={busy !== null} type="submit">{messages.resources.registerLocator}</button>
+                  <button className="primaryButton" disabled={busy !== null} type="submit">{editingSecret === null ? messages.resources.registerLocator : messages.resources.save}</button>
               </form>
             </ModalDialog>
 
@@ -863,7 +983,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                   </div>
                 </div>
                 <p className="hint">{messages.resources.bindingHint}</p>
-                <ResourceList items={bindings.map((item) => ({
+                <ResourceList busy={busy !== null} items={bindings.map((item) => ({
                   id: item.binding_id,
                   title: `${item.requirement_key} · ${bindingLevelText(item.scope_level)}`,
                   detail: `${item.provider} ${item.capability_version} · ${summarizeScope(item.scope, { wildcardLabel: messages.resources.scopeUnrestrictedLabel })}`,
@@ -878,7 +998,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
               drawer
               title={messages.resources.bindingTitle}
               wide
-              onClose={() => setOpenDialog(null)}
+              onClose={() => { if (busy === null) setOpenDialog(null) }}
             >
               <form className="resourceForm" onSubmit={(event) => void submitBinding(event)}>
                   <p className="hint">{messages.resources.bindingHint}</p>
@@ -1045,7 +1165,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                 {writableIntegrations.length === 0 && (
                   <p className="hint">{messages.resources.noWritableIntegration}</p>
                 )}
-                <ResourceList items={policies.map((item) => ({
+                <ResourceList busy={busy !== null} items={policies.map((item) => ({
                   id: item.preauthorization_id,
                   title: `${item.capability_version} · ${item.operation}`,
                   detail: `LOW · v${item.policy_version} · ${summarizeScope(item.scope, { wildcardLabel: messages.resources.scopeUnrestrictedLabel })}`,
@@ -1061,7 +1181,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
               drawer
               title={messages.resources.policyTitle}
               wide
-              onClose={() => setOpenDialog(null)}
+              onClose={() => { if (busy === null) setOpenDialog(null) }}
             >
               <form className="resourceForm" onSubmit={(event) => void submitPolicy(event)}>
                   <p className="hint resourceWarning">{messages.resources.policyHint}</p>
@@ -1149,8 +1269,9 @@ function ResourceTabButton({ current, tab, onSelect, children }: {
 /** resolver 選択と、MANAGED の明文入力 / ENVIRONMENT・FILE の locator 入力を切り替える共通 field。
  *  接続 form と凭据 form の両方で使い、MANAGED 分岐の重複を一箇所へ集約する(hint は各 form 側が持つ)。 */
 function SecretResolverFields({
-  provider, resolver, locator, secretValue, envExample, fileExample, onResolver, onLocator, onSecretValue,
+  provider, resolver, locator, secretValue, envExample, fileExample, onResolver, onLocator, onSecretValue, editing = false,
 }: {
+  editing?: boolean
   provider: ResourceProvider
   resolver: SecretResolver
   locator: string
@@ -1165,7 +1286,7 @@ function SecretResolverFields({
   return (
     <>
       <label>{messages.resources.resolverLabel}
-        <select value={resolver} onChange={(event) => onResolver(event.target.value as SecretResolver)}>
+        <select disabled={editing} value={resolver} onChange={(event) => onResolver(event.target.value as SecretResolver)}>
           <option value="ENVIRONMENT">{messages.resources.resolverEnvOption}</option>
           <option value="FILE">{messages.resources.resolverFileOption}</option>
           <option value="MANAGED">{messages.resources.resolverManagedOption}</option>
@@ -1176,8 +1297,8 @@ function SecretResolverFields({
           <input
             type="password"
             autoComplete="off"
-            placeholder={messages.resources.credentialValuePlaceholders[PROVIDER_FORMS[provider].credentialKind]}
-            required
+            placeholder={editing ? messages.resources.keepSecret : messages.resources.credentialValuePlaceholders[PROVIDER_FORMS[provider].credentialKind]}
+            required={!editing}
             value={secretValue}
             onChange={(event) => onSecretValue(event.target.value)}
           />
@@ -1186,8 +1307,8 @@ function SecretResolverFields({
         <label>{messages.resources.locatorFieldLabel}
           <input
             className="mono"
-            placeholder={resolver === 'ENVIRONMENT' ? envExample : fileExample}
-            required
+            placeholder={editing ? messages.resources.keepSecret : resolver === 'ENVIRONMENT' ? envExample : fileExample}
+            required={!editing}
             value={locator}
             onChange={(event) => onLocator(event.target.value)}
           />
@@ -1197,14 +1318,16 @@ function SecretResolverFields({
   )
 }
 
-/** 管理資源の共通 audit list。削除ではなく disable だけを許可する。 */
-function ResourceList({ items, emptyText }: { emptyText?: string; items: Array<{
+/** 管理資源の編集・無効化・参照保護付き削除を表示する。 */
+function ResourceList({ items, emptyText, busy }: { busy: boolean; emptyText?: string; items: Array<{
   id: string
   title: string
   detail: string
   status: string
   updatedAt: string
   onDisable?: () => void
+  onEdit?: () => void
+  onDelete?: () => void
 }> }) {
   const messages = useMessages()
   if (items.length === 0) return <p className="compactEmpty">{emptyText ?? messages.resources.notConfigured}</p>
@@ -1217,7 +1340,11 @@ function ResourceList({ items, emptyText }: { emptyText?: string; items: Array<{
             <span className="resourceValue">{item.detail}</span>
             <small>{messages.enums.resourceStatus[item.status] ?? item.status} · {formatLocalTimestamp(item.updatedAt)}</small>
           </div>
-          {item.onDisable && <button className="dangerButton" onClick={item.onDisable} type="button">{messages.resources.disable}</button>}
+          <div className="panelHeaderActions">
+            {item.onEdit && <button disabled={busy} className="secondaryButton" onClick={item.onEdit} type="button">{messages.resources.edit}</button>}
+            {item.onDisable && <button disabled={busy} className="secondaryButton" onClick={item.onDisable} type="button">{messages.resources.disable}</button>}
+            {item.onDelete && <button disabled={busy} className="dangerButton" onClick={item.onDelete} type="button">{messages.resources.delete}</button>}
+          </div>
         </li>
       ))}
     </ul>

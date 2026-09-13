@@ -13,6 +13,7 @@ interface TestContext {
   language: UiLanguage
   screen: 'workspace' | 'tasks'
   initialRunId: string | null
+  detailView: boolean
 }
 
 declare global {
@@ -29,6 +30,7 @@ export function SubmissionHarness() {
     projectId: '00000000-0000-4000-8000-000000000020',
     csrfToken: 'c'.repeat(32), language: 'zh',
     screen: 'workspace', initialRunId: new URLSearchParams(location.search).get('run'),
+    detailView: false,
   })
   useEffect(() => {
     window.updateSubmissionTestContext = (next) => setContext((current) => ({ ...current, ...next }))
@@ -48,6 +50,7 @@ export function SubmissionHarness() {
         projectId={context.projectId}
         moduleId=""
         initialRunId={context.initialRunId}
+        detailView={context.detailView}
         onSessionExpired={() => window.dispatchEvent(new Event('interaction-session-expired'))}
       />}
     </LanguageProvider>

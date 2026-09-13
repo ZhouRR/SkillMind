@@ -30,7 +30,7 @@ RUN apt-get update \
 
 RUN groupadd --gid 10001 skillmind \
     && useradd --uid 10001 --gid skillmind --create-home --home-dir /home/skillmind skillmind \
-    && mkdir -p /app /var/lib/skillmind/runs \
+    && mkdir -p /app /var/lib/skillmind/runs /var/lib/skillmind/codex \
     && chown -R skillmind:skillmind /app /var/lib/skillmind
 
 COPY --from=builder /opt/venv /opt/venv

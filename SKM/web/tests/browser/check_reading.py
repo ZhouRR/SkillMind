@@ -145,7 +145,7 @@ async def check(url: str, output: Path) -> None:
                         await expect(
                             page.get_by_text(labels["home"]["emptyNoRuns"])
                         ).to_be_visible()
-                    for name in ("home", "history", "workspace"):
+                    for name in ("home", "history", "detail"):
                         if name == "history":
                             await page.goto(f"{url}#/history?project={PROJECT}")
                             await expect(page.locator(".historyItem")).to_have_count(5 if populated else 0)
@@ -155,8 +155,8 @@ async def check(url: str, output: Path) -> None:
                                 await technical.locator(":scope > summary").click()
                                 await expect(technical.locator("code")).to_have_text(RUN)
                                 await technical.locator(":scope > summary").click()
-                        if name == "workspace":
-                            await page.goto(f"{url}#/workspace?project={PROJECT}&run={RUN}")
+                        if name == "detail":
+                            await page.goto(f"{url}#/history?project={PROJECT}&run={RUN}")
                             await expect(page.locator(".outcomeCard pre")).to_have_text(REPORT)
                             await expect(page.locator(".validationBrief")).to_be_visible()
                             await expect(page.locator(".resultValidationScope")).not_to_be_visible()
@@ -177,7 +177,7 @@ async def check(url: str, output: Path) -> None:
                                 f"-{'filled' if populated else 'empty'}.png"
                             )
                         )
-                        if name == "workspace":
+                        if name == "detail":
                             checks = page.get_by_role(
                                 "button", name=labels["runResult"]["reading"]["checks"], exact=True
                             )

@@ -16,10 +16,11 @@ function mergeInteractions(previous: UserInteractionDetail[], incoming: UserInte
 }
 
 /** 普通答復の単一所有者。結果/技術折畳み/OPEN→settled は state の寿命を変えない。 */
-export function RunInteractions({ scope, state, csrfToken, onResponded, onFacts, onSessionExpired }: {
+export function RunInteractions({ scope, state, csrfToken, pendingOnly = false, onResponded, onFacts, onSessionExpired }: {
   scope: InteractionScope
   state: RunDetailState
   csrfToken: string
+  pendingOnly?: boolean
   onResponded?: (response: RespondedInteractionRecord) => void
   onFacts?: (detail: RunDetailRecord) => void
   onSessionExpired: SessionEnded
@@ -36,14 +37,15 @@ export function RunInteractions({ scope, state, csrfToken, onResponded, onFacts,
   const hasOpen = state.status === 'ready'
     && (valid?.status === 'WAITING_FOR_INPUT' || valid?.status === 'WAITING_FOR_APPROVAL')
     && valid.interactions.some((item) => item.status === 'OPEN')
-  return <section className="runInteractions resultSection">
+  return <section className="runInteractions resultSection" hidden={pendingOnly && !saved.items.some((item) => item.status === 'OPEN')}>
     <h3>{hasOpen ? messages.runResult.pendingTitle : messages.interactionResponse.recordsTitle}</h3>
     {hasOpen && <p className="hint">{messages.runResult.pendingHint}</p>}
-    {saved.items.map((interaction) => <InteractionCard key={interaction.interaction_id.toLowerCase()}
+    {/* 表示だけを切り替え、未知答復の確認に必要なカード所有者は捨てない。 */}
+    {saved.items.map((interaction) => <div key={interaction.interaction_id.toLowerCase()} hidden={pendingOnly && interaction.status !== 'OPEN'}><InteractionCard
       scope={scope} interaction={interaction} csrfToken={csrfToken} onResponded={onResponded}
       onFacts={onFacts} onSessionExpired={onSessionExpired}
       accessFailure={state.status === 'error' ? state.accessFailure : undefined}
       available={Boolean(valid?.interactions.some((item) => sameInteractionIdentity(item.interaction_id, interaction.interaction_id)))}
-      writable={state.status === 'ready' && valid?.status === 'WAITING_FOR_INPUT'} />)}
+      writable={state.status === 'ready' && valid?.status === 'WAITING_FOR_INPUT'} /></div>)}
   </section>
 }

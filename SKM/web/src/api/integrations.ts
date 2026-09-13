@@ -5,6 +5,7 @@ import {
   isStringArray,
   parseItemList,
   requestApiJson,
+  requestApiEmpty,
 } from './http'
 
 /** Worker が Secret を解決する方式。MANAGED のみ明文を一度 API へ渡し密文で保存する。 */
@@ -98,6 +99,65 @@ export interface PutResourceBindingInput {
   integration_id: string
   capability_version: string
   requested_scope: Record<string, unknown>
+}
+
+/** 編集時だけ非機密の接続設定を取得する。 */
+export async function loadIntegrationDetails(
+  projectId: string, integrationId: string, signal?: AbortSignal,
+): Promise<{ integration: IntegrationRecord; config: Record<string, unknown> }> {
+  const value = await requestApiJson(
+    `${API_BASE}/projects/${encodeURIComponent(projectId)}/integrations/${encodeURIComponent(integrationId)}`,
+    { signal },
+  )
+  if (!isRecord(value) || !isRecord(value.config)) throw new Error('Integration details did not match its contract')
+  return { integration: parseIntegration(value.integration), config: value.config }
+}
+
+/** 原 revision を照合して接続設定を更新する。 */
+export async function updateIntegration(
+  projectId: string, integrationId: string,
+  input: CreateIntegrationInput & { expected_revision: number }, csrfToken: string, signal?: AbortSignal,
+): Promise<IntegrationRecord> {
+  return parseIntegration(await requestApiJson(
+    `${API_BASE}/projects/${encodeURIComponent(projectId)}/integrations/${encodeURIComponent(integrationId)}`,
+    { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+      body: JSON.stringify(input), signal },
+  ))
+}
+
+/** 原更新日時を照合し、未指定の認証値を保持する。 */
+export async function updateSecretReference(
+  projectId: string, secretReferenceId: string,
+  input: { name: string; key_version: string; expected_updated_at: string; locator?: string; secret_value?: string },
+  csrfToken: string, signal?: AbortSignal,
+): Promise<SecretReferenceRecord> {
+  return parseSecretReference(await requestApiJson(
+    `${API_BASE}/projects/${encodeURIComponent(projectId)}/secret-references/${encodeURIComponent(secretReferenceId)}`,
+    { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+      body: JSON.stringify(input), signal },
+  ))
+}
+
+/** 未参照接続を元の revision で削除する。 */
+export async function deleteIntegration(
+  projectId: string, integrationId: string, expectedRevision: number, csrfToken: string, signal?: AbortSignal,
+): Promise<void> {
+  await requestApiEmpty(
+    `${API_BASE}/projects/${encodeURIComponent(projectId)}/integrations/${encodeURIComponent(integrationId)}`
+      + `?expected_revision=${expectedRevision}`,
+    { method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken }, signal },
+  )
+}
+
+/** 未参照の認証情報と密文を原更新日時を照合して削除する。 */
+export async function deleteSecretReference(
+  projectId: string, secretReferenceId: string, expectedUpdatedAt: string, csrfToken: string, signal?: AbortSignal,
+): Promise<void> {
+  await requestApiEmpty(
+    `${API_BASE}/projects/${encodeURIComponent(projectId)}/secret-references/${encodeURIComponent(secretReferenceId)}`
+      + `?expected_updated_at=${encodeURIComponent(expectedUpdatedAt)}`,
+    { method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken }, signal },
+  )
 }
 
 /** Project の SecretReference metadata を一覧する。 */

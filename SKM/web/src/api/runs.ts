@@ -245,6 +245,7 @@ export interface RunDetailRecord {
 
 /** Project Run history の一覧と再表示に必要な一行。 */
 export interface RunHistoryItemRecord {
+  task_title?: string | null
   run_id: string
   project_id: string
   task_id: string
@@ -400,11 +401,13 @@ export async function loadRunHistory(
   offset: number,
   signal?: AbortSignal,
   statuses: readonly RunStatus[] = [],
+  taskId?: string,
 ): Promise<RunHistoryPageRecord> {
   const query = new URLSearchParams({ limit: String(limit), offset: String(offset) })
   // 絞り込みは server 側で行う。先頭 page を client で filter すると、待機中の Run が
   // 古い page にあるときに取りこぼす。
   for (const status of statuses) query.append('status', status)
+  if (taskId !== undefined) query.set('task_id', taskId)
   return parseRunHistory(await requestApiJson(
     `${API_BASE}/projects/${encodeURIComponent(projectId)}/runs?${query.toString()}`,
     { signal },
@@ -679,6 +682,7 @@ function isRunHistoryItem(value: unknown): value is RunHistoryItemRecord {
     && (typeof value.finished_at === 'string' || value.finished_at === null)
     && isRecord(value.input)
     && isRunSourceSummaries(value.selected_sources)
+    && (value.task_title === undefined || value.task_title === null || typeof value.task_title === 'string')
     && (typeof value.result_summary === 'string' || value.result_summary === null)
     && (typeof value.result_confidence === 'number' || value.result_confidence === null)
     && (typeof value.result_needs_review === 'boolean' || value.result_needs_review === null)

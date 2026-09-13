@@ -11,7 +11,6 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
-from skillmind.agent.claude import CLAUDE_AGENT_SDK_VERSION, CLAUDE_CODE_CLI_VERSION
 from skillmind.agent.domain import (
     AgentEngine,
     AgentEvent,
@@ -285,11 +284,12 @@ class AgentRunExecutor:
     ) -> None:
         """Engine stream を一度だけ消費し、最初の terminal event で Run を閉じる。"""
 
+        health = await self._engine.health()
         metadata = AgentSessionMetadata(
             cwd=str(context.workspace.cwd),
-            engine="claude-agent-sdk",
-            sdk_version=CLAUDE_AGENT_SDK_VERSION,
-            cli_version=CLAUDE_CODE_CLI_VERSION,
+            engine=health.engine,
+            sdk_version=health.sdk_version,
+            cli_version=health.cli_version,
             model=context.model,
             parent_session_id=claimed.parent_agent_session_id,
             continuation_mode=claimed.continuation_mode,

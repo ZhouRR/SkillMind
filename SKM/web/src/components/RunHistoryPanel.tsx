@@ -34,9 +34,10 @@ export function RunHistoryPanel({ state, selectedRunId, onOpen, onPrevious, onNe
           <article className={`historyItem${selectedRunId === item.run_id ? ' historySelected' : ''}`} key={item.run_id}>
             <button type="button" onClick={() => onOpen(item)}>
               <div className="historyPrimary">
-                <span><strong>{runHistoryTitle(item.result_summary, item.run_id, messages.elements.runFallbackTitle)}</strong><small>{formatLocalTimestamp(item.created_at)}</small></span>
+                <span><strong>{runHistoryTitle(item, messages.elements.unnamedRunTitle)}</strong><small>{formatLocalTimestamp(item.created_at)}</small></span>
                 <StatusBadge status={item.status} />
               </div>
+              {item.task_title && item.result_summary && <p className="historySummary">{item.result_summary}</p>}
               {!item.result_summary && <p>{messages.runHistory.noSummary}</p>}
               <div className="historyMeta">
                 <span>{sourceLabel(item, messages.runHistory.sourceUnavailable)}</span>

@@ -16,6 +16,7 @@
           "run_id": { "type": "string", "format": "uuid" },
           "project_id": { "type": "string", "format": "uuid" },
           "task_id": { "type": "string", "format": "uuid" },
+          "task_title": { "type": ["string", "null"] },
           "status": { "enum": ["QUEUED", "PREPARING", "RUNNING", "RETRY_PENDING", "WAITING_PERMISSION", "WAITING_FOR_INPUT", "WAITING_FOR_APPROVAL", "SUCCEEDED", "FAILED", "CANCELLED"] },
           "row_version": { "type": "integer", "minimum": 1 },
           "created_at": { "type": "string", "format": "date-time" },

@@ -311,6 +311,12 @@ def test_prompt_distinguishes_new_run_from_its_later_segments() -> None:
     assert '"segment_no":1' in initial
     assert "initial segment of this Run" in initial
     assert "Do not adopt another execution's IDs" in initial
+    assert (
+        "unless frozen user input explicitly identifies a business execution to resume" in initial
+    )
+    assert "and the Skill supports that resumption" in initial
+    assert "authorized project and resources" in initial
+    assert "Never claim another Run's effects as this Run's prerequisites" in initial
     assert '"segment_no":2' in resumed
     assert "later segment of the same Run" in resumed
     assert "preserving its business execution IDs" in resumed
@@ -572,3 +578,17 @@ def test_document_prerequisites_are_frozen_in_brief_and_explained_to_agent():
     prompt = render_task_brief_prompt(compiled.brief, input_json={}, output_schema={})
     assert "document.readiness/v1" in prompt
     assert "failed or unknown effects do not unlock" in prompt
+
+
+def test_outcome_report_guidance_preserves_business_and_json_contract() -> None:
+    """HTML 提示を Outcome のみに加え、権限や外側 JSON 契約を変更しない。"""
+    brief = _build().brief
+    schema = {"properties": {"outcome_version": {"const": "skillmind.outcome-envelope/v1"}}}
+    prompt = render_task_brief_prompt(brief, input_json={}, output_schema=schema)
+    assert "self-contained HTML report" in prompt
+    assert "required effect read-backs" in prompt
+    assert "Do not perform extra external writes" in prompt
+    assert "partial/blocked state explicitly" in prompt
+    assert prompt.index("Final report presentation") < prompt.index("Return ONLY one JSON object")
+    custom = render_task_brief_prompt(brief, input_json={}, output_schema={"type": "object"})
+    assert "Final report presentation" not in custom

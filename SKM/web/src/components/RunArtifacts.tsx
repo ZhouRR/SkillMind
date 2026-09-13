@@ -2,10 +2,12 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { loadRunArtifactContent, loadRunArtifacts, type RunArtifactRecord, type RunResultDetail } from '../api'
 import { RESOURCE_REQUEST_TIMEOUT_MS, useResourceQuery, type SessionEnded } from '../hooks/useResourceRequest'
 import { useMessages } from '../i18n'
+import { ModalDialog } from './PageElements'
+import { DOCUMENT_PREVIEW_MAX_BYTES, documentMarkdownHtml, documentPreviewHtml } from '../lib/documentPreview'
 import { ARTIFACT_REQUEST_POLICY, resultArtifactRefs } from '../lib/artifactFeedback'
 
 /** 一つの明示 click に固定した回执。別索引や同名 path で上書きしない。 */
-interface DownloadRequest { id: number; artifact: RunArtifactRecord; deadline: number }
+interface DownloadRequest { mode: 'download' | 'preview'; id: number; artifact: RunArtifactRecord; deadline: number }
 
 /** 実 Workspace の actor/Session/Project/Run ごとに親が再作成する添付区画。 */
 export function RunArtifacts({ projectId, runId, result, onSessionExpired }: {
@@ -24,9 +26,9 @@ export function RunArtifacts({ projectId, runId, result, onSessionExpired }: {
   const unmatched = refs.filter((ref) => !records.some((record) => record.artifact_ref === ref))
 
   /** 再描画前の同 tick 重複 click と、別添付への暗黙の中断を防ぐ。 */
-  function start(artifact: RunArtifactRecord): void {
+  function start(artifact: RunArtifactRecord, mode: 'download' | 'preview' = 'download'): void {
     if (!mounted.current || active.current || index.pending || index.failure) return
-    const next = { id: ++sequence.current, artifact: { ...artifact }, deadline: performance.now() + RESOURCE_REQUEST_TIMEOUT_MS }
+    const next = { mode, id: ++sequence.current, artifact: { ...artifact }, deadline: performance.now() + RESOURCE_REQUEST_TIMEOUT_MS }
     active.current = next
     setRequest(next)
   }
@@ -42,17 +44,55 @@ export function RunArtifacts({ projectId, runId, result, onSessionExpired }: {
         <ul className="artifactList">{records.map((record) => <li key={record.artifact_ref}>
           <div><strong>{record.path}</strong><p>{record.size_bytes} B · {record.mime_type}</p>
             <p className="hint">{refs.includes(record.artifact_ref) ? labels.referenced : labels.unreferenced}</p></div>
-          <button className="secondaryButton compactButton" type="button" disabled={request !== null}
-            onClick={() => start(record)}>{labels.download}</button>
+          <div className="panelHeaderActions">
+            {/\.(md|markdown|html?|txt|json)$/i.test(record.path) && record.size_bytes <= DOCUMENT_PREVIEW_MAX_BYTES
+              && <button className="secondaryButton compactButton" type="button" disabled={request !== null}
+                onClick={() => start(record, 'preview')}>{labels.preview}</button>}
+            <button className="secondaryButton compactButton" type="button" disabled={request !== null}
+              onClick={() => start(record)}>{labels.download}</button>
+          </div>
         </li>)}</ul>
         {unmatched.length > 0 && <div className="artifactUnmatched"><p className="hint">{labels.unavailableRefs}</p>
           <ul>{unmatched.map((ref) => <li key={ref}><code>{ref}</code></li>)}</ul></div>}
       </>}
     <button className="secondaryButton compactButton" type="button" disabled={index.pending || request !== null}
       onClick={index.refresh}>{labels.refresh}</button>
-    {request && <ArtifactDownload key={request.id} projectId={projectId} runId={runId} request={request}
+    {request?.mode === 'download' && <ArtifactDownload key={request.id} projectId={projectId} runId={runId} request={request}
       isCurrent={() => mounted.current && active.current === request} onClose={close} onSessionExpired={onSessionExpired} />}
+    {request?.mode === 'preview' && <ArtifactPreview key={request.id} projectId={projectId} runId={runId}
+      request={request} isCurrent={() => mounted.current && active.current === request}
+      onClose={close} onSessionExpired={onSessionExpired} />}
   </section>
+}
+
+/** 検証済み公開添付だけを読み、既存の文書 sanitizer と同じ sandbox で表示する。 */
+function ArtifactPreview({ projectId, runId, request, isCurrent, onClose, onSessionExpired }: {
+  projectId: string; runId: string; request: DownloadRequest; isCurrent: () => boolean;
+  onClose: () => void; onSessionExpired: SessionEnded
+}) {
+  const labels = useMessages().runResult.artifacts
+  const current = useRef(isCurrent)
+  current.current = isCurrent
+  const loader = useCallback(async (signal: AbortSignal) => {
+    if (!current.current()) throw new DOMException('Preview is no longer current', 'AbortError')
+    const blob = await loadRunArtifactContent(projectId, runId, request.artifact, signal)
+    if (blob.size > DOCUMENT_PREVIEW_MAX_BYTES) throw new Error('Preview is too large')
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(await blob.arrayBuffer())
+    signal.throwIfAborted()
+    if (!current.current()) throw new DOMException('Preview is no longer current', 'AbortError')
+    return /\.html?$/i.test(request.artifact.path) ? { html: documentPreviewHtml(text), text: null }
+      : /\.(md|markdown)$/i.test(request.artifact.path) ? { html: documentMarkdownHtml(text), text: null }
+        : { html: null, text }
+  }, [projectId, runId, request])
+  const query = useResourceQuery(String(request.id), loader,
+    () => { if (current.current()) onSessionExpired() }, ARTIFACT_REQUEST_POLICY)
+  return <ModalDialog open title={request.artifact.path} viewport onClose={onClose}>
+    {query.pending ? <p role="status">{labels.preparing}</p>
+      : query.failure ? <p className="error" role="alert">{labels.failures[query.failure.key]}</p>
+        : query.data?.html ? <iframe className="runReportPreview" title={request.artifact.path}
+          sandbox="" referrerPolicy="no-referrer" srcDoc={query.data.html} />
+          : <pre className="rawResultBody">{query.data?.text}</pre>}
+  </ModalDialog>
 }
 
 /** HTTP 完了だけでは保存成功と主張せず、現在 click の byte だけを browser へ渡す。 */

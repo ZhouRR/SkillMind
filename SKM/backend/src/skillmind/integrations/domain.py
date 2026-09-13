@@ -217,6 +217,19 @@ class CreateSecretReferenceCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class UpdateSecretReferenceCommand:
+    """原更新日時を照合し、未指定の Secret 本文は保持する編集 command。"""
+
+    project_id: UUID
+    secret_reference_id: UUID
+    expected_updated_at: datetime
+    name: str
+    key_version: str
+    locator: str | None = field(default=None, repr=False)
+    secret_value: str | None = field(default=None, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
 class StoredSecretReference:
     """公開可能な SecretReference read model。locator は意図的に含めない。"""
 
@@ -449,8 +462,8 @@ def normalize_provider_scope(
 ) -> dict[str, Any]:
     """Provider scope を allowlist 形式へ正規化し、黙示の無制限を拒否する。
 
-    空 list は従来通り拒否し、全許可は Redmine の issue_ids/field_keys に限り
-    明示 wildcard(``SCOPE_WILDCARD``)としてのみ受け付ける。write の apply は
+    空 list は従来通り拒否し、Redmine の issue_ids/field_keys と PostgreSQL の
+    tables/write_columns だけ明示 wildcard(``SCOPE_WILDCARD``)を受け付ける。apply は
     引き続き承認または explicit 事前許可(wildcard 不可)で gate される。
     """
 
@@ -465,6 +478,8 @@ def normalize_provider_scope(
         columns = _unique_strings(
             scope["write_columns"], maximum=1000, key_pattern=False, maximum_length=256
         )
+        if SCOPE_WILDCARD in columns:
+            columns = [SCOPE_WILDCARD]
         operations = _unique_strings(scope["operations"], maximum=2, key_pattern=False)
         if (
             not columns
@@ -473,9 +488,13 @@ def normalize_provider_scope(
             or any(table.startswith("skillmind_effects.") for table in tables)
             or any(
                 len(column.split(".")) != 3
-                or ".".join(column.split(".")[:2]) not in tables
-                or re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_$]{0,62}", column.split(".")[-1]) is None
-                for column in columns
+                or not scope_values_allow(tables, ".".join(column.split(".")[:2]))
+                or column.startswith("skillmind_effects.")
+                or re.fullmatch(
+                    r"[a-zA-Z_][a-zA-Z0-9_$]{0,62}(?:\.[a-zA-Z_][a-zA-Z0-9_$]{0,62}){2}",
+                    column,
+                ) is None
+                for column in columns if column != SCOPE_WILDCARD
             )
         ):
             raise IntegrationValidationError(
@@ -490,8 +509,10 @@ def normalize_provider_scope(
             scope[key], maximum=200, key_pattern=False,
             maximum_length=2048 if provider == "mcp" else 256,
         )
-        if not values or SCOPE_WILDCARD in values:
+        if not values or (provider == "mcp" and SCOPE_WILDCARD in values):
             raise IntegrationValidationError("Read-only resource scope requires explicit values")
+        if provider == "postgres" and SCOPE_WILDCARD in values:
+            return {key: [SCOPE_WILDCARD]}
         if provider == "postgres" and any(
             re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_$]{0,62}\.[a-zA-Z_][a-zA-Z0-9_$]{0,62}", value)
             is None for value in values

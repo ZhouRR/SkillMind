@@ -11,6 +11,7 @@ from typing import Any, Self
 from uuid import uuid4
 
 import pytest
+
 from skillmind.db.models import SkillInterpretation, SkillSource
 from skillmind.skills import (
     InlineSkillFile,
@@ -182,10 +183,11 @@ class _RepairingInterpreter:
 class _DecodeRepairingInterpreter:
     """最初の decode 失敗後、脱敏 feedback を受けて完全 response を返す。"""
 
-    def __init__(self, code: InterpreterErrorCode) -> None:
+    def __init__(self, code: InterpreterErrorCode, detail: str | None = None) -> None:
         """最初に送出する安定 error code を保持する。"""
 
         self.code = code
+        self.detail = detail
         self.feedback: list[str | None] = []
 
     async def interpret(
@@ -202,7 +204,7 @@ class _DecodeRepairingInterpreter:
         del request, model, parameters, on_event
         self.feedback.append(validation_feedback)
         if validation_feedback is None:
-            raise InterpreterExecutionError(self.code)
+            raise InterpreterExecutionError(self.code, detail=self.detail)
         return _example_response()
 
 
@@ -505,7 +507,9 @@ async def test_interpret_does_not_retry_provider_failure() -> None:
     source_id = uuid4()
     source = _fixture_source(GENERIC_SKILL, organization_id, source_id)
     session = _InterpretSession(source, scalars_results=[None, None])
-    interpreter = _DecodeRepairingInterpreter(InterpreterErrorCode.PROVIDER_ERROR)
+    interpreter = _DecodeRepairingInterpreter(
+        InterpreterErrorCode.PROVIDER_ERROR, "codex:invalid_json_schema; http_status=400"
+    )
 
     stored = await _service(session, interpreter).interpret(
         organization_id=organization_id,
@@ -516,6 +520,8 @@ async def test_interpret_does_not_retry_provider_failure() -> None:
     assert stored.status is SkillInterpretationStatus.FAILED
     assert stored.error_code == InterpreterErrorCode.PROVIDER_ERROR.value
     assert interpreter.feedback == [None]
+    row = next(item for item in session.added if isinstance(item, SkillInterpretation))
+    assert row.execution_json["detail"] == "codex:invalid_json_schema; http_status=400"
 
 
 @pytest.mark.asyncio

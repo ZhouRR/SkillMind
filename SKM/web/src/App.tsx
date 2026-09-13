@@ -35,7 +35,7 @@ import { ResourcesPage } from './pages/ResourcesPage'
 import { SchedulesPage } from './pages/SchedulesPage'
 import { SkillsPage } from './pages/SkillsPage'
 import { TasksPage } from './pages/TasksPage'
-import { WorkspacePage } from './pages/WorkspacePage'
+import { RunDetailPage, WorkspacePage } from './pages/WorkspacePage'
 import {
   APP_ROUTES,
   routeContextFromHash,
@@ -489,7 +489,11 @@ function renderPage(
         projectId={projectId}
       />
     case 'history':
-      return <HistoryPage projectId={projectId} />
+      return initialRunId ? <RunDetailPage
+        actorId={session.user.user_id} projectId={projectId} moduleId={activeModuleId}
+        csrfToken={session.csrf_token} initialRunId={initialRunId}
+        projectReadOnly={currentProject?.status !== 'ACTIVE'} onSessionExpired={onSessionEnded}
+      /> : <HistoryPage projectId={projectId} />
     case 'home':
       return <HomePage metaState={metaState} project={currentProject} projectId={projectId} />
   }

@@ -418,6 +418,30 @@ describe('API routing contract', () => {
     )
   })
 
+  it('requests only the latest terminal run for the exact task', async () => {
+    const fetchMock = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(() => Promise.resolve(new Response(JSON.stringify(RUN_HISTORY_RESPONSE), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    })))
+    vi.stubGlobal('fetch', fetchMock)
+    const task = RUN_HISTORY_RESPONSE.items[0]!.task_id
+    await loadRunHistory(RUN_RESPONSE.project_id, 1, 0, undefined, ['SUCCEEDED', 'FAILED', 'CANCELLED'], task)
+    const url = new URL(String(fetchMock.mock.calls[0]?.[0]), 'http://localhost')
+    expect(url.searchParams.get('task_id')).toBe(task)
+    expect(url.searchParams.getAll('status')).toEqual(['SUCCEEDED', 'FAILED', 'CANCELLED'])
+    expect(url.searchParams.get('limit')).toBe('1')
+  })
+
+  it.each(['仕様書のレビュー', null, undefined, 7])('validates optional history task names: %s', async (title) => {
+    const row = { ...RUN_HISTORY_RESPONSE.items[0], task_title: title }
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(
+      JSON.stringify({ ...RUN_HISTORY_RESPONSE, items: [row] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ))))
+    const request = loadRunHistory(RUN_RESPONSE.project_id, 10, 0)
+    if (typeof title === 'number') await expect(request).rejects.toThrow()
+    else expect((await request).items[0]?.task_title).toBe(title)
+  })
+
   it('parses inline skill files through the backend parser', async () => {
     const fetchMock = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(() => Promise.resolve(new Response(JSON.stringify(SKILL_PARSE_RESPONSE), {
       status: 200,

@@ -3245,6 +3245,25 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "IntegrationDetailsResponse": {
+        "description": "ADMIN 編集専用。認証情報を含まない接続設定を返す。",
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "title": "Config",
+            "type": "object"
+          },
+          "integration": {
+            "$ref": "#/components/schemas/IntegrationResponse"
+          }
+        },
+        "required": [
+          "integration",
+          "config"
+        ],
+        "title": "IntegrationDetailsResponse",
+        "type": "object"
+      },
       "IntegrationListResponse": {
         "description": "Project の Integration 一覧。",
         "properties": {
@@ -5782,6 +5801,17 @@
             "format": "uuid",
             "title": "Task Id",
             "type": "string"
+          },
+          "task_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Title"
           }
         },
         "required": [
@@ -7848,6 +7878,77 @@
         "title": "UiLanguageResponse",
         "type": "object"
       },
+      "UpdateIntegrationRequest": {
+        "additionalProperties": false,
+        "description": "原 revision を照合する接続設定の編集 request。",
+        "properties": {
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "config": {
+            "additionalProperties": true,
+            "title": "Config",
+            "type": "object"
+          },
+          "expected_revision": {
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "kind": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "provider": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          },
+          "scope": {
+            "additionalProperties": true,
+            "title": "Scope",
+            "type": "object"
+          },
+          "secret_reference_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secret Reference Id"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "provider",
+          "capabilities",
+          "scope",
+          "config",
+          "expected_revision"
+        ],
+        "title": "UpdateIntegrationRequest",
+        "type": "object"
+      },
       "UpdateProjectRequest": {
         "additionalProperties": false,
         "anyOf": [
@@ -8003,6 +8104,62 @@
           "expected_row_version"
         ],
         "title": "UpdateScheduleRequest",
+        "type": "object"
+      },
+      "UpdateSecretReferenceRequest": {
+        "additionalProperties": false,
+        "description": "未指定の本文を保持し、原更新日時を照合する編集 request。",
+        "properties": {
+          "expected_updated_at": {
+            "format": "date-time",
+            "title": "Expected Updated At",
+            "type": "string"
+          },
+          "key_version": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Key Version",
+            "type": "string"
+          },
+          "locator": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locator"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "secret_value": {
+            "anyOf": [
+              {
+                "maxLength": 8192,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secret Value"
+          }
+        },
+        "required": [
+          "expected_updated_at",
+          "name",
+          "key_version"
+        ],
+        "title": "UpdateSecretReferenceRequest",
         "type": "object"
       },
       "UpdateUserRequest": {
@@ -17156,6 +17313,195 @@
         ]
       }
     },
+    "/api/v1/projects/{project_id}/integrations/{integration_id}": {
+      "delete": {
+        "description": "ADMIN が未参照の接続を削除する。履歴への連鎖削除は行わない。",
+        "operationId": "delete_integration_api_v1_projects__project_id__integrations__integration_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "integration_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Integration Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "expected_revision",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Expected Revision",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Csrf-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Integration",
+        "tags": [
+          "integrations"
+        ]
+      },
+      "get": {
+        "description": "ADMIN に編集対象の非機密設定を返す。一覧の公開 projection は変えない。",
+        "operationId": "get_integration_details_api_v1_projects__project_id__integrations__integration_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "integration_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Integration Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationDetailsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Integration Details",
+        "tags": [
+          "integrations"
+        ]
+      },
+      "put": {
+        "description": "ADMIN が接続先・認証情報の参照・権限を revision 付きで編集する。",
+        "operationId": "update_integration_api_v1_projects__project_id__integrations__integration_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "integration_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Integration Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Csrf-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateIntegrationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Integration",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
     "/api/v1/projects/{project_id}/integrations/{integration_id}/disable": {
       "post": {
         "description": "ADMIN が optimistic revision を指定して Integration を無効化する。",
@@ -20114,7 +20460,7 @@
     },
     "/api/v1/projects/{project_id}/runs": {
       "get": {
-        "description": "Project access 検証後の Run history だけを返す。\n\n`status` を繰り返すとその状態だけに絞る。回答待ち・承認待ちの一覧はこれで作る——\n画面側で先頭 page を filter すると、待機中の Run が古い page にあるときに取りこぼす。",
+        "description": "Project access 検証後の Run history だけを返す。\n\n`task_id` は精確 Task に、`status` の繰返しはその状態だけに絞る。\n回答待ち・承認待ちの一覧はこれで作る。\n画面側で先頭 page を filter すると、待機中の Run が古い page にあるときに取りこぼす。",
         "operationId": "list_run_history_api_v1_projects__project_id__runs_get",
         "parameters": [
           {
@@ -20167,6 +20513,23 @@
                 }
               ],
               "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "task_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Task Id"
             }
           }
         ],
@@ -29291,6 +29654,143 @@
           }
         },
         "summary": "Create Secret Reference",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/secret-references/{secret_reference_id}": {
+      "delete": {
+        "description": "ADMIN が未参照の認証情報と密文を削除する。",
+        "operationId": "delete_secret_reference_api_v1_projects__project_id__secret_references__secret_reference_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "secret_reference_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Secret Reference Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "expected_updated_at",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "Expected Updated At",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Csrf-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Secret Reference",
+        "tags": [
+          "integrations"
+        ]
+      },
+      "patch": {
+        "description": "ADMIN が同 Project の認証情報を編集する。本文は返さない。",
+        "operationId": "update_secret_reference_api_v1_projects__project_id__secret_references__secret_reference_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "secret_reference_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Secret Reference Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Csrf-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSecretReferenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretReferenceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Secret Reference",
         "tags": [
           "integrations"
         ]

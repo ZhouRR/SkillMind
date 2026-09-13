@@ -26,6 +26,7 @@ from skillmind.agent.run_binding import (
 from skillmind.agent.tool_gateway import ProviderToolResult, RunToolContext, ToolProviderError
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.effects.database_write import database_row_revision
+from skillmind.integrations.domain import scope_values_allow
 from skillmind.integrations.secrets import DeploymentSecretResolver
 
 
@@ -88,7 +89,7 @@ class DatabaseReadProvider:
                 "invalid_request", "Database read request is invalid", retryable=False
             ) from None
         bound, password = await self._bound(context)
-        if query.table not in bound.scope.get("tables", []):
+        if not scope_values_allow(bound.scope.get("tables", []), query.table):
             raise ToolProviderError(
                 "scope_denied", "Table is outside the frozen scope", retryable=False
             )

@@ -145,6 +145,23 @@ async def test_outside_scope_never_contacts_database(provider, context):
 
 
 @pytest.mark.asyncio
+async def test_frozen_all_tables_allows_named_table_but_still_checks_revocation(
+    provider, context, resource,
+):
+    """全許可でも request は具体表を要求し、戻り時の撤権検査を通る。"""
+    implementation, source, bound, _ = provider
+    wildcard = replace(resource, scope={"tables": ["*"]})
+    bound.return_value = wildcard
+    await implementation.execute(context, {"table": "private.reports"})
+    assert source.read.call_args.args[2].table == "private.reports"
+    bound.side_effect = [
+        wildcard, RunBindingError("unavailable", "Resource revoked", retryable=False),
+    ]
+    with pytest.raises(ToolProviderError, match="Resource revoked"):
+        await implementation.execute(context, {"table": "private.reports"})
+
+
+@pytest.mark.asyncio
 async def test_revocation_after_read_discards_data(provider, context, resource):
     """接続前の成功を使って、読取中に失効した binding の結果を公開しない。"""
     implementation, source, bound, _ = provider

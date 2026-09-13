@@ -6,5 +6,8 @@ export function apiErrorMessage(error: unknown, fallback: string, messages: UiMe
   if (error instanceof ApiProblemError && error.status === 403 && error.code === 'administrator_required') {
     return messages.account.failures.adminRequired
   }
+  if (error instanceof ApiProblemError && error.code === 'integration_resource_in_use') {
+    return messages.resources.resourceInUse
+  }
   return error instanceof Error ? error.message : fallback
 }

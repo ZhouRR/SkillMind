@@ -99,7 +99,6 @@ def project_published_tasks(
     投影可能な範囲だけを返すよう防御的に読み取る。
     """
 
-    titles = _capability_titles(manifest)
     compatibility_level = _string_at(manifest, ("compatibility", "level"))
     default_view = _string_at(manifest, ("ui", "default_view"))
     tools = _tool_requirements(manifest)
@@ -142,7 +141,7 @@ def project_published_tasks(
                     skill_version_id=skill_version_id, task_key=task_key
                 ),
                 capability=capability,
-                title=titles.get(capability) or task_key,
+                title=manifest_task_title(manifest, task_key) or task_key,
                 task_type=_string(task.get("type")) or "immediate",
                 input_schema=input_schema,
                 output_schema=outcome.schema,
@@ -256,6 +255,17 @@ def _allowed_capabilities(manifest: Mapping[str, Any]) -> tuple[str, ...]:
             if isinstance(capability, str) and not is_write_capability(capability):
                 capabilities.add(capability)
     return tuple(sorted(capabilities))
+
+
+def manifest_task_title(manifest: Mapping[str, Any], task_key: str) -> str | None:
+    """Catalog と履歴で同じ Manifest の task 名を使い、業務 input は参照しない。"""
+
+    for task in _sequence(manifest.get("tasks")):
+        if isinstance(task, Mapping) and task.get("key") == task_key:
+            capability = task.get("capability")
+            if isinstance(capability, str):
+                return _capability_titles(manifest).get(capability, "").strip() or task_key
+    return None
 
 
 def _capability_titles(manifest: Mapping[str, Any]) -> dict[str, str]:

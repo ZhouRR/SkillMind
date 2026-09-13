@@ -1,17 +1,11 @@
 /** 画面横断で共有する表示用の純 logic。Run 見出しと timestamp の変換をここへ一元化する。 */
 
-/** Run history・概览の主見出しを業務 input field に依存せず決める。
-
-
-    要約が無い場合の代替見出しは利用者言語に依存するため、文言の組み立ては
-    catalog 側(`elements.runFallbackTitle`)を呼び出し元から明示的に受け取る。 */
+/** 不変 task 名を主見出しにし、古い API/履歴は要約または言語別の代替名へ戻す。 */
 export function runHistoryTitle(
-  resultSummary: string | null,
-  runId: string,
-  fallbackTitle: (shortId: string) => string,
+  item: { task_title?: string | null; result_summary: string | null },
+  fallbackTitle: string,
 ): string {
-  if (resultSummary) return resultSummary
-  return fallbackTitle(runId.slice(0, 8))
+  return item.task_title?.trim() || item.result_summary?.trim() || fallbackTitle
 }
 
 /** ISO timestamp を browser locale の日時へ変換する。不正値は原文のまま返す。 */

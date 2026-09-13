@@ -1128,10 +1128,12 @@ class FakeRunService:
         limit: int,
         offset: int,
         statuses: tuple[RunStatus, ...] = (),
+        task_id: UUID | None = None,
     ) -> RunHistoryPage:
         """作成済み Run を一件だけ含む固定 history page を返す。絞り込み条件は記録する。"""
 
         self.history_statuses = statuses
+        self.history_task_id = task_id
         items: tuple[RunHistoryItem, ...] = ()
         if self.created_run is not None and self.created_run.project_id == project_id:
             items = (

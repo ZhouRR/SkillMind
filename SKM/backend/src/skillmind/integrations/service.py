@@ -2,20 +2,25 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Any
 from uuid import UUID
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from skillmind.core.secret_crypto import SecretCipher, SecretCryptoError
 from skillmind.integrations.domain import (
     CreateIntegrationCommand,
     CreateSecretReferenceCommand,
+    IntegrationConflictError,
     PutResourceBindingCommand,
     ResolvedIntegration,
     ResolvedSecretReference,
     StoredIntegration,
     StoredResourceBinding,
     StoredSecretReference,
+    UpdateSecretReferenceCommand,
 )
 from skillmind.integrations.repository import IntegrationRepository
 
@@ -42,6 +47,78 @@ class IntegrationService:
         async with self._session_factory() as session, session.begin():
             repository = IntegrationRepository(session, secret_cipher=self._secret_cipher)
             return await repository.create_secret_reference(command)
+
+    async def update_secret_reference(
+        self, command: UpdateSecretReferenceCommand
+    ) -> StoredSecretReference:
+        """認証情報の編集を暗号化と同じ transaction で確定する。"""
+
+        try:
+            async with self._session_factory() as session, session.begin():
+                return await IntegrationRepository(
+                    session, secret_cipher=self._secret_cipher
+                ).update_secret_reference(command)
+        except IntegrityError as error:
+            raise IntegrationConflictError(
+                "Resource changed concurrently; reload and review"
+            ) from error
+
+    async def delete_secret_reference(
+        self, *, project_id: UUID, secret_reference_id: UUID, expected_updated_at: datetime
+    ) -> None:
+        """未参照の認証情報削除を確定し、並行参照は競合として返す。"""
+
+        try:
+            async with self._session_factory() as session, session.begin():
+                await IntegrationRepository(session).delete_secret_reference(
+                    project_id=project_id, secret_reference_id=secret_reference_id,
+                    expected_updated_at=expected_updated_at,
+                )
+        except IntegrityError as error:
+            raise IntegrationConflictError(
+                "Resource is referenced or changed concurrently"
+            ) from error
+
+    async def get_integration_details(
+        self, *, project_id: UUID, integration_id: UUID
+    ) -> tuple[StoredIntegration, dict[str, Any]]:
+        """ADMIN 編集用の非機密接続設定を metadata と同時に取得する。"""
+
+        async with self._session_factory() as session:
+            return await IntegrationRepository(session).get_integration_details(
+                project_id=project_id, integration_id=integration_id,
+            )
+
+    async def update_integration(
+        self, command: CreateIntegrationCommand, *, integration_id: UUID, expected_revision: int
+    ) -> StoredIntegration:
+        """接続先と権限を revision 付きで更新する。"""
+
+        try:
+            async with self._session_factory() as session, session.begin():
+                return await IntegrationRepository(session).update_integration(
+                    command, integration_id=integration_id, expected_revision=expected_revision,
+                )
+        except IntegrityError as error:
+            raise IntegrationConflictError(
+                "Resource changed concurrently; reload and review"
+            ) from error
+
+    async def delete_integration(
+        self, *, project_id: UUID, integration_id: UUID, expected_revision: int
+    ) -> None:
+        """未参照接続の削除を確定し、FK 競合でも履歴を保護する。"""
+
+        try:
+            async with self._session_factory() as session, session.begin():
+                await IntegrationRepository(session).delete_integration(
+                    project_id=project_id, integration_id=integration_id,
+                    expected_revision=expected_revision,
+                )
+        except IntegrityError as error:
+            raise IntegrationConflictError(
+                "Resource is referenced or changed concurrently"
+            ) from error
 
     async def rotate_managed_secrets(self) -> tuple[int, int]:
         """全 MANAGED 密文を active KEK へ再封入し、(rotated, skipped) を返す。"""

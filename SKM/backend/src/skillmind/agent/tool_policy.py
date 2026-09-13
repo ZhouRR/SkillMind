@@ -93,6 +93,41 @@ class ToolExecutionPolicy:
         )
         if errors:
             raise ToolPolicyViolation("Tool input does not match registered schema")
+        # Effect 側も Agent の Provider を読むため、起動時の循環 import を避ける。
+        from skillmind.effects.catalog import resolve_effect_capability
+        from skillmind.effects.database_write import (
+            DATABASE_WRITE_CAPABILITY,
+            validate_database_proposal_revision,
+            validate_database_proposal_shape,
+        )
+
+        if tool.capability == CHANGE_PROPOSE_CAPABILITY:
+            # Tool 自身の名前と書込能力の混同を、延期前に修正可能なエラーへ戻す。
+            # 登録済みという事実は実行権限ではなく、保存側の配備・binding 検査も必要。
+            try:
+                resolve_effect_capability(str(tool_input["capability_version"]))
+            except ValueError as error:
+                raise ToolPolicyViolation(
+                    "capability_version must name the registered write effect for the resource "
+                    "(for example database.write/v1 or document.write/v1), "
+                    "not the change.propose/v1 control tool or a read capability"
+                ) from error
+        if (
+            tool.capability == CHANGE_PROPOSE_CAPABILITY
+            and tool_input.get("capability_version") == DATABASE_WRITE_CAPABILITY
+        ):
+            # 不正な行形状を defer すると Worker が Run を終端化し、モデルが修正できない。
+            # 純粋な契約検証だけを先行し、永続化側の binding/scope/Evidence 検証は残す。
+            try:
+                row = validate_database_proposal_shape(
+                    changes=tuple(tool_input["changes"]),
+                    verification=tool_input["verification"],
+                )
+                validate_database_proposal_revision(
+                    expected=row["expected"], precondition=tool_input["precondition"],
+                )
+            except ValueError as error:
+                raise ToolPolicyViolation(str(error)) from error
         return tool
 
 

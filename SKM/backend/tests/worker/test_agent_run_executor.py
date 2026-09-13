@@ -17,6 +17,7 @@ from skillmind.agent.domain import (
     AgentEventType,
     AgentSessionRef,
     EngineHealth,
+    EngineHealthStatus,
     ForkContext,
     ResumeContext,
     RunContext,
@@ -137,9 +138,9 @@ class _UnsupportedEngineOperations:
         raise AssertionError("Unexpected interruption")
 
     async def health(self) -> EngineHealth:
-        """実行 fixture から外部 Engine の診断へ進む経路を許可しない。"""
+        """外部接続なしに実行 fixture の監査 identity を返す。"""
 
-        raise AssertionError("Unexpected health check")
+        return EngineHealth(EngineHealthStatus.AVAILABLE, "fixture-sdk", "fixture", "fixture")
 
 
 class HangingEngine(_UnsupportedEngineOperations):

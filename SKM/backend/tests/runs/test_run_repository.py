@@ -48,6 +48,7 @@ from skillmind.runs.domain import (
     SessionContinuationMode,
     UserInteractionStatus,
     UserInteractionType,
+    derive_task_id,
     request_hash,
 )
 from skillmind.runs.interaction import InteractionRequestDraft
@@ -351,7 +352,7 @@ async def test_get_detail_projects_result_tool_calls_and_evidence() -> None:
 
 @pytest.mark.asyncio
 async def test_list_history_uses_limit_plus_one_for_pagination() -> None:
-    """Project Run history が新しい順の page と has_more を一回の query で返す。"""
+    """Project Run history のページ境界と、結果が無い Run の元 task 名を確認する。"""
 
     now = datetime(2026, 7, 2, 13, 0, tzinfo=UTC)
     runs = [create_queued_run() for _ in range(3)]
@@ -386,7 +387,18 @@ async def test_list_history_uses_limit_plus_one_for_pagination() -> None:
         (runs[0], None),
     ]
     session = MagicMock(spec=AsyncSession)
-    session.execute = AsyncMock(return_value=execute_result)
+    version_id = uuid4()
+    runs[2].task_id = derive_task_id(skill_version_id=version_id, task_key="review")
+    binding_result = MagicMock()
+    binding_result.all.return_value = [(RunSkillSnapshot(
+        run_id=runs[2].id, skill_version_id=version_id, manifest_checksum="frozen",
+    ), RuntimeManifest(manifest_json={
+        "tasks": [{"key": "other", "capability": "other"},
+                  {"key": "review", "capability": "review"}],
+        "capabilities": [{"key": "other", "title": "Wrong task"},
+                         {"key": "review", "title": "Specification review"}],
+    }))]
+    session.execute = AsyncMock(side_effect=[execute_result, binding_result])
 
     page = await RunRepository(session).list_history(
         project_id=project_id,
@@ -397,6 +409,11 @@ async def test_list_history_uses_limit_plus_one_for_pagination() -> None:
     assert len(page.items) == 2
     assert page.has_more is True
     assert page.items[1].result_summary == "completed"
+    assert page.items[0].task_title == "Specification review"
+    assert page.items[1].task_title is None
+    binding_sql = str(session.execute.call_args_list[1].args[0])
+    assert "runtime_manifests.checksum = run_skill_snapshots.manifest_checksum" in binding_sql
+    assert "run_skill_snapshots.run_id IN" in binding_sql
 
 
 @pytest.mark.asyncio
@@ -1279,3 +1296,24 @@ async def test_expired_attempt_with_cancel_intent_closes_run() -> None:
         "run.lifecycle.changed/v1"
     ]
     assert added[0].event_type == "RUN_SNAPSHOT"
+
+
+@pytest.mark.asyncio
+async def test_latest_history_filters_task_before_limit() -> None:
+    """精確 Task・Project・終端状態を SQL で先に絞り、同時刻も ID で安定化する。"""
+    session = MagicMock(spec=AsyncSession)
+    result = MagicMock()
+    result.all.return_value = []
+    session.execute = AsyncMock(return_value=result)
+    project_id, task_id = uuid4(), uuid4()
+    page = await RunRepository(session).list_history(
+        project_id=project_id, task_id=task_id, limit=1, offset=0,
+        statuses=(RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED),
+    )
+    statement = session.execute.call_args_list[0].args[0].compile()
+    sql = str(statement)
+    assert "runs.project_id =" in sql and "runs.task_id =" in sql
+    assert "runs.status IN" in sql
+    assert "ORDER BY runs.created_at DESC, runs.id DESC" in sql
+    assert project_id in statement.params.values() and task_id in statement.params.values()
+    assert page.items == () or page.items == []

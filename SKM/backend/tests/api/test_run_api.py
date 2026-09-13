@@ -401,6 +401,7 @@ def test_list_run_history_returns_paginated_project_items(client: TestClient) ->
     assert payload["offset"] == 0
     assert payload["has_more"] is False
     assert payload["items"][0]["input"]["target"] == "main"
+    assert payload["items"][0]["task_title"] is None
 
 
 def test_run_history_filters_by_status_on_the_server(client: TestClient) -> None:
@@ -426,6 +427,23 @@ def test_run_history_filters_by_status_on_the_server(client: TestClient) -> None
     ]
 
 
+def test_run_history_selects_latest_finished_exact_task(client: TestClient) -> None:
+    """他 Task の結果が先頭に混ざらないよう精確 ID と終端状態を渡す。"""
+    fake = FakeRunService()
+    client.app.state.run_service = fake
+    task_id = uuid4()
+    response = client.get(
+        f"/api/v1/projects/{uuid4()}/runs",
+        params={
+            "task_id": str(task_id), "status": ["SUCCEEDED", "FAILED", "CANCELLED"], "limit": 1,
+        },
+    )
+    assert response.status_code == 200
+    assert fake.history_task_id == task_id
+    assert [item.value for item in fake.history_statuses] == ["SUCCEEDED", "FAILED", "CANCELLED"]
+    assert client.get(f"/api/v1/projects/{uuid4()}/runs?task_id=invalid").status_code == 422
+
+
 def test_run_history_without_status_filter_passes_no_constraint(client: TestClient) -> None:
     """絞り込み未指定では全件経路のままであることを確認する。"""
 
@@ -436,6 +454,7 @@ def test_run_history_without_status_filter_passes_no_constraint(client: TestClie
 
     assert response.status_code == 200
     assert fake.history_statuses == ()
+    assert fake.history_task_id is None
 
 
 def test_run_history_rejects_an_unknown_status(client: TestClient) -> None:

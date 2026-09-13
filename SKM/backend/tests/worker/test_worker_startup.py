@@ -8,6 +8,8 @@ from uuid import uuid4
 
 import pytest
 from arq.worker import Function
+
+from skillmind.agent.codex_engine import CodexAgentSdkEngine
 from skillmind.agent.database_provider import DatabaseReadProvider
 from skillmind.agent.engine import ClaudeAgentSdkEngine, RunMcpRuntime
 from skillmind.agent.evidence import PostgresToolAuditWriter
@@ -17,6 +19,7 @@ from skillmind.agent.postgres_source import PostgresDatabaseSource
 from skillmind.agent.result_references import PostgresEffectSummaryLookup
 from skillmind.agent.result_validation import PostgresArtifactLookup, ResultValidator
 from skillmind.agent.subagent_provider import SubagentDispatchProvider
+from skillmind.agent.tool_gateway import RunToolRuntime
 from skillmind.agent.workspace_materializer import WorkspaceMaterializer
 from skillmind.core.settings import Settings
 from skillmind.documents.library import configured_document_library
@@ -32,6 +35,7 @@ from tests.worker.test_agent_run_executor import _claimed, _context
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("agent_sdk", ["codex", "claude"])
 @pytest.mark.parametrize("deferred_enabled", [False, True])
 @pytest.mark.parametrize(
     "document_enabled,library_configured", [(False, False), (False, True), (True, True)],
@@ -42,11 +46,13 @@ async def test_startup_injects_required_receipt_and_preparation_limits(
     deferred_enabled: bool,
     document_enabled: bool,
     library_configured: bool,
+    agent_sdk: str,
 ) -> None:
     """呼出しを記録しつつ実 constructor を通し、必須依存の渡し忘れを隠さない。"""
 
     settings = Settings(  # type: ignore[call-arg]  # BaseSettings の runtime-only 引数。
         _env_file=None,
+        agent_sdk=agent_sdk,
         contracts_dir=Path(__file__).resolve().parents[3] / "contracts",
         run_workspace_root=tmp_path / "runs",
         run_preparation_timeout_seconds=123,
@@ -88,7 +94,8 @@ async def test_startup_injects_required_receipt_and_preparation_limits(
     executor = MagicMock(wraps=AgentRunExecutor)
     validator = MagicMock(wraps=ResultValidator)
     subagent = MagicMock(wraps=SubagentDispatchProvider)
-    engine = MagicMock(wraps=ClaudeAgentSdkEngine)
+    engine_class = CodexAgentSdkEngine if agent_sdk == "codex" else ClaudeAgentSdkEngine
+    engine = MagicMock(wraps=engine_class)
     audit_writer = MagicMock(wraps=PostgresToolAuditWriter)
     registry = MagicMock(wraps=worker.create_run_tool_registry)
     monkeypatch.setattr(worker, "create_run_tool_registry", registry)
@@ -96,7 +103,7 @@ async def test_startup_injects_required_receipt_and_preparation_limits(
     monkeypatch.setattr(worker, "AgentRunExecutor", executor)
     monkeypatch.setattr(worker, "ResultValidator", validator)
     monkeypatch.setattr(worker, "SubagentDispatchProvider", subagent)
-    monkeypatch.setattr(worker, "ClaudeAgentSdkEngine", engine)
+    monkeypatch.setattr(worker, engine_class.__name__, engine)
     monkeypatch.setattr(worker, "PostgresToolAuditWriter", audit_writer)
     context = {"redis": MagicMock()}
 
@@ -162,7 +169,11 @@ async def test_startup_injects_required_receipt_and_preparation_limits(
             executor.call_args.kwargs["result_validator"]
             is subagent.call_args.kwargs["result_validator"]
         )
-    factory = engine.call_args.kwargs["mcp_server_factory"]
+    factory_key = "runtime_factory" if agent_sdk == "codex" else "mcp_server_factory"
+    factory = engine.call_args.kwargs[factory_key]
+    if agent_sdk == "codex":
+        assert executor.call_args.kwargs["context_builder"]._model == "gpt-5.6-terra"
+        assert engine.call_args.kwargs["configuration"].effort == "max"
     claimed = _claimed()
     run_context = _context(claimed, tmp_path, 1)
     with pytest.raises(LeaseValidationError):
@@ -171,7 +182,7 @@ async def test_startup_injects_required_receipt_and_preparation_limits(
     with bind_tool_authority(claimed):
         authority = require_tool_authority(run_context)
         runtime = factory(run_context)
-        assert isinstance(runtime, RunMcpRuntime)
+        assert isinstance(runtime, RunToolRuntime if agent_sdk == "codex" else RunMcpRuntime)
         assert audit_writer.call_args.kwargs["claimed_run"] is claimed
         callback = audit_writer.call_args.kwargs["authority_check"]
         assert callback.__self__ is authority

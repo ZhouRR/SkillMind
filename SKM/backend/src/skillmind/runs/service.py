@@ -501,6 +501,7 @@ class RunService:
         limit: int,
         offset: int,
         statuses: tuple[RunStatus, ...] = (),
+        task_id: UUID | None = None,
     ) -> RunHistoryPage:
         """Project 内の Run history page を read-only transaction で取得する。"""
 
@@ -510,6 +511,7 @@ class RunService:
                 limit=limit,
                 offset=offset,
                 statuses=statuses,
+                task_id=task_id,
             )
 
     async def latest_run_by_task(self, *, project_id: UUID) -> dict[UUID, TaskLastRun]:

@@ -6,6 +6,8 @@ import logging
 from collections.abc import Mapping
 
 from skillmind.agent.claude import ClaudeRuntimeConfiguration
+from skillmind.agent.codex_completion import CodexCompletionClient
+from skillmind.agent.codex_runtime import CodexRuntimeConfiguration
 from skillmind.agent.interpreter_completion import ClaudeCompletionClient
 from skillmind.core.logging import log_event
 from skillmind.core.settings import Settings
@@ -18,7 +20,7 @@ from skillmind.skills.interpreter import (
     load_interpreter_system_skill,
 )
 from skillmind.skills.interpreter_execution import SkillInterpreter
-from skillmind.skills.model_interpreter import ModelSkillInterpreter
+from skillmind.skills.model_interpreter import ModelCompletionClient, ModelSkillInterpreter
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +38,7 @@ def build_skill_interpreter(
     """Interpreter 資産と資格情報が揃う環境でだけ model interpreter を配線する。
 
     System Skill、capability catalog、response Schema のいずれかが欠ける環境では起動を
-    止めず interpret を無効化し、理由を記録する。model は Run と同じ ANTHROPIC 設定に従う。
+    止めず interpret を無効化し、理由を記録する。SDK/model は Run と同じ明示設定に従う。
     """
 
     contracts_dir = settings.contracts_dir.resolve()
@@ -58,7 +60,18 @@ def build_skill_interpreter(
                 if features.capability_enabled(entry.capability)
             ),
         )
-        configuration = ClaudeRuntimeConfiguration.from_environ(fallback=environment_fallback)
+        completion: ModelCompletionClient
+        model: str | None
+        if settings.agent_sdk == "codex":
+            codex_configuration = CodexRuntimeConfiguration(
+                settings.codex_model, settings.codex_reasoning_effort, settings.codex_home,
+            )
+            completion = CodexCompletionClient(codex_configuration)
+            model = codex_configuration.primary_model
+        else:
+            configuration = ClaudeRuntimeConfiguration.from_environ(fallback=environment_fallback)
+            completion = ClaudeCompletionClient(configuration)
+            model = configuration.primary_model
     except (OSError, ValueError) as error:
         log_event(
             logger,
@@ -68,9 +81,9 @@ def build_skill_interpreter(
         )
         return None, None, None, None
     interpreter = ModelSkillInterpreter(
-        completion_client=ClaudeCompletionClient(configuration),
+        completion_client=completion,
         system_skill_root=system_skill_root,
         response_schema=response_schema,
         accept_prompt_json=settings.skill_interpreter_accept_prompt_json,
     )
-    return interpreter, catalog, identity, configuration.primary_model
+    return interpreter, catalog, identity, model

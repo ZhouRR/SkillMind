@@ -11,6 +11,7 @@ from uuid import UUID
 from skillmind.agent.postgres_source import MAX_DATABASE_BYTES, identifier
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.effects.domain import ChangeProposalDraft, ChangeProposalValidationError
+from skillmind.integrations.domain import scope_values_allow
 
 DATABASE_WRITE_CAPABILITY = "database.write/v1"
 DATABASE_WRITE_PROVIDER_VERSION = "postgres-receipt/v1"
@@ -123,15 +124,18 @@ def database_write_payload(
     if not isinstance(scope.get("operations"), list) or not isinstance(scope.get("tables"), list):
         raise ValueError("Database scope requires explicit lists")
     allowed_columns = scope.get("write_columns", [])
-    if table not in scope.get("tables", []) or not isinstance(allowed_columns, list):
+    if (
+        not scope_values_allow(scope.get("tables", []), table)
+        or not isinstance(allowed_columns, list)
+    ):
         raise ValueError("Database table is outside the frozen scope")
     columns = [
         value.removeprefix(table + ".")
         for value in allowed_columns
         if isinstance(value, str) and value.startswith(table + ".")
     ]
-    if not columns:
-        raise ValueError("Database write columns must be explicit")
+    if not allowed_columns:
+        raise ValueError("Database write column permission is required")
     for column in columns:
         identifier(column)
     if not isinstance(key, Mapping) or not 1 <= len(key) <= 20:
@@ -143,7 +147,9 @@ def database_write_payload(
     if set(key).intersection(values):
         raise ValueError("Database primary key cannot be changed")
     written_columns = set(values) | (set(key) if operation == "INSERT" else set())
-    if not written_columns.issubset(columns):
+    if not all(
+        scope_values_allow(allowed_columns, f"{table}.{column}") for column in written_columns
+    ):
         raise ValueError("Database write columns exceed the frozen scope")
     if any(value is None or type(value) not in {str, int, bool} for value in key.values()):
         raise ValueError("Database primary key values are invalid")
@@ -187,6 +193,43 @@ def database_proposal_payload(
 ) -> dict[str, Any]:
     """汎用 change.propose の一つの /row SET を固定された DB 変更へ変換する。"""
 
+    row = validate_database_proposal_shape(changes=changes, verification=verification)
+    table = target.get("locator")
+    if not isinstance(table, str):
+        raise ValueError("Database target requires schema.table")
+    payload = database_write_payload(
+        table=table,
+        operation=operation,
+        key=row["key"],
+        values=row["values"],
+        expected=row["expected"],
+        scope=scope,
+    )
+    validate_database_proposal_revision(expected=payload["expected"], precondition=precondition)
+    return payload
+
+
+def validate_database_proposal_revision(
+    *, expected: Any, precondition: Mapping[str, Any],
+) -> None:
+    """原行と revision の自己整合を延期前にも検証し、実観測との照合は保存側へ残す。"""
+
+    if expected is not None and not isinstance(expected, Mapping):
+        raise ValueError("Database expected must be the complete observed row object or null")
+    if dict(precondition) != {"revision": database_row_revision(expected)}:
+        raise ValueError(
+            "Database proposal revision differs from the observed row. "
+            "For INSERT use expected=null and precondition.revision=absent (lowercase). "
+            "For UPDATE copy the complete observed row into expected and its row_hashes "
+            "entry into precondition.revision, not the response content_hash."
+        )
+
+
+def validate_database_proposal_shape(
+    *, changes: tuple[dict[str, Any], ...], verification: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    """延期前と保存時で同じ行形状を検証する。scope・Evidence の認可は付与しない。"""
+
     if len(changes) != 1 or set(changes[0]) != {"path", "action", "value"}:
         raise ValueError("Database proposal requires exactly one row change")
     change = changes[0]
@@ -199,21 +242,12 @@ def database_proposal_payload(
         or verification.get("method") != "READ_BACK"
         or verification.get("paths") != ["/row"]
     ):
-        raise ValueError("Database proposal row or verification is invalid")
-    table = target.get("locator")
-    if not isinstance(table, str):
-        raise ValueError("Database target requires schema.table")
-    payload = database_write_payload(
-        table=table,
-        operation=operation,
-        key=row["key"],
-        values=row["values"],
-        expected=row["expected"],
-        scope=scope,
-    )
-    if dict(precondition) != {"revision": database_row_revision(payload["expected"])}:
-        raise ValueError("Database proposal revision differs from the observed row")
-    return payload
+        raise ValueError(
+            "Database proposal requires one /row SET with value containing exactly key, "
+            "values and expected; put revision only in precondition.revision. "
+            "Use verification method READ_BACK and paths [/row]."
+        )
+    return row
 
 
 def validate_database_write_proposal(

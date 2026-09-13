@@ -46,8 +46,8 @@ async def check(url: str, output: Path) -> None:
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch()
         try:
-            for language, theme, width in product(
-                ("zh", "ja", "en"), ("light", "dark"), (390, 1440)
+            for language, theme, width, all_scope in product(
+                ("zh", "ja", "en"), ("light", "dark"), (390, 1440), (False, True)
             ):
                 api = DatabaseConnectionsApi(url, language)
                 context = await browser.new_context(viewport={"width": width, "height": 1000})
@@ -89,9 +89,18 @@ async def check(url: str, output: Path) -> None:
                         .fill("public.reports.id\npublic.reports.status")
                     )
                     await dialog.get_by_role("checkbox", name="UPDATE", exact=True).uncheck()
-                    await dialog.locator("textarea").nth(1).scroll_into_view_if_needed()
+                    if all_scope:
+                        all_tables = dialog.get_by_role("checkbox", name=labels["databaseAllTables"], exact=True)
+                        await all_tables.check()
+                        await expect(dialog.locator("textarea")).to_have_count(1)
+                        await dialog.get_by_role("checkbox", name=labels["databaseAllColumns"], exact=True).check()
+                        await expect(dialog.locator("textarea")).to_have_count(0)
+                        await all_tables.uncheck()
+                        await expect(dialog.locator("textarea")).to_have_value("")
+                        await all_tables.check()
+                    await dialog.get_by_role("checkbox", name="UPDATE", exact=True).scroll_into_view_if_needed()
                     await page.screenshot(
-                        path=str(output / f"database-{language}-{theme}-{width}.png")
+                        path=str(output / f"database-{language}-{theme}-{width}-{all_scope}.png")
                     )
                     await dialog.get_by_role(
                         "button", name=labels["connectSubmit"], exact=True
@@ -101,8 +110,8 @@ async def check(url: str, output: Path) -> None:
                     created = api.created[0]
                     assert created["capabilities"] == ["database.read/v1", "database.write/v1"]
                     assert created["scope"] == {
-                        "tables": ["public.reports"],
-                        "write_columns": ["public.reports.id", "public.reports.status"],
+                        "tables": ["*"] if all_scope else ["public.reports"],
+                        "write_columns": ["*"] if all_scope else ["public.reports.id", "public.reports.status"],
                         "operations": ["INSERT"],
                     }
                     await page.get_by_role(
@@ -129,7 +138,7 @@ async def check(url: str, output: Path) -> None:
                         api.failures,
                         api.unexpected,
                     )
-                    print(f"PASS database {language}-{theme}-{width}", flush=True)
+                    print(f"PASS database {language}-{theme}-{width}-all={all_scope}", flush=True)
                 finally:
                     await context.close()
         finally:

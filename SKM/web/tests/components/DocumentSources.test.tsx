@@ -12,6 +12,14 @@ import { sourceRequirements } from '../../src/lib/taskDraft'
 import { DOCUMENT_IDS, documentTask } from '../fixtures/documentTask'
 
 describe.each(['zh', 'ja', 'en'] as const)('document input and history in %s', (language) => {
+  it('offers a directory instead of per-file checkboxes for a document set', () => {
+    const requirement = sourceRequirements(documentTask())[0]!
+    const html = renderToStaticMarkup(<LanguageProvider language={language}><DocumentSourceField requirement={requirement} value={`documents:${DOCUMENT_IDS.join(',')}`} onChange={() => {}} /></LanguageProvider>)
+    expect(html).toContain('value="guides"')
+    expect(html).toContain(MESSAGES[language].workspace.documentSelection.setHint)
+    expect(html).not.toContain('type="checkbox"')
+  })
+
   it('requires confirmation even for a single available document', () => {
     const requirement = sourceRequirements(documentTask())[0]!
     requirement.options = requirement.options.slice(1, 2)

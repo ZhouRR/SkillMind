@@ -463,6 +463,7 @@ class RunHistoryItemResponse(BaseModel):
     result_summary: str | None
     result_confidence: float | None
     result_needs_review: bool | None
+    task_title: str | None = None
 
 
 class RunHistoryResponse(BaseModel):
@@ -623,10 +624,12 @@ async def list_run_history(
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
     status: Annotated[list[RunStatus] | None, Query()] = None,
+    task_id: Annotated[UUID | None, Query()] = None,
 ) -> RunHistoryResponse:
     """Project access 検証後の Run history だけを返す。
 
-    `status` を繰り返すとその状態だけに絞る。回答待ち・承認待ちの一覧はこれで作る——
+    `task_id` は精確 Task に、`status` の繰返しはその状態だけに絞る。
+    回答待ち・承認待ちの一覧はこれで作る。
     画面側で先頭 page を filter すると、待機中の Run が古い page にあるときに取りこぼす。
     """
 
@@ -637,6 +640,7 @@ async def list_run_history(
         limit=limit,
         offset=offset,
         statuses=tuple(status or ()),
+        task_id=task_id,
     )
     return _run_history_response(page)
 
@@ -1102,6 +1106,7 @@ def _run_history_response(page: RunHistoryPage) -> RunHistoryResponse:
                 result_summary=item.result_summary,
                 result_confidence=item.result_confidence,
                 result_needs_review=item.result_needs_review,
+                task_title=item.task_title,
             )
             for item in page.items
         ],

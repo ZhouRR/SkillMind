@@ -147,6 +147,11 @@ export type { DocumentListRecord, ProjectDocumentRecord, DocumentUploadBody, Doc
 export { closeDocumentUpload, loadDocumentUploadClosure } from './documentUploadClosures'
 export type { DocumentUploadClosureReceipt } from './documentUploadClosures'
 export {
+  loadIntegrationDetails,
+  updateIntegration,
+  updateSecretReference,
+  deleteIntegration,
+  deleteSecretReference,
   createIntegration,
   createSecretReference,
   disableIntegration,

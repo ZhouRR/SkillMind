@@ -13,6 +13,7 @@ import { createIdempotencyKey } from '../lib/idempotency'
 import { formatLocalTimestamp } from '../lib/presentation'
 import type { InteractionAccessFailure } from '../lib/interactionResponse'
 import { splitOverflow } from '../lib/resultOverflow'
+import { reportPreviewHtml } from '../lib/documentPreview'
 import { EmptyState, ModalDialog } from './PageElements'
 import { RunDocumentSnapshots } from './RunDocumentSnapshots'
 import { ResultValidationScope } from './ResultValidationScope'
@@ -33,8 +34,9 @@ export type RunDetailState =
 const ignoreSessionExpired: SessionEnded = () => {}
 
 /** 普通答復の owner は loading/error と表示 tab に依存させない。 */
-export function RunResultPanel({ state, csrfToken, actorId = '', projectId, runId, projectReadOnly = false,
+export function RunResultPanel({ state, csrfToken, actorId = '', projectId, runId, projectReadOnly = false, reportOnly = false,
   onInteractionResponded, onInteractionFacts, onProposalDecided, onSessionExpired = ignoreSessionExpired }: {
+  reportOnly?: boolean
   state: RunDetailState
   csrfToken: string
   actorId?: string
@@ -53,12 +55,12 @@ export function RunResultPanel({ state, csrfToken, actorId = '', projectId, runI
   useEffect(() => setEvaluationOwner(null), [owner])
   return <>
     <RunInteractions key={JSON.stringify([actorId, csrfToken, scope.projectId.toLowerCase(), scope.runId.toLowerCase()])}
-      scope={scope} state={state} csrfToken={csrfToken} onResponded={onInteractionResponded}
+      scope={scope} state={state} csrfToken={csrfToken} pendingOnly={reportOnly} onResponded={onInteractionResponded}
       onFacts={onInteractionFacts} onSessionExpired={onSessionExpired} />
     <RunEvaluations key={JSON.stringify(['evaluations', actorId, csrfToken, scope.projectId.toLowerCase(), scope.runId.toLowerCase()])}
       open={evaluationOwner === owner} onClose={() => setEvaluationOwner(null)} onOpen={() => setEvaluationOwner(owner)}
       scope={scope} state={state} csrfToken={csrfToken} readOnly={projectReadOnly} onSessionExpired={onSessionExpired} />
-    <RunResultContent key={`content:${owner}`} state={state} csrfToken={csrfToken} onProposalDecided={onProposalDecided}
+    <RunResultContent key={`content:${owner}`} reportOnly={reportOnly} state={state} csrfToken={csrfToken} onProposalDecided={onProposalDecided}
       onEvaluate={() => setEvaluationOwner(owner)}
       artifactOwner={JSON.stringify([actorId, csrfToken, scope.projectId.toLowerCase(), scope.runId.toLowerCase()])}
       artifactScope={scope}
@@ -67,7 +69,8 @@ export function RunResultPanel({ state, csrfToken, actorId = '', projectId, runI
 }
 
 /** 普通答復とは独立した Result、Proposal、Segment/ToolCall/Evidence 監査を表示する。 */
-function RunResultContent({ state, csrfToken, onProposalDecided, artifactOwner, artifactScope, onSessionExpired, onEvaluate }: {
+function RunResultContent({ reportOnly, state, csrfToken, onProposalDecided, artifactOwner, artifactScope, onSessionExpired, onEvaluate }: {
+  reportOnly: boolean
   state: RunDetailState
   csrfToken: string
   onProposalDecided?: () => void
@@ -116,9 +119,9 @@ function RunResultContent({ state, csrfToken, onProposalDecided, artifactOwner, 
       />
       <div className="resultActions" aria-label={messages.workspace.tabResult}>
         {result && <button className="secondaryButton compactButton" type="button" onClick={onEvaluate}>{messages.runResult.manualEvaluation}</button>}
-        <button className="secondaryButton compactButton" type="button" onClick={() => { setEvidenceSelection(null); setDrawer('evidence') }}>{messages.runResult.evidenceTitle}<span className="eventCount">{detail.evidence.length}</span></button>
+        {!reportOnly && <><button className="secondaryButton compactButton" type="button" onClick={() => { setEvidenceSelection(null); setDrawer('evidence') }}>{messages.runResult.evidenceTitle}<span className="eventCount">{detail.evidence.length}</span></button>
         {result && <button className="secondaryButton compactButton" type="button" onClick={() => setDrawer('checks')}>{messages.runResult.reading.checks}</button>}
-        <button className="secondaryButton compactButton" type="button" onClick={() => setDrawer('details')}>{messages.runResult.reading.details}</button>
+        <button className="secondaryButton compactButton" type="button" onClick={() => setDrawer('details')}>{messages.runResult.reading.details}</button></>}
       </div>
       <ModalDialog drawer open={drawer === 'details'} title={messages.runResult.reading.details} onClose={() => setDrawer(null)}>
         <dl className="runDetailFacts">
@@ -161,15 +164,15 @@ function RunResultContent({ state, csrfToken, onProposalDecided, artifactOwner, 
         </div>
         <dl>
           <div className={result.needs_review ? 'reviewRequired' : undefined}><dt>{messages.runResult.reviewLabel}</dt><dd>{result.needs_review ? messages.runResult.needsReview : messages.runResult.noExtraReview}</dd></div>
-          <div><dt>{messages.runResult.schemaCheckLabel}</dt><dd>{result.validation.schema_valid === true ? messages.runResult.schemaValidText : messages.runResult.schemaCheckRequiredText}</dd></div>
+          {!reportOnly && <div><dt>{messages.runResult.schemaCheckLabel}</dt><dd>{result.validation.schema_valid === true ? messages.runResult.schemaValidText : messages.runResult.schemaCheckRequiredText}</dd></div>}
         </dl>
       </section>
-      <ResultValidationScope result={result} compact />
+      {!reportOnly && <ResultValidationScope result={result} compact />}
 
       <div className="resultReportGrid">
         <section className="resultSection resultReportBody" aria-label={messages.runResult.genericOutcome}>
           {result.result_kind === 'OUTCOME_ENVELOPE'
-            ? <OutcomeEnvelopeResult data={result.data} schema={detail.output_schema} showTechnicalDetails={showTechnicalDetails} onEvidence={(refs) => { setEvidenceSelection(refs); setDrawer('evidence') }} />
+            ? <OutcomeEnvelopeResult data={result.data} schema={detail.output_schema} reportOnly={reportOnly} showTechnicalDetails={showTechnicalDetails} onEvidence={(refs) => { setEvidenceSelection(refs); setDrawer('evidence') }} />
             : <SchemaResultValue schema={detail.output_schema} value={result.data} path="$" showTechnicalDetails={showTechnicalDetails} />}
         </section>
       </div>
@@ -179,13 +182,14 @@ function RunResultContent({ state, csrfToken, onProposalDecided, artifactOwner, 
           一路が失敗していても要約は普通に返るため、畳むと部分的な網羅を全面的な確認と読む。 */}
       {dispatches.length > 0 && <SubagentDispatchSection dispatches={dispatches} />}
 
-      <RunDocumentSnapshots snapshots={detail.document_snapshots} />
+      {!reportOnly && <RunDocumentSnapshots snapshots={detail.document_snapshots} />}
       {detail.project_id.toLowerCase() === artifactScope.projectId.toLowerCase()
         && detail.run_id.toLowerCase() === artifactScope.runId.toLowerCase()
         && <RunArtifacts key={artifactOwner} projectId={detail.project_id} runId={detail.run_id}
           result={result} onSessionExpired={onSessionExpired} />}
 
       {/* 以下は備査情報。既定で畳み、件数だけ見出しに残す。 */}
+      {!reportOnly && <>
       <CollapsibleSection count={detail.tool_calls.length} title={messages.runResult.toolCalls}>
         {detail.tool_calls.length === 0 ? <p className="compactEmpty">{messages.runResult.noToolCalls}</p> : (
           <ul className="toolSummaryList">{detail.tool_calls.map((tool) => <li key={tool.tool_call_id}><div><strong>{tool.capability}</strong><span>{tool.status}</span></div><p>{tool.provider} · {tool.duration_ms === null ? '—' : `${tool.duration_ms} ms`}</p><code>{JSON.stringify(tool.arguments_summary)}</code></li>)}</ul>
@@ -211,6 +215,7 @@ function RunResultContent({ state, csrfToken, onProposalDecided, artifactOwner, 
         </CollapsibleSection>
       )}
 
+      </>}
     </div>
   )
 }
@@ -696,9 +701,10 @@ function shortId(value: string): string {
 
 
 /** 通用 OutcomeEnvelope を task-specific business field に依存せず標準表示する。 */
-function OutcomeEnvelopeResult({ data, schema, showTechnicalDetails, onEvidence }: {
+function OutcomeEnvelopeResult({ data, schema, reportOnly, showTechnicalDetails, onEvidence }: {
   data: Record<string, unknown>
   schema: Record<string, unknown> | null
+  reportOnly: boolean
   showTechnicalDetails: boolean
   onEvidence: (refs: string[]) => void
 }) {
@@ -721,7 +727,12 @@ function OutcomeEnvelopeResult({ data, schema, showTechnicalDetails, onEvidence 
           <article className="outcomeCard" key={textValue(item.key, `deliverable-${index}`)}>
             <div><strong>{textValue(item.title, textValue(item.key, messages.runResult.untitledLabel))}</strong>{showTechnicalDetails && <span>{textValue(item.kind, '—')}</span>}</div>
             {typeof item.description === 'string' && <p>{item.description}</p>}
-            {typeof item.content === 'string' && <pre>{item.content}</pre>}
+            {typeof item.content === 'string' && (item.kind === 'report'
+              ? <iframe className="outcomeReportFrame" title={textValue(item.title, messages.runResult.untitledLabel)}
+                sandbox="" referrerPolicy="no-referrer" srcDoc={reportPreviewHtml(item.content)} />
+              : item.kind === 'structured_data'
+                ? <details className="technicalResultDetails"><summary>{messages.runResult.businessStructured}</summary><pre>{item.content}</pre></details>
+                : <pre>{item.content}</pre>)}
             {showTechnicalDetails && typeof item.artifact_ref === 'string' && <code>{item.artifact_ref}</code>}
           </article>
         ))}
@@ -754,7 +765,7 @@ function OutcomeEnvelopeResult({ data, schema, showTechnicalDetails, onEvidence 
           </details>
         </section>
       )}
-      {(proposalRefs.length > 0 || effects.length > 0) && (
+      {!reportOnly && (proposalRefs.length > 0 || effects.length > 0) && (
         <section className="outcomeGroup">
           <h4>{messages.runResult.changesAndEffects}</h4>
           <p className="hint">{messages.runResult.modelEffectsHint}</p>

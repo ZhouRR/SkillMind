@@ -20,6 +20,30 @@ skm/
 
 复用既有 Traefik 与外部网络，不部署网关、不发布 host port。服务器域名、TLS、网络及 SKILLMIND_CONTEXT_PATH 须正确配置；Web 路径已编入镜像，改服务器 .env 不能改变静态产物。数据库、存储、KEK/model 在首次启动前准备。SKILLMIND_OBJECT_STORAGE_NAMESPACE_ID 必填非零 UUID、API/Worker 共用；新存储首次生成，更新保留，不自动迁移旧对象。migration-check/readiness 拒绝缺失或零值，但不证明 blob 可读写。
 
+## Agent SDK 与 device code 登录
+
+API 与 Worker 使用相同的 `SKILLMIND_AGENT_SDK`（默认 `codex`，可设 `claude`），同时选择 Skill 解释器和 Run 引擎。Codex 配置如下：
+
+```dotenv
+SKILLMIND_AGENT_SDK=codex
+SKILLMIND_CODEX_MODEL=gpt-5.6-terra
+SKILLMIND_CODEX_REASONING_EFFORT=max
+SKILLMIND_CODEX_HOME=/var/lib/skillmind/codex
+```
+
+Compose 的 `codex-data` 卷只挂载到 Worker，保存设备登录和原生会话；更新保留此卷。使用镜像内入口启动登录：
+
+```bash
+docker compose exec -T worker python -m skillmind.agent.codex_login
+docker compose exec -T worker python -m skillmind.agent.codex_login --status
+```
+
+首条命令输出验证网址与一次性 device code，在浏览器完成 ChatGPT 授权后等待命令返回 `authenticated: true`。状态命令只输出是否登录，不输出 token 或账户正文。登录期间需可访问官方认证服务；不要复制宿主 `.codex`、写入 API key 或把凭据放进镜像。非交互部署不会自动执行登录。
+
+Worker 需要代理出口时，在部署环境中设置 `HTTP_PROXY` / `HTTPS_PROXY`（也支持小写及 `ALL_PROXY`）。Codex 子进程仅继承这些网络配置与允许的系统环境，数据库、对象存储和 Claude 凭据仍不传入。`NO_PROXY` / `no_proxy` 合并保留原值，并追加 `localhost`、`127.0.0.1`、`::1`，确保本机受控 MCP 不经过代理。认证服务和模型服务都须可访问；设备码请求 403 不能靠切换模型或降低思考强度解决。
+
+Claude 回退需显式设置 `SKILLMIND_AGENT_SDK=claude` 并重建 API/Worker 容器，保留既有 Anthropic 兼容端点与凭据、DeepSeek 模型、`CLAUDE_CODE_MAX_OUTPUT_TOKENS=128000` 和 `CLAUDE_CODE_EFFORT_LEVEL=max`。不在请求失败时自动重发或降档。切换前核清活动解释/Run；不同引擎的原生会话不能互相恢复。Codex 当前预算限制见[运行时](../design/agent-runtime.md#codex-adapter)。
+
 ## 迁移前置与执行
 
 先区分操作场景，不把升级/恢复要求套到空环境首次安装：

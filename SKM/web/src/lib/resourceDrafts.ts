@@ -1,5 +1,5 @@
-import type { CreateSecretReferenceInput, SecretResolver } from '../api'
-import { PROVIDER_FORMS } from './resourceConfig'
+import type { CreateSecretReferenceInput, IntegrationRecord, SecretResolver } from '../api'
+import { PROVIDER_FORMS, COMMON_REDMINE_FIELD_KEYS, accessForCapabilities, asResourceProvider } from './resourceConfig'
 import type {
   ForgeKind,
   ScopeDraftEntry,
@@ -161,4 +161,41 @@ export const EMPTY_BINDING: BindingDraft = {
 /** 低 risk 事前許可 form の初期草稿。 */
 export const EMPTY_POLICY: PolicyDraft = {
   integration_id: '', operation: 'update_fields', scopeDraft: [], expires_at: '',
+}
+
+/** 保存済みの非機密設定と権限を既存の接続 form へ戻す。 */
+export function connectDraftFromIntegration(
+  item: IntegrationRecord, config: Record<string, unknown>,
+): ConnectDraft {
+  const provider = asResourceProvider(item.provider)
+  if (provider === null) throw new Error('Unsupported resource provider')
+  const draft = emptyConnectDraft(provider)
+  const text = (key: string, fallback = ''): string => {
+    const value = config[key]
+    return typeof value === 'string' || typeof value === 'number' ? String(value) : fallback
+  }
+  const values = (key: string): string[] => {
+    const value = item.scope[key]
+    return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []
+  }
+  return {
+    ...draft, provider, name: item.name, credentialChoice: item.secret_reference_id ?? '',
+    access: accessForCapabilities(item.capabilities),
+    baseUrl: text('base_url'), repositoryUri: text('repository_uri'),
+    defaultRevision: text('default_revision', draft.defaultRevision),
+    host: text('host'), port: text('port', draft.port), database: text('database'),
+    username: text('username'), sslmode: text('sslmode', draft.sslmode), serverUrl: text('server_url'),
+    tables: values('tables').join('\n'), resourceUris: values('resource_uris').join('\n'),
+    writeColumns: values('write_columns').join('\n'),
+    databaseOperations: values('operations').length ? values('operations') : draft.databaseOperations,
+    issueScope: values('issue_ids').includes('*') ? 'all' : 'list', issueIds: values('issue_ids').join('\n'),
+    fieldScope: values('field_keys').includes('*') ? 'all' : 'list',
+    fieldKeys: values('field_keys').filter((key) => COMMON_REDMINE_FIELD_KEYS.includes(key)),
+    customFieldKeys: values('field_keys').filter((key) => !COMMON_REDMINE_FIELD_KEYS.includes(key) && key !== '*').join('\n'),
+    paths: values('paths').join('\n'), revisions: values('revisions').join('\n'),
+    writeMode: text('write_mode') === 'branch' ? 'branch' : 'direct',
+    writeBranchPrefix: text('write_branch_prefix'),
+    forgeKind: text('forge_kind') === 'github' ? 'github' : text('forge_kind') === 'gitlab' ? 'gitlab' : '',
+    forgeApiBaseUrl: text('forge_api_base_url'), forgeProject: text('forge_project'),
+  }
 }

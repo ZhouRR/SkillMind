@@ -52,7 +52,7 @@ rv-reviewer 的完整验收需要 PostgreSQL 执行/文档/成果记录和 MinIO
 
 [`database_write`](../../SKM/backend/src/skillmind/effects/database_write.py) 与 [`postgres_write`](../../SKM/backend/src/skillmind/effects/postgres_write.py) 提供单行事务客户端，[`database_provider`](../../SKM/backend/src/skillmind/effects/database_provider.py) 经共享工厂接入 approved-effect Worker。`SKILLMIND_DATABASE_WRITES_ENABLED` 默认关闭，与后置功能开关独立；能力目录、Run/context、提案/批准、claim/阶段复验及恢复入口统一检查 capability 和操作，旧队列不能绕过。启用数据库不开放其他外部写入、调度或子 Agent，旧扩展开关也不能开启数据库。公开契约见 [database.write/v1](../../SKM/contracts/tools/database.write/v1/request.schema.json)，实际数据库验收仍待完成。
 
-提案使用通用 `change.propose/v1` 的单个 `/row` SET，值包含 `key`、`values`、`expected`；目标是 `schema.table`，revision 是原行摘要或插入的 `absent`。表、操作、可写列采用显式列表，列名为 `schema.table.column`。新建 Run 对写入资源仍只公开已声明的读取 Tool，冻结 binding 保留写入能力；缺少读取声明直接拒绝，不改写历史快照。
+提案使用通用 `change.propose/v1` 的单个 `/row` SET，值仅包含 `key`、`values`、`expected`；目标是 `schema.table`，`precondition.revision` 是原行摘要或插入的 `absent`。`capability_version` 指实际写入能力，不能填提案 Tool 本身或读取能力。两个 SDK 在延期前复用 Effect 注册表及持久化侧的行形状、原行与 revision 一致性校验，将这类错误返回模型修正；这不代替保存时的配备、权限、scope 和 Evidence 检查。表和可写列可逐项指定（`schema.table` / `schema.table.column`），也可由管理员分别显式选择全部（`["*"]`）；全部列仅适用于已允许的表，包含后来新增且数据库账号有权操作的表和列。操作仍逐项限定 INSERT/UPDATE，`skillmind_effects` 回执 schema 仍禁止作为写入目标，不开放主键更新、generated/identity 列或预授权。通配范围使用原 binding 冻结与撤权校验，旧显式范围不自动扩大；API/Worker 均升级后才可保存新全许可配置。新建 Run 对写入资源仍只公开已声明的读取 Tool，冻结 binding 保留写入能力；缺少读取声明直接拒绝，不改写历史快照。
 
 创建及使用提案时复验 Evidence：须来自同一 Run、Integration 和冻结 binding 的成功 `database.read/v1` ToolCall，按完整主键精确过滤、无列投影、零 offset、未截断，且完整原行摘要或不存在结果与提案一致。读取响应附加 `row_hashes`，保留既有 content_hash 计算语义；旧 Evidence 缺少这些事实时须重新观察。数据库 effect 不是可直接调用的 Agent Tool，也不允许预授权。
 

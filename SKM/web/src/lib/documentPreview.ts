@@ -38,6 +38,12 @@ export function documentMarkdownHtml(source: string): string {
   return documentPreviewHtml(envelope(marked.parse(source, { async: false, gfm: true })))
 }
 
+/** 完全な HTML レポートは原 CSS を保ち、既存 Markdown は従来の静的描画を使う。 */
+export function reportPreviewHtml(source: string): string {
+  return /^\s*(?:<!doctype\s+html\b[^>]*>\s*)?<html\b/i.test(source)
+    ? documentPreviewHtml(source) : documentMarkdownHtml(source)
+}
+
 /** 埋め込み CSS と静的 SVG は保持し、能動要素を除いた専用 document を sandbox へ渡す。 */
 export function documentPreviewHtml(source: string): string {
   if (typeof document === 'undefined') return envelope(`<pre>${escapeText(source)}</pre>`)

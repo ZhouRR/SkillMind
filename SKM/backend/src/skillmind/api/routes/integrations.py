@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Request, status
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import APIRouter, Query, Request, Response, status
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from skillmind.api.auth_dependencies import (
     AdminReadActor,
@@ -34,6 +34,7 @@ from skillmind.integrations import (
     StoredResourceBinding,
     StoredSecretReference,
 )
+from skillmind.integrations.domain import UpdateSecretReferenceCommand
 
 router = APIRouter()
 
@@ -173,6 +174,158 @@ class ResourceBindingListResponse(BaseModel):
     """Project 内 ResourceBinding 一覧。"""
 
     items: list[ResourceBindingResponse]
+
+
+class UpdateSecretReferenceRequest(BaseModel):
+    """未指定の本文を保持し、原更新日時を照合する編集 request。"""
+
+    model_config = ConfigDict(extra="forbid")
+    expected_updated_at: AwareDatetime
+    name: str = Field(min_length=1, max_length=200)
+    key_version: str = Field(min_length=1, max_length=128)
+    locator: str | None = Field(default=None, min_length=1, max_length=512)
+    secret_value: str | None = Field(default=None, min_length=1, max_length=8192)
+
+
+class UpdateIntegrationRequest(CreateIntegrationRequest):
+    """原 revision を照合する接続設定の編集 request。"""
+
+    expected_revision: int = Field(ge=1)
+
+
+class IntegrationDetailsResponse(BaseModel):
+    """ADMIN 編集専用。認証情報を含まない接続設定を返す。"""
+
+    integration: IntegrationResponse
+    config: dict[str, Any]
+
+
+@router.patch(
+    "/projects/{project_id}/secret-references/{secret_reference_id}",
+    response_model=SecretReferenceResponse, tags=["integrations"],
+)
+async def update_secret_reference(
+    request: Request, project_id: UUID, secret_reference_id: UUID,
+    actor: AdminWriteActor, body: UpdateSecretReferenceRequest,
+) -> SecretReferenceResponse:
+    """ADMIN が同 Project の認証情報を編集する。本文は返さない。"""
+
+    await authorize_project_access(request, actor, project_id, require_active=True)
+    service: IntegrationService = request.app.state.integration_service
+    try:
+        stored = await service.update_secret_reference(UpdateSecretReferenceCommand(
+            project_id=project_id, secret_reference_id=secret_reference_id,
+            expected_updated_at=body.expected_updated_at, name=body.name,
+            key_version=body.key_version, locator=body.locator, secret_value=body.secret_value,
+        ))
+    except SecretReferenceNotFoundError as error:
+        raise _not_found_problem("SecretReference", error) from error
+    except IntegrationValidationError as error:
+        raise _validation_problem(error) from error
+    except IntegrationConflictError as error:
+        raise _conflict_problem(error) from error
+    except SecretCryptoError as error:
+        raise _managed_secret_unavailable(error) from error
+    return _secret_response(stored)
+
+
+@router.delete(
+    "/projects/{project_id}/secret-references/{secret_reference_id}",
+    status_code=status.HTTP_204_NO_CONTENT, tags=["integrations"],
+)
+async def delete_secret_reference(
+    request: Request, project_id: UUID, secret_reference_id: UUID,
+    actor: AdminWriteActor, expected_updated_at: AwareDatetime,
+) -> Response:
+    """ADMIN が未参照の認証情報と密文を削除する。"""
+
+    await authorize_project_access(request, actor, project_id, require_active=True)
+    service: IntegrationService = request.app.state.integration_service
+    try:
+        await service.delete_secret_reference(
+            project_id=project_id, secret_reference_id=secret_reference_id,
+            expected_updated_at=expected_updated_at,
+        )
+    except SecretReferenceNotFoundError as error:
+        raise _not_found_problem("SecretReference", error) from error
+    except IntegrationConflictError as error:
+        raise _conflict_problem(error) from error
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/projects/{project_id}/integrations/{integration_id}",
+    response_model=IntegrationDetailsResponse, tags=["integrations"],
+)
+async def get_integration_details(
+    request: Request, project_id: UUID, integration_id: UUID, actor: AdminReadActor,
+) -> IntegrationDetailsResponse:
+    """ADMIN に編集対象の非機密設定を返す。一覧の公開 projection は変えない。"""
+
+    await authorize_project_access(request, actor, project_id)
+    service: IntegrationService = request.app.state.integration_service
+    try:
+        stored, config = await service.get_integration_details(
+            project_id=project_id, integration_id=integration_id,
+        )
+    except IntegrationNotFoundError as error:
+        raise _not_found_problem("Integration", error) from error
+    return IntegrationDetailsResponse(integration=_integration_response(stored), config=config)
+
+
+@router.put(
+    "/projects/{project_id}/integrations/{integration_id}",
+    response_model=IntegrationResponse, tags=["integrations"],
+)
+async def update_integration(
+    request: Request, project_id: UUID, integration_id: UUID,
+    actor: AdminWriteActor, body: UpdateIntegrationRequest,
+) -> IntegrationResponse:
+    """ADMIN が接続先・認証情報の参照・権限を revision 付きで編集する。"""
+
+    await authorize_project_access(request, actor, project_id, require_active=True)
+    service: IntegrationService = request.app.state.integration_service
+    try:
+        stored = await service.update_integration(
+            CreateIntegrationCommand(
+                project_id=project_id, name=body.name, kind=body.kind, provider=body.provider,
+                capabilities=tuple(body.capabilities), scope=body.scope, config=body.config,
+                secret_reference_id=body.secret_reference_id, created_by=actor.user_id,
+            ), integration_id=integration_id, expected_revision=body.expected_revision,
+        )
+    except IntegrationValidationError as error:
+        raise _validation_problem(error) from error
+    except IntegrationConflictError as error:
+        raise _conflict_problem(error) from error
+    except IntegrationNotFoundError as error:
+        raise _not_found_problem("Integration", error) from error
+    except SecretReferenceNotFoundError as error:
+        raise _not_found_problem("SecretReference", error) from error
+    return _integration_response(stored)
+
+
+@router.delete(
+    "/projects/{project_id}/integrations/{integration_id}",
+    status_code=status.HTTP_204_NO_CONTENT, tags=["integrations"],
+)
+async def delete_integration(
+    request: Request, project_id: UUID, integration_id: UUID,
+    actor: AdminWriteActor, expected_revision: Annotated[int, Query(ge=1)],
+) -> Response:
+    """ADMIN が未参照の接続を削除する。履歴への連鎖削除は行わない。"""
+
+    await authorize_project_access(request, actor, project_id, require_active=True)
+    service: IntegrationService = request.app.state.integration_service
+    try:
+        await service.delete_integration(
+            project_id=project_id, integration_id=integration_id,
+            expected_revision=expected_revision,
+        )
+    except IntegrationNotFoundError as error:
+        raise _not_found_problem("Integration", error) from error
+    except IntegrationConflictError as error:
+        raise _conflict_problem(error) from error
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(
@@ -498,7 +651,11 @@ def _conflict_problem(error: Exception) -> ProblemException:
         status=409,
         title="Integration conflict",
         detail=str(error),
-        code="integration_conflict",
+        code=("integration_resource_in_use" if str(error) in {
+            "Integration is referenced; disable it instead",
+            "SecretReference is used by an Integration",
+            "Resource is referenced or changed concurrently",
+        } else "integration_conflict"),
     )
 
 

@@ -7,7 +7,7 @@ import time
 from collections import defaultdict, deque
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
@@ -425,6 +425,7 @@ class RunToolRuntime:
 
     mcp: RunMcpRuntime
     gateway: ToolGateway
+    tool_descriptions: Mapping[str, str] = field(default_factory=dict)
 
 
 class ToolRegistry:
@@ -565,6 +566,8 @@ class ToolRegistry:
                 ),
             ),
             gateway=gateway,
+            tool_descriptions={name: binding.definition.description
+                               for name, binding in bindings.items()},
         )
 
 

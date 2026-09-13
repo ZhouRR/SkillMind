@@ -517,6 +517,7 @@
 .historyPrimary strong { overflow: hidden; color: var(--text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .historyPrimary small { color: var(--text-faint); font-size: 12px; }
 .historyItem p { overflow: hidden; margin: 8px 0; color: var(--text-muted); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.historyItem .historySummary { white-space: normal; overflow-wrap: anywhere; }
 .historyMeta { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; color: var(--text-faint); font-size: 12px; }
 .historyMeta code { grid-column: 1 / -1; overflow: hidden; color: var(--text-faint); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .historyPagination { display: flex; flex-shrink: 0; align-items: center; justify-content: center; gap: 14px; margin-top: 12px; }
@@ -599,6 +600,7 @@
 .modalViewport .modalBody > .hint { flex-shrink: 0; margin: 0; }
 .modalViewport .previewText { overflow: auto; }
 .previewFrame { display: block; flex: 1; min-height: 0; width: 100%; border: 1px solid var(--border); border-radius: var(--radius-small); background: #ffffff; }
+.outcomeReportFrame { display: block; width: 100%; height: 28rem; max-height: 70vh; border: 1px solid var(--border); border-radius: var(--radius-small); background: #ffffff; }
 
 /* ---- 応答式 layout ---- */
 @media (max-width: 960px) {

@@ -778,8 +778,11 @@ class SkillService:
                         parent_interpretation_id=str(parent_id) if parent_id else None,
                         attempt=attempt + 1,
                         error_code=error.code.value,
+                        detail=error.detail,
                     )
                     validation_feedback = repair_feedback
+                    if error.detail is not None:
+                        validation_feedback += "; " + error.detail
                     continue
                 # structured_output_unavailable / timeout / provider 等は同一 request の再生成で
                 # 直る根拠がなく、障害分類を保つため fail-fast とする。
@@ -796,6 +799,7 @@ class SkillService:
                         error.code,
                         parent_id,
                         adjustment_value,
+                        detail=error.detail,
                         validation_attempts=validation_attempts,
                     )
                 )

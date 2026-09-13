@@ -53,6 +53,42 @@ def command(**overrides):
     return build_database_write(**{**arguments, **overrides})
 
 
+@pytest.mark.parametrize("tables,columns", [
+    (["*"], ["*"]), (["example.reviews"], ["*"]),
+    (["*"], ["example.reviews.id", "example.reviews.status"]),
+])
+def test_explicit_all_permissions_allow_only_requested_single_row(tables, columns):
+    """全許可でも実行コマンドは具体表・具体列と一つの主キーに固定する。"""
+    result = command(scope={"tables": tables, "write_columns": columns, "operations": ["INSERT"]})
+    assert result.table == "example.reviews"
+    assert result.key == {"id": "record-1"}
+    assert result.values == {"status": "RUNNING"}
+
+
+@pytest.mark.parametrize("overrides", [
+    {"operation": "DELETE"},
+    {"table": "skillmind_effects.execution_receipts"},
+    {"table": "example.*"},
+    {"key": {}},
+    {"values": {"id": "changed"}},
+])
+def test_all_permissions_keep_operation_receipt_and_primary_key_guards(overrides):
+    """全許可は操作・回执・主キー更新の境界を解除しない。"""
+    with pytest.raises(ValueError):
+        command(
+            scope={"tables": ["*"], "write_columns": ["*"], "operations": ["INSERT", "UPDATE"]},
+            **overrides,
+        )
+
+
+def test_all_columns_cannot_expand_the_table_scope():
+    """列の全許可だけでは別テーブルへ書き込めない。"""
+    with pytest.raises(ValueError, match="table is outside"):
+        command(scope={
+            "tables": ["other.reviews"], "write_columns": ["*"], "operations": ["INSERT"],
+        })
+
+
 @pytest.mark.parametrize("operation", ["INSERT", "UPDATE"])
 def test_public_proposal_parser_preserves_database_row_and_checkpoint(operation: str) -> None:
     """公開の提案入口から DB validator まで、主キー・原行・checkpoint を受け渡す。"""

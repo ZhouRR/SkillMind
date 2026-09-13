@@ -24,6 +24,16 @@ import {
 import { emptyConnectDraft } from '../../src/lib/resourceDrafts'
 
 describe('PostgreSQL and MCP connection configuration', () => {
+  it('preserves independently selected all-table and all-column permissions', () => {
+    const scope = buildIntegrationScope('postgres', { issueIds: [], fieldKeys: [], paths: [], revisions: [],
+      tables: ['public.reports'], writeEnabled: true, writeColumns: ['*'], operations: ['INSERT', 'UPDATE'] })
+    expect(scope).toEqual({ tables: ['public.reports'], write_columns: ['*'], operations: ['INSERT', 'UPDATE'] })
+    expect(findScopeIssue('postgres', scope, true)).toBeNull()
+    expect(scopeFromDraft(scopeDraftFromScope({ ...scope, tables: ['*'] }, { keepAll: true })))
+      .toEqual({ ...scope, tables: ['*'] })
+    expect(findScopeIssue('postgres', { ...scope, tables: [] }, true)).toBe('tables_required')
+  })
+
   it('builds structured PostgreSQL metadata with a numeric port and explicit tables', () => {
     const draft = { ...emptyConnectDraft('postgres'), host: ' db.example.test ', database: 'reports', username: 'reader' }
     expect(buildIntegrationConfig('postgres', draft)).toEqual({ host: 'db.example.test', port: 5432,

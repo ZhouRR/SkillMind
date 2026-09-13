@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import hashlib
 import os
 import re
 import stat
@@ -13,6 +11,8 @@ from pathlib import Path
 
 import claude_agent_sdk
 from claude_agent_sdk import _cli_version, _version
+
+from skillmind.agent.runtime_distribution import _stamp, _verify_binary
 
 CLAUDE_AGENT_SDK_VERSION = "0.2.110"
 CLAUDE_CODE_CLI_VERSION = "2.1.191"
@@ -27,45 +27,6 @@ class BundledClaudeBuild:
     cli_checksum: str
     sdk_version: str
     cli_version: str
-
-
-def _stamp(value: os.stat_result) -> tuple[int, ...]:
-    """同じ大きさの書換えや権限変更も、以前の hash 確認から区別する。"""
-    return (
-        value.st_dev,
-        value.st_ino,
-        value.st_size,
-        value.st_mode,
-        value.st_mtime_ns,
-        value.st_ctime_ns,
-    )
-
-
-def _verify_binary(path: str, size: int, digest: str, stamp: tuple[int, ...]) -> str:
-    """毎回 RECORD と実体を比較する。stat の時刻だけを改変検出の根拠にしない。"""
-    descriptor = os.open(
-        path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
-    )
-    with os.fdopen(descriptor, "rb") as source:
-        if _stamp(os.fstat(source.fileno())) != stamp:
-            raise RuntimeError("Bundled Claude CLI changed during verification")
-        checksum = hashlib.sha256()
-        count = 0
-        while chunk := source.read(1024 * 1024):
-            count += len(chunk)
-            if count > size:
-                raise RuntimeError("Bundled Claude CLI size does not match its distribution")
-            checksum.update(chunk)
-        if (
-            count != size
-            or _stamp(os.fstat(source.fileno())) != stamp
-            or _stamp(os.lstat(path)) != stamp
-        ):
-            raise RuntimeError("Bundled Claude CLI changed during verification")
-    actual = base64.urlsafe_b64encode(checksum.digest()).decode("ascii").rstrip("=")
-    if actual != digest:
-        raise RuntimeError("Bundled Claude CLI checksum does not match its distribution")
-    return checksum.hexdigest()
 
 
 def bundled_claude_build() -> BundledClaudeBuild:

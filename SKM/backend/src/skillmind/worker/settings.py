@@ -19,6 +19,8 @@ from arq.worker import func as arq_function
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from skillmind.agent.claude import ClaudeRuntimeConfiguration
+from skillmind.agent.codex_engine import CodexAgentSdkEngine
+from skillmind.agent.codex_runtime import CodexRuntimeConfiguration
 from skillmind.agent.context_builder import (
     ContractStore,
     ProductionRunContextBuilder,
@@ -26,7 +28,7 @@ from skillmind.agent.context_builder import (
 )
 from skillmind.agent.database_provider import DatabaseReadProvider
 from skillmind.agent.document_readiness import DocumentReadinessProvider
-from skillmind.agent.domain import RunContext
+from skillmind.agent.domain import AgentEngine, RunContext
 from skillmind.agent.engine import ClaudeAgentSdkEngine, RunMcpRuntime
 from skillmind.agent.evidence import PostgresToolAuditWriter
 from skillmind.agent.mcp_provider import McpReadProvider
@@ -45,9 +47,10 @@ from skillmind.agent.result_validation import (
     PostgresProposalLookup,
     ResultValidator,
 )
-from skillmind.agent.session_store import PostgresSessionStore
+from skillmind.agent.session_store import PostgresSessionStore, PostgresSessionTranscriptBackend
 from skillmind.agent.subagent_provider import SubagentDispatchProvider
 from skillmind.agent.subagent_sessions import PostgresSubagentSessionRecorder
+from skillmind.agent.tool_gateway import RunToolRuntime
 from skillmind.agent.workspace import WorkspaceManager
 from skillmind.agent.workspace_materializer import WorkspaceMaterializer
 from skillmind.core.logging import configure_logging, log_event
@@ -197,7 +200,7 @@ async def startup(ctx: dict[str, Any]) -> None:
     )
     # engine → registry → 扇出 Provider → engine と参照が循環する。Provider には engine 実体では
     # なく取得関数を渡し、解決を呼び出し時まで遅らせて組み立て順への依存を切る (計画 §23 P2)。
-    engine_holder: dict[str, ClaudeAgentSdkEngine] = {}
+    engine_holder: dict[str, AgentEngine] = {}
     result_validator = ResultValidator(
         PostgresEvidenceLookup(ctx["database_session_factory"]),
         PostgresProposalLookup(ctx["database_session_factory"]),
@@ -233,11 +236,11 @@ async def startup(ctx: dict[str, Any]) -> None:
         ),
         repository_source=repository_source,
     )
-    def create_authorized_runtime(context: RunContext) -> RunMcpRuntime:
+    def create_authorized_gateway(context: RunContext) -> RunToolRuntime:
         """現在の Worker claim を一度だけ捕捉し、別 Run の audit writer を共有しない。"""
 
         authority = require_tool_authority(context)
-        return registry.build_runtime(
+        return registry.build_gateway_runtime(
             context,
             audit_writer=PostgresToolAuditWriter(
                 ctx["database_session_factory"], claimed_run=authority.claimed,
@@ -245,22 +248,39 @@ async def startup(ctx: dict[str, Any]) -> None:
             ),
         )
 
-    runtime_configuration = ClaudeRuntimeConfiguration.from_environ()
+    def create_authorized_runtime(context: RunContext) -> RunMcpRuntime:
+        """Claude は同じ認可済み Gateway の in-process MCP adapter を使う。"""
+
+        return create_authorized_gateway(context).mcp
+
+    engine: AgentEngine
+    selected_model: str | None
+    if settings.agent_sdk == "codex":
+        codex_configuration = CodexRuntimeConfiguration(
+            settings.codex_model, settings.codex_reasoning_effort, settings.codex_home,
+        )
+        selected_model = codex_configuration.primary_model
+        engine = CodexAgentSdkEngine(
+            configuration=codex_configuration, runtime_factory=create_authorized_gateway,
+            transcript_backend=PostgresSessionTranscriptBackend(ctx["database_session_factory"]),
+        )
+    else:
+        runtime_configuration = ClaudeRuntimeConfiguration.from_environ()
+        selected_model = runtime_configuration.primary_model
+        engine = ClaudeAgentSdkEngine(
+            mcp_server_factory=create_authorized_runtime,
+            configuration=runtime_configuration, session_store=ctx["session_store"],
+        )
     context_builder = ProductionRunContextBuilder(
         workspace_manager=WorkspaceManager(settings.run_workspace_root),
         tool_registry=registry,
-        model=runtime_configuration.primary_model,
+        model=selected_model,
         materializer=materializer,
         deferred_features_enabled=features.deferred,
         database_writes_enabled=features.database_writes,
         document_writes_enabled=features.document_writes,
         document_library_target=document_library_target,
         proposal_continuations=ProposalContinuationReader(ctx["database_session_factory"]),
-    )
-    engine = ClaudeAgentSdkEngine(
-        mcp_server_factory=create_authorized_runtime,
-        configuration=runtime_configuration,
-        session_store=ctx["session_store"],
     )
     engine_holder["engine"] = engine
     ctx["run_executor"] = AgentRunExecutor(

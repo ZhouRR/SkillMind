@@ -240,7 +240,7 @@ async def scenario(
     page.on("pageerror", lambda error: errors.append(str(error)))
     name = f"{mode}-{language}-{width}"
     try:
-        await page.goto(f"{url}#/workspace?project={PROJECT}&run={RUN}")
+        await page.goto(f"{url}#/history?project={PROJECT}&run={RUN}")
         labels = await messages(page, language)
         await expect(page.locator(".workspace .runFacts")).to_contain_text(RUN[:8])
         await check_view(page, mode, labels)

@@ -66,12 +66,12 @@ def test_mcp_canonical_unicode_scope_can_be_normalized_again() -> None:
 
 
 @pytest.mark.parametrize("provider", ["postgres", "mcp"])
-@pytest.mark.parametrize("values", [[], ["*"], ["invalid"], [123]])
+@pytest.mark.parametrize("values", [[], ["invalid"], [123]])
 def test_resource_scope_rejects_missing_wildcard_and_malformed_values(
     provider: str,
     values: list[object],
 ) -> None:
-    """空・全許可・不正な識別子を登録で拒否する。"""
+    """空・不正な識別子を登録で拒否する。"""
     key = "tables" if provider == "postgres" else "resource_uris"
     with pytest.raises(IntegrationValidationError):
         normalize_integration_command(replace(command(provider), scope={key: values}))
@@ -142,7 +142,6 @@ def test_database_write_requires_read_and_explicit_flat_column_scope():
     for altered in (
         original.scope,
         {**scope, "write_columns": ["other.reports.id"]},
-        {**scope, "write_columns": ["*"]},
         {**scope, "operations": ["DELETE"]},
         {**scope, "write_columns": []},
         {**scope, "operations": []},
@@ -150,3 +149,32 @@ def test_database_write_requires_read_and_explicit_flat_column_scope():
     ):
         with pytest.raises(IntegrationValidationError):
             normalize_integration_command(replace(writable, scope=altered))
+
+
+@pytest.mark.parametrize("tables,columns", [
+    (["*"], ["*"]),
+    (["public.reports"], ["*"]),
+    (["*"], ["public.reports.status"]),
+])
+def test_postgres_accepts_separate_all_table_and_column_permissions(tables, columns):
+    """全許可は表と列で独立し、操作の許可を暗黙追加しない。"""
+    scope = {"tables": tables, "write_columns": columns, "operations": ["INSERT"]}
+    original = replace(command("postgres"), scope=scope,
+                       capabilities=("database.read/v1", "database.write/v1"))
+    assert normalize_integration_command(original).scope == scope
+
+
+def test_postgres_wildcard_normalization_does_not_enable_other_providers():
+    """明示した星だけ全許可へ正規化し、MCP や空範囲へ波及させない。"""
+    original = command("postgres")
+    assert normalize_integration_command(replace(original, scope={
+        "tables": ["*", "public.reports"],
+    })).scope == {"tables": ["*"]}
+    with pytest.raises(IntegrationValidationError):
+        normalize_integration_command(replace(command("mcp"), scope={"resource_uris": ["*"]}))
+    for column in ("invalid schema.reports.status", "skillmind_effects.receipts.status"):
+        with pytest.raises(IntegrationValidationError):
+            normalize_integration_command(replace(original,
+                capabilities=("database.read/v1", "database.write/v1"),
+                scope={"tables": ["*"], "write_columns": [column], "operations": ["UPDATE"]},
+            ))

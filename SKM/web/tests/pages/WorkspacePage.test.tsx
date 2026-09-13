@@ -71,16 +71,17 @@ function task(overrides: Partial<PublishedTaskRecord> = {}): PublishedTaskRecord
 }
 
 describe('WorkspacePage layout', () => {
-  it('keeps the rail as launcher plus a history shortcut and hosts the run form in a modal', () => {
-    // 履歴の検索とページングは専用画面へ分離し、Workspace には入口だけを残して観測領域を圧迫しない。
+  it('shows launch, pending work and reports without execution audit tabs', () => {
+    // 作業一覧と結果を Workspace、会話・監査を履歴詳細へ分離する。
     const html = renderToStaticMarkup(
       <WorkspacePage actorId="actor" csrfToken={'c'.repeat(32)} moduleId="" projectId="" />,
     )
 
     expect(html).toContain('新建执行')
-    expect(html).toContain('执行历史')
-    expect(html).toContain('historyShortcut')
-    expect(html).toContain('href="#/history"')
+    expect(html).toContain('已完成与报告')
+    expect(html).toContain('待处理')
+    expect(html).not.toContain('historyShortcut')
+    expect(html).not.toContain('observationPanel')
     expect(html).toContain('modalOverlay')
     expect(html).toContain('hidden=""')
   })

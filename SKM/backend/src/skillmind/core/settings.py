@@ -60,6 +60,13 @@ class Settings(BaseSettings):
     # モデル待機の wall timeout と分け、heartbeat があっても資源準備を無期限にしない。
     run_preparation_timeout_seconds: int = Field(default=300, ge=1, le=3600)
     run_workspace_root: Path = Path("/var/lib/skillmind/runs")
+    # API/Worker は同じ選択を使う。失敗時に別 SDK/model を暗黙に呼び直さない。
+    agent_sdk: Literal["codex", "claude"] = "codex"
+    codex_model: str = Field(default="gpt-5.6-terra", min_length=1)
+    codex_reasoning_effort: Literal[
+        "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
+    ] = "max"
+    codex_home: Path = Path("/var/lib/skillmind/codex")
 
     # 凍結入力の存量と単一 search の走査量は別の制限。各 root と全 root の双方を守り、
     # manifest 等を含む最終量の超過は、部分入力を渡さず fail closed とする。

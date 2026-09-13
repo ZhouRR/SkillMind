@@ -276,7 +276,7 @@ async def confirmed(page: Page) -> None:
     """成功/再送応答は既存の Run 観測と detail/SSE へ接続される。"""
 
     await expect(page.get_by_role("dialog")).not_to_be_visible()
-    await expect(page.locator(".runFacts")).to_be_visible()
+    await expect(page.locator(".runTimestamp")).to_be_visible()
 
 
 async def exercise(

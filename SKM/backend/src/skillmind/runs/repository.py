@@ -89,6 +89,7 @@ from skillmind.runs.repository_effects import EffectOperationsMixin
 from skillmind.runs.repository_interactions import InteractionOperationsMixin
 from skillmind.skills.domain import PublishedTaskNotFoundError
 from skillmind.skills.repository import SkillRepository
+from skillmind.skills.task_catalog import manifest_task_title
 
 
 class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
@@ -562,10 +563,12 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
         limit: int,
         offset: int,
         statuses: tuple[RunStatus, ...] = (),
+        task_id: UUID | None = None,
     ) -> RunHistoryPage:
         """Project 内の Run と任意 Result summary を新しい順にページ取得する。
 
-        `statuses` を渡すとその状態だけに絞る。「回答待ち・承認待ちの Run を全部出す」は
+        `task_id` は精確 Task の最新結果、`statuses` はその状態だけに絞る。
+        「回答待ち・承認待ちの Run を全部出す」は
         画面側で先頭 page を filter しても作れないため (待機中の Run が古い page にあると
         取りこぼす)、絞り込みは SQL 側で行う。
         """
@@ -580,8 +583,11 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
         )
         if statuses:
             statement = statement.where(Run.status.in_([status.value for status in statuses]))
+        if task_id is not None:
+            statement = statement.where(Run.task_id == task_id)
         rows = (await self._session.execute(statement)).all()
         has_more = len(rows) > limit
+        titles = await self._history_task_titles([run for run, _ in rows[:limit]])
         return RunHistoryPage(
             items=tuple(
                 RunHistoryItem(
@@ -593,6 +599,7 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
                     result_summary=result.summary if result is not None else None,
                     result_confidence=result.confidence if result is not None else None,
                     result_needs_review=result.needs_review if result is not None else None,
+                    task_title=titles.get(run.id),
                 )
                 for run, result in rows[:limit]
             ),
@@ -600,6 +607,37 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
             offset=offset,
             has_more=has_more,
         )
+
+    async def _history_task_titles(self, runs: list[Run]) -> dict[UUID, str]:
+        """ページ分の不変 Skill binding を一括で読み、元 task の名前だけを投影する。"""
+
+        if not runs:
+            return {}
+        task_ids = {run.id: run.task_id for run in runs}
+        rows = (await self._session.execute(
+            select(RunSkillSnapshot, RuntimeManifest)
+            .join(RuntimeManifest, (
+                (RuntimeManifest.skill_version_id == RunSkillSnapshot.skill_version_id)
+                & (RuntimeManifest.checksum == RunSkillSnapshot.manifest_checksum)
+            ))
+            .where(RunSkillSnapshot.run_id.in_(task_ids))
+        )).all()
+        titles: dict[UUID, str] = {}
+        for snapshot, manifest in rows:
+            # 現在の有効 Skill や最新版へ置換せず、元 Run と一致する task だけを表示する。
+            tasks = manifest.manifest_json.get("tasks")
+            if not isinstance(tasks, list):
+                continue
+            for task in tasks:
+                key = task.get("key") if isinstance(task, dict) else None
+                if not isinstance(key, str) or derive_task_id(
+                    skill_version_id=snapshot.skill_version_id, task_key=key
+                ) != task_ids[snapshot.run_id]:
+                    continue
+                title = manifest_task_title(manifest.manifest_json, key)
+                if title:
+                    titles[snapshot.run_id] = title
+        return titles
 
     async def list_events(
         self, run_id: UUID, *, after: int, limit: int = 100

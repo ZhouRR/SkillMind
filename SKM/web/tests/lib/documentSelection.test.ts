@@ -1,12 +1,32 @@
 import { describe, expect, it } from 'vitest'
 
-import { ALL_DOCUMENTS_SELECTION, readDocumentSelection, validDocumentSelection } from '../../src/lib/documentSelection'
+import { ALL_DOCUMENTS_SELECTION, documentFolders, readDocumentSelection, sameDocumentMembers, validDocumentSelection } from '../../src/lib/documentSelection'
 import { buildTaskDraft, defaultSourceProviders, sourceRequirements } from '../../src/lib/taskDraft'
 import { DOCUMENT_IDS, documentTask } from '../fixtures/documentTask'
 
 const [first, second] = DOCUMENT_IDS
 
 describe('explicit document scopes', () => {
+  it('selects ancestors and subfolders without crossing similar directory names', () => {
+    const folders = documentFolders([
+      { value: `document:${first}`, label: 'specs/login/first.xlsx' },
+      { value: `document:${second}`, label: 'specs-old/second.xlsx' },
+      { value: ALL_DOCUMENTS_SELECTION, label: 'All documents' },
+    ])
+    expect(folders.find((folder) => folder.path === 'specs')?.value).toBe(`document:${first}`)
+    expect(folders.find((folder) => folder.path === 'specs/login')?.ids).toEqual([first])
+    expect(folders.find((folder) => folder.path === '/')?.ids).toEqual([first, second])
+    expect(folders.some((folder) => folder.path.includes('.xlsx'))).toBe(false)
+  })
+
+  it('keeps the confirmed members when a folder later gains a document', () => {
+    const options = sourceRequirements(documentTask())[0]!.options
+    const folder = documentFolders(options).find((item) => item.path === 'guides')!
+    expect(buildTaskDraft(documentTask(), '{}', { documents: folder.value })?.sources.documents).toBe(folder.value)
+    expect(sameDocumentMembers(folder.ids, [...folder.ids].reverse())).toBe(true)
+    expect(sameDocumentMembers(folder.ids, [...folder.ids, '00000000-0000-4000-8000-000000000073'])).toBe(false)
+  })
+
   it.each([`document:${first}`, `documents:${second},${first}`, ALL_DOCUMENTS_SELECTION])('keeps a valid selection unchanged: %s', (selection) => {
     // 確認済みの文字列は並び替えず、server が意図と凍結内容を別々に正規化する。
     expect(readDocumentSelection(selection).valid).toBe(true)

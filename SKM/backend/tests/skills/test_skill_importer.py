@@ -391,8 +391,8 @@ def test_system_skill_identity_is_versioned_and_matches_fixture_contract() -> No
     identity = load_interpreter_system_skill(SYSTEM_SKILL)
     example = _load_contract("examples/skill-interpreter-request.v1.json")["interpreter"]
 
-    assert identity.version == "4.1.2"
-    assert identity.interpreter_version == "skillmind-skill-interpreter/4.1.2"
+    assert identity.version == "4.1.3"
+    assert identity.interpreter_version == "skillmind-skill-interpreter/4.1.3"
     assert identity.to_dict() == example
 
 
@@ -412,6 +412,9 @@ def test_system_skill_instructs_output_language_to_follow_the_source() -> None:
     assert "Business `enum` values are data" in prompt
     assert "preserve the source's exact values, letter case, and JSON types" in prompt
     assert "Platform-defined enum values must match their frozen contracts" in prompt
+    assert "Apply effect `operation` values are platform identifiers" in prompt
+    assert "split different operations into separate effect intents" in prompt
+    assert "effect operations, contract field descriptions" not in prompt
     assert "contract field `key`, `enum` value" not in prompt
     assert "Add an `output_contract` only" in prompt
     assert "`change.propose/v1`" in prompt
@@ -585,7 +588,7 @@ def test_bind_identity_stamps_platform_identity_on_model_output() -> None:
     response["runtime_manifest_draft"]["tasks"] = [task]  # type: ignore[index]
     validated = InterpreterFixtureRunner(CONTRACTS).run(request, response, bind_identity=True)
     identity = validated["runtime_manifest_draft"]["identity"]
-    assert identity["interpreter_version"] == "skillmind-skill-interpreter/4.1.2"
+    assert identity["interpreter_version"] == "skillmind-skill-interpreter/4.1.3"
     assert identity["source_hash"] == request["source"]["content_hash"]  # type: ignore[index]
     # 蓝图は同じ解釈の一部であり、manifest と別の identity/互換 level を持ってはならない。
     blueprint = validated["runtime_manifest_draft"]["capability_blueprint"]
