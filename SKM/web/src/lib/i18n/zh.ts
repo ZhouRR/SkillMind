@@ -914,6 +914,7 @@ export const ZH: UiMessages = {
   workspace: {
     queueTitle: '任务与报告', executionDetail: '执行详情',
     latestReport: '最近一次执行结果', latestReportEmpty: '该任务尚无已结束的执行。',
+    reportLoadFailed: '无法加载报告，请点击“重新读取”重试。',
     queue: { pending: '待处理', running: '执行中', reports: '已完成与报告' },
     queueEmpty: { pending: '没有待处理的任务。', running: '没有执行中的任务。', reports: '尚无已完成的任务。' },
     selectProjectFirst: '请先在侧栏选择项目。',
@@ -1261,6 +1262,7 @@ export const ZH: UiMessages = {
     viewInterpretationDiff: '查看解释差异',
     published: '已发布',
     publishVersion: '发布版本',
+    reviewDraft: '查看草稿',
     hardGateHint: '请先解决未通过的检查，再发布。',
     toolsUnauthorized: '未授权',
     declaredToolsLine: (tools) => `技能包声明的工具：${tools}。声明仅作记录，不授予权限。`,

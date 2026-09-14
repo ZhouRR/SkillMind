@@ -586,8 +586,8 @@ async def test_context_builder_opens_registered_workspace_read_and_search(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("capability", ["workspace.write/v1", "workspace.write/v2"])
-async def test_context_builder_opens_registered_workspace_write(
+@pytest.mark.parametrize("capability", ["workspace.write/v1", "workspace.write/v2", "json.schema.validate/v1"])
+async def test_context_builder_opens_registered_workspace_capability(
     tmp_path: Path, capability: str,
 ) -> None:
     """SUPERVISED Run は明示された精確版だけを取得し、v1 を暗黙に v2 へ上げない。"""

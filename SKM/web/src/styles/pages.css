@@ -213,6 +213,8 @@
 .skillLibraryDescription { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
 .skillLibraryStatus { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
 .skillLibraryList .skillActions { justify-content: flex-end; margin-top: 0; }
+.skillLibraryDraft { grid-column: 1 / -1; min-width: 0; }
+.skillLibraryDraft > summary { cursor: pointer; color: var(--text-muted); }
 
 /* ---- Model interpretation 実行中の流式表示 ---- */
 .interpretStream {
@@ -274,6 +276,8 @@
 /* 資源要求は「種別・必須/任意」を主に、契約 key を副に置く。Skill 原文由来の選択指針は
    平台文言と言語が異なりうるため、行を分けて出典の違いを見た目でも示す。 */
 .readinessList strong { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.readinessDisclosure > summary { cursor: pointer; color: var(--text-muted); font-size: 12px; font-weight: 600; }
+.readinessDisclosure[open] > summary { margin-bottom: 8px; }
 .readinessList strong code { color: var(--text-faint); font: 400 12px var(--font-mono); opacity: .75; }
 .readinessGuidance { color: var(--text-faint) !important; font-size: 12px !important; font-style: italic; }
 .sourceTraceList code { color: var(--accent); font-size: 12px; }

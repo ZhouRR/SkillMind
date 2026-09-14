@@ -34,6 +34,8 @@ class LibraryApi(ProjectsApi):
         self.deletes: list[str] = []
         self.reject_delete = True
         self.reject_read = False
+        self.publishes: list[dict] = []
+        self.reject_publish = False
 
     async def respond(self, route: Route) -> None:
         """元資格を検証し、409 と読取 503 を UI に返す。実データは使わない。"""
@@ -48,6 +50,16 @@ class LibraryApi(ProjectsApi):
             return
         if route.request.method == "GET" and path == f"projects/{PROJECT}/skill-versions":
             await route.fulfill(json={"skill_versions": []})
+            return
+        if route.request.method == "POST" and path.endswith("/publish"):
+            assert route.request.headers.get("x-csrf-token") == CSRF
+            self.publishes.append(route.request.post_data_json)
+            if self.reject_publish:
+                await route.fulfill(status=503, json={"title": "Unavailable", "status": 503})
+            else:
+                version = next(v for v in self.versions if v["skill_version_id"] == path.split("/")[1])
+                version.update(status="PUBLISHED", published_at="2026-09-14T00:00:00Z")
+                await route.fulfill(json=version)
             return
         if route.request.method == "DELETE" and path.startswith("skill-versions/"):
             assert route.request.headers.get("x-csrf-token") == CSRF
@@ -77,6 +89,7 @@ async def check(url: str, output: Path) -> None:
     async with async_playwright() as p:
         browser = await p.chromium.launch()
         try:
+            await check_draft_publication(browser, url, output)
             for language in ("ja", "zh", "en"):
                 api = LibraryApi(url, language)
                 context = await browser.new_context(viewport={"width": 1440, "height": 1000})
@@ -145,6 +158,58 @@ async def check(url: str, output: Path) -> None:
                     await context.close()
         finally:
             await browser.close()
+
+
+async def check_draft_publication(browser, url: str, output: Path) -> None:
+    """再読込後の草稿から gate・警告同意・失敗回復を経て発行できることを確認する。"""
+    for language in ("ja", "zh", "en"):
+        api = LibraryApi(url, language)
+        api.versions[1]["gate_passed"] = False
+        context = await browser.new_context(viewport={"width": 1440, "height": 900})
+        await context.route("**/*", api.route)
+        page = await context.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e, captured=errors: captured.append(str(e)))
+        try:
+            await page.goto(f"{url}#/skills?project={PROJECT}")
+            labels = await messages(page, language)
+            await page.reload()
+            draft = page.locator(".skillLibraryList > li").last
+            await expect(draft.locator(".skillLibraryDraft > summary")).to_have_text(labels["skills"]["reviewDraft"])
+            await draft.locator(".skillLibraryDraft > summary").click()
+            publish = draft.get_by_role("button", name=labels["skills"]["publishVersion"], exact=True)
+            await expect(publish).to_be_disabled()
+            assert not api.publishes
+            api.versions[1]["gate_passed"] = True
+            await page.reload()
+            await draft.locator(".skillLibraryDraft > summary").click()
+            await publish.click()
+            confirmation = page.get_by_role("dialog", name=labels["skills"]["publishVersion"], exact=True)
+            await expect(confirmation).to_be_visible()
+            await confirmation.get_by_role("button", name=labels["elements"]["close"], exact=True).click()
+            await expect(publish).to_be_enabled()
+            assert not api.publishes
+            api.reject_publish = True
+            await publish.click()
+            await confirmation.get_by_role("button", name=labels["skills"]["publishVersion"], exact=True).click()
+            await expect(draft.locator('[role="alert"]')).to_be_visible()
+            await expect(publish).to_be_enabled()
+            await expect(page.locator(".skillLibraryList > li")).to_have_count(2)
+            for width in (1366, 1920, 390):
+                await page.set_viewport_size({"width": width, "height": 900})
+                await layout(page)
+            await page.set_viewport_size({"width": 1440, "height": 900})
+            await page.screenshot(path=str(output / f"draft-review-{language}.png"))
+            api.reject_publish = False
+            await publish.click()
+            await confirmation.get_by_role("button", name=labels["skills"]["publishVersion"], exact=True).click()
+            await expect(draft.locator(".skillLibraryDraft")).to_have_count(0)
+            await expect(draft.get_by_role("button", name=labels["skills"]["enableForProject"], exact=True)).to_be_enabled()
+            assert api.publishes == [{"accepted_warnings": ["assisted_review_required"]}] * 2
+            assert not api.deletes and not errors and not api.failures and not api.unexpected
+            print(f"PASS draft publication {language}", flush=True)
+        finally:
+            await context.close()
 
 
 if __name__ == "__main__":

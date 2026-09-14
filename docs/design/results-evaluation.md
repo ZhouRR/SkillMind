@@ -95,7 +95,7 @@ Gateway 与 audit 同时核对显式选项、原转换 Tool、来源 ID/hash、�
 
 越权/不存在沿 Project/Run 404，未知引用 artifact_not_found；损坏 409 artifact_content_invalid，存储故障静态 503 artifact_storage_unavailable。下载为 text/plain 附件，no-store/nosniff/安全文件名，不是 HTML 预览或二进制协议。
 
-页面按授权索引区分结果采用/未采用；只有模型引用则只显示文字。客户端再验字节限额/原大小/hash/UTF-8；取消、30 秒期限、身份/Project/Run 切换使旧响应失效，及时回收对象 URL。下载不证明外部打开安全。
+页面按授权索引区分结果采用/未采用；只有模型引用则只显示文字。客户端再验字节限额/原大小/hash/UTF-8；HTTP 环境无 WebCrypto 时使用本地 SHA-256 实现，仍执行相同 hash 校验；取消、30 秒期限、身份/Project/Run 切换使旧响应失效，及时回收对象 URL。下载不证明外部打开安全。
 
 [0040](../../SKM/backend/migrations/versions/0040_evidence_artifacts.py)不回填；任一新绑定阻止丢列降级。原字节随 DB 备份，不以工作区恢复替代，见[迁移审查](../operations/deployment.md#迁移与回退审查)。
 

@@ -64,11 +64,12 @@ export function SourceRequirementField({ requirement, value, onChange }: {
  * 「Gate 未通過」の一行では利用者が何を設定すればよいか判断できない。要求ごとに状態・理由・
  * 候補・選択指針を並べ、設定で解決できる不足と平台が対応していない要求を区別して示す。
  */
-export function TaskReadinessPanel({ readiness }: { readiness: TaskReadinessRecord }) {
+export function TaskReadinessPanel({ readiness, collapsible = false }: {
+  readiness: TaskReadinessRecord; collapsible?: boolean
+}) {
   const messages = useMessages()
-  return (
-    <div className="noteBlock">
-      <h4>{messages.workspace.readinessTitle(messages.workspace.readinessLevels[readiness.level] ?? readiness.level)}</h4>
+  const title = messages.workspace.readinessTitle(messages.workspace.readinessLevels[readiness.level] ?? readiness.level)
+  const content = <>
       {readiness.requirements.length === 0 && <p className="hint">{messages.workspace.noResourceNeeded}</p>}
       {readiness.requirements.length > 0 && (
         <ul className="noteList readinessList">
@@ -105,8 +106,15 @@ export function TaskReadinessPanel({ readiness }: { readiness: TaskReadinessReco
       {readiness.level === 'GUIDANCE_ONLY' && (
         <p className="hint">{messages.workspace.guidanceOnlyHint}</p>
       )}
-    </div>
-  )
+    </>
+  // 起動フォームでは既知の候補一覧を折り畳み、不足・未対応の理由は最初から見せる。
+  if (collapsible) return <details className="noteBlock readinessDisclosure"
+    open={readiness.requirements.some((requirement) => requirement.status !== 'AVAILABLE')
+      || ['CONFIGURATION_REQUIRED', 'GUIDANCE_ONLY'].includes(readiness.level)}>
+    <summary>{title}</summary>
+    {content}
+  </details>
+  return <div className="noteBlock"><h4>{title}</h4>{content}</div>
 }
 
 /** 一つの task を走らせるのに要る全項目(就緒度・来源選択・入力)をまとめた共通 fieldset。
@@ -126,7 +134,7 @@ export function TaskLaunchFields({ task, inputText, sourceProviders, onInputText
   const requirements = sourceRequirements(task)
   return (
     <>
-      {task.readiness && <TaskReadinessPanel readiness={task.readiness} />}
+      {task.readiness && <TaskReadinessPanel key={task.task_id} readiness={task.readiness} collapsible />}
       {requirements.map((requirement) => (
         <SourceRequirementField
           key={requirement.key}

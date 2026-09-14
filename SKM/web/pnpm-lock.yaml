@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@noble/hashes':
+        specifier: 2.0.1
+        version: 2.0.1
       marked:
         specifier: 18.0.12
         version: 18.0.12
@@ -56,6 +59,10 @@ packages:
     peerDependencies:
       '@emnapi/core': ^1.7.1
       '@emnapi/runtime': ^1.7.1
+
+  '@noble/hashes@2.0.1':
+    resolution: {integrity: sha512-XlOlEbQcE9fmuXxrVTXCTlG2nlRXa9Rj3rr5Ue/+tX+nmkgbX720YHh0VR3hBF9xDvwnb8D2shVGOwNx+ulArw==}
+    engines: {node: '>= 20.19.0'}
 
   '@oxc-project/types@0.137.0':
     resolution: {integrity: sha512-WT+Gb24i8hmvo85AIv2oEYouEXkRlKAlT9WaCa3TfLgNCN+GhrJOGZuIlMouAh38Qe4QOx26eUOVsq70qXrywA==}
@@ -538,6 +545,8 @@ snapshots:
       '@emnapi/runtime': 1.11.1
       '@tybys/wasm-util': 0.10.3
     optional: true
+
+  '@noble/hashes@2.0.1': {}
 
   '@oxc-project/types@0.137.0': {}
 

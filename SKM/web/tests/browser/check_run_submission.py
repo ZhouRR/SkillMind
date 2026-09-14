@@ -95,6 +95,7 @@ class ApiFixture:
         self.unexpected: list[str] = []
         self.release = asyncio.Event()
         self.received = asyncio.Event()
+        self.catalog = task_catalog()
 
     async def route(self, route: Route) -> None:
         """静的資産だけ Vite へ通し、API は fake から返す。"""
@@ -111,7 +112,7 @@ class ApiFixture:
         if request.method == "POST" and url.path.endswith("/task-runs"):
             await self.create(route)
         elif request.method == "GET" and url.path.endswith("/tasks"):
-            await route.fulfill(json=task_catalog())
+            await route.fulfill(json=self.catalog)
         elif request.method == "GET" and url.path.endswith("/runs"):
             await route.fulfill(json={"items": [], "limit": 10, "offset": 0, "has_more": False})
         elif request.method == "GET" and url.path.endswith("/modules"):
@@ -286,6 +287,25 @@ async def exercise(
 ) -> None:
     """原要求・草稿・認証 context・遅い応答の競争を、実 React event で再現する。"""
 
+    if case in {"ready-details", "missing-resource-details"}:
+        if case == "missing-resource-details":
+            readiness = api.catalog["tasks"][0]["readiness"]
+            readiness["level"] = "CONFIGURATION_REQUIRED"
+            readiness["requirements"][0].update(status="UNAVAILABLE", candidates=[])
+        await page.goto(url)
+        await page.locator(".runLauncher > button").click()
+        disclosure = page.locator(".readinessDisclosure")
+        await expect(disclosure).to_be_visible()
+        if case == "ready-details":
+            await expect(disclosure.locator(".readinessList")).not_to_be_visible()
+            await expect(page.locator(".documentSourceField")).to_be_visible()
+            await disclosure.locator("summary").click()
+            await expect(disclosure.locator(".readinessList")).to_be_visible()
+        else:
+            await expect(disclosure.locator(".readinessList")).to_be_visible()
+            await expect(disclosure).to_contain_text("缺少资源")
+        assert not api.posts
+        return
     await open_form(page, url)
     if case in {"auto-approval", "manual-approval"}:
         choice = page.get_by_role("checkbox", name="自动批准（数据库写入、文档保存）", exact=True)
@@ -439,6 +459,8 @@ async def check(url: str, output: Path | None, selected_case: str | None) -> Non
     if output is not None:
         output.mkdir(parents=True, exist_ok=True)
     cases = {
+        "ready-details": [],
+        "missing-resource-details": [],
         "auto-approval": ["drop"],
         "manual-approval": ["drop"],
         "lost-response": ["drop"],

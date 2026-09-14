@@ -891,6 +891,7 @@ export const EN: UiMessages = {
   workspace: {
     queueTitle: 'Tasks and reports', executionDetail: 'Execution details',
     latestReport: 'Latest execution result', latestReportEmpty: 'This task has no finished executions yet.',
+    reportLoadFailed: 'Could not load the report. Select Reload to try again.',
     queue: { pending: 'Needs attention', running: 'Running', reports: 'Completed and reports' },
     queueEmpty: { pending: 'No tasks need attention.', running: 'No tasks are running.', reports: 'No tasks have completed yet.' },
     selectProjectFirst: 'Select a project in the sidebar first.',
@@ -1238,6 +1239,7 @@ export const EN: UiMessages = {
     viewInterpretationDiff: 'View interpretation differences',
     published: 'Published',
     publishVersion: 'Publish version',
+    reviewDraft: 'Review draft',
     hardGateHint: 'Resolve the failed checks before publishing.',
     toolsUnauthorized: 'Not authorized',
     declaredToolsLine: (tools) => `Tools declared by the skill package: ${tools}. Declarations are recorded only and grant no permissions.`,

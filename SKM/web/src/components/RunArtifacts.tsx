@@ -5,6 +5,7 @@ import { useMessages } from '../i18n'
 import { ModalDialog } from './PageElements'
 import { DOCUMENT_PREVIEW_MAX_BYTES, documentMarkdownHtml, documentPreviewHtml } from '../lib/documentPreview'
 import { ARTIFACT_REQUEST_POLICY, resultArtifactRefs } from '../lib/artifactFeedback'
+import { formatJsonPreview } from '../lib/jsonPreview'
 
 /** 一つの明示 click に固定した回执。別索引や同名 path で上書きしない。 */
 interface DownloadRequest { mode: 'download' | 'preview'; id: number; artifact: RunArtifactRecord; deadline: number }
@@ -82,7 +83,7 @@ function ArtifactPreview({ projectId, runId, request, isCurrent, onClose, onSess
     if (!current.current()) throw new DOMException('Preview is no longer current', 'AbortError')
     return /\.html?$/i.test(request.artifact.path) ? { html: documentPreviewHtml(text), text: null }
       : /\.(md|markdown)$/i.test(request.artifact.path) ? { html: documentMarkdownHtml(text), text: null }
-        : { html: null, text }
+        : { html: null, text: formatJsonPreview(text, request.artifact.path) }
   }, [projectId, runId, request])
   const query = useResourceQuery(String(request.id), loader,
     () => { if (current.current()) onSessionExpired() }, ARTIFACT_REQUEST_POLICY)
@@ -91,7 +92,7 @@ function ArtifactPreview({ projectId, runId, request, isCurrent, onClose, onSess
       : query.failure ? <p className="error" role="alert">{labels.failures[query.failure.key]}</p>
         : query.data?.html ? <iframe className="runReportPreview" title={request.artifact.path}
           sandbox="" referrerPolicy="no-referrer" srcDoc={query.data.html} />
-          : <pre className="rawResultBody">{query.data?.text}</pre>}
+          : <pre className="previewText">{query.data?.text}</pre>}
   </ModalDialog>
 }
 

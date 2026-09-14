@@ -891,6 +891,7 @@ export const JA: UiMessages = {
   workspace: {
     queueTitle: 'タスクとレポート', executionDetail: '実行の詳細',
     latestReport: '最新の実行結果', latestReportEmpty: 'このタスクには完了した実行がありません。',
+    reportLoadFailed: 'レポートを読み込めませんでした。「再読み込み」で再試行してください。',
     queue: { pending: '対応待ち', running: '実行中', reports: '完了・レポート' },
     queueEmpty: { pending: '対応待ちのタスクはありません。', running: '実行中のタスクはありません。', reports: '完了したタスクはありません。' },
     selectProjectFirst: 'まずサイドバーでプロジェクトを選択してください。',
@@ -1238,6 +1239,7 @@ export const JA: UiMessages = {
     viewInterpretationDiff: '解釈の差分を表示',
     published: '公開済み',
     publishVersion: '版を公開',
+    reviewDraft: '下書きを確認',
     hardGateHint: '公開する前に、未合格の検査項目を修正してください。',
     toolsUnauthorized: '未許可',
     declaredToolsLine: (tools) => `スキルパッケージが宣言したツール: ${tools}。宣言は記録のみで、権限は付与されません。`,

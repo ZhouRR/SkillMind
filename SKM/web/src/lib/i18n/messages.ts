@@ -886,6 +886,7 @@ export interface UiMessages {
     queueTitle: string
     latestReport: string
     latestReportEmpty: string
+    reportLoadFailed: string
     executionDetail: string
     queue: { pending: string; running: string; reports: string }
     queueEmpty: { pending: string; running: string; reports: string }
@@ -1214,6 +1215,7 @@ export interface UiMessages {
     viewInterpretationDiff: string
     published: string
     publishVersion: string
+    reviewDraft: string
     hardGateHint: string
     toolsUnauthorized: string
     declaredToolsLine: (tools: string) => string

@@ -78,6 +78,14 @@ describe('authorized Artifact publication index', () => {
 })
 
 describe('original Artifact bytes', () => {
+  it.each(['', TEXT, 'x'.repeat(ARTIFACT_MAX_BYTES)])('verifies bytes without WebCrypto (HTTP deployment, case %#)', async (content) => {
+    vi.stubGlobal('crypto', {})
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(new Response(content, { headers: HEADERS }))))
+    expect(await (await loadRunArtifactContent(PROJECT, RUN, record(content))).text()).toBe(content)
+    await expect(loadRunArtifactContent(PROJECT, RUN, { ...record(content), checksum: `sha256:${'0'.repeat(64)}` }))
+      .rejects.toMatchObject({ code: 'artifact_content_invalid' })
+  })
+
   it.each(['', TEXT, 'x'.repeat(ARTIFACT_MAX_BYTES)])('checks exact bytes and returns a fixed text Blob (case %#)', async (content) => {
     const fetcher = vi.fn().mockResolvedValue(new Response(content, { headers: HEADERS }))
     vi.stubGlobal('fetch', fetcher)

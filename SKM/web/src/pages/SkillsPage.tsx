@@ -520,12 +520,16 @@ export function SkillsPage({ projectId, csrfToken }: {
   }
 
   /** Hard gate 通過済み DRAFT だけを publish API へ送る。 */
-  async function handlePublish(version: SkillVersionRecord): Promise<void> {
-    if (!version.gate_passed) return
-    versionController.current?.abort()
+  async function handlePublish(version: SkillVersionRecord, fromLibrary = false): Promise<void> {
+    if (!version.gate_passed || version.status !== 'DRAFT' || libraryBusyVersionId !== null) return
+    const controllerRef = fromLibrary ? libraryMutationController : versionController
+    controllerRef.current?.abort()
     const controller = new AbortController()
-    versionController.current = controller
-    setVersionState({ status: 'loading' })
+    controllerRef.current = controller
+    if (fromLibrary) {
+      setLibraryActionError(null)
+      setLibraryBusyVersionId(version.skill_version_id)
+    } else setVersionState({ status: 'loading' })
     try {
       const warnings = version.gate_findings
         .filter((finding) => finding.severity === 'warning')
@@ -535,23 +539,30 @@ export function SkillsPage({ projectId, csrfToken }: {
         message: messages.skills.publishWarningsConfirm(warnings),
         confirmLabel: messages.skills.publishVersion,
       })) {
-        setVersionState({ status: 'ready', version })
+        if (!fromLibrary && !controller.signal.aborted) setVersionState({ status: 'ready', version })
         return
       }
-      setVersionState({
-        status: 'ready',
-        version: await publishSkillVersion(
-          version.skill_version_id,
-          warnings,
-          csrfToken,
-          controller.signal,
-        ),
-      })
+      if (controller.signal.aborted) return
+      const published = await publishSkillVersion(
+        version.skill_version_id,
+        warnings,
+        csrfToken,
+        controller.signal,
+      )
+      if (controller.signal.aborted) return
+      // 一覧からの発行は別の取込草稿を置き換えず、同じ版を開いている場合だけ同期する。
+      setVersionState((current) => !fromLibrary || (current.status === 'ready'
+        && current.version.skill_version_id === published.skill_version_id)
+        ? { status: 'ready', version: published } : current)
       await refreshLibrary()
     } catch (error: unknown) {
       if (!controller.signal.aborted) {
-        setVersionState({ status: 'error', message: apiErrorMessage(error, 'Unknown publish API error', messages) })
+        const message = apiErrorMessage(error, 'Unknown publish API error', messages)
+        if (fromLibrary) setLibraryActionError({ versionId: version.skill_version_id, message })
+        else setVersionState({ status: 'error', message })
       }
+    } finally {
+      if (fromLibrary && !controller.signal.aborted) setLibraryBusyVersionId(null)
     }
   }
 
@@ -806,6 +817,7 @@ export function SkillsPage({ projectId, csrfToken }: {
           enablementState={enablementState}
           projectId={projectId}
           busyVersionId={libraryBusyVersionId}
+          onPublish={(version) => void handlePublish(version, true)}
           onDeprecate={(version) => void handleDeprecate(version)}
           onDelete={(version) => void handleDelete(version)}
           onEnable={(version) => void handleEnable(version)}
@@ -845,6 +857,7 @@ export function SkillLibraryPanel({
   enablementState,
   projectId,
   busyVersionId,
+  onPublish,
   onDeprecate,
   onDelete,
   onEnable,
@@ -856,6 +869,7 @@ export function SkillLibraryPanel({
   enablementState: ProjectEnablementState
   projectId: string
   busyVersionId: string | null
+  onPublish: (version: SkillVersionRecord) => void
   onDeprecate: (version: SkillVersionRecord) => void
   onDelete: (version: SkillVersionRecord) => void
   onEnable: (version: SkillVersionRecord) => void
@@ -947,6 +961,12 @@ export function SkillLibraryPanel({
                     </button>
                   )}
                 </div>
+                {version.status === 'DRAFT' && (
+                  <details className="skillLibraryDraft">
+                    <summary>{messages.skills.reviewDraft}</summary>
+                    <SkillVersionDetail version={version} disabled={unavailable} onPublish={() => onPublish(version)} />
+                  </details>
+                )}
               </li>
             )
           })}
@@ -1393,9 +1413,10 @@ function RevisionDiffView({ diff, hasParent }: { diff: Record<string, unknown>; 
 }
 
 /** Frozen Manifest identity、diff、gate finding と publish control を表示する。 */
-export function SkillVersionDetail({ version, onPublish }: {
+export function SkillVersionDetail({ version, onPublish, disabled = false }: {
   version: SkillVersionRecord
   onPublish: () => void
+  disabled?: boolean
 }) {
   const messages = useMessages()
   return (
@@ -1407,7 +1428,7 @@ export function SkillVersionDetail({ version, onPublish }: {
       </DetailDrawer>
       <ul className="diagnostics">{version.gate_findings.map((finding, index) => <li key={`${finding.code}-${index}`}><strong>{finding.severity} · {finding.code}</strong><span>{finding.message}</span></li>)}</ul>
       <details className="rawResult"><summary>{messages.skills.viewInterpretationDiff}</summary><pre>{JSON.stringify(version.interpretation_diff, null, 2)}</pre></details>
-      <button className="primaryButton" disabled={!version.gate_passed || version.status !== 'DRAFT'} type="button" onClick={onPublish}>{version.status === 'PUBLISHED' ? messages.skills.published : messages.skills.publishVersion}</button>
+      <button className="primaryButton" disabled={disabled || !version.gate_passed || version.status !== 'DRAFT'} type="button" onClick={onPublish}>{version.status === 'PUBLISHED' ? messages.skills.published : messages.skills.publishVersion}</button>
       {!version.gate_passed && <p className="hint">{messages.skills.hardGateHint}</p>}
     </section>
   )

@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/json.schema.validate/v1/response.schema.json",
+  "title": "json.schema.validate/v1 response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "provider",
+    "valid",
+    "schema_dialect",
+    "format_assertions",
+    "schema_path",
+    "instance_path",
+    "schema_hash",
+    "instance_hash",
+    "errors",
+    "truncated",
+    "evidence_refs"
+  ],
+  "properties": {
+    "status": {
+      "const": "success"
+    },
+    "provider": {
+      "const": "workspace"
+    },
+    "valid": {
+      "type": "boolean"
+    },
+    "schema_dialect": {
+      "const": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "format_assertions": {
+      "const": true
+    },
+    "schema_path": {
+      "type": "string",
+      "minLength": 7,
+      "maxLength": 4096,
+      "pattern": "^(?:input|workspace|output)/",
+      "not": {
+        "pattern": "(^/|(^|/)\\.\\.(/|$))"
+      }
+    },
+    "instance_path": {
+      "type": "string",
+      "minLength": 7,
+      "maxLength": 4096,
+      "pattern": "^(?:input|workspace|output)/",
+      "not": {
+        "pattern": "(^/|(^|/)\\.\\.(/|$))"
+      }
+    },
+    "schema_hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "instance_hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "errors": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "instance_path",
+          "schema_path",
+          "keyword",
+          "message"
+        ],
+        "properties": {
+          "instance_path": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "schema_path": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "keyword": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      }
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "evidence_refs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^ev_[a-zA-Z0-9_-]+$"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "valid": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "errors": {
+            "maxItems": 0
+          },
+          "truncated": {
+            "const": false
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "errors": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ]
+}

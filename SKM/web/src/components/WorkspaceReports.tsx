@@ -42,6 +42,9 @@ export function WorkspaceReports({ projectId, tasks, actorId, csrfToken, project
     return () => window.clearInterval(timer)
   }, [query.refresh])
   const detail = query.data?.detail
+  const failureMessage = query.failure?.key === 'loadFailed'
+    ? messages.workspace.reportLoadFailed
+    : query.failure ? messages.interactionResponse.failures[query.failure.key] : ''
   return <div className="workspaceReports">
     <div className="reportToolbar">
       <label>{messages.workspace.taskLabel}
@@ -54,7 +57,7 @@ export function WorkspaceReports({ projectId, tasks, actorId, csrfToken, project
         onClick={query.refresh}>{messages.runHistory.retry}</button>
     </div>
     {!taskId ? <EmptyState text={messages.workspace.noModuleTasks} />
-      : !detail && query.failure ? <p className="error" role="alert">{messages.interactionResponse.failures[query.failure.key]}</p>
+      : !detail && query.failure ? <p className="error" role="alert">{failureMessage}</p>
         : !detail && query.pending ? <LoadingSkeleton label={messages.runHistory.loading} rows={3} />
           : !detail ? <EmptyState text={messages.workspace.latestReportEmpty} />
             : <>
@@ -66,7 +69,7 @@ export function WorkspaceReports({ projectId, tasks, actorId, csrfToken, project
                   {messages.workspace.executionDetail}</a>
               </div>
               <RunResultPanel state={query.failure
-                ? { status: 'error', detail, message: messages.interactionResponse.failures[query.failure.key] }
+                ? { status: 'error', detail, message: failureMessage }
                 : { status: 'ready', detail }} actorId={actorId} csrfToken={csrfToken}
                 projectId={projectId} runId={detail.run_id} projectReadOnly={projectReadOnly} reportOnly
                 onSessionExpired={onSessionExpired} />

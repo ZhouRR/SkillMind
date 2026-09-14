@@ -20,6 +20,7 @@ from skillmind.agent.domain import (
     RunLimits,
 )
 from skillmind.agent.evidence import EvidenceDraft
+from skillmind.agent.json_schema_provider import JsonSchemaValidateProvider
 from skillmind.agent.repository_provider import RepositoryReadProvider
 from skillmind.agent.repository_source import (
     RepositoryBindingRef,
@@ -452,6 +453,20 @@ def _workspace_tool_definitions(contracts: ContractStore) -> tuple[ToolDefinitio
     """Run 内の読取と制限付き書込を精確な capability version ごとに登録する。"""
 
     return (
+        ToolDefinition(
+            capability="json.schema.validate/v1",
+            description=("Validate Run-local JSON against a Draft 2020-12 Schema, including "
+                         "format assertions. Read schema_path and instance_path from "
+                         "input/workspace/output only; fragment refs within the schema are "
+                         "allowed, external refs are denied. Returns exact file hashes and "
+                         "bounded JSON Pointer errors. Does not validate business semantics."),
+            request_schema=contracts.load("tools/json.schema.validate/v1/request.schema.json"),
+            response_schema=contracts.load("tools/json.schema.validate/v1/response.schema.json"),
+            error_schema=contracts.load("tools/json.schema.validate/v1/error.schema.json"),
+            providers={"workspace": JsonSchemaValidateProvider()},
+            unbound_provider="workspace",
+            minimum_execution_profile="GUIDED",
+        ),
         ToolDefinition(
             capability="workspace.read/v1",
             description="Read one UTF-8 file from the isolated Run workspace",

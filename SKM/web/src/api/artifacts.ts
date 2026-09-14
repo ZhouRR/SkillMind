@@ -1,3 +1,4 @@
+import { sha256 } from '@noble/hashes/sha2.js'
 import { isApiTimestamp, isNonNilUuid, sameUuid } from '../lib/validation'
 import { API_BASE, ApiProblemError, exactFields, isRecord, requestApiBlob, requestApiJson } from './http'
 
@@ -55,7 +56,9 @@ export async function loadRunArtifactContent(
   if (blob.size !== original.size_bytes) throw invalidContent()
   const bytes = await blob.arrayBuffer()
   signal?.throwIfAborted()
-  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  // HTTP 配備では WebCrypto がないため、同じ SHA-256 をローカル実装で照合する。
+  const digest = globalThis.crypto?.subtle
+    ? new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)) : sha256(new Uint8Array(bytes))
   signal?.throwIfAborted()
   const checksum = `sha256:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`
   if (checksum !== original.checksum) throw invalidContent()

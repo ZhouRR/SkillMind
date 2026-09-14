@@ -1,0 +1,6 @@
+{
+  "status": "error",
+  "code": "external_reference",
+  "message": "JSON validation rejected: external_reference",
+  "retryable": false
+}

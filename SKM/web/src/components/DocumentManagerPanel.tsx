@@ -14,6 +14,7 @@ import { useResourceQuery, type SessionEnded } from '../hooks/useResourceRequest
 import { DOCUMENT_REQUEST_POLICY } from '../lib/documentFeedback'
 import { DOCUMENT_PREVIEW_MAX_BYTES as PREVIEW_MAX_BYTES, documentPreviewHtml, documentMarkdownHtml } from '../lib/documentPreview'
 import { formatByteSize, formatLocalTimestamp } from '../lib/presentation'
+import { formatJsonPreview } from '../lib/jsonPreview'
 import { EmptyState, LoadingSkeleton, ModalDialog, useConfirmDialog } from './PageElements'
 import { DocumentUploadStatus, DocumentUploadRecovery } from './DocumentUploadStatus'
 import { DocumentUploadClosure, DocumentUploadClosureRecovery } from './DocumentUploadClosure'
@@ -527,6 +528,8 @@ export function DocumentPreviewDialog({ preview, projectId, onClose }: {
 }) {
   const messages = useMessages()
   const { document } = preview
+  const text = useMemo(() => preview.status === 'ready'
+    ? formatJsonPreview(preview.content, document.name) : '', [preview, document.name])
   const [showSource, setShowSource] = useState(false)
   const html = useMemo(() => preview.status !== 'ready' ? ''
     : preview.kind === 'markdown' ? documentMarkdownHtml(preview.content)
@@ -554,7 +557,7 @@ export function DocumentPreviewDialog({ preview, projectId, onClose }: {
         className="secondaryButton compactButton" aria-pressed={showSource} onClick={() => setShowSource((current) => !current)}>
         {showSource ? messages.documentsPanel.previewButton : messages.documentsPanel.viewSource}</button>}
       {preview.status === 'ready' && (preview.kind === 'text' || preview.kind === 'markdown' && showSource) && (
-        <pre className="previewText">{preview.content}</pre>
+        <pre className="previewText">{text}</pre>
       )}
       {preview.status === 'ready' && (preview.kind === 'html' || preview.kind === 'markdown' && !showSource) && (
         <iframe className="previewFrame" sandbox="" referrerPolicy="no-referrer" srcDoc={html} title={document.name} />

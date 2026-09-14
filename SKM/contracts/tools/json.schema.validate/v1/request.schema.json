@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/json.schema.validate/v1/request.schema.json",
+  "title": "json.schema.validate/v1 request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_path",
+    "instance_path",
+    "purpose"
+  ],
+  "properties": {
+    "schema_path": {
+      "type": "string",
+      "minLength": 7,
+      "maxLength": 4096,
+      "pattern": "^(?:input|workspace|output)/",
+      "not": {
+        "pattern": "(^/|(^|/)\\.\\.(/|$))"
+      }
+    },
+    "instance_path": {
+      "type": "string",
+      "minLength": 7,
+      "maxLength": 4096,
+      "pattern": "^(?:input|workspace|output)/",
+      "not": {
+        "pattern": "(^/|(^|/)\\.\\.(/|$))"
+      }
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    }
+  }
+}

@@ -40,6 +40,7 @@ _RUN_SCOPED_PLATFORM_CAPABILITIES = frozenset(
         "interaction.request/v1",
         "subagent.dispatch/v1",
         "workspace.read/v1",
+        "json.schema.validate/v1",
         "workspace.search/v1",
         "workspace.write/v1",
         "workspace.write/v2",

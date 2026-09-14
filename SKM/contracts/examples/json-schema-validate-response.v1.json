@@ -1,0 +1,23 @@
+{
+  "status": "success",
+  "provider": "workspace",
+  "valid": false,
+  "schema_dialect": "https://json-schema.org/draft/2020-12/schema",
+  "format_assertions": true,
+  "schema_path": "workspace/schema.json",
+  "instance_path": "output/candidate.json",
+  "schema_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "instance_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "errors": [
+    {
+      "instance_path": "/id",
+      "schema_path": "/properties/id/format",
+      "keyword": "format",
+      "message": "JSON Schema constraint failed: format"
+    }
+  ],
+  "truncated": false,
+  "evidence_refs": [
+    "ev_validation_001"
+  ]
+}

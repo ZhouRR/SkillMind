@@ -95,6 +95,14 @@ Skill 可推荐等级，system ADMIN 设置项目上限，发起人只能收窄�
 - cwd 不是隔离；mount、路径、sandbox、Gateway/scope 共同拒绝 path/symlink 逃逸。
 - Shell、sandbox command、通用网络未开放；须先定义威胁模型、允许命令/镜像/限额及注册网络 Provider，禁止暴露 Docker socket、Secret 和无限制网络。
 
+### 任务内 JSON Schema 校验
+
+`json.schema.validate/v1` 是需由 Manifest 声明、权限快照允许的只读 workspace Tool，无外部绑定。它仅从当前 Run 的 `input/`、`workspace/`、`output/` 读取两份 UTF-8 JSON；输入目录沿用可信回执校验，其他目录沿用有界、拒绝 symlink 的安全读取。每份文件上限 1 MiB，JSON 深度上限 64、节点上限 100000。
+
+支持 Draft 2020-12（未声明时采用此版本）及已安装的 `format` 断言；未支持的方言/format 拒绝，不按通过处理。`$ref` / `$dynamicRef` 只允许同文档 fragment；Registry 禁止取得外部资源，不能读取其他任务、主机文件或网络。固定验证进程只接收已读取的正文，无用户代码入口，不继承应用 Secret；CPU 3 秒、内存 256 MiB、墙钟 8 秒，超限或取消必须停止并回收后才返回。
+
+返回两份原字节 hash、Schema 方言、`valid`、最多 50 项 JSON Pointer 错误及截断标志，并生成 Evidence；诊断不回显实例值。JSON 解析/Schema 无效、能力不支持、超限属于未完成验证；Schema 不适合实例则返回 `valid=false`。`valid=true` 仅证明该字节版本通过 Schema，业务语义、正式发布、Runner 能力和实际执行仍需各自检查。
+
 ### PreToolUse 判定
 
 hook、Gateway、binding/Provider 和 Effect Worker 分担检查：注册 capability 与 Skill/Project/Run 权限、binding/scope/revision、参数与敏感字段、局部限额、apply 的批准。Run 累计限额仍待[共享预算](run-budgets.md)。

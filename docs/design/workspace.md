@@ -64,7 +64,7 @@ Workspace：新建执行、待处理、执行中、已完成与报告
 
 待处理/执行中按服务端状态筛选并分页，不能过滤首页冒充全量。已完成与报告改为当前模块的任务下拉选择，按精确 Task ID 在服务端筛选最新终态 Run（创建时间、ID 倒序），直接展示报告；没有结束执行时显示空态，最新失败或取消且无结果时明确显示该次状态，不回退展示旧成功报告，不推测测试数量或业务通过率。切换任务或项目立即隔离旧请求和内容。工作列表打开 Workspace 报告，历史列表在 `#/history?project=…&run=…` 打开详情，刷新保留该归属。两个入口共用执行、答复、批准和评价的原身份/请求状态实现。
 
-Workspace 默认不展示 Run ID、连接协议、工具和审计记录；答复、批准、未知效果和限制仍在报告附近直接呈现。长报告使用宽阅读区；Outcome 的完整 HTML 报告直接静态渲染，保留内嵌 CSS 和 SVG，旧 Markdown 继续兼容，原 Result 不改写。两者复用文档 sanitizer 和无脚本 sandbox，禁止外部资源及导航。公开 Markdown/HTML 附件经原 Run 索引、原 hash/大小校验后，复用文档 sanitizer 和无脚本 sandbox 预览。未公开或超出预览限额的附件不推测内容，保留下载/不可用状态。源码见 [WorkspacePage](../../SKM/web/src/pages/WorkspacePage.tsx)。
+Workspace 默认不展示 Run ID、连接协议、工具和审计记录；答复、批准、未知效果和限制仍在报告附近直接呈现。长报告使用宽阅读区；Outcome 的完整 HTML 报告直接静态渲染，保留内嵌 CSS 和 SVG，旧 Markdown 继续兼容，原 Result 不改写。两者复用文档 sanitizer 和无脚本 sandbox，禁止外部资源及导航。公开 Markdown/HTML/文本附件经原 Run 索引、原 hash/大小校验后，复用文档 sanitizer 和无脚本 sandbox 预览。JSON 预览仅格式化空白，保留数值精度、重复字段和原字符串；不合法或过深内容按原文显示，下载仍使用原字节。未公开或超出预览限额的附件不推测内容，保留下载/不可用状态。源码见 [WorkspacePage](../../SKM/web/src/pages/WorkspacePage.tsx)。
 
 ## 渲染模式
 
