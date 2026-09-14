@@ -18,6 +18,8 @@ export interface AuthSessionRecord {
   deferred_features_enabled?: boolean
   database_writes_enabled?: boolean
   document_writes_enabled?: boolean
+  scheduling_enabled?: boolean
+  git_writes_enabled?: boolean
 }
 
 /** Password login form の入力。 */
@@ -88,6 +90,8 @@ function parseSession(value: unknown): AuthSessionRecord {
     || ('deferred_features_enabled' in value && typeof value.deferred_features_enabled !== 'boolean')
     || ('database_writes_enabled' in value && typeof value.database_writes_enabled !== 'boolean')
     || ('document_writes_enabled' in value && typeof value.document_writes_enabled !== 'boolean')
+    || ('scheduling_enabled' in value && typeof value.scheduling_enabled !== 'boolean')
+    || ('git_writes_enabled' in value && typeof value.git_writes_enabled !== 'boolean')
     || !hasStrings(value.user, [
       'user_id', 'organization_id', 'email', 'display_name', 'system_role',
     ])

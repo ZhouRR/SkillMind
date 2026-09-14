@@ -105,6 +105,15 @@ describe('independent schedule queries', () => {
     expect(current.record?.row_version).toBe(7)
     expect(current.canWrite).toBe(true)
   })
+  it('invalidates status management synchronously while original details refresh', async () => {
+    let current = await settle()
+    current.select(scheduleFixture().schedule_id); current = await settle()
+    expect(current.canManage()).toBe(true)
+    current.refreshDetail()
+    expect(current.canManage()).toBe(false)
+    current = await settle()
+    expect(current.canManage()).toBe(true)
+  })
   it('uses server filters and total rather than filtering the loaded first page', async () => {
     let current = await settle()
     current.search('literal_%', 'ARCHIVED'); current = await settle()

@@ -116,12 +116,12 @@ describe('buildRows', () => {
     expect(rows[0]?.schedules).toHaveLength(1)
   })
 
-  it('hides archived schedules from the task row', () => {
+  it('keeps archived schedules available to the status filter', () => {
     // 归档済みは「もう走らない」ので、行の「定时执行」件数に混ぜない。
     const tasks = [task()]
     const rows = buildRows(tasks, { tasks, schedules: [schedule({ status: 'ARCHIVED' })] })
 
-    expect(rows[0]?.schedules).toHaveLength(0)
+    expect(rows[0]?.schedules).toHaveLength(1)
   })
 })
 

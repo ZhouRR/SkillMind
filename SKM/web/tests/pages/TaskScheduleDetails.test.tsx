@@ -5,8 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSchedules } from '../../src/hooks/useSchedules'
 import { LanguageProvider } from '../../src/i18n'
 import { MESSAGES, type UiLanguage } from '../../src/lib/i18n/messages'
-import { ScheduleDetails, SchedulesPage } from '../../src/pages/SchedulesPage'
-import { DEMO_PROJECT, demoUser } from '../fixtures'
+import { ScheduleDetails, TaskScheduleDetails } from '../../src/components/TaskScheduleDetails'
+import { DEMO_PROJECT } from '../fixtures'
 import { documentTask } from '../fixtures/documentTask'
 import { scheduleFixture } from '../fixtures/schedule'
 import { scheduleActivityFixture } from '../fixtures/scheduleActivity'
@@ -23,7 +23,7 @@ function state(overrides: Partial<ManagerState> = {}): ManagerState {
   return {
     filter: { q: '', status: '', offset: 100, revision: 0 }, selection: { id: record.schedule_id, revision: 1 }, limit: 25,
     list: query({ schedules: [record], total: 101, limit: 25, offset: 100 }), catalog: query({ tasks: [documentTask()] }),
-    detail: query(record), activity: query(scheduleActivityFixture()), record, task: documentTask(), taskEligibility: 'ready', readDenied: null, canWrite: true,
+    detail: query(record), activity: query(scheduleActivityFixture()), record, task: documentTask(), taskEligibility: 'ready', readDenied: null, canWrite: true, canManage: () => true, canManageRecord: true,
     canEdit: vi.fn(() => true), select: vi.fn(), search: vi.fn(), turnPage: vi.fn(), refreshDetail: vi.fn(), refreshFacts: vi.fn(), refreshCatalog: vi.fn(), ...overrides,
   }
 }
@@ -33,21 +33,16 @@ function render(node: ReactNode, language: UiLanguage = 'zh'): string {
 }
 /** actor/Project は synthetic fixture の現在所有者だけを渡す。 */
 function page(project = DEMO_PROJECT) {
-  return <SchedulesPage projectId={DEMO_PROJECT.project_id} currentProject={project} actorId={demoUser().user_id} csrfToken="synthetic-csrf" />
+  return <TaskScheduleDetails scheduleId={scheduleFixture().schedule_id} schedulingEnabled onSessionEnded={() => {}} onChanged={() => {}} onBusyChange={() => {}} projectId={DEMO_PROJECT.project_id} currentProject={project} csrfToken="synthetic-csrf" />
 }
 beforeEach(() => { manager.state = state() })
 
 describe('project-wide schedule management', () => {
-  it.each(['zh', 'ja', 'en'] as const)('shows full server total and the last page in %s', (language) => {
+  it.each(['zh', 'ja', 'en'] as const)('shows original details without a second directory in %s', (language) => {
     const html = render(page(), language)
-    const labels = MESSAGES[language].scheduleManager
-    expect(html).toContain(labels.total(101))
-    expect(html).toContain(labels.page(100, 25, 101))
-    expect(html).not.toContain(labels.scopeHint)
-    expect(html).toContain('data-schedule-next="true" disabled=""')
-    expect(html).toContain('data-schedule-row=')
-    expect(html).toContain(`class="scheduleRows" tabindex="0" role="list" aria-label="${labels.listTitle}"`)
-    expect(html).toContain('value="ARCHIVED"')
+    expect(html).toContain(scheduleFixture().name)
+    expect(html).toContain('data-schedule-edit')
+    expect(html).not.toContain('data-schedule-row=')
     expect(html).not.toContain('synthetic-csrf')
   })
   it('keeps archived rules and missing exact tasks readable', () => {
@@ -75,7 +70,7 @@ describe('project-wide schedule management', () => {
   })
   it('marks an archived Project read-only without hiding its list', () => {
     const html = render(page({ ...DEMO_PROJECT, status: 'ARCHIVED' }))
-    expect(html).toContain('data-schedule-row=')
+    expect(html).toContain(scheduleFixture().name)
     expect(html).toContain(MESSAGES.zh.scheduleManager.readOnlyProject)
     expect(html).toContain('data-schedule-edit="true" disabled=""')
   })

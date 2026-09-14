@@ -22,7 +22,10 @@ from skillmind.db.models import (
     ToolCall,
 )
 from skillmind.effects.catalog import EFFECT_CAPABILITIES
+from skillmind.effects.domain import EffectLeaseValidationError
 from skillmind.effects.outcomes import effect_requires_reconciliation
+from skillmind.effects.repository_write import LEGACY_GIT_WRITE_PROVIDER_VERSION
+from skillmind.effects.run_approval import has_actor_approval
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,7 +104,7 @@ class PostgresEffectSummaryLookup:
         after = aliased(Evidence, name="effect_after")
         statement = (
             select(ChangeProposal, ChangeApproval, EffectExecution, ToolCall, before, after,
-                   Run.project_id)
+                   Run.project_id, Run)
             .select_from(ChangeProposal)
             .join(Run, Run.id == ChangeProposal.run_id)
             .outerjoin(ChangeApproval, ChangeApproval.proposal_id == ChangeProposal.id)
@@ -128,7 +131,7 @@ def _matches_claim(
     run_id: UUID, claim: EffectSummaryClaim, proposal: ChangeProposal,
     approval: ChangeApproval | None, execution: EffectExecution | None,
     tool: ToolCall | None, before: Evidence | None, after: Evidence | None,
-    project_id: UUID,
+    project_id: UUID, run: Run | None = None,
 ) -> bool:
     """状態文字列だけでなく原批准と実行の結線を検査し、遠端の現在値は主張しない。"""
 
@@ -156,6 +159,15 @@ def _matches_claim(
     if approval.source == "USER":
         if not _identity(approval.actor_id) or approval.preauthorization_id is not None:
             return False
+    elif approval.source == "RUN_START":
+        if run is None or execution is None:
+            return False
+        try:
+            if not has_actor_approval(run, approval, proposal.capability_version,
+                                      provider=execution.provider):
+                return False
+        except EffectLeaseValidationError:
+            return False
     elif approval.source == "PREAUTHORIZATION":
         if (not capability.preauthorizable or proposal.risk_level != "LOW"
                 or approval.actor_id is not None or not _identity(approval.preauthorization_id)):
@@ -173,7 +185,9 @@ def _matches_claim(
         or execution.approval_id != approval.id
         or execution.idempotency_key != proposal.idempotency_key
         or execution.request_fingerprint != proposal.request_fingerprint
-        or capability.provider_versions.get(execution.provider) != execution.provider_version
+        or (capability.provider_versions.get(execution.provider) != execution.provider_version
+            and not (execution.provider == "git"
+                     and execution.provider_version == LEGACY_GIT_WRITE_PROVIDER_VERSION))
     ):
         return False
     expected_execution = {

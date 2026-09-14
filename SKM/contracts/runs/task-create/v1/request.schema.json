@@ -4,12 +4,29 @@
   "title": "Create published task Run request v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["skill_version_id", "task_key", "input", "sources"],
+  "required": [
+    "skill_version_id",
+    "task_key",
+    "input",
+    "sources"
+  ],
   "properties": {
-    "auto_approve": { "type": "boolean", "default": false, "description": "Freeze Run-start consent for database writes and document saves within the existing binding scope. Omitted means manual approval; existing Runs and scheduled execution remain unchanged." },
-    "skill_version_id": { "type": "string", "format": "uuid" },
-    "task_key": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
-    "input": { "type": "object" },
+    "auto_approve": {
+      "type": "boolean",
+      "default": false,
+      "description": "Freeze Run-start consent for database writes and document saves within the existing binding scope. Omitted means manual approval; existing Runs and scheduled execution remain unchanged."
+    },
+    "skill_version_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "task_key": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]*$"
+    },
+    "input": {
+      "type": "object"
+    },
     "sources": {
       "type": "object",
       "additionalProperties": {
@@ -42,6 +59,35 @@
           }
         ]
       }
+    },
+    "auto_approve_git": {
+      "type": "boolean",
+      "default": false,
+      "description": "Include Git commits in Run-start consent. Requires auto_approve=true; omitted preserves DB/document-only consent."
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "auto_approve_git"
+        ],
+        "properties": {
+          "auto_approve_git": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "auto_approve"
+        ],
+        "properties": {
+          "auto_approve": {
+            "const": true
+          }
+        }
+      }
+    }
+  ]
 }

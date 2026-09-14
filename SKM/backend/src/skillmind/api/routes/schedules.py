@@ -27,7 +27,7 @@ from skillmind.api.problems import (
     ProblemException,
     problem_openapi_response,
 )
-from skillmind.api.release_features import require_deferred_features
+from skillmind.api.release_features import require_scheduling
 from skillmind.auth.sessions import CsrfRejectedError, UnauthorizedSessionError
 from skillmind.projects.domain import ProjectArchivedError, ProjectNotFoundError
 from skillmind.schedules import (
@@ -333,7 +333,7 @@ async def create_schedule(
 ) -> ScheduleResponse:
     """定義・task・資源選択をすべて検証してから schedule を作成する。"""
 
-    require_deferred_features(request)
+    require_scheduling(request)
     service: ScheduleService = request.app.state.schedule_service
     definition = _definition(body.definition)
     try:
@@ -408,7 +408,7 @@ async def update_schedule(
 ) -> ScheduleResponse:
     """定義と凍結入力を差し替える。楽観ロックの不一致は 409 にする。"""
 
-    require_deferred_features(request)
+    require_scheduling(request)
     service: ScheduleService = request.app.state.schedule_service
     definition = _definition(body.definition)
     try:
@@ -508,7 +508,7 @@ async def change_schedule_status(
     """暂停・恢复・归档を状態機経由で適用する。"""
 
     if body.status is ScheduleStatus.ACTIVE:
-        require_deferred_features(request)
+        require_scheduling(request)
     service: ScheduleService = request.app.state.schedule_service
     try:
         record = await service.change_status(

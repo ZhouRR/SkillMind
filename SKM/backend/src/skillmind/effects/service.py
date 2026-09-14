@@ -148,7 +148,7 @@ class EffectService:
         """登録済み段階認可だけを許し、同じ批准・binding・原凭据を外部 I/O 前に復験する。"""
 
         if not self._execution_features.effect_enabled(
-            claimed.capability_version, claimed.operation
+            claimed.capability_version, claimed.operation, provider=claimed.provider
         ):
             raise PermissionError("Effect capability is not enabled for staged execution")
         try:

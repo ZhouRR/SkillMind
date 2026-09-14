@@ -81,6 +81,8 @@ class SessionResponse(BaseModel):
     deferred_features_enabled: bool = False
     database_writes_enabled: bool = False
     document_writes_enabled: bool = False
+    scheduling_enabled: bool = False
+    git_writes_enabled: bool = False
 
 
 @router.get(
@@ -166,7 +168,8 @@ async def login(
     response.delete_cookie(LOGIN_CSRF_COOKIE, path="/")
     return _session_response(
         result, settings.deferred_features_enabled, settings.database_writes_enabled,
-        settings.document_writes_enabled,
+        settings.document_writes_enabled, settings.git_writes_enabled,
+        settings.scheduling_enabled or settings.deferred_features_enabled,
     )
 
 
@@ -183,7 +186,8 @@ async def current_session(request: Request) -> SessionResponse:
         raise authentication_required_problem() from error
     return _session_response(
         result, settings.deferred_features_enabled, settings.database_writes_enabled,
-        settings.document_writes_enabled,
+        settings.document_writes_enabled, settings.git_writes_enabled,
+        settings.scheduling_enabled or settings.deferred_features_enabled,
     )
 
 
@@ -217,6 +221,8 @@ def _session_response(
     deferred_features_enabled: bool,
     database_writes_enabled: bool = False,
     document_writes_enabled: bool = False,
+    git_writes_enabled: bool = False,
+    scheduling_enabled: bool = False,
 ) -> SessionResponse:
     """Domain result を field allowlist の公開 response へ変換する。"""
 
@@ -233,4 +239,6 @@ def _session_response(
         deferred_features_enabled=deferred_features_enabled,
         database_writes_enabled=database_writes_enabled,
         document_writes_enabled=document_writes_enabled,
+        git_writes_enabled=git_writes_enabled,
+        scheduling_enabled=scheduling_enabled,
     )

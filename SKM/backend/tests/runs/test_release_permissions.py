@@ -6,7 +6,6 @@ from copy import deepcopy
 from dataclasses import replace
 
 import pytest
-
 from skillmind.db.models import Run
 from skillmind.runs.domain import TaskSourceSelectionError
 from skillmind.runs.service import RunService
@@ -53,3 +52,26 @@ async def test_switch_to_readonly_does_not_rewrite_original_replay():
     result = await db.call()
     assert result is not None and result.idempotent_replay
     assert row_values(db.winner) == original
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('enabled', [False, True])
+async def test_scheduled_creation_has_an_independent_deployment_limit(enabled):
+    """調度の認領から作成まで単独開関を通し、後置 tool の権限は増やさない。"""
+    from tests.schedules.task_creation_harness import ScheduledTaskCreationHarness
+
+    db = ScheduledTaskCreationHarness()
+    db.service = RunService(db.session_factory, deferred_features_enabled=False,
+                            scheduling_enabled=enabled)
+    if not enabled:
+        with pytest.raises(TaskSourceSelectionError, match='Scheduled execution is disabled'):
+            await db.call()
+        assert not any(isinstance(row, Run) for row in db.committed)
+    else:
+        await db.call()
+        run = next(row for row in db.committed if isinstance(row, Run))
+        assert db.occurrence.run_id == run.id
+        assert db.occurrence.status == 'SETTLED'
+        assert set(run.permission_snapshot_json['allowed_capabilities']) == {
+            'repository.read/v1', 'interaction.request/v1',
+        }

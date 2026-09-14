@@ -62,7 +62,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=backend/src python3 scripts/probe_postgres_
 
 Backend 依存を外置した環境ではその path も PYTHONPATH に加える。実 PostgreSQL の検証は前節の承認済み server/account で別途行う。
 
-同じ probe に `--rv-reviewer` を付けると、[RV 業務 DDL](../../SKM/scripts/sql/rv-reviewer-schema.sql) と[列権限](../../SKM/scripts/sql/rv-reviewer-grants.sql)もメモリ DB に適用する。空 table の列/複合主キー/生成列を本番の構造 query で取得し、本番の単行 writer で RUNNING 登録、文書/成果、PASS/FAIL、RV 後の異常と NO_TARGETS、原回执を確認し、結果/ID の不一致や権限外変更を拒否する。MinIO、Excel 変換、model、実会話は使用しない。
+`--rv-reviewer` は別途用意した業務 DDL に依存する補助 probe。現 checkout に `scripts/sql/rv-reviewer-schema.sql` と `rv-reviewer-grants.sql` は含まれないため、標準検証の必須手順には使わない。通常の PostgreSQL 回执 probe と、対象 Skill/プロジェクトの実際の業務 Schema 検証を区別する。
 
 実環境の初期化は対象と独立 owner が確定してから行う。`psql --set=ON_ERROR_STOP=on` で業務 DDL、既存の回执 DDL、列権限の順に適用し、最後の script には `--set=rv_writer=<既存実行 role>` を指定する。接続情報は既存の安全な psql 設定で渡し、password を command に書かない。script は login を作らず、既存 schema では停止する。列権限の付与は既存の強い権限を除去しないため、専用の非 owner role を使う。リソースには三つの `test_automation` table、INSERT/UPDATE と明示列を設定する。列名は権限 script の INSERT 欄を `schema.table.column` にしたものとし、generated の `spec_status` や server 既定の成果作成時刻を含めない。成果表 UPDATE は DB 権限で拒否する。
 

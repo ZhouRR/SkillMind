@@ -52,8 +52,10 @@ class Settings(BaseSettings):
     worker_dispatch_enabled: bool = False
     # 後置の write/調度/子、RV の DB write、文書庫 CREATE を独立して明示有効化する。
     deferred_features_enabled: bool = False
+    scheduling_enabled: bool = False
     database_writes_enabled: bool = False
     document_writes_enabled: bool = False
+    git_writes_enabled: bool = False
     outbox_batch_size: int = Field(default=20, ge=1, le=100)
     run_lease_seconds: int = Field(default=60, ge=30, le=300)
     run_max_attempts: int = Field(default=3, ge=1, le=10)

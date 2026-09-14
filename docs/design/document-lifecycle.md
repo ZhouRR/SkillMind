@@ -129,7 +129,7 @@ S3 同一次 GET 最多读取声明 size + 1 bytes，不先 stat；连接/读取
 
 附件带 no-store、nosniff、安全 Content-Disposition；合法 MIME 保留，非法降 octet-stream。文件名用单段 ASCII fallback + UTF-8 filename*，不拼原引号/控制字符，不改 DB 原名。
 
-Web 将 txt/json/jsonl/csv/tsv/log/yaml/yml/xml 按原文预览，md/markdown 与 htm/html 使用各自的静态查看器。最多 1,000,000 实际 bytes，只接受 200，错误正文也有界。列表 size 仅作按钮提示，Content-Length 不可信；超限停止并提示下载，不显示截断片段，UTF-8 错误明确拒绝。
+Web 将 txt/jsonl/csv/tsv/log/yaml/yml/xml 按原文预览；JSON 仅格式化空白，保留数值精度、重复键与原字符串，非法或过深时回退原文，下载不改原字节，md/markdown 与 htm/html 使用各自的静态查看器。最多 1,000,000 实际 bytes，只接受 200，错误正文也有界。列表 size 仅作按钮提示，Content-Length 不可信；超限停止并提示下载，不显示截断片段，UTF-8 错误明确拒绝。
 
 文本保留原文；Markdown 用 Marked 解析标题、列表、表格、代码块等结构，默认显示渲染结果并可切换原文。解析结果与 HTML 共用以下静态隔离规则。HTML 在无浏览上下文的独立 document 解析，重建静态 HTML/SVG，保留内嵌 CSS、class/id、布局属性、渐变/滤镜和 SVG 同文档引用，不逐条改写 CSS。脚本、事件、表单/frame、SVG 动画/foreignObject、外部资源属性和页面跳转不开放；图片留 alt、链接留文本。超过 20,000 节点安全显示原文，不递归截断。
 

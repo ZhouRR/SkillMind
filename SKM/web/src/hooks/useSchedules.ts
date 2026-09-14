@@ -8,12 +8,13 @@ import { useResourceQuery, type SessionEnded } from './useResourceRequest'
 interface ScheduleFilter { q: string; status: ScheduleStatus | ''; offset: number; revision: number }
 
 /** 一覧・task catalog・精確詳細・在途を分離し、片方の失敗で他方の履歴を消さない。 */
-export function useSchedules(projectId: string, onSessionEnded: SessionEnded, enabled = true) {
+export function useSchedules(projectId: string, onSessionEnded: SessionEnded, enabled = true, scheduleId?: string) {
   const [filter, setFilter] = useState<ScheduleFilter>({ q: '', status: '', offset: 0, revision: 0 })
-  const [selection, setSelection] = useState({ id: '', revision: 0 })
+  const [selection, setSelection] = useState({ id: scheduleId ?? '', revision: 0 })
   const [readDenied, setReadDenied] = useState<ScheduleReadFailure | null>(null)
   const limit = 25
   const writableFacts = useRef(false)
+  const manageableFacts = useRef(false)
   const denied = useRef<{ failure: ScheduleReadFailure | null; generation: number }>({ failure: null, generation: 0 })
   const revalidation = useRef<{ generation: number } | null>(null)
   /** 同じ Project の四つの読取は、拒否だけを共有し古い成功で権限を復活させない。 */
@@ -66,7 +67,7 @@ export function useSchedules(projectId: string, onSessionEnded: SessionEnded, en
       throw error
     }
   }, [projectId, selection, rejectAccess])
-  const list = useResourceQuery(`${projectId}:list:${filter.revision}`, listLoader, onSessionEnded, SCHEDULE_READ_POLICY, enabled)
+  const list = useResourceQuery(`${projectId}:list:${filter.revision}`, listLoader, onSessionEnded, SCHEDULE_READ_POLICY, enabled && scheduleId === undefined)
   const catalog = useResourceQuery(`${projectId}:catalog`, catalogLoader, onSessionEnded, SCHEDULE_READ_POLICY, enabled)
   const detail = useResourceQuery(`${projectId}:detail:${selection.id}:${selection.revision}`, detailLoader, onSessionEnded,
     SCHEDULE_READ_POLICY, enabled && Boolean(selection.id))
@@ -86,10 +87,13 @@ export function useSchedules(projectId: string, onSessionEnded: SessionEnded, en
   }, [list.pending, list.failure, list.data, filter.offset])
 
   /** 旧 callback の編集開始も、同期的に失効済みの読取資格では受理しない。 */
+  manageableFacts.current = enabled && !detail.pending && !detail.failure && Boolean(record)
+  const canManage = useCallback(() => manageableFacts.current && !denied.current.failure, [])
   const canEdit = useCallback(() => writableFacts.current && !denied.current.failure, [])
   /** 行選択は一覧の古い値を編集に渡さず、原 ID の新しい GET を必ず要求する。 */
   const select = useCallback((id: string) => {
     writableFacts.current = false
+    manageableFacts.current = false
     revalidation.current = null
     // render 前に選択が A→B→A と戻っても、旧読取の 401 を新 owner に渡さない。
     detail.refresh()
@@ -99,12 +103,14 @@ export function useSchedules(projectId: string, onSessionEnded: SessionEnded, en
   /** 詳細の再照会開始時点で、旧画面 callback による編集開始を閉じる。 */
   const refreshDetail = useCallback(() => {
     writableFacts.current = false
+    manageableFacts.current = false
     revalidation.current = { generation: denied.current.generation }
     detail.refresh()
   }, [detail.refresh])
   /** 書込回执による自動再読取は、人工の再認可意思を作成も再利用もしない。 */
   const refreshFacts = useCallback(() => {
     writableFacts.current = false
+    manageableFacts.current = false
     revalidation.current = null
     detail.refresh()
   }, [detail.refresh])
@@ -119,6 +125,7 @@ export function useSchedules(projectId: string, onSessionEnded: SessionEnded, en
     setFilter((current) => ({ ...current, offset, revision: current.revision + 1 }))
   }, [])
   return { filter, selection, limit, list, catalog, detail, activity, record, task, taskEligibility, readDenied,
+    canManage, canManageRecord: manageableFacts.current && readDenied === null,
     canWrite: writableFacts.current && readDenied === null,
     canEdit, select, search, turnPage, refreshDetail, refreshFacts, refreshCatalog }
 }

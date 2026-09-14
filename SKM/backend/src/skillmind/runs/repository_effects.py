@@ -68,6 +68,7 @@ from skillmind.effects.domain import (
     StoredChangeProposal,
     StoredEffectExecution,
 )
+from skillmind.effects.git_receipt import GitCommitCommand, git_effect_commit_message
 from skillmind.effects.outcomes import (
     UNKNOWN_EFFECT_CODE,
     effect_failure_record,
@@ -152,6 +153,10 @@ class EffectOperationsMixin(_RunRepositoryBase):
             run=run,
             draft=draft,
         )
+        if draft.capability_version == "repository.write/v1":
+            self._execution_features.require_effect(
+                draft.capability_version, draft.operation, provider=binding.provider
+            )
         await self._validate_checkpoint_refs(run.id, draft.checkpoint)
         self._validate_claimed_lease(attempt, claimed, now=datetime.now(UTC))
         await self._validate_evidence_refs(run.id, draft.evidence_refs)
@@ -206,7 +211,9 @@ class EffectOperationsMixin(_RunRepositoryBase):
             if capability.preauthorizable and binding.integration_id is not None
             else None
         )
-        auto_actor = run_auto_approval_actor(run, draft.capability_version)
+        auto_actor = run_auto_approval_actor(
+            run, draft.capability_version, provider=binding.provider
+        )
         status = (
             ChangeProposalStatus.APPROVED
             if preauthorization is not None or auto_actor is not None
@@ -528,7 +535,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
             )
         ).one()
         if command.decision is ApprovalDecision.APPROVED:
-            self._execution_features.require_effect(proposal.capability_version, proposal.operation)
+            await self._require_proposal_feature(proposal)
         fingerprint = sha256_hex(
             canonical_json(
                 {
@@ -942,7 +949,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
             EffectExecutionStatus.VERIFICATION_FAILED.value,
         }:
             return None
-        self._execution_features.require_effect(proposal.capability_version, proposal.operation)
+        await self._require_proposal_feature(proposal)
         now = datetime.now(UTC)
         if (
             execution.status in {
@@ -993,7 +1000,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
         ):
             raise EffectLeaseValidationError("Effect approval does not match Proposal version")
         if approval.source == ApprovalSource.RUN_START.value and not has_actor_approval(
-            run, approval, proposal.capability_version
+            run, approval, proposal.capability_version, provider=execution.provider
         ):
             raise EffectLeaseValidationError("Run start approval does not match its frozen consent")
         await self._validate_proposal_row(proposal, run=run)
@@ -1156,7 +1163,9 @@ class EffectOperationsMixin(_RunRepositoryBase):
     ) -> EffectStepAuthority:
         """遠端段階の直前に、現在 actor・元批准・snapshot・lease を同じ TX で復験する。"""
 
-        self._execution_features.require_effect(claimed.capability_version, claimed.operation)
+        self._execution_features.require_effect(
+            claimed.capability_version, claimed.operation, provider=claimed.provider
+        )
         # 永続批准の Worker は browser credential を再作成しない。現在の発起人と承認者の
         # 有効性を要求し、Org→User→Project→Run の順序で管理操作と整合させる。
         observed_run = await self._session.get(Run, claimed.run_id)
@@ -1170,7 +1179,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
             raise EffectLeaseValidationError("Effect initiating actor is unavailable") from error
         approval_actor_id = observed_approval.actor_id
         if approval_actor_id is None or not has_actor_approval(
-            observed_run, observed_approval, claimed.capability_version
+            observed_run, observed_approval, claimed.capability_version, provider=claimed.provider
         ):
             raise EffectLeaseValidationError("Effect requires an exact user approval")
         observed_user = await self._session.get(User, actor_id)
@@ -1242,7 +1251,8 @@ class EffectOperationsMixin(_RunRepositoryBase):
             or approval.run_id != run.id
             or approval.proposal_id != proposal.id
             or approval.actor_id != approval_actor_id
-            or not has_actor_approval(run, approval, proposal.capability_version)
+            or not has_actor_approval(run, approval, proposal.capability_version,
+                                      provider=execution.provider)
             or approval.decision != ApprovalDecision.APPROVED.value
             or approval.proposal_version != proposal.version
             or not hmac.compare_digest(approval.proposal_checksum, proposal.checksum)
@@ -1347,7 +1357,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
         if type(lease_seconds) is not int or lease_seconds <= 0:
             raise ValueError("Effect lease duration must be positive")
         capability = resolve_effect_capability(claimed.capability_version)
-        if not capability.staged_authorization:
+        if not capability.supports_supervision(claimed.provider):
             raise ValueError("Effect Provider does not support staged supervision")
         await self.authorize_effect_step(claimed, provider_version=provider_version)
         execution = await self._session.get(EffectExecution, claimed.effect_execution_id)
@@ -1393,13 +1403,14 @@ class EffectOperationsMixin(_RunRepositoryBase):
             and execution.provider == "project-library"
             and execution.provider_version == LEGACY_DOCUMENT_WRITE_PROVIDER_VERSION
         )
-        if (not capability.staged_authorization
+        if (not capability.supports_supervision(execution.provider)
             or (capability.provider_versions.get(execution.provider) != execution.provider_version
                 and not legacy_document)
             or execution.idempotency_key != proposal.idempotency_key
             or execution.request_fingerprint != proposal.request_fingerprint
             or approval is None or approval.run_id != run.id or approval.proposal_id != proposal.id
-            or not has_actor_approval(run, approval, proposal.capability_version)
+            or not has_actor_approval(run, approval, proposal.capability_version,
+                                      provider=execution.provider)
             or approval.decision != ApprovalDecision.APPROVED.value
             or approval.proposal_version != proposal.version
             or approval.proposal_checksum != proposal.checksum):
@@ -1429,6 +1440,23 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 proposal.id, binding.id, proposal.checksum,
                 execution.provider, execution.provider_version,
                 command, canonical_json(integration.config_json), integration.secret_reference_id,
+            )
+        if proposal.capability_version == "repository.write/v1" and execution.provider == "git":
+            integration = await self._session.get(Integration, proposal.integration_id)
+            if integration is None:
+                raise ValueError("Original Git Integration is unavailable")
+            git_command = GitCommitCommand(
+                execution.id, project_id, run_id, integration.id,
+                payload["target_branch"], payload["base_revision"],
+                git_effect_commit_message(
+                    display=proposal.target_json.get("display"), proposal_ref=proposal.proposal_ref,
+                    effect_id=execution.id, fingerprint=execution.request_fingerprint,
+                ), tuple(sorted(payload["files"].items())),
+            )
+            return EffectReconciliationTarget(
+                proposal.id, binding.id, proposal.checksum,
+                execution.provider, execution.provider_version, git_command,
+                canonical_json(integration.config_json), integration.secret_reference_id,
             )
         if proposal.capability_version != DOCUMENT_WRITE_CAPABILITY:
             raise ValueError("Original effect Provider does not support reconciliation")
@@ -1561,7 +1589,8 @@ class EffectOperationsMixin(_RunRepositoryBase):
             assert failure is not None
             execution.status = failure.status.value
             execution.error_json = effect_failure_record(
-                capability=proposal.capability_version, attempt_no=execution.attempt_no,
+                capability=proposal.capability_version, provider=execution.provider,
+                attempt_no=execution.attempt_no,
                 code=failure.code, retryable=failure.retryable, previous=execution.error_json,
             )
             proposal.status = (
@@ -1821,7 +1850,8 @@ class EffectOperationsMixin(_RunRepositoryBase):
         if status not in {EffectExecutionStatus.STALE, EffectExecutionStatus.FAILED}:
             raise ValueError("Pre-provider effect outcome must be STALE or FAILED")
         error = effect_failure_record(
-            capability=proposal.capability_version, attempt_no=execution.attempt_no,
+            capability=proposal.capability_version, provider=execution.provider,
+                attempt_no=execution.attempt_no,
             code=code, retryable=False, previous=execution.error_json,
         )
         execution.status = status.value
@@ -2150,6 +2180,18 @@ class EffectOperationsMixin(_RunRepositoryBase):
             for item in evidence
         ):
             raise ChangeProposalValidationError("Database proposal requires exact read Evidence")
+
+    async def _require_proposal_feature(self, proposal: ChangeProposal) -> None:
+        """停止した Provider の過去提案を、新批准・claim から実行させない。"""
+        self._execution_features.require_effect(proposal.capability_version, proposal.operation)
+        if proposal.capability_version != "repository.write/v1":
+            return
+        binding = await self._session.get(ResourceBinding, proposal.target_binding_id)
+        if binding is None:
+            raise ChangeProposalValidationError("Original effect binding is unavailable")
+        self._execution_features.require_effect(
+            proposal.capability_version, proposal.operation, provider=binding.provider
+        )
 
     async def _validate_effect_binding(
         self, *, run: Run, binding: ResourceBinding, capability_version: str,
@@ -2668,7 +2710,8 @@ class EffectOperationsMixin(_RunRepositoryBase):
             if RunStatus(run.status) is not RunStatus.WAITING_FOR_APPROVAL:
                 execution.status = EffectExecutionStatus.FAILED.value
                 execution.error_json = effect_failure_record(
-                    capability=proposal.capability_version, attempt_no=execution.attempt_no,
+                    capability=proposal.capability_version, provider=execution.provider,
+                attempt_no=execution.attempt_no,
                     code="run_left_effect_waiting_state", retryable=False,
                     previous=execution.error_json,
                 )
@@ -2732,7 +2775,8 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 execution.lease_expires_at = None
                 execution.heartbeat_at = now
                 execution.error_json = effect_failure_record(
-                    capability=proposal.capability_version, attempt_no=execution.attempt_no,
+                    capability=proposal.capability_version, provider=execution.provider,
+                attempt_no=execution.attempt_no,
                     code="lease_expired", retryable=True, previous=execution.error_json,
                 )
                 execution.updated_at = now

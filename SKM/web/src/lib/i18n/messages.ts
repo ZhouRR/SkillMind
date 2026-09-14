@@ -19,6 +19,7 @@ export interface UiMessages {
   /** Route ごとの表示名と概要。導航、browser title、概览 card が共有する。 */
   routes: Record<AppRoute, { label: string; description: string }>
   /** Project 非依存の本人操作・組織ユーザー管理。Server error 本文は表示しない。 */
+  apiKeys: Record<'title' | 'scope' | 'name' | 'create' | 'once' | 'saved' | 'empty' | 'active' | 'revoked' | 'created' | 'lastUsed' | 'never' | 'revoke' | 'confirm' | 'unknown' | 'reviewed', string>
   account: {
     myAccount: string
     manageUsers: string
@@ -993,6 +994,7 @@ export interface UiMessages {
   }
   /** Project 全体の調度一覧と原詳細。編集の文案は独立した namespace に置く。 */
   scheduleManager: {
+    taskLabel: string; chooseTask: string; noAvailableTasks: string; configure: string
     manageAll: string; tasksLink: string; needProject: string; readOnlyProject: string; deferredDisabled: string; scopeHint: string
     listTitle: string; searchLabel: string; searchPlaceholder: string; invalidSearch: string; search: string; statusLabel: string; allStates: string
     refresh: string; loading: string; empty: string; total: (total: number) => string
@@ -1029,6 +1031,7 @@ export interface UiMessages {
     failures: Record<'sessionExpired' | 'unavailable' | 'invalid' | 'loadFailed' | 'timeout', string>
   }
   tasks: {
+    noMatches: string; unavailableTask: string; manageSchedule: string
     titleWithModule: (moduleName: string) => string
     countBadge: (count: number) => string
     selectProjectFirst: string

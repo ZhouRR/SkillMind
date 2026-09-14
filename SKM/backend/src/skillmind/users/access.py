@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from skillmind.auth.domain import derive_session_csrf
+from skillmind.auth.domain import derive_request_proof
 from skillmind.auth.sessions import (
     UnauthorizedSessionError,
     validate_session_credentials,
@@ -19,7 +19,7 @@ def validate_user_access(access: UserAccess) -> None:
     """DB 待機前に原 credential の形式とサーバー生成 request UUID を確認する。"""
 
     try:
-        derive_session_csrf(access.session_token)
+        derive_request_proof(access.session_token)
     except ValueError as error:
         raise UnauthorizedSessionError("Authentication is required") from error
     if not isinstance(access.request_id, UUID):

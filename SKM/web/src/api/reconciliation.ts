@@ -4,7 +4,7 @@ import { apiTimestampMicroseconds, isApiTimestamp, isNonNilUuid, sameUuid } from
 /** 原書込の成功状態とは独立した只読核対の公開要約。 */
 export interface ReconciliationRecord {
   request_id: string; project_id: string; run_id: string; effect_execution_id: string
-  kind: 'DATABASE_TRANSACTION' | 'DOCUMENT_OBJECT'
+  kind: 'DATABASE_TRANSACTION' | 'DOCUMENT_OBJECT' | 'GIT_COMMIT'
   status: 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'REVOKED'
   created_at: string; finished_at: string | null
   observation_status: 'CONFIRMED' | 'NOT_OBSERVED' | 'CONFLICT' | null
@@ -23,7 +23,7 @@ export function parseReconciliation(value: unknown, scope: ReconciliationScope, 
     || !sameUuid(String(value.project_id), scope.projectId) || !sameUuid(String(value.run_id), scope.runId)
     || !sameUuid(String(value.effect_execution_id), scope.effectId)
     || (requestId !== undefined && !sameUuid(String(value.request_id), requestId))
-    || !['DATABASE_TRANSACTION', 'DOCUMENT_OBJECT'].includes(String(value.kind))
+    || !['DATABASE_TRANSACTION', 'DOCUMENT_OBJECT', 'GIT_COMMIT'].includes(String(value.kind))
     || !isApiTimestamp(value.created_at)
     || !(value.finished_at === null || isApiTimestamp(value.finished_at))
     || !(value.observed_at === null || isApiTimestamp(value.observed_at))) throw new Error('Invalid reconciliation response')

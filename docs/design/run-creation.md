@@ -25,7 +25,7 @@
 | Integration/binding | 比较显式身份或默认选择规则；冻结实际 scope/配置版本/binding，不重读今天的默认值 |
 | 权限/额度与追踪 | 上限由服务端冻结；trace、时间、生成 ID 不造成请求差异 |
 
-文档必须显式选择，可选省略不授权全集；Integration 可解析默认 binding，但省略与显式指定仍是不同意图。新增限额选项须版本化纳入身份。手动启动的 `auto_approve` 也参与身份：false/省略维持 v1，true 使用包含此字段的 v2；读取旧记录不补权限。原请求重发保留原选择。适用范围见[Run 启动同意](repository-effects.md#run-启动时的自动批准)。
+文档必须显式选择，可选省略不授权全集；Integration 可解析默认 binding，但省略与显式指定仍是不同意图。新增限额选项须版本化纳入身份。手动启动的 `auto_approve` 也参与身份：false/省略维持 v1，true 使用包含此字段的 v2；新页面同一选项同时发送 `auto_approve_git`，明确包含 Git 时使用 v3。旧 v1/v2、旧浏览器与原样重发不扩张 Git 权限。原请求重发保留原选择。适用范围见[Run 启动同意](repository-effects.md#run-启动时的自动批准)。
 
 服务端用[共享 hashing](../../SKM/backend/src/skillmind/core/hashing.py)保存规范化意图、摘要及格式版本；客户端 fingerprint 不能代替认证或原内容比较。
 
@@ -108,7 +108,7 @@ flush 后失效整体回滚，不改历史胜者。DB 异常、取消、commit �
 
 | 责任 | 入口 |
 | --- | --- |
-| 意图/持久格式 | [creation_request](../../SKM/backend/src/skillmind/runs/creation_request.py)；task_snapshot_json.creation_request 保存 v1/v2，无独立公开字段 |
+| 意图/持久格式 | [creation_request](../../SKM/backend/src/skillmind/runs/creation_request.py)；task_snapshot_json.creation_request 保存 v1/v2/v3，无独立公开字段 |
 | 重放/创建/胜者 | [service](../../SKM/backend/src/skillmind/runs/service.py)、[repository](../../SKM/backend/src/skillmind/runs/repository.py) |
 | Web 原请求 | [runSubmission](../../SKM/web/src/lib/runSubmission.ts)、[useRunSubmission](../../SKM/web/src/hooks/useRunSubmission.ts) |
 | Schedule | [ScheduleService](../../SKM/backend/src/skillmind/schedules/service.py)提供 occurrence participant，不另建 Run/hash |

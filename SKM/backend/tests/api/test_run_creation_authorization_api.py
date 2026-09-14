@@ -141,6 +141,7 @@ def test_create_and_replay_forward_original_credentials_for_two_sessions_of_one_
             "input_json": body["input"],
             "sources": body["sources"],
             "auto_approve": False,
+            "auto_approve_git": False,
             "actor_id": auth.actor.user_id,
             "idempotency_key": headers["Idempotency-Key"],
         }
@@ -359,6 +360,7 @@ def test_creation_openapi_keeps_public_body_and_declares_status_headers_and_prob
         "input",
         "sources",
         "auto_approve",
+        "auto_approve_git",
     }
     assert body_schema["required"] == ["skill_version_id", "task_key"]
     assert body_schema["additionalProperties"] is False
@@ -388,11 +390,14 @@ def test_run_start_consent_reaches_both_creation_and_replay(client, monkeypatch,
     lookup, create = install_creation(client, monkeypatch)
     url, body, headers = creation_request()
     body["auto_approve"] = enabled
+    body["auto_approve_git"] = enabled
     auth = application(client).state.auth_service
     response = client.post(url, json=body, headers={**headers, "X-CSRF-Token": auth.csrf_token})
     assert response.status_code == 201
     assert lookup.await_args.kwargs["auto_approve"] is enabled
     assert create.await_args.kwargs["auto_approve"] is enabled
+    assert lookup.await_args.kwargs["auto_approve_git"] is enabled
+    assert create.await_args.kwargs["auto_approve_git"] is enabled
 
 
 @pytest.mark.parametrize("value", ["true", 1, None])
@@ -407,3 +412,16 @@ def test_run_start_consent_rejects_non_boolean_values(client, value):
         ).status_code
         == 422
     )
+
+
+@pytest.mark.parametrize("value", [True, "true", 1, None])
+def test_git_consent_rejects_missing_general_consent_or_non_boolean(client, monkeypatch, value):
+    """Git 単独許可や暗黙変換で自動承認を広げず、service 前に拒否する。"""
+    lookup, create = install_creation(client, monkeypatch)
+    url, body, headers = creation_request()
+    body["auto_approve_git"] = value
+    auth = application(client).state.auth_service
+    response = client.post(url, json=body, headers={**headers, "X-CSRF-Token": auth.csrf_token})
+    assert response.status_code == 422
+    lookup.assert_not_awaited()
+    create.assert_not_awaited()

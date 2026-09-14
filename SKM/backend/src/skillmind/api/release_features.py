@@ -19,3 +19,10 @@ def require_deferred_features(request: Request) -> None:
             code="feature_not_enabled",
             headers={"Cache-Control": "no-store"},
         )
+
+
+def require_scheduling(request: Request) -> None:
+    """調度だけを独立して開放し、旧拡張環境の設定も引き続き受理する。"""
+    settings: Settings = request.app.state.settings
+    if not settings.scheduling_enabled:
+        require_deferred_features(request)

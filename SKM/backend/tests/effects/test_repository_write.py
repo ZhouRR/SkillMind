@@ -300,3 +300,19 @@ def test_write_prefix_narrows_within_the_reserved_namespace() -> None:
         integration_config=config,
     )
     assert payload["target_branch"] == "skillmind/review/fix"
+
+
+@pytest.mark.parametrize("path", ["src/.git/config", "src/.GIT /config", "src//plan.json",
+                                  "src/./plan.json", "src/*", "src/-plan", "src/a\nb"])
+def test_rejects_metadata_alias_and_nonliteral_paths(path):
+    """Git metadata・正規化別名・pathspec は通常 file の scope に混ぜない。"""
+    with pytest.raises(ChangeProposalValidationError):
+        _validate(_draft(changes=({"path": f"/files/{path}", "action": "SET", "value": "x"},)))
+
+
+def test_accepts_japanese_artifact_name_but_rejects_duplicate_changes():
+    """計画の日本語 file 名を許し、同一 path の複数操作を曖昧に上書きしない。"""
+    change = {"path": "/files/src/テスト計画 01.json", "action": "SET", "value": "{}"}
+    assert _validate(_draft(changes=(change,)))["files"] == {"src/テスト計画 01.json": "{}"}
+    with pytest.raises(ChangeProposalValidationError):
+        _validate(_draft(changes=(change, change)))

@@ -43,7 +43,8 @@ async def test_queued_effect_and_schedule_tick_stop_before_side_effects(dispatch
     effects, schedules = AsyncMock(), AsyncMock()
     context = {
         "settings": Settings(
-            _env_file=None, worker_dispatch_enabled=dispatch, deferred_features_enabled=deferred
+            _env_file=None, worker_dispatch_enabled=dispatch, deferred_features_enabled=deferred,
+            scheduling_enabled=False
         ),
         "effect_executor": effects,
         "schedule_service": schedules,

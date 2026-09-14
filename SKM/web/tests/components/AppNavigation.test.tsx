@@ -124,7 +124,7 @@ describe('AppNavigation grouping', () => {
   it('preserves an unavailable explicit project in navigation links while leaving accounts independent', () => {
     const unavailableId = '00000000-0000-4000-8000-000000000099'
     const html = navigation('workspace', '', [], { projectId: unavailableId, pendingProjectId: '' })
-    for (const route of ['home', 'skills', 'projects', 'tasks', 'schedules', 'workspace', 'history', 'documents', 'resources'] as const) {
+    for (const route of ['home', 'skills', 'projects', 'tasks', 'workspace', 'history', 'documents', 'resources'] as const) {
       expect(html).toContain(`href="${routeHref(route, unavailableId)}"`)
     }
     expect(html).toContain('href="#/accounts"')

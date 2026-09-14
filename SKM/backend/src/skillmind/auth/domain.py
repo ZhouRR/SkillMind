@@ -123,3 +123,28 @@ def derive_session_csrf(session_token: str) -> str:
         info=_SESSION_CSRF_INFO,
     ).derive(session_token.encode("ascii"))
     return "csrf2." + base64.urlsafe_b64encode(material).decode("ascii").rstrip("=")
+
+
+API_KEY_CREDENTIAL_VERSION = 3
+_API_KEY_PATTERN = re.compile(r"skm1\.[A-Za-z0-9_-]{43}")
+
+
+def derive_api_key_proof(token: str) -> str:
+    """非ブラウザ資格の内部検証値を用途分離し、公開 CSRF と混同しない。"""
+    if _API_KEY_PATTERN.fullmatch(token) is None:
+        raise ValueError("Unsupported API key credential")
+    material = HKDF(algorithm=hashes.SHA256(), length=32, salt=None,
+                    info=b"skillmind.auth.api-key-proof/v1").derive(token.encode("ascii"))
+    return "keyproof1." + base64.urlsafe_b64encode(material).decode("ascii").rstrip("=")
+
+
+def generate_api_key_credentials() -> SessionCredentials:
+    """一回だけ返す 256 bit key と検証 hash を作り、平文は保存しない。"""
+    token = "skm1." + secrets.token_urlsafe(SESSION_SECRET_BYTES)
+    proof = derive_api_key_proof(token)
+    return SessionCredentials(token, hash_session_secret(token), proof, hash_session_secret(proof))
+
+
+def derive_request_proof(token: str) -> str:
+    """共通 transaction で元の資格版を維持し、ブラウザ形式へ変換しない。"""
+    return derive_api_key_proof(token) if token.startswith("skm1.") else derive_session_csrf(token)

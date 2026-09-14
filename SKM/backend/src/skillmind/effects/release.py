@@ -22,6 +22,7 @@ def configured_execution_features(settings: Settings) -> ExecutionFeatures:
         deferred=settings.deferred_features_enabled,
         database_writes=settings.database_writes_enabled,
         document_writes=settings.document_writes_enabled,
+        git_writes=settings.git_writes_enabled,
     )
 
 
@@ -37,11 +38,12 @@ class ExecutionFeatures:
     database_writes: bool = False
     # 文書庫 CREATE だけを開き、DB/後置機能の switch とは相互に放行しない。
     document_writes: bool = False
+    git_writes: bool = False
 
     @property
     def effects_enabled(self) -> bool:
         """Effect dispatcher の起動可否。個々の対象は別途精確に検査する。"""
-        return self.deferred or self.database_writes or self.document_writes
+        return self.deferred or self.database_writes or self.document_writes or self.git_writes
 
     @property
     def write_capabilities(self) -> frozenset[str]:
@@ -56,21 +58,35 @@ class ExecutionFeatures:
             return self.database_writes
         if capability == DOCUMENT_WRITE_CAPABILITY:
             return self.document_writes
+        if capability == "repository.write/v1":
+            return self.deferred or self.git_writes
         if capability == "change.propose/v1":
             return self.effects_enabled
         return self.deferred or not is_deferred_execution_capability(capability)
 
-    def effect_enabled(self, capability: str, operation: str) -> bool:
-        """DB は INSERT/UPDATE、文書庫は CREATE に限り、他 switch からの迂回を拒否する。"""
-        return capability in self.write_capabilities and (
-            capability != DATABASE_WRITE_CAPABILITY or operation in {"INSERT", "UPDATE"}
-        ) and (
-            capability != DOCUMENT_WRITE_CAPABILITY or operation == "CREATE"
+    def provider_enabled(self, capability: str, provider: str | None) -> bool:
+        """Git 単独 switch から SVN write へ迂回させない。"""
+        return self.capability_enabled(capability) and (
+            capability != "repository.write/v1" or self.deferred or provider in {None, "git"}
         )
 
-    def require_effect(self, capability: str, operation: str) -> None:
+    def effect_enabled(
+        self, capability: str, operation: str, *, provider: str | None = None
+    ) -> bool:
+        """DB は INSERT/UPDATE、文書庫は CREATE に限り、他 switch からの迂回を拒否する。"""
+        return (
+            capability in self.write_capabilities
+            and (capability != DATABASE_WRITE_CAPABILITY or operation in {"INSERT", "UPDATE"})
+            and (capability != DOCUMENT_WRITE_CAPABILITY or operation == "CREATE")
+            and self.provider_enabled(capability, provider)
+            and (capability != "repository.write/v1" or operation == "commit")
+        )
+
+    def require_effect(
+        self, capability: str, operation: str, *, provider: str | None = None
+    ) -> None:
         """外部 I/O や approval/outbox 更新の前に精確対象を拒否する。"""
-        if not self.effect_enabled(capability, operation):
+        if not self.effect_enabled(capability, operation, provider=provider):
             raise ExecutionFeatureDisabledError("This effect is not enabled in this deployment")
 
     def blueprint_enabled(self, blueprint: Mapping[str, Any]) -> bool:

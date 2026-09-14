@@ -13,6 +13,11 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = ROOT / "contracts"
 
 EXAMPLE_CONTRACTS = {
+    "examples/api-key.v1.json": "auth/api-keys/v1/api-key.schema.json",
+    "examples/api-key-list.v1.json": "auth/api-keys/v1/api-key-list.schema.json",
+    "examples/api-key-create-request.v1.json": "auth/api-keys/v1/api-key-create-request.schema.json",
+    "examples/api-key-created.v1.json": "auth/api-keys/v1/api-key-created.schema.json",
+
     "examples/json-schema-validate-error.v1.json": "tools/json.schema.validate/v1/error.schema.json",
     "examples/json-schema-validate-response.v1.json": "tools/json.schema.validate/v1/response.schema.json",
     "examples/json-schema-validate-request.v1.json": "tools/json.schema.validate/v1/request.schema.json",

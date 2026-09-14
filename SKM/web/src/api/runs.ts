@@ -48,6 +48,7 @@ export interface CancelRunRecord {
  *  sources は data source key ごとの provider を渡し、backend が精確 version と権限を snapshot に固定する。 */
 export interface CreateTaskRunInput {
   auto_approve?: boolean
+  auto_approve_git?: boolean
   skill_version_id: string
   task_key: string
   input: Record<string, unknown>

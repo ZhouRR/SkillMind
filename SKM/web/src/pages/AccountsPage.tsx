@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import type { AuthSessionRecord, UserAccountRecord } from '../api'
+import { ApiKeyPanel } from '../components/ApiKeyPanel'
 import { PageHeader } from '../components/PageElements'
 import { UserAccountPanel } from '../components/UserAccountPanel'
 import { UserDirectory } from '../components/UserDirectory'
@@ -37,6 +38,10 @@ function AccountsContent({ session, onSessionEnded, onAccountChanged }: {
         <UserAccountPanel userId={session.user.user_id} own session={session} revision={revision}
           onSessionEnded={onSessionEnded} onChanged={changed} />
       </div>
+      {session.user.system_role === 'ADMIN' && <details className="detailDisclosure accountDirectorySection">
+        <summary>{messages.apiKeys.title}</summary>
+        <ApiKeyPanel session={session} onSessionEnded={onSessionEnded} />
+      </details>}
       {session.user.system_role === 'ADMIN' && <details className="detailDisclosure accountDirectorySection">
         <summary>{messages.account.manageUsers}</summary>
         <UserDirectory session={session} revision={revision} onSessionEnded={onSessionEnded} onChanged={changed} />

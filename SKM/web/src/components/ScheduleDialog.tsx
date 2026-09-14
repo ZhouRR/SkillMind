@@ -27,6 +27,8 @@ interface ScheduleDialogProps {
   task: PublishedTaskRecord
   onClose: () => void
   onSaved: (schedule: ScheduleRecord) => void
+  disabled?: boolean
+  onSessionEnded?: SessionEnded
 }
 
 /** 元対象の編集 owner は閉じても保持でき、別 row_version の再読取では作り直さない。 */

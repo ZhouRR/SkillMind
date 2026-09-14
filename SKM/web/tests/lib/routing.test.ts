@@ -19,7 +19,7 @@ describe('application routing', () => {
     expect(routeHref('resources')).toBe('#/resources')
     expect(routeHref('workspace')).toBe('#/workspace')
     expect(routeHref('history')).toBe('#/history')
-    expect(routeHref('schedules')).toBe('#/schedules')
+    expect(routeHref('schedules')).toBe('#/tasks')
   })
 
   it('falls back to home for an unknown or empty route', () => {
@@ -64,11 +64,11 @@ describe('application routing', () => {
     const projectRoutes = APP_ROUTES.filter(({ scope }) => scope === 'project')
       .map(({ route }) => route)
 
-    expect(projectRoutes).toEqual(['workspace', 'history', 'tasks', 'schedules', 'documents', 'resources'])
+    expect(projectRoutes).toEqual(['workspace', 'history', 'tasks', 'documents', 'resources'])
   })
 
   it('resolves the project-wide schedule route independently', () => {
-    expect(routeFromHash('#/schedules?project=original')).toBe('schedules')
+    expect(routeFromHash('#/schedules?project=original')).toBe('tasks')
   })
 })
 

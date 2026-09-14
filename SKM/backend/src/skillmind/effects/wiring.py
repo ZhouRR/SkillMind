@@ -17,7 +17,6 @@ from skillmind.effects.database_write import (
 )
 from skillmind.effects.document_provider import DocumentWriteProvider
 from skillmind.effects.document_service import DocumentEffectService
-from skillmind.effects.forge import UrllibForgeTransport
 from skillmind.effects.postgres_write import PostgresDatabaseWriteSource
 from skillmind.effects.provider import (
     EffectProvider,
@@ -30,6 +29,7 @@ from skillmind.effects.repository_effect import (
     GitRepositoryWriteProvider,
     SvnRepositoryWriteProvider,
 )
+from skillmind.effects.repository_write import REPOSITORY_WRITE_PROVIDER_VERSION
 from skillmind.effects.service import EffectService
 from skillmind.integrations.secrets import DeploymentSecretResolver
 from skillmind.storage.s3_effect import S3ObjectWriteSource
@@ -52,14 +52,21 @@ def create_effect_provider_registry(
         implementations.extend(
             [
                 ("issue.update/v1", "redmine", create_redmine_effect_provider()),
-                (
-                    "repository.write/v1",
-                    "git",
-                    GitRepositoryWriteProvider(git_client, forge_transport=UrllibForgeTransport()),
-                ),
                 ("repository.write/v1", "svn", SvnRepositoryWriteProvider(svn_client)),
             ]
         )
+    if features.deferred or features.git_writes:
+        implementations.append((
+            "repository.write/v1", "git",
+            GitRepositoryWriteProvider(
+                git_client,
+                authorize=partial(
+                    effect_service.authorize_effect_step,
+                    provider_version=REPOSITORY_WRITE_PROVIDER_VERSION,
+                    secret_resolver=secret_resolver,
+                ),
+            ),
+        ))
     if features.database_writes:
         implementations.append(
             (
@@ -90,7 +97,7 @@ def create_effect_provider_registry(
                 provider_version=resolve_effect_capability(capability).provider_versions[provider],
                 implementation=implementation,
                 requires_secret=capability != DOCUMENT_WRITE_CAPABILITY,
-                supervised=resolve_effect_capability(capability).staged_authorization,
+                supervised=resolve_effect_capability(capability).supports_supervision(provider),
             )
             for capability, provider, implementation in implementations
         )

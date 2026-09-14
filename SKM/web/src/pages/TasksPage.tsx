@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 
 import {
   isValidTaskFlowTarget,
@@ -6,11 +6,14 @@ import {
   loadProjectSchedules,
   loadProjectTasks,
   type ProjectModuleRecord,
+  type ProjectRecord,
   type PublishedTaskRecord,
   type ScheduleRecord,
 } from '../api'
 import { EmptyState, LoadingSkeleton, PageHeader, StatusBadge } from '../components/PageElements'
-import { ScheduleDialog, ScheduleStatusActions, summarizeTiming } from '../components/ScheduleDialog'
+import { ScheduleDialog, summarizeTiming } from '../components/ScheduleDialog'
+import { TaskScheduleDetails } from '../components/TaskScheduleDetails'
+import { matchesTaskScheduleFilter, schedulesForTask, unavailableScheduledTasks, type TaskScheduleStatusFilter } from '../lib/taskScheduleFilter'
 import { TaskFlowPreview } from '../components/TaskFlowPreview'
 import { ROUTE_ICONS } from '../components/routeIcons'
 import { useTaskFlowPreview } from '../hooks/useTaskFlowPreview'
@@ -42,8 +45,9 @@ export interface TasksPageProps {
   projectId: string
   csrfToken: string
   moduleId: string
+  currentProject?: ProjectRecord | null
   projectReadOnly?: boolean
-  deferredFeaturesEnabled?: boolean
+  schedulingEnabled?: boolean
   actorId?: string
   onSessionEnded?: SessionEnded
 }
@@ -57,13 +61,19 @@ export function TasksPage(props: TasksPageProps) {
 }
 
 /** Task 一覧と独立した read-only preview を同じ精確 Project の中へ置く。 */
-function TaskCenter({ projectId, csrfToken, moduleId, projectReadOnly = false, deferredFeaturesEnabled = true, actorId = '', onSessionEnded = retainSession }: TasksPageProps) {
+function TaskCenter({ projectId, csrfToken, moduleId, currentProject = null, projectReadOnly = false, schedulingEnabled = true, actorId = '', onSessionEnded = retainSession }: TasksPageProps) {
   const messages = useMessages()
   const [state, setState] = useState<LoadState>({ status: 'loading' })
   const [modules, setModules] = useState<ProjectModuleRecord[]>([])
   const [revision, setRevision] = useState(0)
   const [scheduleFor, setScheduleFor] = useState<PublishedTaskRecord | null>(null)
-  const [actionError, setActionError] = useState<string | null>(null)
+  const [q, setQ] = useState('')
+  const [status, setStatus] = useState<TaskScheduleStatusFilter>('')
+  const [filter, setFilter] = useState({ q: '', status: '' as TaskScheduleStatusFilter })
+  const [scheduleId, setScheduleId] = useState<string | null>(null)
+  const [scheduleBusy, setScheduleBusy] = useState(false)
+  const scheduleLock = useRef(false)
+  const setScheduleLocked = useCallback((busy: boolean) => { scheduleLock.current = busy; setScheduleBusy(busy) }, [])
   const controller = useRef<AbortController | null>(null)
   const previewTrigger = useRef<HTMLButtonElement | null>(null)
   const previewHeading = useRef<HTMLHeadingElement | null>(null)
@@ -82,7 +92,7 @@ function TaskCenter({ projectId, csrfToken, moduleId, projectReadOnly = false, d
     setState({ status: 'loading' })
     void Promise.all([
       loadProjectTasks(projectId, active.signal),
-      deferredFeaturesEnabled ? loadProjectSchedules(projectId, active.signal) : Promise.resolve([]),
+      loadProjectSchedules(projectId, active.signal),
       loadProjectModules(projectId, active.signal).catch(() => [] as ProjectModuleRecord[]),
     ])
       .then(([tasks, schedules, projectModules]) => {
@@ -98,7 +108,7 @@ function TaskCenter({ projectId, csrfToken, moduleId, projectReadOnly = false, d
         })
       })
     return () => active.abort()
-  }, [projectId, revision, deferredFeaturesEnabled])
+  }, [projectId, revision, schedulingEnabled])
 
   useEffect(() => () => controller.current?.abort(), [])
 
@@ -106,14 +116,27 @@ function TaskCenter({ projectId, csrfToken, moduleId, projectReadOnly = false, d
     () => modules.find((module) => module.module_id === moduleId) ?? null,
     [modules, moduleId],
   )
-  const rows = useMemo(() => {
+  const allRows = useMemo(() => {
     if (state.status !== 'ready') return []
     return buildRows(filterTasksByModule(state.data.tasks, activeModule), state.data)
   }, [state, activeModule])
+  const rows = allRows.filter((row) => matchesTaskScheduleFilter(row.task, row.schedules, filter.q, filter.status))
+  const unavailable = state.status === 'ready' ? unavailableScheduledTasks(state.data.tasks, state.data.schedules)
+    .filter((schedules) => matchesTaskScheduleFilter(null, schedules, filter.q, filter.status)) : []
+  const queryInvalid = [...q.trim()].length > 200 || q.includes('\u0000')
+
+  /** 検索と状態を同時に適用し、予定の編集 owner は一覧から独立して保つ。 */
+  function search(event: FormEvent): void {
+    event.preventDefault()
+    if (!queryInvalid) setFilter({ q, status })
+  }
+  /** 未決編集がある時は別の予定に対象を切り替えない。 */
+  function manageSchedule(id: string): void { if (!scheduleLock.current) setScheduleId(id) }
+
 
   useEffect(() => {
-    if (flow.target && state.status === 'ready' && !rows.some((row) => taskCatalogId(row.task) === `${flow.target!.skill_version_id}::${flow.target!.task_key}`)) flow.close()
-  }, [rows, state.status, flow.target, flow.close])
+    if (flow.target && state.status === 'ready' && !allRows.some((row) => taskCatalogId(row.task) === `${flow.target!.skill_version_id}::${flow.target!.task_key}`)) flow.close()
+  }, [allRows, state.status, flow.target, flow.close])
 
   /** 閉じた瞬間に旧 query を失効させ、元の選択 button へ keyboard focus を戻す。 */
   function closePreview(): void {
@@ -137,39 +160,63 @@ function TaskCenter({ projectId, csrfToken, moduleId, projectReadOnly = false, d
       <PageHeader
         title={activeModule ? messages.tasks.titleWithModule(activeModule.name) : messages.routes.tasks.label}
         description={activeModule?.description || undefined}
-        aside={<span className="scopeBadge">{messages.tasks.countBadge(rows.length)}</span>}
+        aside={<span className="scopeBadge">{messages.tasks.countBadge(rows.length + unavailable.length)}</span>}
       />
       <section className="panel taskCatalog" aria-label={messages.routes.tasks.label}>
-        {actionError && <p className="error" role="alert">{actionError}</p>}
+        <form className="taskFilters" data-task-filters onSubmit={search}>
+          <label>{messages.scheduleManager.searchLabel}<input data-task-search value={q} maxLength={200}
+            onChange={(event) => setQ(event.target.value)} /></label>
+          <label>{messages.scheduleManager.statusLabel}<select data-task-status value={status}
+            onChange={(event) => setStatus(event.target.value as TaskScheduleStatusFilter)}>
+            <option value="">{messages.scheduleManager.allStates}</option>
+            <option value="UNCONFIGURED">{messages.tasks.noSchedule}</option>
+            {(['ACTIVE', 'PAUSED', 'COMPLETED', 'ERROR', 'ARCHIVED'] as const).map((value) =>
+              <option key={value} value={value}>{messages.enums.scheduleStatus[value]}</option>)}
+          </select></label>
+          <button className="primaryButton compactButton" type="submit" disabled={queryInvalid}>{messages.scheduleManager.search}</button>
+          <button className="secondaryButton compactButton" type="button" data-task-refresh disabled={state.status === 'loading'}
+            onClick={() => setRevision((current) => current + 1)}>{messages.scheduleManager.refresh}</button>
+        </form>
+        {queryInvalid && <p className="error" role="alert">{messages.scheduleManager.invalidSearch}</p>}
         {state.status === 'loading' && <LoadingSkeleton label={messages.tasks.loading} rows={4} />}
         {state.status === 'error' && <p className="error" role="alert">{state.message}</p>}
-        {state.status === 'ready' && rows.length === 0 && (
+        {state.status === 'ready' && rows.length + unavailable.length === 0 && (
           <EmptyState
-            text={messages.tasks.empty}
-            action={<a className="secondaryButton compactButton" href={routeHref('skills')}>{messages.projects.goSkills}</a>}
+            text={filter.q || filter.status ? messages.tasks.noMatches : messages.tasks.empty}
+            action={!(filter.q || filter.status) && <a className="secondaryButton compactButton" href={routeHref('skills')}>{messages.projects.goSkills}</a>}
           />
         )}
-        {state.status === 'ready' && rows.length > 0 && (
+        {state.status === 'ready' && rows.length + unavailable.length > 0 && (
           <ul className="taskCards">
             {rows.map((row) => (
               <TaskCard
-                csrfToken={csrfToken}
                 key={taskCatalogId(row.task)}
                 onSchedule={() => setScheduleFor(row.task)}
-                onScheduleChanged={() => setRevision((current) => current + 1)}
-                onScheduleError={setActionError}
+                onManageSchedule={manageSchedule}
+                scheduleBusy={scheduleBusy}
                 onPreview={(trigger) => { if (flow.select(row.task)) previewTrigger.current = trigger }}
                 previewAllowed={flow.allowed && isValidTaskFlowTarget(row.task)}
                 previewSelected={flow.target?.skill_version_id === row.task.skill_version_id && flow.target?.task_key === row.task.task_key}
                 projectId={projectId}
                 projectReadOnly={projectReadOnly}
-                deferredFeaturesEnabled={deferredFeaturesEnabled}
+                schedulingEnabled={schedulingEnabled}
                 row={row}
               />
             ))}
+            {unavailable.map((schedules) => <li className="taskCard" data-unavailable-task key={`${schedules[0]!.skill_version_id}::${schedules[0]!.task_key}`}>
+              <div className="taskCardTitle"><strong>{schedules[0]!.task_key}</strong><small>{messages.tasks.unavailableTask}</small></div>
+              <TaskSchedules schedules={schedules} onManage={manageSchedule} disabled={scheduleBusy} />
+            </li>)}
           </ul>
         )}
       </section>
+      {scheduleId && <section data-task-schedule-panel>
+        <div className="formRow"><button className="secondaryButton compactButton" type="button" data-task-schedule-close
+          disabled={scheduleBusy} onClick={() => { if (!scheduleLock.current) setScheduleId(null) }}>{messages.elements.close}</button></div>
+        <TaskScheduleDetails key={`${projectId}:${scheduleId}`} projectId={projectId} scheduleId={scheduleId}
+          csrfToken={csrfToken} currentProject={currentProject} schedulingEnabled={schedulingEnabled}
+          onSessionEnded={onSessionEnded} onBusyChange={setScheduleLocked} onChanged={() => setRevision((current) => current + 1)} />
+      </section>}
       {flow.target && <section className="panel taskFlowPanel" id="task-flow-preview" data-task-flow-panel
         aria-labelledby="task-flow-heading" onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); closePreview() } }}>
         <div className="panelHeader"><div><h2 ref={previewHeading} id="task-flow-heading" tabIndex={-1}>{messages.taskFlow.title}</h2>
@@ -183,7 +230,7 @@ function TaskCenter({ projectId, csrfToken, moduleId, projectReadOnly = false, d
       </section>}
       {/* 定时执行は task に属する設定なので、設定入口も一覧の行に置く。工作空间の左 rail に
           置いていたときは「今の下書き」に紐づいていて、どの task の予定なのかが読めなかった。 */}
-      {scheduleFor !== null && !projectReadOnly && deferredFeaturesEnabled && <ScheduleDialog
+      {scheduleFor !== null && !projectReadOnly && schedulingEnabled && <ScheduleDialog
         key={`${projectId}:${taskCatalogId(scheduleFor)}`}
         csrfToken={csrfToken}
         onClose={() => setScheduleFor(null)}
@@ -211,25 +258,20 @@ interface TaskRow {
 export function buildRows(tasks: PublishedTaskRecord[], data: TaskCenterState): TaskRow[] {
   return tasks.map((task) => ({
     task,
-    schedules: data.schedules.filter(
-      (schedule) => schedule.skill_version_id === task.skill_version_id
-        && schedule.task_key === task.task_key
-        && schedule.status !== 'ARCHIVED',
-    ),
+    schedules: schedulesForTask(task, data.schedules),
     requirementCount: task.readiness === null ? null : sourceRequirements(task).length,
   }))
 }
 
 /** 一つの task を、就緒度・資源・定时・操作の四点で示す card。 */
-function TaskCard({ row, projectId, csrfToken, projectReadOnly, deferredFeaturesEnabled, onSchedule, onScheduleChanged, onScheduleError, onPreview, previewAllowed, previewSelected }: {
+function TaskCard({ row, projectId, projectReadOnly, schedulingEnabled, onSchedule, onManageSchedule, scheduleBusy, onPreview, previewAllowed, previewSelected }: {
   row: TaskRow
   projectId: string
-  csrfToken: string
   projectReadOnly: boolean
-  deferredFeaturesEnabled: boolean
+  schedulingEnabled: boolean
   onSchedule: () => void
-  onScheduleChanged: () => void
-  onScheduleError: (message: string) => void
+  onManageSchedule: (id: string) => void
+  scheduleBusy: boolean
   onPreview: (trigger: HTMLButtonElement) => void
   previewAllowed: boolean
   previewSelected: boolean
@@ -241,7 +283,7 @@ function TaskCard({ row, projectId, csrfToken, projectReadOnly, deferredFeatures
   const nextSchedule = activeSchedules.filter((schedule) => schedule.next_run_at !== null)
     .sort((left, right) => Date.parse(left.next_run_at!) - Date.parse(right.next_run_at!))[0]
   return (
-    <li className="taskCard">
+    <li className="taskCard" data-task-card={taskCatalogId(row.task)}>
       <div className="taskCardHead">
         <div className="taskCardIdentity">
           <span className="taskCardIcon" aria-hidden="true">{ROUTE_ICONS.tasks}</span>
@@ -263,13 +305,13 @@ function TaskCard({ row, projectId, csrfToken, projectReadOnly, deferredFeatures
             ? messages.workspace.noResourceNeeded
             : messages.tasks.requirementCount(row.requirementCount)}</dd>
         </div>
-        {deferredFeaturesEnabled && <div>
+        <div>
           <dt>{messages.tasks.scheduleLabel}</dt>
-          <dd>{activeSchedules.length === 0
+          <dd>{row.schedules.length === 0
             ? messages.tasks.noSchedule
-            : messages.tasks.scheduleCount(activeSchedules.length)}</dd>
-        </div>}
-        {activeSchedules.length > 0 && <div>
+            : messages.tasks.scheduleCount(row.schedules.length)}</dd>
+        </div>
+        {row.schedules.length > 0 && <div>
           <dt>{messages.tasks.nextRunLabel}</dt>
           <dd>{nextSchedule ? formatScheduleTimestamp(nextSchedule.next_run_at!, nextSchedule.timezone) : messages.schedules.noNextRun}</dd>
         </div>}
@@ -290,9 +332,9 @@ function TaskCard({ row, projectId, csrfToken, projectReadOnly, deferredFeatures
         <a className="primaryButton compactButton" href={routeHref('workspace', projectId, { taskId: taskCatalogId(row.task) })}>
           {messages.tasks.runNow}
         </a>
-        {deferredFeaturesEnabled && <button
+        {schedulingEnabled && <button
           className="secondaryButton compactButton"
-          disabled={projectReadOnly || level === 'GUIDANCE_ONLY'}
+          disabled={projectReadOnly || level === null || level === 'GUIDANCE_ONLY'}
           type="button"
           onClick={onSchedule}
         >
@@ -300,32 +342,23 @@ function TaskCard({ row, projectId, csrfToken, projectReadOnly, deferredFeatures
         </button>}
       </div>
       {!isValidTaskFlowTarget(row.task) && <p className="hint" data-flow-invalid-target>{messages.taskFlow.failures.invalid}</p>}
-      {row.schedules.length > 0 && (
-        <ul className="taskScheduleList">
-          {row.schedules.map((schedule) => (
-            <li key={schedule.schedule_id}>
-              <span className={`statusBadge scheduleStatus-${schedule.status.toLowerCase()}`}>
-                {messages.enums.scheduleStatus[schedule.status] ?? schedule.status}
-              </span>
-              <span className="mono">{summarizeTiming(schedule)}</span>
-              {/* 走った回数と見送った回数は別々に出す。混ぜると「動いていない」理由が読めない。 */}
-              <small>
-                {messages.schedules.runCount(schedule.run_count)}
-                {schedule.missed_count > 0 && ` · ${messages.schedules.missedCount(schedule.missed_count)}`}
-              </small>
-              <ScheduleStatusActions
-                csrfToken={csrfToken}
-                onChanged={onScheduleChanged}
-                onError={onScheduleError}
-                projectId={projectId}
-                schedule={schedule}
-                disabled={projectReadOnly}
-              />
-              {schedule.last_error && <small className="error">{schedule.last_error}</small>}
-            </li>
-          ))}
-        </ul>
-      )}
+      <TaskSchedules schedules={row.schedules} onManage={onManageSchedule} disabled={scheduleBusy} />
     </li>
   )
+}
+
+/** カードには各予定の状態と次回時刻を出し、詳細を開いて元版の操作を行う。 */
+function TaskSchedules({ schedules, onManage, disabled }: {
+  schedules: ScheduleRecord[]; onManage: (id: string) => void; disabled: boolean
+}) {
+  const messages = useMessages()
+  if (!schedules.length) return null
+  return <details className="taskSchedules"><summary>{messages.tasks.manageSchedule} ({schedules.length})</summary><ul className="taskScheduleList">
+    {schedules.map((schedule) => <li key={schedule.schedule_id}>
+      <span className={`statusBadge scheduleStatus-${schedule.status.toLowerCase()}`}>{messages.enums.scheduleStatus[schedule.status]}</span>
+      <strong>{schedule.name}</strong><span className="mono">{summarizeTiming(schedule)}</span>
+      <button className="secondaryButton compactButton" type="button" data-task-schedule-manage={schedule.schedule_id}
+        disabled={disabled} onClick={() => onManage(schedule.schedule_id)}>{messages.tasks.manageSchedule}</button>
+    </li>)}
+  </ul></details>
 }

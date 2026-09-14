@@ -52,7 +52,7 @@ Claude 回退需显式设置 `SKILLMIND_AGENT_SDK=claude` 并重建 API/Worker �
 - **已有环境更新**：先关闭新业务入口、核清在途调用/远端未知效果，停止全部写入者并取得[一致恢复点](backup-recovery.md#一致恢复点包含什么)。不并发部署或改写镜像/tag、配置；重命名不迁移旧数据。
 - **数据恢复/故障对账**：走[恢复流程](backup-recovery.md)，不执行会自动启动 Worker 的 `make deploy`。
 
-`make deploy` 停止当前 project 应用服务，再初始化基建、迁移并启动 API/Web/Worker；执行即允许恢复后台工作，可能立即消费队列和恢复任务。默认保持 `SKILLMIND_DEFERRED_FEATURES_ENABLED=false`、`SKILLMIND_DATABASE_WRITES_ENABLED=false` 和 `SKILLMIND_DOCUMENT_WRITES_ENABLED=false`，三个值分别在 API/Worker 保持一致。后置开关控制既有外部写入、调度发火和子 Agent；数据库开关仅开放 PostgreSQL INSERT/UPDATE；文档开关仅开放项目文档库的 Artifact CREATE 提案与人工批准执行，三者不互相放行。文档写入需 API/Worker 同时升级至 v2 对象协议并完成 0048 migration，使用既有文档库 namespace；旧 v1 待写只允许核对。数据库启用前须配置明确表/列/操作范围，并按[回执权限要求](../design/repository-effects.md#postgresql-单行事务与原执行回执)安装目标库回执表。`SKILLMIND_WORKER_DISPATCH_ENABLED=false` 阻止新的 Run/Effect/解释 job 执行，不取消已在运行的调用，也不是维护模式。Makefile 不控制其他实例、orphan、其他 daemon 或远端写入，不能代替全局停写确认。
+`make deploy` 停止当前 project 应用服务，再初始化基建、迁移并启动 API/Web/Worker；执行即允许恢复后台工作，可能立即消费队列和恢复任务。默认保持 `SKILLMIND_DEFERRED_FEATURES_ENABLED=false`、`SKILLMIND_DATABASE_WRITES_ENABLED=false`、`SKILLMIND_DOCUMENT_WRITES_ENABLED=false` 和 `SKILLMIND_GIT_WRITES_ENABLED=false`，四个值分别在 API/Worker 保持一致。后置开关控制既有外部写入、调度发火和子 Agent；数据库开关仅开放 PostgreSQL INSERT/UPDATE；文档开关仅开放项目文档库的 Artifact CREATE 提案与人工批准执行；Git 开关仅开放批准后的 commit/push，四者不互相放行。Git 须配套升级 API/Worker/Web 并执行 0050 migration；现有连接仍保持原权限，需在资源页面显式选择写入范围与模式。文档写入需 API/Worker 同时升级至 v2 对象协议并完成 0048 migration，使用既有文档库 namespace；旧 v1 待写只允许核对。数据库启用前须配置明确表/列/操作范围，并按[回执权限要求](../design/repository-effects.md#postgresql-单行事务与原执行回执)安装目标库回执表。`SKILLMIND_WORKER_DISPATCH_ENABLED=false` 阻止新的 Run/Effect/解释 job 执行，不取消已在运行的调用，也不是维护模式。Makefile 不控制其他实例、orphan、其他 daemon 或远端写入，不能代替全局停写确认。
 
 ### Windows 构建与移送
 
@@ -140,12 +140,16 @@ revision 不识别、多个 head、连接失败或迁移错误均需核对实际
 | 0042 停止待发布 | 关闭标记/独立审计同存，不改原回执/占用；任一存在拒绝降级。API/Web 配套；DB CHECK 拒绝旧 SQL 发布已关闭项，但不阻止旧 PUT 或替代停写/对账 |
 | 0043 预算启动所有权 | 旧行不造 owner，新绑定存 token hash；任一 owner 痕迹拒绝丢列。旧调用方不混跑，hash/迁移不证明模型未启动、停止或计量完整 |
 | 0044 解释原请求 | 只建新台账、不补旧会话；任何请求/调用记录阻止降级。Web/API/Worker 配套切换，旧解释/调整 URI 关闭，旧队列任务明确拒绝；停止旧 API/Worker 后迁移，不从旧 job 补造作者或重放未知模型调用 |
+| 0050 Git 核对 | 核对类型 CHECK 增加 GIT_COMMIT，不改旧行；已有 Git 核对记录时旧 CHECK 拒绝降级，不删除历史绕过。Git v2 不重放旧 v1 写入；核对不自动继续业务 Run |
 | 0049 Run 启动同意 | 只扩展审批来源 CHECK，不改旧审批或 Run；存在自动批准的原请求或 RUN_START 审批时拒绝降级。API/Worker/Web 配套更新，启动同意不扩大绑定权限 |
 | 0048 成果对象 v2 | 只扩展 0045 台账的协议 CHECK，不改 v1 原 key/hash；v1 仅核对，v2 使用隔离物理前缀。含任意 v2 台账或 revision 2 文档库 binding 即拒绝降级，API/Worker 配套更新，不混跑旧 writer |
 
 有表/旧页面可读不证明功能接齐或非终态可续行；预算另过[混合 Worker 门禁](../design/run-budgets.md#上线门禁与接线顺序)。兼容未知保持停写，按[回退](backup-recovery.md#应用版本回退)处理，不删审计/快照/未决占用凑条件。
 
 ## 会话协议切换检查
+
+API Key 需先应用 0051 migration，再放行同版 API/Worker；既有浏览器会话保持有效。Key 资格版及降级限制见[认证设计](../design/authentication.md#外部应用-api-key)。
+
 
 仅升级涉及[会话凭据协议](../design/authentication.md#会话凭据-v2-与切换要求)时适用：保全未确认动作 ID/key、通知重登并排空旧 API；隔离验证旧行升级、新登录/失效和降级拒绝，head 正确后开新 API。用真实 HTTPS 验多页/多实例 CSRF、失效与 no-store，不采集凭据或探测真实用户密码。
 
@@ -163,4 +167,4 @@ Windows 只构建 Web 后正常导出，Linux 仍执行 `make deploy`。此入�
 
 保持交付为镜像包、Compose、.env 与 Makefile，不重新增加服务器端辅助脚本、隐藏错误或日常部署必填审批参数。新增检查优先使用 Compose 状态/退出码与镜像内已有运维命令；不能用删数据、忽略错误或自动回滚来简化流程。
 
-[R11](../planning/roadmap.md#开发任务)仍缺跨实例停写/清理与真实恢复证据。Make/PowerShell 的 fake Docker 回归只证明命令顺序与失败停止；实际 Rancher/Linux、CPU、迁移事务、health/HTTPS 和业务效果须在目标环境验收。
+[R11](../planning/roadmap.md#开发任务)仍缺跨实例停写/清理与真实恢复证据。Make/PowerShell 的 fake Docker 回归只证明命令顺序与失败停止；当前 Linux 部署和正常业务路径已有实际使用，范围见计划；Rancher、跨实例恢复、完整 HTTPS 与异常业务效果仍须分别验收。

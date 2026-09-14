@@ -457,3 +457,26 @@
 }
 .documentItem .documentInfo { flex: 1; }
 .docFolderBody > button { width: fit-content; justify-self: start; }
+
+/* Task の検索は一列の toolbar、狭幅では自然に折り返す。詳細 owner は一覧の filter で消さない。 */
+.taskFilters { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 24px; }
+.taskFilters label { flex: 1 1 220px; min-width: 0; margin: 0; }
+.taskFilters input, .taskFilters select { width: 100%; min-width: 0; }
+.taskFilters > button { flex: 0 0 auto; width: auto; min-height: 42px; margin: 0; }
+[data-task-schedule-panel] { margin-top: 24px; }
+[data-task-schedule-panel] > .formRow { justify-content: flex-end; margin-bottom: 12px; }
+.taskScheduleList strong { overflow-wrap: anywhere; }
+.taskSchedules summary { cursor: pointer; color: var(--text-muted); }
+
+/* API key の作成と秘密表示はアカウント画面の幅内に収める。 */
+.apiKeyPanel { display: grid; gap: 16px; padding-block: 16px; }
+.apiKeyCreate { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; }
+.apiKeyCreate .field { flex: 1; min-width: 180px; margin: 0; }
+.apiKeyCreate .primaryButton { margin: 0; width: auto; min-height: 42px; }
+.apiKeySecret { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; }
+.apiKeySecret input { font-family: monospace; width: 100%; }
+.apiKeySecret .secondaryButton { justify-self: start; }
+.apiKeyList { display: grid; gap: 12px; }
+.apiKeyRow { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 16px 0; border-top: 1px solid var(--border); }
+.apiKeyInfo { display: flex; flex-direction: column; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.apiKeyRevoke { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

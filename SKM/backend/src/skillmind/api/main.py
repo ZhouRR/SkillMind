@@ -25,6 +25,7 @@ from skillmind.api.problems import (
 )
 from skillmind.api.routes import router as api_router
 from skillmind.artifacts.service import ArtifactService
+from skillmind.auth.api_keys import ApiKeyService
 from skillmind.auth.login_protection import LoginProtectionUnavailableError, LoginRateLimitedError
 from skillmind.auth.service import AuthService
 from skillmind.compositions import CompositionService
@@ -93,6 +94,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         login_source_requests_per_minute=settings.auth_login_source_requests_per_minute,
         login_protection_timeout_seconds=settings.auth_login_protection_timeout_seconds,
     )
+    app.state.api_key_service = ApiKeyService(app.state.database_session_factory)
     app.state.project_service = ProjectService(app.state.database_session_factory)
     app.state.user_service = UserService(app.state.database_session_factory)
     # MANAGED SecretReference 封入用の KEK cipher。未設定なら MANAGED 作成は fail closed。
@@ -108,9 +110,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     features = configured_execution_features(settings)
     app.state.run_service = RunService(
         app.state.database_session_factory,
+        scheduling_enabled=settings.scheduling_enabled,
         deferred_features_enabled=features.deferred,
         database_writes_enabled=features.database_writes,
         document_writes_enabled=features.document_writes,
+        git_writes_enabled=features.git_writes,
         document_library_target=document_library_target,
     )
     app.state.artifact_service = ArtifactService(app.state.database_session_factory)
@@ -146,7 +150,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # document Provider を合流させる (計画 §19 W1)。就緒度が候補の provider を実行可能性まで
         # 検査できるようにする唯一の注入点。
         installed_provider_capabilities={
-            **INSTALLED_PROVIDER_CAPABILITIES,
+            **{capability: frozenset(
+                provider for provider in providers
+                if features.provider_enabled(capability, provider)
+            ) for capability, providers in INSTALLED_PROVIDER_CAPABILITIES.items()},
             DOCUMENT_READINESS_CAPABILITY: frozenset({"platform"}),
             **{item: frozenset({DOCUMENT_PROVIDER}) for item in DOCUMENT_CAPABILITIES},
             **({DOCUMENT_WRITE_CAPABILITY: frozenset({DOCUMENT_LIBRARY_PROVIDER})}
@@ -237,6 +244,7 @@ def create_app() -> FastAPI:
             request_id=request_id,
             method=request.method,
             path=request.url.path,
+            api_key_id=getattr(request.state, "api_key_id", None),
             status_code=response.status_code,
             duration_ms=round((monotonic() - started) * 1000, 2),
         )

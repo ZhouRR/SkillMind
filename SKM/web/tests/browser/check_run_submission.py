@@ -308,13 +308,14 @@ async def exercise(
         return
     await open_form(page, url)
     if case in {"auto-approval", "manual-approval"}:
-        choice = page.get_by_role("checkbox", name="自动批准（数据库写入、文档保存）", exact=True)
+        choice = page.get_by_role("checkbox", name="自动批准（数据库写入、文档保存、Git 提交）", exact=True)
         await expect(choice).to_be_checked()
         enabled = case == "auto-approval"
         await choice.set_checked(enabled)
         await start(page)
         await pending(page)
         assert json.loads(api.posts[0]["body"])["auto_approve"] is enabled
+        assert json.loads(api.posts[0]["body"])["auto_approve_git"] is enabled
         # 再送は原同意を使い、変更した草稿へ追随しない。
         await choice.set_checked(not enabled)
         await page.get_by_role("button", name="用原请求再次确认").click()

@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from skillmind import __version__
 from skillmind.api.routes import (
+    api_keys,
     artifacts,
     auth,
     compositions,
@@ -50,6 +51,7 @@ async def meta() -> MetaResponse:
 
 
 router.include_router(auth.router)
+router.include_router(api_keys.router)
 router.include_router(projects.router)
 router.include_router(users.router)
 router.include_router(users.language_router)

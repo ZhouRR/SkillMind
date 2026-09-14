@@ -8,6 +8,7 @@ from typing import Literal
 from uuid import UUID
 
 from skillmind.effects.database_write import DatabaseWriteCommand
+from skillmind.effects.git_receipt import GitCommitCommand, GitCommitReceipt
 from skillmind.effects.postgres_write import DatabaseWriteReceipt
 from skillmind.storage.effect_write import ObjectWriteCommand, ObjectWriteReceipt
 
@@ -41,7 +42,7 @@ class EffectReconciliationTarget:
     proposal_checksum: str
     provider: str
     provider_version: str
-    command: DatabaseWriteCommand | ObjectWriteCommand = field(repr=False)
+    command: DatabaseWriteCommand | ObjectWriteCommand | GitCommitCommand = field(repr=False)
     config_json: str = field(repr=False)
     secret_reference_id: UUID | None = field(repr=False)
 
@@ -59,8 +60,8 @@ class EffectReconciliationObservation:
     """一回の読取事実。元 transaction と object の確認は、平台の APPLIED と区別する。"""
 
     effect_execution_id: UUID
-    kind: Literal["DATABASE_TRANSACTION", "DOCUMENT_OBJECT"]
+    kind: Literal["DATABASE_TRANSACTION", "DOCUMENT_OBJECT", "GIT_COMMIT"]
     status: Literal["CONFIRMED", "NOT_OBSERVED", "CONFLICT"]
     observed_at: datetime
     request_checksum: str
-    receipt: DatabaseWriteReceipt | ObjectWriteReceipt | None = field(repr=False)
+    receipt: DatabaseWriteReceipt | ObjectWriteReceipt | GitCommitReceipt | None = field(repr=False)

@@ -13,8 +13,9 @@ import asyncio
 import base64
 import os
 import re
+import signal
 import tempfile
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -574,6 +575,8 @@ class GitWriteSession:
         branch: str,
         files: Mapping[str, str | None],
         message: str,
+        expected_head: str | None = None,
+        authorize: Callable[[], Awaitable[None]] | None = None,
     ) -> str:
         """Base から branch を作り、指定 file を書いて commit し push する。
 
@@ -606,23 +609,66 @@ class GitWriteSession:
                 f"user.email={_COMMIT_AUTHOR_EMAIL}",
                 "commit",
                 "--quiet",
+                "--allow-empty",
                 "--message",
                 message,
             ]
         )
         raw = await self._run(["rev-parse", "--verify", "HEAD"])
         commit = raw.decode("utf-8", errors="replace").strip()
-        # 新規 branch への push のみ。非 fast-forward は git 自身が拒否し、既存 branch を
-        # 巻き戻す余地を残さない (--force 系は使わない)。
-        await self._run(["push", "--quiet", "origin", f"{branch}:refs/heads/{branch}"])
+        if expected_head is not None and expected_head != self._base_revision:
+            raise RepositoryClientError("invalid_request", "Invalid expected head", retryable=False)
+        # pre-push は push 自身の advertisement を受け取る。GET 後の競合もここで拒否し、
+        # その後の競合は receive-pack の old OID 比較が拒否する。force は使わない。
+        with tempfile.TemporaryDirectory(prefix="skillmind-push-guard-") as directory:
+            hook = Path(directory) / "pre-push"
+            hook.write_text(
+                "#!/bin/sh\nset -eu\nseen=0\n"
+                "while read -r local_ref local_oid remote_ref remote_oid; do\n"
+                "  test \"$remote_ref\" = \"$SKM_PUSH_REF\" || exit 1\n"
+                "  test \"$remote_oid\" = \"$SKM_PUSH_OLD\" || exit 1\n"
+                "  test \"$local_oid\" = \"$SKM_PUSH_NEW\" || exit 1\n"
+                "  seen=$((seen + 1))\ndone\ntest \"$seen\" = 1\n",
+                encoding="utf-8",
+            )
+            hook.chmod(0o700)
+            if authorize is not None:
+                await authorize()
+            await _run_command(
+                [self._executable, "-C", str(self._checkout), "-c", f"core.hooksPath={directory}",
+                 "push", "--quiet", "origin", f"{commit}:refs/heads/{branch}"],
+                environment={**self._environment, "SKM_PUSH_REF": f"refs/heads/{branch}",
+                             "SKM_PUSH_OLD": expected_head or "0" * len(commit),
+                             "SKM_PUSH_NEW": commit},
+                timeout_seconds=self._timeout_seconds,
+            )
         return commit
+
+    async def matches_commit_identity(
+        self, revision: str, *, message: str, paths: Sequence[str]
+    ) -> bool:
+        """原 Effect の識別子、唯一の親、全変更 path を照合する。同内容だけでは再送成功にしない。"""
+        _validate_revision(revision)
+        metadata = await self._run(["show", "-s", "--format=%P%x00%B", revision])
+        parents, _, body = metadata.decode("utf-8").partition("\x00")
+        if parents != self._base_revision or body.rstrip("\n") != message.rstrip("\n"):
+            return False
+        raw = await self._run(["diff-tree", "--no-commit-id", "--name-only", "-z", "-r",
+                               self._base_revision, revision])
+        changed = {path.decode("utf-8") for path in raw.split(b"\x00") if path}
+        return changed.issubset(set(paths))
 
     def _resolve_writable(self, path: str) -> Path:
         """作業 copy 内の書き込み先を解決し、外へ出る path を拒否する。"""
 
         base = self._checkout.resolve(strict=True)
-        target = (base / path).resolve(strict=False)
-        if not target.is_relative_to(base) or target.is_symlink():
+        target = base / path
+        if any(parent.is_symlink() for parent in (target, *target.parents)):
+            raise RepositoryClientError(
+                "invalid_request", "Repository symlinks cannot be written", retryable=False
+            )
+        target = target.resolve(strict=False)
+        if not target.is_relative_to(base):
             raise RepositoryClientError(
                 "invalid_request", "Repository path escapes the working copy", retryable=False
             )
@@ -1164,7 +1210,8 @@ def _validate_repository_path(path: str) -> None:
             "invalid_request", "Repository path is invalid", retryable=False
         )
     parts = path.split("/")
-    if any(part in {"", ".", ".."} or not part.isprintable() for part in parts):
+    if any(part in {"", ".", ".."} or not part.isprintable()
+           or part.rstrip(" .").casefold() in {".git", ".svn"} for part in parts):
         raise RepositoryClientError(
             "invalid_request", "Repository path is invalid", retryable=False
         )
@@ -1228,6 +1275,7 @@ async def _run_command(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=dict(environment),
+            start_new_session=True,
         )
     except OSError as error:
         raise RepositoryClientError(
@@ -1244,7 +1292,7 @@ async def _run_command(
         raise RepositoryClientError(
             "unavailable", "Repository command timed out", retryable=True
         ) from error
-    except RepositoryClientError:
+    except (RepositoryClientError, asyncio.CancelledError):
         await _terminate(process)
         raise
     if process.returncode != 0:
@@ -1306,7 +1354,7 @@ async def _terminate(process: asyncio.subprocess.Process) -> None:
     if process.returncode is not None:
         return
     with suppress(ProcessLookupError):
-        process.kill()
+        os.killpg(process.pid, signal.SIGKILL)
     with suppress(Exception):
         await process.wait()
 

@@ -76,6 +76,8 @@ input/sources 在首次 await 前复制，既有调度先验锁内版本；创�
 
 ## 保存表单与触发预览
 
+定期执行统一放在「タスク」列表，不设独立页面或 Tab。卡片保留「定期実行を設定」，显示已配置数量和最近的下次执行时间；展开计划可查看状态、原设置、编辑、暂停/恢复和归档。任务按名称、task_key/ID 字面子串与定期状态联合检索；同一任务任一计划匹配状态即可，只有没有任何计划（含归档历史）才算未设置。目录已失效但仍有计划的原任务保留管理卡片，不替换成最新版本。
+
 ScheduleDialog 与即时执行共用输入组件，发送精确任务/input/sources，必需文档缺失或集合不完整拒绝保存。
 
 保存须当前 definition 的成功非空预览和人工确认；修改即清确认，A→B→A 也不收旧响应。预览仅发 definition，只验时间、不授权资源或创建 Run。
@@ -84,7 +86,9 @@ ScheduleDialog 与即时执行共用输入组件，发送精确任务/input/sour
 
 ### 保存后的管理入口
 
-`#/schedules?project=<id>` 独立于模块/TaskCatalog，默认全部状态。服务端 total/limit/offset 分页；q 对 name/task_key 做不区分大小写的字面子串查询，status 单选，created_at/ID 降序。count/items 非原子快照，矛盾须刷新；任务卡汇总读完后续页，遇总数变更/重复不宣称完整。
+旧 `#/schedules?project=<id>` 链接进入任务列表。任务目录与计划全页读取完成后，才按名称和状态筛选；不把第一页当全量，读取失败不显示为未设置。任务目录仍按当前模块筛选；目录已消失的计划保留原 task_key 管理卡片。
+
+详情由任务卡片打开，精确 GET 与编辑 owner 独立于列表筛选/刷新；未决写入时禁止关闭或切换到另一计划。计划 API 保留服务端 total/limit/offset 分页和搜索，客户端全页读取遇总数变化或重复仍拒绝不完整聚合。
 
 详情匹配精确 SkillVersion/task；失效仍展示原配置，只读编辑并说明，不跟 latest。目录错误不冒充任务失效、不清列表；归档 Project 只读。编辑保留原来源/未改绝对时刻精度，不归档重建或清计数。
 
@@ -157,6 +161,10 @@ claim 保存 worker/token hash/generation/到期，非 RunAttempt；旧持有者
 历史核对/迁移工具未实现；不得改 protocol、清数或归档重建冒充恢复。保留旧 Run/key/快照，历史可读不代表可发火。
 
 发布前停全部 Run/Schedule writer、不混新旧 API/Worker；dispatch=false 不够。0036 排他锁下遇任一 occurrence/新协议 Schedule 拒绝降级，不删审计，也不证明更早迁移安全。
+
+## 部署开关
+
+`SKILLMIND_SCHEDULING_ENABLED` 独立控制创建、编辑、恢复 ACTIVE、Worker 到期/原认领恢复与调度 Run 创建；API/Worker 使用相同值。旧 `SKILLMIND_DEFERRED_FEATURES_ENABLED=true` 保留兼容，但启用调度无需开放其他后置能力。会话返回有效的 `scheduling_enabled` 供页面显示入口；关闭时仍可读历史、暂停和归档。Worker 还须开启 dispatch。定时 Run 不继承手动启动时的自动批准同意。
 
 ## 实现与验收
 

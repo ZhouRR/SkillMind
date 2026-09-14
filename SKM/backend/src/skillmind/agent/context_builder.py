@@ -249,6 +249,7 @@ def create_run_tool_registry(
     deferred_features_enabled: bool = True,
     database_writes_enabled: bool = False,
     document_writes_enabled: bool = False,
+    git_writes_enabled: bool = False,
 ) -> ToolRegistry:
     """Project 文書、実 Integration と platform 能力を registry へ登録する。"""
 
@@ -282,7 +283,7 @@ def create_run_tool_registry(
             _interaction_tool_definition(contracts),
             *((_change_propose_tool_definition(contracts),)
               if deferred_features_enabled or database_writes_enabled
-              or document_writes_enabled else ()),
+              or document_writes_enabled or git_writes_enabled else ()),
             *(_subagent_tool_definitions(contracts, subagent_provider)
               if deferred_features_enabled else ()),
         )
@@ -526,6 +527,7 @@ class ProductionRunContextBuilder:
         deferred_features_enabled: bool = True,
         database_writes_enabled: bool = False,
         document_writes_enabled: bool = False,
+        git_writes_enabled: bool = False,
         document_library_target: DocumentLibraryTarget | None = None,
         proposal_continuations: ProposalContinuationReader | None = None,
     ) -> None:
@@ -542,7 +544,8 @@ class ProductionRunContextBuilder:
         self._document_library_target = document_library_target
         self._proposal_continuations = proposal_continuations
         self._execution_features = ExecutionFeatures(
-            deferred_features_enabled, database_writes_enabled, document_writes_enabled
+            deferred_features_enabled, database_writes_enabled,
+            document_writes_enabled, git_writes_enabled
         )
 
     async def build(self, claimed_run: ClaimedRun, *, sequence_start: int) -> RunContext:

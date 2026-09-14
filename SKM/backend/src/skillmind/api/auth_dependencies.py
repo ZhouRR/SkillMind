@@ -7,8 +7,12 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends, Header, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 
 from skillmind.api.problems import ProblemException
+from skillmind.auth.api_keys import ApiKeyService
+from skillmind.auth.domain import derive_api_key_proof
 from skillmind.auth.service import (
     AuthenticatedActor,
     AuthService,
@@ -27,14 +31,57 @@ def user_access(request: Request, actor: AuthenticatedActor) -> UserAccess:
     return UserAccess(
         actor=actor,
         request_id=UUID(request.state.request_id),
-        session_token=request.cookies.get(settings.auth_session_cookie_name, ""),
-        csrf_token=request.headers.get("X-CSRF-Token", ""),
+        session_token=getattr(request.state, "api_key_token", None)
+        or request.cookies.get(settings.auth_session_cookie_name, ""),
+        csrf_token=(
+            derive_api_key_proof(request.state.api_key_token)
+            if getattr(request.state, "api_key_token", None)
+            else request.headers.get("X-CSRF-Token", "")
+        ),
     )
 
 
-async def authenticated_actor(request: Request) -> AuthenticatedActor:
-    """Read request の opaque cookie を検証して actor を返す。"""
+# OpenAPI には両方式を示すが、曖昧な header の判定は raw header で一元化する。
+_bearer = HTTPBearer(auto_error=False, scheme_name="ApiKeyBearer")
+_key_header = APIKeyHeader(name="X-API-Key", auto_error=False, scheme_name="ApiKeyHeader")
 
+
+async def api_key_actor(
+    request: Request,
+    bearer: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+    key_header: Annotated[str | None, Depends(_key_header)],
+) -> AuthenticatedActor | None:
+    """明示資格がある場合は cookie へ fallback せず、重複・混在も拒否する。"""
+    headers = request.headers.getlist("authorization")
+    keys = request.headers.getlist("x-api-key")
+    if not headers and not keys:
+        return None
+    if len(headers) + len(keys) != 1:
+        raise authentication_required_problem()
+    if headers:
+        parts = headers[0].split(" ")
+        if len(parts) != 2 or parts[0].lower() != "bearer":
+            raise authentication_required_problem()
+        token = parts[1]
+    else:
+        token = keys[0]
+    service: ApiKeyService = request.app.state.api_key_service
+    try:
+        actor, key_id = await service.authenticate(token)
+    except UnauthorizedSessionError as error:
+        raise authentication_required_problem() from error
+    request.state.api_key_token = token
+    request.state.api_key_id = key_id
+    return actor
+
+
+async def authenticated_actor(
+    request: Request,
+    key_actor: Annotated[AuthenticatedActor | None, Depends(api_key_actor)],
+) -> AuthenticatedActor:
+    """Read request の header key または opaque cookie を検証する。"""
+    if key_actor is not None:
+        return key_actor
     service: AuthService = request.app.state.auth_service
     settings: Settings = request.app.state.settings
     token = request.cookies.get(settings.auth_session_cookie_name, "")
@@ -46,10 +93,24 @@ async def authenticated_actor(request: Request) -> AuthenticatedActor:
 
 async def csrf_authenticated_actor(
     request: Request,
-    x_csrf_token: str = Header(alias="X-CSRF-Token"),
+    key_actor: Annotated[AuthenticatedActor | None, Depends(api_key_actor)],
+    x_csrf_token: str | None = Header(default=None, alias="X-CSRF-Token"),
 ) -> AuthenticatedActor:
-    """Unsafe request の Origin、Session、CSRF を検証して actor を返す。"""
-
+    """Header key は検証済み資格、cookie は従来の Origin/CSRF で書込を認証する。"""
+    if key_actor is not None:
+        return key_actor
+    if x_csrf_token is None:
+        # Cookie consumer の既存 422 契約を維持し、key request だけを例外にする。
+        raise RequestValidationError(
+            [
+                {
+                    "type": "missing",
+                    "loc": ("header", "X-CSRF-Token"),
+                    "msg": "Field required",
+                    "input": None,
+                }
+            ]
+        )
     require_same_origin(request)
     service: AuthService = request.app.state.auth_service
     settings: Settings = request.app.state.settings
@@ -57,7 +118,7 @@ async def csrf_authenticated_actor(
     try:
         return await service.authenticate_unsafe_session(
             session_token=token,
-            csrf_token=x_csrf_token,
+            csrf_token=x_csrf_token or "",
         )
     except UnauthorizedSessionError as error:
         raise authentication_required_problem() from error
@@ -188,7 +249,7 @@ def authentication_required_problem() -> ProblemException:
     return ProblemException(
         status=status.HTTP_401_UNAUTHORIZED,
         title="Authentication required",
-        detail="A valid session is required.",
+        detail="A valid session or API key is required.",
         code="authentication_required",
     )
 

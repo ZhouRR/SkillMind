@@ -120,6 +120,8 @@ WAITING_FOR_INPUT/APPROVAL 非终态；查 Interaction/Proposal、Brief/checkpoi
 
 resume 须 transcript/workspace 与 engine/model 兼容；fork 保留 parent/checkpoint，replace 从可信 checkpoint 建会话，均不改冻结版本/权限/资源/预算。仅 PRIMARY 限一个 ACTIVE，不把子会话算重；见[交互](../design/user-interactions.md)、[Runtime](../design/agent-runtime.md)。
 
+Git 写入结果未知时，在原执行详情发起只读核对：CONFIRMED 表示原 commit 被观察到，不表示 Run 已接续；NOT_OBSERVED/CONFLICT 也不允许换键重推。分支已推进、批准失效或目标范围改变时保留原记录，先核对仓库和批准事实。Git 模式与分支约束见[仓库写入模式](../design/repository-effects.md#仓库写入模式)。
+
 ## 结果与评价的只读分诊
 
 查授权 detail/历史，保留原 ID/响应，不复制正文。SUCCEEDED 可与 PARTIAL/BLOCKED 并存；模型 APPLIED 不替代平台 read-back，引用计数不证明可读。

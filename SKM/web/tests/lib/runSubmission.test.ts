@@ -33,8 +33,10 @@ describe('frozen Run submission', () => {
     const saved = freezeRunSubmission(scope, form, 'analysis/v1', 'original-key')
     form.autoApprove = !autoApprove
     expect(submissionPayload(saved).auto_approve).toBe(autoApprove)
+    expect(submissionPayload(saved).auto_approve_git).toBe(autoApprove)
     const failed = failedRunSubmission(sendingRunSubmission(saved), new TypeError('offline'))
     expect(submissionPayload(failed.request).auto_approve).toBe(autoApprove)
+    expect(submissionPayload(failed.request).auto_approve_git).toBe(autoApprove)
   })
 
   it('keeps the original request when the draft or a decoded copy is edited', () => {

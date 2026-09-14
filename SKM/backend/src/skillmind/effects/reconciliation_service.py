@@ -15,6 +15,12 @@ from skillmind.agent.run_binding import load_bound_run_resource, resolve_binding
 from skillmind.auth.sessions import UnauthorizedSessionError, validate_session_state
 from skillmind.documents.library import DocumentLibraryTarget
 from skillmind.effects.database_write import DatabaseWriteCommand
+from skillmind.effects.git_receipt import (
+    GitCommitCommand,
+    GitCommitConflictError,
+    GitCommitReader,
+    GitCommitReceipt,
+)
 from skillmind.effects.postgres_write import DatabaseWriteConflictError, DatabaseWriteReceipt
 from skillmind.effects.reconciliation_domain import (
     EffectReconciliationDeniedError,
@@ -23,7 +29,11 @@ from skillmind.effects.reconciliation_domain import (
     EffectReconciliationReference,
     EffectReconciliationUnavailableError,
 )
-from skillmind.effects.reconciliation_requests import reconciliation_target_checksum
+from skillmind.effects.reconciliation_requests import (
+    reconciliation_command_checksum,
+    reconciliation_kind,
+    reconciliation_target_checksum,
+)
 from skillmind.integrations.secrets import DeploymentSecretResolver
 from skillmind.projects.domain import ProjectNotFoundError
 from skillmind.projects.repository import ProjectRepository
@@ -81,11 +91,13 @@ class EffectReconciliationService:
         database_reader: DatabaseReceiptReader,
         document_reader: ObjectReceiptReader | None,
         document_library_target: DocumentLibraryTarget | None,
+        git_reader: GitCommitReader | None = None,
     ) -> None:
         """既存接続の只読 port と現在 namespace を受け取り、書込 Provider を登録しない。"""
 
         self._session_factory = session_factory
         self._secret_resolver = secret_resolver
+        self._git_reader = git_reader
         self._database_reader = database_reader
         self._document_reader = document_reader
         self._document_library_target = document_library_target
@@ -122,15 +134,20 @@ class EffectReconciliationService:
                         raise EffectReconciliationDeniedError("Original read target changed")
 
                 command = original.target.command
-                receipt: DatabaseWriteReceipt | ObjectWriteReceipt | None = None
+                receipt: DatabaseWriteReceipt | ObjectWriteReceipt | GitCommitReceipt | None = None
                 observed: Literal["CONFIRMED", "NOT_OBSERVED", "CONFLICT"] = "NOT_OBSERVED"
-                kind: Literal["DATABASE_TRANSACTION", "DOCUMENT_OBJECT"] = (
-                    "DATABASE_TRANSACTION"
-                    if isinstance(command, DatabaseWriteCommand)
-                    else "DOCUMENT_OBJECT"
-                )
+                kind = reconciliation_kind(original.target)
                 try:
-                    if isinstance(command, DatabaseWriteCommand):
+                    if isinstance(command, GitCommitCommand):
+                        if self._git_reader is None or original.credential is None:
+                            raise EffectReconciliationUnavailableError("Original Git unavailable")
+                        receipt = await self._git_reader.lookup(
+                            json.loads(original.target.config_json),
+                            original.credential,
+                            command,
+                            authorize=authorize,
+                        )
+                    elif isinstance(command, DatabaseWriteCommand):
                         if original.credential is None:
                             raise EffectReconciliationUnavailableError(
                                 "Original credential unavailable"
@@ -152,7 +169,11 @@ class EffectReconciliationService:
                         receipt = await self._document_reader.lookup(command, authorize=authorize)
                     if receipt is not None:
                         observed = "CONFIRMED"
-                except (DatabaseWriteConflictError, ObjectWriteConflictError):
+                except (
+                    DatabaseWriteConflictError,
+                    ObjectWriteConflictError,
+                    GitCommitConflictError,
+                ):
                     observed = "CONFLICT"
                 await authorize()
                 return EffectReconciliationObservation(
@@ -160,9 +181,7 @@ class EffectReconciliationService:
                     kind,
                     observed,
                     datetime.now(UTC),
-                    command.checksum
-                    if isinstance(command, DatabaseWriteCommand)
-                    else command.request_checksum,
+                    reconciliation_command_checksum(original.target),
                     receipt,
                 )
         except (EffectReconciliationDeniedError, UnauthorizedSessionError, ProjectNotFoundError):
@@ -200,7 +219,7 @@ class EffectReconciliationService:
                 effect_execution_id=reference.effect_execution_id,
             )
             credential = None
-            if isinstance(target.command, DatabaseWriteCommand):
+            if isinstance(target.command, (DatabaseWriteCommand, GitCommitCommand)):
                 bound = await load_bound_run_resource(
                     session,
                     project_id=reference.project_id,
@@ -208,7 +227,11 @@ class EffectReconciliationService:
                     binding_id=target.binding_id,
                     integration_id=target.command.integration_id,
                     provider=target.provider,
-                    capability="database.write/v1",
+                    capability=(
+                        "repository.write/v1"
+                        if isinstance(target.command, GitCommitCommand)
+                        else "database.write/v1"
+                    ),
                 )
                 if (
                     bound.integration.secret_reference_id != target.secret_reference_id

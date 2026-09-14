@@ -216,3 +216,6 @@ export type {
   ScheduleStatus,
   UpdateScheduleInput,
 } from './schedules'
+
+export { loadApiKeys, createApiKey, revokeApiKey } from './apiKeys'
+export type { ApiKeyRecord, CreatedApiKeyRecord } from './apiKeys'

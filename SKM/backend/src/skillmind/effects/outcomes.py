@@ -16,10 +16,11 @@ def effect_failure_record(
     code: str,
     retryable: bool,
     previous: dict[str, Any] | None,
+    provider: str | None = None,
 ) -> dict[str, Any]:
     """claim 済みの保存処理は原回执で成功を証明するまで、失敗理由だけで未実行としない。"""
 
-    if not resolve_effect_capability(capability).staged_authorization or attempt_no == 0:
+    if not resolve_effect_capability(capability).supports_supervision(provider) or attempt_no == 0:
         return {"code": code, "retryable": retryable}
     # 呼出し直前で停止した場合も、現在の記録だけでは未送信を証明できない。
     # 生の例外や過去 JSON は複製せず、元の分類 code だけを一定サイズで保持する。

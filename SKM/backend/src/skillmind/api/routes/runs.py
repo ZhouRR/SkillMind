@@ -128,6 +128,14 @@ class CreateTaskRunRequest(BaseModel):
     input: dict[str, Any] = Field(default_factory=dict)
     sources: dict[str, str] = Field(default_factory=dict, max_length=50)
     auto_approve: bool = Field(default=False, strict=True)
+    auto_approve_git: bool = Field(default=False, strict=True)
+
+    @model_validator(mode="after")
+    def validate_git_consent(self) -> CreateTaskRunRequest:
+        """Git の同意を既存 Run 同意から独立した全許可にしない。"""
+        if self.auto_approve_git and not self.auto_approve:
+            raise ValueError("Git approval requires Run automatic approval")
+        return self
 
 
 class RunResponse(BaseModel):
@@ -541,6 +549,7 @@ async def create_task_run(
         input_json=body.input,
         sources=body.sources,
         auto_approve=body.auto_approve,
+        auto_approve_git=body.auto_approve_git,
         actor_id=actor.user_id,
         idempotency_key=idempotency_key,
         authorization=authorization,
@@ -567,6 +576,7 @@ async def create_task_run(
                     input_json=body.input,
                     sources=body.sources,
                     auto_approve=body.auto_approve,
+                    auto_approve_git=body.auto_approve_git,
                     idempotency_key=idempotency_key,
                     trace_id=request.state.request_id,
                     actor_id=actor.user_id,

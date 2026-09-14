@@ -24,13 +24,22 @@ from skillmind.integrations.domain import (
 )
 
 REPOSITORY_WRITE_CAPABILITY = "repository.write/v1"
-REPOSITORY_WRITE_PROVIDER_VERSION = "git-branch-commit/v1"
+LEGACY_GIT_WRITE_PROVIDER_VERSION = "git-branch-commit/v1"
+REPOSITORY_WRITE_PROVIDER_VERSION = "git-branch-commit/v2"
 REPOSITORY_WRITE_SVN_PROVIDER_VERSION = "svn-branch-commit/v1"
 
 _BRANCH_PATTERN = re.compile(r"^skillmind/[A-Za-z0-9][A-Za-z0-9._/-]{0,110}$")
 # direct mode も含めた target 名の共通健全性 (ref として安全か)。namespace の判定は別。
 _TARGET_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$")
-_FILE_PATH_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,4000}$")
+def _valid_file_path(path: str) -> bool:
+    """日本語の成果名を許し、正規化別名・metadata・option/pathspec を拒否する。"""
+    return bool(path) and len(path) <= 4001 and not any(
+        ord(char) < 32 or ord(char) == 127 or char in "\\:*?[]" for char in path
+    ) and all(
+        part and part not in {".", ".."} and not part.startswith("-")
+        and part.rstrip(" .").casefold() not in {".git", ".svn"}
+        for part in path.split("/")
+    )
 
 # 変更規模の上限 (D4)。人手 review と read-back が成り立つ範囲に限る。超過は截断せず拒否する。
 _MAX_CHANGED_FILES = 50
@@ -53,6 +62,8 @@ def validate_repository_write_proposal(
 
     if draft.capability_version != REPOSITORY_WRITE_CAPABILITY:
         raise ChangeProposalValidationError("Effect capability is not repository.write/v1")
+    if draft.operation != "commit":
+        raise ChangeProposalValidationError("Repository write requires the commit operation")
     config = integration_config or {}
     mode = config.get("write_mode", REPOSITORY_WRITE_MODE_DEFAULT)
     branch = draft.target.get("locator")
@@ -87,9 +98,7 @@ def validate_repository_write_proposal(
         if not isinstance(path, str) or not path.startswith("/files/"):
             raise ChangeProposalValidationError("Repository change path must stay under /files")
         repository_path = path.removeprefix("/files/")
-        if _FILE_PATH_PATTERN.fullmatch(repository_path) is None or ".." in repository_path.split(
-            "/"
-        ):
+        if not _valid_file_path(repository_path) or repository_path in files:
             raise ChangeProposalValidationError("Repository change path is invalid")
         value = change.get("value")
         if action == "REMOVE":

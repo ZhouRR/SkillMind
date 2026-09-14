@@ -66,6 +66,13 @@
     "document_writes_enabled": {
       "type": "boolean",
       "default": false
+    },
+    "git_writes_enabled": {
+      "type": "boolean"
+    },
+    "scheduling_enabled": {
+      "type": "boolean",
+      "default": false
     }
   }
 }

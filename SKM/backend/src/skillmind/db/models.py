@@ -354,11 +354,11 @@ class ResourceBinding(IdentityMixin, TimestampMixin, Base):
 
 
 class AuthSession(IdentityMixin, Base):
-    """Opaque browser session の hash と失効・期限監査を保持する。"""
+    """Browser / API key の元資格 hash、失効・期限と非同期参照を保持する。"""
 
     __tablename__ = "auth_sessions"
     __table_args__ = (
-        CheckConstraint("credential_version IN (1, 2)", name="auth_sessions_credential_version"),
+        CheckConstraint("credential_version IN (1, 2, 3)", name="auth_sessions_credential_version"),
         CheckConstraint(
             "system_role_at_login IS NULL OR system_role_at_login IN ('ADMIN', 'USER')",
             name="auth_sessions_login_role",
@@ -386,6 +386,16 @@ class AuthSession(IdentityMixin, Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     client_ip_hash: Mapped[str | None] = mapped_column(String(71))
     user_agent_hash: Mapped[str | None] = mapped_column(String(71))
+
+
+class ApiKey(Base):
+    """API key の公開管理 metadata。資格原値は共通台帳にも保存しない。"""
+
+    __tablename__ = "api_keys"
+    id: Mapped[UUID] = mapped_column(ForeignKey("auth_sessions.id", ondelete="RESTRICT"), primary_key=True)
+    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    key_prefix: Mapped[str] = mapped_column(String(16), nullable=False)
 
 
 class SkillSource(IdentityMixin, Base):
@@ -1583,7 +1593,7 @@ class EffectReconciliationRequest(IdentityMixin, Base):
             name="effect_reconciliation_status",
         ),
         CheckConstraint(
-            "kind IN ('DATABASE_TRANSACTION', 'DOCUMENT_OBJECT')",
+            "kind IN ('DATABASE_TRANSACTION', 'DOCUMENT_OBJECT', 'GIT_COMMIT')",
             name="effect_reconciliation_kind",
         ),
         CheckConstraint(

@@ -1,14 +1,15 @@
 # 认证、会话与项目授权
 
-本页负责浏览器身份和授权入口；[登录防护](login-protection.md)、[用户管理](user-lifecycle.md)、[外部 Secret](secret-storage.md)分别维护独立协议。当前交付缺口见[计划 R05](../planning/roadmap.md#开发任务)。
+本页负责浏览器、外部应用身份和授权入口；[登录防护](login-protection.md)、[用户管理](user-lifecycle.md)、[外部 Secret](secret-storage.md)分别维护独立协议。当前交付缺口见[计划 R05](../planning/roadmap.md#开发任务)。
 
-## 先分清四类凭据
+## 凭据种类
 
 | 凭据 | 用途与边界 |
 | --- | --- |
 | login CSRF challenge | 登录前正文与短时 HttpOnly cookie 配对，Redis 一次性消费；不是会话 |
 | session token | HttpOnly cookie 携带；服务端仅保存 hash，Web 不读取原值 |
 | session CSRF token | 当前会话的写请求 header；Web 仅在内存保存，不能单独证明身份 |
+| API Key | 外部应用请求头；默认访问创建者所在组织全部资源，只保存摘要，可持久撤销 |
 | Provider Secret | 只交受控 Provider 使用，不授予额外 Tool 权限 |
 
 ## 威胁边界与目标
@@ -16,7 +17,7 @@
 - 独立账号体系，当前只支持一个 Organization。email 唯一键含组织，但登录只按 email 查询；引入多组织前须先定义组织选择与查询隔离。
 - 生产由共享 Traefik 提供 HTTPS；API/Web 同源，位于 SKILLMIND_CONTEXT_PATH 下。浏览器不持有长期 Bearer token，不将会话存入 Local/Session Storage。
 - PostgreSQL 保存用户、会话、成员与审计；Redis 仅承载登录防护等短期状态。
-- 当前不提供 OAuth/OIDC、API token、找回密码、邮件验证或 MFA；受控内部部署的边界不能直接推广到公网。
+- 当前不提供 OAuth/OIDC、找回密码、邮件验证或 MFA；受控内部部署的边界不能直接推广到公网。
 
 ## 密码认证
 
@@ -47,7 +48,7 @@ email 标准化后在组织内唯一。不存在、停用和密码错误统一�
 
 ## CSRF 与同源约束
 
-非安全方法同时验证 Origin 与 synchronizer CSRF；SameSite 只是纵深防御。登录前 challenge 经 header/cookie 配对后以 Redis GETDEL 消费，每次重试重新获取；登录后写请求仅通过 X-CSRF-Token 提交会话 CSRF，不能混用两种凭据。
+Cookie 的非安全方法同时验证 Origin 与 synchronizer CSRF；SameSite 只是纵深防御。登录前 challenge 经 header/cookie 配对后以 Redis GETDEL 消费，每次重试重新获取；登录后写请求仅通过 X-CSRF-Token 提交会话 CSRF，不能混用两种凭据。
 
 GET/SSE 不触发业务命令，但认证可能更新 idle，login-context 会保存 challenge；不能作为无持久副作用的健康检查。只信任明确配置的代理，不直接相信任意 X-Forwarded-*。
 
@@ -79,6 +80,20 @@ auth-tag route 的已处理响应与登录防护路径设置 Cache-Control: no-s
 
 [require_same_origin](../../SKM/backend/src/skillmind/api/auth_dependencies.py)比较 Origin 与代理恢复后的 scheme/host/port；context path 不属于 Origin。缺失 Origin 拒绝，不以关掉 Secure/CSRF 或信任全部代理解决配置错误。
 
+## 外部应用 API Key
+
+管理员在「アカウントと安全性 → API キー」命名并创建；完整 Key 只在创建成功时返回一次，页面只保存在内存，不写浏览器存储。列表显示前缀、创建与最后利用时间、撤销状态。创建响应丢失时先重新读取列表，撤销无用 Key 后再人工创建，不能自动重发；撤销按精确 ID 幂等生效。
+
+外部应用沿用现有 `{contextPath}/api/v1` 文件、任务、Run 和管理 API，使用 `Authorization: Bearer <API_KEY>` 或 `X-API-Key: <API_KEY>`，二选一。无需 Cookie、Origin 或 CSRF；显式 header 无效、重复或混用时返回 401，不能回退浏览器会话。浏览器的登录/会话/登出端点仍使用 Cookie 协议，不把 Key 当浏览器会话。
+
+首版没有逐 Key scope，Key 默认具有当前组织的 ADMIN 资源权限；不扩大到其他组织，也不绕过项目归档、部署开关、Run 冻结权限、Tool 约束、外部写入审批及幂等规则。Key 绑定活动 ADMIN 创建者；停用、改角色、改密或撤销该用户全部会话同时撤销其 Key，重新启用不能复活。单独撤销 Key 不影响浏览器会话。最后利用时间按五分钟节流。
+
+内部 Key 使用 `skm1.` 加 32 随机 bytes 的 base64url，AuthSession 保存 `credential_version=3` 和 token hash，`api_keys` 保存组织、名称及前缀。内部重认证证明使用 HKDF SHA-256、salt=None、info=`skillmind.auth.api-key-proof/v1`，加 `keyproof1.` 前缀后只保存 hash；它与浏览器 CSRF 派生分离，调用方无需提交。Key 无可配置到期时间，内部期限以 9999-01-01 UTC 表示；不受浏览器 idle 延长逻辑影响。
+
+共享 actor dependency 验证 Key 后，`UserAccess` 继续传递原 token 和内部证明，在业务锁等待后及提交前复核同一持久资格；异步 Skill 解释也保留原资格 ID。审计日志只增加 Key ID，不记录 token、header 或秘密正文。管理 API 的响应禁止缓存，公开格式见[API Key 契约](../../SKM/contracts/auth/api-keys/v1/api-key.schema.json)。
+
+0051 migration 只增加 Key 资格版和元数据，不迁移或撤销现有浏览器会话。API/Worker 必须使用支持 v3 的同版 package；任何 v3 行存在时拒绝降级，避免丢失持久撤销和原请求审计。
+
 ## 首个 ADMIN 初始化
 
 仅受控交互 CLI，密码经 getpass，不进参数、环境或 shell history。锁 migration 创建的 Organization，存在任何 ADMIN 即拒绝；后续走[用户管理](user-lifecycle.md)，不以反复 bootstrap、匿名 HTTP、启动自动创建或 SQL 提权恢复账户。命令见[首次起动](../operations/quickstart.md#最初の-admin-を作成する)；当前 make bootstrap-admin 不清空数据，也不是重置入口。
@@ -86,7 +101,7 @@ auth-tag route 的已处理响应与登录防护路径设置 Cache-Control: no-s
 ## 权限判定
 
 ```text
-cookie + 写请求 Origin/CSRF
+cookie + 写请求 Origin/CSRF，或显式 API Key header
   → 当前会话/用户/期限
   → actor dependency：角色与 Project
   → use case：目标所有权、版本、业务条件

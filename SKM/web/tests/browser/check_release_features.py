@@ -11,8 +11,8 @@ from urllib.parse import urlsplit
 from check_accounts import session
 from check_document_upload import UploadBrowserAudit
 from check_projects import PROJECT, messages
-from check_schedule_management import ScheduleManagementApi
 from playwright.async_api import Route, async_playwright, expect
+from schedule_management_fixture import ScheduleManagementApi
 
 
 class ReleaseApi(ScheduleManagementApi):
@@ -34,7 +34,7 @@ class ReleaseApi(ScheduleManagementApi):
     def __init__(self, url: str, language: str) -> None:
         """一覧と精確履歴は同じ元予定を保持する。"""
         super().__init__(url, language)
-        self.allow_schedule_reads = False
+        self.allow_schedule_reads = True
         self.records = self.records[:1]
 
     async def respond(self, route: Route) -> None:
@@ -124,12 +124,9 @@ async def check(url: str, output: Path) -> None:
                     )
                     api.allow_schedule_reads = True
                     await page.goto(f"{url}#/schedules?project={PROJECT}")
-                    await expect(
-                        page.get_by_text(
-                            labels["scheduleManager"]["deferredDisabled"], exact=True
-                        )
-                    ).to_be_visible()
-                    await page.locator("[data-schedule-select]").first.click()
+                    await expect(page.locator('[data-task-card]')).to_be_visible()
+                    await page.locator('.taskSchedules summary').first.click()
+                    await page.locator('[data-task-schedule-manage]').first.click()
                     await expect(page.locator("[data-schedule-edit]")).to_be_disabled()
                     await expect(
                         page.locator('[data-schedule-status="ACTIVE"]')

@@ -19,7 +19,6 @@ export const APP_ROUTES: ReadonlyArray<{
   { route: 'workspace', scope: 'project' },
   { route: 'history', scope: 'project' },
   { route: 'tasks', scope: 'project' },
-  { route: 'schedules', scope: 'project' },
   { route: 'documents', scope: 'project' },
   { route: 'resources', scope: 'project' },
   // Skills 解析は資産を作る平台能力として platform 組に置く。保存先は sidebar の現在 Project。
@@ -31,6 +30,7 @@ export const APP_ROUTES: ReadonlyArray<{
 /** URL hash を既知の画面へ正規化し、不明な値は主页へ安全に戻す。 */
 export function routeFromHash(hash: string): AppRoute {
   const candidate = hash.replace(/^#\/?/, '').split('?', 1)[0]?.replace(/\/+$/, '') ?? ''
+  if (candidate === 'schedules') return 'tasks'
   return APP_ROUTES.some(({ route }) => route === candidate)
     ? candidate as AppRoute
     : 'home'
@@ -44,7 +44,7 @@ export interface RouteContext {
 
 /** 固定画面を static hosting と互換な hash URL へ変換する。 */
 export function routeHref(route: AppRoute, projectId?: string, context?: RouteContext): string {
-  const base = route === 'home' ? '#/' : `#/${route}`
+  const base = route === 'home' ? '#/' : `#/${route === 'schedules' ? 'tasks' : route}`
   // Account の検索や対象は画面内に限定し、Project/Run の URL 文脈を引き継がない。
   if (route === 'accounts') return base
   const query = new URLSearchParams()

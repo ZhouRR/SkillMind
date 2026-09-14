@@ -58,6 +58,7 @@ class TaskRunIntent:
     input_json: dict[str, Any]
     sources: dict[str, str]
     auto_approve: bool = False
+    auto_approve_git: bool = False
 
     def __post_init__(self) -> None:
         """呼出し元の可変 dict を所有せず、生成時に表記と形を固定する。"""
@@ -73,6 +74,10 @@ class TaskRunIntent:
             raise ValueError("Creation input and sources must be objects")
         if not isinstance(self.auto_approve, bool):
             raise ValueError("Automatic approval must be a boolean")
+        if not isinstance(self.auto_approve_git, bool) or (
+            self.auto_approve_git and not self.auto_approve
+        ):
+            raise ValueError("Git approval requires Run automatic approval")
         object.__setattr__(self, "input_json", deepcopy(self.input_json))
         object.__setattr__(self, "sources", normalize_source_choices(self.sources))
 
@@ -81,7 +86,12 @@ class TaskRunIntent:
 
         return {
             # 手動承認は既存 v1 の identity を維持し、権限を追加する要求だけ v2 にする。
-            "request_version": "v2" if self.auto_approve else "v1",
+            "request_version": "v3"
+            if self.auto_approve_git
+            else "v2"
+            if self.auto_approve
+            else "v1",
+            **({"auto_approve_git": True} if self.auto_approve_git else {}),
             **({"auto_approve": True} if self.auto_approve else {}),
             "project_id": str(self.project_id),
             "skill_version_id": str(self.skill_version_id),
@@ -100,13 +110,18 @@ class TaskRunIntent:
     def from_json(cls, value: object) -> TaskRunIntent:
         """保存済みの形式を厳格に読み、未知版や非正規の identity を拒否する。"""
 
-        if (
-            not isinstance(value, dict)
-            or not (
-                (set(value) == _REQUEST_FIELDS and value.get("request_version") == "v1")
-                or (set(value) == _REQUEST_FIELDS | {"auto_approve"}
-                    and value.get("request_version") == "v2"
-                    and value.get("auto_approve") is True)
+        if not isinstance(value, dict) or not (
+            (set(value) == _REQUEST_FIELDS and value.get("request_version") == "v1")
+            or (
+                set(value) == _REQUEST_FIELDS | {"auto_approve"}
+                and value.get("request_version") == "v2"
+                and value.get("auto_approve") is True
+            )
+            or (
+                set(value) == _REQUEST_FIELDS | {"auto_approve", "auto_approve_git"}
+                and value.get("request_version") == "v3"
+                and value.get("auto_approve") is True
+                and value.get("auto_approve_git") is True
             )
         ):
             raise ValueError("Stored creation request has an unsupported format")
@@ -123,6 +138,7 @@ class TaskRunIntent:
             input_json=value["input"],
             sources=value["sources"],
             auto_approve=value.get("auto_approve", False),
+            auto_approve_git=value.get("auto_approve_git", False),
         )
         if canonical_json(intent.to_json()) != canonical_json(value):
             raise ValueError("Stored creation request is not canonical")

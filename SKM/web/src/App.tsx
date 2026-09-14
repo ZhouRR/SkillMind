@@ -32,7 +32,6 @@ import { HistoryPage } from './pages/HistoryPage'
 import { LoginPage } from './pages/LoginPage'
 import { ProjectsPage } from './pages/ProjectsPage'
 import { ResourcesPage } from './pages/ResourcesPage'
-import { SchedulesPage } from './pages/SchedulesPage'
 import { SkillsPage } from './pages/SkillsPage'
 import { TasksPage } from './pages/TasksPage'
 import { RunDetailPage, WorkspacePage } from './pages/WorkspacePage'
@@ -469,13 +468,12 @@ function renderPage(
     case 'resources':
       return <ResourcesPage csrfToken={session.csrf_token} projectId={projectId}
         deferredFeaturesEnabled={session.deferred_features_enabled === true}
-        databaseWritesEnabled={session.database_writes_enabled === true} />
+        databaseWritesEnabled={session.database_writes_enabled === true}
+        gitWritesEnabled={session.git_writes_enabled === true} />
+    case 'schedules':
     case 'tasks':
       return <TasksPage key={`${session.user.user_id}:${projectId}`} csrfToken={session.csrf_token} actorId={session.user.user_id} onSessionEnded={onSessionEnded} moduleId={activeModuleId} projectId={projectId}
-        projectReadOnly={currentProject?.status !== 'ACTIVE'} deferredFeaturesEnabled={session.deferred_features_enabled === true} />
-    case 'schedules':
-      return <SchedulesPage projectId={projectId} actorId={session.user.user_id} csrfToken={session.csrf_token}
-        currentProject={currentProject} onSessionEnded={onSessionEnded} deferredFeaturesEnabled={session.deferred_features_enabled === true} />
+        currentProject={currentProject} projectReadOnly={currentProject?.status !== 'ACTIVE'} schedulingEnabled={(session.scheduling_enabled ?? session.deferred_features_enabled) === true} />
     case 'workspace':
       return <WorkspacePage
         key={`${session.user.user_id}:${projectId}`}

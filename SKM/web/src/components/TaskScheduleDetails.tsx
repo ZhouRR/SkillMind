@@ -1,47 +1,40 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
-import type { ProjectRecord, PublishedTaskRecord, ScheduleRecord, ScheduleStatus } from '../api'
-import { DetailDrawer, EmptyState, LoadingSkeleton, PageHeader } from '../components/PageElements'
+import type { ProjectRecord, PublishedTaskRecord, ScheduleRecord } from '../api'
+import { DetailDrawer, EmptyState } from '../components/PageElements'
 import { ScheduleActivityPanel } from '../components/ScheduleActivityPanel'
-import { ScheduleEditDialog, ScheduleStatusActions, summarizeTiming } from '../components/ScheduleDialog'
+import { ScheduleEditDialog, ScheduleStatusActions } from '../components/ScheduleDialog'
 import { useSchedules } from '../hooks/useSchedules'
 import type { SessionEnded } from '../hooks/useResourceRequest'
 import { useMessages } from '../i18n'
-import { routeHref } from '../lib/routing'
 import { formatScheduleTimestamp } from '../lib/scheduleTime'
+import { routeHref } from '../lib/routing'
 import { sameUuid } from '../lib/validation'
 import '../styles/schedules.css'
 
-/** 精確に認可済みの Project と現在 actor が、一覧と編集の所有者を決める。 */
-export interface SchedulesPageProps {
+/** Task カードから選んだ原 Schedule の詳細・編集・状態変更を一つの owner に固定する。 */
+interface TaskScheduleDetailsProps {
   projectId: string
-  actorId: string
+  scheduleId: string
   csrfToken: string
   currentProject: ProjectRecord | null
-  onSessionEnded?: SessionEnded
-  deferredFeaturesEnabled?: boolean
+  schedulingEnabled: boolean
+  onSessionEnded: SessionEnded
+  onChanged: () => void
+  onBusyChange: (busy: boolean) => void
 }
 
-/** 単独利用でも 401 後の業務成功を補造しない。通常 App は原会話の終了を受け持つ。 */
-function retainSession(): void {}
-
-/** 状態 owner の Review が唯一の失敗表示を担い、採用後に親へ古い警告を残さない。 */
+/** 各 mutation の owner が失敗を表示し、別の古いエラーを重ねない。 */
 function retainStatusFeedback(): void {}
 
-/** Module/task catalog に依存しない、Project 全体の調度管理入口。 */
-export function SchedulesPage(props: SchedulesPageProps) {
-  return <ScheduleManager key={`${props.actorId.toLowerCase()}:${props.csrfToken}:${props.projectId.toLowerCase()}`} {...props} />
-}
-
-/** 行選択・一覧読取と原編集 owner を分離し、refresh で未決書込を消さない。 */
-function ScheduleManager({ projectId, currentProject, csrfToken, deferredFeaturesEnabled = true, onSessionEnded = retainSession }: SchedulesPageProps) {
+/** フィルタや一覧再読込から独立し、未知の書込と元草稿を維持する。 */
+export function TaskScheduleDetails({ projectId, scheduleId, csrfToken, currentProject,
+  schedulingEnabled, onSessionEnded, onChanged, onBusyChange }: TaskScheduleDetailsProps) {
   const messages = useMessages()
   const labels = messages.scheduleManager
   const authorized = Boolean(currentProject && sameUuid(currentProject.project_id, projectId))
   const readonly = !authorized || currentProject?.status !== 'ACTIVE'
-  const state = useSchedules(projectId, onSessionEnded, authorized)
-  const [q, setQ] = useState('')
-  const [status, setStatus] = useState<ScheduleStatus | ''>('')
+  const state = useSchedules(projectId, onSessionEnded, authorized, scheduleId)
   const [editor, setEditor] = useState<{ schedule: ScheduleRecord; task: PublishedTaskRecord; revision: number } | null>(null)
   const [editorOpen, setEditorOpen] = useState(false)
   const [editorPending, setEditorPending] = useState(false)
@@ -51,90 +44,27 @@ function ScheduleManager({ projectId, currentProject, csrfToken, deferredFeature
   const editorOpenRef = useRef(false)
   const statusLock = useRef(false)
   const heading = useRef<HTMLHeadingElement>(null)
-  const selectionLock = editorOpen || editorPending || statusPending
   const detailReady = !state.detail.pending && !state.detail.failure && Boolean(state.record)
-  const listReady = !state.list.pending && !state.list.failure && state.list.data !== null
-  const queryInvalid = [...q.trim()].length > 200 || q.includes('\u0000')
+  useEffect(() => { if (detailReady) heading.current?.focus() }, [detailReady])
+  useEffect(() => { onBusyChange(editorOpen || editorPending || statusPending) },
+    [editorOpen, editorPending, statusPending, onBusyChange])
 
-  useEffect(() => {
-    if (detailReady) heading.current?.focus()
-  }, [state.selection.revision, detailReady])
-
-  /** 検索は literal のまま送る。画面内の先頭頁を全件と見なして filter しない。 */
-  function search(event: FormEvent): void {
-    event.preventDefault()
-    if (queryInvalid) return
-    state.search(q, status)
-  }
-  /** 一覧行をそのまま書込へ使わず、新しい精確 GET と task 照合を確認する。 */
+  /** 最新の精確 GET と Task を照合してから編集草稿を固定する。 */
   function edit(): void {
     if (readonly || editorLock.current || editorPendingRef.current || statusLock.current
       || !state.canEdit() || !state.record || !state.task) return
     editorLock.current = true
+    onBusyChange(true)
     editorOpenRef.current = true
-    setEditor((current) => ({
-      schedule: state.record!, task: state.task!, revision: (current?.revision ?? 0) + 1,
-    }))
+    setEditor((current) => ({ schedule: state.record!, task: state.task!, revision: (current?.revision ?? 0) + 1 }))
     setEditorOpen(true)
   }
-  /** 成功回执でも一覧/詳細は再読取する。別の未知 operation の成功証明には使わない。 */
-  function changed(): void {
-    state.list.refresh()
-    state.refreshFacts()
-  }
+  /** 成功回执は詳細/親カードの再読取を促し、他の未知操作を成功と断定しない。 */
+  function changed(): void { state.refreshFacts(); onChanged() }
 
-  return <div data-schedule-manager>
-    <PageHeader title={messages.routes.schedules.label} />
-    {!authorized ? <section className="panel"><EmptyState text={labels.needProject} /></section> : <>
-      {readonly && <p className="scheduleNotice" role="status">{labels.readOnlyProject}</p>}
-      {!deferredFeaturesEnabled && <p className="scheduleNotice" role="status">{labels.deferredDisabled}</p>}
-      {state.readDenied && <p className="error" role="alert" data-schedule-read-denied>{labels.failures[state.readDenied.key]}</p>}
-      <div className="scheduleManagerLayout">
-        <section className="panel scheduleManagerList" aria-label={labels.listTitle}>
-          <form className="scheduleFilters" onSubmit={search}>
-            <label>{labels.searchLabel}<input data-schedule-search name="q" value={q}
-              placeholder={labels.searchPlaceholder} onChange={(event) => setQ(event.target.value)} /></label>
-            <label>{labels.statusLabel}<select data-schedule-filter value={status}
-              onChange={(event) => setStatus(event.target.value as ScheduleStatus | '')}>
-              <option value="">{labels.allStates}</option>
-              {(['ACTIVE', 'PAUSED', 'COMPLETED', 'ERROR', 'ARCHIVED'] as const).map((value) => (
-                <option key={value} value={value}>{messages.enums.scheduleStatus[value]}</option>
-              ))}
-            </select></label>
-            <button className="primaryButton compactButton" disabled={queryInvalid} type="submit">{labels.search}</button>
-            <button className="secondaryButton compactButton" data-schedule-refresh type="button"
-              disabled={state.list.pending} onClick={state.list.refresh}>{labels.refresh}</button>
-          </form>
-          {queryInvalid && <p className="error" role="alert">{labels.invalidSearch}</p>}
-          {state.list.pending && <LoadingSkeleton label={labels.loading} rows={3} />}
-          {state.list.failure && <p className="error" role="alert">{labels.failures[state.list.failure.key]}</p>}
-          {listReady && <>
-            <p className="hint" data-schedule-total>{labels.total(state.list.data!.total)}</p>
-            {state.list.data!.schedules.length === 0 ? <EmptyState text={labels.empty} /> : <ul className="scheduleRows"
-              tabIndex={0} role="list" aria-label={labels.listTitle}>
-              {state.list.data!.schedules.map((schedule) => <li key={schedule.schedule_id} data-schedule-row={schedule.schedule_id}>
-                <button className="scheduleSelect" data-schedule-select={schedule.schedule_id} type="button"
-                  disabled={selectionLock} aria-pressed={sameUuid(schedule.schedule_id, state.selection.id)}
-                  onClick={() => {
-                    if (editorLock.current || statusLock.current) return
-                    setEditor(null); state.select(schedule.schedule_id)
-                  }}>
-                  <strong title={schedule.schedule_id}>{schedule.name}</strong>
-                  <span className={`statusBadge scheduleStatus-${schedule.status.toLowerCase()}`}>{messages.enums.scheduleStatus[schedule.status]}</span>
-                  <small>{summarizeTiming(schedule)}</small>
-                </button>
-              </li>)}
-            </ul>}
-            <nav className="schedulePager" aria-label={labels.pagination}>
-              <button className="secondaryButton compactButton" type="button" data-schedule-previous
-                disabled={state.filter.offset === 0} onClick={() => state.turnPage(Math.max(0, state.filter.offset - state.limit))}>{labels.previous}</button>
-              <span>{labels.page(state.list.data!.offset, state.list.data!.limit, state.list.data!.total)}</span>
-              <button className="secondaryButton compactButton" type="button" data-schedule-next
-                disabled={state.list.data!.offset + state.list.data!.limit >= state.list.data!.total}
-                onClick={() => state.turnPage(state.filter.offset + state.limit)}>{labels.next}</button>
-            </nav>
-          </>}
-        </section>
+  return !authorized ? <EmptyState text={labels.needProject} /> : <div data-task-schedule-details>
+    {readonly && <p className="scheduleNotice">{labels.readOnlyProject}</p>}
+    {state.readDenied && <p className="error" role="alert" data-schedule-read-denied>{labels.failures[state.readDenied.key]}</p>}
         <section className="panel scheduleManagerDetail" data-schedule-detail aria-label={labels.detailTitle}>
           <h2 ref={heading} tabIndex={-1}>{labels.detailTitle}</h2>
           {!state.selection.id && <EmptyState text={labels.selectSchedule} />}
@@ -156,13 +86,13 @@ function ScheduleManager({ projectId, currentProject, csrfToken, deferredFeature
               <ScheduleDetails schedule={state.record} />
               <div className="formRow">
                 <button className="primaryButton compactButton" type="button" data-schedule-edit
-                  disabled={!deferredFeaturesEnabled || readonly || !state.canWrite || statusPending || editorPending
+                  disabled={!schedulingEnabled || readonly || !state.canWrite || statusPending || editorPending
                     || ['COMPLETED', 'ARCHIVED'].includes(state.record.status)} onClick={edit}>{labels.edit}</button>
                 <ScheduleStatusActions key={state.selection.revision} schedule={state.record} projectId={projectId} csrfToken={csrfToken}
-                  allowResume={deferredFeaturesEnabled}
-                  disabled={readonly || !state.canWrite || editorOpen || editorPending}
-                  isWriteAllowed={() => !editorLock.current && state.canEdit()}
-                  onSessionEnded={onSessionEnded} onPendingChange={(pending) => { statusLock.current = pending; setStatusPending(pending) }}
+                  allowResume={schedulingEnabled}
+                  disabled={readonly || !state.canManageRecord || editorOpen || editorPending}
+                  isWriteAllowed={() => !editorLock.current && state.canManage()}
+                  onSessionEnded={onSessionEnded} onPendingChange={(pending) => { statusLock.current = pending; if (pending) onBusyChange(true); setStatusPending(pending) }}
                   onChanged={changed} onError={retainStatusFeedback} />
               </div>
               <p className="hint">{labels.controlHint}</p>
@@ -171,15 +101,15 @@ function ScheduleManager({ projectId, currentProject, csrfToken, deferredFeature
               failure={state.activity.failure} onRefresh={state.activity.refresh} />
           </>}
         </section>
-      </div>
       {editor && <>
         {!editorOpen && editorPending && <div className="scheduleNotice" role="status">{labels.editorPending}
           <button className="secondaryButton compactButton" type="button" data-schedule-reopen
             onClick={() => { editorLock.current = true; editorOpenRef.current = true; setEditorOpen(true) }}>{labels.reopenEditor}</button></div>}
         <ScheduleEditDialog key={`${editor.schedule.schedule_id}:${editor.revision}`} schedule={editor.schedule} task={editor.task}
-          projectId={projectId} csrfToken={csrfToken} open={editorOpen} disabled={!deferredFeaturesEnabled || readonly || statusPending || !state.canWrite}
+          projectId={projectId} csrfToken={csrfToken} open={editorOpen} disabled={!schedulingEnabled || readonly || statusPending || !state.canWrite}
           isWriteAllowed={() => !statusLock.current && state.canEdit()}
           onSessionEnded={onSessionEnded} onPendingChange={(pending) => {
+            if (pending) onBusyChange(true)
             editorPendingRef.current = pending; editorLock.current = editorOpenRef.current || pending; setEditorPending(pending)
           }}
           onClose={() => { editorOpenRef.current = false; editorLock.current = editorPendingRef.current; setEditorOpen(false) }}
@@ -188,8 +118,7 @@ function ScheduleManager({ projectId, currentProject, csrfToken, deferredFeature
             setEditorOpen(false); setEditorPending(false); changed()
           }} />
       </>}
-    </>}
-  </div>
+    </div>
 }
 
 /** 原 input/sources と上書きされる摘要を分け、摘要を発火台帳や成功数に見せない。 */

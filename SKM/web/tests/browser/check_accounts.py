@@ -152,7 +152,9 @@ class AccountsApi:
             assert request.headers.get("x-csrf-token") == CSRF, "Missing current CSRF"
             assert request.headers.get("origin") == self.origin, "Wrong Origin"
         result: object
-        if suffix == "auth/session" and method == "GET":
+        if suffix == "api-keys" and method == "GET":
+            result = {"items": []}
+        elif suffix == "auth/session" and method == "GET":
             result = session(self.actor, self.role)
         elif suffix == "auth/login-context" and method == "GET":
             result = {"csrf_token": CSRF, "expires_in_seconds": 300}

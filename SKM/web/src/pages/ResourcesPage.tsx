@@ -51,7 +51,6 @@ import {
   summarizeScope,
   taskOptionLabel,
   taskScopeKey,
-  type ForgeKind,
   type RepositoryWriteMode,
   type ResourceAccess,
   type ResourceProvider,
@@ -81,11 +80,12 @@ import {
     認証情報・接続先・権限を一つの form に束ね、個別の Secret 管理・binding・事前許可は
     高度設定として折り畳む。scope/config の裸 JSON 入力は構造化入力へ置き換え、
     検証の最終権威は server 側に置いたまま「確実に弾かれる入力」だけを送信前に知らせる。 */
-export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = true, databaseWritesEnabled = false }: {
+export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = true, databaseWritesEnabled = false, gitWritesEnabled = false }: {
   projectId: string
   csrfToken: string
   deferredFeaturesEnabled?: boolean
   databaseWritesEnabled?: boolean
+  gitWritesEnabled?: boolean
 }) {
   const messages = useMessages()
   const [secrets, setSecrets] = useState<SecretReferenceRecord[]>([])
@@ -121,9 +121,9 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
       setResourceTab((current) => current === 'policy' ? 'secret' : current)
       setOpenDialog((current) => current === 'policy' ? null : current)
     }
-    setConnectDraft((current) => (current.provider === 'postgres' ? databaseWritesEnabled : deferredFeaturesEnabled)
+    setConnectDraft((current) => (current.provider === 'postgres' ? databaseWritesEnabled : current.provider === 'git' ? gitWritesEnabled || deferredFeaturesEnabled : deferredFeaturesEnabled)
       ? current : { ...current, access: 'read' })
-  }, [deferredFeaturesEnabled, databaseWritesEnabled])
+  }, [deferredFeaturesEnabled, databaseWritesEnabled, gitWritesEnabled])
 
   useEffect(() => () => {
     loadController.current?.abort()
@@ -275,9 +275,9 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
       writeEnabled: access === 'read_write',
       writeMode: draft.writeMode,
       writeBranchPrefix: draft.writeBranchPrefix,
-      forgeKind: draft.forgeKind,
-      forgeApiBaseUrl: draft.forgeApiBaseUrl,
-      forgeProject: draft.forgeProject,
+      forgeKind: '' as const,
+      forgeApiBaseUrl: '',
+      forgeProject: '',
     }
     const writeIssue = findWriteConfigIssue(draft.provider, {
       defaultRevision: draft.defaultRevision,
@@ -478,7 +478,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
     }
   }
 
-  const connectWriteEnabled = connectDraft.provider === 'postgres' ? databaseWritesEnabled : deferredFeaturesEnabled
+  const connectWriteEnabled = connectDraft.provider === 'postgres' ? databaseWritesEnabled : connectDraft.provider === 'git' ? gitWritesEnabled || deferredFeaturesEnabled : deferredFeaturesEnabled
   const connectForm = PROVIDER_FORMS[connectDraft.provider]
   const connectSecrets = secrets.filter(
     (item) => item.status === 'ACTIVE' && item.provider === connectDraft.provider,
@@ -646,40 +646,6 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                             onChange={(event) => setConnectDraft((value) => ({ ...value, writeBranchPrefix: event.target.value }))}
                           />
                         </label>
-                      )}
-                      <label>{messages.resources.forgeKindLabel}
-                        <select
-                          value={connectDraft.forgeKind}
-                          onChange={(event) => setConnectDraft((value) => ({
-                            ...value,
-                            forgeKind: event.target.value as ForgeKind,
-                          }))}
-                        >
-                          <option value="">{messages.resources.forgeNone}</option>
-                          <option value="github">GitHub</option>
-                          <option value="gitlab">GitLab</option>
-                        </select>
-                      </label>
-                      {connectDraft.forgeKind !== '' && (
-                        <>
-                          <label>{messages.resources.forgeApiBaseUrlLabel}
-                            <input
-                              className="mono"
-                              placeholder="https://api.github.com"
-                              value={connectDraft.forgeApiBaseUrl}
-                              onChange={(event) => setConnectDraft((value) => ({ ...value, forgeApiBaseUrl: event.target.value }))}
-                            />
-                          </label>
-                          <label>{messages.resources.forgeProjectLabel}
-                            <input
-                              className="mono"
-                              placeholder="owner/repository"
-                              value={connectDraft.forgeProject}
-                              onChange={(event) => setConnectDraft((value) => ({ ...value, forgeProject: event.target.value }))}
-                            />
-                          </label>
-                          <p className="hint">{messages.resources.forgeHint}</p>
-                        </>
                       )}
                     </>
                   )}

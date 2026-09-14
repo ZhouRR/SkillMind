@@ -177,8 +177,9 @@ async def test_lookup_uses_one_scoped_snapshot_and_preserves_missing_outer_joins
         "ON effect_after.evidence_ref = effect_executions.after_ref",
     ):
         assert clause in sql
-    assert len(statement.column_descriptions) == 7
-    assert statement.column_descriptions[-1]["name"] == "project_id"
+    assert len(statement.column_descriptions) == 8
+    assert statement.column_descriptions[-2]["name"] == "project_id"
+    assert statement.column_descriptions[-1]["name"] == "Run"
     assert "FOR UPDATE" not in sql
     assert "JOIN integrations" not in sql
     assert "JOIN resource_bindings" not in sql
@@ -688,3 +689,24 @@ async def test_actual_provider_result_and_evidence_writer_match_new_result_gate(
         now=graph.execution.executed_at,
     )
     assert await _invalid(replace(graph, before=before, after=after)) == frozenset()
+
+
+@pytest.mark.parametrize("consent", ["git", "legacy", "tampered", "other_actor"])
+async def test_result_accepts_only_original_git_run_start_approval(consent):
+    """自動承認済み Git 成果を手動承認扱いにせず、原 Run の固定同意を照合する。"""
+    from tests.runs.creation_fakes import creation_command, creation_intent, stored_creation
+
+    graph = _graph(provider="git")
+    intent = replace(creation_intent(), project_id=graph.project_id,
+                     actor_id=graph.approval.actor_id, auto_approve=True,
+                     auto_approve_git=consent != "legacy")
+    run = stored_creation(creation_command(intent))
+    run.id = graph.proposal.run_id
+    graph.approval.source = "RUN_START"
+    if consent == "tampered":
+        run.request_hash = "0" * 64
+    elif consent == "other_actor":
+        graph.approval.actor_id = uuid4()
+    lookup, _, _ = _lookup((*graph.joined(), run))
+    invalid = await lookup.invalid_refs(graph.proposal.run_id, (graph.claim(),))
+    assert invalid == (frozenset() if consent == "git" else {graph.proposal.proposal_ref})

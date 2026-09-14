@@ -99,8 +99,10 @@ class RunService:
     def __init__(
         self, session_factory: async_sessionmaker[AsyncSession], *,
         deferred_features_enabled: bool = True,
+        scheduling_enabled: bool = False,
         database_writes_enabled: bool = False,
         document_writes_enabled: bool = False,
+        git_writes_enabled: bool = False,
         budget_policy: BudgetPolicy | None = None,
         document_library_target: DocumentLibraryTarget | None = None,
     ) -> None:
@@ -108,8 +110,10 @@ class RunService:
 
         self._session_factory = session_factory
         self._deferred_features_enabled = deferred_features_enabled
+        self._scheduling_enabled = scheduling_enabled or deferred_features_enabled
         self._execution_features = ExecutionFeatures(
-            deferred_features_enabled, database_writes_enabled, document_writes_enabled
+            deferred_features_enabled, database_writes_enabled,
+            document_writes_enabled, git_writes_enabled
         )
         if budget_policy is not None and budget_policy.max_cost_nanos is not None:
             raise BudgetUnavailableError("Primary execution cost adapter is not configured")
@@ -128,6 +132,7 @@ class RunService:
         actor_id: UUID,
         authorization: UserAccess | RunCreationParticipant,
         auto_approve: bool = False,
+        auto_approve_git: bool = False,
     ) -> CreatedRun:
         """解決済み PUBLISHED task と現在の資格から通用 Run を作成する。
 
@@ -146,6 +151,7 @@ class RunService:
             actor_id=actor_id,
             idempotency_key=idempotency_key,
             auto_approve=auto_approve,
+            auto_approve_git=auto_approve_git,
         ) as (session, intent, authority):
             # 精確 task の同一性は現在の権限や資源の変化から独立させる。
             task_id = derive_task_id(
@@ -174,7 +180,7 @@ class RunService:
                 isinstance(effect, dict) and effect.get("mode") == "apply"
                 for effect in blueprint.get("effect_intents", [])
             )
-            if not self._deferred_features_enabled and not isinstance(authorization, UserAccess):
+            if not self._scheduling_enabled and not isinstance(authorization, UserAccess):
                 raise TaskSourceSelectionError("Scheduled execution is disabled in this deployment")
             if (
                 not self._execution_features.blueprint_enabled(blueprint)
@@ -201,6 +207,13 @@ class RunService:
                     document_repository=DocumentRepository(session),
                     document_library_target=self._document_library_target,
                 )
+                if any(
+                    isinstance(item, ResolvedRunBinding)
+                    and not self._execution_features.provider_enabled(
+                        item.capability_version, item.integration.provider
+                    ) for item in run_bindings
+                ):
+                    raise TaskSourceSelectionError("The selected Provider is disabled")
                 # 保存先候補があっても未登録/配備停止中の write は Run 作成権限にならない。
                 if any(
                     isinstance(item, ResolvedDocumentLibraryBinding) for item in run_bindings
@@ -323,6 +336,7 @@ class RunService:
         idempotency_key: str,
         authorization: UserAccess | RunCreationParticipant,
         auto_approve: bool = False,
+        auto_approve_git: bool = False,
     ) -> CreatedRun | None:
         """API と調度が現在の Project 授権後に、元の要求を先に確認する共通入口。"""
 
@@ -336,6 +350,7 @@ class RunService:
             actor_id=actor_id,
             idempotency_key=idempotency_key,
             auto_approve=auto_approve,
+            auto_approve_git=auto_approve_git,
         ) as (session, intent, _):
             replay = await RunRepository(session).find_task_run_replay(
                 intent=intent, idempotency_key=idempotency_key
@@ -359,6 +374,7 @@ class RunService:
         actor_id: UUID,
         idempotency_key: str,
         auto_approve: bool = False,
+        auto_approve_git: bool = False,
     ) -> AsyncIterator[tuple[AsyncSession, TaskRunIntent, RunCreationAuthority]]:
         """普通要求の原会話と内部認領を区別し、すべての確認/作成出口を保護する。"""
 
@@ -368,7 +384,7 @@ class RunService:
                 raise UnauthorizedSessionError("Authentication is required")
         elif not isinstance(authorization, RunCreationParticipant):
             raise TypeError("Run creation requires user access or an internal claim participant")
-        if auto_approve and not isinstance(authorization, UserAccess):
+        if (auto_approve or auto_approve_git) and not isinstance(authorization, UserAccess):
             raise TaskSourceSelectionError("Automatic approval requires an interactive Run start")
         make_intent = partial(
             _task_run_intent,
@@ -379,6 +395,7 @@ class RunService:
             sources=deepcopy(sources),
             actor_id=actor_id,
             auto_approve=auto_approve,
+            auto_approve_git=auto_approve_git,
         )
         async with self._session_factory() as session, session.begin():
             if not isinstance(authorization, UserAccess):
@@ -861,6 +878,7 @@ def _task_run_intent(
     sources: dict[str, str],
     actor_id: UUID,
     auto_approve: bool = False,
+    auto_approve_git: bool = False,
 ) -> TaskRunIntent:
     """選択構文の失敗を公開 Problem へ変換できる domain error に統一する。"""
 
@@ -873,6 +891,7 @@ def _task_run_intent(
             sources=sources,
             actor_id=actor_id,
             auto_approve=auto_approve,
+            auto_approve_git=auto_approve_git,
         )
     except ValueError as error:
         raise TaskSourceSelectionError(str(error)) from error

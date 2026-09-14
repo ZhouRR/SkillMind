@@ -10,6 +10,7 @@ from uuid import UUID
 
 _CONTEXT_FIELDS = frozenset({
     "trace_id",
+    "api_key_id",
     "request_id",
     "run_id",
     "run_attempt_id",

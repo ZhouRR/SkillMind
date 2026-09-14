@@ -6,8 +6,8 @@ capability ごとに答えが違う。これを呼び出し側の `if capability
 ここを唯一の判断表とし、上位層は表を引くだけにする。
 
 `preauthorizable` は Project policy、`run_auto_approvable` は開始時の Run 限定同意を表す。
-repository への書き込みは
-後戻り費用が高く、PR/branch という可評審の形で残しても**承認そのものは省けない** (§20.2)。
+repository は Project 事前許可の対象外。Git は新 Run の固定同意により精確な承認記録を
+作成できるが、SVN や旧 Run へこの許可を広げない。
 """
 
 from __future__ import annotations
@@ -65,6 +65,16 @@ class EffectCapabilityDefinition:
     staged_authorization: bool = False
     # 開始者の現在権限を各段階で再検証できる保存 Provider だけを Run 限定同意に含める。
     run_auto_approvable: bool = False
+    staged_providers: frozenset[str] = frozenset()
+    run_auto_approvable_providers: frozenset[str] = frozenset()
+
+    def supports_run_approval(self, provider: str | None) -> bool:
+        """Run 限定同意を段階認可済みの Provider にだけ許可する。"""
+        return self.run_auto_approvable or provider in self.run_auto_approvable_providers
+
+    def supports_supervision(self, provider: str | None) -> bool:
+        """同じ capability の未対応 Provider まで段階認可を広げない。"""
+        return self.staged_authorization or provider in self.staged_providers
 
     @property
     def providers(self) -> frozenset[str]:
@@ -112,12 +122,14 @@ EFFECT_CAPABILITIES: Mapping[str, EffectCapabilityDefinition] = {
             "git": REPOSITORY_WRITE_PROVIDER_VERSION,
             "svn": REPOSITORY_WRITE_SVN_PROVIDER_VERSION,
         },
-        # 代码変更は常に人手承認を要する (§20.2)。事前許可の対象に**しない**。
+        # Project policy で常時許可しない。Git の Run 限定同意は別途検証する。
         preauthorizable=False,
         validate=lambda draft, scope, config: validate_repository_write_proposal(
             draft, binding_scope=scope, integration_config=config
         ),
         requested_scope=repository_write_scope_from_payload,
+        staged_providers=frozenset({"git"}),
+        run_auto_approvable_providers=frozenset({"git"}),
     ),
 }
 

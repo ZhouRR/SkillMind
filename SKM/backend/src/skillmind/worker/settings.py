@@ -64,6 +64,7 @@ from skillmind.documents.source import (
     DatabaseProjectDocumentSource,
 )
 from skillmind.effects.document_service import DocumentEffectService
+from skillmind.effects.git_receipt import GitCommitReader
 from skillmind.effects.postgres_write import PostgresDatabaseWriteSource
 from skillmind.effects.reconciliation_execution import EffectReconciliationExecutor
 from skillmind.effects.reconciliation_request_service import ReconciliationRequestService
@@ -128,9 +129,11 @@ async def startup(ctx: dict[str, Any]) -> None:
     )
     ctx["run_service"] = RunService(
         ctx["database_session_factory"],
+        scheduling_enabled=settings.scheduling_enabled,
         deferred_features_enabled=features.deferred,
         database_writes_enabled=features.database_writes,
         document_writes_enabled=features.document_writes,
+        git_writes_enabled=features.git_writes,
         document_library_target=document_library_target,
     )
     ctx["effect_service"] = EffectService(
@@ -152,6 +155,7 @@ async def startup(ctx: dict[str, Any]) -> None:
             ctx["database_session_factory"],
             secret_resolver=DeploymentSecretResolver(cipher=secret_cipher),
             database_reader=PostgresDatabaseWriteSource(),
+            git_reader=GitCommitReader(GitCommandRepositoryClient(command_timeout_seconds=30)),
             document_reader=document_receipt_source,
             document_library_target=document_library_target,
         ),
@@ -212,6 +216,7 @@ async def startup(ctx: dict[str, Any]) -> None:
         deferred_features_enabled=features.deferred,
         database_writes_enabled=features.database_writes,
         document_writes_enabled=features.document_writes,
+        git_writes_enabled=features.git_writes,
         subagent_provider=SubagentDispatchProvider(
             engine=lambda: engine_holder["engine"],
             branch_timeout_seconds=settings.subagent_branch_timeout_seconds,
@@ -279,6 +284,7 @@ async def startup(ctx: dict[str, Any]) -> None:
         deferred_features_enabled=features.deferred,
         database_writes_enabled=features.database_writes,
         document_writes_enabled=features.document_writes,
+        git_writes_enabled=features.git_writes,
         document_library_target=document_library_target,
         proposal_continuations=ProposalContinuationReader(ctx["database_session_factory"]),
     )
@@ -692,7 +698,10 @@ async def trigger_due_schedules(ctx: dict[str, Any]) -> dict[str, str | int]:
 
     service: ScheduleService = ctx["schedule_service"]
     settings = ctx["settings"]
-    if not settings.deferred_features_enabled or not settings.worker_dispatch_enabled:
+    if (
+        not (settings.scheduling_enabled or settings.deferred_features_enabled)
+        or not settings.worker_dispatch_enabled
+    ):
         return {"status": "disabled", "reason": "scheduling_disabled"}
     report = await service.run_due_schedules(limit=settings.outbox_batch_size)
     log_event(

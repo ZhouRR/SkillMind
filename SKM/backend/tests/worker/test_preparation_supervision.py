@@ -449,6 +449,7 @@ async def test_lost_lease_closes_engine_suspended_between_events(tmp_path: Path)
         await persisting.wait()
         raise LeaseValidationError("lost while storing")
 
+    engine.health = AsyncMock(return_value=await SequenceEngine([]).health())
     stream = events()
     engine.execute.return_value = stream
     service.append_agent_event.side_effect = append

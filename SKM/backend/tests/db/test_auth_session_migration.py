@@ -53,7 +53,12 @@ def test_auth_session_upgrade_matches_columns_constraints_and_revokes_legacy(
     for call in operations.create_check_constraint.call_args_list:
         name, table, condition = call.args
         assert table == "auth_sessions"
-        assert checks[f"ck_auth_sessions_{name}"] == condition
+        if name == "auth_sessions_credential_version":
+            # 0031 の歴史 DDL は v2、現 model は 0051 で v3 を追加している。
+            assert condition == "credential_version IN (1, 2)"
+            assert checks[f"ck_auth_sessions_{name}"] == "credential_version IN (1, 2, 3)"
+        else:
+            assert checks[f"ck_auth_sessions_{name}"] == condition
     assert len(operations.create_check_constraint.call_args_list) == 3
     assert operations.execute.call_args.args[0] == (
         "UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP "

@@ -9,6 +9,7 @@ from uuid import UUID
 
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.effects.database_write import DatabaseWriteCommand
+from skillmind.effects.git_receipt import GitCommitCommand, GitCommitReceipt, validate_git_receipt
 from skillmind.effects.postgres_write import DatabaseWriteReceipt, validate_database_write_receipt
 from skillmind.effects.reconciliation_domain import (
     EffectReconciliationObservation,
@@ -37,7 +38,7 @@ class ReconciliationRequestSnapshot:
     reference: EffectReconciliationReference = field(repr=False)
     target_checksum: str
     command_checksum: str
-    kind: Literal["DATABASE_TRANSACTION", "DOCUMENT_OBJECT"]
+    kind: Literal["DATABASE_TRANSACTION", "DOCUMENT_OBJECT", "GIT_COMMIT"]
     status: str
     created_at: datetime
     finished_at: datetime | None
@@ -65,9 +66,11 @@ def reconciliation_command_checksum(target: EffectReconciliationTarget) -> str:
 
 def reconciliation_kind(
     target: EffectReconciliationTarget,
-) -> Literal["DATABASE_TRANSACTION", "DOCUMENT_OBJECT"]:
+) -> Literal["DATABASE_TRANSACTION", "DOCUMENT_OBJECT", "GIT_COMMIT"]:
     """transaction 回执と object byte の確認を混ぜない。"""
 
+    if isinstance(target.command, GitCommitCommand):
+        return "GIT_COMMIT"
     return (
         "DATABASE_TRANSACTION"
         if isinstance(target.command, DatabaseWriteCommand)
@@ -116,7 +119,12 @@ def reconciliation_receipt_json(
     if observation.status != "CONFIRMED":
         raise ValueError("Reconciliation observation status is invalid")
     command = target.command
-    if isinstance(command, DatabaseWriteCommand):
+    if isinstance(command, GitCommitCommand):
+        if not isinstance(receipt, GitCommitReceipt):
+            raise ValueError("Original Git receipt is invalid")
+        validate_git_receipt(command, receipt)
+        result = {**asdict(receipt), "effect_id": str(receipt.effect_id)}
+    elif isinstance(command, DatabaseWriteCommand):
         if not isinstance(receipt, DatabaseWriteReceipt):
             raise ValueError("Original database receipt is invalid")
         validate_database_write_receipt(command, receipt)

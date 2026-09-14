@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ScheduleEditDialog, ScheduleStatusActions } from '../../src/components/ScheduleDialog'
 import { MESSAGES } from '../../src/lib/i18n/messages'
-import { SchedulesPage, type SchedulesPageProps } from '../../src/pages/SchedulesPage'
-import { DEMO_PROJECT, demoUser } from '../fixtures'
+import { TaskScheduleDetails } from '../../src/components/TaskScheduleDetails'
+import { DEMO_PROJECT } from '../fixtures'
 import { documentTask } from '../fixtures/documentTask'
 import { scheduleFixture } from '../fixtures/schedule'
 
@@ -31,7 +31,7 @@ vi.mock('../../src/hooks/useSchedules', () => ({ useSchedules: () => {
   const query = { data: record, pending: false, failure: null, refresh: vi.fn() }
   return {
     selection: { id: record.schedule_id, revision: 1 }, record, task: documentTask(),
-    taskEligibility: 'ready', readDenied: null, canWrite: true, canEdit: () => true,
+    taskEligibility: 'ready', readDenied: null, canWrite: true, canManageRecord: true, canManage: () => true, canEdit: () => true,
     detail: query, catalog: query, activity: { ...query, data: null }, list: { ...query, data: { schedules: [record], total: 1, limit: 25, offset: 0 } },
     filter: { q: '', status: '', offset: 0 }, limit: 25,
   }
@@ -52,9 +52,9 @@ function find(node: ReactNode, predicate: (value: Node) => boolean): Node {
 function render(): ReactNode {
   phases.cursor = 0
   const props = { projectId: DEMO_PROJECT.project_id, currentProject: DEMO_PROJECT,
-    actorId: demoUser().user_id, csrfToken: 'synthetic-token' }
-  const outer = SchedulesPage(props)
-  return (outer.type as (props: SchedulesPageProps) => ReactNode)(props)
+    scheduleId: scheduleFixture().schedule_id, schedulingEnabled: true, onSessionEnded: () => {},
+    onChanged: () => {}, onBusyChange: () => {}, csrfToken: 'synthetic-token' }
+  return TaskScheduleDetails(props)
 }
 /** Props の型 escape は汎用 tree 調査の境界だけに閉じ込める。 */
 function invoke(node: Node, name: string, ...args: unknown[]): unknown {

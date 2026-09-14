@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
-
 from tests.api.fakes import FakeEffectService, FakeScheduleService
 
 
@@ -16,7 +15,7 @@ from tests.api.fakes import FakeEffectService, FakeScheduleService
 def test_readonly_api_rejects_deferred_mutations_before_service(client, operation):
     """同じ Project の ADMIN と有効 CSRF でも、配備上限を越えた mutation は実行しない。"""
     client.app.state.settings = client.app.state.settings.model_copy(
-        update={"deferred_features_enabled": False}
+        update={"deferred_features_enabled": False, "scheduling_enabled": False}
     )
     service = AsyncMock()
     client.app.state.schedule_service = service
@@ -59,7 +58,7 @@ def test_readonly_api_rejects_deferred_mutations_before_service(client, operatio
 def test_readonly_resource_and_schedule_lists_remain_readable(client):
     """後置 mutation の停止で、核心ページが依存する既存 GET を一緒に閉じない。"""
     client.app.state.settings = client.app.state.settings.model_copy(
-        update={"deferred_features_enabled": False}
+        update={"deferred_features_enabled": False, "scheduling_enabled": False}
     )
     client.app.state.schedule_service = FakeScheduleService()
     client.app.state.effect_service = FakeEffectService()
@@ -72,7 +71,7 @@ def test_readonly_resource_and_schedule_lists_remain_readable(client):
 def test_readonly_schedule_can_still_be_stopped(client, status):
     """後置機能を無効化しても、現在の資格と原版で既存調度を停止できる。"""
     client.app.state.settings = client.app.state.settings.model_copy(
-        update={"deferred_features_enabled": False}
+        update={"deferred_features_enabled": False, "scheduling_enabled": False}
     )
     client.app.state.schedule_service = FakeScheduleService()
     response = client.post(
@@ -80,3 +79,29 @@ def test_readonly_schedule_can_still_be_stopped(client, status):
         json={"status": status, "expected_row_version": 1},
     )
     assert response.status_code == 200 and response.json()["status"] == status
+
+
+@pytest.mark.parametrize('operation', ['create', 'edit', 'enable'])
+def test_independent_scheduling_flag_allows_only_scheduling(client, operation):
+    """後置全体を開かず、保存・編集・再開を同じ調度開関で許可する。"""
+    client.app.state.settings = client.app.state.settings.model_copy(
+        update={'deferred_features_enabled': False, 'scheduling_enabled': True}
+    )
+    client.app.state.schedule_service = FakeScheduleService()
+    project, record = uuid4(), uuid4()
+    path = f'/api/v1/projects/{project}/schedules'
+    body = {
+        'name': 'Example',
+        'definition': {'kind': 'ONCE', 'timezone': 'UTC', 'run_at': '2099-01-01T00:00:00Z'},
+        'skill_version_id': str(uuid4()), 'task_key': 'review',
+    }
+    method = 'POST'
+    if operation == 'edit':
+        method, path = 'PUT', path + f'/{record}'
+        del body['skill_version_id'], body['task_key']
+        body['expected_row_version'] = 1
+    elif operation == 'enable':
+        path += f'/{record}/status'
+        body = {'status': 'ACTIVE', 'expected_row_version': 1}
+    response = client.request(method, path, json=body)
+    assert response.status_code == (201 if operation == 'create' else 200)

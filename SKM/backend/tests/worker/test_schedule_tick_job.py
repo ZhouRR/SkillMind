@@ -10,7 +10,6 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-
 from skillmind.schedules import ScheduleOutcome, ScheduleTickReport, ScheduleTriggerResult
 from skillmind.worker.settings import WorkerSettings, trigger_due_schedules
 
@@ -64,6 +63,7 @@ async def test_schedule_tick_reports_each_outcome_separately() -> None:
             "schedule_service": service,
             "settings": type("S", (), {
                 "outbox_batch_size": 25, "deferred_features_enabled": True,
+                "scheduling_enabled": False,
                 "worker_dispatch_enabled": True,
             })(),
             "worker_id": "worker-1",
@@ -80,3 +80,19 @@ def test_schedule_tick_is_registered_as_a_cron_job() -> None:
     names = {job.name for job in WorkerSettings.cron_jobs}
 
     assert "cron:trigger_due_schedules" in names
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('enabled, dispatch', [(True, True), (False, True), (True, False)])
+async def test_independent_scheduling_requires_dispatch(enabled: bool, dispatch: bool) -> None:
+    """調度単独の開関でも dispatch 停止を尊重し、無効時は認領しない。"""
+    from skillmind.core.settings import Settings
+
+    service = MemoryScheduleService()
+    result = await trigger_due_schedules({
+        'schedule_service': service, 'worker_id': 'fixture',
+        'settings': Settings(_env_file=None, scheduling_enabled=enabled,
+                             deferred_features_enabled=False, worker_dispatch_enabled=dispatch),
+    })
+    assert result['status'] == ('ok' if enabled and dispatch else 'disabled')
+    assert bool(service.limits) is (enabled and dispatch)

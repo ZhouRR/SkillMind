@@ -35,7 +35,7 @@ from tests.runs.test_document_proposals import document_proposal
 from tests.runs.test_execution_gates import execution_rows
 
 
-def freeze_consent(run, *, enabled=True):
+def freeze_consent(run, *, enabled=True, git=False):
     """同じ actor/版/Run の作成要求を本番形式/hash で固定する。"""
     intent = TaskRunIntent(
         project_id=run.project_id,
@@ -45,6 +45,7 @@ def freeze_consent(run, *, enabled=True):
         input_json={},
         sources={},
         auto_approve=enabled,
+        auto_approve_git=git,
     )
     run.task_snapshot_json.update(task_key=intent.task_key, creation_request=intent.to_json())
     run.task_id = derive_task_id(skill_version_id=intent.skill_version_id, task_key=intent.task_key)
@@ -114,27 +115,33 @@ async def test_automatic_approval_rechecks_frozen_consent_and_current_authority(
             await call
 
 
+@pytest.mark.parametrize("provider", ["postgres", "git"])
 @pytest.mark.parametrize("automatic", [False, True])
 async def test_proposal_creates_one_audited_effect_or_one_manual_interaction(
-    monkeypatch, automatic
+    monkeypatch, automatic, provider
 ):
     """同じ有効提案が自動時は独立 Effect Outbox、手動時は OPEN interaction に分岐する。"""
     claimed, run, segment, attempt = execution_rows()
     run.row_version = 1
     run.permission_snapshot_json = {"actor_id": str(uuid4())}
     run.task_snapshot_json = {"skill_version_id": str(uuid4()), "skill_snapshots": []}
-    freeze_consent(run, enabled=automatic)
+    freeze_consent(run, enabled=automatic, git=automatic and provider == "git")
     event = execution_event(claimed, AgentEventType.CHANGE_PROPOSED)
     draft = replace(
         parse_change_proposal_request(event.payload["change_proposal_request"]),
-        capability_version="database.write/v1",
-        operation="INSERT",
+        capability_version="repository.write/v1" if provider == "git" else "database.write/v1",
+        operation="commit" if provider == "git" else "INSERT",
     )
     session = MagicMock(spec=AsyncSession)
     session.scalar = AsyncMock(return_value=None)
-    repository = RunRepository(session, execution_features=ExecutionFeatures(database_writes=True))
+    repository = RunRepository(
+        session, execution_features=ExecutionFeatures(database_writes=True, git_writes=True)
+    )
     binding = SimpleNamespace(
-        id=uuid4(), integration_id=uuid4(), provider="postgres", resource_kind="database"
+        id=uuid4(),
+        integration_id=uuid4(),
+        provider=provider,
+        resource_kind="repository" if provider == "git" else "database",
     )
     monkeypatch.setattr(
         repository, "_lock_claimed_execution", AsyncMock(return_value=(run, segment, attempt))
@@ -148,7 +155,7 @@ async def test_proposal_creates_one_audited_effect_or_one_manual_interaction(
     agent = AgentSession(id=uuid4(), sdk_session_id=UUID(event.agent_session_id), usage_json={})
     monkeypatch.setattr(repository, "_ensure_agent_session", AsyncMock(return_value=agent))
     definition = replace(
-        resolve_effect_capability("database.write/v1"), requested_scope=lambda _: {}
+        resolve_effect_capability(draft.capability_version), requested_scope=lambda _: {}
     )
     monkeypatch.setattr(
         "skillmind.runs.repository_effects.resolve_effect_capability",
@@ -197,3 +204,77 @@ async def test_start_choice_is_frozen_by_authorized_service_transaction():
     run = next(row for row in h.committed if getattr(row, "id", None) == result.run_id)
     assert run_auto_approval_actor(run, "database.write/v1") == h.intent.actor_id
     assert run.task_snapshot_json["creation_request"]["auto_approve"] is True
+
+
+@pytest.mark.parametrize("provider", ["git", "svn", None])
+def test_git_requires_new_frozen_consent_and_exact_provider(provider):
+    """新 checkbox だけが Git を含み、v2/旧 browser/同じ capability の SVN を広げない。"""
+    old = replace(creation_intent(), auto_approve=True)
+    new = replace(old, auto_approve_git=True)
+    assert new.to_json()["request_version"] == "v3"
+    assert TaskRunIntent.from_json(new.to_json()) == new
+    old_run = stored_creation(creation_command(old))
+    new_run = stored_creation(creation_command(new))
+    assert run_auto_approval_actor(old_run, "repository.write/v1", provider=provider) is None
+    assert run_auto_approval_actor(new_run, "repository.write/v1", provider=provider) == (
+        new.actor_id if provider == "git" else None
+    )
+    with pytest.raises(IdempotencyConflictError):
+        validate_creation_replay(old_run, new)
+    with pytest.raises(ValueError):
+        replace(new, auto_approve=False)
+
+
+async def test_new_git_consent_is_frozen_by_authorized_service():
+    """API/service の同意が単なる現在値でなく、原要求 hash と同じ TX に保存される。"""
+    from tests.runs.creation_authorization_harness import CreationAuthorizationHarness
+
+    h = CreationAuthorizationHarness("new")
+    result = await h.service.create_task_run(
+        project_id=h.intent.project_id,
+        resolved=h.resolved,
+        input_json=h.input_json,
+        sources=h.sources,
+        actor_id=h.intent.actor_id,
+        idempotency_key=h.key,
+        authorization=h.access,
+        trace_id="synthetic",
+        auto_approve=True,
+        auto_approve_git=True,
+    )
+    run = next(row for row in h.committed if getattr(row, "id", None) == result.run_id)
+    assert run_auto_approval_actor(run, "repository.write/v1", provider="git") == h.intent.actor_id
+
+
+@pytest.mark.parametrize("mutation", [None, "old_consent", "actor", "member", "cancel", "scope"])
+async def test_git_automatic_approval_revalidates_original_consent_and_authority(mutation):
+    """Git も原同意・現在資格・批准 scope を push の各段階で再検証する。"""
+    from skillmind.effects.repository_write import REPOSITORY_WRITE_PROVIDER_VERSION
+
+    h = AuthorizationHarness()
+    h.claimed = replace(
+        h.claimed, capability_version="repository.write/v1", provider="git", operation="commit"
+    )
+    h.proposal.capability_version, h.proposal.operation = "repository.write/v1", "commit"
+    h.execution.provider, h.integration.provider = "git", "git"
+    h.execution.provider_version = REPOSITORY_WRITE_PROVIDER_VERSION
+    h.repository._execution_features = ExecutionFeatures(git_writes=True)
+    h.freeze_skill_snapshot()
+    freeze_consent(h.run, git=mutation != "old_consent")
+    h.approval.source, h.approval.preauthorization_id = "RUN_START", None
+    if mutation == "actor":
+        h.approval.actor_id = uuid4()
+    elif mutation == "member":
+        h.member.status = "DISABLED"
+    elif mutation == "cancel":
+        h.repository.is_cancellation_requested.return_value = True
+    elif mutation == "scope":
+        h.binding.scope_json = {"paths": ["other"]}
+    call = h.repository.authorize_effect_step(
+        h.claimed, provider_version=REPOSITORY_WRITE_PROVIDER_VERSION
+    )
+    if mutation is None:
+        await call
+    else:
+        with pytest.raises((EffectLeaseValidationError, ProjectNotFoundError)):
+            await call

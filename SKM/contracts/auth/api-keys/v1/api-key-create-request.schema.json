@@ -1,0 +1,19 @@
+{
+  "additionalProperties": false,
+  "description": "発行時に必要なのは識別名のみ。権限指定は受け付けない。",
+  "properties": {
+    "name": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "CreateApiKeyRequest",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skillmind.example/contracts/auth/api-keys/v1/api-key-create-request.schema.json"
+}

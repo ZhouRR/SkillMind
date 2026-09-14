@@ -6,8 +6,9 @@ import hmac
 from datetime import datetime
 
 from skillmind.auth.domain import (
+    API_KEY_CREDENTIAL_VERSION,
     SESSION_CREDENTIAL_VERSION,
-    derive_session_csrf,
+    derive_request_proof,
     hash_session_secret,
 )
 from skillmind.db.models import AuthSession, User
@@ -32,11 +33,17 @@ def validate_session_credentials(
 
     validate_session_state(auth_session, user, now=now)
     try:
-        expected_csrf_hash = hash_session_secret(derive_session_csrf(session_token))
+        expected_csrf_hash = hash_session_secret(derive_request_proof(session_token))
     except ValueError as error:
         raise UnauthorizedSessionError("Authentication is required") from error
     if (
-        not hmac.compare_digest(auth_session.token_hash, hash_session_secret(session_token))
+        auth_session.credential_version
+        != (
+            API_KEY_CREDENTIAL_VERSION
+            if session_token.startswith("skm1.")
+            else SESSION_CREDENTIAL_VERSION
+        )
+        or not hmac.compare_digest(auth_session.token_hash, hash_session_secret(session_token))
         or not hmac.compare_digest(auth_session.csrf_token_hash, expected_csrf_hash)
     ):
         raise UnauthorizedSessionError("Authentication is required")
@@ -55,7 +62,12 @@ def validate_session_state(auth_session: AuthSession, user: User, *, now: dateti
         or auth_session.idle_expires_at <= now
         or auth_session.absolute_expires_at <= now
         or user.status != "ACTIVE"
-        or auth_session.credential_version != SESSION_CREDENTIAL_VERSION
+        or auth_session.credential_version
+        not in (SESSION_CREDENTIAL_VERSION, API_KEY_CREDENTIAL_VERSION)
+        or (
+            auth_session.credential_version == API_KEY_CREDENTIAL_VERSION
+            and user.system_role != "ADMIN"
+        )
         or auth_session.system_role_at_login != user.system_role
     ):
         raise UnauthorizedSessionError("Authentication is required")

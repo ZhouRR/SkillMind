@@ -7,7 +7,6 @@ bare repository を remote に見立てて `file://` で push する。branch �
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import subprocess
@@ -23,7 +22,6 @@ from skillmind.agent.repository_client import (
     SvnCommandRepositoryClient,
 )
 from skillmind.effects.domain import ClaimedEffectExecution, EffectExecutionStatus
-from skillmind.effects.forge import PullRequestRef
 from skillmind.effects.redmine import (
     EffectProviderStaleError,
     EffectProviderTransportError,
@@ -133,11 +131,15 @@ def _execution(*, uri: str, base_revision: str, changes: tuple[dict[str, Any], .
     )
 
 
+async def _authorize(execution: ClaimedEffectExecution, credential: str | None) -> None:
+    """実 Git fixture は認可済み snapshot を注入し、認可失効は個別 test で再現する。"""
+
+
 def _provider() -> GitRepositoryWriteProvider:
     """実 git client を使う Provider を作る。"""
 
     return GitRepositoryWriteProvider(
-        GitCommandRepositoryClient(command_timeout_seconds=60)
+        GitCommandRepositoryClient(command_timeout_seconds=60), authorize=_authorize
     )
 
 
@@ -313,149 +315,6 @@ async def test_branch_outside_the_reserved_namespace_is_refused(tmp_path: Path) 
 
     assert "reserved namespace" in str(error.value)
     assert EffectExecutionStatus.APPLIED  # 状態列挙が読み込めることの sanity check
-
-
-class _RecordingForge:
-    """PR 開設要求を記録する forge transport の fake。"""
-
-    def __init__(self, *, existing: PullRequestRef | None = None) -> None:
-        """既存 PR と呼び出し記録を初期化する。"""
-
-        self.existing = existing
-        self.calls: list[dict[str, str]] = []
-
-    async def ensure_pull_request(
-        self,
-        *,
-        kind: str,
-        api_base_url: str,
-        project: str,
-        token: str,
-        source_branch: str,
-        target_branch: str,
-        title: str,
-        body: str,
-    ) -> PullRequestRef:
-        """要求内容を記録し、既存 PR が在ればそれを返す。"""
-
-        self.calls.append(
-            {
-                "kind": kind,
-                "api_base_url": api_base_url,
-                "project": project,
-                "token": token,
-                "source_branch": source_branch,
-                "target_branch": target_branch,
-                "title": title,
-                "body": body,
-            }
-        )
-        if self.existing is not None:
-            return self.existing
-        return PullRequestRef(
-            url="https://forge.example.invalid/pr/7", identifier="7", created=True
-        )
-
-
-def _forge_config(uri: str) -> dict[str, str]:
-    """forge を設定した Integration config を返す。"""
-
-    return {
-        "repository_uri": uri,
-        "default_revision": "main",
-        "write_mode": "branch",
-        "forge_kind": "github",
-        "forge_api_base_url": "https://api.forge.example.invalid",
-        "forge_project": "acme/widgets",
-    }
-
-
-@requires_git
-@pytest.mark.asyncio
-async def test_pull_request_is_opened_after_a_verified_push(tmp_path: Path) -> None:
-    """read-back 通過後に PR を開き、URL を verification へ残す (計画 §20 R4)。"""
-
-    uri, base = _remote_repository(tmp_path)
-    forge = _RecordingForge()
-    execution = _execution(
-        uri=uri,
-        base_revision=base,
-        changes=(
-            {"path": "/files/src/handler.py", "action": "SET", "value": "x\n"},
-        ),
-    )
-    execution = replace(execution, integration_config=_forge_config(uri))
-    provider = GitRepositoryWriteProvider(
-        GitCommandRepositoryClient(command_timeout_seconds=60), forge_transport=forge
-    )
-
-    result = await provider.apply(execution, credential="deploy:token-value")
-
-    assert result.verification["pull_request_url"] == "https://forge.example.invalid/pr/7"
-    assert result.verification["pull_request_id"] == "7"
-    assert len(forge.calls) == 1
-    call = forge.calls[0]
-    assert call["source_branch"] == _BRANCH
-    assert call["target_branch"] == "main"
-    # token は forge へ渡るが、commit message や Evidence には現れない。
-    assert call["token"] == "token-value"
-    assert "token-value" not in json.dumps(result.verification)
-    assert "token-value" not in json.dumps(result.after.content)
-
-
-@requires_git
-@pytest.mark.asyncio
-async def test_without_forge_configuration_no_pull_request_is_attempted(tmp_path: Path) -> None:
-    """forge 未設定の Integration では PR を開かず、branch と commit だけを残す。"""
-
-    uri, base = _remote_repository(tmp_path)
-    forge = _RecordingForge()
-    provider = GitRepositoryWriteProvider(
-        GitCommandRepositoryClient(command_timeout_seconds=60), forge_transport=forge
-    )
-
-    result = await provider.apply(
-        _execution(
-            uri=uri,
-            base_revision=base,
-            changes=({"path": "/files/src/handler.py", "action": "SET", "value": "x\n"},),
-        ),
-        credential=None,
-    )
-
-    assert forge.calls == []
-    assert "pull_request_url" not in result.verification
-
-
-@requires_git
-@pytest.mark.asyncio
-async def test_replayed_apply_reuses_the_existing_pull_request(tmp_path: Path) -> None:
-    """再実行では commit を作り直さず、既存 PR をそのまま参照する。"""
-
-    uri, base = _remote_repository(tmp_path)
-    forge = _RecordingForge(
-        existing=PullRequestRef(
-            url="https://forge.example.invalid/pr/3", identifier="3", created=False
-        )
-    )
-    execution = replace(
-        _execution(
-            uri=uri,
-            base_revision=base,
-            changes=({"path": "/files/src/handler.py", "action": "SET", "value": "x\n"},),
-        ),
-        integration_config=_forge_config(uri),
-    )
-    provider = GitRepositoryWriteProvider(
-        GitCommandRepositoryClient(command_timeout_seconds=60), forge_transport=forge
-    )
-
-    first = await provider.apply(execution, credential="deploy:token-value")
-    second = await provider.apply(execution, credential="deploy:token-value")
-
-    assert second.replayed is True
-    assert second.verification["commit_revision"] == first.verification["commit_revision"]
-    assert second.verification["pull_request_url"] == "https://forge.example.invalid/pr/3"
 
 
 def _direct_config(uri: str) -> dict[str, str]:
@@ -691,3 +550,120 @@ async def test_svn_existing_branch_with_other_content_is_a_conflict(tmp_path: Pa
         )
 
     assert error.value.code == "target_branch_conflict"
+
+
+@requires_git
+async def test_other_effect_with_identical_content_is_not_replayed(tmp_path: Path) -> None:
+    """同じ byte でも別 Effect の commit を原成功に転用しない。"""
+    uri, base = _remote_repository(tmp_path)
+    execution = _execution(uri=uri, base_revision=base, changes=(
+        {"path": "/files/src/handler.py", "action": "SET", "value": "same\n"},
+    ))
+    await _provider().apply(execution, credential=None)
+    with pytest.raises(EffectProviderTransportError, match="target_branch_conflict"):
+        await _provider().apply(replace(execution, effect_execution_id=uuid4()), credential=None)
+
+
+@requires_git
+@pytest.mark.parametrize("mode", ["branch", "direct"])
+async def test_push_rejects_ref_created_or_rewound_after_observation(tmp_path: Path, mode) -> None:
+    """GET 後の branch 作成/本流巻戻しを、push 自身の advertisement で拒否する。"""
+    uri, base = _remote_repository(tmp_path)
+    home, seed, bare = tmp_path / "home", tmp_path / "seed", tmp_path / "remote.git"
+    initial = base
+    if mode == "direct":
+        _run(["git", "-C", str(seed), "-c", "user.name=Seed", "-c",
+              "user.email=seed@example.invalid", "commit", "--allow-empty", "-m", "second"],
+             home=home)
+        _run(["git", "-C", str(seed), "push", "origin", "main"], home=home)
+        base = _run(["git", "-C", str(seed), "rev-parse", "HEAD"], home=home).strip()
+    branch = "main" if mode == "direct" else _BRANCH
+    execution = replace(_execution(uri=uri, base_revision=base, changes=(
+        {"path": "/files/src/handler.py", "action": "SET", "value": "new\n"},
+    )), target={"locator": branch}, integration_config={
+        "repository_uri": uri, "default_revision": "main", "write_mode": mode,
+    })
+    checks = 0
+
+    async def race(claimed, credential):
+        """Push 前の再認可時点で別 actor の ref 更新を再現する。"""
+        nonlocal checks
+        checks += 1
+        if checks == 2:
+            _run(["git", "--git-dir", str(bare), "update-ref", f"refs/heads/{branch}", initial],
+                 home=home)
+
+    provider = GitRepositoryWriteProvider(
+        GitCommandRepositoryClient(command_timeout_seconds=30), authorize=race
+    )
+    with pytest.raises(EffectProviderTransportError):
+        await provider.apply(execution, credential=None)
+    assert _run(["git", "ls-remote", uri, f"refs/heads/{branch}"], home=home).split()[0] == initial
+
+
+@requires_git
+async def test_revoked_approval_before_push_leaves_remote_unchanged(tmp_path: Path) -> None:
+    """長い clone 中に失効した批准で push しない。"""
+    uri, base = _remote_repository(tmp_path)
+    checks = 0
+
+    async def revoke(claimed, credential):
+        """最初は有効、push 直前に失効する認可 port。"""
+        nonlocal checks
+        checks += 1
+        if checks == 2:
+            raise PermissionError("revoked")
+
+    execution = _execution(uri=uri, base_revision=base, changes=(
+        {"path": "/files/src/handler.py", "action": "SET", "value": "new\n"},
+    ))
+    provider = GitRepositoryWriteProvider(
+        GitCommandRepositoryClient(command_timeout_seconds=30), authorize=revoke
+    )
+    with pytest.raises(EffectProviderTransportError, match="effect_authority_revoked"):
+        await provider.apply(execution, credential=None)
+    assert not _run(["git", "ls-remote", uri, f"refs/heads/{_BRANCH}"], home=tmp_path / "home")
+
+
+@requires_git
+async def test_lost_response_retry_reads_original_commit_and_never_resends(tmp_path, monkeypatch):
+    """送信応答を失っても原 Effect を照合し、不在なら二度目の push を実行しない。"""
+    from skillmind.agent.repository_client import GitWriteSession
+
+    uri, base = _remote_repository(tmp_path)
+    execution = _execution(uri=uri, base_revision=base, changes=(
+        {"path": "/files/src/テスト計画.json", "action": "SET", "value": '{"計画":1}\n'},
+    ))
+    first = await _provider().apply(execution, credential=None)
+
+    async def forbidden(*args, **kwargs):
+        """再試行が push 経路へ進むと test を失敗させる。"""
+        raise AssertionError("Unexpected resend")
+
+    monkeypatch.setattr(GitWriteSession, "commit_and_push", forbidden)
+    replay = await _provider().apply(replace(execution, attempt_no=2), credential=None)
+    assert replay.replayed
+    assert replay.verification == {**first.verification, "replayed": True}
+    assert _branch_content(tmp_path, uri, "src/テスト計画.json") == '{"計画":1}\n'
+    _run(["git", "--git-dir", str(tmp_path / "remote.git"), "update-ref", "-d",
+          f"refs/heads/{_BRANCH}"], home=tmp_path / "home")
+    with pytest.raises(EffectProviderTransportError, match="repository_effect_unconfirmed"):
+        await _provider().apply(replace(execution, attempt_no=2), credential=None)
+
+
+@requires_git
+async def test_repository_symlink_alias_cannot_write_another_path(tmp_path):
+    """同じ repository 内を指す symlink でも批准外 path への別名 write を拒否する。"""
+    uri, _ = _remote_repository(tmp_path)
+    home, seed = tmp_path / "home", tmp_path / "seed"
+    (seed / "src/alias.py").symlink_to("handler.py")
+    _run(["git", "-C", str(seed), "add", "src/alias.py"], home=home)
+    _run(["git", "-C", str(seed), "-c", "user.name=Seed", "-c",
+          "user.email=seed@example.invalid", "commit", "-m", "alias"], home=home)
+    _run(["git", "-C", str(seed), "push", "origin", "main"], home=home)
+    base = _run(["git", "-C", str(seed), "rev-parse", "HEAD"], home=home).strip()
+    with pytest.raises(EffectProviderTransportError, match="invalid_request"):
+        await _provider().apply(_execution(uri=uri, base_revision=base, changes=(
+            {"path": "/files/src/alias.py", "action": "SET", "value": "changed\n"},
+        )), credential=None)
+    assert not _run(["git", "ls-remote", uri, f"refs/heads/{_BRANCH}"], home=home)

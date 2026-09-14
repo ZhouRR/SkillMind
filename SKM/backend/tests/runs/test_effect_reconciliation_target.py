@@ -187,3 +187,32 @@ async def test_reconciliation_cannot_change_the_original_object_protocol(
     h.execution.provider_version = provider
     with pytest.raises(ValueError, match="protocol"):
         await load(h)
+
+
+async def test_stopped_git_target_keeps_original_identity_with_write_switch_disabled():
+    """取消済み Git を旧批准期限や現在 write switch に頼らず、原要求だけで核対する。"""
+    from skillmind.effects.git_receipt import GitCommitCommand
+    from skillmind.effects.repository_write import REPOSITORY_WRITE_PROVIDER_VERSION
+
+    h = AuthorizationHarness()
+    h.run.status, h.execution.status = "CANCELLED", "FAILED"
+    h.execution.error_json = {"code": "effect_result_unknown", "retryable": False}
+    h.execution.provider, h.integration.provider = "git", "git"
+    h.execution.provider_version = REPOSITORY_WRITE_PROVIDER_VERSION
+    h.proposal.capability_version, h.proposal.operation = "repository.write/v1", "commit"
+    h.repository._execution_features = ExecutionFeatures()
+    h.integration.config_json = {"repository_uri": "https://git.example.invalid/test.git"}
+    h.repository._validate_proposal_row.return_value = {
+        "target_branch": "skillmind/test", "base_revision": "a" * 40,
+        "files": {"plans/計画.json": "{}"},
+    }
+    target = await load(h)
+    assert isinstance(target.command, GitCommitCommand)
+    assert target.command.effect_id == h.execution.id
+    assert target.command.project_id == h.run.project_id
+    assert target.command.run_id == h.run.id
+    assert target.command.integration_id == h.integration.id
+    assert target.command.files == (("plans/計画.json", "{}"),)
+    assert str(h.execution.id) in target.command.message
+    assert h.execution.request_fingerprint in target.command.message
+    assert h.run.status == "CANCELLED"

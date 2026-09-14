@@ -209,14 +209,15 @@ class ReconciliationRequestRepository:
     @staticmethod
     def snapshot(row: EffectReconciliationRequest) -> ReconciliationRequestSnapshot:
         """秘密・owner hash・内部 receipt を除外し、公開用明示投影の入力を返す。"""
-        if row.kind not in {"DATABASE_TRANSACTION", "DOCUMENT_OBJECT"}:
+        if row.kind not in {"DATABASE_TRANSACTION", "DOCUMENT_OBJECT", "GIT_COMMIT"}:
             raise ValueError("Invalid reconciliation kind")
         return ReconciliationRequestSnapshot(
             row.id,
             ReconciliationRequestRepository.reference(row),
             row.target_checksum,
             row.command_checksum,
-            "DATABASE_TRANSACTION" if row.kind == "DATABASE_TRANSACTION" else "DOCUMENT_OBJECT",
+            ("GIT_COMMIT" if row.kind == "GIT_COMMIT" else
+             "DATABASE_TRANSACTION" if row.kind == "DATABASE_TRANSACTION" else "DOCUMENT_OBJECT"),
             row.status,
             row.created_at,
             row.finished_at,

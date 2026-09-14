@@ -33,7 +33,7 @@ def test_production_registry_matches_readiness_and_provider_versions(deferred, d
             == resolve_effect_capability(capability).provider_versions[provider]
         )
         assert definition.requires_secret
-        assert definition.supervised == (capability == "database.write/v1")
+        assert definition.supervised == (capability == "database.write/v1" or provider == "git")
     if not database:
         with pytest.raises(LookupError):
             registry.resolve(capability_version="database.write/v1", provider="postgres")

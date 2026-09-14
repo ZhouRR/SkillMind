@@ -4,7 +4,7 @@
 
 ## 先分清四种事实
 
-Git push/回读成功而 PR 超时：commit 已成立，PR/平台保存仍可能未知；重启、再批准、取消 Run 均不撤销 commit。
+Git push 已完成但平台记录响应丢失时，远端 commit 仍可能成立；重启、再批准和取消 Run 均不撤销提交。当前 Git Provider 不连带创建 PR。
 
 | 对象 | 状态含义 |
 | --- | --- |
@@ -21,7 +21,7 @@ Effect attempt_no 非 RunAttempt。before_ref/after_ref 可空，仓库 before �
 observe → Evidence → change.propose → 精确批准/允许的预授权
   → TX 1：批准 / Effect / Outbox
   → TX 2：提案与 binding 校验 / claim
-  → 锁外：凭据 / 前置检查 / 写入 / read-back / 可选 PR
+  → 锁外：凭据 / 前置检查 / 写入 / read-back
   → TX 3：结果 / Evidence / 事件 / 后续调度
 ```
 
@@ -34,15 +34,15 @@ observe → Evidence → change.propose → 精确批准/允许的预授权
 | capability | 批准与执行边界 |
 | --- | --- |
 | issue.update/v1 | Redmine CAS adapter；仅 system ADMIN 配置 LOW 风险精确 scope 可预授权，discovery → 前置 revision → 条件写入 → 回读 |
-| repository.write/v1 | Git/SVN，始终人工批准，不 force；精确 CAS/恢复仍有缺口 |
+| repository.write/v1 | Git 独立开关、精确 ref CAS 与原提交核对；Git 可由新 Run 启动同意自动批准，SVN 仍人工批准，均不 force，SVN 可靠性仍待补 |
 | database.write/v1 | PostgreSQL 单行 INSERT/UPDATE，逐次批准或 Run 启动同意；独立部署开关、可信原行 Evidence、精确表/列范围与同事务回执 |
-| document.write/v1 | 项目文档库 CREATE，逐次批准或 Run 启动同意；按原 Effect/内容隔离物理对象，独立部署开关默认关闭；真实完整流程验收待补 |
+| document.write/v1 | 项目文档库 CREATE，逐次批准或 Run 启动同意；按原 Effect/内容隔离物理对象，独立部署开关默认关闭；异常恢复验收仍待补 |
 
 标准 Redmine REST 不具本协议 CAS/幂等，须通过版本化 discovery 及真实竞争验收。批准复验 actor/Project/version/checksum/Integration/binding/scope；仅 Run 发起人或组织 system ADMIN 决策。HTTP 决策在共享事务内锁定当前账户、原 Session 和项目，复验 CSRF、当前角色及成员关系，提交前再次验证；不能沿用请求开始时缓存的管理员身份。
 
 ### Run 启动时的自动批准
 
-手动启动页面提供默认勾选的「自動承認（データベースへの書込み・文書保存）」。提交的 `auto_approve` 与 actor、任务、输入和资源选择一起冻结；API 省略时为 false，旧 Run 和调度不自动授权，执行中不可修改。相同幂等键改变此选项返回冲突。问题答复仍由用户决定，repository.write 仍逐次人工批准，Redmine 沿原 Project policy。
+手动启动页面提供默认勾选的「自動承認（データベース・文書保存・Git 提出）」。提交的 `auto_approve`、`auto_approve_git` 与 actor、任务、输入和资源选择一起冻结；API 省略时为 false，旧 Run 和调度不自动授权，执行中不可修改。相同幂等键改变此选项返回冲突。问题答复仍由用户决定，Git 在新同意范围内自动批准；未勾选时逐次人工批准。SVN 仍人工批准，Redmine 沿原 Project policy。新浏览器使用同一个 checkbox 同时发送两个同意字段；API 缺省 `auto_approve_git=false`，v2 旧请求仍只覆盖 DB/文档，v3 才明确包含 Git。新字段必须与 `auto_approve=true` 配合，不修改在途原请求或旧 Run 的 hash。
 
 平台在提案通过原能力、Evidence、冻结 binding 和 scope 校验后，为精确 Proposal version/checksum 保存 `ChangeApproval.source=RUN_START`，actor 为原发起人。同事务保存 Effect 和 dispatch Outbox，不创建待答复 interaction；独立 Effect Worker 沿原 apply/read-back/续行协议运行。Run 在外部保存期间仍可短暂显示 WAITING_FOR_APPROVAL，此时没有人工待办。
 
@@ -58,7 +58,7 @@ rv-reviewer 的完整验收需要 PostgreSQL 执行/文档/成果记录和 MinIO
 
 ### PostgreSQL 单行事务与原执行回执
 
-[`database_write`](../../SKM/backend/src/skillmind/effects/database_write.py) 与 [`postgres_write`](../../SKM/backend/src/skillmind/effects/postgres_write.py) 提供单行事务客户端，[`database_provider`](../../SKM/backend/src/skillmind/effects/database_provider.py) 经共享工厂接入 approved-effect Worker。`SKILLMIND_DATABASE_WRITES_ENABLED` 默认关闭，与后置功能开关独立；能力目录、Run/context、提案/批准、claim/阶段复验及恢复入口统一检查 capability 和操作，旧队列不能绕过。启用数据库不开放其他外部写入、调度或子 Agent，旧扩展开关也不能开启数据库。公开契约见 [database.write/v1](../../SKM/contracts/tools/database.write/v1/request.schema.json)，实际数据库验收仍待完成。
+[`database_write`](../../SKM/backend/src/skillmind/effects/database_write.py) 与 [`postgres_write`](../../SKM/backend/src/skillmind/effects/postgres_write.py) 提供单行事务客户端，[`database_provider`](../../SKM/backend/src/skillmind/effects/database_provider.py) 经共享工厂接入 approved-effect Worker。`SKILLMIND_DATABASE_WRITES_ENABLED` 默认关闭，与后置功能开关独立；能力目录、Run/context、提案/批准、claim/阶段复验及恢复入口统一检查 capability 和操作，旧队列不能绕过。启用数据库不开放其他外部写入、调度或子 Agent，旧扩展开关也不能开启数据库。公开契约见 [database.write/v1](../../SKM/contracts/tools/database.write/v1/request.schema.json)，实际验收范围见计划。
 
 提案使用通用 `change.propose/v1` 的单个 `/row` SET，值仅包含 `key`、`values`、`expected`；目标是 `schema.table`，`precondition.revision` 是原行摘要或插入的 `absent`。`capability_version` 指实际写入能力，不能填提案 Tool 本身或读取能力。两个 SDK 在延期前复用 Effect 注册表及持久化侧的行形状、原行与 revision 一致性校验，将这类错误返回模型修正；这不代替保存时的配备、权限、scope 和 Evidence 检查。表和可写列可逐项指定（`schema.table` / `schema.table.column`），也可由管理员分别显式选择全部（`["*"]`）；全部列仅适用于已允许的表，包含后来新增且数据库账号有权操作的表和列。操作仍逐项限定 INSERT/UPDATE，`skillmind_effects` 回执 schema 仍禁止作为写入目标，不开放主键更新、generated/identity 列或预授权。通配范围使用原 binding 冻结与撤权校验，旧显式范围不自动扩大；API/Worker 均升级后才可保存新全许可配置。新建 Run 对写入资源仍只公开已声明的读取 Tool，冻结 binding 保留写入能力；缺少读取声明直接拒绝，不改写历史快照。
 
@@ -70,7 +70,7 @@ rv-reviewer 的完整验收需要 PostgreSQL 执行/文档/成果记录和 MinIO
 
 [回执 DDL](../../SKM/scripts/sql/postgres-effect-receipts.sql)只定义独立 `skillmind_effects` schema，不创建业务表或凭据，也不由 Worker 自动执行。配置数据库时由独立 owner 安装，执行账号仅获得 schema USAGE、回执 SELECT/INSERT 与明确业务表权限，不授予回执修改/删除/截断或 schema CREATE。回执表示原事务已保存的事实，不是当前业务行状态，也不提供 MinIO 跨系统原子性。
 
-新建 RV 业务库可使用独立的[业务 DDL](../../SKM/scripts/sql/rv-reviewer-schema.sql)和[列权限脚本](../../SKM/scripts/sql/rv-reviewer-grants.sql)，它们不属于平台 migration，也不由 Worker 执行。三张表保存运行、文档和成果；评价与 `rv_result` 的判定、原 ID 和版本必须匹配，结束状态与结束时间成对保存，`spec_status` 仅导出原 Skill 指定的 FAIL 状态。成果用原 Run/文档/种类作为完整主键，并检查文档、文档库和 bucket 归属；成果表仅授予 SELECT/INSERT，运行的输入条件和文档的来源路径不授予 UPDATE。此 DDL 是尚未配置的目标库的初始化契约，不表示现有项目已部署；既有库须先核对兼容性，不能直接覆盖。它不证明对象已上传、RV 质量正确或跨表件数已核对。
+业务库的表、列、状态和时间约束由项目 Schema 与 Skill 管理，不属于平台 migration。配置前核对目标库兼容性、账号权限和原执行回执表；不要把业务 DDL 固化成平台公共契约，也不要直接覆盖既有业务库。数据库记录成立不证明文档已上传或业务质量正确。
 
 隔离 PGlite 探测覆盖 SQL、类型转换、回执、撤权回滚与最小回执权限；可追加 RV 业务 DDL、列权限及记录约束验证。它只有单个连接，不能替代真实 PostgreSQL 的 asyncpg/TLS、并发锁、断连提交及角色部署验收，命令见[本地验证](../development/local-development.md#postgresql-写入的隔离-sql-探测)。
 
@@ -92,12 +92,18 @@ Provider 将获批的 `absent` 标为前置条件，不伪称已观察远端不�
 
 ## 仓库写入模式
 
+`SKILLMIND_GIT_WRITES_ENABLED` 单独开放 Git，不开启 SVN、Redmine、调度或子 Agent；会话返回 `git_writes_enabled` 控制资源页面，旧 API 缺省按关闭。现有只读连接不自动扩权；用户在「認証情報と権限」编辑 Git，选择允许提议修改、目录范围和写入模式，继续使用原凭据。
+
 | write_mode | 目标与限制 |
 | --- | --- |
-| direct（默认） | Git 默认目标普通 fast-forward push；SVN 绑定 URL，不据此宣称精确 revision CAS |
-| branch | skillmind/ 保留分支；SVN 为仓库根 branches/skillmind/，只应新建或证明重放原提交 |
+| direct（默认） | 仅配置的明确默认分支；推送旧 ref 必须等于批准的完整 base commit，普通 fast-forward，不接受 HEAD 代替分支名 |
+| branch | 仅 `skillmind/` 及配置收窄前缀内的新分支；实际 push 时远端 ref 必须不存在，已有分支只允许核对原提交 |
 
-Git branch 可经 forge 建 PR/MR，未配 forge 仅分支/commit；direct/SVN 不调 forge，PR 失败不撤 commit。
+Git v2 在临时受信 pre-push hook 中比较 push 自身收到的远端旧 OID、本地新 OID 与目标 ref，远端 receive-pack 再以同一旧 OID 原子更新。这样覆盖预读后、推送前和推送中的竞争窗口，不使用 force 或仅靠一次 ls-remote。批准失效时停止本地执行；超时/取消清理 Git 进程组，但不据此断言远端未提交。
+
+原提交消息绑定 Proposal ref、Effect ID 和 request fingerprint；重放须同时匹配唯一父 commit、完整消息、全部实际变更路径和获批正文/删除结果。日本語文件名可用，单次最多 50 文件、每份 1 MiB、总计 4 MiB；重复路径、metadata、pathspec、路径别名和 symlink 写入拒绝。重试只读取原提交，不再次 push；若分支已推进或原提交未观测到，保留冲突/未知供人工核对。
+
+当前 Git 不自动创建 PR/MR，也不自动合并。提交后需要 PR 时由仓库现有流程处理。SVN 仍走原后置 Provider，不能以 Git 验证结果作为 SVN 安全保证。
 
 ## 变更载体和冻结内容
 
@@ -117,15 +123,15 @@ Git branch 可经 forge 建 PR/MR，未配 forge 仅分支/commit；direct/SVN �
 | 目标陈旧/冲突 | STALE/target_stale 或 FAILED/target_branch_conflict，不改已批准内容 |
 | 可重试 transport 错误 | 记错后 REQUESTED/Outbox 重进原 Provider；次数耗尽、取消、过期不自动继续，已 claim 的存储写入保留待核对状态 |
 | 回读不匹配 | VERIFICATION_FAILED，不自动重试；外部可能已变，证据未必保存 |
-| 回读断连/commit 后 PR 失败 | 按 transport 分类；暂无持久“commit 完成待 PR”阶段 |
+| Git 回读断连/响应丢失 | 保留原 Effect 的未知结果，读取原提交核对，不重复 push |
 | claim 前取消 | 拒绝 Provider；claim 后仍有窗口 |
-| Provider 中取消 | PostgreSQL/文档保存的阶段复验与心跳会停止失权的本地执行；已返回的结果仍由有效 lease finalize 保存，不做逆向写入。未知结果的取消后核对待补 |
+| Provider 中取消 | PostgreSQL/文档保存/Git 的阶段复验与心跳会停止失权的本地执行；已返回的结果仍由有效 lease finalize 保存，不做逆向写入。只读核对可用，人工接续待补 |
 
-reversible/rollback 不提供回滚操作；撤回须验真实 revision 再走新修正流程。禁止 force、自动合并、自批、repository 免审、跨仓库原子写及无 scope 更新。
+reversible/rollback 不提供回滚操作；撤回须验真实 revision 再走新修正流程。禁止 force、自动合并、模型自行批准、无原 Run 同意的 repository 免审、跨仓库原子写及无 scope 更新。
 
 ### 写入未知时停止主处理
 
-PostgreSQL 与文档保存一旦交付 claim，失败分类、lease 到期或当前未查到结果都不足以证明未写入。未取得原 Provider 的完整成功结果时，Effect 的 `error.code` 使用 `effect_result_unknown`，`cause_code` 保留原分类，`reason_code` 表示此次停止/恢复原因，`retryable` 仅控制同一 Effect 的技术重试。首次 claim 前的取消仍是未开始；旧无标记记录不回填，在实际恢复时保留原错误码并补充未知语义。旧 Provider 的失败语义不因此改变。
+PostgreSQL、文档保存与 Git v2 一旦交付 claim，失败分类、lease 到期或当前未查到结果都不足以证明未写入。未取得原 Provider 的完整成功结果时，Effect 的 `error.code` 使用 `effect_result_unknown`，`cause_code` 保留原分类，`reason_code` 表示此次停止/恢复原因，`retryable` 仅控制同一 Effect 的技术重试。首次 claim 前的取消仍是未开始；旧无标记记录不回填，在实际恢复时保留原错误码并补充未知语义。旧 SVN/Redmine Provider 的失败语义不因此改变。
 
 取消、批准过期、次数耗尽或不可重试失败停止已 claim 的存储写入时，保留原 Effect/台账/回执，Tool 与事件同样标记待核对，Run 以 FAILED 或 CANCELLED 停止并保存原 Effect ID；不生成新 Segment 或自动模型续行。Run 已离开等待状态的迟到回收只更新原 Effect/Tool，历史详情重新读取可见；不改写原 Run 终局，也不在终态快照后追加 Run 事件。执行状态的 FAILED/STALE 不能证明远端失败；页面在折叠审计之外显示待核对，结果核验也拒绝将此标记匹配成确定的失败摘要。
 
@@ -133,9 +139,9 @@ PostgreSQL 与文档保存一旦交付 claim，失败分类、lease 到期或当
 
 [`reconciliation_service`](../../SKM/backend/src/skillmind/effects/reconciliation_service.py) 已提供 Worker 内部只读单元：根据原 Effect/提案/批准与冻结 binding 重建同一请求，文档与写入共用 Artifact 字节和路径构造，数据库复用原 binding/Secret 解析。每次外部读取前后复验当前核对者的账户、原会话和项目成员关系；归档项目仍可按当前读权限核对，不借用已过期的写入 lease、旧批准者会话或部署写入开关。所有数据库锁在外部 I/O 前释放，30 秒期限触发本地取消并等待资源清理；撤权、目标或凭据改变会拒绝返回观测。
 
-该单元只调用原回执 READ ONLY SELECT 或原对象 GET，返回 CONFIRMED、NOT_OBSERVED 或 CONFLICT；数据库事务确认与对象确认分开，对象已确认也不表示文档已发布。读取异常/超时不返回确认结果，未查到不证明旧请求已停止。它不 claim、续租、写入、发布文档或修改 Effect/Run。
+该单元只调用原回执 READ ONLY SELECT、原对象 GET 或 Git fetch/原 commit 检查，返回 CONFIRMED、NOT_OBSERVED 或 CONFLICT；数据库事务、文档对象与 Git commit 确认分开，对象已确认也不表示文档已发布。读取异常/超时不返回确认结果，未查到不证明旧请求已停止。它不 claim、续租、写入、发布文档或修改 Effect/Run。
 
-0047 的独立核对台账与 [`reconciliation_request_service`](../../SKM/backend/src/skillmind/effects/reconciliation_request_service.py) 在当前会话、CSRF 和项目读权限的同一事务内保存原会话、目标摘要和仅含请求 ID 的 Outbox；API 层不解析业务凭据。每个 Effect 最多一个 QUEUED/RUNNING 请求，重复受理只接受同一请求与原会话；当前项目读权限可查询历史，不换发原 owner。查询仅认领一次，60 秒 owner 期限内保存原观测；重复完成只接受相同 owner 和同一观测，旧 Worker 不能改写已关闭记录。SUCCEEDED 表示查询完成，不将 Effect 改为 APPLIED；查询失败后可另建只读请求，原写入身份和未知状态保持不变。观测与 Run 事件分开保存，降级拒绝删除任何核对历史。
+0047 台账及 0050 的 Git 观测类型扩展与 [`reconciliation_request_service`](../../SKM/backend/src/skillmind/effects/reconciliation_request_service.py) 在当前会话、CSRF 和项目读权限的同一事务内保存原会话、目标摘要和仅含请求 ID 的 Outbox；API 层不解析业务凭据。每个 Effect 最多一个 QUEUED/RUNNING 请求，重复受理只接受同一请求与原会话；当前项目读权限可查询历史，不换发原 owner。查询仅认领一次，60 秒 owner 期限内保存原观测；重复完成只接受相同 owner 和同一观测，旧 Worker 不能改写已关闭记录。SUCCEEDED 表示查询完成，不将 Effect 改为 APPLIED；查询失败后可另建只读请求，原写入身份和未知状态保持不变。观测与 Run 事件分开保存，降级拒绝删除任何核对历史。
 
 [`reconciliation_execution`](../../SKM/backend/src/skillmind/effects/reconciliation_execution.py) 与 Worker 装配、Outbox、job 和期限回收已连接，原会话与目标只从持久要求取得。只有认领提交已确认才开始查询，读取前后校验受理目标和当前 owner，观测提交前及 flush 后重验会话、目标与期限；保存后响应丢失保留原观测。只读调度受 Worker dispatch 开关控制，独立于外部写入开关；已有文档库 client 的 lookup 共用当前存储归属。认领最多等待 15 秒，随后执行器 45 秒内完成读与保存；读取单元仍受 30 秒期限约束，停止记录最多尝试 5 秒，数据库不可用则留待回收。这些本地期限不证明远端旧写入停止。RUNNING 超过 owner 期限、QUEUED 超过 30 分钟均只关闭核对请求，不重发查询或写入，避免丢失队列任务永久占用核对位置。
 
@@ -149,15 +155,15 @@ PostgreSQL 与文档保存一旦交付 claim，失败分类、lease 到期或当
 
 ### 执行身份与远端前置条件
 
-当前 Git/SVN matches 只比变更路径内容，Redmine 不同 revision 同值也可报 replayed；同内容/同名 branch 不证明原执行。
+Git v2 的原提交核对见上文；SVN 仍只比较变更路径内容，Redmine 不同 revision 同值也可报 replayed，不能作为原执行证明。
 
-目标重放须证原 Effect/请求、目标、批准基线、实际 revision/变更集；已知未执行但基线失效拒绝 stale，未知先核对。Git direct/branch 须在远端更新点校验精确旧 ref/不存在条件，GET/本地锁不足，仍禁 force。
+后置 Provider 须补齐原 Effect/请求、目标、批准基线与实际变更集；基线失效拒绝 stale，结果未知先核对。Git v1 历史不补造 v2 身份，也不作为新的 v2 claim 执行。
 
 SVN 当前 checkout 未固定 revision，回读取事后值；须固定 direct/branch 基线、提交回执并按对应 revision 回读。out-of-date 不保护 checkout 前变化，旧记录不补造回执。
 
 ### 阶段回执与不确定结果
 
-当前 Provider 完整返回才存 before/after：forge 失败会丢 commit 返回，SVN copy/文件 commit 是两次写；首个同 source open PR 未完整验 target/提案/并发。
+当前 Provider 完整返回才保存 before/after；Git 的远端成功与平台 finalize 仍有断连窗口，核对不会自动改为 APPLIED。SVN copy/文件 commit 是两次写；后置 forge 仍缺完整 target/提案/并发身份校验。
 
 目标同 Effect 追加调用前身份、写后回执、回读，区分未执行/已执行待验证或 PR/未知。恢复查原身份、仅补未发生阶段；PR/MR 验仓库/source/target/提案，分别处理关闭/合并/并发/丢响应。
 
@@ -165,9 +171,9 @@ SVN 当前 checkout 未固定 revision，回读取事后值；须固定 direct/b
 
 ### 执行权与取消
 
-claim 在锁及校验等待后按新时间建立 lease，期限不超过原批准到期时间。PostgreSQL 与文档保存 Provider 通过共享 catalog 声明阶段授权，Worker 对其执行及 finalize 维持同一心跳：默认间隔为 lease 时长的三分之一，每次以共享阶段授权重验当前账户、项目、取消、原批准和完整 claim，提交确认后才采用新期限；已过期 lease 不可续活。续租请求卡住时也受上次确认的租约剩余时间限制。
+claim 在锁及校验等待后按新时间建立 lease，期限不超过原批准到期时间。PostgreSQL、文档保存与 Git v2 Provider 通过共享 catalog 声明阶段授权，Worker 对其执行及 finalize 维持同一心跳：默认间隔为 lease 时长的三分之一，每次以共享阶段授权重验当前账户、项目、取消、原批准和完整 claim，提交确认后才采用新期限；已过期 lease 不可续活。续租请求卡住时也受上次确认的租约剩余时间限制。
 
-这两个 Provider 的本地监督默认在 300 秒发出超时取消；续租失败或上层取消也停止所有权内的 coroutine，并等待清理。清理耗时不保证有界，本地取消不证明远端请求已停止或未写入。监督失败不伪造 finalize 结果，原 Effect、台账与回执保留供恢复核对；finalize 已返回后迟到的心跳拒绝不覆盖原结果。旧 Redmine/Git/SVN 路径仍无此贯穿监督，不能因共享 claim 的计时修正而开放。
+这些 Provider 的本地监督默认在 300 秒发出超时取消；续租失败或上层取消也停止所有权内的 coroutine，并等待清理。清理耗时不保证有界，本地取消不证明远端请求已停止或未写入。监督失败不伪造 finalize 结果，原 Effect、台账与回执保留供恢复核对；finalize 已返回后迟到的心跳拒绝不覆盖原结果。旧 Redmine/SVN 路径仍无此贯穿监督，不能因共享 claim 的计时修正而开放。
 
 每个新外部步骤仍须重验批准、取消与执行权。失权/超时后的只读核对必须与新写分开，第二 Worker 不直接重写；停止后的接续缺口见[写入未知时停止主处理](#写入未知时停止主处理)。真实数据库等待、断连和远端迟到执行仍需验收。
 
