@@ -1,27 +1,56 @@
 # Output contract rules
 
-- `runtime_manifest_draft.capability_blueprint` is the primary product; the task contracts are optional derived detail.
-- Never output the blueprint's `identity` or `compatibility`. Skillmind binds both from the frozen request so the blueprint and the RuntimeManifest cannot disagree.
-- Every `required_rules` entry needs a `source_traces` entry pointing at it; quality criteria and prohibited actions carry the Skill's own wording without invention. That rule binds business content — rules, criteria, thresholds, field constraints — not procedure: a recommended step that names a raw tool (`svn`, `curl`, `python3`, shell) is re-expressed as a capability call per `SKILL.md` "Procedural re-expression", keeping the source's language and adding a `source_traces` entry back to the original command.
-- A re-expressed step may only name a capability that is in the frozen catalog. Integration-backed capabilities must also appear in some `resource_requirements` entry's `capabilities`; platform-scoped exceptions follow `SKILL.md` CapabilityBlueprint rule 8 without creating a binding. Otherwise keep the step as guidance saying Skillmind cannot perform it yet. Connection detail — host, base URL, repository root, credentials, API keys — never appears in a step, rule, or deliverable; it belongs to the ResourceBinding.
-- An `apply` effect intent must reference a `write` resource requirement and keep `approval_mode=ask`. Its `operation` must be the exact registered write-contract identifier, never a translated description or combined operation: `database.write/v1` accepts `INSERT` and `UPDATE` as separate intents; `document.write/v1` accepts `CREATE`. Put business purpose and ordering in guidance. Declaring an effect never authorizes it.
-- `change.propose/v1` is the only Agent-facing control Tool for external-change proposals. Apply capabilities such as `issue.update/v1` stay off the Agent Tool list and are invoked only by Skillmind after exact approval.
-- Git/SVN patch, commit-message, and commit-plan outputs remain proposal-only until their dedicated write Providers, concurrency policy, idempotency, rollback, and read-back contracts exist.
-- Declare each external resource once in `resource_requirements`, listing the registered identifiers it needs under `capabilities`. There is no separate `data_sources` list — the blueprint entry is what the user reviews *and* what the Run binds. Every Integration-backed capability listed in `tools` must appear in some requirement's `capabilities`, or the version cannot be published. `workspace.read/v1`, `workspace.search/v1`, `workspace.write/v1`, and `workspace.write/v2` are platform-owned access to the current Run's already-bound isolated snapshot and do not create a resource requirement. Both write versions are restricted to `workspace/` or `output/`, never the read-only `input/`.
-- `document.readiness/v1` reads the current Run's prerequisite status without a resource binding or document bytes. On-demand document metadata is not prepared content: preserve mandatory pre-document effects, require readiness, and explicitly map inspection, listing, and conversion to registered document capabilities.
-- A downloadable immutable deliverable requires an explicitly declared and frozen-catalog-registered `workspace.write/v2` writing `output/`. Only copy the `artifact_refs` from its committed Tool response; v2 `workspace/` returns an empty list, and v1 success never proves Artifact publication. Do not change historical manifests, permission snapshots, or v1 identifiers to introduce v2 implicitly.
-- Human-readable text mirrors the Skill source's own language; identifiers (`key`, capability identifiers, checksums) stay lowercase ASCII in every language. Business enum values retain the source's exact case and JSON types; platform enums match their frozen contracts. A Japanese source yields Japanese titles, objectives and guidance with unchanged ASCII keys.
-- Bind `source_hash` to the request source and `interpreter_version` to the system Skill identity.
-- Every material capability, task, and Tool proposal must include source trace evidence in the InterpretationReport.
-- Confidence, assumptions, questions, and unmapped references are optional explanatory fields.
-- Domain capabilities may be defined by the Skill. Only Tool and resource capabilities must come from the frozen catalog.
-- Every task must contain a bounded `input_contract` and `contract_source_trace`. Add `output_contract` only for stable machine-consumable business fields explicitly supported by the source; open reports and artifacts use Skillmind's generic OutcomeEnvelope without a task-specific output draft.
-- All four task contract positions follow the depth-5 counting and source-fidelity rules in `SKILL.md`: root is 1 and each field/items node adds 1. Preserve a required deep JSON Artifact exactly instead of copying or truncating its full payload into an optional task output contract.
-- Skillmind is the sole compiler of executable input Schema, optional task-specific output Schema, and their checksums. Never output `$ref`, inline JSON Schema, or checksum values.
-- Preserve ambiguity through conservative types, diagnostics, assumptions, questions, and source traces; do not invent required fields or restrictions that the source does not support.
-- Add enum, pattern, length, and numeric constraints only when their exact values are stated by the Skill source; capability-catalog metadata is not a business-field constraint.
-- Mark fields, Tools, and resource requirements required only for unconditional requirements, and keep Tool/resource required flags aligned.
-- Classify complete natural-language adaptation as `adapted`; reserve `native` for an already Skillmind-native contract and `assisted` for an unresolved safe mapping.
-- Use the deterministic selection-guidance and single-workflow ordering rules from `SKILL.md`; internal key wording may vary, but requiredness and stage kinds must not.
-- ViewSpec and contract-test fixtures are optional; the generated Schema drives the standard form and result renderer.
-- RuntimeManifest candidates remain subject to deterministic Schema, reference, permission, Tool, ViewSpec, and publish-gate validation.
+These rules specify candidate shape; interpretation decisions are defined in SKILL.md.
+
+## Platform-owned fields
+
+- `runtime_manifest_draft.capability_blueprint` is the primary product. Do not emit its `identity`
+  or `compatibility`: Skillmind binds them to the Manifest and frozen request.
+- Bind Manifest `source_hash` to the request source and `interpreter_version` to the supplied
+  system Skill identity. Do not emit `source_documents`; the platform attaches them separately.
+- Skillmind compiles task contracts into executable Schema and checksums. Do not emit JSON
+  Schema, `$ref`, executable expressions or compiler checksums.
+- Use the supplied versioned response contract. RuntimeManifest candidates remain subject to
+  deterministic Schema, reference, permission, Tool and publish validation.
+
+Blueprint `source_traces[].target` is a JSON Pointer relative to the Blueprint itself
+(for example `/tasks/0` or `/guidance/required_rules/0`) and must resolve to an existing value.
+Put Manifest Tool/workflow evidence in `report.source_traces` (for example `/tools/0`),
+not Blueprint traces.
+
+## Task contracts
+
+Every task has a bounded `input_contract` for caller-supplied parameters and
+`contract_source_trace` entries for material fields. Do not duplicate bound document contents,
+selected paths, internal IDs, processing state or report payloads as form fields. No caller
+parameters means an empty object contract.
+
+Add `output_contract` only for stable machine-consumable business fields explicitly defined
+by the source. Open reports, Markdown and artifact delivery use the platform's generic
+OutcomeEnvelope. Missing output contracts, ViewSpec or fixtures do not lower compatibility.
+
+Add enum, pattern, length or numeric bounds only when the source gives their exact constraints;
+catalog Provider names are not business enum evidence. Use conservative types and diagnostics
+for unresolved fields rather than inventing restrictions.
+
+Every TaskContractDraft has a maximum nesting depth of 5. Count the root as depth 1; each field
+and each array `items` node adds 1, including scalar leaves. Count independently for
+`input_contract`, `output_contract`, `parameter_contract` and `result_contract`; Manifest and
+Blueprint wrappers do not count. For example: root object (1), array field (2), object items
+(3), array field (4), scalar items (5).
+
+A required deep JSON file can remain an exact Artifact deliverable with its source-backed
+rules in guidance. Do not truncate, rename or serialize its structure to fit an optional task
+contract. If a required caller input cannot be represented faithfully within the depth limit,
+record the limitation as an `assisted` diagnostic.
+
+## Workflow shape
+
+Create exactly one workflow per immediate task. Its stages are one `tool` step for each declared
+RuntimeManifest Tool in array order, followed by one `agent`, one `validator` and one `artifact`
+step. This execution scaffold does not replace the source's business order or conditions.
+
+Set `execution_preferences.recommended_profile` only when the source justifies it; otherwise
+omit it and use the platform default. Explanatory confidence, assumptions, questions and unmapped
+references are optional. There is no separate `data_sources` list: the Blueprint requirements
+are the resources reviewed and bound for the Run.

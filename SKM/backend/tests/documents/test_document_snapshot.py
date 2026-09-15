@@ -222,3 +222,41 @@ async def test_deleted_or_replaced_document_cannot_supply_a_new_version() -> Non
             await read_frozen_document(
                 _ContentSource(replacement), project_id=project_id, document=frozen
             )
+
+
+async def test_input_library_reference_is_frozen_without_output_binding_or_blob_read():
+    """登録用庫参照は入力だけで固定し、別世代の文書を現在の庫へ付け替えない。"""
+
+    from unittest.mock import AsyncMock
+
+    from skillmind.documents.repository import DocumentRepository
+    from skillmind.storage.blob import BlobReference
+    from tests.documents.test_document_library_binding import target
+
+    project_id = uuid4()
+    document = stored_document(project_id, document_content())
+    library = target()
+    repository = AsyncMock(spec=DocumentRepository)
+    repository.get.return_value = document
+    repository.get_for_download.return_value = (
+        document,
+        BlobReference("private/key", library.namespace),
+    )
+    arguments = dict(
+        project_id=project_id,
+        requirement_key="input",
+        token=f"document:{document.document_id}",
+        library_target=library,
+    )
+    source = await resolve_document_binding(repository, **arguments)
+    assert source["document_library"] == library.reference(project_id)
+    assert source["access"] == "read"
+    assert "private/key" not in str(source)
+    assert "namespace_id" not in str(source)
+    repository.list_for_project.assert_not_awaited()
+    repository.get_for_download.return_value = (
+        document,
+        BlobReference("private/key", target().namespace),
+    )
+    with pytest.raises(DocumentSnapshotError, match="storage"):
+        await resolve_document_binding(repository, **arguments)

@@ -50,7 +50,7 @@ export function WorkspaceQueue(props: Parameters<typeof WorkspaceReports>[0]) {
         : page === null ? <LoadingSkeleton label={messages.runHistory.loading} rows={3} />
         : page.items.length === 0 ? <EmptyState text={messages.workspace.queueEmpty[tab]} />
         : <ul className="pendingList">{page.items.map((item) => <li key={item.run_id}>
-          <a className="pendingItem" href={routeHref('workspace', projectId, { runId: item.run_id })}>
+          <a className="pendingItem" href={routeHref('history', projectId, { runId: item.run_id })}>
             <span className="pendingItemTitle"><strong>{runHistoryTitle(item, messages.elements.unnamedRunTitle)}</strong>
               <small>{formatLocalTimestamp(item.finished_at ?? item.created_at)}</small>
             </span><StatusBadge status={item.status} />

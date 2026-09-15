@@ -190,7 +190,7 @@
         {
           "key": "tracker",
           "kind": "issue",
-          "required": false,
+          "required": true,
           "access": "write",
           "status": "UNAVAILABLE",
           "reason": "The project has no resource bound for this requirement yet",

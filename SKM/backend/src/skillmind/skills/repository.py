@@ -90,6 +90,7 @@ _VALIDATION_ARRAY_FIELDS = frozenset({
     "document_prerequisites", "providers", "workflows", "steps",
 })
 _CONTRACT_VALIDATION_CODES = frozenset({
+    "source_trace_target_invalid",
     "contract_constraint_invalid", "contract_constraint_out_of_range", "contract_depth_exceeded",
     "contract_description_invalid", "contract_description_too_long", "contract_enum_duplicate",
     "contract_enum_invalid", "contract_enum_limit_exceeded", "contract_enum_type_mismatch",

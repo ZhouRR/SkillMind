@@ -88,6 +88,25 @@ def configured_document_library(
     return DocumentLibraryTarget(namespace, bucket)
 
 
+def parse_document_library_reference(value: object, *, project_id: UUID) -> dict[str, str]:
+    """凍結済み登録用識別子だけを受理し、scope・資格情報や別 Project を混入させない。"""
+
+    if not isinstance(value, Mapping) or set(value) != {
+        "document_library_id", "project_id", "bucket"
+    }:
+        raise ValueError("Document library reference is invalid")
+    if value.get("project_id") != str(project_id):
+        raise ValueError("Document library reference belongs to another project")
+    library_id = value.get("document_library_id")
+    bucket = value.get("bucket")
+    if not isinstance(library_id, str) or not isinstance(bucket, str):
+        raise ValueError("Document library reference is invalid")
+    if UUID(library_id).int == 0 or str(UUID(library_id)) != library_id:
+        raise ValueError("Document library reference identity is invalid")
+    check_bucket_name(bucket, strict=True)
+    return {"document_library_id": library_id, "project_id": str(project_id), "bucket": bucket}
+
+
 @dataclass(frozen=True, slots=True)
 class ResolvedDocumentLibraryBinding:
     """Run ID 確定前の選択。Integration の契約を偽造せず同じ作成 transaction で凍結する。"""

@@ -288,3 +288,132 @@ def test_brief_library_reference_requires_exact_original_identity(mismatch):
             selected_sources=claimed.selected_sources_json,
             project_id=project_id, run_id=run_id,
         )
+
+
+@pytest.mark.parametrize("mode", ["SINGLE", "SET", "ALL"])
+async def test_initial_context_supplies_selection_without_index_tools_or_output_binding(
+    tmp_path, mode
+):
+    """登録 metadata を直接交付し、空の物化本文・workspace Tool 不在でも選択を失わない。"""
+
+    manifest = _document_manifest()
+    manifest["capability_blueprint"]["resource_requirements"][0]["capabilities"] = [
+        "document.inspect/v1"
+    ]
+    manifest["tools"] = [{"capability": "document.inspect/v1", "required": True}]
+    claimed = _generic_claimed(
+        manifest=manifest, allowed=("document.inspect/v1",), selected_sources={}
+    )
+    contents = [document_content(name="first.xlsx")]
+    if mode != "SINGLE":
+        contents.append(document_content(name="second.xlsx"))
+    snapshot = replace(
+        document_snapshot(claimed.project_id, contents, key="project-doc"), selection_mode=mode
+    )
+    library = target()
+    claimed.selected_sources_json["project-doc"] = {
+        "capability": "document.inspect/v1",
+        "provider": "project-documents",
+        "document_snapshot": snapshot.to_json(),
+        "preparation_policy": "on-demand/v1",
+        "document_library": library.reference(claimed.project_id),
+    }
+    inventory = _FakeInventory(contents)
+    context = await builder(
+        tmp_path,
+        library,
+        materializer=WorkspaceMaterializer(
+            document_inventory=inventory,
+            input_snapshots=MemoryInputSnapshots(claimed),
+            max_bytes=10_485_760,
+            max_files=500,
+        ),
+    ).build(claimed, sequence_start=1)
+    assert inventory.calls == 0
+    assert [t.capability for t in context.tools] == ["document.inspect/v1"]
+    (resource,) = context.task_brief["resources"]
+    assert resource["document_selection"] == snapshot.to_json()
+    assert resource["document_library"] == library.reference(claimed.project_id)
+    assert canonical_json({"resource_key": "project-doc", **snapshot.to_json()}) in context.prompt
+    assert "Local index reading is not available" in context.prompt
+    assert "read them with the workspace" not in context.prompt
+    assert resource["materialization"]["materialized_files"] == 0
+    Draft202012Validator(
+        ContractStore(CONTRACTS).load("agent-task-brief/v1.schema.json"),
+        format_checker=FormatChecker(),
+    ).validate(context.task_brief)
+
+
+@pytest.mark.parametrize("mutation", ["project", "bucket", "extra", "missing-target"])
+async def test_input_library_reference_rejects_mismatch_before_any_materialization(
+    tmp_path, mutation
+):
+    """入力庫の移し替えと非公開項目の混入を、本文取得より前に拒否する。"""
+
+    manifest = _document_manifest()
+    claimed = _generic_claimed(
+        manifest=manifest, allowed=("document.read/v1",), selected_sources={}
+    )
+    library = target()
+    reference = library.reference(claimed.project_id)
+    if mutation == "project":
+        reference["project_id"] = str(uuid4())
+    elif mutation == "bucket":
+        reference["bucket"] = "another-bucket"
+    elif mutation == "extra":
+        reference["internal_prefix"] = "not-public"
+    claimed.selected_sources_json["project-doc"] = {
+        "capability": "document.read/v1",
+        "provider": "project-documents",
+        "document_snapshot": document_snapshot(
+            claimed.project_id, [document_content()], key="project-doc"
+        ).to_json(),
+        "document_library": reference,
+    }
+    materializer = AsyncMock(spec=WorkspaceMaterializer)
+    with pytest.raises(ValueError):
+        await builder(
+            tmp_path, None if mutation == "missing-target" else library, materializer=materializer
+        ).build(claimed, sequence_start=1)
+    materializer.materialize.assert_not_awaited()
+
+
+async def test_registration_brief_has_metadata_while_document_gate_is_still_closed(tmp_path):
+    """全接続を束縛済みの前置登録で、本文を取得せず必要 metadata を交付する。"""
+
+    manifest = _document_manifest()
+    blueprint = manifest['capability_blueprint']
+    blueprint['resource_requirements'][0]['capabilities'] = ['document.inspect/v1']
+    blueprint['resource_requirements'].append({
+        'key': 'records', 'kind': 'document', 'required': True, 'access': 'write',
+        'capabilities': ['document.write/v1'],
+    })
+    blueprint['effect_intents'] = [{
+        'key': 'register', 'resource_key': 'records', 'mode': 'apply', 'operation': 'CREATE',
+        'risk': 'medium', 'approval_mode': 'ask',
+    }]
+    blueprint['tasks'][0]['document_prerequisites'] = ['register']
+    capabilities = ('document.inspect/v1', 'document.readiness/v1', 'change.propose/v1')
+    manifest['tools'] = [{'capability': c, 'required': True} for c in capabilities]
+    claimed = _generic_claimed(manifest=manifest, allowed=capabilities, selected_sources={})
+    library = target()
+    content = document_content(name='selected.xlsx')
+    snapshot = document_snapshot(claimed.project_id, [content], key='project-doc')
+    claimed.selected_sources_json['project-doc'] = {
+        'capability': 'document.inspect/v1', 'provider': 'project-documents',
+        'preparation_policy': 'on-demand/v1', 'document_snapshot': snapshot.to_json(),
+        'document_library': library.reference(claimed.project_id),
+    }
+    claimed.selected_sources_json['records'] = FrozenDocumentLibraryBinding(
+        claimed.project_id, claimed.run_id, uuid4(), 'records', library,
+    ).to_json()
+    inventory = _FakeInventory([content])
+    context = await builder(tmp_path, library, materializer=WorkspaceMaterializer(
+        document_inventory=inventory, input_snapshots=MemoryInputSnapshots(claimed),
+        max_bytes=10_485_760, max_files=500,
+    )).build(claimed, sequence_start=1)
+    assert inventory.calls == 0
+    assert context.task_brief['execution']['document_prerequisites'] == ['register']
+    assert context.task_brief['resources'][0]['document_selection'] == snapshot.to_json()
+    assert {t.capability for t in context.tools} == set(capabilities)
+    assert not (context.workspace.input_dir / 'documents/specs/selected.xlsx').exists()

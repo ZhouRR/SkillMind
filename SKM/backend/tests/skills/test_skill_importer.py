@@ -395,157 +395,101 @@ def test_system_skill_identity_is_versioned_and_matches_fixture_contract() -> No
     identity = load_interpreter_system_skill(SYSTEM_SKILL)
     example = _load_contract("examples/skill-interpreter-request.v1.json")["interpreter"]
 
-    assert identity.version == "4.2.0"
-    assert identity.interpreter_version == "skillmind-skill-interpreter/4.2.0"
+    assert identity.version == "4.3.1"
+    assert identity.interpreter_version == "skillmind-skill-interpreter/4.3.1"
     assert identity.to_dict() == example
 
 
-def test_system_skill_instructs_output_language_to_follow_the_source() -> None:
-    """解釈結果の自然言語は Skill 源の言語に従い、識別子は ASCII に留まると指示する。
-
-    この規則は model が実行するため確定性検査で守れない (docs/11 §5.1)。prompt から落ちても
-    schema は通り、日本語 Skill が英語の蓝图を返すだけなので気付けない。唯一の防波堤として
-    指示が prompt に載っていること自体をここで固定する。
-    """
+def _system_prompt() -> str:
+    """本番と同じ loader で本文と参照文書を一緒に読む。"""
 
     package = SkillPackageParser().parse_directory(SYSTEM_SKILL.resolve())
-    prompt = "\n".join(item.content for item in load_inline_text_files(SYSTEM_SKILL, package))
-
-    assert "same natural language as the Skill source" in prompt
-    assert "stay lowercase ASCII" in prompt
-    assert "Business `enum` values are data" in prompt
-    assert "preserve the source's exact values, letter case, and JSON types" in prompt
-    assert "Platform-defined enum values must match their frozen contracts" in prompt
-    assert "Apply effect `operation` values are platform identifiers" in prompt
-    assert "split different operations into separate effect intents" in prompt
-    assert "effect operations, contract field descriptions" not in prompt
-    assert "contract field `key`, `enum` value" not in prompt
-    assert "Add an `output_contract` only" in prompt
-    assert "`change.propose/v1`" in prompt
-    assert "For `mode=propose`" in prompt
-    assert "without `change.propose/v1`" in prompt
-    assert "Never declare an apply" in prompt
-    assert "capability such as `issue.update/v1`" in prompt
-    assert "For Git/SVN" in prompt
-    assert "generic OutcomeEnvelope" in prompt
-
-
-def test_system_skill_instructs_procedural_re_expression_of_raw_tool_steps() -> None:
-    """生ツール手順は能力呼び出しへ重表達し、業務規則は原文保持すると指示する (計画 §21 I2)。
-
-    静的門は I1 で「宣言は授与ではない」を実装したが、その先の重表達は model が行うため
-    確定性検査で守れない。指示が prompt から落ちても schema は通り、蓝图に `svn cat` が
-    原文のまま載るだけで気付けない。指示の在中自体をここで固定する (docs/11 §5.4)。
-    """
-
-    package = SkillPackageParser().parse_directory(SYSTEM_SKILL.resolve())
-    prompt = "\n".join(item.content for item in load_inline_text_files(SYSTEM_SKILL, package))
-
-    assert "## Procedural re-expression" in prompt
-    # 三档: 直訳 / idiom 換え / guidance 降格。
-    assert "**Direct.**" in prompt
-    assert "**Different idiom.**" in prompt
-    assert "**Guidance.**" in prompt
-    # 過程は重表達、業務は原文保持という分界。
-    assert "Re-express mechanism, preserve business" in prompt
-    assert "keeps the source's own wording" in prompt
-    # 守卫: catalog 登録済み かつ requirement 宣言済みの能力のみ。捏造禁止。
-    assert "must already exist in the frozen capability catalog" in prompt
-    assert "invent a capability identifier to make a step fit" in prompt
-    # 声明・重表達のいずれも授与ではない。接続情報と credential は解釈へ持ち込まない。
-    assert "Re-expressing a step grants nothing" in prompt
-    assert "never an authorization" in prompt
-    assert "Never copy a credential" in prompt
-    # 硬失败は required 核心手順が三档いずれにも落ちない場合のみ。
-    assert "Interpret rather than refuse" in prompt
-    assert "never by itself such a case" in prompt
-
-
-def test_system_skill_maps_procedure_onto_the_capabilities_that_now_exist() -> None:
-    """idiom 档の写像先を §19/§20 で実装済みの能力へ更新したことを固定する (計画 §21 I4)。
-
-    I2 の三档は当時の能力集で書かれており、commit 履歴・binary 設計書・仓库書き込みは
-    「等価能力なし」として guidance へ降格する例だった。§19 W5 と §20 でそれらが実装された
-    後もこの文面が残ると、model は**実行できる手順をわざわざ降格し続ける**。降格は静かに
-    起きて schema も通るため、指示の在中をここで固定する以外に検知手段が無い。
-    """
-
-    package = SkillPackageParser().parse_directory(SYSTEM_SKILL.resolve())
-    prompt = "\n".join(item.content for item in load_inline_text_files(SYSTEM_SKILL, package))
-
-    # 名前での file 探索は物化索引 (§19 W5) へ写す。
-    assert "files.txt" in prompt
-    assert "`workspace.search/v1`" in prompt
-    # commit 履歴は物化 history (§19 W5) の読取へ写す。もう guidance 降格ではない。
-    assert "history.txt" in prompt
-    assert "svn log" in prompt
-    # binary 設計書は platform が text 化した副本 (§19 W5 / §20 R4a) を読む。
-    assert "`.xlsx`, `.xlsm`, `.docx`" in prompt
-    assert "<original name>.txt" in prompt
-    # 中間産物の書き出しは workspace.write (§19 W2)。物化 input/ は書けない。
-    assert "`workspace.write/v1`" in prompt
-    assert "`workspace.write/v2`" in prompt
-    assert "committed Tool response's `artifact_refs`" in prompt
-    assert "never upgrade an existing published Skill or Run permission" in prompt
-    assert "frozen evidence and is never" in prompt
-    # 仓库への変更は直訳ではなく提案 (§20)。Agent は commit しない。
-    assert "`svn commit`, `git commit`" in prompt
-    assert "Agent proposes and never commits" in prompt
-    # guidance 档に残るのは本当に等価能力が無いものだけ。
-    assert "a format the platform cannot textualize" in prompt
-
-
-def test_system_skill_distinguishes_on_demand_content_and_proposal_only_changes() -> None:
-    """未準備文書の先読みや未適用の変更を、別段落の説明で完了扱いさせない。"""
-
-    package = SkillPackageParser().parse_directory(SYSTEM_SKILL.resolve())
-    prompt = "\n".join(item.content for item in load_inline_text_files(SYSTEM_SKILL, package))
-
-    assert "document bindings initially contain metadata only" in prompt
-    assert "an index never proves that content was downloaded or converted" in prompt
-    assert "Preserve an explicitly" in prompt and "required converter" in prompt
-    assert "When a task declares\n       `document_prerequisites`" in prompt
-    assert "`document.readiness/v1` is an exception" in prompt
-    assert "platform-scoped\n   exceptions follow CapabilityBlueprint rule 8" in prompt
-    assert "follows the Git/SVN proposal-only rule above" in prompt
-    assert "a proposal does not prove it was applied" in prompt
-    assert "Every bound\n     `repository` and `document`" not in prompt
-    assert "Skillmind lands the approved change itself" not in prompt
-
-
-def test_output_contract_scopes_without_invention_to_business_content() -> None:
-    """`without invention` は業務内容のみを縛り、手順の重表達を禁じないと明記する。"""
-
-    contract = (SYSTEM_SKILL / "references" / "output-contract.md").read_text(encoding="utf-8")
-
-    assert "That rule binds business content" in contract
-    assert "not procedure" in contract
-    assert 'per `SKILL.md` "Procedural re-expression"' in contract
-    assert "in the frozen catalog" in contract
-    assert (
-        "Integration-backed capabilities must also appear in some `resource_requirements`"
-        in contract
+    return " ".join(
+        " ".join(item.content.split())
+        for item in load_inline_text_files(SYSTEM_SKILL, package)
     )
-    assert "platform-scoped exceptions follow `SKILL.md` CapabilityBlueprint rule 8" in contract
-    assert "never appears in a step, rule, or deliverable" in contract
 
 
-def test_system_skill_bounds_contract_depth_without_changing_source_deliverables() -> None:
-    """Model に compiler と同じ深度を伝え、深い成果物をフォーム契約へ改変させない。"""
+def test_system_skill_preserves_business_language_and_source_constraints() -> None:
+    """Schema だけでは検出できない原文保持と手順変換の境界を prompt に残す。"""
 
-    package = SkillPackageParser().parse_directory(SYSTEM_SKILL.resolve())
-    prompt = "\n".join(item.content for item in load_inline_text_files(SYSTEM_SKILL, package))
+    prompt = _system_prompt()
+    for instruction in (
+        "source's own natural language",
+        "stay lowercase ASCII",
+        "Preserve business enum values with their exact case and JSON types",
+        "exact schema/table and column names",
+        "Re-express mechanism, preserve business",
+        "each with a trace targeting that rule",
+        "Do not turn internal processing stages into separate user tasks",
+        "Use source defaults when no project override is supplied",
+        "mandatory core outcome cannot be achieved",
+    ):
+        assert instruction in prompt
 
+
+def test_system_skill_maps_catalog_capabilities_without_granting_writes() -> None:
+    """利用可能な Git write を旧説明で抑止せず、承認と Provider 境界を保持する。"""
+
+    prompt = _system_prompt()
+    for instruction in (
+        "must exist in the frozen capability catalog and accept the proposed inputs",
+        "Every Integration-backed Agent Tool must be covered by a requirement",
+        "never on the Agent Tool list",
+        "Only the approved EffectExecution Worker writes",
+        "`change.propose/v1`",
+        "`approval_mode=ask`",
+        "when the frozen catalog provides the needed repository write Provider",
+        "A proposal does not prove that a change was applied",
+        "committed Tool response's `artifact_refs` prove publication",
+        "materialized `input/` tree remains read-only",
+        "Never execute bundled commands or scripts",
+        "`external_write_policy=deny`",
+    ):
+        assert instruction in prompt
+
+
+def test_system_skill_separates_resource_setup_from_document_execution() -> None:
+    """条件付き write の任意接続化と登録前メタデータの循環依存を防ぐ指示を固定する。"""
+
+    prompt = _system_prompt()
+    for instruction in (
+        "Group targets sharing one source-declared connection and authorization purpose",
+        "Every resource referenced by an `apply` intent",
+        "`access=write` and `required=true` before launch",
+        "a required binding neither forces a write nor approves it",
+        "Optional read-only enrichment may remain optional",
+        "`document_prerequisites`",
+        "require `document.readiness/v1`",
+        "no bytes are acquired before the gate",
+        "TaskBrief supplies frozen document selection metadata and library identifiers",
+        "without inspecting or converting content",
+        "a path does not make a Tool available",
+        "Metadata does not prove that bytes were read or converted",
+    ):
+        assert instruction in prompt
+
+
+def test_system_skill_bounds_contracts_without_changing_source_deliverables() -> None:
+    """フォーム深度を守り、Markdown や深い成果物を不要な出力契約へ押し込まない。"""
+
+    prompt = _system_prompt()
     assert f"maximum nesting depth of {MAX_CONTRACT_DEPTH}" in prompt
-    assert "root as depth 1" in prompt
-    assert "each object field and each array `items` node adds 1, including scalar leaves" in prompt
-    assert "Manifest and Blueprint wrappers do not count" in prompt
+    for instruction in (
+        "root as depth 1",
+        "each field and each array `items` node adds 1, including scalar leaves",
+        "Blueprint wrappers do not count",
+        "caller-supplied parameters",
+        "an exact Artifact deliverable",
+        "Do not truncate, rename or serialize",
+        "record the limitation as an `assisted` diagnostic",
+        "No caller parameters means an empty object contract",
+        "Add `output_contract` only for stable machine-consumable business fields",
+        "generic OutcomeEnvelope",
+    ):
+        assert instruction in prompt
     for field in ("input_contract", "output_contract", "parameter_contract", "result_contract"):
         assert f"`{field}`" in prompt
-    assert "caller-supplied parameters" in prompt
-    assert "an exact Artifact deliverable" in prompt
-    assert "Do not truncate, rename, or\nserialize required structures" in prompt
-    assert "preserve that limitation as an `assisted` diagnostic" in prompt
 
 
 def test_fixture_runner_validates_response_and_publishable_manifest() -> None:
@@ -592,7 +536,7 @@ def test_bind_identity_stamps_platform_identity_on_model_output() -> None:
     response["runtime_manifest_draft"]["tasks"] = [task]  # type: ignore[index]
     validated = InterpreterFixtureRunner(CONTRACTS).run(request, response, bind_identity=True)
     identity = validated["runtime_manifest_draft"]["identity"]
-    assert identity["interpreter_version"] == "skillmind-skill-interpreter/4.2.0"
+    assert identity["interpreter_version"] == "skillmind-skill-interpreter/4.3.1"
     assert identity["source_hash"] == request["source"]["content_hash"]  # type: ignore[index]
     # 蓝图は同じ解釈の一部であり、manifest と別の identity/互換 level を持ってはならない。
     blueprint = validated["runtime_manifest_draft"]["capability_blueprint"]
@@ -702,34 +646,34 @@ def test_offline_fixture_runner_uses_repository_assets() -> None:
     assert response["response_version"] == "skillmind.skill-interpreter.response/v1"
 
 
-def test_system_skill_maps_independent_aspects_onto_bounded_fan_out() -> None:
-    """扇出の档と、その適用境界が prompt に載っていることを固定する (計画 §23 D1/D5)。
+def test_system_skill_keeps_parallel_execution_optional_and_bounded() -> None:
+    """独立した観点だけで扇出を強制せず、依存順と読取専用の境界を保つ。"""
 
-    この規則は model が実行するため確定性検査では守れない。落ちても schema は通り、
-    「独立に検討できる面」が順次実行へ黙って戻るだけなので気付けない。とくに
-    「互いの結果に依存する手順は並行化しない」が落ちると、依存のある手順が並行化され、
-    結論が実行順に左右されるようになる——再現しない不具合として現れる最悪の形。
-    """
-
-    package = SkillPackageParser().parse_directory(SYSTEM_SKILL.resolve())
-    prompt = "\n".join(item.content for item in load_inline_text_files(SYSTEM_SKILL, package))
-
-    assert "subagent.dispatch/v1" in prompt
-    # 子は読み取り専用の真部分集合しか持たない。
-    assert "read-only subset" in prompt
-    # 入れ子禁止と、書き込み・問い合わせの不許可。
-    assert "cannot fan out" in prompt
-    assert "cannot write, cannot ask the user" in prompt
-    # 依存のある手順は順次のまま。
-    assert "those stay sequential" in prompt
+    prompt = _system_prompt()
+    assert "independent review aspects alone do not require `subagent.dispatch/v1`" in prompt
+    assert "branches are independent and read-only" in prompt
+    assert "dependent steps stay sequential" in prompt
+    assert "Respect source requirements for a single execution" in prompt
 
 
-def test_system_skill_preserves_mandatory_effect_before_document_access():
-    """原文依拠の gate、旧 Worker 拒否、按需準備と不明結果の扱いを prompt に固定する。"""
-    text = (SYSTEM_SKILL / "SKILL.md").read_text("utf-8")
+def test_system_skill_preserves_mandatory_effect_before_document_access() -> None:
+    """原文依拠の gate、按需準備と不明結果の扱いを prompt に固定する。"""
+
+    prompt = _system_prompt()
     for required in (
-        "document_prerequisites", "/tasks/<index>/document_prerequisites",
-        "document.readiness/v1", "on-demand preparation", "unknown effects never satisfy it",
-        "Do not invent prerequisites",
+        "`document_prerequisites`, trace that field",
+        "require `document.readiness/v1`",
+        "Use on-demand document preparation",
+        "Approval, unknown effects or a checkpoint claim do not satisfy the gate",
+        "Recommended ordering and conditional steps alone do not justify it",
     ):
-        assert required in text
+        assert required in prompt
+
+
+def test_system_skill_separates_blueprint_and_manifest_source_trace_scopes() -> None:
+    """出典の target 基準点を区別し、Tool の trace を Blueprint に混入させない。"""
+
+    prompt = _system_prompt()
+    assert "relative to the Blueprint itself" in prompt
+    assert "must resolve to an existing value" in prompt
+    assert "Manifest Tool/workflow evidence in `report.source_traces`" in prompt

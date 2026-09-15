@@ -15,7 +15,9 @@
       "key": "repository.review",
       "title": "Repository Review",
       "summary": "Review a repository revision against the rules carried by the Skill source.",
-      "intents": ["The user wants an evidence-backed review of a code change."]
+      "intents": [
+        "The user wants an evidence-backed review of a code change."
+      ]
     }
   ],
   "tasks": [
@@ -29,7 +31,10 @@
           "text": "Every finding cites a repository path and revision."
         }
       ],
-      "resource_keys": ["target_repository", "review_notes"],
+      "resource_keys": [
+        "target_repository",
+        "review_notes"
+      ],
       "deliverables": [
         {
           "key": "review-report",
@@ -64,8 +69,14 @@
       "kind": "repository",
       "required": true,
       "access": "read",
-      "capabilities": ["repository.read/v1"],
-      "accepted_providers": ["git", "svn", "project-files"],
+      "capabilities": [
+        "repository.read/v1"
+      ],
+      "accepted_providers": [
+        "git",
+        "svn",
+        "project-files"
+      ],
       "selection_guidance": "Prefer the revision named by the user; ask when it is not stated."
     },
     {
@@ -73,17 +84,25 @@
       "kind": "document",
       "required": false,
       "access": "read",
-      "capabilities": ["document.read/v1"],
-      "accepted_providers": ["project-documents"],
+      "capabilities": [
+        "document.read/v1"
+      ],
+      "accepted_providers": [
+        "project-documents"
+      ],
       "selection_guidance": "Use the project review checklist when one is bound."
     },
     {
       "key": "review_tracker",
       "kind": "issue",
-      "required": false,
+      "required": true,
       "access": "write",
-      "capabilities": ["issue.read/v1"],
-      "accepted_providers": ["redmine"],
+      "capabilities": [
+        "issue.read/v1"
+      ],
+      "accepted_providers": [
+        "redmine"
+      ],
       "selection_guidance": "Only needed when the user asks for the outcome to be recorded."
     }
   ],

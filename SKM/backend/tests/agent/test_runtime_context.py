@@ -586,7 +586,9 @@ async def test_context_builder_opens_registered_workspace_read_and_search(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("capability", ["workspace.write/v1", "workspace.write/v2", "json.schema.validate/v1"])
+@pytest.mark.parametrize(
+    "capability", ["workspace.write/v1", "workspace.write/v2", "json.schema.validate/v1"]
+)
 async def test_context_builder_opens_registered_workspace_capability(
     tmp_path: Path, capability: str,
 ) -> None:
@@ -1086,6 +1088,7 @@ async def test_document_effect_prerequisites_reject_eager_input_preparation(tmp_
             await builder.build(claimed, sequence_start=1)
         assert not (tmp_path / "runs").exists()
     else:
-        context = await builder.build(claimed, sequence_start=1)
-        assert "document.readiness/v1" in {tool.capability for tool in context.tools}
-        assert context.task_brief["execution"]["document_prerequisites"] == ["register-run"]
+        # 前置書込の接続が無い旧任意 slot も、モデル起動前に停止する。
+        with pytest.raises(ValueError, match="Required data source has no selected provider"):
+            await builder.build(claimed, sequence_start=1)
+        assert not (tmp_path / "runs").exists()

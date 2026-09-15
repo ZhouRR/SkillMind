@@ -180,6 +180,24 @@ class _RepairingInterpreter:
         return {"response_version": "wrong"} if validation_feedback is None else _example_response()
 
 
+class _TraceRepairingInterpreter(_RepairingInterpreter):
+    """初回だけ Blueprint 外の出典を返し、通常の一回修復へ渡す。"""
+
+    async def interpret(
+        self, request, *, model, parameters, validation_feedback=None, on_event=None,
+    ):
+        """再生成時は元 fixture を返し、入力候補を platform が補正しないことを検証する。"""
+
+        self.feedback.append(validation_feedback)
+        response = _example_response()
+        if validation_feedback is None:
+            response["runtime_manifest_draft"]["capability_blueprint"]["source_traces"].append({
+                "target": "/runtime_manifest_draft/tools/0",
+                "path": "SKILL.md", "line": 3, "reason": "Synthetic Tool evidence",
+            })
+        return response
+
+
 class _DecodeRepairingInterpreter:
     """最初の decode 失敗後、脱敏 feedback を受けて完全 response を返す。"""
 
@@ -762,3 +780,24 @@ def test_validate_task_input_rejects_schema_invalid_input() -> None:
     }
     with pytest.raises(TaskInputInvalidError):
         service._validate_task_input(schema, {})
+
+
+@pytest.mark.asyncio
+async def test_interpret_repairs_misplaced_blueprint_trace_before_preview_ready() -> None:
+    """発行時だけ失敗する候補を保存せず、安全な位置/code で一度だけ再生成する。"""
+
+    organization_id = uuid4()
+    source_id = uuid4()
+    source = _fixture_source(GENERIC_SKILL, organization_id, source_id)
+    session = _InterpretSession(source, scalars_results=[None, None])
+    interpreter = _TraceRepairingInterpreter()
+    stored = await _service(session, interpreter).interpret(
+        organization_id=organization_id, skill_source_id=source_id, model="synthetic-model",
+    )
+    assert stored.status is SkillInterpretationStatus.PREVIEW_READY
+    assert len(interpreter.feedback) == 2 and interpreter.feedback[0] is None
+    detail = interpreter.feedback[1]
+    assert detail.startswith("/capability_blueprint/source_traces/")
+    assert detail.endswith("/target: source_trace_target_invalid")
+    assert "runtime_manifest_draft/tools/0" not in detail
+    assert stored.validation_attempts == (detail,)

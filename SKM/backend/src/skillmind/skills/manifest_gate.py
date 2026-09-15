@@ -114,7 +114,7 @@ class ManifestValidator:
         try:
             design = validate_skill_design(source=source, contracts_dir=self._contracts_dir)
         except SkillDesignInvalidError as error:
-            return False, (self._error(error.code, str(error), None),)
+            return False, (self._error(error.code, str(error), error.path),)
         manifest = design.manifest
         blueprint = design.blueprint
         assert blueprint is not None

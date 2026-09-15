@@ -39,6 +39,8 @@ parse 不调用模型，初始 Draft 可无蓝图、不可直接发布。ZIP/TAR
 
 模型只生成蓝图；平台从冻结请求独立绑定 RuntimeManifest 的可选 `source_documents`，不采信模型复制的原文。发布门禁将全文与原 SkillSource/index 对照，Manifest/checksum 和 Run snapshot 一并冻结。此字段保全来源，不替代蓝图的能力声明、语义审查或授权。二进制附件仍只有原索引，不能据此宣称已读内容。
 
+Blueprint 的 `source_traces[].target` 以蓝图自身为 JSON Pointer 根，必须指向已有值；Manifest Tool/workflow 的出典保存在解释报告中。解析阶段与发布阶段共用此检查，失败以静态位置和 `source_trace_target_invalid` 进入现有的一次候选修复；不删除、移动错误引用来改写模型候选，也不公开错误 target 的原值。
+
 API 与 Worker 必须同步升级后使用新解释。旧版本/Run 缺少该字段时保持原值，不在执行时从当前 Skill 补写；要获得原文保留，重新解释并发布新版本。模型重解析仍需检查结果，保存全文不保证模型一定正确理解。
 
 ### 导入保存与上传授权
@@ -125,7 +127,9 @@ Manifest checksum 证明自身内容一致，Interpretation 既有 checksum 是�
 
 ## ResourceBinding 与 readiness
 
-资源仅来自 capability_blueprint.resource_requirements，无顶层 data_sources；Tool 投影用相同 key，write 不进入 Agent allowed_capabilities。
+资源仅来自 capability_blueprint.resource_requirements，无顶层 data_sources；Tool 投影用相同 key，write 不进入 Agent allowed_capabilities。 同一连接、同一授权用途的多张表共用资源项，表名、列名和操作约束保留在指导与 trace 中；输入文档与成果保存目标仍分别选择。
+
+Interpreter 4.3.0 起区分条件执行与连接准备：`apply` 指向的写入资源必须 `required=true`，候选与发布校验拒绝矛盾声明，条件本身仍控制是否执行写入。可省略的只读补充资源保持可选。readiness、新建 Run/调度配置及 Worker 共用必需资源计算，既有声明中的 apply 资源漏绑也在启动前拒绝；不据此授予新权限或无条件执行。旧 Blueprint 的原 required/checksum 保留，历史查看不因新解释规则改写。
 
 空 allowlist 不授权；issue_ids/field_keys 可显式 ["*"]，子 scope 不枚举扩 wildcard；repository path 不用该 wildcard，LOW 预授权须精确 scope。
 

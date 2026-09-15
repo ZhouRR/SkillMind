@@ -32,13 +32,19 @@ class SkillDesignInvalidError(ValueError):
     def __init__(
         self,
         code: Literal[
-            "skill_design_invalid", "capability_blueprint_missing"
+            "skill_design_invalid", "capability_blueprint_missing", "source_trace_target_invalid"
         ] = "skill_design_invalid",
+        *, path: str | None = None,
     ) -> None:
         """既存の未宣言 finding と損傷を区別し、source の値を message に含めない。"""
 
-        super().__init__("The saved skill design is invalid.")
+        super().__init__(
+            "Source trace target must resolve within the CapabilityBlueprint"
+            if code == "source_trace_target_invalid"
+            else "The saved skill design is invalid."
+        )
         self.code = code
+        self.path = path
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,8 +84,13 @@ def validate_skill_design(
         )
     except SkillDesignInvalidError:
         raise
+    except CapabilityBlueprintError as error:
+        if error.code == "source_trace_target_invalid":
+            raise SkillDesignInvalidError(
+                "source_trace_target_invalid", path=f"/capability_blueprint{error.path}"
+            ) from None
+        raise SkillDesignInvalidError() from None
     except (
-        CapabilityBlueprintError,
         InvalidEvaluationRevisionError,
         TypeError,
         ValueError,

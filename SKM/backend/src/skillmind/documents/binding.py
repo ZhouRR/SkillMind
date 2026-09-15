@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from skillmind.documents.domain import DocumentNotFoundError
+from skillmind.documents.domain import DocumentNotFoundError, DocumentStorageUnavailableError
+from skillmind.documents.library import DocumentLibraryTarget
 from skillmind.documents.repository import DocumentRepository
 from skillmind.documents.snapshot import (
     DOCUMENT_CAPABILITIES,
@@ -25,6 +26,7 @@ from skillmind.documents.snapshot import (
 async def resolve_document_binding(
     repository: DocumentRepository, *, project_id: UUID, requirement_key: str, token: str,
     capability: str = DOCUMENT_READ_CAPABILITY,
+    library_target: DocumentLibraryTarget | None = None,
 ) -> dict[str, Any]:
     """全集も明示選択だけを受理し、Project 所有権と具体 ID を作成時に固定する。"""
 
@@ -56,6 +58,20 @@ async def resolve_document_binding(
         "access": "read",
         "document_snapshot": snapshot.to_json(),
     }
+    if library_target is not None:
+        try:
+            for document in documents:
+                current, blob = await repository.get_for_download(
+                    project_id=project_id, document_id=document.document_id
+                )
+                if current != document or blob.namespace != library_target.namespace:
+                    raise DocumentSnapshotError(
+                        "Selected document storage does not match the library"
+                    )
+        except (DocumentNotFoundError, DocumentStorageUnavailableError) as error:
+            raise DocumentSnapshotError("Selected document library is unavailable") from error
+        # 入力側だけでも前置登録に使える。保存 slot・直接アクセス権は生成しない。
+        binding["document_library"] = library_target.reference(project_id)
     if capability in {
         DOCUMENT_CONVERT_CAPABILITY, DOCUMENT_INSPECT_CAPABILITY, DOCUMENT_LIST_CAPABILITY,
     }:

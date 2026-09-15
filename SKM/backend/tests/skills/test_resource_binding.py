@@ -314,10 +314,8 @@ def test_candidate_of_another_kind_is_not_matched() -> None:
     assert readiness.requirements[0].candidates == ()
 
 
-def test_apply_intent_without_a_write_provider_stays_runnable() -> None:
-    """write Provider が無い apply 意図は提案止まりであり ACTIONABLE にしない。
-
-    docs/04 §3.3 のとおり、この状態でも分析と提案生成までは実行できる。
+def test_apply_intent_without_a_write_provider_requires_configuration_support() -> None:
+    """apply 用接続が未配線なら、実行後の確認待ちではなく起動前の不足にする。
     """
 
     blueprint = _blueprint(
@@ -348,11 +346,11 @@ def test_apply_intent_without_a_write_provider_stays_runnable() -> None:
         registered_write_capabilities=frozenset(),
     )
 
-    assert readiness.level is TaskReadinessLevel.RUNNABLE
+    assert readiness.level is TaskReadinessLevel.GUIDANCE_ONLY
 
 
-def test_apply_intent_with_a_registered_write_provider_is_actionable() -> None:
-    """登録済み write Provider が揃った apply 意図だけが ACTIONABLE になる。"""
+def test_apply_intent_with_a_registered_write_provider_still_needs_a_binding() -> None:
+    """write Provider が登録済みでも、具体接続なしでは開始可能としない。"""
 
     blueprint = _blueprint(
         _document_requirement(),
@@ -382,7 +380,7 @@ def test_apply_intent_with_a_registered_write_provider_is_actionable() -> None:
         registered_write_capabilities=frozenset({"issue.update/v1"}),
     )
 
-    assert readiness.level is TaskReadinessLevel.ACTIONABLE
+    assert readiness.level is TaskReadinessLevel.CONFIGURATION_REQUIRED
 
 
 def test_blueprint_without_resources_is_runnable_as_advice() -> None:

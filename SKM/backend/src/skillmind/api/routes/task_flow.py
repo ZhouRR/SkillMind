@@ -14,7 +14,7 @@ from skillmind.api.problems import ProblemException, problem_openapi_response
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.runs.domain import derive_task_id
 from skillmind.skills.domain import PublishedTaskNotFoundError, SkillVersionNotFoundError
-from skillmind.skills.resource_binding import TaskReadiness
+from skillmind.skills.resource_binding import TaskReadiness, required_resource_keys
 from skillmind.skills.service import SkillService, TaskFlowPreviewResult
 from skillmind.skills.task_contract import compile_task_contract
 from skillmind.skills.task_flow_preview import TaskFlowPreview, TaskFlowPreviewInvalidError
@@ -415,6 +415,16 @@ class TaskFlowPreviewResponse(_FlowModel):
                 raise ValueError("Preview task resource declarations are inconsistent")
             assessment = self.readiness.assessment
             if assessment is not None:
+                # 原宣言の optional は保存し、現在の起動条件だけ共通規則で照合する。
+                required_keys = required_resource_keys({
+                    "resource_requirements": [
+                        resource.model_dump(exclude_unset=True) for resource in resources.values()
+                    ],
+                    "effect_intents": [
+                        effect.model_dump(exclude_unset=True)
+                        for effect in self.plan.shared.effect_intents or []
+                    ],
+                })
                 if len(assessment.requirements) != len(resources) or len(
                     {item.key for item in assessment.requirements}
                 ) != len(resources):
@@ -429,7 +439,7 @@ class TaskFlowPreviewResponse(_FlowModel):
                         item.selection_guidance,
                     ) != (
                         resource.kind,
-                        resource.required,
+                        resource.key in required_keys,
                         resource.access,
                         resource.capabilities or [],
                         resource.selection_guidance,

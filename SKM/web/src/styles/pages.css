@@ -198,7 +198,7 @@
 .skillLibraryList { display: grid; gap: 9px; margin: 0; padding: 0; list-style: none; }
 .skillLibraryList > li {
   display: grid;
-  grid-template-columns: minmax(230px, 1fr) auto minmax(210px, auto);
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 14px;
   align-items: center;
   border: 1px solid var(--border);
@@ -212,7 +212,9 @@
 /* SKILL.md 原文の説明。skill_key より読める識別なので、key より一段強く出す。 */
 .skillLibraryDescription { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
 .skillLibraryStatus { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
-.skillLibraryList .skillActions { justify-content: flex-end; margin-top: 0; }
+.skillLibraryList .skillActions { grid-column: 1 / -1; justify-content: flex-end; margin-top: 0; }
+.skillLibraryList .skillActions > button { flex: 0 0 auto; width: auto; white-space: nowrap; }
+.skillLibraryList .skillActions > .hint { flex: 1 1 240px; margin: 0; }
 .skillLibraryDraft { grid-column: 1 / -1; min-width: 0; }
 .skillLibraryDraft > summary { cursor: pointer; color: var(--text-muted); }
 

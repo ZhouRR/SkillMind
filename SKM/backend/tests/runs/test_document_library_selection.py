@@ -285,3 +285,20 @@ def test_library_can_coexist_with_existing_non_document_read_sources(capability,
     row.selected_sources_json["records"]["document_snapshot"] = {}
     with pytest.raises(ValueError):
         run_document_ids(row)
+
+
+async def test_missing_optional_legacy_apply_binding_is_rejected_before_run_creation():
+    """旧候補の任意表示でも apply 接続を省略して確認待ち Run を作らない。"""
+
+    requirement = {**REQUIREMENT, 'required': False}
+    integrations = AsyncMock(spec=IntegrationRepository)
+    integrations.find_configured_binding.return_value = None
+    with pytest.raises(TaskSourceSelectionError, match='outputs'):
+        await _resolve_selected_sources(
+            _resolved((requirement,)), {},
+            blueprint={'resource_requirements': [requirement], 'effect_intents': [
+                {'key': 'save', 'mode': 'apply', 'resource_key': 'outputs'}]},
+            project_id=uuid4(), integration_repository=integrations,
+            document_library_target=target(),
+        )
+    integrations.get_integration.assert_not_awaited()

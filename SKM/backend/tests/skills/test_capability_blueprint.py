@@ -318,3 +318,46 @@ def test_capability_order_changes_checksum(
     extended["capabilities"].append({"key": "repository.audit", "title": "Repository Audit"})
 
     assert validator.validate(blueprint).checksum != validator.validate(extended).checksum
+
+
+def test_apply_requires_configured_resource_even_when_operation_is_conditional(validator):
+    """条件付き保存を任意の接続と解釈した候補は、公開前に修正を要求する。"""
+
+    blueprint = _example()
+    blueprint["identity"]["interpreter_version"] = "skillmind-skill-interpreter/4.3.0"
+    next(r for r in blueprint["resource_requirements"] if r["key"] == "review_tracker")[
+        "required"
+    ] = False
+    with pytest.raises(CapabilityBlueprintError) as error:
+        validator.validate(blueprint)
+    assert error.value.code == "effect_resource_optional"
+
+
+def test_historical_optional_apply_design_remains_readable(validator):
+    """旧版の宣言を移行時に書き換えず、当時の任意指定を保存する。"""
+
+    blueprint = _example()
+    resource = next(r for r in blueprint["resource_requirements"] if r["key"] == "review_tracker")
+    resource["required"] = False
+    compiled = validator.validate(blueprint)
+    assert next(r for r in compiled.blueprint["resource_requirements"]
+                if r["key"] == "review_tracker")["required"] is False
+
+
+@pytest.mark.parametrize("target", ["/runtime_manifest_draft/tools/0", "/tools/0", "/tasks/99"])
+def test_source_trace_target_must_resolve_inside_original_blueprint(
+    validator: CapabilityBlueprintValidator, target: str,
+) -> None:
+    """Manifest 側や存在しない target を、出典検査を後回しにせず拒否する。"""
+
+    blueprint = _minimal_blueprint()
+    blueprint["source_traces"].append({
+        "target": target, "path": "SKILL.md", "line": 2, "reason": "Synthetic source evidence",
+    })
+    original = deepcopy(blueprint)
+    with pytest.raises(CapabilityBlueprintError) as captured:
+        validator.validate(blueprint)
+    assert captured.value.code == "source_trace_target_invalid"
+    assert captured.value.path == "/source_traces/1/target"
+    assert target not in str(captured.value)
+    assert blueprint == original

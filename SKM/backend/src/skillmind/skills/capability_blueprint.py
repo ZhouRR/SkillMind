@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from typing import Any, cast
 from jsonschema import Draft202012Validator, FormatChecker
 
 from skillmind.core.hashing import canonical_json, sha256_hex
+from skillmind.evaluations.domain import InvalidEvaluationRevisionError, resolve_json_pointer
 from skillmind.skills.document_prerequisites import document_prerequisites
 from skillmind.skills.task_contract import (
     TaskContractCompilationError,
@@ -159,10 +161,25 @@ class CapabilityBlueprintValidator:
         self._validate_effect_intents(normalized)
         self._validate_required_rule_traces(normalized)
         self._validate_document_prerequisites(normalized)
+        self._validate_source_trace_targets(blueprint)
         return CompiledCapabilityBlueprint(
             blueprint=normalized,
             checksum=f"sha256:{sha256_hex(canonical_json(normalized))}",
         )
+
+    def _validate_source_trace_targets(self, blueprint: Mapping[str, Any]) -> None:
+        """出典 target は Blueprint 内で解決し、発行時だけ拒否される候補を返さない。"""
+
+        for index, trace in enumerate(_object_list(blueprint.get("source_traces"))):
+            try:
+                resolve_json_pointer(blueprint, str(trace["target"]))
+            except InvalidEvaluationRevisionError:
+                # 原 target には任意文字列が含まれるため、公開位置は固定 field と添字だけにする。
+                raise CapabilityBlueprintError(
+                    "source_trace_target_invalid",
+                    f"/source_traces/{index}/target",
+                    "Source trace target must resolve within the CapabilityBlueprint",
+                ) from None
 
     def _validate_document_prerequisites(self, blueprint: Mapping[str, Any]) -> None:
         """前置条件は既存 apply intent と原文 trace に対応する場合だけ受理する。"""
@@ -293,6 +310,24 @@ class CapabilityBlueprintValidator:
                     "effect_resource_not_writable",
                     f"{path}/resource_key",
                     "An apply effect intent must reference a write resource requirement",
+                )
+            # 旧公開 snapshot の意味を後付けで無効化せず、新 Interpreter の候補へ適用する。
+            identity = blueprint.get("identity", {})
+            interpreter_version = (
+                identity.get("interpreter_version", "") if isinstance(identity, Mapping) else ""
+            )
+            version = re.fullmatch(
+                r"skillmind-skill-interpreter/(\d+)\.(\d+)\.(\d+)", str(interpreter_version)
+            )
+            if (
+                version is not None and tuple(map(int, version.groups())) >= (4, 3, 0)
+                and resource.get("required") is not True
+            ):
+                raise CapabilityBlueprintError(
+                    "effect_resource_optional",
+                    f"{path}/resource_key",
+                    "An apply effect requires a binding before launch; mark its resource required "
+                    "and keep conditional execution in guidance",
                 )
             if approval != "ask":
                 raise CapabilityBlueprintError(

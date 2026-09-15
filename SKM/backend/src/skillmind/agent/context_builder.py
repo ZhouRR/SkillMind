@@ -53,6 +53,7 @@ from skillmind.documents.library import (
     DOCUMENT_WRITE_CAPABILITY,
     DocumentLibraryTarget,
     is_document_library_source,
+    parse_document_library_reference,
     parse_document_library_source,
 )
 from skillmind.documents.observation_repository import DocumentObservationLookup
@@ -79,6 +80,7 @@ from skillmind.skills.document_prerequisites import (
     document_prerequisites,
 )
 from skillmind.skills.frozen_manifest import verified_run_manifest
+from skillmind.skills.resource_binding import required_resource_keys
 
 
 class ContractStore:
@@ -763,6 +765,9 @@ def _resolve_source_tools(
     requirements = (
         _sequence(blueprint.get("resource_requirements")) if isinstance(blueprint, Mapping) else []
     )
+    required_keys = (
+        required_resource_keys(blueprint) if isinstance(blueprint, Mapping) else frozenset()
+    )
     requirement_keys = {
         item.get("key") for item in requirements if isinstance(item, Mapping)
     }
@@ -778,7 +783,7 @@ def _resolve_source_tools(
             requirement, claimed_run, document_library_target=document_library_target
         )
         if selected_source is None:
-            if bool(requirement.get("required", False)):
+            if requirement.get("key") in required_keys:
                 raise ValueError("Required data source has no selected provider")
             continue
         capability, provider, integration_id, binding_id = selected_source
@@ -927,6 +932,15 @@ def _selected_source(
         ):
             raise ValueError("Selected document source is invalid")
         selected_document_snapshots({requirement_key: value}, project_id=claimed_run.project_id)
+        if "document_library" in value:
+            reference = parse_document_library_reference(
+                value["document_library"], project_id=claimed_run.project_id
+            )
+            if (
+                document_library_target is None
+                or reference != document_library_target.reference(claimed_run.project_id)
+            ):
+                raise ValueError("Input document library changed after Run creation")
         return capability, provider, None, None
     raw_integration_id = value.get("integration_id")
     if raw_integration_id is None:

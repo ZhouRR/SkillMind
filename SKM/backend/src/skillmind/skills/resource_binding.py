@@ -81,6 +81,24 @@ class TaskReadiness:
     requirements: tuple[RequirementBinding, ...]
 
 
+def required_resource_keys(blueprint: Mapping[str, Any]) -> frozenset[str]:
+    """新規実行に必要な接続を求め、条件付き apply の未束縛も起動前に拒否する。
+
+    旧 Blueprint の required を書き換えず、readiness・作成・Worker で同じ条件を使う。
+    接続を必須にしても、実際の書込条件・承認・scope は拡張しない。
+    """
+
+    return frozenset(
+        str(item["key"])
+        for item in _object_list(blueprint.get("resource_requirements"))
+        if item.get("required") is True and isinstance(item.get("key"), str)
+    ) | frozenset(
+        str(item["resource_key"])
+        for item in _object_list(blueprint.get("effect_intents"))
+        if item.get("mode") == "apply" and isinstance(item.get("resource_key"), str)
+    )
+
+
 def evaluate_blueprint_readiness(
     blueprint: Mapping[str, Any],
     *,
@@ -100,9 +118,10 @@ def evaluate_blueprint_readiness(
     (計画 §19 W1)。None のときは Provider 検査を行わず、catalog 登録だけで判定する従来挙動を保つ。
     """
 
+    required_keys = required_resource_keys(blueprint)
     bindings = tuple(
         _bind_requirement(
-            requirement,
+            {**requirement, "required": requirement.get("key") in required_keys},
             candidates=candidates,
             registered_capabilities=registered_capabilities,
             installed_provider_capabilities=installed_provider_capabilities,

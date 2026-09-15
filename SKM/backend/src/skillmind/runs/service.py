@@ -76,7 +76,7 @@ from skillmind.runs.interaction import (
 from skillmind.runs.repository import RunRepository
 from skillmind.skills.capability_blueprint import resolve_capability_blueprint
 from skillmind.skills.domain import PublishedTaskNotFoundError
-from skillmind.skills.resource_binding import is_write_capability
+from skillmind.skills.resource_binding import is_write_capability, required_resource_keys
 from skillmind.skills.task_catalog import ResolvedTaskRun
 from skillmind.users.access import authorize_user_access, validate_user_access
 from skillmind.users.domain import UserAccess
@@ -925,8 +925,9 @@ async def _resolve_selected_sources(
         if isinstance(item.get("key"), str)
     }
     task_scope_key = f"{resolved.skill_version_id}:{resolved.task_key}"
+    required_keys = required_resource_keys(blueprint)
     for key, blueprint_requirement in blueprint_requirements.items():
-        required = bool(blueprint_requirement.get("required", False))
+        required = key in required_keys
         selected_token = provided.pop(key, None)
         configured = None
         if selected_token is None:
@@ -972,6 +973,7 @@ async def _resolve_selected_sources(
                     requirement_key=key,
                     token=selected_token,
                     capability=next(item for item in declared if item in DOCUMENT_CAPABILITIES),
+                    library_target=document_library_target,
                 )
             except DocumentSnapshotError as error:
                 raise TaskSourceSelectionError(str(error)) from error

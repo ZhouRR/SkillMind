@@ -17,7 +17,12 @@ from uuid import UUID
 
 from skillmind.agent.domain import MaterializedResource, RegisteredTool, RunLimits
 from skillmind.core.hashing import canonical_json, sha256_hex
-from skillmind.documents.library import is_document_library_source, parse_document_library_source
+from skillmind.documents.library import (
+    is_document_library_source,
+    parse_document_library_reference,
+    parse_document_library_source,
+)
+from skillmind.documents.snapshot import DOCUMENT_CAPABILITIES, selected_document_snapshots
 from skillmind.effects.continuation import validated_effect_result
 from skillmind.skills.capability_blueprint import resolve_capability_blueprint
 from skillmind.skills.source_documents import validate_source_documents
@@ -283,6 +288,22 @@ def render_task_brief_prompt(
             "input set. Propose output paths relative to the library; use the applied Effect "
             "receipt for the actual object key. Do not invent missing project settings."
         )
+    selections = [
+        {"resource_key": resource["key"], **resource["document_selection"]}
+        for resource in brief["resources"] if "document_selection" in resource
+    ]
+    if selections:
+        sections.append(
+            "Frozen selected document metadata for pre-document registration (JSON): "
+            + canonical_json(selections)
+            + ". These exact selections are already available before document prerequisites; "
+            "no file read or listing is needed to obtain them. SINGLE is an explicit file, "
+            "SET is an explicit frozen set, and ALL is the project set frozen at creation. "
+            "None is a live directory query. Do not infer selection mode from common folders "
+            "or counts. Metadata and stored hashes do not prove document bytes were read or "
+            "converted. Use source-defined defaults where no project override is supplied; "
+            "do not ask users to re-enter these identifiers or confirm absent overrides."
+        )
     if brief["resources"]:
         sections.append(
             "Frozen resource slots (JSON): " + canonical_json([
@@ -318,7 +339,7 @@ def render_task_brief_prompt(
     _append_notes(sections, "Recommended steps", guidance["recommended_steps"])
     _append_notes(sections, "Stop and report when", brief["execution"]["stop_conditions"])
     _append_notes(sections, "Expected deliverables", brief["deliverables"], key="description")
-    _append_materialization(sections, brief["resources"])
+    _append_materialization(sections, brief["resources"], brief["allowed_tools"])
     sections.append(_tool_instruction(brief["allowed_tools"]))
     sections.append(_effect_instruction(brief["effect_policy"]))
     sections.append(_interaction_instruction(brief["interaction_policy"]))
@@ -390,7 +411,9 @@ def _append_notes(
         sections.append("\n".join([f"{title}:", *lines]))
 
 
-def _append_materialization(sections: list[str], resources: Sequence[Any]) -> None:
+def _append_materialization(
+    sections: list[str], resources: Sequence[Any], allowed_tools: Sequence[Any]
+) -> None:
     """物化済み資源の落点を prompt へ明示する (計画 §19 W6)。
 
     §19 は「Agent が既存の workspace.search/read で自走発見する」ことを前提にしているが、
@@ -406,10 +429,8 @@ def _append_materialization(sections: list[str], resources: Sequence[Any]) -> No
     ]
     if not placed:
         return
-    lines = [
-        "Materialized resources (already on disk in this Run; read them with the "
-        "workspace.search/v1 and workspace.read/v1 tools):"
-    ]
+    readable = any(tool.get("capability") == "workspace.read/v1" for tool in allowed_tools)
+    lines = ["Materialized resources (already on disk in this Run):"]
     for resource, placement in placed:
         details = [f"files under {placement['root']}/"]
         revision = placement.get("revision")
@@ -433,12 +454,19 @@ def _append_materialization(sections: list[str], resources: Sequence[Any]) -> No
                 "After the Skill's prerequisites succeed, use the authorized document tool "
                 "with the listed project-relative path. Deferred is not missing or a read failure."
             )
-    lines.append(
-        "Start from the file index or the manifest before searching, and quote the manifest "
-        "revision when you cite a file. Paths listed in the manifest \"skipped\" array exist "
-        "but could not be read by the platform (binary, oversized, or unconvertible); never "
-        "report them as missing."
-    )
+    if readable:
+        lines.append(
+            "Read the file index or manifest with workspace.read/v1 before locating content. "
+            "Use workspace.search/v1 only if it appears in the allowed Tool list. Quote the "
+            "manifest revision when citing a file. Skipped sources were not materialized; "
+            "never report them as missing."
+        )
+    else:
+        lines.append(
+            "Local index reading is not available in this Run. Use the frozen selection "
+            "metadata above for registration and the declared document Tools for content "
+            "after prerequisites succeed. These paths do not grant file access."
+        )
     sections.append("\n".join(lines))
 
 
@@ -624,6 +652,15 @@ def _resources(
                 source, project_id=project_id, requirement_key=key, run_id=run_id,
             )
             resource["document_library"] = library.target.reference(project_id)
+        elif isinstance(source, Mapping) and source.get("capability") in DOCUMENT_CAPABILITIES:
+            if project_id is None or binding is None or resource["access"] != "read":
+                raise ValueError("Document selection requires its original project and read slot")
+            snapshot, = selected_document_snapshots({key: source}, project_id=project_id)
+            resource["document_selection"] = snapshot.to_json()
+            if "document_library" in source:
+                resource["document_library"] = parse_document_library_reference(
+                    source["document_library"], project_id=project_id
+                )
         guidance = _string(requirement.get("selection_guidance"))
         if guidance:
             resource["selection_guidance"] = guidance

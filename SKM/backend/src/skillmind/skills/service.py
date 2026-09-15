@@ -25,6 +25,7 @@ from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.core.logging import log_event
 from skillmind.projects.domain import ProjectArchivedError, ProjectNotFoundError
 from skillmind.projects.repository import LockedProjectAccess, ProjectRepository
+from skillmind.skills.capability_blueprint import CapabilityBlueprintError
 from skillmind.skills.domain import (
     CreateSkillVersionDraftCommand,
     InlineSkillFile,
@@ -1669,6 +1670,8 @@ def _schema_failure_detail(error: Exception) -> str:
     (model/来源由来のため秘匿) は載せない。その他の ValueError は platform 固定 message のみ。
     """
 
+    if isinstance(error, CapabilityBlueprintError) and error.code == "source_trace_target_invalid":
+        return f"/capability_blueprint{error.path}: {error.code}"
     if isinstance(error, TaskContractCompilationError):
         return f"{error.path}: {error.code}"
     if isinstance(error, ValidationError):

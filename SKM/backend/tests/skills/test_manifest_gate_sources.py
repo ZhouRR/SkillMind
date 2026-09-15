@@ -147,7 +147,17 @@ def test_blueprint_trace_must_resolve_original_target_and_file(
     source = _source_context(_generated_manifest())
     source.manifest["capability_blueprint"]["source_traces"][0][field] = replacement
 
-    _assert_invalid(_rehash(source))
+    if field == "target":
+        original = deepcopy(source)
+        passed, findings = ManifestValidator(ROOT / "contracts").evaluate(_rehash(source))
+        assert not passed
+        assert len(findings) == 1
+        assert findings[0].code == "source_trace_target_invalid"
+        assert findings[0].path == "/capability_blueprint/source_traces/0/target"
+        assert replacement not in findings[0].message
+        assert source == original
+    else:
+        _assert_invalid(_rehash(source))
 
 
 @pytest.mark.parametrize(

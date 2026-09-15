@@ -89,9 +89,13 @@ selected_sources_json 保存 Project/requirement、模式、成员 ID/路径/MIM
 
 ContextBuilder 在工作区准备前验证保存目标的声明、原 Project/Run/slot、完整摘要和 Worker 当前存储配置，同时检查独立能力门禁与提案权限。保存目标不注册直接写入或文档读取 Tool；输入准备器只要求读取槽位的冻结清单，保存目标不扩大输入范围。Brief 按 requirement key 匹配来源，不将同能力的另一槽位视为已选择，也不向保存目标附加输入目录；实际保存仍经[批准与 Effect Worker](repository-effects.md#minio-条件创建与原结果核对)。
 
-新准备的 Brief 在 identity 中传入原 Project ID；已校验的保存槽位另带 `document_library`（库 ID、Project ID、bucket），并在首次模型调用前渲染，供前置业务登记使用。库 ID 是平台逻辑文档库的稳定 UUIDv5：以存储 namespace UUID 为 namespace，以规范 JSON `{"kind":"project-document-library/v1","project_id":原ProjectUUID字符串,"bucket":原bucket}` 为 name；不含 Run、binding 或 slot，所以同库跨运行一致，Project/bucket/存储世代不同则区分。它不代表新建的 Integration 或外部 MinIO ID，不新增库表，也不改写原 binding/snapshot/checksum。成果回执使用同一身份算法。
+新建 Run 时，文档读取槽位也冻结登记用 `document_library`（库 ID、Project ID、bucket），不依赖成果保存槽位是否存在。冻结前按文档自身保存归属核对当前配置，仅查询数据库元数据，不获取 blob；Worker 在准备前再验原引用与配置一致。旧来源没有该字段时不从当前配置补写。
 
-以上字段是运行内的登记引用，不是对象读取许可；候选和历史来源摘要仍不公开存储 scope。Brief 不传 endpoint、namespace、凭据、内部 prefix 或未配置的目录/时区/输出设置；路径默认值由 Skill 自身规则处理。旧 Brief 缺少新可选字段时不补造原值，依赖这些字段的业务运行需要新版 Worker。
+Brief 在 identity 中传入原 Project ID，并将每个读取槽位已验证的 `document_selection`（选择方式、ID、路径、MIME、大小、内容 hash 和清单 checksum）直接交给模型。前置业务登记可使用这些元数据；它们不证明已取得或转换正文，也不绕过 document.readiness 的效果门禁。SINGLE/SET/ALL 均为创建时固定集合，不推测为实时目录条件。没有 workspace.read/v1 时不提示模型读取索引；需要文件内容的过程必须声明相应的文档或 workspace Tool。
+
+库 ID 是平台逻辑文档库的稳定 UUIDv5：以存储 namespace UUID 为 namespace，以规范 JSON `{"kind":"project-document-library/v1","project_id":原ProjectUUID字符串,"bucket":原bucket}` 为 name。同库跨 Run/slot 一致，Project/bucket/存储世代不同则区分；成果回执使用同一算法。它不代表新建 Integration 或外部 MinIO ID，不新增库表。
+
+以上字段只用于原 Run 的登记引用，不授予直接存储访问或扩大输入集合。Brief 不传 endpoint、namespace、凭据、内部 prefix 或未配置的项目覆盖值；未提供覆盖值时沿用 Skill 的明确默认值，不要求用户再次确认“是否配置”。公开候选和历史来源摘要仍不暴露存储 scope。旧 Brief/Run 不补写原字段；使用新增元数据交接需要新建 Run。
 
 ### 用一个例子理解冻结边界
 
