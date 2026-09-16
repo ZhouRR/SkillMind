@@ -34,6 +34,8 @@ from skillmind.skills.model_interpreter import (
     ModelProviderError,
 )
 
+from skillmind.skills.runtime_profile import validate_interpreter_parameters
+
 logger = logging.getLogger(__name__)
 _INTERRUPT_TIMEOUT_SECONDS = 5
 
@@ -87,7 +89,10 @@ class CodexCompletionClient:
     ) -> ModelCompletion:
         """一つの native turn を実行し、切断時の別モデルへの自動再送を行わない。"""
 
-        del parameters
+        try:
+            validate_interpreter_parameters(parameters)
+        except ValueError as error:
+            raise ModelProviderError("Per-call interpreter parameters are not supported") from error
         if model != self._configuration.model:
             raise ModelProviderError("Configured Codex model changed")
         output = (

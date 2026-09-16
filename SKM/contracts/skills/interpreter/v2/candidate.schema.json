@@ -272,7 +272,10 @@
           "type": "string"
         },
         "type": {
-          "$ref": "#/$defs/contractValueType"
+          "type": "string",
+          "enum": [
+            "object"
+          ]
         },
         "description": {
           "anyOf": [

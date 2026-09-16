@@ -25,6 +25,15 @@ from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.core.logging import log_event
 from skillmind.projects.domain import ProjectArchivedError, ProjectNotFoundError
 from skillmind.projects.repository import LockedProjectAccess, ProjectRepository
+from skillmind.skills.candidate_revision import (
+    CandidateRevisionError,
+    launch_contract_checksum,
+    repair_components,
+    snapshot_launch_contract,
+    validate_adjustment_scope,
+    validate_editable_paths,
+    validate_repair_scope,
+)
 from skillmind.skills.capability_blueprint import CapabilityBlueprintError
 from skillmind.skills.domain import (
     CreateSkillVersionDraftCommand,
@@ -97,6 +106,7 @@ from skillmind.skills.resource_binding import (
     TaskReadiness,
     evaluate_blueprint_readiness,
 )
+from skillmind.skills.runtime_profile import validate_interpreter_parameters
 from skillmind.skills.source_documents import SourceTraceLocationError
 from skillmind.skills.task_catalog import (
     PublishedTaskDescriptor,
@@ -335,6 +345,7 @@ class SkillService:
 
         interpreter, catalog, identity = self._require_interpreter()
         resolved_model = self._resolve_model(model)
+        validate_interpreter_parameters(parameters)
         resolved = dict(parameters or {})
         nonce = regeneration_nonce or (uuid4().hex if force_regenerate else None)
         async with self._session_factory() as session:
@@ -366,18 +377,23 @@ class SkillService:
         model: str | None = None,
         parameters: Mapping[str, Any] | None = None,
         force_regenerate: bool = False,
+        editable_paths: Sequence[str] | None = None,
     ) -> InterpretationRequestSnapshot:
         """原資格で入力を読み、モデルを起動せず凍結要求と Outbox を受理する。"""
 
         access = deepcopy(access)
         if (skill_source_id is None) == (parent_interpretation_id is None):
             raise ValueError("Exactly one interpretation source is required")
+        paths = validate_editable_paths(editable_paths)
+        if parent_interpretation_id is None and paths is not None:
+            raise ValueError("An editable scope requires a parent interpretation")
         if parent_interpretation_id is None and instruction is not None:
             raise ValueError("An adjustment requires a parent interpretation")
         if parent_interpretation_id is not None and (not instruction or force_regenerate):
             raise ValueError("An adjustment requires an instruction and no regeneration flag")
         _, catalog, identity = self._require_interpreter()
         resolved_model = self._resolve_model(model)
+        validate_interpreter_parameters(parameters)
         resolved_parameters = deepcopy(dict(parameters or {}))
         previous: dict[str, Any] | None = None
         adjustment: dict[str, Any] | None = None
@@ -395,6 +411,12 @@ class SkillService:
                     "instruction": instruction, "actor_id": str(locked.actor.id),
                     "parent_interpretation_id": str(parent_interpretation_id),
                 }
+                if paths is not None:
+                    if "launch_contract" not in previous:
+                        raise SkillInterpretationNotReadyError(
+                            "Scoped adjustments require a source-execution parent"
+                        )
+                    adjustment["editable_paths"] = list(paths)
             assert skill_source_id is not None
             source = await repository.get_source(
                 organization_id=organization_id, skill_source_id=skill_source_id
@@ -418,6 +440,7 @@ class SkillService:
             catalog=catalog, identity=identity,
             model=resolved_model, parameters=resolved_parameters, previous=previous,
             adjustment=adjustment, parent_id=parent_interpretation_id, nonce=nonce,
+            runtime_profile=self._runtime_profile_snapshot(),
         )
         return await InterpretationRequestService(self._session_factory).accept(
             access=access, request_id=request_id, skill_source_id=skill_source_id,
@@ -475,6 +498,7 @@ class SkillService:
                 prepared=prepared, catalog=catalog, identity=identity,
                 model=model, parameters=parameters,
                 previous=previous, adjustment=adjustment, parent_id=parent_id, nonce=nonce,
+                runtime_profile=self._runtime_profile_snapshot(),
             )
             if canonical_json(expected) != canonical_json(frozen):
                 raise SkillSourceIntegrityError("Frozen interpretation input no longer matches")
@@ -541,6 +565,7 @@ class SkillService:
         model: str | None = None,
         parameters: Mapping[str, Any] | None = None,
         on_event: InterpretProgressCallback | None = None,
+        editable_paths: Sequence[str] | None = None,
     ) -> StoredInterpretationExecution:
         """親 interpretation に追加式 adjustment を適用し、新しい reinterpretation を作る。
 
@@ -549,13 +574,22 @@ class SkillService:
 
         interpreter, catalog, identity = self._require_interpreter()
         resolved_model = self._resolve_model(model)
+        validate_interpreter_parameters(parameters)
         resolved = dict(parameters or {})
+        paths = validate_editable_paths(editable_paths)
         parent, source, adjustment = await self._load_adjust_context(
             organization_id=organization_id,
             interpretation_id=interpretation_id,
             instruction=instruction,
             actor_id=actor_id,
         )
+        previous = self._previous_interpretation_summary(parent)
+        if paths is not None:
+            if "launch_contract" not in previous:
+                raise SkillInterpretationNotReadyError(
+                    "Scoped adjustments require a source-execution parent"
+                )
+            adjustment["editable_paths"] = list(paths)
         return await self._run_interpretation(
             source=source,
             interpreter=interpreter,
@@ -563,7 +597,7 @@ class SkillService:
             identity=identity,
             model=resolved_model,
             parameters=resolved,
-            previous=self._previous_interpretation_summary(parent),
+            previous=previous,
             adjustment=adjustment,
             parent_id=interpretation_id,
             regeneration_nonce=None,
@@ -759,7 +793,9 @@ class SkillService:
         validation_feedback: str | None = None
         validated: dict[str, Any] | None = None
         repair_context: dict[str, Any] = {}
+        repair_fields: frozenset[str] | None = None
         native_candidates = getattr(interpreter, "uses_native_candidates", False) is True
+        direct_candidates = getattr(interpreter, "uses_direct_candidates", False) is True
         for attempt in range(_MAX_CANDIDATE_REPAIR_ATTEMPTS + 1):
             try:
                 if control is None:
@@ -815,14 +851,20 @@ class SkillService:
                 await _emit_terminal(on_event, stored)
                 return stored
             try:
+                if direct_candidates and repair_context:
+                    validate_repair_scope(
+                        repair_context["previous_candidate"], response, repair_fields
+                    )
                 # model 経路は identity を platform 権威値で stamp する(model に複刻を強いない)。
                 validated = self._runner().run(
                     request, response, bind_identity=True,
                     require_native_candidate=native_candidates,
-                    require_direct_candidate=(
-                        getattr(interpreter, "uses_direct_candidates", False) is True
-                    ),
+                    require_direct_candidate=direct_candidates,
                 )
+                if direct_candidates:
+                    validate_adjustment_scope(
+                        previous, adjustment, validated["runtime_manifest_draft"]
+                    )
                 break
             except (ValidationError, ValueError, UnsafeSkillSourceError) as error:
                 # 監査には脱敏済み path/validator のみ保存し、修復入力に限り前候補を保持する。
@@ -841,9 +883,24 @@ class SkillService:
                 if attempt < _MAX_CANDIDATE_REPAIR_ATTEMPTS:
                     validation_feedback = detail
                     if native_candidates or "candidate_version" in response:
-                        repair_context = {"previous_candidate": response}
+                        repair_context = {"previous_candidate": deepcopy(response)}
                         if isinstance(error, CapabilityBlueprintError):
                             validation_feedback += "; Expected: " + error.message[:2000]
+                        if direct_candidates:
+                            path = (
+                                _json_pointer(error.absolute_path)
+                                if isinstance(error, ValidationError) else getattr(error, "path", "")
+                            )
+                            code = (
+                                str(error.validator) if isinstance(error, ValidationError)
+                                else getattr(error, "code", "")
+                            )
+                            repair_fields = repair_components(path, code)
+                            if repair_fields is not None:
+                                validation_feedback += (
+                                    "; Edit only these candidate components; preserve all others: "
+                                    + ", ".join(sorted(repair_fields))
+                                )
                     continue
                 stored = await finalize(
                     self._failure_command(
@@ -908,7 +965,7 @@ class SkillService:
     async def _finalize(
         self, command: SaveModelInterpretationCommand
     ) -> StoredInterpretationExecution:
-        """Execution record を保存し、親がある場合は構造化 diff を付与して返す。"""
+        """Execution record を保存し、親との構造化 diff を付与して返す。"""
 
         return await self._attach_diff(await self._save_execution(command))
 
@@ -932,22 +989,34 @@ class SkillService:
         )
         return replace(stored, diff=diff)
 
+    def _runtime_profile_snapshot(self) -> dict[str, Any] | None:
+        """実 transport が公開した資格情報なしの設定だけを、要求と監査へ固定する。"""
+
+        value = getattr(self._interpreter, "runtime_profile", None)
+        return deepcopy(dict(value)) if isinstance(value, Mapping) else None
+
     def _previous_interpretation_summary(
         self, parent: StoredInterpretationExecution
     ) -> dict[str, Any]:
-        """親 interpretation の要点だけを prompt 用に compact 化する。"""
+        """要約に加え原文実行版の準備宣言を保持し、調整で未変更の内容を再推測させない。"""
 
         manifest = parent.preview.runtime_manifest_draft
         identity = manifest.get("identity") if isinstance(manifest, dict) else {}
         confidence = parent.report.get("confidence") if isinstance(parent.report, dict) else None
-        return {
+        result = {
             "interpretation_id": str(parent.interpretation_id),
             "execution_key": parent.execution_key,
             "compatibility_level": parent.compatibility_level,
             "summary": parent.summary,
             "confidence": confidence,
-            "manifest_identity": identity if isinstance(identity, dict) else {},
+            "manifest_identity": deepcopy(identity) if isinstance(identity, dict) else {},
         }
+        if isinstance(manifest, Mapping):
+            declaration = snapshot_launch_contract(manifest)
+            if declaration is not None:
+                result["launch_contract"] = declaration
+                result["launch_contract_checksum"] = launch_contract_checksum(declaration)
+        return result
 
     async def create_version_draft(
         self, *, access: UserAccess, interpretation_id: UUID
@@ -1470,6 +1539,7 @@ class SkillService:
     ) -> SaveModelInterpretationCommand:
         """検証済み response を PREVIEW_READY の不変 record command へ写像する。"""
 
+        runtime_profile = self._runtime_profile_snapshot()
         report = cast(dict[str, Any], validated["report"])
         manifest = cast(dict[str, Any], validated["runtime_manifest_draft"])
         interpreter = cast(dict[str, Any], validated["interpreter"])
@@ -1502,6 +1572,7 @@ class SkillService:
             execution={
                 "model": model,
                 "parameters": dict(parameters),
+                **({"runtime_profile": runtime_profile} if runtime_profile is not None else {}),
                 "prompt_checksum": interpreter["prompt_checksum"],
                 "response_version": validated["response_version"],
                 "catalog_checksum": catalog.checksum,
@@ -1534,7 +1605,9 @@ class SkillService:
         """失敗を Secret や来源本文を含まない FAILED 監査 record command へ写像する。"""
 
         # detail は構造化 path/validator など脱敏済みの短い内訳のみ (来源値は含めない)。
+        runtime_profile = self._runtime_profile_snapshot()
         execution: dict[str, Any] = {
+            **({"runtime_profile": runtime_profile} if runtime_profile is not None else {}),
             "model": model,
             "parameters": dict(parameters),
             "error_code": code.value,
@@ -1677,11 +1750,13 @@ def _interpretation_request_input(
     adjustment: Mapping[str, Any] | None,
     parent_id: UUID | None,
     nonce: str | None,
+    runtime_profile: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """受理と実行で同じ完全入力を比較し、再構築による暗黙の差替えを防ぐ。"""
 
     return deepcopy({
         "format_version": 1, "model": model, "parameters": dict(parameters),
+        **({"runtime_profile": dict(runtime_profile)} if runtime_profile is not None else {}),
         "previous": dict(previous) if previous is not None else None,
         "adjustment": dict(adjustment) if adjustment is not None else None,
         "parent_id": str(parent_id) if parent_id is not None else None, "nonce": nonce,
@@ -1698,7 +1773,10 @@ def _schema_failure_detail(error: Exception) -> str:
     (model/来源由来のため秘匿) は載せない。その他の ValueError は platform 固定 message のみ。
     """
 
+    if isinstance(error, CandidateRevisionError):
+        return f"{error.path}: {error.code}"
     if isinstance(error, CapabilityBlueprintError) and error.code in (
+        "candidate_input_root_invalid",
         "candidate_source_invalid", "candidate_contract_source_missing",
         "candidate_publish_invalid", "skill_execution_invalid",
     ):
