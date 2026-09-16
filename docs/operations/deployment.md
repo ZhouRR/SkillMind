@@ -54,7 +54,7 @@ Claude 回退需显式设置 `SKILLMIND_AGENT_SDK=claude` 并重建 API/Worker �
 - **已有环境更新**：先关闭新业务入口、核清在途调用/远端未知效果，停止全部写入者并取得[一致恢复点](backup-recovery.md#一致恢复点包含什么)。不并发部署或改写镜像/tag、配置；重命名不迁移旧数据。
 - **数据恢复/故障对账**：走[恢复流程](backup-recovery.md)，不执行会自动启动 Worker 的 `make deploy`。
 
-`make deploy` 停止当前 project 应用服务，再初始化基建、迁移并启动 API/Web/Worker/Maintenance；执行即允许恢复后台工作，可能立即消费队列和恢复任务。默认保持 `SKILLMIND_DEFERRED_FEATURES_ENABLED=false`、`SKILLMIND_DATABASE_WRITES_ENABLED=false`、`SKILLMIND_DOCUMENT_WRITES_ENABLED=false` 和 `SKILLMIND_GIT_WRITES_ENABLED=false`，四个值分别在 API/Worker 保持一致。后置开关控制既有外部写入、调度发火和子 Agent；数据库开关仅开放 PostgreSQL INSERT/UPDATE；文档开关仅开放项目文档库的 Artifact CREATE 提案与人工批准执行；Git 开关仅开放批准后的 commit/push，四者不互相放行。Git 须配套升级 API/Worker/Web 并执行 0050 migration；现有连接仍保持原权限，需在资源页面显式选择写入范围与模式。文档写入需 API/Worker 同时升级至 v2 对象协议并完成 0048 migration，使用既有文档库 namespace；旧 v1 待写只允许核对。数据库启用前须配置明确表/列/操作范围，并按[回执权限要求](../design/repository-effects.md#postgresql-单行事务与原执行回执)安装目标库回执表。`SKILLMIND_WORKER_DISPATCH_ENABLED=false` 阻止新的 Run/Effect/解释 job 执行，不取消已在运行的调用，也不是维护模式。Makefile 不控制其他实例、orphan、其他 daemon 或远端写入，不能代替全局停写确认。
+`make deploy` 停止当前 project 应用服务，再初始化基建、迁移，同批启动 API/Worker/Maintenance，核对一致性后恢复 Web；执行即允许恢复后台工作，可能立即消费队列和恢复任务。默认保持 `SKILLMIND_DEFERRED_FEATURES_ENABLED=false`、`SKILLMIND_DATABASE_WRITES_ENABLED=false`、`SKILLMIND_DOCUMENT_WRITES_ENABLED=false` 和 `SKILLMIND_GIT_WRITES_ENABLED=false`，四个值分别在 API/Worker 保持一致。后置开关控制既有外部写入、调度发火和子 Agent；数据库开关仅开放 PostgreSQL INSERT/UPDATE；文档开关仅开放项目文档库的 Artifact CREATE 提案与人工批准执行；Git 开关仅开放批准后的 commit/push，四者不互相放行。Git 须配套升级 API/Worker/Web 并执行 0050 migration；现有连接仍保持原权限，需在资源页面显式选择写入范围与模式。文档写入需 API/Worker 同时升级至 v2 对象协议并完成 0048 migration，使用既有文档库 namespace；旧 v1 待写只允许核对。数据库启用前须配置明确表/列/操作范围，并按[回执权限要求](../design/repository-effects.md#postgresql-单行事务与原执行回执)安装目标库回执表。`SKILLMIND_WORKER_DISPATCH_ENABLED=false` 阻止新的 Run/Effect/解释 job 执行，不取消已在运行的调用，也不是维护模式。Makefile 不控制其他实例、orphan、其他 daemon 或远端写入，不能代替全局停写确认。
 
 ### Windows 构建与移送
 
@@ -101,7 +101,7 @@ make deploy
 | stop-application | 停止当前 project 的应用服务和旧一次性任务，保留数据卷 |
 | infrastructure / initialize-storage | 等 PostgreSQL/Redis 就绪、启动 MinIO、幂等创建 bucket；连接重试有上限 |
 | migration-check / migrate / readiness | 校验存储 namespace 配置及合法前进路径、执行 Alembic upgrade head，再核配置与 DB head/Redis |
-| api-web / worker | 等 API/Web health，再启动 Worker/Maintenance |
+| backend / runtime-check / web | 同批重建 API/Worker/Maintenance，核对镜像与配置后恢复 Web |
 | complete | 显示当前服务状态 |
 
 失败显示原始错误、阶段与退出码，立即停止，不自动重试、回滚、删卷或重置密码。镜像、部分迁移或服务可能已生效；先查状态和原错误，再决定如何继续：
@@ -117,38 +117,21 @@ docker compose --file compose.yml run --rm -T --no-deps migrate alembic heads
 
 revision 不识别、多个 head、连接失败或迁移错误均需核对实际 DB 状态；不 stamp、不删除 alembic_version/审计记录绕过。数据库初始化、migration 与 bucket 创建是实际写入，health/preflight 成功不证明业务、HTTPS、blob/KEK 或恢复已验收。
 
+## 同批更新与检查
+
+API、执行 Worker 和维护 Worker 共用 `skills/service_wiring.py`；维护侧不加载解释器。`make deploy` 使用同批镜像与配置强制重建全部后端，等待健康检查、执行一致性核对后恢复 Web。此流程是协调重启，不是零停机；不删除数据卷或 Codex 登录数据，也不重跑未知业务。
+
+独立诊断使用 `make runtime-check`，检查所有后端副本的实际 image ID、解释身份、能力目录、队列和功能开关。诊断不调用模型、不创建 Run、不查询业务数据；解释器一致地未配置时仅警告，不把可选解释器变成确定性导入的新前提。
+
+独立检查失败只返回非零，不自动停止或修复容器。部署中的检查失败会停止后续步骤，但已经启动的后端可能继续运行；失败不是全局停写证明。相同 fingerprint 只证明当前容器配置一致，不证明登录、外部网络或业务结果正确。
+
+需要查看脱敏配置时运行 `docker compose --env-file .env exec -T api python -m skillmind.ops.runtime_identity`，对 Worker 将服务名改为 `worker`。它是短命诊断进程，不是实际模型进程的状态探针。
+
 ## 迁移与回退审查
 
-`skillmind.runtime/v2` 须先上线兼容旧 HTML/新结构化结果的 Web，再配套更新 API/Worker。新 Run 固定诊断/结构工具与精简报告提示；旧 Run 不补写运行版本，不改变其冻结规则。本次复用既有 ToolCall/Evidence/Brief 存储，无新增缓存服务或数据库迁移。
+只审查本次真实涉及的数据库和公开协议变更；精确 upgrade/downgrade 条件以 [migration 实现](../../SKM/backend/migrations/versions/)为准，不在发布文档复制逐版本目录。当前运行策略的诊断、结构工具和报告消费者应同批更新。
 
-有数据库/协议变化时审查本次跨越的 [upgrade/downgrade](../../SKM/backend/migrations/versions/)及消费者；回退时核相关限制。纯样式更新不要求重审所有历史迁移，`make deploy` 仍自动检查当前 DB 路径。下表是版本兼容索引，不是每次发布逐项执行的清单：
-
-| revision | 回退限制 |
-| --- | --- |
-| 0018–0021 | 组织共享不能还原成单 Project；新结果包络、Segment/Interaction/Effect 不由旧 Worker 自动兼容 |
-| 0022–0023 | 降级可能丢用户偏好/密文材料；已有引用与旧 KEK 必须保留 |
-| 0025–0028 | 调度/生成版本/索引/审计可能丢失。0027 在 DDL 前锁表，子 Session、无 SDK ID、BRANCH 或旧唯一键冲突均拒绝；仅旧 PRIMARY 可无损表示的数据可降级，不删审计 |
-| 0029 输入回执 | 任何回执行存在时拒绝降级，不仅 READY；不能删回执绕过 |
-| 0030 预算账本 | 三表任一有数据即拒绝降级，包括已结算记录；不为旧 Run 补造账户，无通用核对/退款 CLI |
-| 0031 会话 v2 | 旧会话需重登，任何 v2 行（含撤销）阻止丢列；新旧 API 不混跑 |
-| 0032 用户生命周期 | 初始化旧版本、不造事件；任何安全事件阻止降级，API/页面与真实 DB 分别验收 |
-| 0033 成员审计 | 不补旧事件；任何事件阻止降级/整项目删除。成员/账户/偏好/项目删除共用组织锁，旧 writer 不混跑 |
-| 0034 项目版本 | 旧版 1 不代表历史次数；任一版本 >1 拒绝丢列。API/Web 成套切换，缺原版本为 422、不补版；回退前全停写/在途核对 |
-| 0035 调用绑定/观察 | 旧预约不补调用历史；锁表后，任何非空绑定字段或观察记录拒绝降级，观察对原预约为 RESTRICT |
-| 0036 调度 occurrence | 旧行 protocol=0，不补历史；旧 writer 不混跑。RESTRICT 保留引用；锁表后任一 occurrence、protocol=1 或 configuration_version≠1 均拒绝降级，不删记录绕过 |
-| 0037 文档存储归属 | 旧行不绑定，新写保存完整身份；任一归属非空拒绝丢列。旧 API/Worker 不混跑，迁移不证明旧 blob 可读/可清理 |
-| 0038 原上传意图 | PUT 前保存原请求/占用，发布/清理不删除；意图/关联阻止降级。POST 必填 Idempotency-Key，缺失 422；API/Web 成套切换、旧 writer 不混跑 |
-| 0039 文档清理记录 | 删除前保存原对象/元信息/DELETE 身份，不造旧上传历史；任一记录阻止降级，文档/意图/清理阻止整项目删除；旧删除 writer 不混跑 |
-| 0040 附件字节 | 新字段全空为未发布，不回填；任一非空拒绝降级。API/Web 理解 checks v2，Worker/Interpreter/Tool catalog 配套；保留 write/v1，不给旧 Skill/Run 升权 |
-| 0041 评价原请求 | 原键/hash 同事务保存，旧行空值；任一绑定非空拒绝丢列。API/新 Web 配套提交/确认/分页，旧接口无新增重放保证，不删评价绕回退 |
-| 0042 停止待发布 | 关闭标记/独立审计同存，不改原回执/占用；任一存在拒绝降级。API/Web 配套；DB CHECK 拒绝旧 SQL 发布已关闭项，但不阻止旧 PUT 或替代停写/对账 |
-| 0043 预算启动所有权 | 旧行不造 owner，新绑定存 token hash；任一 owner 痕迹拒绝丢列。旧调用方不混跑，hash/迁移不证明模型未启动、停止或计量完整 |
-| 0044 解释原请求 | 只建新台账、不补旧会话；任何请求/调用记录阻止降级。Web/API/Worker 配套切换，旧解释/调整 URI 关闭，旧队列任务明确拒绝；停止旧 API/Worker 后迁移，不从旧 job 补造作者或重放未知模型调用 |
-| 0050 Git 核对 | 核对类型 CHECK 增加 GIT_COMMIT，不改旧行；已有 Git 核对记录时旧 CHECK 拒绝降级，不删除历史绕过。Git v2 不重放旧 v1 写入；核对不自动继续业务 Run |
-| 0049 Run 启动同意 | 只扩展审批来源 CHECK，不改旧审批或 Run；存在自动批准的原请求或 RUN_START 审批时拒绝降级。API/Worker/Web 配套更新，启动同意不扩大绑定权限 |
-| 0048 成果对象 v2 | 只扩展 0045 台账的协议 CHECK，不改 v1 原 key/hash；v1 仅核对，v2 使用隔离物理前缀。含任意 v2 台账或 revision 2 文档库 binding 即拒绝降级，API/Worker 配套更新，不混跑旧 writer |
-
-有表/旧页面可读不证明功能接齐或非终态可续行；预算另过[混合 Worker 门禁](../design/run-budgets.md#上线门禁与接线顺序)。兼容未知保持停写，按[回退](backup-recovery.md#应用版本回退)处理，不删审计/快照/未决占用凑条件。
+变更前明确恢复点，回退按 [备份恢复](backup-recovery.md#应用版本回退)处理。不能 stamp、删除审计/快照、清空队列或重放 UNKNOWN 来绕过迁移失败。单纯文档、显示或局部代码优化不额外引入业务批准、重新导入或历史格式转换流程。
 
 ## 会话协议切换检查
 

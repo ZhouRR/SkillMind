@@ -125,6 +125,8 @@ async def _validate_in_process(payload: bytes) -> dict[str, Any]:
         )
     try:
         result = json.loads(stdout)
+        if not isinstance(result, dict):
+            raise ValueError("Invalid validator response")
         if "error" in result:
             code = result["error"] if result["error"] in _ERRORS else "invalid_schema"
             raise ToolProviderError(code, f"JSON validation rejected: {code}", retryable=False)

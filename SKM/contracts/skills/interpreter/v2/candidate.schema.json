@@ -65,18 +65,12 @@
             "type": "string"
           },
           "capabilities": {
-            "anyOf": [
-              {
-                "type": "array",
-                "maxItems": 20,
-                "items": {
-                  "$ref": "#/$defs/versionedCapability"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/$defs/versionedCapability"
+            },
+            "minItems": 1
           },
           "accepted_providers": {
             "anyOf": [

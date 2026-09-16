@@ -10,11 +10,16 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
-from skillmind.skills.candidate import _omit_optional_nulls, source_index
 from skillmind.skills.capability_blueprint import CapabilityBlueprintError
 from skillmind.skills.execution import EXECUTION_VERSION, PLATFORM_TOOLS, validate_execution
 from skillmind.skills.importer import _skill_key
-from skillmind.skills.source_documents import validate_source_location
+from skillmind.skills.source_projection import (
+    SourceLocations,
+    source_index,
+)
+from skillmind.skills.source_projection import (
+    omit_optional_nulls as _omit_optional_nulls,
+)
 
 CANDIDATE_VERSION = "skillmind.skill-candidate/v2"
 CANDIDATE_SCHEMA_ID = "https://schemas.skillmind.local/skills/interpreter/v2/candidate.schema.json"
@@ -24,7 +29,7 @@ def candidate_schema(contracts_dir: Path) -> dict[str, Any]:
     """新規解釈で使う小さい native Schema をロードする。"""
 
     schema: dict[str, Any] = json.loads(
-        (contracts_dir / "skills/interpreter/v2/candidate.schema.json").read_text()
+        (contracts_dir / "skills/interpreter/v2/candidate.schema.json").read_text(encoding="utf-8")
     )
     Draft202012Validator.check_schema(schema)
     return schema
@@ -44,23 +49,7 @@ def compile_candidate(
             "Caller input must have an object root; nested arrays and scalar fields are allowed.",
         )
     Draft202012Validator(candidate_schema(root)).validate(raw)
-    sources = source_index(request)
-    files = {s["path"]: s["content"] for s in sources}
-
-    def location(reference: str | None) -> dict[str, Any]:
-        """番号付き原文の厳密な位置だけを受け付ける。"""
-
-        if reference is None:
-            return {"path": None, "line": None}
-        source_id, _, line = reference.partition(":")
-        source = next((s for s in sources if s["id"] == source_id), None)
-        if source is None:
-            raise CapabilityBlueprintError(
-                "candidate_source_invalid", "/source_ref", "Use a frozen source ID."
-            )
-        value = {"path": source["path"], "line": int(line) if line else None}
-        validate_source_location(value["path"], value["line"], files, pointer="/source_ref")
-        return value
+    location = SourceLocations(source_index(request)).resolve
 
     value = _omit_optional_nulls(deepcopy(dict(raw)))
     source, identity = request["source"], request["interpreter"]
@@ -72,7 +61,10 @@ def compile_candidate(
     traces = []
     for i, resource in enumerate(resources):
         traces.append(
-            {"target": f"/resource_requirements/{i}", **location(resource.pop("source_ref"))}
+            {
+                "target": f"/resource_requirements/{i}",
+                **location(resource.pop("source_ref"), f"/resource_requirements/{i}/source_ref"),
+            }
         )
     task = {
         "key": "execute",
@@ -112,12 +104,12 @@ def compile_candidate(
             "severity": d["severity"],
             "code": d["code"],
             "message": d["message"],
-            **location(d.get("source_ref")),
+            **location(d.get("source_ref"), f"/diagnostics/{i}/source_ref"),
         }
-        for d in value["diagnostics"]
+        for i, d in enumerate(value["diagnostics"])
     ]
     level = "assisted" if any(d["severity"] == "error" for d in diagnostics) else "adapted"
-    input_location = location(value["input_source_ref"])
+    input_location = location(value["input_source_ref"], "/input_source_ref")
     manifest = {
         "manifest_version": "skillmind/v1alpha1",
         "identity": {

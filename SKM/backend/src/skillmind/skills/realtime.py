@@ -6,26 +6,25 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
-from redis.exceptions import RedisError
-
-from skillmind.runs.realtime import RedisPublisher
+from skillmind.core.pubsub import BestEffortPublisher, RedisPublisher
 
 # 進行 event の許可語彙。契約は contracts/events/skill-interpret-event/v1 と同期する。
-INTERPRET_EVENT_NAMES = frozenset({
-    "interpret.queued",
-    "interpret.started",
-    "interpret.prompt",
-    "interpret.delta",
-    "interpret.completed",
-    "interpret.failed",
-    "interpret.unknown",
-    "interpret.disconnected",
-})
+INTERPRET_EVENT_NAMES = frozenset(
+    {
+        "interpret.queued",
+        "interpret.started",
+        "interpret.prompt",
+        "interpret.delta",
+        "interpret.completed",
+        "interpret.failed",
+        "interpret.unknown",
+        "interpret.disconnected",
+    }
+)
 
 
 def interpret_channel(execution_key: str) -> str:
@@ -55,18 +54,10 @@ class RedisInterpretEventPublisher:
     def __init__(self, redis: RedisPublisher) -> None:
         """Worker の Redis client を publish port として保持する。"""
 
-        self._redis = redis
+        self._publisher = BestEffortPublisher(redis)
 
-    async def publish(
-        self, *, execution_key: str, event: str, data: Mapping[str, Any]
-    ) -> None:
+    async def publish(self, *, execution_key: str, event: str, data: Mapping[str, Any]) -> None:
         """進行 event を配送する。Redis 障害は表示品質の劣化に留め、実行は続行する。"""
 
         message = interpret_event_data(event=event, execution_key=execution_key, data=data)
-        try:
-            await self._redis.publish(
-                interpret_channel(execution_key),
-                json.dumps(message, ensure_ascii=False, separators=(",", ":")),
-            )
-        except RedisError:
-            return
+        await self._publisher.publish(interpret_channel(execution_key), message)

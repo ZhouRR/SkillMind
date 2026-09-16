@@ -141,11 +141,7 @@ class DatabaseReadProvider:
             raise ToolProviderError(
                 "unavailable", "Database read could not be completed", retryable=False
             ) from None
-        current, current_password = await self._bound(context)
-        if current != bound or current_password != password:
-            raise ToolProviderError(
-                "unavailable", "Database binding changed during read", retryable=False
-            )
+        await self._same_bound(context, bound, password)
         table_schema = None
         if query.include_schema:
             try:
@@ -353,14 +349,15 @@ class DatabaseReadProvider:
         """次 Segment へ確定値をそのまま投影し、モデルに schema の転記を要求しない。"""
         if not runtime_policy(claimed.task_snapshot_json) or claimed.run_segment_id is None:
             return []
+        schema_tools = [tool for tool in tools if tool.capability == "database.describe/v1"]
+        if not schema_tools:
+            return []
         try:
             frozen, before = await self._observations.segment_index(
                 claimed.run_id, claimed.run_segment_id
             )
             facts: list[dict[str, Any]] = []
-            for tool in tools:
-                if tool.capability != "database.describe/v1":
-                    continue
+            for tool in schema_tools:
                 context = RunToolContext(
                     run_id=claimed.run_id,
                     run_attempt_id=claimed.run_attempt_id,

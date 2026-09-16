@@ -2,22 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from typing import Protocol
 from uuid import UUID
 
-from redis.exceptions import RedisError
-
 from skillmind.agent.domain import AgentEvent, AgentEventType
-
-
-class RedisPublisher(Protocol):
-    """Redis client の publish capability だけを表す port。"""
-
-    async def publish(self, channel: str, message: str) -> int:
-        """Channel へ一つの message を publish する。"""
-
-        ...
+from skillmind.core.pubsub import BestEffortPublisher
+from skillmind.core.pubsub import RedisPublisher as RedisPublisher
 
 
 class RunRealtimePublisher(Protocol):
@@ -35,7 +25,7 @@ class RedisRunRealtimePublisher:
     def __init__(self, redis: RedisPublisher) -> None:
         """ARQ と通常 Redis client が共有する publish port を保持する。"""
 
-        self._redis = redis
+        self._publisher = BestEffortPublisher(redis)
 
     async def publish(self, event: AgentEvent) -> None:
         """許可した realtime event だけを secret-free public shape で配送する。"""
@@ -45,16 +35,9 @@ class RedisRunRealtimePublisher:
         text = event.payload.get("text")
         if not isinstance(text, str) or not text:
             raise ValueError("TEXT_DELTA must contain non-empty text")
-        try:
-            await self._redis.publish(
-                run_realtime_channel(event.run_id),
-                json.dumps(
-                    realtime_event_data(event), ensure_ascii=False, separators=(",", ":")
-                ),
-            )
-        except RedisError:
-            # Realtime 表示の一時障害で監査可能な本体 Run を失敗させてはならない。
-            return
+        await self._publisher.publish(
+            run_realtime_channel(event.run_id), realtime_event_data(event)
+        )
 
 
 def run_realtime_channel(run_id: UUID) -> str:
