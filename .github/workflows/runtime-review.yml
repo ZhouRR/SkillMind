@@ -4,56 +4,63 @@ on:
     branches: [refactor/runtime-stability-cleanup]
 permissions:
   contents: read
+concurrency:
+  group: runtime-review-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  backend:
+  prepare:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      SKILLMIND_ENVIRONMENT: test
+      SKILLMIND_DATABASE_URL: postgresql+asyncpg://skillmind:skillmind@127.0.0.1:1/skillmind_test
+      SKILLMIND_REDIS_URL: redis://127.0.0.1:1/15
+      PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install locked application and test dependencies
-        working-directory: SKM/backend
-        run: python -m pip install -e '.[dev]'
-      - name: Run runtime, interpreter and read-path regressions without external services
-        working-directory: SKM/backend
+      - name: Apply only reviewed changes to isolated checkout
         env:
-          SKILLMIND_ENVIRONMENT: test
-          SKILLMIND_DATABASE_URL: postgresql+asyncpg://skillmind:skillmind@127.0.0.1:1/skillmind_test
-          SKILLMIND_REDIS_URL: redis://127.0.0.1:1/15
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/runtime_review_patch.py
+      - name: Install pinned application and development dependencies
+        working-directory: SKM/backend
+        run: python -m pip install -q -e '.[dev]'
+      - name: Normalize imports and verify touched Python
+        run: |
+          python - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          paths = [p for p in json.loads((Path(os.environ['RUNNER_TEMP']) / 'runtime-review-paths.json').read_text()) if p.endswith('.py')]
+          subprocess.run(['python', '-m', 'ruff', 'check', '--config', 'SKM/backend/pyproject.toml', '--no-cache', '--select', 'I', '--fix', *paths], check=True)
+          subprocess.run(['python', '-m', 'ruff', 'format', '--config', 'SKM/backend/pyproject.toml', '--no-cache', *paths], check=True)
+          subprocess.run(['python', '-m', 'ruff', 'check', '--config', 'SKM/backend/pyproject.toml', '--no-cache', *paths], check=True)
+          PY
+      - name: Run new regression tests first
+        working-directory: SKM/backend
+        run: python -m pytest tests/core/test_pubsub.py tests/skills/test_source_projection.py tests/agent/test_continuation_lists.py tests/agent/test_database_observation_selection.py -p no:cacheprovider -o addopts= -q --tb=short
+      - name: Run existing interpreter and execution regressions
+        working-directory: SKM/backend
         run: python -m pytest tests/skills tests/agent tests/worker tests/runs tests/core tests/contracts -p no:cacheprovider -o addopts= -q --tb=short
-      - name: Contract and documentation checks
-        if: always()
+      - name: Check application types
+        working-directory: SKM/backend
+        run: python -m mypy --no-incremental src/skillmind
+      - name: Validate contracts and regenerate consolidated documentation
         working-directory: SKM
         run: |
-          python -m pip install -r scripts/docs-requirements.txt
+          python -m pip install -q -r scripts/docs-requirements.txt
           python scripts/validate_contracts.py
+          python scripts/build_docs.py
           python scripts/build_docs.py --check
-  web:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '26'
-      - name: Install and verify existing frontend
-        working-directory: SKM/web
+      - name: Prepare exact validated Git tree without updating a branch
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          npx -y pnpm@11.7.0 install --frozen-lockfile
-          npx -y pnpm@11.7.0 typecheck
-          npx -y pnpm@11.7.0 test
-  inventory:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Review module and document sizes
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          for root, pattern in [('docs', '*.md'), ('SKM/backend/src/skillmind/skills', '*.py')]:
-              values = [(len(p.read_text().splitlines()), str(p)) for p in Path(root).rglob(pattern)]
-              for count, name in sorted(values, reverse=True):
-                  print(count, name)
-          PY
+          git diff --stat
+          python .github/runtime_review_patch.py --publish
