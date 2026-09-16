@@ -27,6 +27,7 @@ import { useMessages } from '../i18n'
 import type { UiMessages } from '../lib/i18n/messages'
 import { type AgentPromptSummary } from '../lib/agentStream'
 import { routeHref } from '../lib/routing'
+import { appendOrderedEvent } from '../lib/runEventBuffer'
 import { formatLocalTimestamp } from '../lib/presentation'
 import { applicableRunSnapshot } from '../lib/runReplay'
 import { applyInteractionSnapshot, interactionAccessFailure, interactionFailure, sameInteractionIdentity } from '../lib/interactionResponse'
@@ -665,8 +666,7 @@ function ObservationTabButton({ current, tab, onSelect, children }: {
 
 /** Duplicate replay を sequence で排除し、常に昇順を保つ。 */
 function appendEvent(current: RunEventRecord[], incoming: RunEventRecord): RunEventRecord[] {
-  if (current.some((event) => event.sequence === incoming.sequence)) return current
-  return [...current, incoming].sort((left, right) => left.sequence - right.sequence)
+  return appendOrderedEvent(current, incoming)
 }
 
 /** SSE UI state と terminal status から利用者向け表示を返す。 */
