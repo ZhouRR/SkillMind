@@ -6,7 +6,7 @@ SHELL := /bin/sh
 ENV_FILE ?= .env
 export ENV_FILE
 COMPOSE = docker compose --project-directory . --file compose.yml --env-file "$(ENV_FILE)"
-.PHONY: status config build deploy run stop down bootstrap-admin logs logs-follow
+.PHONY: status config build deploy run stop down bootstrap-admin logs logs-follow runtime-check
 
 status:
 	@$(COMPOSE) ps --all
@@ -58,10 +58,13 @@ deploy:
 	$(COMPOSE) run --rm -T --no-deps migrate
 	step readiness
 	$(COMPOSE) run --rm -T --no-deps migrate python -m skillmind.ops.preflight
-	step api-web
-	$(COMPOSE) up -d --no-build --no-deps --pull never --wait --wait-timeout 120 api web
-	step worker
-	$(COMPOSE) up -d --no-build --no-deps --pull never --wait --wait-timeout 120 worker maintenance
+	step backend
+	# 同じ image/env から全 Backend を再作成し、旧 Worker だけを残さない。
+	$(COMPOSE) up -d --no-build --no-deps --pull never --force-recreate --wait --wait-timeout 120 api worker maintenance
+	step runtime-check
+	$(MAKE) --no-print-directory runtime-check
+	step web
+	$(COMPOSE) up -d --no-build --no-deps --pull never --wait --wait-timeout 120 web
 	step complete
 	$(COMPOSE) ps --all
 
@@ -72,3 +75,24 @@ logs:
 	@$(COMPOSE) logs --tail=100
 logs-follow:
 	@$(COMPOSE) logs --tail=100 --follow
+
+# 配備検査は業務受付とは分離する。モデル・DB・job の実行/再送は行わない。
+runtime-check:
+	@skm_expected=$$(docker image inspect skillmind/backend:0.1.0 --format '{{.Id}}')
+	skm_reference=
+	for skm_service in api worker maintenance; do
+		skm_containers=$$($(COMPOSE) ps -q "$$skm_service")
+		[ -n "$$skm_containers" ] || { printf 'Backend service is not running: %s\n' "$$skm_service" >&2; exit 1; }
+		for skm_container in $$skm_containers; do
+			skm_image=$$(docker inspect "$$skm_container" --format '{{.Image}}')
+			[ "$$skm_image" = "$$skm_expected" ] || { printf 'Backend image mismatch: %s\n' "$$skm_service" >&2; exit 1; }
+			skm_identity=$$(docker exec "$$skm_container" python -m skillmind.ops.runtime_identity --fingerprint)
+			case "$$skm_identity" in sha256:*) ;; *) echo 'Invalid runtime identity response.' >&2; exit 1 ;; esac
+			skm_digest=$${skm_identity#sha256:}
+			[ "$${#skm_digest}" -eq 64 ] || { echo 'Invalid runtime identity length.' >&2; exit 1; }
+			case "$$skm_digest" in *[!0-9a-f]*) echo 'Invalid runtime identity digest.' >&2; exit 1 ;; esac
+			if [ -z "$$skm_reference" ]; then skm_reference=$$skm_identity; fi
+			[ "$$skm_identity" = "$$skm_reference" ] || { printf 'Backend configuration mismatch: %s\n' "$$skm_service" >&2; exit 1; }
+		done
+	done
+	printf 'Backend images and configuration identities match. No model or business job was executed.\n'

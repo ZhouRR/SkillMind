@@ -98,6 +98,7 @@ from skillmind.skills.request_service import (
     INTERPRETATION_DISPATCH_TOPIC,
     InterpretationRequestService,
 )
+from skillmind.skills.service_wiring import build_skill_service
 from skillmind.skills.wiring import build_skill_interpreter
 from skillmind.storage.factory import (
     create_document_upload_limits,
@@ -158,9 +159,11 @@ async def startup(ctx: dict[str, Any], *, maintenance_only: bool = False) -> Non
     )
     if maintenance_only:
         # 発火時の公開 Skill 読取は共有 service を使い、モデル・鍵・workspace は準備しない。
-        ctx["skill_service"] = SkillService(
-            ctx["database_session_factory"], settings.contracts_dir,
-            file_storage=file_storage, storage_bucket=settings.object_storage_bucket,
+        ctx["skill_service"] = build_skill_service(
+            settings,
+            session_factory=ctx["database_session_factory"],
+            file_storage=file_storage,
+            document_library_target=document_library_target,
         )
         _configure_schedule_service(ctx)
         return
@@ -338,16 +341,13 @@ async def startup(ctx: dict[str, Any], *, maintenance_only: bool = False) -> Non
             max_attempts=settings.run_max_attempts,
         )
     # Skill interpret を Worker 側で実行する。model への egress は Worker だけが持つ。
-    interpreter, catalog, identity, default_model = build_skill_interpreter(settings)
-    ctx["skill_service"] = SkillService(
-        ctx["database_session_factory"],
-        settings.contracts_dir,
-        interpreter=interpreter,
-        capability_catalog=catalog,
-        interpreter_identity=identity,
-        default_model=default_model,
-        file_storage=create_file_storage(settings),
-        storage_bucket=settings.object_storage_bucket,
+    interpreter_components = build_skill_interpreter(settings)
+    ctx["skill_service"] = build_skill_service(
+        settings,
+        interpreter_components=interpreter_components,
+        session_factory=ctx["database_session_factory"],
+        file_storage=file_storage,
+        document_library_target=document_library_target,
     )
     ctx["interpret_publisher"] = RedisInterpretEventPublisher(cast(RedisPublisher, ctx["redis"]))
     _configure_schedule_service(ctx)

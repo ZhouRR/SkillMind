@@ -26,6 +26,6 @@
 
 ## 部署和验证边界
 
-API 与 Worker 同步升级。生产身份变化会使旧排队请求与新部署重建输入不一致；保留原请求及 UNKNOWN 等已有状态，按既有输入完整性错误处理，不能用新身份自动重启未知模型调用。已发布 Manifest 和旧 Run 不重写、不重新计算 checksum。
+API、执行 Worker 和维护 Worker 使用同一 SkillService 装配入口；维护侧不加载解释器。同步 image/配置的更新与无模型检查见[Backend 同步升级](../operations/backend-runtime-sync.md)。装配接线不改变生成提示或 pipeline 版本，不向导入或已发布任务增加必填参数与每请求的部署检查。真正的生产身份变化仍按原冻结输入和 UNKNOWN 规则处理，不能自动重启未知模型调用；历史 Manifest/Run 不重写、不重新计算 checksum。
 
 回归覆盖 object root / nested 类型、空输入、父声明副本、范围越界、单 component 修复、实际配置影响执行键及无效参数拒绝。纯 helper/Schema 测试与实际 service/adapter 的 fake-completion 接线测试分开；两者均不证明真实模型语义稳定率、真实 DB 事务或外部写入效果。字段名兼容、默认值、条件输入、业务执行门禁和大型 Skill 按需加载不在本次变更范围。
