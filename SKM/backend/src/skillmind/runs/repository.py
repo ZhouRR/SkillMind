@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
 from skillmind.agent.domain import AgentEvent, AgentEventType
+from skillmind.agent.runtime_policy import uses_modern_runtime
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.core.timing import timed_async
 from skillmind.db.models import (
@@ -86,6 +87,7 @@ from skillmind.runs.domain import (
     plan_run_transition,
     request_hash,
 )
+from skillmind.runs.execution_metrics import execution_metrics
 from skillmind.runs.execution_outcome import user_cancellation_event
 from skillmind.runs.repository_budgets import new_budget_account
 from skillmind.runs.repository_effects import EffectOperationsMixin
@@ -433,6 +435,11 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
                 else None
             ),
             result=None if result is None else self._to_stored_result(result),
+            started_at=run.started_at,
+            finished_at=run.finished_at,
+            execution_metrics=execution_metrics(tool_calls,
+                modern=uses_modern_runtime(run.task_snapshot_json),
+                manual_responses=len(responses)),
             tool_calls=tuple(
                 StoredToolCall(
                     tool_call_id=item.id,
@@ -539,6 +546,7 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
                 Run.task_id.label("task_id"),
                 Run.status.label("status"),
                 Run.created_at.label("created_at"),
+                Run.started_at.label("started_at"),
                 Run.finished_at.label("finished_at"),
                 RunResult.summary.label("summary"),
                 func.row_number()
@@ -561,6 +569,7 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
                 created_at=row.created_at,
                 finished_at=row.finished_at,
                 result_summary=row.summary,
+                started_at=row.started_at,
             )
             for row in rows
         }

@@ -254,7 +254,8 @@ describe('Run Result view', () => {
     expect(html).toContain('needs_confirmation')
     expect(html).toContain('Missing source evidence')
     expect(html).toContain('<details class="evidenceCard">')
-    expect(html).toContain('sanitized excerpt')
+    // 抜粋の Markdown 解析は開いた時だけ行い、一覧表示を重くしない。
+    expect(html).not.toContain('sanitized excerpt')
   })
 
   it('renders every result through the same generated-schema renderer', () => {
@@ -405,7 +406,7 @@ describe('Run Result information order', () => {
     const html = render(detail(null))
 
     expect(html).toContain('resultCollapse')
-    expect(html).toContain('resultCollapseBody')
+    expect(html).not.toContain('resultCollapseBody')
     // 既定展開(open 属性)は付けない。
     expect(html).not.toContain('<details class="resultCollapse" open')
   })
@@ -781,4 +782,25 @@ it('shows capacity wait, final failure, and clears the notice after recovery', (
   record.status = 'SUCCEEDED'
   const recovered = renderToStaticMarkup(<RunResultPanel csrfToken="test" state={{ status: 'ready', detail: record }} />)
   expect(recovered).not.toContain('模型服务容量不足')
+})
+
+
+it.each(['COMPLETED', 'PARTIAL', 'BLOCKED'])('renders generic %s without inventing business PASS or a report artifact', (status) => {
+  const record = detail({
+    result_id: '00000000-0000-4000-8000-000000000007', output_schema: 'outcome',
+    result_kind: 'OUTCOME_ENVELOPE', data: {
+      outcome_version: 'skillmind.outcome-envelope/v1', status, summary: 'Checked sender only',
+      deliverables: [], findings: [{ key: 'scope', title: 'Observed steps', detail: '1 case, 4 steps <script>alert(1)</script>', evidence_refs: [] }],
+      limitations: ['Application not run; delivery not verified'], open_questions: [], effects: [],
+    }, summary: 'Checked sender only', evidence_refs: [], artifact_refs: [], change_proposal_refs: [],
+    optional_schema_identity: {}, confidence: null, needs_review: false, usage: {}, cost: {},
+    validation: { schema_valid: true }, created_at: '2026-07-02T13:03:00Z',
+  })
+  const html = render(record)
+  expect(html).toContain('1 case, 4 steps &lt;script&gt;')
+  expect(html).toContain('Application not run; delivery not verified')
+  expect(html).not.toContain('<script>')
+  expect(html).not.toContain('PASS')
+  expect(html).not.toContain('<iframe')
+  expect(html.includes('outcomePartial')).toBe(status !== 'COMPLETED')
 })

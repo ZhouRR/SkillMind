@@ -195,7 +195,8 @@ def test_all_ten_user_operations_describe_models_guards_statuses_and_headers() -
             if parameter["name"] == "X-CSRF-Token"
         ]
         if request:
-            assert len(csrf) == 1 and csrf[0]["required"] is True and csrf[0]["in"] == "header"
+            # API key 認証は CSRF 不要。Cookie の必須検証は actor dependency が担う。
+            assert len(csrf) == 1 and csrf[0]["required"] is False and csrf[0]["in"] == "header"
             body = operation["requestBody"]
             assert body["required"] is True and set(body["content"]) == {"application/json"}
             expected = contract(request)

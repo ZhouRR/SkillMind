@@ -44,6 +44,7 @@ from skillmind.agent.domain import (
 )
 from skillmind.agent.session_store import SessionTranscriptBackend, TranscriptKey
 from skillmind.agent.tool_gateway import RunToolRuntime
+from skillmind.core.timing import observe_phase
 from skillmind.runs.budget import BudgetUnavailableError
 from skillmind.runs.capacity_retry import MODEL_CAPACITY_CODE
 
@@ -394,8 +395,13 @@ class CodexAgentSdkEngine:
                                 yield event(AgentEventType.ENGINE_FAILED, failure_payload)
                             else:
                                 try:
-                                    candidate = output.decode(final_text)
-                                    final_text = json.dumps(candidate, ensure_ascii=False)
+                                    with observe_phase(
+                                        "run.performance.codex_result_decode",
+                                        run_id=context.run_id,
+                                        run_attempt_id=context.run_attempt_id,
+                                    ):
+                                        candidate = output.decode(final_text)
+                                        final_text = json.dumps(candidate, ensure_ascii=False)
                                 except CodexOutputError:
                                     candidate = None
                                 yield event(

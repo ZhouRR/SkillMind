@@ -1,0 +1,45 @@
+{
+  "status": "success",
+  "provider": "postgres",
+  "table": "public.reports",
+  "rows": [],
+  "read_at": "2026-09-11T00:00:00Z",
+  "truncated": false,
+  "table_schema": {
+    "columns": [
+      {
+        "not_null": true,
+        "has_default": false,
+        "generated": false,
+        "identity": "NONE",
+        "name": "id",
+        "data_type": "uuid"
+      },
+      {
+        "not_null": true,
+        "has_default": false,
+        "generated": false,
+        "identity": "NONE",
+        "name": "status",
+        "data_type": "text"
+      },
+      {
+        "not_null": false,
+        "has_default": true,
+        "generated": true,
+        "identity": "NONE",
+        "name": "derived",
+        "data_type": "text"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  "content_hash": "sha256:f62abc065c0a7d53af166689f45896b07e97355f61e2365bd9821234f7ab951a",
+  "row_hashes": [],
+  "evidence_refs": [
+    "ev_empty_table_schema"
+  ],
+  "warnings": []
+}

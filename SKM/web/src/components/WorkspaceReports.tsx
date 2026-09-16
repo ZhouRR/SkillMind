@@ -1,3 +1,4 @@
+import { RunDuration } from './RunDuration'
 import { useCallback, useEffect, useState } from 'react'
 
 import { loadRunDetail, loadRunHistory, type PublishedTaskRecord, type RunStatus } from '../api'
@@ -62,8 +63,9 @@ export function WorkspaceReports({ projectId, tasks, actorId, csrfToken, project
           : !detail ? <EmptyState text={messages.workspace.latestReportEmpty} />
             : <>
               <div className="reportRunMeta">
-                <span>{messages.workspace.latestReport} · <time dateTime={query.data!.latest.created_at}>
-                  {formatLocalTimestamp(query.data!.latest.created_at)}</time></span>
+                <span>{messages.workspace.latestReport} · <time dateTime={query.data!.latest.started_at ?? query.data!.latest.created_at}>
+                  {formatLocalTimestamp(query.data!.latest.started_at ?? query.data!.latest.created_at)}</time></span>
+                <RunDuration run={detail.started_at !== undefined ? detail : query.data!.latest} />
                 <StatusBadge status={detail.status} />
                 <a className="secondaryButton compactButton" href={routeHref('history', projectId, { runId: detail.run_id })}>
                   {messages.workspace.executionDetail}</a>

@@ -234,3 +234,10 @@ B 后崩溃/丢响应可能已收费，只有证明未开始且不能再开始�
 ## 验收矩阵
 
 覆盖连续主子分配、最后余额竞争、同键异内容、重复/乱序/缺测报告、resume 历史去重、A/B/C 提交丢响应、启动后崩溃/接管、晚到结算、混合 Worker/回退与旧 Run。分别证明真实事务、adapter 硬限额和 SDK 计量完整性；split_budget 或内部账本单测不代表 Run 级预算已生效。
+
+
+Codex 最终文本的 JSON 解码另记 `run.performance.codex_result_decode`，包含在引擎等待内。结果观测另分 `run.performance.result_schema`、`result_references`、`result_validation` 与 `terminal_save`。前两项包含在 validation/finalize 总项内，不能重复相加；schema 区间测平台接收到 JSON 对象后的 Schema/敏感字段校验，不含 SDK 已完成的传输解码。`final_output.output_bytes` 是最终验证结果的 canonical UTF-8 JSON 字节数，不是 token；实际 token 仅采用已有 SDK usage。`engine_wait` 仍包含引擎/工具/传输等待，不能称为纯模型推理时间。
+
+`database.schema.projected.sample_count` 记录后续上下文中的结构事实数量；详情的 cache hit 只计显式 describe 的命中，不把投影计为新的远端读取。Run detail 的可选 `execution_metrics` 从现有审计投影结构错误、同条件重复、明确订正、结构读取/复用/刷新及人工回答；旧记录或无法可靠投影时为 null，不回填成功率。因查询错误引起的人工回答若没有明确因果关联，`query_error_interventions` 保持 null。浏览器 Performance API 仅本地保留 `skillmind.run.detail` 的获取/解析时长与 JSON 编码字节数、`skillmind.run.received_to_paint` 的收到详情到绘制区间；它不等于远端保存到用户显示的跨时钟时长，也不是线上的压缩传输大小。不上传正文、凭据或资源标识，计测故障不改变返回、事务或取消。
+
+对比验收在独立授权环境中使用相同冻结 Skill、模型/思考强度、输入及独立预期，每次生成独立业务记录；不重放已完成生产 Run。逐次检查结论、证据、必要写入、未验证范围和人工介入，再报告样本数、中位数及范围；少量样本不声称 P95 或稳定率，确定性回归不替代模型重复实测。

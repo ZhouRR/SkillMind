@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from functools import wraps
 from time import perf_counter
 from typing import Literal, ParamSpec, TypeVar
@@ -105,3 +105,19 @@ class ExecutionTimings:
         except Exception:
             # ハンドラの I/O 失敗は結果 commit や stream cleanup の成否に影響させない。
             pass
+
+
+def safe_observation(event: str, **fields: object) -> None:
+    """固定分類・数値・ID のみを渡し、観測先の障害を業務へ伝播しない。"""
+    with suppress(Exception):
+        log_event(logger, logging.INFO, event, **fields)
+
+
+@contextmanager
+def observe_phase(event: str, **fields: object) -> Iterator[None]:
+    """元の例外・取消を保持し、下位区間の経過だけを記録する。"""
+    started = perf_counter()
+    try:
+        yield
+    finally:
+        safe_observation(event, duration_ms=round((perf_counter() - started) * 1000, 3), **fields)

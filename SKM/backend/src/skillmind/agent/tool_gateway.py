@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server, tool
 from jsonschema import Draft202012Validator, FormatChecker
 
+from skillmind.agent.database_errors import safe_database_diagnostic
 from skillmind.agent.domain import RegisteredTool, RunContext, RunWorkspace
 from skillmind.agent.engine import RunMcpRuntime
 from skillmind.agent.evidence import (
@@ -47,6 +48,7 @@ class RunToolContext:
     # 子 context の派生元であり、実行権そのものではない。frozen dataclass の入れ子は可変なので、
     # 権限縮小は共有 resolver、監査の提交権は Worker-private scope と DB lease で検証する。
     run: RunContext | None = None
+    tool_call_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +73,10 @@ class ToolProvider(Protocol):
 class ToolProviderError(RuntimeError):
     """Agent へ返してよい安定 code と message を持つ Provider error。"""
 
-    def __init__(self, code: str, message: str, *, retryable: bool) -> None:
+    def __init__(
+        self, code: str, message: str, *, retryable: bool,
+        diagnostic: Mapping[str, Any] | None = None,
+    ) -> None:
         """資格情報を含まない公開 error を保持する。"""
 
         if not message or len(message) > 500 or any(ord(character) < 32 for character in message):
@@ -80,6 +85,7 @@ class ToolProviderError(RuntimeError):
         self.code = code
         self.message = message
         self.retryable = retryable
+        self.diagnostic = safe_database_diagnostic(dict(diagnostic)) if diagnostic else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -305,6 +311,7 @@ class ToolGateway:
                     tool=binding.registered,
                     workspace=self._context.workspace,
                     run=self._context,
+                    tool_call_id=lease.tool_call_id,
                 ),
                 arguments,
             )
@@ -352,8 +359,12 @@ class ToolGateway:
                 code=error.code,
                 retryable=error.retryable,
                 duration_ms=_duration_ms(started),
+                diagnostic=error.diagnostic,
             )
-            raise ToolGatewayError(error.code, error.message, retryable=error.retryable) from None
+            message = error.message
+            if error.diagnostic and binding.registered.capability == "database.read/v2":
+                message += f" Failed ToolCall: {lease.tool_call_id}."
+            raise ToolGatewayError(error.code, message, retryable=error.retryable) from None
         except ToolGatewayError as error:
             await self._record_failure(
                 lease,
@@ -405,13 +416,15 @@ class ToolGateway:
         return candidate
 
     async def _record_failure(
-        self, lease: ToolAuditLease, *, code: str, retryable: bool, duration_ms: int
+        self, lease: ToolAuditLease, *, code: str, retryable: bool, duration_ms: int,
+        diagnostic: Mapping[str, Any] | None = None,
     ) -> None:
         """失敗監査も原実行権に従い、DB 詳細を公開 Tool 応答へ出さない。"""
 
         try:
             await self._audit_writer.fail(
-                lease, code=code, retryable=retryable, duration_ms=duration_ms
+                lease, code=code, retryable=retryable, duration_ms=duration_ms,
+                **({"diagnostic": diagnostic} if diagnostic else {}),
             )
         except Exception as error:
             raise ToolGatewayError(

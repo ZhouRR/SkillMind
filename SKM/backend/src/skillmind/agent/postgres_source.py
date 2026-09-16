@@ -13,16 +13,14 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from skillmind.agent.database_errors import DatabaseReadError as DatabaseReadError
+from skillmind.agent.database_errors import DatabaseStage, classify_database_error
 from skillmind.agent.postgres_schema import identifier as identifier
 from skillmind.agent.postgres_schema import read_table_schema
 from skillmind.core.hashing import canonical_json
 
 MAX_DATABASE_BYTES = 1_048_576
 MAX_DATABASE_ROWS = 100
-
-
-class DatabaseReadError(RuntimeError):
-    """接続先・SQL・資格情報を含まない読取失敗。"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,11 +57,22 @@ class DatabaseSource(Protocol):
         """許可済み接続に対し、一回の有界読取を行う。"""
         ...
 
+    async def describe(self, config: Mapping[str, Any], password: str, table: str) -> DatabaseRows:
+        """行を読み取らず、許可済み単一 table の構造だけを返す。"""
+        ...
+
 
 def build_database_query(arguments: Mapping[str, Any]) -> DatabaseQuery:
     """Gateway 外から呼ばれても SQL 断片や無限取得を受け付けない。"""
     if set(arguments) - {
-        "table", "columns", "filters", "order_by", "limit", "offset", "purpose", "include_schema"
+        "table",
+        "columns",
+        "filters",
+        "order_by",
+        "limit",
+        "offset",
+        "purpose",
+        "include_schema",
     }:
         raise ValueError("Unknown database read field")
     table = arguments.get("table")
@@ -103,7 +112,9 @@ def build_database_query(arguments: Mapping[str, Any]) -> DatabaseQuery:
 
 
 def database_statement(
-    query: DatabaseQuery, *, byte_limit: int = MAX_DATABASE_BYTES,
+    query: DatabaseQuery,
+    *,
+    byte_limit: int = MAX_DATABASE_BYTES,
 ) -> tuple[str, dict[str, Any]]:
     """識別子と値を分離し、巨大行は wire に出す前に NULL へ置換する。"""
     table = ".".join(identifier(part) for part in query.table.split("."))
@@ -133,7 +144,10 @@ def database_statement(
 
 
 async def read_database_rows(
-    connection: AsyncConnection, query: DatabaseQuery, *, byte_limit: int = MAX_DATABASE_BYTES,
+    connection: AsyncConnection,
+    query: DatabaseQuery,
+    *,
+    byte_limit: int = MAX_DATABASE_BYTES,
 ) -> DatabaseRows:
     """一件ずつ消費し、100 行/合計 byte のいずれかで停止する。"""
     sql, params = database_statement(query, byte_limit=byte_limit)
@@ -147,9 +161,14 @@ async def read_database_rows(
             size += len(payload.encode("utf-8"))
             if size > byte_limit:
                 return DatabaseRows(tuple(rows), True)
-            value = json.loads(payload)
-            if not isinstance(value, dict):
-                raise DatabaseReadError("Database returned an invalid row")
+            try:
+                value = json.loads(payload)
+                if not isinstance(value, dict):
+                    raise ValueError("Invalid database row")
+            except ValueError as error:
+                raise DatabaseReadError(
+                    diagnostic=classify_database_error(error, "result_decode")
+                ) from None
             rows.append(value)
     return DatabaseRows(tuple(rows), False)
 
@@ -164,30 +183,74 @@ class PostgresDatabaseSource:
         query: DatabaseQuery,
     ) -> DatabaseRows:
         """短い専用接続と read-only transaction を閉じ、失敗理由を外部に反射しない。"""
+        return await self._read(config, password, query, describe_only=False)
+
+    async def describe(self, config: Mapping[str, Any], password: str, table: str) -> DatabaseRows:
+        """行 SQL を一切実行せず、同じ有界 reflection を使用する。"""
+        query = build_database_query({"table": table, "include_schema": True})
+        return await self._read(config, password, query, describe_only=True)
+
+    async def _read(
+        self, config: Mapping[str, Any], password: str, query: DatabaseQuery, *, describe_only: bool
+    ) -> DatabaseRows:
+        """例外発生段階を保存し、rollback/dispose が元の取消や失敗を隠さないようにする。"""
         engine = create_database_engine(config, password, read_only=True)
+        stage: DatabaseStage = "connect"
+        failed = False
         try:
             async with asyncio.timeout(15), engine.connect() as connection, connection.begin():
                 await connection.exec_driver_sql(
                     "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"
                 )
+                table_schema = None
                 if query.include_schema:
+                    stage = "schema_read"
                     table = ".".join(identifier(part) for part in query.table.split("."))
-                    # 列観測と行読取の間に DDL が入り、異なる table 版を混ぜない。
-                    await connection.exec_driver_sql(f"LOCK TABLE {table} IN ACCESS SHARE MODE")
+                    try:
+                        await connection.exec_driver_sql(f"LOCK TABLE {table} IN ACCESS SHARE MODE")
+                    except SQLAlchemyError as error:
+                        raise DatabaseReadError(
+                            diagnostic=classify_database_error(
+                                error,
+                                "schema_read",
+                                target_lookup=True,
+                            )
+                        ) from None
                     table_schema = await read_table_schema(connection, quoted_table=table)
-                    schema_bytes = len(canonical_json(table_schema).encode("utf-8"))
-                    remaining = MAX_DATABASE_BYTES - schema_bytes
+                if describe_only:
+                    result = DatabaseRows((), False, table_schema)
+                else:
+                    stage = "row_read"
+                    remaining = MAX_DATABASE_BYTES - (
+                        len(canonical_json(table_schema).encode("utf-8")) if table_schema else 0
+                    )
                     rows = await read_database_rows(connection, query, byte_limit=remaining)
-                    return DatabaseRows(rows.rows, rows.truncated, table_schema)
-                return await read_database_rows(connection, query)
+                    result = DatabaseRows(rows.rows, rows.truncated, table_schema)
+                stage = "cleanup"
+            return result
         except (SQLAlchemyError, OSError, TimeoutError, ValueError) as error:
-            raise DatabaseReadError("Database read could not be completed") from error
+            failed = True
+            raise DatabaseReadError(diagnostic=classify_database_error(error, stage)) from None
+        except BaseException:
+            # CancelledError と既分類の失敗を dispose の副次障害で置き換えない。
+            failed = True
+            raise
         finally:
-            await engine.dispose()
+            try:
+                await engine.dispose()
+            except Exception as error:
+                # cleanup の二次障害は、元の分類済み失敗や取消を隠さない。
+                if not failed:
+                    raise DatabaseReadError(
+                        diagnostic=classify_database_error(error, "cleanup")
+                    ) from None
 
 
 def create_database_engine(
-    config: Mapping[str, Any], password: str, *, read_only: bool,
+    config: Mapping[str, Any],
+    password: str,
+    *,
+    read_only: bool,
 ) -> AsyncEngine:
     """接続情報と timeout を共通化し、読取/承認済み書込の既定 transaction を分離する。"""
 

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "table",
+    "purpose"
+  ],
+  "properties": {
+    "table": {
+      "type": "string",
+      "pattern": "^[a-zA-Z_][a-zA-Z0-9_$]{0,62}\\.[a-zA-Z_][a-zA-Z0-9_$]{0,62}$"
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "refresh": {
+      "type": "boolean",
+      "default": false
+    },
+    "recovery_from": {
+      "type": "string",
+      "format": "uuid"
+    }
+  },
+  "$id": "https://schemas.skillmind.local/tools/database.describe/v1/request.schema.json",
+  "title": "database.describe/v1 request"
+}

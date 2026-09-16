@@ -18,6 +18,7 @@ from skillmind.agent.result_references import EffectSummaryLookup, collect_resul
 from skillmind.artifacts.domain import ArtifactIntegrityError
 from skillmind.artifacts.repository import ArtifactRepository
 from skillmind.core.redaction import find_sensitive_key
+from skillmind.core.timing import observe_phase, timed_async
 from skillmind.db.models import ChangeProposal, Evidence
 
 
@@ -220,6 +221,7 @@ class ResultValidator:
         self._artifact_lookup = artifact_lookup
         self._generic = GenericResultInterpreter()
 
+    @timed_async("run.performance.result_validation")
     async def validate_context(
         self, context: RunContext, *, structured_output: Any
     ) -> ValidatedResult:
@@ -259,120 +261,125 @@ class ResultValidator:
     ) -> ValidatedResult:
         """通用包絡、任意業務 Schema、機密遮断と Evidence 所有を順に検証する。"""
 
-        Draft202012Validator.check_schema(schema)
-        if not isinstance(structured_output, dict):
-            raise ResultValidationError(
-                "structured_output_missing",
-                "Agent result did not contain a JSON object",
-            )
-        # Lookup の await 中に producer が nested JSON を変えても、検証済み候補を差し替えさせない。
-        structured_output = deepcopy(structured_output)
-        validation: dict[str, Any] = {
-            "schema_ref": schema_ref,
-            "schema_valid": True,
-        }
-        if result_kind == "OUTCOME_ENVELOPE":
-            self._validate_schema(
-                schema=OUTCOME_ENVELOPE_SCHEMA,
-                value=structured_output,
-                code="outcome_envelope_invalid",
-                label="OutcomeEnvelope",
-            )
-            validation["outcome_envelope_valid"] = True
-            validation["outcome_version"] = structured_output["outcome_version"]
-            if task_schema is not None:
-                structured_data = structured_output.get("structured_data")
+        with observe_phase("run.performance.result_schema", run_id=run_id):
+            Draft202012Validator.check_schema(schema)
+            if not isinstance(structured_output, dict):
+                raise ResultValidationError(
+                    "structured_output_missing",
+                    "Agent result did not contain a JSON object",
+                )
+            # Lookup 中に nested JSON を変えられても、検証済み候補を差し替えさせない。
+            structured_output = deepcopy(structured_output)
+            validation: dict[str, Any] = {
+                "schema_ref": schema_ref,
+                "schema_valid": True,
+            }
+            if result_kind == "OUTCOME_ENVELOPE":
                 self._validate_schema(
-                    schema=task_schema,
-                    value=structured_data,
-                    code="task_result_schema_invalid",
-                    label="task-specific result",
+                    schema=OUTCOME_ENVELOPE_SCHEMA,
+                    value=structured_output,
+                    code="outcome_envelope_invalid",
+                    label="OutcomeEnvelope",
                 )
-                validation["task_schema_valid"] = True
-                validation["task_schema_ref"] = task_schema_ref
-            else:
-                if "structured_data" in structured_output:
-                    raise ResultValidationError(
-                        "task_result_schema_undeclared",
-                        "Agent result included structured_data without a task-specific Schema",
+                validation["outcome_envelope_valid"] = True
+                validation["outcome_version"] = structured_output["outcome_version"]
+                if task_schema is not None:
+                    structured_data = structured_output.get("structured_data")
+                    self._validate_schema(
+                        schema=task_schema,
+                        value=structured_data,
+                        code="task_result_schema_invalid",
+                        label="task-specific result",
                     )
-                validation["task_schema_valid"] = None
-                validation["task_schema_ref"] = None
-        self._validate_schema(
-            schema=schema,
-            value=structured_output,
-            code="result_schema_invalid",
-            label="output",
-        )
-        if find_sensitive_key(structured_output) is not None:
-            raise ResultValidationError(
-                "result_sensitive_field",
-                "Agent result contained a sensitive field",
+                    validation["task_schema_valid"] = True
+                    validation["task_schema_ref"] = task_schema_ref
+                else:
+                    if "structured_data" in structured_output:
+                        raise ResultValidationError(
+                            "task_result_schema_undeclared",
+                            "Agent result included structured_data without a task-specific Schema",
+                        )
+                    validation["task_schema_valid"] = None
+                    validation["task_schema_ref"] = None
+            self._validate_schema(
+                schema=schema,
+                value=structured_output,
+                code="result_schema_invalid",
+                label="output",
             )
-
-        references = collect_result_references(
-            structured_output, outcome=result_kind == "OUTCOME_ENVELOPE",
-        )
-        refs = references.evidence
-        existing = await self._evidence_lookup.existing_refs(run_id, refs)
-        missing = refs - existing
-        if missing:
-            raise ResultValidationError(
-                "evidence_reference_invalid",
-                f"Agent result referenced {len(missing)} unavailable Evidence item(s)",
-            )
-
-        artifact_refs = references.artifacts
-        if artifact_refs:
-            if self._artifact_lookup is None:
+            if find_sensitive_key(structured_output) is not None:
                 raise ResultValidationError(
-                    "artifact_reference_unavailable",
-                    "Agent result referenced Artifact items without a verifiable saved snapshot",
-                )
-            try:
-                verified = await self._artifact_lookup.verified_refs(run_id, artifact_refs)
-            except ArtifactIntegrityError:
-                raise ResultValidationError(
-                    "artifact_reference_invalid", "Agent result Artifact snapshot is invalid",
-                ) from None
-            if artifact_refs - verified:
-                raise ResultValidationError(
-                    "artifact_reference_invalid",
-                    "Agent result referenced unavailable Artifact items",
-                )
-        change_proposal_refs = references.proposals
-        if change_proposal_refs:
-            if self._proposal_lookup is None:
-                raise ResultValidationError(
-                    "change_proposal_reference_invalid",
-                    "Agent result referenced unavailable ChangeProposal items",
-                )
-            existing_proposals = await self._proposal_lookup.existing_refs(
-                run_id, change_proposal_refs
-            )
-            missing_proposals = change_proposal_refs - existing_proposals
-            if missing_proposals:
-                raise ResultValidationError(
-                    "change_proposal_reference_invalid",
-                    "Agent result referenced "
-                    f"{len(missing_proposals)} unavailable ChangeProposal item(s)",
-                )
-            incomplete = await self._proposal_lookup.incomplete_refs(run_id, change_proposal_refs)
-            if incomplete:
-                raise ResultValidationError(
-                    "change_proposal_incomplete",
-                    "Agent result referenced a ChangeProposal that is still awaiting "
-                    "an effect decision",
+                    "result_sensitive_field",
+                    "Agent result contained a sensitive field",
                 )
 
-        if references.effects and (
-            self._effect_lookup is None
-            or await self._effect_lookup.invalid_refs(run_id, references.effects)
-        ):
-            raise ResultValidationError(
-                "effect_summary_invalid",
-                "Agent result effect claims did not match the saved platform records",
+        with observe_phase("run.performance.result_references", run_id=run_id):
+            references = collect_result_references(
+                structured_output, outcome=result_kind == "OUTCOME_ENVELOPE",
             )
+            refs = references.evidence
+            existing = await self._evidence_lookup.existing_refs(run_id, refs)
+            missing = refs - existing
+            if missing:
+                raise ResultValidationError(
+                    "evidence_reference_invalid",
+                    f"Agent result referenced {len(missing)} unavailable Evidence item(s)",
+                )
+
+            artifact_refs = references.artifacts
+            if artifact_refs:
+                if self._artifact_lookup is None:
+                    raise ResultValidationError(
+                        "artifact_reference_unavailable",
+                        "Agent result referenced Artifact items "
+                        "without a verifiable saved snapshot",
+                    )
+                try:
+                    verified = await self._artifact_lookup.verified_refs(run_id, artifact_refs)
+                except ArtifactIntegrityError:
+                    raise ResultValidationError(
+                        "artifact_reference_invalid", "Agent result Artifact snapshot is invalid",
+                    ) from None
+                if artifact_refs - verified:
+                    raise ResultValidationError(
+                        "artifact_reference_invalid",
+                        "Agent result referenced unavailable Artifact items",
+                    )
+            change_proposal_refs = references.proposals
+            if change_proposal_refs:
+                if self._proposal_lookup is None:
+                    raise ResultValidationError(
+                        "change_proposal_reference_invalid",
+                        "Agent result referenced unavailable ChangeProposal items",
+                    )
+                existing_proposals = await self._proposal_lookup.existing_refs(
+                    run_id, change_proposal_refs
+                )
+                missing_proposals = change_proposal_refs - existing_proposals
+                if missing_proposals:
+                    raise ResultValidationError(
+                        "change_proposal_reference_invalid",
+                        "Agent result referenced "
+                        f"{len(missing_proposals)} unavailable ChangeProposal item(s)",
+                    )
+                incomplete = await self._proposal_lookup.incomplete_refs(
+                    run_id, change_proposal_refs
+                )
+                if incomplete:
+                    raise ResultValidationError(
+                        "change_proposal_incomplete",
+                        "Agent result referenced a ChangeProposal that is still awaiting "
+                        "an effect decision",
+                    )
+
+            if references.effects and (
+                self._effect_lookup is None
+                or await self._effect_lookup.invalid_refs(run_id, references.effects)
+            ):
+                raise ResultValidationError(
+                    "effect_summary_invalid",
+                    "Agent result effect claims did not match the saved platform records",
+                )
 
         # 表示用 convention も全 task で同じ interpreter を通し、business path 分岐を作らない。
         self._generic.validate_findings(structured_output)

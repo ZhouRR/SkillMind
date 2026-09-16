@@ -66,6 +66,9 @@
     }
   },
   "properties": {
+    "started_at": {"type": ["string","null"],"format": "date-time"},
+    "finished_at": {"type": ["string","null"],"format": "date-time"},
+    "execution_metrics": {"oneOf": [{"type": "null"},{"type": "object","additionalProperties": false,"required": ["structural_errors","repeated_query_errors","correction_attempts","corrected_reads","unresolved_tool_errors","duplicate_reads","schema_reads","schema_cache_hits","schema_refreshes","manual_responses","query_error_interventions"],"properties": {"structural_errors": {"type": "integer","minimum": 0},"repeated_query_errors": {"type": "integer","minimum": 0},"correction_attempts": {"type": "integer","minimum": 0},"corrected_reads": {"type": "integer","minimum": 0},"unresolved_tool_errors": {"type": "integer","minimum": 0},"duplicate_reads": {"type": "integer","minimum": 0},"schema_reads": {"type": "integer","minimum": 0},"schema_cache_hits": {"type": "integer","minimum": 0},"schema_refreshes": {"type": "integer","minimum": 0},"manual_responses": {"type": "integer","minimum": 0},"query_error_interventions": {"type": ["integer","null"],"minimum": 0}}}]},
     "run_id": { "type": "string", "format": "uuid" },
     "project_id": { "type": "string", "format": "uuid" },
     "task_id": { "type": "string", "format": "uuid" },

@@ -1,3 +1,4 @@
+import { observeRunDetail, performanceNow } from '../lib/runPerformance'
 import { API_BASE, ApiProblemError, exactFields, hasStrings, isRecord, isStringArray, requestApiJson } from './http'
 import { isApiTimestamp, isUuid, sameUuid } from '../lib/validation'
 import { isRunDocumentSnapshots, isRunSourceSummaries, type RunDocumentSnapshotRecord, type RunSourceSummaries } from './runResources'
@@ -215,7 +216,25 @@ export interface RespondedInteractionRecord {
 }
 
 /** Workspace の Result/Evidence view が利用する Run detail。 */
+/** 回復数は明示監査に基づく。関連のない旧記録は null として区別する。 */
+export interface ExecutionMetrics {
+  structural_errors: number
+  repeated_query_errors: number
+  correction_attempts: number
+  corrected_reads: number
+  unresolved_tool_errors: number
+  duplicate_reads: number
+  schema_reads: number
+  schema_cache_hits: number
+  schema_refreshes: number
+  manual_responses: number
+  query_error_interventions: number | null
+}
+
 export interface RunDetailRecord {
+  started_at?: string | null
+  finished_at?: string | null
+  execution_metrics?: ExecutionMetrics | null
   run_id: string
   project_id: string
   task_id: string
@@ -332,6 +351,7 @@ export async function loadRunDetail(
   runId: string,
   signal?: AbortSignal,
 ): Promise<RunDetailRecord> {
+  const started = performanceNow()
   signal?.throwIfAborted()
   const value = await requestApiJson(
     `${API_BASE}/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/detail`,
@@ -343,6 +363,7 @@ export async function loadRunDetail(
   if (!sameUuid(detail.project_id, projectId) || !sameUuid(detail.run_id, runId)) {
     throw new Error('Run detail response did not match its requested scope')
   }
+  observeRunDetail(detail, started)
   return detail
 }
 
@@ -471,7 +492,10 @@ function parseRunDetail(value: unknown): RunDetailRecord {
       'selected_sources', 'document_snapshots', 'output_schema', 'output_schema_checksum',
       'result', 'tool_calls', 'evidence', 'skill_snapshots', 'segments', 'attempts', 'sessions',
       'interactions', 'change_proposals', 'approvals', 'effect_executions',
+      ...(['execution_metrics', 'started_at', 'finished_at'].filter((key) => key in value)),
     ])
+    || (value.execution_metrics !== undefined && value.execution_metrics !== null && !isExecutionMetrics(value.execution_metrics))
+    || !['started_at', 'finished_at'].every((key) => value[key] === undefined || value[key] === null || isApiTimestamp(value[key]))
     || !hasStrings(value, ['run_id', 'project_id', 'task_id', 'created_at', 'status'])
     || ![value.run_id, value.project_id, value.task_id].every(isUuid)
     || !isApiTimestamp(value.created_at)
@@ -729,4 +753,13 @@ function isEvidenceDetail(value: unknown): value is EvidenceDetail {
     && (typeof value.snapshot_uri === 'string' || value.snapshot_uri === null)
     && (typeof value.excerpt === 'string' || value.excerpt === null)
     && isRecord(value.metadata)
+}
+
+/** 未知・負値・浮動小数の集計を画面へ成功数として渡さない。 */
+function isExecutionMetrics(value: unknown): value is ExecutionMetrics {
+  const fields = ['structural_errors', 'repeated_query_errors', 'correction_attempts', 'corrected_reads',
+    'unresolved_tool_errors', 'duplicate_reads', 'schema_reads', 'schema_cache_hits', 'schema_refreshes', 'manual_responses']
+  return isRecord(value) && exactFields(value, [...fields, 'query_error_interventions'])
+    && fields.every((key) => Number.isSafeInteger(value[key]) && (value[key] as number) >= 0)
+    && (value.query_error_interventions === null || (Number.isSafeInteger(value.query_error_interventions) && (value.query_error_interventions as number) >= 0))
 }

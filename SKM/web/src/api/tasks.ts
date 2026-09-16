@@ -3,6 +3,7 @@ import { RUN_STATUSES, type RunStatus } from './runs'
 
 /** task catalog に同梱される最新 Run の要約。詳細は Run API が返す。 */
 export interface TaskLastRunRecord {
+  started_at?: string | null
   run_id: string
   status: RunStatus
   created_at: string

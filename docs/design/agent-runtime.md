@@ -55,7 +55,7 @@ Brief 保留必需指导，不注入 Integration 凭据、运行连接配置或�
 
 新 Run 默认遵守 Skill 的新业务执行规则，不能因路径或日期相同就沿用历史业务 ID。只有冻结用户输入明确指定恢复对象且 Skill 支持业务恢复时，才按当前 Project 和授权资源核对原记录并复用业务 ID；剩余写入仍在当前 Run 重新观察、提案和批准。业务恢复不继承旧 Run 的 Effect，也不能用旧回执满足当前 Run 的文档前置条件。
 
-使用 OutcomeEnvelope 的任务在提交最终结果前，由共享提示要求 Agent 生成一份自包含 HTML 报告，放入 `kind=report` 交付项的 `content`。报告按请求语言呈现结论、已核实汇总、明细、证据与限制；区分业务判定和执行状态，不补造数量或成功效果。内嵌 CSS 可组织版面，禁止脚本、外部资源和导航。该展示要求不替代 Skill 的业务 JSON、成果保存或原效果回读，不引入额外外部写入，也不改变模型配置；自定义输出 Schema 不强加 HTML 字段。
+新 Run 固定 `runtime_policy=skillmind.runtime/v3`，该字段进入 AgentTaskBrief、checksum 和原生会话指令比较。OutcomeEnvelope 继续返回完整结论、依据、范围、限制、交付物与引用，由页面统一排版，默认不再要求模型额外生成整页 HTML/CSS 或重复执行履历。v3 进一步要求在现有字段中使用简明 Markdown，正文优先结论、依据和范围，不重复 UUID、hash、存储坐标或回执；必需业务标识和精确引用仍保留在原结构化字段/成果中。v2 与未记录 policy 的历史 Run 保持原指令，不在续行时升级。Skill 明确要求的业务 HTML/Markdown 等成果仍按原规则生成、校验和保存。未记录 runtime policy 的旧 Run 保留原 HTML 提示；新版展示端同时读取旧 HTML 与无 HTML 的结构化结果，不改历史 checksum。平台页面区分执行状态、结果完成程度与 Skill 的业务判定；不会将 SUCCEEDED 推导为 PASS，也不会登记新的业务成果。附加排版失败时退回原结果展示，不重跑模型、不改已保存的业务状态。
 
 Effect 成功确认为 APPLIED 时，同事务生成的下一 Segment checkpoint 带可选 `effect_result`：原 Effect/Proposal、before/after Evidence 引用、after 摘要、完整回读内容和 verification。Brief 保留并渲染这份原执行事实，不靠模型从引用或批准内容重建返回值；正文作为数据，不作为指令、当前外部状态或新写入权限。最终 effects 的引用须来自对应原回执，不能用提案前的查询 Evidence 替代 before_ref；旧回执缺少该可选字段时保持原值并省略摘要中的 before_ref，仍由结果校验核对原执行的两份证据。对象保存回执可含后续登记所需的 bucket/key/version/ETag，不含连接 endpoint 或凭据。该字段仅由平台 finalize 写入，模型的 propose/interaction checkpoint 不接受；失败续行不沿用上次回执，结果未知仍按效果协议停止。
 
@@ -64,6 +64,8 @@ Effect 成功确认为 APPLIED 时，同事务生成的下一 Segment checkpoint
 `change.propose/v1` 暂停后的 RESUME 先只读核对当前 Segment 的 trigger、原 Proposal/Effect 或拒绝/过期记录，再以原请求 fingerprint、SDK Session 和 transcript 中的 tool ID 匹配原调用。只有这个已处理调用通过普通 Tool 审计读取结果；新提案仍 defer，不经该路径创建 Proposal 或调用外部写入 Provider。未知效果、缺失或不匹配的回执拒绝恢复。原 transcript 保持不变，旧 `{status: "success", deferred: true}` 响应形状继续有效。
 
 固定 CLI 会在 deferred replay 后自动开始模型 turn，因此已处理调用返回 `deferred: false`、实际 outcome 和当前完整任务提示（含已冻结 Brief/回执），不再排队发送第二份 user prompt。原 tool_result 已保存的技术重试则使用通常 prompt 续行；缺少可核对的 transcript 不补造完成记录。此控制回复有独立 Evidence，仍受 Gateway 的敏感字段和大小限制。SDK 的 `tool_deferred_unavailable` 是引擎恢复失败，不能作为新提案再次入库。
+
+新运行策略将冻结文档选择作为输入事实，将已审计的数据库结构与成功效果回执作为平台事实。结构与回执原值进入后续 Segment 的 checkpoint 投影，保留证据和观测时间；Agent 不必重写表结构或存储坐标。既有 Segment 优先读取已冻结投影，续行只发送新增或变化的事实，保留原生会话；事实不写回 Skill 或冻结输入。回执仅证明原操作，不能替代当前状态、并发检查或写权限。进度说明限于阶段、决策、异常和交付；平台机械状态仍来自真实事件。
 
 ## 自主执行等级
 

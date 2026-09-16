@@ -1,0 +1,6 @@
+{
+  "status": "error",
+  "code": "scope_denied",
+  "message": "Table is outside the frozen scope",
+  "retryable": false
+}

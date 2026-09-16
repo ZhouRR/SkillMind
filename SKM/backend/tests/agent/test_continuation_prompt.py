@@ -162,3 +162,19 @@ def test_source_execution_resumes_without_repeating_original_skill(tmp_path):
     replaced = compiled(context, changed)
     full, _ = continuation_prompt(replaced, replaced.prompt, metadata)
     assert full == replaced.prompt
+
+
+def test_schema_observations_are_exact_deltas_not_rewritten_checkpoints(tmp_path):
+    """構造の証拠・観測時刻は原値で渡し、同一観測を次回再送しない。"""
+    old = context_with_brief(tmp_path)
+    _, metadata = continuation_prompt(old, old.prompt, None)
+    brief = deepcopy(old.task_brief)
+    observation = {"table": "public.reports", "observed_at": "2026-09-16T01:00:00Z",
+                   "observation_refs": ["ev_original"], "table_schema": {"primary_key": ["b", "a"]}}
+    brief["checkpoint"]["database_observations"] = [observation]
+    current = compiled(old, brief)
+    delta, updated = continuation_prompt(current, current.prompt, metadata)
+    assert canonical_json(observation) in delta
+    repeated, _ = continuation_prompt(current, current.prompt, updated)
+    assert '"ev_original"' not in repeated
+    assert "exact_table.exact_column" not in repeated

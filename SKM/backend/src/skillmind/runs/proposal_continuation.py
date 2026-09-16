@@ -11,9 +11,11 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from skillmind.agent.runtime_policy import uses_modern_runtime
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.db.models import (
     AgentSession,
+    AgentTaskBriefSnapshot,
     ChangeApproval,
     ChangeProposal,
     EffectExecution,
@@ -123,6 +125,30 @@ class ProposalContinuationReader:
                 proposal_ref=proposal.proposal_ref,
                 outcome=outcome,
             )
+
+
+    async def receipts(self, claimed: ClaimedRun) -> list[dict[str, Any]]:
+        """以前の Segment の確定回执を原値で再利用し、失敗・不明な操作は追加しない。"""
+        if not uses_modern_runtime(claimed.task_snapshot_json):
+            return []
+        async with self._session_factory() as session:
+            frozen = await session.scalar(select(AgentTaskBriefSnapshot).where(
+                AgentTaskBriefSnapshot.run_id == claimed.run_id,
+                AgentTaskBriefSnapshot.run_segment_id == claimed.run_segment_id,
+            ))
+            if frozen is not None:
+                return [validated_effect_result(item) for item in
+                        frozen.brief_json.get("checkpoint", {}).get("effect_receipts", [])]
+            checkpoints = await session.scalars(select(RunSegment.checkpoint_json).where(
+                RunSegment.run_id == claimed.run_id, RunSegment.segment_no < claimed.segment_no,
+            ).order_by(RunSegment.segment_no).limit(100))
+            receipts: dict[str, dict[str, Any]] = {}
+            for checkpoint in checkpoints:
+                value = checkpoint.get("effect_result")
+                if value is not None:
+                    receipt = validated_effect_result(value)
+                    receipts[receipt["effect_execution_id"]] = receipt
+            return list(receipts.values())
 
 
 async def _resolved_outcome(

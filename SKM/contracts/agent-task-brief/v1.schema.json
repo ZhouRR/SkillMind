@@ -713,6 +713,130 @@
         },
         "effect_result": {
           "$ref": "#/$defs/effectResult"
+        },
+        "database_observations": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "table",
+              "table_schema",
+              "observed_at",
+              "schema_checksum",
+              "observation_refs",
+              "binding_id",
+              "integration_id",
+              "binding_checksum"
+            ],
+            "properties": {
+              "table": {
+                "type": "string",
+                "pattern": "^[a-zA-Z_][a-zA-Z0-9_$]{0,62}\\.[a-zA-Z_][a-zA-Z0-9_$]{0,62}$"
+              },
+              "table_schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "columns",
+                  "primary_key"
+                ],
+                "description": "Exact observed structure; original observation time and evidence are retained on reuse. Not proof of current DDL or write permission.",
+                "properties": {
+                  "columns": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "name",
+                        "data_type",
+                        "not_null",
+                        "has_default",
+                        "generated",
+                        "identity"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "pattern": "^[a-zA-Z_][a-zA-Z0-9_$]{0,62}$"
+                        },
+                        "data_type": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1000
+                        },
+                        "not_null": {
+                          "type": "boolean",
+                          "description": "Column NOT NULL flag; does not describe domain or check constraints."
+                        },
+                        "has_default": {
+                          "type": "boolean"
+                        },
+                        "generated": {
+                          "type": "boolean"
+                        },
+                        "identity": {
+                          "enum": [
+                            "NONE",
+                            "ALWAYS",
+                            "BY_DEFAULT"
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "primary_key": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z_][a-zA-Z0-9_$]{0,62}$"
+                    }
+                  }
+                }
+              },
+              "observed_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "schema_checksum": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "observation_refs": {
+                "type": "array",
+                "maxItems": 10,
+                "items": {
+                  "type": "string",
+                  "pattern": "^ev_[a-zA-Z0-9_-]+$"
+                }
+              },
+              "binding_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "integration_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "binding_checksum": {
+                "type": "string",
+                "pattern": "^sha256:[a-f0-9]{64}$"
+              }
+            }
+          }
+        },
+        "effect_receipts": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/effectResult"
+          }
         }
       }
     },
@@ -779,6 +903,9 @@
     },
     "source_documents": {
       "$ref": "#/$defs/sourceDocuments"
+    },
+    "runtime_policy": {
+      "enum": ["skillmind.runtime/v2", "skillmind.runtime/v3"]
     }
   },
   "$defs": {

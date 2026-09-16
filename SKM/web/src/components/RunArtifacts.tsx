@@ -1,26 +1,35 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { loadRunArtifactContent, loadRunArtifacts, type RunArtifactRecord, type RunResultDetail } from '../api'
+import { loadRunArtifactContent, loadRunArtifacts, type RunArtifactRecord, type RunResultDetail, type RunDetailRecord } from '../api'
 import { RESOURCE_REQUEST_TIMEOUT_MS, useResourceQuery, type SessionEnded } from '../hooks/useResourceRequest'
 import { useMessages } from '../i18n'
 import { ModalDialog } from './PageElements'
-import { DOCUMENT_PREVIEW_MAX_BYTES, documentMarkdownHtml, documentPreviewHtml } from '../lib/documentPreview'
+import { DOCUMENT_PREVIEW_MAX_BYTES, documentPreviewHtml } from '../lib/documentPreview'
+import { artifactTitle } from '../lib/resultPresentation'
+import { MarkdownText } from './MarkdownText'
 import { ARTIFACT_REQUEST_POLICY, resultArtifactRefs } from '../lib/artifactFeedback'
 import { formatJsonPreview } from '../lib/jsonPreview'
 
 /** 一つの明示 click に固定した回执。別索引や同名 path で上書きしない。 */
-interface DownloadRequest { mode: 'download' | 'preview'; id: number; artifact: RunArtifactRecord; deadline: number }
+interface DownloadRequest { mode: 'download' | 'preview'; id: number; artifact: RunArtifactRecord; title: string; deadline: number }
 
 /** 実 Workspace の actor/Session/Project/Run ごとに親が再作成する添付区画。 */
-export function RunArtifacts({ projectId, runId, result, onSessionExpired }: {
+export function RunArtifacts({ projectId, runId, result, onSessionExpired, evidence = [], snapshots = [], requestedPreview }: {
   projectId: string; runId: string; result: RunResultDetail | null; onSessionExpired: SessionEnded
+  evidence?: RunDetailRecord['evidence']; snapshots?: RunDetailRecord['document_snapshots']
+  requestedPreview?: { ref: string; nonce: number } | null
 }) {
-  const labels = useMessages().runResult.artifacts
+  const messages = useMessages().runResult
+  const labels = messages.artifacts
   const loader = useCallback((signal: AbortSignal) => loadRunArtifacts(projectId, runId, signal), [projectId, runId])
   const index = useResourceQuery(`${projectId}:${runId}`, loader, onSessionExpired, ARTIFACT_REQUEST_POLICY)
   const [request, setRequest] = useState<DownloadRequest | null>(null)
   const active = useRef<DownloadRequest | null>(null)
   const sequence = useRef(0)
   const mounted = useRef(false)
+  const handled = useRef<typeof requestedPreview>(null)
+  const [unavailable, setUnavailable] = useState(false)
+  const section = useRef<HTMLElement>(null)
+  useEffect(() => { if (unavailable) section.current?.scrollIntoView({ block: 'nearest' }) }, [unavailable])
   useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false; active.current = null } }, [])
   const refs = resultArtifactRefs(result)
   const records = !index.pending && !index.failure ? index.data ?? [] : []
@@ -29,21 +38,36 @@ export function RunArtifacts({ projectId, runId, result, onSessionExpired }: {
   /** 再描画前の同 tick 重複 click と、別添付への暗黙の中断を防ぐ。 */
   function start(artifact: RunArtifactRecord, mode: 'download' | 'preview' = 'download'): void {
     if (!mounted.current || active.current || index.pending || index.failure) return
-    const next = { mode, id: ++sequence.current, artifact: { ...artifact }, deadline: performance.now() + RESOURCE_REQUEST_TIMEOUT_MS }
+    const next = { mode, id: ++sequence.current, artifact: { ...artifact }, title: artifactTitle(artifact, result, evidence, snapshots), deadline: performance.now() + RESOURCE_REQUEST_TIMEOUT_MS }
+    setUnavailable(false)
     active.current = next
     setRequest(next)
   }
   /** 取消/閉じる時点で資格を閉じ、passive cleanup を待って旧応答を許可しない。 */
   function close(): void { active.current = null; setRequest(null) }
 
-  return <section className="resultSection runArtifacts" aria-label={labels.title}>
+  // 成果物の明示 click だけを索引の完全一致へ解決する。path や似た題名では取得しない。
+  useEffect(() => {
+    if (!requestedPreview || handled.current === requestedPreview || index.pending || index.failure || active.current) return
+    handled.current = requestedPreview
+    const match = records.find((record) => record.artifact_ref === requestedPreview.ref)
+    if (!match || !/\.(md|markdown|html?|txt|json)$/i.test(match.path) || match.size_bytes > DOCUMENT_PREVIEW_MAX_BYTES) {
+      setUnavailable(true)
+      return
+    }
+    start(match, 'preview')
+  }, [requestedPreview, index.pending, index.failure, index.data, request])
+
+  return <section ref={section} className="resultSection runArtifacts" aria-label={labels.title}>
     <h3>{labels.title}</h3>
+    {unavailable && <p role="status" className="hint">{labels.previewUnavailable}</p>}
     {index.pending ? <p role="status">{labels.loading}</p> : index.failure
       ? <p className="error" role="alert">{labels.failures[index.failure.key]}</p>
       : <>
         {records.length === 0 && <p>{labels.empty}</p>}
         <ul className="artifactList">{records.map((record) => <li key={record.artifact_ref}>
-          <div><strong>{record.path}</strong><p>{record.size_bytes} B · {record.mime_type}</p>
+          <div><strong>{artifactTitle(record, result, evidence, snapshots)}</strong><p>{record.size_bytes} B · {record.mime_type}</p>
+            <details className="artifactMetadata"><summary>{messages.technicalDetails}</summary><code>{record.path}</code><code>{record.checksum}</code></details>
             <p className="hint">{refs.includes(record.artifact_ref) ? labels.referenced : labels.unreferenced}</p></div>
           <div className="panelHeaderActions">
             {/\.(md|markdown|html?|txt|json)$/i.test(record.path) && record.size_bytes <= DOCUMENT_PREVIEW_MAX_BYTES
@@ -81,18 +105,19 @@ function ArtifactPreview({ projectId, runId, request, isCurrent, onClose, onSess
     const text = new TextDecoder('utf-8', { fatal: true }).decode(await blob.arrayBuffer())
     signal.throwIfAborted()
     if (!current.current()) throw new DOMException('Preview is no longer current', 'AbortError')
-    return /\.html?$/i.test(request.artifact.path) ? { html: documentPreviewHtml(text), text: null }
-      : /\.(md|markdown)$/i.test(request.artifact.path) ? { html: documentMarkdownHtml(text), text: null }
-        : { html: null, text: formatJsonPreview(text, request.artifact.path) }
+    return /\.html?$/i.test(request.artifact.path) ? { format: 'html', content: documentPreviewHtml(text) }
+      : /\.(md|markdown)$/i.test(request.artifact.path) ? { format: 'markdown', content: text }
+        : { format: 'text', content: formatJsonPreview(text, request.artifact.path) }
   }, [projectId, runId, request])
   const query = useResourceQuery(String(request.id), loader,
     () => { if (current.current()) onSessionExpired() }, ARTIFACT_REQUEST_POLICY)
-  return <ModalDialog open title={request.artifact.path} viewport onClose={onClose}>
+  return <ModalDialog open title={request.title} viewport onClose={onClose}>
     {query.pending ? <p role="status">{labels.preparing}</p>
       : query.failure ? <p className="error" role="alert">{labels.failures[query.failure.key]}</p>
-        : query.data?.html ? <iframe className="runReportPreview" title={request.artifact.path}
-          sandbox="" referrerPolicy="no-referrer" srcDoc={query.data.html} />
-          : <pre className="previewText">{query.data?.text}</pre>}
+        : query.data?.format === 'html' ? <iframe className="runReportPreview" title={request.title}
+          sandbox="" referrerPolicy="no-referrer" srcDoc={query.data.content} />
+          : query.data?.format === 'markdown' ? <div className="artifactMarkdownPreview"><MarkdownText text={query.data.content} /></div>
+            : <pre className="previewText">{query.data?.content}</pre>}
   </ModalDialog>
 }
 
@@ -139,7 +164,7 @@ function ArtifactDownload({ projectId, runId, request, isCurrent, onClose, onSes
   }, [query.pending, query.failure, query.data, request])
   const failure = query.failure?.key ?? (status === 'timeout' ? 'timeout' : status === 'failed' ? 'loadFailed' : null)
   return <div className="artifactDownload" role="status">
-    <strong>{request.artifact.path}</strong>
+    <strong>{request.title}</strong>
     <p className={failure ? 'error' : undefined}>{failure ? labels.failures[failure]
       : status === 'delivered' ? labels.delivered : labels.preparing}</p>
     <button className="secondaryButton compactButton" type="button" onClick={onClose}>

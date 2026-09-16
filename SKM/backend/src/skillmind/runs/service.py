@@ -15,10 +15,12 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from skillmind.agent.domain import AgentEvent
+from skillmind.agent.runtime_policy import RUNTIME_POLICY
 from skillmind.agent.subagent import SUBAGENT_DISPATCH_CAPABILITY
 from skillmind.agent.task_brief import resolve_execution_profile
 from skillmind.agent.tool_policy import DENIED_BUILTIN_TOOLS
 from skillmind.auth.sessions import UnauthorizedSessionError
+from skillmind.core.timing import timed_async
 from skillmind.documents.binding import resolve_document_binding
 from skillmind.documents.library import (
     DOCUMENT_LIBRARY_SELECTION,
@@ -240,6 +242,7 @@ class RunService:
                 input_json=intent.input_json,
                 task_snapshot_json={
                     CREATION_REQUEST_FIELD: intent.to_json(),
+                    "runtime_policy": RUNTIME_POLICY,
                     "task_id": str(task_id),
                     "task_key": resolved.task_key,
                     "capability": resolved.capability,
@@ -268,6 +271,8 @@ class RunService:
                         {
                             *(capability for capability in resolved.allowed_capabilities
                               if self._execution_features.capability_enabled(capability)),
+                            *({"database.read/v2", "database.describe/v1"}
+                              if "database.read/v1" in resolved.allowed_capabilities else set()),
                             INTERACTION_REQUEST_CAPABILITY,
                             *({SUBAGENT_DISPATCH_CAPABILITY}
                               if self._deferred_features_enabled else set()),
@@ -801,6 +806,7 @@ class RunService:
             raise RuntimeError("ChangeProposal decision produced no result")
         return result
 
+    @timed_async("run.performance.terminal_save")
     async def finalize_execution(
         self,
         claimed: ClaimedRun,

@@ -42,7 +42,7 @@ docker compose exec -T worker python -m skillmind.agent.codex_login --status
 
 首条命令输出验证网址与一次性 device code，在浏览器完成 ChatGPT 授权后等待命令返回 `authenticated: true`。状态命令只输出是否登录，不输出 token 或账户正文。登录期间需可访问官方认证服务；不要复制宿主 `.codex`、写入 API key 或把凭据放进镜像。非交互部署不会自动执行登录。
 
-Worker 需要代理出口时，在部署环境中设置 `HTTP_PROXY` / `HTTPS_PROXY`（也支持小写及 `ALL_PROXY`）。Codex 子进程仅继承这些网络配置与允许的系统环境，数据库、对象存储和 Claude 凭据仍不传入。`NO_PROXY` / `no_proxy` 合并保留原值，并追加 `localhost`、`127.0.0.1`、`::1`，确保本机受控 MCP 不经过代理。认证服务和模型服务都须可访问；设备码请求 403 不能靠切换模型或降低思考强度解决。
+Worker 需要代理出口时，在 `.env` 设置 `SKILLMIND_WORKER_HTTP_PROXY` / `SKILLMIND_WORKER_HTTPS_PROXY` 和可选的 `SKILLMIND_WORKER_NO_PROXY`，Compose 仅向业务 Worker 映射大小写代理变量，并追加内部服务及 loopback 的直连例外。修改后用 `docker compose up -d --no-deps worker` 重建容器；先确认没有在途业务执行。直接启动 Worker 的环境仍可使用标准 `HTTP_PROXY` / `HTTPS_PROXY`（也支持小写及 `ALL_PROXY`）。Codex 子进程仅继承这些网络配置与允许的系统环境，数据库、对象存储和 Claude 凭据仍不传入。`NO_PROXY` / `no_proxy` 合并保留原值，并追加 `localhost`、`127.0.0.1`、`::1`，确保本机受控 MCP 不经过代理。认证服务和模型服务都须可访问；设备码请求 403 不能靠切换模型或降低思考强度解决。
 
 Claude 回退需显式设置 `SKILLMIND_AGENT_SDK=claude` 并重建 API/Worker 容器，保留既有 Anthropic 兼容端点与凭据、DeepSeek 模型、`CLAUDE_CODE_MAX_OUTPUT_TOKENS=128000` 和 `CLAUDE_CODE_EFFORT_LEVEL=max`。不在请求失败时自动重发或降档。切换前核清活动解释/Run；不同引擎的原生会话不能互相恢复。Codex 当前预算限制见[运行时](../design/agent-runtime.md#codex-adapter)。
 
@@ -118,6 +118,8 @@ docker compose --file compose.yml run --rm -T --no-deps migrate alembic heads
 revision 不识别、多个 head、连接失败或迁移错误均需核对实际 DB 状态；不 stamp、不删除 alembic_version/审计记录绕过。数据库初始化、migration 与 bucket 创建是实际写入，health/preflight 成功不证明业务、HTTPS、blob/KEK 或恢复已验收。
 
 ## 迁移与回退审查
+
+`skillmind.runtime/v2` 须先上线兼容旧 HTML/新结构化结果的 Web，再配套更新 API/Worker。新 Run 固定诊断/结构工具与精简报告提示；旧 Run 不补写运行版本，不改变其冻结规则。本次复用既有 ToolCall/Evidence/Brief 存储，无新增缓存服务或数据库迁移。
 
 有数据库/协议变化时审查本次跨越的 [upgrade/downgrade](../../SKM/backend/migrations/versions/)及消费者；回退时核相关限制。纯样式更新不要求重审所有历史迁移，`make deploy` 仍自动检查当前 DB 路径。下表是版本兼容索引，不是每次发布逐项执行的清单：
 

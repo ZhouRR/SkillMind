@@ -298,6 +298,7 @@ async def test_create_task_run_freezes_generic_snapshot() -> None:
         NAMESPACE_URL, f"skillmind:task:{resolved.skill_version_id}:{resolved.task_key}"
     )
     assert command.task_id == expected_task_id
+    assert command.task_snapshot_json["runtime_policy"] == "skillmind.runtime/v3"
     assert command.task_snapshot_json["task_key"] == "review-change"
     assert command.task_snapshot_json["capability"] == "repository.review"
     assert command.task_snapshot_json["skill_version_id"] == str(resolved.skill_version_id)

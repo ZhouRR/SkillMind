@@ -32,6 +32,7 @@ class WorkspaceApi(ArtifactApi):
         self.failed = False
         self.empty = False
         self.wrong_scope = False
+        self.preview_requests = 0
         self.report = REPORT
         self.report_path = 'output/login-report.md'
         self.body['result']['summary'] = 'Desktop login: 17 passed, 3 failed'
@@ -78,6 +79,7 @@ class WorkspaceApi(ArtifactApi):
             await route.fulfill(json=[item])
             return
         if route.request.method == 'GET' and suffix == f'projects/{PROJECT}/runs/{RUN}/artifacts/{ARTIFACT}/content':
+            self.preview_requests += 1
             await route.fulfill(headers=HEADERS, body=self.report)
             return
         await super().respond(route)
@@ -103,7 +105,8 @@ async def check(url: str, output: Path) -> None:
                     await expect(page.locator('.workspaceQueue .pendingItem')).to_have_count(1)
                     await expect(page.get_by_role('tab', name=work['tabEvents'], exact=True)).to_have_count(0)
                     await page.get_by_role('tab', name=work['queue']['reports'], exact=True).click()
-                    await expect(page.locator('.workspaceReports iframe.outcomeReportFrame')).to_be_visible()
+                    await expect(page.locator('.workspaceReports .deliverableContent')).to_have_count(2)
+                    await expect(page.locator('.workspaceReports iframe.outcomeReportFrame')).to_have_count(0)
                     await expect(page.locator('.workspaceQueue .pendingItem')).to_have_count(0)
                     await expect(page.locator('.workspaceQueue .pagination')).to_have_count(0)
                     assert api.queries[-1]['status'] == ['SUCCEEDED', 'FAILED', 'CANCELLED']
@@ -115,13 +118,13 @@ async def check(url: str, output: Path) -> None:
                     await expect(page.get_by_text(work['latestReportEmpty'], exact=True)).to_be_visible()
                     await expect(page.locator('iframe.outcomeReportFrame')).to_have_count(0)
                     await chooser.select_option(TASK)
-                    await expect(page.locator('.resultSummary h3')).to_have_text(api.body['result']['summary'])
+                    await expect(page.locator('.resultSummary .readingMarkdown')).to_have_text(api.body['result']['summary'])
                     await expect(page.get_by_role('tab', name=work['tabConversation'], exact=True)).to_have_count(0)
                     await expect(page.get_by_role('tab', name=work['tabEvents'], exact=True)).to_have_count(0)
                     await expect(page.locator('.runFacts')).to_have_count(0)
+                    await page.locator('.deliverableContent > summary').first.click()
+                    await expect(page.locator('.deliverableContent .readingMarkdown').get_by_role('heading', name='Desktop login report')).to_be_visible()
                     report = page.frame_locator('iframe.outcomeReportFrame')
-                    await expect(report.get_by_role('heading', name='Desktop login report')).to_be_visible()
-                    await expect(page.locator('iframe.outcomeReportFrame')).to_have_attribute('sandbox', '')
                     structured = page.locator('.outcomeCard details').filter(has_text='"passed":17')
                     await expect(structured).to_have_count(1)
                     assert not await structured.evaluate('(element) => element.open')
@@ -129,9 +132,9 @@ async def check(url: str, output: Path) -> None:
                     preview = page.locator('.runArtifacts').get_by_role('button', name=labels['runResult']['artifacts']['preview'], exact=True)
                     await preview.click()
                     frame = page.frame_locator('iframe.runReportPreview')
-                    await expect(frame.get_by_role('heading', name='Desktop login report')).to_be_visible()
-                    await expect(frame.locator('body')).to_contain_text('Passed: 17')
-                    await expect(page.locator('iframe.runReportPreview')).to_have_attribute('sandbox', '')
+                    await expect(page.locator('.artifactMarkdownPreview').get_by_role('heading', name='Desktop login report')).to_be_visible()
+                    await expect(page.locator('.artifactMarkdownPreview')).to_contain_text('Passed: 17')
+                    await expect(page.locator('iframe.runReportPreview')).to_have_count(0)
                     await page.screenshot(path=str(output / f'report-{language}.png'))
                     await page.get_by_role('dialog').get_by_role('button', name=labels['elements']['close'], exact=True).click()
                     html = ('<!doctype html><html lang="en"><head><style>'
@@ -189,6 +192,8 @@ async def check(url: str, output: Path) -> None:
                     api.report_path = 'output/login-report.html'
                     api.report = '<html><body><h1>HTML login report</h1><script>fetch("https://forbidden.invalid")</script><img src="https://forbidden.invalid/x"><p>Passed: 17</p></body></html>'
                     await page.goto(f'{url}#/workspace?project={PROJECT}&run={RUN}')
+                    # 別 fixture の本文へ変えたので索引も再取得する。同一 hash の頁移動だけでは更新されない。
+                    await page.reload()
                     await preview.click()
                     await expect(frame.get_by_role('heading', name='HTML login report')).to_be_visible()
                     assert not errors and not api.failures and not api.unexpected, (errors, api.failures, api.unexpected)

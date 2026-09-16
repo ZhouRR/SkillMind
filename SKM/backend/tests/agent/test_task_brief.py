@@ -592,3 +592,54 @@ def test_outcome_report_guidance_preserves_business_and_json_contract() -> None:
     assert prompt.index("Final report presentation") < prompt.index("Return ONLY one JSON object")
     custom = render_task_brief_prompt(brief, input_json={}, output_schema={"type": "object"})
     assert "Final report presentation" not in custom
+
+
+def test_runtime_policy_freezes_concise_report_and_preserves_skill_deliverables():
+    """新規 Run だけ既定 HTML を省き、原 Skill の Markdown 納品と JSON 契約は維持する。"""
+    manifest = _manifest(blueprint=_blueprint())
+    compiled = build_agent_task_brief(run_id=RUN_ID,
+        task_snapshot={**_task_snapshot(manifest), "runtime_policy": "skillmind.runtime/v2"},
+        manifest=manifest, selected_sources={}, tools=_tools(), limits=_limits())
+    schema = {"properties": {"outcome_version": {"const": "skillmind.outcome-envelope/v1"}}}
+    prompt = render_task_brief_prompt(compiled.brief, input_json={}, output_schema=schema)
+    assert "self-contained HTML report" not in prompt
+    assert "A Markdown report listing findings and risk." in prompt
+    assert "Return ONLY one JSON object" in prompt
+    assert "current state" in prompt and "Never drop filters" in prompt
+    Draft202012Validator(_brief_schema()).validate(compiled.brief)
+    legacy = render_task_brief_prompt(_build().brief, input_json={}, output_schema=schema)
+    assert "self-contained HTML report" in legacy
+    assert "runtime_policy" not in _build().brief
+    assert compiled.brief["runtime_policy"] == "skillmind.runtime/v2"
+
+
+@pytest.mark.parametrize("version,expected", [
+    (None, "3272d2bd4c14376aad8c6fbc347c0abee09410ab23b32c4151733b9d343f821c"),
+    ("skillmind.runtime/v2", "6021d6913f6ff3f61e539ea5ede7a6207c6ab984c4611ec6433fe9a704b7d6ef"),
+])
+def test_old_report_prompt_remains_byte_identical(version, expected):
+    """v3 の読書用方針を追加しても旧 Run の凍結指示を途中で変えない。"""
+    brief = dict(_build().brief)
+    if version:
+        brief["runtime_policy"] = version
+    schema = {"properties": {"outcome_version": {"const": "skillmind.outcome-envelope/v1"}}}
+    prompt = render_task_brief_prompt(brief, input_json={}, output_schema=schema)
+    assert sha256_hex(prompt) == expected
+
+
+def test_new_report_policy_keeps_references_without_technical_prose():
+    """可読性の指示は既存 JSON 内に限定し、必須成果・参照を省略させない。"""
+    manifest = _manifest(blueprint=_blueprint())
+    compiled = build_agent_task_brief(
+        run_id=RUN_ID, task_snapshot={**_task_snapshot(manifest), "runtime_policy": "skillmind.runtime/v3"},
+        manifest=manifest, selected_sources={}, tools=_tools(), limits=_limits(),
+    )
+    schema = {"properties": {"outcome_version": {"const": "skillmind.outcome-envelope/v1"}}}
+    prompt = render_task_brief_prompt(compiled.brief, input_json={}, output_schema=schema)
+    assert "Runtime policy skillmind.runtime/v3" in prompt
+    assert "Report readability:" in prompt
+    assert "never omit Skill-required business data" in prompt
+    assert "never a path or a guessed association" in prompt
+    assert "Return ONLY one JSON object" in prompt
+    assert "A Markdown report listing findings and risk." in prompt
+    Draft202012Validator(_brief_schema()).validate(compiled.brief)

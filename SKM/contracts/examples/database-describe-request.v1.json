@@ -1,0 +1,5 @@
+{
+  "table": "public.reports",
+  "purpose": "Inspect the authorized table before constructing a key",
+  "refresh": true
+}

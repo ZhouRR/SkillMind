@@ -2193,7 +2193,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
                     ToolCall.run_id == binding.run_id,
                     ToolCall.integration_id == binding.integration_id,
                     ToolCall.provider == "postgres",
-                    ToolCall.capability_version == "database.read/v1",
+                    ToolCall.capability_version.in_(["database.read/v1", "database.read/v2"]),
                     ToolCall.status == "SUCCEEDED",
                 )
             )

@@ -244,6 +244,12 @@ export interface UiMessages {
   }
   /** Run 履歴一覧(RunHistoryPanel)。 */
   runHistory: {
+    durationLabel: string
+    elapsedLabel: string
+    durationWaiting: string
+    durationHint: string
+    durationValue: (hours: number, minutes: number, seconds: number) => string
+
     loading: string
     retry: string
     empty: string
@@ -725,6 +731,28 @@ export interface UiMessages {
       | 'unknown' | 'loadFailed' | 'readTimeout', string>
   }
   runResult: {
+    evidencePhases: Record<string, string>
+    deliverableContent: string
+    executionDiagnostics: string
+    viewLocator: string
+    evidenceTypes: Record<string, string>
+    reportTitle: string
+    completionStates: Record<string, string>
+    excerptDisplay: string
+    excerptSource: string
+    platformStatus: string
+    completionStatus: string
+    recoveryUnknown: string
+    unresolvedErrors: string
+    correctedReads: string
+    manualResponses: string
+    structuralErrors: string
+    correctionAttempts: string
+    repeatedQueries: string
+    schemaReads: string
+    schemaCacheHits: string
+    schemaRefreshes: string
+
     capacityTitle: string
     capacityWaiting: string
     capacityRetryAt: (time: string) => string
@@ -759,6 +787,7 @@ export interface UiMessages {
     }
     /** 公開索引・保存時の検証・今回の取得結果を分けて表示する。 */
     artifacts: {
+      previewUnavailable: string
       preview: string
       title: string; loading: string; empty: string; referenced: string; unreferenced: string
       unavailableRefs: string; download: string; refresh: string; preparing: string; delivered: string; cancel: string; close: string

@@ -497,7 +497,7 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
               </p>
             )}
             {!run && visibleTasks.length > 0 && (
-              <p className="hint">{messages.workspace.runnableCount(visibleTasks.length)}</p>
+              <p className="hint launcherTaskCount">{messages.workspace.runnableCount(visibleTasks.length)}</p>
             )}
             <button
               className={run ? 'secondaryButton' : 'primaryButton'}

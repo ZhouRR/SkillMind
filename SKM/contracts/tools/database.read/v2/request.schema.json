@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "table",
+    "purpose"
+  ],
+  "properties": {
+    "table": {
+      "type": "string",
+      "pattern": "^[a-zA-Z_][a-zA-Z0-9_$]{0,62}\\.[a-zA-Z_][a-zA-Z0-9_$]{0,62}$"
+    },
+    "columns": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-zA-Z_][a-zA-Z0-9_$]{0,62}$"
+      },
+      "maxItems": 100,
+      "uniqueItems": true
+    },
+    "filters": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-zA-Z_][a-zA-Z0-9_$]{0,62}$"
+      },
+      "maxProperties": 20,
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ],
+        "maxLength": 2000
+      }
+    },
+    "order_by": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-zA-Z_][a-zA-Z0-9_$]{0,62}$"
+      },
+      "maxItems": 100,
+      "uniqueItems": true
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100
+    },
+    "offset": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "include_schema": {
+      "type": "boolean",
+      "default": false,
+      "description": "Also return complete column attributes and ordered primary keys for the bound ordinary or partitioned table, even if empty. Requires table SELECT privilege; failure is an error, not a partial schema."
+    },
+    "recovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "failed_tool_call_id",
+        "schema_evidence_ref"
+      ],
+      "properties": {
+        "failed_tool_call_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "schema_evidence_ref": {
+          "type": "string",
+          "pattern": "^ev_[a-zA-Z0-9_-]+$"
+        }
+      }
+    }
+  },
+  "$id": "https://schemas.skillmind.local/tools/database.read/v2/request.schema.json",
+  "title": "database.read/v2 request"
+}

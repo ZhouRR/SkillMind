@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
+
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.db.models import (
     AgentSession,
@@ -75,6 +76,54 @@ def test_descriptor_matches_only_original_request_and_session():
     assert resolved.matches(arguments, "session")
     assert not resolved.matches(arguments, "another-session")
     assert not resolved.matches({**arguments, "changes": [{"value": 2}]}, "session")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("policy", ["skillmind.runtime/v2", "skillmind.runtime/v3"])
+async def test_receipt_index_preserves_frozen_values_without_history_reload(policy):
+    """同 Segment は固定済み回読を使い、後続の観測で書き換えない。"""
+    session, segment, _, _ = _rows()
+    receipt = segment.checkpoint_json["effect_result"]
+    session.scalar.return_value = SimpleNamespace(
+        brief_json={"checkpoint": {"effect_receipts": [receipt]}}
+    )
+    session.__aenter__.return_value = session
+    reader = ProposalContinuationReader(Mock(return_value=session))
+    claimed = SimpleNamespace(
+        task_snapshot_json={"runtime_policy": policy},
+        run_id=uuid4(), run_segment_id=uuid4(), segment_no=3,
+    )
+    assert await reader.receipts(claimed) == [receipt]
+    session.scalars.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_receipt_index_deduplicates_exact_effect_and_rejects_unknown():
+    """同じ確定操作を重複投影せず、未知の結果を成功に変換しない。"""
+    session, segment, _, _ = _rows()
+    receipt = segment.checkpoint_json["effect_result"]
+    session.scalar.return_value = None
+    session.scalars.return_value = [{}, segment.checkpoint_json, segment.checkpoint_json]
+    session.__aenter__.return_value = session
+    reader = ProposalContinuationReader(Mock(return_value=session))
+    claimed = SimpleNamespace(
+        task_snapshot_json={"runtime_policy": "skillmind.runtime/v2"},
+        run_id=uuid4(), run_segment_id=uuid4(), segment_no=3,
+    )
+    assert await reader.receipts(claimed) == [receipt]
+    session.scalars.return_value = [{"effect_result": {**receipt, "status": "UNKNOWN"}}]
+    with pytest.raises(ValueError, match="invalid"):
+        await reader.receipts(claimed)
+
+
+@pytest.mark.asyncio
+async def test_legacy_receipt_index_does_not_change_frozen_runtime():
+    """旧 Run には新しい回読索引も追加の DB 読取も導入しない。"""
+    factory = Mock()
+    assert await ProposalContinuationReader(factory).receipts(
+        SimpleNamespace(task_snapshot_json={})
+    ) == []
+    factory.assert_not_called()
 
 
 @pytest.mark.asyncio

@@ -339,7 +339,10 @@ def test_registry_only_exposes_injected_postgres_provider(provider):
     contracts = ContractStore(ROOT / "contracts")
     assert _read_tool_definitions(contracts) == ()
     definitions = _read_tool_definitions(contracts, database_provider=provider[0])
-    assert len(definitions) == 1 and set(definitions[0].providers) == {"postgres"}
+    assert {item.capability for item in definitions} == {
+        "database.read/v1", "database.read/v2", "database.describe/v1",
+    }
+    assert all(set(item.providers) == {"postgres"} for item in definitions)
 
 
 def test_postgres_catalog_is_publishable_and_runnable_with_bound_resource(resource):

@@ -9,6 +9,7 @@ from typing import Any
 from uuid import UUID
 
 _CONTEXT_FIELDS = frozenset({
+    "reason_code", "sqlstate", "failure_stage", "tool_call_id", "output_bytes",
     "trace_id",
     "api_key_id",
     "request_id",

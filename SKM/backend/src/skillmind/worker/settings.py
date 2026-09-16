@@ -223,6 +223,10 @@ async def startup(ctx: dict[str, Any], *, maintenance_only: bool = False) -> Non
         effect_lookup=PostgresEffectSummaryLookup(ctx["database_session_factory"]),
         artifact_lookup=PostgresArtifactLookup(ctx["database_session_factory"]),
     )
+    database_provider = DatabaseReadProvider(
+            ctx["database_session_factory"], source=PostgresDatabaseSource(),
+            secret_resolver=DeploymentSecretResolver(cipher=secret_cipher),
+        )
     registry = create_run_tool_registry(
         contracts,
         deferred_features_enabled=features.deferred,
@@ -242,10 +246,7 @@ async def startup(ctx: dict[str, Any], *, maintenance_only: bool = False) -> Non
             ctx["database_session_factory"], source=StreamableHttpMcpSource(),
             secret_resolver=DeploymentSecretResolver(cipher=secret_cipher),
         ),
-        database_provider=DatabaseReadProvider(
-            ctx["database_session_factory"], source=PostgresDatabaseSource(),
-            secret_resolver=DeploymentSecretResolver(cipher=secret_cipher),
-        ),
+        database_provider=database_provider,
         redmine_issue_provider=RedmineIssueReadProvider(
             ctx["database_session_factory"],
             transport=UrllibRedmineTransport(),
@@ -299,6 +300,7 @@ async def startup(ctx: dict[str, Any], *, maintenance_only: bool = False) -> Non
         git_writes_enabled=features.git_writes,
         document_library_target=document_library_target,
         proposal_continuations=ProposalContinuationReader(ctx["database_session_factory"]),
+        database_observations=database_provider,
     )
     engine_holder["engine"] = engine
     ctx["run_executor"] = AgentRunExecutor(

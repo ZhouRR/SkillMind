@@ -16,6 +16,7 @@ from skillmind.effects.domain import (
 )
 from skillmind.runs.budget import BudgetPolicy
 from skillmind.runs.creation_request import CREATION_REQUEST_FIELD, TaskRunIntent
+from skillmind.runs.execution_metrics import ExecutionMetrics
 
 
 class RunStatus(StrEnum):
@@ -530,6 +531,9 @@ class RunDetail:
     change_proposals: tuple[StoredChangeProposal, ...] = ()
     approvals: tuple[StoredChangeApproval, ...] = ()
     effect_executions: tuple[StoredEffectExecution, ...] = ()
+    execution_metrics: ExecutionMetrics | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -562,6 +566,8 @@ class TaskLastRun:
     created_at: datetime
     finished_at: datetime | None
     result_summary: str | None
+
+    started_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)

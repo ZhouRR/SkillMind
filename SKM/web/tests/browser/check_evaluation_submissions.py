@@ -636,7 +636,7 @@ async def scenario(
                     await expect(intent).to_contain_text(labels["phase"]["sending"])
                     api.detail_gate.release.set()
                     await asyncio.wait_for(api.detail_gate.returned.wait(), 5)
-                    await expect(page.locator(".resultSummary h3")).to_have_text(marker)
+                    await expect(page.locator(".resultSummary .readingMarkdown")).to_have_text(marker)
                     await page.wait_for_function(
                         "() => document.querySelector('.runArtifacts') !== null"
                     )

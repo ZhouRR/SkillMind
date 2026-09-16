@@ -66,6 +66,8 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=backend/src python3 scripts/probe_postgres_
   --pglite-root /tmp/skillmind-pglite
 ```
 
+同じ package root で `python3 scripts/probe_postgres_read.py --pglite-root /tmp/skillmind-pglite` を実行すると、本番 read/describe Source をメモリ PostgreSQL に接続し、空表・複合主鍵・主鍵なし、字段エラー後の rollback/訂正、DDL 更新、欠落表・権限不足を確認できる。adapter の SQLSTATE 写像であり、実 asyncpg 接続・Run 認可・複数 Worker の競争は別の検証である。
+
 Backend 依存を外置した環境ではその path も PYTHONPATH に加える。実 PostgreSQL の検証は前節の承認済み server/account で別途行う。
 
 `--rv-reviewer` は別途用意した業務 DDL に依存する補助 probe。現 checkout に `scripts/sql/rv-reviewer-schema.sql` と `rv-reviewer-grants.sql` は含まれないため、標準検証の必須手順には使わない。通常の PostgreSQL 回执 probe と、対象 Skill/プロジェクトの実際の業務 Schema 検証を区別する。
@@ -101,7 +103,7 @@ npx -y pnpm@11.7.0 dev
 
 ### ブラウザ回帰
 
-専用 harness は実 Component + mock API を検証し、通常の Vitest には含まれない。
+専用 harness は実 Component + mock API を検証し、通常の Vitest には含まれない。 報告書式と Markdown 抜粋の切替は `check_report_reading.py`、旧 HTML/公開添付の互換性は `check_workspace_reports.py` を使う。
 実 credential/Backend/DB/model は使わず、runner を実環境 URL に向けない。
 
 初回だけ `SKM/web/` で依存を導入し、専用 terminal で Vite を起動する：

@@ -25,7 +25,7 @@ from skillmind.agent.result_validation import ResultValidationError, ResultValid
 from skillmind.agent.stream_lifecycle import close_async_stream
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.core.logging import log_event
-from skillmind.core.timing import ExecutionTimings, timed_async
+from skillmind.core.timing import ExecutionTimings, safe_observation, timed_async
 from skillmind.effects.proposal import parse_change_proposal_request
 from skillmind.runs.budget import BudgetError, BudgetExhaustedError, BudgetUnavailableError
 from skillmind.runs.capacity_retry import MODEL_CAPACITY_CODE, capacity_retry_delay
@@ -670,6 +670,11 @@ class AgentRunExecutor:
                 error_code=error.code if stored_status is RunStatus.FAILED else None,
             )
             return
+
+        with suppress(TypeError, ValueError):
+            safe_observation("run.performance.final_output", run_id=claimed.run_id,
+                run_attempt_id=claimed.run_attempt_id,
+                output_bytes=len(canonical_json(validated.data).encode("utf-8")))
 
         record = RunResultRecord(
             output_schema=validated.validation["schema_ref"],

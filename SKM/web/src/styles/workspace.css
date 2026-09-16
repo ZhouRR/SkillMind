@@ -653,3 +653,6 @@
 .branch-failed,
 .branch-timed_out { border-color: var(--danger-border); color: var(--danger); background: var(--danger-soft); }
 .branch-cancelled { border-color: var(--border-strong); color: var(--text-muted); background: var(--surface-raised); }
+
+/* 時刻と所要時間を併記し、狭いカードでも duration 自体は途中で折らない。 */
+.runDuration { font-variant-numeric: tabular-nums; white-space: nowrap; }

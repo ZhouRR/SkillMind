@@ -427,6 +427,22 @@ class RunDocumentSnapshotResponse(BaseModel):
     snapshot: DocumentSnapshotResponse | None
 
 
+class ExecutionMetricsResponse(BaseModel):
+    """監査済み訂正と未知の因果を区別する read-only 指標。"""
+
+    structural_errors: int = Field(ge=0)
+    repeated_query_errors: int = Field(ge=0)
+    correction_attempts: int = Field(ge=0)
+    corrected_reads: int = Field(ge=0)
+    unresolved_tool_errors: int = Field(ge=0)
+    duplicate_reads: int = Field(ge=0)
+    schema_reads: int = Field(ge=0)
+    schema_cache_hits: int = Field(ge=0)
+    schema_refreshes: int = Field(ge=0)
+    manual_responses: int = Field(ge=0)
+    query_error_interventions: int | None = Field(default=None, ge=0)
+
+
 class RunDetailResponse(BaseModel):
     """Project-scoped Run、Result、ToolCall、Evidence の read response。"""
 
@@ -454,6 +470,9 @@ class RunDetailResponse(BaseModel):
     change_proposals: list[ChangeProposalResponse]
     approvals: list[ChangeApprovalResponse]
     effect_executions: list[EffectExecutionResponse]
+    execution_metrics: ExecutionMetricsResponse | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
 
 
 class RunHistoryItemResponse(BaseModel):
@@ -929,6 +948,10 @@ def _run_detail_response(detail: RunDetail) -> RunDetailResponse:
             ),
             created_at=result.created_at,
         ),
+        execution_metrics=(ExecutionMetricsResponse.model_validate(detail.execution_metrics)
+            if detail.execution_metrics is not None else None),
+        started_at=detail.started_at,
+        finished_at=detail.finished_at,
         tool_calls=[
             ToolCallSummaryResponse(
                 tool_call_id=item.tool_call_id,

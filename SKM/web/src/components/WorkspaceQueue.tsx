@@ -1,3 +1,4 @@
+import { RunDuration } from './RunDuration'
 import { useEffect, useState } from 'react'
 import { loadRunHistory, type RunHistoryPageRecord, type RunStatus } from '../api'
 import { useMessages } from '../i18n'
@@ -52,7 +53,7 @@ export function WorkspaceQueue(props: Parameters<typeof WorkspaceReports>[0]) {
         : <ul className="pendingList">{page.items.map((item) => <li key={item.run_id}>
           <a className="pendingItem" href={routeHref('history', projectId, { runId: item.run_id })}>
             <span className="pendingItemTitle"><strong>{runHistoryTitle(item, messages.elements.unnamedRunTitle)}</strong>
-              <small>{formatLocalTimestamp(item.finished_at ?? item.created_at)}</small>
+              <small>{formatLocalTimestamp(item.started_at ?? item.created_at)} · <RunDuration run={item} /></small>
             </span><StatusBadge status={item.status} />
           </a>
         </li>)}</ul>}

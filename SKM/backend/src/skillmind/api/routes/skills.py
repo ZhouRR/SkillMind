@@ -347,6 +347,8 @@ class TaskLastRunResponse(BaseModel):
     finished_at: datetime | None
     result_summary: str | None
 
+    started_at: datetime | None = None
+
 
 class TaskCatalogResponse(BaseModel):
     """Project 内で発見可能な実行可能 task の一覧。"""
@@ -1364,6 +1366,7 @@ def _task_last_run_response(last_run: TaskLastRun | None) -> TaskLastRunResponse
         status=last_run.status,
         created_at=last_run.created_at,
         finished_at=last_run.finished_at,
+        started_at=last_run.started_at,
         result_summary=last_run.result_summary,
     )
 

@@ -6,7 +6,7 @@ x-backend-runtime: &backend-runtime
   pull_policy: never
   env_file:
     - ${ENV_FILE:-.env}
-  environment:
+  environment: &backend-environment
     SKILLMIND_CONTEXT_PATH: ${SKILLMIND_CONTEXT_PATH:-/skillmind}
     TZ: ${SKILLMIND_TIMEZONE:-Asia/Tokyo}
   restart: unless-stopped
@@ -100,6 +100,15 @@ services:
 
   worker:
     <<: *backend-runtime
+    # 外部 Agent 通信だけを代理へ送り、内部サービスと loopback MCP は直接接続する。
+    environment:
+      <<: *backend-environment
+      HTTP_PROXY: ${SKILLMIND_WORKER_HTTP_PROXY:-}
+      HTTPS_PROXY: ${SKILLMIND_WORKER_HTTPS_PROXY:-}
+      http_proxy: ${SKILLMIND_WORKER_HTTP_PROXY:-}
+      https_proxy: ${SKILLMIND_WORKER_HTTPS_PROXY:-}
+      NO_PROXY: "${SKILLMIND_WORKER_NO_PROXY:-},localhost,127.0.0.1,::1,api,postgres,redis,object-storage"
+      no_proxy: "${SKILLMIND_WORKER_NO_PROXY:-},localhost,127.0.0.1,::1,api,postgres,redis,object-storage"
     command:
       - python
       - -m

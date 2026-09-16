@@ -131,3 +131,16 @@ def test_emit_failure_does_not_escape(monkeypatch) -> None:
     with metrics.measure("result_finalize"):
         pass
     metrics.emit(run_id=uuid4(), run_attempt_id=uuid4())
+
+
+@pytest.mark.parametrize('failure', [ValueError('private'), asyncio.CancelledError()])
+def test_result_subphase_does_not_replace_failure_when_log_sink_fails(monkeypatch, failure):
+    """下位計測も元失敗を維持し、別の業務戻り値へ変換しない。"""
+    def broken(*args, **kwargs):
+        """観測先障害の合成例。"""
+        raise OSError('log sink unavailable')
+    monkeypatch.setattr(timing, 'log_event', broken)
+    with pytest.raises(type(failure)) as caught:
+        with timing.observe_phase('run.performance.result_schema', run_id=uuid4()):
+            raise failure
+    assert caught.value is failure

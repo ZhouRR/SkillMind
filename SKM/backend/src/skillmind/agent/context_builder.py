@@ -10,6 +10,7 @@ from uuid import UUID
 
 from jsonschema import Draft202012Validator, FormatChecker
 
+from skillmind.agent.database_provider import DatabaseReadProvider
 from skillmind.agent.document_inspection import DocumentInspectProvider
 from skillmind.agent.document_listing import DocumentListProvider
 from skillmind.agent.document_provider import DocumentConvertProvider, DocumentProvider
@@ -26,6 +27,7 @@ from skillmind.agent.repository_source import (
     RepositoryBindingRef,
     RepositorySnapshotSource,
 )
+from skillmind.agent.runtime_policy import uses_modern_runtime
 from skillmind.agent.subagent import SUBAGENT_DISPATCH_CAPABILITY
 from skillmind.agent.task_brief import (
     build_agent_task_brief,
@@ -121,14 +123,18 @@ def _read_tool_definitions(
 
     definitions: list[ToolDefinition] = []
     if mcp_provider is not None:
-        definitions.append(ToolDefinition(
-            capability="mcp.read/v1",
-            description="Read text or Base64 content from one allowed MCP resource URI",
-            request_schema=contracts.load("tools/mcp.read/v1/request.schema.json"),
-            response_schema=contracts.load("tools/mcp.read/v1/response.schema.json"),
-            error_schema=contracts.load("tools/mcp.read/v1/error.schema.json"),
-            providers={"mcp": mcp_provider},
-        ))
+        definitions.append(
+            ToolDefinition(
+                capability="mcp.read/v1",
+                description="Read text or Base64 content from one allowed MCP resource URI",
+                request_schema=contracts.load("tools/mcp.read/v1/request.schema.json"),
+                response_schema=contracts.load(
+                    "tools/mcp.read/v1/response.schema.json"
+                ),
+                error_schema=contracts.load("tools/mcp.read/v1/error.schema.json"),
+                providers={"mcp": mcp_provider},
+            )
+        )
     if database_provider is not None:
         definitions.append(
             ToolDefinition(
@@ -138,31 +144,84 @@ def _read_tool_definitions(
                     "and bounded rows; use include_schema to inspect columns and primary keys "
                     "even for empty tables before proposing a write; no SQL input"
                 ),
-                request_schema=contracts.load("tools/database.read/v1/request.schema.json"),
-                response_schema=contracts.load("tools/database.read/v1/response.schema.json"),
+                request_schema=contracts.load(
+                    "tools/database.read/v1/request.schema.json"
+                ),
+                response_schema=contracts.load(
+                    "tools/database.read/v1/response.schema.json"
+                ),
                 error_schema=contracts.load("tools/database.read/v1/error.schema.json"),
                 providers={"postgres": database_provider},
             )
         )
+    if database_provider is not None:
+        for capability, description in (
+            (
+                "database.read/v2",
+                "Read the exact authorized PostgreSQL table; no SQL. Use "
+                "database.describe/v1 when columns or keys are unknown. Preserve query "
+                "meaning. After one correctable failure, link a corrected read with "
+                "recovery.failed_tool_call_id and schema_evidence_ref. Do not repeat "
+                "unchanged queries.",
+            ),
+            (
+                "database.describe/v1",
+                "Inspect only the named authorized table's columns and ordered primary key, "
+                "without reading rows. Reuse Run observations unless refresh=true or "
+                "correcting a structural error. recovery_from links the original failed "
+                "ToolCall. Cached structure is not current DDL or write permission.",
+            ),
+        ):
+            name, version = capability.split("/")
+            definitions.append(
+                ToolDefinition(
+                    capability=capability,
+                    description=description,
+                    request_schema=contracts.load(
+                        f"tools/{name}/{version}/request.schema.json"
+                    ),
+                    response_schema=contracts.load(
+                        f"tools/{name}/{version}/response.schema.json"
+                    ),
+                    error_schema=contracts.load(
+                        f"tools/{name}/{version}/error.schema.json"
+                    ),
+                    providers={"postgres": database_provider},
+                )
+            )
     if redmine_issue_provider is not None:
-        definitions.append(ToolDefinition(
-            capability="issue.read/v1",
-            description="Read one issue from the bound Integration",
-            request_schema=contracts.load("tools/issue.read/v1/request.schema.json"),
-            response_schema=contracts.load("tools/issue.read/v1/response.schema.json"),
-            error_schema=contracts.load("tools/issue.read/v1/error.schema.json"),
-            providers={"redmine": redmine_issue_provider},
-        ))
+        definitions.append(
+            ToolDefinition(
+                capability="issue.read/v1",
+                description="Read one issue from the bound Integration",
+                request_schema=contracts.load(
+                    "tools/issue.read/v1/request.schema.json"
+                ),
+                response_schema=contracts.load(
+                    "tools/issue.read/v1/response.schema.json"
+                ),
+                error_schema=contracts.load("tools/issue.read/v1/error.schema.json"),
+                providers={"redmine": redmine_issue_provider},
+            )
+        )
     if repository_source is not None:
         bound = RepositoryReadProvider(repository_source)
-        definitions.append(ToolDefinition(
-            capability="repository.read/v1",
-            description="Read one UTF-8 file from the bound repository at a fixed revision",
-            request_schema=contracts.load("tools/repository.read/v1/request.schema.json"),
-            response_schema=contracts.load("tools/repository.read/v1/response.schema.json"),
-            error_schema=contracts.load("tools/repository.read/v1/error.schema.json"),
-            providers={"git": bound, "svn": bound},
-        ))
+        definitions.append(
+            ToolDefinition(
+                capability="repository.read/v1",
+                description="Read one UTF-8 file from the bound repository at a fixed revision",
+                request_schema=contracts.load(
+                    "tools/repository.read/v1/request.schema.json"
+                ),
+                response_schema=contracts.load(
+                    "tools/repository.read/v1/response.schema.json"
+                ),
+                error_schema=contracts.load(
+                    "tools/repository.read/v1/error.schema.json"
+                ),
+                providers={"git": bound, "svn": bound},
+            )
+        )
     return tuple(definitions)
 
 
@@ -534,6 +593,7 @@ class ProductionRunContextBuilder:
         git_writes_enabled: bool = False,
         document_library_target: DocumentLibraryTarget | None = None,
         proposal_continuations: ProposalContinuationReader | None = None,
+        database_observations: DatabaseReadProvider | None = None,
     ) -> None:
         """Workspace、Tool と model の Worker 起動時 snapshot を保持する。
 
@@ -547,6 +607,7 @@ class ProductionRunContextBuilder:
         self._materializer = materializer
         self._document_library_target = document_library_target
         self._proposal_continuations = proposal_continuations
+        self._database_observations = database_observations
         self._execution_features = ExecutionFeatures(
             deferred_features_enabled, database_writes_enabled,
             document_writes_enabled, git_writes_enabled
@@ -664,6 +725,13 @@ class ProductionRunContextBuilder:
             segment_no=claimed_run.segment_no,
             segment_objective=_segment_objective(claimed_run.segment_objective_json),
             checkpoint=claimed_run.checkpoint_json,
+            effect_receipts=(await self._proposal_continuations.receipts(claimed_run)
+                if self._proposal_continuations is not None
+                and uses_modern_runtime(task) else ()),
+            database_observations=(await self._database_observations.project_facts(
+                claimed_run, tools, workspace
+            )
+                if self._database_observations is not None else ()),
             # 物化器が実際に書いた落点だけを Brief へ載せる (計画 §19 W6)。未配線環境で存在
             # しない directory を案内すると、Agent は読めない path を試して行き詰まる。
             materialized=materialized,
@@ -824,7 +892,22 @@ def _resolve_source_tools(
             # 複数の文書 slot は同じ Run 集合を読む。SDK 名を重複登録しない。
             continue
         tools.append(resolved)
+    if uses_modern_runtime(claimed_run.task_snapshot_json):
+        for original in tuple(tools):
+            if original.capability != "database.read/v1":
+                continue
+            for capability in ("database.read/v2", "database.describe/v1"):
+                if capability not in allowed:
+                    raise ValueError("Database assistance requires frozen permission")
+                tools.append(registry.resolve(
+                    capability, provider=original.provider,
+                    integration_id=original.integration_id, binding_id=original.binding_id,
+                    execution_profile=execution_profile,
+                ))
+            tools.remove(original)
     resolved_capabilities = {tool.capability for tool in tools}
+    if "database.read/v2" in resolved_capabilities:
+        resolved_capabilities.add("database.read/v1")
     for tool_requirement in _sequence(manifest.get("tools")):
         if not isinstance(tool_requirement, Mapping):
             continue

@@ -21,6 +21,11 @@
 - MCP 每次读取独立会话，用 SDK 处理初始化与 JSON/SSE；传输层限定原 endpoint、禁跳转和压缩、至多 16 次 HTTP 请求、单响应 1 MiB、累计响应 3 MiB，初始化与读取共用 20 秒 deadline。取消关闭本地会话/连接，不由 disconnect 推断远端已停止；不自动重放资源读取。文本或 Base64 内容最多 20 项、合计 1 MiB，超限整次失败，不静默截断。I/O 前后复验原 binding/凭据，记录读取时间、内容 hash 和 Evidence；第三方传输日志不输出 URL、会话 ID 或正文。
 - PostgreSQL 读取可显式指定 `include_schema=true`，为普通表或分区表附带完整列名、SQL 类型、列级 NOT NULL 标记、默认值存在标记、generated/identity 属性和按定义顺序排列的主键，空表同样返回结构。只接受原 binding 内且当前账号拥有完整 SELECT 权限的表；先取得该表的 ACCESS SHARE 锁，再在同一 REPEATABLE READ、READ ONLY 事务内查询结构与数据，结构缺失、权限不足或超限均整次失败。结构最多 100 列、64 KiB，与行数据共用 1 MiB 上限，不返回默认表达式、CHECK/域约束或其他表信息。结构完整不代表行投影完整，也不授予写入权限或替代按精确主键取得的原行/不在场 Evidence。结构一并纳入响应和 Evidence 的内容 hash；省略或关闭此选项时保持旧响应形状和摘要算法，不补写历史结构。旧 Worker 不认识此选项时须拒绝请求，不能把缺失结构当成功。
 
+- 新运行策略从已选择且冻结的 `database.read/v1` binding 派生 `database.read/v2` 与 `database.describe/v1`，同时固定权限上限和工具契约；它们不是新的资源必填项，也不扩大表范围。旧 Run 继续使用 v1。`describe` 不接受行条件，不查询行，只返回同一授权表的列属性、有序主键、观测时间、结构 checksum 和 Evidence；无主键返回空数组。普通读取不强制先 describe，写入仍需精确主键的实时原行/不在场观察与受控回读。
+- 数据库诊断按结构化 SQLSTATE 和 `connect/schema_read/row_read/result_decode/cleanup` 分类。调用者查询的字段或参数类型错误映射 `invalid_request`，确切目标不存在映射 `not_found`，权限不足映射 `scope_denied`，连接故障和不可可靠分类映射 `unavailable`。平台自身结构 SQL 的错误不建议修改业务过滤条件。不反射 driver 本文、SQL、参数或 hint，错误分支也复验授权；取消保持原语义。
+- 可修正错误不原样重试：在 Skill 允许时，`describe.recovery_from` 指向原失败 ToolCall，再用 read v2 的 `recovery.failed_tool_call_id/schema_evidence_ref` 明确关联修正查询。平台按同 Run、binding、integration 和表校验，最多一次结构确认与一次关联订正；不改 SQL/条件、不重放写入，原 FAILED 审计保留。无明确关联的后续成功不算已恢复。
+- 结构复用从同 Run 的 ToolCall/Evidence 读取，身份包含 binding/checksum、integration 和精确表名；每次使用仍检查当前授权。cache hit 保留原时间、结构 hash 和证据，checksum 不证明 DDL 新鲜度；`refresh=true` 或结构错误的恢复调用重新观测。行数据不缓存、不根据旧结构拒绝新字段；缓存缺失、损坏或容量超限退回受控获取。后续 Segment 只采用其创建前的结构观测，同 Segment 重试不改已冻结投影；不跨 Run 共享。
+
 - [`mcp.read/v1`](../../SKM/contracts/tools/mcp.read/v1/request.schema.json) 与 PostgreSQL 一样，经能力目录、可信 Provider、原 binding/撤权检查、Evidence 和 Worker 装配进入 Run；不得把远端 MCP 配置直接交给模型 SDK，或依据远端声明自动授予工具权限。配置或本机合成服务验证不代表真实业务 DB/MCP 验收。
 
 ## Excel 取得与转换的扩展边界

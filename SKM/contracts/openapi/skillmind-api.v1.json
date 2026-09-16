@@ -2082,6 +2082,87 @@
         "title": "EvidenceResponse",
         "type": "object"
       },
+      "ExecutionMetricsResponse": {
+        "description": "監査済み訂正と未知の因果を区別する read-only 指標。",
+        "properties": {
+          "corrected_reads": {
+            "minimum": 0.0,
+            "title": "Corrected Reads",
+            "type": "integer"
+          },
+          "correction_attempts": {
+            "minimum": 0.0,
+            "title": "Correction Attempts",
+            "type": "integer"
+          },
+          "duplicate_reads": {
+            "minimum": 0.0,
+            "title": "Duplicate Reads",
+            "type": "integer"
+          },
+          "manual_responses": {
+            "minimum": 0.0,
+            "title": "Manual Responses",
+            "type": "integer"
+          },
+          "query_error_interventions": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query Error Interventions"
+          },
+          "repeated_query_errors": {
+            "minimum": 0.0,
+            "title": "Repeated Query Errors",
+            "type": "integer"
+          },
+          "schema_cache_hits": {
+            "minimum": 0.0,
+            "title": "Schema Cache Hits",
+            "type": "integer"
+          },
+          "schema_reads": {
+            "minimum": 0.0,
+            "title": "Schema Reads",
+            "type": "integer"
+          },
+          "schema_refreshes": {
+            "minimum": 0.0,
+            "title": "Schema Refreshes",
+            "type": "integer"
+          },
+          "structural_errors": {
+            "minimum": 0.0,
+            "title": "Structural Errors",
+            "type": "integer"
+          },
+          "unresolved_tool_errors": {
+            "minimum": 0.0,
+            "title": "Unresolved Tool Errors",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "structural_errors",
+          "repeated_query_errors",
+          "correction_attempts",
+          "corrected_reads",
+          "unresolved_tool_errors",
+          "duplicate_reads",
+          "schema_reads",
+          "schema_cache_hits",
+          "schema_refreshes",
+          "manual_responses"
+        ],
+        "title": "ExecutionMetricsResponse",
+        "type": "object"
+      },
       "FlowAssessmentResponse": {
         "additionalProperties": false,
         "description": "既存の四段階 readiness を全 Blueprint の現在状態として保持する。",
@@ -5943,6 +6024,28 @@
             "title": "Evidence",
             "type": "array"
           },
+          "execution_metrics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionMetricsResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
           "input": {
             "additionalProperties": true,
             "title": "Input",
@@ -6037,6 +6140,18 @@
             },
             "title": "Skill Snapshots",
             "type": "array"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
           },
           "status": {
             "$ref": "#/components/schemas/RunStatus"
@@ -8177,6 +8292,18 @@
             "format": "uuid",
             "title": "Run Id",
             "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
           },
           "status": {
             "$ref": "#/components/schemas/RunStatus"

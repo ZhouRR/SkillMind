@@ -1,3 +1,4 @@
+import { RunDuration } from '../components/RunDuration'
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 
 import {
@@ -320,7 +321,7 @@ function TaskCard({ row, projectId, projectReadOnly, schedulingEnabled, onSchedu
       <p className="hint taskCardLastRun">
         {messages.tasks.lastRunLabel}:{' '}
         {row.task.last_run
-          ? <>{formatLocalTimestamp(row.task.last_run.created_at)} <StatusBadge status={row.task.last_run.status} /></>
+          ? <>{formatLocalTimestamp(row.task.last_run.started_at ?? row.task.last_run.created_at)} <StatusBadge status={row.task.last_run.status} /> <RunDuration run={row.task.last_run} /></>
           : messages.tasks.neverRun}
       </p>
       <div className="taskCardActions">

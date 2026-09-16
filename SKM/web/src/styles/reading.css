@@ -132,3 +132,85 @@
   .reportRunMeta > a { margin-left: 0; }
   .workspaceReports .outcomeReportFrame { min-height: 24rem; }
 }
+
+/* プラットフォームの監査要約は report 本文と区別し、展開後も狭幅で折り返す。 */
+.executionMetrics { margin: 8px 0 18px; color: var(--text-muted); font-size: 13px; }
+.executionMetrics summary { cursor: pointer; line-height: 1.7; }
+.outcomePartial strong { color: var(--warn); }
+
+/* 原 Outcome の内容を、見出し・要約・根拠の順に読む共通の報告書式。 */
+.resultView .reportSummary { position: static; display: block; border: 1px solid var(--border); border-top: 3px solid var(--accent-border); border-radius: var(--radius-small); padding: 22px 24px 18px; background: var(--surface); box-shadow: none; }
+.resultView .reportSummary > div { display: block; min-width: 0; }
+.resultView .reportSummary h3 { max-width: none; margin: 0 0 14px; overflow: visible; color: var(--text-hi); font-size: 20px; font-weight: 700; line-height: 1.5; white-space: normal; }
+.resultView .reportSummary dl { display: flex; flex-wrap: wrap; gap: 10px 28px; margin-top: 18px; border-top: 1px solid var(--border); padding-top: 14px; }
+.resultView .reportSummary dl > div { display: grid; gap: 4px; }
+.resultView .reportSummary dd { color: var(--text); font-size: 13px; white-space: normal; }
+.resultView .reportSummary .reviewRequired dd { color: var(--warn); }
+.resultReportBody .outcomeEnvelope { gap: 26px; }
+.resultReportBody .outcomeGroup { min-width: 0; gap: 16px; }
+.resultReportBody .outcomeGroup > h4 { border-bottom: 1px solid var(--border); padding-bottom: 10px; color: var(--text-hi); font-size: 14px; font-weight: 650; }
+.resultReportBody .outcomeCard { min-width: 0; gap: 12px; padding: 0 0 18px; }
+.resultReportBody .outcomeCard:last-child { border-bottom: 0; padding-bottom: 0; }
+.outcomeCardHeading { align-items: baseline; flex-wrap: wrap; }
+.outcomeCardHeading h5 { margin: 0; color: var(--text-hi); font-size: 16px; font-weight: 650; line-height: 1.6; overflow-wrap: anywhere; }
+.outcomeCard .outcomeSeverity { border: 1px solid var(--border); border-radius: 4px; padding: 2px 7px; color: var(--text-muted); font-size: 11px; }
+.outcomeCard > button { justify-self: start; }
+.resultReportBody .outcomeColumns { gap: 20px; }
+.resultReportBody .outcomeColumns > .outcomeGroup { align-content: start; border-left: 3px solid var(--warn-border); padding: 12px 16px; background: var(--warn-soft); }
+.resultReportBody .outcomeColumns > .outcomeGroup > h4 { border-bottom: 0; padding-bottom: 0; }
+.resultReportBody .outcomeColumns > .outcomeGroup:only-child { grid-column: 1 / -1; }
+
+/* レポート閲覧中の起動入口は上段に収め、左 rail の幅を本文へ戻す。 */
+.workspace:has(.workspaceReports) { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.workspace:has(.workspaceReports) > .workspaceRail { position: static; display: flex; flex-direction: row; justify-content: flex-end; max-height: none; }
+.workspace:has(.workspaceReports) .runLauncher { display: flex; flex: 0 1 auto; align-items: center; flex-wrap: wrap; gap: 12px; margin: 0; padding: 0; border: 0; background: transparent; box-shadow: none; }
+.workspace:has(.workspaceReports) .runLauncher > button { width: auto; margin: 0; }
+.workspace:has(.workspaceReports) .runLauncher .panelHeader,
+.workspace:has(.workspaceReports) .launcherTaskCount { display: none; }
+.resultActions .runDuration { margin-right: auto; align-self: center; font-size: 13px; color: var(--text-muted); }
+.deliverableContent { min-width: 0; }
+.outcomeCardActions { display: flex; flex-wrap: wrap; gap: 8px; }
+.deliverableContent > summary, .outcomeEffects > summary, .artifactMetadata > summary, .evidenceMetadata > summary { cursor: pointer; color: var(--text-muted); font-size: 13px; line-height: 1.8; }
+.deliverableContent[open] > summary, .outcomeEffects[open] > summary { margin-bottom: 14px; }
+.resultReportBody .outcomeEffects { display: block; border-top: 1px solid var(--border); padding-top: 14px; }
+.outcomeEffects .eventCount { display: inline-grid; margin-left: 8px; }
+.outcomeEffects > p { margin: 10px 0; }
+.evidenceCard > summary strong { white-space: normal; overflow-wrap: anywhere; font: 600 14px/1.6 var(--font-body); }
+.evidenceCard > .evidenceMetadata { margin-bottom: 14px; }
+.evidenceCard .evidenceMetadata > summary { display: list-item; padding: 6px 0; list-style: disclosure-closed inside; }
+.evidenceCard .evidenceMetadata[open] > summary { list-style-type: disclosure-open; }
+.evidenceMetadata > code { display: block; overflow-wrap: anywhere; margin-bottom: 10px; color: var(--text-muted); }
+.artifactMetadata code { display: block; margin: 6px 0; overflow-wrap: anywhere; font-size: 12px; color: var(--text-muted); }
+.artifactMarkdownPreview { padding: 12px; }
+.artifactMarkdownPreview .readingMarkdown { max-width: 1280px; margin: 0 auto; }
+
+/* Markdown の表・長い code は自身でスクロールし、周囲の本文幅を広げない。 */
+.readingMarkdown { min-width: 0; color: var(--text); font: 400 15px/1.85 var(--font-body); overflow-wrap: anywhere; }
+.readingMarkdown > :first-child { margin-top: 0; }
+.readingMarkdown > :last-child { margin-bottom: 0; }
+.readingMarkdown p, .resultReportBody .readingMarkdown p { margin: 0 0 12px; color: inherit; font: inherit; }
+.readingMarkdown :is(h4, h5, h6), .resultReportBody .readingMarkdown :is(h4, h5, h6) { display: block; margin: 20px 0 10px; color: var(--text-hi); font-size: 1.06em; font-weight: 650; line-height: 1.6; }
+.readingMarkdown > :is(h4, h5, h6):first-child { margin-top: 0; }
+.readingMarkdown strong, .resultReportBody .readingMarkdown strong { color: inherit; font-size: inherit; font-weight: 650; }
+.readingMarkdown :is(ul, ol) { margin: 8px 0 14px; padding-left: 1.6em; }
+.readingMarkdown li { margin: 4px 0; padding-left: 3px; }
+.readingMarkdown li > p { margin-bottom: 4px; }
+.readingMarkdown code { border-radius: 4px; padding: 2px 5px; background: var(--surface-raised); color: var(--text-hi); font: .88em/1.7 var(--font-mono); }
+.readingMarkdown pre, .resultReportBody .readingMarkdown pre { max-width: 100%; max-height: 32rem; overflow: auto; border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; background: var(--surface-raised); color: var(--text); font: 13px/1.7 var(--font-mono); white-space: pre; }
+.readingMarkdown pre code { padding: 0; font: inherit; background: transparent; }
+.readingMarkdown table { display: block; max-width: 100%; overflow: auto; margin: 16px 0; border-collapse: collapse; font-size: 13px; line-height: 1.65; }
+.readingMarkdown :is(th, td) { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; min-width: 100px; }
+.readingMarkdown th { background: var(--surface-raised); color: var(--text-hi); font-weight: 650; }
+.readingMarkdown blockquote { margin: 14px 0; border-left: 3px solid var(--border-strong); padding: 4px 16px; color: var(--text-muted); }
+.readingMarkdown hr { margin: 20px 0; border: 0; border-top: 1px solid var(--border); }
+.excerptToolbar { display: flex; gap: 6px; margin: 14px 0; }
+.excerptToolbar button[aria-pressed="true"] { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent); }
+.evidenceCard > .readingMarkdown { margin: 16px 0 20px; }
+.evidenceCard { min-width: 0; }
+.evidenceCard summary > span:first-child { min-width: 0; }
+.evidenceCard summary > span:last-child { flex-shrink: 0; }
+.evidenceCard .excerptSource { max-height: none; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .resultView .reportSummary { padding: 16px; }
+  .resultReportBody .outcomeColumns { grid-template-columns: minmax(0, 1fr); }
+}

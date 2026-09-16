@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "provider",
+    "table",
+    "rows",
+    "read_at",
+    "truncated",
+    "content_hash",
+    "evidence_refs",
+    "warnings"
+  ],
+  "properties": {
+    "status": {
+      "const": "success"
+    },
+    "provider": {
+      "const": "postgres"
+    },
+    "table": {
+      "type": "string",
+      "pattern": "^[a-zA-Z_][a-zA-Z0-9_$]{0,62}\\.[a-zA-Z_][a-zA-Z0-9_$]{0,62}$"
+    },
+    "rows": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object"
+      }
+    },
+    "read_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "content_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "evidence_refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "pattern": "^ev_[a-zA-Z0-9_-]+$"
+      },
+      "uniqueItems": true
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "row_hashes": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "string",
+        "pattern": "^sha256:[0-9a-f]{64}$"
+      },
+      "description": "Full returned row revisions in rows order. For update observation, request all columns and exact primary key filters."
+    },
+    "table_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "columns",
+        "primary_key"
+      ],
+      "description": "Present only when include_schema was requested. At most 64 KiB. No default expressions, constraints or data values. Metadata grants no write permission and does not replace exact-key row observation.",
+      "properties": {
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "data_type",
+              "not_null",
+              "has_default",
+              "generated",
+              "identity"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z_][a-zA-Z0-9_$]{0,62}$"
+              },
+              "data_type": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "not_null": {
+                "type": "boolean",
+                "description": "Column NOT NULL flag; does not describe domain or check constraints."
+              },
+              "has_default": {
+                "type": "boolean"
+              },
+              "generated": {
+                "type": "boolean"
+              },
+              "identity": {
+                "enum": [
+                  "NONE",
+                  "ALWAYS",
+                  "BY_DEFAULT"
+                ]
+              }
+            }
+          }
+        },
+        "primary_key": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-zA-Z_][a-zA-Z0-9_$]{0,62}$"
+          }
+        }
+      }
+    }
+  },
+  "$id": "https://schemas.skillmind.local/tools/database.read/v2/response.schema.json",
+  "title": "database.read/v2 response"
+}

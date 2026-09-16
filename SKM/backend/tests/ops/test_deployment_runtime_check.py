@@ -142,7 +142,11 @@ def test_compose_shares_backend_image_env_and_checks_worker_heartbeat() -> None:
     for role in ("worker", "maintenance"):
         assert services[role]["image"] == api["image"]
         assert services[role]["env_file"] == api["env_file"]
-        assert services[role]["environment"] == api["environment"]
+        assert services[role]["environment"].items() >= api["environment"].items()
         assert "--check" in services[role]["healthcheck"]["test"]
+    proxy_keys = {"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"}
+    assert proxy_keys <= services["worker"]["environment"].keys()
+    for role in ("api", "maintenance", "migrate"):
+        assert not proxy_keys.intersection(services[role]["environment"])
     assert "codex-data:/var/lib/skillmind/codex" in services["worker"]["volumes"]
     assert "volumes" not in api
