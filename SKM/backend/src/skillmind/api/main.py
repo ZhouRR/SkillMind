@@ -37,34 +37,17 @@ from skillmind.db.resources import (
     create_redis_client,
     create_session_factory,
 )
-from skillmind.documents.library import (
-    DOCUMENT_LIBRARY_PROVIDER,
-    DOCUMENT_WRITE_CAPABILITY,
-    configured_document_library,
-)
-from skillmind.documents.resource_catalog import DocumentResourceCatalog
+from skillmind.documents.library import configured_document_library
 from skillmind.documents.service import DocumentService
-from skillmind.documents.snapshot import (
-    DOCUMENT_CAPABILITIES,
-    DOCUMENT_PROVIDER,
-)
 from skillmind.effects.reconciliation_request_service import ReconciliationRequestService
 from skillmind.effects.release import configured_execution_features
 from skillmind.effects.service import EffectService
 from skillmind.evaluations import EvaluationService
-from skillmind.integrations import (
-    INSTALLED_PROVIDER_CAPABILITIES,
-    IntegrationService,
-)
-from skillmind.integrations.resource_catalog import (
-    CompositeProjectResourceCatalog,
-    IntegrationResourceCatalog,
-)
+from skillmind.integrations import IntegrationService
 from skillmind.projects import ProjectService
 from skillmind.runs.service import RunService
 from skillmind.schedules import ScheduleService
-from skillmind.skills import SkillService
-from skillmind.skills.document_prerequisites import DOCUMENT_READINESS_CAPABILITY
+from skillmind.skills.service_wiring import build_skill_service
 from skillmind.skills.wiring import build_skill_interpreter
 from skillmind.storage.factory import create_document_upload_limits, create_file_storage
 from skillmind.users.service import UserService
@@ -127,38 +110,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.reconciliation_requests = ReconciliationRequestService(
         app.state.database_session_factory, document_library_target=document_library_target,
     )
-    interpreter, catalog, identity, default_model = build_skill_interpreter(settings)
-    app.state.skill_service = SkillService(
-        app.state.database_session_factory,
-        settings.contracts_dir,
-        interpreter=interpreter,
-        capability_catalog=catalog,
-        interpreter_identity=identity,
-        default_model=default_model,
+    # API/Worker は同じ組立入口を使う。モデル呼出しと追加の受付門禁はここに置かない。
+    interpreter_components = build_skill_interpreter(settings)
+    app.state.skill_service = build_skill_service(
+        settings,
+        interpreter_components=interpreter_components,
+        session_factory=app.state.database_session_factory,
         file_storage=app.state.file_storage,
-        storage_bucket=settings.object_storage_bucket,
-        resource_catalog=CompositeProjectResourceCatalog(
-            (
-                DocumentResourceCatalog(
-                    app.state.database_session_factory, library_target=document_library_target
-                ),
-                IntegrationResourceCatalog(app.state.database_session_factory),
-            )
-        ),
-        registered_write_capabilities=features.write_capabilities,
-        # Integration Provider の installed 索引に、Integration 外だが常に配線済みの
-        # document Provider を合流させる (計画 §19 W1)。就緒度が候補の provider を実行可能性まで
-        # 検査できるようにする唯一の注入点。
-        installed_provider_capabilities={
-            **{capability: frozenset(
-                provider for provider in providers
-                if features.provider_enabled(capability, provider)
-            ) for capability, providers in INSTALLED_PROVIDER_CAPABILITIES.items()},
-            DOCUMENT_READINESS_CAPABILITY: frozenset({"platform"}),
-            **{item: frozenset({DOCUMENT_PROVIDER}) for item in DOCUMENT_CAPABILITIES},
-            **({DOCUMENT_WRITE_CAPABILITY: frozenset({DOCUMENT_LIBRARY_PROVIDER})}
-               if features.document_writes and document_library_target is not None else {}),
-        },
+        document_library_target=document_library_target,
     )
     app.state.document_service = DocumentService(
         app.state.database_session_factory,
