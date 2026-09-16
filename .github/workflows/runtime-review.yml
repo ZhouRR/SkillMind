@@ -28,7 +28,9 @@ jobs:
       - name: Apply only reviewed changes to isolated checkout
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python .github/runtime_review_patch.py
+        run: |
+          python .github/runtime_review_patch.py
+          python .github/runtime_review_types.py
       - name: Install pinned application and development dependencies
         working-directory: SKM/backend
         run: python -m pip install -q -e '.[dev]'
@@ -42,15 +44,12 @@ jobs:
           subprocess.run(['python', '-m', 'ruff', 'format', '--config', 'SKM/backend/pyproject.toml', '--no-cache', *paths], check=True)
           subprocess.run(['python', '-m', 'ruff', 'check', '--config', 'SKM/backend/pyproject.toml', '--no-cache', *paths], check=True)
           PY
-      - name: Run new regression tests first
-        working-directory: SKM/backend
-        run: python -m pytest tests/core/test_pubsub.py tests/skills/test_source_projection.py tests/agent/test_continuation_lists.py tests/agent/test_database_observation_selection.py -p no:cacheprovider -o addopts= -q --tb=short
-      - name: Run existing interpreter and execution regressions
-        working-directory: SKM/backend
-        run: python -m pytest tests/skills tests/agent tests/worker tests/runs tests/core tests/contracts -p no:cacheprovider -o addopts= -q --tb=short
       - name: Check application types
         working-directory: SKM/backend
         run: python -m mypy --no-incremental src/skillmind
+      - name: Run new regression tests first
+        working-directory: SKM/backend
+        run: python -m pytest tests/core/test_pubsub.py tests/skills/test_source_projection.py tests/agent/test_continuation_lists.py tests/agent/test_database_observation_selection.py tests/agent/test_json_validation_boundary.py -p no:cacheprovider -o addopts= -q --tb=short
       - name: Validate contracts and regenerate consolidated documentation
         working-directory: SKM
         run: |
@@ -58,6 +57,9 @@ jobs:
           python scripts/validate_contracts.py
           python scripts/build_docs.py
           python scripts/build_docs.py --check
+      - name: Run existing interpreter and execution regressions
+        working-directory: SKM/backend
+        run: python -m pytest tests/skills tests/agent tests/worker tests/runs tests/core tests/contracts -p no:cacheprovider -o addopts= -q --tb=short -rs
       - name: Prepare exact validated Git tree without updating a branch
         env:
           GH_TOKEN: ${{ github.token }}
