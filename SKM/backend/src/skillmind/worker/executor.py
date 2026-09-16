@@ -25,6 +25,7 @@ from skillmind.agent.result_validation import ResultValidationError, ResultValid
 from skillmind.agent.stream_lifecycle import close_async_stream
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.core.logging import log_event
+from skillmind.core.timing import ExecutionTimings, timed_async
 from skillmind.effects.proposal import parse_change_proposal_request
 from skillmind.runs.budget import BudgetError, BudgetExhaustedError, BudgetUnavailableError
 from skillmind.runs.capacity_retry import MODEL_CAPACITY_CODE, capacity_retry_delay
@@ -190,6 +191,7 @@ class AgentRunExecutor:
         finally:
             done.set()
 
+    @timed_async("run.performance.prepare")
     async def _prepare_context(
         self, claimed_run: ClaimedRun, *, sequence_start: int, cancellation: asyncio.Event
     ) -> RunContext | None:
@@ -277,6 +279,7 @@ class AgentRunExecutor:
         # thread 内の I/O が遅れて完了しても、取消済み coroutine は READY/Brief を公開しない。
         return None if cancellation.is_set() else build.result()
 
+    @timed_async("run.performance.engine_total")
     async def _consume_engine(
         self,
         claimed: ClaimedRun,
@@ -304,6 +307,7 @@ class AgentRunExecutor:
         last_event: AgentEvent | None = None
         usage: dict[str, Any] = {}
         cost: dict[str, Any] = {}
+        timings = ExecutionTimings()
         stream = aiter(self._execution_stream(claimed, context))
         loop = asyncio.get_running_loop()
         deadline = loop.time() + context.limits.wall_timeout_seconds
@@ -314,12 +318,14 @@ class AgentRunExecutor:
                 try:
                     if remaining <= 0:
                         raise TimeoutError
-                    if session_ref.done():
-                        event = await asyncio.wait_for(anext(stream), timeout=remaining)
-                    else:
-                        event = await _first_engine_event(
-                            stream, cancellation=cancellation, timeout=remaining
-                        )
+                    # 次 event の待機には SDK・モデル・Tool を含む。純推論時間ではない。
+                    with timings.measure("engine_wait"):
+                        if session_ref.done():
+                            event = await asyncio.wait_for(anext(stream), timeout=remaining)
+                        else:
+                            event = await _first_engine_event(
+                                stream, cancellation=cancellation, timeout=remaining
+                            )
                 except StopAsyncIteration:
                     if await self._run_service.is_cancellation_requested(claimed.run_id):
                         await self._finalize_cancelled(
@@ -396,17 +402,19 @@ class AgentRunExecutor:
                 if event.event_type is AgentEventType.TEXT_DELTA:
                     # 監査 DB を肥大化させず、切断時に失ってよい一時通知として配送する。
                     if self._realtime_publisher is not None:
-                        await self._realtime_publisher.publish(event)
+                        with timings.measure("realtime_publish"):
+                            await self._realtime_publisher.publish(event)
                     continue
                 if event.event_type is AgentEventType.RESULT_COMPLETED:
-                    await self._complete_result(
-                        claimed,
-                        context,
-                        event,
-                        metadata=metadata,
-                        usage=usage,
-                        cost=cost,
-                    )
+                    with timings.measure("result_finalize"):
+                        await self._complete_result(
+                            claimed,
+                            context,
+                            event,
+                            metadata=metadata,
+                            usage=usage,
+                            cost=cost,
+                        )
                     return
                 if event.event_type is AgentEventType.INTERACTION_REQUESTED:
                     request_payload = event.payload.get("interaction_request")
@@ -552,11 +560,12 @@ class AgentRunExecutor:
                         error_code=code if stored_status is RunStatus.FAILED else None,
                     )
                     return
-                await self._run_service.append_agent_event(
-                    claimed,
-                    event,
-                    session_metadata=metadata,
-                )
+                with timings.measure("event_persist"):
+                    await self._run_service.append_agent_event(
+                        claimed,
+                        event,
+                        session_metadata=metadata,
+                    )
 
             await self._finalize_stream_failure(
                 claimed,
@@ -579,7 +588,10 @@ class AgentRunExecutor:
             )
         finally:
             done.set()
-            await _close_stream(stream)
+            try:
+                await _close_stream(stream)
+            finally:
+                timings.emit(run_id=claimed.run_id, run_attempt_id=claimed.run_attempt_id)
 
     def _execution_stream(
         self, claimed: ClaimedRun, context: RunContext

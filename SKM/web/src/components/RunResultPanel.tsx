@@ -15,6 +15,7 @@ import type { InteractionAccessFailure } from '../lib/interactionResponse'
 import { splitOverflow } from '../lib/resultOverflow'
 import { reportPreviewHtml } from '../lib/documentPreview'
 import { EmptyState, ModalDialog } from './PageElements'
+import { LazyAuditSection } from './LazyAuditSection'
 import { RunDocumentSnapshots } from './RunDocumentSnapshots'
 import { ResultValidationScope } from './ResultValidationScope'
 import { RunArtifacts } from './RunArtifacts'
@@ -202,17 +203,15 @@ function RunResultContent({ reportOnly, state, csrfToken, onProposalDecided, art
 
       {/* 以下は備査情報。既定で畳み、件数だけ見出しに残す。 */}
       {!reportOnly && <>
-      <CollapsibleSection count={detail.tool_calls.length} title={messages.runResult.toolCalls}>
-        {detail.tool_calls.length === 0 ? <p className="compactEmpty">{messages.runResult.noToolCalls}</p> : (
+      <LazyAuditSection count={detail.tool_calls.length} title={messages.runResult.toolCalls}>
+        {() => detail.tool_calls.length === 0 ? <p className="compactEmpty">{messages.runResult.noToolCalls}</p> : (
           <ul className="toolSummaryList">{detail.tool_calls.map((tool) => <li key={tool.tool_call_id}><div><strong>{tool.capability}</strong><span>{tool.status}</span></div><p>{tool.provider} · {tool.duration_ms === null ? '—' : `${tool.duration_ms} ms`}</p><code>{JSON.stringify(tool.arguments_summary)}</code></li>)}</ul>
         )}
-      </CollapsibleSection>
+      </LazyAuditSection>
 
-      <CollapsibleSection count={detail.segments.length} title={messages.runResult.conversationAudit}>
-        <RunConversationAudit
-          detail={detail}
-        />
-      </CollapsibleSection>
+      <LazyAuditSection count={detail.segments.length} title={messages.runResult.conversationAudit}>
+        {() => <RunConversationAudit detail={detail} />}
+      </LazyAuditSection>
 
       <ControlledEffectsSection
         csrfToken={csrfToken}
@@ -222,9 +221,9 @@ function RunResultContent({ reportOnly, state, csrfToken, onProposalDecided, art
       />
 
       {result !== null && (
-        <CollapsibleSection title={messages.runResult.viewRawResult}>
-          <pre className="rawResultBody">{JSON.stringify(result.data, null, 2)}</pre>
-        </CollapsibleSection>
+        <LazyAuditSection title={messages.runResult.viewRawResult}>
+          {() => <pre className="rawResultBody">{JSON.stringify(result.data, null, 2)}</pre>}
+        </LazyAuditSection>
       )}
 
       </>}

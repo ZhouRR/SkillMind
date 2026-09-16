@@ -1,8 +1,8 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 
 import type { RunEventRecord, RunStatus } from '../api'
 import {
-  projectAgentStream,
+  createAgentStreamProjector,
   type AgentPromptSummary,
   type StructuredResultDigest,
 } from '../lib/agentStream'
@@ -17,7 +17,8 @@ export function AgentConversation({ prompt, events, runStatus }: {
   runStatus: RunStatus | null
 }) {
   const messages = useMessages()
-  const stream = projectAgentStream(events)
+  const projectStream = useMemo(() => createAgentStreamProjector(), [])
+  const stream = projectStream(events)
   const scrollRef = useRef<HTMLDivElement>(null)
   const pinnedToBottom = useRef(true)
   // 完成 message と streaming delta の伸長に追随して末尾へスクロールする。上へ離れている間は追随しない。

@@ -41,6 +41,7 @@ _CONTEXT_FIELDS = frozenset({
     "path",
     "status_code",
     "duration_ms",
+    "sample_count",
     "selected",
     "published",
     "failed",

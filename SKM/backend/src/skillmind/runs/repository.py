@@ -10,9 +10,11 @@ from uuid import UUID, uuid4
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from skillmind.agent.domain import AgentEvent, AgentEventType
 from skillmind.core.hashing import canonical_json, sha256_hex
+from skillmind.core.timing import timed_async
 from skillmind.db.models import (
     AgentSession,
     AgentTaskBriefSnapshot,
@@ -289,6 +291,7 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
             raise ConcurrentRunUpdateError("Run source snapshot is already immutable")
         run.selected_sources_json = selected_sources
 
+    @timed_async("run.performance.detail_query")
     async def get_detail(self, *, project_id: UUID, run_id: UUID) -> RunDetail:
         """Project と Run の複合条件を満たす Result、ToolCall、Evidence を取得する。"""
 
@@ -382,7 +385,12 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
         ).all()
         briefs = (
             await self._session.scalars(
-                select(AgentTaskBriefSnapshot).where(AgentTaskBriefSnapshot.run_id == run_id)
+                # 詳細 DTO は checksum のみ使う。凍結原文を含む Brief 正文は取得しない。
+                select(AgentTaskBriefSnapshot)
+                .options(load_only(
+                    AgentTaskBriefSnapshot.run_segment_id, AgentTaskBriefSnapshot.checksum,
+                ))
+                .where(AgentTaskBriefSnapshot.run_id == run_id)
             )
         ).all()
         brief_by_segment = {item.run_segment_id: item for item in briefs}
@@ -557,6 +565,7 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
             for row in rows
         }
 
+    @timed_async("run.performance.history_query")
     async def list_history(
         self,
         *,
@@ -576,6 +585,15 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
 
         statement = (
             select(Run, RunResult)
+            # 一覧で使う列だけ取得する。DTO/元の権限・ページ条件は変更しない。
+            .options(
+                load_only(
+                    Run.id, Run.project_id, Run.task_id, Run.status, Run.row_version,
+                    Run.created_at, Run.input_json, Run.selected_sources_json,
+                    Run.started_at, Run.finished_at,
+                ),
+                load_only(RunResult.summary, RunResult.confidence, RunResult.needs_review),
+            )
             .outerjoin(RunResult, RunResult.run_id == Run.id)
             .where(Run.project_id == project_id)
             .order_by(Run.created_at.desc(), Run.id.desc())

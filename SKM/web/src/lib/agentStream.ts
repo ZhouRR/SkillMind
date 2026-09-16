@@ -103,3 +103,55 @@ function unwrapCodeFence(text: string): string {
 function isNestedObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
+
+/** 同じ不変 prefix の末尾追加だけを処理し、重放・Run 切替・中間置換では正確に再構築する。 */
+export function createAgentStreamProjector(): (events: RunEventRecord[]) => AgentStreamView {
+  let previous: RunEventRecord[] = []
+  let view: AgentStreamView = { completed: [], partial: '', partialKind: 'text' }
+  let lastSequence = -Infinity
+  return (events) => {
+    if (events === previous) return view
+    let incremental = events.length >= previous.length
+      && previous.every((event, index) => events[index] === event)
+    if (incremental) {
+      let sequence = lastSequence
+      for (let index = previous.length; index < events.length; index += 1) {
+        const next = events[index]!.sequence
+        if (next <= sequence) { incremental = false; break }
+        sequence = next
+      }
+    }
+    if (!incremental) {
+      view = projectAgentStream(events)
+      lastSequence = events.reduce((maximum, event) => Math.max(maximum, event.sequence), -Infinity)
+      previous = events
+      return view
+    }
+    let partial = view.partial
+    const additions: AgentCompletedMessage[] = []
+    for (let index = previous.length; index < events.length; index += 1) {
+      const event = events[index]!
+      const text = event.payload.text
+      lastSequence = event.sequence
+      if (typeof text !== 'string' || !text) continue
+      if (event.event_type === 'TEXT_DELTA') partial += text
+      else if (event.event_type === 'TEXT_COMPLETED') {
+        const digest = structuredResultDigest(text)
+        additions.push(digest === null
+          ? { sequence: event.sequence, kind: 'text', text }
+          : { sequence: event.sequence, kind: 'structured', digest })
+        partial = ''
+      }
+    }
+    previous = events
+    // 過去に返した view を変更しない。非 text event では同じ参照を維持する。
+    if (additions.length > 0 || partial !== view.partial) {
+      view = {
+        completed: additions.length > 0 ? [...view.completed, ...additions] : view.completed,
+        partial,
+        partialKind: /^\s*(\{|```)/.test(partial) ? 'structured' : 'text',
+      }
+    }
+    return view
+  }
+}
