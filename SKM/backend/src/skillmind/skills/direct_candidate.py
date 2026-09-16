@@ -35,6 +35,14 @@ def compile_candidate(
 ) -> dict[str, Any]:
     """原文を複写させず、task 一件と binding 要求だけを確定する。"""
 
+    # Run API は object の入力だけを受け付ける。汎用契約の nested 型や旧版は狭めない。
+    input_contract = raw.get("input_contract")
+    if isinstance(input_contract, Mapping) and input_contract.get("type") != "object":
+        raise CapabilityBlueprintError(
+            "candidate_input_root_invalid",
+            "/input_contract/type",
+            "Caller input must have an object root; nested arrays and scalar fields are allowed.",
+        )
     Draft202012Validator(candidate_schema(root)).validate(raw)
     sources = source_index(request)
     files = {s["path"]: s["content"] for s in sources}

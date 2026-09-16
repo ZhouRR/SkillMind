@@ -35,6 +35,8 @@ from skillmind.skills.model_interpreter import (
     ModelStructuredOutputError,
 )
 
+from skillmind.skills.runtime_profile import validate_interpreter_parameters
+
 _TRUNCATED_STOP_REASONS = frozenset({"max_tokens", "max_turns"})
 _TRUNCATED_SUBTYPES = frozenset({"error_max_turns"})
 _STRUCTURED_OUTPUT_FAILURE_SUBTYPES = frozenset({"error_max_structured_output_retries"})
@@ -69,7 +71,10 @@ class ClaudeCompletionClient:
     ) -> ModelCompletion:
         """Tool を持たない一回の構造化 completion を実行し、SDK 例外を変換する。"""
 
-        del parameters  # M0 interpreter は温度など追加生成 parameter を使わない。
+        try:
+            validate_interpreter_parameters(parameters)
+        except ValueError as error:
+            raise ModelProviderError("Per-call interpreter parameters are not supported") from error
         options = ClaudeAgentOptions(
             cli_path=bundled_claude_build().cli_path,
             system_prompt=system_prompt,

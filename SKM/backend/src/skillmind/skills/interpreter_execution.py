@@ -39,6 +39,7 @@ class InterpreterErrorCode(StrEnum):
 
     UNSAFE_SOURCE = "unsafe_source"
     IDENTITY_MISMATCH = "identity_mismatch"
+    INVALID_PARAMETERS = "invalid_parameters"
     TIMEOUT = "timeout"
     PROVIDER_ERROR = "provider_error"
     EMPTY_RESPONSE = "empty_response"

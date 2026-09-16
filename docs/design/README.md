@@ -20,6 +20,7 @@
 | [認証](authentication.md) / [ログイン防護](login-protection.md) | Session・CSRF・授権 / 配額・退避 |
 | [ユーザー](user-lifecycle.md) / [Secret](secret-storage.md) | 管理・撤銷・監査 / 暗号化・鍵更新 |
 | [Skill](skill-contract.md) / [解釈](skill-interpretation.md) | 契約・精確版・有効化 / source・候補・公開 |
+| [解釈の安定性](skill-interpreter-stability.md) | 入力 root・調整 scope・実効設定の凍結 |
 | [Run 作成](run-creation.md) / [資源快照](resource-snapshots.md) | 原要求・再送 / 選択・凍結・実 byte |
 | [Runtime](agent-runtime.md) / [監督](run-supervision.md) | Segment・Attempt・Session・event / 停止・timeout |
 | [回答](user-interactions.md) / [結果と評価](results-evaluation.md) | 答復・期限 / 引用・原値・修訂 |
