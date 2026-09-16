@@ -1,0 +1,182 @@
+name: Prepare reviewed history patch
+on:
+  push:
+    branches: [perf/run-history-observability]
+    paths: [.github/workflows/skillmind-history-submit.yml]
+permissions:
+  contents: write
+concurrency:
+  group: skillmind-history-patch-preparation
+  cancel-in-progress: false
+jobs:
+  prepare:
+    if: github.repository == 'ZhouRR/SkillMind' && github.ref == 'refs/heads/perf/run-history-observability'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify source bytes and prepare the reviewed tree only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          """確認済み patch の tree だけを作る。一時 workflow は最終 tree に含めない。"""
+          import ast
+          import asyncio
+          import base64
+          import gzip
+          import hashlib
+          import json
+          import logging
+          import os
+          import types
+          import sys
+          import urllib.request
+          from uuid import uuid4
+          from pathlib import PurePosixPath
+
+          REPO = 'ZhouRR/SkillMind'
+          BASE = '933c82ff16d19b26acbe963bcf2d0b23d1d31ab2'
+          MANIFEST = '7593e258c61a2624a6f724355bd425691bed1a9e'
+          WORKFLOW = '.github/workflows/skillmind-history-submit.yml'
+          assert os.environ['GITHUB_REPOSITORY'] == REPO
+          assert os.environ['GITHUB_REF'] == 'refs/heads/perf/run-history-observability'
+          stage = os.environ['GITHUB_SHA']
+
+          def api(path, data=None):
+              """同じ repository の Git API だけを使い、token や response 本文はログに出さない。"""
+              request = urllib.request.Request(
+                  'https://api.github.com/repos/' + REPO + '/' + path,
+                  data=None if data is None else json.dumps(data, ensure_ascii=False).encode(),
+                  headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                           'Accept': 'application/vnd.github+json',
+                           'Content-Type': 'application/json',
+                           'User-Agent': 'skillmind-reviewed-patch'},
+              )
+              with urllib.request.urlopen(request, timeout=60) as response:
+                  return json.load(response)
+
+          def blob_hash(data):
+              """元 byte の Git SHA を照合する。"""
+              return hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+
+          cache = {}
+          def blob(sha):
+              """固定 SHA のみ読み、一回取得した byte を再利用する。"""
+              if sha not in cache:
+                  value = api('git/blobs/' + sha)
+                  assert value['encoding'] == 'base64'
+                  decoded = base64.b64decode(value['content'])
+                  assert blob_hash(decoded) == sha
+                  cache[sha] = decoded
+              return cache[sha]
+
+          def files(tree):
+              """完全な tree のみを扱い、truncated な一覧では変更しない。"""
+              value = api('git/trees/' + tree + '?recursive=1')
+              assert value['truncated'] is False
+              return {item['path']: (item['mode'], item['type'], item['sha'])
+                      for item in value['tree'] if item['type'] != 'tree'}
+
+          assert api('git/ref/heads/perf/run-history-observability')['object']['sha'] == stage
+          stage_commit = api('git/commits/' + stage)
+          assert [item['sha'] for item in stage_commit['parents']] == [BASE]
+          base_commit = api('git/commits/' + BASE)
+          original_files = files(base_commit['tree']['sha'])
+          staged_files = files(stage_commit['tree']['sha'])
+          assert set(staged_files) - set(original_files) == {WORKFLOW}
+          assert all(staged_files[path] == item for path, item in original_files.items())
+          manifest = json.loads(gzip.decompress(blob(MANIFEST)))
+          assert manifest['base'] == BASE
+          edits = {item['path']: item for item in manifest['changes']}
+          payload = manifest['payload']
+          paths = set(edits) | set(payload)
+          assert len(paths) == 15
+          updated = {}
+          for path in sorted(paths):
+              parsed = PurePosixPath(path)
+              assert not parsed.is_absolute() and '..' not in parsed.parts
+              assert path.startswith(('SKM/backend/', 'SKM/web/', 'docs/operations/'))
+              if path in edits:
+                  edit = edits[path]
+                  assert original_files[path] == ('100644', 'blob', edit['base_blob'])
+                  text = blob(edit['base_blob']).decode('utf-8')
+                  if edit.get('payload'):
+                      text = blob(payload[path]).decode('utf-8')
+                  else:
+                      for replacement in edit['replacements']:
+                          assert text.count(replacement['old']) == 1, 'Ambiguous edit: ' + path
+                          text = text.replace(replacement['old'], replacement['new'], 1)
+              else:
+                  assert path not in original_files, 'New-file conflict: ' + path
+                  text = blob(payload[path]).decode('utf-8')
+              if path.endswith('.py'):
+                  ast.parse(text, filename=path)
+              updated[path] = text
+              print('VERIFIED', path, blob_hash(text.encode('utf-8')))
+
+          # 固定の新 timing と元 logging だけを隔離 import する。DB/SDK/application は起動しない。
+          for name in ('skillmind', 'skillmind.core'):
+              package = types.ModuleType(name)
+              package.__path__ = []
+              sys.modules[name] = package
+          for name in ('logging', 'timing'):
+              module_name = 'skillmind.core.' + name
+              module = types.ModuleType(module_name)
+              sys.modules[module_name] = module
+              exec(compile(updated['SKM/backend/src/skillmind/core/' + name + '.py'], name, 'exec'), module.__dict__)
+          timing = sys.modules['skillmind.core.timing']
+          timing.logger.setLevel(logging.INFO)
+          records = []
+          class Capture(logging.Handler):
+              """実 logger の allowlist 後の metadata のみ検証する。"""
+              def emit(self, record):
+                  records.append(record.skillmind_context)
+          timing.logger.addHandler(Capture())
+          metrics = timing.ExecutionTimings()
+          for _ in range(100):
+              with metrics.measure('engine_wait'):
+                  pass
+          metrics.emit(run_id=uuid4(), run_attempt_id=uuid4())
+          assert len(records) == 1 and records[0]['sample_count'] == 100
+          assert set(records[0]) == {'run_id', 'run_attempt_id', 'duration_ms', 'sample_count'}
+          def broken(*args, **kwargs):
+              """観測先故障を再現し、業務結果への影響を検証する。"""
+              raise OSError('synthetic logging failure')
+          timing.log_event = broken
+          async def verify_outcomes():
+              """戻り値・同じ例外・取消を維持し、追加の業務実行を起こさない。"""
+              @timing.timed_async('run.performance.test')
+              async def success():
+                  return 42
+              assert await success() == 42
+              for failure in (ValueError('synthetic'), asyncio.CancelledError()):
+                  @timing.timed_async('run.performance.test')
+                  async def failed():
+                      raise failure
+                  try:
+                      await failed()
+                  except BaseException as caught:
+                      assert caught is failure
+                  else:
+                      raise AssertionError('Original failure lost')
+          asyncio.run(verify_outcomes())
+          print('ISOLATED_TIMING_CHECKS=passed')
+          tree = api('git/trees', {
+              'base_tree': base_commit['tree']['sha'],
+              'tree': [{'path': path, 'mode': '100644', 'type': 'blob', 'content': text}
+                       for path, text in sorted(updated.items())],
+          })
+          expected = dict(original_files)
+          expected.update({path: ('100644', 'blob', blob_hash(text.encode('utf-8')))
+                           for path, text in updated.items()})
+          assert files(tree['sha']) == expected
+          assert WORKFLOW not in expected
+          print('PREPARED_TREE=' + tree['sha'])
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+              summary.write('Reviewed patch prepared: 15 files; original blob and edit-anchor checks, '
+                            'modified Python AST and isolated timing checks passed.\n\n'
+                            'No branch update, PR, application, SDK, database, deployment, '
+                            'or complete integration tests were run by this job.\n\n'
+                            'PREPARED_TREE=' + tree['sha'] + '\n')
+          PY
