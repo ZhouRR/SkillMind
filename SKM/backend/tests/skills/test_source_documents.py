@@ -11,7 +11,6 @@ from uuid import uuid4
 
 import pytest
 from jsonschema import Draft202012Validator
-
 from skillmind.agent.domain import RunLimits
 from skillmind.agent.task_brief import build_agent_task_brief, render_task_brief_prompt
 from skillmind.core.hashing import canonical_json, sha256_hex
@@ -142,7 +141,8 @@ def test_model_cannot_replace_platform_source_documents(
     validated = InterpreterFixtureRunner(CONTRACTS).run(request, response, bind_identity=True)
     assert validated["runtime_manifest_draft"]["source_documents"] == manifest["source_documents"]
     schema = build_interpreter_generation_schema(CONTRACTS)
-    assert "source_documents" not in schema["properties"]["runtime_manifest_draft"]["properties"]
+    assert "source_documents" not in schema["properties"]
+    assert "runtime_manifest_draft" not in schema["properties"]
 
 
 def test_request_rejects_missing_reference_text(
@@ -166,3 +166,30 @@ def test_runtime_rejects_damaged_source_text(
     manifest["source_documents"][0]["content"] += "tampered"
     with pytest.raises(ValueError, match="integrity"):
         validate_source_documents(manifest["source_documents"])
+
+
+@pytest.mark.parametrize("content", ["first\nsecond\n", "first\r\nsecond\r\n", ""])
+def test_source_trace_line_boundary_uses_original_text_and_preserves_optional_line(
+    content: str,
+) -> None:
+    """末尾改行・CRLF を架空の追加行と数えず、行未指定は元仕様どおり許可する。"""
+
+    from skillmind.skills.source_documents import SourceTraceLocationError, validate_source_location
+
+    files = {"source.md": content, "asset.bin": None}
+    last_line = max(1, len(content.splitlines()))
+    assert validate_source_location(
+        "source.md", last_line, files, pointer="/source_traces/0",
+    ) == "TEXT_SNAPSHOT"
+    with pytest.raises(SourceTraceLocationError) as captured:
+        validate_source_location("source.md", last_line + 1, files, pointer="/source_traces/0")
+    assert captured.value.code == "source_trace_line_invalid"
+    assert captured.value.path == "/source_traces/0/line"
+    assert validate_source_location(
+        "source.md", None, files, pointer="/source_traces/0",
+    ) == "TEXT_SNAPSHOT"
+    assert validate_source_location(
+        "asset.bin", None, files, pointer="/source_traces/0",
+    ) == "SOURCE_INDEX"
+    with pytest.raises(SourceTraceLocationError):
+        validate_source_location("asset.bin", 1, files, pointer="/source_traces/0")

@@ -305,6 +305,9 @@
     },
     "source_documents": {
       "$ref": "#/$defs/sourceDocuments"
+    },
+    "skill_execution": {
+      "type": "object"
     }
   },
   "$defs": {
@@ -600,5 +603,15 @@
         }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "not": {
+        "required": [
+          "capability_blueprint",
+          "skill_execution"
+        ]
+      }
+    }
+  ]
 }

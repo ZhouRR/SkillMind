@@ -1,3 +1,4 @@
+import { SourceExecutionPreview } from './SourceExecutionPreview'
 import type { TaskFlowNote, TaskFlowPreviewRecord, TaskFlowResourceReference, TaskFlowSourceTrace } from '../api'
 import { useMessages } from '../i18n'
 import { stringifyLosslessJson } from '../lib/losslessJson'
@@ -59,6 +60,10 @@ function FlowResources({ title, resources, traces, task = false }: { title: stri
 export function TaskFlowPreview({ preview }: { preview: TaskFlowPreviewRecord }) {
   const messages = useMessages()
   const labels = messages.taskFlow
+  if (preview.source_execution) return <div data-task-flow-preview data-preview-status={preview.status}>
+    <SourceExecutionPreview preview={preview.source_execution} />
+    {preview.readiness.assessment && <TaskReadinessPanel readiness={preview.readiness.assessment} />}
+  </div>
   const plan = preview.plan
   const originalTask = plan?.task.value
   const shared = plan?.shared

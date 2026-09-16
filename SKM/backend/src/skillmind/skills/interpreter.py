@@ -21,7 +21,11 @@ from skillmind.skills.capability_blueprint import (
 from skillmind.skills.domain import InlineSkillFile
 from skillmind.skills.importer import NormalizedSkillPackage, SkillPackageParser
 from skillmind.skills.runtime_defaults import normalize_runtime_manifest
-from skillmind.skills.source_documents import build_source_documents, validate_source_documents
+from skillmind.skills.source_documents import (
+    build_source_documents,
+    validate_manifest_source_locations,
+    validate_source_documents,
+)
 from skillmind.skills.task_contract import MAX_CONTRACT_DEPTH, compile_task_contract
 
 _VERSIONED_CAPABILITY = re.compile(r"^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$")
@@ -411,6 +415,14 @@ def load_interpreter_system_skill(
 
 
 def build_interpreter_generation_schema(contracts_dir: Path) -> dict[str, Any]:
+    """新規 model 解釈には native な単一 Blueprint 候補だけを要求する。"""
+
+    from skillmind.skills.direct_candidate import candidate_schema
+
+    return candidate_schema(contracts_dir)
+
+
+def build_legacy_interpreter_generation_schema(contracts_dir: Path) -> dict[str, Any]:
     """Model に渡す response Schema へ Report と contract draft の形状を埋め込む。
 
     公開 response contract は各 artifact を独立検証できるよう分割している。一方、model 側へ
@@ -534,6 +546,7 @@ class InterpreterFixtureRunner:
 
         root = contracts_dir.resolve(strict=True)
         self._request_schema = _load_json(root / "skills/interpreter/v1/request.schema.json")
+        self._contracts_dir = root
         self._response_schema = _load_json(root / "skills/interpreter/v1/response.schema.json")
         self._report_schema = _load_json(
             root / "skills/interpreter/v1/interpretation-report.schema.json"
@@ -566,6 +579,8 @@ class InterpreterFixtureRunner:
         fixture_response: Mapping[str, Any],
         *,
         bind_identity: bool = False,
+        require_native_candidate: bool = False,
+        require_direct_candidate: bool = False,
     ) -> dict[str, Any]:
         """Schema と identity binding を検証し、defensive copy を返す。
 
@@ -577,6 +592,32 @@ class InterpreterFixtureRunner:
         checker = FormatChecker()
         request_value = copy.deepcopy(dict(request))
         response_value = copy.deepcopy(dict(fixture_response))
+        from skillmind.skills.candidate import (
+            CANDIDATE_VERSION,
+            candidate_schema,
+            compile_candidate,
+        )
+        from skillmind.skills.direct_candidate import (
+            CANDIDATE_VERSION as DIRECT_VERSION,
+        )
+        from skillmind.skills.direct_candidate import (
+            compile_candidate as compile_direct_candidate,
+        )
+
+        direct_candidate = require_direct_candidate or (
+            bind_identity and response_value.get("candidate_version") == DIRECT_VERSION
+        )
+        native_candidate = require_native_candidate or (
+            bind_identity and response_value.get("candidate_version") == CANDIDATE_VERSION
+        )
+        if direct_candidate:
+            response_value = compile_direct_candidate(
+                request_value, response_value, self._contracts_dir
+            )
+        elif native_candidate:
+            response_value = compile_candidate(
+                request_value, response_value, candidate_schema(self._contracts_dir)
+            )
         Draft202012Validator(
             self._request_schema, format_checker=checker
         ).validate(request_value)
@@ -623,9 +664,56 @@ class InterpreterFixtureRunner:
         blueprint = manifest.get("capability_blueprint")
         if blueprint is not None:
             self._blueprint_validator.validate(cast(dict[str, Any], blueprint))
+        if bind_identity:
+            files: dict[str, str | None] = {
+                item["path"]: None for item in index if item["binary"]
+            }
+            files.update({item["path"]: item["content"] for item in documents})
+            validate_manifest_source_locations(manifest, files)
+        if native_candidate or direct_candidate:
+            self._validate_candidate_publishability(request_value, manifest)
         if not bind_identity:
             _validate_fixture_identity(request_value, response_value, manifest)
         return response_value
+
+    def _validate_candidate_publishability(
+        self, request: Mapping[str, Any], manifest: dict[str, Any],
+    ) -> None:
+        """発行時と同じ静的門禁を使い、Project の接続資格や可達性は要求しない。"""
+
+        from uuid import UUID
+
+        from skillmind.skills.design_validation import SkillDesignSource
+        from skillmind.skills.manifest_gate import ManifestValidator
+
+        source = request["source"]
+        context = SkillDesignSource(
+            skill_key=manifest["identity"]["skill_key"],
+            manifest_checksum="sha256:" + sha256_hex(canonical_json(manifest)),
+            manifest=manifest, source_hash=source["content_hash"],
+            source_file_index=source["normalized_package"]["source"]["files"],
+            source_snapshot=[{"path": d["path"], "content": d["content"]}
+                             for d in source["source_documents"]],
+            interpretation_id=UUID(manifest["identity"]["interpretation_id"]),
+            interpreter_version=manifest["identity"]["interpreter_version"],
+        )
+        passed, findings = ManifestValidator(
+            self._contracts_dir,
+            registered_capabilities=frozenset(
+                c["capability"] for c in request["capability_catalog"]["capabilities"]
+            ),
+        ).evaluate(context)
+        if not passed:
+            from skillmind.skills.capability_blueprint import CapabilityBlueprintError
+
+            errors = [f for f in findings if f.severity == "error"][:8]
+            raise CapabilityBlueprintError(
+                "candidate_publish_invalid", errors[0].path or "/",
+                "Publish preflight failed: " + "; ".join(
+                    f"{f.path or '/'}: {f.code}" for f in errors
+                ),
+            )
+
 
 
 def load_inline_text_files(

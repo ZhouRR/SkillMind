@@ -74,11 +74,11 @@ from skillmind.integrations.domain import ResourceBindingLevel, binding_checksum
 from skillmind.runs.domain import ClaimedRun
 from skillmind.runs.interaction import INTERACTION_REQUEST_CAPABILITY
 from skillmind.runs.proposal_continuation import ProposalContinuationReader
-from skillmind.skills.capability_blueprint import resolve_capability_blueprint
 from skillmind.skills.document_prerequisites import (
     DOCUMENT_READINESS_CAPABILITY,
     document_prerequisites,
 )
+from skillmind.skills.execution import resolve_skill_definition
 from skillmind.skills.frozen_manifest import verified_run_manifest
 from skillmind.skills.resource_binding import required_resource_keys
 
@@ -424,8 +424,10 @@ def _change_propose_tool_definition(contracts: ContractStore) -> ToolDefinition:
         capability=CHANGE_PROPOSE_CAPABILITY,
         description=(
             "Create a structured external change proposal; this never applies the change and "
-            "Skillmind independently validates approval and scope. Use the exact intent key, "
-            "resource slot key, operation and declared risk from the task brief. "
+            "Skillmind independently validates approval and scope. Use the exact resource slot key "
+            "and authorized operation from the task brief. When operations are listed, omit "
+            "effect_intent_key and use at least minimum_risk; for legacy declared intents, "
+            "copy the exact intent key and risk. "
             "capability_version identifies the write effect declared by that resource "
             "(database.write/v1 for database rows, document.write/v1 for library documents), "
             "not this change.propose/v1 control tool. "
@@ -579,7 +581,7 @@ class ProductionRunContextBuilder:
         # 不変 SkillVersion snapshot を先に確定してから、その Manifest を根拠に Tool を解決する。
         # 業務固有 task に依存せず、任意 published task の Run を同一経路で実行する。
         manifest = _verified_manifest(claimed_run, task)
-        blueprint = resolve_capability_blueprint(manifest)
+        blueprint = resolve_skill_definition(manifest)
         if blueprint is None:
             raise ValueError("Run SkillVersion Manifest does not declare a CapabilityBlueprint")
         if not self._execution_features.blueprint_enabled(blueprint):
@@ -693,6 +695,7 @@ class ProductionRunContextBuilder:
             },
             task_brief=brief.brief,
             task_brief_checksum=brief.checksum,
+            input_json=dict(claimed_run.input_json),
             resolved_proposal=(
                 await self._proposal_continuations.load(claimed_run)
                 if self._proposal_continuations is not None else None
@@ -761,7 +764,7 @@ def _resolve_source_tools(
 
     tools: list[RegisteredTool] = []
     repository_bindings: dict[str, RepositoryBindingRef] = {}
-    blueprint = manifest.get("capability_blueprint")
+    blueprint = resolve_skill_definition(manifest)
     requirements = (
         _sequence(blueprint.get("resource_requirements")) if isinstance(blueprint, Mapping) else []
     )

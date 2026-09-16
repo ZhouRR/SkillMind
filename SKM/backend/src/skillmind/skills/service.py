@@ -54,6 +54,7 @@ from skillmind.skills.domain import (
     TaskInputInvalidError,
     UploadSkillFile,
 )
+from skillmind.skills.execution import resolve_skill_definition
 from skillmind.skills.importer import (
     HTTP_SKILL_IMPORT_LIMITS,
     DeterministicManifestDraftBuilder,
@@ -77,6 +78,8 @@ from skillmind.skills.interpreter import (
     load_inline_text_files,
 )
 from skillmind.skills.interpreter_execution import (
+    MODEL_OUTPUT_WHITESPACE_LIMIT,
+    MODEL_OUTPUT_WHITESPACE_MESSAGE,
     InterpreterCallControl,
     InterpreterErrorCode,
     InterpreterExecutionError,
@@ -94,6 +97,7 @@ from skillmind.skills.resource_binding import (
     TaskReadiness,
     evaluate_blueprint_readiness,
 )
+from skillmind.skills.source_documents import SourceTraceLocationError
 from skillmind.skills.task_catalog import (
     PublishedTaskDescriptor,
     ResolvedTaskRun,
@@ -754,17 +758,21 @@ class SkillService:
         validation_attempts: list[str] = []
         validation_feedback: str | None = None
         validated: dict[str, Any] | None = None
+        repair_context: dict[str, Any] = {}
+        native_candidates = getattr(interpreter, "uses_native_candidates", False) is True
         for attempt in range(_MAX_CANDIDATE_REPAIR_ATTEMPTS + 1):
             try:
                 if control is None:
                     response = await interpreter.interpret(
                         request, model=model, parameters=parameters,
                         validation_feedback=validation_feedback, on_event=on_event,
+                        **repair_context,
                     )
                 else:
                     response = await interpreter.interpret(
                         request, model=model, parameters=parameters,
                         validation_feedback=validation_feedback, on_event=on_event, control=control,
+                        **repair_context,
                     )
             except InterpreterExecutionError as error:
                 repair_feedback = candidate_repair_feedback(error.code)
@@ -808,10 +816,16 @@ class SkillService:
                 return stored
             try:
                 # model 経路は identity を platform 権威値で stamp する(model に複刻を強いない)。
-                validated = self._runner().run(request, response, bind_identity=True)
+                validated = self._runner().run(
+                    request, response, bind_identity=True,
+                    require_native_candidate=native_candidates,
+                    require_direct_candidate=(
+                        getattr(interpreter, "uses_direct_candidates", False) is True
+                    ),
+                )
                 break
             except (ValidationError, ValueError, UnsafeSkillSourceError) as error:
-                # Candidate 本文ではなく脱敏済み path/validator だけを retry と監査へ渡す。
+                # 監査には脱敏済み path/validator のみ保存し、修復入力に限り前候補を保持する。
                 detail = _schema_failure_detail(error)
                 validation_attempts.append(detail)
                 log_event(
@@ -826,6 +840,10 @@ class SkillService:
                 )
                 if attempt < _MAX_CANDIDATE_REPAIR_ATTEMPTS:
                     validation_feedback = detail
+                    if native_candidates or "candidate_version" in response:
+                        repair_context = {"previous_candidate": response}
+                        if isinstance(error, CapabilityBlueprintError):
+                            validation_feedback += "; Expected: " + error.message[:2000]
                     continue
                 stored = await finalize(
                     self._failure_command(
@@ -1048,7 +1066,7 @@ class SkillService:
             replace(
                 descriptor,
                 readiness=evaluate_blueprint_readiness(
-                    descriptor.capability_blueprint,
+                    descriptor.skill_definition,
                     candidates=candidates,
                     registered_capabilities=self._registered_capabilities,
                     registered_write_capabilities=self._registered_write_capabilities,
@@ -1080,7 +1098,7 @@ class SkillService:
             contracts_dir=self._contracts_dir,
         )
         readiness = None
-        blueprint = source.manifest.get("capability_blueprint")
+        blueprint = resolve_skill_definition(source.manifest)
         if self._resource_catalog is not None and isinstance(blueprint, dict):
             candidates = await self._resource_catalog.candidates(project_id=project_id)
             # 既存 catalog と同じ全 Blueprint 範囲を明記し、Task 限定の実行証明にしない。
@@ -1526,6 +1544,13 @@ class SkillService:
         }
         if detail is not None:
             execution["detail"] = detail
+        whitespace_stall = (
+            code is InterpreterErrorCode.PROVIDER_ERROR and detail == MODEL_OUTPUT_WHITESPACE_LIMIT
+        )
+        if whitespace_stall:
+            execution["validation_attempts"] = [
+                *validation_attempts, MODEL_OUTPUT_WHITESPACE_MESSAGE,
+            ]
         return SaveModelInterpretationCommand(
             organization_id=source.organization_id,
             skill_source_id=source.skill_source_id,
@@ -1538,7 +1563,10 @@ class SkillService:
             summary=f"Model interpretation failed: {code.value}",
             assumptions=(),
             questions=(),
-            diagnostics=(),
+            diagnostics=({
+                "severity": "error", "code": MODEL_OUTPUT_WHITESPACE_LIMIT,
+                "message": MODEL_OUTPUT_WHITESPACE_MESSAGE,
+            },) if whitespace_stall else (),
             normalized_package=package.to_dict(),
             manifest_draft={},
             report=None,
@@ -1670,8 +1698,21 @@ def _schema_failure_detail(error: Exception) -> str:
     (model/来源由来のため秘匿) は載せない。その他の ValueError は platform 固定 message のみ。
     """
 
-    if isinstance(error, CapabilityBlueprintError) and error.code == "source_trace_target_invalid":
-        return f"/capability_blueprint{error.path}: {error.code}"
+    if isinstance(error, CapabilityBlueprintError) and error.code in (
+        "candidate_source_invalid", "candidate_contract_source_missing",
+        "candidate_publish_invalid", "skill_execution_invalid",
+    ):
+        return f"{error.path}: {error.code}"
+    if isinstance(error, CapabilityBlueprintError) and error.code in (
+        "source_trace_target_invalid", "document_library_capabilities_invalid",
+    ):
+        prefix = (
+            "" if error.path.startswith(("/skill_execution", "/platform_tools"))
+            else "/capability_blueprint"
+        )
+        return f"{prefix}{error.path}: {error.code}"
+    if isinstance(error, SourceTraceLocationError):
+        return f"{error.path}: {error.code}"
     if isinstance(error, TaskContractCompilationError):
         return f"{error.path}: {error.code}"
     if isinstance(error, ValidationError):

@@ -15,8 +15,6 @@ from uuid import UUID, uuid4
 
 import pytest
 from jsonschema import Draft202012Validator
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from skillmind.db.models import ProjectSkillVersion, SkillInterpretation, SkillSource
 from skillmind.skills.capability_blueprint import CapabilityBlueprintError
 from skillmind.skills.domain import (
@@ -39,6 +37,7 @@ from skillmind.skills.domain import (
 from skillmind.skills.manifest_gate import ManifestValidator
 from skillmind.skills.repository import SkillRepository
 from skillmind.skills.service import _schema_failure_detail
+from sqlalchemy.ext.asyncio import AsyncSession
 
 ORGANIZATION_ID = UUID("00000000-0000-4000-8000-0000000000a1")
 
@@ -309,6 +308,13 @@ def _stored_schema_diagnostic(instance, schema, *, wrapped=False):
         ({"validation_attempts": ["/tasks/0: required", "/tasks/0: type"]},
          ("/tasks/0: required", "/tasks/0: type")),
         ({"validation_attempts": []}, ()),
+        ({"validation_attempts": [
+            "/capability_blueprint/source_traces/19/line: source_trace_line_invalid",
+            "/tasks/0/contract_source_trace/0/source_path: source_trace_file_invalid",
+        ]}, (
+            "/capability_blueprint/source_traces/19/line: source_trace_line_invalid",
+            "/tasks/0/contract_source_trace/0/source_path: source_trace_file_invalid",
+        )),
         ({"error_code": "schema_validation_failed", "detail": "/tasks/0: required"},
          ("/tasks/0: required",)),
         ({"error_code": "provider_error", "detail": "private upstream response"}, ()),

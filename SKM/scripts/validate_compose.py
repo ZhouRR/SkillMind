@@ -70,10 +70,10 @@ def validate() -> None:
             raise ValueError(f"services.{service_name} must use the shared Skillmind timezone")
 
     # 同一 tag の並列 export を防ぐため、Backend image の build 所有者は API 一つに限定する。
-    backend_service_names = {"api", "worker", "migrate"}
+    backend_service_names = {"api", "worker", "maintenance", "migrate"}
     backend_images = {services[service_name].get("image") for service_name in backend_service_names}
     if backend_images != {"skillmind/backend:0.1.0"}:
-        raise ValueError("API, Worker, and Migrate must share one Backend image")
+        raise ValueError("API, Workers, and Migrate must share one Backend image")
     if services["web"].get("image") != "skillmind/web:0.1.0":
         raise ValueError("Web must use the exported application image tag")
     # build/配備とも既定は .env。Makefile の ENV_FILE は補間/注入で共有する。
@@ -82,7 +82,7 @@ def validate() -> None:
         if services[service_name].get("pull_policy") != "never":
             raise ValueError("Backend services must use local images through pull_policy: never")
         if services[service_name].get("env_file") != [source]:
-            raise ValueError("API, Worker, and Migrate must share the selected environment file")
+            raise ValueError("API, Workers, and Migrate must share the selected environment file")
     backend_builders = {
         service_name for service_name in backend_service_names if "build" in services[service_name]
     }
@@ -103,7 +103,7 @@ def validate() -> None:
     )
     if object_storage_dependency.get("condition") != "service_started":
         raise ValueError("Object-storage initializer must wait for object-storage startup")
-    for service_name in ("api", "worker"):
+    for service_name in ("api", "worker", "maintenance"):
         service_depends_on = as_mapping(
             services[service_name].get("depends_on"), name=f"services.{service_name}.depends_on"
         )

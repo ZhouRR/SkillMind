@@ -1,0 +1,41 @@
+{
+  "execution_version": "skillmind.skill-execution/v1",
+  "tasks": [
+    {
+      "key": "execute",
+      "capability": "repository-review",
+      "title": "repository-review",
+      "description": "固定 revision の repository file を 1 つレビューし、evidence に基づく findings を返す。",
+      "resource_keys": [
+        "review_outputs"
+      ]
+    }
+  ],
+  "resource_requirements": [
+    {
+      "key": "review_outputs",
+      "kind": "document",
+      "required": true,
+      "access": "write",
+      "capabilities": [
+        "document.write/v1"
+      ],
+      "accepted_providers": [
+        "project-library"
+      ],
+      "operations": [
+        {
+          "capability_version": "document.write/v1",
+          "operation": "CREATE"
+        }
+      ]
+    }
+  ],
+  "source_traces": [
+    {
+      "target": "/resource_requirements/0",
+      "path": "SKILL.md",
+      "line": 1
+    }
+  ]
+}

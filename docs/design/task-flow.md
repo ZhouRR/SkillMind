@@ -2,6 +2,8 @@
 
 本页分为现行只读预览与后续 Run Flow。修改预览不要求新增 Flow Schema、DRAFT 编辑或 Run 冻结字段；完整流程按[计划 R03](../planning/roadmap.md#开发任务)后置。语义与页面分别见[Skill](skill-contract.md)、[Workspace](workspace.md)。
 
+新原文执行的只读预览返回 `SOURCE_EXECUTION` 和 `source_execution`，展示一个任务、调用输入、资源要求及可展开原文；plan 与 blueprint_checksum 为 null。旧 AVAILABLE/NOT_DECLARED 保持原值。公开响应、Web validator 与 API/Worker/Web 同批升级；旧浏览器无法识别新状态时需刷新，不回写历史快照。
+
 ## 目标
 
 让用户看懂目标、资源、自动工作/人工确认及交付物，区分三层：

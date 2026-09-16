@@ -2563,6 +2563,49 @@
         "title": "FlowEffectResponse",
         "type": "object"
       },
+      "FlowExecutionDeclarationResponse": {
+        "additionalProperties": false,
+        "description": "Blueprint を補作しない版付き宣言。",
+        "properties": {
+          "execution_version": {
+            "const": "skillmind.skill-execution/v1",
+            "title": "Execution Version",
+            "type": "string"
+          },
+          "resource_requirements": {
+            "items": {
+              "$ref": "#/components/schemas/FlowExecutionResourceResponse"
+            },
+            "maxItems": 50,
+            "title": "Resource Requirements",
+            "type": "array"
+          },
+          "source_traces": {
+            "items": {
+              "$ref": "#/components/schemas/FlowExecutionTraceResponse"
+            },
+            "title": "Source Traces",
+            "type": "array"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/FlowExecutionTaskResponse"
+            },
+            "maxItems": 1,
+            "minItems": 1,
+            "title": "Tasks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "execution_version",
+          "tasks",
+          "resource_requirements",
+          "source_traces"
+        ],
+        "title": "FlowExecutionDeclarationResponse",
+        "type": "object"
+      },
       "FlowExecutionPreferencesResponse": {
         "additionalProperties": false,
         "description": "実行推奨は表示だけとし、Run profile や停止証明として利用しない。",
@@ -2594,6 +2637,164 @@
           }
         },
         "title": "FlowExecutionPreferencesResponse",
+        "type": "object"
+      },
+      "FlowExecutionResourceResponse": {
+        "additionalProperties": false,
+        "description": "読書宣言に実操作を添える。",
+        "properties": {
+          "accepted_providers": {
+            "items": {
+              "maxLength": 128,
+              "pattern": "^[a-z][a-z0-9_.-]*$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Accepted Providers",
+            "type": "array"
+          },
+          "access": {
+            "enum": [
+              "read",
+              "write"
+            ],
+            "title": "Access",
+            "type": "string"
+          },
+          "capabilities": {
+            "items": {
+              "pattern": "^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "key": {
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "issue",
+              "repository",
+              "document",
+              "file",
+              "knowledge",
+              "other"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "operations": {
+            "items": {
+              "$ref": "#/components/schemas/FlowOperationResponse"
+            },
+            "title": "Operations",
+            "type": "array"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "selection_guidance": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Selection Guidance",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "required",
+          "access",
+          "operations"
+        ],
+        "title": "FlowExecutionResourceResponse",
+        "type": "object"
+      },
+      "FlowExecutionTaskResponse": {
+        "additionalProperties": false,
+        "description": "一つの原文実行タスク。",
+        "properties": {
+          "capability": {
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Capability",
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "key": {
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Key",
+            "type": "string"
+          },
+          "resource_keys": {
+            "items": {
+              "maxLength": 128,
+              "pattern": "^[a-z][a-z0-9_.-]*$",
+              "type": "string"
+            },
+            "title": "Resource Keys",
+            "type": "array"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "capability",
+          "title",
+          "description",
+          "resource_keys"
+        ],
+        "title": "FlowExecutionTaskResponse",
+        "type": "object"
+      },
+      "FlowExecutionTraceResponse": {
+        "additionalProperties": false,
+        "description": "最小宣言の原文位置。",
+        "properties": {
+          "line": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "path",
+          "line"
+        ],
+        "title": "FlowExecutionTraceResponse",
         "type": "object"
       },
       "FlowGuidanceResponse": {
@@ -2760,6 +2961,29 @@
           "text"
         ],
         "title": "FlowNoteResponse",
+        "type": "object"
+      },
+      "FlowOperationResponse": {
+        "additionalProperties": false,
+        "description": "資源に必要な実操作。承認済みの効果ではない。",
+        "properties": {
+          "capability_version": {
+            "pattern": "^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$",
+            "title": "Capability Version",
+            "type": "string"
+          },
+          "operation": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Operation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "capability_version",
+          "operation"
+        ],
+        "title": "FlowOperationResponse",
         "type": "object"
       },
       "FlowPlanResponse": {
@@ -3144,6 +3368,58 @@
           "execution_preferences"
         ],
         "title": "FlowSharedResponse",
+        "type": "object"
+      },
+      "FlowSourceDocumentResponse": {
+        "additionalProperties": false,
+        "description": "凍結 source の内容と識別 hash。",
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "content",
+          "sha256"
+        ],
+        "title": "FlowSourceDocumentResponse",
+        "type": "object"
+      },
+      "FlowSourceExecutionResponse": {
+        "additionalProperties": false,
+        "description": "原文実行の最小宣言と凍結 source をそのまま返す。",
+        "properties": {
+          "declaration": {
+            "$ref": "#/components/schemas/FlowExecutionDeclarationResponse"
+          },
+          "input_contract": {
+            "$ref": "#/components/schemas/FlowContractResponse"
+          },
+          "source_documents": {
+            "items": {
+              "$ref": "#/components/schemas/FlowSourceDocumentResponse"
+            },
+            "title": "Source Documents",
+            "type": "array"
+          }
+        },
+        "required": [
+          "declaration",
+          "input_contract",
+          "source_documents"
+        ],
+        "title": "FlowSourceExecutionResponse",
         "type": "object"
       },
       "FlowTaskEntryResponse": {
@@ -4185,6 +4461,18 @@
             "additionalProperties": true,
             "title": "Runtime Manifest Draft",
             "type": "object"
+          },
+          "skill_execution": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skill Execution"
           }
         },
         "required": [
@@ -7692,6 +7980,20 @@
         "allOf": [
           {
             "else": {
+              "not": {
+                "required": [
+                  "source_execution"
+                ]
+              }
+            },
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "SOURCE_EXECUTION"
+                }
+              }
+            },
+            "then": {
               "properties": {
                 "blueprint_checksum": {
                   "type": "null"
@@ -7699,15 +8001,45 @@
                 "plan": {
                   "type": "null"
                 },
-                "readiness": {
-                  "properties": {
-                    "assessment": {
-                      "type": "null"
-                    }
-                  }
+                "source_execution": {
+                  "type": "object"
                 },
                 "source_traces": {
                   "maxItems": 0
+                }
+              },
+              "required": [
+                "source_execution"
+              ]
+            }
+          },
+          {
+            "else": {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "NOT_DECLARED"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "blueprint_checksum": {
+                    "type": "null"
+                  },
+                  "plan": {
+                    "type": "null"
+                  },
+                  "readiness": {
+                    "properties": {
+                      "assessment": {
+                        "type": "null"
+                      }
+                    }
+                  },
+                  "source_traces": {
+                    "maxItems": 0
+                  }
                 }
               }
             },
@@ -7776,6 +8108,9 @@
           "readiness": {
             "$ref": "#/components/schemas/FlowReadinessResponse"
           },
+          "source_execution": {
+            "$ref": "#/components/schemas/FlowSourceExecutionResponse"
+          },
           "source_traces": {
             "items": {
               "$ref": "#/components/schemas/FlowTraceResponse"
@@ -7787,7 +8122,8 @@
           "status": {
             "enum": [
               "AVAILABLE",
-              "NOT_DECLARED"
+              "NOT_DECLARED",
+              "SOURCE_EXECUTION"
             ],
             "title": "Status",
             "type": "string"

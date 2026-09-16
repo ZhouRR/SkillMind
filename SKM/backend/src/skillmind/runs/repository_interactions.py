@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 
 from skillmind.agent.domain import AgentEvent, AgentEventType
+from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.db.models import (
     InteractionResponse,
     Run,
@@ -18,6 +19,7 @@ from skillmind.db.models import (
     RunSegment,
     UserInteraction,
 )
+from skillmind.runs.checkpoint import merge_checkpoint
 from skillmind.runs.domain import (
     AgentSessionMetadata,
     ClaimedRun,
@@ -97,7 +99,9 @@ class InteractionOperationsMixin(_RunRepositoryBase):
         )
         if existing_open is not None:
             raise InteractionConflictError("Run already has an open interaction")
-        await self._validate_checkpoint_refs(run.id, request.checkpoint)
+        checkpoint = merge_checkpoint(segment.checkpoint_json or {}, request.checkpoint)
+        checkpoint_checksum = f"sha256:{sha256_hex(canonical_json(checkpoint))}"
+        await self._validate_checkpoint_refs(run.id, checkpoint)
         self._validate_claimed_lease(attempt, claimed, now=datetime.now(UTC))
         agent_session = await self._ensure_agent_session(
             claimed,
@@ -123,8 +127,8 @@ class InteractionOperationsMixin(_RunRepositoryBase):
             status=UserInteractionStatus.OPEN.value,
             version=1,
             continuation_mode=request.continuation_mode.value,
-            checkpoint_json=request.checkpoint,
-            checkpoint_checksum=request.checkpoint_checksum,
+            checkpoint_json=checkpoint,
+            checkpoint_checksum=checkpoint_checksum,
             created_at=now,
             updated_at=now,
         )
@@ -176,8 +180,8 @@ class InteractionOperationsMixin(_RunRepositoryBase):
             event_type=AgentEventType.CHECKPOINT_CREATED.value,
             payload_json={
                 "interaction_id": str(interaction_id),
-                "checkpoint_checksum": request.checkpoint_checksum,
-                "evidence_refs": list(request.checkpoint.get("evidence_refs", [])),
+                "checkpoint_checksum": checkpoint_checksum,
+                "evidence_refs": list(checkpoint.get("evidence_refs", [])),
             },
             occurred_at=now,
             trace_id=None,

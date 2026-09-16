@@ -48,11 +48,6 @@ _RUN_SCOPED_PLATFORM_CAPABILITIES = frozenset(
     }
 )
 
-# Apply Provider は Agent MCP registry へ出さず、Approval/EffectExecution Worker だけが呼ぶ。
-# 登録済み write capability は必ずここへ加える (§20 で `repository.write/v1` を追加)。抜けると
-# Skill が apply 能力を Agent Tool として宣言でき、publish gate がそれを黙って通してしまう。
-_EFFECT_ONLY_CAPABILITIES = frozenset({"issue.update/v1", "repository.write/v1"})
-
 # Guidance 本文が名指しする能力識別子 (`issue.read/v1` 形)。散文と区別するため、
 # 少なくとも一つの `.` と `/v<数字>` を持つ token だけを重表達先の名指しとみなす。
 # 先行の lookbehind は scheme や path 途中からの部分一致を禁じ、`https://x.example.com/v1`
@@ -116,7 +111,9 @@ class ManifestValidator:
         except SkillDesignInvalidError as error:
             return False, (self._error(error.code, str(error), error.path),)
         manifest = design.manifest
-        blueprint = design.blueprint
+        from skillmind.skills.execution import resolve_skill_definition
+
+        blueprint = resolve_skill_definition(manifest)
         assert blueprint is not None
         findings: list[ManifestGateFinding] = []
         for task in _object_list(blueprint.get("tasks")):
@@ -273,6 +270,8 @@ class ManifestValidator:
     ) -> None:
         """Task 参照と登録済み capability、script checksum gate を検査する。"""
 
+        from skillmind.effects.catalog import EFFECT_CAPABILITIES
+
         capabilities = {item.get("key") for item in _object_list(manifest.get("capabilities"))}
         workflows = {item.get("key") for item in _object_list(manifest.get("workflows"))}
         for task in _object_list(manifest.get("tasks")):
@@ -296,7 +295,7 @@ class ManifestValidator:
                         "/tools",
                     )
                 )
-            if isinstance(capability, str) and capability in _EFFECT_ONLY_CAPABILITIES:
+            if isinstance(capability, str) and capability in EFFECT_CAPABILITIES:
                 findings.append(
                     self._error(
                         "effect_capability_exposed_to_agent",

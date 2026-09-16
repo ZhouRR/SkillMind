@@ -17,11 +17,13 @@ from skillmind.db.models import (
     ChangeApproval,
     ChangeProposal,
     EffectExecution,
+    RunAttempt,
     RunSegment,
     UserInteraction,
 )
 from skillmind.effects.continuation import validated_effect_result
 from skillmind.effects.outcomes import effect_requires_reconciliation
+from skillmind.runs.capacity_retry import MODEL_CAPACITY_CODE
 from skillmind.runs.domain import ClaimedRun, SessionContinuationMode
 
 
@@ -64,11 +66,37 @@ class ProposalContinuationReader:
             parent = await session.get(AgentSession, claimed.parent_agent_session_id)
             if segment is None or parent is None:
                 raise ValueError("Proposal continuation lineage is unavailable")
+            continuation_parent_id = claimed.parent_agent_session_id
+            continuation_sdk_id = claimed.parent_sdk_session_id
+            if parent.run_segment_id == segment.id:
+                # 技術再試行の親 Session と、業務 Segment を作った原提案の親は別に検証する。
+                previous = await session.get(RunAttempt, parent.run_attempt_id)
+                if (previous is None or previous.run_id != claimed.run_id
+                    or previous.run_segment_id != segment.id
+                    or previous.attempt_no != claimed.attempt_no - 1
+                    or previous.status != "FAILED"
+                    or not previous.error_json
+                    or previous.error_json.get("code") != MODEL_CAPACITY_CODE
+                    or parent.run_id != claimed.run_id
+                    or parent.sdk_session_id != claimed.parent_sdk_session_id
+                    or segment.run_id != claimed.run_id
+                    or segment.segment_no != claimed.segment_no
+                    or segment.checkpoint_json != claimed.checkpoint_json):
+                    raise ValueError("Capacity retry proposal lineage changed")
+                if segment.continuation_mode != SessionContinuationMode.RESUME.value:
+                    return None
+                if segment.parent_agent_session_id is None:
+                    raise ValueError("Original proposal parent is unavailable")
+                parent = await session.get(AgentSession, segment.parent_agent_session_id)
+                if parent is None or parent.sdk_session_id is None:
+                    raise ValueError("Original proposal parent is unavailable")
+                continuation_parent_id = parent.id
+                continuation_sdk_id = parent.sdk_session_id
             if (
                 segment.run_id != claimed.run_id
-                or segment.parent_agent_session_id != parent.id
+                or segment.parent_agent_session_id != continuation_parent_id
                 or parent.run_id != claimed.run_id
-                or parent.sdk_session_id != claimed.parent_sdk_session_id
+                or parent.sdk_session_id != continuation_sdk_id
                 or segment.segment_no != claimed.segment_no
                 or segment.continuation_mode != claimed.continuation_mode.value
                 or segment.checkpoint_json != claimed.checkpoint_json

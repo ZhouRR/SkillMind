@@ -3,8 +3,8 @@
   "source_hash": "sha256:613de186ec2f208e92c913568333b057ad2b12ead5032f895489f68b78e302b5",
   "interpreter": {
     "skill_key": "skillmind-skill-interpreter",
-    "version": "4.3.1",
-    "prompt_checksum": "sha256:357b0e3edf363d2dd8c48916bc3c7c9335a882794a2be9a88839c1a77c489ef6"
+    "version": "6.0.0",
+    "prompt_checksum": "sha256:957578708dafe60cc0e9b120355ce88652ee596339f88991aa6225e4eece07db"
   },
   "report": {
     "report_version": "skillmind.skill-interpretation-report/v1",
@@ -56,7 +56,7 @@
       "skill_key": "repository-review",
       "source_hash": "sha256:613de186ec2f208e92c913568333b057ad2b12ead5032f895489f68b78e302b5",
       "interpretation_id": "00000000-0000-4000-8000-000000000301",
-      "interpreter_version": "skillmind-skill-interpreter/4.3.1"
+      "interpreter_version": "skillmind-skill-interpreter/6.0.0"
     },
     "compatibility": {
       "level": "adapted",
@@ -78,7 +78,7 @@
         "skill_key": "repository-review",
         "source_hash": "sha256:613de186ec2f208e92c913568333b057ad2b12ead5032f895489f68b78e302b5",
         "interpretation_id": "00000000-0000-4000-8000-000000000301",
-        "interpreter_version": "skillmind-skill-interpreter/4.3.1"
+        "interpreter_version": "skillmind-skill-interpreter/6.0.0"
       },
       "compatibility": {
         "level": "adapted",

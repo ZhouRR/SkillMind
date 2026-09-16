@@ -31,6 +31,8 @@ export const APP_ROUTES: ReadonlyArray<{
 export function routeFromHash(hash: string): AppRoute {
   const candidate = hash.replace(/^#\/?/, '').split('?', 1)[0]?.replace(/\/+$/, '') ?? ''
   if (candidate === 'schedules') return 'tasks'
+  // 保存済みの旧 Workspace/Run URL も履歴へ所属させ、画面と主導航を一致させる。
+  if (candidate === 'workspace' && new URLSearchParams(hash.split('?', 2)[1]).get('run')) return 'history'
   return APP_ROUTES.some(({ route }) => route === candidate)
     ? candidate as AppRoute
     : 'home'
@@ -44,6 +46,7 @@ export interface RouteContext {
 
 /** 固定画面を static hosting と互換な hash URL へ変換する。 */
 export function routeHref(route: AppRoute, projectId?: string, context?: RouteContext): string {
+  if (route === 'workspace' && context?.runId) route = 'history'
   const base = route === 'home' ? '#/' : `#/${route === 'schedules' ? 'tasks' : route}`
   // Account の検索や対象は画面内に限定し、Project/Run の URL 文脈を引き継がない。
   if (route === 'accounts') return base

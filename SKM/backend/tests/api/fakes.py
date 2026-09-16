@@ -1495,7 +1495,7 @@ class FakeSkillService:
                     TaskToolRequirement(capability="repository.read/v1", required=True),
                 ),
                 published_at=datetime(2026, 7, 9, tzinfo=UTC),
-                capability_blueprint={
+                skill_definition={
                     "blueprint_version": "skillmind.capability-blueprint/v1",
                     "capabilities": [{"key": "repository.review", "title": "Repository Review"}],
                     "tasks": [

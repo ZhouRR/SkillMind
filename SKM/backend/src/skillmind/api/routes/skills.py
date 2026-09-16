@@ -106,6 +106,7 @@ class ParseSkillResponse(BaseModel):
     normalized_package: dict[str, Any]
     runtime_manifest_draft: dict[str, Any]
     capability_blueprint: dict[str, Any] | None
+    skill_execution: dict[str, Any] | None = None
 
 
 class StoredSkillPreviewResponse(BaseModel):
@@ -1272,6 +1273,7 @@ def _parse_response(preview: SkillPreview) -> ParseSkillResponse:
         normalized_package=preview.normalized_package,
         runtime_manifest_draft=preview.runtime_manifest_draft,
         capability_blueprint=resolve_capability_blueprint(preview.runtime_manifest_draft),
+        skill_execution=preview.runtime_manifest_draft.get("skill_execution"),
     )
 
 

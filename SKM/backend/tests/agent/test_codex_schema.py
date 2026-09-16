@@ -9,10 +9,11 @@ from typing import Any
 
 import pytest
 from jsonschema import Draft202012Validator
-
 from skillmind.agent.codex_diagnostics import codex_failure_detail
 from skillmind.agent.codex_schema import CodexOutputError, CodexOutputSchema
-from skillmind.skills.interpreter import build_interpreter_generation_schema
+from skillmind.skills.interpreter import (
+    build_legacy_interpreter_generation_schema as build_interpreter_generation_schema,
+)
 
 
 def assert_strict_schema(schema: dict[str, Any], depth: int = 0) -> None:
@@ -186,3 +187,19 @@ def test_encoded_object_rejects_extra_string_wrapper_at_wire_boundary() -> None:
         with pytest.raises(CodexOutputError) as caught:
             codec.decode(json.dumps({"extensions": value}))
         assert caught.value.detail == "codex_output:invalid_wire_pattern; path=/extensions"
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("codexErrorInfo", "serverOverloaded"),
+        ("codex_error_info", "server_overloaded"),
+        ("code", "server_overloaded"),
+    ],
+)
+def test_capacity_diagnostics_preserve_only_classification(field, value):
+    """SDK 通知と原生記録の分類を認識し、本文は記録しない。"""
+    assert (
+        codex_failure_detail({field: value, "message": "sensitive provider message"})
+        == "codex:server_overloaded"
+    )

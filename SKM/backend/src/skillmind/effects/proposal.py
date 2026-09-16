@@ -15,6 +15,7 @@ from skillmind.effects.domain import (
     ChangeProposalValidationError,
     EffectRiskLevel,
 )
+from skillmind.effects.operation_policy import operation_authorization_key
 
 CHANGE_PROPOSE_CAPABILITY = "change.propose/v1"
 CHANGE_PROPOSE_SDK_NAME = "mcp__skillmind__change_propose_v1"
@@ -28,7 +29,6 @@ CHANGE_PROPOSE_REQUEST_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
     "required": [
-        "effect_intent_key",
         "resource_key",
         "capability_version",
         "operation",
@@ -87,9 +87,7 @@ CHANGE_PROPOSE_REQUEST_SCHEMA: dict[str, Any] = {
             "type": "object",
             "additionalProperties": False,
             "required": ["revision"],
-            "properties": {
-                "revision": {"type": "string", "minLength": 1, "maxLength": 256}
-            },
+            "properties": {"revision": {"type": "string", "minLength": 1, "maxLength": 256}},
         },
         "summary": {"type": "string", "minLength": 1, "maxLength": 4000},
         "evidence_refs": {
@@ -105,9 +103,7 @@ CHANGE_PROPOSE_REQUEST_SCHEMA: dict[str, Any] = {
             "type": "object",
             "additionalProperties": False,
             "required": ["description"],
-            "properties": {
-                "description": {"type": "string", "minLength": 1, "maxLength": 2000}
-            },
+            "properties": {"description": {"type": "string", "minLength": 1, "maxLength": 2000}},
         },
         "verification": {
             "type": "object",
@@ -210,7 +206,14 @@ def parse_change_proposal_request(
     current = (now or datetime.now(UTC)).astimezone(UTC)
     fingerprint = sha256_hex(canonical_json(payload))
     return ChangeProposalDraft(
-        effect_intent_key=str(payload["effect_intent_key"]),
+        effect_intent_key=str(
+            payload.get("effect_intent_key")
+            or operation_authorization_key(
+                str(payload["resource_key"]),
+                str(payload["capability_version"]),
+                str(payload["operation"]),
+            )
+        ),
         resource_key=str(payload["resource_key"]),
         capability_version=str(payload["capability_version"]),
         operation=str(payload["operation"]),

@@ -56,6 +56,7 @@ from skillmind.skills.domain import (
     StoredSkillVersion,
     validate_skill_publication,
 )
+from skillmind.skills.interpreter_execution import MODEL_OUTPUT_WHITESPACE_MESSAGE
 from skillmind.skills.task_catalog import PublishedTaskDescriptor, project_published_tasks
 from skillmind.skills.task_flow_preview import TaskFlowPreviewInvalidError, TaskFlowPreviewSource
 
@@ -65,8 +66,10 @@ _VALIDATION_LOCATION = re.compile(
 )
 # 公開契約の構造 field だけを許可する。candidate が作る map key は文字種だけで信用しない。
 _VALIDATION_PATH_FIELDS = frozenset({
+    "candidate_version", "source_ref",
     "response_version", "source_hash", "interpreter", "skill_key", "version", "prompt_checksum",
     "normalized_package", "runtime_manifest_draft", "report", "capability_blueprint", "identity",
+    "skill_execution", "operations", "capability_version", "platform_tools", "input_source_ref",
     "compatibility", "tasks", "capabilities", "tools", "resource_requirements", "guidance",
     "required_rules", "recommended_steps", "quality_criteria", "prohibited_actions", "assumptions",
     "questions", "diagnostics", "source_traces", "effect_intents", "interaction_points",
@@ -76,7 +79,8 @@ _VALIDATION_PATH_FIELDS = frozenset({
     "resource_keys", "resource_key", "operation", "risk", "contract_source_trace", "workflows",
     "steps",
     "document_prerequisites", "mode", "approval_mode", "access", "kind", "source", "target",
-    "path", "line_start", "line_end", "file_path", "field_path", "reference", "title", "summary",
+    "path", "line", "source_path", "line_start", "line_end", "file_path", "field_path",
+    "reference", "title", "summary",
     "confidence", "level", "name", "provider", "providers", "request_schema", "response_schema",
     "error_schema", "input_schema", "output_schema", "input_schema_checksum",
     "output_schema_checksum",
@@ -87,10 +91,14 @@ _VALIDATION_ARRAY_FIELDS = frozenset({
     "recommended_steps",
     "quality_criteria", "prohibited_actions", "assumptions", "questions", "diagnostics",
     "source_traces", "effect_intents", "interaction_points", "fields", "enum", "resource_keys",
-    "document_prerequisites", "providers", "workflows", "steps",
+    "document_prerequisites", "providers", "workflows", "steps", "contract_source_trace",
+    "operations", "platform_tools",
 })
 _CONTRACT_VALIDATION_CODES = frozenset({
-    "source_trace_target_invalid",
+    "source_trace_target_invalid", "skill_execution_invalid",
+    "document_library_capabilities_invalid",
+    "candidate_source_invalid", "candidate_contract_source_missing", "candidate_publish_invalid",
+    "source_trace_file_invalid", "source_trace_line_invalid",
     "contract_constraint_invalid", "contract_constraint_out_of_range", "contract_depth_exceeded",
     "contract_description_invalid", "contract_description_too_long", "contract_enum_duplicate",
     "contract_enum_invalid", "contract_enum_limit_exceeded", "contract_enum_type_mismatch",
@@ -102,6 +110,7 @@ _CONTRACT_VALIDATION_CODES = frozenset({
 })
 # 汎用 ValueError の本文は instance を含み得る。値を埋め込まない既知 message だけを許可する。
 _STATIC_VALIDATION_DIAGNOSTICS = frozenset({
+    MODEL_OUTPUT_WHITESPACE_MESSAGE,
     "RuntimeManifest tasks must be an array",
     "Model RuntimeManifest tasks must define input_contract",
     "Model RuntimeManifest output_contract must be an object",
@@ -492,7 +501,8 @@ class SkillRepository:
         if source is None or source.organization_id != organization_id:
             raise SkillInterpretationNotFoundError("SkillInterpretation was not found")
         if interpretation.status != SkillInterpretationStatus.PREVIEW_READY.value or (
-            manifest.get("capability_blueprint") is not None and interpretation.origin != "model"
+            (manifest.get("capability_blueprint") is not None or "skill_execution" in manifest)
+            and interpretation.origin != "model"
         ):
             raise SkillInterpretationNotReadyError("SkillInterpretation is not preview-ready")
         identity = manifest.get("identity")
@@ -995,7 +1005,8 @@ class SkillRepository:
             or not isinstance(manifest.manifest_json, dict)
             or manifest.manifest_version != manifest.manifest_json.get("manifest_version")
             or (
-                manifest.manifest_json.get("capability_blueprint") is not None
+                (manifest.manifest_json.get("capability_blueprint") is not None
+                 or "skill_execution" in manifest.manifest_json)
                 and interpretation.origin != "model"
             )
         ):

@@ -757,6 +757,10 @@ export const ZH: UiMessages = {
     failures: { sessionExpired: '会话已失效，请重新登录后查询原请求。', csrfRejected: '会话安全校验失败，已停止写入。', forbidden: '没有当前操作权限，已停止写入。', notFound: '当前项目或执行不存在，或无权访问。', projectArchived: '项目已归档；可以查看历史和核对原请求，不能提交评价。', resultUnavailable: '当前执行没有可评价的结果。', resultMismatch: '当前结果与原请求不一致，已停止写入。', invalidRequest: '评价输入不符合要求，请检查后修改。', invalidRevision: '修订路径无效、重复或原值不存在；整份评价未被接收。', conflict: '原 UUID 与已保存的内容冲突；不能换 UUID 当作重试，请核对原请求。', notSeen: '暂未查到原请求；这不证明原提交不会稍后保存。', unavailable: '暂时无法读取评价回执或历史，请稍后只读核对。', cursorInvalid: '历史游标无效，请从头刷新历史。', unknown: '未收到可信保存回执；原请求保持未确认。', loadFailed: '无法读取可信的评价记录，请重试读取。', readTimeout: '读取超时，原请求的保存状态未改变。' },
   },
   runResult: {
+    capacityTitle: '模型服务容量不足',
+    capacityWaiting: '已保留原会话和已完成的处理记录，正在等待自动重试。',
+    capacityRetryAt: (time: string) => `下次重试计划时间：${time}`,
+    capacityFailed: '模型服务容量不足，执行已结束，自动重试已停止。已完成的处理记录仍然保留。',
     reading: { details: '运行详情', checks: '检查说明', confidenceHint: '模型置信度不代表正确率。' },
     referenceChecks: {
       briefV1: '保存时已核对引用；附件内容未验证，结论仍需人工判断。',
@@ -1049,6 +1053,7 @@ export const ZH: UiMessages = {
     failures: { sessionExpired: '当前会话已失效，请重新登录。', accessUnavailable: '当前无法访问这些定时安排。', loadFailed: '读取失败，请手动重试；未确认任何修改结果。' },
   },
   taskFlow: {
+    sourceInputs: '输入项', sourceNoInputs: '无需填写输入。', sourceResources: '所需资源', sourceText: 'Skill 原文',
     open: '预览任务流程', title: '任务流程预览', intro: '仅展示这份技能的原声明，不执行步骤，也不表示已有进度或执行证据。',
     close: '关闭流程预览', refresh: '重新读取预览', loading: '正在读取原任务声明…',
     missing: '此精确版本未声明能力蓝图，无法提供流程预览。原任务入口仍保留，不从 Schema 或最新版本补造计划。',

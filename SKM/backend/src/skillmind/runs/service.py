@@ -28,6 +28,7 @@ from skillmind.documents.library import (
     FrozenDocumentLibraryBinding,
     ResolvedDocumentLibraryBinding,
 )
+from skillmind.documents.library_contract import supports_document_library_capabilities
 from skillmind.documents.repository import DocumentRepository
 from skillmind.documents.snapshot import DOCUMENT_CAPABILITIES, DocumentSnapshotError
 from skillmind.effects.domain import (
@@ -74,8 +75,8 @@ from skillmind.runs.interaction import (
     InteractionRequestDraft,
 )
 from skillmind.runs.repository import RunRepository
-from skillmind.skills.capability_blueprint import resolve_capability_blueprint
 from skillmind.skills.domain import PublishedTaskNotFoundError
+from skillmind.skills.execution import is_source_execution, resolve_skill_definition
 from skillmind.skills.resource_binding import is_write_capability, required_resource_keys
 from skillmind.skills.task_catalog import ResolvedTaskRun
 from skillmind.users.access import authorize_user_access, validate_user_access
@@ -172,14 +173,13 @@ class RunService:
             manifest = resolved.skill_snapshot.get("manifest")
             if not isinstance(manifest, dict):
                 raise ValueError("Resolved task is missing its frozen RuntimeManifest")
-            blueprint = resolve_capability_blueprint(manifest)
+            blueprint = resolve_skill_definition(manifest)
             if blueprint is None:
                 raise ValueError("Resolved task is missing its CapabilityBlueprint")
             execution_profile = resolve_execution_profile(blueprint).profile.value
-            has_apply_intent = any(
-                isinstance(effect, dict) and effect.get("mode") == "apply"
-                for effect in blueprint.get("effect_intents", [])
-            )
+            from skillmind.skills.execution import declared_operations
+
+            has_apply_intent = bool(declared_operations(blueprint))
             if not self._scheduling_enabled and not isinstance(authorization, UserAccess):
                 raise TaskSourceSelectionError("Scheduled execution is disabled in this deployment")
             if (
@@ -479,7 +479,7 @@ class RunService:
         manifest = resolved.skill_snapshot.get("manifest")
         if not isinstance(manifest, dict):
             raise ValueError("Resolved task is missing its frozen RuntimeManifest")
-        blueprint = resolve_capability_blueprint(manifest)
+        blueprint = resolve_skill_definition(manifest)
         if blueprint is None:
             raise ValueError("Resolved task is missing its CapabilityBlueprint")
         async with self._session_factory() as session:
@@ -811,6 +811,7 @@ class RunService:
         session_metadata: AgentSessionMetadata | None,
         result: RunResultRecord | None,
         error_json: dict[str, Any] | None,
+        retry_delay_seconds: int | None = None,
     ) -> RunStatus:
         """Agent terminal outcome と Result を Run aggregate へ原子的に反映する。"""
 
@@ -823,6 +824,7 @@ class RunService:
                 session_metadata=session_metadata,
                 result=result,
                 error_json=error_json,
+                retry_delay_seconds=retry_delay_seconds,
             )
 
     async def recover_expired_attempts(self, *, limit: int = 20) -> int:
@@ -951,7 +953,7 @@ async def _resolve_selected_sources(
                 if (
                     document_library_target is None
                     or selected_token != DOCUMENT_LIBRARY_SELECTION
-                    or declared != (DOCUMENT_WRITE_CAPABILITY,)
+                    or not supports_document_library_capabilities(declared)
                 ):
                     raise TaskSourceSelectionError(
                         f"Document library binding is not supported: {key}"
@@ -974,6 +976,7 @@ async def _resolve_selected_sources(
                     token=selected_token,
                     capability=next(item for item in declared if item in DOCUMENT_CAPABILITIES),
                     library_target=document_library_target,
+                    defer_content=is_source_execution(blueprint),
                 )
             except DocumentSnapshotError as error:
                 raise TaskSourceSelectionError(str(error)) from error

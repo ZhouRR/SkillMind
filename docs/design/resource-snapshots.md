@@ -79,7 +79,7 @@ sources 由客户端编码、服务端校验，界面显示名称与范围。
 | 全集 | project-documents:all，创建时 1–5000 个成员；空/超量拒绝，不截断 |
 | 不使用 | 省略可选槽位；空串不是合法选择 |
 
-成果保存使用独立的 `document`/`write` 槽位，显式选择 `project-library:documents`；它不是输入文档的单份、集合或全集。候选复用项目现有文档库，要求 FileStorage 有持久存储归属，空文档库也可列出；候选不公开 bucket、namespace 或连接。前端按 access 区分两种选择，保存目标不自动勾选，候选消失时拒绝原草稿，不替换成输入全集。能力就绪与批准边界见[受控写入](repository-effects.md#minio-条件创建与原结果核对)。
+成果保存使用独立的 `document`/`write` 槽位，显式选择 `project-library:documents`；能力只能声明 `document.write/v1`，不能混入输入文档读取、列举或转换；候选校验与发布门禁报告具体能力路径，旧版本的就绪检查也不把部分匹配当作可启动。它不是输入文档的单份、集合或全集。候选复用项目现有文档库，要求 FileStorage 有持久存储归属，空文档库也可列出；候选不公开 bucket、namespace 或连接。前端按 access 区分两种选择，保存目标不自动勾选，候选消失时拒绝原草稿，不替换成输入全集。能力就绪与批准边界见[受控写入](repository-effects.md#minio-条件创建与原结果核对)。
 
 即时执行/Schedule 共用组件，不自动选首份。目录入口使用完整就绪候选的相对路径，按目录边界包含子目录，选择时展开为明确 ID：一份使用单份编码，2–5000 份使用集合编码，超量不截断。目录只是选择入口，不保存实时目录绑定；之后新增文件不自动进入草稿或调度，旧自定义集合保留原成员。候选变化保留草稿并要求修正，不改全集、替换 ID 或接受单成员集合；原请求确认不受草稿影响。
 
@@ -91,7 +91,7 @@ ContextBuilder 在工作区准备前验证保存目标的声明、原 Project/Ru
 
 新建 Run 时，文档读取槽位也冻结登记用 `document_library`（库 ID、Project ID、bucket），不依赖成果保存槽位是否存在。冻结前按文档自身保存归属核对当前配置，仅查询数据库元数据，不获取 blob；Worker 在准备前再验原引用与配置一致。旧来源没有该字段时不从当前配置补写。
 
-Brief 在 identity 中传入原 Project ID，并将每个读取槽位已验证的 `document_selection`（选择方式、ID、路径、MIME、大小、内容 hash 和清单 checksum）直接交给模型。前置业务登记可使用这些元数据；它们不证明已取得或转换正文，也不绕过 document.readiness 的效果门禁。SINGLE/SET/ALL 均为创建时固定集合，不推测为实时目录条件。没有 workspace.read/v1 时不提示模型读取索引；需要文件内容的过程必须声明相应的文档或 workspace Tool。
+Brief 在 identity 中传入原 Project ID，并将每个读取槽位已验证的 `document_selection`（选择方式、ID、路径、MIME、大小、内容 hash 和清单 checksum）直接交给模型。新原文执行的所有文档读取均按需准备（包括 document.read/v1），启动前不预取正文；Agent 使用完整原文决定业务处理次序。前置业务登记可使用这些元数据；它们不证明已取得或转换正文，旧 Blueprint 也不绕过 document.readiness 的效果门禁。SINGLE/SET/ALL 均为创建时固定集合，不推测为实时目录条件。没有 workspace.read/v1 时不提示模型读取索引；需要文件内容的过程必须声明相应的文档或 workspace Tool。
 
 库 ID 是平台逻辑文档库的稳定 UUIDv5：以存储 namespace UUID 为 namespace，以规范 JSON `{"kind":"project-document-library/v1","project_id":原ProjectUUID字符串,"bucket":原bucket}` 为 name。同库跨 Run/slot 一致，Project/bucket/存储世代不同则区分；成果回执使用同一算法。它不代表新建 Integration 或外部 MinIO ID，不新增库表。
 

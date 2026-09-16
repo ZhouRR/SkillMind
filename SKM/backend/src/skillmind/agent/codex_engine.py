@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
 from contextlib import aclosing, suppress
 from dataclasses import dataclass, field, replace
@@ -30,6 +31,7 @@ from skillmind.agent.codex_runtime import (
     start_codex,
 )
 from skillmind.agent.codex_schema import CodexOutputError, CodexOutputSchema
+from skillmind.agent.continuation_prompt import continuation_prompt
 from skillmind.agent.domain import (
     AgentEvent,
     AgentEventType,
@@ -43,6 +45,7 @@ from skillmind.agent.domain import (
 from skillmind.agent.session_store import SessionTranscriptBackend, TranscriptKey
 from skillmind.agent.tool_gateway import RunToolRuntime
 from skillmind.runs.budget import BudgetUnavailableError
+from skillmind.runs.capacity_retry import MODEL_CAPACITY_CODE
 
 
 @dataclass(slots=True)
@@ -149,8 +152,12 @@ class CodexAgentSdkEngine:
             raise BudgetUnavailableError("Codex native monetary metering is not wired")
         if context.model != self._configuration.model:
             raise ValueError("Run model does not match the configured Codex model")
+        previous = None
         if parent is not None:
-            context = await self._validate_parent(context, parent)
+            context, previous = await self._validate_parent(context, parent)
+        prompt, prompt_context = continuation_prompt(
+            context, prompt, previous if not fork else None,
+        )
         runtime = self._runtime_factory(context)
 
         async def save_deferred(
@@ -222,7 +229,7 @@ class CodexAgentSdkEngine:
                     thread = await asyncio.to_thread(client.thread_fork, parent.session_id, options)
                 else:
                     thread = await asyncio.to_thread(
-                        client.thread_resume, parent.session_id, options
+                        client.thread_resume, parent.session_id, {**options, "excludeTurns": True}
                     )
                 session_id = thread.thread.id
                 if (
@@ -246,6 +253,7 @@ class CodexAgentSdkEngine:
                         "effort": self._configuration.effort,
                         "parent_session_id": parent.session_id if parent else None,
                         "attempt_id": str(context.run_attempt_id),
+                        "prompt_context": prompt_context,
                     },
                 )
                 yield event(
@@ -287,12 +295,18 @@ class CodexAgentSdkEngine:
                 message_bytes: dict[str, int] = {}
                 steps = 0
                 limit_exceeded = False
+                pending_text = ""
+                text_flushed_at = time.monotonic()
                 async with aclosing(codex_notifications(client, turn.turn.id)) as stream:
                     async for notification in stream:
                         while not bridge.events.empty():
                             kind, payload = bridge.events.get_nowait()
                             yield event(kind, payload)
                         method, params = notification["method"], notification["params"]
+                        if pending_text and method != "item/agentMessage/delta":
+                            yield event(AgentEventType.TEXT_DELTA, {"text": pending_text})
+                            pending_text = ""
+                            text_flushed_at = time.monotonic()
                         if method == "item/agentMessage/delta":
                             text = params["delta"]
                             size = len(text.encode("utf-8"))
@@ -306,7 +320,15 @@ class CodexAgentSdkEngine:
                                     client.turn_interrupt, session_id, turn.turn.id
                                 )
                             else:
-                                yield event(AgentEventType.TEXT_DELTA, {"text": text})
+                                # Redis/画面通知を token ごとの直列待機にせず、順序と全文を保つ。
+                                pending_text += text
+                                if (
+                                    len(pending_text) >= 4096
+                                    or time.monotonic() - text_flushed_at >= 0.1
+                                ):
+                                    yield event(AgentEventType.TEXT_DELTA, {"text": pending_text})
+                                    pending_text = ""
+                                    text_flushed_at = time.monotonic()
                         elif method == "item/completed":
                             item = params.get("item", {})
                             if item.get("type") == "agentMessage":
@@ -341,6 +363,10 @@ class CodexAgentSdkEngine:
                                     "type": "codex_terminal",
                                     "turn_id": turn.turn.id,
                                     "status": status,
+                                    "failure_detail": (
+                                        codex_failure_detail(params["turn"].get("error"))
+                                        if status == "failed" else None
+                                    ),
                                     "attempt_id": str(context.run_attempt_id),
                                 },
                             )
@@ -356,13 +382,16 @@ class CodexAgentSdkEngine:
                             }:
                                 yield event(*bridge.deferred)
                             elif status != "completed":
-                                yield event(
-                                    AgentEventType.ENGINE_FAILED,
-                                    {
-                                        "reason": "codex_turn_failed",
-                                        "detail": codex_failure_detail(params["turn"].get("error")),
-                                    },
-                                )
+                                detail = codex_failure_detail(params["turn"].get("error"))
+                                failure_payload: dict[str, Any] = {
+                                    "reason": "codex_turn_failed", "detail": detail,
+                                }
+                                if (status == "failed"
+                                    and detail.split(";")[0] == "codex:server_overloaded"):
+                                    failure_payload.update(
+                                        code=MODEL_CAPACITY_CODE, retryable=bridge.deferred is None,
+                                    )
+                                yield event(AgentEventType.ENGINE_FAILED, failure_payload)
                             else:
                                 try:
                                     candidate = output.decode(final_text)
@@ -409,7 +438,9 @@ class CodexAgentSdkEngine:
             ({"uuid": str(uuid4()), **entry},),
         )
 
-    async def _validate_parent(self, context: RunContext, parent: AgentSessionRef) -> RunContext:
+    async def _validate_parent(
+        self, context: RunContext, parent: AgentSessionRef,
+    ) -> tuple[RunContext, Mapping[str, Any] | None]:
         """別 Run/SDK、未決 native turn、違う原提案の resume を model 開始前に拒否する。"""
 
         if parent.run_id != context.run_id:
@@ -425,6 +456,11 @@ class CodexAgentSdkEngine:
         starts = [entry for entry in entries if entry.get("type") == "codex_start"]
         if not starts or starts[-1].get("model") != context.model:
             raise ValueError("Original Codex model is incompatible")
+        start = starts[-1]
+        if start.get("effort", self._configuration.effort) != self._configuration.effort:
+            raise ValueError("Original Codex reasoning effort is incompatible")
+        if start.get("attempt_id", str(parent.run_attempt_id)) != str(parent.run_attempt_id):
+            raise ValueError("Original Codex attempt is incompatible")
         resolved = context.resolved_proposal
         if resolved is not None:
             matches = [
@@ -443,4 +479,5 @@ class CodexAgentSdkEngine:
                     tool_use_id=matches[0]["tool_use_id"],
                 ),
             )
-        return context
+        prompt_context = start.get("prompt_context")
+        return context, prompt_context if isinstance(prompt_context, Mapping) else None

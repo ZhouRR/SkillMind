@@ -177,7 +177,7 @@ def test_projects_generic_task_with_schemas_workflow_view_and_requirements() -> 
     assert task.compatibility_level == "adapted"
     assert task.version == "1.0.0"
     assert task.published_at == PUBLISHED_AT
-    requirements = task.capability_blueprint["resource_requirements"]
+    requirements = task.skill_definition["resource_requirements"]
     assert len(requirements) == 1
     assert requirements[0]["capabilities"] == ["repository.read/v1"]
     assert requirements[0]["required"] is True
@@ -360,7 +360,7 @@ def test_descriptor_carries_the_resolved_capability_blueprint() -> None:
 
     tasks = _project(_manifest())
 
-    blueprint = tasks[0].capability_blueprint
+    blueprint = tasks[0].skill_definition
     assert blueprint["blueprint_version"] == "skillmind.capability-blueprint/v1"
     assert [item["key"] for item in blueprint["resource_requirements"]] == ["repository-source"]
     # 就緒度は Project の資源保有状況に依存するため、投影層では未判定のままにする。

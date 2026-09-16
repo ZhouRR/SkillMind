@@ -9,9 +9,10 @@ from typing import Any
 
 import pytest
 from jsonschema import Draft202012Validator, ValidationError
-
 from skillmind.skills.interpreter import (
-    build_interpreter_generation_schema,
+    build_legacy_interpreter_generation_schema as build_interpreter_generation_schema,
+)
+from skillmind.skills.interpreter import (
     load_interpreter_system_skill,
 )
 from skillmind.skills.interpreter_execution import (
@@ -509,16 +510,12 @@ def test_compose_system_prompt_embeds_envelope_contract_and_schema() -> None:
 
     assert "# Interpreter" in prompt  # SKILL.md 本文
     assert "Bind source_hash" in prompt  # output contract 連結
-    # Envelope の top-level key を明示し、余分な field、code fence、request echo を禁じる。
-    assert "response_version" in prompt and "runtime_manifest_draft" in prompt
-    assert "no additional top-level fields" in prompt and "no code fences" in prompt
-    assert "never flatten" in prompt
-    # 観測された平铺失敗への直接対策: manifest 系 field は runtime_manifest_draft へ入れ子と明示。
-    assert "belong INSIDE `runtime_manifest_draft`" in prompt
-    # 追加観察は新 top-level key ではなく report に入れるよう誘導(view_spec_needs 混入への対策)。
-    assert "never as a new top-level key" in prompt
-    assert '"runtime_manifest_draft":{"capabilities":[...]' in prompt  # 骨架例
-    assert '"additionalProperties":false' in prompt  # schema 本体を同梱する
+    assert "one JSON object matching the supplied output schema" in prompt
+    assert "No Markdown fences" in prompt
+    assert "MUST be exactly" not in prompt
+    assert '"additionalProperties":false' in prompt
+    native_prompt = _compose_system_prompt("Skill", "Rules", schema, include_schema=False)
+    assert '"additionalProperties"' not in native_prompt
 
 
 def test_generation_schema_constrains_contract_drafts_nested_in_the_blueprint() -> None:

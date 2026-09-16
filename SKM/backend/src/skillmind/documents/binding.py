@@ -27,6 +27,7 @@ async def resolve_document_binding(
     repository: DocumentRepository, *, project_id: UUID, requirement_key: str, token: str,
     capability: str = DOCUMENT_READ_CAPABILITY,
     library_target: DocumentLibraryTarget | None = None,
+    defer_content: bool = False,
 ) -> dict[str, Any]:
     """全集も明示選択だけを受理し、Project 所有権と具体 ID を作成時に固定する。"""
 
@@ -72,7 +73,7 @@ async def resolve_document_binding(
             raise DocumentSnapshotError("Selected document library is unavailable") from error
         # 入力側だけでも前置登録に使える。保存 slot・直接アクセス権は生成しない。
         binding["document_library"] = library_target.reference(project_id)
-    if capability in {
+    if defer_content or capability in {
         DOCUMENT_CONVERT_CAPABILITY, DOCUMENT_INSPECT_CAPABILITY, DOCUMENT_LIST_CAPABILITY,
     }:
         binding["preparation_policy"] = ON_DEMAND_DOCUMENT_PREPARATION

@@ -1,6 +1,6 @@
 {
   "catalog_version": "skillmind.tool-catalog/1",
-  "checksum": "sha256:2f933d39ea83f83bd1c25e01b046e84806fdaedce773ce43de5c5d3b03d90d5e",
+  "checksum": "sha256:35fc9e516d5cbfb9468a36b614ba6679d4e70e6733428922b42c6ef2e91b9658",
   "capabilities": [
     {
       "capability": "change.propose/v1",
@@ -64,7 +64,7 @@
     },
     {
       "capability": "document.read/v1",
-      "description": "Read one project document at a fixed content hash.",
+      "description": "Read one project document at a fixed content hash. Requires a separate frozen input selection; do not add this capability to a document.write/v1 library output slot. Effect read-back does not grant library read access.",
       "request_schema": "tools/document.read/v1/request.schema.json",
       "response_schema": "tools/document.read/v1/response.schema.json",
       "error_schema": "tools/document.read/v1/error.schema.json",
@@ -84,7 +84,7 @@
     },
     {
       "capability": "document.write/v1",
-      "description": "Effect-only project library CREATE. Agent uses change.propose/v1: select a separate document/write resource slot; target.locator is the relative output path; one /document SET value={artifact_ref,content_hash,size_bytes,mime_type} from a committed same-Run workspace.write/v2 Artifact; precondition.revision=absent; verification READ_BACK /document. Always requires approval; never a direct Agent Tool.",
+      "description": "Effect-only library CREATE via change.propose/v1; never a direct Agent Tool. Separate document/write slot with capabilities=[document.write/v1] only; no reads. target.locator=relative output path; one /document SET value={artifact_ref,content_hash,size_bytes,mime_type} from a committed same-Run workspace.write/v2 Artifact; precondition.revision=absent; verification READ_BACK /document. Always requires approval. Read retained local outputs via workspace.read/v1.",
       "request_schema": "tools/document.write/v1/request.schema.json",
       "response_schema": "tools/document.write/v1/response.schema.json",
       "error_schema": "tools/document.write/v1/error.schema.json",

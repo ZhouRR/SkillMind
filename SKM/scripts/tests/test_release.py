@@ -185,7 +185,8 @@ class ReleaseTests(unittest.TestCase):
         self.assertTrue(
             all("--no-build" in args and "--no-deps" in args and "never" in args for args in up)
         )
-        self.assertEqual(up[-1][-1], "worker")
+        self.assertEqual(up[-1][-2:], ["worker", "maintenance"])
+        self.assertEqual(current["containers"]["maintenance"], "running")
         pull = next(args for args in self.trace() if "pull" in args)
         self.assertEqual(pull[-4:], ["postgres", "redis", "object-storage", "object-storage-init"])
 
@@ -194,7 +195,9 @@ class ReleaseTests(unittest.TestCase):
 
         self.state["containers"] = {
             name: "running"
-            for name in ("api", "web", "worker", "postgres", "redis", "object-storage")
+            for name in (
+                "api", "web", "worker", "maintenance", "postgres", "redis", "object-storage",
+            )
         }
         self.save_state()
         result = self.deploy(SKM_FAKE_OFFLINE="1")
@@ -206,6 +209,7 @@ class ReleaseTests(unittest.TestCase):
         )
         self.assertLess(stop, migrate)
         self.assertIn("worker", trace[stop])
+        self.assertIn("maintenance", trace[stop])
         self.assertNotIn("postgres", trace[stop])
 
     def test_failures_report_stage_and_never_continue(self) -> None:
@@ -214,7 +218,7 @@ class ReleaseTests(unittest.TestCase):
         for suffix, stage, next_stage in (
             ("image load --input images.tar", "load-images", "prepare-images"),
             (
-                "stop --timeout 60 api web worker migrate object-storage-init",
+                "stop --timeout 60 api web worker maintenance migrate object-storage-init",
                 "stop-application",
                 "infrastructure",
             ),
@@ -237,7 +241,7 @@ class ReleaseTests(unittest.TestCase):
             ("run --rm -T --no-deps migrate", "migrate", "readiness"),
             ("migrate python -m skillmind.ops.preflight", "readiness", "api-web"),
             ("--wait-timeout 120 api web", "api-web", "worker"),
-            ("--wait-timeout 120 worker", "worker", "complete"),
+            ("--wait-timeout 120 worker maintenance", "worker", "complete"),
         ):
             with self.subTest(stage=stage):
                 result = self.deploy(SKM_FAKE_FAIL_SUFFIX=suffix)

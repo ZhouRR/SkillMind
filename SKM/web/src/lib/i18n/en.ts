@@ -737,6 +737,10 @@ export const EN: UiMessages = {
     failures: { sessionExpired: 'The session expired. Log in again to look up the original request.', csrfRejected: 'Session security verification failed. Writes are stopped.', forbidden: 'You do not have permission for this operation. Writes are stopped.', notFound: 'The project or run does not exist, or is not accessible.', projectArchived: 'This project is archived. History and original receipts remain readable; evaluations cannot be submitted.', resultUnavailable: 'This run has no result available for evaluation.', resultMismatch: 'The current result does not match the original request. Writes are stopped.', invalidRequest: 'The evaluation input does not meet the requirements. Review and edit it.', invalidRevision: 'A revision path is invalid, duplicated, or missing its original value. The whole evaluation was refused.', conflict: 'The original UUID conflicts with saved content. Do not change UUIDs to retry; check the original request.', notSeen: 'The original request is not visible yet. Its earlier POST may still be saved later.', unavailable: 'The receipt or history is temporarily unavailable. Check it with a read request later.', cursorInvalid: 'The history cursor is invalid. Reload history from the start.', unknown: 'No trustworthy saved receipt arrived. The original request remains unconfirmed.', loadFailed: 'Trustworthy evaluation records could not be read. Retry the read.', readTimeout: 'The read timed out. The original request’s save status is unchanged.' },
   },
   runResult: {
+    capacityTitle: 'Model service is at capacity',
+    capacityWaiting: 'Waiting to retry with the same conversation and completed work preserved.',
+    capacityRetryAt: (time: string) => `Next retry scheduled for: ${time}`,
+    capacityFailed: 'Execution ended because the model service is at capacity. Automatic retries have stopped. Completed work is preserved.',
     reading: { details: 'Run details', checks: 'Check scope', confidenceHint: 'Model confidence is not an accuracy score.' },
     referenceChecks: {
       briefV1: 'References checked at save time; attachment content was not verified. Conclusions still need human judgment.',
@@ -1026,6 +1030,7 @@ export const EN: UiMessages = {
     failures: { sessionExpired: 'Your session expired. Sign in again.', accessUnavailable: 'These schedules are currently inaccessible.', loadFailed: 'Reading failed. Retry manually; no change outcome was confirmed.' },
   },
   taskFlow: {
+    sourceInputs: 'Inputs', sourceNoInputs: 'No input required.', sourceResources: 'Required resources', sourceText: 'Skill source',
     open: 'Preview task flow', title: 'Task flow preview', intro: 'Original skill declarations only. This does not execute steps or report progress or execution evidence.',
     close: 'Close flow preview', refresh: 'Reload preview', loading: 'Reading the original task declarations…',
     missing: 'This exact version has no declared capability blueprint. The task entry remains available; no plan is reconstructed from schemas or a newer version.',

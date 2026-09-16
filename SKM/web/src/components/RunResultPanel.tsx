@@ -96,8 +96,20 @@ function RunResultContent({ reportOnly, state, csrfToken, onProposalDecided, art
   const settledProposals = detail.change_proposals.filter((item) => !isDecidable(item))
   const versionId = detail.skill_snapshots[0]?.skill_version_id
   const dispatches = collectSubagentDispatches(detail.evidence)
+  const latestAttempt = [...detail.attempts].sort((a, b) => b.created_at.localeCompare(a.created_at))[0]
+  const capacityError = latestAttempt?.error?.code === 'model_capacity_unavailable'
+    && (detail.status === 'RETRY_PENDING' || detail.status === 'FAILED')
+  const retryAt = latestAttempt?.error?.retry_at
+
   return (
     <div className="resultView">
+      {capacityError && <section className="resultSection" role={detail.status === 'FAILED' ? 'alert' : 'status'}>
+        <strong>{messages.runResult.capacityTitle}</strong>
+        <p>{detail.status === 'RETRY_PENDING' ? messages.runResult.capacityWaiting : messages.runResult.capacityFailed}</p>
+        {detail.status === 'RETRY_PENDING' && typeof retryAt === 'string' && Number.isFinite(Date.parse(retryAt))
+          && <p>{messages.runResult.capacityRetryAt(formatLocalTimestamp(retryAt))}</p>}
+      </section>}
+
       {detail.effect_executions.some((effect) => effect.error?.code === 'effect_result_unknown') && (
         <section className="resultSection" role="status">
           <strong>{messages.runResult.effectResultUnknown}</strong>

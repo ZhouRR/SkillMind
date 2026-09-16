@@ -10,7 +10,6 @@ from uuid import uuid4
 
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
-
 from skillmind.agent.context_builder import (
     ContractStore,
     ProductionRunContextBuilder,
@@ -417,3 +416,39 @@ async def test_registration_brief_has_metadata_while_document_gate_is_still_clos
     assert context.task_brief['resources'][0]['document_selection'] == snapshot.to_json()
     assert {t.capability for t in context.tools} == set(capabilities)
     assert not (context.workspace.input_dir / 'documents/specs/selected.xlsx').exists()
+
+
+async def test_source_execution_context_resolves_library_without_blueprint(tmp_path: Path):
+    """原文方式も実 registry/context builder を通し、元の庫 ID と bucket を保持する。"""
+    from tests.skills.test_source_execution import compile_case
+
+    _, manifest = compile_case(writes=True)
+    from skillmind.agent.outcome import compile_outcome_schema
+    from skillmind.core.hashing import sha256_hex
+
+    claimed, _ = library_run()
+    checksum = "sha256:" + sha256_hex(canonical_json(manifest))
+    outcome = compile_outcome_schema(None, task_schema_checksum=None)
+    claimed = replace(claimed, input_json={}, task_snapshot_json={
+        **claimed.task_snapshot_json, "task_key": "execute",
+        "capability": manifest["tasks"][0]["capability"], "manifest_checksum": checksum,
+        "input_schema_json": manifest["tasks"][0]["input_schema"],
+        "output_schema_json": outcome.schema,
+    }, skill_snapshots_json=({**claimed.skill_snapshots_json[0],
+                             "manifest": manifest, "manifest_checksum": checksum},),
+        selected_sources_json={}, permission_snapshot_json={
+            **claimed.permission_snapshot_json,
+            "allowed_capabilities": list(_allowed_capabilities(manifest)),
+            "execution_profile": "SUPERVISED",
+        })
+    library = target()
+    claimed.selected_sources_json["review_outputs"] = FrozenDocumentLibraryBinding(
+        claimed.project_id, claimed.run_id, uuid4(), "review_outputs", library
+    ).to_json()
+    context = await builder(tmp_path, library).build(claimed, sequence_start=1)
+    assert context.task_brief["brief_version"] == "skillmind.agent-task-brief/v2"
+    resource = context.task_brief["resources"][0]
+    assert resource["document_library"] == library.reference(claimed.project_id)
+    assert "document.write/v1" not in {tool.capability for tool in context.tools}
+    assert "change.propose/v1" in {tool.capability for tool in context.tools}
+    assert context.task_brief["source_documents"] == manifest["source_documents"]

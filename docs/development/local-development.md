@@ -21,6 +21,8 @@ python3 -m uvicorn skillmind.api.main:app --reload --port 8000
 
 ```bash
 arq skillmind.worker.settings.WorkerSettings
+# 別 terminal で保守 Queue を起動する。
+arq skillmind.worker.settings.MaintenanceWorkerSettings
 ```
 
 health は `http://localhost:8000/internal/health/live` と `/internal/health/ready`（外部 service も検査）。一括起動は[Quickstart](../operations/quickstart.md)へ。
@@ -43,6 +45,10 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m pytest --import-mode=importlib -p no:cachep
 ```
 
 新しい fixture 利用先も確認する。除外は全 test の無副作用保証ではなく、Redis 等の process は別に確認する。
+
+### Worker Queue の隔離検証
+
+`SKM/` で `PYTHONPATH=backend/src python3 scripts/probe_worker_queues.py --redis-socket <専用の空 Redis Unix socket>` を実行する。所有する一時 Redis process を TCP・永続化なしで用意し、終了後はその process だけを停止する。既存の Redis やアプリの `.env` は使わない。実 ARQ の既定 poll 間隔で、保守が待機中でも実行・続行でき、実行中も Outbox が業務 Queue へ配送されることを検証する。DB とモデルは合成境界であり、実 RV の総所要時間を証明しない。
 
 ### Proposal 的隔离 CLI 续行验证
 

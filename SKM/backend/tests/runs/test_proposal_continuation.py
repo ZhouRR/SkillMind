@@ -7,12 +7,12 @@ from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
-
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.db.models import (
     AgentSession,
     ChangeApproval,
     EffectExecution,
+    RunAttempt,
     RunSegment,
     UserInteraction,
 )
@@ -151,7 +151,8 @@ async def test_non_applied_outcome_does_not_invent_a_success_receipt(outcome):
 
 
 @pytest.mark.asyncio
-async def test_reader_checks_current_segment_parent_and_checkpoint():
+@pytest.mark.parametrize("retry", [False, True])
+async def test_reader_checks_current_segment_parent_and_checkpoint(retry):
     """別 Segment/parent/checkpoint を持ち込んでも、原提案の確定記述子を渡さない。"""
     session, segment, proposal, effect = _rows()
     parent = SimpleNamespace(
@@ -174,8 +175,34 @@ async def test_reader_checks_current_segment_parent_and_checkpoint():
         checkpoint_json=segment.checkpoint_json,
     )
 
+    retry_parent = None
+    previous = None
+    if retry:
+        previous = SimpleNamespace(
+            id=uuid4(),
+            run_id=proposal.run_id,
+            run_segment_id=segment.id,
+            attempt_no=1,
+            status="FAILED",
+            error_json={"code": "model_capacity_unavailable"},
+        )
+        retry_parent = SimpleNamespace(
+            id=uuid4(),
+            run_id=proposal.run_id,
+            run_attempt_id=previous.id,
+            run_segment_id=segment.id,
+            sdk_session_id=parent.sdk_session_id,
+        )
+        claimed.parent_agent_session_id = retry_parent.id
+        claimed.parent_sdk_session_id = retry_parent.sdk_session_id
+        claimed.attempt_no = 2
+
     async def get(model, identity):
         """Model と原 ID の組にだけ fixture を返す。"""
+        if retry and model is AgentSession and identity == retry_parent.id:
+            return retry_parent
+        if retry and model is RunAttempt and identity == previous.id:
+            return previous
         return {
             (RunSegment, segment.id): segment,
             (AgentSession, parent.id): parent,

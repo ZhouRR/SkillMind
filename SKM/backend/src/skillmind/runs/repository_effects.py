@@ -69,6 +69,7 @@ from skillmind.effects.domain import (
     StoredEffectExecution,
 )
 from skillmind.effects.git_receipt import GitCommitCommand, git_effect_commit_message
+from skillmind.effects.operation_policy import operation_authorization_key, operation_risk
 from skillmind.effects.outcomes import (
     UNKNOWN_EFFECT_CODE,
     effect_failure_record,
@@ -88,6 +89,7 @@ from skillmind.integrations.domain import (
     binding_checksum,
 )
 from skillmind.projects.repository import ProjectRepository
+from skillmind.runs.checkpoint import merge_checkpoint
 from skillmind.runs.domain import (
     AgentSessionMetadata,
     ClaimedRun,
@@ -104,13 +106,33 @@ from skillmind.runs.domain import (
     plan_run_transition,
 )
 from skillmind.runs.repository_base import _RunRepositoryBase
-from skillmind.skills.capability_blueprint import resolve_capability_blueprint
+from skillmind.skills.execution import (
+    declared_operations,
+    is_source_execution,
+    resolve_skill_definition,
+)
 from skillmind.skills.frozen_manifest import verified_run_manifest
 from skillmind.users.repository import lock_organization
 
 
 class EffectOperationsMixin(_RunRepositoryBase):
     """observe → propose → apply の承認境界と effect 実行を担う mixin。"""
+
+    async def pending_effect_for_attempt(self, *, run_id: UUID, attempt_id: UUID) -> UUID | None:
+        """即時配送は原 Attempt の承認済み候補だけを返し、実行権は通常 claim に委ねる。"""
+
+        effect_id: UUID | None = await self._session.scalar(
+            select(EffectExecution.id)
+            .join(ChangeProposal, ChangeProposal.id == EffectExecution.proposal_id)
+            .where(
+                EffectExecution.run_id == run_id,
+                ChangeProposal.run_id == run_id,
+                ChangeProposal.run_attempt_id == attempt_id,
+                ChangeProposal.status == ChangeProposalStatus.APPROVED.value,
+                EffectExecution.status == EffectExecutionStatus.REQUESTED.value,
+            )
+        )
+        return effect_id
 
     async def suspend_for_proposal(
         self,
@@ -157,9 +179,13 @@ class EffectOperationsMixin(_RunRepositoryBase):
             self._execution_features.require_effect(
                 draft.capability_version, draft.operation, provider=binding.provider
             )
-        await self._validate_checkpoint_refs(run.id, draft.checkpoint)
+        checkpoint = merge_checkpoint(segment.checkpoint_json or {}, draft.checkpoint)
+        await self._validate_checkpoint_refs(run.id, checkpoint)
         self._validate_claimed_lease(attempt, claimed, now=datetime.now(UTC))
         await self._validate_evidence_refs(run.id, draft.evidence_refs)
+        checkpoint["evidence_refs"] = list(dict.fromkeys([
+            *checkpoint.get("evidence_refs", []), *draft.evidence_refs,
+        ]))
         agent_session = await self._ensure_agent_session(
             claimed,
             sdk_session_id=UUID(event.agent_session_id),
@@ -172,7 +198,6 @@ class EffectOperationsMixin(_RunRepositoryBase):
 
         proposal_id = uuid4()
         proposal_ref = f"cp_{uuid4().hex}"
-        checkpoint = dict(draft.checkpoint)
         prior_proposals = checkpoint.get("change_proposal_refs", [])
         proposal_refs = (
             [str(item) for item in prior_proposals if isinstance(item, str)]
@@ -1327,12 +1352,13 @@ class EffectOperationsMixin(_RunRepositoryBase):
             manifest = verified_run_manifest(task.get("skill_snapshots", []), task)
             if task.get("skill_version_id") != str(proposal.skill_version_id):
                 raise ValueError("Proposal SkillVersion changed")
-            blueprint = resolve_capability_blueprint(manifest)
+            blueprint = resolve_skill_definition(manifest)
             if blueprint is None:
                 raise ValueError("Frozen effect Blueprint is unavailable")
             cls._validate_effect_intent(
                 blueprint, effect_intent_key=proposal.effect_intent_key,
                 resource_key=binding.requirement_key, operation=proposal.operation,
+                capability_version=proposal.capability_version,
                 risk_level=proposal.risk_level,
             )
             resources = [
@@ -2305,12 +2331,13 @@ class EffectOperationsMixin(_RunRepositoryBase):
         manifest = claimed.skill_snapshots_json[0].get("manifest")
         if not isinstance(manifest, dict):
             raise ChangeProposalValidationError("Run Manifest snapshot is unavailable")
-        blueprint = resolve_capability_blueprint(manifest)
+        blueprint = resolve_skill_definition(manifest)
         if blueprint is None:
             raise ChangeProposalValidationError("Run CapabilityBlueprint is unavailable")
         intent = self._validate_effect_intent(
             blueprint, effect_intent_key=draft.effect_intent_key, resource_key=draft.resource_key,
             operation=draft.operation, risk_level=draft.risk_level.value,
+            capability_version=draft.capability_version,
         )
         binding = (
             await self._session.scalars(
@@ -2341,10 +2368,23 @@ class EffectOperationsMixin(_RunRepositoryBase):
     @staticmethod
     def _validate_effect_intent(
         blueprint: dict[str, Any], *, effect_intent_key: str, resource_key: str,
-        operation: str, risk_level: str,
+        operation: str, risk_level: str, capability_version: str | None = None,
     ) -> dict[str, Any]:
         """初回提案と段階認可で同じ apply 意図/対象/操作/リスク境界を使う。"""
 
+        if is_source_execution(blueprint):
+            matches = [op for op in declared_operations(blueprint)
+                       if op["resource_key"] == resource_key
+                       and op["capability_version"] == capability_version
+                       and op["operation"] == operation]
+            levels = {"LOW": 0, "MEDIUM": 1, "HIGH": 2}
+            if len(matches) != 1 or capability_version is None or effect_intent_key != (
+                operation_authorization_key(resource_key, capability_version, operation)
+            ) or levels.get(risk_level, -1) < levels[operation_risk(capability_version)]:
+                raise ChangeProposalValidationError(
+                    "ChangeProposal does not match an authorized resource operation"
+                )
+            return matches[0]
         intents = [
             item for item in blueprint.get("effect_intents", [])
             if isinstance(item, dict) and item.get("key") == effect_intent_key

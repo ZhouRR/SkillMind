@@ -27,6 +27,7 @@ from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.core.logging import log_event
 from skillmind.effects.proposal import parse_change_proposal_request
 from skillmind.runs.budget import BudgetError, BudgetExhaustedError, BudgetUnavailableError
+from skillmind.runs.capacity_retry import MODEL_CAPACITY_CODE, capacity_retry_delay
 from skillmind.runs.domain import (
     AgentSessionMetadata,
     ClaimedRun,
@@ -77,6 +78,7 @@ class AgentRunExecutor:
         result_validator: ResultValidator,
         lease_seconds: int,
         preparation_timeout_seconds: float = 300,
+        max_attempts: int = 3,
         heartbeat_interval_seconds: float | None = None,
         realtime_publisher: RunRealtimePublisher | None = None,
         budget_coordinator: PrimaryBudgetCoordinator | None = None,
@@ -90,6 +92,7 @@ class AgentRunExecutor:
             raise ValueError("Heartbeat interval must be positive and shorter than the lease")
         if not math.isfinite(preparation_timeout_seconds) or preparation_timeout_seconds <= 0:
             raise ValueError("Preparation timeout must be finite and positive")
+        self._max_attempts = max_attempts
         self._run_service = run_service
         self._context_builder = context_builder
         self._engine = engine
@@ -504,6 +507,23 @@ class AgentRunExecutor:
                         proposal_id=proposal_id,
                         segment_no=claimed.segment_no,
                         status=RunStatus.WAITING_FOR_APPROVAL.value,
+                    )
+                    return
+                if (event.event_type is AgentEventType.ENGINE_FAILED
+                    and event.payload.get("code") == MODEL_CAPACITY_CODE):
+                    # SDK/MCP の cleanup 後に次 Attempt を予約し、実行の重複を防ぐ。
+                    await _close_stream(stream)
+                    delay = (capacity_retry_delay(claimed.attempt_no, self._max_attempts)
+                             if event.payload.get("retryable") is True
+                             and claimed.run_segment_id is not None else None)
+                    await self._run_service.finalize_execution(
+                        claimed,
+                        target=RunStatus.RETRY_PENDING if delay is not None else RunStatus.FAILED,
+                        attempt_status=RunAttemptStatus.FAILED,
+                        event=event, session_metadata=metadata, result=None,
+                        error_json={"code": MODEL_CAPACITY_CODE, "retryable": delay is not None,
+                                    "attempts": claimed.attempt_no},
+                        retry_delay_seconds=delay,
                     )
                     return
                 terminal = _terminal_mapping(event.event_type)

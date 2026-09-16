@@ -1,0 +1,64 @@
+{
+  "capabilities": [
+    {
+      "key": "repository.review",
+      "title": "Repository review",
+      "summary": null,
+      "intents": null
+    }
+  ],
+  "tasks": [
+    {
+      "key": "review",
+      "capability": "repository.review",
+      "objective": "Review the selected repository.",
+      "success_criteria": null,
+      "resource_keys": null,
+      "deliverables": null,
+      "parameter_contract": {
+        "contract_version": "skillmind.task-contract-draft/v1",
+        "type": "object",
+        "description": null,
+        "enum": null,
+        "fields": [],
+        "items": null,
+        "min_length": null,
+        "max_length": null,
+        "pattern": null,
+        "minimum": null,
+        "maximum": null
+      },
+      "result_contract": null,
+      "document_prerequisites": null
+    }
+  ],
+  "resource_requirements": [],
+  "guidance": {
+    "required_rules": null,
+    "recommended_steps": null,
+    "quality_criteria": null,
+    "prohibited_actions": null
+  },
+  "interaction_points": null,
+  "effect_intents": null,
+  "execution_preferences": null,
+  "source_traces": [
+    {
+      "target": "/tasks/0",
+      "reason": "Task purpose.",
+      "source_ref": "s0"
+    },
+    {
+      "target": "/tasks/0/parameter_contract",
+      "reason": "No caller parameters.",
+      "source_ref": "s0"
+    }
+  ],
+  "assumptions": null,
+  "questions": null,
+  "candidate_version": "skillmind.skill-candidate/v1",
+  "summary": "Review the selected repository.",
+  "compatibility_level": "adapted",
+  "diagnostics": [],
+  "tools": []
+}

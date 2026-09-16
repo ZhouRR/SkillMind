@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from openai_codex.client import CodexClient, CodexConfig
-from openai_codex.models import UnknownNotification
+from openai_codex.models import Notification, UnknownNotification
 
 from skillmind.agent.codex_catalog import platform_model_catalog
 from skillmind.agent.runtime_distribution import _stamp, _verify_binary
@@ -243,7 +243,7 @@ async def codex_notifications(
 
     try:
         while True:
-            notification = await asyncio.to_thread(client.next_turn_notification, turn_id)
+            notification = await asyncio.to_thread(_next_runtime_notification, client, turn_id)
             payload = (
                 notification.payload.params
                 if isinstance(notification.payload, UnknownNotification)
@@ -254,6 +254,19 @@ async def codex_notifications(
                 return
     finally:
         client.unregister_turn_notifications(turn_id)
+
+
+def _next_runtime_notification(client: CodexClient, turn_id: str) -> Notification:
+    """未使用の Tool 引数 delta 等を待機 thread 内で読み飛ばし、逐 token の往復を避ける。"""
+
+    methods = {
+        "item/agentMessage/delta", "item/completed", "thread/tokenUsage/updated",
+        "turn/completed",
+    }
+    while True:
+        notification = client.next_turn_notification(turn_id)
+        if notification.method in methods:
+            return notification
 
 
 async def start_codex(client: CodexClient) -> None:

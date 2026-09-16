@@ -29,6 +29,8 @@ observe → Evidence → change.propose → 精确批准/允许的预授权
 
 有效 finalize 的结果/不可重试失败交新 Segment，临时失败沿原 Segment/Proposal/Effect 重调度。Agent 仅提案；[catalog](../../SKM/backend/src/skillmind/effects/catalog.py)统一 Provider/validator/预授权资格。
 
+原文执行按冻结资源的 `operations` 校验实际 capability/operation，再检查 binding、Provider 和真实目标。`change.propose/v1` 可省略 `effect_intent_key`；平台以资源/能力/操作生成确定性引用，原请求 fingerprint 不变。最低风险由平台确定：数据库/文档为 MEDIUM，其他写入为 HIGH，模型只能提高。初次提案及批准后的阶段授权使用相同检查；自动批准、观察证据、冲突、幂等、回读和结果未知边界全部保留。旧 Blueprint 必须匹配原 effect_intent_key、操作和风险，不从省略 key 获得新授权。
+
 ## 已注册写入
 
 | capability | 批准与执行边界 |
@@ -44,7 +46,7 @@ observe → Evidence → change.propose → 精确批准/允许的预授权
 
 手动启动页面提供默认勾选的「自動承認（データベース・文書保存・Git 提出）」。提交的 `auto_approve`、`auto_approve_git` 与 actor、任务、输入和资源选择一起冻结；API 省略时为 false，旧 Run 和调度不自动授权，执行中不可修改。相同幂等键改变此选项返回冲突。问题答复仍由用户决定，Git 在新同意范围内自动批准；未勾选时逐次人工批准。SVN 仍人工批准，Redmine 沿原 Project policy。新浏览器使用同一个 checkbox 同时发送两个同意字段；API 缺省 `auto_approve_git=false`，v2 旧请求仍只覆盖 DB/文档，v3 才明确包含 Git。新字段必须与 `auto_approve=true` 配合，不修改在途原请求或旧 Run 的 hash。
 
-平台在提案通过原能力、Evidence、冻结 binding 和 scope 校验后，为精确 Proposal version/checksum 保存 `ChangeApproval.source=RUN_START`，actor 为原发起人。同事务保存 Effect 和 dispatch Outbox，不创建待答复 interaction；独立 Effect Worker 沿原 apply/read-back/续行协议运行。Run 在外部保存期间仍可短暂显示 WAITING_FOR_APPROVAL，此时没有人工待办。
+平台在提案通过原能力、Evidence、冻结 binding 和 scope 校验后，为精确 Proposal version/checksum 保存 `ChangeApproval.source=RUN_START`，actor 为原发起人。同事务保存 Effect 和 dispatch Outbox，不创建待答复 interaction。Agent 清理结束后，Worker 可直接将原 Attempt 中已批准的 REQUESTED Effect 交给独立 Effect executor，沿原 claim/apply/read-back 协议执行；人工待办和未知效果不进入这条路径。原 Outbox 保留作故障回收，重复配送由同一 claim/幂等协议抑制。效果完成后立即尝试配送续行，不等待定期 relay；失败仍由持久 Outbox 重送。批准后仍创建新的 Segment，Run 在外部保存期间可短暂显示 WAITING_FOR_APPROVAL，此时没有人工待办。
 
 claim、阶段执行、续租及未知结果只读核对使用同一判断源校验；原请求 hash、actor 或同意不符即拒绝。每个写入步骤仍检查当前用户/项目资格、冻结绑定、撤权、取消、期限及精确批准，不新增 SQL、覆盖对象或越界写入权限。结果未知沿原回执核对，不重复生成批准或重做写入。部署须先迁移判断源 CHECK，并配套切换 API/Worker/Web；旧浏览器须刷新以识别新审批来源。
 

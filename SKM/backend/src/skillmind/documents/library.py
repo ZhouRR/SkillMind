@@ -15,12 +15,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.db.models import ResourceBinding
+from skillmind.documents.library_contract import (
+    DOCUMENT_WRITE_CAPABILITY as DOCUMENT_WRITE_CAPABILITY,
+)
 from skillmind.documents.paths import document_effect_prefix
 from skillmind.integrations.domain import ResourceBindingLevel, binding_checksum
 from skillmind.storage.blob import FileStorage, FileStorageError, StorageNamespace
 
 DOCUMENT_LIBRARY_PROVIDER = "project-library"
-DOCUMENT_WRITE_CAPABILITY = "document.write/v1"
 DOCUMENT_LIBRARY_REVISION = "2"
 DOCUMENT_LIBRARY_SELECTION = "project-library:documents"
 

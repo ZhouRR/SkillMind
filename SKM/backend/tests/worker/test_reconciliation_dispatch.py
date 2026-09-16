@@ -6,13 +6,13 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
-
 from skillmind.core.settings import Settings
 from skillmind.effects.reconciliation_requests import (
     RECONCILIATION_DISPATCH_TOPIC,
     ReconciliationRequestNotFoundError,
 )
 from skillmind.worker.settings import (
+    MaintenanceWorkerSettings,
     WorkerSettings,
     execute_reconciliation_request_job,
     recover_reconciliation_requests,
@@ -97,6 +97,7 @@ async def test_job_and_recovery_use_original_ledger_and_are_registered():
     assert await recover_reconciliation_requests(ctx) == {"changed": 1}
     ledger.recover_expired.assert_awaited_once_with(limit=settings.outbox_batch_size)
     assert execute_reconciliation_request_job in WorkerSettings.functions
-    assert any(job.coroutine is recover_reconciliation_requests for job in WorkerSettings.cron_jobs)
+    assert any(job.coroutine is recover_reconciliation_requests
+               for job in MaintenanceWorkerSettings.cron_jobs)
     executor.execute.side_effect = ReconciliationRequestNotFoundError()
     assert (await execute_reconciliation_request_job(ctx, str(uuid4())))["status"] == "rejected"

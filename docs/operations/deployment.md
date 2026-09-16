@@ -31,6 +31,8 @@ SKILLMIND_CODEX_REASONING_EFFORT=max
 SKILLMIND_CODEX_HOME=/var/lib/skillmind/codex
 ```
 
+Compose 同时启动 `worker`（业务执行）与 `maintenance`（Outbox、回收与定时触发），共用 Backend 镜像和 `.env`。维护进程仅连接内部网络，不挂载 Run/Codex 卷；`maintenance` 健康检查独立于业务队列。手动更新须一起更新这两个服务；仅启动业务 Worker 不再运行定期维护。部署前停止旧 Worker，避免旧 cron 继续进入业务队列；已有业务 job 不迁移、不清空。
+
 Compose 的 `codex-data` 卷只挂载到 Worker，保存设备登录和原生会话；更新保留此卷。使用镜像内入口启动登录：
 
 ```bash
@@ -52,7 +54,7 @@ Claude 回退需显式设置 `SKILLMIND_AGENT_SDK=claude` 并重建 API/Worker �
 - **已有环境更新**：先关闭新业务入口、核清在途调用/远端未知效果，停止全部写入者并取得[一致恢复点](backup-recovery.md#一致恢复点包含什么)。不并发部署或改写镜像/tag、配置；重命名不迁移旧数据。
 - **数据恢复/故障对账**：走[恢复流程](backup-recovery.md)，不执行会自动启动 Worker 的 `make deploy`。
 
-`make deploy` 停止当前 project 应用服务，再初始化基建、迁移并启动 API/Web/Worker；执行即允许恢复后台工作，可能立即消费队列和恢复任务。默认保持 `SKILLMIND_DEFERRED_FEATURES_ENABLED=false`、`SKILLMIND_DATABASE_WRITES_ENABLED=false`、`SKILLMIND_DOCUMENT_WRITES_ENABLED=false` 和 `SKILLMIND_GIT_WRITES_ENABLED=false`，四个值分别在 API/Worker 保持一致。后置开关控制既有外部写入、调度发火和子 Agent；数据库开关仅开放 PostgreSQL INSERT/UPDATE；文档开关仅开放项目文档库的 Artifact CREATE 提案与人工批准执行；Git 开关仅开放批准后的 commit/push，四者不互相放行。Git 须配套升级 API/Worker/Web 并执行 0050 migration；现有连接仍保持原权限，需在资源页面显式选择写入范围与模式。文档写入需 API/Worker 同时升级至 v2 对象协议并完成 0048 migration，使用既有文档库 namespace；旧 v1 待写只允许核对。数据库启用前须配置明确表/列/操作范围，并按[回执权限要求](../design/repository-effects.md#postgresql-单行事务与原执行回执)安装目标库回执表。`SKILLMIND_WORKER_DISPATCH_ENABLED=false` 阻止新的 Run/Effect/解释 job 执行，不取消已在运行的调用，也不是维护模式。Makefile 不控制其他实例、orphan、其他 daemon 或远端写入，不能代替全局停写确认。
+`make deploy` 停止当前 project 应用服务，再初始化基建、迁移并启动 API/Web/Worker/Maintenance；执行即允许恢复后台工作，可能立即消费队列和恢复任务。默认保持 `SKILLMIND_DEFERRED_FEATURES_ENABLED=false`、`SKILLMIND_DATABASE_WRITES_ENABLED=false`、`SKILLMIND_DOCUMENT_WRITES_ENABLED=false` 和 `SKILLMIND_GIT_WRITES_ENABLED=false`，四个值分别在 API/Worker 保持一致。后置开关控制既有外部写入、调度发火和子 Agent；数据库开关仅开放 PostgreSQL INSERT/UPDATE；文档开关仅开放项目文档库的 Artifact CREATE 提案与人工批准执行；Git 开关仅开放批准后的 commit/push，四者不互相放行。Git 须配套升级 API/Worker/Web 并执行 0050 migration；现有连接仍保持原权限，需在资源页面显式选择写入范围与模式。文档写入需 API/Worker 同时升级至 v2 对象协议并完成 0048 migration，使用既有文档库 namespace；旧 v1 待写只允许核对。数据库启用前须配置明确表/列/操作范围，并按[回执权限要求](../design/repository-effects.md#postgresql-单行事务与原执行回执)安装目标库回执表。`SKILLMIND_WORKER_DISPATCH_ENABLED=false` 阻止新的 Run/Effect/解释 job 执行，不取消已在运行的调用，也不是维护模式。Makefile 不控制其他实例、orphan、其他 daemon 或远端写入，不能代替全局停写确认。
 
 ### Windows 构建与移送
 
@@ -99,7 +101,7 @@ make deploy
 | stop-application | 停止当前 project 的应用服务和旧一次性任务，保留数据卷 |
 | infrastructure / initialize-storage | 等 PostgreSQL/Redis 就绪、启动 MinIO、幂等创建 bucket；连接重试有上限 |
 | migration-check / migrate / readiness | 校验存储 namespace 配置及合法前进路径、执行 Alembic upgrade head，再核配置与 DB head/Redis |
-| api-web / worker | 等 API/Web health，再启动 Worker |
+| api-web / worker | 等 API/Web health，再启动 Worker/Maintenance |
 | complete | 显示当前服务状态 |
 
 失败显示原始错误、阶段与退出码，立即停止，不自动重试、回滚、删卷或重置密码。镜像、部分迁移或服务可能已生效；先查状态和原错误，再决定如何继续：
@@ -157,7 +159,7 @@ API Key 需先应用 0051 migration，再放行同版 API/Worker；既有浏览�
 
 ## 启动与放行
 
-部署默认启动 API/Web/Worker，不改业务开关；首次完成后执行 `make bootstrap-admin`。普通业务开放前验证登录、权限、Skill、Run/结果/证据和外部接入；真实 smoke 会写入或计费，只用获准环境与输入。启动成功不替代模型、事务、存储或备份恢复验收；恢复场景仍须核清事实后分别放行 API/Web、后台与普通入口。
+部署默认启动 API/Web/Worker/Maintenance，不改业务开关；首次完成后执行 `make bootstrap-admin`。普通业务开放前验证登录、权限、Skill、Run/结果/证据和外部接入；真实 smoke 会写入或计费，只用获准环境与输入。启动成功不替代模型、事务、存储或备份恢复验收；恢复场景仍须核清事实后分别放行 API/Web、后台与普通入口。
 
 ## 仅更新 Web
 

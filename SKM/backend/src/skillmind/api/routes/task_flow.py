@@ -67,6 +67,11 @@ def _preview_schema(schema: dict[str, Any]) -> None:
 
     _flow_schema(schema)
     schema["allOf"] = [
+        {"if": {"properties": {"status": {"const": "SOURCE_EXECUTION"}}},
+         "then": {"required": ["source_execution"], "properties": {
+             "source_execution": {"type": "object"}, "plan": {"type": "null"},
+             "blueprint_checksum": {"type": "null"}, "source_traces": {"maxItems": 0}}},
+         "else": {"not": {"required": ["source_execution"]}}},
         {
             "if": {"properties": {"status": {"const": "AVAILABLE"}}, "required": ["status"]},
             "then": {
@@ -77,12 +82,13 @@ def _preview_schema(schema: dict[str, Any]) -> None:
                 }
             },
             "else": {
-                "properties": {
+                "if": {"properties": {"status": {"const": "NOT_DECLARED"}}},
+                "then": {"properties": {
                     "plan": {"type": "null"},
                     "blueprint_checksum": {"type": "null"},
                     "source_traces": {"maxItems": 0},
                     "readiness": {"properties": {"assessment": {"type": "null"}}},
-                }
+                }}
             },
         }
     ]
@@ -371,6 +377,73 @@ class FlowReadinessResponse(_FlowModel):
     assessment: FlowAssessmentResponse | None
 
 
+class FlowOperationResponse(_FlowModel):
+    """資源に必要な実操作。承認済みの効果ではない。"""
+
+    capability_version: Capability
+    operation: Annotated[str, Field(min_length=1, max_length=128)]
+
+
+class FlowExecutionResourceResponse(FlowResourceResponse):
+    """読書宣言に実操作を添える。"""
+
+    operations: list[FlowOperationResponse]
+
+
+class FlowExecutionTaskResponse(_FlowModel):
+    """一つの原文実行タスク。"""
+
+    key: Key
+    capability: Key
+    title: Annotated[str, Field(min_length=1, max_length=200)]
+    description: Annotated[str, Field(min_length=1, max_length=2000)]
+    resource_keys: list[Key]
+
+
+class FlowExecutionTraceResponse(_FlowModel):
+    """最小宣言の原文位置。"""
+
+    target: str
+    path: str
+    line: Annotated[int, Field(ge=1)] | None
+
+
+class FlowExecutionDeclarationResponse(_FlowModel):
+    """Blueprint を補作しない版付き宣言。"""
+
+    execution_version: Literal["skillmind.skill-execution/v1"]
+    tasks: Annotated[list[FlowExecutionTaskResponse], Field(min_length=1, max_length=1)]
+    resource_requirements: Annotated[list[FlowExecutionResourceResponse], Field(max_length=50)]
+    source_traces: list[FlowExecutionTraceResponse]
+
+
+class FlowSourceDocumentResponse(_FlowModel):
+    """凍結 source の内容と識別 hash。"""
+
+    path: str
+    content: str
+    sha256: Checksum
+
+
+class FlowSourceExecutionResponse(_FlowModel):
+    """原文実行の最小宣言と凍結 source をそのまま返す。"""
+
+    declaration: FlowExecutionDeclarationResponse
+    input_contract: FlowContractResponse
+    source_documents: list[FlowSourceDocumentResponse]
+
+    @model_validator(mode="after")
+    def verify_sources(self) -> Self:
+        """原文 hash と宣言の一意な resource 参照を公開前に照合する。"""
+        from skillmind.skills.source_documents import validate_source_documents
+
+        validate_source_documents([doc.model_dump() for doc in self.source_documents])
+        keys = [r.key for r in self.declaration.resource_requirements]
+        if len(set(keys)) != len(keys) or self.declaration.tasks[0].resource_keys != keys:
+            raise ValueError("Source execution resource references differ")
+        return self
+
+
 class TaskFlowPreviewResponse(_FlowModel):
     """新しい read-only preview の完全な公開 shape。Run の frozen plan ではない。"""
 
@@ -378,18 +451,37 @@ class TaskFlowPreviewResponse(_FlowModel):
 
     preview_version: Literal["skillmind.task-flow-preview/v1"]
     identity: FlowIdentityResponse
-    status: Literal["AVAILABLE", "NOT_DECLARED"]
+    status: Literal["AVAILABLE", "NOT_DECLARED", "SOURCE_EXECUTION"]
     blueprint_checksum: Checksum | None
     preview_checksum: Checksum
     plan: FlowPlanResponse | None
     source_traces: Annotated[list[FlowTraceResponse], Field(max_length=500)]
     readiness: FlowReadinessResponse
+    source_execution: FlowSourceExecutionResponse | None = None
 
     @model_validator(mode="after")
     def verify_state_and_scope(self) -> Self:
         """空の未宣言と壊れた宣言を区別し、Task と Skill の適用範囲を入れ替えない。"""
 
-        if self.status == "NOT_DECLARED":
+        if self.status == "SOURCE_EXECUTION":
+            if self.source_execution is None or self.plan is not None or (
+                self.blueprint_checksum is not None or self.source_traces
+            ):
+                raise ValueError("Source execution preview has inconsistent fields")
+            declaration = self.source_execution.declaration.model_dump(exclude_unset=True)
+            if declaration["tasks"][0]["key"] != self.identity.task_key:
+                raise ValueError("Source execution task differs from identity")
+            if self.readiness.assessment is not None:
+                resources = declaration["resource_requirements"]
+                requirements = self.readiness.assessment.requirements
+                if len(resources) != len(requirements) or any(
+                    (r["key"], r["kind"], r["required"], r["access"], r["capabilities"],
+                     r.get("selection_guidance")) !=
+                    (q.key, q.kind, q.required, q.access, q.capabilities, q.selection_guidance)
+                    for r, q in zip(resources, requirements, strict=True)
+                ):
+                    raise ValueError("Source execution readiness differs from declaration")
+        elif self.status == "NOT_DECLARED":
             if self.plan is not None or self.blueprint_checksum is not None or self.source_traces:
                 raise ValueError("Undeclared preview contains a plan")
             if self.readiness.assessment is not None:
@@ -445,6 +537,8 @@ class TaskFlowPreviewResponse(_FlowModel):
                         resource.selection_guidance,
                     ):
                         raise ValueError("Readiness does not match the Blueprint declarations")
+        if self.status != "SOURCE_EXECUTION" and self.source_execution is not None:
+            raise ValueError("Legacy preview contains source execution")
         if any(
             value.int == 0
             for value in (

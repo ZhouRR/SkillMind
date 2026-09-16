@@ -763,3 +763,22 @@ describe('groupSessionsByLineage', () => {
     expect(lineages[1]?.branches.map((item) => item.agent_session_id)).toEqual(['b2'])
   })
 })
+
+it('shows capacity wait, final failure, and clears the notice after recovery', () => {
+  const record = detail(null)
+  record.attempts = [{ run_attempt_id: '00000000-0000-4000-8000-000000000010', run_segment_id: null,
+    attempt_no: 1, reason: 'INITIAL', status: 'FAILED', worker_id: null,
+    started_at: record.created_at, finished_at: record.created_at, created_at: record.created_at,
+    error: { code: 'model_capacity_unavailable', retryable: true, retry_at: '2026-09-15T12:00:00Z' } }]
+  record.status = 'RETRY_PENDING'
+  const waiting = renderToStaticMarkup(<RunResultPanel csrfToken="test" state={{ status: 'ready', detail: record }} />)
+  expect(waiting).toContain('模型服务容量不足')
+  expect(waiting).toContain('下次重试计划时间')
+  record.status = 'FAILED'
+  const failed = renderToStaticMarkup(<RunResultPanel csrfToken="test" state={{ status: 'ready', detail: record }} />)
+  expect(failed).toContain('自动重试已停止')
+  expect(failed).not.toContain('下次重试计划时间')
+  record.status = 'SUCCEEDED'
+  const recovered = renderToStaticMarkup(<RunResultPanel csrfToken="test" state={{ status: 'ready', detail: record }} />)
+  expect(recovered).not.toContain('模型服务容量不足')
+})

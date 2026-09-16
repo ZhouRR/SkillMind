@@ -70,7 +70,7 @@ SDK 0.2.110 / CLI 2.1.191 的 Linux x86_64 构建 `1038dba88bdf1b80941dc3e383e93
 | 仓库单命令 | 120 秒，可配 5–600，不是所有根准备总时长 |
 | 模型事件流 | 普通创建冻结 900 秒，准备后起算；只对下一事件 await 施加 deadline，不打断事件持久化 |
 | 子分支 | 300 秒，可配 30–600，不赠送 Run 额度 |
-| ARQ execute_run | 1200 + 准备秒数，默认 1500；整个 job 最终防线，其他 job/cron 独立 |
+| ARQ execute_run | 1500 + 准备秒数，默认 1800；含 Agent 清理后一次已批准 Effect 的 300 秒执行余量，模型/Effect 各自上限不变，其他 job/cron 独立 |
 | 人工等待 | 持久 expires_at；释放主 lease，不刷新 Run 总额度 |
 
 准备 240 秒加模型 850 秒不违反各自限制，但不是 Run 共计 900 秒。续 lease 不延长 deadline；timeout 为协作取消，I/O/清理/DB 可晚返回，job 关停可打断终态提交。Effect 有[独立监督缺口](repository-effects.md#执行权与取消)。

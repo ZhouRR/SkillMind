@@ -274,3 +274,27 @@ class CodexOutputSchema:
         if isinstance(source.get("description"), str):
             schema["description"] = source["description"]
         return _Node(schema)
+
+
+class NativeCodexOutputSchema:
+    """候補専用の strict Schema を変換せず使い、null やネストも元の JSON で運ぶ。"""
+
+    def __init__(self, schema: Mapping[str, Any]) -> None:
+        """SDK に渡す Schema と復元後に検証する Schema を一致させる。"""
+
+        self.schema = dict(schema)
+
+    @property
+    def instructions(self) -> str:
+        """別の wire 形式を指示せず、単一の出力契約を使う。"""
+
+        return "\nReturn native JSON matching outputSchema. Do not JSON-encode objects or arrays."
+
+    def decode(self, text: str) -> dict[str, Any]:
+        """重複 key/非 JSON 定数を拒否し、意味候補の検査は共有 runner へ委ねる。"""
+
+        value = _json(text)
+        if not isinstance(value, dict):
+            raise CodexOutputError("expected_object")
+        # Provider が Schema を逸脱した候補も共有 validator の有界修復へ渡す。
+        return value

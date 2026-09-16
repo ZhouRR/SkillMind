@@ -736,6 +736,10 @@ export const JA: UiMessages = {
     failures: { sessionExpired: 'セッションが失効しました。再ログイン後に元リクエストを照会してください。', csrfRejected: 'セッションの安全確認に失敗したため、書込を停止しました。', forbidden: '現在の操作権限がないため、書込を停止しました。', notFound: '現在のプロジェクト・実行が存在しないか、アクセスできません。', projectArchived: 'プロジェクトはアーカイブ済みです。履歴と元リクエストは読めますが、評価は送信できません。', resultUnavailable: 'この実行には評価可能な結果がありません。', resultMismatch: '現在の結果が元リクエストと一致しないため、書込を停止しました。', invalidRequest: '評価入力が要件を満たしていません。確認して修正してください。', invalidRevision: '修正案パスが無効・重複、または原値がありません。評価全体が受理されませんでした。', conflict: '元の UUID が保存内容と競合しています。UUID を変えて再試行せず、元リクエストを確認してください。', notSeen: '元リクエストはまだ見つかりません。先の送信が後から保存されない証明ではありません。', unavailable: '受付記録または履歴を現在読み取れません。後で読取確認してください。', cursorInvalid: '履歴カーソルが無効です。先頭から再読込してください。', unknown: '信頼できる保存受付記録が届いていないため、元リクエストは未確認のままです。', loadFailed: '信頼できる評価記録を読み取れません。読取を再試行してください。', readTimeout: '読取が時間切れになりました。元リクエストの保存状態は変わりません。' },
   },
   runResult: {
+    capacityTitle: 'モデルサービスが混雑しています',
+    capacityWaiting: '同じ会話と処理済みの記録を保持して、自動再試行を待っています。',
+    capacityRetryAt: (time: string) => `次回の再試行予定：${time}`,
+    capacityFailed: 'モデルサービスの容量不足により、実行を終了しました。自動再試行は終了しています。処理済みの記録は保持されています。',
     reading: { details: '実行詳細', checks: '検証の範囲', confidenceHint: 'モデルの確信度は正答率ではありません。' },
     referenceChecks: {
       briefV1: '保存時の参照を検証済み。添付内容は未検証で、結論には人の判断が必要です。',
@@ -1026,6 +1030,7 @@ export const JA: UiMessages = {
     failures: { sessionExpired: 'セッションが失効しました。再ログインしてください。', accessUnavailable: '現在この予定にアクセスできません。', loadFailed: '読込に失敗しました。手動で再試行してください。変更結果は未確認です。' },
   },
   taskFlow: {
+    sourceInputs: '入力項目', sourceNoInputs: '入力は不要です。', sourceResources: '必要なリソース', sourceText: 'Skill 原文',
     open: 'タスクの流れを確認', title: 'タスクの流れのプレビュー', intro: 'スキルの元の宣言だけを表示します。手順の実行、進捗や実行証拠の表示ではありません。',
     close: 'プレビューを閉じる', refresh: 'プレビューを再読込', loading: '元のタスク宣言を読込中…',
     missing: 'この正確な版には能力ブループリントの宣言がありません。タスクの入口は維持し、Schema や新しい版から計画を補いません。',

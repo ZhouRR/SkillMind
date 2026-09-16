@@ -13,14 +13,25 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = ROOT / "contracts"
 
 EXAMPLE_CONTRACTS = {
+    "examples/skill-execution.v1.json": "skill-execution/v1.schema.json",
+    "examples/agent-task-brief.v2.json": "agent-task-brief/v2.schema.json",
+    "examples/task-flow-preview-source.v1.json": "tasks/flow-preview/v1.schema.json",
     "examples/api-key.v1.json": "auth/api-keys/v1/api-key.schema.json",
     "examples/api-key-list.v1.json": "auth/api-keys/v1/api-key-list.schema.json",
-    "examples/api-key-create-request.v1.json": "auth/api-keys/v1/api-key-create-request.schema.json",
+    "examples/api-key-create-request.v1.json": (
+        "auth/api-keys/v1/api-key-create-request.schema.json"
+    ),
     "examples/api-key-created.v1.json": "auth/api-keys/v1/api-key-created.schema.json",
 
-    "examples/json-schema-validate-error.v1.json": "tools/json.schema.validate/v1/error.schema.json",
-    "examples/json-schema-validate-response.v1.json": "tools/json.schema.validate/v1/response.schema.json",
-    "examples/json-schema-validate-request.v1.json": "tools/json.schema.validate/v1/request.schema.json",
+    "examples/json-schema-validate-error.v1.json": (
+        "tools/json.schema.validate/v1/error.schema.json"
+    ),
+    "examples/json-schema-validate-response.v1.json": (
+        "tools/json.schema.validate/v1/response.schema.json"
+    ),
+    "examples/json-schema-validate-request.v1.json": (
+        "tools/json.schema.validate/v1/request.schema.json"
+    ),
     "examples/change-propose-response.v1.json": "tools/change.propose/v1/response.schema.json",
     "examples/task-flow-preview.v1.json": "tasks/flow-preview/v1.schema.json",
     "examples/task-flow-preview-not-declared.v1.json": "tasks/flow-preview/v1.schema.json",
@@ -172,6 +183,8 @@ EXAMPLE_CONTRACTS = {
     ),
     "examples/effect-reconciliation.v1.json": "effects/reconciliation/v1.schema.json",
     "examples/skill-interpreter-request.v1.json": "skills/interpreter/v1/request.schema.json",
+    "examples/skill-candidate.v2.json": "skills/interpreter/v2/candidate.schema.json",
+    "examples/skill-candidate.v1.json": "skills/interpreter/v1/candidate.schema.json",
     "examples/skill-interpreter-response.v1.json": "skills/interpreter/v1/response.schema.json",
     "examples/task-contract-draft.v1.json": "task-contract-draft/v1.schema.json",
     "examples/task-schedule.v1.json": "task-schedule/v1.schema.json",

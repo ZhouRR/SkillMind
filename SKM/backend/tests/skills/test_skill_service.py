@@ -11,7 +11,6 @@ from typing import Any, Self
 from uuid import uuid4
 
 import pytest
-
 from skillmind.db.models import SkillInterpretation, SkillSource
 from skillmind.skills import (
     InlineSkillFile,
@@ -801,3 +800,151 @@ async def test_interpret_repairs_misplaced_blueprint_trace_before_preview_ready(
     assert detail.endswith("/target: source_trace_target_invalid")
     assert "runtime_manifest_draft/tools/0" not in detail
     assert stored.validation_attempts == (detail,)
+
+
+class _LocationRepairingInterpreter(_RepairingInterpreter):
+    """実 source を越す行・不存在 file を返し、同じ一回修復の境界を試す。"""
+
+    def __init__(self, *, contract: bool, missing_file: bool, persistent: bool) -> None:
+        """出典種別と修復成功/失敗を保持する。"""
+
+        super().__init__()
+        self.contract = contract
+        self.missing_file = missing_file
+        self.persistent = persistent
+
+    async def interpret(
+        self, request, *, model, parameters, validation_feedback=None, on_event=None,
+    ):
+        """凍結本文の長さから越境を合成し、未知値が feedback に出ないことを検査する。"""
+
+        self.feedback.append(validation_feedback)
+        response = _example_response()
+        if validation_feedback is None or self.persistent:
+            manifest = response["runtime_manifest_draft"]
+            trace = (
+                manifest["tasks"][0]["contract_source_trace"][0] if self.contract
+                else manifest["capability_blueprint"]["source_traces"][0]
+            )
+            if self.missing_file:
+                trace["source_path" if self.contract else "path"] = "private-source-name.md"
+            else:
+                content = next(
+                    doc["content"] for doc in request["source"]["source_documents"]
+                    if doc["path"] == "SKILL.md"
+                )
+                trace["line"] = len(content.splitlines()) + 1
+        return response
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("contract", [False, True])
+@pytest.mark.parametrize("missing_file", [False, True])
+@pytest.mark.parametrize("persistent", [False, True])
+async def test_source_location_is_repaired_once_or_saved_failed_with_safe_detail(
+    contract: bool, missing_file: bool, persistent: bool,
+) -> None:
+    """出典の位置不正は公開前に修復し、再失敗時は PREVIEW_READY にしない。"""
+
+    organization_id, source_id = uuid4(), uuid4()
+    source = _fixture_source(GENERIC_SKILL, organization_id, source_id)
+    session = _InterpretSession(source, scalars_results=[None, None])
+    interpreter = _LocationRepairingInterpreter(
+        contract=contract, missing_file=missing_file, persistent=persistent,
+    )
+    stored = await _service(session, interpreter).interpret(
+        organization_id=organization_id, skill_source_id=source_id, model="synthetic-model",
+    )
+    expected_status = (
+        SkillInterpretationStatus.FAILED if persistent else SkillInterpretationStatus.PREVIEW_READY
+    )
+    assert stored.status is expected_status
+    assert len(interpreter.feedback) == 2 and interpreter.feedback[0] is None
+    detail = interpreter.feedback[1]
+    prefix = (
+        "/tasks/0/contract_source_trace/" if contract else "/capability_blueprint/source_traces/"
+    )
+    assert detail.startswith(prefix)
+    suffix = "source_trace_file_invalid" if missing_file else "source_trace_line_invalid"
+    assert detail.endswith(suffix)
+    assert "private-source-name" not in detail
+    assert stored.validation_attempts == (detail,) * (2 if persistent else 1)
+
+
+@pytest.mark.asyncio
+async def test_whitespace_stall_is_visible_and_does_not_start_a_repair_call() -> None:
+    """停止済み空白 loop を具体診断付き FAILED にし、自動再生成へ渡さない。"""
+
+    from skillmind.skills.interpreter_execution import MODEL_OUTPUT_WHITESPACE_LIMIT
+
+    organization_id, source_id = uuid4(), uuid4()
+    source = _fixture_source(GENERIC_SKILL, organization_id, source_id)
+    session = _InterpretSession(source, scalars_results=[None, None])
+    interpreter = _DecodeRepairingInterpreter(
+        InterpreterErrorCode.PROVIDER_ERROR, detail=MODEL_OUTPUT_WHITESPACE_LIMIT,
+    )
+    stored = await _service(session, interpreter).interpret(
+        organization_id=organization_id, skill_source_id=source_id, model="synthetic-model",
+    )
+    assert stored.status is SkillInterpretationStatus.FAILED
+    assert stored.error_code == "provider_error"
+    assert interpreter.feedback == [None]
+    saved = next(item for item in session.added if isinstance(item, SkillInterpretation))
+    assert saved.execution_json["detail"] == MODEL_OUTPUT_WHITESPACE_LIMIT
+    assert stored.validation_attempts == (
+        "Model output stalled on repeated whitespace. Interpretation was stopped; "
+        "no automatic retry was started.",
+    )
+    assert saved.diagnostics_json == [{
+        "severity": "error", "code": MODEL_OUTPUT_WHITESPACE_LIMIT,
+        "message": "Model output stalled on repeated whitespace. Interpretation was stopped; "
+                   "no automatic retry was started.",
+    }]
+
+
+class _LibraryRepairingInterpreter(_RepairingInterpreter):
+    """保存・読取を混在させた候補に対する一回だけの再生成を再現する。"""
+
+    def __init__(self, persistent: bool) -> None:
+        """二回目も不正な候補を返すかを保持する。"""
+
+        super().__init__()
+        self.persistent = persistent
+
+    async def interpret(
+        self, request, *, model, parameters, validation_feedback=None, on_event=None,
+    ):
+        """成功時の修正はモデル応答で行い、平台側で能力を削除しない。"""
+
+        self.feedback.append(validation_feedback)
+        response = _example_response()
+        capabilities = ["document.write/v1"]
+        if validation_feedback is None or self.persistent:
+            capabilities.append("document.read/v1")
+        response["runtime_manifest_draft"]["capability_blueprint"]["resource_requirements"].append({
+            "key": "outputs", "kind": "document", "required": True, "access": "write",
+            "capabilities": capabilities,
+        })
+        return response
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("persistent", [False, True])
+async def test_mixed_library_candidate_is_repaired_once_or_saved_failed(persistent: bool) -> None:
+    """混在を preview 前に検出し、公開可能な診断を保った有限修復に渡す。"""
+
+    organization_id, source_id = uuid4(), uuid4()
+    source = _fixture_source(GENERIC_SKILL, organization_id, source_id)
+    session = _InterpretSession(source, scalars_results=[None, None])
+    interpreter = _LibraryRepairingInterpreter(persistent)
+    stored = await _service(session, interpreter).interpret(
+        organization_id=organization_id, skill_source_id=source_id, model="synthetic-model",
+    )
+    assert len(interpreter.feedback) == 2
+    detail = interpreter.feedback[1]
+    assert detail.startswith("/capability_blueprint/resource_requirements/")
+    assert detail.endswith("/capabilities: document_library_capabilities_invalid")
+    assert stored.validation_attempts == (detail,) * (2 if persistent else 1)
+    assert stored.status is (
+        SkillInterpretationStatus.FAILED if persistent else SkillInterpretationStatus.PREVIEW_READY
+    )

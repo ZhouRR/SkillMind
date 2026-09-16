@@ -6,7 +6,6 @@ from dataclasses import replace
 from uuid import UUID, uuid4
 
 import pytest
-
 from skillmind.documents.binding import resolve_document_binding
 from skillmind.documents.domain import DocumentNotFoundError, StoredDocument
 from skillmind.documents.snapshot import (
@@ -260,3 +259,19 @@ async def test_input_library_reference_is_frozen_without_output_binding_or_blob_
     )
     with pytest.raises(DocumentSnapshotError, match="storage"):
         await resolve_document_binding(repository, **arguments)
+
+
+async def test_source_execution_defers_plain_read_with_frozen_membership() -> None:
+    """原文実行では read も按需取得し、登録前に文書 bytes を前借りしない。"""
+    from skillmind.documents.snapshot import document_preparation_policy
+
+    project_id = uuid4()
+    document = stored_document(project_id, document_content())
+    repository = _DocumentRepository([document])
+    binding = await resolve_document_binding(
+        repository, project_id=project_id, requirement_key="documents",
+        token=ALL_DOCUMENTS_SELECTION, capability="document.read/v1", defer_content=True,
+    )  # type: ignore[arg-type]
+    assert document_preparation_policy(binding) == "on-demand/v1"
+    frozen = selected_document_snapshots({"documents": binding}, project_id=project_id)
+    assert frozen[0].documents[0].document_id == document.document_id

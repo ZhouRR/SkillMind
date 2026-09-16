@@ -96,15 +96,20 @@ class ExecutionFeatures:
             for item in blueprint.get("resource_requirements", [])
             if isinstance(item, Mapping)
         }
-        for effect in blueprint.get("effect_intents", []):
-            if not isinstance(effect, Mapping) or effect.get("mode") != "apply":
-                continue
+        from skillmind.skills.execution import declared_operations
+
+        for effect in declared_operations(blueprint):
             resource = resources.get(effect.get("resource_key"), {})
             writes = [
                 cap
                 for cap in resource.get("capabilities", [])
                 if isinstance(cap, str) and is_write_capability(cap)
             ]
+            if "capability_version" in effect:
+                writes = (
+                    [effect["capability_version"]]
+                    if effect["capability_version"] in writes else []
+                )
             if not writes or not all(
                 self.effect_enabled(cap, str(effect.get("operation", ""))) for cap in writes
             ):

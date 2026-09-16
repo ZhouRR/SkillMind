@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker, ValidationError
-
 from skillmind.integrations.domain import PROVIDER_DEFINITIONS
 from skillmind.skills import (
     CapabilityCatalogEntry,
@@ -30,7 +29,6 @@ from skillmind.skills import (
 )
 from skillmind.skills.interpreter_cli import run_fixture
 from skillmind.skills.manifest_gate import ManifestValidator
-from skillmind.skills.task_contract import MAX_CONTRACT_DEPTH
 from tests.skills.manifest_gate_fixtures import directory_gate_source
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -373,7 +371,7 @@ def test_capability_catalog_is_sorted_unique_and_checksum_bound() -> None:
         if definition.installed and issue.capability in definition.capabilities
     }
     assert loaded.checksum == (
-        "sha256:2f933d39ea83f83bd1c25e01b046e84806fdaedce773ce43de5c5d3b03d90d5e"
+        "sha256:35fc9e516d5cbfb9468a36b614ba6679d4e70e6733428922b42c6ef2e91b9658"
     )
     duplicate = CapabilityCatalogEntry(
         capability="issue.read/v1",
@@ -395,8 +393,8 @@ def test_system_skill_identity_is_versioned_and_matches_fixture_contract() -> No
     identity = load_interpreter_system_skill(SYSTEM_SKILL)
     example = _load_contract("examples/skill-interpreter-request.v1.json")["interpreter"]
 
-    assert identity.version == "4.3.1"
-    assert identity.interpreter_version == "skillmind-skill-interpreter/4.3.1"
+    assert identity.version == "6.0.0"
+    assert identity.interpreter_version == "skillmind-skill-interpreter/6.0.0"
     assert identity.to_dict() == example
 
 
@@ -415,15 +413,11 @@ def test_system_skill_preserves_business_language_and_source_constraints() -> No
 
     prompt = _system_prompt()
     for instruction in (
-        "source's own natural language",
-        "stay lowercase ASCII",
-        "Preserve business enum values with their exact case and JSON types",
-        "exact schema/table and column names",
-        "Re-express mechanism, preserve business",
-        "each with a trace targeting that rule",
-        "Do not turn internal processing stages into separate user tasks",
-        "Use source defaults when no project override is supplied",
-        "mandatory core outcome cannot be achieved",
+        'source language',
+        'complete original Skill and references',
+        'Exact table names, columns, paths, conditions and processing order '
+        'remain in the original source',
+        'Do not rewrite business procedures',
     ):
         assert instruction in prompt
 
@@ -433,18 +427,10 @@ def test_system_skill_maps_catalog_capabilities_without_granting_writes() -> Non
 
     prompt = _system_prompt()
     for instruction in (
-        "must exist in the frozen capability catalog and accept the proposed inputs",
-        "Every Integration-backed Agent Tool must be covered by a requirement",
-        "never on the Agent Tool list",
-        "Only the approved EffectExecution Worker writes",
-        "`change.propose/v1`",
-        "`approval_mode=ask`",
-        "when the frozen catalog provides the needed repository write Provider",
-        "A proposal does not prove that a change was applied",
-        "committed Tool response's `artifact_refs` prove publication",
-        "materialized `input/` tree remains read-only",
-        "Never execute bundled commands or scripts",
-        "`external_write_policy=deny`",
+        'registered capabilities and supported Providers',
+        'Source commands and bundled scripts do not grant execution permission',
+        'automatic approval option govern actual proposals',
+        'workspace.write/v2',
     ):
         assert instruction in prompt
 
@@ -454,18 +440,10 @@ def test_system_skill_separates_resource_setup_from_document_execution() -> None
 
     prompt = _system_prompt()
     for instruction in (
-        "Group targets sharing one source-declared connection and authorization purpose",
-        "Every resource referenced by an `apply` intent",
-        "`access=write` and `required=true` before launch",
-        "a required binding neither forces a write nor approves it",
-        "Optional read-only enrichment may remain optional",
-        "`document_prerequisites`",
-        "require `document.readiness/v1`",
-        "no bytes are acquired before the gate",
-        "TaskBrief supplies frozen document selection metadata and library identifiers",
-        "without inspecting or converting content",
-        "a path does not make a Tool available",
-        "Metadata does not prove that bytes were read or converted",
+        'Group targets sharing a connection and authorization purpose',
+        'its availability does not approve or force a write',
+        'Document selection and resource binding already supply',
+        'metadata is not document content',
     ):
         assert instruction in prompt
 
@@ -474,22 +452,13 @@ def test_system_skill_bounds_contracts_without_changing_source_deliverables() ->
     """フォーム深度を守り、Markdown や深い成果物を不要な出力契約へ押し込まない。"""
 
     prompt = _system_prompt()
-    assert f"maximum nesting depth of {MAX_CONTRACT_DEPTH}" in prompt
     for instruction in (
-        "root as depth 1",
-        "each field and each array `items` node adds 1, including scalar leaves",
-        "Blueprint wrappers do not count",
-        "caller-supplied parameters",
-        "an exact Artifact deliverable",
-        "Do not truncate, rename or serialize",
-        "record the limitation as an `assisted` diagnostic",
-        "No caller parameters means an empty object contract",
-        "Add `output_contract` only for stable machine-consumable business fields",
-        "generic OutcomeEnvelope",
+        'Declare only values the caller must choose',
+        'Use an empty object contract when no caller input is needed',
+        'Do not rewrite business procedures, rules, output schemas',
+        'platform owns task keys',
     ):
         assert instruction in prompt
-    for field in ("input_contract", "output_contract", "parameter_contract", "result_contract"):
-        assert f"`{field}`" in prompt
 
 
 def test_fixture_runner_validates_response_and_publishable_manifest() -> None:
@@ -536,7 +505,7 @@ def test_bind_identity_stamps_platform_identity_on_model_output() -> None:
     response["runtime_manifest_draft"]["tasks"] = [task]  # type: ignore[index]
     validated = InterpreterFixtureRunner(CONTRACTS).run(request, response, bind_identity=True)
     identity = validated["runtime_manifest_draft"]["identity"]
-    assert identity["interpreter_version"] == "skillmind-skill-interpreter/4.3.1"
+    assert identity["interpreter_version"] == "skillmind-skill-interpreter/6.0.0"
     assert identity["source_hash"] == request["source"]["content_hash"]  # type: ignore[index]
     # 蓝图は同じ解釈の一部であり、manifest と別の identity/互換 level を持ってはならない。
     blueprint = validated["runtime_manifest_draft"]["capability_blueprint"]
@@ -650,30 +619,29 @@ def test_system_skill_keeps_parallel_execution_optional_and_bounded() -> None:
     """独立した観点だけで扇出を強制せず、依存順と読取専用の境界を保つ。"""
 
     prompt = _system_prompt()
-    assert "independent review aspects alone do not require `subagent.dispatch/v1`" in prompt
-    assert "branches are independent and read-only" in prompt
-    assert "dependent steps stay sequential" in prompt
-    assert "Respect source requirements for a single execution" in prompt
+    for instruction in ('only needed task-local capabilities', 'platform creates one task'):
+        assert instruction in prompt
 
 
 def test_system_skill_preserves_mandatory_effect_before_document_access() -> None:
     """原文依拠の gate、按需準備と不明結果の扱いを prompt に固定する。"""
 
     prompt = _system_prompt()
-    for required in (
-        "`document_prerequisites`, trace that field",
-        "require `document.readiness/v1`",
-        "Use on-demand document preparation",
-        "Approval, unknown effects or a checkpoint claim do not satisfy the gate",
-        "Recommended ordering and conditional steps alone do not justify it",
+    for instruction in (
+        'processing order remain in the original source',
+        'required document conversion explicitly',
+        'Platform approvals',
     ):
-        assert required in prompt
+        assert instruction in prompt
 
 
 def test_system_skill_separates_blueprint_and_manifest_source_trace_scopes() -> None:
     """出典の target 基準点を区別し、Tool の trace を Blueprint に混入させない。"""
 
     prompt = _system_prompt()
-    assert "relative to the Blueprint itself" in prompt
-    assert "must resolve to an existing value" in prompt
-    assert "Manifest Tool/workflow evidence in `report.source_traces`" in prompt
+    for instruction in (
+        'Source references use the supplied source ID',
+        'Never invent file IDs or line numbers',
+        'Input and resource declarations require a source reference',
+    ):
+        assert instruction in prompt

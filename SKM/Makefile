@@ -46,7 +46,7 @@ deploy:
 		[ "$$skm_actual" = "$$skm_platform" ] || { printf 'Image platform mismatch: %s (%s, server %s)\n' "$$skm_image" "$$skm_actual" "$$skm_platform" >&2; exit 1; }
 	done
 	step stop-application
-	$(COMPOSE) stop --timeout 60 api web worker migrate object-storage-init
+	$(COMPOSE) stop --timeout 60 api web worker maintenance migrate object-storage-init
 	step infrastructure
 	$(COMPOSE) up -d --no-build --no-deps --pull never --wait --wait-timeout 120 postgres redis object-storage
 	step initialize-storage
@@ -61,7 +61,7 @@ deploy:
 	step api-web
 	$(COMPOSE) up -d --no-build --no-deps --pull never --wait --wait-timeout 120 api web
 	step worker
-	$(COMPOSE) up -d --no-build --no-deps --pull never --wait --wait-timeout 120 worker
+	$(COMPOSE) up -d --no-build --no-deps --pull never --wait --wait-timeout 120 worker maintenance
 	step complete
 	$(COMPOSE) ps --all
 

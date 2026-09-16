@@ -46,9 +46,64 @@ export interface TaskFlowSourceTrace { target: string; path: string; line: numbe
 export interface TaskFlowPreviewRecord {
   preview_version: 'skillmind.task-flow-preview/v1'
   identity: TaskFlowPreviewTarget & { project_id: string; manifest_checksum: string }
-  status: 'AVAILABLE' | 'NOT_DECLARED'; blueprint_checksum: string | null; preview_checksum: string
+  status: 'AVAILABLE' | 'NOT_DECLARED' | 'SOURCE_EXECUTION'; blueprint_checksum: string | null; preview_checksum: string
   plan: TaskFlowPlan | null; source_traces: TaskFlowSourceTrace[]
+  source_execution?: SourceExecutionPreview
   readiness: { scope: 'SKILL_BLUEPRINT'; assessment: TaskReadinessRecord | null }
+}
+
+/** 原文実行の準備宣言。業務計画や生成された結果契約を含めない。 */
+export interface SourceExecutionPreview {
+  declaration: {
+    execution_version: 'skillmind.skill-execution/v1'
+    tasks: [{ key: string; capability: string; title: string; description: string; resource_keys: string[] }]
+    resource_requirements: Array<TaskFlowResource & { operations: Array<{ capability_version: string; operation: string }> }>
+    source_traces: Array<{ target: string; path: string; line: number | null }>
+  }
+  input_contract: Record<string, unknown>
+  source_documents: Array<{ path: string; content: string; sha256: string }>
+}
+/** 不完全な新宣言を旧 Blueprint や空の成功表示に置き換えない。 */
+export function parseSourceExecution(value: unknown): SourceExecutionPreview {
+  if (!fields(value, ['declaration', 'input_contract', 'source_documents'])
+    || !fields(value.declaration, ['execution_version', 'tasks', 'resource_requirements', 'source_traces'])
+    || value.declaration.execution_version !== 'skillmind.skill-execution/v1'
+    || !contract(value.input_contract)
+    || !Array.isArray(value.source_documents) || value.source_documents.length === 0
+    || !value.source_documents.every((doc) => fields(doc, ['path', 'content', 'sha256'])
+      && text(doc.path, 1024) && typeof doc.content === 'string' && typeof doc.sha256 === 'string' && HASH.test(doc.sha256))
+    || !Array.isArray(value.declaration.tasks) || value.declaration.tasks.length !== 1
+    || !value.declaration.tasks.every((task) => fields(task, ['key', 'capability', 'title', 'description', 'resource_keys'])
+      && key(task.key) && key(task.capability) && text(task.title, 200) && text(task.description, 2000) && keys(task.resource_keys))
+    || !Array.isArray(value.declaration.resource_requirements) || value.declaration.resource_requirements.length > 50
+    || !value.declaration.resource_requirements.every((item) => {
+      if (!isRecord(item)) return false
+      const { operations, ...base } = item
+      return resource(base) && Array.isArray(base.capabilities) && base.capabilities.length > 0
+        && Array.isArray(operations) && operations.every((op) => fields(op, ['capability_version', 'operation'])
+          && typeof op.capability_version === 'string' && base.capabilities?.includes(op.capability_version)
+          && text(op.operation, 128))
+    })
+    || !Array.isArray(value.declaration.source_traces) || !value.declaration.source_traces.every((trace) => fields(trace, ['target', 'path', 'line'])
+      && typeof trace.target === 'string' && trace.target.startsWith('/') && text(trace.path, 1024)
+      && (trace.line === null || (typeof trace.line === 'number' && Number.isInteger(trace.line) && trace.line >= 1)))) {
+    throw new Error('Source execution preview did not match its contract')
+  }
+  const record = value as unknown as SourceExecutionPreview
+  const resources = record.declaration.resource_requirements.map((item) => item.key)
+  if (new Set(resources).size !== resources.length || resources.join('\n') !== record.declaration.tasks[0].resource_keys.join('\n')
+    || new Set(record.source_documents.map((doc) => doc.path)).size !== record.source_documents.length) {
+    throw new Error('Source execution references did not match its contract')
+  }
+  return record
+}
+/** 凍結 Manifest の原値だけから import preview を読む。 */
+export function sourceExecutionFromManifest(manifest: Record<string, unknown>): SourceExecutionPreview | null {
+  if (!Object.hasOwn(manifest, 'skill_execution')) return null
+  if (Object.hasOwn(manifest, 'capability_blueprint') || !Array.isArray(manifest.tasks) || manifest.tasks.length !== 1 || !isRecord(manifest.tasks[0])) {
+    throw new Error('Conflicting Skill execution declarations')
+  }
+  return parseSourceExecution({ declaration: manifest.skill_execution, input_contract: manifest.tasks[0].input_contract, source_documents: manifest.source_documents })
 }
 
 const KEY = /^[a-z][a-z0-9_.-]*$/
@@ -206,11 +261,11 @@ function readiness(value: unknown): value is TaskFlowPreviewRecord['readiness'] 
 function readinessMatches(value: TaskFlowPreviewRecord): boolean {
   const current = value.readiness.assessment
   if (!current) return true
-  if (!value.plan) return false
-  const resources = [...value.plan.task_resources, ...value.plan.shared.resource_requirements].map((item) => item.value)
+  if (!value.plan && !value.source_execution) return false
+  const resources = value.source_execution?.declaration.resource_requirements ?? [...value.plan!.task_resources, ...value.plan!.shared.resource_requirements].map((item) => item.value)
   return current.requirements.length === resources.length && current.requirements.every((requirement) => {
     const declared = resources.find((item) => item.key === requirement.key)
-    return declared !== undefined && requirement.kind === declared.kind && requirement.required === declared.required
+    return declared !== undefined && requirement.kind === declared.kind && requirement.required === (declared.required || Boolean(value.plan?.shared.effect_intents?.some((effect) => effect.mode === 'apply' && effect.resource_key === declared.key)))
       && requirement.access === declared.access && requirement.capabilities.length === (declared.capabilities ?? []).length
       && requirement.selection_guidance === (declared.selection_guidance ?? null)
       && requirement.capabilities.every((capability) => (declared.capabilities ?? []).includes(capability))
@@ -227,16 +282,18 @@ function identity(value: unknown, projectId: string, target: TaskFlowPreviewTarg
 }
 /** Client 境界の全検証。checksum は Server identity であり Python canonical JSON を再実装しない。 */
 export function parseTaskFlowPreview(value: unknown, projectId: string, target: TaskFlowPreviewTarget): TaskFlowPreviewRecord {
-  if (!fields(value, ['preview_version', 'identity', 'status', 'blueprint_checksum', 'preview_checksum', 'plan', 'source_traces', 'readiness'])
+  if (!fields(value, ['preview_version', 'identity', 'status', 'blueprint_checksum', 'preview_checksum', 'plan', 'source_traces', 'readiness'], ['source_execution'])
     || value.preview_version !== 'skillmind.task-flow-preview/v1'
     || !isNonNilUuid(projectId) || !isValidTaskFlowTarget(target)
     || !identity(value.identity, projectId, target)
     || typeof value.preview_checksum !== 'string' || !HASH.test(value.preview_checksum)
     || !list(value.source_traces, 500, trace) || !readiness(value.readiness)
-    || !(value.status === 'NOT_DECLARED' ? value.plan === null && value.blueprint_checksum === null && value.source_traces.length === 0 && value.readiness.assessment === null
+    || !(value.status === 'SOURCE_EXECUTION' ? value.plan === null && value.blueprint_checksum === null && value.source_traces.length === 0 && parseSourceExecution(value.source_execution).declaration.tasks[0].key === target.task_key
+      : value.status === 'NOT_DECLARED' ? value.plan === null && value.blueprint_checksum === null && value.source_traces.length === 0 && value.readiness.assessment === null
       : value.status === 'AVAILABLE' && value.source_traces.length > 0 && typeof value.blueprint_checksum === 'string' && HASH.test(value.blueprint_checksum) && plan(value.plan, target))) {
     throw new Error('Task flow preview response did not match its contract')
   }
+  if (value.status !== 'SOURCE_EXECUTION' && Object.hasOwn(value, 'source_execution')) throw new Error('Legacy preview contains source execution')
   const record = value as unknown as TaskFlowPreviewRecord
   if (!readinessMatches(record)) throw new Error('Task flow readiness does not match original declarations')
   return record

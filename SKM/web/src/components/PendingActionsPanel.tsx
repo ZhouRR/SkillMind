@@ -72,7 +72,7 @@ export function PendingActionsPanel({ projectId }: { projectId: string }) {
         <ul className="pendingList">
           {state.items.map((item) => (
             <li key={item.run_id}>
-              <a className="pendingItem" href={routeHref('workspace', projectId, { runId: item.run_id })}>
+              <a className="pendingItem" href={routeHref('history', projectId, { runId: item.run_id })}>
                 <span className="pendingItemTitle">
                   <strong>{runHistoryTitle(item, messages.elements.unnamedRunTitle)}</strong>
                   <small>{formatLocalTimestamp(item.created_at)}</small>

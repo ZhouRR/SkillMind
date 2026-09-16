@@ -8,7 +8,6 @@ from uuid import uuid4
 
 import pytest
 from arq.worker import Function
-
 from skillmind.agent.codex_engine import CodexAgentSdkEngine
 from skillmind.agent.database_provider import DatabaseReadProvider
 from skillmind.agent.engine import ClaudeAgentSdkEngine, RunMcpRuntime
@@ -197,9 +196,10 @@ async def test_startup_injects_required_receipt_and_preparation_limits(
 def test_only_run_job_reserves_additional_preparation_time() -> None:
     """準備を増やしてモデル/終態化の余白を削らず、別 job の上限も変更しない。"""
 
-    registered = [item for item in worker.WorkerSettings.functions if isinstance(item, Function)]
+    registered = [item for item in worker.WorkerSettings.functions
+                  if isinstance(item, Function) and item.timeout_s is not None]
     assert len(registered) == 1
     run_job = registered[0]
     assert run_job.name == "execute_run" and run_job.coroutine is worker.execute_run
-    assert run_job.timeout_s == 1200 + worker._settings.run_preparation_timeout_seconds
+    assert run_job.timeout_s == 1500 + worker._settings.run_preparation_timeout_seconds
     assert worker.WorkerSettings.job_timeout == 1200

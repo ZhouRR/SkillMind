@@ -16,7 +16,7 @@ from uuid import UUID
 
 from skillmind.agent.outcome import compile_outcome_schema
 from skillmind.runs.domain import derive_task_id
-from skillmind.skills.capability_blueprint import resolve_capability_blueprint
+from skillmind.skills.execution import resolve_skill_definition
 from skillmind.skills.resource_binding import TaskReadiness, is_write_capability
 
 
@@ -77,7 +77,7 @@ class PublishedTaskDescriptor:
     compatibility_level: str
     tool_requirements: tuple[TaskToolRequirement, ...]
     published_at: datetime | None
-    capability_blueprint: dict[str, Any]
+    skill_definition: dict[str, Any]
     # 就緒度は Project の資源保有状況に依存するため、DB を持たない投影層では決められない。
     # Catalog を配線した service が evaluate_blueprint_readiness で埋める。
     readiness: TaskReadiness | None = None
@@ -102,7 +102,7 @@ def project_published_tasks(
     compatibility_level = _string_at(manifest, ("compatibility", "level"))
     default_view = _string_at(manifest, ("ui", "default_view"))
     tools = _tool_requirements(manifest)
-    blueprint = resolve_capability_blueprint(manifest)
+    blueprint = resolve_skill_definition(manifest)
     if blueprint is None:
         # publish gate が蓝图を必須にしているため、ここへ来る manifest は必ず持っている。
         # 万一欠けた行を discovery へ出すと、目標も規則も無い task が実行できてしまう。
@@ -155,7 +155,7 @@ def project_published_tasks(
                 compatibility_level=compatibility_level,
                 tool_requirements=tools,
                 published_at=published_at,
-                capability_blueprint=deepcopy(blueprint),
+                skill_definition=deepcopy(blueprint),
             )
         )
     return descriptors
@@ -242,7 +242,7 @@ def _allowed_capabilities(manifest: Mapping[str, Any]) -> tuple[str, ...]:
             capability = item.get("capability")
             if isinstance(capability, str):
                 capabilities.add(capability)
-    blueprint = manifest.get("capability_blueprint")
+    blueprint = resolve_skill_definition(manifest)
     requirements = (
         _sequence(blueprint.get("resource_requirements"))
         if isinstance(blueprint, Mapping)

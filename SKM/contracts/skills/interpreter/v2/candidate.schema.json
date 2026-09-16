@@ -1,0 +1,624 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/skills/interpreter/v2/candidate.schema.json",
+  "title": "Skill execution preparation candidate v2",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "candidate_version": {
+      "type": "string",
+      "enum": [
+        "skillmind.skill-candidate/v2"
+      ]
+    },
+    "title": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 200
+    },
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 2000
+    },
+    "input_contract": {
+      "$ref": "#/$defs/taskContractDraft"
+    },
+    "input_source_ref": {
+      "$ref": "#/$defs/sourceRef"
+    },
+    "resource_requirements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "kind",
+          "required",
+          "access",
+          "capabilities",
+          "accepted_providers",
+          "selection_guidance",
+          "operations",
+          "source_ref"
+        ],
+        "properties": {
+          "key": {
+            "$ref": "#/$defs/key"
+          },
+          "kind": {
+            "$ref": "#/$defs/resourceKind"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "access": {
+            "enum": [
+              "read",
+              "write"
+            ],
+            "type": "string"
+          },
+          "capabilities": {
+            "anyOf": [
+              {
+                "type": "array",
+                "maxItems": 20,
+                "items": {
+                  "$ref": "#/$defs/versionedCapability"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "accepted_providers": {
+            "anyOf": [
+              {
+                "type": "array",
+                "maxItems": 20,
+                "items": {
+                  "$ref": "#/$defs/key"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "selection_guidance": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/text"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "capability_version": {
+                  "$ref": "#/$defs/versionedCapability"
+                },
+                "operation": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                }
+              },
+              "required": [
+                "capability_version",
+                "operation"
+              ]
+            },
+            "maxItems": 20
+          },
+          "source_ref": {
+            "$ref": "#/$defs/sourceRef"
+          }
+        }
+      },
+      "maxItems": 50
+    },
+    "platform_tools": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/versionedCapability"
+      },
+      "maxItems": 30
+    },
+    "diagnostics": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "info"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_.:-]*$"
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "source_ref": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "severity",
+          "code",
+          "message",
+          "source_ref"
+        ]
+      }
+    }
+  },
+  "required": [
+    "candidate_version",
+    "title",
+    "description",
+    "input_contract",
+    "input_source_ref",
+    "resource_requirements",
+    "platform_tools",
+    "diagnostics"
+  ],
+  "$defs": {
+    "key": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "maxLength": 128
+    },
+    "versionedCapability": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$"
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "resourceKind": {
+      "enum": [
+        "issue",
+        "repository",
+        "document",
+        "file",
+        "knowledge",
+        "other"
+      ],
+      "type": "string"
+    },
+    "contractValueType": {
+      "enum": [
+        "object",
+        "array",
+        "string",
+        "integer",
+        "number",
+        "boolean"
+      ],
+      "type": "string"
+    },
+    "contractDescription": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "contractStringLength": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000
+    },
+    "contractEnumValues": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": [
+          "string",
+          "integer",
+          "number",
+          "boolean"
+        ]
+      }
+    },
+    "taskContractDraft": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "type",
+        "description",
+        "enum",
+        "fields",
+        "items",
+        "min_length",
+        "max_length",
+        "pattern",
+        "minimum",
+        "maximum"
+      ],
+      "properties": {
+        "contract_version": {
+          "enum": [
+            "skillmind.task-contract-draft/v1"
+          ],
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/contractValueType"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractDescription"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "enum": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractEnumValues"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fields": {
+          "anyOf": [
+            {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "$ref": "#/$defs/contractField"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "items": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractItem"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "min_length": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractStringLength"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_length": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractStringLength"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "minimum": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "maximum": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "contractField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "type",
+        "required",
+        "description",
+        "enum",
+        "fields",
+        "items",
+        "min_length",
+        "max_length",
+        "pattern",
+        "minimum",
+        "maximum"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "type": {
+          "$ref": "#/$defs/contractValueType"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractDescription"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "enum": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractEnumValues"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fields": {
+          "anyOf": [
+            {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "$ref": "#/$defs/contractField"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "items": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractItem"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "min_length": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractStringLength"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_length": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractStringLength"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "minimum": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "maximum": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "contractItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "description",
+        "enum",
+        "fields",
+        "items",
+        "min_length",
+        "max_length",
+        "pattern",
+        "minimum",
+        "maximum"
+      ],
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/contractValueType"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractDescription"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "enum": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractEnumValues"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fields": {
+          "anyOf": [
+            {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "$ref": "#/$defs/contractField"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "items": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractItem"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "min_length": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractStringLength"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_length": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractStringLength"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "minimum": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "maximum": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "sourceRef": {
+      "type": "string",
+      "pattern": "^s[0-9]+(:[1-9][0-9]*)?$",
+      "description": "Use the frozen source ID, optionally followed by its displayed line number, e.g. s0:12."
+    }
+  }
+}

@@ -11,7 +11,7 @@ from uuid import uuid4
 
 import pytest
 from skillmind.schedules import ScheduleOutcome, ScheduleTickReport, ScheduleTriggerResult
-from skillmind.worker.settings import WorkerSettings, trigger_due_schedules
+from skillmind.worker.settings import MaintenanceWorkerSettings, trigger_due_schedules
 
 
 class MemoryScheduleService:
@@ -77,7 +77,7 @@ async def test_schedule_tick_reports_each_outcome_separately() -> None:
 def test_schedule_tick_is_registered_as_a_cron_job() -> None:
     """tick が Worker の cron_jobs に載っていることを確認する。"""
 
-    names = {job.name for job in WorkerSettings.cron_jobs}
+    names = {job.name for job in MaintenanceWorkerSettings.cron_jobs}
 
     assert "cron:trigger_due_schedules" in names
 

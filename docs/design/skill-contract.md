@@ -4,9 +4,9 @@
 
 ## 设计目标
 
-外部 Skill 无需改成平台专用目录/业务 Schema；Interpreter 理解目标、资源、规则和交付，动态派生业务字段，平台仅固定跨组件协议。
+外部 Skill 无需改成平台专用目录/业务 Schema；Interpreter 仅识别调用输入、资源和操作要求；平台将完整冻结原文交给 Agent 自主执行，固定跨组件协议与授权边界。
 
-Tool/Shell/network/write 声明不是权限。必需规则/禁止事项不因缺工具而弱化，推荐步骤可在冻结权限内调整；来源/解释/调整保留 trace，发布版本不可原地修改。
+Tool/Shell/network/write 声明不是权限。原文规则/禁止事项不因缺工具而弱化，执行顺序与条件由 Agent 按原文处理；来源/解释/调整保留 trace，发布版本不可原地修改。
 
 ## 分层架构
 
@@ -29,37 +29,23 @@ NormalizedSkillPackage 保留身份、adapter version、hash、文件索引、�
 
 ## Interpreter 的核心输出
 
-### CapabilityBlueprint
+### 原文执行声明
 
-主要产物是 [CapabilityBlueprint](../../SKM/contracts/capability-blueprint/v1.schema.json)，不是业务表单 Schema：
+新导入使用 [SkillExecution v1](../../SKM/contracts/skill-execution/v1.schema.json)：一个任务的标题/说明、资源要求和允许提案的操作。调用输入只在 Manifest 的 `input_contract` 声明一次。内部阶段、批准和恢复不拆为独立任务；业务规则、表名/列名、保存路径、条件、结果格式与恢复说明保留在完整 Skill 原文及引用文件中，不生成第二份业务执行计划或结果 Schema。
 
-| 内容 | 含义 |
-| --- | --- |
-| capability/intents/objectives | 能做什么、何时调用、目标 |
-| resource_requirements | 资源、必需性、访问/绑定条件 |
-| guidance/success_criteria | 必需/建议、质量与禁止事项 |
-| deliverables/interaction_points/effect_intents | 交付、澄清/审查/批准、可能效果 |
-| source_traces/assumptions/questions | 依据及不能伪造的未知 |
+### 资源与输入
 
-新业务 capability 不必注册；真正 Tool 调用才使用 repository.read/v1 等注册版本 ID。
+`resource_requirements` 保留 kind、required、access、capabilities、selection_guidance；accepted_providers 是兼容提示，不代替 capability/scope 校验。每个写入资源的 `operations` 指明实际 capability/operation，写入目标在启动前必需绑定，包括条件写入；绑定可用不等于批准或强制执行。可选只读补充资源仍可省略。
 
-### ResourceRequirement
+同一连接和授权用途的多张表共用一个资源。文档输入与保存目标分开绑定；文书范围已提供的路径、ID、库标识和 bucket 不重复作为调用参数。只有用户必须选择的业务值进入受限 TaskContractDraft。改 Integration/文档/权限范围须新 Run，见[资源快照](resource-snapshots.md)。
 
-kind、required、access、versioned capabilities、selection_guidance 表达抽象条件；accepted_providers 只是兼容提示，不代替 capability/scope 校验。
+### 旧版本兼容
 
-多资源独立声明，创建前选定绑定；交互只能补冻结 scope 内信息，不换 Integration/文档或扩权，变化须新 Run，见[资源快照](resource-snapshots.md)。
-
-### Guidance 与约束
-
-required_rules 必须保留，recommended_steps 可重排，quality_criteria 约束最终证据/完整性，prohibited_actions 与平台硬拒绝独立生效。原文和规范化 guidance 均冻结，Worker 接收 checksum/引用，不能只传丢规则的摘要。
-
-### TaskBlueprint 与动态参数
-
-TaskBlueprint 投影目标、资源槽、参数、交付/效果。稳定输入/机器输出可由受限 TaskContractDraft 编译 Schema；开放分析可仅用 OutcomeEnvelope、Markdown/Artifact、Evidence/Proposal。缺业务 Schema、ViewSpec、fixture 不单独阻止解释/发布。
+旧 [CapabilityBlueprint](../../SKM/contracts/capability-blueprint/v1.schema.json) 及 Brief v1 保持原规则、结果契约、effect_intents 和 checksum；不自动转换历史版本或 Run。Manifest 的 `skill_execution` 与 `capability_blueprint` 互斥，未知执行版本拒绝；新解释入口不能返回旧格式绕过候选验证。共享消费者读取原声明，不从 Manifest 逆生成 Blueprint。
 
 ## 平台 contracts 的边界
 
-contracts 固定 API/Problem/RunEvent、Manifest/Blueprint/Brief/Outcome、Interaction/Effect/Evidence 和 Tool 通用协议，不预置业务结果模型或保存 Skill Gold。实例/评价数据留各自资产/测试边界，结构正确不证明推理正确。
+contracts 固定 API/Problem/RunEvent、Manifest/SkillExecution/旧 Blueprint/Brief/Outcome、Interaction/Effect/Evidence 和 Tool 通用协议，不预置业务结果模型或保存 Skill Gold。实例/评价数据留各自资产/测试边界，结构正确不证明推理正确。
 
 ## 解释请求与响应
 
@@ -69,13 +55,13 @@ contracts 固定 API/Problem/RunEvent、Manifest/Blueprint/Brief/Outcome、Inter
 
 ### 结构化响应
 
-响应含 summary、compatibility、Blueprint、trace/diagnostics 及可选 confidence/assumptions/questions/TaskContractDraft。结构失败不将自由文本包装为已验证 Manifest；调整追加 Interpretation、lineage/diff。
+响应包含最小执行声明、输入契约、原文和诊断；身份、hash、固定工作流及平台 OutcomeEnvelope 由平台绑定。结构失败不将自由文本包装为已验证 Manifest；调整追加 Interpretation、lineage/diff。
 
 默认 SDK structured-output；显式 SKILLMIND_SKILL_INTERPRETER_ACCEPT_PROMPT_JSON=true 可接文本完整 JSON，仍不得补字段/绕 Schema、identity/hash/gate，且不能当 structured-output 验收。
 
 ### 防提示注入
 
-平台规则、发布 guidance、用户输入、Tool 外部数据分层信任。来源不得泄露 Secret、改系统指令或授未注册 Tool；记录 diagnostic 并受上层边界约束。发现明文 credential 在模型前阻断，不等模型脱敏。
+平台规则、发布的 Skill 原文、用户输入、Tool 外部数据分层信任。来源不得泄露 Secret、改系统指令或授未注册 Tool；记录 diagnostic 并受上层边界约束。发现明文 credential 在模型前阻断，不等模型脱敏。
 
 ## 兼容级别与运行就绪度
 
@@ -83,7 +69,7 @@ contracts 固定 API/Problem/RunEvent、Manifest/Blueprint/Brief/Outcome、Inter
 
 | 事实 | 仍需检查 |
 | --- | --- |
-| parse / Preview | 可审查，不代表合法蓝图或可发布 |
+| parse / Preview | 可审查，不代表声明合法或可发布 |
 | gate_passed | 无 hard error，warning 仍须 ADMIN 接受 |
 | PUBLISHED | Project 显式启用精确版 |
 | Project 已启用 | 资源、真实已安装 Provider/策略决定 readiness |

@@ -725,6 +725,10 @@ export interface UiMessages {
       | 'unknown' | 'loadFailed' | 'readTimeout', string>
   }
   runResult: {
+    capacityTitle: string
+    capacityWaiting: string
+    capacityRetryAt: (time: string) => string
+    capacityFailed: string
     reading: { details: string; checks: string; confidenceHint: string }
     /** 原 Result の保存時に記録した検証範囲。歴史欠損は成功へ補完しない。 */
     referenceChecks: {
@@ -1010,6 +1014,7 @@ export interface UiMessages {
   /** 任务中心 (TasksPage)。「何を走らせられるか」を選ぶ画面。 */
   /** 原宣言の単 Task preview。準備評価と実行済み事実は同じ状態にしない。 */
   taskFlow: {
+    sourceInputs: string; sourceNoInputs: string; sourceResources: string; sourceText: string
     open: string; title: string; intro: string; close: string; refresh: string; loading: string
     missing: string; taskScope: string; sharedScope: string; sharedHint: string
     objective: string; taskResources: string; sharedResources: string; noTaskResources: string

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -187,6 +188,23 @@ async def test_unclaimable_execution_never_reaches_provider() -> None:
     assert outcome == "ignored"
     assert provider.calls == 0
     assert service.finalized is None
+
+
+@pytest.mark.parametrize("pending", [False, True])
+async def test_immediate_handoff_still_claims_and_never_applies_unclaimable_effect(pending):
+    """人工待ち候補なし、配送重複、撤権などで claim 不可なら write しない。"""
+
+    from tests.worker.test_agent_run_executor import _claimed as claimed_run
+
+    run = claimed_run()
+    service = MemoryEffectService(None)
+    lookup = AsyncMock(return_value=uuid4() if pending else None)
+    service.pending_effect_for_attempt = lookup
+    provider = RaisingProvider(RuntimeError("must not run"))
+    outcome = await _executor(service, provider).execute_pending_for_attempt(run)
+    lookup.assert_awaited_once_with(run_id=run.run_id, attempt_id=run.run_attempt_id)
+    assert outcome == ("ignored" if pending else None)
+    assert provider.calls == 0 and service.finalized is None
 
 
 @pytest.mark.parametrize(

@@ -1,3 +1,4 @@
+import { SourceExecutionPreview } from '../components/SourceExecutionPreview'
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 
 import {
@@ -1083,6 +1084,7 @@ export function InterpretationExecutionView({ execution, instruction, onInstruct
   const parentInstruction = readAdjustmentInstruction(execution.adjustment)
   const blueprint = execution.preview.capability_blueprint
   const hasBlueprint = blueprint !== null && (blueprint.capabilities.length > 0 || blueprint.tasks.length > 0)
+  const sourceExecution = execution.preview.source_execution
   const manifest = execution.preview.runtime_manifest_draft
   const hasContracts = Array.isArray(manifest.tasks) && manifest.tasks.some(isPlainRecord)
   return (
@@ -1095,7 +1097,7 @@ export function InterpretationExecutionView({ execution, instruction, onInstruct
         <div><dt>{messages.skills.interpretationIdLabel}</dt><dd className="mono">{execution.interpretation_id}</dd></div>
         <div><dt>{messages.skills.interpretationStatusLabel}</dt><dd>{execution.status}{execution.reused ? messages.skills.reusedSuffix : ''}</dd></div>
         <div><dt>{messages.skills.interpretationModelLabel}</dt><dd className="mono">{execution.model ?? '—'}</dd></div>
-        <div><dt>{messages.skills.interpretationConfidenceLabel}</dt><dd>{execution.confidence.toFixed(2)}</dd></div>
+        {!sourceExecution && <div><dt>{messages.skills.interpretationConfidenceLabel}</dt><dd>{execution.confidence.toFixed(2)}</dd></div>}
       </dl>
       {failed && <p className="error" role="alert">{messages.skills.interpretationFailedLine(execution.error_code ?? 'unknown')}</p>}
       {validationAttempts && validationAttempts.length > 0 && (
@@ -1109,8 +1111,9 @@ export function InterpretationExecutionView({ execution, instruction, onInstruct
       {execution.parent_interpretation_id && (
         <p className="hint">{messages.skills.parentPrefix}<code className="mono">{execution.parent_interpretation_id}</code>{parentInstruction ? messages.skills.adjustQuote(parentInstruction) : ''}</p>
       )}
-      {report && <p className="interpretationSummary">{report.summary}</p>}
-      <div className="tabBar" role="tablist" aria-label={messages.skills.detailTabsAria}>
+      {report && !sourceExecution && <p className="interpretationSummary">{report.summary}</p>}
+      {sourceExecution && <SourceExecutionPreview preview={sourceExecution} />}
+      {!sourceExecution && <div className="tabBar" role="tablist" aria-label={messages.skills.detailTabsAria}>
         <InterpretationTabButton current={detailTab} tab="report" onSelect={setDetailTab}>{messages.skills.tabReport}</InterpretationTabButton>
         <InterpretationTabButton current={detailTab} tab="blueprint" onSelect={setDetailTab}>{messages.skills.blueprintTitle}</InterpretationTabButton>
         <InterpretationTabButton current={detailTab} tab="contracts" onSelect={setDetailTab}>{messages.skills.generatedContractsTitle}</InterpretationTabButton>
@@ -1119,14 +1122,14 @@ export function InterpretationExecutionView({ execution, instruction, onInstruct
           {/* 構造差分がある時だけ点を出し、他 tab からも「見るべき差分がある」ことを示す。 */}
           {execution.diff.has_changes === true && <i className="tabAlert" aria-hidden="true" />}
         </InterpretationTabButton>
-      </div>
-      <div className="tabPanel" role="tabpanel" hidden={detailTab !== 'report'}>
+      </div>}
+      <div className="tabPanel" role="tabpanel" hidden={!sourceExecution && detailTab !== 'report'}>
         {report ? (
           <div className="interpretationDetailStack">
-            <ConfidenceGrid confidence={report.confidence} />
-            <NoteBlock title={messages.skills.assumptionsTitle} items={report.assumptions} />
+            {!sourceExecution && <ConfidenceGrid confidence={report.confidence} />}
+            {!sourceExecution && <NoteBlock title={messages.skills.assumptionsTitle} items={report.assumptions} />}
             <NoteBlock title={messages.skills.questionsTitle} items={report.questions.map((q) => ({ key: q.key, text: q.required ? `${q.text}${messages.skills.requiredAnswerSuffix}` : q.text }))} />
-            {report.source_traces.length > 0 && (
+            {!sourceExecution && report.source_traces.length > 0 && (
               <div className="noteBlock">
                 <h4>{messages.skills.sourceTracesTitle}</h4>
                 <ul className="sourceTraceList">
@@ -1147,19 +1150,20 @@ export function InterpretationExecutionView({ execution, instruction, onInstruct
           </div>
         ) : <p className="hint">{messages.skills.reportEmpty}</p>}
       </div>
-      <div className="tabPanel" role="tabpanel" hidden={detailTab !== 'blueprint'}>
+      <div className="tabPanel" role="tabpanel" hidden={!!sourceExecution || detailTab !== 'blueprint'}>
         {hasBlueprint
           ? <CapabilityBlueprintPreview blueprint={blueprint} />
           : <p className="hint">{messages.skills.blueprintEmpty}</p>}
       </div>
-      <div className="tabPanel" role="tabpanel" hidden={detailTab !== 'contracts'}>
+      <div className="tabPanel" role="tabpanel" hidden={!!sourceExecution || detailTab !== 'contracts'}>
         {hasContracts
           ? <GeneratedContractPreview manifest={manifest} />
           : <p className="hint">{messages.skills.contractsEmpty}</p>}
       </div>
-      <div className="tabPanel" role="tabpanel" hidden={detailTab !== 'diff'}>
+      <div className="tabPanel" role="tabpanel" hidden={!!sourceExecution || detailTab !== 'diff'}>
         <RevisionDiffView diff={execution.diff} hasParent={execution.parent_interpretation_id !== null} />
       </div>
+      {sourceExecution && execution.parent_interpretation_id && <details className="rawResult"><summary>{messages.skills.revisionDiffTitle}</summary><RevisionDiffView diff={execution.diff} hasParent /></details>}
       <form className="adjustForm" onSubmit={(event) => { event.preventDefault(); onAdjust() }}>
         <label>{messages.skills.adjustLabel}<textarea className="compactTextarea" value={instruction} onChange={(event) => onInstructionChange(event.target.value)} placeholder={messages.skills.adjustPlaceholder} spellCheck={false} /></label>
         {adjustState.status === 'error' && <p className="error" role="alert">{adjustState.message}</p>}
@@ -1512,7 +1516,7 @@ function summarizeDiff(messages: UiMessages, diff: Record<string, unknown>): str
   }
   const level = diff.compatibility_level
   if (isPlainRecord(level)) lines.push(`compatibility_level: ${String(level.from)} → ${String(level.to)}`)
-  for (const dimension of ['identity', 'permissions', 'ui', 'confidence']) {
+  for (const dimension of ['identity', 'permissions', 'ui', 'confidence', 'skill_execution']) {
     const value = diff[dimension]
     if (isPlainRecord(value) && isPlainRecord(value.changed)) {
       const count = Object.keys(value.changed).length

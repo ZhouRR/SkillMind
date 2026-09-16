@@ -422,3 +422,28 @@ def test_api_readiness_response_is_null_when_undetermined() -> None:
     """Catalog 未配線の環境では未判定を null で表し、実行不可と断定しない。"""
 
     assert _readiness_response(None) is None
+
+
+def test_mixed_output_requirement_is_not_runnable_despite_partial_match() -> None:
+    """旧発行版も保存候補との一部一致だけでは起動可能と表示しない。"""
+
+    candidate = ProjectResourceCandidate(
+        key="project-library:documents", kind="document", provider="project-library",
+        label="Documents", capabilities=("document.write/v1",),
+    )
+    for capabilities, expected in (
+        (["document.write/v1", "document.read/v1"], RequirementStatus.UNSUPPORTED),
+        (["document.write/v1"], RequirementStatus.AVAILABLE),
+    ):
+        readiness = evaluate_blueprint_readiness(
+            _blueprint(_document_requirement(access="write", capabilities=capabilities)),
+            candidates=[candidate], registered_capabilities=REGISTERED | {"document.write/v1"},
+        )
+        requirement = readiness.requirements[0]
+        assert requirement.status is expected
+        if expected is RequirementStatus.UNSUPPORTED:
+            assert readiness.level is TaskReadinessLevel.GUIDANCE_ONLY
+            assert requirement.candidates == ()
+            assert "Reinterpret" in requirement.reason
+        else:
+            assert readiness.level is TaskReadinessLevel.RUNNABLE

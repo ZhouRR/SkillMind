@@ -6,6 +6,18 @@ export const DOCUMENT_PREVIEW_MAX_BYTES = 1_000_000
 const HTML_NAMESPACE = 'http://www.w3.org/1999/xhtml'
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg'
 const PREVIEW_POLICY = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"
+/** 埋め込み完了報告だけ余白を揃え、原文の配色・図表と印刷レイアウトを維持する。 */
+const REPORT_LAYOUT = `@media screen {
+  html { margin: 0 !important; padding: 0 !important; }
+  body { margin: 0 !important; padding: 12px !important; }
+  body > :is(main, article, [role="main"]) {
+    box-sizing: border-box !important; width: auto !important; max-width: none !important;
+    margin: 0 !important; padding: 0 !important;
+  }
+  body > :is(main, article, [role="main"]) > :is(header, section) {
+    padding: 16px !important; margin-bottom: 16px !important;
+  }
+}`
 const ALLOWED_TAGS = new Set([
   'html', 'head', 'body', 'style', 'details', 'summary', 'nav', 'col', 'colgroup',
   'a', 'abbr', 'article', 'aside', 'b', 'blockquote', 'br', 'caption', 'code', 'dd', 'del',
@@ -38,14 +50,14 @@ export function documentMarkdownHtml(source: string): string {
   return documentPreviewHtml(envelope(marked.parse(source, { async: false, gfm: true })))
 }
 
-/** 完全な HTML レポートは原 CSS を保ち、既存 Markdown は従来の静的描画を使う。 */
+/** HTML 完了報告は埋め込み用の余白に揃え、既存 Markdown は従来の静的描画を使う。 */
 export function reportPreviewHtml(source: string): string {
   return /^\s*(?:<!doctype\s+html\b[^>]*>\s*)?<html\b/i.test(source)
-    ? documentPreviewHtml(source) : documentMarkdownHtml(source)
+    ? documentPreviewHtml(source, 'report') : documentMarkdownHtml(source)
 }
 
 /** 埋め込み CSS と静的 SVG は保持し、能動要素を除いた専用 document を sandbox へ渡す。 */
-export function documentPreviewHtml(source: string): string {
+export function documentPreviewHtml(source: string, layout: 'document' | 'report' = 'document'): string {
   if (typeof document === 'undefined') return envelope(`<pre>${escapeText(source)}</pre>`)
   // browsing context のない document で head/body の構造と属性を保持する。原 tree は live DOM に移さない。
   const inert = document.implementation.createHTMLDocument('')
@@ -93,6 +105,11 @@ export function documentPreviewHtml(source: string): string {
   policy.setAttribute('http-equiv', 'Content-Security-Policy')
   policy.setAttribute('content', PREVIEW_POLICY)
   head.prepend(policy)
+  if (layout === 'report') {
+    const style = inert.createElement('style')
+    style.textContent = REPORT_LAYOUT
+    head.append(style)
+  }
   return '<!doctype html>' + root.outerHTML
 }
 

@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from skillmind.skills.capability_blueprint import (
     CAPABILITY_BLUEPRINT_VERSION,
     CapabilityBlueprintError,
@@ -361,3 +360,37 @@ def test_source_trace_target_must_resolve_inside_original_blueprint(
     assert captured.value.path == "/source_traces/1/target"
     assert target not in str(captured.value)
     assert blueprint == original
+
+
+@pytest.mark.parametrize("extra", ["document.read/v1", "document.list/v1", "document.convert/v1"])
+def test_output_library_cannot_also_declare_input_capabilities(validator, extra) -> None:
+    """既知の保存能力と入力能力の混在を、正確な修復位置とともに拒否する。"""
+
+    blueprint = _minimal_blueprint()
+    blueprint["resource_requirements"] = [{
+        "key": "outputs", "kind": "document", "required": True, "access": "write",
+        "capabilities": ["document.write/v1", extra],
+    }]
+    original = deepcopy(blueprint)
+    with pytest.raises(CapabilityBlueprintError) as caught:
+        validator.validate(blueprint)
+    assert caught.value.code == "document_library_capabilities_invalid"
+    assert caught.value.path == "/resource_requirements/0/capabilities"
+    assert "workspace.read/v1" in caught.value.message
+    assert blueprint == original
+
+
+def test_separate_input_and_output_resources_are_valid(validator) -> None:
+    """凍結入力と保存専用槽位は同じ Skill 内で独立して宣言できる。"""
+
+    blueprint = _minimal_blueprint()
+    blueprint["resource_requirements"] = [
+        {"key": "input", "kind": "document", "required": True, "access": "read",
+         "capabilities": ["document.read/v1", "document.list/v1"]},
+        {"key": "output", "kind": "document", "required": True, "access": "write",
+         "capabilities": ["document.write/v1"]},
+        {"key": "future", "kind": "document", "required": False, "access": "write",
+         "capabilities": ["custom.publish/v1"]},
+    ]
+    compiled = validator.validate(blueprint)
+    assert compiled.blueprint["resource_requirements"] == blueprint["resource_requirements"]

@@ -9,7 +9,6 @@ from contextlib import redirect_stdout
 from unittest.mock import patch
 
 import yaml
-
 from scripts import validate_compose
 
 
@@ -26,7 +25,7 @@ class ComposeSourceInvariantTests(unittest.TestCase):
         """ENV_FILE の選択が一 service にだけ伝わらない変更を拒否する。"""
 
         document = yaml.safe_load(validate_compose.COMPOSE_FILE.read_text(encoding="utf-8"))
-        for name in ("api", "worker", "migrate"):
+        for name in ("api", "worker", "maintenance", "migrate"):
             with self.subTest(name=name):
                 changed = json.loads(json.dumps(document))
                 changed["services"][name]["env_file"] = [".env"]
@@ -54,7 +53,7 @@ class ComposeSourceInvariantTests(unittest.TestCase):
         """run --pull に頼らず、共通設定で不足 image の自動取得を拒否する。"""
 
         document = yaml.safe_load(validate_compose.COMPOSE_FILE.read_text(encoding="utf-8"))
-        for name in ("api", "worker", "migrate"):
+        for name in ("api", "worker", "maintenance", "migrate"):
             with self.subTest(name=name):
                 changed = json.loads(json.dumps(document))
                 changed["services"][name].pop("pull_policy")
@@ -68,7 +67,7 @@ class ComposeSourceInvariantTests(unittest.TestCase):
         """一 service だけ別の image tag を使う変更を拒否する。"""
 
         document = yaml.safe_load(validate_compose.COMPOSE_FILE.read_text(encoding="utf-8"))
-        for name in ("api", "worker", "migrate", "web"):
+        for name in ("api", "worker", "maintenance", "migrate", "web"):
             with self.subTest(name=name):
                 changed = json.loads(json.dumps(document))
                 changed["services"][name]["image"] = "old:latest"

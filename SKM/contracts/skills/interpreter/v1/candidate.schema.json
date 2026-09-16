@@ -1,0 +1,1112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/skills/interpreter/v1/candidate.schema.json",
+  "title": "Skill interpretation candidate v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "capabilities",
+    "tasks",
+    "resource_requirements",
+    "guidance",
+    "interaction_points",
+    "effect_intents",
+    "execution_preferences",
+    "source_traces",
+    "assumptions",
+    "questions",
+    "candidate_version",
+    "summary",
+    "compatibility_level",
+    "diagnostics",
+    "tools"
+  ],
+  "properties": {
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "title",
+          "summary",
+          "intents"
+        ],
+        "properties": {
+          "key": {
+            "$ref": "#/$defs/key"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/text"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "intents": {
+            "anyOf": [
+              {
+                "type": "array",
+                "maxItems": 50,
+                "items": {
+                  "$ref": "#/$defs/text"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "capability",
+          "objective",
+          "success_criteria",
+          "resource_keys",
+          "deliverables",
+          "parameter_contract",
+          "result_contract",
+          "document_prerequisites"
+        ],
+        "properties": {
+          "key": {
+            "$ref": "#/$defs/key"
+          },
+          "capability": {
+            "$ref": "#/$defs/key"
+          },
+          "objective": {
+            "$ref": "#/$defs/text"
+          },
+          "success_criteria": {
+            "anyOf": [
+              {
+                "type": "array",
+                "maxItems": 50,
+                "items": {
+                  "$ref": "#/$defs/note"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resource_keys": {
+            "anyOf": [
+              {
+                "type": "array",
+                "maxItems": 50,
+                "items": {
+                  "$ref": "#/$defs/key"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deliverables": {
+            "anyOf": [
+              {
+                "type": "array",
+                "maxItems": 50,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "key",
+                    "kind",
+                    "description"
+                  ],
+                  "properties": {
+                    "key": {
+                      "$ref": "#/$defs/key"
+                    },
+                    "kind": {
+                      "$ref": "#/$defs/deliverableKind"
+                    },
+                    "description": {
+                      "$ref": "#/$defs/text"
+                    }
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "parameter_contract": {
+            "$ref": "#/$defs/taskContractDraft"
+          },
+          "result_contract": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/taskContractDraft"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "document_prerequisites": {
+            "anyOf": [
+              {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 50,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_.-]*$",
+                  "maxLength": 128
+                },
+                "description": "All named apply effect intents must be confirmed in this Run before any document read, inspect, list or conversion. Requires document.readiness/v1 as a required runtime Tool and on-demand input preparation; never a permission grant."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "resource_requirements": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "kind",
+          "required",
+          "access",
+          "capabilities",
+          "accepted_providers",
+          "selection_guidance"
+        ],
+        "properties": {
+          "key": {
+            "$ref": "#/$defs/key"
+          },
+          "kind": {
+            "$ref": "#/$defs/resourceKind"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "access": {
+            "enum": [
+              "read",
+              "write"
+            ],
+            "type": "string"
+          },
+          "capabilities": {
+            "anyOf": [
+              {
+                "type": "array",
+                "maxItems": 20,
+                "items": {
+                  "$ref": "#/$defs/versionedCapability"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "accepted_providers": {
+            "anyOf": [
+              {
+                "type": "array",
+                "maxItems": 20,
+                "items": {
+                  "$ref": "#/$defs/key"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "selection_guidance": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/text"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "guidance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_rules",
+        "recommended_steps",
+        "quality_criteria",
+        "prohibited_actions"
+      ],
+      "properties": {
+        "required_rules": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/noteList"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "recommended_steps": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/noteList"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "quality_criteria": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/noteList"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prohibited_actions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/noteList"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "interaction_points": {
+      "anyOf": [
+        {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "key",
+              "type",
+              "condition",
+              "prompt"
+            ],
+            "properties": {
+              "key": {
+                "$ref": "#/$defs/key"
+              },
+              "type": {
+                "enum": [
+                  "CLARIFICATION",
+                  "CHOICE",
+                  "REVIEW",
+                  "EFFECT_APPROVAL"
+                ],
+                "type": "string"
+              },
+              "condition": {
+                "$ref": "#/$defs/text"
+              },
+              "prompt": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/text"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "effect_intents": {
+      "anyOf": [
+        {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "key",
+              "mode",
+              "resource_key",
+              "operation",
+              "risk",
+              "approval_mode"
+            ],
+            "properties": {
+              "key": {
+                "$ref": "#/$defs/key"
+              },
+              "mode": {
+                "enum": [
+                  "observe",
+                  "propose",
+                  "apply"
+                ],
+                "type": "string"
+              },
+              "resource_key": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/key"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "operation": {
+                "$ref": "#/$defs/text"
+              },
+              "risk": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ],
+                "type": "string"
+              },
+              "approval_mode": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "ask"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "execution_preferences": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "recommended_profile",
+            "session_split_hints",
+            "stop_conditions"
+          ],
+          "properties": {
+            "recommended_profile": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "GUIDED",
+                    "SUPERVISED",
+                    "DELEGATED"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "session_split_hints": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/noteList"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "stop_conditions": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/noteList"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "source_traces": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "target",
+          "reason",
+          "source_ref"
+        ],
+        "properties": {
+          "target": {
+            "type": "string",
+            "pattern": "^/",
+            "maxLength": 512
+          },
+          "reason": {
+            "$ref": "#/$defs/text"
+          },
+          "source_ref": {
+            "$ref": "#/$defs/sourceRef"
+          }
+        }
+      }
+    },
+    "assumptions": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/noteList"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "questions": {
+      "anyOf": [
+        {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "key",
+              "text",
+              "required"
+            ],
+            "properties": {
+              "key": {
+                "$ref": "#/$defs/key"
+              },
+              "text": {
+                "$ref": "#/$defs/text"
+              },
+              "required": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "candidate_version": {
+      "type": "string",
+      "enum": [
+        "skillmind.skill-candidate/v1"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "compatibility_level": {
+      "type": "string",
+      "enum": [
+        "native",
+        "adapted",
+        "assisted"
+      ]
+    },
+    "diagnostics": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "info"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_.:-]*$"
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "source_ref": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "severity",
+          "code",
+          "message",
+          "source_ref"
+        ]
+      }
+    },
+    "tools": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "capability",
+          "required",
+          "source_ref",
+          "reason"
+        ],
+        "properties": {
+          "capability": {
+            "$ref": "#/$defs/versionedCapability"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "source_ref": {
+            "$ref": "#/$defs/sourceRef"
+          },
+          "reason": {
+            "$ref": "#/$defs/text"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "key": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "maxLength": 128
+    },
+    "versionedCapability": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$"
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "note": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "text"
+      ],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/key"
+        },
+        "text": {
+          "$ref": "#/$defs/text"
+        }
+      }
+    },
+    "noteList": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/$defs/note"
+      }
+    },
+    "deliverableKind": {
+      "enum": [
+        "report",
+        "structured_data",
+        "patch",
+        "change_proposal",
+        "artifact"
+      ],
+      "type": "string"
+    },
+    "resourceKind": {
+      "enum": [
+        "issue",
+        "repository",
+        "document",
+        "file",
+        "knowledge",
+        "other"
+      ],
+      "type": "string"
+    },
+    "contractValueType": {
+      "enum": [
+        "object",
+        "array",
+        "string",
+        "integer",
+        "number",
+        "boolean"
+      ],
+      "type": "string"
+    },
+    "contractDescription": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "contractStringLength": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000
+    },
+    "contractEnumValues": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": [
+          "string",
+          "integer",
+          "number",
+          "boolean"
+        ]
+      }
+    },
+    "taskContractDraft": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "type",
+        "description",
+        "enum",
+        "fields",
+        "items",
+        "min_length",
+        "max_length",
+        "pattern",
+        "minimum",
+        "maximum"
+      ],
+      "properties": {
+        "contract_version": {
+          "enum": [
+            "skillmind.task-contract-draft/v1"
+          ],
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/contractValueType"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractDescription"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "enum": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractEnumValues"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fields": {
+          "anyOf": [
+            {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "$ref": "#/$defs/contractField"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "items": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractItem"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "min_length": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractStringLength"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_length": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractStringLength"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "minimum": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "maximum": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "contractField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "type",
+        "required",
+        "description",
+        "enum",
+        "fields",
+        "items",
+        "min_length",
+        "max_length",
+        "pattern",
+        "minimum",
+        "maximum"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "type": {
+          "$ref": "#/$defs/contractValueType"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractDescription"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "enum": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractEnumValues"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fields": {
+          "anyOf": [
+            {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "$ref": "#/$defs/contractField"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "items": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractItem"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "min_length": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractStringLength"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_length": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractStringLength"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "minimum": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "maximum": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "contractItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "description",
+        "enum",
+        "fields",
+        "items",
+        "min_length",
+        "max_length",
+        "pattern",
+        "minimum",
+        "maximum"
+      ],
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/contractValueType"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractDescription"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "enum": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractEnumValues"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fields": {
+          "anyOf": [
+            {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "$ref": "#/$defs/contractField"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "items": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractItem"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "min_length": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractStringLength"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_length": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contractStringLength"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "minimum": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "maximum": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "sourceRef": {
+      "type": "string",
+      "pattern": "^s[0-9]+(:[1-9][0-9]*)?$",
+      "description": "Use the frozen source ID, optionally followed by its displayed line number, e.g. s0:12."
+    }
+  }
+}

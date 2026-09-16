@@ -159,7 +159,7 @@ export function ScheduleDetails({ schedule }: { schedule: ScheduleRecord }) {
       <div><dt>{labels.fields.lastAt}</dt><dd>{stamp(schedule.last_run_at)}</dd></div>
       <div><dt>{labels.fields.lastOutcome}</dt><dd>{schedule.last_outcome ? labels.outcomes[schedule.last_outcome] : '—'}</dd></div>
       <div><dt>{labels.fields.lastRun}</dt><dd>{schedule.last_run_id
-        ? <a className="mono" href={routeHref('workspace', schedule.project_id, { runId: schedule.last_run_id })}>{schedule.last_run_id}</a> : '—'}</dd></div>
+        ? <a className="mono" href={routeHref('history', schedule.project_id, { runId: schedule.last_run_id })}>{schedule.last_run_id}</a> : '—'}</dd></div>
     </dl>
     {schedule.last_error && <p className="hint">{schedule.last_error}</p>}
     <details><summary>{labels.inputTitle}</summary><pre>{JSON.stringify(schedule.input, null, 2)}</pre></details>

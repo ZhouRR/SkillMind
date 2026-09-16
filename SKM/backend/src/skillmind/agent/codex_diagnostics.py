@@ -8,7 +8,7 @@ from collections.abc import Mapping
 _CODES = frozenset({
     "invalid_json_schema", "invalid_request_error", "authentication_error",
     "invalid_api_key", "rate_limit_exceeded", "insufficient_quota",
-    "server_error", "context_length_exceeded", "model_not_found",
+    "server_error", "context_length_exceeded", "model_not_found", "server_overloaded",
 })
 
 
@@ -26,8 +26,10 @@ def codex_failure_detail(error: object) -> str:
                 break
         if not isinstance(current, Mapping):
             break
-        for key in ("code", "type"):
+        for key in ("code", "type", "codexErrorInfo", "codex_error_info"):
             value = current.get(key)
+            if value == "serverOverloaded":
+                value = "server_overloaded"
             if isinstance(value, str) and value in _CODES:
                 code = value
                 break

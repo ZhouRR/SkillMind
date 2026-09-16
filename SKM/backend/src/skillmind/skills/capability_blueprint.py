@@ -13,6 +13,10 @@ from typing import Any, cast
 from jsonschema import Draft202012Validator, FormatChecker
 
 from skillmind.core.hashing import canonical_json, sha256_hex
+from skillmind.documents.library_contract import (
+    DOCUMENT_LIBRARY_CAPABILITIES_MESSAGE,
+    has_invalid_document_library_capabilities,
+)
 from skillmind.evaluations.domain import InvalidEvaluationRevisionError, resolve_json_pointer
 from skillmind.skills.document_prerequisites import document_prerequisites
 from skillmind.skills.task_contract import (
@@ -157,6 +161,7 @@ class CapabilityBlueprintValidator:
 
         normalized = normalize_capability_blueprint(blueprint)
         self._validate_schema(normalized)
+        self._validate_document_library_resources(normalized)
         self._validate_references(normalized)
         self._validate_effect_intents(normalized)
         self._validate_required_rule_traces(normalized)
@@ -166,6 +171,17 @@ class CapabilityBlueprintValidator:
             blueprint=normalized,
             checksum=f"sha256:{sha256_hex(canonical_json(normalized))}",
         )
+
+    def _validate_document_library_resources(self, blueprint: Mapping[str, Any]) -> None:
+        """保存槽位の混在能力を候補段階で拒否し、通常の一回修復へ返す。"""
+
+        for index, requirement in enumerate(blueprint.get("resource_requirements", [])):
+            if has_invalid_document_library_capabilities(requirement):
+                raise CapabilityBlueprintError(
+                    "document_library_capabilities_invalid",
+                    f"/resource_requirements/{index}/capabilities",
+                    DOCUMENT_LIBRARY_CAPABILITIES_MESSAGE,
+                )
 
     def _validate_source_trace_targets(self, blueprint: Mapping[str, Any]) -> None:
         """出典 target は Blueprint 内で解決し、発行時だけ拒否される候補を返さない。"""

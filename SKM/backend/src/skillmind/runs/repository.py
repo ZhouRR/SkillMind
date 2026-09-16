@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hmac
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -39,6 +39,7 @@ from skillmind.effects.domain import (
     EffectExecutionStatus,
 )
 from skillmind.runs.budget import BudgetError
+from skillmind.runs.capacity_retry import MODEL_CAPACITY_CODE, capacity_retry_at
 from skillmind.runs.creation_replay import validate_creation_replay
 from skillmind.runs.creation_request import CREATION_REQUEST_FIELD, TaskRunIntent
 from skillmind.runs.domain import (
@@ -936,6 +937,10 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
             # 重複 Queue job は既に進行した Run を再度 claim せず、idempotent no-op とする。
             return None
 
+        retry_at = capacity_retry_at(run.error_json) if current is RunStatus.RETRY_PENDING else None
+        if retry_at is not None and datetime.now(UTC) < retry_at:
+            return None
+
         segment = (
             await self._session.scalars(
                 select(RunSegment)
@@ -1067,13 +1072,33 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
             run_attempt_id=attempt_id,
             trace_id=trace_id,
         )
-        stored.extend([attempt, event, self._event_outbox(event, status=RunStatus.PREPARING.value)])
+        # relationship のない FK は ORM の追加順では INSERT 順を保証できない。
+        # Event の追加・親 Session 検索より先に Attempt を同一 transaction 内で保存する。
+        self._session.add(attempt)
+        await self._session.flush()
+        stored.extend([event, self._event_outbox(event, status=RunStatus.PREPARING.value)])
         self._session.add_all(stored)
         parent_session = None
         if segment.parent_agent_session_id is not None:
             parent_session = await self._session.get(AgentSession, segment.parent_agent_session_id)
             if parent_session is None or parent_session.run_id != run_id:
                 raise LeaseValidationError("RunSegment parent AgentSession is invalid")
+        continuation_mode = SessionContinuationMode(segment.continuation_mode)
+        if retry_at is not None:
+            parent_session = (await self._session.scalars(
+                select(AgentSession)
+                .join(RunAttempt, AgentSession.run_attempt_id == RunAttempt.id)
+                .where(RunAttempt.run_segment_id == segment.id,
+                       RunAttempt.attempt_no == attempt_no - 1,
+                       RunAttempt.status == RunAttemptStatus.FAILED.value,
+                       AgentSession.session_kind == "PRIMARY",
+                       AgentSession.status == "FAILED",
+                       AgentSession.run_id == run_id)
+            )).one_or_none()
+            if parent_session is None:
+                raise LeaseValidationError("Capacity retry lost its original AgentSession")
+            continuation_mode = SessionContinuationMode.RESUME
+        run.error_json = None
         checkpoint = dict(segment.checkpoint_json)
         checkpoint_checksum = (
             f"sha256:{sha256_hex(canonical_json(checkpoint))}" if segment.segment_no > 1 else None
@@ -1095,8 +1120,8 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
             skill_snapshots_json=tuple(run.task_snapshot_json.get("skill_snapshots", ())),
             run_segment_id=segment.id,
             segment_no=segment.segment_no,
-            continuation_mode=SessionContinuationMode(segment.continuation_mode),
-            parent_agent_session_id=segment.parent_agent_session_id,
+            continuation_mode=continuation_mode,
+            parent_agent_session_id=parent_session.id if parent_session is not None else None,
             parent_sdk_session_id=(
                 parent_session.sdk_session_id if parent_session is not None else None
             ),
@@ -1374,6 +1399,7 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
         session_metadata: AgentSessionMetadata | None,
         result: RunResultRecord | None,
         error_json: dict[str, Any] | None,
+        retry_delay_seconds: int | None = None,
     ) -> RunStatus:
         """Result/Event/Session/Attempt/Run/Outbox を一つの終態 transaction で確定する。"""
 
@@ -1391,6 +1417,20 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
             raise ValueError("Only a successful Run may persist a Result")
         if event is not None:
             self._validate_agent_event(event, claimed)
+
+        if target is RunStatus.RETRY_PENDING:
+            if (segment is None or event is None or session_metadata is None
+                or event.event_type is not AgentEventType.ENGINE_FAILED
+                or event.payload.get("code") != MODEL_CAPACITY_CODE
+                or event.payload.get("retryable") is not True
+                or not error_json or error_json.get("code") != MODEL_CAPACITY_CODE
+                or attempt_status is not RunAttemptStatus.FAILED
+                or type(retry_delay_seconds) is not int or retry_delay_seconds not in {15, 30}):
+                raise ValueError("Retry requires a confirmed capacity failure and original session")
+            error_json = {**error_json, "retryable": True,
+                          "retry_at": (now + timedelta(seconds=retry_delay_seconds)).isoformat()}
+        elif retry_delay_seconds is not None:
+            raise ValueError("Retry delay requires RETRY_PENDING")
 
         # poll と終態化の間に取消が commit されても、同じ Run lock 下の intent が勝つ。
         # 失効 lease は上で拒否済みなので、この上書きは古い Worker の権限を復活させない。
@@ -1433,9 +1473,10 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
                 RunStatus.WAITING_FOR_APPROVAL,
             }:
                 segment.status = RunSegmentStatus.WAITING.value
-            else:
+            elif target is not RunStatus.RETRY_PENDING:
                 segment.status = RunSegmentStatus.FAILED.value
             if target not in {
+                RunStatus.RETRY_PENDING,
                 RunStatus.WAITING_PERMISSION,
                 RunStatus.WAITING_FOR_INPUT,
                 RunStatus.WAITING_FOR_APPROVAL,
@@ -1540,6 +1581,12 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
                 for item in (stored, self._event_outbox(stored, status=target.value))
             ]
         )
+        if target is RunStatus.RETRY_PENDING:
+            assert error_json is not None
+            self._session.add(self._dispatch_outbox(
+                run.id, payload={"run_id": str(run.id), "retry_at": error_json["retry_at"]},
+                occurred_at=now,
+            ))
         return target
 
     async def heartbeat_attempt(

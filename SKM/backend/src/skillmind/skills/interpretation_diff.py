@@ -52,6 +52,11 @@ def diff_interpretations(
         _report_sequence(parent_report, "diagnostics"),
         _report_sequence(child_report, "diagnostics"),
     )
+    if "skill_execution" in parent_manifest or "skill_execution" in child_manifest:
+        result["skill_execution"] = {"changed": _diff_object(
+            _object(parent_manifest, "skill_execution"),
+            _object(child_manifest, "skill_execution"),
+        )}
     result["has_changes"] = _has_changes(result)
     return result
 

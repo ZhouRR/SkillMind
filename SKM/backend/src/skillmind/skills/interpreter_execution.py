@@ -12,6 +12,13 @@ from skillmind.core.hashing import canonical_json, sha256_hex
 # None の場合は完全に無音で、実行結果へ一切影響しない。
 InterpretProgressCallback = Callable[[str, Mapping[str, Any]], Awaitable[None]]
 
+# SDK 固有の本文を持たず、失敗表示と transport が共有する固定分類。
+MODEL_OUTPUT_WHITESPACE_LIMIT = "model_output_whitespace_limit"
+MODEL_OUTPUT_WHITESPACE_MESSAGE = (
+    "Model output stalled on repeated whitespace. Interpretation was stopped; "
+    "no automatic retry was started."
+)
+
 
 class InterpreterCallControl(Protocol):
     """表示通知とは独立し、実 completion の直前と return 観測を管理する。"""
@@ -85,6 +92,7 @@ class SkillInterpreter(Protocol):
         model: str,
         parameters: Mapping[str, Any],
         validation_feedback: str | None = None,
+        previous_candidate: Mapping[str, Any] | None = None,
         on_event: InterpretProgressCallback | None = None,
         control: InterpreterCallControl | None = None,
     ) -> dict[str, Any]:

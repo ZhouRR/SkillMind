@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/skill-execution/v1.schema.json",
+  "title": "Skill source execution v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "execution_version": {
+      "const": "skillmind.skill-execution/v1"
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "$ref": "#/$defs/key"
+          },
+          "capability": {
+            "$ref": "#/$defs/key"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "resource_keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/key"
+            },
+            "maxItems": 50
+          }
+        },
+        "required": [
+          "key",
+          "capability",
+          "title",
+          "description",
+          "resource_keys"
+        ]
+      },
+      "maxItems": 1,
+      "minItems": 1
+    },
+    "resource_requirements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "kind",
+          "required",
+          "access",
+          "operations"
+        ],
+        "properties": {
+          "key": {
+            "$ref": "#/$defs/key"
+          },
+          "kind": {
+            "$ref": "#/$defs/resourceKind"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "access": {
+            "enum": [
+              "read",
+              "write"
+            ],
+            "type": "string"
+          },
+          "capabilities": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/$defs/versionedCapability"
+            }
+          },
+          "accepted_providers": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/$defs/key"
+            }
+          },
+          "selection_guidance": {
+            "$ref": "#/$defs/text"
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "capability_version": {
+                  "$ref": "#/$defs/versionedCapability"
+                },
+                "operation": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                }
+              },
+              "required": [
+                "capability_version",
+                "operation"
+              ]
+            },
+            "maxItems": 20
+          }
+        }
+      },
+      "maxItems": 50
+    },
+    "source_traces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "target": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "line": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          }
+        },
+        "required": [
+          "target",
+          "path",
+          "line"
+        ]
+      },
+      "maxItems": 100
+    }
+  },
+  "required": [
+    "execution_version",
+    "tasks",
+    "resource_requirements",
+    "source_traces"
+  ],
+  "$defs": {
+    "key": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "maxLength": 128
+    },
+    "versionedCapability": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$"
+    },
+    "resourceKind": {
+      "enum": [
+        "issue",
+        "repository",
+        "document",
+        "file",
+        "knowledge",
+        "other"
+      ],
+      "type": "string"
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    }
+  }
+}

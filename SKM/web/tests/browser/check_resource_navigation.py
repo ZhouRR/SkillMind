@@ -29,6 +29,23 @@ async def check(url, output):
                 await page.locator('.sideNavSubItem').first.click()
                 await expect(page.locator('main')).to_have_attribute('data-page', 'workspace')
                 await expect(page.locator('.workspaceQueue')).to_be_visible()
+                # 概要の最近実行と対応待ちは同じ履歴詳細を開き、戻る/再読込でも所属を保つ。
+                for selector in ('.homeRunItem', '.homeAttention .pendingItem'):
+                    await page.goto(f'{url}#/?project={PROJECT}')
+                    link = page.locator(selector).first
+                    await expect(link).to_be_visible()
+                    target = await link.get_attribute('href')
+                    assert target.startswith(f'#/history?project={PROJECT}&run='), target
+                    await link.click()
+                    await expect(page.locator('main')).to_have_attribute('data-page', 'history')
+                    await expect(page.locator('.sideNav a[aria-current="page"]')).to_have_attribute('href', f'#/history?project={PROJECT}')
+                    await page.reload()
+                    await expect(page.locator('main')).to_have_attribute('data-page', 'history')
+                    await page.locator('.sideNavSubItem').first.click()
+                    await expect(page.locator('main')).to_have_attribute('data-page', 'workspace')
+                    # 古い Bookmark も入口ごとの修正に依存せず履歴へ正規化する。
+                    await page.goto(f'{url}{target.replace("#/history?", "#/workspace?")}')
+                    await expect(page.locator('main')).to_have_attribute('data-page', 'history')
                 assert not api.failures and not api.unexpected
                 await context.close()
                 for width in (1440, 1366, 390):

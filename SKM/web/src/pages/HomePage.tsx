@@ -109,7 +109,7 @@ function RecentRuns({ projectId, state }: { projectId: string; state: RecentRuns
     <ol className="homeRunList">
       {state.items.map((item) => (
         <li key={item.run_id}>
-          <a className="homeRunItem" href={routeHref('workspace', projectId, { runId: item.run_id })}>
+          <a className="homeRunItem" href={routeHref('history', projectId, { runId: item.run_id })}>
             <span className="homeRunTitle">
               <strong>{runHistoryTitle(item, messages.elements.unnamedRunTitle)}</strong>
               <small>{formatLocalTimestamp(item.created_at)}</small>

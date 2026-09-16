@@ -7,7 +7,6 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
-
 from skillmind.agent.domain import AgentEventType
 from skillmind.agent.result_validation import ResultValidator
 from skillmind.runs.domain import (
@@ -113,3 +112,42 @@ async def test_interrupted_event_without_durable_intent_is_failed(
     assert final["error_json"] == {"code": "agent_session_interrupted", "retryable": False}
     assert final["result"] is None
     assert final["event"] == event
+
+
+@pytest.mark.parametrize(
+    "attempt,maximum,delay", [(1, 3, 15), (2, 3, 30), (3, 3, None), (1, 1, None)]
+)
+async def test_capacity_failure_schedules_only_bounded_context_retry(
+    tmp_path, attempt, maximum, delay
+):
+    """容量不足だけは同じ Segment の有限再試行へ写し、Result を生成しない。"""
+    from dataclasses import replace
+
+    from skillmind.runs.capacity_retry import MODEL_CAPACITY_CODE
+
+    claimed, service = replace(_claimed(), run_segment_id=uuid4(), attempt_no=attempt), _service()
+    event = _event(
+        claimed,
+        10,
+        AgentEventType.ENGINE_FAILED,
+        session_id=str(uuid4()),
+        payload={"code": MODEL_CAPACITY_CODE, "retryable": True},
+    )
+    executor = AgentRunExecutor(
+        run_service=service,
+        context_builder=ContextBuilder(tmp_path),
+        engine=SequenceEngine([event]),
+        result_validator=MagicMock(),
+        lease_seconds=60,
+        max_attempts=maximum,
+    )
+    await executor.execute(claimed)
+    final = service.finalize_execution.await_args.kwargs
+    assert final["target"] is (RunStatus.RETRY_PENDING if delay is not None else RunStatus.FAILED)
+    assert final["retry_delay_seconds"] == delay
+    assert final["error_json"] == {
+        "code": MODEL_CAPACITY_CODE,
+        "retryable": delay is not None,
+        "attempts": attempt,
+    }
+    assert final["result"] is None

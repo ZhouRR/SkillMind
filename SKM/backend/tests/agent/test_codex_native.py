@@ -6,7 +6,9 @@ import asyncio
 import json
 import sys
 import threading
+import time
 from collections.abc import Iterator
+from copy import deepcopy
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -14,8 +16,8 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from jsonschema import Draft202012Validator
 from openai_codex.client import CodexConfig
-
 from skillmind.agent import codex_completion, codex_engine
 from skillmind.agent.codex_completion import CodexCompletionClient
 from skillmind.agent.codex_engine import CodexAgentSdkEngine
@@ -26,7 +28,11 @@ from skillmind.agent.session_store import TranscriptKey
 from skillmind.agent.tool_gateway import ToolRegistry
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.runs.proposal_continuation import ResolvedProposal
+from skillmind.skills.candidate import CANDIDATE_SCHEMA_ID, candidate_schema
+from skillmind.skills.direct_candidate import CANDIDATE_SCHEMA_ID as DIRECT_SCHEMA_ID
+from skillmind.skills.direct_candidate import candidate_schema as direct_schema
 from tests.agent.test_codex_schema import assert_strict_schema
+from tests.agent.test_continuation_prompt import compiled, context_with_brief
 from tests.agent.test_session_store import MemoryTranscriptBackend
 from tests.agent.test_tool_gateway import CsvIssueProvider, MemoryAuditWriter, _context, _registry
 
@@ -63,6 +69,11 @@ class SyntheticEndpoint(ThreadingHTTPServer):
         self.reply_allowed.set()
         self.request_seen = threading.Event()
         self.failure: dict[str, Any] | None = None
+        self.failure_after_requests = 0
+        self.tool_request_numbers = {1, 3}
+        self.stream_text = False
+        self.whitespace_loop = False
+        self.native_candidate: dict[str, Any] | None = None
 
     def handle_error(self, request: object, client_address: tuple[str, int]) -> None:
         """取消による接続終了だけを許容し、その他の fixture 障害は表示する。"""
@@ -89,11 +100,15 @@ def endpoint() -> Iterator[tuple[SyntheticEndpoint, list[dict[str, Any]]]]:
             body = json.loads(self.rfile.read(int(self.headers["content-length"])))
             requests.append(body)
             schema = body["text"]["format"]["schema"]
-            assert_strict_schema(schema)
+            if schema.get("$id") in {CANDIDATE_SCHEMA_ID, DIRECT_SCHEMA_ID}:
+                Draft202012Validator.check_schema(schema)
+                Draft202012Validator(schema).validate(server.native_candidate)
+            else:
+                assert_strict_schema(schema)
             server.request_seen.set()
             if not server.reply_allowed.wait(timeout=10):
                 return
-            if server.failure is not None:
+            if server.failure is not None and len(requests) > server.failure_after_requests:
                 self.send_response(400)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
@@ -105,6 +120,8 @@ def endpoint() -> Iterator[tuple[SyntheticEndpoint, list[dict[str, Any]]]]:
             )
             if "present" in schema["properties"].get("ok", {}).get("properties", {}):
                 result = '{"ok":{"present":true,"value":true}}'
+            if server.native_candidate is not None:
+                result = json.dumps(server.native_candidate, ensure_ascii=False)
             item: dict[str, Any] = {
                 "id": "msg_fixture",
                 "type": "message",
@@ -118,7 +135,8 @@ def endpoint() -> Iterator[tuple[SyntheticEndpoint, list[dict[str, Any]]]]:
                     }
                 ],
             }
-            if len(requests) in {1, 3} and "mcp__skillmind.issue_read_v1" in _wire_tool_names(body):
+            if (len(requests) in server.tool_request_numbers
+                and "mcp__skillmind.issue_read_v1" in _wire_tool_names(body)):
                 item = {
                     "id": f"fc_fixture_{len(requests)}",
                     "type": "function_call",
@@ -160,9 +178,38 @@ def endpoint() -> Iterator[tuple[SyntheticEndpoint, list[dict[str, Any]]]]:
                 ("response.output_item.done", {"output_index": 0, "item": item}),
                 ("response.completed", {"response": response}),
             ]
+            if server.stream_text and item["type"] == "message":
+                text = item["content"][0]["text"]
+                empty_part = {"type": "output_text", "text": "", "annotations": []}
+                position = {"item_id": item["id"], "output_index": 0, "content_index": 0}
+                events[1:2] = [
+                    ("response.output_item.added", {
+                        "output_index": 0, "item": {**item, "content": [], "status": "in_progress"},
+                    }),
+                    ("response.content_part.added", {**position, "part": empty_part}),
+                    *[("response.output_text.delta", {**position, "delta": char}) for char in text],
+                    ("response.output_text.done", {**position, "text": text}),
+                    ("response.content_part.done", {**position, "part": item["content"][0]}),
+                ]
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.end_headers()
+            if server.whitespace_loop:
+                # 完了 event のない空白 loop を実 CLI へ流し、client の中断で接続が閉じる。
+                position = {"item_id": item["id"], "output_index": 0, "content_index": 0}
+                opening = [events[0], ("response.output_item.added", {
+                    "output_index": 0, "item": {**item, "content": [], "status": "in_progress"},
+                })]
+                for method, payload in opening:
+                    self.wfile.write(("data: " + json.dumps({"type": method, **payload})
+                                      + "\n\n").encode())
+                for _ in range(10000):
+                    self.wfile.write(("data: " + json.dumps({
+                        "type": "response.output_text.delta", **position, "delta": " " * 128,
+                    }) + "\n\n").encode())
+                    self.wfile.flush()
+                    time.sleep(.002)
+                return
             for method, payload in events:
                 self.wfile.write(
                     (
@@ -272,7 +319,7 @@ async def test_native_gateway_and_resume_keep_original_thread(
     _local_client(monkeypatch, server)
     provider = CsvIssueProvider()
     registry = _registry(provider)
-    context = replace(_context(tmp_path, registry), model="gpt-5.6-terra")
+    context = replace(context_with_brief(tmp_path), model="gpt-5.6-terra")
     writer = MemoryAuditWriter()
     backend = MemoryTranscriptBackend()
     engine = CodexAgentSdkEngine(
@@ -305,14 +352,17 @@ async def test_native_gateway_and_resume_keep_original_thread(
     assert events[-1].payload["structured_output"] == {"ok": True}
     assert all(body["reasoning"]["effort"] == "max" for body in requests)
     session = AgentSessionRef(context.run_id, context.run_attempt_id, events[0].agent_session_id)
+    next_brief = deepcopy(context.task_brief)
+    next_brief["identity"]["segment_no"] = 2
+    next_brief["checkpoint"]["summary"] = "Continue with final JSON."
+    next_context = compiled(replace(context, run_attempt_id=uuid4()), next_brief)
     async with asyncio.timeout(30):
         resumed = [
             event
             async for event in engine.resume(
                 ResumeContext(
-                    replace(context, run_attempt_id=uuid4()),
+                    next_context,
                     session,
-                    input_text="Continue with final JSON.",
                 )
             )
         ]
@@ -320,6 +370,40 @@ async def test_native_gateway_and_resume_keep_original_thread(
     assert resumed[0].agent_session_id == session.session_id
     assert len(writer.completed) == 2
     assert len(requests) == 4
+    resumed_wire = json.dumps(requests[-1], ensure_ascii=False)
+    assert resumed_wire.count("Frozen Skill source documents") == 1
+    assert "Audited continuation changes" in resumed_wire
+
+
+async def test_native_streamed_text_is_coalesced_without_losing_content_or_terminal_order(
+    tmp_path, monkeypatch, endpoint,
+):
+    """一文字ごとの実 SDK delta をまとめ、全文・最終候補・単調 event 順序を維持する。"""
+
+    server, _ = endpoint
+    server.stream_text = True
+    _local_client(monkeypatch, server)
+    registry = _registry(CsvIssueProvider())
+    context = replace(_context(tmp_path, registry), model="gpt-5.6-terra", tools=())
+    engine = CodexAgentSdkEngine(
+        configuration=CodexRuntimeConfiguration(context.model, "max", tmp_path / "codex"),
+        runtime_factory=lambda run: registry.build_gateway_runtime(
+            run, audit_writer=MemoryAuditWriter(),
+        ),
+        transcript_backend=MemoryTranscriptBackend(),
+    )
+    async with asyncio.timeout(30):
+        events = [event async for event in engine.execute(context)]
+    chunks = [
+        event.payload["text"] for event in events if event.event_type is AgentEventType.TEXT_DELTA
+    ]
+    text = next(event.payload["text"] for event in events
+                if event.event_type is AgentEventType.TEXT_COMPLETED)
+    assert "".join(chunks) == text
+    assert 0 < len(chunks) < len(text)
+    assert events[-1].event_type is AgentEventType.RESULT_COMPLETED
+    assert events[-1].payload["structured_output"] == {"ok": True}
+    assert [event.sequence for event in events] == sorted({event.sequence for event in events})
 
 
 async def test_native_proposal_pauses_before_provider_and_resumes_original_receipt(
@@ -481,3 +565,148 @@ async def test_native_schema_rejection_retains_safe_diagnostic(
         "codex:invalid_json_schema" + ("; http_status=400" if include_status else "")
     )
     assert "private" not in str(caught.value)
+
+
+async def test_native_capacity_failure_resumes_same_thread_and_keeps_tool_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    endpoint: tuple[SyntheticEndpoint, list[dict[str, Any]]],
+) -> None:
+    """合成容量エラー後、実 CLI の原会話を継承し、済み Tool を再実行しない。"""
+    from skillmind.runs.capacity_retry import MODEL_CAPACITY_CODE
+
+    server, requests = endpoint
+    server.failure_after_requests = 1
+    server.tool_request_numbers = {1}
+    server.failure = {"error": {"code": "server_overloaded", "message": "private fixture text"}}
+    _local_client(monkeypatch, server)
+    registry = _registry(CsvIssueProvider())
+    context = replace(_context(tmp_path, registry), model="gpt-5.6-terra")
+    writer = MemoryAuditWriter()
+    backend = MemoryTranscriptBackend()
+    engine = CodexAgentSdkEngine(
+        configuration=CodexRuntimeConfiguration("gpt-5.6-terra", "max", tmp_path / "codex"),
+        runtime_factory=lambda run: registry.build_gateway_runtime(run, audit_writer=writer),
+        transcript_backend=backend,
+    )
+    async with asyncio.timeout(30):
+        events = [event async for event in engine.execute(context)]
+    assert events[-1].event_type is AgentEventType.ENGINE_FAILED
+    assert events[-1].payload["code"] == MODEL_CAPACITY_CODE
+    assert events[-1].payload["retryable"] is True
+    assert "private" not in str(events[-1].payload)
+    session_id = events[0].agent_session_id
+    key = TranscriptKey(f"codex:{context.run_id}", session_id)
+    assert backend.entries[key][-1]["failure_detail"] == "codex:server_overloaded"
+    completed_before = len(writer.completed)
+    assert completed_before > 0
+    server.failure = None
+    async with asyncio.timeout(30):
+        resumed = [
+            event
+            async for event in engine.resume(
+                ResumeContext(
+                    replace(context, run_attempt_id=uuid4()),
+                    AgentSessionRef(context.run_id, context.run_attempt_id, session_id),
+                )
+            )
+        ]
+    assert resumed[-1].event_type is AgentEventType.RESULT_COMPLETED
+    assert resumed[0].agent_session_id == session_id
+    assert len(writer.completed) == completed_before
+    assert len(requests) == 3
+    assert "call_fixture_1" in json.dumps(requests[-1]["input"])
+
+
+@pytest.mark.parametrize("with_progress", [False, True])
+async def test_native_whitespace_loop_interrupts_and_reaps_its_only_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    endpoint: tuple[SyntheticEndpoint, list[dict[str, Any]]], with_progress: bool,
+) -> None:
+    """実 SDK/CLI の空白 stream を止め、進行購読なしでも再送と残存 process を防ぐ。"""
+
+    from skillmind.skills.interpreter_execution import MODEL_OUTPUT_WHITESPACE_LIMIT
+    from skillmind.skills.model_interpreter import ModelProviderError
+
+    server, requests = endpoint
+    server.whitespace_loop = True
+    _local_client(monkeypatch, server)
+    factory = codex_completion.create_codex_client
+    processes = []
+    interrupts = []
+
+    def tracked_client(config):
+        """実 process handle と実 interrupt を観測するだけで protocol を置換しない。"""
+
+        client = factory(config)
+        start = client.start
+        interrupt = client.turn_interrupt
+
+        def tracked_start():
+            """起動直後の handle を、SDK が close で消す前に保持する。"""
+
+            start()
+            processes.append(client._proc)
+
+        def tracked_interrupt(thread_id, turn_id):
+            """実 RPC の thread/turn が固定されていることを確認する。"""
+
+            interrupts.append((thread_id, turn_id))
+            return interrupt(thread_id, turn_id)
+
+        client.start = tracked_start
+        client.turn_interrupt = tracked_interrupt
+        return client
+
+    monkeypatch.setattr(codex_completion, "create_codex_client", tracked_client)
+    chunks = []
+
+    async def progress(delta: str) -> None:
+        """表示へ届いた文字数だけを集計し、閾値後は送出されないことを検査する。"""
+
+        chunks.append(delta)
+
+    configuration = CodexRuntimeConfiguration("gpt-5.6-terra", "max", tmp_path / "codex")
+    async with asyncio.timeout(30):
+        with pytest.raises(ModelProviderError) as caught:
+            await CodexCompletionClient(configuration).complete(
+                system_prompt="Return JSON.", user_message="Return ok true.",
+                response_schema={"type": "object"}, model="gpt-5.6-terra", parameters={},
+                on_text_delta=progress if with_progress else None,
+            )
+    assert caught.value.detail == MODEL_OUTPUT_WHITESPACE_LIMIT
+    assert len(requests) == len(processes) == len(interrupts) == 1
+    assert processes[0].poll() is not None
+    assert sum(map(len, chunks)) < 4096
+
+
+@pytest.mark.parametrize("direct", [False, True])
+async def test_native_skill_candidate_uses_unencoded_schema_and_original_model(
+    direct: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    endpoint: tuple[SyntheticEndpoint, list[dict[str, Any]]],
+) -> None:
+    """固定 SDK/CLI で単一候補を往復し、Schema と Astra/medium をそのまま送る。"""
+
+    server, requests = endpoint
+    _local_client(monkeypatch, server)
+    contracts = Path(__file__).resolve().parents[3] / "contracts"
+    schema = direct_schema(contracts) if direct else candidate_schema(contracts)
+    server.native_candidate = json.loads(
+        (contracts / (
+            "examples/skill-candidate.v2.json" if direct else "examples/skill-candidate.v1.json"
+        )).read_text()
+    )
+    configuration = CodexRuntimeConfiguration("gpt-6-astra", "medium", tmp_path / "codex")
+    async with asyncio.timeout(30):
+        result = await CodexCompletionClient(configuration).complete(
+            system_prompt="Return the candidate as native JSON.", user_message="Synthetic fixture.",
+            response_schema=schema, model="gpt-6-astra", parameters={},
+        )
+    assert result.structured_output == server.native_candidate
+    assert len(requests) == 1
+    assert requests[0]["model"] == "gpt-6-astra"
+    assert requests[0]["reasoning"]["effort"] == "medium"
+    assert requests[0]["text"]["format"]["schema"] == schema
+    assert not _wire_tool_names(requests[0]) - {"update_plan", "request_user_input"}

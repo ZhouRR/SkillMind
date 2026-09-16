@@ -13,6 +13,11 @@ from enum import StrEnum
 from typing import Any, Protocol, cast
 from uuid import UUID
 
+from skillmind.documents.library_contract import (
+    DOCUMENT_LIBRARY_CAPABILITIES_MESSAGE,
+    has_invalid_document_library_capabilities,
+)
+
 
 class TaskReadinessLevel(StrEnum):
     """Task が今この Project で到達できる実行段階。"""
@@ -187,7 +192,12 @@ def _bind_requirement(
         )
     )
     runnable = _runnable_candidates(matched, serviceable, installed_provider_capabilities)
-    if hints and not serviceable:
+    exposed: tuple[ProjectResourceCandidate, ...]
+    if has_invalid_document_library_capabilities(requirement):
+        status = RequirementStatus.UNSUPPORTED
+        reason = DOCUMENT_LIBRARY_CAPABILITIES_MESSAGE
+        exposed = ()
+    elif hints and not serviceable:
         # 平台に未登録、または宣言のみで実装が無い Tool capability しか無い要求は、設定を足しても
         # 安全に自動実行できない。docs/11 §5.2 のとおり発行 gate ではないが GUIDANCE_ONLY へ下がる。
         status = RequirementStatus.UNSUPPORTED
@@ -300,10 +310,9 @@ def _has_executable_apply(
 ) -> bool:
     """宣言された apply 意図が登録済み write Provider で実行可能かを判定する。"""
 
-    intents = [
-        item for item in _object_list(blueprint.get("effect_intents"))
-        if item.get("mode") == "apply"
-    ]
+    from skillmind.skills.execution import declared_operations
+
+    intents = declared_operations(blueprint)
     if not intents:
         return False
     resources = {

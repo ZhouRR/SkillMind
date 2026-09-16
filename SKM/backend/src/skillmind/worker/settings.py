@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -110,14 +111,12 @@ from skillmind.worker.tool_authority import require_tool_authority
 logger = logging.getLogger(__name__)
 
 
-async def startup(ctx: dict[str, Any]) -> None:
-    """Worker process で共有する Database engine を初期化する。"""
+async def startup(ctx: dict[str, Any], *, maintenance_only: bool = False) -> None:
+    """共有 service を組み立て、実行 Worker だけに SDK と外部実行 port を追加する。"""
 
     settings = get_settings()
     features = configured_execution_features(settings)
     configure_logging(settings.log_level)
-    # MANAGED SecretReference 復号用の KEK cipher。未設定なら MANAGED は fail closed で解決不能。
-    secret_cipher = load_secret_cipher(settings.managed_secret_kek)
     ctx["database_engine"] = create_database_engine(settings)
     ctx["database_session_factory"] = create_session_factory(ctx["database_engine"])
     ctx["session_store"] = PostgresSessionStore.from_session_factory(
@@ -145,6 +144,27 @@ async def startup(ctx: dict[str, Any]) -> None:
     ctx["reconciliation_requests"] = ReconciliationRequestService(
         ctx["database_session_factory"], document_library_target=document_library_target,
     )
+    ctx["outbox_relay"] = OutboxRelay(
+        ctx["database_session_factory"], batch_size=settings.outbox_batch_size
+    )
+    ctx["settings"] = settings
+    ctx["maintenance_only"] = maintenance_only
+    ctx["worker_id"] = f"{socket.gethostname()}-{os.getpid()}"
+    log_event(
+        logger,
+        logging.INFO,
+        "worker.started",
+        worker_id=ctx["worker_id"],
+    )
+    if maintenance_only:
+        # 発火時の公開 Skill 読取は共有 service を使い、モデル・鍵・workspace は準備しない。
+        ctx["skill_service"] = SkillService(
+            ctx["database_session_factory"], settings.contracts_dir,
+            file_storage=file_storage, storage_bucket=settings.object_storage_bucket,
+        )
+        _configure_schedule_service(ctx)
+        return
+    secret_cipher = load_secret_cipher(settings.managed_secret_kek)
     document_receipt_source = (
         create_document_write_source(settings, storage=file_storage)
         if document_library_target is not None else None
@@ -159,17 +179,6 @@ async def startup(ctx: dict[str, Any]) -> None:
             document_reader=document_receipt_source,
             document_library_target=document_library_target,
         ),
-    )
-    ctx["outbox_relay"] = OutboxRelay(
-        ctx["database_session_factory"], batch_size=settings.outbox_batch_size
-    )
-    ctx["settings"] = settings
-    ctx["worker_id"] = f"{socket.gethostname()}-{os.getpid()}"
-    log_event(
-        logger,
-        logging.INFO,
-        "worker.started",
-        worker_id=ctx["worker_id"],
     )
     contracts = ContractStore(settings.contracts_dir)
     document_source = DatabaseProjectDocumentSource(
@@ -296,6 +305,7 @@ async def startup(ctx: dict[str, Any]) -> None:
         result_validator=result_validator,
         lease_seconds=settings.run_lease_seconds,
         preparation_timeout_seconds=settings.run_preparation_timeout_seconds,
+        max_attempts=settings.run_max_attempts,
         realtime_publisher=RedisRunRealtimePublisher(cast(RedisPublisher, ctx["redis"])),
     )
     if features.effects_enabled:
@@ -340,6 +350,12 @@ async def startup(ctx: dict[str, Any]) -> None:
         storage_bucket=settings.object_storage_bucket,
     )
     ctx["interpret_publisher"] = RedisInterpretEventPublisher(cast(RedisPublisher, ctx["redis"]))
+    _configure_schedule_service(ctx)
+
+
+def _configure_schedule_service(ctx: dict[str, Any]) -> None:
+    """両 Worker で同じ公開 Skill と Run 作成・承認検証経路を配線する。"""
+
     # 調度の発火は即時実行と同じ RunService/SkillService を通す。別経路を作らないことが、
     # 承認・事前許可・binding 再検証が調度でだけ緩む事故を防ぐ唯一の方法 (計画 §22)。
     ctx["schedule_service"] = ScheduleService(
@@ -347,6 +363,19 @@ async def startup(ctx: dict[str, Any]) -> None:
         skill_service=ctx["skill_service"],
         run_service=ctx["run_service"],
     )
+
+
+async def maintenance_startup(ctx: dict[str, Any]) -> None:
+    """保守専用 process では共有台帳と調度 service だけを起動する。"""
+
+    await startup(ctx, maintenance_only=True)
+
+
+async def retired_maintenance_job(ctx: dict[str, Any]) -> dict[str, str]:
+    """旧実行 Queue の保守 tick は捨て、新 Queue の現在 tick に集約する。"""
+
+    del ctx
+    return {"status": "ignored", "reason": "maintenance_queue_moved"}
 
 
 async def shutdown(ctx: dict[str, Any]) -> None:
@@ -369,11 +398,15 @@ async def relay_outbox(ctx: dict[str, Any]) -> dict[str, int | str]:
     redis = cast(ArqRedis, ctx["redis"])
     relay: OutboxRelay = ctx["outbox_relay"]
     topics = {"run.lifecycle.changed/v1"}
-    run_dispatch_ready = settings.worker_dispatch_enabled and "run_executor" in ctx
+    # 保守 process は配送専用で executor を持たない。実行側が別途同じ gate と lease を検証する。
+    maintenance = ctx.get("maintenance_only") is True
+    run_dispatch_ready = settings.worker_dispatch_enabled and (
+        maintenance or "run_executor" in ctx
+    )
     effect_dispatch_ready = (
         settings.worker_dispatch_enabled
         and configured_execution_features(settings).effects_enabled
-        and "effect_executor" in ctx
+        and (maintenance or "effect_executor" in ctx)
     )
     if run_dispatch_ready:
         topics.add("run.dispatch.requested/v1")
@@ -383,7 +416,7 @@ async def relay_outbox(ctx: dict[str, Any]) -> dict[str, int | str]:
     if interpretation_dispatch_ready:
         topics.add(INTERPRETATION_DISPATCH_TOPIC)
     reconciliation_dispatch_ready = (
-        settings.worker_dispatch_enabled and "reconciliation_executor" in ctx
+        settings.worker_dispatch_enabled and (maintenance or "reconciliation_executor" in ctx)
     )
     if reconciliation_dispatch_ready:
         topics.add(RECONCILIATION_DISPATCH_TOPIC)
@@ -410,11 +443,18 @@ async def relay_outbox(ctx: dict[str, Any]) -> dict[str, int | str]:
             )
             return
         if message.topic == "run.dispatch.requested/v1":
+            scheduling: dict[str, Any] = {}
+            if "retry_at" in message.payload:
+                deadline = datetime.fromisoformat(message.payload["retry_at"])
+                if deadline.tzinfo is None:
+                    raise ValueError("Run retry deadline must include timezone")
+                scheduling["_defer_until"] = deadline
             await redis.enqueue_job(
                 "execute_run",
                 str(message.aggregate_id),
                 _job_id=f"run-dispatch:{message.message_id}",
                 _queue_name=settings.queue_name,
+                **scheduling,
             )
             return
         if message.topic == "run.lifecycle.changed/v1":
@@ -492,6 +532,12 @@ async def execute_run(ctx: dict[str, Any], run_id: str) -> dict[str, str | int]:
     )
     try:
         await executor.execute(claimed)
+        effect_executor = cast(ApprovedEffectExecutor | None, ctx.get("effect_executor"))
+        if effect_executor is not None and configured_execution_features(settings).effects_enabled:
+            # モデル/Tool の清理完了後、保存済み承認を通常 Effect executor で再検証する。
+            # 人工待ち・未決効果・他 Attempt は対象外。既存 Outbox は障害時の回収に残す。
+            await effect_executor.execute_pending_for_attempt(claimed)
+        await _relay_after_execution(ctx)
     except Exception as error:
         # ARQ job 境界では再送判断のため例外を維持し、秘密を含まない型名だけを記録する。
         log_event(
@@ -536,7 +582,21 @@ async def execute_effect(ctx: dict[str, Any], effect_execution_id: str) -> dict[
     if executor is None:
         raise RuntimeError("EffectExecutor is not configured")
     status_value = await executor.execute(UUID(effect_execution_id))
+    await _relay_after_execution(ctx)
     return {"status": status_value, "effect_execution_id": effect_execution_id}
+
+
+async def _relay_after_execution(ctx: dict[str, Any]) -> None:
+    """続行を cron 待ちにせず配送し、通知障害では確定済み実行を巻き戻さない。"""
+
+    if "outbox_relay" not in ctx:
+        return
+    try:
+        async with asyncio.timeout(5):
+            await relay_outbox(ctx)
+    except Exception:
+        # Outbox が正本なので次回 relay が同一 message ID を再送できる。
+        log_event(logger, logging.WARNING, "outbox.relay.deferred")
 
 
 def _interpret_progress(ctx: dict[str, Any], execution_key: str) -> InterpretProgressCallback:
@@ -725,18 +785,40 @@ _settings = get_settings()
 
 
 class WorkerSettings:
-    """M0 Worker を単一同時 job に制限する ARQ 設定。"""
+    """実行 Queue の同時 job 数を維持し、保守 tick は別 Queue に分離する。"""
 
     functions: ClassVar[tuple[Callable[..., Awaitable[Any]] | Function, ...]] = (
         worker_probe,
-        # 資源準備を追加しても従来のモデル実行/終態化の余白を削らない。別 job は延長しない。
-        arq_function(execute_run, timeout=1200 + _settings.run_preparation_timeout_seconds),
+        # 準備と清理後の一回の Effect に余白を取り、元のモデル/Effect 上限は延ばさない。
+        arq_function(execute_run, timeout=1500 + _settings.run_preparation_timeout_seconds),
         execute_effect,
         execute_interpretation_request_job,
         execute_reconciliation_request_job,
         interpret_skill_source_job,
         adjust_skill_interpretation_job,
+        # 旧 tick の登録名だけ受け取り、保守の再実行や function-not-found にしない。
+        *(arq_function(retired_maintenance_job, name=f"cron:{name}") for name in (
+            "recover_reconciliation_requests", "recover_interpretation_requests",
+            "relay_outbox", "recover_expired_leases", "trigger_due_schedules",
+        )),
     )
+    cron_jobs: ClassVar[tuple[CronJob, ...]] = ()
+    on_startup = startup
+    on_shutdown = shutdown
+    redis_settings = RedisSettings.from_dsn(_settings.redis_url)
+    queue_name = _settings.queue_name
+    max_jobs = 1
+    # Run 自体の打ち切りは wall_timeout_seconds (900 秒) を Executor が強制する。
+    # ARQ の job timeout はその graceful 終態化が完了する余白を持たせた最終防衛線とする。
+    job_timeout = 1200
+    keep_result = 3600
+    health_check_interval = 30
+
+
+class MaintenanceWorkerSettings:
+    """短い保守 tick の専用 Queue。Run/Effect/モデルの実行関数は登録しない。"""
+
+    functions: ClassVar[tuple[Callable[..., Awaitable[Any]], ...]] = (worker_probe,)
     cron_jobs: ClassVar[tuple[CronJob, ...]] = (
         cron(
             recover_reconciliation_requests, second={11, 26, 41, 56},
@@ -769,13 +851,11 @@ class WorkerSettings:
             timeout=60,
         ),
     )
-    on_startup = startup
+    on_startup = maintenance_startup
     on_shutdown = shutdown
     redis_settings = RedisSettings.from_dsn(_settings.redis_url)
-    queue_name = _settings.queue_name
+    queue_name = f"{_settings.queue_name}:maintenance"
     max_jobs = 1
-    # Run 自体の打ち切りは wall_timeout_seconds (900 秒) を Executor が強制する。
-    # ARQ の job timeout はその graceful 終態化が完了する余白を持たせた最終防衛線とする。
-    job_timeout = 1200
-    keep_result = 3600
+    job_timeout = 60
+    keep_result = 0
     health_check_interval = 30

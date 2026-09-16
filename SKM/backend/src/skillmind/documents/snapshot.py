@@ -229,7 +229,8 @@ def document_preparation_policy(source: Mapping[str, Any]) -> str | None:
     if (
         policy != ON_DEMAND_DOCUMENT_PREPARATION
         or source.get("capability") not in {
-            DOCUMENT_CONVERT_CAPABILITY, DOCUMENT_INSPECT_CAPABILITY, DOCUMENT_LIST_CAPABILITY,
+            DOCUMENT_READ_CAPABILITY, DOCUMENT_CONVERT_CAPABILITY,
+            DOCUMENT_INSPECT_CAPABILITY, DOCUMENT_LIST_CAPABILITY,
         }
         or source.get("provider") != DOCUMENT_PROVIDER
     ):

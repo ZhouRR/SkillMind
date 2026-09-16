@@ -300,7 +300,8 @@ export function EventTimelineItem({ event }: { event: RunEventRecord }) {
       <details className="eventDetails">
         <summary>
           <span className="sequence">#{event.sequence}</span>
-          <span className="eventSummary"><strong>{friendlyEventType(messages.enums.runEvent, event.event_type)}</strong><time>{formatLocalTime(event.occurred_at)}</time></span>
+          <span className="eventSummary"><strong>{event.event_type === 'ENGINE_FAILED' && event.payload.code === 'model_capacity_unavailable'
+            ? messages.runResult.capacityTitle : friendlyEventType(messages.enums.runEvent, event.event_type)}</strong><time>{formatLocalTime(event.occurred_at)}</time></span>
           <span className="detailHint">{messages.elements.detail}</span>
         </summary>
         <div className="eventDetailBody">

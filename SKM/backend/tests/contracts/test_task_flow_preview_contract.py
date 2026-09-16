@@ -237,5 +237,6 @@ def test_task_preview_openapi_exposes_only_a_no_store_get_with_stable_problems()
         media = "application/json" if status == 200 else "application/problem+json"
         assert media in response["content"]
     schema = spec["components"]["schemas"]["TaskFlowPreviewResponse"]
-    assert set(schema["required"]) == set(schema["properties"]) == FIELDS
+    assert set(schema["required"]) == FIELDS
+    assert set(schema["properties"]) == FIELDS | {"source_execution"}
     assert schema["additionalProperties"] is False

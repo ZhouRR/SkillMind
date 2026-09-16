@@ -13,13 +13,18 @@ from uuid import UUID
 from jsonschema import Draft202012Validator, FormatChecker
 
 from skillmind.core.hashing import canonical_json, sha256_hex
+from skillmind.documents.library_contract import DOCUMENT_LIBRARY_CAPABILITIES_MESSAGE
 from skillmind.evaluations.domain import InvalidEvaluationRevisionError, resolve_json_pointer
 from skillmind.skills.capability_blueprint import (
     CapabilityBlueprintError,
     CapabilityBlueprintValidator,
 )
 from skillmind.skills.importer import SkillImportLimits
-from skillmind.skills.source_documents import validate_source_documents
+from skillmind.skills.source_documents import (
+    SourceTraceLocationError,
+    validate_source_documents,
+    validate_source_location,
+)
 
 _HASH = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _KEY = re.compile(r"[a-z][a-z0-9_.-]{0,127}\Z")
@@ -32,7 +37,9 @@ class SkillDesignInvalidError(ValueError):
     def __init__(
         self,
         code: Literal[
-            "skill_design_invalid", "capability_blueprint_missing", "source_trace_target_invalid"
+            "skill_design_invalid", "capability_blueprint_missing", "source_trace_target_invalid",
+            "source_trace_file_invalid", "source_trace_line_invalid",
+            "document_library_capabilities_invalid",
         ] = "skill_design_invalid",
         *, path: str | None = None,
     ) -> None:
@@ -41,6 +48,10 @@ class SkillDesignInvalidError(ValueError):
         super().__init__(
             "Source trace target must resolve within the CapabilityBlueprint"
             if code == "source_trace_target_invalid"
+            else str(SourceTraceLocationError(code, path or ""))
+            if code == "source_trace_file_invalid" or code == "source_trace_line_invalid"
+            else DOCUMENT_LIBRARY_CAPABILITIES_MESSAGE
+            if code == "document_library_capabilities_invalid"
             else "The saved skill design is invalid."
         )
         self.code = code
@@ -84,10 +95,16 @@ def validate_skill_design(
         )
     except SkillDesignInvalidError:
         raise
+    except SourceTraceLocationError as error:
+        raise SkillDesignInvalidError(error.code, path=error.path) from None
     except CapabilityBlueprintError as error:
         if error.code == "source_trace_target_invalid":
             raise SkillDesignInvalidError(
                 "source_trace_target_invalid", path=f"/capability_blueprint{error.path}"
+            ) from None
+        if error.code == "document_library_capabilities_invalid":
+            raise SkillDesignInvalidError(
+                "document_library_capabilities_invalid", path=f"/capability_blueprint{error.path}"
             ) from None
         raise SkillDesignInvalidError() from None
     except (
@@ -122,6 +139,34 @@ def _validate(
     }
     _require(manifest.get("identity") == expected_identity)
     manifest_tasks = _keyed(manifest.get("tasks"), maximum=50)
+    if "skill_execution" in manifest:
+        from skillmind.skills.execution import resolve_skill_definition, validate_execution
+
+        definition = resolve_skill_definition(manifest)
+        if definition is None:
+            raise SkillDesignInvalidError()
+        _validate_raw_schema(manifest, contracts_dir / "runtime-manifest/v1alpha1.schema.json")
+        validate_execution(definition, contracts_dir)
+        _require(set(manifest_tasks) == {t["key"] for t in definition["tasks"]})
+        _require(not any(
+            {"output_contract", "output_schema", "output_schema_checksum"} & t.keys()
+            for _, t in manifest_tasks.values()
+        ))
+        for task in definition["tasks"]:
+            _require(manifest_tasks[task["key"]][1]["capability"] == task["capability"])
+        files = _source_files(source)
+        documents = validate_source_documents(manifest["source_documents"])
+        _require({d["path"]: d["content"] for d in documents} == {
+            path: content for path, (_, content) in files.items() if content is not None
+        })
+        for trace in definition["source_traces"]:
+            resolve_json_pointer(definition, trace["target"])
+            _source_location(
+                trace["path"], trace["line"], files, pointer="/skill_execution/source_traces"
+            )
+        _check_contract_traces(manifest, files)
+        return ValidatedSkillDesign(manifest=manifest, blueprint=None,
+                                    source_traces=tuple(definition["source_traces"]))
     blueprint = manifest.get("capability_blueprint")
     if blueprint is None:
         if not allow_missing_blueprint:
@@ -155,7 +200,10 @@ def _validate(
         _require({item["path"]: item["content"] for item in documents} == {
             path: content for path, (_, content) in files.items() if content is not None
         })
-    traces = tuple(_trace(blueprint, trace, files) for trace in blueprint["source_traces"])
+    traces = tuple(
+        _trace(blueprint, trace, files, index)
+        for index, trace in enumerate(blueprint["source_traces"])
+    )
     _check_contract_traces(manifest, files)
     return ValidatedSkillDesign(manifest=manifest, blueprint=blueprint, source_traces=traces)
 
@@ -165,31 +213,30 @@ def _check_contract_traces(
 ) -> None:
     """生成契約の出典も同じ保存 file/行門禁へ通し、schema 文言を source と誤認しない。"""
 
-    for task in manifest["tasks"]:
-        for trace in task["contract_source_trace"]:
+    for task_index, task in enumerate(manifest["tasks"]):
+        for index, trace in enumerate(task["contract_source_trace"]):
             _require(f"{trace['contract']}_contract" in task)
             # field_path は既存 producer の '/' を含む原文として保持する。業務 field の
             # 配列位置や source_section の意味は未定義なので、解決済みとは主張しない。
-            _source_location(trace["source_path"], trace.get("line"), files)
+            _source_location(
+                trace["source_path"], trace.get("line"), files,
+                pointer=f"/tasks/{task_index}/contract_source_trace/{index}",
+                path_field="source_path",
+            )
 
 
 def _source_location(
     path: Any,
     line: Any,
     files: dict[str, tuple[dict[str, Any], str | None]],
+    *, pointer: str, path_field: str = "path",
 ) -> Literal["TEXT_SNAPSHOT", "SOURCE_INDEX"]:
     """Blueprint と契約 trace の双方で、安全な原 file/行の存在だけを確認する。"""
 
-    normalized = _source_path(path)
-    _require(normalized in files)
-    _, content = files[normalized]
-    _require(line is None or (type(line) is int and line > 0))
-    if content is None:
-        _require(line is None)
-        return "SOURCE_INDEX"
-    if line is not None:
-        _require(line <= max(1, len(content.splitlines())))
-    return "TEXT_SNAPSHOT"
+    return validate_source_location(
+        path, line, {name: content for name, (_, content) in files.items()},
+        pointer=pointer, path_field=path_field,
+    )
 
 
 def _check_declared_types(blueprint: dict[str, Any]) -> None:
@@ -279,11 +326,15 @@ def _trace(
     blueprint: dict[str, Any],
     trace: dict[str, Any],
     files: dict[str, tuple[dict[str, Any], str | None]],
+    index: int,
 ) -> dict[str, Any]:
     """JSON Pointer、保存 file 名、確認できる原文行だけを検証する。意味の正しさは証明しない。"""
 
     resolve_json_pointer(blueprint, trace["target"])
-    verification = _source_location(trace["path"], trace["line"], files)
+    verification = _source_location(
+        trace["path"], trace["line"], files,
+        pointer=f"/capability_blueprint/source_traces/{index}",
+    )
     return {**deepcopy(trace), "verification": verification}
 
 

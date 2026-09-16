@@ -10,7 +10,7 @@ Run 是持续业务线程，不是一次 SDK query、Session 或进程。默认�
 
 | 责任方 | 负责什么 |
 | --- | --- |
-| Skillmind | 从发布版本的 Blueprint 生成任务/Brief，冻结资源与权限；管理 lease、恢复、预算、交互、效果、证据、结果与事件 |
+| Skillmind | 从发布版本的最小声明或旧 Blueprint 生成任务/Brief，冻结资源与权限；管理 lease、恢复、预算、交互、效果、证据、结果与事件 |
 | AgentEngine | 在 Brief 内规划、选择允许的 Tool、维持会话，产生公开文本、用量、交互和结果候选 |
 | Agent 无权决定 | 扩大 Project/scope、取得 Secret、增加 Tool、自批提案、绕过限额/校验或直接调用未注册 Provider |
 
@@ -30,13 +30,17 @@ Python SDK 与捆绑 CLI 固定为 0.154.0，启动时校验安装版本与 CLI 
 
 原生 shell、文件写入、浏览器、应用、插件和子 Agent 不开放。由于模型目录中的 Tool 模式可覆盖普通功能开关，Adapter 从固定 CLI 的内置模型目录派生平台配置，仅收窄 Tool 路由与附加能力；保留模型 ID、思考等级与上下文参数。模型的资源调用只连接本进程随机地址的 loopback MCP，逐次经过共享 ToolExecutionPolicy、授权 Gateway、Provider 校验和证据审计。原生批准请求拒绝；用户交互与外部写入仍走平台注册 Tool。
 
-`change.propose/v1` 和 `interaction.request/v1` 保存原调用后停止原生 turn，再交 Worker 持久化等待状态，不在模型进程执行效果。续行核对 Run、模型、原生 Session 和原请求回执，恢复同一原生会话，并传入当前冻结 Brief；新提案仍暂停。PostgreSQL 保存平台开始/暂停/终止记录与业务审计，Codex 专用卷保存原生历史。任一恢复依据缺失时失败，不拼造历史或隐式从头运行。下文 Claude 的 deferred replay 机制仅适用于 Claude Adapter。
+`change.propose/v1` 和 `interaction.request/v1` 保存原调用后停止原生 turn，再交 Worker 持久化等待状态，不在模型进程执行效果。续行核对 Run、模型/思考强度、原 Attempt、原生 Session 和原请求回执，恢复同一原生会话；新提案仍暂停。PostgreSQL 保存平台开始/暂停/终止记录与业务审计，Codex 专用卷保存原生历史。任一恢复依据缺失时失败，不拼造历史或隐式从头运行。下文 Claude 的 deferred replay 机制仅适用于 Claude Adapter。
+
+Codex RESUME 在静态提示、业务输入、Tool Schema 和权限的 hash 与前次记录一致时，仅发送当前阶段目标与新增 checkpoint 数据；全量 Brief/checksum 仍按 Segment 保存。首次、FORK/REPLACE、旧会话缺少提示记录或指令变化时发送完整提示，不丢弃原文。SDK 的 `excludeTurns` 仅省略恢复响应中的历史明细，不删除模型会话；未使用的通知在读取线程中过滤，文本 delta 按短间隔/有界块合并后发布，最终文本、用量、输出限额和终态顺序不变。
+
+Codex 明确返回 `server_overloaded` 时，平台保留安全分类 `model_capacity_unavailable` 并在原 Run/Segment 内重试：初次执行后分别等待 15、30 秒，合计最多 3 个 Attempt，部署的 `run_max_attempts` 更小时优先遵守。原生 turn 有失败回执且 SDK/MCP 已关闭后，才同事务关闭失败 Attempt、保存 RETRY_PENDING/绝对重试时间与 Outbox；提前重复配送不取得 lease。新 Attempt 恢复上一失败 Attempt 的原 SDK 会话，Segment 的 Brief、checkpoint 和业务提案父链保持不变；已完成 Tool/Effect 沿用原身份与回执，不重新应用外部写入。等待时可取消，锁内取消优先；缺少原会话依据、存在未交付的暂停请求或非明确容量错误时不自动重试。页面显示容量不足、重试计划时间及停止状态，不改变模型或思考强度。
 
 Codex 支持输出字节与 Tool 调用次数边界及原生取消，取消完成须等待所属 MCP 服务关闭。当前未接通美元预算预留/结算，带 `max_budget_usd` 或已准备计费调用的请求在启动模型前拒绝。局部消息/Tool 次数限制不等于完整 Run 的模型计费 turn 上限；共享预算与完整用量结算仍按[预算门禁](run-budgets.md)管理。
 
 ## AgentTaskBrief
 
-每个 Segment 启动前冻结一份 [AgentTaskBrief](../../SKM/contracts/agent-task-brief/v1.schema.json)：
+每个 Segment 启动前冻结 Brief。新原文执行使用 [Brief v2](../../SKM/contracts/agent-task-brief/v2.schema.json)，只包含任务说明、完整 source_documents、资源/环境、实际操作边界、可用 Tool、checkpoint 和限额；Agent 按原文自主规划。旧版继续使用 [Brief v1](../../SKM/contracts/agent-task-brief/v1.schema.json)，保留以下字段：
 
 | 内容 | 必须说明什么 |
 | --- | --- |
@@ -47,7 +51,7 @@ Codex 支持输出字节与 Tool 调用次数边界及原生取消，取消完�
 
 Brief 保留必需指导，不注入 Integration 凭据、运行连接配置或跨 Project 数据；已绑定项目文档库的最小登记引用遵循[资源投影](resource-snapshots.md#公开选择与读取投影的实施契约)。Checkpoint 可压缩上下文，但须保留原 transcript/source trace，不改用户事实或批准范围。
 
-新版 Manifest 的 `source_documents` 原样进入 Brief/checksum，并在初次执行和每次续行的共享提示中完整渲染；Codex 与 Claude 使用同一入口。先验正文 SHA-256 和导入字节上限，损坏或超限拒绝，不悄悄摘要或截断。原文作为来源材料保留，业务标识符不得猜测、改名或复数化；解析指导与原文冲突时停止并报告。原文中的命令、脚本、连接描述和工具声明不产生执行权，仍只能用冻结绑定和已注册工具，通过原审批/效果协议执行。
+新版 Manifest 的 `source_documents` 原样进入每份 Brief/checksum，共享入口完整渲染原文；Codex 仅在上述可核对的同会话续行中省略重复发送，Claude 继续使用完整提示。每次仍校验正文 SHA-256 和导入字节上限，损坏或超限拒绝，不悄悄摘要或截断。原文作为来源材料保留，业务标识符不得猜测、改名或复数化；新方式不另生成可能与原文冲突的 guidance；旧版冲突仍停止并报告。原文中的命令、脚本、连接描述和工具声明不产生执行权，仍只能用冻结绑定和已注册工具，通过原审批/效果协议执行。
 
 新 Run 默认遵守 Skill 的新业务执行规则，不能因路径或日期相同就沿用历史业务 ID。只有冻结用户输入明确指定恢复对象且 Skill 支持业务恢复时，才按当前 Project 和授权资源核对原记录并复用业务 ID；剩余写入仍在当前 Run 重新观察、提案和批准。业务恢复不继承旧 Run 的 Effect，也不能用旧回执满足当前 Run 的文档前置条件。
 
@@ -55,7 +59,7 @@ Brief 保留必需指导，不注入 Integration 凭据、运行连接配置或�
 
 Effect 成功确认为 APPLIED 时，同事务生成的下一 Segment checkpoint 带可选 `effect_result`：原 Effect/Proposal、before/after Evidence 引用、after 摘要、完整回读内容和 verification。Brief 保留并渲染这份原执行事实，不靠模型从引用或批准内容重建返回值；正文作为数据，不作为指令、当前外部状态或新写入权限。最终 effects 的引用须来自对应原回执，不能用提案前的查询 Evidence 替代 before_ref；旧回执缺少该可选字段时保持原值并省略摘要中的 before_ref，仍由结果校验核对原执行的两份证据。对象保存回执可含后续登记所需的 bucket/key/version/ETag，不含连接 endpoint 或凭据。该字段仅由平台 finalize 写入，模型的 propose/interaction checkpoint 不接受；失败续行不沿用上次回执，结果未知仍按效果协议停止。
 
-回执采用规范 JSON、2 MiB 字节上限、原 Evidence hash 和共享敏感字段校验；超限或损坏拒绝交给 Agent，不截断为成功。每次仅携带本次回执，后续 checkpoint 通过既有事实和引用字段保存所需上下文。旧 checkpoint 缺少字段时保持原形，不补造历史值；无 summary 但有事实或引用时也必须渲染。API/Worker 须同步升级，旧 Worker 会丢弃新增字段，不能用于依赖返回值的完整业务验收。
+回执采用规范 JSON、2 MiB 字节上限、原 Evidence hash 和共享敏感字段校验；超限或损坏拒绝交给 Agent，不截断为成功。每次仅携带本次回执，不将旧成功用于新写入。保存新提案或普通交互时，平台将新增事实/引用与原 Segment 的事实、用户回答和引用去重合并，并记录提案 ID 和已核验的观察 Evidence；原模型请求及 fingerprint 保持不变。RESUME 的模型 checkpoint 只需当前摘要与新增业务事实，REPLACE 还须提供脱离原会话所需的业务状态。历史记录不回写，无 summary 但有事实或引用时仍渲染；API/Worker 须同步升级。
 
 `change.propose/v1` 暂停后的 RESUME 先只读核对当前 Segment 的 trigger、原 Proposal/Effect 或拒绝/过期记录，再以原请求 fingerprint、SDK Session 和 transcript 中的 tool ID 匹配原调用。只有这个已处理调用通过普通 Tool 审计读取结果；新提案仍 defer，不经该路径创建 Proposal 或调用外部写入 Provider。未知效果、缺失或不匹配的回执拒绝恢复。原 transcript 保持不变，旧 `{status: "success", deferred: true}` 响应形状继续有效。
 
@@ -182,6 +186,7 @@ observe → Evidence → propose → 精确批准/允许的预授权 → 独立 
 
 - [RunEvent 契约](../../SKM/contracts/events/run-event/v1.schema.json)覆盖 Segment、Session、Interaction、checkpoint 与 Effect；Run 内 sequence 严格递增。
 - 状态变更与 Outbox 同事务。Queue 重投由数据库领取抑制，Tool 重放与 Effect 幂等各用自身协议，不承诺模型/远端全局精确一次。
+- 业务 Worker 与维护 Worker 使用独立队列和执行槽：前者处理 Run、Effect、解释及核对执行，后者只处理 Outbox 配送、租约/请求回收和定时触发。维护队列名由业务队列追加 `:maintenance` 派生，配送仍显式写入原业务队列。两侧复用同一持久台账、功能开关与授权逻辑，业务同一 Run 的领取和 Effect 幂等规则不变。维护进程不构建模型或外部写入执行器；升级前积压的旧维护 tick 在业务队列中只作无副作用的兼容消费，由独立维护进程处理当前事实。
 - 只有有效 lease 可提交；失效由 Recovery 接管，同段重试受 SKILLMIND_RUN_MAX_ATTEMPTS 限制。
 - 终态 RUN_SNAPSHOT 是最后持久事件，SSE 据此结束。终态不可恢复，新目标创建新 Run。
 - 模型 wall timeout 不含准备、排队、人工等待或全部 Attempt 累计；各计时器见[预算说明](run-budgets.md#现有计时器的覆盖范围)。

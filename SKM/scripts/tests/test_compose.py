@@ -19,7 +19,7 @@ class BackendPackagingSourceTests(unittest.TestCase):
 
         source = (ROOT / "compose.yml").read_text(encoding="utf-8")
         services = yaml.safe_load(source)["services"]
-        for role in ("api", "worker", "migrate"):
+        for role in ("api", "worker", "maintenance", "migrate"):
             self.assertEqual(services[role]["env_file"], ["${ENV_FILE:-.env}"])
         self.assertNotIn("args", services["api"]["build"])
         self.assertEqual(

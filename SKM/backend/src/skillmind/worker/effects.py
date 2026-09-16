@@ -25,6 +25,7 @@ from skillmind.effects.redmine import (
 from skillmind.effects.release import ExecutionFeatureDisabledError
 from skillmind.effects.service import EffectService
 from skillmind.integrations.secrets import DeploymentSecretResolver, SecretResolutionError
+from skillmind.runs.domain import ClaimedRun
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +101,14 @@ class ApprovedEffectExecutor:
         if definition is not None and definition.supervised:
             return await self._supervise(claimed, provider_version=definition.provider_version)
         return await self._execute_claimed(claimed)
+
+    async def execute_pending_for_attempt(self, claimed: ClaimedRun) -> str | None:
+        """Agent 終了後の承認済み write を通常 claim/apply へ直結し、Queue 再投も冪等にする。"""
+
+        execution_id = await self._effect_service.pending_effect_for_attempt(
+            run_id=claimed.run_id, attempt_id=claimed.run_attempt_id,
+        )
+        return await self.execute(execution_id) if execution_id is not None else None
 
     async def _supervise(self, claimed: ClaimedEffectExecution, *, provider_version: str) -> str:
         """Provider と finalize を同じ心拍の寿命に置き、失権時は所有 coroutine の清理を待つ。"""

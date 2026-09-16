@@ -189,6 +189,8 @@ class RunContext:
     prepared_invocation: AgentInvocation | None = field(default=None, repr=False)
     # 現 Segment の原 trigger/回执から得た読取専用 descriptor。モデルに設定させない。
     resolved_proposal: ResolvedProposal | None = field(default=None, repr=False)
+    # 初回/全量復旧と同じ入力を、続行 prompt の静的 identity 照合にも用いる。
+    input_json: Mapping[str, Any] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
         """Attempt を跨ぐ event 採番の開始値が正数であることを保証する。"""

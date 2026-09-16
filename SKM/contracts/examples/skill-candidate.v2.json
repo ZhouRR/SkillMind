@@ -1,0 +1,24 @@
+{
+  "candidate_version": "skillmind.skill-candidate/v2",
+  "title": null,
+  "description": null,
+  "input_contract": {
+    "contract_version": "skillmind.task-contract-draft/v1",
+    "type": "object",
+    "description": null,
+    "enum": null,
+    "fields": [],
+    "items": null,
+    "min_length": null,
+    "max_length": null,
+    "pattern": null,
+    "minimum": null,
+    "maximum": null
+  },
+  "input_source_ref": "s0",
+  "resource_requirements": [],
+  "platform_tools": [
+    "workspace.write/v2"
+  ],
+  "diagnostics": []
+}

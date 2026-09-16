@@ -10,7 +10,6 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.skills.design_validation import SkillDesignSource
 from skillmind.skills.manifest_gate import ManifestValidator
@@ -156,8 +155,10 @@ def test_blueprint_trace_must_resolve_original_target_and_file(
         assert findings[0].path == "/capability_blueprint/source_traces/0/target"
         assert replacement not in findings[0].message
         assert source == original
-    else:
+    elif type(replacement) is bool:
         _assert_invalid(_rehash(source))
+    else:
+        _assert_location_invalid(source, field, "/capability_blueprint/source_traces/0")
 
 
 @pytest.mark.parametrize(
@@ -172,7 +173,26 @@ def test_generated_contract_source_trace_uses_same_real_file_gate(
     source = _source_context(_generated_manifest())
     source.manifest["tasks"][0]["contract_source_trace"][0][field] = replacement
 
-    _assert_invalid(_rehash(source))
+    if type(replacement) is bool:
+        _assert_invalid(_rehash(source))
+    else:
+        _assert_location_invalid(source, field, "/tasks/0/contract_source_trace/0")
+
+
+def _assert_location_invalid(source: SkillDesignSource, field: str, pointer: str) -> None:
+    """出典値を含まない具体診断と、候補を改変しない門禁を確認する。"""
+
+    original = deepcopy(source)
+    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(_rehash(source))
+    assert not passed and len(findings) == 1
+    expected = "source_trace_line_invalid" if field == "line" else "source_trace_file_invalid"
+    assert findings[0].code == expected
+    assert findings[0].path == f"{pointer}/{field}"
+    assert findings[0].message == (
+        "Source trace line must refer to an existing line in the saved source file."
+        if field == "line" else "Source trace file must exist in the saved source package."
+    )
+    assert source == original
 
 
 @pytest.mark.parametrize("field", ["size", "sha256", "path", "content"])
@@ -344,3 +364,23 @@ def test_no_business_output_contract_still_allows_an_open_outcome() -> None:
 
     assert passed is True, findings
     assert "output_contract" not in task
+
+
+def test_mixed_output_library_has_specific_publish_failure_without_rewriting() -> None:
+    """保存版でも混在槽位の位置を示し、原 manifest を自動補修しない。"""
+
+    source = _source_context(_generated_manifest())
+    resources = source.manifest["capability_blueprint"]["resource_requirements"]
+    index = len(resources)
+    resources.append({
+        "key": "outputs", "kind": "document", "required": True, "access": "write",
+        "capabilities": ["document.write/v1", "document.read/v1"],
+    })
+    source = _rehash(source)
+    original = deepcopy(source)
+    passed, findings = ManifestValidator(ROOT / "contracts").evaluate(source)
+    assert not passed
+    assert findings[0].code == "document_library_capabilities_invalid"
+    assert findings[0].path == f"/capability_blueprint/resource_requirements/{index}/capabilities"
+    assert "only document.write/v1" in findings[0].message
+    assert source == original

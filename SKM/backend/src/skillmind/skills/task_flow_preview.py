@@ -66,12 +66,13 @@ class TaskFlowPreview:
     """Readiness や実行事実を含めない、版付きの読み取り専用 response。"""
 
     identity: dict[str, Any]
-    status: Literal["AVAILABLE", "NOT_DECLARED"]
+    status: Literal["AVAILABLE", "NOT_DECLARED", "SOURCE_EXECUTION"]
     blueprint_checksum: str | None
     preview_checksum: str
     plan: dict[str, Any] | None = field(repr=False)
     source_traces: tuple[dict[str, Any], ...] = field(repr=False)
     preview_version: str = TASK_FLOW_PREVIEW_VERSION
+    source_execution: dict[str, Any] | None = None
 
     def to_json(self) -> dict[str, Any]:
         """公開 field を明示し、consumer の変更を元 DTO へ戻さない。"""
@@ -85,6 +86,7 @@ class TaskFlowPreview:
                 "preview_checksum": self.preview_checksum,
                 "plan": self.plan,
                 "source_traces": list(self.source_traces),
+                **({"source_execution": self.source_execution} if self.source_execution else {}),
             }
         )
 
@@ -150,6 +152,19 @@ def _project(
         "version": source.version,
         "manifest_checksum": source.manifest_checksum,
     }
+    if "skill_execution" in design.manifest:
+        execution = {
+            "declaration": design.manifest["skill_execution"],
+            "input_contract": manifest_tasks[task_key]["input_contract"],
+            "source_documents": design.manifest["source_documents"],
+        }
+        body: dict[str, Any] = {"preview_version": TASK_FLOW_PREVIEW_VERSION,
+                "identity": identity, "status": "SOURCE_EXECUTION",
+                "blueprint_checksum": None, "plan": None, "source_traces": [],
+                "source_execution": execution}
+        return TaskFlowPreview(identity=identity, status="SOURCE_EXECUTION",
+                               blueprint_checksum=None, preview_checksum=_checksum(body),
+                               plan=None, source_traces=(), source_execution=execution)
     blueprint = design.blueprint
     if blueprint is None:
         return _result(identity, blueprint=None, plan=None, traces=())

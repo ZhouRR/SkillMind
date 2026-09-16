@@ -52,11 +52,22 @@ describe('application routing', () => {
     const taskId = 'skill:review'
 
     expect(routeHref('workspace', projectId, { runId })).toBe(
-      `#/workspace?project=${projectId}&run=${runId}`,
+      `#/history?project=${projectId}&run=${runId}`,
     )
     expect(routeHref('workspace', projectId, { taskId })).toBe(
       `#/workspace?project=${projectId}&task=${encodeURIComponent(taskId)}`,
     )
+  })
+
+  it('opens saved workspace run links under history and lets navigation return to workspace', () => {
+    /** 概要・待機・定期実行の旧リンクでも sidebar と詳細の所属を一致させる。 */
+    const oldLink = '#/workspace?project=original&run=running'
+    expect(routeFromHash(oldLink)).toBe('history')
+    expect(projectIdFromHash(oldLink)).toBe('original')
+    const back = routeHrefWithProject('workspace', oldLink)
+    expect(back).toBe('#/workspace?project=original')
+    expect(routeFromHash(back)).toBe('workspace')
+    expect(routeFromHash('#/workspace?project=original&task=new-task')).toBe('workspace')
   })
 
   it('leads the project group with the workspace, the project main screen', () => {

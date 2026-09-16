@@ -125,6 +125,10 @@ async def test_proposal_creates_one_audited_effect_or_one_manual_interaction(
     run.row_version = 1
     run.permission_snapshot_json = {"actor_id": str(uuid4())}
     run.task_snapshot_json = {"skill_version_id": str(uuid4()), "skill_snapshots": []}
+    segment.checkpoint_json = {
+        "confirmed_facts": ["business_id=original"], "evidence_refs": ["ev_prior"],
+        "artifact_refs": ["art_prior"], "user_responses": [{"text": "Original answer"}],
+    }
     freeze_consent(run, enabled=automatic, git=automatic and provider == "git")
     event = execution_event(claimed, AgentEventType.CHANGE_PROPOSED)
     draft = replace(
@@ -170,6 +174,12 @@ async def test_proposal_creates_one_audited_effect_or_one_manual_interaction(
     effects = [row for row in rows if isinstance(row, EffectExecution)]
     interactions = [row for row in rows if isinstance(row, UserInteraction)]
     assert len(proposals) == 1
+    assert proposals[0].checkpoint_json["confirmed_facts"] == ["business_id=original"]
+    assert proposals[0].checkpoint_json["artifact_refs"] == ["art_prior"]
+    assert proposals[0].checkpoint_json["user_responses"] == [{"text": "Original answer"}]
+    assert set(proposals[0].checkpoint_json["evidence_refs"]) == {"ev_prior", "ev_fixture_1"}
+    assert proposals[0].request_fingerprint == draft.request_fingerprint
+    assert not draft.checkpoint["confirmed_facts"]
     assert len(approvals) == len(effects) == int(automatic)
     assert len(interactions) == int(not automatic)
     if automatic:

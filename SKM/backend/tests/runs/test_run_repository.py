@@ -10,9 +10,6 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import Select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from skillmind.agent.domain import AgentEvent, AgentEventType
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.db.models import (
@@ -53,6 +50,8 @@ from skillmind.runs.domain import (
 )
 from skillmind.runs.interaction import InteractionRequestDraft
 from skillmind.runs.repository import RunRepository
+from sqlalchemy import Select
+from sqlalchemy.ext.asyncio import AsyncSession
 from tests.runs.task_binding_fakes import TaskBindingRows
 
 
@@ -837,7 +836,9 @@ async def test_interaction_suspension_releases_lease_and_persists_checkpoint() -
     added = session.add_all.call_args.args[0]
     interactions = [item for item in added if isinstance(item, UserInteraction)]
     assert len(interactions) == 1
-    assert interactions[0].checkpoint_checksum == request.checkpoint_checksum
+    assert interactions[0].checkpoint_checksum == (
+        "sha256:" + sha256_hex(canonical_json(interactions[0].checkpoint_json))
+    )
     events = [item for item in added if isinstance(item, RunEvent)]
     assert [(item.sequence, item.event_type) for item in events] == [
         (10, AgentEventType.INTERACTION_REQUESTED.value),
@@ -875,7 +876,8 @@ async def test_claim_creates_attempt_event_and_outbox_atomically() -> None:
     assert claimed.row_version == 2
     assert run.status == RunStatus.PREPARING.value
     added = session.add_all.call_args.args[0]
-    attempts = [item for item in added if isinstance(item, RunAttempt)]
+    attempts = [call.args[0] for call in session.add.call_args_list
+                if isinstance(call.args[0], RunAttempt)]
     assert len(attempts) == 1
     assert attempts[0].run_segment_id == segment.id
     assert attempts[0].lease_token_hash != lease_token
@@ -1245,7 +1247,8 @@ async def test_worker_loss_recovery_creates_second_attempt_without_snapshot_drif
         run.permission_snapshot_json,
     ) == original_snapshots
     second_attempt = next(
-        item for item in claim_session.add_all.call_args.args[0] if isinstance(item, RunAttempt)
+        call.args[0] for call in claim_session.add.call_args_list
+        if isinstance(call.args[0], RunAttempt)
     )
     assert second_attempt.reason == "RETRY"
 

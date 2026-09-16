@@ -1,3 +1,4 @@
+import { sourceExecutionFromManifest, type SourceExecutionPreview } from './taskFlowPreview'
 import {
   API_BASE,
   hasStrings,
@@ -592,6 +593,7 @@ export interface InterpretationReport {
 export interface InterpretationPreview {
   normalized_package: NormalizedSkillPackage
   runtime_manifest_draft: Record<string, unknown>
+  source_execution?: SourceExecutionPreview | null
   capability_blueprint: CapabilityBlueprintView | null
 }
 
@@ -834,6 +836,7 @@ function parseInterpretationPreview(value: unknown): InterpretationPreview {
   return {
     normalized_package: value.normalized_package,
     runtime_manifest_draft: value.runtime_manifest_draft,
+    source_execution: sourceExecutionFromManifest(value.runtime_manifest_draft),
     capability_blueprint: parseOptionalBlueprint(value.capability_blueprint),
   }
 }

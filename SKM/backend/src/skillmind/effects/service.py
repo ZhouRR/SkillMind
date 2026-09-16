@@ -110,6 +110,14 @@ class EffectService:
                 max_attempts=max_attempts,
             )
 
+    async def pending_effect_for_attempt(self, *, run_id: UUID, attempt_id: UUID) -> UUID | None:
+        """確定済みの原 Attempt に属する REQUESTED effect だけを即時配送候補にする。"""
+
+        async with self._session_factory() as session:
+            return await RunRepository(session).pending_effect_for_attempt(
+                run_id=run_id, attempt_id=attempt_id,
+            )
+
     async def heartbeat_effect_execution(
         self, claimed: ClaimedEffectExecution, *, provider_version: str, lease_seconds: int,
     ) -> datetime:

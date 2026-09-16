@@ -1,0 +1,82 @@
+{
+  "preview_version": "skillmind.task-flow-preview/v1",
+  "identity": {
+    "project_id": "00000000-0000-4000-8000-000000000020",
+    "skill_id": "00000000-0000-4000-8000-000000000060",
+    "skill_version_id": "00000000-0000-4000-8000-000000000061",
+    "task_id": "dd3a76d3-504c-568d-beb6-b1f31df3b3bd",
+    "task_key": "execute",
+    "skill_key": "repository-review",
+    "version": "0.1.0",
+    "manifest_checksum": "sha256:222c7b33ddf14743aa767f6727cfd8cde366aa31e8ed849e4b140464b3b5d09a"
+  },
+  "status": "SOURCE_EXECUTION",
+  "blueprint_checksum": null,
+  "preview_checksum": "sha256:843401b57c2305a9fdbbfa1efeb977c7d7cfea28613d14f8f81f2f7843297003",
+  "plan": null,
+  "source_traces": [],
+  "source_execution": {
+    "declaration": {
+      "execution_version": "skillmind.skill-execution/v1",
+      "tasks": [
+        {
+          "key": "execute",
+          "capability": "repository-review",
+          "title": "repository-review",
+          "description": "固定 revision の repository file を 1 つレビューし、evidence に基づく findings を返す。",
+          "resource_keys": [
+            "review_outputs"
+          ]
+        }
+      ],
+      "resource_requirements": [
+        {
+          "key": "review_outputs",
+          "kind": "document",
+          "required": true,
+          "access": "write",
+          "capabilities": [
+            "document.write/v1"
+          ],
+          "accepted_providers": [
+            "project-library"
+          ],
+          "operations": [
+            {
+              "capability_version": "document.write/v1",
+              "operation": "CREATE"
+            }
+          ]
+        }
+      ],
+      "source_traces": [
+        {
+          "target": "/resource_requirements/0",
+          "path": "SKILL.md",
+          "line": 1
+        }
+      ]
+    },
+    "input_contract": {
+      "contract_version": "skillmind.task-contract-draft/v1",
+      "type": "object",
+      "fields": []
+    },
+    "source_documents": [
+      {
+        "path": "SKILL.md",
+        "content": "---\nname: repository-review\ndescription: 固定 revision の repository file を 1 つレビューし、evidence に基づく findings を返す。\nallowed-tools: [repository.read/v1]\n---\n# リポジトリレビュー\n\n不変の Git または SVN revision にある repository file を 1 つレビューする。登録済みの\n`repository.read/v1` capability だけを使い、repository を変更しない。\n\n## 入力\n\n固定の `revision`、repository 相対の `path`、`review_focus` を必須とする。`review_focus` には\ncorrectness、maintainability、security、またはその他の明示された観点を指定する。欠けている値を\n推測で補わない。\n\n## 結果\n\n簡潔な `summary`、`findings` の配列、report が引用した一意な `evidence_refs`、`needs_review` を\n返す。各 finding は `severity`、`title`、`description`、`evidence_refs` を持つ。`severity` は\n`info`、`warning`、`error` のいずれかとする。\n\nsource 内容が不完全な場合、evidence が不十分な場合、結論に人の判断が必要な場合は `needs_review`\nを立てる。evidence 識別子を新たに作らず、Tool が返した値だけを再利用する。\n\n## 安全\n\ncode、script、test、package manager、shell command を実行しない。外部 system へ書き込まず、\n選択した file 以外の repository 内容を露出しない。\n",
+        "sha256": "sha256:c75ebe8ccf7be27dcb3ccf5c9bbd6c1f526124d06c0f474643514649491916f4"
+      },
+      {
+        "path": "agents/openai.yaml",
+        "content": "interface:\n  display_name: \"リポジトリレビュー\"\n  short_description: \"repository file 1 つを evidence 付きでレビューする\"\n  default_prompt: \"$repository-review で、固定 revision の repository file を 1 つ調査し、evidence に基づく findings を報告する。\"\n",
+        "sha256": "sha256:e212c7b51297fd4ff5cde1802bedc5f5c74cc4848b040c6d4c36fffa7c26ab6c"
+      }
+    ]
+  },
+  "readiness": {
+    "scope": "SKILL_BLUEPRINT",
+    "assessment": null
+  }
+}
