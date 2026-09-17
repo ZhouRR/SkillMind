@@ -11,7 +11,7 @@ from typing import Any, Protocol
 
 from skillmind.core.json_text import strip_code_fence
 from skillmind.effects.operation_policy import WRITE_OPERATIONS
-from skillmind.skills.candidate import CANDIDATE_SCHEMA_ID, model_request
+from skillmind.skills.candidate import CANDIDATE_SCHEMA_ID
 from skillmind.skills.direct_candidate import CANDIDATE_SCHEMA_ID as DIRECT_SCHEMA_ID
 from skillmind.skills.interpreter import (
     InterpreterSystemSkillIdentity,
@@ -23,12 +23,12 @@ from skillmind.skills.interpreter_execution import (
     InterpreterExecutionError,
     InterpretProgressCallback,
 )
-
 from skillmind.skills.runtime_profile import (
     InterpreterRuntimeProfile,
     bind_runtime_identity,
     validate_interpreter_parameters,
 )
+from skillmind.skills.source_projection import model_request
 
 # 進行 event の prompt 本文はこの長さで切り、SSE payload の肥大化を防ぐ。監査には影響しない。
 PROMPT_EVENT_MAX_CHARS = 65_536
@@ -111,8 +111,11 @@ class ModelSkillInterpreter:
         self._write_operations = deepcopy(WRITE_OPERATIONS)
         self._runtime_profile = (
             runtime_profile.snapshot(
-                write_operations=self._write_operations, accept_prompt_json=accept_prompt_json,
-            ) if runtime_profile is not None else None
+                write_operations=self._write_operations,
+                accept_prompt_json=accept_prompt_json,
+            )
+            if runtime_profile is not None
+            else None
         )
         self._identity: InterpreterSystemSkillIdentity | None = None
         self._prompt_text: str | None = None
@@ -169,10 +172,7 @@ class ModelSkillInterpreter:
         if not isinstance(requested, Mapping) or dict(requested) != identity.to_dict():
             # 別 system Skill の request を実行させないため、model 呼び出し前に閉じる。
             raise InterpreterExecutionError(InterpreterErrorCode.IDENTITY_MISMATCH)
-        projected = (
-            model_request(request) if self.uses_native_candidates
-            else dict(request)
-        )
+        projected = model_request(request) if self.uses_native_candidates else dict(request)
         if self.uses_direct_candidates:
             projected["write_operations"] = deepcopy(self._write_operations)
         if previous_candidate is not None:
@@ -189,13 +189,16 @@ class ModelSkillInterpreter:
             )
         if on_event is not None:
             # 実際に model へ渡す prompt を可視化する。切り詰めは表示専用で実行本体へ影響しない。
-            await on_event("interpret.prompt", {
-                "system_prompt": _clipped(prompt_text),
-                "user_message": _clipped(user_message),
-                "system_prompt_chars": len(prompt_text),
-                "user_message_chars": len(user_message),
-                "interpreter": identity.to_dict(),
-            })
+            await on_event(
+                "interpret.prompt",
+                {
+                    "system_prompt": _clipped(prompt_text),
+                    "user_message": _clipped(user_message),
+                    "system_prompt_chars": len(prompt_text),
+                    "user_message_chars": len(user_message),
+                    "interpreter": identity.to_dict(),
+                },
+            )
 
         async def forward_delta(text: str) -> None:
             """Transport の text delta を進行 event へ転送する。"""
@@ -279,19 +282,26 @@ class ModelSkillInterpreter:
             )
             # Native endpoint は Schema を SDK に一度だけ渡し、明示 fallback だけ本文へ添える。
             self._prompt_text = _compose_system_prompt(
-                skill_md, output_contract, self._response_schema,
+                skill_md,
+                output_contract,
+                self._response_schema,
                 include_schema=self._accept_prompt_json,
             )
             if self._runtime_profile is not None:
                 self._identity = bind_runtime_identity(
-                    self._identity, profile=self._runtime_profile, system_prompt=self._prompt_text,
+                    self._identity,
+                    profile=self._runtime_profile,
+                    system_prompt=self._prompt_text,
                 )
         return self._identity, self._prompt_text
 
 
 def _compose_system_prompt(
-    skill_md: str, output_contract: str, response_schema: Mapping[str, Any],
-    *, include_schema: bool = True,
+    skill_md: str,
+    output_contract: str,
+    response_schema: Mapping[str, Any],
+    *,
+    include_schema: bool = True,
 ) -> str:
     """提示と native 出力契約を一致させ、非対応 endpoint だけに Schema 本文を添える。"""
 
@@ -308,9 +318,11 @@ def _compose_system_prompt(
         "launch_contract wrapper, checksum, or adjustment control fields."
     )
     if include_schema:
-        sections.append(json.dumps(
-            dict(response_schema), ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        ))
+        sections.append(
+            json.dumps(
+                dict(response_schema), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
+        )
     return "\n\n".join(section for section in sections if section)
 
 

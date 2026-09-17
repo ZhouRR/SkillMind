@@ -12,7 +12,9 @@ from skillmind.core.hashing import canonical_json, sha256_hex
 
 
 def continuation_prompt(
-    context: RunContext, prompt: str, previous: Mapping[str, Any] | None,
+    context: RunContext,
+    prompt: str,
+    previous: Mapping[str, Any] | None,
 ) -> tuple[str, dict[str, Any]]:
     """静的指示の同一性が記録で確認できる場合だけ、既送の指示・事実を再送しない。"""
 
@@ -27,17 +29,22 @@ def continuation_prompt(
         static["objective"]["segment_objective"] = static["objective"]["run_objective"]
     static["checkpoint"] = {}
     static_prompt = render_task_brief_prompt(
-        static, input_json=context.input_json, output_schema=context.result_schema,
+        static,
+        input_json=context.input_json,
+        output_schema=context.result_schema,
     )
-    static_checksum = sha256_hex(canonical_json({
-        "protocol": "skillmind.codex-continuation/v1",
-        "prompt": static_prompt,
-        "permission": dict(context.permission_snapshot),
-        "tools": [
-            {"name": tool.sdk_name, "schema": tool.input_schema}
-            for tool in context.tools
-        ],
-    }))
+    static_checksum = sha256_hex(
+        canonical_json(
+            {
+                "protocol": "skillmind.codex-continuation/v1",
+                "prompt": static_prompt,
+                "permission": dict(context.permission_snapshot),
+                "tools": [
+                    {"name": tool.sdk_name, "schema": tool.input_schema} for tool in context.tools
+                ],
+            }
+        )
+    )
     checkpoint = brief["checkpoint"]
     hashes = {
         key: [_hash(item) for item in value] if isinstance(value, list) else _hash(value)
@@ -57,13 +64,13 @@ def continuation_prompt(
         if hashes[key] == old_hashes.get(key):
             continue
         if isinstance(value, list) and isinstance(old_hashes.get(key), list):
-            prior = set(old_hashes[key])
-            if not prior.issubset(hashes[key]):
-                # 旧 checkpoint が要約し直した配列は、全 Skill の再投入でなく明示置換する。
+            prior = old_hashes[key]
+            if hashes[key][: len(prior)] != prior:
+                # 並べ替え・削除・途中挿入は置換。完全な prefix 一致だけを追加とする。
                 delta[key] = value
                 replaced_lists.append(key)
             else:
-                delta[key] = [item for item in value if _hash(item) not in prior]
+                delta[key] = value[len(prior) :]
         else:
             delta[key] = value
     return (
@@ -75,12 +82,18 @@ def continuation_prompt(
         "A receipt is evidence of that original effect, not current remote state or new "
         "write permission. Preserve its exact IDs, storage coordinates and before/after "
         "references; never reconstruct them from guesses.\n"
-        + "Run identity (JSON): " + canonical_json(brief["identity"])
-        + "\nCurrent task: " + (brief["task"]["title"]
+        + "Run identity (JSON): "
+        + canonical_json(brief["identity"])
+        + "\nCurrent task: "
+        + (
+            brief["task"]["title"]
             if brief.get("brief_version") == "skillmind.agent-task-brief/v2"
-            else brief["objective"]["segment_objective"])
-        + "\nAudited continuation changes (JSON): " + canonical_json(delta)
-        + "\nReplacement checkpoint lists (JSON): " + canonical_json(replaced_lists)
+            else brief["objective"]["segment_objective"]
+        )
+        + "\nAudited continuation changes (JSON): "
+        + canonical_json(delta)
+        + "\nReplacement checkpoint lists (JSON): "
+        + canonical_json(replaced_lists)
         + "\nFor the next RESUME checkpoint, supply a short summary and only new business "
         "facts/references; the platform retains previous facts and references. Complete "
         "the original deliverables and report when all required effects are verified.",

@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import select, true
+from sqlalchemy import func, select, true
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -89,13 +89,13 @@ class DatabaseObservations:
                             Evidence.metadata_json["binding_id"].as_string()
                             == str(context.tool.binding_id),
                             ToolCall.result_json["table"].as_string() == table,
-                            ToolCall.result_json["table_schema"].is_not(None),
+                            func.jsonb_typeof(ToolCall.result_json["table_schema"]) == "object",
                             ToolCall.capability_version.in_(
                                 ["database.describe/v1", "database.read/v2"]
                             ),
                         )
                         .where(Evidence.created_at <= before if before else true())
-                        .order_by(Evidence.created_at.desc())
+                        .order_by(Evidence.created_at.desc(), Evidence.id.desc())
                         .limit(1)
                     )
                 ).all()
@@ -238,9 +238,10 @@ class DatabaseObservations:
 
     async def tables(self, context: RunToolContext, before: datetime) -> list[str]:
         """候補名のみ読み、同一 Run/binding でも過去の行本文を一括取得しない。"""
+        table_name = ToolCall.result_json["table"].as_string()
         async with self._sessions() as session:
             names = await session.scalars(
-                select(ToolCall.result_json["table"].as_string())
+                select(table_name)
                 .where(
                     ToolCall.run_id == context.run_id,
                     ToolCall.integration_id == context.tool.integration_id,
@@ -249,9 +250,10 @@ class DatabaseObservations:
                     ToolCall.created_at <= before,
                     ToolCall.arguments_summary["database"]["binding_id"].as_string()
                     == str(context.tool.binding_id),
-                    ToolCall.result_json["table_schema"].is_not(None),
+                    func.jsonb_typeof(ToolCall.result_json["table_schema"]) == "object",
                 )
-                .order_by(ToolCall.created_at.desc())
-                .limit(100)
+                .group_by(table_name)
+                .order_by(func.max(ToolCall.created_at).desc(), table_name)
+                .limit(20)
             )
-            return list(dict.fromkeys(name for name in names if isinstance(name, str)))[:20]
+            return [name for name in names if isinstance(name, str)]

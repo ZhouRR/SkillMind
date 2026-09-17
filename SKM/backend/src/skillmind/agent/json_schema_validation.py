@@ -10,7 +10,7 @@ from typing import Any
 from jsonschema import Draft202012Validator, FormatChecker
 from jsonschema.exceptions import SchemaError
 from referencing import Registry
-from referencing.exceptions import NoSuchResource, Unresolvable
+from referencing.exceptions import Unresolvable
 
 MAX_FILE_BYTES = 1_048_576
 MAX_ERRORS = 50
@@ -26,11 +26,6 @@ class ValidationRejected(ValueError):
         """入力本文を例外へ保持しない。"""
         super().__init__(code)
         self.code = code
-
-
-def _no_resource(uri: str) -> Any:
-    """Schema の ID は識別子に限り、URL/file の取得は常に拒否する。"""
-    raise NoSuchResource(ref=uri)
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -141,9 +136,8 @@ def validate(schema_text: str, instance_text: str) -> dict[str, Any]:
     schema, instance = _parse(schema_text), _parse(instance_text)
     checker = FormatChecker()
     _check_schema(schema, checker)
-    validator = Draft202012Validator(
-        schema, format_checker=checker, registry=Registry(retrieve=_no_resource)
-    )
+    # Registry の既定は外部取得を拒否する。別の取得 callback や URL I/O を加えない。
+    validator = Draft202012Validator(schema, format_checker=checker, registry=Registry())
     errors: list[dict[str, str]] = []
     truncated = False
     try:
