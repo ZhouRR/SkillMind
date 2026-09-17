@@ -22,7 +22,7 @@
       "format": "date-time"
     },
     "profile": {
-      "const": "flaui-step/v1"
+      "const": "mcp-tools/v1"
     },
     "catalog_hash": {
       "type": "string",
@@ -31,9 +31,120 @@
     "tools": {
       "type": "array",
       "minItems": 1,
-      "maxItems": 5,
+      "maxItems": 100,
       "items": {
-        "type": "object"
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "input_schema",
+          "output_schema",
+          "access"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_.-]{1,128}$"
+          },
+          "description": {
+            "type": "string"
+          },
+          "input_schema": {
+            "type": "object"
+          },
+          "output_schema": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "access": {
+            "enum": [
+              "read",
+              "call"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "connection_ref": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "binding_ref": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "desktop": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "lease_ref",
+            "run_id",
+            "status",
+            "pending_operation",
+            "scope",
+            "external_exclusivity"
+          ],
+          "properties": {
+            "lease_ref": {
+              "type": "string",
+              "pattern": "^mcp-desktop:[0-9a-f]{64}:[0-9a-f-]{36}$"
+            },
+            "run_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "status": {
+              "const": "HELD_BY_RUN"
+            },
+            "pending_operation": {
+              "type": "boolean"
+            },
+            "scope": {
+              "const": "SKM_ENDPOINT_ONLY"
+            },
+            "external_exclusivity": {
+              "const": "NOT_VERIFIED"
+            }
+          }
+        }
+      ]
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool_call_timeout_seconds"
+      ],
+      "properties": {
+        "tool_call_timeout_seconds": {
+          "const": 90
+        }
       }
     }
   },
@@ -44,7 +155,12 @@
     "observed_at",
     "profile",
     "catalog_hash",
-    "tools"
+    "tools",
+    "server",
+    "connection_ref",
+    "binding_ref",
+    "desktop",
+    "limits"
   ],
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.skillmind.local/tools/mcp.tools/v1/response.schema.json",

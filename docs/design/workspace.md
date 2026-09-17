@@ -113,7 +113,7 @@ Conversation、Session、Interaction、Proposal 由平台负责，Task Center �
 
 ## 任务启动与执行
 
-Preflight 显示精确版本/Task、输入、资源与 readiness，创建时服务端重验。DocumentSourceField 共用显式单份/目录/全集选择：目录一次选择其中全部可用文档（含子目录），显示件数，不逐份勾选；可选未选省略，候选变化不覆盖草稿。
+Preflight 显示精确版本/Task、输入、资源与 readiness，创建时服务端重验。 启动链接按精确 SkillVersion/task_key 解析，不受侧栏模块默认值的异步加载影响。弹窗打开后，模块筛选或目录刷新不得自动替换已选任务；目标失效时显示不可用并禁止提交，需用户重新选择。下拉框显示、资源草稿和提交参数必须属于同一精确任务。DocumentSourceField 共用显式单份/目录/全集选择：目录一次选择其中全部可用文档（含子目录），显示件数，不逐份勾选；可选未选省略，候选变化不覆盖草稿。
 
 草稿与已发送 payload/key 分开；[创建未知](run-creation.md#提交结果未知时的界面责任)先确认原请求，关窗保留待确认项，刷新/离页不承诺恢复。创建后按 Run ID 读 detail/SSE，以持久 sequence 重放，TEXT_DELTA 不推进 cursor。
 

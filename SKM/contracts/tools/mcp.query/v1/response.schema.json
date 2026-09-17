@@ -22,10 +22,8 @@
       "format": "date-time"
     },
     "name": {
-      "enum": [
-        "inspect_window",
-        "get_step_status"
-      ]
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_.-]{1,128}$"
     },
     "result": {
       "type": "object"

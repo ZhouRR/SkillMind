@@ -14,9 +14,9 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from skillmind.agent.database_errors import safe_database_diagnostic
 from skillmind.agent.database_observations import database_audit_identity
 from skillmind.agent.domain import RegisteredTool
+from skillmind.agent.tool_diagnostics import safe_tool_diagnostic
 from skillmind.artifacts.conversion import conversion_artifact, conversion_artifact_description
 from skillmind.artifacts.domain import MAX_RUN_ARTIFACT_BYTES, MAX_RUN_ARTIFACTS, ArtifactDraft
 from skillmind.core.hashing import canonical_json, sha256_hex
@@ -384,9 +384,10 @@ class PostgresToolAuditWriter:
             tool_call.status = "FAILED"
             tool_call.duration_ms = duration_ms
             tool_call.error_json = {"code": code, "retryable": retryable}
-            safe_diagnostic = safe_database_diagnostic(dict(diagnostic)) if diagnostic else None
+            safe_diagnostic = safe_tool_diagnostic(dict(diagnostic)) if diagnostic else None
             if safe_diagnostic is not None:
-                tool_call.error_json["database"] = safe_diagnostic
+                domain = "mcp" if safe_diagnostic.get("kind") == "mcp" else "database"
+                tool_call.error_json[domain] = safe_diagnostic
             await self._finish(session, gate, locked)
 
     async def _find(

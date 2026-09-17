@@ -134,7 +134,7 @@
     },
     {
       "capability": "mcp.call/v1",
-      "description": "Approved FlaUI effect via change.propose/v1 only. Observe mcp.tools Evidence first. operation=target.locator=open_application/execute_step/cancel_step; one /call SET=arguments (omit execute_step requestId; platform supplies Effect UUID); precondition.revision=catalog_hash; verification=READ_BACK /call. Approval per call. Unknown results: query original ID, never replay. COMPLETED is operation status, not test PASS. Artifact URLs are not saved documents.",
+      "description": "Approved MCP tools/call through change.propose/v1 only. Observe mcp.tools/v1 Evidence first. operation=\"call\", target.locator=the authorized tool name. One /call SET value={\"arguments\":{...},\"read_back\":{\"name\":\"authorized_read_tool\",\"arguments\":{...},\"checks\":[{\"path\":\"/field\",\"equals\":\"expected value\"}]}}. Each check uses equals or one_of, with a JSON Pointer into the parsed read result. precondition.revision=catalog_hash; verification={\"method\":\"READ_BACK\",\"paths\":[\"/call\"]}. Both tools and all arguments/checks are approved together. Use the exact string ${effect_id} for a platform-owned operation ID in arguments and read-back checks; the platform substitutes the original Effect UUID. Unknown outcomes are never resent. Original receipt recovery requires a read-back equals check against ${effect_id}; otherwise keep the outcome unknown. Application-specific prerequisites and business verdicts remain defined by the Skill. Returned URLs are not downloaded or saved artifacts.",
       "request_schema": "tools/mcp.call/v1/request.schema.json",
       "response_schema": "tools/mcp.call/v1/response.schema.json",
       "error_schema": "tools/mcp.call/v1/error.schema.json",
@@ -144,7 +144,7 @@
     },
     {
       "capability": "mcp.query/v1",
-      "description": "Call only inspect_window(appId, optional windowTitle) or get_step_status(requestId) within the original Run. Does not start applications or execute actions.",
+      "description": "Call a tool explicitly authorized as read in mcp.tools/v1. Validate arguments against its frozen input_schema. Other tools require change.propose/v1 approval.",
       "request_schema": "tools/mcp.query/v1/request.schema.json",
       "response_schema": "tools/mcp.query/v1/response.schema.json",
       "error_schema": "tools/mcp.query/v1/error.schema.json",

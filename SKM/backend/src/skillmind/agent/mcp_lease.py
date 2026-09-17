@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
 import httpx
@@ -31,7 +32,7 @@ class McpDesktopLeases:
         *,
         begin_effect: UUID | None = None,
         cancel_target: UUID | None = None,
-    ) -> None:
+    ) -> dict[str, Any]:
         """原 Run が終わり、遠端呼出しも確認済みの場合だけ次 Run へ占有を移す。"""
         key = sha256_hex(str(httpx.URL(endpoint)))
         async with self._sessions() as session, session.begin():
@@ -66,6 +67,14 @@ class McpDesktopLeases:
                 if lease.pending_effect_id not in {None, begin_effect, cancel_target}:
                     raise McpDesktopBusyError("MCP desktop has an unconfirmed operation")
                 lease.pending_effect_id = begin_effect
+            return {
+                "lease_ref": f"mcp-desktop:{key}:{run_id}",
+                "run_id": str(run_id),
+                "status": "HELD_BY_RUN",
+                "pending_operation": lease.pending_effect_id is not None,
+                "scope": "SKM_ENDPOINT_ONLY",
+                "external_exclusivity": "NOT_VERIFIED",
+            }
 
     async def require_original_step(
         self, run_id: UUID, integration_id: UUID, request_id: str

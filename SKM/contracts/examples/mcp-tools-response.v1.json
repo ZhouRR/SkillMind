@@ -5,7 +5,7 @@
     "ev_catalog"
   ],
   "observed_at": "2026-09-17T00:00:00Z",
-  "profile": "flaui-step/v1",
+  "profile": "mcp-tools/v1",
   "catalog_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
   "tools": [
     {
@@ -14,7 +14,25 @@
       "input_schema": {
         "type": "object"
       },
-      "output_schema": null
+      "output_schema": null,
+      "access": "read"
     }
-  ]
+  ],
+  "server": {
+    "name": "FlaUiMcp",
+    "version": "0.3.0.0"
+  },
+  "connection_ref": "00000000-0000-4000-8000-000000000001",
+  "binding_ref": "00000000-0000-4000-8000-000000000002",
+  "desktop": {
+    "lease_ref": "mcp-desktop:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:00000000-0000-4000-8000-000000000003",
+    "run_id": "00000000-0000-4000-8000-000000000003",
+    "status": "HELD_BY_RUN",
+    "pending_operation": false,
+    "scope": "SKM_ENDPOINT_ONLY",
+    "external_exclusivity": "NOT_VERIFIED"
+  },
+  "limits": {
+    "tool_call_timeout_seconds": 90
+  }
 }

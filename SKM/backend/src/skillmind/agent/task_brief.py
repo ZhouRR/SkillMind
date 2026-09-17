@@ -125,6 +125,21 @@ def resolve_execution_profile(
     return ResolvedExecutionProfile(recommended, ProfileSource.SKILL_RECOMMENDATION)
 
 
+def _runtime_metadata(
+    brief: dict[str, Any], snapshot: Mapping[str, Any], model: str | None
+) -> None:
+    """新方針だけに実際に選択したモデルを載せ、旧 Segment の本文を保持する。"""
+    if snapshot.get("runtime_policy") != "skillmind.runtime/v4":
+        return
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("Runtime metadata requires the configured model")
+    brief["runtime_metadata"] = {
+        "model": model,
+        "model_identity_kind": "CONFIGURED_MODEL_ID",
+        "wall_timeout_scope": "AGENT_ATTEMPT",
+    }
+
+
 def build_agent_task_brief(
     *,
     run_id: UUID,
@@ -134,6 +149,7 @@ def build_agent_task_brief(
     tools: Sequence[RegisteredTool],
     limits: RunLimits,
     project_id: UUID | None = None,
+    model: str | None = None,
     segment_no: int = 1,
     segment_objective: str | None = None,
     checkpoint: Mapping[str, Any] | None = None,
@@ -199,6 +215,7 @@ def build_agent_task_brief(
                 "max_budget_usd": limits.max_budget_usd,
             },
         }
+        _runtime_metadata(direct_brief, task_snapshot, model)
         if project_id is None:
             direct_brief["identity"].pop("project_id")
         elif not isinstance(project_id, UUID) or project_id.int == 0:
@@ -280,6 +297,7 @@ def build_agent_task_brief(
         if not isinstance(project_id, UUID) or project_id.int == 0:
             raise ValueError("AgentTaskBrief project identity is invalid")
         brief["identity"]["project_id"] = str(project_id)
+    _runtime_metadata(brief, task_snapshot, model)
     if runtime_policy(task_snapshot):
         brief["runtime_policy"] = runtime_policy(task_snapshot)
     return CompiledAgentTaskBrief(
@@ -512,6 +530,17 @@ def _finish_task_prompt(
             "Do not copy effect_result into a proposed checkpoint; preserve needed facts "
             "and references using the checkpoint fields accepted by the Tool."
         )
+    if runtime_policy(brief) == "skillmind.runtime/v4":
+        sections.append(
+            "Platform runtime metadata (JSON): " + canonical_json(brief["runtime_metadata"])
+            + "\nAgent attempt limits (JSON): " + canonical_json(brief["limits"])
+            + "\nThe model value identifies the configured model, not an immutable provider build. "
+            "Agent attempt limits are not a desktop test deadline. MCP tools/v1 can return "
+            "server version, connection references and an explicit desktop reservation. "
+            "A reservation only excludes other SKM Runs using the same endpoint; retain "
+            "external dedicated-desktop confirmation separately. Do not infer environment/build "
+            "values or application readiness from a tool catalog."
+        )
     sections.append(f"Task input (JSON): {canonical_json(input_json)}")
     properties = output_schema.get("properties", {})
     outcome_version = properties.get("outcome_version") if isinstance(properties, Mapping) else None
@@ -531,7 +560,7 @@ def _finish_task_prompt(
                 "collections "
                 "to shorten output; keep the evidence needed to assess each conclusion."
             )
-            if runtime_policy(brief) == "skillmind.runtime/v3":
+            if runtime_policy(brief) in {"skillmind.runtime/v3", "skillmind.runtime/v4"}:
                 sections.append(
                     "Report readability: use concise Markdown paragraphs, lists and tables inside "
                     "the existing string fields. Put the business conclusion and scope first. "

@@ -128,13 +128,18 @@ def _read_tool_definitions(
         (
             "mcp.tools/v1",
             mcp_tools_provider,
-            "Inspect allowed frozen MCP tool schemas and obtain catalog Evidence. "
+            "Discover frozen MCP schemas, server version and connection references. "
+            "Use reserve_desktop=true before planning desktop execution "
+            "to obtain a Run reservation. "
+            "This only excludes other SKM Runs at the same endpoint; "
+            "external exclusivity is not verified. "
+            "Does not start an app or provide unobserved environment/build configuration. "
             + str(contracts.load("tools/mcp.call/v1/request.schema.json")["description"]),
         ),
         (
             "mcp.query/v1",
             mcp_query_provider,
-            "Call only inspect_window or get_step_status. Action tools require "
+            "Call tools explicitly authorized as read in the frozen catalog. Other tools require "
             "change.propose approval; never call them here.",
         ),
     ):
@@ -733,6 +738,7 @@ class ProductionRunContextBuilder:
             selected_sources=claimed_run.selected_sources_json,
             tools=tools,
             limits=limits,
+            model=self._model,
             segment_no=claimed_run.segment_no,
             segment_objective=_segment_objective(claimed_run.segment_objective_json),
             checkpoint=claimed_run.checkpoint_json,
@@ -842,6 +848,7 @@ def _resolve_source_tools(
     """
 
     tools: list[RegisteredTool] = []
+    bound_tool_sources: dict[str, RegisteredTool] = {}
     repository_bindings: dict[str, RepositoryBindingRef] = {}
     blueprint = resolve_skill_definition(manifest)
     requirements = (
@@ -903,6 +910,22 @@ def _resolve_source_tools(
             # 複数の文書 slot は同じ Run 集合を読む。SDK 名を重複登録しない。
             continue
         tools.append(resolved)
+        if integration_id is not None and binding_id is not None:
+            # 一つの資源が複数の読取能力を宣言できる。代表能力だけでなく、後続 Tool の
+            # 解決にも検証済みの原 binding を渡す。Provider 名による別 slot の推測は禁止する。
+            for declared in _sequence(requirement.get("capabilities")):
+                if (
+                    not isinstance(declared, str)
+                    or declared not in allowed
+                    or declared in EFFECT_CAPABILITIES
+                ):
+                    continue
+                previous = bound_tool_sources.get(declared)
+                if previous is not None and (
+                    previous.provider, previous.integration_id, previous.binding_id
+                ) != (provider, integration_id, binding_id):
+                    raise LookupError(f"Tool capability has multiple resource bindings: {declared}")
+                bound_tool_sources[declared] = resolved
     if uses_modern_runtime(claimed_run.task_snapshot_json):
         for original in tuple(tools):
             if original.capability != "database.read/v1":
@@ -938,6 +961,13 @@ def _resolve_source_tools(
                     raise LookupError("Document Tool requires a frozen document selection")
                 resolved = registry.resolve(
                     tool_capability, provider=DOCUMENT_PROVIDER, integration_id=None,
+                    execution_profile=execution_profile,
+                )
+            elif tool_capability in bound_tool_sources:
+                source = bound_tool_sources[tool_capability]
+                resolved = registry.resolve(
+                    tool_capability, provider=source.provider,
+                    integration_id=source.integration_id, binding_id=source.binding_id,
                     execution_profile=execution_profile,
                 )
             else:

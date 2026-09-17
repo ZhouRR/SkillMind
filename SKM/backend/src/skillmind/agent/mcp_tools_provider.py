@@ -16,7 +16,9 @@ from skillmind.agent.mcp_tools_source import McpToolsError, StreamableHttpMcpToo
 from skillmind.agent.tool_gateway import ProviderToolResult, RunToolContext, ToolProviderError
 from skillmind.integrations.mcp_tools import (
     PROFILE,
-    READ_TOOLS,
+    tool_access,
+    validate_tool_value,
+    McpResultError,
     configured_tool,
     digest,
     normalize_catalog,
@@ -54,42 +56,64 @@ class McpToolsProvider:
         bound, token = await self._binding._bound(context)
         data: dict[str, Any]
         locator: dict[str, Any]
+        stage = "configuration"
         try:
             catalog = normalize_catalog(bound.integration.config.get("tool_catalog"))
             allowed = [
-                configured_tool(bound.integration.config, bound.scope, name)
+                tool = configured_tool(bound.integration.config, bound.scope, name)
                 for name in bound.scope.get("tool_names", [])
             ]
             if not allowed:
                 raise ValueError("MCP tool permission is empty")
             if self._capability == "mcp.tools/v1":
-                if set(arguments) - {"purpose"}:
+                stage = "arguments"
+                if set(arguments) - {"purpose", "reserve_desktop"}:
                     raise ValueError("Invalid discovery request")
+                reserve = arguments.get("reserve_desktop", False)
+                if type(reserve) is not bool:
+                    raise ValueError("Invalid reservation request")
+                stage = "contract"
                 actual = await self._source.discover(bound.integration.config, token)
                 if digest(actual) != digest(catalog):
                     raise ValueError(
                         "MCP tool contract changed; rediscover and save the connection"
                     )
-                data = {"profile": PROFILE, "tools": allowed, "catalog_hash": digest(catalog)}
+                data = {"profile": PROFILE, "tools": [{**tool, "access": tool_access(bound.integration.config, tool["name"])} for tool in allowed], "catalog_hash": digest(catalog)}
                 locator = {"catalog_hash": digest(catalog)}
+                # 予約は SKM 内の同 endpoint だけを直列化する。Windows 全体の専有ではない。
+                desktop = None
+                if reserve:
+                    stage = "configuration"
+                    desktop = await self._leases.acquire(
+                        bound.integration.config["server_url"], context.run_id
+                    )
+                data.update(
+                    {
+                        "server": dict(actual["server"]),
+                        "connection_ref": str(bound.integration.integration_id),
+                        "binding_ref": str(context.tool.binding_id),
+                        "desktop": desktop,
+                        "limits": {
+                            "tool_call_timeout_seconds": 90,
+                        },
+                    }
+                )
+                locator.update({"server": dict(actual["server"]), "desktop": desktop})
             else:
+                stage = "arguments"
                 name = arguments.get("name")
                 if (
                     not isinstance(name, str)
-                    or name not in READ_TOOLS
+                    or tool_access(bound.integration.config, name) != "read"
                     or set(arguments) - {"name", "arguments", "purpose"}
                 ):
-                    raise ValueError("Only inspect_window and get_step_status are read-only tools")
-                configured_tool(bound.integration.config, bound.scope, name)
+                    raise ValueError("MCP tool is not authorized for read-only calls")
+                stage = "configuration"
+                tool = configured_tool(bound.integration.config, bound.scope, name)
+                stage = "arguments"
                 params = validate_arguments(name, arguments.get("arguments"))
-                if name == "get_step_status":
-                    await self._leases.require_original_step(
-                        context.run_id, bound.integration.integration_id, params["requestId"]
-                    )
-                if name == "inspect_window":
-                    await self._leases.acquire(
-                        bound.integration.config["server_url"], context.run_id
-                    )
+                validate_tool_value(tool["input_schema"], params)
+                stage = "result"
                 data = {
                     "name": name,
                     "result": parse_result(
@@ -103,18 +127,14 @@ class McpToolsProvider:
                     "result_status": data["result"].get("status"),
                     "window_title": data["result"].get("windowTitle"),
                 }
-        except ValueError:
-            raise ToolProviderError(
-                "invalid_request",
-                "MCP tool scope, arguments or frozen contract is invalid",
-                retryable=False,
-            ) from None
-        except (McpToolsError, McpDesktopBusyError):
-            raise ToolProviderError(
-                "unavailable",
-                "MCP tool read could not be confirmed or the desktop is reserved",
-                retryable=False,
-            ) from None
+        except (ValueError, McpToolsError, McpDesktopBusyError) as error:
+            # エラーにも同じ撤権境界を適用する。遠端本文は返さない。
+            current, current_token = await self._binding._bound(context)
+            if current != bound or current_token != token:
+                raise ToolProviderError(
+                    "scope_denied", "MCP binding changed during read", retryable=False
+                ) from None
+            raise _read_error(error, stage) from None
         current, current_token = await self._binding._bound(context)
         if current != bound or current_token != token:
             raise ToolProviderError(
@@ -138,3 +158,60 @@ class McpToolsProvider:
                 ),
             ),
         )
+
+
+def _read_error(error: Exception, stage: str) -> ToolProviderError:
+    """再送許可と原因を混同せず、固定診断と安全な相関 ID だけを返す。"""
+    reason = error.reason if isinstance(error, (McpResultError, McpToolsError)) else stage
+    if isinstance(error, McpDesktopBusyError):
+        reason = "desktop_busy"
+    messages = {
+        "configuration": ("invalid_request", "MCP configured profile or tool scope is invalid."),
+        "arguments": (
+            "invalid_request",
+            "MCP arguments are invalid. Check the frozen tool schema.",
+        ),
+        "invalid_arguments": (
+            "invalid_request",
+            "MCP arguments do not match the frozen tool schema.",
+        ),
+        "contract": (
+            "invalid_request",
+            "MCP catalog changed. Save the new connection contract and start a new Run.",
+        ),
+        "contract_changed": (
+            "invalid_request",
+            "MCP catalog changed. Save the new connection contract and start a new Run.",
+        ),
+        "desktop_busy": (
+            "unavailable",
+            "MCP desktop is reserved or the original operation cannot be accessed. "
+            "Do not replay an action.",
+        ),
+        "remote_tool_error": (
+            "unavailable",
+            "The remote MCP tool returned an execution error; this is not a local scope "
+            "or argument rejection. For inspect_window, an accessible registered process "
+            "in the same Windows session is required. Check Runner diagnostics; do not "
+            "assume the application is stopped or replay actions.",
+        ),
+        "result": (
+            "unavailable",
+            "MCP response does not match the result contract. Do not replay actions.",
+        ),
+        "invalid_response": (
+            "unavailable",
+            "MCP response does not match the result contract. Do not replay actions.",
+        ),
+        "transport_unconfirmed": (
+            "unavailable",
+            "MCP communication or response could not be confirmed. Do not replay actions.",
+        ),
+    }
+    code, message = messages[reason]
+    if isinstance(error, McpResultError) and error.diagnostic_id is not None:
+        message += f" diagnosticId={error.diagnostic_id}"
+    diagnostic = {"kind": "mcp", "reason": reason}
+    if isinstance(error, McpResultError) and error.diagnostic_id is not None:
+        diagnostic["diagnostic_id"] = error.diagnostic_id
+    return ToolProviderError(code, message, retryable=False, diagnostic=diagnostic)

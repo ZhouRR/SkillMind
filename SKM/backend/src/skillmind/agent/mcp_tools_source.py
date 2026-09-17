@@ -19,6 +19,27 @@ from skillmind.integrations.mcp_tools import digest, normalize_catalog, validate
 class McpToolsError(RuntimeError):
     """本文・URL・credential を含まない通信または契約エラー。"""
 
+    def __init__(self, reason: str = "transport_unconfirmed") -> None:
+        """固定の分類だけを保持し、低層の例外を出力しない。"""
+        self.reason = (
+            reason
+            if reason in {"contract_changed", "invalid_arguments", "invalid_response"}
+            else "transport_unconfirmed"
+        )
+        super().__init__(self.reason)
+
+
+def _request_failure(error: Exception) -> McpToolsError:
+    """SDK の task group が包んだ既知の分類だけを復元する。"""
+    if isinstance(error, McpToolsError):
+        return error
+    if isinstance(error, ExceptionGroup):
+        for child in error.exceptions:
+            found = _request_failure(child)
+            if found.reason != "transport_unconfirmed":
+                return found
+    return McpToolsError()
+
 
 class _ToolTransport(BoundedMcpTransport):
     """resources/read を開かず、発見と一回の精確 call だけを通す。"""
@@ -147,23 +168,27 @@ class StreamableHttpMcpToolsSource:
                 if call is None:
                     return observed
                 if digest(observed) != digest(expected):
-                    raise ValueError("Tool contract changed")
+                    raise McpToolsError("contract_changed")
                 tool = next(entry for entry in observed["tools"] if entry["name"] == call["name"])
-                validate_tool_value(tool["input_schema"], call["arguments"])
+                try:
+                    validate_tool_value(tool["input_schema"], call["arguments"])
+                except ValueError:
+                    raise McpToolsError("invalid_arguments") from None
                 result = await client.call_tool(call["name"], arguments=call["arguments"])
                 content = [
                     item.model_dump(mode="json", exclude_none=True) for item in result.content
                 ]
-                # この profile は JSON text を返す。embedded resource/画像 URL は自動取得しない。
-                if any(item.get("type") != "text" for item in content):
-                    raise ValueError("Unsupported tool content")
-                if tool["output_schema"] is not None:
-                    validate_tool_value(tool["output_schema"], result.structuredContent)
+                # 画像・resource link を返しても自動取得はしない。
+                if tool["output_schema"] is not None and not result.isError:
+                    try:
+                        validate_tool_value(tool["output_schema"], result.structuredContent)
+                    except ValueError:
+                        raise McpToolsError("invalid_response") from None
                 return {
                     "is_error": bool(result.isError),
                     "content": content,
                     "structured_content": result.structuredContent,
                 }
-        except Exception:
+        except Exception as error:
             # CancelledError は変換しない。送信後の失敗を未実行と宣言しない。
-            raise McpToolsError("MCP tool request could not be confirmed") from None
+            raise _request_failure(error) from None

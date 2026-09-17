@@ -445,7 +445,7 @@ def normalize_integration_command(command: CreateIntegrationCommand) -> CreateIn
         write_enabled=bool(set(capabilities) & definition.write_capabilities),
     )
     if command.provider == "mcp":
-        from skillmind.integrations.mcp_tools import WRITE_TOOLS, configured_tool
+        from skillmind.integrations.mcp_tools import configured_tool, tool_access
 
         tools = scope.get("tool_names", [])
         try:
@@ -458,9 +458,9 @@ def normalize_integration_command(command: CreateIntegrationCommand) -> CreateIn
                     if command.secret_reference_id is None:
                         raise ValueError("MCP actions require a credential reference")
                     if ("mcp.query/v1" not in capabilities
-                        or not {"inspect_window", "get_step_status"} <= set(tools)):
+                        or not any(tool_access(config, name) == "read" for name in tools)):
                         raise ValueError("MCP calls require their read-back tools")
-                elif set(tools) & WRITE_TOOLS:
+                elif any(tool_access(config, name) == "call" for name in tools):
                     raise ValueError("MCP action tools require the call capability")
             elif tools:
                 raise ValueError("Resource-only connections cannot grant tool access")
@@ -493,10 +493,8 @@ def normalize_provider_scope(
     if provider == "mcp" and "tool_names" in scope:
         if set(scope) != {"resource_uris", "tool_names"}:
             raise IntegrationValidationError("MCP tool scope contains unknown fields")
-        from skillmind.integrations.mcp_tools import TOOLS, WRITE_TOOLS
-
-        names = _unique_strings(scope["tool_names"], maximum=5, key_pattern=False)
-        if not names or set(names) - TOOLS or (not write_enabled and set(names) & WRITE_TOOLS):
+        names = _unique_strings(scope["tool_names"], maximum=100, key_pattern=False, maximum_length=128)
+        if not names or any(re.fullmatch(r"[a-zA-Z0-9_.-]{1,128}", name) is None for name in names):
             raise IntegrationValidationError("MCP tool scope is invalid")
         resources = normalize_provider_scope(
             "mcp", {"resource_uris": scope["resource_uris"]}, write_enabled=False
@@ -718,7 +716,7 @@ def _validate_provider_config(provider: str, config: dict[str, Any]) -> dict[str
         return dict(config)
     if provider == "mcp":
         if (set(config) not in ({"server_url", "transport"},
-                              {"server_url", "transport", "tool_profile", "tool_catalog"})
+                              {"server_url", "transport", "tool_profile", "tool_catalog", "tool_permissions"})
                 or config.get("transport") != "streamable_http"):
             raise IntegrationValidationError("MCP requires Streamable HTTP connection fields")
         value = config["server_url"]
@@ -746,6 +744,13 @@ def _validate_provider_config(provider: str, config: dict[str, Any]) -> dict[str
                 )
             except ValueError as error:
                 raise IntegrationValidationError("MCP tool catalog is invalid") from error
+            permissions = config.get("tool_permissions")
+            names = {tool["name"] for tool in result["tool_catalog"]["tools"]}
+            if (not isinstance(permissions, dict) or not permissions
+                or set(permissions) - names
+                or any(mode not in {"read", "call"} for mode in permissions.values())):
+                raise IntegrationValidationError("MCP requires explicit per-tool permissions")
+            result["tool_permissions"] = dict(permissions)
         return result
     if provider == "redmine":
         if set(config) != {"base_url"}:

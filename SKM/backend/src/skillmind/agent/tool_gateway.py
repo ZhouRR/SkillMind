@@ -14,7 +14,6 @@ from uuid import UUID, uuid4
 from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server, tool
 from jsonschema import Draft202012Validator, FormatChecker
 
-from skillmind.agent.database_errors import safe_database_diagnostic
 from skillmind.agent.domain import RegisteredTool, RunContext, RunWorkspace
 from skillmind.agent.engine import RunMcpRuntime
 from skillmind.agent.evidence import (
@@ -27,6 +26,7 @@ from skillmind.agent.evidence import (
     new_evidence_ref,
     validate_artifact_publication,
 )
+from skillmind.agent.tool_diagnostics import safe_tool_diagnostic
 from skillmind.agent.tool_policy import ToolExecutionPolicy, capability_to_sdk_name
 from skillmind.core.hashing import canonical_json
 from skillmind.core.redaction import find_sensitive_key
@@ -85,7 +85,7 @@ class ToolProviderError(RuntimeError):
         self.code = code
         self.message = message
         self.retryable = retryable
-        self.diagnostic = safe_database_diagnostic(dict(diagnostic)) if diagnostic else None
+        self.diagnostic = safe_tool_diagnostic(dict(diagnostic)) if diagnostic else None
 
 
 @dataclass(frozen=True, slots=True)

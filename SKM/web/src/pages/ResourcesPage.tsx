@@ -1,5 +1,5 @@
 import { discoverMcpTools } from '../api/integrations'
-import { supportsFlaUiCatalog } from '../lib/resourceConfig'
+import { supportsMcpCatalog, mcpToolNames } from '../lib/resourceConfig'
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 
 import {
@@ -238,9 +238,9 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
     await mutate('mcp-discover', async (signal) => {
       const result = await discoverMcpTools(projectId, item.integration_id, item.revision, csrfToken, signal)
       if (signal.aborted) return
-      if (!supportsFlaUiCatalog(result.catalog)) setError(messages.resources.mcpUnsupported)
+      if (!supportsMcpCatalog(result.catalog)) setError(messages.resources.mcpUnsupported)
       setConnectDraft((current) => current.provider === 'mcp' && current.serverUrl.trim() === savedMcpUrl.current
-        ? { ...current, mcpCatalog: result.catalog, mcpTools: supportsFlaUiCatalog(result.catalog) } : current)
+        ? { ...current, mcpCatalog: result.catalog, mcpTools: supportsMcpCatalog(result.catalog), mcpPermissions: Object.fromEntries(Object.entries(current.mcpPermissions).filter(([name]) => mcpToolNames(result.catalog).includes(name))) } : current)
     })
   }
 
@@ -286,6 +286,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
       operations: draft.databaseOperations,
       resourceUris: parseListInput(draft.resourceUris),
       mcpTools: draft.mcpTools,
+      mcpPermissions: draft.mcpPermissions,
     })
     const issue = findScopeIssue(draft.provider, scope, access === 'read_write')
     if (issue !== null) {
@@ -779,13 +780,20 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                     onClick={() => void discoverTools()}>{messages.resources.mcpDiscover}</button>
                   {editingIntegration === null && <p className="hint">{messages.resources.mcpSaveFirst}</p>}
                   {connectDraft.mcpCatalog && <>
-                    <label className="scopeOption"><input type="checkbox" checked={connectDraft.mcpTools} disabled={!supportsFlaUiCatalog(connectDraft.mcpCatalog)}
+                    <label className="scopeOption"><input type="checkbox" checked={connectDraft.mcpTools} disabled={!supportsMcpCatalog(connectDraft.mcpCatalog)}
                       onChange={(event) => setConnectDraft((value) => ({ ...value, mcpTools: event.target.checked }))} />
                       <span>{messages.resources.mcpEnableTools}</span></label>
                     <p className="hint">{messages.resources.mcpToolsHint}</p>
-                    <ul>{Array.isArray(connectDraft.mcpCatalog.tools) && connectDraft.mcpCatalog.tools.map((tool: unknown) =>
-                      typeof tool === 'object' && tool !== null && 'name' in tool && typeof tool.name === 'string'
-                        ? <li key={tool.name}><code>{tool.name}</code></li> : null)}</ul>
+                    {mcpToolNames(connectDraft.mcpCatalog).map((name) => <label key={name} className="resourceToolPermission">
+                      <code>{name}</code>
+                      <select aria-label={name} disabled={!connectDraft.mcpTools}
+                        value={connectDraft.mcpPermissions[name] === 'call' && connectDraft.access !== 'read_write' ? '' : connectDraft.mcpPermissions[name] ?? ''}
+                        onChange={(event) => setConnectDraft((value) => ({ ...value, mcpPermissions: { ...value.mcpPermissions, [name]: event.target.value } }))}>
+                        <option value="">{messages.resources.mcpToolDenied}</option>
+                        <option value="read">{messages.resources.mcpToolRead}</option>
+                        {connectDraft.access === 'read_write' && <option value="call">{messages.resources.mcpToolCall}</option>}
+                      </select>
+                    </label>)}
                   </>}
                 </div>}
                 <label>{messages.resources.mcpResourceUris}<textarea className="mono compactTextarea"

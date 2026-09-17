@@ -1473,7 +1473,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
             if integration is None:
                 raise ValueError("Original MCP Integration is unavailable")
             command_mcp = McpOperationCommand(execution.id, project_id, run_id, integration.id,
-                                              payload["name"], canonical_json(payload["arguments"]))
+                                              payload["name"], canonical_json(payload))
             return EffectReconciliationTarget(proposal.id, binding.id, proposal.checksum,
                 execution.provider, execution.provider_version, command_mcp,
                 canonical_json(integration.config_json), integration.secret_reference_id)
@@ -2191,24 +2191,6 @@ class EffectOperationsMixin(_RunRepositoryBase):
         """同 Run・同 binding の発見証拠だけを call の前提にする。"""
         if draft.capability_version != "mcp.call/v1":
             return
-        if payload["name"] == "cancel_step":
-            original = (
-                await self._session.scalars(
-                    select(EffectExecution)
-                    .join(ChangeProposal, ChangeProposal.id == EffectExecution.proposal_id)
-                    .where(
-                        EffectExecution.id == UUID(payload["arguments"]["requestId"]),
-                        EffectExecution.run_id == binding.run_id,
-                        ChangeProposal.integration_id == binding.integration_id,
-                        ChangeProposal.capability_version == "mcp.call/v1",
-                        ChangeProposal.operation == "execute_step",
-                    )
-                )
-            ).one_or_none()
-            if original is None:
-                raise ChangeProposalValidationError(
-                    "MCP cancellation requires an original Run operation"
-                )
         evidence = (
             await self._session.scalars(
                 select(Evidence)
@@ -2230,40 +2212,6 @@ class EffectOperationsMixin(_RunRepositoryBase):
             for item in evidence
         ):
             raise ChangeProposalValidationError("MCP call requires original catalog Evidence")
-        if payload["name"] == "execute_step":
-            observations = (
-                await self._session.scalars(
-                    select(Evidence)
-                    .join(ToolCall, ToolCall.id == Evidence.tool_call_id)
-                    .where(
-                        Evidence.run_id == binding.run_id,
-                        Evidence.evidence_ref.in_(draft.evidence_refs),
-                        ToolCall.run_id == binding.run_id,
-                        ToolCall.integration_id == binding.integration_id,
-                        ToolCall.provider == "mcp",
-                        ToolCall.capability_version == "mcp.query/v1",
-                        ToolCall.status == "SUCCEEDED",
-                    )
-                )
-            ).all()
-            args = payload["arguments"]
-            if not any(
-                item.metadata_json.get("binding_checksum") == binding.checksum
-                and item.source_locator.get("tool_name") == "inspect_window"
-                and item.source_locator.get("result_status") == "READY"
-                and item.source_locator.get("arguments", {}).get("appId") == args["appId"]
-                and (
-                    item.source_locator.get("arguments", {}).get("windowTitle")
-                    == args.get("windowTitle")
-                    or (
-                        args.get("windowTitle") is not None
-                        and item.source_locator.get("window_title") == args["windowTitle"]
-                    )
-                )
-                for item in observations
-            ):
-                raise ChangeProposalValidationError("MCP action requires same-app window Evidence")
-
 
     async def _validate_database_observation(
         self, draft: ChangeProposalDraft, *, binding: ResourceBinding, payload: dict[str, Any]

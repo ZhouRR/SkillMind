@@ -83,6 +83,7 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
   onSessionExpired = ignoreSessionExpired }: WorkspacePageProps) {
   const messages = useMessages()
   const [tasks, setTasks] = useState<PublishedTaskRecord[]>([])
+  const [tasksLoaded, setTasksLoaded] = useState(false)
   const [modules, setModules] = useState<ProjectModuleRecord[]>([])
   const [tasksError, setTasksError] = useState<string | null>(null)
   const [selectedTaskId, setSelectedTaskId] = useState<string>('')
@@ -132,8 +133,8 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
     [events],
   )
   const selectedTask = useMemo(
-    () => tasks.find((task) => taskCatalogId(task) === selectedTaskId) ?? null,
-    [tasks, selectedTaskId],
+    () => tasksLoaded ? tasks.find((task) => taskCatalogId(task) === selectedTaskId) ?? null : null,
+    [tasks, tasksLoaded, selectedTaskId],
   )
   const activeModule = useMemo(
     () => modules.find((module) => module.module_id === moduleId) ?? null,
@@ -142,6 +143,9 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
   // sidebar で選択された業務模块に task 一覧を絞る。module を持たない Project(null)は catalog 全件。
   const visibleTasks = useMemo(() => moduleId && !activeModule ? [] : filterTasksByModule(tasks, activeModule),
     [tasks, activeModule, moduleId])
+  // 開いている草稿の精確 Task は module の遅延到着で差し替えない。表示 option と送信元を一致させる。
+  const launchTasks = runDialogOpen && selectedTask && !visibleTasks.includes(selectedTask)
+    ? [selectedTask, ...visibleTasks] : visibleTasks
 
   useEffect(() => setAcknowledgePrevious(false), [submission.pending?.request.idempotencyKey, submission.pending?.phase])
 
@@ -169,6 +173,7 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
   // projectId は sidebar/项目管理の検証済み選択に限られるため、未選択（空）だけを弾けばよい。
   useEffect(() => {
     tasksController.current?.abort()
+    setTasksLoaded(false)
     if (!projectId) {
       setTasks([])
       setTasksError(messages.workspace.selectProjectFirst)
@@ -178,7 +183,12 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
     tasksController.current = controller
     setTasksError(null)
     void loadProjectTasks(projectId, controller.signal)
-      .then((catalog) => { if (!controller.signal.aborted && ownsSession()) setTasks(catalog.tasks) })
+      .then((catalog) => {
+        if (!controller.signal.aborted && ownsSession()) {
+          setTasks(catalog.tasks)
+          setTasksLoaded(true)
+        }
+      })
       .catch((caught: unknown) => {
         if (!controller.signal.aborted && ownsSession()) {
           setTasks([])
@@ -205,27 +215,24 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
     return () => controller.abort()
   }, [projectId, sessionIdentity])
 
-  // 選択 task は常に表示中一覧の中へ丸める。模块切替・catalog 再読込の直後も実行可能な既定を保ち、
-  // 選択が実際に変わった時だけ入力を初期化する(手動選択の onChange と同じ規約)。
+  // 閉じた草稿だけ module の既定を選ぶ。明示リンクの解決待ちや編集中の対象は上書きしない。
   useEffect(() => {
-    if (
-      visibleTasks.some((task) => taskCatalogId(task) === selectedTaskId)
-      || (initialTaskId !== null && visibleTasks.some((task) => taskCatalogId(task) === initialTaskId))
-    ) return
+    if (!tasksLoaded || runDialogOpen
+      || (initialTaskId !== null && appliedInitialTaskId.current !== initialTaskId)
+      || visibleTasks.some((task) => taskCatalogId(task) === selectedTaskId)) return
     setSelectedTaskId(visibleTasks[0] ? taskCatalogId(visibleTasks[0]) : '')
     setInputText('{}')
-  }, [visibleTasks, selectedTaskId])
+  }, [visibleTasks, selectedTaskId, initialTaskId, runDialogOpen, tasksLoaded])
 
   // 「立即执行」链接直接打开对应 task 的 modal，避免先回到工作空间再重复寻找 task。
   useEffect(() => {
-    if (!initialTaskId || appliedInitialTaskId.current === initialTaskId) return
-    if (!visibleTasks.some((task) => taskCatalogId(task) === initialTaskId)) return
+    if (!tasksLoaded || !initialTaskId || appliedInitialTaskId.current === initialTaskId) return
     appliedInitialTaskId.current = initialTaskId
     setSelectedTaskId(initialTaskId)
     setInputText('{}')
     setError(null)
     setRunDialogOpen(true)
-  }, [initialTaskId, visibleTasks])
+  }, [initialTaskId, tasksLoaded])
 
   // 文書は必ず明示選択する。同じ task の候補更新では草稿を保持し、失効を選択欄で説明する。
   useEffect(() => {
@@ -597,12 +604,16 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
               onRetry={submission.retry}
             />
           )}
-          {visibleTasks.length === 0 && <p className="hint">{messages.workspace.noModuleTasks}</p>}
-          {visibleTasks.length > 0 && (
+          {tasksError && <p className="error" role="alert">{tasksError}</p>}
+          {tasksLoaded && selectedTaskId && !selectedTask && <p className="error" role="alert">{messages.workspace.selectedTaskUnavailable}</p>}
+          {launchTasks.length === 0 && <p className="hint">{messages.workspace.noModuleTasks}</p>}
+          {launchTasks.length > 0 && (
             <>
               <label>{messages.workspace.taskLabel}
-                <select value={selectedTaskId} onChange={(event) => { setSelectedTaskId(event.target.value); setInputText('{}') }}>
-                  {visibleTasks.map((task) => (
+                <select value={selectedTask ? selectedTaskId : ''} disabled={!tasksLoaded}
+                  onChange={(event) => { setSelectedTaskId(event.target.value); setInputText('{}'); setError(null) }}>
+                  {!selectedTask && <option value="" disabled>{messages.workspace.selectTaskFirst}</option>}
+                  {launchTasks.map((task) => (
                     <option key={taskCatalogId(task)} value={taskCatalogId(task)}>{task.title} · {task.skill_name} v{task.version}</option>
                   ))}
                 </select>

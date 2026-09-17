@@ -52,7 +52,14 @@ async def test_terminal_confirmed_owner_can_transfer_and_only_original_effect_cl
     row = SimpleNamespace(run_id=uuid4(), pending_effect_id=None)
     source = leases(row, "SUCCEEDED")
     run_id, effect_id = uuid4(), uuid4()
-    await source.acquire("https://mcp.example.test/mcp", run_id, begin_effect=effect_id)
+    observed = await source.acquire(
+        "https://mcp.example.test/mcp", run_id, begin_effect=effect_id
+    )
+    assert observed["run_id"] == str(run_id)
+    assert observed["lease_ref"].endswith(":" + str(run_id))
+    assert observed["pending_operation"] is True
+    assert observed["scope"] == "SKM_ENDPOINT_ONLY"
+    assert observed["external_exclusivity"] == "NOT_VERIFIED"
     assert (row.run_id, row.pending_effect_id) == (run_id, effect_id)
     with pytest.raises(McpDesktopBusyError):
         await source.confirm("https://mcp.example.test/mcp", run_id, uuid4())

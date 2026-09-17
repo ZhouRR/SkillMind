@@ -461,6 +461,9 @@ export interface UiMessages {
     mcpDiscover: string
     mcpSaveFirst: string
     mcpEnableTools: string
+    mcpToolDenied: string
+    mcpToolRead: string
+    mcpToolCall: string
     mcpToolsHint: string
     tablesRequired: string
     title: string
@@ -985,6 +988,7 @@ export interface UiMessages {
       unavailable: string
     }
     selectTaskFirst: string
+    selectedTaskUnavailable: string
     inputMustBeJson: string
     history: string
     /** 模块に属さない作用域を表す語。実行履歴 badge と模块未設定時の見出し badge が共有する。 */

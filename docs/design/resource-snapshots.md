@@ -16,13 +16,17 @@
 
 ### MCP 工具接入边界
 
-工具接入与 `resources/read` 分开授权。`mcp.tools/v1` 返回已绑定服务的工具契约，`mcp.query/v1` 仅调用平台已审查的只读工具；`mcp.call/v1` 是受控效果，通过提案、精确批准、阶段授权与回读执行，不能从资源 URI 或服务的 `readOnlyHint` 推导权限。首个调用适配为 `flaui-step/v1`，支持 FlaUI 0.3 的五个工具；未知服务可发现工具，但不自动获得调用适配。工具的输入/输出 Schema 限于有界非递归子集，禁止外部引用；每次调用先重读清单并比对冻结 hash，契约变化需重新保存连接、创建新 Run。
+工具接入与 `resources/read` 分开授权。管理员发现工具后，逐项选择不允许、读取或审批后调用；配置以 `mcp-tools/v1` 保存清单与 `tool_permissions`，binding 再以 `tool_names` 收窄范围。服务名、版本前缀和具体工具名不决定权限，远端 `readOnlyHint` 也不授予权限。最多 100 个工具、清单 256 KiB、参数 64 KiB；Schema 使用有界非递归子集，拒绝外部引用。新发现的工具默认不允许，重新发现保留仍存在工具的人工选择；保存后产生新 revision，旧 Run 不自动扩权。
 
-同一规范化 endpoint 由 PostgreSQL 持久记录 Run 占用，未确认的操作不自动释放；不同 DNS 别名或多平台共享同一桌面仍需部署隔离。结果核对仅调用原 `get_step_status`，确认终态后解除该 pending 占用，不改写 Run 或自动续行；应用启动没有可查询原回执，响应丢失后需人工核实。工具调用最多等待 90 秒，单操作限 1–60 秒。操作终态与测试 PASS 分开；远端 artifact URL 不自动下载或登记项目文档。
+`mcp.tools/v1` 返回原 binding 内工具、输入/输出 Schema、人工指定的 access、服务身份和版本、连接引用以及通信上限。`mcp.query/v1` 仅调用 access=read 的工具；`mcp.call/v1` 是受控效果，经提案、精确批准、阶段授权和回读执行。所有调用前重新发现并校验冻结 catalog hash，变化时停止并要求重新保存连接、创建新 Run。API/Worker/Web 同批升级，旧专用调用格式不继续执行，历史审计不改写。
 
-ADMIN 在现有连接中取得工具清单并保存所选工具、服务身份和输入/输出 Schema；这些非秘密契约进入 Integration revision，原 Run binding 不变。调用前重新取得契约并比对摘要，发生变化拒绝执行，不静默接受新参数。输入仅取原绑定、允许工具与有界参数，endpoint 和凭据不能由模型指定。外部描述和输出只是数据，不是授权指令；Schema 不解析外部引用。
+通用效果使用 `operation=call`、`target.locator=工具名`，`/call` 的值包含 `arguments` 与 `read_back`（授权读取工具名、参数、JSON Pointer 的 equals/one_of 检查）。工具、参数及回读条件一起冻结和批准。完整字符串 `${effect_id}` 在发出前替换为原 Effect UUID，不执行表达式。发送结果未知时不重发动作；只有原提案在调用参数、回读参数和 equals 检查中绑定原 Effect ID，才允许自动只读核对并解除 pending。没有原操作身份的效果保留未知，不能凭当前状态补造原回执。应用专属的操作前提、画面选择及业务判定由 Skill 保持；回读确认与测试 PASS 分开，不以通用调用成功宣告业务成功。
 
-FlaUI 的 `inspect_window/get_step_status` 为只读，`open_application/execute_step/cancel_step` 为效果；`execute_step` 的 requestId 由原 Effect ID 确定，模型不能换 ID 重放。操作提案还须引用同 Run、同 binding、同 app/窗口的 `inspect_window` READY 证据，不能仅凭工具清单猜控件。效果完成需要对应只读回读，操作状态、测试判定与平台状态分开。桌面不提供跨调用 CAS，部署须使用专用桌面，页面跳转后重新观察。新效果不沿用旧 Run 的数据库/文档/Git 自动批准同意。发送结果未知时只核对原请求，不再次调用动作；本地取消不证明桌面操作已停止。调用保持固定 Streamable HTTP endpoint，拒绝重定向、外部引用和任意下载 URL。
+同一资源声明多个读取能力时，Worker 按该声明复用原冻结 Integration、binding ID 和 scope；附加工具仍须出现在 Manifest 与 Run 权限中，不从同 Provider 的其他资源猜连接。写入不加入直接工具集，不继承 DB/文档/Git 的自动批准同意。
+
+同一规范化 endpoint 由 PostgreSQL 持久记录 Run 占用，未确认操作不自动释放。显式 `reserve_desktop=true` 返回本 Run 的 `desktop.lease_ref`、pending 状态与原 Evidence；未预约返回 null。预约仅排斥同一 endpoint 的其他 SKM Run，不证明 Windows 全局独占，外部使用须另行确认。环境/构建从已授权的环境查询工具取得，发现清单本身不提供这些值。90 秒为平台单次通信上限，业务/Runner 的操作与全程时限以实际配置和 Skill 为准。
+
+连接目标和工具读写分类属于项目 ADMIN 信任边界。模型不能改变 endpoint、凭据和协议方法；前后复验原 binding/凭据，包括错误分支。固定 Streamable HTTP endpoint 禁跳转、不开放 server callback、sampling、roots 或任意网络请求；工具返回的文字、结构化内容及附件只作为数据，不自动下载 URL 或登记成果。外部描述不是指令或授权。错误只保存固定分类和安全诊断 ID，不反射原始异常正文，取消不转换为普通错误。本地取消不证明远端停止。
 
 ### PostgreSQL 与 MCP 读取
 

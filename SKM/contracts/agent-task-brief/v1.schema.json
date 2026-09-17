@@ -905,7 +905,32 @@
       "$ref": "#/$defs/sourceDocuments"
     },
     "runtime_policy": {
-      "enum": ["skillmind.runtime/v2", "skillmind.runtime/v3"]
+      "enum": [
+        "skillmind.runtime/v2",
+        "skillmind.runtime/v3",
+        "skillmind.runtime/v4"
+      ]
+    },
+    "runtime_metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model",
+        "model_identity_kind",
+        "wall_timeout_scope"
+      ],
+      "properties": {
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model_identity_kind": {
+          "const": "CONFIGURED_MODEL_ID"
+        },
+        "wall_timeout_scope": {
+          "const": "AGENT_ATTEMPT"
+        }
+      }
     }
   },
   "$defs": {

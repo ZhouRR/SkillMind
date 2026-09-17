@@ -9,6 +9,7 @@ from uuid import UUID
 
 from skillmind.agent.mcp_tools_source import StreamableHttpMcpToolsSource
 from skillmind.integrations.mcp_tools import digest, parse_result
+from skillmind.effects.mcp_call import check_read_back, has_operation_identity, resolve_effect_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,23 +47,11 @@ class McpOperationReceipt:
 
 def validate_receipt(command: McpOperationCommand, receipt: McpOperationReceipt) -> None:
     """元 ID と操作内容が同じ terminal receipt 以外を拒否する。"""
-    args = json.loads(command.arguments_json)
-    request_id = str(command.effect_id) if command.name == "execute_step" else args.get("requestId")
-    result = receipt.result
-    if command.name not in {"execute_step", "cancel_step"} or result.get("requestId") != request_id:
-        raise ValueError("MCP receipt identity differs")
-    if result.get("status") not in {"COMPLETED", "ERROR", "TIMEOUT", "CANCELLED", "ABORTED"}:
-        raise ValueError("MCP operation is not confirmed terminal")
-    if command.name == "execute_step" and any(
-        result.get(k) != args[k] for k in ("appId", "operation")
-    ):
-        raise ValueError("MCP receipt operation differs")
-    if (
-        command.name == "cancel_step"
-        and not result.get("cancellationRequested")
-        and result.get("status") != "CANCELLED"
-    ):
-        raise ValueError("MCP cancellation is not confirmed")
+    payload = json.loads(command.arguments_json)
+    if not has_operation_identity(payload):
+        raise ValueError("MCP original operation has no verifiable receipt identity")
+    resolved = resolve_effect_id(payload, str(command.effect_id))
+    check_read_back(resolved["read_back"], receipt.result)
 
 
 async def lookup_operation(
@@ -72,15 +61,14 @@ async def lookup_operation(
     command: McpOperationCommand,
 ) -> McpOperationReceipt | None:
     """原 requestId の状態だけを照会し、起動結果を現在プロセスから推測しない。"""
-    if command.name == "open_application":
-        raise ValueError("Application launch has no queryable operation receipt")
-    args = json.loads(command.arguments_json)
-    request_id = str(command.effect_id) if command.name == "execute_step" else args["requestId"]
-    result = parse_result(
-        await source.call(config, credential, "get_step_status", {"requestId": request_id})
-    )
-    if result.get("requestId") == request_id and result.get("status") == "RUNNING":
-        return None
+    payload = json.loads(command.arguments_json)
+    if not has_operation_identity(payload):
+        raise ValueError("MCP original operation has no verifiable receipt identity")
+    reader = resolve_effect_id(payload, str(command.effect_id))["read_back"]
+    result = parse_result(await source.call(config, credential, reader["name"], reader["arguments"]))
     receipt = McpOperationReceipt(result)
-    validate_receipt(command, receipt)
+    try:
+        validate_receipt(command, receipt)
+    except ValueError:
+        return None
     return receipt

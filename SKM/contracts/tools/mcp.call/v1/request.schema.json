@@ -3,28 +3,88 @@
   "additionalProperties": false,
   "properties": {
     "name": {
-      "enum": [
-        "open_application",
-        "execute_step",
-        "cancel_step"
-      ]
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_.-]{1,128}$"
     },
     "arguments": {
-      "type": "object",
-      "maxProperties": 6
+      "type": "object"
     },
     "catalog_hash": {
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "read_back": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "arguments",
+        "checks"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_.-]{1,128}$"
+        },
+        "arguments": {
+          "type": "object"
+        },
+        "checks": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "path",
+                  "equals"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "pattern": "^/",
+                    "maxLength": 512
+                  },
+                  "equals": {}
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "path",
+                  "one_of"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "pattern": "^/",
+                    "maxLength": 512
+                  },
+                  "one_of": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 20
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
     }
   },
   "required": [
     "name",
     "arguments",
-    "catalog_hash"
+    "catalog_hash",
+    "read_back"
   ],
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.skillmind.local/tools/mcp.call/v1/request.schema.json",
   "title": "mcp.call/v1 request",
-  "description": "Effect-only approved FlaUI call through change.propose/v1. First read mcp.tools/v1 Evidence. operation and target.locator = open_application, execute_step or cancel_step. One /call SET value = exact tool arguments; execute_step omits requestId (platform supplies original Effect UUID). precondition.revision = observed catalog_hash. verification = READ_BACK /call. Each call requires approval. Never retry actions with a new requestId on unknown results. Query original status only. COMPLETED confirms one operation, not test PASS. Artifact download paths are not saved project documents. execute_step also requires mcp.query inspect_window Evidence for the same appId and window; select controls from that observation. Desktop state can change; use a dedicated desktop and re-inspect after navigation."
+  "description": "Approved MCP tools/call through change.propose/v1 only. Observe mcp.tools/v1 Evidence first. operation=\"call\", target.locator=the authorized tool name. One /call SET value={\"arguments\":{...},\"read_back\":{\"name\":\"authorized_read_tool\",\"arguments\":{...},\"checks\":[{\"path\":\"/field\",\"equals\":\"expected value\"}]}}. Each check uses equals or one_of, with a JSON Pointer into the parsed read result. precondition.revision=catalog_hash; verification={\"method\":\"READ_BACK\",\"paths\":[\"/call\"]}. Both tools and all arguments/checks are approved together. Use the exact string ${effect_id} for a platform-owned operation ID in arguments and read-back checks; the platform substitutes the original Effect UUID. Unknown outcomes are never resent. Original receipt recovery requires a read-back equals check against ${effect_id}; otherwise keep the outcome unknown. Application-specific prerequisites and business verdicts remain defined by the Skill. Returned URLs are not downloaded or saved artifacts."
 }

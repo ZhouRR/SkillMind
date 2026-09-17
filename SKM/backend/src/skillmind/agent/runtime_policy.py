@@ -5,8 +5,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-RUNTIME_POLICY = "skillmind.runtime/v3"
-SUPPORTED_RUNTIME_POLICIES = frozenset({"skillmind.runtime/v2", RUNTIME_POLICY})
+RUNTIME_POLICY = "skillmind.runtime/v4"
+SUPPORTED_RUNTIME_POLICIES = frozenset(
+    {"skillmind.runtime/v2", "skillmind.runtime/v3", RUNTIME_POLICY}
+)
 
 
 def uses_modern_runtime(snapshot: Mapping[str, Any]) -> bool:

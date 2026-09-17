@@ -6,6 +6,10 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 1000
+    },
+    "reserve_desktop": {
+      "type": "boolean",
+      "description": "Reserve the same endpoint for this Run. Does not verify exclusive Windows use outside SKM."
     }
   },
   "required": [],

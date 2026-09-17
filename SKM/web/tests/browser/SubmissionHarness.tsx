@@ -13,6 +13,8 @@ interface TestContext {
   language: UiLanguage
   screen: 'workspace' | 'tasks'
   initialRunId: string | null
+  initialTaskId: string | null
+  moduleId: string
   detailView: boolean
 }
 
@@ -30,6 +32,7 @@ export function SubmissionHarness() {
     projectId: '00000000-0000-4000-8000-000000000020',
     csrfToken: 'c'.repeat(32), language: 'zh',
     screen: 'workspace', initialRunId: new URLSearchParams(location.search).get('run'),
+    initialTaskId: new URLSearchParams(location.search).get('task'), moduleId: '',
     detailView: false,
   })
   useEffect(() => {
@@ -42,14 +45,15 @@ export function SubmissionHarness() {
         key={`${context.actorId}:${context.projectId}`}
         csrfToken={context.csrfToken}
         projectId={context.projectId}
-        moduleId=""
+        moduleId={context.moduleId}
       /> : <WorkspacePage
         key={`${context.actorId}:${context.projectId}`}
         actorId={context.actorId}
         csrfToken={context.csrfToken}
         projectId={context.projectId}
-        moduleId=""
+        moduleId={context.moduleId}
         initialRunId={context.initialRunId}
+        initialTaskId={context.initialTaskId}
         detailView={context.detailView}
         onSessionExpired={() => window.dispatchEvent(new Event('interaction-session-expired'))}
       />}

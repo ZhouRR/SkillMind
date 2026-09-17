@@ -3,14 +3,11 @@
   "additionalProperties": false,
   "properties": {
     "name": {
-      "enum": [
-        "inspect_window",
-        "get_step_status"
-      ]
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_.-]{1,128}$"
     },
     "arguments": {
-      "type": "object",
-      "maxProperties": 5
+      "type": "object"
     },
     "purpose": {
       "type": "string",
@@ -25,5 +22,5 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.skillmind.local/tools/mcp.query/v1/request.schema.json",
   "title": "mcp.query/v1 request",
-  "description": "Call only inspect_window(appId, optional windowTitle) or get_step_status(requestId) within the original Run. Does not start applications or execute actions."
+  "description": "Call a tool explicitly authorized as read in mcp.tools/v1. Validate arguments against its frozen input_schema. Other tools require change.propose/v1 approval."
 }

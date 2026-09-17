@@ -5,7 +5,7 @@ from skillmind.core.hashing import canonical_json, sha256_hex
 
 # 各 Provider の提案 validator と一致する操作名。資格情報や接続範囲を生成しない。
 WRITE_OPERATIONS: dict[str, tuple[str, ...]] = {
-    "mcp.call/v1": ("open_application", "execute_step", "cancel_step"),
+    "mcp.call/v1": ("call",),
     "database.write/v1": ("INSERT", "UPDATE"),
     "document.write/v1": ("CREATE",),
     "repository.write/v1": ("commit",),

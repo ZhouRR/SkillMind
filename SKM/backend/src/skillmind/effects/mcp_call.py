@@ -1,4 +1,4 @@
-"""FlaUI の一操作を既存の proposal/approval/read-back 契約へ束縛する。"""
+"""MCP の一操作と明示的な回読を、既存の承認契約へ束縛する。"""
 
 from __future__ import annotations
 
@@ -7,49 +7,87 @@ from typing import Any
 
 from skillmind.effects.domain import ChangeProposalDraft, ChangeProposalValidationError
 from skillmind.integrations.mcp_tools import (
-    WRITE_TOOLS,
-    configured_tool,
-    digest,
-    validate_arguments,
-    validate_tool_value,
+    PROFILE, configured_tool, digest, tool_access, validate_arguments, validate_tool_value,
 )
 
 MCP_CALL = "mcp.call/v1"
-MCP_PROVIDER_VERSION = "flaui-step/v1"
+MCP_PROVIDER_VERSION = PROFILE
+EFFECT_ID = "${effect_id}"
+
+
+def resolve_effect_id(value: Any, effect_id: str) -> Any:
+    """完全一致の予約値だけを置換し、部分文字列や式を評価しない。"""
+    if isinstance(value, dict):
+        return {key: resolve_effect_id(item, effect_id) for key, item in value.items()}
+    if isinstance(value, list):
+        return [resolve_effect_id(item, effect_id) for item in value]
+    return effect_id if value == EFFECT_ID else value
 
 
 def call_payload(
-    *,
-    operation: str,
-    target: Mapping[str, Any],
-    changes: tuple[dict[str, Any], ...],
-    precondition: Mapping[str, Any],
-    verification: Mapping[str, Any],
-    scope: Mapping[str, Any],
-    config: Mapping[str, Any],
+    *, operation: str, target: Mapping[str, Any], changes: tuple[dict[str, Any], ...],
+    precondition: Mapping[str, Any], verification: Mapping[str, Any],
+    scope: Mapping[str, Any], config: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """承認の対象 tool・全引数・清單 revision を一致させる。requestId は platform が採番する。"""
-    if operation not in WRITE_TOOLS or target.get("locator") != operation:
+    """工具名・全引数・回読条件を一緒に承認する。工具名で業務動作を推定しない。"""
+    name = target.get("locator")
+    if operation != "call" or not isinstance(name, str) or tool_access(config, name) != "call":
         raise ValueError("MCP operation target is invalid")
-    tool = configured_tool(config, scope, operation)
-    # Task の範囲絞り込みで回読権が落ちていれば、提案段階から拒否する。
-    for reader in ("inspect_window", "get_step_status"):
-        configured_tool(config, scope, reader)
-    if (
-        len(changes) != 1
-        or set(changes[0]) != {"path", "action", "value"}
-        or changes[0]["path"] != "/call"
-        or changes[0]["action"] != "SET"
+    tool = configured_tool(config, scope, name)
+    if (len(changes) != 1 or set(changes[0]) != {"path", "action", "value"}
+        or changes[0]["path"] != "/call" or changes[0]["action"] != "SET"
         or verification != {"method": "READ_BACK", "paths": ["/call"]}
-        or precondition != {"revision": digest(config["tool_catalog"])}
-    ):
-        raise ValueError("MCP proposal must use the observed tool contract and one exact call")
-    params = validate_arguments(operation, changes[0]["value"], proposal=True)
-    schema_args = dict(params)
-    if operation == "execute_step":
-        schema_args["requestId"] = "00000000-0000-4000-8000-000000000001"
-    validate_tool_value(tool["input_schema"], schema_args)
-    return {"name": operation, "arguments": params, "catalog_hash": precondition["revision"]}
+        or precondition != {"revision": digest(config["tool_catalog"])}):
+        raise ValueError("MCP proposal requires its observed catalog and exact call")
+    value = changes[0]["value"]
+    if not isinstance(value, dict) or set(value) != {"arguments", "read_back"}:
+        raise ValueError("MCP call requires explicit arguments and read_back")
+    args = validate_arguments(name, value["arguments"])
+    read_back = value["read_back"]
+    if not isinstance(read_back, dict) or set(read_back) != {"name", "arguments", "checks"}:
+        raise ValueError("MCP read_back is invalid")
+    reader = read_back["name"]
+    if not isinstance(reader, str) or tool_access(config, reader) != "read":
+        raise ValueError("MCP read_back must use an authorized read tool")
+    reader_tool = configured_tool(config, scope, reader)
+    read_args = validate_arguments(reader, read_back["arguments"])
+    checks = read_back["checks"]
+    if not isinstance(checks, list) or not 1 <= len(checks) <= 20:
+        raise ValueError("MCP read_back requires bounded checks")
+    for check in checks:
+        if (not isinstance(check, dict) or set(check) not in ({"path", "equals"}, {"path", "one_of"})
+            or not isinstance(check["path"], str) or not check["path"].startswith("/")
+            or len(check["path"]) > 512
+            or ("one_of" in check and (not isinstance(check["one_of"], list)
+                or not 1 <= len(check["one_of"]) <= 20))):
+            raise ValueError("MCP read_back check is invalid")
+    sample_id = "00000000-0000-4000-8000-000000000001"
+    validate_tool_value(tool["input_schema"], resolve_effect_id(args, sample_id))
+    validate_tool_value(reader_tool["input_schema"], resolve_effect_id(read_args, sample_id))
+    payload = {"name": name, "arguments": args, "read_back": read_back,
+               "catalog_hash": precondition["revision"]}
+    validate_arguments(name, payload)
+    return payload
+
+
+def check_read_back(read_back: Mapping[str, Any], result: Mapping[str, Any]) -> None:
+    """JSON Pointer が実際に存在し、承認済み比較条件を満たすことを確認する。"""
+    for check in read_back["checks"]:
+        value: Any = result
+        try:
+            for part in check["path"][1:].split("/"):
+                key = part.replace("~1", "/").replace("~0", "~")
+                value = value[int(key)] if isinstance(value, list) else value[key]
+        except (KeyError, TypeError, ValueError, IndexError):
+            raise ValueError("MCP read_back path is missing") from None
+        candidates = check["one_of"] if "one_of" in check else [check["equals"]]
+        if not any(digest(value) == digest(candidate) for candidate in candidates):
+            raise ValueError("MCP read_back did not match")
+
+
+def has_operation_identity(payload: Mapping[str, Any]) -> bool:
+    """再照会は原 Effect ID の完全一致を確認できる契約だけに限定する。"""
+    return any(check.get("equals") == EFFECT_ID for check in payload["read_back"]["checks"])
 
 
 def validate_mcp_proposal(
@@ -57,15 +95,8 @@ def validate_mcp_proposal(
 ) -> dict[str, Any]:
     """保存前と claim 前に同じ関数で model 提案を検証する。"""
     try:
-        return call_payload(
-            operation=draft.operation,
-            target=draft.target,
-            changes=draft.changes,
-            precondition=draft.precondition,
-            verification=draft.verification,
-            scope=scope,
-            config=config,
-        )
+        return call_payload(operation=draft.operation, target=draft.target, changes=draft.changes,
+            precondition=draft.precondition, verification=draft.verification, scope=scope, config=config)
     except ValueError:
         raise ChangeProposalValidationError(
             "MCP proposal does not match the authorized tool contract"
@@ -73,5 +104,5 @@ def validate_mcp_proposal(
 
 
 def mcp_call_scope(payload: Mapping[str, Any]) -> dict[str, Any]:
-    """承認範囲は単一 tool とし、resource URI の読取権を追加しない。"""
-    return {"resource_uris": [], "tool_names": [payload["name"]]}
+    """承認に含む工具だけを要求し、資源 URI の権限を追加しない。"""
+    return {"resource_uris": [], "tool_names": sorted({payload["name"], payload["read_back"]["name"]})}

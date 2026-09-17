@@ -136,13 +136,13 @@ export function accessForCapabilities(capabilities: readonly string[]): Resource
 /** 構造化入力から server の scope allowlist 形へ組み立てる。形は Provider ごとに固定。 */
 export function buildIntegrationScope(
   provider: ResourceProvider,
-  input: { issueIds: string[]; fieldKeys: string[]; paths: string[]; revisions: string[]; tables?: string[]; resourceUris?: string[]; mcpTools?: boolean; writeEnabled?: boolean; writeColumns?: string[]; operations?: string[] },
+  input: { issueIds: string[]; fieldKeys: string[]; paths: string[]; revisions: string[]; tables?: string[]; resourceUris?: string[]; mcpTools?: boolean; mcpPermissions?: Record<string, string>; writeEnabled?: boolean; writeColumns?: string[]; operations?: string[] },
 ): Record<string, string[]> {
   if (provider === 'postgres') return input.writeEnabled
     ? { tables: input.tables ?? [], write_columns: input.writeColumns ?? [], operations: input.operations ?? [] }
     : { tables: input.tables ?? [] }
-  if (provider === 'mcp') return { resource_uris: input.resourceUris ?? [], ...(input.mcpTools ? { tool_names: input.writeEnabled
-    ? ['inspect_window', 'get_step_status', 'open_application', 'execute_step', 'cancel_step'] : ['inspect_window', 'get_step_status'] } : {}) }
+  if (provider === 'mcp') return { resource_uris: input.resourceUris ?? [], ...(input.mcpTools
+    ? { tool_names: Object.entries(input.mcpPermissions ?? {}).filter(([, mode]) => mode === 'read' || (mode === 'call' && input.writeEnabled)).map(([name]) => name).sort() } : {}) }
   if (provider === 'redmine') {
     return { issue_ids: input.issueIds, field_keys: input.fieldKeys }
   }
@@ -180,13 +180,14 @@ export function buildIntegrationConfig(
     serverUrl?: string
     mcpCatalog?: Record<string, unknown> | null
     mcpTools?: boolean
+    mcpPermissions?: Record<string, string>
     write?: RepositoryWriteInput
   },
 ): Record<string, unknown> {
   if (provider === 'postgres') return { host: input.host?.trim() ?? '', port: Number(input.port ?? '5432'),
     database: input.database?.trim() ?? '', username: input.username?.trim() ?? '', sslmode: input.sslmode ?? 'verify-full' }
   if (provider === 'mcp') return { server_url: input.serverUrl?.trim() ?? '', transport: 'streamable_http',
-    ...(input.mcpTools && input.mcpCatalog ? { tool_profile: 'flaui-step/v1', tool_catalog: input.mcpCatalog } : {}) }
+    ...(input.mcpTools && input.mcpCatalog ? { tool_profile: 'mcp-tools/v1', tool_catalog: input.mcpCatalog, tool_permissions: Object.fromEntries(Object.entries(input.mcpPermissions ?? {}).filter(([, mode]) => mode === 'read' || (mode === 'call' && input.write?.writeEnabled))) } : {}) }
   if (provider === 'redmine') {
     return { base_url: input.baseUrl.trim() }
   }
@@ -454,14 +455,13 @@ export function collectRequirementOptions(tasks: readonly PublishedTaskRecord[])
   return [...merged.values()].sort((a, b) => a.key.localeCompare(b.key))
 }
 
-/** 保存可能な最初の profile は審査済み FlaUI 0.3 の五 tool に限定する。 */
-export function supportsFlaUiCatalog(catalog: Record<string, unknown>): boolean {
-  const server = catalog.server
-  if (typeof server !== 'object' || server === null || !('name' in server) || server.name !== 'FlaUiMcp'
-    || !('version' in server) || typeof server.version !== 'string' || !server.version.startsWith('0.3.')
-    || !Array.isArray(catalog.tools)) return false
-  const names = catalog.tools.flatMap((tool: unknown) => typeof tool === 'object' && tool !== null
-    && 'name' in tool && typeof tool.name === 'string' ? [tool.name] : [])
-  return ['inspect_window', 'get_step_status', 'open_application', 'execute_step', 'cancel_step']
-    .every((name) => names.includes(name))
+/** 発見した工具は名称・サービス名によらず、管理者が個別に権限を指定する。 */
+export function supportsMcpCatalog(catalog: Record<string, unknown>): boolean {
+  return Array.isArray(catalog.tools) && catalog.tools.length > 0 && catalog.tools.length <= 100
+}
+
+/** 契約内の実在する名前だけを画面へ列挙する。 */
+export function mcpToolNames(catalog: Record<string, unknown> | null): string[] {
+  return Array.isArray(catalog?.tools) ? catalog.tools.flatMap((tool: unknown) =>
+    typeof tool === 'object' && tool !== null && 'name' in tool && typeof tool.name === 'string' ? [tool.name] : []) : []
 }
