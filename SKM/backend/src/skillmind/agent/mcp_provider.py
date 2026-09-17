@@ -30,8 +30,10 @@ class McpReadProvider:
         *,
         source: McpResourceSource,
         secret_resolver: DeploymentSecretResolver,
+        capability: str = "mcp.read/v1",
     ) -> None:
         """Project の権限 DB、I/O source、非公開 Secret resolver を注入する。"""
+        self._capability = capability
         self._session_factory = session_factory
         self._source = source
         self._secret_resolver = secret_resolver
@@ -49,7 +51,7 @@ class McpReadProvider:
                     binding_id=context.tool.binding_id,
                     integration_id=context.tool.integration_id,
                     provider="mcp",
-                    capability="mcp.read/v1",
+                    capability=self._capability,
                 )
                 token = await resolve_binding_secret(
                     session,

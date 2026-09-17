@@ -107,6 +107,17 @@ async def test_outside_scope_or_protocol_override_never_contacts_server(
 
 
 @pytest.mark.asyncio
+async def test_empty_scope_denies_reads_without_contacting_server(provider, mcp_context, resource):
+    """接続だけの登録は任意 URI や遠端 tools の許可として扱わない。"""
+    implementation, source, bound, _ = provider
+    bound.return_value = replace(resource, scope={"resource_uris": []})
+    with pytest.raises(ToolProviderError) as failure:
+        await implementation.execute(mcp_context, {"uri": URI})
+    assert failure.value.code == "scope_denied"
+    source.read.assert_not_called()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("changed", ["revoked", "rotated", "revision"])
 async def test_changes_during_read_discard_contents(provider, mcp_context, resource, changed):
     """読取後の撤権・資格情報輪換・接続版変更では Evidence を発行しない。"""

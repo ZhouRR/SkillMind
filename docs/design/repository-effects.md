@@ -38,6 +38,7 @@ observe → Evidence → change.propose → 精确批准/允许的预授权
 | issue.update/v1 | Redmine CAS adapter；仅 system ADMIN 配置 LOW 风险精确 scope 可预授权，discovery → 前置 revision → 条件写入 → 回读 |
 | repository.write/v1 | Git 独立开关、精确 ref CAS 与原提交核对；Git 可由新 Run 启动同意自动批准，SVN 仍人工批准，均不 force，SVN 可靠性仍待补 |
 | database.write/v1 | PostgreSQL 单行 INSERT/UPDATE，逐次批准或 Run 启动同意；独立部署开关、可信原行 Evidence、精确表/列范围与同事务回执 |
+| mcp.call/v1 | FlaUI 单步操作，独立开关、同 Run 工具/窗口 Evidence、逐次精确批准与原请求状态核对；不继承 DB/文档/Git 自动批准，详见[工具接入边界](resource-snapshots.md#mcp-工具接入边界) |
 | document.write/v1 | 项目文档库 CREATE，逐次批准或 Run 启动同意；按原 Effect/内容隔离物理对象，独立部署开关默认关闭；异常恢复验收仍待补 |
 
 标准 Redmine REST 不具本协议 CAS/幂等，须通过版本化 discovery 及真实竞争验收。批准复验 actor/Project/version/checksum/Integration/binding/scope；仅 Run 发起人或组织 system ADMIN 决策。HTTP 决策在共享事务内锁定当前账户、原 Session 和项目，复验 CSRF、当前角色及成员关系，提交前再次验证；不能沿用请求开始时缓存的管理员身份。

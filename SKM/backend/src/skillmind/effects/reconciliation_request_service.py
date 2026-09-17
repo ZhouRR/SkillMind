@@ -9,11 +9,13 @@ from datetime import UTC, datetime, timedelta
 from secrets import token_urlsafe
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from skillmind.auth.sessions import UnauthorizedSessionError, validate_session_state
-from skillmind.db.models import EffectReconciliationRequest
+from skillmind.db.models import EffectReconciliationRequest, McpDesktopLease
 from skillmind.documents.library import DocumentLibraryTarget
+from skillmind.effects.mcp_receipt import McpOperationCommand
 from skillmind.effects.reconciliation_domain import (
     EffectReconciliationDeniedError,
     EffectReconciliationObservation,
@@ -356,6 +358,14 @@ class ReconciliationRequestService:
                         target=target,
                         now=datetime.now(UTC),
                     )
+                    if (isinstance(target.command, McpOperationCommand)
+                        and observation.status == "CONFIRMED"):
+                        lease = (await session.scalars(select(McpDesktopLease).where(
+                            McpDesktopLease.run_id == target.command.run_id,
+                            McpDesktopLease.pending_effect_id == target.command.effect_id,
+                        ).with_for_update())).one_or_none()
+                        if lease is not None:
+                            lease.pending_effect_id = None
                     await session.flush()
                     if not authorize() or (
                         not replay

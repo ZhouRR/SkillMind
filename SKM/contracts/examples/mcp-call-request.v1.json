@@ -1,0 +1,7 @@
+{
+  "name": "open_application",
+  "arguments": {
+    "appId": "sample"
+  },
+  "catalog_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+}

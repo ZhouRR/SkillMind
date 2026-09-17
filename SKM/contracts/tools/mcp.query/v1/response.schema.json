@@ -1,0 +1,45 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "const": "success"
+    },
+    "provider": {
+      "const": "mcp"
+    },
+    "evidence_refs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^ev_[a-zA-Z0-9_-]+$"
+      }
+    },
+    "observed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "name": {
+      "enum": [
+        "inspect_window",
+        "get_step_status"
+      ]
+    },
+    "result": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "status",
+    "provider",
+    "evidence_refs",
+    "observed_at",
+    "name",
+    "result"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/mcp.query/v1/response.schema.json",
+  "title": "mcp.query/v1 response"
+}

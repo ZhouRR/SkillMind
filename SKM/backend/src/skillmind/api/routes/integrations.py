@@ -12,7 +12,10 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from skillmind.api.auth_dependencies import (
     AdminReadActor,
     AdminWriteActor,
+    admin_actor,
+    api_key_actor,
     authorize_project_access,
+    csrf_authenticated_actor,
 )
 from skillmind.api.problems import ProblemException
 from skillmind.core.secret_crypto import SecretCryptoError
@@ -37,6 +40,14 @@ from skillmind.integrations import (
 from skillmind.integrations.domain import UpdateSecretReferenceCommand
 
 router = APIRouter()
+
+
+class McpDiscoveryResponse(BaseModel):
+    """業務 tool を実行しない発見結果。保存操作までは接続を変更しない。"""
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int
+    catalog: dict[str, Any]
+    catalog_hash: str
 
 
 class CreateSecretReferenceRequest(BaseModel):
@@ -198,6 +209,63 @@ class IntegrationDetailsResponse(BaseModel):
 
     integration: IntegrationResponse
     config: dict[str, Any]
+
+
+@router.post(
+    "/projects/{project_id}/integrations/{integration_id}/mcp-tools/discover",
+    response_model=McpDiscoveryResponse,
+    tags=["integrations"],
+)
+async def discover_mcp_tools(
+    request: Request,
+    project_id: UUID,
+    integration_id: UUID,
+    actor: AdminWriteActor,
+    body: DisableIntegrationRequest,
+) -> McpDiscoveryResponse:
+    """ADMIN の明示操作で保存済み MCP の tool 清單だけを読む。"""
+    from skillmind.agent.mcp_tools_source import McpToolsError
+    from skillmind.integrations.mcp_tools import digest
+    from skillmind.integrations.secrets import SecretResolutionError
+
+    await authorize_project_access(request, actor, project_id, require_active=True)
+    if not request.app.state.settings.mcp_tools_enabled:
+        raise ProblemException(
+            status=409,
+            code="mcp_tools_disabled",
+            title="MCP tools disabled",
+            detail="MCP tools are not enabled in this deployment",
+        )
+    service: IntegrationService = request.app.state.integration_service
+    try:
+        catalog = await service.discover_mcp_tools(
+            project_id=project_id,
+            integration_id=integration_id,
+            expected_revision=body.expected_revision,
+        )
+    except (IntegrationNotFoundError, SecretReferenceNotFoundError) as error:
+        raise _not_found_problem("Integration", error) from error
+    except IntegrationConflictError as error:
+        raise _conflict_problem(error) from error
+    except IntegrationValidationError as error:
+        raise _validation_problem(error) from error
+    except (McpToolsError, SecretResolutionError):
+        raise ProblemException(
+            status=503,
+            code="mcp_discovery_unavailable",
+            title="MCP discovery unavailable",
+            detail="MCP tool discovery could not be completed",
+        ) from None
+    await authorize_project_access(request, actor, project_id, require_active=True)
+    current = await admin_actor(
+        await csrf_authenticated_actor(
+            request, await api_key_actor(request, None, None), request.headers.get("X-CSRF-Token")
+        )
+    )
+    await authorize_project_access(request, current, project_id, require_active=True)
+    return McpDiscoveryResponse(
+        expected_revision=body.expected_revision, catalog=catalog, catalog_hash=digest(catalog)
+    )
 
 
 @router.patch(

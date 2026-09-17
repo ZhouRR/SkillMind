@@ -4322,6 +4322,32 @@
         "title": "ManifestGateFindingResponse",
         "type": "object"
       },
+      "McpDiscoveryResponse": {
+        "additionalProperties": false,
+        "description": "業務 tool を実行しない発見結果。保存操作までは接続を変更しない。",
+        "properties": {
+          "catalog": {
+            "additionalProperties": true,
+            "title": "Catalog",
+            "type": "object"
+          },
+          "catalog_hash": {
+            "title": "Catalog Hash",
+            "type": "string"
+          },
+          "expected_revision": {
+            "title": "Expected Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "catalog",
+          "catalog_hash"
+        ],
+        "title": "McpDiscoveryResponse",
+        "type": "object"
+      },
       "MetaResponse": {
         "description": "Web が現在の実装 scope と配備経路を確認するための metadata。",
         "properties": {
@@ -5331,7 +5357,8 @@
             "enum": [
               "DATABASE_TRANSACTION",
               "DOCUMENT_OBJECT",
-              "GIT_COMMIT"
+              "GIT_COMMIT",
+              "MCP_OPERATION"
             ],
             "title": "Kind",
             "type": "string"
@@ -7763,6 +7790,11 @@
           "git_writes_enabled": {
             "default": false,
             "title": "Git Writes Enabled",
+            "type": "boolean"
+          },
+          "mcp_tools_enabled": {
+            "default": false,
+            "title": "Mcp Tools Enabled",
             "type": "boolean"
           },
           "scheduling_enabled": {
@@ -19821,6 +19853,94 @@
           }
         ],
         "summary": "Disable Integration",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/integrations/{integration_id}/mcp-tools/discover": {
+      "post": {
+        "description": "ADMIN の明示操作で保存済み MCP の tool 清單だけを読む。",
+        "operationId": "discover_mcp_tools_api_v1_projects__project_id__integrations__integration_id__mcp_tools_discover_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "integration_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Integration Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DisableIntegrationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpDiscoveryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyBearer": []
+          },
+          {
+            "ApiKeyHeader": []
+          }
+        ],
+        "summary": "Discover Mcp Tools",
         "tags": [
           "integrations"
         ]

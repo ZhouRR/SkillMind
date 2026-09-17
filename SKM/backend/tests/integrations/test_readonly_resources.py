@@ -66,15 +66,23 @@ def test_mcp_canonical_unicode_scope_can_be_normalized_again() -> None:
 
 
 @pytest.mark.parametrize("provider", ["postgres", "mcp"])
-@pytest.mark.parametrize("values", [[], ["invalid"], [123]])
+@pytest.mark.parametrize("values", [["invalid"], [123]])
 def test_resource_scope_rejects_missing_wildcard_and_malformed_values(
     provider: str,
     values: list[object],
 ) -> None:
-    """空・不正な識別子を登録で拒否する。"""
+    """不正な識別子を登録で拒否する。"""
     key = "tables" if provider == "postgres" else "resource_uris"
     with pytest.raises(IntegrationValidationError):
         normalize_integration_command(replace(command(provider), scope={key: values}))
+
+
+def test_empty_mcp_scope_preserves_connection_without_granting_resource_access() -> None:
+    """Resources がない接続を保存でき、PostgreSQL の必須範囲は変えない。"""
+    original = replace(command("mcp"), scope={"resource_uris": []})
+    assert normalize_integration_command(original) == original
+    with pytest.raises(IntegrationValidationError):
+        normalize_integration_command(replace(command("postgres"), scope={"tables": []}))
 
 
 @pytest.mark.parametrize("provider", ["postgres", "mcp"])

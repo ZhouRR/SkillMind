@@ -469,7 +469,7 @@ function renderPage(
       return <ResourcesPage csrfToken={session.csrf_token} projectId={projectId}
         deferredFeaturesEnabled={session.deferred_features_enabled === true}
         databaseWritesEnabled={session.database_writes_enabled === true}
-        gitWritesEnabled={session.git_writes_enabled === true} />
+        mcpToolsEnabled={session.mcp_tools_enabled === true} gitWritesEnabled={session.git_writes_enabled === true} />
     case 'schedules':
     case 'tasks':
       return <TasksPage key={`${session.user.user_id}:${projectId}`} csrfToken={session.csrf_token} actorId={session.user.user_id} onSessionEnded={onSessionEnded} moduleId={activeModuleId} projectId={projectId}

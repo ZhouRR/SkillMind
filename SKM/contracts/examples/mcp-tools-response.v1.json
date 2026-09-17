@@ -1,0 +1,20 @@
+{
+  "status": "success",
+  "provider": "mcp",
+  "evidence_refs": [
+    "ev_catalog"
+  ],
+  "observed_at": "2026-09-17T00:00:00Z",
+  "profile": "flaui-step/v1",
+  "catalog_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "tools": [
+    {
+      "name": "inspect_window",
+      "description": "Inspect",
+      "input_schema": {
+        "type": "object"
+      },
+      "output_schema": null
+    }
+  ]
+}

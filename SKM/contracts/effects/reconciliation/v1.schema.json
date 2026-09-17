@@ -10,7 +10,7 @@
     "project_id": {"type": "string", "format": "uuid"},
     "run_id": {"type": "string", "format": "uuid"},
     "effect_execution_id": {"type": "string", "format": "uuid"},
-    "kind": {"enum": ["DATABASE_TRANSACTION", "DOCUMENT_OBJECT", "GIT_COMMIT"]},
+    "kind": {"enum": ["DATABASE_TRANSACTION", "DOCUMENT_OBJECT", "GIT_COMMIT", "MCP_OPERATION"]},
     "status": {"enum": ["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "REVOKED"]},
     "created_at": {"type": "string", "format": "date-time"},
     "finished_at": {"type": ["string", "null"], "format": "date-time"},

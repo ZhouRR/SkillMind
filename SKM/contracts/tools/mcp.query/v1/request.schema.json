@@ -1,0 +1,29 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "enum": [
+        "inspect_window",
+        "get_step_status"
+      ]
+    },
+    "arguments": {
+      "type": "object",
+      "maxProperties": 5
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    }
+  },
+  "required": [
+    "name",
+    "arguments"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/mcp.query/v1/request.schema.json",
+  "title": "mcp.query/v1 request",
+  "description": "Call only inspect_window(appId, optional windowTitle) or get_step_status(requestId) within the original Run. Does not start applications or execute actions."
+}

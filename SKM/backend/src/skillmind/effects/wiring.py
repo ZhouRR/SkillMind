@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from functools import partial
 
+from skillmind.agent.mcp_lease import McpDesktopLeases
+from skillmind.agent.mcp_tools_source import StreamableHttpMcpToolsSource
 from skillmind.agent.repository_client import (
     GitWritableRepositoryClient,
     SvnWritableRepositoryClient,
@@ -17,6 +19,8 @@ from skillmind.effects.database_write import (
 )
 from skillmind.effects.document_provider import DocumentWriteProvider
 from skillmind.effects.document_service import DocumentEffectService
+from skillmind.effects.mcp_call import MCP_CALL, MCP_PROVIDER_VERSION
+from skillmind.effects.mcp_provider import McpCallProvider
 from skillmind.effects.postgres_write import PostgresDatabaseWriteSource
 from skillmind.effects.provider import (
     EffectProvider,
@@ -44,10 +48,29 @@ def create_effect_provider_registry(
     svn_client: SvnWritableRepositoryClient,
     document_service: DocumentEffectService | None = None,
     document_source: S3ObjectWriteSource | None = None,
+    mcp_leases: McpDesktopLeases | None = None,
 ) -> EffectProviderRegistry:
     """API readiness と同じ capability 上限、catalog の原 version でだけ登録する。"""
 
     implementations: list[tuple[str, str, EffectProvider]] = []
+    if features.mcp_tools:
+        if mcp_leases is None:
+            raise ValueError("MCP calls require persistent desktop ownership")
+        implementations.append(
+            (
+                MCP_CALL,
+                "mcp",
+                McpCallProvider(
+                    source=StreamableHttpMcpToolsSource(),
+                    leases=mcp_leases,
+                    authorize=partial(
+                        effect_service.authorize_effect_step,
+                        provider_version=MCP_PROVIDER_VERSION,
+                        secret_resolver=secret_resolver,
+                    ),
+                ),
+            )
+        )
     if features.deferred:
         implementations.extend(
             [
@@ -56,17 +79,20 @@ def create_effect_provider_registry(
             ]
         )
     if features.deferred or features.git_writes:
-        implementations.append((
-            "repository.write/v1", "git",
-            GitRepositoryWriteProvider(
-                git_client,
-                authorize=partial(
-                    effect_service.authorize_effect_step,
-                    provider_version=REPOSITORY_WRITE_PROVIDER_VERSION,
-                    secret_resolver=secret_resolver,
+        implementations.append(
+            (
+                "repository.write/v1",
+                "git",
+                GitRepositoryWriteProvider(
+                    git_client,
+                    authorize=partial(
+                        effect_service.authorize_effect_step,
+                        provider_version=REPOSITORY_WRITE_PROVIDER_VERSION,
+                        secret_resolver=secret_resolver,
+                    ),
                 ),
-            ),
-        ))
+            )
+        )
     if features.database_writes:
         implementations.append(
             (
@@ -85,10 +111,13 @@ def create_effect_provider_registry(
     if features.document_writes:
         if document_service is None or document_source is None:
             raise ValueError("Document writes require the configured service and storage source")
-        implementations.append((
-            DOCUMENT_WRITE_CAPABILITY, DOCUMENT_LIBRARY_PROVIDER,
-            DocumentWriteProvider(service=document_service, source=document_source),
-        ))
+        implementations.append(
+            (
+                DOCUMENT_WRITE_CAPABILITY,
+                DOCUMENT_LIBRARY_PROVIDER,
+                DocumentWriteProvider(service=document_service, source=document_source),
+            )
+        )
     return EffectProviderRegistry(
         tuple(
             EffectProviderDefinition(

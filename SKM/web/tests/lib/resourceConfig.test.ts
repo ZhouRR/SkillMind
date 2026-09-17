@@ -59,7 +59,9 @@ describe('PostgreSQL and MCP connection configuration', () => {
       .toEqual({ server_url: 'https://mcp.example.test/mcp', transport: 'streamable_http' })
     expect(buildIntegrationScope('mcp', { issueIds: [], fieldKeys: [], paths: [], revisions: [], resourceUris: ['resource://reports/current'] }))
       .toEqual({ resource_uris: ['resource://reports/current'] })
-    expect(findScopeIssue('mcp', { resource_uris: [] }, false)).toBe('resource_uris_required')
+    expect(findScopeIssue('mcp', { resource_uris: [] }, false)).toBeNull()
+    expect(buildIntegrationScope('mcp', { issueIds: [], fieldKeys: [], paths: [], revisions: [] }))
+      .toEqual({ resource_uris: [] })
   })
 
   it.each(['mcp'] as const)('recognizes %s without granting a write capability', (provider) => {
@@ -390,4 +392,13 @@ describe('repository write configuration', () => {
       write: { ...write, writeEnabled: false },
     })).toBeNull()
   })
+})
+
+it('keeps MCP resources optional and action permission explicit', () => {
+  expect(capabilitiesForAccess('mcp', 'read', true, false)).toEqual(['mcp.tools/v1', 'mcp.query/v1'])
+  expect(capabilitiesForAccess('mcp', 'read_write', true, false)).toEqual(['mcp.tools/v1', 'mcp.query/v1', 'mcp.call/v1'])
+  expect(capabilitiesForAccess('mcp', 'read_write', false, false)).toEqual(['mcp.read/v1'])
+  expect(buildIntegrationScope('mcp', { issueIds: [], fieldKeys: [], paths: [], revisions: [], mcpTools: true, writeEnabled: false }))
+    .toEqual({ resource_uris: [], tool_names: ['inspect_window', 'get_step_status'] })
+  expect(accessForCapabilities(['mcp.tools/v1', 'mcp.query/v1', 'mcp.call/v1'])).toBe('read_write')
 })

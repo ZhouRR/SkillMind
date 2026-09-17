@@ -39,7 +39,7 @@ export const PROVIDER_FORMS: Record<ResourceProvider, ProviderFormDefinition> = 
     requiresSecret: true, credentialKind: 'password', environmentLocatorExample: 'POSTGRES_PASSWORD', fileLocatorExample: '/run/secrets/postgres-password',
   },
   mcp: {
-    provider: 'mcp', kind: 'other', readCapability: 'mcp.read/v1', writeCapability: null,
+    provider: 'mcp', kind: 'other', readCapability: 'mcp.read/v1', writeCapability: 'mcp.call/v1',
     requiresSecret: false, credentialKind: 'token', environmentLocatorExample: 'MCP_ACCESS_TOKEN', fileLocatorExample: '/run/secrets/mcp-access-token',
   },
   redmine: {
@@ -108,7 +108,12 @@ export function parseListInput(value: string): string[] {
 export function capabilitiesForAccess(
   provider: ResourceProvider,
   access: ResourceAccess,
+  mcpTools = false,
+  mcpResources = true,
 ): string[] {
+  if (provider === 'mcp') return mcpTools
+    ? [...(mcpResources ? ['mcp.read/v1'] : []), 'mcp.tools/v1', 'mcp.query/v1', ...(access === 'read_write' ? ['mcp.call/v1'] : [])]
+    : ['mcp.read/v1']
   const form = PROVIDER_FORMS[provider]
   if (access === 'read_write' && form.writeCapability !== null) {
     return [form.readCapability, form.writeCapability]
@@ -118,7 +123,7 @@ export function capabilitiesForAccess(
 
 /** Backend runs/service の write 判定 mirror。表示と capability 自動選択で共有する。 */
 export function isWriteCapability(capability: string): boolean {
-  return capability.includes('.update/')
+  return capability === 'mcp.call/v1' || capability.includes('.update/')
     || capability.includes('.apply/')
     || capability.includes('.write/')
 }
@@ -131,12 +136,13 @@ export function accessForCapabilities(capabilities: readonly string[]): Resource
 /** 構造化入力から server の scope allowlist 形へ組み立てる。形は Provider ごとに固定。 */
 export function buildIntegrationScope(
   provider: ResourceProvider,
-  input: { issueIds: string[]; fieldKeys: string[]; paths: string[]; revisions: string[]; tables?: string[]; resourceUris?: string[]; writeEnabled?: boolean; writeColumns?: string[]; operations?: string[] },
+  input: { issueIds: string[]; fieldKeys: string[]; paths: string[]; revisions: string[]; tables?: string[]; resourceUris?: string[]; mcpTools?: boolean; writeEnabled?: boolean; writeColumns?: string[]; operations?: string[] },
 ): Record<string, string[]> {
   if (provider === 'postgres') return input.writeEnabled
     ? { tables: input.tables ?? [], write_columns: input.writeColumns ?? [], operations: input.operations ?? [] }
     : { tables: input.tables ?? [] }
-  if (provider === 'mcp') return { resource_uris: input.resourceUris ?? [] }
+  if (provider === 'mcp') return { resource_uris: input.resourceUris ?? [], ...(input.mcpTools ? { tool_names: input.writeEnabled
+    ? ['inspect_window', 'get_step_status', 'open_application', 'execute_step', 'cancel_step'] : ['inspect_window', 'get_step_status'] } : {}) }
   if (provider === 'redmine') {
     return { issue_ids: input.issueIds, field_keys: input.fieldKeys }
   }
@@ -172,12 +178,15 @@ export function buildIntegrationConfig(
     username?: string
     sslmode?: string
     serverUrl?: string
+    mcpCatalog?: Record<string, unknown> | null
+    mcpTools?: boolean
     write?: RepositoryWriteInput
   },
-): Record<string, string | number> {
+): Record<string, unknown> {
   if (provider === 'postgres') return { host: input.host?.trim() ?? '', port: Number(input.port ?? '5432'),
     database: input.database?.trim() ?? '', username: input.username?.trim() ?? '', sslmode: input.sslmode ?? 'verify-full' }
-  if (provider === 'mcp') return { server_url: input.serverUrl?.trim() ?? '', transport: 'streamable_http' }
+  if (provider === 'mcp') return { server_url: input.serverUrl?.trim() ?? '', transport: 'streamable_http',
+    ...(input.mcpTools && input.mcpCatalog ? { tool_profile: 'flaui-step/v1', tool_catalog: input.mcpCatalog } : {}) }
   if (provider === 'redmine') {
     return { base_url: input.baseUrl.trim() }
   }
@@ -240,7 +249,7 @@ export function findWriteConfigIssue(
 export const REPOSITORY_WRITE_BRANCH_PREFIX = 'skillmind/'
 
 /** Server が確実に拒否する scope を送信前に検出する。null は「送ってよい」。 */
-export type ScopeIssue = 'issue_ids_required' | 'field_keys_required' | 'paths_required' | 'tables_required' | 'resource_uris_required' | 'write_columns_required' | 'database_operations_required'
+export type ScopeIssue = 'issue_ids_required' | 'field_keys_required' | 'paths_required' | 'tables_required' | 'write_columns_required' | 'database_operations_required'
 
 /** Backend normalize_provider_scope の必須条件 mirror。write は明示 field 列を要求する。 */
 export function findScopeIssue(
@@ -254,7 +263,7 @@ export function findScopeIssue(
     if (writeEnabled && !scope.operations?.length) return 'database_operations_required'
     return null
   }
-  if (provider === 'mcp') return scope.resource_uris?.length ? null : 'resource_uris_required'
+  if (provider === 'mcp') return null
   if (provider === 'redmine') {
     if ((scope.issue_ids ?? []).length === 0) return 'issue_ids_required'
     if (writeEnabled && (scope.field_keys ?? []).length === 0) return 'field_keys_required'
@@ -443,4 +452,16 @@ export function collectRequirementOptions(tasks: readonly PublishedTaskRecord[])
     }
   }
   return [...merged.values()].sort((a, b) => a.key.localeCompare(b.key))
+}
+
+/** 保存可能な最初の profile は審査済み FlaUI 0.3 の五 tool に限定する。 */
+export function supportsFlaUiCatalog(catalog: Record<string, unknown>): boolean {
+  const server = catalog.server
+  if (typeof server !== 'object' || server === null || !('name' in server) || server.name !== 'FlaUiMcp'
+    || !('version' in server) || typeof server.version !== 'string' || !server.version.startsWith('0.3.')
+    || !Array.isArray(catalog.tools)) return false
+  const names = catalog.tools.flatMap((tool: unknown) => typeof tool === 'object' && tool !== null
+    && 'name' in tool && typeof tool.name === 'string' ? [tool.name] : [])
+  return ['inspect_window', 'get_step_status', 'open_application', 'execute_step', 'cancel_step']
+    .every((name) => names.includes(name))
 }

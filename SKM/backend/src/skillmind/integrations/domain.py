@@ -130,10 +130,10 @@ PROVIDER_DEFINITIONS: dict[str, ProviderDefinition] = {
     "mcp": ProviderDefinition(
         kind="other",
         provider="mcp",
-        capabilities=frozenset({"mcp.read/v1"}),
-        write_capabilities=frozenset(),
+        capabilities=frozenset({"mcp.read/v1", "mcp.tools/v1", "mcp.query/v1", "mcp.call/v1"}),
+        write_capabilities=frozenset({"mcp.call/v1"}),
         requires_secret=False,
-        installed=True,  # resource 読取 Provider のみ。遠端 tools の実行権は付与しない。
+        installed=True,  # tools は独立した配備 switch と凍結 profile の scope で制限する。
     ),
     "redmine": ProviderDefinition(
         kind="issue",
@@ -444,6 +444,28 @@ def normalize_integration_command(command: CreateIntegrationCommand) -> CreateIn
         command.scope,
         write_enabled=bool(set(capabilities) & definition.write_capabilities),
     )
+    if command.provider == "mcp":
+        from skillmind.integrations.mcp_tools import WRITE_TOOLS, configured_tool
+
+        tools = scope.get("tool_names", [])
+        try:
+            if set(capabilities) - {"mcp.read/v1"}:
+                if not tools or "mcp.tools/v1" not in capabilities:
+                    raise ValueError("MCP tool capabilities require a frozen catalog and scope")
+                for name in tools:
+                    configured_tool(config, scope, name)
+                if "mcp.call/v1" in capabilities:
+                    if command.secret_reference_id is None:
+                        raise ValueError("MCP actions require a credential reference")
+                    if ("mcp.query/v1" not in capabilities
+                        or not {"inspect_window", "get_step_status"} <= set(tools)):
+                        raise ValueError("MCP calls require their read-back tools")
+                elif set(tools) & WRITE_TOOLS:
+                    raise ValueError("MCP action tools require the call capability")
+            elif tools:
+                raise ValueError("Resource-only connections cannot grant tool access")
+        except ValueError as error:
+            raise IntegrationValidationError(str(error)) from None
     return CreateIntegrationCommand(
         project_id=command.project_id,
         name=command.name.strip(),
@@ -462,11 +484,24 @@ def normalize_provider_scope(
 ) -> dict[str, Any]:
     """Provider scope を allowlist 形式へ正規化し、黙示の無制限を拒否する。
 
-    空 list は従来通り拒否し、Redmine の issue_ids/field_keys と PostgreSQL の
+    MCP の空 URI list は読取を許可しない接続保存用とし、他の必須空 list は拒否する。
+    Redmine の issue_ids/field_keys と PostgreSQL の
     tables/write_columns だけ明示 wildcard(``SCOPE_WILDCARD``)を受け付ける。apply は
     引き続き承認または explicit 事前許可(wildcard 不可)で gate される。
     """
 
+    if provider == "mcp" and "tool_names" in scope:
+        if set(scope) != {"resource_uris", "tool_names"}:
+            raise IntegrationValidationError("MCP tool scope contains unknown fields")
+        from skillmind.integrations.mcp_tools import TOOLS, WRITE_TOOLS
+
+        names = _unique_strings(scope["tool_names"], maximum=5, key_pattern=False)
+        if not names or set(names) - TOOLS or (not write_enabled and set(names) & WRITE_TOOLS):
+            raise IntegrationValidationError("MCP tool scope is invalid")
+        resources = normalize_provider_scope(
+            "mcp", {"resource_uris": scope["resource_uris"]}, write_enabled=False
+        )
+        return {**resources, "tool_names": names}
     if provider == "postgres" and write_enabled:
         if set(scope) != {"tables", "write_columns", "operations"}:
             raise IntegrationValidationError(
@@ -509,7 +544,10 @@ def normalize_provider_scope(
             scope[key], maximum=200, key_pattern=False,
             maximum_length=2048 if provider == "mcp" else 256,
         )
-        if not values or (provider == "mcp" and SCOPE_WILDCARD in values):
+        # MCP は接続と凭据だけ先に登録できる。空 URI は無許可であり、全許可ではない。
+        if (provider == "postgres" and not values) or (
+            provider == "mcp" and SCOPE_WILDCARD in values
+        ):
             raise IntegrationValidationError("Read-only resource scope requires explicit values")
         if provider == "postgres" and SCOPE_WILDCARD in values:
             return {key: [SCOPE_WILDCARD]}
@@ -679,7 +717,9 @@ def _validate_provider_config(provider: str, config: dict[str, Any]) -> dict[str
             raise IntegrationValidationError("PostgreSQL TLS mode is invalid")
         return dict(config)
     if provider == "mcp":
-        if set(config) != {"server_url", "transport"} or config["transport"] != "streamable_http":
+        if (set(config) not in ({"server_url", "transport"},
+                              {"server_url", "transport", "tool_profile", "tool_catalog"})
+                or config.get("transport") != "streamable_http"):
             raise IntegrationValidationError("MCP requires Streamable HTTP connection fields")
         value = config["server_url"]
         if not isinstance(value, str) or not 1 <= len(value) <= 2048:
@@ -694,7 +734,19 @@ def _validate_provider_config(provider: str, config: dict[str, Any]) -> dict[str
             (parsed.username, parsed.password, parsed.query, parsed.fragment)
         ) or any(character.isspace() or ord(character) < 32 for character in value):
             raise IntegrationValidationError("MCP server URL contains forbidden components")
-        return {"server_url": value, "transport": "streamable_http"}
+        result: dict[str, Any] = {"server_url": value, "transport": "streamable_http"}
+        if "tool_profile" in config:
+            from skillmind.integrations.mcp_tools import PROFILE, normalize_catalog
+
+            if config["tool_profile"] != PROFILE:
+                raise IntegrationValidationError("MCP tool profile is not supported")
+            try:
+                result.update(
+                    tool_profile=PROFILE, tool_catalog=normalize_catalog(config["tool_catalog"])
+                )
+            except ValueError as error:
+                raise IntegrationValidationError("MCP tool catalog is invalid") from error
+        return result
     if provider == "redmine":
         if set(config) != {"base_url"}:
             raise IntegrationValidationError("Redmine config requires only base_url")

@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "enum": [
+        "open_application",
+        "execute_step",
+        "cancel_step"
+      ]
+    },
+    "arguments": {
+      "type": "object",
+      "maxProperties": 6
+    },
+    "catalog_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "name",
+    "arguments",
+    "catalog_hash"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/mcp.call/v1/request.schema.json",
+  "title": "mcp.call/v1 request",
+  "description": "Effect-only approved FlaUI call through change.propose/v1. First read mcp.tools/v1 Evidence. operation and target.locator = open_application, execute_step or cancel_step. One /call SET value = exact tool arguments; execute_step omits requestId (platform supplies original Effect UUID). precondition.revision = observed catalog_hash. verification = READ_BACK /call. Each call requires approval. Never retry actions with a new requestId on unknown results. Query original status only. COMPLETED confirms one operation, not test PASS. Artifact download paths are not saved project documents. execute_step also requires mcp.query inspect_window Evidence for the same appId and window; select controls from that observation. Desktop state can change; use a dedicated desktop and re-inspect after navigation."
+}

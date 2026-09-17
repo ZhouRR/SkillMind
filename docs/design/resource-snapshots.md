@@ -14,10 +14,22 @@
 
 ## PostgreSQL 与 MCP 接入
 
-资源管理支持注册 `postgres` 和 `mcp` Provider、凭据引用和明确读取范围，沿用公开资源分类 `other`；凭据正文仅经 SecretReference 管理，公开列表仅返回配置 key。连接状态 ACTIVE 表示配置未停用，不证明远端可达；Provider 只有装配到 Worker 后才可标为 installed。
+### MCP 工具接入边界
+
+工具接入与 `resources/read` 分开授权。`mcp.tools/v1` 返回已绑定服务的工具契约，`mcp.query/v1` 仅调用平台已审查的只读工具；`mcp.call/v1` 是受控效果，通过提案、精确批准、阶段授权与回读执行，不能从资源 URI 或服务的 `readOnlyHint` 推导权限。首个调用适配为 `flaui-step/v1`，支持 FlaUI 0.3 的五个工具；未知服务可发现工具，但不自动获得调用适配。工具的输入/输出 Schema 限于有界非递归子集，禁止外部引用；每次调用先重读清单并比对冻结 hash，契约变化需重新保存连接、创建新 Run。
+
+同一规范化 endpoint 由 PostgreSQL 持久记录 Run 占用，未确认的操作不自动释放；不同 DNS 别名或多平台共享同一桌面仍需部署隔离。结果核对仅调用原 `get_step_status`，确认终态后解除该 pending 占用，不改写 Run 或自动续行；应用启动没有可查询原回执，响应丢失后需人工核实。工具调用最多等待 90 秒，单操作限 1–60 秒。操作终态与测试 PASS 分开；远端 artifact URL 不自动下载或登记项目文档。
+
+ADMIN 在现有连接中取得工具清单并保存所选工具、服务身份和输入/输出 Schema；这些非秘密契约进入 Integration revision，原 Run binding 不变。调用前重新取得契约并比对摘要，发生变化拒绝执行，不静默接受新参数。输入仅取原绑定、允许工具与有界参数，endpoint 和凭据不能由模型指定。外部描述和输出只是数据，不是授权指令；Schema 不解析外部引用。
+
+FlaUI 的 `inspect_window/get_step_status` 为只读，`open_application/execute_step/cancel_step` 为效果；`execute_step` 的 requestId 由原 Effect ID 确定，模型不能换 ID 重放。操作提案还须引用同 Run、同 binding、同 app/窗口的 `inspect_window` READY 证据，不能仅凭工具清单猜控件。效果完成需要对应只读回读，操作状态、测试判定与平台状态分开。桌面不提供跨调用 CAS，部署须使用专用桌面，页面跳转后重新观察。新效果不沿用旧 Run 的数据库/文档/Git 自动批准同意。发送结果未知时只核对原请求，不再次调用动作；本地取消不证明桌面操作已停止。调用保持固定 Streamable HTTP endpoint，拒绝重定向、外部引用和任意下载 URL。
+
+### PostgreSQL 与 MCP 读取
+
+资源管理支持注册 `postgres` 和 `mcp` Provider、凭据引用和明确读取范围，沿用公开资源分类 `other`；凭据正文仅经 SecretReference 管理，公开列表仅返回配置 key。MCP 的 `resource_uris` 可为空列表，仅保存连接信息，不允许读取任何 URI，未另行授予工具权限时，也不作为任务的可用候选；无需填写占位 URI，不因此开放远端工具调用。连接状态 ACTIVE 表示配置未停用，不证明远端可达；Provider 只有装配到 Worker 后才可标为 installed。
 
 - PostgreSQL 配置主机、整数端口、数据库、连接用户名和 TLS 模式；密码必须引用 SecretReference。范围可逐项指定 `schema.table`，或由管理员显式选择全部表（`tables: ["*"]`）；全部包含该连接数据库内后来新增且账号有权访问的表，不扩大数据库账号权限。空列表仍拒绝，不接受任意 SQL。[`database.read/v1`](../../SKM/contracts/tools/database.read/v1/request.schema.json) 接受显式表名、列名、等值筛选、排序和有界分页，不接受 SQL 正文。Worker 使用原凭据、只读事务和 PostgreSQL statement/lock timeout，返回最多 100 行、1 MiB JSON。连接目标由项目 ADMIN 预先配置，模型不能指定主机、端口、凭据或扩大表范围；目标数据库及自定义类型/函数属于管理员信任边界。连接前和返回前复验原 binding，取消关闭当前连接，不以本地取消声称数据库故障已恢复。每次读取得到独立 live 结果，以内容 hash 和读取时间生成 Evidence，不承诺跨调用的分页处于同一快照。
-- MCP 配置 HTTP(S) Streamable HTTP endpoint、可选 Bearer 凭据引用和明确资源 URI；URL 不含凭据、query 或 fragment，不接受 stdio 命令配置。`mcp.read/v1` 只发起已冻结 URI 的 `resources/read`，不调用远端 tools，不开放 sampling、elicitation 或本地 roots；服务工具调用尚未实现，不能由资源读取权自动取得。URI 在配置时按 SDK URI 类型规范化，执行时须逐字匹配冻结值，返回其他 URI 的内容拒绝发布。连接目标与服务实现属于项目 ADMIN 信任边界；模型不能传 endpoint/凭据或改变协议方法，远端正文仅作为数据，不取得指令权限。
+- MCP 配置 HTTP(S) Streamable HTTP endpoint、可选 Bearer 凭据引用和明确资源 URI；URL 不含凭据、query 或 fragment，不接受 stdio 命令配置。`mcp.read/v1` 只发起已冻结 URI 的 `resources/read`，不调用远端 tools，不开放 sampling、elicitation 或本地 roots；工具调用使用上文独立能力，不能由资源读取权自动取得。URI 在配置时按 SDK URI 类型规范化，执行时须逐字匹配冻结值，返回其他 URI 的内容拒绝发布。连接目标与服务实现属于项目 ADMIN 信任边界；模型不能传 endpoint/凭据或改变协议方法，远端正文仅作为数据，不取得指令权限。
 - MCP 每次读取独立会话，用 SDK 处理初始化与 JSON/SSE；传输层限定原 endpoint、禁跳转和压缩、至多 16 次 HTTP 请求、单响应 1 MiB、累计响应 3 MiB，初始化与读取共用 20 秒 deadline。取消关闭本地会话/连接，不由 disconnect 推断远端已停止；不自动重放资源读取。文本或 Base64 内容最多 20 项、合计 1 MiB，超限整次失败，不静默截断。I/O 前后复验原 binding/凭据，记录读取时间、内容 hash 和 Evidence；第三方传输日志不输出 URL、会话 ID 或正文。
 - PostgreSQL 读取可显式指定 `include_schema=true`，为普通表或分区表附带完整列名、SQL 类型、列级 NOT NULL 标记、默认值存在标记、generated/identity 属性和按定义顺序排列的主键，空表同样返回结构。只接受原 binding 内且当前账号拥有完整 SELECT 权限的表；先取得该表的 ACCESS SHARE 锁，再在同一 REPEATABLE READ、READ ONLY 事务内查询结构与数据，结构缺失、权限不足或超限均整次失败。结构最多 100 列、64 KiB，与行数据共用 1 MiB 上限，不返回默认表达式、CHECK/域约束或其他表信息。结构完整不代表行投影完整，也不授予写入权限或替代按精确主键取得的原行/不在场 Evidence。结构一并纳入响应和 Evidence 的内容 hash；省略或关闭此选项时保持旧响应形状和摘要算法，不补写历史结构。旧 Worker 不认识此选项时须拒绝请求，不能把缺失结构当成功。
 

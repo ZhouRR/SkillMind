@@ -57,14 +57,15 @@ def integration_fixture() -> tuple[IntegrationRepository, MagicMock, Integration
 
 
 @pytest.mark.asyncio
-async def test_edit_updates_connection_and_scope_under_original_revision() -> None:
+@pytest.mark.parametrize("uris", [["resource://reports/new"], []])
+async def test_edit_updates_connection_and_scope_under_original_revision(uris) -> None:
     """metadata と scope を更新して revision を進め、既存 snapshot は触らない。"""
     repo, session, row = integration_fixture()
     value = replace(
         command("mcp"),
         project_id=row.project_id,
         name="Updated reports",
-        scope={"resource_uris": ["resource://reports/new"]},
+        scope={"resource_uris": uris},
     )
     result = await repo.update_integration(value, integration_id=row.id, expected_revision=2)
     assert result.name == "Updated reports"

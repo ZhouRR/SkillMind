@@ -1,0 +1,52 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "const": "success"
+    },
+    "provider": {
+      "const": "mcp"
+    },
+    "evidence_refs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^ev_[a-zA-Z0-9_-]+$"
+      }
+    },
+    "observed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "profile": {
+      "const": "flaui-step/v1"
+    },
+    "catalog_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "tools": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 5,
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  "required": [
+    "status",
+    "provider",
+    "evidence_refs",
+    "observed_at",
+    "profile",
+    "catalog_hash",
+    "tools"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/mcp.tools/v1/response.schema.json",
+  "title": "mcp.tools/v1 response"
+}

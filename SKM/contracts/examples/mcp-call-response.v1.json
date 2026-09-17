@@ -1,0 +1,13 @@
+{
+  "status": "success",
+  "provider": "mcp",
+  "before_ref": "ev_before",
+  "after_ref": "ev_after",
+  "verification": {
+    "method": "READ_BACK",
+    "matched_paths": [
+      "/call"
+    ]
+  },
+  "replayed": false
+}

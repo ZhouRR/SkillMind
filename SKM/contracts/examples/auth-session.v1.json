@@ -11,5 +11,6 @@
   "deferred_features_enabled": false,
   "database_writes_enabled": false,
   "document_writes_enabled": false,
-  "git_writes_enabled": false
+  "git_writes_enabled": false,
+  "mcp_tools_enabled": false
 }

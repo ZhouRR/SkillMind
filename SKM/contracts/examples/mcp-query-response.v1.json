@@ -1,0 +1,12 @@
+{
+  "status": "success",
+  "provider": "mcp",
+  "evidence_refs": [
+    "ev_window"
+  ],
+  "observed_at": "2026-09-17T00:00:00Z",
+  "name": "inspect_window",
+  "result": {
+    "status": "READY"
+  }
+}

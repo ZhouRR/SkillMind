@@ -32,8 +32,11 @@ from skillmind.agent.document_readiness import DocumentReadinessProvider
 from skillmind.agent.domain import AgentEngine, RunContext
 from skillmind.agent.engine import ClaudeAgentSdkEngine, RunMcpRuntime
 from skillmind.agent.evidence import PostgresToolAuditWriter
+from skillmind.agent.mcp_lease import McpDesktopLeases
 from skillmind.agent.mcp_provider import McpReadProvider
 from skillmind.agent.mcp_source import StreamableHttpMcpSource
+from skillmind.agent.mcp_tools_provider import McpToolsProvider
+from skillmind.agent.mcp_tools_source import StreamableHttpMcpToolsSource
 from skillmind.agent.postgres_source import PostgresDatabaseSource
 from skillmind.agent.redmine_provider import RedmineIssueReadProvider
 from skillmind.agent.repository_client import (
@@ -134,6 +137,7 @@ async def startup(ctx: dict[str, Any], *, maintenance_only: bool = False) -> Non
         database_writes_enabled=features.database_writes,
         document_writes_enabled=features.document_writes,
         git_writes_enabled=features.git_writes,
+        mcp_tools_enabled=features.mcp_tools,
         document_library_target=document_library_target,
     )
     ctx["effect_service"] = EffectService(
@@ -233,6 +237,7 @@ async def startup(ctx: dict[str, Any], *, maintenance_only: bool = False) -> Non
         database_writes_enabled=features.database_writes,
         document_writes_enabled=features.document_writes,
         git_writes_enabled=features.git_writes,
+        mcp_tools_enabled=features.mcp_tools,
         subagent_provider=SubagentDispatchProvider(
             engine=lambda: engine_holder["engine"],
             branch_timeout_seconds=settings.subagent_branch_timeout_seconds,
@@ -246,6 +251,18 @@ async def startup(ctx: dict[str, Any], *, maintenance_only: bool = False) -> Non
             ctx["database_session_factory"], source=StreamableHttpMcpSource(),
             secret_resolver=DeploymentSecretResolver(cipher=secret_cipher),
         ),
+        mcp_tools_provider=McpToolsProvider(
+            ctx["database_session_factory"], capability="mcp.tools/v1",
+            source=StreamableHttpMcpToolsSource(),
+            secret_resolver=DeploymentSecretResolver(cipher=secret_cipher),
+            leases=McpDesktopLeases(ctx["database_session_factory"]),
+        ) if features.mcp_tools else None,
+        mcp_query_provider=McpToolsProvider(
+            ctx["database_session_factory"], capability="mcp.query/v1",
+            source=StreamableHttpMcpToolsSource(),
+            secret_resolver=DeploymentSecretResolver(cipher=secret_cipher),
+            leases=McpDesktopLeases(ctx["database_session_factory"]),
+        ) if features.mcp_tools else None,
         database_provider=database_provider,
         redmine_issue_provider=RedmineIssueReadProvider(
             ctx["database_session_factory"],
@@ -298,6 +315,7 @@ async def startup(ctx: dict[str, Any], *, maintenance_only: bool = False) -> Non
         database_writes_enabled=features.database_writes,
         document_writes_enabled=features.document_writes,
         git_writes_enabled=features.git_writes,
+        mcp_tools_enabled=features.mcp_tools,
         document_library_target=document_library_target,
         proposal_continuations=ProposalContinuationReader(ctx["database_session_factory"]),
         database_observations=database_provider,
@@ -334,6 +352,7 @@ async def startup(ctx: dict[str, Any], *, maintenance_only: bool = False) -> Non
                 svn_client=svn_client,
                 document_service=document_effect_service,
                 document_source=document_effect_source,
+                mcp_leases=McpDesktopLeases(ctx["database_session_factory"]),
             ),
             # 承認済み apply も MANAGED 凭据を使うため、読取 Provider と同じ KEK cipher を渡す。
             # 渡し漏れると「読めるのに承認後の書き込みだけ失敗する」非対称な障害になる。

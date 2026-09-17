@@ -457,8 +457,12 @@ export interface UiMessages {
     databaseOperationsRequired: string
     mcpResourceUris: string
     mcpReadHint: string
+    mcpUnsupported: string
+    mcpDiscover: string
+    mcpSaveFirst: string
+    mcpEnableTools: string
+    mcpToolsHint: string
     tablesRequired: string
-    resourceUrisRequired: string
     title: string
     scopeBadge: string
     selectProjectFirst: string

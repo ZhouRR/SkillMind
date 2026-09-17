@@ -354,7 +354,10 @@ def test_capability_catalog_is_sorted_unique_and_checksum_bound() -> None:
         "issue.read/v1",
         "issue.update/v1",
         "json.schema.validate/v1",
+        "mcp.call/v1",
+        "mcp.query/v1",
         "mcp.read/v1",
+        "mcp.tools/v1",
         "repository.read/v1",
         "repository.write/v1",
         "subagent.dispatch/v1",
@@ -371,7 +374,7 @@ def test_capability_catalog_is_sorted_unique_and_checksum_bound() -> None:
         if definition.installed and issue.capability in definition.capabilities
     }
     assert loaded.checksum == (
-        "sha256:35fc9e516d5cbfb9468a36b614ba6679d4e70e6733428922b42c6ef2e91b9658"
+        "sha256:34fda26a4b4ea0541ce12317c3334be850903c77642d9e7ec768bcafb629ccea"
     )
     duplicate = CapabilityCatalogEntry(
         capability="issue.read/v1",

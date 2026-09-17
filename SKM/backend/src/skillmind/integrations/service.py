@@ -39,6 +39,39 @@ class IntegrationService:
         self._session_factory = session_factory
         self._secret_cipher = secret_cipher
 
+    async def discover_mcp_tools(
+        self, *, project_id: UUID, integration_id: UUID, expected_revision: int
+    ) -> dict[str, Any]:
+        """保存済み endpoint/credential だけで発見し、I/O 後にも原 revision を検査する。"""
+        from skillmind.agent.mcp_tools_source import StreamableHttpMcpToolsSource
+        from skillmind.integrations.domain import IntegrationStatus, IntegrationValidationError
+        from skillmind.integrations.secrets import DeploymentSecretResolver
+
+        resolver = DeploymentSecretResolver(cipher=self._secret_cipher)
+
+        async def load() -> tuple[ResolvedIntegration, str | None]:
+            """最新の有効な接続と秘密を一緒に照合する。"""
+            item = await self.get_integration(project_id=project_id, integration_id=integration_id)
+            if item.revision != expected_revision or item.status is not IntegrationStatus.ACTIVE:
+                raise IntegrationConflictError("MCP connection changed; reload before discovery")
+            if item.provider != "mcp":
+                raise IntegrationValidationError("This connection is not MCP")
+            token = None
+            if item.secret_reference_id is not None:
+                token = resolver.resolve(
+                    await self.resolve_secret_reference(
+                        project_id=project_id, secret_reference_id=item.secret_reference_id
+                    )
+                )
+            return item, token
+
+        original, token = await load()
+        catalog = await StreamableHttpMcpToolsSource().discover(original.config, token)
+        current, current_token = await load()
+        if current != original or current_token != token:
+            raise IntegrationConflictError("MCP connection changed during discovery")
+        return catalog
+
     async def create_secret_reference(
         self, command: CreateSecretReferenceCommand
     ) -> StoredSecretReference:

@@ -106,6 +106,7 @@ class RunService:
         database_writes_enabled: bool = False,
         document_writes_enabled: bool = False,
         git_writes_enabled: bool = False,
+        mcp_tools_enabled: bool = False,
         budget_policy: BudgetPolicy | None = None,
         document_library_target: DocumentLibraryTarget | None = None,
     ) -> None:
@@ -116,7 +117,7 @@ class RunService:
         self._scheduling_enabled = scheduling_enabled or deferred_features_enabled
         self._execution_features = ExecutionFeatures(
             deferred_features_enabled, database_writes_enabled,
-            document_writes_enabled, git_writes_enabled
+            document_writes_enabled, git_writes_enabled, mcp_tools_enabled
         )
         if budget_policy is not None and budget_policy.max_cost_nanos is not None:
             raise BudgetUnavailableError("Primary execution cost adapter is not configured")

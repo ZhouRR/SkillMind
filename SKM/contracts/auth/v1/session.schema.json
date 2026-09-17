@@ -73,6 +73,10 @@
     "scheduling_enabled": {
       "type": "boolean",
       "default": false
+    },
+    "mcp_tools_enabled": {
+      "type": "boolean",
+      "default": false
     }
   }
 }

@@ -23,6 +23,7 @@ def configured_execution_features(settings: Settings) -> ExecutionFeatures:
         database_writes=settings.database_writes_enabled,
         document_writes=settings.document_writes_enabled,
         git_writes=settings.git_writes_enabled,
+        mcp_tools=settings.mcp_tools_enabled,
     )
 
 
@@ -39,11 +40,18 @@ class ExecutionFeatures:
     # 文書庫 CREATE だけを開き、DB/後置機能の switch とは相互に放行しない。
     document_writes: bool = False
     git_writes: bool = False
+    mcp_tools: bool = False
 
     @property
     def effects_enabled(self) -> bool:
         """Effect dispatcher の起動可否。個々の対象は別途精確に検査する。"""
-        return self.deferred or self.database_writes or self.document_writes or self.git_writes
+        return (
+            self.deferred
+            or self.database_writes
+            or self.document_writes
+            or self.git_writes
+            or self.mcp_tools
+        )
 
     @property
     def write_capabilities(self) -> frozenset[str]:
@@ -54,6 +62,8 @@ class ExecutionFeatures:
 
     def capability_enabled(self, capability: str) -> bool:
         """Interpreter、Run permission、実 Tool 準備で同じ上限を使う。"""
+        if capability in {"mcp.tools/v1", "mcp.query/v1", "mcp.call/v1"}:
+            return self.mcp_tools
         if capability == DATABASE_WRITE_CAPABILITY:
             return self.database_writes
         if capability == DOCUMENT_WRITE_CAPABILITY:

@@ -12,16 +12,13 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from sqlalchemy.schema import CreateIndex
 
-from skillmind.db.models import EffectReconciliationRequest
+from skillmind.db.models import EffectReconciliationRequest, McpDesktopLease
 from tests.db.test_input_snapshot_migration import _contract
 
 
-def migration():
+def migration(filename="0047_effect_reconciliation_requests.py"):
     """接続なしで原 migration をロードする。"""
-    path = (
-        Path(__file__).resolve().parents[2]
-        / "migrations/versions/0047_effect_reconciliation_requests.py"
-    )
+    path = Path(__file__).resolve().parents[2] / "migrations/versions" / filename
     spec = importlib.util.spec_from_file_location("reconciliation_migration", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -53,6 +50,27 @@ def test_migration_matches_model_and_active_index(monkeypatch):
             assert method == "create_index"
             name, table, columns = args
             sa.Index(name, *(metadata.tables[table].c[column] for column in columns), **kwargs)
+    # 原 migration を書換えず、追加 revision の制約差分も適用した head と比較する。
+    latest = migration("0052_mcp_desktop_leases.py")
+    monkeypatch.setattr(latest, "op", Mock(f=lambda value: value))
+    latest.upgrade()
+    for method, args, kwargs in latest.op.method_calls:
+        if method == "drop_constraint":
+            name, table = args
+            constraint = next(
+                item for item in metadata.tables[table].constraints if item.name == name
+            )
+            metadata.tables[table].constraints.remove(constraint)
+        elif method == "create_check_constraint":
+            name, table, condition = args
+            metadata.tables[table].append_constraint(
+                sa.CheckConstraint(condition, name=sa.schema.conv(name))
+            )
+        else:
+            assert method == "create_table"
+            name, *elements = args
+            sa.Table(name, metadata, *elements, **kwargs)
+    assert _contract(metadata.tables["mcp_desktop_leases"]) == _contract(McpDesktopLease.__table__)
     migrated = metadata.tables[actual.name]
     assert _contract(migrated) == _contract(actual)
     assert {c.name for c in migrated.constraints} == {c.name for c in actual.constraints}

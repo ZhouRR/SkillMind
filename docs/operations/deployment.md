@@ -2,6 +2,8 @@
 
 Windows 构建镜像，Linux 用 Docker Compose + GNU make 部署。首次安装与后续更新均执行 `make deploy`，不要求宿主 Python/Node。首次配置与管理员创建见[启动](quickstart.md)，数据恢复见[恢复](backup-recovery.md)。
 
+MCP 工具接入需先迁移数据库至 `0052_mcp_desktop_leases`，API 与 Worker 同时设置 `SKILLMIND_MCP_TOOLS_ENABLED=true`，再更新 Web。Compose 共用 `.env`，无需额外端口。资源连接保存完整 Streamable HTTP `/mcp` 地址和现有凭据后，在编辑画面取得工具、启用 FlaUI 工具，并选择读取或修改提案权限。旧 Run 不追加新能力；新任务须声明并绑定 MCP 工具能力。修改操作逐次批准，不继承既有 DB/文档/Git 自动批准同意。
+
 ## 环境文件与配置边界
 
 服务器部署目录只需四个文件：

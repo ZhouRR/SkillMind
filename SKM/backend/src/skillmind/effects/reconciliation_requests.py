@@ -10,6 +10,7 @@ from uuid import UUID
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.effects.database_write import DatabaseWriteCommand
 from skillmind.effects.git_receipt import GitCommitCommand, GitCommitReceipt, validate_git_receipt
+from skillmind.effects.mcp_receipt import McpOperationCommand, McpOperationReceipt, validate_receipt
 from skillmind.effects.postgres_write import DatabaseWriteReceipt, validate_database_write_receipt
 from skillmind.effects.reconciliation_domain import (
     EffectReconciliationObservation,
@@ -38,7 +39,7 @@ class ReconciliationRequestSnapshot:
     reference: EffectReconciliationReference = field(repr=False)
     target_checksum: str
     command_checksum: str
-    kind: Literal["DATABASE_TRANSACTION", "DOCUMENT_OBJECT", "GIT_COMMIT"]
+    kind: Literal["DATABASE_TRANSACTION", "DOCUMENT_OBJECT", "GIT_COMMIT", "MCP_OPERATION"]
     status: str
     created_at: datetime
     finished_at: datetime | None
@@ -66,9 +67,11 @@ def reconciliation_command_checksum(target: EffectReconciliationTarget) -> str:
 
 def reconciliation_kind(
     target: EffectReconciliationTarget,
-) -> Literal["DATABASE_TRANSACTION", "DOCUMENT_OBJECT", "GIT_COMMIT"]:
+) -> Literal["DATABASE_TRANSACTION", "DOCUMENT_OBJECT", "GIT_COMMIT", "MCP_OPERATION"]:
     """transaction 回执と object byte の確認を混ぜない。"""
 
+    if isinstance(target.command, McpOperationCommand):
+        return "MCP_OPERATION"
     if isinstance(target.command, GitCommitCommand):
         return "GIT_COMMIT"
     return (
@@ -119,7 +122,12 @@ def reconciliation_receipt_json(
     if observation.status != "CONFIRMED":
         raise ValueError("Reconciliation observation status is invalid")
     command = target.command
-    if isinstance(command, GitCommitCommand):
+    if isinstance(command, McpOperationCommand):
+        if not isinstance(receipt, McpOperationReceipt):
+            raise ValueError("Original MCP receipt is invalid")
+        validate_receipt(command, receipt)
+        result = asdict(receipt)
+    elif isinstance(command, GitCommitCommand):
         if not isinstance(receipt, GitCommitReceipt):
             raise ValueError("Original Git receipt is invalid")
         validate_git_receipt(command, receipt)

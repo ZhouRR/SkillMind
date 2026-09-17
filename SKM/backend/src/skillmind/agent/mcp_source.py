@@ -86,24 +86,7 @@ class BoundedMcpTransport(httpx.AsyncBaseTransport):
         if self._budget.requests > _MAX_HTTP_REQUESTS or request.url != self._endpoint:
             raise McpReadError("MCP request exceeds the connection boundary")
         if request.method == "POST":
-            payload = json.loads(request.content)
-            method = payload.get("method")
-            if method == "resources/read":
-                if self._read_started or payload.get("params", {}).get("uri") != self._uri:
-                    raise McpReadError("MCP resource URI changed before read")
-                self._read_started = True
-            elif method not in {
-                "initialize",
-                "notifications/initialized",
-                "notifications/cancelled",
-            }:
-                # SDK は非公開の roots/sampling/elicitation を拒否し、server ping には応答する。
-                if (
-                    method is not None
-                    or "id" not in payload
-                    or not ("result" in payload or "error" in payload)
-                ):
-                    raise McpReadError("MCP method is not permitted")
+            self._check_rpc(json.loads(request.content))
         elif request.method not in {"GET", "DELETE"}:
             raise McpReadError("MCP HTTP method is not permitted")
         response = await self._inner.handle_async_request(request)
@@ -117,6 +100,26 @@ class BoundedMcpTransport(httpx.AsyncBaseTransport):
             raise McpReadError("MCP transport returned a non-async stream")
         response.stream = _LimitedStream(response.stream, self._budget)
         return response
+
+    def _check_rpc(self, payload: dict[str, Any]) -> None:
+        """原 resource protocol だけを認可し、拡張 transport は別途明示する。"""
+        method = payload.get("method")
+        if method == "resources/read":
+            if self._read_started or payload.get("params", {}).get("uri") != self._uri:
+                raise McpReadError("MCP resource URI changed before read")
+            self._read_started = True
+        elif method not in {
+            "initialize",
+            "notifications/initialized",
+            "notifications/cancelled",
+        }:
+            # SDK は非公開の roots/sampling/elicitation を拒否し、server ping には応答する。
+            if (
+                method is not None
+                or "id" not in payload
+                or not ("result" in payload or "error" in payload)
+            ):
+                raise McpReadError("MCP method is not permitted")
 
     async def aclose(self) -> None:
         """所有する HTTP pool を閉じる。"""

@@ -1,0 +1,6 @@
+{
+  "status": "error",
+  "code": "unavailable",
+  "message": "MCP request could not be confirmed",
+  "retryable": false
+}

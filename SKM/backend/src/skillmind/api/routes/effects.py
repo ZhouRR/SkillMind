@@ -86,7 +86,7 @@ class ReconciliationResponse(BaseModel):
     project_id: UUID
     run_id: UUID
     effect_execution_id: UUID
-    kind: Literal["DATABASE_TRANSACTION", "DOCUMENT_OBJECT", "GIT_COMMIT"]
+    kind: Literal["DATABASE_TRANSACTION", "DOCUMENT_OBJECT", "GIT_COMMIT", "MCP_OPERATION"]
     status: Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "REVOKED"]
     created_at: datetime
     finished_at: datetime | None

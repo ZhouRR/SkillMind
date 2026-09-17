@@ -11,6 +11,7 @@ from typing import Any, Literal, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from skillmind.agent.mcp_tools_source import StreamableHttpMcpToolsSource
 from skillmind.agent.run_binding import load_bound_run_resource, resolve_binding_secret
 from skillmind.auth.sessions import UnauthorizedSessionError, validate_session_state
 from skillmind.documents.library import DocumentLibraryTarget
@@ -21,6 +22,7 @@ from skillmind.effects.git_receipt import (
     GitCommitReader,
     GitCommitReceipt,
 )
+from skillmind.effects.mcp_receipt import McpOperationCommand, McpOperationReceipt, lookup_operation
 from skillmind.effects.postgres_write import DatabaseWriteConflictError, DatabaseWriteReceipt
 from skillmind.effects.reconciliation_domain import (
     EffectReconciliationDeniedError,
@@ -134,11 +136,20 @@ class EffectReconciliationService:
                         raise EffectReconciliationDeniedError("Original read target changed")
 
                 command = original.target.command
-                receipt: DatabaseWriteReceipt | ObjectWriteReceipt | GitCommitReceipt | None = None
+                receipt: (DatabaseWriteReceipt | ObjectWriteReceipt | GitCommitReceipt
+                          | McpOperationReceipt | None) = None
                 observed: Literal["CONFIRMED", "NOT_OBSERVED", "CONFLICT"] = "NOT_OBSERVED"
                 kind = reconciliation_kind(original.target)
                 try:
-                    if isinstance(command, GitCommitCommand):
+                    if isinstance(command, McpOperationCommand):
+                        if original.credential is None:
+                            raise EffectReconciliationUnavailableError(
+                                "Original MCP credential unavailable"
+                            )
+                        await authorize()
+                        receipt = await lookup_operation(StreamableHttpMcpToolsSource(),
+                            json.loads(original.target.config_json), original.credential, command)
+                    elif isinstance(command, GitCommitCommand):
                         if self._git_reader is None or original.credential is None:
                             raise EffectReconciliationUnavailableError("Original Git unavailable")
                         receipt = await self._git_reader.lookup(
@@ -219,7 +230,9 @@ class EffectReconciliationService:
                 effect_execution_id=reference.effect_execution_id,
             )
             credential = None
-            if isinstance(target.command, (DatabaseWriteCommand, GitCommitCommand)):
+            if isinstance(
+                target.command, (DatabaseWriteCommand, GitCommitCommand, McpOperationCommand)
+            ):
                 bound = await load_bound_run_resource(
                     session,
                     project_id=reference.project_id,
@@ -228,6 +241,7 @@ class EffectReconciliationService:
                     integration_id=target.command.integration_id,
                     provider=target.provider,
                     capability=(
+                        "mcp.call/v1" if isinstance(target.command, McpOperationCommand) else
                         "repository.write/v1"
                         if isinstance(target.command, GitCommitCommand)
                         else "database.write/v1"

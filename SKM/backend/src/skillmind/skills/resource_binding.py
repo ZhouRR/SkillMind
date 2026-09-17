@@ -159,7 +159,8 @@ def is_write_capability(capability: str) -> bool:
     write を除外しないと承認経路を迂回して apply を呼べてしまう。
     """
 
-    return ".update/" in capability or ".apply/" in capability or ".write/" in capability
+    return (".update/" in capability or ".apply/" in capability or ".write/" in capability
+            or capability == "mcp.call/v1")
 
 
 def _bind_requirement(

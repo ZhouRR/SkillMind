@@ -42,6 +42,8 @@ export interface ConnectDraft {
   username: string
   sslmode: string
   serverUrl: string
+  mcpCatalog: Record<string, unknown> | null
+  mcpTools: boolean
   tables: string
   writeColumns: string
   databaseOperations: string[]
@@ -107,7 +109,7 @@ export function emptyConnectDraft(provider: ResourceProvider): ConnectDraft {
     repositoryUri: '',
     defaultRevision: 'HEAD',
     host: '', port: '5432', database: '', username: '', sslmode: 'verify-full',
-    serverUrl: '', tables: '', resourceUris: '', writeColumns: '', databaseOperations: ['INSERT', 'UPDATE'],
+    mcpCatalog: null, mcpTools: false, serverUrl: '', tables: '', resourceUris: '', writeColumns: '', databaseOperations: ['INSERT', 'UPDATE'],
     credentialChoice: PROVIDER_FORMS[provider].requiresSecret ? NEW_CREDENTIAL : '',
     // 自助接入の黄金路径として、既定は平台托管(直接入力)。ENVIRONMENT/FILE は選択で残す。
     resolver: 'MANAGED',
@@ -179,7 +181,9 @@ export function connectDraftFromIntegration(
     return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []
   }
   return {
-    ...draft, provider, name: item.name, credentialChoice: item.secret_reference_id ?? '',
+    ...draft,
+    mcpCatalog: typeof config.tool_catalog === 'object' && config.tool_catalog !== null && !Array.isArray(config.tool_catalog) ? config.tool_catalog as Record<string, unknown> : null,
+    mcpTools: item.capabilities.includes('mcp.tools/v1'), provider, name: item.name, credentialChoice: item.secret_reference_id ?? '',
     access: accessForCapabilities(item.capabilities),
     baseUrl: text('base_url'), repositoryUri: text('repository_uri'),
     defaultRevision: text('default_revision', draft.defaultRevision),

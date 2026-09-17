@@ -35,12 +35,18 @@ class IntegrationResourceCatalog:
                 kind=integration.kind,
                 provider=integration.provider,
                 label=integration.name,
-                capabilities=integration.capabilities,
+                capabilities=tuple(
+                    capability for capability in integration.capabilities
+                    if capability != "mcp.read/v1" or integration.scope.get("resource_uris")
+                ),
                 integration_id=integration.integration_id,
                 revision=str(integration.revision),
                 scope=integration.scope,
             )
             for integration in integrations
+            # MCP の空範囲は接続の保存用。読取 Task の実行可能候補にはしない。
+            if (integration.provider != "mcp" or integration.scope.get("resource_uris")
+                or integration.scope.get("tool_names"))
         )
 
 

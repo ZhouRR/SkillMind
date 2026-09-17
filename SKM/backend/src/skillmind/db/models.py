@@ -741,6 +741,17 @@ class ProjectSkillVersion(IdentityMixin, Base):
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class McpDesktopLease(Base):
+    """MCP endpoint の Run 専有と、終了未確認の原 Effect を保持する。"""
+
+    __tablename__ = "mcp_desktop_leases"
+    endpoint_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="RESTRICT"), nullable=False)
+    pending_effect_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("effect_executions.id", ondelete="RESTRICT"), nullable=True
+    )
+
+
 class Run(IdentityMixin, TimestampMixin, Base):
     """不変 snapshot と現在 status を保持する論理的な一回の実行。"""
 
@@ -1593,7 +1604,7 @@ class EffectReconciliationRequest(IdentityMixin, Base):
             name="effect_reconciliation_status",
         ),
         CheckConstraint(
-            "kind IN ('DATABASE_TRANSACTION', 'DOCUMENT_OBJECT', 'GIT_COMMIT')",
+            "kind IN ('DATABASE_TRANSACTION', 'DOCUMENT_OBJECT', 'GIT_COMMIT', 'MCP_OPERATION')",
             name="effect_reconciliation_kind",
         ),
         CheckConstraint(

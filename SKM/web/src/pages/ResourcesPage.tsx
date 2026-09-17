@@ -1,3 +1,5 @@
+import { discoverMcpTools } from '../api/integrations'
+import { supportsFlaUiCatalog } from '../lib/resourceConfig'
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 
 import {
@@ -80,12 +82,13 @@ import {
     認証情報・接続先・権限を一つの form に束ね、個別の Secret 管理・binding・事前許可は
     高度設定として折り畳む。scope/config の裸 JSON 入力は構造化入力へ置き換え、
     検証の最終権威は server 側に置いたまま「確実に弾かれる入力」だけを送信前に知らせる。 */
-export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = true, databaseWritesEnabled = false, gitWritesEnabled = false }: {
+export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = true, databaseWritesEnabled = false, gitWritesEnabled = false, mcpToolsEnabled = false }: {
   projectId: string
   csrfToken: string
   deferredFeaturesEnabled?: boolean
   databaseWritesEnabled?: boolean
   gitWritesEnabled?: boolean
+  mcpToolsEnabled?: boolean
 }) {
   const messages = useMessages()
   const [secrets, setSecrets] = useState<SecretReferenceRecord[]>([])
@@ -108,6 +111,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
   const [error, setError] = useState<string | null>(null)
   const loadController = useRef<AbortController | null>(null)
   const mutationController = useRef<AbortController | null>(null)
+  const savedMcpUrl = useRef('')
 
   useEffect(() => {
     mutationController.current?.abort()
@@ -121,9 +125,9 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
       setResourceTab((current) => current === 'policy' ? 'secret' : current)
       setOpenDialog((current) => current === 'policy' ? null : current)
     }
-    setConnectDraft((current) => (current.provider === 'postgres' ? databaseWritesEnabled : current.provider === 'git' ? gitWritesEnabled || deferredFeaturesEnabled : deferredFeaturesEnabled)
+    setConnectDraft((current) => (current.provider === 'mcp' ? mcpToolsEnabled : current.provider === 'postgres' ? databaseWritesEnabled : current.provider === 'git' ? gitWritesEnabled || deferredFeaturesEnabled : deferredFeaturesEnabled)
       ? current : { ...current, access: 'read' })
-  }, [deferredFeaturesEnabled, databaseWritesEnabled, gitWritesEnabled])
+  }, [deferredFeaturesEnabled, databaseWritesEnabled, gitWritesEnabled, mcpToolsEnabled])
 
   useEffect(() => () => {
     loadController.current?.abort()
@@ -200,7 +204,6 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
     if (issue === 'write_columns_required') return messages.resources.databaseWriteColumnsRequired
     if (issue === 'database_operations_required') return messages.resources.databaseOperationsRequired
     if (issue === 'tables_required') return messages.resources.tablesRequired
-    if (issue === 'resource_uris_required') return messages.resources.resourceUrisRequired
     return messages.resources.pathsRequired
   }
 
@@ -218,9 +221,26 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
     await mutate('load-edit', async (signal) => {
       const detail = await loadIntegrationDetails(projectId, item.integration_id, signal)
       if (signal.aborted) return
+      savedMcpUrl.current = typeof detail.config.server_url === 'string' ? detail.config.server_url : ''
       setEditingIntegration(detail.integration)
       setConnectDraft(connectDraftFromIntegration(detail.integration, detail.config))
       setOpenDialog('connect')
+    })
+  }
+
+  /** 保存済み接続だけを発見し、対象変更・閉鎖後の遅延結果は破棄する。 */
+  async function discoverTools(): Promise<void> {
+    const item = editingIntegration
+    if (!item || connectDraft.serverUrl.trim() !== savedMcpUrl.current
+      || connectDraft.credentialChoice !== (item.secret_reference_id ?? '') || connectDraft.secretValue || connectDraft.locator) {
+      setError(messages.resources.mcpSaveFirst); return
+    }
+    await mutate('mcp-discover', async (signal) => {
+      const result = await discoverMcpTools(projectId, item.integration_id, item.revision, csrfToken, signal)
+      if (signal.aborted) return
+      if (!supportsFlaUiCatalog(result.catalog)) setError(messages.resources.mcpUnsupported)
+      setConnectDraft((current) => current.provider === 'mcp' && current.serverUrl.trim() === savedMcpUrl.current
+        ? { ...current, mcpCatalog: result.catalog, mcpTools: supportsFlaUiCatalog(result.catalog) } : current)
     })
   }
 
@@ -265,6 +285,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
       writeColumns: parseListInput(draft.writeColumns),
       operations: draft.databaseOperations,
       resourceUris: parseListInput(draft.resourceUris),
+      mcpTools: draft.mcpTools,
     })
     const issue = findScopeIssue(draft.provider, scope, access === 'read_write')
     if (issue !== null) {
@@ -323,7 +344,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
         name: draft.name,
         kind: form.kind,
         provider: draft.provider,
-        capabilities: capabilitiesForAccess(draft.provider, access),
+        capabilities: capabilitiesForAccess(draft.provider, access, draft.mcpTools, parseListInput(draft.resourceUris).length > 0),
         scope,
         config: buildIntegrationConfig(draft.provider, { ...draft, write: writeInput }),
         secret_reference_id: secretReferenceId,
@@ -478,7 +499,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
     }
   }
 
-  const connectWriteEnabled = connectDraft.provider === 'postgres' ? databaseWritesEnabled : connectDraft.provider === 'git' ? gitWritesEnabled || deferredFeaturesEnabled : deferredFeaturesEnabled
+  const connectWriteEnabled = connectDraft.provider === 'mcp' ? mcpToolsEnabled && connectDraft.mcpTools : connectDraft.provider === 'postgres' ? databaseWritesEnabled : connectDraft.provider === 'git' ? gitWritesEnabled || deferredFeaturesEnabled : deferredFeaturesEnabled
   const connectForm = PROVIDER_FORMS[connectDraft.provider]
   const connectSecrets = secrets.filter(
     (item) => item.status === 'ACTIVE' && item.provider === connectDraft.provider,
@@ -590,7 +611,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
               ) : connectDraft.provider === 'mcp' ? (
                 <label>{messages.resources.mcpServerUrl}<input type="url" required maxLength={2048}
                   placeholder="https://mcp.example.com/mcp" value={connectDraft.serverUrl}
-                  onChange={(event) => setConnectDraft((value) => ({ ...value, serverUrl: event.target.value }))} /></label>
+                  onChange={(event) => setConnectDraft((value) => ({ ...value, serverUrl: event.target.value, mcpCatalog: null, mcpTools: false }))} /></label>
               ) : connectDraft.provider === 'redmine' ? (
                 <label>{messages.resources.baseUrlLabel}
                   <input
@@ -653,10 +674,11 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
               )}
               <label>{messages.resources.credentialLabel}
                 <select
+                  required={connectForm.requiresSecret || (connectDraft.provider === 'mcp' && connectDraft.mcpTools && connectDraft.access === 'read_write')}
                   value={connectDraft.credentialChoice}
                   onChange={(event) => setConnectDraft((value) => ({ ...value, credentialChoice: event.target.value, secretValue: '', locator: '' }))}
                 >
-                  {!connectForm.requiresSecret && <option value="">{messages.resources.notUsed}</option>}
+                  {!connectForm.requiresSecret && <option value="" disabled={connectDraft.provider === 'mcp' && connectDraft.mcpTools && connectDraft.access === 'read_write'}>{messages.resources.notUsed}</option>}
                   <option value={NEW_CREDENTIAL}>{messages.resources.credentialNew}</option>
                   {connectSecrets.map((item) => (
                     <option key={item.secret_reference_id} value={item.secret_reference_id}>{item.name}</option>
@@ -751,10 +773,26 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                   </fieldset>
                 </>}</>
               ) : connectDraft.provider === 'mcp' ? (
-                <label>{messages.resources.mcpResourceUris}<textarea required className="mono compactTextarea"
-                  placeholder="resource://reports/current" value={connectDraft.resourceUris}
+                <>
+                {mcpToolsEnabled && <div className="resourceFormSection">
+                  <button className="secondaryButton" type="button" disabled={busy !== null || editingIntegration === null}
+                    onClick={() => void discoverTools()}>{messages.resources.mcpDiscover}</button>
+                  {editingIntegration === null && <p className="hint">{messages.resources.mcpSaveFirst}</p>}
+                  {connectDraft.mcpCatalog && <>
+                    <label className="scopeOption"><input type="checkbox" checked={connectDraft.mcpTools} disabled={!supportsFlaUiCatalog(connectDraft.mcpCatalog)}
+                      onChange={(event) => setConnectDraft((value) => ({ ...value, mcpTools: event.target.checked }))} />
+                      <span>{messages.resources.mcpEnableTools}</span></label>
+                    <p className="hint">{messages.resources.mcpToolsHint}</p>
+                    <ul>{Array.isArray(connectDraft.mcpCatalog.tools) && connectDraft.mcpCatalog.tools.map((tool: unknown) =>
+                      typeof tool === 'object' && tool !== null && 'name' in tool && typeof tool.name === 'string'
+                        ? <li key={tool.name}><code>{tool.name}</code></li> : null)}</ul>
+                  </>}
+                </div>}
+                <label>{messages.resources.mcpResourceUris}<textarea className="mono compactTextarea"
+                  value={connectDraft.resourceUris}
                   onChange={(event) => setConnectDraft((value) => ({ ...value, resourceUris: event.target.value }))} />
                   <span className="hint">{messages.resources.mcpReadHint}</span></label>
+                </>
               ) : connectDraft.provider === 'redmine' ? (
                 <>
                   <fieldset className="scopePicker">

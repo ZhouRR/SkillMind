@@ -35,6 +35,12 @@ from skillmind.effects.issue_update import (
     issue_update_scope_from_payload,
     validate_issue_update_proposal,
 )
+from skillmind.effects.mcp_call import (
+    MCP_CALL,
+    MCP_PROVIDER_VERSION,
+    mcp_call_scope,
+    validate_mcp_proposal,
+)
 from skillmind.effects.repository_write import (
     REPOSITORY_WRITE_CAPABILITY,
     REPOSITORY_WRITE_PROVIDER_VERSION,
@@ -84,6 +90,11 @@ class EffectCapabilityDefinition:
 
 
 EFFECT_CAPABILITIES: Mapping[str, EffectCapabilityDefinition] = {
+    MCP_CALL: EffectCapabilityDefinition(
+        capability_version=MCP_CALL, provider_versions={"mcp": MCP_PROVIDER_VERSION},
+        preauthorizable=False, validate=validate_mcp_proposal, requested_scope=mcp_call_scope,
+        staged_authorization=True,
+    ),
     DOCUMENT_WRITE_CAPABILITY: EffectCapabilityDefinition(
         capability_version=DOCUMENT_WRITE_CAPABILITY,
         provider_versions={"project-library": DOCUMENT_WRITE_PROVIDER_VERSION},

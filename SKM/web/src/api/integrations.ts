@@ -357,3 +357,17 @@ function isResourceBinding(value: unknown): value is ResourceBindingRecord {
     && (typeof value.disabled_at === 'string' || value.disabled_at === null)
     && isRecord(value.scope)
 }
+
+/** 保存済み endpoint に tools/list だけを送る。発見結果は明示保存まで有効化しない。 */
+export async function discoverMcpTools(projectId: string, integrationId: string, revision: number,
+  csrfToken: string, signal?: AbortSignal): Promise<{ catalog: Record<string, unknown> }> {
+  const value: unknown = await requestApiJson(`${API_BASE}/projects/${projectId}/integrations/${integrationId}/mcp-tools/discover`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+    body: JSON.stringify({ expected_revision: revision }), signal,
+  })
+  if (!isRecord(value) || value.expected_revision !== revision || typeof value.catalog_hash !== 'string'
+    || !isRecord(value.catalog) || !isRecord(value.catalog.server) || !Array.isArray(value.catalog.tools)) {
+    throw new Error('MCP discovery did not match its contract')
+  }
+  return { catalog: value.catalog }
+}

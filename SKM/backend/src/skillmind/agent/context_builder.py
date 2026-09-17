@@ -117,20 +117,45 @@ def _read_tool_definitions(
     redmine_issue_provider: ToolProvider | None = None,
     database_provider: ToolProvider | None = None,
     mcp_provider: ToolProvider | None = None,
+    mcp_tools_provider: ToolProvider | None = None,
+    mcp_query_provider: ToolProvider | None = None,
     repository_source: RepositorySnapshotSource | None = None,
 ) -> tuple[ToolDefinition, ...]:
     """注入済みの実 Provider だけを公開し、未設定の資源を合成 data で補わない。"""
 
     definitions: list[ToolDefinition] = []
+    for capability, provider, description in (
+        (
+            "mcp.tools/v1",
+            mcp_tools_provider,
+            "Inspect allowed frozen MCP tool schemas and obtain catalog Evidence. "
+            + str(contracts.load("tools/mcp.call/v1/request.schema.json")["description"]),
+        ),
+        (
+            "mcp.query/v1",
+            mcp_query_provider,
+            "Call only inspect_window or get_step_status. Action tools require "
+            "change.propose approval; never call them here.",
+        ),
+    ):
+        if provider is not None:
+            definitions.append(
+                ToolDefinition(
+                    capability=capability,
+                    description=description,
+                    request_schema=contracts.load(f"tools/{capability}/request.schema.json"),
+                    response_schema=contracts.load(f"tools/{capability}/response.schema.json"),
+                    error_schema=contracts.load(f"tools/{capability}/error.schema.json"),
+                    providers={"mcp": provider},
+                )
+            )
     if mcp_provider is not None:
         definitions.append(
             ToolDefinition(
                 capability="mcp.read/v1",
                 description="Read text or Base64 content from one allowed MCP resource URI",
                 request_schema=contracts.load("tools/mcp.read/v1/request.schema.json"),
-                response_schema=contracts.load(
-                    "tools/mcp.read/v1/response.schema.json"
-                ),
+                response_schema=contracts.load("tools/mcp.read/v1/response.schema.json"),
                 error_schema=contracts.load("tools/mcp.read/v1/error.schema.json"),
                 providers={"mcp": mcp_provider},
             )
@@ -144,12 +169,8 @@ def _read_tool_definitions(
                     "and bounded rows; use include_schema to inspect columns and primary keys "
                     "even for empty tables before proposing a write; no SQL input"
                 ),
-                request_schema=contracts.load(
-                    "tools/database.read/v1/request.schema.json"
-                ),
-                response_schema=contracts.load(
-                    "tools/database.read/v1/response.schema.json"
-                ),
+                request_schema=contracts.load("tools/database.read/v1/request.schema.json"),
+                response_schema=contracts.load("tools/database.read/v1/response.schema.json"),
                 error_schema=contracts.load("tools/database.read/v1/error.schema.json"),
                 providers={"postgres": database_provider},
             )
@@ -177,15 +198,9 @@ def _read_tool_definitions(
                 ToolDefinition(
                     capability=capability,
                     description=description,
-                    request_schema=contracts.load(
-                        f"tools/{name}/{version}/request.schema.json"
-                    ),
-                    response_schema=contracts.load(
-                        f"tools/{name}/{version}/response.schema.json"
-                    ),
-                    error_schema=contracts.load(
-                        f"tools/{name}/{version}/error.schema.json"
-                    ),
+                    request_schema=contracts.load(f"tools/{name}/{version}/request.schema.json"),
+                    response_schema=contracts.load(f"tools/{name}/{version}/response.schema.json"),
+                    error_schema=contracts.load(f"tools/{name}/{version}/error.schema.json"),
                     providers={"postgres": database_provider},
                 )
             )
@@ -194,12 +209,8 @@ def _read_tool_definitions(
             ToolDefinition(
                 capability="issue.read/v1",
                 description="Read one issue from the bound Integration",
-                request_schema=contracts.load(
-                    "tools/issue.read/v1/request.schema.json"
-                ),
-                response_schema=contracts.load(
-                    "tools/issue.read/v1/response.schema.json"
-                ),
+                request_schema=contracts.load("tools/issue.read/v1/request.schema.json"),
+                response_schema=contracts.load("tools/issue.read/v1/response.schema.json"),
                 error_schema=contracts.load("tools/issue.read/v1/error.schema.json"),
                 providers={"redmine": redmine_issue_provider},
             )
@@ -210,15 +221,9 @@ def _read_tool_definitions(
             ToolDefinition(
                 capability="repository.read/v1",
                 description="Read one UTF-8 file from the bound repository at a fixed revision",
-                request_schema=contracts.load(
-                    "tools/repository.read/v1/request.schema.json"
-                ),
-                response_schema=contracts.load(
-                    "tools/repository.read/v1/response.schema.json"
-                ),
-                error_schema=contracts.load(
-                    "tools/repository.read/v1/error.schema.json"
-                ),
+                request_schema=contracts.load("tools/repository.read/v1/request.schema.json"),
+                response_schema=contracts.load("tools/repository.read/v1/response.schema.json"),
+                error_schema=contracts.load("tools/repository.read/v1/error.schema.json"),
                 providers={"git": bound, "svn": bound},
             )
         )
@@ -305,12 +310,15 @@ def create_run_tool_registry(
     redmine_issue_provider: ToolProvider | None = None,
     database_provider: ToolProvider | None = None,
     mcp_provider: ToolProvider | None = None,
+    mcp_tools_provider: ToolProvider | None = None,
+    mcp_query_provider: ToolProvider | None = None,
     repository_source: RepositorySnapshotSource | None = None,
     subagent_provider: ToolProvider | None = None,
     deferred_features_enabled: bool = True,
     database_writes_enabled: bool = False,
     document_writes_enabled: bool = False,
     git_writes_enabled: bool = False,
+    mcp_tools_enabled: bool = False,
 ) -> ToolRegistry:
     """Project 文書、実 Integration と platform 能力を registry へ登録する。"""
 
@@ -321,6 +329,8 @@ def create_run_tool_registry(
                 redmine_issue_provider=redmine_issue_provider,
                 database_provider=database_provider,
                 mcp_provider=mcp_provider,
+                mcp_tools_provider=mcp_tools_provider,
+                mcp_query_provider=mcp_query_provider,
                 repository_source=repository_source,
             ),
             document_read_tool_definition(contracts, document_source),
@@ -344,7 +354,7 @@ def create_run_tool_registry(
             _interaction_tool_definition(contracts),
             *((_change_propose_tool_definition(contracts),)
               if deferred_features_enabled or database_writes_enabled
-              or document_writes_enabled or git_writes_enabled else ()),
+              or document_writes_enabled or git_writes_enabled or mcp_tools_enabled else ()),
             *(_subagent_tool_definitions(contracts, subagent_provider)
               if deferred_features_enabled else ()),
         )
@@ -591,6 +601,7 @@ class ProductionRunContextBuilder:
         database_writes_enabled: bool = False,
         document_writes_enabled: bool = False,
         git_writes_enabled: bool = False,
+        mcp_tools_enabled: bool = False,
         document_library_target: DocumentLibraryTarget | None = None,
         proposal_continuations: ProposalContinuationReader | None = None,
         database_observations: DatabaseReadProvider | None = None,
@@ -610,7 +621,7 @@ class ProductionRunContextBuilder:
         self._database_observations = database_observations
         self._execution_features = ExecutionFeatures(
             deferred_features_enabled, database_writes_enabled,
-            document_writes_enabled, git_writes_enabled
+            document_writes_enabled, git_writes_enabled, mcp_tools_enabled
         )
 
     async def build(self, claimed_run: ClaimedRun, *, sequence_start: int) -> RunContext:

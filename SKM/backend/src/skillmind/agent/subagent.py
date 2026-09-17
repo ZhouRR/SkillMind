@@ -66,7 +66,9 @@ def is_write_like(capability: str) -> bool:
     `.write/` を含む識別子は一律に書き込み扱いにし、**知らない能力は拒否側へ倒す**。
     """
 
-    return ".write/" in capability or capability.endswith(".update/v1")
+    from skillmind.skills.resource_binding import is_write_capability
+
+    return is_write_capability(capability)
 
 
 def resolve_subagent_capabilities(
