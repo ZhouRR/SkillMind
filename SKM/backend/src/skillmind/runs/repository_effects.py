@@ -69,6 +69,7 @@ from skillmind.effects.domain import (
     StoredEffectExecution,
 )
 from skillmind.effects.git_receipt import GitCommitCommand, git_effect_commit_message
+from skillmind.effects.mcp_diagnostics import diagnostic_message
 from skillmind.effects.mcp_receipt import McpOperationCommand
 from skillmind.effects.operation_policy import operation_authorization_key, operation_risk
 from skillmind.effects.outcomes import (
@@ -1628,7 +1629,18 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 capability=proposal.capability_version, provider=execution.provider,
                 attempt_no=execution.attempt_no,
                 code=failure.code, retryable=failure.retryable, previous=execution.error_json,
+                diagnostic=failure.diagnostic,
             )
+            if proposal.capability_version == "mcp.call/v1" and failure.observations:
+                refs = list(execution.error_json.get("observation_refs", []))
+                for observation in failure.observations[:2]:
+                    ref = f"ev_{uuid4().hex}"
+                    self._session.add(self._effect_evidence_row(
+                        run_id=run.id, tool_call_id=tool_call.id, evidence_ref=ref,
+                        draft=observation, now=now,
+                    ))
+                    refs.append(ref)
+                execution.error_json["observation_refs"] = refs[-16:]
             proposal.status = (
                 ChangeProposalStatus.STALE.value
                 if failure.status is EffectExecutionStatus.STALE
@@ -1639,6 +1651,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
             tool_call.error_json = _effect_tool_error(
                 code=execution.error_json["code"],
                 retryable=failure.retryable,
+                diagnostic=execution.error_json.get("diagnostic"),
             )
             outcome = failure.status.value
             event_type = AgentEventType.EFFECT_FAILED
@@ -1776,6 +1789,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
             outcome=outcome,
             evidence_refs=evidence_refs,
             effect_result=effect_result,
+            effect_error=execution.error_json,
             now=now,
         )
         transition = plan_run_transition(
@@ -1912,7 +1926,9 @@ class EffectOperationsMixin(_RunRepositoryBase):
         if tool_call is not None:
             tool_call.status = "FAILED"
             tool_call.result_json = None
-            tool_call.error_json = _effect_tool_error(code=error["code"], retryable=False)
+            tool_call.error_json = _effect_tool_error(
+                code=error["code"], retryable=False, diagnostic=error.get("diagnostic"),
+            )
             tool_call.updated_at = now
 
         cancellation_requested = await self.is_cancellation_requested(run.id)
@@ -2191,6 +2207,22 @@ class EffectOperationsMixin(_RunRepositoryBase):
         """同 Run・同 binding の発見証拠だけを call の前提にする。"""
         if draft.capability_version != "mcp.call/v1":
             return
+        if "cancel_target" in payload:
+            original = (await self._session.scalars(
+                select(EffectExecution)
+                .join(ChangeProposal, ChangeProposal.id == EffectExecution.proposal_id)
+                .where(
+                    EffectExecution.id == UUID(payload["cancel_target"]),
+                    EffectExecution.run_id == binding.run_id,
+                    ChangeProposal.integration_id == binding.integration_id,
+                    ChangeProposal.capability_version == "mcp.call/v1",
+                    ChangeProposal.operation == "call",
+                )
+            )).one_or_none()
+            if original is None:
+                raise ChangeProposalValidationError(
+                    "MCP cancellation requires an original Run effect"
+                )
         evidence = (
             await self._session.scalars(
                 select(Evidence)
@@ -2568,6 +2600,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
         now: datetime,
         evidence_refs: tuple[str, ...] = (),
         effect_result: dict[str, Any] | None = None,
+        effect_error: dict[str, Any] | None = None,
         rejection_reason: str | None = None,
         trigger_type: RunSegmentTrigger = RunSegmentTrigger.APPROVAL_RESPONSE,
     ) -> RunSegment:
@@ -2588,6 +2621,11 @@ class EffectOperationsMixin(_RunRepositoryBase):
         facts.append(
             f"ChangeProposal {proposal.proposal_ref} reached controlled effect outcome {outcome}."
         )
+        if effect_error is not None:
+            facts.append(
+                f"Controlled effect failure: {effect_error.get('code', 'effect_provider_failed')}."
+                + diagnostic_message(effect_error.get("diagnostic"))
+            )
         if rejection_reason is not None:
             if outcome != "REJECTED":
                 raise ValueError("Only a rejection can carry rejection feedback")
@@ -2967,15 +3005,17 @@ class EffectOperationsMixin(_RunRepositoryBase):
         return recovered
 
 
-def _effect_tool_error(*, code: str, retryable: bool) -> dict[str, Any]:
+def _effect_tool_error(
+    *, code: str, retryable: bool, diagnostic: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Tool contract に適合し、外部 response 本文を含まない effect error を返す。"""
 
     return {
         "status": "error",
-        "code": code,
+        "code": "invalid_request" if code == "mcp_request_not_sent" else code,
         "message": (
             "Original external write result requires reconciliation"
             if code == UNKNOWN_EFFECT_CODE else "Controlled effect could not be completed"
-        ),
+        ) + diagnostic_message(diagnostic),
         "retryable": retryable,
     }

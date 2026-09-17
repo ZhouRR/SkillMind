@@ -10,7 +10,6 @@ from unittest.mock import Mock
 
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
-
 from skillmind.agent.context_builder import (
     ContractStore,
     ProductionRunContextBuilder,
@@ -63,7 +62,7 @@ async def test_discovery_exposes_observed_identity_and_explicit_reservation(
     schema = ContractStore(CONTRACTS).load("tools/mcp.tools/v1/response.schema.json")
     response = {**result.response, "evidence_refs": ["ev_observation"]}
     Draft202012Validator(schema, format_checker=FormatChecker()).validate(response)
-    assert response["server"] == {"name": "FlaUiMcp", "version": "0.3.0.0"}
+    assert response["server"] == {"name": "ExampleMcp", "version": "2.1.0"}
     assert response["binding_ref"] == str(mcp_context.tool.binding_id)
     assert response["desktop"] == (lease if reserve else None)
     assert result.evidence[0].source_locator["desktop"] == response["desktop"]
@@ -92,13 +91,15 @@ async def test_source_failure_has_actionable_classification(
     with pytest.raises(ToolProviderError) as caught:
         await obj.execute(mcp_context, {"name": "inspect_window", "arguments": {"appId": "sample"}})
     assert caught.value.code == expected_code
-    assert caught.value.diagnostic == {"kind": "mcp", "reason": reason}
+    assert caught.value.diagnostic["reason"] == reason
+    assert caught.value.diagnostic["local_diagnostic_id"] in caught.value.message
+    assert caught.value.diagnostic["remote_detail"] == {}
     assert not caught.value.retryable
     assert obj._binding._bound.await_count == 2
     source.call.assert_awaited_once()
 
 
-async def test_remote_error_keeps_only_diagnostic_id_and_not_scope_error(provider, mcp_context):
+async def test_remote_error_redacts_secrets_and_uses_local_correlation(provider, mcp_context):
     """遠端の機密を含む例外本文を捨て、相関 ID と正しい層を保存する。"""
     obj, source, _ = provider
     obj._capability = "mcp.query/v1"
@@ -117,12 +118,10 @@ async def test_remote_error_keeps_only_diagnostic_id_and_not_scope_error(provide
         await obj.execute(mcp_context, {"name": "inspect_window", "arguments": {"appId": "sample"}})
     error = caught.value
     assert error.code == "unavailable"
-    assert diagnostic_id in error.message
-    assert error.diagnostic == {
-        "kind": "mcp",
-        "reason": "remote_tool_error",
-        "diagnostic_id": diagnostic_id,
-    }
+    assert error.diagnostic["local_diagnostic_id"] in error.message
+    assert error.diagnostic["reason"] == "remote_tool_error"
+    assert "diagnostic_id" not in error.diagnostic
+    assert error.diagnostic["remote_detail"]["content"][0]["text"] == "[redacted]"
     assert "fixture-secret" not in str(error) and "private" not in str(error)
 
 
@@ -165,7 +164,8 @@ def test_untrusted_diagnostic_text_is_not_reflected(text):
     """形式不正または曖昧な相関値を拒否する。"""
     with pytest.raises(McpResultError) as caught:
         parse_result({"is_error": True, "content": [{"type": "text", "text": text}]})
-    assert caught.value.diagnostic_id is None
+    assert caught.value.local_diagnostic_id not in text
+    assert caught.value.remote_detail["content"][0]["text"] == text
     assert safe_tool_diagnostic(
         {"kind": "mcp", "reason": "remote_tool_error", "diagnostic_id": text, "password": "secret"}
     ) == {"kind": "mcp", "reason": "remote_tool_error"}
@@ -247,6 +247,8 @@ async def test_diagnostic_is_saved_with_original_failed_toolcall(monkeypatch):
             "kind": "mcp",
             "reason": "remote_tool_error",
             "diagnostic_id": "a" * 32,
+            "local_diagnostic_id": "c" * 32,
+            "remote_detail": {"error": {"code": "BUSY", "password": "must-redact"}},
             "message": "unsafe private body",
         },
     )
@@ -255,7 +257,9 @@ async def test_diagnostic_is_saved_with_original_failed_toolcall(monkeypatch):
     assert row.error_json == {
         "code": "unavailable",
         "retryable": False,
-        "mcp": {"kind": "mcp", "reason": "remote_tool_error", "diagnostic_id": "a" * 32},
+        "mcp": {"kind": "mcp", "reason": "remote_tool_error", "diagnostic_id": "a" * 32,
+                "local_diagnostic_id": "c" * 32,
+                "remote_detail": {"error": {"code": "BUSY", "password": "[redacted]"}}},
     }
 
 

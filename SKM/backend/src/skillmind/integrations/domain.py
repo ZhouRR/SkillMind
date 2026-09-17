@@ -457,9 +457,9 @@ def normalize_integration_command(command: CreateIntegrationCommand) -> CreateIn
                 if "mcp.call/v1" in capabilities:
                     if command.secret_reference_id is None:
                         raise ValueError("MCP actions require a credential reference")
-                    if ("mcp.query/v1" not in capabilities
-                        or not any(tool_access(config, name) == "read" for name in tools)):
-                        raise ValueError("MCP calls require their read-back tools")
+                    # 接続保存は工具構成を受理する。具体的な回読権は各提案の契約で要求する。
+                    if "mcp.query/v1" not in capabilities:
+                        raise ValueError("MCP calls require the query capability")
                 elif any(tool_access(config, name) == "call" for name in tools):
                     raise ValueError("MCP action tools require the call capability")
             elif tools:
@@ -493,7 +493,9 @@ def normalize_provider_scope(
     if provider == "mcp" and "tool_names" in scope:
         if set(scope) != {"resource_uris", "tool_names"}:
             raise IntegrationValidationError("MCP tool scope contains unknown fields")
-        names = _unique_strings(scope["tool_names"], maximum=100, key_pattern=False, maximum_length=128)
+        names = _unique_strings(
+            scope["tool_names"], maximum=100, key_pattern=False, maximum_length=128
+        )
         if not names or any(re.fullmatch(r"[a-zA-Z0-9_.-]{1,128}", name) is None for name in names):
             raise IntegrationValidationError("MCP tool scope is invalid")
         resources = normalize_provider_scope(
@@ -716,7 +718,10 @@ def _validate_provider_config(provider: str, config: dict[str, Any]) -> dict[str
         return dict(config)
     if provider == "mcp":
         if (set(config) not in ({"server_url", "transport"},
-                              {"server_url", "transport", "tool_profile", "tool_catalog", "tool_permissions"})
+                              {
+                                  "server_url", "transport", "tool_profile",
+                                  "tool_catalog", "tool_permissions",
+                              })
                 or config.get("transport") != "streamable_http"):
             raise IntegrationValidationError("MCP requires Streamable HTTP connection fields")
         value = config["server_url"]
@@ -748,7 +753,7 @@ def _validate_provider_config(provider: str, config: dict[str, Any]) -> dict[str
             names = {tool["name"] for tool in result["tool_catalog"]["tools"]}
             if (not isinstance(permissions, dict) or not permissions
                 or set(permissions) - names
-                or any(mode not in {"read", "call"} for mode in permissions.values())):
+                or any(mode not in ("read", "call") for mode in permissions.values())):
                 raise IntegrationValidationError("MCP requires explicit per-tool permissions")
             result["tool_permissions"] = dict(permissions)
         return result

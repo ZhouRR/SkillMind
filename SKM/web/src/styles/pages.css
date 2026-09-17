@@ -482,3 +482,8 @@
 .apiKeyRow { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 16px 0; border-top: 1px solid var(--border); }
 .apiKeyInfo { display: flex; flex-direction: column; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
 .apiKeyRevoke { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* 工具権限は名称と選択欄を同じ行で対応させる。 */
+.resourceToolPermission { display: grid; grid-template-columns: minmax(0, 1fr) minmax(10rem, 16rem); align-items: center; gap: 1rem; }
+.resourceToolPermission code { overflow-wrap: anywhere; }
+@media (max-width: 640px) { .resourceToolPermission { grid-template-columns: 1fr; gap: .35rem; } }

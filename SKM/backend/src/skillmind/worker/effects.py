@@ -16,6 +16,7 @@ from skillmind.effects.domain import (
     EffectFailure,
     EffectLeaseValidationError,
 )
+from skillmind.effects.mcp_diagnostics import McpEffectFailure
 from skillmind.effects.provider import EffectProviderRegistry
 from skillmind.effects.redmine import (
     EffectProviderStaleError,
@@ -208,6 +209,8 @@ class ApprovedEffectExecutor:
                 status=EffectExecutionStatus.FAILED,
                 code=error.code,
                 retryable=error.retryable,
+                diagnostic=error.diagnostic if isinstance(error, McpEffectFailure) else None,
+                observations=error.observations if isinstance(error, McpEffectFailure) else (),
             )
         except (SecretResolutionError, LookupError, ValueError):
             failure = EffectFailure(

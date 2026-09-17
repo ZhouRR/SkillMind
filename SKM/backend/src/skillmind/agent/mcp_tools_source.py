@@ -10,35 +10,51 @@ from typing import Any
 import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
+from mcp.shared.exceptions import McpError
+from mcp.types import CONNECTION_CLOSED
 
 from skillmind.agent.mcp_source import BoundedMcpTransport, McpReadError
 from skillmind.core.hashing import canonical_json
+from skillmind.integrations.mcp_errors import local_diagnostic_id, safe_remote_detail
 from skillmind.integrations.mcp_tools import digest, normalize_catalog, validate_tool_value
 
 
 class McpToolsError(RuntimeError):
-    """本文・URL・credential を含まない通信または契約エラー。"""
+    """通信・契約・JSON-RPC の分類と、独立した脱敏済み診断データ。"""
 
-    def __init__(self, reason: str = "transport_unconfirmed") -> None:
-        """固定の分類だけを保持し、低層の例外を出力しない。"""
+    def __init__(self, reason: str = "transport_unconfirmed", *,
+                 diagnostic_id: str | None = None,
+                 remote_detail: dict[str, Any] | None = None) -> None:
+        """例外文字列は固定分類とし、標準エラーの詳細は別属性へ保持する。"""
         self.reason = (
             reason
-            if reason in {"contract_changed", "invalid_arguments", "invalid_response"}
+            if reason in {
+                "contract_changed", "invalid_arguments", "invalid_response", "protocol_error",
+            }
             else "transport_unconfirmed"
         )
+        self.local_diagnostic_id = local_diagnostic_id(diagnostic_id)
+        self.remote_detail = remote_detail or {}
         super().__init__(self.reason)
 
 
-def _request_failure(error: Exception) -> McpToolsError:
-    """SDK の task group が包んだ既知の分類だけを復元する。"""
+def _request_failure(error: Exception, *, credential: str | None = None,
+                     diagnostic_id: str | None = None) -> McpToolsError:
+    """SDK の包んだ分類を復元し、JSON-RPC の標準フィールドだけを脱敏する。"""
     if isinstance(error, McpToolsError):
+        if diagnostic_id is not None:
+            error.local_diagnostic_id = diagnostic_id
         return error
+    if isinstance(error, McpError) and error.error.code not in {408, CONNECTION_CLOSED}:
+        return McpToolsError("protocol_error", diagnostic_id=diagnostic_id,
+            remote_detail=safe_remote_detail(error.error.model_dump(exclude_none=True),
+                                            credential=credential))
     if isinstance(error, ExceptionGroup):
         for child in error.exceptions:
-            found = _request_failure(child)
+            found = _request_failure(child, credential=credential, diagnostic_id=diagnostic_id)
             if found.reason != "transport_unconfirmed":
                 return found
-    return McpToolsError()
+    return McpToolsError(diagnostic_id=diagnostic_id)
 
 
 class _ToolTransport(BoundedMcpTransport):
@@ -108,6 +124,7 @@ class StreamableHttpMcpToolsSource:
         expected: dict[str, Any] | None,
     ) -> dict[str, Any]:
         """双方向 callback は登録せず、例外本文は transport 境界で封じる。"""
+        diagnostic_id = local_diagnostic_id()
         try:
             headers = {"Accept-Encoding": "identity"}
             if token is not None:
@@ -146,6 +163,12 @@ class StreamableHttpMcpToolsSource:
                             "description": tool.description or "",
                             "input_schema": tool.inputSchema,
                             "output_schema": tool.outputSchema,
+                            **(
+                                {"read_only_hint": tool.annotations.readOnlyHint}
+                                if tool.annotations is not None
+                                and tool.annotations.readOnlyHint is not None
+                                else {}
+                            ),
                         }
                         for tool in page.tools
                     )
@@ -188,7 +211,8 @@ class StreamableHttpMcpToolsSource:
                     "is_error": bool(result.isError),
                     "content": content,
                     "structured_content": result.structuredContent,
+                    "local_diagnostic_id": diagnostic_id,
                 }
         except Exception as error:
             # CancelledError は変換しない。送信後の失敗を未実行と宣言しない。
-            raise _request_failure(error) from None
+            raise _request_failure(error, credential=token, diagnostic_id=diagnostic_id) from None

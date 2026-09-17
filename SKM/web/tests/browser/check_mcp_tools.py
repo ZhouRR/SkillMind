@@ -1,4 +1,4 @@
-"""FlaUI 接続の発見・保存・明示操作権を本番画面で隔離検証する。"""
+"""任意 MCP 接続の発見・保存・明示操作権を本番画面で隔離検証する。"""
 
 from __future__ import annotations
 
@@ -13,15 +13,17 @@ from check_projects import PROJECT, messages
 from check_resource_editing import EditingApi
 from playwright.async_api import async_playwright, expect
 
-TOOLS = ["inspect_window", "get_step_status", "open_application", "execute_step", "cancel_step"]
+TOOLS = ["inspect_window", "get_step_status", "open_application", "execute_step", "cancel_step", "get_environment", "read_inventory", "new_tool"]
+READS = {"inspect_window", "get_step_status", "get_environment", "read_inventory"}
 CATALOG = {
-    "server": {"name": "FlaUiMcp", "version": "0.3.0.0"},
+    "server": {"name": "ExampleMcp", "version": "2.0.0"},
     "tools": [
         {
             "name": name,
             "description": name,
             "input_schema": {"type": "object"},
             "output_schema": None,
+            **({"read_only_hint": name in READS} if name != "new_tool" else {}),
         }
         for name in TOOLS
     ],
@@ -94,18 +96,30 @@ async def check(url, output):
                     ).to_be_checked()
                     for name in TOOLS:
                         await expect(dialog.get_by_text(name, exact=True)).to_be_visible()
+                        await expect(dialog.get_by_role("combobox", name=name, exact=True)).to_have_count(0)
+                        mode = labels["mcpToolRead"] if name in READS else labels["mcpToolDenied"]
+                        await expect(dialog.locator(".resourceToolPermission").filter(has_text=name)).to_contain_text(mode)
                     # 権限 select の値を選び、モデルへ write が直接露出しない構成を保存する。
                     await dialog.get_by_role(
                         "radio", name=labels["accessReadWrite"], exact=True
                     ).check()
+                    for name in TOOLS:
+                        mode = labels["mcpToolRead"] if name in READS else labels["mcpToolCall"]
+                        await expect(dialog.locator(".resourceToolPermission").filter(has_text=name)).to_contain_text(mode)
                     await page.screenshot(path=str(output / f"mcp-{language}-{theme}.png"))
                     await dialog.get_by_role("button", name=labels["save"], exact=True).click()
                     await expect(dialog).to_have_count(0)
                     assert api.discoveries == 1
                     body = api.updates[-1]
-                    assert body["scope"] == {"resource_uris": [], "tool_names": TOOLS}
+                    assert body["scope"] == {"resource_uris": [], "tool_names": sorted(TOOLS)}
                     assert body["capabilities"] == ["mcp.tools/v1", "mcp.query/v1", "mcp.call/v1"]
                     assert body["config"]["tool_catalog"] == CATALOG
+                    assert body["config"]["tool_profile"] == "mcp-tools/v1"
+                    assert body["config"]["tool_permissions"] == {name: "read" if name in READS else "call" for name in TOOLS}
+                    await row.get_by_role("button", name=labels["edit"], exact=True).click()
+                    await expect(dialog.get_by_role("combobox", name="get_environment", exact=True)).to_have_count(0)
+                    await expect(dialog.locator(".resourceToolPermission").filter(has_text="get_environment")).to_contain_text(labels["mcpToolRead"])
+                    await expect(dialog.locator(".resourceToolPermission").filter(has_text="new_tool")).to_contain_text(labels["mcpToolCall"])
                     assert not errors and not api.failures and not api.unexpected, (
                         errors,
                         api.failures,

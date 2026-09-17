@@ -11,7 +11,6 @@ from uuid import uuid4
 
 import pytest
 from jsonschema import Draft202012Validator
-
 from skillmind.db.models import EffectExecution, RunEvent, RunSegment, ToolCall
 from skillmind.effects.domain import (
     EffectEvidenceDraft,
@@ -215,7 +214,7 @@ def test_old_uncertain_code_is_preserved_when_recovery_stops():
     }
 
 
-@pytest.mark.parametrize("capability", ["database.write", "document.write"])
+@pytest.mark.parametrize("capability", ["database.write", "document.write", "mcp.call"])
 def test_unknown_tool_record_matches_public_error_contract(capability):
     """実保存用 Tool error を公開 schema で検証し、未登録 code を持ち出さない。"""
     schema_path = (
@@ -226,3 +225,71 @@ def test_unknown_tool_record_matches_public_error_contract(capability):
     Draft202012Validator(schema).validate(
         _effect_tool_error(code="effect_result_unknown", retryable=False)
     )
+
+
+async def test_mcp_failure_keeps_observations_separate_from_applied_evidence():
+    """原応答を診断 Evidence として残すが、APPLIED の before/after 参照は作らない。"""
+    from skillmind.db.models import Evidence
+
+    h = harness(capability="mcp.call/v1")
+    diagnostic = {"stage": "verify", "reason": "read_back_path_missing", "action_attempted": True,
+                  "call_response_received": True, "read_back_attempts": 1, "check_index": 1}
+    observation = EffectEvidenceDraft(
+        "resource", "mcp://fixture/tools/start", {},
+        {"verified": False, "response": {"status": "READY"}}, None, {},
+    )
+    stored = await h.repository.finalize_effect_execution(
+        h.claimed, result=None,
+        failure=EffectFailure(EffectExecutionStatus.FAILED, "mcp_effect_unconfirmed", False,
+                              diagnostic, (observation,)), duration_ms=1,
+    )
+    assert stored.error["diagnostic"] == diagnostic
+    assert len(stored.error["observation_refs"]) == 1
+    assert stored.before_ref is None and stored.after_ref is None
+    row = h.session.add.call_args.args[0]
+    assert isinstance(row, Evidence) and row.metadata_json["snapshot"]["verified"] is False
+    assert h.tool.error_json["message"].endswith(
+        "Read-back check 2. Do not repeat the action; reconcile its original result.")
+    assert h.run.status == "FAILED"
+    h.repository._next_effect_segment.assert_not_called()
+    later = effect_failure_record(
+        capability="mcp.call/v1", attempt_no=3, code="retry_exhausted", retryable=False,
+        previous=stored.error,
+    )
+    assert later["diagnostic"] == diagnostic
+    assert later["observation_refs"] == stored.error["observation_refs"]
+
+
+@pytest.mark.parametrize("attempt,prior_unknown", [(1, False), (2, False), (1, True)])
+def test_only_proven_first_attempt_before_send_can_be_known_failure(attempt, prior_unknown):
+    """前段で止まっても、旧 attempt の未知を消したり再送許可へ変えない。"""
+    record = effect_failure_record(
+        capability="mcp.call/v1", attempt_no=attempt, code="mcp_request_not_sent",
+        retryable=False, previous={"code": "effect_result_unknown"} if prior_unknown else None,
+        diagnostic={"stage": "preflight", "reason": "output_schema_conflict",
+                    "action_attempted": False, "call_response_received": False,
+                    "read_back_attempts": 0},
+    )
+    assert record["code"] == (
+        "mcp_request_not_sent" if attempt == 1 and not prior_unknown else "effect_result_unknown")
+
+
+async def test_confirmed_unsent_mcp_failure_continues_with_diagnostic_for_skill_cleanup():
+    """確実に未送信の失敗だけは通常の続行経路で Skill の記録処理へ返す。"""
+    h = harness(capability="mcp.call/v1")
+    del h.repository._next_effect_segment
+    h.proposal.checkpoint_json = {"summary": "Prepared execution record", "evidence_refs": []}
+    h.proposal.continuation_mode = "resume"
+    await h.repository.finalize_effect_execution(
+        h.claimed, result=None,
+        failure=EffectFailure(EffectExecutionStatus.FAILED, "mcp_request_not_sent", False, {
+            "stage": "acquire", "reason": "desktop_busy", "action_attempted": False,
+            "call_response_received": False, "read_back_attempts": 0,
+        }), duration_ms=1,
+    )
+    assert h.run.status == "QUEUED"
+    assert h.tool.error_json["code"] == "invalid_request"
+    added = [row for call in h.session.add_all.call_args_list for row in call.args[0]]
+    segment = next(row for row in added if isinstance(row, RunSegment))
+    assert "effect_result" not in segment.checkpoint_json
+    assert "desktop_busy" in segment.checkpoint_json["confirmed_facts"][-1]

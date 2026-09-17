@@ -13,7 +13,6 @@ from skillmind.agent.tool_gateway import ToolProviderError
 from skillmind.effects.catalog import resolve_effect_capability
 from skillmind.effects.release import ExecutionFeatures
 from skillmind.integrations.domain import IntegrationValidationError, normalize_integration_command
-from skillmind.integrations.mcp_tools import TOOLS
 from tests.agent.test_mcp_provider import (
     context as context,
 )
@@ -26,7 +25,7 @@ from tests.agent.test_mcp_provider import (
 from tests.agent.test_mcp_provider import (
     resource as resource,
 )
-from tests.agent.test_mcp_tools import catalog, config, encoded
+from tests.agent.test_mcp_tools import TOOLS, catalog, config, encoded
 from tests.integrations.test_readonly_resources import command
 
 
@@ -65,26 +64,19 @@ async def test_catalog_is_observed_twice_authorized_and_evidenced(provider, mcp_
     assert result.evidence[0].source_locator["catalog_hash"] == result.response["catalog_hash"]
 
 
-async def test_query_cannot_call_action_or_read_other_run(provider, mcp_context):
-    """読取門から action を実行できず、原操作の所有確認失敗後も送信しない。"""
-    from skillmind.agent.mcp_lease import McpDesktopBusyError
-
+async def test_query_cannot_call_action_but_can_get_environment(provider, mcp_context):
+    """新しい読取工具を名前 whitelist なしで呼び、変更工具は読取門で拒否する。"""
     obj, source, leases = provider
     obj._capability = "mcp.query/v1"
     with pytest.raises(ToolProviderError):
         await obj.execute(
             mcp_context, {"name": "open_application", "arguments": {"appId": "sample"}}
         )
-    leases.require_original_step.side_effect = McpDesktopBusyError("not owned")
-    with pytest.raises(ToolProviderError):
-        await obj.execute(
-            mcp_context,
-            {
-                "name": "get_step_status",
-                "arguments": {"requestId": "00000000-0000-4000-8000-000000000001"},
-            },
-        )
     source.call.assert_not_awaited()
+    source.call.return_value = encoded({"environmentVersion": "test-01"})
+    result = await obj.execute(mcp_context, {"name": "get_environment", "arguments": {}})
+    assert result.response["result"]["environmentVersion"] == "test-01"
+    leases.acquire.assert_not_awaited()
 
 
 async def test_revoked_binding_result_is_not_published(provider, mcp_context, tools_resource):
@@ -111,26 +103,22 @@ def test_profile_scope_requires_readback_and_cannot_reuse_autoapproval():
     assert normalize_integration_command(original).scope["resource_uris"] == []
     with pytest.raises(IntegrationValidationError):
         normalize_integration_command(replace(original, secret_reference_id=None))
-    with pytest.raises(IntegrationValidationError):
-        normalize_integration_command(
-            replace(original, scope={"resource_uris": [], "tool_names": ["open_application"]})
-        )
+    saved = normalize_integration_command(
+        replace(original, scope={"resource_uris": [], "tool_names": ["open_application"]})
+    )
+    assert saved.scope["tool_names"] == ["open_application"]
     with pytest.raises(IntegrationValidationError):
         normalize_integration_command(
             replace(original, capabilities=("mcp.tools/v1", "mcp.query/v1"))
         )
     assert not resolve_effect_capability("mcp.call/v1").supports_run_approval("mcp")
     assert not ExecutionFeatures(deferred=True).capability_enabled("mcp.call/v1")
-    assert ExecutionFeatures(mcp_tools=True).effect_enabled(
-        "mcp.call/v1", "execute_step", provider="mcp"
-    )
+    assert ExecutionFeatures(mcp_tools=True).effect_enabled("mcp.call/v1", "call", provider="mcp")
 
 
-@pytest.mark.parametrize("bad_binding,bad_window", [(False, False), (True, False), (False, True)])
-async def test_action_proposal_requires_original_catalog_and_window_evidence(
-    bad_binding, bad_window
-):
-    """Agent の自己申告ではなく、同じ Run の成功した観測だけを採用する。"""
+@pytest.mark.parametrize("bad_binding", [False, True])
+async def test_action_proposal_requires_original_catalog_and_window_evidence(bad_binding):
+    """Agent の自己申告ではなく、同じ Run の成功した工具発見だけを採用する。"""
     from types import SimpleNamespace
     from uuid import uuid4
 
@@ -152,7 +140,7 @@ async def test_action_proposal_requires_original_catalog_and_window_evidence(
                 "tool_name": "inspect_window",
                 "result_status": "READY",
                 "window_title": "Main",
-                "arguments": {"appId": "other" if bad_window else "sample"},
+                "arguments": {"appId": "sample"},
             },
         )
     ]
@@ -175,7 +163,7 @@ async def test_action_proposal_requires_original_catalog_and_window_evidence(
             "arguments": {"appId": "sample", "windowTitle": "Main"},
         },
     }
-    if bad_binding or bad_window:
+    if bad_binding:
         with pytest.raises(ChangeProposalValidationError):
             await repo._validate_mcp_observation(*args, **kwargs)
     else:

@@ -323,3 +323,5 @@ class EffectFailure:
     status: EffectExecutionStatus
     code: str
     retryable: bool
+    diagnostic: dict[str, Any] | None = None
+    observations: tuple[EffectEvidenceDraft, ...] = ()

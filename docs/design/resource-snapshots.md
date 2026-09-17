@@ -16,17 +16,21 @@
 
 ### MCP 工具接入边界
 
-工具接入与 `resources/read` 分开授权。管理员发现工具后，逐项选择不允许、读取或审批后调用；配置以 `mcp-tools/v1` 保存清单与 `tool_permissions`，binding 再以 `tool_names` 收窄范围。服务名、版本前缀和具体工具名不决定权限，远端 `readOnlyHint` 也不授予权限。最多 100 个工具、清单 256 KiB、参数 64 KiB；Schema 使用有界非递归子集，拒绝外部引用。新发现的工具默认不允许，重新发现保留仍存在工具的人工选择；保存后产生新 revision，旧 Run 不自动扩权。
+工具接入与 `resources/read` 分开授权。管理员发现工具后，仅选择整体访问权限：只读模式启用服务以 `readOnlyHint=true` 声明的工具；允许变更提案时，同时将其余工具配置为审批后调用。工具列表只展示生效权限，不提供逐项调整。保存时将本次清单与生成的工具权限一起确认，配置以 `mcp-tools/v1` 保存清单与 `tool_permissions`，binding 再以 `tool_names` 收窄范围。服务名、版本前缀和具体工具名不决定权限，远端 `readOnlyHint` 仅参与保存时的分类，本身不授予运行权限。最多 100 个工具、清单 256 KiB、参数 64 KiB；Schema 使用有界非递归子集，拒绝外部引用。新发现的工具仅在管理员保存整体权限后生效；保存产生新 revision，旧 Run 不自动扩权。服务未声明只读的工具不按名字或描述猜测；需要只读查询/回读的工具应由服务补齐标注。连接可以先保存，具体的工具/回读权限在提案阶段验证，不用“缺少回读工具”阻止保存整个连接。
 
-`mcp.tools/v1` 返回原 binding 内工具、输入/输出 Schema、人工指定的 access、服务身份和版本、连接引用以及通信上限。`mcp.query/v1` 仅调用 access=read 的工具；`mcp.call/v1` 是受控效果，经提案、精确批准、阶段授权和回读执行。所有调用前重新发现并校验冻结 catalog hash，变化时停止并要求重新保存连接、创建新 Run。API/Worker/Web 同批升级，旧专用调用格式不继续执行，历史审计不改写。
+`mcp.tools/v1` 返回原 binding 内工具、输入/输出 Schema、保存时确认的 access、服务身份和版本、连接引用以及通信上限。`mcp.query/v1` 仅调用 access=read 的工具；`mcp.call/v1` 是受控效果，经提案、精确批准、阶段授权和回读执行。所有调用前重新发现并校验冻结 catalog hash，变化时停止并要求重新保存连接、创建新 Run。API/Worker/Web 同批升级，旧专用调用格式不继续执行，历史审计不改写。
 
-通用效果使用 `operation=call`、`target.locator=工具名`，`/call` 的值包含 `arguments` 与 `read_back`（授权读取工具名、参数、JSON Pointer 的 equals/one_of 检查）。工具、参数及回读条件一起冻结和批准。完整字符串 `${effect_id}` 在发出前替换为原 Effect UUID，不执行表达式。发送结果未知时不重发动作；只有原提案在调用参数、回读参数和 equals 检查中绑定原 Effect ID，才允许自动只读核对并解除 pending。没有原操作身份的效果保留未知，不能凭当前状态补造原回执。应用专属的操作前提、画面选择及业务判定由 Skill 保持；回读确认与测试 PASS 分开，不以通用调用成功宣告业务成功。
+通用效果使用 `operation=call`、`target.locator=工具名`，`/call` 的值包含 `arguments` 与 `read_back`（授权读取工具名、参数、JSON Pointer 的 equals/one_of 检查）。工具、参数及回读条件一起冻结和批准。完整字符串 `${effect_id}` 在发出前替换为原 Effect UUID，不执行表达式。发送结果未知时不重发动作；只有原提案在调用参数、回读参数和 equals 检查中绑定原 Effect ID，才允许自动只读核对并解除 pending。取消提案可显式提供 `cancel_target`，要求同 Run、同连接的原 Effect，并将调用、回读参数和 equals 检查绑定该 ID；通过精确审批后才可取消 pending 操作。没有原操作身份的效果保留未知，不能凭当前状态补造原回执。应用专属的操作前提、画面选择及业务判定由 Skill 保持；回读确认与测试 PASS 分开，不以通用调用成功宣告业务成功。
+
+回读条件先按已声明的 `output_schema` 检查：拒绝闭合对象中不存在的字段、明确类型或枚举冲突及越界数组位置；联合类型和可选字段保守处理，未声明输出不代表任意字段已被证明存在。条件应来自真实输出契约或观测，不能从输入参数推断返回字段。提案和执行前共用校验。原调用收到响应后，临时回读错误或值尚未匹配最多读取三次，间隔 0.5 / 1 秒；字段缺失、契约变化、撤权和取消不进入轮询。每次回读仍检查原批准和权限，循环不包含实际操作。
+
+MCP 失败按标准 JSON-RPC error、工具 `isError=true` 与传输未确认分别分类，不解析服务专属的错误码或括号格式来决定权限、重试和操作结果。SKM 为请求生成 `local_diagnostic_id`，失败时关联 ToolCall／Effect 与日志；远端自定义诊断 ID 仅作为可选数据。诊断保留固定阶段、原因、条件序号和读取次数。已授权取得的调用响应与最后一次成功取得的回读响应以 `verified=false` 的 Evidence 保存，经 `error.observation_refs` 引用；不设置成功的 before/after 引用，不作为原操作回执。包含凭据或敏感赋值的完整响应省略正文。标准工具错误的文本、结构化内容及 JSON-RPC 的 code/message/data 经过凭据与敏感字段脱敏、深度/节点/长度限制后，以不超过 4 KiB 的 `remote_detail` 保存并作为不可信诊断数据提供给 Agent；普通日志仅记录本地关联 ID、固定分类与 Run/ToolCall/Effect 标识，不记录远端正文。无诊断 ID 或非结构化错误不影响失败识别；未知低层异常仍不反射正文。后续重试耗尽保留这些诊断引用。首次调用在校验或占用检查阶段被明确拒绝、且此前无未知结果时，标记 `mcp_request_not_sent` 并沿正常失败续行交回 Skill；传输中断、已发操作或无法证明未发送仍保持未知并停止，不能由错误文字推断未执行。
 
 同一资源声明多个读取能力时，Worker 按该声明复用原冻结 Integration、binding ID 和 scope；附加工具仍须出现在 Manifest 与 Run 权限中，不从同 Provider 的其他资源猜连接。写入不加入直接工具集，不继承 DB/文档/Git 的自动批准同意。
 
-同一规范化 endpoint 由 PostgreSQL 持久记录 Run 占用，未确认操作不自动释放。显式 `reserve_desktop=true` 返回本 Run 的 `desktop.lease_ref`、pending 状态与原 Evidence；未预约返回 null。预约仅排斥同一 endpoint 的其他 SKM Run，不证明 Windows 全局独占，外部使用须另行确认。环境/构建从已授权的环境查询工具取得，发现清单本身不提供这些值。90 秒为平台单次通信上限，业务/Runner 的操作与全程时限以实际配置和 Skill 为准。
+同一规范化 endpoint 由 PostgreSQL 持久记录 Run 占用，未确认操作不自动释放。显式 `reserve_desktop=true` 返回本 Run 的 `desktop.lease_ref`、pending 状态与原 Evidence；未预约返回 null。预约仅排斥同一 endpoint 的其他 SKM Run，不证明 Windows 全局独占；外部使用条件由项目或 Skill 的明确运行前提约定，不由预约推断，也不强制每次人工询问。环境/构建从已授权的环境查询工具取得，发现清单本身不提供这些值。90 秒为平台单次通信上限，业务/Runner 的操作与全程时限以实际配置和 Skill 为准。
 
-连接目标和工具读写分类属于项目 ADMIN 信任边界。模型不能改变 endpoint、凭据和协议方法；前后复验原 binding/凭据，包括错误分支。固定 Streamable HTTP endpoint 禁跳转、不开放 server callback、sampling、roots 或任意网络请求；工具返回的文字、结构化内容及附件只作为数据，不自动下载 URL 或登记成果。外部描述不是指令或授权。错误只保存固定分类和安全诊断 ID，不反射原始异常正文，取消不转换为普通错误。本地取消不证明远端停止。
+连接目标和工具声明的可信性属于项目 ADMIN 对所配置服务的信任边界。模型不能改变 endpoint、凭据和协议方法；前后复验原 binding/凭据，包括错误分支。固定 Streamable HTTP endpoint 禁跳转、不开放 server callback、sampling、roots 或任意网络请求；工具返回的文字、结构化内容及附件只作为数据，不自动下载 URL 或登记成果。外部描述不是指令或授权。诊断数据同样受上述授权与脱敏边界约束，不取得指令权限，取消不转换为普通错误。本地取消不证明远端停止。
 
 ### PostgreSQL 与 MCP 读取
 

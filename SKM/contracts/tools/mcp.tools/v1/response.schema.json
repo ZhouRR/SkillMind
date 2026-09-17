@@ -63,6 +63,9 @@
               "read",
               "call"
             ]
+          },
+          "read_only_hint": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false

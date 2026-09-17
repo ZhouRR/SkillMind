@@ -1,0 +1,585 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "testRunId",
+    "documentId",
+    "specVersion",
+    "executionId",
+    "testCaseId",
+    "executionStatus",
+    "versionSnapshot",
+    "judgementModelVersion",
+    "verdict",
+    "confidence",
+    "classification",
+    "assessments",
+    "missingEvidence",
+    "counterEvidence",
+    "failureFingerprint",
+    "fingerprintBasis",
+    "knownIssueCheck",
+    "knownIssues",
+    "recommendedActions",
+    "sourcePlan"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "testRunId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "documentId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "specVersion": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "executionId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "testCaseId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "executionStatus": {
+      "enum": [
+        "QUEUED",
+        "RUNNING",
+        "COMPLETED",
+        "ERROR",
+        "TIMEOUT",
+        "ABORTED",
+        "NOT_RUN"
+      ]
+    },
+    "versionSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "skillVersion",
+        "environmentVersion",
+        "sutBuild",
+        "runnerVersions",
+        "modelVersion"
+      ],
+      "properties": {
+        "environmentVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sutBuild": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runnerVersions": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "modelVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "skillVersion": {
+          "type": "string",
+          "minLength": 1,
+          "description": "計画生成 Skill の固定公開版または checksum。実行・判定へ同じ値を引き継ぐ。"
+        }
+      }
+    },
+    "judgementModelVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "verdict": {
+      "enum": [
+        "PASS",
+        "FAIL",
+        "BLOCKED",
+        "INCONCLUSIVE"
+      ]
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "classification": {
+      "enum": [
+        "PRODUCT",
+        "TEST",
+        "ENV",
+        "FLAKY",
+        "UNKNOWN",
+        null
+      ]
+    },
+    "assessments": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "stepId",
+          "expectedResult",
+          "actualResult",
+          "executionStatus",
+          "satisfied",
+          "evidenceRefs"
+        ],
+        "properties": {
+          "stepId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "expectedResult": {
+            "type": "string",
+            "minLength": 1
+          },
+          "actualResult": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "executionStatus": {
+            "enum": [
+              "QUEUED",
+              "RUNNING",
+              "COMPLETED",
+              "ERROR",
+              "TIMEOUT",
+              "ABORTED",
+              "NOT_RUN"
+            ]
+          },
+          "satisfied": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "evidenceRefs": {
+            "type": "array",
+            "minItems": 0,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "documentLibraryId",
+                "bucket",
+                "objectKey"
+              ],
+              "properties": {
+                "documentLibraryId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "bucket": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "objectKey": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(?!/)(?![A-Za-z][A-Za-z0-9+.-]*://).+"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "missingEvidence": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "counterEvidence": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "failureFingerprint": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "fingerprintBasis": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "knownIssueCheck": {
+      "enum": [
+        "CHECKED",
+        "UNAVAILABLE"
+      ]
+    },
+    "knownIssues": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "url",
+          "matchReason"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "matchReason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "recommendedActions": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "sourcePlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "documentLibraryId",
+        "bucket",
+        "objectKey",
+        "sha256"
+      ],
+      "properties": {
+        "documentLibraryId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bucket": {
+          "type": "string",
+          "minLength": 1
+        },
+        "objectKey": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?![A-Za-z][A-Za-z0-9+.-]*://).+"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "description": "実行前に固定した実行計画の文書参照とバイト列の SHA-256。DB の plan_ref と照合する。"
+    }
+  },
+  "title": "ケース別の実測判定",
+  "description": "PASS は全必須条件の証拠を必要とする。対応と版の一致は Schema に加えて確認する。",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "verdict": {
+            "const": "PASS"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "executionStatus": {
+            "const": "COMPLETED"
+          },
+          "classification": {
+            "type": "null"
+          },
+          "failureFingerprint": {
+            "type": "null"
+          },
+          "fingerprintBasis": {
+            "type": "null"
+          },
+          "missingEvidence": {
+            "maxItems": 0
+          },
+          "assessments": {
+            "minItems": 1,
+            "items": {
+              "properties": {
+                "executionStatus": {
+                  "const": "COMPLETED"
+                },
+                "satisfied": {
+                  "const": true
+                },
+                "actualResult": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "evidenceRefs": {
+                  "minItems": 1
+                }
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "classification": {
+            "enum": [
+              "PRODUCT",
+              "TEST",
+              "ENV",
+              "FLAKY",
+              "UNKNOWN"
+            ]
+          },
+          "failureFingerprint": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "fingerprintBasis": {
+            "type": "object",
+            "minProperties": 1
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "defectPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "executionId",
+        "testRunId",
+        "documentId",
+        "testCaseId",
+        "classification",
+        "failureFingerprint",
+        "disposition",
+        "title",
+        "expectedResult",
+        "actualResult",
+        "reproductionSteps",
+        "evidenceRefs",
+        "versionSnapshot",
+        "knownIssues",
+        "sourcePlan"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "executionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "testRunId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "documentId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "testCaseId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "classification": {
+          "const": "PRODUCT"
+        },
+        "failureFingerprint": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "disposition": {
+          "enum": [
+            "NEW_CANDIDATE",
+            "KNOWN_ISSUE",
+            "CHECK_REQUIRED"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expectedResult": {
+          "type": "string",
+          "minLength": 1
+        },
+        "actualResult": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reproductionSteps": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "evidenceRefs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "documentLibraryId",
+              "bucket",
+              "objectKey"
+            ],
+            "properties": {
+              "documentLibraryId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "bucket": {
+                "type": "string",
+                "minLength": 1
+              },
+              "objectKey": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(?!/)(?![A-Za-z][A-Za-z0-9+.-]*://).+"
+              }
+            }
+          }
+        },
+        "versionSnapshot": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "skillVersion",
+            "environmentVersion",
+            "sutBuild",
+            "runnerVersions",
+            "modelVersion"
+          ],
+          "properties": {
+            "environmentVersion": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sutBuild": {
+              "type": "string",
+              "minLength": 1
+            },
+            "runnerVersions": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "modelVersion": {
+              "type": "string",
+              "minLength": 1
+            },
+            "skillVersion": {
+              "type": "string",
+              "minLength": 1,
+              "description": "計画生成 Skill の固定公開版または checksum。実行・判定へ同じ値を引き継ぐ。"
+            }
+          }
+        },
+        "knownIssues": {
+          "type": "array",
+          "minItems": 0,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "url",
+              "matchReason"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "matchReason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "sourcePlan": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "documentLibraryId",
+            "bucket",
+            "objectKey",
+            "sha256"
+          ],
+          "properties": {
+            "documentLibraryId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "bucket": {
+              "type": "string",
+              "minLength": 1
+            },
+            "objectKey": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!/)(?![A-Za-z][A-Za-z0-9+.-]*://).+"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          },
+          "description": "実行前に固定した実行計画の文書参照とバイト列の SHA-256。DB の plan_ref と照合する。"
+        }
+      }
+    }
+  }
+}

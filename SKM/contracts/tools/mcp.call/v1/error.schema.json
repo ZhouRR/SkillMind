@@ -19,7 +19,8 @@
         "not_found",
         "unavailable",
         "scope_denied",
-        "invalid_request"
+        "invalid_request",
+        "effect_result_unknown"
       ]
     },
     "message": {

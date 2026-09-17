@@ -250,7 +250,7 @@ export function findWriteConfigIssue(
 export const REPOSITORY_WRITE_BRANCH_PREFIX = 'skillmind/'
 
 /** Server が確実に拒否する scope を送信前に検出する。null は「送ってよい」。 */
-export type ScopeIssue = 'issue_ids_required' | 'field_keys_required' | 'paths_required' | 'tables_required' | 'write_columns_required' | 'database_operations_required'
+export type ScopeIssue = 'issue_ids_required' | 'field_keys_required' | 'paths_required' | 'tables_required' | 'write_columns_required' | 'database_operations_required' | 'mcp_tools_required'
 
 /** Backend normalize_provider_scope の必須条件 mirror。write は明示 field 列を要求する。 */
 export function findScopeIssue(
@@ -264,7 +264,7 @@ export function findScopeIssue(
     if (writeEnabled && !scope.operations?.length) return 'database_operations_required'
     return null
   }
-  if (provider === 'mcp') return null
+  if (provider === 'mcp') return scope.tool_names !== undefined && scope.tool_names.length === 0 ? 'mcp_tools_required' : null
   if (provider === 'redmine') {
     if ((scope.issue_ids ?? []).length === 0) return 'issue_ids_required'
     if (writeEnabled && (scope.field_keys ?? []).length === 0) return 'field_keys_required'
@@ -464,4 +464,18 @@ export function supportsMcpCatalog(catalog: Record<string, unknown>): boolean {
 export function mcpToolNames(catalog: Record<string, unknown> | null): string[] {
   return Array.isArray(catalog?.tools) ? catalog.tools.flatMap((tool: unknown) =>
     typeof tool === 'object' && tool !== null && 'name' in tool && typeof tool.name === 'string' ? [tool.name] : []) : []
+}
+
+/** 保存時の全体権限から工具権限を確定し、宣言のない工具を読取へ昇格させない。 */
+export function mcpPermissionsForAccess(
+  catalog: Record<string, unknown> | null, access: ResourceAccess,
+): Record<string, string> {
+  if (!Array.isArray(catalog?.tools)) return {}
+  const permissions: Record<string, string> = {}
+  for (const tool of catalog.tools as unknown[]) {
+    if (typeof tool !== 'object' || tool === null || !('name' in tool) || typeof tool.name !== 'string') continue
+    if ('read_only_hint' in tool && tool.read_only_hint === true) permissions[tool.name] = 'read'
+    else if (access === 'read_write') permissions[tool.name] = 'call'
+  }
+  return permissions
 }

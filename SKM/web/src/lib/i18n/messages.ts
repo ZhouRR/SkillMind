@@ -464,6 +464,7 @@ export interface UiMessages {
     mcpToolDenied: string
     mcpToolRead: string
     mcpToolCall: string
+    mcpToolsRequired: string
     mcpToolsHint: string
     tablesRequired: string
     title: string

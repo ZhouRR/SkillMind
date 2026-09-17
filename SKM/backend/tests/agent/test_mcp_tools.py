@@ -20,26 +20,41 @@ from skillmind.effects.mcp_provider import McpCallProvider
 from skillmind.effects.redmine import EffectProviderTransportError
 from skillmind.integrations.mcp_tools import (
     PROFILE,
-    TOOLS,
     digest,
     normalize_catalog,
-    validate_arguments,
+    validate_tool_value,
 )
 from tests.agent.test_mcp_source import ENDPOINT, ResourceStream, json_response
 from tests.effects.database_fixtures import database_execution
+
+TOOLS = {
+    "inspect_window",
+    "get_step_status",
+    "open_application",
+    "execute_step",
+    "cancel_step",
+    "get_environment",
+    "read_inventory",
+    "update_inventory",
+}
+READS = {"inspect_window", "get_step_status", "get_environment", "read_inventory"}
 
 
 def catalog():
     """外部サービスの住所・説明文を含まない有界 tool fixture。"""
     return normalize_catalog(
         {
-            "server": {"name": "FlaUiMcp", "version": "0.3.0.0"},
+            "server": {"name": "ExampleMcp", "version": "2.1.0"},
             "tools": [
                 {
                     "name": name,
                     "description": name,
-                    "input_schema": {"type": "object"},
+                    "input_schema": {
+                        "type": "object",
+                        **({"additionalProperties": False} if name == "get_environment" else {}),
+                    },
                     "output_schema": None,
+                    "read_only_hint": name in READS,
                 }
                 for name in TOOLS
             ],
@@ -54,6 +69,7 @@ def config():
         "transport": "streamable_http",
         "tool_profile": PROFILE,
         "tool_catalog": catalog(),
+        "tool_permissions": {name: "read" if name in READS else "call" for name in TOOLS},
     }
 
 
@@ -93,6 +109,7 @@ class ToolServer(httpx.AsyncBaseTransport):
                         "name": t["name"],
                         "description": t["description"] + ("changed" if self.changed else ""),
                         "inputSchema": t["input_schema"],
+                        "annotations": {"readOnlyHint": t["read_only_hint"]},
                     }
                     for t in catalog()["tools"]
                 ]
@@ -116,17 +133,19 @@ class ToolServer(httpx.AsyncBaseTransport):
 
 
 @pytest.mark.parametrize("sse", [False, True])
-async def test_real_sdk_discovers_then_calls_exact_tool_once(sse):
+@pytest.mark.parametrize("tool_name", ["inspect_window", "get_environment", "read_inventory"])
+async def test_real_sdk_discovers_then_calls_exact_tool_once(sse, tool_name):
     """JSON/SSE と session cleanup を実 SDK で通し、native tool 登録を要しない。"""
     server = ToolServer(sse=sse)
     source = StreamableHttpMcpToolsSource(transport_factory=lambda: server)
-    result = await source.call(config(), "fixture-token", "inspect_window", {"appId": "sample"})
+    arguments = {} if tool_name == "get_environment" else {"appId": "sample"}
+    result = await source.call(config(), "fixture-token", tool_name, arguments)
     assert result["is_error"] is False and server.closed
     methods = [m.get("method") for m in server.messages]
     assert methods == ["initialize", "notifications/initialized", "tools/list", "tools/call"]
     assert server.messages[-1]["params"] == {
-        "name": "inspect_window",
-        "arguments": {"appId": "sample"},
+        "name": tool_name,
+        "arguments": arguments,
     }
 
 
@@ -181,9 +200,35 @@ def execution(name="execute_step", attempt=1):
         database_execution(),
         capability_version="mcp.call/v1",
         provider="mcp",
-        operation=name,
+        operation="call",
         target={"locator": name, "display": name},
-        changes=({"path": "/call", "action": "SET", "value": args},),
+        changes=(
+            {
+                "path": "/call",
+                "action": "SET",
+                "value": {
+                    "arguments": {
+                        **args,
+                        **({"requestId": "${effect_id}"} if name == "execute_step" else {}),
+                    },
+                    "read_back": {
+                        "name": "get_step_status" if name == "execute_step" else "inspect_window",
+                        "arguments": {"requestId": "${effect_id}"}
+                        if name == "execute_step"
+                        else args,
+                        "checks": [
+                            {"path": "/requestId", "equals": "${effect_id}"},
+                            {
+                                "path": "/status",
+                                "one_of": ["COMPLETED", "ERROR", "TIMEOUT", "CANCELLED", "ABORTED"],
+                            },
+                        ]
+                        if name == "execute_step"
+                        else [{"path": "/status", "equals": "READY"}],
+                    },
+                },
+            },
+        ),
         integration_config=config(),
         integration_scope={"resource_uris": [], "tool_names": sorted(TOOLS)},
         precondition={"revision": digest(catalog())},
@@ -217,7 +262,7 @@ async def test_original_id_readback_and_retry_without_action(attempt, state):
         for call in source.call.await_args_list
     )
     assert result.verification["business_verdict"] == "NOT_EVALUATED"
-    assert result.verification["operation_status"] == state
+    assert result.verification["operation_status"] == "READ_BACK_CONFIRMED"
     leases.confirm.assert_awaited_once()
     assert authorize.await_count >= 4
 
@@ -237,8 +282,8 @@ async def test_lost_response_keeps_pending_and_never_replays_launch():
     source.call.assert_not_awaited()
 
 
-async def test_launch_uses_process_readback_and_does_not_claim_pass():
-    """起動結果の processId を画面検査と照合する。"""
+async def test_launch_uses_explicit_readback_and_does_not_claim_pass():
+    """起動後に承認済みの画面回読を行い、業務判定を補造しない。"""
     source, leases = AsyncMock(), AsyncMock()
     source.call.side_effect = [
         encoded({"status": "READY", "processId": 42}),
@@ -269,23 +314,19 @@ async def test_authority_loss_and_cancellation_do_not_contact_server(error):
     source.call.assert_not_awaited()
 
 
-@pytest.mark.parametrize(
-    "args",
-    [
-        {"appId": "sample", "operation": "shell", "inputsJson": "{}"},
-        {"appId": "sample", "operation": "click", "inputsJson": '{"automationId":"a","name":"b"}'},
-        {
-            "appId": "sample",
-            "operation": "click",
-            "inputsJson": '{"automationId":"a"}',
-            "requestId": "00000000-0000-4000-8000-000000000001",
-        },
-    ],
-)
-def test_proposal_cannot_choose_request_id_or_unreviewed_actions(args):
-    """Tool Schema が緩くても profile の業務境界を通過できない。"""
+@pytest.mark.parametrize("args", [{"count": "bad"}, {"count": -1}, {"other": 1}])
+def test_generic_arguments_follow_saved_schema(args):
+    """サービス固有 whitelist ではなく保存 Schema の型・範囲を使う。"""
     with pytest.raises(ValueError):
-        validate_arguments("execute_step", args, proposal=True)
+        validate_tool_value(
+            {
+                "type": "object",
+                "required": ["count"],
+                "additionalProperties": False,
+                "properties": {"count": {"type": "integer", "minimum": 0}},
+            },
+            args,
+        )
 
 
 async def test_reconciliation_only_queries_original_step_and_never_launches():
@@ -332,7 +373,13 @@ async def test_reconciliation_only_queries_original_step_and_never_launches():
     source.reset_mock()
     with pytest.raises(ValueError):
         await lookup_operation(
-            source, config(), "fixture-token", replace(command, name="open_application")
+            source,
+            config(),
+            "fixture-token",
+            replace(
+                command,
+                arguments_json=json.dumps(execution("open_application").changes[0]["value"]),
+            ),
         )
     source.call.assert_not_awaited()
 
@@ -344,8 +391,9 @@ async def test_narrowed_binding_without_readback_never_sends_action():
     restricted = replace(
         original, integration_scope={"resource_uris": [], "tool_names": ["open_application"]}
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(EffectProviderTransportError) as error:
         await McpCallProvider(source=source, leases=AsyncMock(), authorize=AsyncMock()).apply(
             restricted, credential="fixture-token"
         )
+    assert error.value.code == "mcp_request_not_sent"
     source.call.assert_not_awaited()

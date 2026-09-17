@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
-
 from skillmind.effects.domain import (
     ClaimedEffectExecution,
     EffectExecutionStatus,
@@ -368,3 +367,22 @@ async def test_repository_branch_conflict_is_a_terminal_failure() -> None:
         code="target_branch_conflict",
         retryable=False,
     )
+
+
+async def test_mcp_diagnostic_and_unverified_observations_reach_finalization():
+    """Worker が Provider の安全診断を汎用 transport error へ落とさない。"""
+    from skillmind.effects.domain import EffectEvidenceDraft
+    from skillmind.effects.mcp_diagnostics import McpEffectFailure
+
+    diagnostic = {"stage": "read_back", "reason": "remote_tool_error", "action_attempted": True,
+                  "call_response_received": True, "read_back_attempts": 3,
+                  "diagnostic_id": "a" * 32}
+    observation = EffectEvidenceDraft(
+        "resource", "mcp://fixture", {}, {"verified": False}, None, {},
+    )
+    error = McpEffectFailure(retryable=False, diagnostic=diagnostic, observations=(observation,))
+    service = MemoryEffectService(_claimed())
+    await _executor(service, RaisingProvider(error)).execute(service.claimed.effect_execution_id)
+    assert service.finalized[1].diagnostic == error.diagnostic
+    assert len(service.finalized[1].diagnostic["local_diagnostic_id"]) == 32
+    assert service.finalized[1].observations == (observation,)

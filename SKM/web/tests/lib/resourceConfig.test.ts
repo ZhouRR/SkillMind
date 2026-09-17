@@ -1,3 +1,4 @@
+import { mcpPermissionsForAccess } from '../../src/lib/resourceConfig'
 import { describe, expect, it } from 'vitest'
 
 import type { PublishedTaskRecord } from '../../src/api'
@@ -399,6 +400,36 @@ it('keeps MCP resources optional and action permission explicit', () => {
   expect(capabilitiesForAccess('mcp', 'read_write', true, false)).toEqual(['mcp.tools/v1', 'mcp.query/v1', 'mcp.call/v1'])
   expect(capabilitiesForAccess('mcp', 'read_write', false, false)).toEqual(['mcp.read/v1'])
   expect(buildIntegrationScope('mcp', { issueIds: [], fieldKeys: [], paths: [], revisions: [], mcpTools: true, writeEnabled: false }))
-    .toEqual({ resource_uris: [], tool_names: ['inspect_window', 'get_step_status'] })
+    .toEqual({ resource_uris: [], tool_names: [] })
   expect(accessForCapabilities(['mcp.tools/v1', 'mcp.query/v1', 'mcp.call/v1'])).toBe('read_write')
+})
+
+
+it('uses explicit discovered permissions and never invents a FlaUI tool', () => {
+  const input = { issueIds: [], fieldKeys: [], paths: [], revisions: [], mcpTools: true,
+    mcpPermissions: { get_environment: 'read', inspect_window: 'read', update_inventory: 'call', new_tool: '' } }
+  expect(buildIntegrationScope('mcp', { ...input, writeEnabled: false })).toEqual({ resource_uris: [], tool_names: ['get_environment', 'inspect_window'] })
+  expect(buildIntegrationScope('mcp', { ...input, writeEnabled: true })).toEqual({ resource_uris: [], tool_names: ['get_environment', 'inspect_window', 'update_inventory'] })
+})
+
+it('rejects enabled MCP tools without a selected permission while allowing resource-only connections', () => {
+  expect(findScopeIssue('mcp', { resource_uris: [], tool_names: [] }, false)).toBe('mcp_tools_required')
+  expect(findScopeIssue('mcp', { resource_uris: [] }, false)).toBeNull()
+})
+
+
+describe('MCP connection-level access', () => {
+  const catalog = { tools: [
+    { name: 'environment', read_only_hint: true },
+    { name: 'change', read_only_hint: false },
+    { name: 'unclassified' },
+    { name: 'invalid_hint', read_only_hint: 'true' },
+  ] }
+  it('grants declared reads and approved calls without individual selections', () => {
+    expect(mcpPermissionsForAccess(catalog, 'read_write')).toEqual({ environment: 'read', change: 'call', unclassified: 'call', invalid_hint: 'call' })
+    expect(mcpPermissionsForAccess(catalog, 'read')).toEqual({ environment: 'read' })
+  })
+  it('does not grant calls before a catalog has been discovered', () => {
+    expect(mcpPermissionsForAccess(null, 'read_write')).toEqual({})
+  })
 })

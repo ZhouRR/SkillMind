@@ -3,5 +3,17 @@
   "arguments": {
     "appId": "sample"
   },
-  "catalog_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  "catalog_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "read_back": {
+    "name": "inspect_window",
+    "arguments": {
+      "appId": "sample"
+    },
+    "checks": [
+      {
+        "path": "/status",
+        "equals": "READY"
+      }
+    ]
+  }
 }

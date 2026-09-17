@@ -38,7 +38,7 @@ observe → Evidence → change.propose → 精确批准/允许的预授权
 | issue.update/v1 | Redmine CAS adapter；仅 system ADMIN 配置 LOW 风险精确 scope 可预授权，discovery → 前置 revision → 条件写入 → 回读 |
 | repository.write/v1 | Git 独立开关、精确 ref CAS 与原提交核对；Git 可由新 Run 启动同意自动批准，SVN 仍人工批准，均不 force，SVN 可靠性仍待补 |
 | database.write/v1 | PostgreSQL 单行 INSERT/UPDATE，逐次批准或 Run 启动同意；独立部署开关、可信原行 Evidence、精确表/列范围与同事务回执 |
-| mcp.call/v1 | FlaUI 单步操作，独立开关、同 Run 工具/窗口 Evidence、逐次精确批准与原请求状态核对；不继承 DB/文档/Git 自动批准，详见[工具接入边界](resource-snapshots.md#mcp-工具接入边界) |
+| mcp.call/v1 | 通用 MCP 单次调用，独立开关、同 Run 工具 Evidence、逐次精确批准与显式只读回读；不继承 DB/文档/Git 自动批准，详见[工具接入边界](resource-snapshots.md#mcp-工具接入边界) |
 | document.write/v1 | 项目文档库 CREATE，逐次批准或 Run 启动同意；按原 Effect/内容隔离物理对象，独立部署开关默认关闭；异常恢复验收仍待补 |
 
 标准 Redmine REST 不具本协议 CAS/幂等，须通过版本化 discovery 及真实竞争验收。批准复验 actor/Project/version/checksum/Integration/binding/scope；仅 Run 发起人或组织 system ADMIN 决策。HTTP 决策在共享事务内锁定当前账户、原 Session 和项目，复验 CSRF、当前角色及成员关系，提交前再次验证；不能沿用请求开始时缓存的管理员身份。
@@ -137,6 +137,8 @@ reversible/rollback 不提供回滚操作；撤回须验真实 revision 再走�
 PostgreSQL、文档保存与 Git v2 一旦交付 claim，失败分类、lease 到期或当前未查到结果都不足以证明未写入。未取得原 Provider 的完整成功结果时，Effect 的 `error.code` 使用 `effect_result_unknown`，`cause_code` 保留原分类，`reason_code` 表示此次停止/恢复原因，`retryable` 仅控制同一 Effect 的技术重试。首次 claim 前的取消仍是未开始；旧无标记记录不回填，在实际恢复时保留原错误码并补充未知语义。旧 SVN/Redmine Provider 的失败语义不因此改变。
 
 取消、批准过期、次数耗尽或不可重试失败停止已 claim 的存储写入时，保留原 Effect/台账/回执，Tool 与事件同样标记待核对，Run 以 FAILED 或 CANCELLED 停止并保存原 Effect ID；不生成新 Segment 或自动模型续行。Run 已离开等待状态的迟到回收只更新原 Effect/Tool，历史详情重新读取可见；不改写原 Run 终局，也不在终态快照后追加 Run 事件。执行状态的 FAILED/STALE 不能证明远端失败；页面在折叠审计之外显示待核对，结果核验也拒绝将此标记匹配成确定的失败摘要。
+
+MCP 的明确未发送诊断、只读重试和未验证响应保存见[工具接入边界](resource-snapshots.md#mcp-工具接入边界)。明确未发送的首次失败可以沿原批准结果续行，让 Skill 在既有授权下记录业务错误；平台不硬编码业务表。已发送但结果未知时仍停止主处理，不能宣称 Skill 的收尾写入已经执行。跨阶段核对需要服务提供原请求身份和可查询回执；没有该契约时不以当前窗口状态替代原操作结果。
 
 获准技术重试仍沿原 Effect 进入其回执协议；原 Provider 确认成功后保存 Evidence、清除未知并按 APPLIED 续行。停止后的人工处置及接续入口尚未接齐；当前待核对标记是保留事实和阻止自动重写，不是核对已经完成。不要通过新建 Run、换 ID、再次批准或删除台账绕过。
 

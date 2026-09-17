@@ -1,0 +1,274 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "testRunId",
+    "documentId",
+    "specVersion",
+    "executionId",
+    "executionStatus",
+    "versionSnapshot",
+    "startedAt",
+    "finishedAt",
+    "cases",
+    "error",
+    "sourcePlan"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "testRunId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "documentId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "specVersion": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "検証済み実行計画の specVersion をそのまま引き継ぐ。元ファイルの取得・再計算を要求しない。"
+    },
+    "executionId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "executionStatus": {
+      "enum": [
+        "COMPLETED",
+        "ERROR",
+        "TIMEOUT",
+        "ABORTED"
+      ]
+    },
+    "versionSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "skillVersion",
+        "environmentVersion",
+        "sutBuild",
+        "runnerVersions",
+        "modelVersion"
+      ],
+      "properties": {
+        "environmentVersion": {
+          "type": "string",
+          "minLength": 1,
+          "description": "公開された環境設定または監査済み回答で確認した環境版。appId やサーバー名から推測しない。"
+        },
+        "sutBuild": {
+          "type": "string",
+          "minLength": 1,
+          "description": "登録対象アプリの確認済みビルド。環境版・Runner 版で代用しない。"
+        },
+        "runnerVersions": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "確認済みの版を識別体系別の key で保持する。MCP tools/v1 の server.version は mcpServer:<server.name>、操作応答の runnerVersion は別 key とする。異なる体系の文字列同士を比較しない。固定後に得た版は操作記録に残す。"
+        },
+        "modelVersion": {
+          "type": "string",
+          "minLength": 1,
+          "description": "計画時のプラットフォーム runtime_metadata.model にある設定モデル ID。非公開のモデル内部ビルドは要求しない。"
+        },
+        "skillVersion": {
+          "type": "string",
+          "minLength": 1,
+          "description": "計画生成 Skill の固定公開版または checksum。実行・判定へ同じ値を引き継ぐ。"
+        }
+      }
+    },
+    "startedAt": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "finishedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "testCaseId",
+          "executionStatus",
+          "steps",
+          "error"
+        ],
+        "properties": {
+          "testCaseId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "executionStatus": {
+            "enum": [
+              "QUEUED",
+              "RUNNING",
+              "COMPLETED",
+              "ERROR",
+              "TIMEOUT",
+              "ABORTED",
+              "NOT_RUN"
+            ]
+          },
+          "steps": {
+            "type": "array",
+            "minItems": 0,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "stepId",
+                "executionStatus",
+                "actualResult",
+                "evidence",
+                "error"
+              ],
+              "properties": {
+                "stepId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "executionStatus": {
+                  "enum": [
+                    "QUEUED",
+                    "RUNNING",
+                    "COMPLETED",
+                    "ERROR",
+                    "TIMEOUT",
+                    "ABORTED",
+                    "NOT_RUN"
+                  ]
+                },
+                "actualResult": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "evidence": {
+                  "type": "array",
+                  "minItems": 0,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "evidenceId",
+                      "reference",
+                      "type"
+                    ],
+                    "properties": {
+                      "evidenceId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "reference": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "documentLibraryId",
+                          "bucket",
+                          "objectKey"
+                        ],
+                        "properties": {
+                          "documentLibraryId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "bucket": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "objectKey": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "^(?!/)(?![A-Za-z][A-Za-z0-9+.-]*://).+"
+                          }
+                        }
+                      },
+                      "type": {
+                        "enum": [
+                          "SCREENSHOT",
+                          "VIDEO",
+                          "TRACE",
+                          "LOG",
+                          "DB_RESULT",
+                          "ACTUAL_OUTPUT"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "error": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                }
+              }
+            }
+          },
+          "error": {
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "error": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "sourcePlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "documentLibraryId",
+        "bucket",
+        "objectKey",
+        "sha256"
+      ],
+      "properties": {
+        "documentLibraryId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bucket": {
+          "type": "string",
+          "minLength": 1
+        },
+        "objectKey": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?![A-Za-z][A-Za-z0-9+.-]*://).+"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "description": "実行前に固定した実行計画の文書参照とバイト列の SHA-256。DB の plan_ref と照合する。"
+    }
+  },
+  "title": "Runner の実行終了結果",
+  "description": "Orchestrator / Runner が実測から作成する。欠落ケースは計画との照合で検出し、成功扱いしない。"
+}

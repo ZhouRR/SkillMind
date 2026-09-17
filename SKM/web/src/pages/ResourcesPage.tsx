@@ -1,5 +1,5 @@
 import { discoverMcpTools } from '../api/integrations'
-import { supportsMcpCatalog, mcpToolNames } from '../lib/resourceConfig'
+import { supportsMcpCatalog, mcpToolNames, mcpPermissionsForAccess } from '../lib/resourceConfig'
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 
 import {
@@ -203,6 +203,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
     if (issue === 'field_keys_required') return messages.resources.fieldKeysRequired
     if (issue === 'write_columns_required') return messages.resources.databaseWriteColumnsRequired
     if (issue === 'database_operations_required') return messages.resources.databaseOperationsRequired
+    if (issue === 'mcp_tools_required') return messages.resources.mcpToolsRequired
     if (issue === 'tables_required') return messages.resources.tablesRequired
     return messages.resources.pathsRequired
   }
@@ -240,7 +241,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
       if (signal.aborted) return
       if (!supportsMcpCatalog(result.catalog)) setError(messages.resources.mcpUnsupported)
       setConnectDraft((current) => current.provider === 'mcp' && current.serverUrl.trim() === savedMcpUrl.current
-        ? { ...current, mcpCatalog: result.catalog, mcpTools: supportsMcpCatalog(result.catalog), mcpPermissions: Object.fromEntries(Object.entries(current.mcpPermissions).filter(([name]) => mcpToolNames(result.catalog).includes(name))) } : current)
+        ? { ...current, mcpCatalog: result.catalog, mcpTools: supportsMcpCatalog(result.catalog) } : current)
     })
   }
 
@@ -271,6 +272,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
     const access: ResourceAccess = !connectWriteEnabled || form.writeCapability === null ? 'read' : draft.access
     // 既定は明示 wildcard(不限)。field は「変更できる集合」を write 時だけ列挙でき、
     // 読取だけの integration は全 field 読取(承認境界は issue 側)とする。
+    const mcpPermissions = mcpPermissionsForAccess(draft.mcpCatalog, access)
     const scope = buildIntegrationScope(draft.provider, {
       issueIds: draft.issueScope === 'all'
         ? [SCOPE_WILDCARD]
@@ -286,7 +288,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
       operations: draft.databaseOperations,
       resourceUris: parseListInput(draft.resourceUris),
       mcpTools: draft.mcpTools,
-      mcpPermissions: draft.mcpPermissions,
+      mcpPermissions,
     })
     const issue = findScopeIssue(draft.provider, scope, access === 'read_write')
     if (issue !== null) {
@@ -347,7 +349,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
         provider: draft.provider,
         capabilities: capabilitiesForAccess(draft.provider, access, draft.mcpTools, parseListInput(draft.resourceUris).length > 0),
         scope,
-        config: buildIntegrationConfig(draft.provider, { ...draft, write: writeInput }),
+        config: buildIntegrationConfig(draft.provider, { ...draft, mcpPermissions, write: writeInput }),
         secret_reference_id: secretReferenceId,
       }
       if (editingIntegration === null) await createIntegration(projectId, input, csrfToken, signal)
@@ -784,16 +786,13 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                       onChange={(event) => setConnectDraft((value) => ({ ...value, mcpTools: event.target.checked }))} />
                       <span>{messages.resources.mcpEnableTools}</span></label>
                     <p className="hint">{messages.resources.mcpToolsHint}</p>
-                    {mcpToolNames(connectDraft.mcpCatalog).map((name) => <label key={name} className="resourceToolPermission">
-                      <code>{name}</code>
-                      <select aria-label={name} disabled={!connectDraft.mcpTools}
-                        value={connectDraft.mcpPermissions[name] === 'call' && connectDraft.access !== 'read_write' ? '' : connectDraft.mcpPermissions[name] ?? ''}
-                        onChange={(event) => setConnectDraft((value) => ({ ...value, mcpPermissions: { ...value.mcpPermissions, [name]: event.target.value } }))}>
-                        <option value="">{messages.resources.mcpToolDenied}</option>
-                        <option value="read">{messages.resources.mcpToolRead}</option>
-                        {connectDraft.access === 'read_write' && <option value="call">{messages.resources.mcpToolCall}</option>}
-                      </select>
-                    </label>)}
+                    {mcpToolNames(connectDraft.mcpCatalog).map((name) => {
+                      const mode = connectDraft.mcpTools ? mcpPermissionsForAccess(connectDraft.mcpCatalog, connectDraft.access)[name] : undefined
+                      return <div key={name} className="resourceToolPermission">
+                        <code>{name}</code>
+                        <span>{mode === 'read' ? messages.resources.mcpToolRead : mode === 'call' ? messages.resources.mcpToolCall : messages.resources.mcpToolDenied}</span>
+                      </div>
+                    })}
                   </>}
                 </div>}
                 <label>{messages.resources.mcpResourceUris}<textarea className="mono compactTextarea"

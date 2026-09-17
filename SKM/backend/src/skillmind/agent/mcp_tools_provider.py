@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -14,16 +15,18 @@ from skillmind.agent.mcp_provider import McpReadProvider
 from skillmind.agent.mcp_source import StreamableHttpMcpSource
 from skillmind.agent.mcp_tools_source import McpToolsError, StreamableHttpMcpToolsSource
 from skillmind.agent.tool_gateway import ProviderToolResult, RunToolContext, ToolProviderError
+from skillmind.core.logging import log_event
+from skillmind.integrations.mcp_errors import diagnostic_fields, remote_detail_message
 from skillmind.integrations.mcp_tools import (
     PROFILE,
-    tool_access,
-    validate_tool_value,
     McpResultError,
     configured_tool,
     digest,
     normalize_catalog,
     parse_result,
+    tool_access,
     validate_arguments,
+    validate_tool_value,
 )
 from skillmind.integrations.secrets import DeploymentSecretResolver
 
@@ -60,7 +63,7 @@ class McpToolsProvider:
         try:
             catalog = normalize_catalog(bound.integration.config.get("tool_catalog"))
             allowed = [
-                tool = configured_tool(bound.integration.config, bound.scope, name)
+                configured_tool(bound.integration.config, bound.scope, name)
                 for name in bound.scope.get("tool_names", [])
             ]
             if not allowed:
@@ -78,7 +81,14 @@ class McpToolsProvider:
                     raise ValueError(
                         "MCP tool contract changed; rediscover and save the connection"
                     )
-                data = {"profile": PROFILE, "tools": [{**tool, "access": tool_access(bound.integration.config, tool["name"])} for tool in allowed], "catalog_hash": digest(catalog)}
+                data = {
+                    "profile": PROFILE,
+                    "tools": [
+                        {**tool, "access": tool_access(bound.integration.config, tool["name"])}
+                        for tool in allowed
+                    ],
+                    "catalog_hash": digest(catalog),
+                }
                 locator = {"catalog_hash": digest(catalog)}
                 # 予約は SKM 内の同 endpoint だけを直列化する。Windows 全体の専有ではない。
                 desktop = None
@@ -117,7 +127,8 @@ class McpToolsProvider:
                 data = {
                     "name": name,
                     "result": parse_result(
-                        await self._source.call(bound.integration.config, token, name, params)
+                        await self._source.call(bound.integration.config, token, name, params),
+                        credential=token,
                     ),
                 }
                 locator = {
@@ -128,13 +139,18 @@ class McpToolsProvider:
                     "window_title": data["result"].get("windowTitle"),
                 }
         except (ValueError, McpToolsError, McpDesktopBusyError) as error:
-            # エラーにも同じ撤権境界を適用する。遠端本文は返さない。
+            # エラーにも同じ撤権境界を適用し、認可後だけ脱敏済み診断を返す。
             current, current_token = await self._binding._bound(context)
             if current != bound or current_token != token:
                 raise ToolProviderError(
                     "scope_denied", "MCP binding changed during read", retryable=False
                 ) from None
-            raise _read_error(error, stage) from None
+            failure = _read_error(error, stage)
+            log_event(logging.getLogger(__name__), logging.WARNING, "mcp.query.failed",
+                      run_id=context.run_id, tool_call_id=context.tool_call_id,
+                      reason_code=(failure.diagnostic or {}).get("reason"),
+                      local_diagnostic_id=(failure.diagnostic or {}).get("local_diagnostic_id"))
+            raise failure from None
         current, current_token = await self._binding._bound(context)
         if current != bound or current_token != token:
             raise ToolProviderError(
@@ -161,7 +177,7 @@ class McpToolsProvider:
 
 
 def _read_error(error: Exception, stage: str) -> ToolProviderError:
-    """再送許可と原因を混同せず、固定診断と安全な相関 ID だけを返す。"""
+    """再送許可と原因を混同せず、固定診断と有界の遠端データを返す。"""
     reason = error.reason if isinstance(error, (McpResultError, McpToolsError)) else stage
     if isinstance(error, McpDesktopBusyError):
         reason = "desktop_busy"
@@ -188,12 +204,12 @@ def _read_error(error: Exception, stage: str) -> ToolProviderError:
             "MCP desktop is reserved or the original operation cannot be accessed. "
             "Do not replay an action.",
         ),
+        "protocol_error": ("unavailable", "MCP returned a JSON-RPC error. Do not replay actions."),
         "remote_tool_error": (
             "unavailable",
             "The remote MCP tool returned an execution error; this is not a local scope "
-            "or argument rejection. For inspect_window, an accessible registered process "
-            "in the same Windows session is required. Check Runner diagnostics; do not "
-            "assume the application is stopped or replay actions.",
+            "or argument rejection. Check the service diagnostics; do not assume "
+            "the operation was not executed or replay actions.",
         ),
         "result": (
             "unavailable",
@@ -209,9 +225,7 @@ def _read_error(error: Exception, stage: str) -> ToolProviderError:
         ),
     }
     code, message = messages[reason]
-    if isinstance(error, McpResultError) and error.diagnostic_id is not None:
-        message += f" diagnosticId={error.diagnostic_id}"
-    diagnostic = {"kind": "mcp", "reason": reason}
-    if isinstance(error, McpResultError) and error.diagnostic_id is not None:
-        diagnostic["diagnostic_id"] = error.diagnostic_id
+    diagnostic = {"kind": "mcp", "reason": reason, **diagnostic_fields(error)}
+    message += f" SKM diagnostic ID: {diagnostic['local_diagnostic_id']}."
+    message += remote_detail_message(diagnostic["remote_detail"])
     return ToolProviderError(code, message, retryable=False, diagnostic=diagnostic)

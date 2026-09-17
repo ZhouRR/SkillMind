@@ -1,6 +1,6 @@
 {
   "catalog_version": "skillmind.tool-catalog/1",
-  "checksum": "sha256:34fda26a4b4ea0541ce12317c3334be850903c77642d9e7ec768bcafb629ccea",
+  "checksum": "sha256:3f1c1bc1e365cf3c56fa59288b681f5512cf8949a07d0f20b4ed6a04cb69e766",
   "capabilities": [
     {
       "capability": "change.propose/v1",
@@ -134,7 +134,7 @@
     },
     {
       "capability": "mcp.call/v1",
-      "description": "Approved MCP tools/call through change.propose/v1 only. Observe mcp.tools/v1 Evidence first. operation=\"call\", target.locator=the authorized tool name. One /call SET value={\"arguments\":{...},\"read_back\":{\"name\":\"authorized_read_tool\",\"arguments\":{...},\"checks\":[{\"path\":\"/field\",\"equals\":\"expected value\"}]}}. Each check uses equals or one_of, with a JSON Pointer into the parsed read result. precondition.revision=catalog_hash; verification={\"method\":\"READ_BACK\",\"paths\":[\"/call\"]}. Both tools and all arguments/checks are approved together. Use the exact string ${effect_id} for a platform-owned operation ID in arguments and read-back checks; the platform substitutes the original Effect UUID. Unknown outcomes are never resent. Original receipt recovery requires a read-back equals check against ${effect_id}; otherwise keep the outcome unknown. Application-specific prerequisites and business verdicts remain defined by the Skill. Returned URLs are not downloaded or saved artifacts.",
+      "description": "Approved generic MCP tools/call via change.propose/v1. operation=call; target.locator=authorized tool name. /call SET contains arguments and read_back (read tool, arguments, JSON Pointer checks). precondition.revision=catalog_hash; verification=READ_BACK /call. See request schema for exact shape. ${effect_id} binds the original operation; unknown effects are never resent. Read-back confirms the declared conditions, not a business PASS.",
       "request_schema": "tools/mcp.call/v1/request.schema.json",
       "response_schema": "tools/mcp.call/v1/response.schema.json",
       "error_schema": "tools/mcp.call/v1/error.schema.json",

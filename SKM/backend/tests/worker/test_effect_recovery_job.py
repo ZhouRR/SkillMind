@@ -5,7 +5,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from skillmind.worker.settings import recover_expired_leases
 
 
@@ -53,7 +52,7 @@ async def test_recovery_cron_counts_all_durable_timeouts() -> None:
             "settings": SimpleNamespace(
                 outbox_batch_size=25, run_max_attempts=3, deferred_features_enabled=True,
                 database_writes_enabled=False, document_writes_enabled=False,
-                git_writes_enabled=False,
+                git_writes_enabled=False, mcp_tools_enabled=False,
             ),
             "worker_id": "worker-test",
         }

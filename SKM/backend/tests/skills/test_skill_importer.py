@@ -374,7 +374,7 @@ def test_capability_catalog_is_sorted_unique_and_checksum_bound() -> None:
         if definition.installed and issue.capability in definition.capabilities
     }
     assert loaded.checksum == (
-        "sha256:34fda26a4b4ea0541ce12317c3334be850903c77642d9e7ec768bcafb629ccea"
+        "sha256:3f1c1bc1e365cf3c56fa59288b681f5512cf8949a07d0f20b4ed6a04cb69e766"
     )
     duplicate = CapabilityCatalogEntry(
         capability="issue.read/v1",

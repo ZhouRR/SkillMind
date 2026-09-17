@@ -76,7 +76,7 @@ class McpDesktopLeases:
                 "external_exclusivity": "NOT_VERIFIED",
             }
 
-    async def require_original_step(
+    async def require_original_effect(
         self, run_id: UUID, integration_id: UUID, request_id: str
     ) -> None:
         """別 Run の UUID を知っていても結果の読取・取消を許可しない。"""
@@ -90,7 +90,7 @@ class McpDesktopLeases:
                         EffectExecution.run_id == run_id,
                         ChangeProposal.integration_id == integration_id,
                         ChangeProposal.capability_version == "mcp.call/v1",
-                        ChangeProposal.operation == "execute_step",
+                        ChangeProposal.operation == "call",
                     )
                 )
             ).one_or_none()

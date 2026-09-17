@@ -45,7 +45,7 @@ def mcp_claim(*, primary='mcp.query/v1', writable=True, required=True, declarati
     if writable:
         blueprint['effect_intents'] = [{
             'key': 'step', 'resource_key': 'runner', 'mode': 'apply',
-            'operation': 'execute_step', 'risk': 'low',
+            'operation': 'call', 'risk': 'low',
         }]
     selected = {'runner': {'capability': primary, 'provider': 'mcp'}}
     if extra_resource:

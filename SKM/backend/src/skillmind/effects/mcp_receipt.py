@@ -8,8 +8,8 @@ from typing import Any
 from uuid import UUID
 
 from skillmind.agent.mcp_tools_source import StreamableHttpMcpToolsSource
-from skillmind.integrations.mcp_tools import digest, parse_result
 from skillmind.effects.mcp_call import check_read_back, has_operation_identity, resolve_effect_id
+from skillmind.integrations.mcp_tools import configured_tool, digest, parse_result, tool_access
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +65,12 @@ async def lookup_operation(
     if not has_operation_identity(payload):
         raise ValueError("MCP original operation has no verifiable receipt identity")
     reader = resolve_effect_id(payload, str(command.effect_id))["read_back"]
-    result = parse_result(await source.call(config, credential, reader["name"], reader["arguments"]))
+    configured_tool(config, {"tool_names": [reader["name"]]}, reader["name"])
+    if tool_access(config, reader["name"]) != "read":
+        raise ValueError("MCP receipt tool is not authorized for reading")
+    result = parse_result(
+        await source.call(config, credential, reader["name"], reader["arguments"])
+    )
     receipt = McpOperationReceipt(result)
     try:
         validate_receipt(command, receipt)

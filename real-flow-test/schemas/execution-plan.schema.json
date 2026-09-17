@@ -1,0 +1,401 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "testRunId",
+    "documentId",
+    "specVersion",
+    "versionSnapshot",
+    "sourceMarkdown",
+    "cases",
+    "blockers"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "testRunId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "documentId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "specVersion": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "対象文書の RV 登録記録からそのまま引き継ぐ追跡値。元ファイルの取得・再計算を要求しない。Markdown 自体のハッシュは sourceMarkdown.sha256 に保持する。"
+    },
+    "versionSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "skillVersion",
+        "environmentVersion",
+        "sutBuild",
+        "runnerVersions",
+        "modelVersion"
+      ],
+      "properties": {
+        "environmentVersion": {
+          "type": "string",
+          "minLength": 1,
+          "description": "公開された環境設定または監査済み回答で確認した環境版。appId やサーバー名から推測しない。"
+        },
+        "sutBuild": {
+          "type": "string",
+          "minLength": 1,
+          "description": "登録対象アプリの確認済みビルド。環境版・Runner 版で代用しない。"
+        },
+        "runnerVersions": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "確認済みの版を識別体系別の key で保持する。MCP tools/v1 の server.version は mcpServer:<server.name>、操作応答の runnerVersion は別 key とする。異なる体系の文字列同士を比較しない。固定後に得た版は操作記録に残す。"
+        },
+        "modelVersion": {
+          "type": "string",
+          "minLength": 1,
+          "description": "計画時のプラットフォーム runtime_metadata.model にある設定モデル ID。非公開のモデル内部ビルドは要求しない。"
+        },
+        "skillVersion": {
+          "type": "string",
+          "minLength": 1,
+          "description": "計画生成 Skill の固定公開版または checksum。実行・判定へ同じ値を引き継ぐ。"
+        }
+      }
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "testCaseId",
+          "dependsOn",
+          "environmentLease",
+          "maxParallelism",
+          "timeoutSeconds",
+          "preconditions",
+          "steps",
+          "cleanup",
+          "title",
+          "objective",
+          "sourceRefs",
+          "testData"
+        ],
+        "properties": {
+          "testCaseId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "dependsOn": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "environmentLease": {
+            "type": "string",
+            "minLength": 1,
+            "description": "プラットフォームで確認した本 Run の desktop.lease_ref。SKM 同一 endpoint の予約であり、Windows 全体の排他証明ではない。"
+          },
+          "maxParallelism": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "単一デスクトップでは 1。"
+          },
+          "timeoutSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1800,
+            "description": "ケース最初のアプリ準備からの経過時間上限（秒）。承認・中断待ちも含め継続時にリセットしない。期限後は新操作を提案せず、進行中操作は照合する。Runner の単操作上限・Agent attempt 上限とは別。"
+          },
+          "preconditions": {
+            "type": "array",
+            "minItems": 0,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "steps": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "stepId",
+                "runner",
+                "operation",
+                "inputs",
+                "expectedResult",
+                "evidence",
+                "timeoutSeconds",
+                "retryLimit",
+                "idempotent",
+                "cleanup",
+                "action",
+                "sourceRefs"
+              ],
+              "properties": {
+                "stepId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "runner": {
+                  "enum": [
+                    "PLAYWRIGHT",
+                    "FLAUI",
+                    "DB",
+                    "MCP"
+                  ]
+                },
+                "operation": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "inputs": {
+                  "type": "object"
+                },
+                "expectedResult": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "evidence": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "type",
+                      "description"
+                    ],
+                    "properties": {
+                      "type": {
+                        "enum": [
+                          "SCREENSHOT",
+                          "VIDEO",
+                          "TRACE",
+                          "LOG",
+                          "DB_RESULT",
+                          "ACTUAL_OUTPUT"
+                        ]
+                      },
+                      "description": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                },
+                "timeoutSeconds": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "default": 15,
+                  "description": "単独操作の時間上限（秒）。公開工具・Runner の上限以下にする。ケース全体の時間制限とは別。"
+                },
+                "retryLimit": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "idempotent": {
+                  "type": "boolean"
+                },
+                "cleanup": {
+                  "type": "array",
+                  "minItems": 0,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "action": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "元仕様の操作内容。operation は Runner の実行操作名。"
+                },
+                "sourceRefs": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "$ref": "#/$defs/sourceRef"
+                  }
+                },
+                "connectionRef": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "MCP 接続の設定上の参照名。認証情報の実値は含めない。"
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "retryLimit": {
+                        "minimum": 1
+                      }
+                    }
+                  },
+                  "then": {
+                    "properties": {
+                      "idempotent": {
+                        "const": true
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "runner": {
+                        "const": "MCP"
+                      }
+                    }
+                  },
+                  "then": {
+                    "required": [
+                      "connectionRef"
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "cleanup": {
+            "type": "array",
+            "minItems": 0,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "objective": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sourceRefs": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/$defs/sourceRef"
+            }
+          },
+          "testData": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/testData"
+            }
+          }
+        }
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "maxItems": 0,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "sourceMarkdown": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "documentLibraryId",
+        "bucket",
+        "objectKey",
+        "sha256"
+      ],
+      "properties": {
+        "documentLibraryId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bucket": {
+          "type": "string",
+          "minLength": 1
+        },
+        "objectKey": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?![A-Za-z][A-Za-z0-9+.-]*://).+"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "description": "実際に使用した RV 済み Markdown の保存参照と、そのバイト列の SHA-256。元ファイルの取得は不要。"
+    }
+  },
+  "title": "検証済み実行計画",
+  "description": "RV PASS の固定 Markdown から直接作る検証済み実行計画。ケース・期待結果・Runner 操作を内包し、実行は別工程で行う。",
+  "$defs": {
+    "sourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "section",
+        "quote"
+      ],
+      "properties": {
+        "section": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Markdown 内の見出し・節。見出しがない場合はケース・手順の位置。"
+        },
+        "quote": {
+          "type": "string",
+          "minLength": 1,
+          "description": "判断の根拠となる元文書の記述"
+        },
+        "sourceCaseId": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "testData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "description"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "description": "仕様で確定している場合の値"
+        },
+        "fixtureRef": {
+          "type": "string",
+          "minLength": 1,
+          "description": "既存テストデータの参照。認証情報の実値は格納しない"
+        }
+      }
+    }
+  }
+}

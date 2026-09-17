@@ -12,19 +12,22 @@ from jsonschema.exceptions import SchemaError
 from referencing import Registry
 
 from skillmind.core.hashing import canonical_json, sha256_hex
+from skillmind.integrations.mcp_errors import local_diagnostic_id, safe_remote_detail
 
 PROFILE = "mcp-tools/v1"
 MAX_ARGUMENT_BYTES = 65_536
 
 
 class McpResultError(ValueError):
-    """遠端失敗と不正な応答を分離し、本文ではなく診断 ID だけを保持する。"""
+    """標準の工具失敗を、SKM 相関 ID と安全な遠端データ付きで保持する。"""
 
-    def __init__(self, reason: str, diagnostic_id: str | None = None) -> None:
-        """資格情報を含み得る遠端メッセージは保持しない。"""
+    def __init__(self, reason: str, *, diagnostic_id: str | None = None,
+                 remote_detail: dict[str, Any] | None = None) -> None:
+        """例外本文は固定分類のみ。診断本文は認可後に別途投影する。"""
         super().__init__(reason)
         self.reason = reason
-        self.diagnostic_id = diagnostic_id
+        self.local_diagnostic_id = local_diagnostic_id(diagnostic_id)
+        self.remote_detail = remote_detail or {}
 
 
 def digest(value: Any) -> str:
@@ -55,9 +58,18 @@ def _schema(value: Any, depth: int = 0) -> None:
         "minimum",
         "maximum",
         "minItems",
-        "maxItems", "minProperties", "maxProperties", "uniqueItems",
-        "anyOf", "oneOf", "allOf", "not", "exclusiveMinimum", "exclusiveMaximum",
-        "multipleOf", "$schema",
+        "maxItems",
+        "minProperties",
+        "maxProperties",
+        "uniqueItems",
+        "anyOf",
+        "oneOf",
+        "allOf",
+        "not",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "multipleOf",
+        "$schema",
     }
     if set(value) - allowed:
         raise ValueError("MCP tool schema uses unsupported constraints or references")
@@ -98,13 +110,15 @@ def normalize_catalog(value: Any) -> dict[str, Any]:
         raise ValueError("MCP server or tools are invalid")
     names: set[str] = set()
     for entry in entries:
-        if not isinstance(entry, dict) or set(entry) != {
+        if not isinstance(entry, dict) or set(entry) - {"read_only_hint"} != {
             "name",
             "description",
             "input_schema",
             "output_schema",
         }:
             raise ValueError("MCP tool descriptor is invalid")
+        if "read_only_hint" in entry and type(entry["read_only_hint"]) is not bool:
+            raise ValueError("MCP read-only annotation must be boolean")
         name = entry["name"]
         if (
             not isinstance(name, str)
@@ -143,8 +157,10 @@ def tool_access(config: Mapping[str, Any], name: str) -> str | None:
 
 def validate_arguments(name: str, arguments: Any, *, proposal: bool = False) -> dict[str, Any]:
     """具体的な引数は保存 Schema に委ね、共通の大きさだけを制限する。"""
-    if (not isinstance(arguments, dict)
-        or len(canonical_json(arguments).encode()) > MAX_ARGUMENT_BYTES):
+    if (
+        not isinstance(arguments, dict)
+        or len(canonical_json(arguments).encode()) > MAX_ARGUMENT_BYTES
+    ):
         raise ValueError("MCP arguments are invalid or too large")
     frozen: dict[str, Any] = json.loads(canonical_json(arguments))
     return frozen
@@ -158,16 +174,20 @@ def validate_tool_value(schema: dict[str, Any], value: Any) -> None:
         raise ValueError("MCP value does not match the frozen tool schema")
 
 
-def parse_result(value: Mapping[str, Any]) -> dict[str, Any]:
+def parse_result(value: Mapping[str, Any], *, credential: str | None = None) -> dict[str, Any]:
     """構造化内容を優先し、その他の内容も取得済みデータとして返す。"""
     if value.get("is_error") is True:
-        # FlaUI の診断参照のみ許可する。例外本文・path・stack は反射しない。
-        ids = set()
         content = value.get("content")
-        for item in content if isinstance(content, list) else []:
-            if isinstance(item, dict) and isinstance(item.get("text"), str):
-                ids.update(re.findall(r"\[diagnosticId=([0-9a-f]{32})\]", item["text"][:65_536]))
-        raise McpResultError("remote_tool_error", next(iter(ids)) if len(ids) == 1 else None)
+        # 診断 ID の名前・括弧形式を推測せず、標準 content と structuredContent を保持する。
+        detail = {
+            "content": [item for item in content[:8]
+                        if isinstance(item, dict) and item.get("type") == "text"]
+                       if isinstance(content, list) else [],
+            "structured_content": value.get("structured_content"),
+        }
+        raise McpResultError("remote_tool_error",
+                             diagnostic_id=value.get("local_diagnostic_id"),
+                             remote_detail=safe_remote_detail(detail, credential=credential))
     if value.get("is_error") is not False:
         raise McpResultError("invalid_response")
     if len(canonical_json(value).encode()) > 1_048_576:
