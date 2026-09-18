@@ -34,6 +34,15 @@ jobs:
         run: |
           python .github/generic_mcp_patch.py
           python .github/generic_mcp_finish.py
+          python - <<'PY'
+          import base64, hashlib, json, os, urllib.request
+          sha = '5e093eef7720440102df91a2c6ec7e224046c403'
+          request = urllib.request.Request('https://api.github.com/repos/ZhouRR/SkillMind/git/blobs/' + sha, headers={'Authorization':'Bearer ' + os.environ['GH_TOKEN'], 'Accept':'application/vnd.github+json', 'User-Agent':'skillmind-reviewed-mcp-patch'})
+          with urllib.request.urlopen(request, timeout=60) as response:
+              content=base64.b64decode(json.load(response)['content'])
+          assert hashlib.sha1(b'blob '+str(len(content)).encode()+b'\0'+content).hexdigest()==sha
+          exec(compile(content, 'reviewed_tuple_patch', 'exec'))
+          PY
       - name: Install pinned application dependencies
         working-directory: SKM/backend
         run: python -m pip install -q -e '.[dev]'
