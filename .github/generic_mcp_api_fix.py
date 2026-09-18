@@ -34,7 +34,11 @@ paths.add(p)
 
 p = 'SKM/backend/tests/api/test_run_creation_authorization_api.py'
 t = load(p, '7fd19321896627460374d4a9ed33ee08cdd81940')
+# 原 credential と全引数の厳密比較を維持し、省略された MCP 同意だけを false として追加する。
+t = once(t, '            "auto_approve_git": False,\n', '            "auto_approve_git": False,\n            "auto_approve_mcp": False,\n')
+t = once(t, '            assert created["sources"] == body["sources"]\n', '            assert created["sources"] == body["sources"]\n            assert created["auto_approve_mcp"] is False\n')
 t = once(t, '        "auto_approve_git",\n', '        "auto_approve_git",\n        "auto_approve_mcp",\n')
+t = once(t, '    assert body_schema["required"] == ["skill_version_id", "task_key"]\n', '    assert body_schema["required"] == ["skill_version_id", "task_key"]\n    assert body_schema["properties"]["auto_approve_mcp"]["type"] == "boolean"\n    assert body_schema["properties"]["auto_approve_mcp"]["default"] is False\n')
 t = once(t, '    body["auto_approve_git"] = enabled\n', '    body["auto_approve_git"] = enabled\n    body["auto_approve_mcp"] = enabled\n')
 t = once(t, '    assert create.await_args.kwargs["auto_approve_git"] is enabled\n', '    assert create.await_args.kwargs["auto_approve_git"] is enabled\n    assert lookup.await_args.kwargs["auto_approve_mcp"] is enabled\n    assert create.await_args.kwargs["auto_approve_mcp"] is enabled\n')
 t += '''\n\n@pytest.mark.parametrize("value", [True, "true", 1, None])
@@ -64,4 +68,4 @@ def test_omitted_mcp_consent_remains_false_on_api_replay_and_creation(client, mo
 Path(p).write_text(t, encoding='utf-8')
 paths.add(p)
 state.write_text(json.dumps(sorted(paths)), encoding='utf-8')
-print('API test signatures and consent assertions synchronized.')
+print('API test signatures and strict consent expectations synchronized.')
