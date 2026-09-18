@@ -28,6 +28,7 @@ from skillmind.agent.repository_source import (
     RepositorySnapshotSource,
 )
 from skillmind.agent.runtime_policy import uses_modern_runtime
+from skillmind.agent.skill_files import SKILL_FILE_CAPABILITIES
 from skillmind.agent.subagent import SUBAGENT_DISPATCH_CAPABILITY
 from skillmind.agent.task_brief import (
     build_agent_task_brief,
@@ -74,6 +75,7 @@ from skillmind.effects.proposal import CHANGE_PROPOSE_CAPABILITY
 from skillmind.effects.release import ExecutionFeatures
 from skillmind.integrations.domain import ResourceBindingLevel, binding_checksum
 from skillmind.runs.domain import ClaimedRun
+from skillmind.runs.input_snapshot import InputFileSeal
 from skillmind.runs.interaction import INTERACTION_REQUEST_CAPABILITY
 from skillmind.runs.proposal_continuation import ProposalContinuationReader
 from skillmind.skills.document_prerequisites import (
@@ -716,6 +718,7 @@ class ProductionRunContextBuilder:
         # 物化は permission/Tool 解決の後に置き、許可されていない資源を先に落とさない。
         workspace = self._workspace_manager.initialize(claimed_run.run_id)
         materialized: tuple[MaterializedResource, ...] = ()
+        skill_files: tuple[InputFileSeal, ...] = ()
         if self._materializer is not None:
             prepared_input = await self._materializer.materialize(
                 claimed_run=claimed_run,
@@ -725,9 +728,12 @@ class ProductionRunContextBuilder:
                 blueprint=blueprint,
                 repository_bindings=repository_bindings,
                 document_snapshots=document_snapshots,
+                skill_documents=(manifest.get("source_documents", ())
+                    if any(tool.capability in SKILL_FILE_CAPABILITIES for tool in tools) else ()),
             )
             workspace = prepared_input.workspace
             materialized = prepared_input.resources
+            skill_files = prepared_input.skill_files
         # Skill guidance は Brief を経由してのみ Agent へ届く。permission と Tool 解決を先に
         # 確定させてから組み立て、Brief が許可されていない能力を語らないようにする。
         brief = build_agent_task_brief(
@@ -752,6 +758,7 @@ class ProductionRunContextBuilder:
             # 物化器が実際に書いた落点だけを Brief へ載せる (計画 §19 W6)。未配線環境で存在
             # しない directory を案内すると、Agent は読めない path を試して行き詰まる。
             materialized=materialized,
+            skill_files=skill_files,
         )
         return RunContext(
             run_id=claimed_run.run_id,

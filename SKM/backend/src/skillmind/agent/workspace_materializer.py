@@ -1,11 +1,13 @@
 """冻结した ResourceBinding を Run workspace の input/ へ只読物化する (計画 §19 W3/W4)。
 
 Agent は物化済みの input/ を既存の workspace.search/read で自走発見する。凭据は物化段階の
-Provider 境界内でのみ解決され、Agent 上下文・日志・manifest には決して現れない。物化対象は
+Provider 境界内でのみ解決され、Agent 上下文・日志・manifest には決して現れない。資源の物化対象は
 二路: document 一路は Run の凍結文書集合だけを input/documents/ へ、repository
 一路 (§19 W4) は Run に凍結された binding の scope 配下を revision 固定で
 input/<requirement_key>/ へ落とす。いずれも上限超過は截断せず fail closed とし、読めなかった
 file は manifest.skipped に必ず残す (「読めない」を「存在しない」と誤認させないため)。
+凍結 Skill text の副本は同じ封印世代へ任意で追加する。全体が既存予算に収まらない場合は
+副本を作らず、既存の完全原文経路を維持する。実在を確認した path だけを Brief へ渡す。
 
 計画 §19 W5 で三つの増分を加えた: ① `.skillmind/files.txt` (物化物と skip の索引。名前で
 file を探す idiom (`svn list | grep`) を `workspace.search` で成立させる)、② `.skillmind/
@@ -53,6 +55,7 @@ from skillmind.agent.repository_source import (
     RepositorySnapshotSource,
     ScopedRepositorySession,
 )
+from skillmind.agent.skill_files import frozen_file_contents, reused_skill_files
 from skillmind.core.hashing import sha256_hex
 from skillmind.documents.snapshot import (
     DOCUMENT_PROVIDER,
@@ -115,6 +118,7 @@ class PreparedInput:
 
     workspace: RunWorkspace
     resources: tuple[MaterializedResource, ...]
+    skill_files: tuple[InputFileSeal, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,6 +170,7 @@ class WorkspaceMaterializer:
         blueprint: Mapping[str, Any],
         repository_bindings: Mapping[str, RepositoryBindingRef] | None = None,
         document_snapshots: Sequence[DocumentSnapshot] = (),
+        skill_documents: Sequence[Mapping[str, str]] = (),
     ) -> PreparedInput:
         """lease 認領した新世代を封じ、DB の READY が確定してから Agent へ渡す。"""
 
@@ -175,6 +180,8 @@ class WorkspaceMaterializer:
             or workspace.root.name != str(run_id)
         ):
             raise MaterializationError("Input preparation does not belong to the claimed Run")
+        skill_contents = frozen_file_contents(claimed_run, skill_documents)
+        expected_skill_files = tuple(seal for seal, _ in skill_contents)
         snapshots = _validated_document_snapshots(blueprint, project_id, document_snapshots)
         if [item.to_json() for item in snapshots] != [
             item.to_json()
@@ -233,11 +240,12 @@ class WorkspaceMaterializer:
             verified = replace(candidate, input_files=receipt.files)
             self._ensure_total_budget(receipt.files)
             await asyncio.to_thread(verify_input, verified)
+            skill_files = reused_skill_files(verified, expected_skill_files)
             resources = await asyncio.to_thread(
                 self._reuse, verified, project_id, run_id, snapshots, bindings,
-                repository_metadata, deferred_ids,
+                repository_metadata, deferred_ids, skill_files,
             )
-            return PreparedInput(verified, resources)
+            return PreparedInput(verified, resources, skill_files)
         materialized: list[MaterializedResource] = []
         files: list[InputFileSeal] = []
         if snapshots:
@@ -263,6 +271,21 @@ class WorkspaceMaterializer:
             )
             materialized.append(prepared.resource)
             files.extend(prepared.files)
+        # 原文は Brief に完全に残る。任意の副本で既存 input の容量を超過させない。
+        if skill_contents:
+            try:
+                self._ensure_total_budget((*files, *expected_skill_files))
+            except MaterializationError:
+                # 予算の事前検査だけを降級する。I/O・封印・取消の失敗は隠さない。
+                expected_skill_files = ()
+            else:
+                prefix = input_relative(candidate)
+                await asyncio.to_thread(
+                    self._write_tree, candidate.root,
+                    [_AcceptedFile(f"{prefix}/{seal.path}", data, seal.checksum)
+                     for seal, data in skill_contents],
+                )
+                files.extend(expected_skill_files)
         sealed = tuple(sorted(files, key=lambda item: item.path))
         await asyncio.to_thread(seal_generation, workspace.root, relative=relative, files=sealed)
         try:
@@ -278,7 +301,9 @@ class WorkspaceMaterializer:
             or completed.source_checksum != receipt.source_checksum
         ):
             raise MaterializationError("Input publication did not confirm this generation")
-        return PreparedInput(replace(candidate, input_files=sealed), tuple(materialized))
+        return PreparedInput(
+            replace(candidate, input_files=sealed), tuple(materialized), expected_skill_files
+        )
 
     async def _inspect_bindings(
         self,
@@ -336,11 +361,14 @@ class WorkspaceMaterializer:
         bindings: Mapping[str, RepositoryBindingRef],
         metadata: Mapping[str, RepositorySnapshotBinding],
         deferred_ids: frozenset[UUID],
+        skill_files: tuple[InputFileSeal, ...] = (),
     ) -> tuple[MaterializedResource, ...]:
         """READY の実 byte からだけ案内を再構成し、Project や remote を再取得しない。"""
 
         resources: list[MaterializedResource] = []
         expected_roots = set(bindings)
+        if skill_files:
+            expected_roots.add(_PLATFORM_DIRECTORY)
         if snapshots:
             expected_roots.add(_DOCUMENTS_KEY)
             documents = snapshot_documents(snapshots)
