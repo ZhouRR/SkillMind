@@ -21,6 +21,7 @@ from skillmind.integrations.mcp_tools import (
     PROFILE,
     McpResultError,
     configured_tool,
+    configured_tools,
     digest,
     normalize_catalog,
     parse_result,
@@ -61,14 +62,11 @@ class McpToolsProvider:
         locator: dict[str, Any]
         stage = "configuration"
         try:
-            catalog = normalize_catalog(bound.integration.config.get("tool_catalog"))
-            allowed = [
-                configured_tool(bound.integration.config, bound.scope, name)
-                for name in bound.scope.get("tool_names", [])
-            ]
-            if not allowed:
-                raise ValueError("MCP tool permission is empty")
             if self._capability == "mcp.tools/v1":
+                catalog = normalize_catalog(bound.integration.config.get("tool_catalog"))
+                allowed = configured_tools(bound.integration.config, bound.scope)
+                if not allowed:
+                    raise ValueError("MCP tool permission is empty")
                 stage = "arguments"
                 if set(arguments) - {"purpose", "reserve_desktop"}:
                     raise ValueError("Invalid discovery request")
@@ -146,10 +144,15 @@ class McpToolsProvider:
                     "scope_denied", "MCP binding changed during read", retryable=False
                 ) from None
             failure = _read_error(error, stage)
-            log_event(logging.getLogger(__name__), logging.WARNING, "mcp.query.failed",
-                      run_id=context.run_id, tool_call_id=context.tool_call_id,
-                      reason_code=(failure.diagnostic or {}).get("reason"),
-                      local_diagnostic_id=(failure.diagnostic or {}).get("local_diagnostic_id"))
+            log_event(
+                logging.getLogger(__name__),
+                logging.WARNING,
+                "mcp.query.failed",
+                run_id=context.run_id,
+                tool_call_id=context.tool_call_id,
+                reason_code=(failure.diagnostic or {}).get("reason"),
+                local_diagnostic_id=(failure.diagnostic or {}).get("local_diagnostic_id"),
+            )
             raise failure from None
         current, current_token = await self._binding._bound(context)
         if current != bound or current_token != token:

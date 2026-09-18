@@ -31,6 +31,8 @@ def run_auto_approval_actor(
     # v2 の同意は DB/文書だけ。新しい既定値で旧 Run の Git 権限を増やさない。
     if capability_version == "repository.write/v1" and not intent.auto_approve_git:
         return None
+    if capability_version == "mcp.call/v1" and not intent.auto_approve_mcp:
+        return None
     return intent.actor_id if intent.auto_approve else None
 
 

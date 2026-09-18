@@ -129,12 +129,15 @@ class CreateTaskRunRequest(BaseModel):
     sources: dict[str, str] = Field(default_factory=dict, max_length=50)
     auto_approve: bool = Field(default=False, strict=True)
     auto_approve_git: bool = Field(default=False, strict=True)
+    auto_approve_mcp: bool = Field(default=False, strict=True)
 
     @model_validator(mode="after")
     def validate_git_consent(self) -> CreateTaskRunRequest:
         """Git の同意を既存 Run 同意から独立した全許可にしない。"""
         if self.auto_approve_git and not self.auto_approve:
             raise ValueError("Git approval requires Run automatic approval")
+        if self.auto_approve_mcp and not self.auto_approve:
+            raise ValueError("MCP approval requires Run automatic approval")
         return self
 
 
@@ -569,6 +572,7 @@ async def create_task_run(
         sources=body.sources,
         auto_approve=body.auto_approve,
         auto_approve_git=body.auto_approve_git,
+        auto_approve_mcp=body.auto_approve_mcp,
         actor_id=actor.user_id,
         idempotency_key=idempotency_key,
         authorization=authorization,
@@ -596,6 +600,7 @@ async def create_task_run(
                     sources=body.sources,
                     auto_approve=body.auto_approve,
                     auto_approve_git=body.auto_approve_git,
+                    auto_approve_mcp=body.auto_approve_mcp,
                     idempotency_key=idempotency_key,
                     trace_id=request.state.request_id,
                     actor_id=actor.user_id,
@@ -948,8 +953,11 @@ def _run_detail_response(detail: RunDetail) -> RunDetailResponse:
             ),
             created_at=result.created_at,
         ),
-        execution_metrics=(ExecutionMetricsResponse.model_validate(detail.execution_metrics)
-            if detail.execution_metrics is not None else None),
+        execution_metrics=(
+            ExecutionMetricsResponse.model_validate(detail.execution_metrics)
+            if detail.execution_metrics is not None
+            else None
+        ),
         started_at=detail.started_at,
         finished_at=detail.finished_at,
         tool_calls=[

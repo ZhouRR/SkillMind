@@ -966,7 +966,7 @@ export const JA: UiMessages = {
       incompleteDraft: '有効な JSON object を入力し、文書範囲を確認してください。任意の範囲は「使用しない」を選択できます。',
     },
     creating: '作成中…',
-    autoApprove: '自動承認（データベース・文書保存・Git 提出）',
+    autoApprove: '自動承認（データベース・文書保存・Git 提出・MCP 操作）',
     startRun: '実行を開始',
     submission: {
       title: '前回の送信を確認',

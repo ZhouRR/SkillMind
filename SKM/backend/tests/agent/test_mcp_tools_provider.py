@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
-
 from skillmind.agent.mcp_tools_provider import McpToolsProvider
 from skillmind.agent.tool_gateway import ToolProviderError
 from skillmind.effects.catalog import resolve_effect_capability
@@ -91,7 +90,7 @@ async def test_revoked_binding_result_is_not_published(provider, mcp_context, to
     assert error.value.code == "scope_denied"
 
 
-def test_profile_scope_requires_readback_and_cannot_reuse_autoapproval():
+def test_profile_scope_requires_readback_and_only_registered_mcp_run_consent():
     """起動時の既存自動承認同意と MCP の新操作を混同しない。"""
     original = replace(
         command("mcp"),
@@ -111,7 +110,9 @@ def test_profile_scope_requires_readback_and_cannot_reuse_autoapproval():
         normalize_integration_command(
             replace(original, capabilities=("mcp.tools/v1", "mcp.query/v1"))
         )
-    assert not resolve_effect_capability("mcp.call/v1").supports_run_approval("mcp")
+    assert resolve_effect_capability("mcp.call/v1").supports_run_approval("mcp")
+    assert not resolve_effect_capability("mcp.call/v1").supports_run_approval("other")
+    assert not resolve_effect_capability("mcp.call/v1").supports_run_approval(None)
     assert not ExecutionFeatures(deferred=True).capability_enabled("mcp.call/v1")
     assert ExecutionFeatures(mcp_tools=True).effect_enabled("mcp.call/v1", "call", provider="mcp")
 

@@ -38,14 +38,14 @@ observe → Evidence → change.propose → 精确批准/允许的预授权
 | issue.update/v1 | Redmine CAS adapter；仅 system ADMIN 配置 LOW 风险精确 scope 可预授权，discovery → 前置 revision → 条件写入 → 回读 |
 | repository.write/v1 | Git 独立开关、精确 ref CAS 与原提交核对；Git 可由新 Run 启动同意自动批准，SVN 仍人工批准，均不 force，SVN 可靠性仍待补 |
 | database.write/v1 | PostgreSQL 单行 INSERT/UPDATE，逐次批准或 Run 启动同意；独立部署开关、可信原行 Evidence、精确表/列范围与同事务回执 |
-| mcp.call/v1 | 通用 MCP 单次调用，独立开关、同 Run 工具 Evidence、逐次精确批准与显式只读回读；不继承 DB/文档/Git 自动批准，详见[工具接入边界](resource-snapshots.md#mcp-工具接入边界) |
+| mcp.call/v1 | 通用 MCP 单次调用，独立开关、同 Run 工具 Evidence、逐次精确批准或本 Run 明确的 MCP 启动同意，并执行显式只读回读；不从旧 DB/文档/Git 同意推导 MCP 权限，详见[工具接入边界](resource-snapshots.md#mcp-工具接入边界) |
 | document.write/v1 | 项目文档库 CREATE，逐次批准或 Run 启动同意；按原 Effect/内容隔离物理对象，独立部署开关默认关闭；异常恢复验收仍待补 |
 
 标准 Redmine REST 不具本协议 CAS/幂等，须通过版本化 discovery 及真实竞争验收。批准复验 actor/Project/version/checksum/Integration/binding/scope；仅 Run 发起人或组织 system ADMIN 决策。HTTP 决策在共享事务内锁定当前账户、原 Session 和项目，复验 CSRF、当前角色及成员关系，提交前再次验证；不能沿用请求开始时缓存的管理员身份。
 
 ### Run 启动时的自动批准
 
-手动启动页面提供默认勾选的「自動承認（データベース・文書保存・Git 提出）」。提交的 `auto_approve`、`auto_approve_git` 与 actor、任务、输入和资源选择一起冻结；API 省略时为 false，旧 Run 和调度不自动授权，执行中不可修改。相同幂等键改变此选项返回冲突。问题答复仍由用户决定，Git 在新同意范围内自动批准；未勾选时逐次人工批准。SVN 仍人工批准，Redmine 沿原 Project policy。新浏览器使用同一个 checkbox 同时发送两个同意字段；API 缺省 `auto_approve_git=false`，v2 旧请求仍只覆盖 DB/文档，v3 才明确包含 Git。新字段必须与 `auto_approve=true` 配合，不修改在途原请求或旧 Run 的 hash。
+手动启动页使用同一个自动批准 checkbox，明确涵盖数据库、文档、Git 与 MCP 操作。新提交同时冻结 `auto_approve`、`auto_approve_git`、`auto_approve_mcp`；MCP 同意由 `TaskRunIntent` 的 v4 身份记录，API 省略时为 false，不回填在途 Run，不从旧同意推导新权限。未勾选时仍逐次人工批准；需要业务判断的问题仍由用户回答。所有额外同意均要求 `auto_approve=true`，幂等重放使用原请求全文。MCP 只允许已配置的 `mcp` Provider 与冻结工具范围，服务端 `readOnlyHint` 不是授权，SVN/Redmine 沿原规则。
 
 平台在提案通过原能力、Evidence、冻结 binding 和 scope 校验后，为精确 Proposal version/checksum 保存 `ChangeApproval.source=RUN_START`，actor 为原发起人。同事务保存 Effect 和 dispatch Outbox，不创建待答复 interaction。Agent 清理结束后，Worker 可直接将原 Attempt 中已批准的 REQUESTED Effect 交给独立 Effect executor，沿原 claim/apply/read-back 协议执行；人工待办和未知效果不进入这条路径。原 Outbox 保留作故障回收，重复配送由同一 claim/幂等协议抑制。效果完成后立即尝试配送续行，不等待定期 relay；失败仍由持久 Outbox 重送。批准后仍创建新的 Segment，Run 在外部保存期间可短暂显示 WAITING_FOR_APPROVAL，此时没有人工待办。
 

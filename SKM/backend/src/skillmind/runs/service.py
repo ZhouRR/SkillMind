@@ -100,7 +100,9 @@ class RunService:
     """Transaction 境界を所有して Run use case を実行する。"""
 
     def __init__(
-        self, session_factory: async_sessionmaker[AsyncSession], *,
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+        *,
         deferred_features_enabled: bool = True,
         scheduling_enabled: bool = False,
         database_writes_enabled: bool = False,
@@ -116,8 +118,11 @@ class RunService:
         self._deferred_features_enabled = deferred_features_enabled
         self._scheduling_enabled = scheduling_enabled or deferred_features_enabled
         self._execution_features = ExecutionFeatures(
-            deferred_features_enabled, database_writes_enabled,
-            document_writes_enabled, git_writes_enabled, mcp_tools_enabled
+            deferred_features_enabled,
+            database_writes_enabled,
+            document_writes_enabled,
+            git_writes_enabled,
+            mcp_tools_enabled,
         )
         if budget_policy is not None and budget_policy.max_cost_nanos is not None:
             raise BudgetUnavailableError("Primary execution cost adapter is not configured")
@@ -137,6 +142,7 @@ class RunService:
         authorization: UserAccess | RunCreationParticipant,
         auto_approve: bool = False,
         auto_approve_git: bool = False,
+        auto_approve_mcp: bool = False,
     ) -> CreatedRun:
         """解決済み PUBLISHED task と現在の資格から通用 Run を作成する。
 
@@ -156,6 +162,7 @@ class RunService:
             idempotency_key=idempotency_key,
             auto_approve=auto_approve,
             auto_approve_git=auto_approve_git,
+            auto_approve_mcp=auto_approve_mcp,
         ) as (session, intent, authority):
             # 精確 task の同一性は現在の権限や資源の変化から独立させる。
             task_id = derive_task_id(
@@ -214,7 +221,8 @@ class RunService:
                     isinstance(item, ResolvedRunBinding)
                     and not self._execution_features.provider_enabled(
                         item.capability_version, item.integration.provider
-                    ) for item in run_bindings
+                    )
+                    for item in run_bindings
                 ):
                     raise TaskSourceSelectionError("The selected Provider is disabled")
                 # 保存先候補があっても未登録/配備停止中の write は Run 作成権限にならない。
@@ -270,13 +278,22 @@ class RunService:
                     # 新規 Run だけに配備上限を固定する。旧 snapshot の権限を削って再利用しない。
                     "allowed_capabilities": sorted(
                         {
-                            *(capability for capability in resolved.allowed_capabilities
-                              if self._execution_features.capability_enabled(capability)),
-                            *({"database.read/v2", "database.describe/v1"}
-                              if "database.read/v1" in resolved.allowed_capabilities else set()),
+                            *(
+                                capability
+                                for capability in resolved.allowed_capabilities
+                                if self._execution_features.capability_enabled(capability)
+                            ),
+                            *(
+                                {"database.read/v2", "database.describe/v1"}
+                                if "database.read/v1" in resolved.allowed_capabilities
+                                else set()
+                            ),
                             INTERACTION_REQUEST_CAPABILITY,
-                            *({SUBAGENT_DISPATCH_CAPABILITY}
-                              if self._deferred_features_enabled else set()),
+                            *(
+                                {SUBAGENT_DISPATCH_CAPABILITY}
+                                if self._deferred_features_enabled
+                                else set()
+                            ),
                             *({CHANGE_PROPOSE_CAPABILITY} if has_apply_intent else set()),
                         }
                     ),
@@ -298,12 +315,17 @@ class RunService:
                     frozen_library = await DocumentLibraryBindingRepository(
                         session, target=binding.target
                     ).freeze(
-                        run_id=created.run_id, project_id=project_id, actor_id=actor_id,
+                        run_id=created.run_id,
+                        project_id=project_id,
+                        actor_id=actor_id,
                         requirement_key=binding.requirement_key,
                     )
                     frozen_sources[binding.requirement_key] = FrozenDocumentLibraryBinding(
-                        project_id, created.run_id, frozen_library.id,
-                        binding.requirement_key, binding.target,
+                        project_id,
+                        created.run_id,
+                        frozen_library.id,
+                        binding.requirement_key,
+                        binding.target,
                     ).to_json()
                     continue
                 frozen = await integration_repository.freeze_run_binding(
@@ -343,6 +365,7 @@ class RunService:
         authorization: UserAccess | RunCreationParticipant,
         auto_approve: bool = False,
         auto_approve_git: bool = False,
+        auto_approve_mcp: bool = False,
     ) -> CreatedRun | None:
         """API と調度が現在の Project 授権後に、元の要求を先に確認する共通入口。"""
 
@@ -357,6 +380,7 @@ class RunService:
             idempotency_key=idempotency_key,
             auto_approve=auto_approve,
             auto_approve_git=auto_approve_git,
+            auto_approve_mcp=auto_approve_mcp,
         ) as (session, intent, _):
             replay = await RunRepository(session).find_task_run_replay(
                 intent=intent, idempotency_key=idempotency_key
@@ -381,6 +405,7 @@ class RunService:
         idempotency_key: str,
         auto_approve: bool = False,
         auto_approve_git: bool = False,
+        auto_approve_mcp: bool = False,
     ) -> AsyncIterator[tuple[AsyncSession, TaskRunIntent, RunCreationAuthority]]:
         """普通要求の原会話と内部認領を区別し、すべての確認/作成出口を保護する。"""
 
@@ -402,6 +427,7 @@ class RunService:
             actor_id=actor_id,
             auto_approve=auto_approve,
             auto_approve_git=auto_approve_git,
+            auto_approve_mcp=auto_approve_mcp,
         )
         async with self._session_factory() as session, session.begin():
             if not isinstance(authorization, UserAccess):
@@ -695,9 +721,10 @@ class RunService:
 
         async with self._session_factory() as session, session.begin():
             return await RunRepository(
-                    session, execution_features=self._execution_features,
-                    document_library_target=self._document_library_target,
-                ).suspend_for_proposal(
+                session,
+                execution_features=self._execution_features,
+                document_library_target=self._document_library_target,
+            ).suspend_for_proposal(
                 claimed,
                 event=event,
                 session_metadata=session_metadata,
@@ -776,7 +803,9 @@ class RunService:
         result: ProposalDecisionResult | None = None
         async with self._session_factory() as session, session.begin():
             users = await UserRepository(session).lock_users(
-                access=access, target_id=None, include_target_sessions=False,
+                access=access,
+                target_id=None,
+                include_target_sessions=False,
             )
             authorize_user_access(access, users, now=datetime.now(UTC), admin=False, write=True)
             projects = ProjectRepository(session)
@@ -789,7 +818,8 @@ class RunService:
             command = replace(command, actor_is_administrator=users.actor.system_role == "ADMIN")
             try:
                 result = await RunRepository(
-                    session, execution_features=self._execution_features,
+                    session,
+                    execution_features=self._execution_features,
                     document_library_target=self._document_library_target,
                 ).decide_change_proposal(command)
             except ChangeProposalExpiredError as error:
@@ -888,6 +918,7 @@ def _task_run_intent(
     actor_id: UUID,
     auto_approve: bool = False,
     auto_approve_git: bool = False,
+    auto_approve_mcp: bool = False,
 ) -> TaskRunIntent:
     """選択構文の失敗を公開 Problem へ変換できる domain error に統一する。"""
 
@@ -901,6 +932,7 @@ def _task_run_intent(
             actor_id=actor_id,
             auto_approve=auto_approve,
             auto_approve_git=auto_approve_git,
+            auto_approve_mcp=auto_approve_mcp,
         )
     except ValueError as error:
         raise TaskSourceSelectionError(str(error)) from error

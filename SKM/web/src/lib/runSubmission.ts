@@ -38,7 +38,7 @@ export function freezeRunSubmission(
     task_key: draft.taskKey,
     input: draft.input,
     sources: draft.sources,
-    ...(draft.autoApprove !== undefined ? { auto_approve: draft.autoApprove, auto_approve_git: draft.autoApprove } : {}),
+    ...(draft.autoApprove !== undefined ? { auto_approve: draft.autoApprove, auto_approve_git: draft.autoApprove, auto_approve_mcp: draft.autoApprove } : {}),
   }
   return Object.freeze({
     actorId: scope.actorId,

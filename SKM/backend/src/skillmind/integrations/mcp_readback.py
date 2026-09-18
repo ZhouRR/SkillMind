@@ -23,8 +23,9 @@ def validate_read_back_schema(schema: Any, checks: list[dict[str, Any]]) -> None
         # 未宣言は一致の証明ではないが、既存の観測ベースの回読を禁止しない。
         return
     for index, check in enumerate(checks):
-        parts = [part.replace("~1", "/").replace("~0", "~")
-                 for part in check["path"][1:].split("/")]
+        parts = [
+            part.replace("~1", "/").replace("~0", "~") for part in check["path"][1:].split("/")
+        ]
         values = check["one_of"] if "one_of" in check else [check["equals"]]
         if not any(_possible(schema, parts, value) for value in values):
             raise McpReadBackError("output_schema_conflict", index)
@@ -35,6 +36,10 @@ def _possible(schema: Any, parts: list[str], value: Any) -> bool:
     if schema is False:
         return False
     if not isinstance(schema, dict):
+        return True
+    if "$ref" in schema:
+        # 部分射影だけでは元文書の reference を解決できない。ここで不可能と断定せず、
+        # 実応答は Source の全 outputSchema と exact read-back の両方で検証する。
         return True
     if not parts:
         try:
@@ -55,7 +60,19 @@ def _possible(schema: Any, parts: list[str], value: Any) -> bool:
         child = schema.get("properties", {}).get(key, schema.get("additionalProperties", True))
         if _possible(child, rest, value):
             return True
-    if ("array" in types and re.fullmatch(r"0|[1-9][0-9]*", key)
-        and ("maxItems" not in schema or int(key) < schema["maxItems"])):
-        return _possible(schema.get("items", True), rest, value)
+    if (
+        "array" in types
+        and re.fullmatch(r"0|[1-9][0-9]*", key)
+        and ("maxItems" not in schema or int(key) < schema["maxItems"])
+    ):
+        index = int(key)
+        prefix = schema.get("prefixItems", [])
+        items = schema.get("items", True)
+        if isinstance(prefix, list) and index < len(prefix):
+            child = prefix[index]
+        elif isinstance(items, list):
+            child = items[index] if index < len(items) else schema.get("additionalItems", True)
+        else:
+            child = items
+        return _possible(child, rest, value)
     return False

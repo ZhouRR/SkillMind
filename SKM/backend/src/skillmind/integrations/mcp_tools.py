@@ -5,14 +5,13 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
+from copy import deepcopy
+from functools import lru_cache
 from typing import Any
-
-from jsonschema import Draft202012Validator, FormatChecker
-from jsonschema.exceptions import SchemaError
-from referencing import Registry
 
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.integrations.mcp_errors import local_diagnostic_id, safe_remote_detail
+from skillmind.integrations.mcp_schema import validate_schema, validate_value
 
 PROFILE = "mcp-tools/v1"
 MAX_ARGUMENT_BYTES = 65_536
@@ -21,8 +20,13 @@ MAX_ARGUMENT_BYTES = 65_536
 class McpResultError(ValueError):
     """標準の工具失敗を、SKM 相関 ID と安全な遠端データ付きで保持する。"""
 
-    def __init__(self, reason: str, *, diagnostic_id: str | None = None,
-                 remote_detail: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        reason: str,
+        *,
+        diagnostic_id: str | None = None,
+        remote_detail: dict[str, Any] | None = None,
+    ) -> None:
         """例外本文は固定分類のみ。診断本文は認可後に別途投影する。"""
         super().__init__(reason)
         self.reason = reason
@@ -35,66 +39,10 @@ def digest(value: Any) -> str:
     return "sha256:" + sha256_hex(canonical_json(value))
 
 
-def _schema(value: Any, depth: int = 0) -> None:
-    """外部参照なしの有界 Schema を検証する。"""
-    if isinstance(value, bool):
-        return
-    if not isinstance(value, dict) or depth > 12 or len(value) > 30:
-        raise ValueError("MCP tool schema is invalid")
-    allowed = {
-        "type",
-        "properties",
-        "required",
-        "additionalProperties",
-        "items",
-        "enum",
-        "const",
-        "description",
-        "title",
-        "default",
-        "format",
-        "minLength",
-        "maxLength",
-        "minimum",
-        "maximum",
-        "minItems",
-        "maxItems",
-        "minProperties",
-        "maxProperties",
-        "uniqueItems",
-        "anyOf",
-        "oneOf",
-        "allOf",
-        "not",
-        "exclusiveMinimum",
-        "exclusiveMaximum",
-        "multipleOf",
-        "$schema",
-    }
-    if set(value) - allowed:
-        raise ValueError("MCP tool schema uses unsupported constraints or references")
-    props = value.get("properties", {})
-    if not isinstance(props, dict) or len(props) > 100:
-        raise ValueError("MCP tool schema properties are invalid")
-    for child in props.values():
-        _schema(child, depth + 1)
-    for keyword in ("anyOf", "oneOf", "allOf"):
-        if keyword in value:
-            if not isinstance(value[keyword], list) or len(value[keyword]) > 30:
-                raise ValueError("MCP schema alternatives exceed their limit")
-            for child in value[keyword]:
-                _schema(child, depth + 1)
-    for key in ("items", "additionalProperties", "not"):
-        if key in value:
-            _schema(value[key], depth + 1)
-    try:
-        Draft202012Validator.check_schema(value)
-    except SchemaError:
-        raise ValueError("MCP tool schema is invalid") from None
-
-
-def normalize_catalog(value: Any) -> dict[str, Any]:
+@lru_cache(maxsize=16)
+def _normalized_catalog(encoded: str) -> dict[str, Any]:
     """サービスと Schema の snapshot を検証し、注釈から実行権を生成しない。"""
+    value = json.loads(encoded)
     if not isinstance(value, dict) or set(value) != {"server", "tools"}:
         raise ValueError("MCP tool catalog is invalid")
     if len(canonical_json(value).encode()) > 262_144:
@@ -129,24 +77,50 @@ def normalize_catalog(value: Any) -> dict[str, Any]:
         names.add(name)
         if not isinstance(entry["description"], str) or len(entry["description"]) > 4000:
             raise ValueError("MCP tool description exceeds its limit")
-        _schema(entry["input_schema"])
+        validate_schema(entry["input_schema"])
         if entry["output_schema"] is not None:
-            _schema(entry["output_schema"])
+            validate_schema(entry["output_schema"])
     return {"server": dict(server), "tools": sorted(entries, key=lambda item: item["name"])}
+
+
+def _catalog(value: Any) -> dict[str, Any]:
+    """契約の内容だけを有界に cache し、入力 dict の後続変更を検出する。"""
+    encoded = canonical_json(value)
+    if len(encoded.encode("utf-8")) > 262_144:
+        raise ValueError("MCP tool catalog exceeds its limit")
+    return _normalized_catalog(encoded)
+
+
+def normalize_catalog(value: Any) -> dict[str, Any]:
+    """公開する snapshot は私有 cache と分離し、呼出し側の変更を共有しない。"""
+    return deepcopy(_catalog(value))
 
 
 def configured_tool(
     config: Mapping[str, Any], scope: Mapping[str, Any], name: str
 ) -> dict[str, Any]:
-    """管理者が保存した契約と、原 binding の工具範囲を同時に要求する。"""
+    """単一要求では対象工具だけを解決する。現在の権限は毎回検証する。"""
     if config.get("tool_profile") != PROFILE or name not in scope.get("tool_names", []):
         raise ValueError("MCP tool is outside the configured scope")
     if tool_access(config, name) not in {"read", "call"}:
         raise ValueError("MCP tool permission is missing")
-    for entry in normalize_catalog(config.get("tool_catalog"))["tools"]:
+    for entry in _catalog(config.get("tool_catalog"))["tools"]:
         if entry["name"] == name:
-            return dict(entry)
+            return deepcopy(entry)
     raise ValueError("MCP tool is missing from the frozen catalog")
+
+
+def configured_tools(config: Mapping[str, Any], scope: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """一覧公開だけ全 scope を一回走査し、工具数ごとの全 catalog 再検証を避ける。"""
+    if config.get("tool_profile") != PROFILE:
+        raise ValueError("MCP tool profile is invalid")
+    by_name = {entry["name"]: entry for entry in _catalog(config.get("tool_catalog"))["tools"]}
+    result = []
+    for name in scope.get("tool_names", []):
+        if name not in by_name or tool_access(config, name) not in {"read", "call"}:
+            raise ValueError("MCP tool permission or contract is missing")
+        result.append(deepcopy(by_name[name]))
+    return result
 
 
 def tool_access(config: Mapping[str, Any], name: str) -> str | None:
@@ -168,10 +142,7 @@ def validate_arguments(name: str, arguments: Any, *, proposal: bool = False) -> 
 
 def validate_tool_value(schema: dict[str, Any], value: Any) -> None:
     """外部参照のない小さい Schema で呼出し入力・structured output を照合する。"""
-    _schema(schema)
-    validator = Draft202012Validator(schema, format_checker=FormatChecker(), registry=Registry())
-    if not validator.is_valid(value):
-        raise ValueError("MCP value does not match the frozen tool schema")
+    validate_value(schema, value)
 
 
 def parse_result(value: Mapping[str, Any], *, credential: str | None = None) -> dict[str, Any]:
@@ -180,14 +151,20 @@ def parse_result(value: Mapping[str, Any], *, credential: str | None = None) -> 
         content = value.get("content")
         # 診断 ID の名前・括弧形式を推測せず、標準 content と structuredContent を保持する。
         detail = {
-            "content": [item for item in content[:8]
-                        if isinstance(item, dict) and item.get("type") == "text"]
-                       if isinstance(content, list) else [],
+            "content": [
+                item
+                for item in content[:8]
+                if isinstance(item, dict) and item.get("type") == "text"
+            ]
+            if isinstance(content, list)
+            else [],
             "structured_content": value.get("structured_content"),
         }
-        raise McpResultError("remote_tool_error",
-                             diagnostic_id=value.get("local_diagnostic_id"),
-                             remote_detail=safe_remote_detail(detail, credential=credential))
+        raise McpResultError(
+            "remote_tool_error",
+            diagnostic_id=value.get("local_diagnostic_id"),
+            remote_detail=safe_remote_detail(detail, credential=credential),
+        )
     if value.get("is_error") is not False:
         raise McpResultError("invalid_response")
     if len(canonical_json(value).encode()) > 1_048_576:

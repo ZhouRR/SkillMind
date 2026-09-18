@@ -989,7 +989,7 @@ export const ZH: UiMessages = {
       incompleteDraft: '请填写有效的 JSON 对象，并完成所有文档范围选择；可选范围可明确选择不使用。',
     },
     creating: '正在创建…',
-    autoApprove: '自动批准（数据库写入、文档保存、Git 提交）',
+    autoApprove: '自动批准（数据库写入、文档保存、Git 提交、MCP 操作）',
     startRun: '开始执行',
     submission: {
       title: '确认上一次提交',
