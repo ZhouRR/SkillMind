@@ -8,34 +8,11 @@ concurrency:
   group: generic-mcp-review-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  inventory:
+  prepare:
     runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - name: Inspect generic MCP and approval entry points
-        run: |
-          python3 - <<'PY'
-          import ast
-          from pathlib import Path
-          for root in ('SKM/backend/src/skillmind', 'SKM/backend/tests'):
-              for p in sorted(Path(root).rglob('*.py')):
-                  if 'mcp' in p.name or 'approval' in p.name or p.name in ('executor.py', 'test_schema.py'):
-                      text = p.read_text()
-                      print('\nFILE', p, len(text.splitlines()))
-                      for n in ast.walk(ast.parse(text)):
-                          if isinstance(n, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
-                              print(n.lineno, n.name)
-          for p in sorted(Path('SKM/contracts/tools').glob('mcp*/*/*.json')):
-              print('CONTRACT', p)
-          for p in sorted(Path('docs').rglob('*.md')):
-              if 'mcp.execute' in p.read_text() or 'mcp.call' in p.read_text():
-                  print('DESIGN', p)
-          PY
-  backend:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
+    permissions:
+      contents: write
     env:
       SKILLMIND_ENVIRONMENT: test
       SKILLMIND_DATABASE_URL: postgresql+asyncpg://skillmind:skillmind@127.0.0.1:1/skillmind_test
@@ -48,9 +25,50 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install pinned backend dependencies
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+      - name: Apply reviewed changes to isolated checkout
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/generic_mcp_patch.py
+      - name: Install pinned application dependencies
         working-directory: SKM/backend
         run: python -m pip install -q -e '.[dev]'
-      - name: Run interpreter, agent, run and effect regression tests
+      - name: Check changed Python source
+        run: |
+          python - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          paths = [p for p in json.loads((Path(os.environ['RUNNER_TEMP'])/'generic-mcp-paths.json').read_text()) if p.endswith('.py')]
+          subprocess.run(['python','-m','ruff','check','--config','SKM/backend/pyproject.toml','--no-cache','--select','I','--fix',*paths],check=True)
+          subprocess.run(['python','-m','ruff','format','--config','SKM/backend/pyproject.toml','--no-cache',*paths],check=True)
+          subprocess.run(['python','-m','ruff','check','--config','SKM/backend/pyproject.toml','--no-cache',*paths],check=True)
+          PY
+      - name: Run focused MCP and event regression tests
         working-directory: SKM/backend
-        run: python -m pytest tests/skills tests/agent tests/worker tests/runs tests/effects tests/core tests/contracts -p no:cacheprovider -o addopts= -q --tb=short -rs
+        run: python -m pytest tests/agent/test_mcp_hot_path.py tests/runs/test_realtime_buffer.py tests/runs/test_mcp_run_approval.py tests/runs/test_run_start_approval.py tests/agent/test_mcp_generic.py tests/agent/test_mcp_tools.py tests/agent/test_mcp_tools_provider.py tests/agent/test_mcp_readback.py -p no:cacheprovider -o addopts= -q --tb=short -rs
+      - name: Check backend types
+        working-directory: SKM/backend
+        run: python -m mypy --no-incremental src/skillmind
+      - name: Check frontend contracts and regression tests
+        working-directory: SKM/web
+        run: |
+          npx -y pnpm@11.7.0 install --frozen-lockfile
+          npx -y pnpm@11.7.0 typecheck
+          npx -y pnpm@11.7.0 test
+      - name: Regenerate API and documentation and validate contracts
+        working-directory: SKM
+        run: |
+          python -m pip install -q -r scripts/docs-requirements.txt
+          python scripts/export_openapi.py
+          python scripts/validate_contracts.py
+          python scripts/build_docs.py
+          python scripts/build_docs.py --check
+      - name: Run interpreter, agent, worker, run, effects and API suites
+        working-directory: SKM/backend
+        run: python -m pytest tests/skills tests/agent tests/worker tests/runs tests/effects tests/core tests/contracts tests/api -p no:cacheprovider -o addopts= -q --tb=short -rs
+      - name: Prepare validated tree without updating branch or creating PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/generic_mcp_patch.py --publish
