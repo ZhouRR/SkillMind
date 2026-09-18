@@ -1,0 +1,21 @@
+name: Frozen Skill files review
+on:
+  push:
+    branches: [perf/frozen-skill-files]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Export tracked review source only
+        run: git archive --format=zip --output="$RUNNER_TEMP/skillmind-source.zip" HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: skillmind-source
+          path: ${{ runner.temp }}/skillmind-source.zip
+          retention-days: 1
