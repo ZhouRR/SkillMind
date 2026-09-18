@@ -1,0 +1,56 @@
+name: Generic MCP execution review
+on:
+  push:
+    branches: [perf/generic-mcp-execution]
+permissions:
+  contents: read
+concurrency:
+  group: generic-mcp-review-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  inventory:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Inspect generic MCP and approval entry points
+        run: |
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+          for root in ('SKM/backend/src/skillmind', 'SKM/backend/tests'):
+              for p in sorted(Path(root).rglob('*.py')):
+                  if 'mcp' in p.name or 'approval' in p.name or p.name in ('executor.py', 'test_schema.py'):
+                      text = p.read_text()
+                      print('\nFILE', p, len(text.splitlines()))
+                      for n in ast.walk(ast.parse(text)):
+                          if isinstance(n, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                              print(n.lineno, n.name)
+          for p in sorted(Path('SKM/contracts/tools').glob('mcp*/*/*.json')):
+              print('CONTRACT', p)
+          for p in sorted(Path('docs').rglob('*.md')):
+              if 'mcp.execute' in p.read_text() or 'mcp.call' in p.read_text():
+                  print('DESIGN', p)
+          PY
+  backend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      SKILLMIND_ENVIRONMENT: test
+      SKILLMIND_DATABASE_URL: postgresql+asyncpg://skillmind:skillmind@127.0.0.1:1/skillmind_test
+      SKILLMIND_REDIS_URL: redis://127.0.0.1:1/15
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned backend dependencies
+        working-directory: SKM/backend
+        run: python -m pip install -q -e '.[dev]'
+      - name: Run interpreter, agent, run and effect regression tests
+        working-directory: SKM/backend
+        run: python -m pytest tests/skills tests/agent tests/worker tests/runs tests/effects tests/core tests/contracts -p no:cacheprovider -o addopts= -q --tb=short -rs
