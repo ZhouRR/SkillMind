@@ -63,9 +63,7 @@ class EffectCapabilityDefinition:
     # 検証は「凍結 binding scope」と「Integration の非機密 config」の両方を見る。config 側にしか
     # 無い制約 (書き込み先 branch の追加制限など) を apply まで持ち越すと、承認画面には落とせない
     # 提案が並んでしまう。
-    validate: Callable[
-        [ChangeProposalDraft, Mapping[str, Any], Mapping[str, Any]], dict[str, Any]
-    ]
+    validate: Callable[[ChangeProposalDraft, Mapping[str, Any], Mapping[str, Any]], dict[str, Any]]
     requested_scope: Callable[[Mapping[str, Any]], dict[str, Any]]
     # 共有 actor/批准/lease の段階検査を実装した Provider だけを贯穿監督する。
     staged_authorization: bool = False
@@ -91,9 +89,13 @@ class EffectCapabilityDefinition:
 
 EFFECT_CAPABILITIES: Mapping[str, EffectCapabilityDefinition] = {
     MCP_CALL: EffectCapabilityDefinition(
-        capability_version=MCP_CALL, provider_versions={"mcp": MCP_PROVIDER_VERSION},
-        preauthorizable=False, validate=validate_mcp_proposal, requested_scope=mcp_call_scope,
+        capability_version=MCP_CALL,
+        provider_versions={"mcp": MCP_PROVIDER_VERSION},
+        preauthorizable=False,
+        validate=validate_mcp_proposal,
+        requested_scope=mcp_call_scope,
         staged_authorization=True,
+        run_auto_approvable_providers=frozenset({"mcp"}),
     ),
     DOCUMENT_WRITE_CAPABILITY: EffectCapabilityDefinition(
         capability_version=DOCUMENT_WRITE_CAPABILITY,

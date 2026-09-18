@@ -50,6 +50,7 @@ export interface CancelRunRecord {
 export interface CreateTaskRunInput {
   auto_approve?: boolean
   auto_approve_git?: boolean
+  auto_approve_mcp?: boolean
   skill_version_id: string
   task_key: string
   input: Record<string, unknown>

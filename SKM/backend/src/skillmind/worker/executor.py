@@ -42,6 +42,7 @@ from skillmind.runs.domain import (
 from skillmind.runs.execution_outcome import user_cancellation_event
 from skillmind.runs.interaction import parse_interaction_request
 from skillmind.runs.realtime import RunRealtimePublisher
+from skillmind.runs.realtime_buffer import BufferedRunRealtimePublisher
 from skillmind.runs.service import RunService
 from skillmind.worker.primary_budget import PrimaryBudgetCoordinator
 from skillmind.worker.tool_authority import bind_tool_authority
@@ -149,10 +150,7 @@ class AgentRunExecutor:
         """準備・Brief・開始 gate と engine を同じ heartbeat の寿命に収める。"""
 
         try:
-            if (
-                "budget_policy" in claimed.limits_snapshot_json
-                and self._budget_coordinator is None
-            ):
+            if "budget_policy" in claimed.limits_snapshot_json and self._budget_coordinator is None:
                 raise BudgetUnavailableError("Run requires a configured primary budget coordinator")
             prepared = await self._run_service.prepare_execution(claimed)
             context = await self._prepare_context(
@@ -174,9 +172,13 @@ class AgentRunExecutor:
             if budget is not None:
                 context = budget.context
             with (
-                coordinator.bind(budget)
-                if coordinator is not None and budget is not None else nullcontext()
-            ), bind_tool_authority(claimed):
+                (
+                    coordinator.bind(budget)
+                    if coordinator is not None and budget is not None
+                    else nullcontext()
+                ),
+                bind_tool_authority(claimed),
+            ):
                 await self._consume_engine(claimed, context, done, session_ref, cancellation)
         except BudgetError as error:
             if await self._run_service.is_cancellation_requested(claimed.run_id):
@@ -185,7 +187,8 @@ class AgentRunExecutor:
                 await self._finalize_without_event(
                     claimed,
                     code="run_budget_exhausted"
-                    if isinstance(error, BudgetExhaustedError) else "run_budget_unavailable",
+                    if isinstance(error, BudgetExhaustedError)
+                    else "run_budget_unavailable",
                     error_type=type(error).__name__,
                 )
         finally:
@@ -311,6 +314,11 @@ class AgentRunExecutor:
         stream = aiter(self._execution_stream(claimed, context))
         loop = asyncio.get_running_loop()
         deadline = loop.time() + context.limits.wall_timeout_seconds
+        realtime = (
+            BufferedRunRealtimePublisher(self._realtime_publisher, timings)
+            if self._realtime_publisher is not None
+            else None
+        )
         try:
             while True:
                 # Wall timeout は event 待機だけに適用し、終態化 transaction を中断させない。
@@ -401,9 +409,8 @@ class AgentRunExecutor:
                     return
                 if event.event_type is AgentEventType.TEXT_DELTA:
                     # 監査 DB を肥大化させず、切断時に失ってよい一時通知として配送する。
-                    if self._realtime_publisher is not None:
-                        with timings.measure("realtime_publish"):
-                            await self._realtime_publisher.publish(event)
+                    if realtime is not None:
+                        realtime.enqueue(event)
                     continue
                 if event.event_type is AgentEventType.RESULT_COMPLETED:
                     with timings.measure("result_finalize"):
@@ -517,20 +524,30 @@ class AgentRunExecutor:
                         status=RunStatus.WAITING_FOR_APPROVAL.value,
                     )
                     return
-                if (event.event_type is AgentEventType.ENGINE_FAILED
-                    and event.payload.get("code") == MODEL_CAPACITY_CODE):
+                if (
+                    event.event_type is AgentEventType.ENGINE_FAILED
+                    and event.payload.get("code") == MODEL_CAPACITY_CODE
+                ):
                     # SDK/MCP の cleanup 後に次 Attempt を予約し、実行の重複を防ぐ。
                     await _close_stream(stream)
-                    delay = (capacity_retry_delay(claimed.attempt_no, self._max_attempts)
-                             if event.payload.get("retryable") is True
-                             and claimed.run_segment_id is not None else None)
+                    delay = (
+                        capacity_retry_delay(claimed.attempt_no, self._max_attempts)
+                        if event.payload.get("retryable") is True
+                        and claimed.run_segment_id is not None
+                        else None
+                    )
                     await self._run_service.finalize_execution(
                         claimed,
                         target=RunStatus.RETRY_PENDING if delay is not None else RunStatus.FAILED,
                         attempt_status=RunAttemptStatus.FAILED,
-                        event=event, session_metadata=metadata, result=None,
-                        error_json={"code": MODEL_CAPACITY_CODE, "retryable": delay is not None,
-                                    "attempts": claimed.attempt_no},
+                        event=event,
+                        session_metadata=metadata,
+                        result=None,
+                        error_json={
+                            "code": MODEL_CAPACITY_CODE,
+                            "retryable": delay is not None,
+                            "attempts": claimed.attempt_no,
+                        },
                         retry_delay_seconds=delay,
                     )
                     return
@@ -591,7 +608,11 @@ class AgentRunExecutor:
             try:
                 await _close_stream(stream)
             finally:
-                timings.emit(run_id=claimed.run_id, run_attempt_id=claimed.run_attempt_id)
+                try:
+                    if realtime is not None:
+                        await realtime.aclose(drain=not cancellation.is_set())
+                finally:
+                    timings.emit(run_id=claimed.run_id, run_attempt_id=claimed.run_attempt_id)
 
     def _execution_stream(
         self, claimed: ClaimedRun, context: RunContext
@@ -672,9 +693,12 @@ class AgentRunExecutor:
             return
 
         with suppress(TypeError, ValueError):
-            safe_observation("run.performance.final_output", run_id=claimed.run_id,
+            safe_observation(
+                "run.performance.final_output",
+                run_id=claimed.run_id,
                 run_attempt_id=claimed.run_attempt_id,
-                output_bytes=len(canonical_json(validated.data).encode("utf-8")))
+                output_bytes=len(canonical_json(validated.data).encode("utf-8")),
+            )
 
         record = RunResultRecord(
             output_schema=validated.validation["schema_ref"],

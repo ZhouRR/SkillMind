@@ -895,6 +895,7 @@ class FakeRunService:
         authorization: UserAccess | RunCreationParticipant,
         auto_approve: bool = False,
         auto_approve_git: bool = False,
+        auto_approve_mcp: bool = False,
     ) -> CreatedRun | None:
         """初回要求を先に確認し、再送では現在の task 解決を必要としない。"""
 
@@ -933,6 +934,7 @@ class FakeRunService:
         authorization: UserAccess | RunCreationParticipant,
         auto_approve: bool = False,
         auto_approve_git: bool = False,
+        auto_approve_mcp: bool = False,
     ) -> CreatedRun:
         """通用 Run を作成し、source 不正と conflict の scenario を再現する。"""
 
@@ -1582,8 +1584,13 @@ class FakeSkillService:
         )
 
     async def accept_interpretation_request(
-        self, *, access: UserAccess, request_id: UUID, skill_source_id: UUID | None = None,
-        parent_interpretation_id: UUID | None = None, instruction: str | None = None,
+        self,
+        *,
+        access: UserAccess,
+        request_id: UUID,
+        skill_source_id: UUID | None = None,
+        parent_interpretation_id: UUID | None = None,
+        instruction: str | None = None,
         force_regenerate: bool = False,
     ) -> InterpretationRequestSnapshot:
         """HTTP の原資格/UUID と明示入力を観測し、Queue 操作を模倣せず返す。"""
@@ -1603,13 +1610,18 @@ class FakeSkillService:
             self.adjustment_instruction = instruction
         terminal = self.launch_stored and not force_regenerate
         result = InterpretationRequestSnapshot(
-            request_id=request_id, organization_id=access.actor.organization_id,
-            actor_id=access.actor.user_id, auth_session_id=uuid4(),
+            request_id=request_id,
+            organization_id=access.actor.organization_id,
+            actor_id=access.actor.user_id,
+            auth_session_id=uuid4(),
             skill_source_id=skill_source_id or self.stored.skill_source_id,
             execution_key="sha256:" + (("f" if force_regenerate else "e") * 64),
-            input_checksum="sha256:" + "a" * 64, input={},
-            status="SUCCEEDED" if terminal else "QUEUED", created_at=datetime.now(UTC),
-            interpretation_id=self.stored.interpretation_id if terminal else None, error_code=None,
+            input_checksum="sha256:" + "a" * 64,
+            input={},
+            status="SUCCEEDED" if terminal else "QUEUED",
+            created_at=datetime.now(UTC),
+            interpretation_id=self.stored.interpretation_id if terminal else None,
+            error_code=None,
         )
         self.interpretation_requests[request_id] = result
         return result
@@ -1695,7 +1707,10 @@ class FakeEvaluationService:
         self.submissions: dict[tuple[UUID, UUID], tuple[str, StoredEvaluation]] = {}
 
     async def create(
-        self, command: CreateEvaluationCommand, *, access: UserAccess,
+        self,
+        command: CreateEvaluationCommand,
+        *,
+        access: UserAccess,
     ) -> StoredEvaluation:
         """Request command を記録し、原値補完済みの固定評価を追加する。"""
 
@@ -1733,7 +1748,11 @@ class FakeEvaluationService:
         return evaluation
 
     async def list_for_run(
-        self, *, project_id: UUID, run_id: UUID, access: UserAccess,
+        self,
+        *,
+        project_id: UUID,
+        run_id: UUID,
+        access: UserAccess,
     ) -> tuple[StoredEvaluation, ...]:
         """指定 Run に追加済みの評価だけを作成順で返す。"""
 
@@ -1741,7 +1760,11 @@ class FakeEvaluationService:
         return tuple(item for item in self.items if item.run_id == run_id)
 
     async def submit(
-        self, command: CreateEvaluationCommand, *, submission_key: UUID, result_id: UUID,
+        self,
+        command: CreateEvaluationCommand,
+        *,
+        submission_key: UUID,
+        result_id: UUID,
         access: UserAccess,
     ) -> StoredEvaluationSubmission:
         """共有原要求 hash で fixture の再送を区別し、DB の競争証明とは分ける。"""
@@ -1750,25 +1773,37 @@ class FakeEvaluationService:
         assert command.user_id == access.actor.user_id
         self._result(result_id)
         checksum = evaluation_request_hash(
-            command, result_id=result_id, submission_key=submission_key,
+            command,
+            result_id=result_id,
+            submission_key=submission_key,
         )
         original = self.submissions.get((access.actor.user_id, submission_key))
         if original is not None:
             if checksum != original[0]:
                 raise EvaluationSubmissionConflictError("Original request differs")
             return StoredEvaluationSubmission(
-                project_id=command.project_id, run_id=command.run_id,
-                submission_key=submission_key, evaluation=original[1], idempotent_replay=True,
+                project_id=command.project_id,
+                run_id=command.run_id,
+                submission_key=submission_key,
+                evaluation=original[1],
+                idempotent_replay=True,
             )
         evaluation = self._append(command)
         self.submissions[(access.actor.user_id, submission_key)] = (checksum, evaluation)
         return StoredEvaluationSubmission(
-            project_id=command.project_id, run_id=command.run_id,
-            submission_key=submission_key, evaluation=evaluation,
+            project_id=command.project_id,
+            run_id=command.run_id,
+            submission_key=submission_key,
+            evaluation=evaluation,
         )
 
     async def get_submission(
-        self, *, project_id: UUID, run_id: UUID, submission_key: UUID, result_id: UUID,
+        self,
+        *,
+        project_id: UUID,
+        run_id: UUID,
+        submission_key: UUID,
+        result_id: UUID,
         access: UserAccess,
     ) -> StoredEvaluationSubmission:
         """同じ actor の原要求だけを確認し、類似する履歴から成功を補わない。"""
@@ -1779,12 +1814,20 @@ class FakeEvaluationService:
         if original is None:
             raise EvaluationSubmissionNotFoundError("Original request was not found")
         return StoredEvaluationSubmission(
-            project_id=project_id, run_id=run_id, submission_key=submission_key,
-            evaluation=original[1], idempotent_replay=True,
+            project_id=project_id,
+            run_id=run_id,
+            submission_key=submission_key,
+            evaluation=original[1],
+            idempotent_replay=True,
         )
 
     async def list_page(
-        self, *, project_id: UUID, run_id: UUID, access: UserAccess, limit: int = 20,
+        self,
+        *,
+        project_id: UUID,
+        run_id: UUID,
+        access: UserAccess,
+        limit: int = 20,
         after: UUID | None = None,
     ) -> StoredEvaluationPage:
         """同時刻も ID で安定順化し、未知/別 Result の cursor を固定拒否する。"""
@@ -1797,9 +1840,12 @@ class FakeEvaluationService:
             if not positions:
                 raise InvalidEvaluationCursorError("Invalid Evaluation cursor")
             start = positions[0] + 1
-        items = tuple(ordered[start:start + limit])
+        items = tuple(ordered[start : start + limit])
         return StoredEvaluationPage(
-            project_id=project_id, run_id=run_id, result_id=self.result_id, items=items,
+            project_id=project_id,
+            run_id=run_id,
+            result_id=self.result_id,
+            items=items,
             next_cursor=items[-1].evaluation_id if start + limit < len(ordered) else None,
         )
 
@@ -1881,15 +1927,22 @@ class FakeDocumentService:
             project_id, access.actor.user_id, folder, name, len(data), content_type
         )
         self.uploads[identity] = StoredDocumentUpload(
-            upload_key=upload_key, project_id=project_id, state="PUBLISHED",
-            created_at=document.created_at, document=document,
+            upload_key=upload_key,
+            project_id=project_id,
+            state="PUBLISHED",
+            created_at=document.created_at,
+            document=document,
         )
         self.upload_fingerprints[identity] = fingerprint
         self.upload_targets[identity] = document.document_id
         return document
 
     async def get_upload(
-        self, *, project_id: UUID, upload_key: UUID, access: UserAccess,
+        self,
+        *,
+        project_id: UUID,
+        upload_key: UUID,
+        access: UserAccess,
     ) -> StoredDocumentUpload:
         """同じ actor/Project の原記録だけを読み、削除後も元の公開 metadata を保持する。"""
 
@@ -1900,7 +1953,11 @@ class FakeDocumentService:
         return upload
 
     async def close_upload(
-        self, *, project_id: UUID, upload_key: UUID, access: UserAccess,
+        self,
+        *,
+        project_id: UUID,
+        upload_key: UUID,
+        access: UserAccess,
     ) -> tuple[StoredDocumentUploadClosure, bool]:
         """fixture の原対象だけに独立回执を作る。競争・transaction は実 service 側で検証する。"""
 
@@ -1914,14 +1971,20 @@ class FakeDocumentService:
         if identity in self.upload_closures:
             return self.upload_closures[identity], False
         closure = StoredDocumentUploadClosure(
-            upload_key=upload_key, project_id=project_id,
-            document_id=self.upload_targets[identity], closed_at=datetime.now(UTC),
+            upload_key=upload_key,
+            project_id=project_id,
+            document_id=self.upload_targets[identity],
+            closed_at=datetime.now(UTC),
         )
         self.upload_closures[identity] = closure
         return closure, True
 
     async def get_upload_closure(
-        self, *, project_id: UUID, upload_key: UUID, access: UserAccess,
+        self,
+        *,
+        project_id: UUID,
+        upload_key: UUID,
+        access: UserAccess,
     ) -> StoredDocumentUploadClosure:
         """同じ原作者の閉鎖回执だけを取得し、書込 fake は呼ばない。"""
 
@@ -2050,9 +2113,7 @@ class FakeCompositionService:
             skill_version_ids=skill_version_ids,
         )
 
-    async def delete_module(
-        self, *, access: UserAccess, project_id: UUID, module_id: UUID
-    ) -> None:
+    async def delete_module(self, *, access: UserAccess, project_id: UUID, module_id: UUID) -> None:
         """削除対象を記録する。"""
 
         self.accesses.append(access)

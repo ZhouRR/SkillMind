@@ -8,8 +8,6 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from skillmind.agent.domain import AgentEventType
 from skillmind.db.models import (
     AgentSession,
@@ -28,6 +26,7 @@ from skillmind.runs.creation_replay import validate_creation_replay
 from skillmind.runs.creation_request import TaskRunIntent
 from skillmind.runs.domain import IdempotencyConflictError, derive_task_id
 from skillmind.runs.repository import RunRepository
+from sqlalchemy.ext.asyncio import AsyncSession
 from tests.runs.creation_fakes import creation_command, creation_intent, stored_creation
 from tests.runs.effect_authorization_harness import AuthorizationHarness
 from tests.runs.execution_event_fakes import execution_event
@@ -35,7 +34,7 @@ from tests.runs.test_document_proposals import document_proposal
 from tests.runs.test_execution_gates import execution_rows
 
 
-def freeze_consent(run, *, enabled=True, git=False):
+def freeze_consent(run, *, enabled=True, git=False, mcp=False):
     """同じ actor/版/Run の作成要求を本番形式/hash で固定する。"""
     intent = TaskRunIntent(
         project_id=run.project_id,
@@ -46,6 +45,7 @@ def freeze_consent(run, *, enabled=True, git=False):
         sources={},
         auto_approve=enabled,
         auto_approve_git=git,
+        auto_approve_mcp=mcp,
     )
     run.task_snapshot_json.update(task_key=intent.task_key, creation_request=intent.to_json())
     run.task_id = derive_task_id(skill_version_id=intent.skill_version_id, task_key=intent.task_key)
@@ -115,7 +115,7 @@ async def test_automatic_approval_rechecks_frozen_consent_and_current_authority(
             await call
 
 
-@pytest.mark.parametrize("provider", ["postgres", "git"])
+@pytest.mark.parametrize("provider", ["postgres", "git", "mcp"])
 @pytest.mark.parametrize("automatic", [False, True])
 async def test_proposal_creates_one_audited_effect_or_one_manual_interaction(
     monkeypatch, automatic, provider
@@ -126,20 +126,32 @@ async def test_proposal_creates_one_audited_effect_or_one_manual_interaction(
     run.permission_snapshot_json = {"actor_id": str(uuid4())}
     run.task_snapshot_json = {"skill_version_id": str(uuid4()), "skill_snapshots": []}
     segment.checkpoint_json = {
-        "confirmed_facts": ["business_id=original"], "evidence_refs": ["ev_prior"],
-        "artifact_refs": ["art_prior"], "user_responses": [{"text": "Original answer"}],
+        "confirmed_facts": ["business_id=original"],
+        "evidence_refs": ["ev_prior"],
+        "artifact_refs": ["art_prior"],
+        "user_responses": [{"text": "Original answer"}],
     }
-    freeze_consent(run, enabled=automatic, git=automatic and provider == "git")
+    freeze_consent(
+        run,
+        enabled=automatic,
+        git=automatic and provider == "git",
+        mcp=automatic and provider == "mcp",
+    )
     event = execution_event(claimed, AgentEventType.CHANGE_PROPOSED)
     draft = replace(
         parse_change_proposal_request(event.payload["change_proposal_request"]),
-        capability_version="repository.write/v1" if provider == "git" else "database.write/v1",
-        operation="commit" if provider == "git" else "INSERT",
+        capability_version="mcp.call/v1"
+        if provider == "mcp"
+        else "repository.write/v1"
+        if provider == "git"
+        else "database.write/v1",
+        operation="call" if provider == "mcp" else "commit" if provider == "git" else "INSERT",
     )
     session = MagicMock(spec=AsyncSession)
     session.scalar = AsyncMock(return_value=None)
     repository = RunRepository(
-        session, execution_features=ExecutionFeatures(database_writes=True, git_writes=True)
+        session,
+        execution_features=ExecutionFeatures(database_writes=True, git_writes=True, mcp_tools=True),
     )
     binding = SimpleNamespace(
         id=uuid4(),

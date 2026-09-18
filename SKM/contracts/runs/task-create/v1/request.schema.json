@@ -64,6 +64,11 @@
       "type": "boolean",
       "default": false,
       "description": "Include Git commits in Run-start consent. Requires auto_approve=true; omitted preserves DB/document-only consent."
+    },
+    "auto_approve_mcp": {
+      "type": "boolean",
+      "default": false,
+      "description": "Include authorized MCP tool effects in this Run-start consent. Requires auto_approve=true; exact binding, tool permissions, approval records and read-back remain required."
     }
   },
   "allOf": [
@@ -74,6 +79,28 @@
         ],
         "properties": {
           "auto_approve_git": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "auto_approve"
+        ],
+        "properties": {
+          "auto_approve": {
+            "const": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "auto_approve_mcp"
+        ],
+        "properties": {
+          "auto_approve_mcp": {
             "const": true
           }
         }

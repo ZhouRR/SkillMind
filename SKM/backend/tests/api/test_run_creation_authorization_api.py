@@ -10,8 +10,6 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy.exc import OperationalError
-
 from skillmind.api.problems import PROBLEM_DETAILS_SCHEMA
 from skillmind.auth.domain import generate_session_credentials
 from skillmind.auth.service import AuthenticatedActor
@@ -25,6 +23,7 @@ from skillmind.projects.domain import (
 from skillmind.runs.domain import IdempotencyConflictError, TaskSourceSelectionError
 from skillmind.skills.domain import PublishedTaskNotFoundError
 from skillmind.users.domain import UserAccess
+from sqlalchemy.exc import OperationalError
 from tests.api.fakes import (
     FakeAuthService,
     FakeProjectAuthorizationService,
@@ -142,6 +141,7 @@ def test_create_and_replay_forward_original_credentials_for_two_sessions_of_one_
             "sources": body["sources"],
             "auto_approve": False,
             "auto_approve_git": False,
+            "auto_approve_mcp": False,
             "actor_id": auth.actor.user_id,
             "idempotency_key": headers["Idempotency-Key"],
         }
@@ -152,6 +152,7 @@ def test_create_and_replay_forward_original_credentials_for_two_sessions_of_one_
             assert created["trace_id"] == str(access.request_id)
             assert created["input_json"] == body["input"]
             assert created["sources"] == body["sources"]
+            assert created["auto_approve_mcp"] is False
             assert created["idempotency_key"] == headers["Idempotency-Key"]
             assert created["actor_id"] == auth.actor.user_id
             assert not {"participant", "actor_system_role", "project_membership"} & created.keys()
@@ -361,8 +362,11 @@ def test_creation_openapi_keeps_public_body_and_declares_status_headers_and_prob
         "sources",
         "auto_approve",
         "auto_approve_git",
+        "auto_approve_mcp",
     }
     assert body_schema["required"] == ["skill_version_id", "task_key"]
+    assert body_schema["properties"]["auto_approve_mcp"]["type"] == "boolean"
+    assert body_schema["properties"]["auto_approve_mcp"]["default"] is False
     assert body_schema["additionalProperties"] is False
     assert set(operation["responses"]) == {"200", "201", "401", "403", "404", "409", "422"}
     for code, declaration in operation["responses"].items():
@@ -391,6 +395,7 @@ def test_run_start_consent_reaches_both_creation_and_replay(client, monkeypatch,
     url, body, headers = creation_request()
     body["auto_approve"] = enabled
     body["auto_approve_git"] = enabled
+    body["auto_approve_mcp"] = enabled
     auth = application(client).state.auth_service
     response = client.post(url, json=body, headers={**headers, "X-CSRF-Token": auth.csrf_token})
     assert response.status_code == 201
@@ -398,6 +403,8 @@ def test_run_start_consent_reaches_both_creation_and_replay(client, monkeypatch,
     assert create.await_args.kwargs["auto_approve"] is enabled
     assert lookup.await_args.kwargs["auto_approve_git"] is enabled
     assert create.await_args.kwargs["auto_approve_git"] is enabled
+    assert lookup.await_args.kwargs["auto_approve_mcp"] is enabled
+    assert create.await_args.kwargs["auto_approve_mcp"] is enabled
 
 
 @pytest.mark.parametrize("value", ["true", 1, None])
@@ -425,3 +432,28 @@ def test_git_consent_rejects_missing_general_consent_or_non_boolean(client, monk
     assert response.status_code == 422
     lookup.assert_not_awaited()
     create.assert_not_awaited()
+
+
+@pytest.mark.parametrize("value", [True, "true", 1, None])
+def test_mcp_consent_rejects_missing_general_consent_or_non_boolean(client, monkeypatch, value):
+    """MCP 単独同意や暗黙変換は、原要求確認・新規作成の前に拒否する。"""
+    lookup, create = install_creation(client, monkeypatch)
+    url, body, headers = creation_request()
+    body["auto_approve_mcp"] = value
+    auth = application(client).state.auth_service
+    response = client.post(url, json=body, headers={**headers, "X-CSRF-Token": auth.csrf_token})
+    assert response.status_code == 422
+    lookup.assert_not_awaited()
+    create.assert_not_awaited()
+
+
+def test_omitted_mcp_consent_remains_false_on_api_replay_and_creation(client, monkeypatch):
+    """既存 DB/Git 同意から MCP の新規権限を推定しない。"""
+    lookup, create = install_creation(client, monkeypatch)
+    url, body, headers = creation_request()
+    body.update(auto_approve=True, auto_approve_git=True)
+    auth = application(client).state.auth_service
+    response = client.post(url, json=body, headers={**headers, "X-CSRF-Token": auth.csrf_token})
+    assert response.status_code == 201
+    assert lookup.await_args.kwargs["auto_approve_mcp"] is False
+    assert create.await_args.kwargs["auto_approve_mcp"] is False

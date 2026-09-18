@@ -1165,6 +1165,11 @@
             "title": "Auto Approve Git",
             "type": "boolean"
           },
+          "auto_approve_mcp": {
+            "default": false,
+            "title": "Auto Approve Mcp",
+            "type": "boolean"
+          },
           "input": {
             "additionalProperties": true,
             "title": "Input",
