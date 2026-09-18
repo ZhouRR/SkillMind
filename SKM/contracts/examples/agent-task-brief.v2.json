@@ -43,7 +43,13 @@
       "binding": null
     }
   ],
-  "allowed_tools": [],
+  "allowed_tools": [
+    {
+      "capability": "workspace.read/v1",
+      "provider": "workspace",
+      "read_only": true
+    }
+  ],
   "effect_policy": {
     "operations": [
       {
@@ -67,5 +73,17 @@
     "wall_timeout_seconds": 300,
     "max_output_bytes": 100000,
     "max_budget_usd": null
-  }
+  },
+  "skill_files": [
+    {
+      "source_path": "SKILL.md",
+      "path": "input/.skillmind/skill/SKILL.md",
+      "sha256": "sha256:c75ebe8ccf7be27dcb3ccf5c9bbd6c1f526124d06c0f474643514649491916f4"
+    },
+    {
+      "source_path": "agents/openai.yaml",
+      "path": "input/.skillmind/skill/agents/openai.yaml",
+      "sha256": "sha256:e212c7b51297fd4ff5cde1802bedc5f5c74cc4848b040c6d4c36fffa7c26ab6c"
+    }
+  ]
 }

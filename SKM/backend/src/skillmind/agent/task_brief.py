@@ -17,6 +17,7 @@ from uuid import UUID
 
 from skillmind.agent.domain import MaterializedResource, RegisteredTool, RunLimits
 from skillmind.agent.runtime_policy import runtime_policy
+from skillmind.agent.skill_files import append_skill_file_guidance, skill_file_locations
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.documents.library import (
     is_document_library_source,
@@ -26,6 +27,7 @@ from skillmind.documents.library import (
 from skillmind.documents.snapshot import DOCUMENT_CAPABILITIES, selected_document_snapshots
 from skillmind.effects.continuation import validated_effect_result
 from skillmind.effects.operation_policy import operation_risk
+from skillmind.runs.input_snapshot import InputFileSeal
 from skillmind.skills.execution import (
     declared_operations,
     is_source_execution,
@@ -154,6 +156,7 @@ def build_agent_task_brief(
     segment_objective: str | None = None,
     checkpoint: Mapping[str, Any] | None = None,
     materialized: Sequence[MaterializedResource] = (),
+    skill_files: Sequence[InputFileSeal] = (),
     database_observations: Sequence[Mapping[str, Any]] = (),
     effect_receipts: Sequence[Mapping[str, Any]] = (),
 ) -> CompiledAgentTaskBrief:
@@ -215,6 +218,10 @@ def build_agent_task_brief(
                 "max_budget_usd": limits.max_budget_usd,
             },
         }
+        if skill_files:
+            direct_brief["skill_files"] = skill_file_locations(
+                direct_brief["source_documents"], skill_files
+            )
         _runtime_metadata(direct_brief, task_snapshot, model)
         if project_id is None:
             direct_brief["identity"].pop("project_id")
@@ -289,6 +296,8 @@ def build_agent_task_brief(
     }
     if "source_documents" in manifest:
         brief["source_documents"] = validate_source_documents(manifest["source_documents"])
+    if skill_files:
+        brief["skill_files"] = skill_file_locations(brief.get("source_documents", ()), skill_files)
     if "document_prerequisites" in blueprint_task:
         brief["execution"]["document_prerequisites"] = list(
             blueprint_task["document_prerequisites"]
@@ -339,6 +348,7 @@ def render_task_brief_prompt(
             _effect_instruction(brief["effect_policy"]),
             _interaction_instruction([]),
         ]
+        append_skill_file_guidance(sections, brief)
         _append_materialization(sections, brief["resources"], brief["allowed_tools"])
         return _finish_task_prompt(sections, brief, input_json, output_schema)
     sections = [
@@ -473,6 +483,7 @@ def render_task_brief_prompt(
     sections.append(_tool_instruction(brief["allowed_tools"]))
     sections.append(_effect_instruction(brief["effect_policy"]))
     sections.append(_interaction_instruction(brief["interaction_policy"]))
+    append_skill_file_guidance(sections, brief)
     return _finish_task_prompt(sections, brief, input_json, output_schema)
 
 

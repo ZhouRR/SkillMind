@@ -167,6 +167,7 @@ scope.paths 是硬边界，scope.revisions 是允许范围；HEAD/分支可移�
 
 ```text
 input/（只读）
+├── .skillmind/skill/         冻结 Skill 文本文件（保留包内路径）
 ├── documents/               文档或转换文本
 │   └── .skillmind/        manifest.json、files.txt
 └── <repository requirement>/
@@ -176,6 +177,10 @@ output/                      可写报告/补丁
 ```
 
 Tool 逻辑路径映射到 Run 根下 .skillmind-inputs/&lt;snapshot_id&gt;/，不开放世代目录、不用 symlink 切换，也不搬迁旧 input/ 补签。Brief、read/search、Evidence 必须消费同一 PreparedInput。
+
+冻结 Skill 文本不由模型复制：ContextBuilder 在原 Manifest 验证及工具授权后，将已有 `source_documents` 交给同一输入准备器。只有本 Run 已有 workspace read/search 或 JSON Schema 校验能力时才物化；不新增能力、用户参数、资源绑定或外部请求。冻结文本（包括 Schema、参考资料及脚本文本）保留原 UTF-8 字节、包内路径与 hash，写到保留的 `input/.skillmind/skill/<source_path>`。不重排 JSON、转换换行、去掉说明、执行脚本，未冻结的二进制文件也不冒充已提供。
+
+文件与普通输入共享世代、现有单文件/单根/总量上限和 PREPARING → READY 事务。若整个 Skill 副本无法放入现有容量，全部不物化且不发布路径，继续原来的完整原文方式，不截断或让原任务因辅助副本超限而失败；I/O、取消和完整性失败仍正常传播。Brief 的可选 `skill_files` 只在完成后列出原路径、实际逻辑路径和 hash，并参与 Brief checksum。校验工具直接使用该路径作为 `schema_path`，无需模型重新输出 Schema；路径不是新权限，外部引用处理不变。重试/续行核对原回执、完整树和原文哈希后复用，不重复写文件。既有 READY 未含 Skill 文件时不改写，继续原文方式且不发布不存在的位置；缺失或被篡改的已封存文件仍按原完整性规则拒绝。无物化器或无相应能力时也不猜路径。原 Skill 的业务执行、审批和成果保存规则不变。
 
 workspace.write 只写 workspace/output；v2 output 原 UTF-8 字节另作[不可变附件](results-evaluation.md#可信附件的发布与读取)，v1/中间文件不自动成为附件。xlsx/xlsm/docx 经[统一转换](../../SKM/backend/src/skillmind/agent/binary_text.py)保留源 hash/位置，PDF 未支持；文件、manifest、Evidence、上下文均不含凭据。
 

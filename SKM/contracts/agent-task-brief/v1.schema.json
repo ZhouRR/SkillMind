@@ -931,6 +931,36 @@
           "const": "AGENT_ATTEMPT"
         }
       }
+    },
+    "skill_files": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1000,
+      "description": "Verified read-only locations of the frozen Skill text files; absent when not materialized. Does not grant tool or script execution permission.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_path",
+          "path",
+          "sha256"
+        ],
+        "properties": {
+          "source_path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "path": {
+            "type": "string",
+            "pattern": "^input/\\.skillmind/skill/[^\\\\]+$",
+            "maxLength": 1050
+          },
+          "sha256": {
+            "$ref": "#/$defs/sha256"
+          }
+        }
+      }
     }
   },
   "$defs": {
