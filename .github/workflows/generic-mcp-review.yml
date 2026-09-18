@@ -31,7 +31,9 @@ jobs:
       - name: Apply reviewed changes to isolated checkout
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python .github/generic_mcp_patch.py
+        run: |
+          python .github/generic_mcp_patch.py
+          python .github/generic_mcp_finish.py
       - name: Install pinned application dependencies
         working-directory: SKM/backend
         run: python -m pip install -q -e '.[dev]'
@@ -47,7 +49,7 @@ jobs:
           PY
       - name: Run focused MCP and event regression tests
         working-directory: SKM/backend
-        run: python -m pytest tests/agent/test_mcp_hot_path.py tests/runs/test_realtime_buffer.py tests/runs/test_mcp_run_approval.py tests/runs/test_run_start_approval.py tests/agent/test_mcp_generic.py tests/agent/test_mcp_tools.py tests/agent/test_mcp_tools_provider.py tests/agent/test_mcp_readback.py -p no:cacheprovider -o addopts= -q --tb=short -rs
+        run: python -m pytest tests/agent/test_mcp_hot_path.py tests/runs/test_realtime_buffer.py tests/runs/test_mcp_run_approval.py tests/runs/test_run_start_approval.py tests/agent/test_mcp_generic.py tests/agent/test_mcp_tools.py tests/agent/test_mcp_tools_provider.py tests/agent/test_mcp_readback.py --import-mode=importlib -p no:cacheprovider -o addopts= -q --tb=short -rs
       - name: Check backend types
         working-directory: SKM/backend
         run: python -m mypy --no-incremental src/skillmind
@@ -67,7 +69,7 @@ jobs:
           python scripts/build_docs.py --check
       - name: Run interpreter, agent, worker, run, effects and API suites
         working-directory: SKM/backend
-        run: python -m pytest tests/skills tests/agent tests/worker tests/runs tests/effects tests/core tests/contracts tests/api -p no:cacheprovider -o addopts= -q --tb=short -rs
+        run: python -m pytest tests/skills tests/agent tests/worker tests/runs tests/effects tests/core tests/contracts tests/api --import-mode=importlib -p no:cacheprovider -o addopts= -q --tb=short -rs
       - name: Prepare validated tree without updating branch or creating PR
         env:
           GH_TOKEN: ${{ github.token }}
