@@ -14,11 +14,11 @@
     "finishedAt",
     "cases",
     "error",
-    "sourcePlan"
+    "executionBasis"
   ],
   "properties": {
     "schemaVersion": {
-      "const": "1.0"
+      "const": "2.0"
     },
     "testRunId": {
       "type": "string",
@@ -31,7 +31,7 @@
     "specVersion": {
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$",
-      "description": "検証済み実行計画の specVersion をそのまま引き継ぐ。元ファイルの取得・再計算を要求しない。"
+      "description": "RV 文書の登録値を引き継ぐ。executionBasis.specVersion および DB と照合する。"
     },
     "executionId": {
       "type": "string",
@@ -78,12 +78,12 @@
         "modelVersion": {
           "type": "string",
           "minLength": 1,
-          "description": "計画時のプラットフォーム runtime_metadata.model にある設定モデル ID。非公開のモデル内部ビルドは要求しない。"
+          "description": "実行登録時のプラットフォーム runtime_metadata.model にある設定モデル ID。非公開のモデル内部ビルドは要求しない。"
         },
         "skillVersion": {
           "type": "string",
           "minLength": 1,
-          "description": "計画生成 Skill の固定公開版または checksum。実行・判定へ同じ値を引き継ぐ。"
+          "description": "実行 Skill の固定公開版または checksum。実行・判定へ同じ値を引き継ぐ。"
         }
       }
     },
@@ -100,7 +100,7 @@
     },
     "cases": {
       "type": "array",
-      "minItems": 0,
+      "minItems": 1,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -128,7 +128,7 @@
           },
           "steps": {
             "type": "array",
-            "minItems": 0,
+            "minItems": 1,
             "items": {
               "type": "object",
               "additionalProperties": false,
@@ -238,37 +238,185 @@
         "null"
       ]
     },
-    "sourcePlan": {
+    "executionBasis": {
+      "title": "Markdown 直接実行の根拠",
+      "description": "実行登録の execution_basis に保存する。独立した計画成果物や状態管理は作らない。ID・行範囲・全件対応・依存関係は原文と別途照合する。",
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "documentLibraryId",
-        "bucket",
-        "objectKey",
-        "sha256"
+        "sourceMarkdown",
+        "specVersion",
+        "cases",
+        "environment"
       ],
       "properties": {
-        "documentLibraryId": {
-          "type": "string",
-          "minLength": 1
+        "sourceMarkdown": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "documentLibraryId",
+            "bucket",
+            "objectKey",
+            "sha256"
+          ],
+          "properties": {
+            "documentLibraryId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "bucket": {
+              "type": "string",
+              "minLength": 1
+            },
+            "objectKey": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!/)(?![A-Za-z][A-Za-z0-9+.-]*://).+"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          },
+          "description": "RV 済み Markdown の取得元と原バイト列の SHA-256。実行登録値と照合する。"
         },
-        "bucket": {
-          "type": "string",
-          "minLength": 1
-        },
-        "objectKey": {
-          "type": "string",
-          "minLength": 1,
-          "pattern": "^(?!/)(?![A-Za-z][A-Za-z0-9+.-]*://).+"
-        },
-        "sha256": {
+        "specVersion": {
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "cases": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "testCaseId",
+              "steps"
+            ],
+            "properties": {
+              "testCaseId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "steps": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "stepId",
+                    "sourceLines",
+                    "expectedLines",
+                    "dependsOn"
+                  ],
+                  "properties": {
+                    "stepId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "sourceLines": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "start",
+                        "end"
+                      ],
+                      "properties": {
+                        "start": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "end": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      },
+                      "description": "UTF-8 Markdown の 1 始まりの包含行範囲。end >= start と文書内の範囲を別途検証する。"
+                    },
+                    "expectedLines": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "start",
+                        "end"
+                      ],
+                      "properties": {
+                        "start": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "end": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      },
+                      "description": "UTF-8 Markdown の 1 始まりの包含行範囲。end >= start と文書内の範囲を別途検証する。"
+                    },
+                    "dependsOn": {
+                      "type": "array",
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "testCaseId",
+                          "stepId"
+                        ],
+                        "properties": {
+                          "testCaseId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "stepId": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "environment": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "appId",
+            "connectionRef",
+            "environmentLease",
+            "maxParallelism",
+            "caseTimeoutSeconds"
+          ],
+          "properties": {
+            "appId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "connectionRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "environmentLease": {
+              "type": "string",
+              "minLength": 1
+            },
+            "maxParallelism": {
+              "const": 1
+            },
+            "caseTimeoutSeconds": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
         }
-      },
-      "description": "実行前に固定した実行計画の文書参照とバイト列の SHA-256。DB の plan_ref と照合する。"
+      }
     }
   },
   "title": "Runner の実行終了結果",
-  "description": "Orchestrator / Runner が実測から作成する。欠落ケースは計画との照合で検出し、成功扱いしない。"
+  "description": "実行前に登録した根拠の全ケース・ステップを含める。未実行は NOT_RUN とし、欠落・未知を成功扱いしない。DB との根拠の完全一致は別途検証する。"
 }
