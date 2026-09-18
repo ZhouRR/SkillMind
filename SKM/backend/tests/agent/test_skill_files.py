@@ -6,7 +6,6 @@ import json
 import os
 from copy import deepcopy
 from dataclasses import replace
-from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -32,11 +31,13 @@ from tests.agent.input_fakes import MemoryInputSnapshots
 from tests.agent.test_runtime_context import (
     CONTRACTS,
     _document_builder,
+    _document_manifest,
     _generic_claimed,
     _generic_manifest,
 )
 from tests.agent.test_workspace_materializer import _FakeInventory
 from tests.agent.test_workspace_provider import _context
+from tests.documents.fakes import document_content, document_snapshot
 
 SCHEMA_TEXT = '''{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -86,7 +87,7 @@ def _case(tmp_path, *, capabilities=("workspace.read/v1", "workspace.search/v1",
 
 def _tool_context(tmp_path, context, capability):
     """実 Context の世代と identity を、対応する既存 Provider に渡す。"""
-    original = _context(tmp_path / "unused", capability)
+    original = _context(tmp_path, capability)
     return replace(original, workspace=context.workspace, run_id=context.run_id,
                    run_attempt_id=context.run_attempt_id, project_id=context.project_id)
 
@@ -321,3 +322,40 @@ def test_brief_contract_and_checksum_include_only_verified_locations(version):
     assert f"input/{SKILL_FILES_ROOT}/schemas/独自.json" in prompt
     with pytest.raises(MaterializationError):
         build_agent_task_brief(**args, skill_files=files[:-1])
+
+
+async def test_skill_sources_coexist_with_selected_documents_across_attempts(tmp_path):
+    """文書 input と Skill は同じ封印に入り、新 Attempt も再取得・再物化しない。"""
+    selected = document_content(name="selected.md")
+    hidden = document_content(name="not-selected.md")
+    manifest = _document_manifest()
+    manifest["source_documents"] = _sources()
+    capabilities = ("document.read/v1", "workspace.read/v1", "json.schema.validate/v1")
+    manifest["tools"] = [{"capability": c, "required": True} for c in capabilities]
+    manifest["capability_blueprint"]["execution_preferences"] = {
+        "recommended_profile": "SUPERVISED"
+    }
+    claim = _generic_claimed(manifest=manifest, allowed=capabilities, selected_sources={})
+    claim.permission_snapshot_json["execution_profile"] = "SUPERVISED"
+    claim.selected_sources_json["project-doc"] = {
+        "capability": "document.read/v1", "provider": "project-documents",
+        "document_snapshot": document_snapshot(claim.project_id, [selected], key="project-doc").to_json(),
+    }
+    store = MemoryInputSnapshots(claim)
+    inventory = _FakeInventory([selected, hidden])
+    builder = _document_builder(tmp_path, materializer=WorkspaceMaterializer(
+        document_inventory=inventory, input_snapshots=store, max_bytes=10_485_760, max_files=1000,
+    ))
+    first = await builder.build(claim, sequence_start=1)
+    assert (first.workspace.input_dir / "documents/specs/selected.md").is_file()
+    assert not (first.workspace.input_dir / "documents/specs/not-selected.md").exists()
+    assert "input/documents/.skillmind/files.txt" in first.prompt
+    assert len(first.task_brief["skill_files"]) == len(_sources())
+    verify_input(first.workspace)
+    next_claim = replace(claim, run_attempt_id=uuid4(), attempt_no=2, lease_token="next-owner")
+    store.current_claim = deepcopy(next_claim)
+    resumed = await builder.build(next_claim, sequence_start=50)
+    assert resumed.workspace == first.workspace
+    assert resumed.task_brief["skill_files"] == first.task_brief["skill_files"]
+    assert inventory.calls == store.complete_calls == 1
+    assert store.record.prepared_by_attempt_id == claim.run_attempt_id
