@@ -1,145 +1,41 @@
-name: Finalize validated MCP changes
+name: MCP regression failure details
 on:
   push:
     branches: [perf/generic-mcp-execution]
 permissions:
-  contents: write
   actions: read
+  contents: read
 jobs:
-  finalize:
+  inspect:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 3
     steps:
-      - name: Verify successful test tree and fast-forward only the requested branch
+      - name: Read only completed regression failure summary
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
-          """成功済み検証の tree を直接使用し、転記・再生成・本番実行を行わない。"""
-          import json
+          """過去の完了済み log の末尾だけを表示し、コードや実環境を実行しない。"""
           import os
-          import re
           import urllib.request
           from urllib.parse import urlparse
-
-          REPO = 'ZhouRR/SkillMind'
-          BASE = '24485544e697e2612793c55fe5266fee071b1f86'
-          BRANCH = 'perf/generic-mcp-execution'
-          TEST_RUN = 35299573722
-          TEST_JOB = 105459246398
-          TEST_HEAD = '899a15b7549c3ce0c23bb0bcadc85adbeacf562a'
-          assert os.environ['GITHUB_REPOSITORY'] == REPO
-          assert os.environ['GITHUB_REF'] == 'refs/heads/' + BRANCH
-          parent = os.environ['GITHUB_SHA']
-          expected = set('''SKM/backend/src/skillmind/agent/mcp_tools_provider.py
-          SKM/backend/src/skillmind/api/routes/runs.py
-          SKM/backend/src/skillmind/effects/catalog.py
-          SKM/backend/src/skillmind/effects/run_approval.py
-          SKM/backend/src/skillmind/integrations/mcp_readback.py
-          SKM/backend/src/skillmind/integrations/mcp_schema.py
-          SKM/backend/src/skillmind/integrations/mcp_tools.py
-          SKM/backend/src/skillmind/runs/creation_request.py
-          SKM/backend/src/skillmind/runs/realtime_buffer.py
-          SKM/backend/src/skillmind/runs/service.py
-          SKM/backend/src/skillmind/worker/executor.py
-          SKM/backend/tests/agent/test_mcp_hot_path.py
-          SKM/backend/tests/agent/test_mcp_tools_provider.py
-          SKM/backend/tests/runs/test_mcp_run_approval.py
-          SKM/backend/tests/runs/test_realtime_buffer.py
-          SKM/backend/tests/runs/test_run_start_approval.py
-          SKM/contracts/openapi/v1/openapi.json
-          SKM/contracts/runs/task-create/v1/request.schema.json
-          SKM/web/src/api/runs.ts
-          SKM/web/src/lib/i18n/en.ts
-          SKM/web/src/lib/i18n/ja.ts
-          SKM/web/src/lib/i18n/zh.ts
-          SKM/web/src/lib/runSubmission.ts
-          SKM/web/tests/lib/mcpRunConsent.test.ts
-          docs/design/repository-effects.md
-          docs/design/resource-snapshots.md
-          docs/index.html
-          docs/operations/run-performance.md'''.splitlines())
-          expected = {item.strip() for item in expected}
-
           class SafeRedirect(urllib.request.HTTPRedirectHandler):
-              """GitHub の署名付き log 転送先へ repository token を送らない。"""
               def redirect_request(self, req, fp, code, msg, headers, newurl):
                   assert urlparse(newurl).scheme == 'https'
-                  redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
-                  if redirected is not None:
-                      redirected.remove_header('Authorization')
-                  return redirected
-
-          opener = urllib.request.build_opener(SafeRedirect())
-
-          def request(path, data=None, method=None, raw=False):
-              """同じ repository の API だけを操作し、response 本文と token を表示しない。"""
-              req = urllib.request.Request(
-                  'https://api.github.com/repos/' + REPO + '/' + path,
-                  data=None if data is None else json.dumps(data, ensure_ascii=False).encode(),
-                  method=method,
-                  headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
-                           'Accept': 'application/vnd.github+json',
-                           'Content-Type': 'application/json',
-                           'User-Agent': 'skillmind-validated-tree-finalizer'},
-              )
-              with opener.open(req, timeout=60) as response:
-                  value = response.read(8_000_001)
-              assert len(value) <= 8_000_000
-              return value if raw else json.loads(value)
-
-          run = request(f'actions/runs/{TEST_RUN}')
-          assert run['head_sha'] == TEST_HEAD and run['conclusion'] == 'success'
-          job = request(f'actions/jobs/{TEST_JOB}')
-          assert job['run_id'] == TEST_RUN and job['conclusion'] == 'success'
-          log = request(f'actions/jobs/{TEST_JOB}/logs', raw=True).decode('utf-8-sig')
-          trees = set(re.findall(r'PREPARED_TREE=([0-9a-f]{40})(?![0-9a-f])', log))
-          assert len(trees) == 1, 'Expected one validated 40-character Git tree identity'
-          tree_sha = trees.pop()
-          verified = dict(re.findall(r'VERIFIED\s+(\S+)\s+([0-9a-f]{40})(?![0-9a-f])', log))
-
-          def files(sha):
-              """切り詰めのない全 tree で path/mode/content を比較する。"""
-              result = request('git/trees/' + sha + '?recursive=1')
-              assert result['truncated'] is False
-              return {v['path']: (v['mode'], v['type'], v['sha'])
-                      for v in result['tree'] if v['type'] != 'tree'}
-
-          base_tree = request('git/commits/' + BASE)['tree']['sha']
-          before, after = files(base_tree), files(tree_sha)
-          changed = {p for p in set(before) | set(after) if before.get(p) != after.get(p)}
-          assert changed == expected, ('Unexpected reviewed paths', sorted(changed ^ expected))
-          for path in changed:
-              assert after[path] == ('100644', 'blob', verified[path]), path
-          assert not any(path.startswith('.github/generic_mcp_') for path in after)
-          assert '.github/workflows/generic-mcp-review.yml' not in after
-          assert request('git/ref/heads/' + BRANCH)['object']['sha'] == parent
-          assert request('git/ref/heads/main')['object']['sha'] == BASE
-          parent_commit = request('git/commits/' + parent)
-          assert [v['sha'] for v in parent_commit['parents']] == [TEST_HEAD]
-          staged = files(parent_commit['tree']['sha'])
-          preparation = {p for p in set(before) | set(staged) if before.get(p) != staged.get(p)}
-          assert preparation == {'.github/generic_mcp_patch.py', '.github/generic_mcp_finish.py',
-                                 '.github/workflows/generic-mcp-review.yml'}
-          message = '''perf(mcp): reuse generic contracts and decouple live events with explicit Run consent
-
-          Reuse bounded content-addressed MCP catalog/schema validation, resolve only
-          the requested tool, support standard local references and positional tuples.
-          Freeze optional MCP consent in the original Run-start request through UI/API.
-          Decouple only lossy TEXT_DELTA delivery from Agent event consumption.
-          Preserve scope, approval, read-back, cancellation and UNKNOWN handling.
-
-          Exact tested tree from Actions run 35299573722: 139 focused tests;
-          13176 backend passed, 5 skipped; 2649 frontend passed; mypy, Ruff,
-          OpenAPI, contracts and documentation passed. No live model, FlaUI,
-          production database or deployment execution. Remove preparation files.'''
-          commit = request('git/commits', {'message': message, 'tree': tree_sha, 'parents': [parent]})
-          assert request('git/ref/heads/' + BRANCH)['object']['sha'] == parent
-          updated = request('git/refs/heads/' + BRANCH,
-                            {'sha': commit['sha'], 'force': False}, method='PATCH')
-          assert updated['object']['sha'] == commit['sha']
-          print('VALIDATED_TREE=' + tree_sha)
-          print('FINAL_COMMIT=' + commit['sha'])
-          print('CHANGED_FILES=' + str(len(changed)))
-          print('Only the requested branch was fast-forwarded. No merge or deployment.')
+                  new = super().redirect_request(req, fp, code, msg, headers, newurl)
+                  if new is not None:
+                      new.remove_header('Authorization')
+                  return new
+          request = urllib.request.Request(
+              'https://api.github.com/repos/ZhouRR/SkillMind/actions/jobs/105459246398/logs',
+              headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                       'Accept': 'application/vnd.github+json',
+                       'User-Agent': 'skillmind-regression-summary'},
+          )
+          with urllib.request.build_opener(SafeRedirect()).open(request, timeout=60) as response:
+              data = response.read(8_000_001)
+          assert len(data) <= 8_000_000
+          text = data.decode('utf-8-sig')
+          for line in text.splitlines()[-170:]:
+              print(line)
           PY
