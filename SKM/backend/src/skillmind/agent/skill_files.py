@@ -7,6 +7,7 @@ from typing import Any
 
 from skillmind.agent.domain import RunWorkspace
 from skillmind.agent.materialization_storage import MaterializationError
+from skillmind.core.hashing import canonical_json
 from skillmind.runs.domain import ClaimedRun
 from skillmind.runs.input_snapshot import InputFileSeal, parse_input_files
 from skillmind.skills.frozen_manifest import verified_run_manifest
@@ -78,16 +79,16 @@ def skill_file_locations(
 
 
 def append_skill_file_guidance(sections: list[str], brief: Mapping[str, Any]) -> None:
-    """実在する file のみ案内し、許可 Tool の利用方法を示す。実行権は追加しない。"""
-    from skillmind.core.hashing import canonical_json
-
+    """実在 file の利用を案内し、明示された派生物の生成や元の権限を変更しない。"""
     if not brief.get("skill_files"):
         return
     sections.append(
         "Frozen Skill files (already sealed on disk): " + canonical_json(brief["skill_files"])
         + "\nUse these exact paths with the allowed workspace or JSON validation Tools. "
-        "For a bundled schema, pass its path directly as schema_path; do not rewrite, "
-        "shorten or regenerate the schema in workspace/output. Other frozen text files "
-        "are equally available. File availability grants no script execution, external "
-        "reference resolution or additional Tool permissions."
+        "To validate against a bundled schema, pass its path directly as schema_path; "
+        "do not rewrite, shorten or regenerate it merely to supply the validator. "
+        "If the Skill explicitly requires a derived file, create it separately using "
+        "already allowed Tools and distinguish it from the frozen original. Other frozen "
+        "text files are equally available. File availability grants no script execution, "
+        "external reference resolution or additional Tool permissions."
     )
