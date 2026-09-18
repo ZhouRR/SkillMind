@@ -24,6 +24,50 @@ SCHEMA = {
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("timestamp", "valid"),
+    [
+        ("2026-09-18T04:57:20Z", True),
+        ("2026-09-18T13:57:20.1234567+09:00", True),
+        ("2024-02-29T00:00:00Z", True),
+        ("2026-02-29T00:00:00Z", False),
+        ("2026-09-18T04:57:20", False),
+        ("2026-09-18T25:00:00Z", False),
+        ("not-a-timestamp", False),
+    ],
+)
+async def test_datetime_formats_are_checked_in_validation_process(
+    timestamp: str, valid: bool
+) -> None:
+    """実子プロセスで日時の依存欠落と不正値の黙認を検出し、UUID の共存も確認する。"""
+    schema = {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string", "format": "uuid"},
+            "startedAt": {"type": ["string", "null"], "format": "date-time"},
+            "finishedAt": {"type": "string", "format": "date-time"},
+        },
+        "required": ["id", "startedAt", "finishedAt"],
+    }
+    instance = {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "startedAt": None,
+        "finishedAt": timestamp,
+    }
+    result = await _validate_in_process(
+        json.dumps({"schema": json.dumps(schema), "instance": json.dumps(instance)}).encode()
+    )
+    assert result["valid"] is valid
+    assert result["format_assertions"] is True
+    if valid:
+        assert result["errors"] == []
+    else:
+        assert len(result["errors"]) == 1
+        assert result["errors"][0]["instance_path"] == "/finishedAt"
+        assert result["errors"][0]["keyword"] == "format"
+
+
+@pytest.mark.asyncio
 async def test_validates_sealed_schema_and_output_with_format_errors(tmp_path: Path) -> None:
     """封印 Schema と output の hash、format の不適合位置を実 process で確認する。"""
     context = _context(tmp_path, CAPABILITY)
