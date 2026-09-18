@@ -5,17 +5,140 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+env:
+  SKILLMIND_ENVIRONMENT: test
+  SKILLMIND_DATABASE_URL: postgresql+asyncpg://test:test@127.0.0.1:1/skillmind_test
+  SKILLMIND_REDIS_URL: redis://127.0.0.1:1/15
+  PYTHONDONTWRITEBYTECODE: '1'
 jobs:
-  source:
+  regression:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: runtime
+            targets: tests/agent tests/worker tests/runs tests/effects
+          - group: skills
+            targets: tests/skills tests/core tests/contracts
+          - group: api
+            targets: tests/api
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Export tracked review source only
-        run: git archive --format=zip --output="$RUNNER_TEMP/skillmind-source.zip" HEAD
-      - uses: actions/upload-artifact@v4
+      - uses: actions/setup-python@v5
         with:
-          name: skillmind-source
-          path: ${{ runner.temp }}/skillmind-source.zip
-          retention-days: 1
+          python-version: '3.12'
+      - name: Install locked development dependencies
+        working-directory: SKM/backend
+        run: python -m pip install -q -r dev-requirements.lock && python -m pip install -q --no-deps -e .
+      - name: Prepare reviewed changes
+        run: python .github/prepare_skill_files.py
+      - name: Verify direct file delivery before larger regression
+        working-directory: SKM/backend
+        run: python -m pytest tests/agent/test_skill_files.py --import-mode=importlib -p no:cacheprovider -o addopts= -q --tb=short
+      - name: Regression without production services
+        working-directory: SKM/backend
+        env:
+          TARGETS: ${{ matrix.targets }}
+        run: |
+          set +e
+          python -m pytest $TARGETS --import-mode=importlib -p no:cacheprovider -o addopts= -q --tb=short -ra --junitxml="$RUNNER_TEMP/results.xml" > "$RUNNER_TEMP/pytest.log" 2>&1
+          result=$?
+          tail -80 "$RUNNER_TEMP/pytest.log"
+          exit "$result"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: skill-files-${{ matrix.group }}
+          path: |
+            ${{ runner.temp }}/results.xml
+            ${{ runner.temp }}/source-fingerprint.json
+          retention-days: 7
+  finalize:
+    needs: regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install locked development dependencies
+        working-directory: SKM/backend
+        run: python -m pip install -q -r dev-requirements.lock && python -m pip install -q --no-deps -e .
+      - name: Reproduce exact reviewed files
+        run: python .github/prepare_skill_files.py
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: skill-files-*
+          path: ${{ runner.temp }}/groups
+      - name: Check results and source fingerprints
+        run: |
+          python - <<'PY'
+          import json, os, xml.etree.ElementTree as ET
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP'])
+          expected=json.loads((root/'source-fingerprint.json').read_text())
+          groups=list((root/'groups').iterdir()); assert len(groups)==3
+          totals={'tests':0,'failures':0,'errors':0,'skipped':0}
+          for group in groups:
+              assert json.loads((group/'source-fingerprint.json').read_text())==expected
+              result=ET.parse(group/'results.xml').getroot()
+              for suite in result.iter('testsuite'):
+                  for key in totals: totals[key]+=int(suite.get(key,'0'))
+          assert totals['failures']==totals['errors']==0
+          print('VERIFIED_RESULTS',json.dumps(totals))
+          PY
+      - name: Type check backend
+        working-directory: SKM/backend
+        run: python -m mypy --no-incremental src/skillmind
+      - name: Contracts and generated documentation
+        working-directory: SKM
+        run: |
+          python -m pip install -q -r scripts/docs-requirements.txt
+          python scripts/validate_contracts.py
+          python scripts/build_docs.py
+          python scripts/build_docs.py --check
+      - name: Publish only verified files to requested branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import base64, hashlib, json, os, urllib.request
+          from pathlib import Path
+          repo='ZhouRR/SkillMind'; branch='perf/frozen-skill-files'; parent=os.environ['GITHUB_SHA']
+          assert os.environ['GITHUB_REPOSITORY']==repo and os.environ['GITHUB_REF']=='refs/heads/'+branch
+          def api(path,data=None,method=None):
+              req=urllib.request.Request('https://api.github.com/repos/'+repo+'/'+path,
+                  data=None if data is None else json.dumps(data).encode(), method=method,
+                  headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','Content-Type':'application/json'})
+              with urllib.request.urlopen(req,timeout=60) as response: return json.load(response)
+          assert api('git/ref/heads/'+branch)['object']['sha']==parent
+          paths=json.loads((Path(os.environ['RUNNER_TEMP'])/'skill-files-paths.json').read_text())
+          expected=json.loads((Path(os.environ['RUNNER_TEMP'])/'source-fingerprint.json').read_text())
+          for path in paths:
+              assert hashlib.sha256(Path(path).read_bytes()).hexdigest()==expected[path],path
+          paths.append('docs/index.html')
+          entries=[]
+          for path in sorted(paths):
+              raw=Path(path).read_bytes()
+              blob=api('git/blobs',{'content':base64.b64encode(raw).decode(),'encoding':'base64'})
+              assert blob['sha']==hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()
+              entries.append({'path':path,'mode':'100644','type':'blob','sha':blob['sha']})
+          for path in ('.github/prepare_skill_files.py','.github/workflows/skill-files-review.yml'):
+              entries.append({'path':path,'mode':'100644','type':'blob','sha':None})
+          tree=api('git/trees',{'base_tree':api('git/commits/'+parent)['tree']['sha'],'tree':entries})
+          commit=api('git/commits',{'tree':tree['sha'],'parents':[parent],
+              'message':'feat(skills): deliver frozen Skill files as sealed read-only inputs\n\nVerified source fingerprints, backend regressions, mypy and contracts/docs. Preserve original bytes, permissions and business flow. No production execution or deployment.'})
+          assert api('git/ref/heads/'+branch)['object']['sha']==parent
+          result=api('git/refs/heads/'+branch,{'sha':commit['sha'],'force':False},method='PATCH')
+          assert result['object']['sha']==commit['sha']
+          print('FINAL_COMMIT='+commit['sha']); print('FINAL_TREE='+tree['sha'])
+          PY
