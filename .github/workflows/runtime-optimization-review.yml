@@ -2,22 +2,95 @@ name: Runtime optimization review
 on:
   push:
     branches: [perf/audit-export-continuations]
-    paths: [.github/workflows/runtime-optimization-review.yml]
+    paths:
+      - .github/workflows/runtime-optimization-review.yml
+      - .github/prepare_runtime_changes.py
+      - .github/publish_runtime_changes.py
 permissions:
   contents: read
+env:
+  SKILLMIND_ENVIRONMENT: test
+  SKILLMIND_DATABASE_URL: postgresql+asyncpg://skillmind:skillmind@127.0.0.1:1/skillmind_test
+  SKILLMIND_REDIS_URL: redis://127.0.0.1:1/15
+  PYTHONDONTWRITEBYTECODE: '1'
 jobs:
-  source:
+  regression:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: api
+            scope: tests/api
+          - group: skills
+            scope: tests/skills tests/core tests/contracts
+          - group: runtime
+            scope: tests/agent tests/worker tests/runs tests/effects tests/artifacts
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Archive tracked source only
-        run: |
-          git archive --format=zip --output="$RUNNER_TEMP/skillmind-source.zip" HEAD
-      - uses: actions/upload-artifact@v4
+      - uses: actions/setup-python@v5
         with:
-          name: runtime-review-source
-          path: ${{ runner.temp }}/skillmind-source.zip
-          retention-days: 1
+          python-version: '3.12'
+      - name: Install locked dependencies without production services
+        working-directory: SKM/backend
+        run: python -m pip install -q -r dev-requirements.lock && python -m pip install -q --no-deps -e .
+      - name: Prepare exact reviewed files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/prepare_runtime_changes.py
+      - name: Verify new functionality first
+        working-directory: SKM/backend
+        run: python -m pytest tests/agent/test_audit_export.py tests/agent/test_result_proposal_lookup.py tests/agent/test_result_references.py tests/worker/test_receipt_sequence_experiment.py --junitxml="$RUNNER_TEMP/focused.xml"
+      - name: Run related backend regression
+        working-directory: SKM/backend
+        run: python -m pytest ${{ matrix.scope }} --junitxml="$RUNNER_TEMP/results.xml"
+      - name: Keep exact-source test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-optimization-${{ matrix.group }}
+          path: |
+            ${{ runner.temp }}/source-fingerprint.json
+            ${{ runner.temp }}/focused.xml
+            ${{ runner.temp }}/results.xml
+          retention-days: 7
+  finalize:
+    needs: regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        working-directory: SKM/backend
+        run: python -m pip install -q -r dev-requirements.lock && python -m pip install -q --no-deps -e .
+      - name: Reproduce the tested source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/prepare_runtime_changes.py
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: runtime-optimization-*
+          path: ${{ runner.temp }}/groups
+      - name: Check all application types
+        working-directory: SKM/backend
+        run: python -m mypy --no-incremental src/skillmind
+      - name: Verify contracts and generated documentation
+        run: |
+          python -m pip install -q -r scripts/docs-requirements.txt
+          python scripts/validate_contracts.py
+          python scripts/build_docs.py
+          python scripts/build_docs.py --check
+      - name: Publish verified application changes only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/publish_runtime_changes.py
