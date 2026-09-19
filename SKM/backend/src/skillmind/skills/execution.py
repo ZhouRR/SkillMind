@@ -20,6 +20,7 @@ PLATFORM_TOOLS = frozenset(
         "workspace.search/v1",
         "workspace.write/v1",
         "workspace.write/v2",
+        "audit.export/v1",
         "json.schema.validate/v1",
         "subagent.dispatch/v1",
         "interaction.request/v1",

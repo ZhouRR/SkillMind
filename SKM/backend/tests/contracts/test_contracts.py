@@ -206,6 +206,8 @@ EXAMPLES = {
     "examples/workspace-search-response.v1.json": "tools/workspace.search/v1/response.schema.json",
     "examples/workspace-write-request.v1.json": "tools/workspace.write/v1/request.schema.json",
     "examples/workspace-write-response.v1.json": "tools/workspace.write/v1/response.schema.json",
+    "examples/audit-export-request.v1.json": "tools/audit.export/v1/request.schema.json",
+    "examples/audit-export-response.v1.json": "tools/audit.export/v1/response.schema.json",
     "examples/workspace-write-request.v2.json": "tools/workspace.write/v2/request.schema.json",
     "examples/workspace-write-response.v2.json": "tools/workspace.write/v2/response.schema.json",
     "examples/workspace-write-draft-response.v2.json": (

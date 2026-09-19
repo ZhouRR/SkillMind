@@ -1,0 +1,10 @@
+{
+  "path": "output/audit.json",
+  "purpose": "Export saved observations without rewriting them",
+  "evidence_refs": [
+    "ev_observation"
+  ],
+  "proposal_refs": [
+    "cp_operation"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "status": "success",
+  "provider": "platform",
+  "path": "output/audit.json",
+  "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "bytes_written": 300,
+  "created": true,
+  "counts": {
+    "evidence": 1,
+    "proposals": 1
+  },
+  "evidence_refs": [
+    "ev_export"
+  ],
+  "artifact_refs": [
+    "art_export"
+  ]
+}

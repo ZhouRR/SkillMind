@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "$id": "https://schemas.skillmind.local/tools/audit.export/v1/response.schema.json",
+  "title": "audit.export/v1 response",
+  "required": [
+    "status",
+    "provider",
+    "path",
+    "content_hash",
+    "bytes_written",
+    "created",
+    "counts",
+    "evidence_refs",
+    "artifact_refs"
+  ],
+  "properties": {
+    "status": {
+      "const": "success"
+    },
+    "provider": {
+      "const": "platform"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 4096,
+      "pattern": "^output/"
+    },
+    "content_hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "bytes_written": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1048576
+    },
+    "created": {
+      "type": "boolean"
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence",
+        "proposals"
+      ],
+      "properties": {
+        "evidence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 50
+        },
+        "proposals": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 50
+        }
+      }
+    },
+    "evidence_refs": {
+      "type": "array",
+      "maxItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^ev_[a-zA-Z0-9_-]{1,60}$"
+      },
+      "minItems": 1
+    },
+    "artifact_refs": {
+      "type": "array",
+      "maxItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^art_[a-zA-Z0-9_-]{1,60}$"
+      },
+      "minItems": 1
+    }
+  }
+}

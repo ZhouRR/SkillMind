@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "$id": "https://schemas.skillmind.local/tools/audit.export/v1/request.schema.json",
+  "title": "audit.export/v1 request",
+  "required": [
+    "path",
+    "purpose"
+  ],
+  "properties": {
+    "path": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 4096,
+      "pattern": "^output/"
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "evidence_refs": {
+      "type": "array",
+      "maxItems": 50,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^ev_[a-zA-Z0-9_-]{1,60}$"
+      }
+    },
+    "proposal_refs": {
+      "type": "array",
+      "maxItems": 50,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^cp_[a-zA-Z0-9_-]{1,60}$"
+      }
+    }
+  },
+  "anyOf": [
+    {
+      "required": [
+        "evidence_refs"
+      ],
+      "properties": {
+        "evidence_refs": {
+          "minItems": 1
+        }
+      }
+    },
+    {
+      "required": [
+        "proposal_refs"
+      ],
+      "properties": {
+        "proposal_refs": {
+          "minItems": 1
+        }
+      }
+    }
+  ]
+}
