@@ -92,6 +92,41 @@ def test_delete_passes_original_cookie_csrf_and_server_request_identity(
     assert str(access.request_id) == response.headers["x-request-id"]
 
 
+@pytest.mark.parametrize(
+    "error,code",
+    [
+        (DocumentInUseError, "document_in_use"),
+        (DocumentReferencesUnavailableError, "document_references_unavailable"),
+    ],
+)
+def test_recycle_distinguishes_reference_failure_from_actual_reference(
+    client: TestClient, error: type[Exception], code: str
+) -> None:
+    """回収箱も物理削除と同じ診断を返し、未確認を実参照と断定しない。"""
+
+    service = AsyncMock()
+    service.manage_documents.side_effect = error("private reference data")
+    client.app.state.document_service = service
+    response = client.post(
+        f"/api/v1/projects/{uuid4()}/document-operations",
+        json={
+            "action": "TRASH",
+            "changes": [{
+                "document_id": str(uuid4()),
+                "expected_folder": "",
+                "expected_name": "notes.json",
+                "folder": "",
+                "name": "notes.json",
+            }],
+        },
+    )
+    assert response.status_code == 409
+    assert response.json()["code"] == code
+    assert "private reference data" not in response.text
+    assert response.headers["cache-control"] == "no-store"
+    service.manage_documents.assert_awaited_once()
+
+
 @pytest.mark.parametrize("missing", [False, True])
 def test_exact_metadata_lookup_has_no_storage_or_mutation_effect(
     client: TestClient, missing: bool, monkeypatch: pytest.MonkeyPatch

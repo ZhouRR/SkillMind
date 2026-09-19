@@ -1,55 +1,51 @@
-# 系统结构与执行链路
+# 架构与核心术语
 
-Backend 是模块化单体，API 与 Worker 共享 `skillmind` package、分进程运行；业务层依赖 AgentEngine 抽象。
+Backend 是模块化单体：API、业务 Worker 与维护 Worker 共享 Python package，分别运行。业务层依赖 AgentEngine 抽象，SDK 适配器负责 Codex/Claude 的具体通信。
 
-## 组件和数据所有权
+## 执行链路
 
 ```text
-浏览器 Web → 共享 Traefik → FastAPI → 领域服务 → PostgreSQL
-                  └── Web 静态资源        │         └── 业务与审计正本
-                                      Outbox
-                                         ↓
-                                   Redis → ARQ Worker
-                                              ↓
-                                    AgentEngine → 模型
-                                              ↓
-                                       Tool Gateway
-                                              ↓
-                                    Provider → 已绑定资源
-                                              ↓
-                                      Evidence / Artifact
+Web / API 调用方 → Traefik → FastAPI → 领域服务 → PostgreSQL
+                                          ↓ Outbox
+                                Redis 队列与通知
+                                  ↓         ↓
+                             业务 Worker  维护 Worker
+                                  ↓
+                           AgentEngine → 模型
+                                  ↓
+                         Tool Gateway / Provider
+                                  ↓
+                        受绑定和授权限制的外部资源
 ```
 
-PostgreSQL 保存 Skill、Run/Segment/Attempt、Session、Event/Outbox、Result 和批准。
-Redis 承担队列、短期锁、通知与登录防护；blob 在 object storage，执行文件在 Run workspace。
-这些存储不属于同一事务；恢复需一起核对数据库引用、blob、workspace 和密钥。
+- Skill：原文导入 → 最小执行声明 → 审查发布 → 项目启用 → 任务目录。历史 Blueprint 保持原版本兼容。
+- Run：冻结版本、输入与授权上限 → 入队 → 准备只读输入 → 执行 → 等待答复/批准或提交结果。
+- 外部变更：观测 → 提案 → 人工或适用的自动批准 → Effect → 回读并保存回执。
 
-## 三条关键链路
+数据库是业务与审计正本，Redis 提供队列、短期锁、通知和登录防护；文档 blob 与 Run workspace 独立存储，不能当作同一事务。恢复参见[一致恢复点](../operations/backup-recovery.md#一致恢复点包含什么)。
 
-| 链路 | 关键步骤 |
+## 读代码时的核心术语
+
+| 名称 | 含义 |
 | --- | --- |
-| Skill 成为任务 | Source → Interpreter → Blueprint → 审查/发布 → Project 启用 → TaskCatalog |
-| 一次 Run | 冻结输入/授权 → Outbox → claim → 受监督准备 → Brief/启动校验 → 执行 → 等待或终态 |
-| 外部变更 | Proposal → 精确批准 → EffectExecution → CAS → 写入 → read-back |
+| Organization / Project | 组织资产与项目访问范围 |
+| SkillVersion / Task | 不可变发布版本及该版本提供的任务入口 |
+| Integration / ResourceBinding | 外部连接及运行获准使用的资源范围，凭据不交给模型 |
+| Run / Segment / Attempt | 一次业务请求、一次分析或续行阶段、同阶段的技术尝试 |
+| Brief / Snapshot | 冻结执行指令与输入事实，不能用当前配置回填旧值 |
+| Interaction / Proposal | 普通问题与具体外部变更提案，采用不同回答协议 |
+| Effect / Receipt | 实际变更及原操作回执；回执不证明远端当前状态 |
+| Evidence / Artifact | 可追溯的观测证据与已保存文件 |
+| Result / Evaluation | 不可变执行结果与追加式人工评价/修订 |
 
-模型提出调用，平台校验 capability、绑定、参数及适用的批准后才执行；当前只有局部限额，不能把未接入的[Run 统一预算](../design/run-budgets.md)当作既有保证。
-创建冻结授权与选择；Run 输入回执、Segment Brief、Attempt lease 分别证明不同事实，不能互相替代。
-登录防护的 Redis 配额也不等于数据库 Session 的撤销状态。
+## 实现入口
 
-## 变更应放在哪一层
-
-| 层 | 实现与责任 |
+| 责任 | 代码 |
 | --- | --- |
-| API | [routes](../../SKM/backend/src/skillmind/api/routes/) / [actor dependency](../../SKM/backend/src/skillmind/api/auth_dependencies.py)：认证、授权、入出参 |
-| 领域与持久化 | service/domain 决定规则；repository / [db](../../SKM/backend/src/skillmind/db/)负责事务、锁与快照 |
-| 执行 | [agent](../../SKM/backend/src/skillmind/agent/) / [worker](../../SKM/backend/src/skillmind/worker/)：SDK、Tool、监督与恢复 |
-| Web / 契约 | [代码入口](../../SKM/README.md#web)负责校验和交互；[contracts](../../SKM/README.md#contracts)固定公开形状 |
+| 认证与公开 API | [routes](../../SKM/backend/src/skillmind/api/routes/) / [auth_dependencies](../../SKM/backend/src/skillmind/api/auth_dependencies.py) |
+| 规则、事务与迁移 | 各领域 service/repository、[db](../../SKM/backend/src/skillmind/db/) 与 [migrations](../../SKM/backend/migrations/) |
+| 执行与维护 | [agent](../../SKM/backend/src/skillmind/agent/) / [worker](../../SKM/backend/src/skillmind/worker/) / [effects](../../SKM/backend/src/skillmind/effects/) |
+| 页面与接口形状 | [Web](../../SKM/README.md#web) / [Contracts](../../SKM/README.md#contracts) |
 
-规则归属见[设计索引](../design/README.md#どの設計を変更するか)，同步步骤见[变更指南](../development/change-guide.md)。
-
-## 部署边界
-
-复用共享 Traefik，仅 web/api 进入 edge network，不发布宿主端口。外部 context path 被 Traefik 去除；
-API 内部保持 `/api`、Web 保持 `/`，Web build path 与 API root_path 须匹配。
-[Compose](../../SKM/compose.yml)包含应用、存储与一次性迁移/初始化服务，module-builder 尚未接入。
-[技术结构图](technical-architecture.html)用于整体展示，发布步骤见[部署指南](../operations/deployment.md)。
+维护时遵守[运行边界](../development/runtime-guide.md)，按[变更指南](../development/change-guide.md)选择消费者和验证范围。
+部署复用共享 Traefik，仅 Web/API 接入 edge network；外部 context path 与 Web build path、API root_path 保持一致，详见[部署指南](../operations/deployment.md)。

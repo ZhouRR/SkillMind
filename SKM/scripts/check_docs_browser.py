@@ -16,16 +16,15 @@ MODULES = ("backend", "web", "contracts", "scripts", "skills", "images")
 HANDOFFS = (
     ("docs/README.md", "", "docs/overview/product.md"),
     ("docs/overview/product.md", "", "docs/overview/architecture.md"),
-    ("docs/design/README.md", "", "docs/design/domain-model.md"),
-    ("SKM/README.md", "backend", "docs/design/run-creation.md"),
-    ("SKM/README.md", "backend", "docs/design/document-lifecycle.md"),
+    ("docs/README.md", "", "docs/development/runtime-guide.md"),
+    ("SKM/README.md", "backend", "docs/development/runtime-guide.md"),
     ("SKM/README.md", "web", "docs/design/workspace.md"),
     ("SKM/README.md", "contracts", "docs/development/contract-workflow.md"),
     ("SKM/README.md", "scripts", "docs/development/documentation.md"),
-    ("SKM/README.md", "skills", "docs/design/skill-contract.md"),
+    ("SKM/README.md", "skills", "docs/development/runtime-guide.md"),
     ("SKM/README.md", "images", "docs/operations/quickstart.md"),
     ("SKM/AGENTS.md", "作業前に読むもの", "docs/development/coding-rules.md"),
-    ("docs/planning/roadmap.md", "", "docs/design/results-evaluation.md"),
+    ("docs/planning/roadmap.md", "", "docs/development/runtime-guide.md"),
 )
 
 
@@ -119,7 +118,7 @@ async def check_destination(page: Page, book: Path, document: str) -> None:
 
 
 async def check_handoffs(page: Page, book: Path, output: Path | None) -> None:
-    """中心入口から目的設計への実クリックを、desktop と mobile で確認する。"""
+    """中心入口から開発・運用案内への実クリックを、desktop と mobile で確認する。"""
 
     for width in (390, 1440):
         await page.set_viewport_size({"width": width, "height": 1000})
@@ -139,7 +138,7 @@ async def check_handoffs(page: Page, book: Path, output: Path | None) -> None:
         for name, document in (
             ("guide", "docs/README.md"),
             ("readme", "SKM/README.md"),
-            ("runtime", "docs/design/agent-runtime.md"),
+            ("runtime", "docs/development/runtime-guide.md"),
             ("plan", "docs/planning/roadmap.md"),
         ):
             await page.goto(page_url(book, document))
@@ -172,11 +171,11 @@ async def check_navigation(page: Page, book: Path, pages: list[dict]) -> None:
     assert not any("jaf" in json.dumps(item, ensure_ascii=False).lower() for item in pages)
 
     search = page.locator("#search")
-    await search.fill("run-creation.md")
+    await search.fill("runtime-guide.md")
     first = page.locator("#navigation .search-hit > a").first
-    assert "docs/design/run-creation.md::" in (await first.get_attribute("href") or "")
+    assert "docs/development/runtime-guide.md::" in (await first.get_attribute("href") or "")
     await first.click()
-    await check_destination(page, book, "docs/design/run-creation.md")
+    await check_destination(page, book, "docs/development/runtime-guide.md")
 
     await search.fill("jaf")
     await expect(page.locator("#navigation .search-hit")).to_have_count(0)

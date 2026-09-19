@@ -15423,7 +15423,7 @@
                 }
               }
             },
-            "description": "Path conflict or folder not empty",
+            "description": "document_conflict, document_in_use, document_references_unavailable, or project_archived",
             "headers": {}
           },
           "422": {

@@ -1,49 +1,36 @@
-# Run 履历减负与耗时观测
+# Run 耗时观测与优化
 
-本页说明不改变 Skill 语义的读路径优化及运行计时。任务身份、原文、审批、权限、事件持久化和恢复规则不变；不新增 HTTP 参数、数据库迁移或启动检查。
-
-## 查询与展示
-
-历史列表仍返回同一 DTO，SQL 只读取列表实际使用的 Run / Result 列。详情仅需要 Brief checksum，因此不读取 Brief 正文。详情的工具、证据、会话等明细集合仍完整返回；本批没有拆分概览 API 或实现服务端明细分页，也没有减少同一详情中的 SQL 查询次数。
-
-工具列表、会话审计、原始结果的折叠区域只在展开时求值和挂载，关闭后卸载。待确认操作、失败和未知效果仍在原来的常显区域。模型生成的报告与业务结果不变。已收起的技术正文不参与浏览器页面内搜索，须展开后检索；这不是删除审计记录。
-
-前端按序追加事件时不再排序整个历史；乱序插入二分定位，重复 sequence 继续 first-wins。会话展示缓存完整不变的前缀，只处理新事件；重放、中间替换或 Run 清空时回退到原全量投影。前缀引用校验仍是线性的，不宣称整个更新为 O(1)，也不裁剪已有事件。
+先用相同任务、输入、模型配置和并发条件比较耗时与业务结果，再决定优化范围。关联 `run_id` / `run_attempt_id`，分别记录首次执行、等待批准/答复及续行；不把一次最快结果当成整体收益。
 
 ## 固定日志事件
 
-使用现有 JSON 日志，不另写 RunEvent、Outbox 或业务表。INFO 级别下新增如下事件，按 `run_id` 和 `run_attempt_id` 关联；列表查询没有可用 Run 身份时不补造。
+INFO JSON 日志使用 `run.performance.` 前缀。实现入口为[计时器](../../SKM/backend/src/skillmind/core/timing.py)、[执行器](../../SKM/backend/src/skillmind/worker/executor.py)、[结果校验](../../SKM/backend/src/skillmind/agent/result_validation.py)与[查询](../../SKM/backend/src/skillmind/runs/repository.py)。
 
-| 事件 | duration_ms 的边界 |
+| 事件后缀 | 观测范围 |
 | --- | --- |
-| run.performance.history_query | 历史 repository 读取及 DTO 投影（含原标题查询） |
-| run.performance.detail_query | 详情 repository 读取及 DTO 投影 |
-| run.performance.prepare | Context 准备和 Brief 冻结 |
-| run.performance.engine_total | 整个 engine 消费过程，含工具、持久化、校验和 cleanup |
-| run.performance.engine_wait | 等待下一条 engine event 的累计时间；包含 SDK/模型/工具等待，不是纯推理时间 |
-| run.performance.event_persist | 普通持久化 AgentEvent 的累计 await 时间 |
-| run.performance.realtime_publish | 临时文字通知 publish 的累计 await 时间 |
-| run.performance.result_finalize | 最终结果校验和终态保存时间 |
+| `history_query` / `detail_query` | 履历/详情读取与 DTO 投影 |
+| `prepare` | Context 准备和 Brief 冻结 |
+| `engine_total` | engine 消费、工具、持久化、校验和 cleanup |
+| `engine_wait` | 等待 engine event 的累计时间，含 SDK/模型/工具等待 |
+| `event_persist` / `realtime_publish` | 持久事件保存 / 即时文字通知 |
+| `result_finalize` | 结果校验与终态收尾 |
+| `result_validation` / `result_schema` / `result_references` | 结果完整校验 / Schema / 引用核对 |
+| `terminal_save` | 终态持久化 |
+| `final_output` | 最终数据 `output_bytes`，无 duration_ms |
 
-最后四项按 Attempt 汇总，`sample_count` 是 await 区间数量，不是模型请求数。`engine_total` 已包含这些区间，不能相加当作总耗时；部分分支和 cleanup 没有独立计时，不能声称完整无重叠分解。当前没有新增排队等待、纯模型推理、工具内部细分或首屏渲染耗时指标。
+耗时单位为 `duration_ms`；`sample_count` 是累计 await 区间数，不是模型请求数。区间存在包含和并行关系，不能相加为总耗时；`engine_wait` 也不是纯推理时间。当前日志不能完整拆分排队、工具内部和页面首屏时间。
 
-日志中不放 Skill 正文、工具参数、用户输入或异常正文。观测 handler 出错不会替换业务返回值、原异常或取消信号；不为了性能观测重试模型、延迟提交或增加业务门禁。日志仍使用原同步 sink，建议沿用现有本地 stdout 收集，不加入远程同步 handler。
+## 按瓶颈行动
+
+- 准备慢：查资源读取、冻结输入大小和外部连接，不用当前资源替换原快照。
+- 执行慢：比较工具调用、批准/续行次数及最终输出量；区分模型等待和远端工具耗时。
+- 收尾慢：比较 Schema、引用核对与终态保存区间；已有 `audit.export/v1` 可导出平台原记录，减少重复生成，仍需满足结果契约和保存要求。
+- 页面慢：分别观察 API 响应和渲染；履历技术明细按展开挂载，页面内搜索前先展开相应内容。
+
+业务 Worker 与维护 Worker 已分队列；健康检查正常不证明没有业务排队。实时文字配送采用有界队列，过载可能丢即时片段，完整消息和持久结果仍应从详情核对。
 
 ## 验证与解释
 
-运行相关核心计时、履历 query shape 和前端增量投影测试。浏览器另验证展开/收起、Run 切换、断线重放、待批准操作和 UNKNOWN 常显。查询列变少与 JSON 重解析次数减少，不等于已证明真实模型执行提速；用同样的任务、配置和并发情况比较日志与页面。
+每次只调整已确认瓶颈，比较多次执行的耗时、输出完整性和业务准确性；需要真实模型/写入时使用获准环境。查询列减少或测试变快不证明真实任务提速，隔离实验也不代表生产恢复能力已闭环。
 
-## MCP 和实时通知的执行开销
-
-MCP catalog 和 Schema 的结构检查按完整 canonical 内容做有界进程内复用；真实调用参数和结果仍逐次验证，权限、凭据、业务响应不缓存。单工具 query 只解析目标工具，discovery 才投影全授权列表。相同 Schema 不再在每个子节点和每个工具上重复 meta-schema 校验。外部工具目录仍在真实调用前核对，不以缓存代替远端契约检查。
-
-每个 Attempt 的 TEXT_DELTA 通过独立有界队列配送：最多 32 条、每条 16,384 字符，正常结束最多等待 100ms，取消时直接清理。仅过载的即时文字可丢弃，完整消息、结果、批准和持久事件不进入该队列。`realtime_publish` 现在与引擎消费并行，不能再与 `engine_wait` 相加解释总耗时；原授权、事件顺序和终态保存不减项。此项减少显示通道的反压，不宣称消除模型思考或 Effect 续行开销。
-
-
-## 审计导出与结果收尾
-
-新运行中已有工作区成果写入权限时，可用 `audit.export/v1` 将当前 Run 的已存 Evidence/Proposal 引用直接导出为 Artifact。模型不再为生成原始记录而重写回执、时间或参数摘要；输出仍保留原观测和 UNKNOWN，不合成缺失内容。通用导出不替代业务结果 JSON、必需解释或文档保存，保存频率与审批不变。工具返回路径、hash、计数和引用；运行日志不记录正文。
-
-结果校验将 Proposal 归属与待处理状态合并为一个作用域查询，减少一次数据库往返，未移除任何校验。这不代表减少了模型 turn，需分别比较导出前后的生成字节、保存阶段耗时及 `result_references`。
-
-连续回执与短序列仅做隔离实验：`tests/worker/test_receipt_sequence_experiment.py` 使用真实通用 MCP Provider、固定工具契约、模拟授权/通信和本地 SQLite journal，检验原操作 ID 回读、保存后交付、失败停止、取消、等待及中断恢复。没有接入 SDK、生产 PostgreSQL/Outbox、Agent lease 或 Web；不能把这些测试当作线上暂停次数已减少或跨 Worker 恢复已保证。当前生产提案仍正常暂停、批准并续行。
+观测不记录正文或凭据，不为提速跳过授权、批准、read-back、持久事件或结果校验。质量缺陷与耗时问题分别记录，实施验证见[本地开发](../development/local-development.md)。

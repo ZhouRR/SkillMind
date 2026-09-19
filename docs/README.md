@@ -1,33 +1,25 @@
 # Skillmind 文書ガイド
 
-[ブラウザで読む](index.html) · [コードの入口](../SKM/README.md) · [現在の計画](planning/roadmap.md#当前执行状态)
+[ブラウザで読む](index.html) · [コードの入口](../SKM/README.md) · [現在の進捗](planning/roadmap.md#当前执行状态)
+
+主要フローの実装を基準に、利用・開発・運用に必要なガイドをまとめる。今後の改善は実際の利用結果から選ぶ。
 
 ## 目的から探す
 
 | 目的 | 入口 |
 | --- | --- |
-| 製品を理解する | [概要](overview/product.md) → [構成](overview/architecture.md) → [用語](overview/glossary.md) |
-| 機能を開発する | [設計索引](design/README.md) → [変更ガイド](development/change-guide.md) |
-| 環境・API | [ローカル開発](development/local-development.md) / [API 利用](development/api-usage.md) / [契約変更](development/contract-workflow.md) |
-| 起動・運用 | [Quickstart](operations/quickstart.md) / [配備](operations/deployment.md) / [復元](operations/backup-recovery.md) / [Runbook](operations/runbook.md) |
-| 文書を更新する | [文書維持](development/documentation.md) |
+| 製品を使う | [利用の流れと画面](overview/product.md) |
+| 全体を理解する | [システム構成と用語](overview/architecture.md) |
+| 変更する | [変更ガイド](development/change-guide.md) / [維持する実行境界](development/runtime-guide.md) / [実装細則](development/coding-rules.md) |
+| 画面を整える | [UI ガイド](design/workspace.md#视觉规范) |
+| 開発・連携する | [ローカル開発](development/local-development.md) / [API 利用](development/api-usage.md) / [契約変更](development/contract-workflow.md) |
+| 起動・更新する | [Quickstart](operations/quickstart.md) / [配備](operations/deployment.md) |
+| 障害・遅延を調べる | [Runbook](operations/runbook.md) / [復元](operations/backup-recovery.md) / [性能観測](operations/run-performance.md) |
+| 進捗・文書を更新する | [Roadmap](planning/roadmap.md) / [文書維持](development/documentation.md) |
 
-## 配置と責任
+## 文書とコードの役割
 
-`overview/` は全体像、`design/` は規則、`planning/` は現在の不足、`development/` は開発手順、`operations/` は運用手順。
-[業務構造図](overview/business-structure.html)と[技術構造図](overview/technical-architecture.html)は全体像の補助資料である。
+ガイドには操作手順、判断基準、維持すべき境界を置く。詳細な型・字段・状態遷移は [Contracts](../SKM/README.md#contracts) と実装・回帰テストを参照する。
+コード上の実装、隔離テスト、実環境の確認、配備済み状態を区別する。過去の詳細設計と重複する構造図は保持せず、必要な経緯は Git 履歴を参照する。
 
-設計は要求、契約は形状、コードと検証は到達点を示す。設計済み・実装済み・実環境で受入済みを区別する。
-
-## 旧番号の対応
-
-コード注釈に残る旧番号の案内のみ。歴史文書や現行仕様の別版ではなく、注釈を一括 path 置換しない。
-
-| ID | 現在の正本 |
-| --- | --- |
-| 01 | [計画](planning/roadmap.md) |
-| 02 / 03 | [業務構造](overview/business-structure.html) / [技術構造](overview/technical-architecture.html) |
-| 04 / 05 | [領域モデル](design/domain-model.md) / [Skill 契約](design/skill-contract.md) |
-| 06 / 07 | [Runtime](design/agent-runtime.md) / [Workspace](design/workspace.md) |
-| 09 / 10 | [認証](design/authentication.md) / [運用](operations/runbook.md) |
-| 11 | [解釈・公開](design/skill-interpretation.md) |
+業務 Skill の `SKILL.md`、参照資料、Schema は実行入力であり、この文書整理の対象に含めない。

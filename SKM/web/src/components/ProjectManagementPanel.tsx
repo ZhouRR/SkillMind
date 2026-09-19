@@ -164,7 +164,7 @@ export function ProjectMetadataForm({ draft, editing, locked, onChange, onSubmit
 }) {
   const messages = useMessages()
   return <form data-project-form="" onSubmit={onSubmit}><fieldset disabled={locked}>
-    {!editing && <label>{messages.projects.keyLabel}<input name="key" maxLength={100} pattern="[a-z0-9][a-z0-9-]*" value={draft.key} required onChange={(event) => onChange({ ...draft, key: event.target.value })} /></label>}
+    {!editing && <label>{messages.projects.keyLabel}<input name="key" maxLength={100} pattern="[a-z0-9][a-z0-9\-]*" value={draft.key} required onChange={(event) => onChange({ ...draft, key: event.target.value })} /></label>}
     <label>{messages.projects.nameLabel}<input name="name" maxLength={200} value={draft.name} required onChange={(event) => onChange({ ...draft, name: event.target.value })} /></label>
     <label>{messages.projects.descriptionLabel}<textarea className="compactTextarea" name="description" maxLength={4000} value={draft.description} onChange={(event) => onChange({ ...draft, description: event.target.value })} /></label>
     <label>{messages.projects.retentionLabel}<input name="retention_days" type="number" min={1} max={3650} value={draft.retentionDays} required onChange={(event) => onChange({ ...draft, retentionDays: event.target.value })} /></label>

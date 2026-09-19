@@ -172,6 +172,56 @@ async def test_valid_run_without_selected_optional_documents_does_not_pin_assets
 
 
 @pytest.mark.parametrize(
+    "capability", ["mcp.read/v1", "mcp.tools/v1", "mcp.query/v1", "mcp.call/v1"]
+)
+@pytest.mark.parametrize("referenced", [False, True])
+async def test_mcp_run_preserves_exact_document_references(
+    capability: str, referenced: bool
+) -> None:
+    """MCP source の凍結済み契約を認識し、無関係な文書だけ削除を許可する。"""
+
+    db = DeletionDatabase()
+    token = f"document:{db.document.id}"
+    integration_id = uuid4()
+    intent = replace(
+        creation_intent(sources={"docs": token, "runner": f"integration:{integration_id}"}),
+        project_id=db.project.id,
+    )
+    document_source = referenced_run(db).selected_sources_json["docs"]
+    command = replace(
+        creation_command(intent),
+        selected_sources_json={
+            "docs": document_source,
+            "runner": {"provider": "mcp", "capability": capability},
+        },
+    )
+    db.runs.append(stored_creation(command))
+    if referenced:
+        with pytest.raises(DocumentInUseError):
+            await db.remove_document()
+        db.storage.delete.assert_not_called()
+    else:
+        db.document.id = uuid4()
+        await db.remove_document()
+        db.storage.delete.assert_awaited_once()
+
+
+async def test_unknown_mcp_source_contract_still_blocks_document_deletion() -> None:
+    """未知の version を同じ MCP 接頭辞だけで無参照に分類しない。"""
+
+    db = DeletionDatabase()
+    intent = replace(creation_intent(), project_id=db.project.id)
+    command = replace(
+        creation_command(intent),
+        selected_sources_json={"runner": {"provider": "mcp", "capability": "mcp.query/v99"}},
+    )
+    db.runs.append(stored_creation(command))
+    with pytest.raises(DocumentReferencesUnavailableError):
+        await db.remove_document()
+    db.storage.delete.assert_not_called()
+
+
+@pytest.mark.parametrize(
     "corrupt", ["hash", "missing", "project", "slot", "id", "candidate", "intent", "unknown"]
 )
 async def test_corrupt_frozen_reference_is_unverifiable_not_empty(corrupt: str) -> None:

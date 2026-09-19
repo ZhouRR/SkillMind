@@ -253,6 +253,8 @@ export interface UiMessages {
     loading: string
     retry: string
     empty: string
+    emptyTrash: string
+    emptyPage: string
     noSummary: string
     sourceUnavailable: string
     previous: string
@@ -603,6 +605,8 @@ export interface UiMessages {
     active: string
     trashAction: string
     emptyFolder: string
+    emptyTrash: string
+    noMatches: string
     moveSelected: string
     selectFolder: string
     failure: string

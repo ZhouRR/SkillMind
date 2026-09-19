@@ -242,6 +242,11 @@ async def success(page: Page) -> None:
 
 async def basic_flow(page: Page, api: ManagementApi, _: dict) -> None:
     """作成・編集・アーカイブ・復元・削除を原版で辿り、同tick確認を毎回一通にする。"""
+    # HTML pattern は modern browser の v flag でも有効で、誤入力を拒否する。
+    key = page.locator('[data-project-form] input[name="key"]')
+    for value, valid in (("UPPERCASE", False), ("bad_key", False), ("-prefix", False), ("fixture-01", True)):
+        await key.fill(value)
+        assert await key.evaluate("input => input.checkValidity()") is valid
     await freeze(page, operation="create")
     await page.locator("[data-project-cancel]").click()
     await expect(page.locator(".projectSidePanel > h2")).to_be_focused()

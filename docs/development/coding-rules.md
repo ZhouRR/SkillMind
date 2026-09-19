@@ -23,28 +23,28 @@ route 只做认证/入出参，业务在 domain/service，查询/锁/持久化�
 
 documents/__init__.py 只导出 domain 类型，service/repository/source 显式导入，避免 DB → Run → 文档循环。
 
-repository.write/v1 不可预授权。direct 仅默认 branch fast-forward；branch 仅新建 skillmind/ 命名空间 branch；禁止 force、覆盖既有 branch 或任意 branch 写入。协议见[受控写入](../design/repository-effects.md)。
+repository.write/v1 不支持项目级事先授权；原 Run 可按明确的 Git 启动同意自动批准。direct 仅默认 branch fast-forward；branch 仅新建 skillmind/ 命名空间 branch；禁止 force、覆盖既有 branch 或任意 branch 写入。协议见[受控写入](runtime-guide.md)。
 
 ## Run lifecycle
 
-修改执行、认领、续行或取消时，查 [Runtime](../design/agent-runtime.md)和[监督](../design/run-supervision.md)；仅改页面展示先查 [Workspace](../design/workspace.md)，不因此补齐全部执行链路。
+修改执行、认领、续行或取消时，查[执行与恢复边界](runtime-guide.md#执行与恢复)；仅改页面展示先查 [Workspace](../design/workspace.md)，不因此补齐全部执行链路。
 
 - 转换只经 plan_run_transition / ALLOWED_RUN_TRANSITIONS；锁序 Run → Segment → Attempt。旧 migration 路径仍为 Run → Attempt，不反转 _lock_claimed_execution。
 - 终态 RUN_SNAPSHOT 是最后一个 RunEvent。sequence 在 Run 内单调；TEXT_DELTA 消耗 sequence 但不持久化，允许缺号、不改子层编号。遵守 RunEvent Schema。
 - 重新 dispatch 也受 SKILLMIND_RUN_MAX_ATTEMPTS 限制，耗尽以 retry_exhausted 关闭为 FAILED。
 - wall_timeout_seconds 只中断 event 等待，不中断终态 transaction；ARQ job_timeout 必须更长，不能替代执行 deadline。
-- 子能力统一经 resolve_subagent_capabilities，分配与消费不混同；权限、返回和 Session 审计见[子分析](../design/subagents.md)。
-- 预算执行接线须满足[上线门禁](../design/run-budgets.md#上线门禁与接线顺序)，内部账本不等于实际执行受控。
-- 准备遵循[资源快照](../design/resource-snapshots.md)，Result 遵循[结果与评价](../design/results-evaluation.md)，不在 route/job 复制校验。
-- TaskSchedule 复用 RunService.create_task_run；版本、失效与迟发行为见[调度](../design/task-scheduling.md)。
+- 子能力统一经 resolve_subagent_capabilities，分配与消费不混同；权限、返回和 Session 审计见[后置能力](runtime-guide.md#后置能力)。
+- 预算执行接线须满足[后置范围](runtime-guide.md#后置能力)，内部账本不等于实际执行受控。
+- 准备遵循[输入与文档](runtime-guide.md#输入与文档)，Result 遵循[结果与评价](runtime-guide.md#结果与评价)，不在 route/job 复制校验。
+- TaskSchedule 复用 RunService.create_task_run；版本、失效与迟发行为见[执行与恢复](runtime-guide.md#执行与恢复)。
 
 ## Web
 
 - 资源 client 放 src/api/，画面经 index.ts barrel；HTTP 只用 requestApiJson / requestApiEmpty。mutation 传 csrfToken / X-CSRF-Token，响应在 client 边界验证，纯逻辑放 src/lib/。
-- TasksPage 选任务，WorkspacePage 管理 Run；不重造 SSE/取消/终态 lifecycle。即时/调度共用 taskDraft.ts / TaskLaunchFields.tsx。
+- TasksPage 选任务，WorkspacePage 管理待办与报告，Run 详情归属历史；不重造 SSE/取消/终态 lifecycle。即时/调度共用 taskDraft.ts / TaskLaunchFields.tsx。
 - 不在前端重算服务端 ID（如 derive_task_id）。筛选/分页在服务端，不能过滤第一页冒充全量。
 - 三语统一 src/lib/i18n/{zh,ja,en}.ts，同步 UiMessages / MESSAGES；画面用 useMessages()。
-- 实现生成 FrontendModule 时先完成威胁模型与 CSP/iframe 隔离回归，且不继承应用权限，见[生成界面](../design/generated-modules.md)；普通 Web 页面不套用 builder/Host 门禁。
+- 实现生成 FrontendModule 时先完成威胁模型与 CSP/iframe 隔离回归，且不继承应用权限，见[后置能力](runtime-guide.md#后置能力)；普通 Web 页面不套用 builder/Host 门禁。
 
 ## 同步点
 

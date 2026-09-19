@@ -1,0 +1,65 @@
+# 运行与数据维护指南
+
+本页保留修改现有链路时必须守住的边界和代码入口，不定义新的完整流程。字段、状态和接口以代码与 [contracts](../../SKM/contracts/) 为准；当前不足集中在[计划](../planning/roadmap.md)。从实际使用问题出发做最小改动，分别验证业务效果和权限、恢复边界，再决定下一步。
+
+## 身份与授权
+
+- 入口复用 [actor dependency](../../SKM/backend/src/skillmind/api/auth_dependencies.py)：Cookie 写请求同时检查 Origin/CSRF；显式 API Key header 验证原 Key，重复、混用或无效时拒绝，不回退 Cookie。越权与不存在统一为 404，归档项目只开放获授权读取。
+- API Key 当前授予创建者所在组织的 ADMIN 资源权限，没有逐 Key scope；创建者须保持有效 ADMIN。不能借 Key 绕过项目状态、冻结权限、部署开关或批准。
+- 入口认证与业务提交分属不同事务。涉及持久写入时复用 [UserAccess](../../SKM/backend/src/skillmind/users/access.py)，在业务锁等待后及最终提交检查原资格、当前成员与项目状态；后台执行按持久发起人、批准与原 claim 复核，不能伪造浏览器会话。
+- Run 冻结的是权限上限，后来的授权不能补进旧 Run；当前撤权仍须生效。凭据停用、业务取消、本地连接关闭分别处理，不据此宣称远端进程已停止。
+- Secret 只经 [resolver](../../SKM/backend/src/skillmind/integrations/secrets.py)交给受控 Provider，不进入 Brief、日志、Evidence 或业务工作区。ENVIRONMENT/FILE 保存引用；MANAGED 由 [SecretCipher](../../SKM/backend/src/skillmind/core/secret_crypto.py)直接使用 AES-256-GCM 与 Project/引用 AAD 加密，缺 key、篡改或解析失败必须拒绝。
+- Secret 恢复同时需要原数据库与匹配 keyring；旧备份仍需旧 key。轮换须覆盖 API/Worker 等所有持钥进程并验证读取，重加密不等于更换外部凭据；FILE 的链接与替换竞争、完整恢复仍不能由 helper 测试证明。操作沿用[运行手册](../operations/runbook.md)与[备份恢复](../operations/backup-recovery.md)。
+
+## Skill 与冻结原文
+
+- Skill 是 Organization 资产，发布后由 Project 显式启用精确版本。沿 [SkillService](../../SKM/backend/src/skillmind/skills/service.py)处理导入、发布、启停与引用检查，不覆盖已发布内容或绕开现存引用删除版本。
+- 新导入只提取输入、资源及操作的最小声明，并形成一个执行任务；完整冻结原文进入 Brief，业务顺序与条件由 Agent 按原文执行。入口为 [direct_candidate](../../SKM/backend/src/skillmind/skills/direct_candidate.py)、[execution](../../SKM/backend/src/skillmind/skills/execution.py)及 [task_brief](../../SKM/backend/src/skillmind/agent/task_brief.py)。旧 Blueprint 保留原值，不从 Manifest 逆算，不在续行时升级历史策略。
+- 来源、规则、脚本和模型建议都不是权限。能力须同时通过版本化契约、冻结声明/绑定、当前部署开关和已注册 Provider；未知业务能力不能按相近名字放行。脚本执行入口若增加，须核对发布 checksum，不把业务专用 Schema、seed 或 renderer 放回通用层。
+- Tool 选择复用 [registry](../../SKM/backend/src/skillmind/agent/context_builder.py)与 [ToolExecutionPolicy](../../SKM/backend/src/skillmind/agent/tool_policy.py)；SDK builtin 保持拒绝，不能用原生 Shell、网络或文件工具绕过 Gateway。改变 cwd 不构成隔离。
+- 异步解释保留原请求、来源 hash、模型配置和调用事实；超时、取消或响应未知不能靠换 ID 重新生成。修改解释流程先核对 [request_service](../../SKM/backend/src/skillmind/skills/request_service.py)与消费者，模型质量另用固定输入和独立预期验收。
+
+## 输入与文档
+
+- 冻结精确版本、资源选择、文档 ID/hash 与绑定。新增文件、同名重传或配置变化不改变原 Run；缺失或损坏不能用当前文件补齐。物化与复用沿 [workspace_materializer](../../SKM/backend/src/skillmind/agent/workspace_materializer.py)和 [input_snapshot](../../SKM/backend/src/skillmind/runs/input_snapshot.py)，校验原回执及完整输入树；`input/` 只读，写入限 `workspace/`、`output/`。
+- 选择文档、读取正文、转换与保存成果是独立能力。按需准备仅冻结清单，后续工具核验原内容；文档观察不等于取得正文，MCP 服务的只读标注不等于授权。能力与 Provider 是否可用，以 [Worker 装配](../../SKM/backend/src/skillmind/worker/settings.py)及冻结 binding 为准。
+- 上传按原 actor/Project、幂等键和内容确认；数据库提交与对象 PUT 不原子。沿 [DocumentService](../../SKM/backend/src/skillmind/documents/service.py)保留预约、发布/关闭回执及原存储归属；关闭发布不证明 PUT 停止，未知不自动重传、删对象或退配额。
+- 改名/移动不改变 ID 与原字节；回收站仍保留字节和占用。完全删除先检查回收状态、生成执行已结束、无未决操作及其他引用；[引用查询](../../SKM/backend/src/skillmind/documents/reference_repository.py)覆盖保留的 Run、Schedule、occurrence，未知历史拒绝删除。
+- 删除须在同一事务保存原对象清理要求，再在确认提交后尝试删 blob。204、目录消失或一次读不到对象都不证明全部版本、在途 PUT 和配额已结清；持久清理重试与结算仍待补齐。执行履历 purge 沿 [history_purge](../../SKM/backend/src/skillmind/runs/history_purge.py)，保留共享成果与最小删除审计，不删除外部业务数据或重做操作。
+
+## 执行与恢复
+
+- PostgreSQL 是持久事实正本；Redis 负责队列、短期锁与通知。API/Worker 共用 package，业务依赖 AgentEngine，route/job/SDK adapter 不承载业务规则。生产入口为 [worker/settings](../../SKM/backend/src/skillmind/worker/settings.py)与 [executor](../../SKM/backend/src/skillmind/worker/executor.py)。
+- Run 表示一条业务执行线程；首次启动、用户答复或批准后的续行属于 Segment；同一 Segment 的技术恢复使用新 Attempt。原快照、权限上限和已存 Result 不改写；恢复不能偷换成新 Run，也不能扩大原输入或权限。
+- 提交前冻结原身份、幂等键、输入、资源选择与批准同意；同键只确认同一内容。复用 [creation_request](../../SKM/backend/src/skillmind/runs/creation_request.py)、[creation_replay](../../SKM/backend/src/skillmind/runs/creation_replay.py)与 Web [runSubmission](../../SKM/web/src/lib/runSubmission.ts)，重放不读取当前资源重建快照。
+- 断网、超时、abort、提交异常或损坏的成功响应均可能已经落库。保留原请求，先查询原回执；404 仅表示本次未见。协议允许显式重发时仍用原键、原内容和相同业务身份，不自动换键；新会话可按接口规则查询原事实，不能接管旧在途写入。晚到响应必须隔离于新 actor/Project/Run。
+- 取消先持久保存意图；[RunRepository](../../SKM/backend/src/skillmind/runs/repository.py)在原 Run/Segment/Attempt 锁内核验 lease、取消和终态。旧 Worker 失去 lease 后不得补写成功或失败；Tool 登记、调用与保存沿 [evidence](../../SKM/backend/src/skillmind/agent/evidence.py)复核原执行权，未决调用不重新发放执行许可，成功重放只返回可核实的原回执。
+- 接受取消、业务终态、SDK 清理返回和远端真实停止是不同事实。保留已有协作取消与清理，不能把本地 task 退出当作停止证明或退额依据；持久停止核对与跨 Worker 恢复仍须实际验证。
+- 模型/会话恢复沿原记录与 [session_store](../../SKM/backend/src/skillmind/agent/session_store.py)，缺失依据时停止；不补造 transcript、自动改模型或从头重跑。定期执行同样保留原 occurrence 与创建身份，入口见 [schedules/service](../../SKM/backend/src/skillmind/schedules/service.py)。
+
+## 外部效果
+
+- 外部写入沿 observe → propose → approve → apply；Agent 提案不等于远端执行。批准绑定精确 Proposal version/checksum、Provider、操作与 scope；[EffectService](../../SKM/backend/src/skillmind/effects/service.py)与独立 Worker 核对当前资格、冻结 binding、lease、取消和期限，不在业务锁内等待远端 I/O。
+- 自动批准只能来自原 Run 启动时明确记录的同意，或适用能力的既有预授权规则；Git/MCP 的额外同意不从旧 Run 补推。`repository.write/v1` 禁止 Project 预授权与 force，Git 仍核对精确 ref 和原提交，不把启动同意当作任意仓库写权限。
+- 实际能力由 [ExecutionFeatures](../../SKM/backend/src/skillmind/effects/release.py)与 [Provider registry](../../SKM/backend/src/skillmind/effects/wiring.py)共同限定：PostgreSQL INSERT/UPDATE、文档 CREATE、Git commit、MCP 调用各有独立开关；开启一项不开放其余。旧队列也须检查当前开关，历史读取与获授权的原结果核对保持独立。
+- 写入前观察、并发冲突检查、原操作幂等和 read-back 均须保留。原回执证明原操作；当前同名、同值或当前画面不能代替原回执。数据库、对象存储、仓库、MCP 与平台数据库之间没有统一原子事务。
+- 写入结果未知时停止主处理，保留原 Effect 与已发生事实；失败状态不证明未写入，不据此重做写入或补偿删除。原结果只读核对走 [reconciliation_service](../../SKM/backend/src/skillmind/effects/reconciliation_service.py)。取消、lease 到期或核对未检出都不证明未执行；MCP 的回读重试不能重发修改操作，入口见 [mcp_provider](../../SKM/backend/src/skillmind/effects/mcp_provider.py)。
+
+## 结果与评价
+
+- 技术终态、结果完整程度与业务 PASS/FAIL 分开表达。结果通过 [ResultValidator](../../SKM/backend/src/skillmind/agent/result_validation.py)校验冻结 Schema、引用归属、附件字节及保存的 Effect 事实；模型自称成功不构成 APPLIED，结构有效不证明业务正确。
+- Result/Evidence/Artifact 保留原值。人工修正追加 [Evaluation](../../SKM/backend/src/skillmind/evaluations/service.py)，不覆盖结果或自动采用建议；重复提交和未知响应沿原评价身份确认。
+- 附件只能发布经工具审计确认的原字节，下载核验归属和 hash。`audit.export/v1` 导出已存事实，不重新执行操作，不把通用审计 JSON 当作 Skill 规定的业务成果；入口见 [audit_export](../../SKM/backend/src/skillmind/agent/audit_export.py)。
+- 标准结果界面统一排版；Skill 明确要求的 HTML/Markdown 等仍按原规则生成与保存。展示故障回退原结果，不重跑模型、不改业务状态；静态文档预览保持禁脚本隔离。
+
+## 后置能力
+
+以生产注册、实际消费者和验证证据判断能力，不从数据表、常量或测试存在推导已交付；具体优先级只维护在[计划](../planning/roadmap.md)。
+
+| 范围 | 当前维护边界 |
+| --- | --- |
+| Run 统一预算 | [primary_budget](../../SKM/backend/src/skillmind/worker/primary_budget.py)及账本已有局部实现，生产 Worker 未装配 coordinator；[Codex](../../SKM/backend/src/skillmind/agent/codex_engine.py)对美元限额在启动前拒绝。局部 turns/output/timeout 不等于完整计费上限。后续接入须主子共享、收费前预留、可信计量，未知费用不退额。 |
+| 子 Agent | 后置开关下已有 Provider；权限只能经 [resolve_subagent_capabilities](../../SKM/backend/src/skillmind/agent/subagent.py)收窄，禁止写入、交互和递归 dispatch。[subagent_provider](../../SKM/backend/src/skillmind/agent/subagent_provider.py)仍沿用父 Schema/Brief，局部分配未接共享消费账本，停止与跨事务审计恢复未闭合。 |
+| 生成 UI | [modules](../../SKM/backend/src/skillmind/modules/)仅有版本模型与静态前置，[Manifest](../../SKM/contracts/runtime-manifest/v1alpha1.schema.json)的 frontend_module 仍仅允许 null，builder/安全投放/Host 未接。普通页面与静态 HTML 报告不算生成应用；开放执行前须验证隔离，bundle 使用 CSP sandbox allow-scripts，iframe 禁止 allow-same-origin。 |
+| 连续回执与短序列 | [局部实验](../../SKM/backend/tests/worker/test_receipt_sequence_experiment.py)仅用测试 journal 与 fake 批准/所有权；SDK、PostgreSQL、Outbox 的生产连续执行未接，不能当作可用运行模式。 |
+| 其他扩展 | Task Flow 目前只读预览；完整编排、SVN/Redmine 写入的交付、PR 自动创建及更广的 Shell/network 能力后置。新增能力按实际问题单独明确权限、恢复与验收范围，不因开关或局部 Provider 存在而扩大默认承诺。 |

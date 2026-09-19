@@ -523,7 +523,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
       {projectId && (
         <div className="resourceAdmin">
           {/* 弹窗が開いている間の error は弹窗内に出す。ここは一覧上の操作(停用など)の失敗用。 */}
-          {error && openDialog === null && <p className="error resourceAdminError" role="alert">{error}</p>}
+          {error && openDialog === null && deleteTarget === null && <p className="error resourceAdminError" role="alert">{error}</p>}
           {loading && <LoadingSkeleton label={messages.resources.loadingConfig} rows={2} />}
           {/* 通常操作は認証情報と権限の一覧・追加だけで完結する。 */}
           <section className="resourceTabPanel" aria-label={messages.resources.integrationListTitle}>
@@ -559,7 +559,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
           <ModalDialog open={deleteTarget !== null} title={messages.resources.deleteConfirm}
             onClose={() => { if (busy === null) setDeleteTarget(null) }}>
             <p>{deleteTarget?.name}</p>
-            {error && <p className="error" role="alert">{error}</p>}
+            {error && deleteTarget !== null && <p className="error" role="alert">{error}</p>}
             <div className="panelHeaderActions">
               <button className="secondaryButton" disabled={busy !== null} onClick={() => setDeleteTarget(null)} type="button">{messages.resources.cancel}</button>
               <button className="dangerButton" disabled={busy !== null} onClick={() => void removeResource()} type="button">{messages.resources.delete}</button>

@@ -481,8 +481,8 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
     <>
       <PageHeader
         title={detailView ? messages.workspace.executionDetail : activeModule ? messages.workspace.titleWithModule(activeModule.name) : messages.routes.workspace.label}
-        description={run ? undefined : activeModule?.description || undefined}
-        aside={<span className="scopeBadge">{activeModule?.name ?? messages.workspace.projectWideScope}</span>}
+        description={detailView || run ? undefined : activeModule?.description || undefined}
+        aside={<span className="scopeBadge">{!detailView && activeModule ? activeModule.name : messages.workspace.projectWideScope}</span>}
       />
       <section className={`workspace${run || detailView ? ' workspaceReading' : ''}`} aria-label={messages.workspace.taskExecutionAria}>
         {/* 左 rail は「実行の入口」と履歴へのショートカット、右 main は現在 Run の観測に責務を分離する。

@@ -30,9 +30,11 @@ export function RunHistoryPanel({ state, selectedRunId, onOpen, onPrevious, onNe
   if (state.status === 'error') {
     return <div><p className="error" role="alert">{state.message}</p><button className="secondaryButton" type="button" onClick={onRefresh}>{messages.runHistory.retry}</button></div>
   }
-  if (state.page.items.length === 0) return <EmptyState text={messages.runHistory.empty} />
+  const empty = state.page.items.length === 0
   return (
     <>
+      {empty && <EmptyState text={state.page.offset > 0 ? messages.runHistory.emptyPage
+        : trashed ? messages.runHistory.emptyTrash : messages.runHistory.empty} />}
       <div className="historyList">
         {state.page.items.map((item) => (
           <article className={`historyItem${selectedRunId === item.run_id ? ' historySelected' : ''}`} key={item.run_id}>
@@ -56,11 +58,11 @@ export function RunHistoryPanel({ state, selectedRunId, onOpen, onPrevious, onNe
           </article>
         ))}
       </div>
-      <div className="historyPagination">
+      {(!empty || state.page.offset > 0) && <div className="historyPagination">
         <button className="secondaryButton compactButton" disabled={state.page.offset === 0} type="button" onClick={onPrevious}>{messages.runHistory.previous}</button>
-        <span>{state.page.offset + 1}–{state.page.offset + state.page.items.length}</span>
+        {!empty && <span>{state.page.offset + 1}–{state.page.offset + state.page.items.length}</span>}
         <button className="secondaryButton compactButton" disabled={!state.page.has_more} type="button" onClick={onNext}>{messages.runHistory.next}</button>
-      </div>
+      </div>}
     </>
   )
 }

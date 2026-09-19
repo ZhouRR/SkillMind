@@ -557,8 +557,8 @@
   transition: border-color .15s ease;
 }
 .documentItem:hover { border-color: var(--border-strong); }
-.documentInfo { display: grid; gap: 3px; min-width: 0; }
-.documentInfo strong { overflow: hidden; color: var(--text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.documentInfo { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; min-width: 0; }
+.documentInfo strong { color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
 .documentInfo span { overflow: hidden; color: var(--text-faint); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .documentActions { display: flex; flex-shrink: 0; gap: 8px; }
 /* 寸法は .compactButton が持つ。ここは download 用の <a> を button と同じ行に揃える分だけ。 */
@@ -620,8 +620,10 @@
   .runPanel .runFacts { grid-template-columns: minmax(0, 1fr); }
   .runPanel .runFacts div { border: 0; padding: 6px 0; }
   .outcomeColumns { grid-template-columns: 1fr; }
-  .documentItem { flex-direction: column; align-items: stretch; }
-  .documentActions { justify-content: flex-end; }
+  .documentItem { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; }
+  .documentItem:has(> input[type='checkbox']) { grid-template-columns: 16px minmax(0, 1fr); }
+  .documentItem > input[type='checkbox'] { margin-top: 2px; }
+  .documentActions { grid-column: 1 / -1; justify-content: flex-end; min-width: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

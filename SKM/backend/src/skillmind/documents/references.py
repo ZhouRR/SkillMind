@@ -75,7 +75,13 @@ def run_document_ids(run: Run) -> frozenset[UUID]:
                 not isinstance(capability, str)
                 or (
                     not capability.startswith(("issue.", "repository."))
-                    and capability not in {"database.read/v1", "mcp.read/v1"}
+                    and capability not in {
+                        "database.read/v1",
+                        "mcp.read/v1",
+                        "mcp.tools/v1",
+                        "mcp.query/v1",
+                        "mcp.call/v1",
+                    }
                 )
                 or not isinstance(source.get("provider"), str)
                 or not source["provider"]

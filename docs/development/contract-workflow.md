@@ -1,6 +1,6 @@
 # 公开契约变更与联调
 
-本页适用于公开协议或持久格式变更；内部重构、样式和文案不因此新增 Schema、版本或 migration。字段语义见[领域设计](../design/README.md)，状态见[计划](../planning/roadmap.md)，命令环境见[本地开发](local-development.md)。
+本页适用于公开协议或持久格式变更；内部重构、样式和文案不因此新增 Schema、版本或 migration。维护边界见[运行指南](runtime-guide.md)，状态见[计划](../planning/roadmap.md)，命令环境见[本地开发](local-development.md)。
 
 ## 先看整条交付链
 
@@ -50,12 +50,7 @@ python3 -m pytest -p no:cacheprovider -o addopts= -q \
 - 旧 Web 读新 API：核对额外字段/enum；同批发布仍有旧浏览器、Worker 和在途请求。
 - API/Worker 回退：确认 schema、队列和非终态可读，不删审计或降低校验。
 
-可选展示损坏可按设计降级；身份、授权和必需协议错误不能降级为成功。
-
-## 示例：Run 的冻结文档读取投影
-
-[资源投影](../design/resource-snapshots.md#公开选择与读取投影的实施契约)贯穿选择 → 创建冻结 → detail 完整投影/history 摘要 → Web 三态。
-FROZEN 有清单，LEGACY_UNAVAILABLE/INVALID 无成员。验证跨 Project/slot/hash 拒绝、旧清单不变和各层一致；清单可信不表示 blob 可读或执行成功。
+可选展示损坏可按既有规则降级；身份、授权和必需协议错误不能降级为成功。
 
 ## 怎样记录验证结论
 

@@ -1,4 +1,4 @@
-import { purgeProjectDocument } from '../api'
+import { ApiProblemError, purgeProjectDocument } from '../api'
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import {
@@ -15,7 +15,7 @@ import { useDocumentDeletion } from '../hooks/useDocumentDeletion'
 import { useDocumentUpload } from '../hooks/useDocumentUpload'
 import { useDocumentUploadClosure } from '../hooks/useDocumentUploadClosure'
 import { useResourceQuery, type SessionEnded } from '../hooks/useResourceRequest'
-import { DOCUMENT_REQUEST_POLICY } from '../lib/documentFeedback'
+import { DOCUMENT_REQUEST_POLICY, documentFailure, type DocumentFailure } from '../lib/documentFeedback'
 import { DOCUMENT_PREVIEW_MAX_BYTES as PREVIEW_MAX_BYTES, documentPreviewHtml, documentMarkdownHtml } from '../lib/documentPreview'
 import { formatByteSize, formatLocalTimestamp } from '../lib/presentation'
 import { formatJsonPreview } from '../lib/jsonPreview'
@@ -106,7 +106,7 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
   const [manageBusy, setManageBusy] = useState(false)
   const managePending = useRef(false)
   const manageController = useRef<AbortController | null>(null)
-  const [manageFailure, setManageFailure] = useState(false)
+  const [manageFailure, setManageFailure] = useState<DocumentFailure['key'] | 'conflict' | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
   const refresh = useCallback(() => setRevision((current) => current + 1), [])
   const deletion = useDocumentDeletion({ projectId, csrfToken, readOnly, onSessionEnded, onDeleted: refresh })
@@ -134,7 +134,11 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
   const documentsState = list.failure ? { status: 'error' as const, message: messages.documentsPanel.failures[list.failure.key] }
     : list.data ? { status: 'ready' as const, documents: list.data } : { status: 'loading' as const }
   const blocked = manageBusy || readOnly || !!deletion.denied || deletion.phase !== 'idle' || confirming || upload.isLocked() || closure.locked()
+  const browsingBlocked = manageBusy || confirming || upload.isLocked() || closure.locked()
   const busyId = deletion.phase === 'sending' ? deletion.intent?.document_id ?? '__blocked__' : blocked ? '__blocked__' : null
+  const managementMessage = manageFailure === null ? null : manageFailure === 'conflict'
+    ? messages.fileManagement.failure : manageFailure === 'unknown' ? messages.fileManagement.unknown
+      : messages.documentsPanel.failures[manageFailure]
 
   useLayoutEffect(() => {
     mounted.current = true
@@ -150,7 +154,7 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
     if (!mounted.current || blocked || managePending.current || !deletion.canWrite()) return
     managePending.current = true
     setManageBusy(true)
-    setManageFailure(false)
+    setManageFailure(null)
     const controller = new AbortController()
     manageController.current = controller
     const timeout = window.setTimeout(() => controller.abort(), 30_000)
@@ -161,11 +165,25 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
       setSelectedIds(new Set())
       refresh()
     } catch (error) {
-      if (mounted.current) { setManageFailure(true); observeFailure(error); setEdit(null); refresh() }
+      if (mounted.current) {
+        const reason = reportManagementFailure(error)
+        // 確定した入力拒否は草稿を残し、その場で訂正できる。未知は再送を促さない。
+        if (reason !== 'conflict' && reason !== 'invalid') setEdit(null)
+        refresh()
+      }
     } finally {
       window.clearTimeout(timeout)
       if (mounted.current) { managePending.current = false; setManageBusy(false) }
     }
+  }
+
+  /** 参照拒否と結果未知を区別し、内部の例外本文は表示しない。 */
+  function reportManagementFailure(error: unknown): DocumentFailure['key'] | 'conflict' {
+    const reason = error instanceof ApiProblemError && error.status === 409 && error.code === 'document_conflict'
+      ? 'conflict' : documentFailure(error, true).key
+    setManageFailure(reason)
+    observeFailure(error)
+    return reason
   }
 
   /** 対象を一度確認し、複数件も同一 transaction で回収箱へ移す。 */
@@ -190,7 +208,7 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
     if (!mounted.current) return
     setConfirming(false)
     if (!confirmed || !deletion.canWrite() || managePending.current) return
-    managePending.current = true; setManageBusy(true); setManageFailure(false)
+    managePending.current = true; setManageBusy(true); setManageFailure(null)
     const request = new AbortController(); manageController.current = request
     try {
       for (const document of items) {
@@ -199,7 +217,7 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
         try { await purgeProjectDocument(projectId, document.document_id, csrfToken, request.signal) }
         finally { window.clearTimeout(timeout) }
       }
-    } catch (error) { if (mounted.current) { setManageFailure(true); observeFailure(error) } }
+    } catch (error) { if (mounted.current) reportManagementFailure(error) }
     finally { if (mounted.current) { managePending.current = false; setManageBusy(false); setSelectedIds(new Set()); refresh() } }
   }
 
@@ -256,15 +274,18 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
         {documentsState.status === 'ready' && <span className="eventCount">{documents.length}</span>}
       </div>
       <div className="formRow documentManagementToolbar">
-        <button type="button" className="secondaryButton" disabled={blocked} aria-pressed={!trashed} onClick={() => { setTrashed(false); setSelectedIds(new Set()) }}>{messages.fileManagement.active}</button>
-        <button type="button" className="secondaryButton" disabled={blocked} aria-pressed={trashed} onClick={() => { setTrashed(true); setSelectedIds(new Set()) }}>{messages.fileManagement.trash}</button>
+        <button type="button" className="secondaryButton" disabled={browsingBlocked} aria-pressed={!trashed} onClick={() => { setTrashed(false); setSelectedIds(new Set()) }}>{messages.fileManagement.active}</button>
+        <button type="button" className="secondaryButton" disabled={browsingBlocked} aria-pressed={trashed} onClick={() => { setTrashed(true); setSelectedIds(new Set()) }}>{messages.fileManagement.trash}</button>
         <input aria-label={messages.fileManagement.search} placeholder={messages.fileManagement.search} value={search} onChange={(e) => { setSearch(e.target.value); setSelectedIds(new Set()) }} />
         <select aria-label={messages.fileManagement.sort} value={sort} onChange={(e) => setSort(e.target.value)}><option value="name">{messages.fileManagement.byName}</option><option value="date">{messages.fileManagement.byDate}</option><option value="size">{messages.fileManagement.bySize}</option></select>
         {!trashed && <button className="secondaryButton" type="button" disabled={blocked} onClick={() => setEdit({ mode: 'CREATE_FOLDER', documents: [], folder: targetFolder ? targetFolder + '/' : '' })}>{messages.fileManagement.newFolder}</button>}
+        <button type="button" className="secondaryButton" onClick={refresh} disabled={list.pending}>
+          {messages.documentsPanel.refresh}
+        </button>
       </div>
       {trashed && <p className="hint">{messages.fileManagement.recycleHint}</p>}
       {folderQuery.failure && <p role="alert" className="error">{messages.fileManagement.failure}</p>}
-      {manageFailure && <p role="alert" className="error">{messages.fileManagement.failure}</p>}
+      {managementMessage && !edit && <p role="alert" className="error">{managementMessage}</p>}
       {!trashed && <div className="documentUpload documentToolbar">
         <label className="documentTargetFolder">{messages.documentsPanel.targetFolder}
           <input type="text" list="document-upload-folders" value={targetFolder} maxLength={200} disabled={blocked}
@@ -300,9 +321,6 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
             }}
           />
         </label>
-        <button type="button" className="secondaryButton documentRefresh" onClick={refresh} disabled={list.pending}>
-          {messages.documentsPanel.refresh}
-        </button>
       </div>}
       {documents.length > 0 && <div className="documentSelectionToolbar">
         <label><input type="checkbox" disabled={blocked} checked={visible.length > 0 && selectedDocuments.length === visible.length}
@@ -340,7 +358,8 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
       {documentsState.status === 'loading' && <LoadingSkeleton label={messages.documentsPanel.loadingDocs} rows={2} />}
       {documentsState.status === 'error' && <p className="error" role="alert">{documentsState.message}</p>}
       {documentsState.status === 'ready' && visible.length === 0 && (trashed || search || !folderQuery.data?.length) && (
-        <EmptyState text={messages.documentsPanel.emptyDocs} />
+        <EmptyState text={search ? messages.fileManagement.noMatches
+          : trashed ? messages.fileManagement.emptyTrash : messages.documentsPanel.emptyDocs} />
       )}
       {documentsState.status === 'ready' && (visible.length > 0 || (!trashed && (folderQuery.data?.length ?? 0) > 0)) && (
         <DocumentTree
@@ -360,7 +379,8 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
       {preview && <DocumentPreviewLoader key={preview.id} request={preview} projectId={projectId}
         isCurrent={() => mounted.current && previewRequest.current === preview}
         observeFailure={observeFailure} onClose={closePreview} />}
-      {edit && <DocumentOrganizeDialog edit={edit} folders={[...folders].sort()} busy={manageBusy} onClose={() => setEdit(null)} onSave={saveEdit} />}
+      {edit && <DocumentOrganizeDialog edit={edit} folders={[...folders].sort()} busy={manageBusy}
+        error={managementMessage} onClose={() => { setEdit(null); setManageFailure(null) }} onSave={saveEdit} />}
       {confirmDialog}
     </section>
   )
@@ -529,7 +549,7 @@ function FileRow({ document, projectId, busyId, onDelete, onPreview, selection }
         aria-label={messages.documentsPanel.selectFile(document.name)}
         onChange={(event) => selection.toggle(document.document_id, event.target.checked)} />}
       <div className="documentInfo">
-        <strong>{document.name}</strong>
+        <strong title={document.name}>{document.name}</strong>
         <span>
           {formatByteSize(document.size)} · {document.mime}
           {' · '}{formatLocalTimestamp(document.created_at)}

@@ -887,7 +887,10 @@ async def list_document_folders(
     tags=["documents"],
     responses={
         **_ACCESS_PROBLEMS,
-        409: problem_openapi_response("Path conflict or folder not empty"),
+        409: problem_openapi_response(
+            "document_conflict, document_in_use, document_references_unavailable, "
+            "or project_archived"
+        ),
         422: problem_openapi_response("Invalid document operation"),
     },
 )
@@ -953,11 +956,14 @@ async def manage_documents(
             detail="Document or folder is not accessible",
         ) from error
     except (DocumentInUseError, DocumentReferencesUnavailableError) as error:
+        in_use = isinstance(error, DocumentInUseError)
         raise ProblemException(
             status=409,
-            code="document_in_use",
-            title="Document is in use",
-            detail="A retained execution or schedule references this document",
+            code="document_in_use" if in_use else "document_references_unavailable",
+            title="Document operation blocked",
+            detail="A retained execution or schedule references this document"
+            if in_use
+            else "Document references could not be verified",
         ) from error
     except DocumentConflictError as error:
         raise ProblemException(

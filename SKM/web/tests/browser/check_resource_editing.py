@@ -127,6 +127,9 @@ async def check(url: str, output: Path) -> None:
                     await panel.get_by_role("button", name=labels["delete"], exact=True).click()
                     await dialog.get_by_role("button", name=labels["delete"], exact=True).click()
                     await expect(dialog.get_by_role("alert")).to_contain_text(labels["resourceInUse"])
+                    # 削除の失敗は確認中の dialog だけへ表示し、背面へ重複しない。
+                    await expect(page.locator(".resourceAdminError")).to_have_count(0)
+                    await expect(page.get_by_text(labels["resourceInUse"], exact=True)).to_have_count(1)
                     assert not api.deletes
                     await page.screenshot(path=str(output / f"resource-edit-{language}.png"))
                     await dialog.get_by_role("button", name=labels["cancel"], exact=True).click()

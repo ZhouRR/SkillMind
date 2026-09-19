@@ -705,13 +705,13 @@ export function SkillsPage({ projectId, csrfToken }: {
       />
       {/* 非活性側も mount を保ち、頁签切替で入力草稿や進行中の要求を破棄しない。 */}
       <div className="tabBar" role="tablist" aria-label={messages.skills.pageTabsAria}>
-        <SkillsPageTabButton current={pageTab} tab="library" onSelect={setPageTab}>
+        <SkillTabButton current={pageTab} tab="library" onSelect={setPageTab}>
           {messages.skills.libraryTitle}
           {libraryState.status === 'ready' && <span className="eventCount">{libraryState.versions.length}</span>}
-        </SkillsPageTabButton>
-        <SkillsPageTabButton current={pageTab} tab="workbench" onSelect={setPageTab}>
+        </SkillTabButton>
+        <SkillTabButton current={pageTab} tab="workbench" onSelect={setPageTab}>
           {messages.skills.tabWorkbench}
-        </SkillsPageTabButton>
+        </SkillTabButton>
       </div>
       {pageTab === 'library' && <>
         {importPending && <p role="status">{importPending}</p>}
@@ -830,11 +830,11 @@ export function SkillsPage({ projectId, csrfToken }: {
   )
 }
 
-/** 画面 2 大区分の tab button。選択状態を aria-selected で表す。 */
-function SkillsPageTabButton({ current, tab, onSelect, children }: {
-  current: SkillsPageTab
-  tab: SkillsPageTab
-  onSelect: (tab: SkillsPageTab) => void
+/** 画面と解釈詳細の tab を同じ keyboard 操作で切り替え、非表示の草稿は保持する。 */
+function SkillTabButton<T extends string>({ current, tab, onSelect, children }: {
+  current: T
+  tab: T
+  onSelect: (tab: T) => void
   children: ReactNode
 }) {
   return (
@@ -842,7 +842,19 @@ function SkillsPageTabButton({ current, tab, onSelect, children }: {
       aria-selected={current === tab}
       className="tab"
       onClick={() => onSelect(tab)}
+      onKeyDown={(event) => {
+        const buttons = Array.from(event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [])
+        const index = buttons.indexOf(event.currentTarget)
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1
+          : event.key === 'ArrowRight' ? (index + 1) % buttons.length
+            : event.key === 'ArrowLeft' ? (index + buttons.length - 1) % buttons.length : null
+        if (next === null) return
+        event.preventDefault()
+        buttons[next]?.focus()
+        buttons[next]?.click()
+      }}
       role="tab"
+      tabIndex={current === tab ? 0 : -1}
       type="button"
     >
       {children}
@@ -1114,14 +1126,14 @@ export function InterpretationExecutionView({ execution, instruction, onInstruct
       {report && !sourceExecution && <p className="interpretationSummary">{report.summary}</p>}
       {sourceExecution && <SourceExecutionPreview preview={sourceExecution} />}
       {!sourceExecution && <div className="tabBar" role="tablist" aria-label={messages.skills.detailTabsAria}>
-        <InterpretationTabButton current={detailTab} tab="report" onSelect={setDetailTab}>{messages.skills.tabReport}</InterpretationTabButton>
-        <InterpretationTabButton current={detailTab} tab="blueprint" onSelect={setDetailTab}>{messages.skills.blueprintTitle}</InterpretationTabButton>
-        <InterpretationTabButton current={detailTab} tab="contracts" onSelect={setDetailTab}>{messages.skills.generatedContractsTitle}</InterpretationTabButton>
-        <InterpretationTabButton current={detailTab} tab="diff" onSelect={setDetailTab}>
+        <SkillTabButton current={detailTab} tab="report" onSelect={setDetailTab}>{messages.skills.tabReport}</SkillTabButton>
+        <SkillTabButton current={detailTab} tab="blueprint" onSelect={setDetailTab}>{messages.skills.blueprintTitle}</SkillTabButton>
+        <SkillTabButton current={detailTab} tab="contracts" onSelect={setDetailTab}>{messages.skills.generatedContractsTitle}</SkillTabButton>
+        <SkillTabButton current={detailTab} tab="diff" onSelect={setDetailTab}>
           {messages.skills.revisionDiffTitle}
           {/* 構造差分がある時だけ点を出し、他 tab からも「見るべき差分がある」ことを示す。 */}
           {execution.diff.has_changes === true && <i className="tabAlert" aria-hidden="true" />}
-        </InterpretationTabButton>
+        </SkillTabButton>
       </div>}
       <div className="tabPanel" role="tabpanel" hidden={!sourceExecution && detailTab !== 'report'}>
         {report ? (
@@ -1174,26 +1186,6 @@ export function InterpretationExecutionView({ execution, instruction, onInstruct
         </div>
       </form>
     </section>
-  )
-}
-
-/** 解釈詳細 tab の button。選択状態を aria-selected で表す。 */
-function InterpretationTabButton({ current, tab, onSelect, children }: {
-  current: InterpretationDetailTab
-  tab: InterpretationDetailTab
-  onSelect: (tab: InterpretationDetailTab) => void
-  children: ReactNode
-}) {
-  return (
-    <button
-      aria-selected={current === tab}
-      className="tab"
-      onClick={() => onSelect(tab)}
-      role="tab"
-      type="button"
-    >
-      {children}
-    </button>
   )
 }
 

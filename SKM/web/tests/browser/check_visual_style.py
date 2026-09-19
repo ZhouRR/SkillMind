@@ -37,6 +37,7 @@ class VisualApi(ResultApi):
                 f"projects/{PROJECT}/documents": {
                     "documents": [json.loads((CONTRACTS / "examples/document.v1.json").read_text())]
                 },
+                f"projects/{PROJECT}/document-folders": {"folders": []},
                 **{
                     f"projects/{PROJECT}/{resource}": {"items": []}
                     for resource in (
@@ -68,10 +69,11 @@ async def brand_identity(page: Page, *, login: bool = False) -> None:
 
 
 async def header_navigation(page: Page) -> None:
-    """側欄・tab と同じ遷移を頁見出しへ重複させず、共通の予定 icon を使う。"""
+    """側欄は task 管理に予定設定を集約し、頁見出しへ移動先を重複させない。"""
     await expect(page.locator(".pageHeader button, .pageHeader a")).to_have_count(0)
     await expect(page.locator(".historyPage .panelHeader a")).to_have_count(0)
-    icon = page.locator('.sideNav a[href*="/schedules"] svg')
+    await expect(page.locator('.sideNav a[href*="/schedules"]')).to_have_count(0)
+    icon = page.locator('.sideNav a[href*="/tasks"] svg')
     await expect(icon.locator("rect")).to_have_count(1)
     await expect(icon.locator("circle")).to_have_count(0)
 
@@ -102,8 +104,16 @@ async def theme_controls(browser: Browser, url: str, output: Path) -> None:
         source = page.locator(".skillForm textarea").first
         await source.fill("Browser-only unsaved draft")
         await page.locator(".skillTextSource > summary").click()
-        await page.get_by_role("tab", name=labels["skills"]["libraryTitle"]).click()
-        await page.get_by_role("tab", name=labels["skills"]["tabWorkbench"], exact=True).click()
+        library = page.get_by_role("tab", name=labels["skills"]["libraryTitle"])
+        workbench = page.get_by_role("tab", name=labels["skills"]["tabWorkbench"], exact=True)
+        await library.click()
+        await expect(library).to_have_attribute("tabindex", "0")
+        await expect(workbench).to_have_attribute("tabindex", "-1")
+        for key, selected_tab in (("ArrowRight", workbench), ("ArrowRight", library),
+                                  ("ArrowLeft", workbench), ("Home", library), ("End", workbench)):
+            await page.keyboard.press(key)
+            await expect(selected_tab).to_be_focused()
+            await expect(selected_tab).to_have_attribute("aria-selected", "true")
         await page.locator(".skillTextSource > summary").click()
         await expect(source).to_have_value("Browser-only unsaved draft")
         await toggle.get_by_role("button", name=labels["theme"]["light"]).click()

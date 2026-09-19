@@ -11,7 +11,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from jsonschema import Draft202012Validator, ValidationError
+from jsonschema import ValidationError
 from markdown_it import MarkdownIt
 
 from scripts import build_docs
@@ -334,9 +334,8 @@ class DocumentationBuildTests(unittest.TestCase):
         self.assertEqual(paths[: len(priority)], priority)
         self.assertEqual(priority[0], "docs/README.md")
         chains = (
-            ("overview/product", "overview/architecture", "overview/glossary"),
-            ("design/authentication", "design/login-protection", "design/user-lifecycle"),
-            ("design/run-creation", "design/resource-snapshots", "design/agent-runtime"),
+            ("overview/product", "overview/architecture", "planning/roadmap"),
+            ("development/change-guide", "development/runtime-guide", "development/coding-rules"),
             ("operations/quickstart", "operations/deployment", "operations/backup-recovery"),
         )
         for chain in chains:
@@ -376,51 +375,42 @@ class DocumentationBuildTests(unittest.TestCase):
                     "Removed archive link found",
                 )
 
-    def test_design_index_covers_every_domain_source(self) -> None:
-        """領域の正本を総当たりで案内し、独立設計の孤立を防ぐ。"""
+    def test_guidance_index_links_to_current_reading_entries(self) -> None:
+        """入口から利用・実装・運用の案内を辿れ、削除した詳細設計を要求しない。"""
 
-        source = self.parse("docs/design/README.md").source
-        designs = sorted((build_docs.DOCS / "design").glob("*.md"))
-        self.assertGreater(len(designs), 1)
-        for path in designs:
-            if path.name == "README.md":
-                continue
-            with self.subTest(document=path.name):
-                self.assertIn(path.name, source)
+        source = self.parse("docs/README.md").source
+        for target in (
+            "overview/product.md", "planning/roadmap.md", "development/change-guide.md",
+            "development/runtime-guide.md", "design/workspace.md", "operations/quickstart.md",
+        ):
+            with self.subTest(target=target):
+                self.assertIn(target, source)
+        self.assertEqual(build_docs.GROUPS["design"], "界面规范")
 
     def test_roadmap_uses_current_report_with_all_work_items(self) -> None:
-        """進捗・優先表・首版範囲・受入条件を保ち、割合や優先順位は固定しない。"""
+        """現状・検証境界・改善方針と旧 ID を残し、割合や固定待項目を要求しない。"""
 
         document = self.parse("docs/planning/roadmap.md")
         self.assertTrue(
-            {"当前执行状态", "开发任务", "首版目标与推进顺序", "首版验收与停止条件"}
+            {"当前执行状态", "已实现的主要能力", "当前仍需核实的事项", "后续推进方式", "交付判断"}
             <= document.anchors
         )
         tasks = next(
             section for section in build_docs.search_sections(document)
-            if section["anchor"] == "开发任务"
+            if section["anchor"] == "原任务编号定位"
         )
-        rows = re.findall(
-            r"^\| (\d+) \| \[(R\d{2}) [^\]]+\]\([^)]+\) \| (\d+)% \| ([^|]+) \| ([^|]+) \|$",
-            tasks["text"],
-            re.MULTILINE,
+        self.assertEqual(
+            set(re.findall(r"\bR\d{2}\b", tasks["text"])),
+            {f"R{number:02d}" for number in range(1, 14)},
         )
-        self.assertEqual(len(rows), 13)
-        self.assertEqual([int(row[0]) for row in rows], list(range(1, 14)))
-        self.assertEqual({row[1] for row in rows}, {f"R{number:02d}" for number in range(1, 14)})
-        for _, identifier, percentage, status, scope in rows:
-            with self.subTest(item=identifier):
-                self.assertTrue(0 <= int(percentage) <= 100)
-                self.assertTrue(status.strip())
-                self.assertTrue(scope.strip())
-        self.assertEqual(sum(token.type == "table_open" for token in document.tokens), 1)
         self.assertNotIn("delivery-history", document.source)
 
-    def test_design_headings_use_topics_without_legacy_numbers(self) -> None:
+    def test_guidance_headings_use_topics_without_legacy_numbers(self) -> None:
         """整理後の章を旧番号へ戻さず、安定したテーマ名で案内する。"""
 
         targets = [
-            *sorted((build_docs.DOCS / "design").glob("*.md")),
+            build_docs.DOCS / "design/workspace.md",
+            build_docs.DOCS / "development/runtime-guide.md",
             build_docs.DOCS / "planning/roadmap.md",
         ]
         for path in targets:
@@ -430,21 +420,19 @@ class DocumentationBuildTests(unittest.TestCase):
                     continue
                 with self.subTest(document=path.name, section=section["title"]):
                     self.assertNotRegex(section["title"], r"^\d+(?:\.\d+)*\.?\s+")
-        self.assertIn("开发任务", self.parse("docs/planning/roadmap.md").anchors)
+        self.assertIn("当前执行状态", self.parse("docs/planning/roadmap.md").anchors)
 
     def test_adjacent_responsibilities_link_to_their_single_sources(self) -> None:
-        """会話・入力・結果と運用の分担を、旧空見出しなしで辿れるようにする。"""
+        """開発と運用の正本を辿れ、操作コマンドを障害案内へ複製しない。"""
 
         handoffs = {
-            "docs/design/authentication.md": ("user-lifecycle.md",),
-            "docs/design/agent-runtime.md": ("user-interactions.md", "results-evaluation.md"),
-            "docs/design/resource-snapshots.md": ("document-lifecycle.md",),
-            "docs/design/project-lifecycle.md": ("document-lifecycle.md",),
+            "docs/development/change-guide.md": (
+                "runtime-guide.md", "coding-rules.md", "contract-workflow.md",
+            ),
             "docs/operations/runbook.md": ("deployment.md", "backup-recovery.md"),
             "SKM/README.md": (
-                "project-lifecycle.md",
-                "document-lifecycle.md",
-                "user-lifecycle.md",
+                "runtime-guide.md",
+                "workspace.md",
                 "contract-workflow.md",
             ),
         }
@@ -459,37 +447,27 @@ class DocumentationBuildTests(unittest.TestCase):
         self.assertIn("dropdb --force", self.parse("docs/operations/backup-recovery.md").source)
         self.assertIn("alembic current", self.parse("docs/operations/deployment.md").source)
 
-    def test_evaluation_design_example_matches_the_request_schema(self) -> None:
-        """修訂例にも実契約を適用し、原値や actor を入力へ混入させない。"""
-
-        document = self.parse("docs/design/results-evaluation.md")
-        schema = json.loads(
-            (build_docs.ROOT / "SKM/contracts/evaluations/v1/create-request.schema.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        Draft202012Validator.check_schema(schema)
-        validator = Draft202012Validator(schema)
-        examples = [
-            json.loads(token.content)
-            for token in document.tokens
-            if token.type == "fence" and token.info == "json"
-        ]
-        self.assertTrue(examples)
-        for example in examples:
-            with self.subTest(example=example):
-                validator.validate(example)
-                self.assertTrue(example["revisions"])
-                self.assertTrue(example["revisions"][0]["pointer"].startswith("/"))
-
     def test_view_spec_examples_reject_invalid_shape_and_json(self) -> None:
-        """実 Schema の正例に加え、型違反と壊れた JSON も確実に拒否する。"""
+        """試験内の文書で実 Schema を検証し、説明本文への重複例を必須にしない。"""
 
-        documents = [
-            self.parse(path.relative_to(build_docs.ROOT).as_posix())
-            for path in build_docs.source_paths()
-        ]
-        self.assertGreater(build_docs.validate_examples(documents), 0)
+        fixture = {
+            "view_version": "skillmind.view/v1alpha1",
+            "key": "example.report",
+            "title": "Example report",
+            "mode": "report",
+            "input": {"schema_ref": "example-input/v1", "layout": []},
+            "preflight": {"sections": []},
+            "result": {"sections": [{"component": "summary"}]},
+        }
+        with tempfile.TemporaryDirectory(prefix="skillmind-doc-example-") as directory:
+            root = Path(directory)
+            path = root / "example.md"
+            path.write_text(f"# Example\n\n```json\n{json.dumps(fixture)}\n```\n")
+            with patch.object(build_docs, "ROOT", root):
+                document = build_docs.parse_document(path, MarkdownIt("commonmark"))
+
+        documents = [document]
+        self.assertEqual(build_docs.validate_examples(documents), 1)
         example = next(
             token
             for document in documents
@@ -520,9 +498,6 @@ class DocumentationBuildTests(unittest.TestCase):
         self.assertIn("backend/README.md", (backend / "Dockerfile").read_text())
         self.assertTrue(list((build_docs.ROOT / "SKM/contracts/users/v1").glob("*.schema.json")))
         self.assertIn("(contracts/users/v1/)", readme.source)
-        self.assertIn(
-            "(../../SKM/contracts/users/v1/)", self.parse("docs/design/user-lifecycle.md").source
-        )
 
     def test_invalid_legacy_target_fails_the_build(self) -> None:
         """統合先の不存在を unknown-page の黙った fallback にしない。"""
@@ -547,7 +522,10 @@ class DocumentationBuildTests(unittest.TestCase):
         payload = json.loads(first.split(marker, 1)[1].split("</script>", 1)[0])
         self.assertEqual(count, len(payload["pages"]))
         self.assertEqual(payload["aliases"], build_docs.LEGACY_PAGE_ALIASES)
-        self.assertGreater(examples, 0)
+        self.assertEqual(examples, build_docs.validate_examples([
+            self.parse(path.relative_to(build_docs.ROOT).as_posix())
+            for path in build_docs.source_paths()
+        ]))
         expected_ids = {
             path.relative_to(build_docs.ROOT).as_posix() for path in build_docs.source_paths()
         }
