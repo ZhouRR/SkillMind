@@ -48,19 +48,33 @@ assert len(patch) == 82132
 assert hashlib.sha256(patch).hexdigest() == '9e8925c7a43b2f3329522f31f0fd1a1233baa41cd7c8bb71344e6c843ca21eeb'
 subprocess.run(['git', 'apply', '--check', '-'], input=patch, check=True)
 subprocess.run(['git', 'apply', '-'], input=patch, check=True)
+
+def replace_once(path, old, new):
+    """一意な確認済み箇所だけを変更する。"""
+    p = Path(path)
+    text = p.read_text()
+    assert text.count(old) == 1, path
+    p.write_text(text.replace(old, new, 1))
+
 # 同じ Run/Integration の子操作を試す。操作ごとの Effect/Proposal identity は別に保つ。
-p = Path('SKM/backend/tests/worker/test_receipt_sequence_experiment.py')
-t = p.read_text()
-old = '        self.claims = claims or [self._claim() for _ in range(count)]\n'
-assert t.count(old) == 1
-t = t.replace(old, '''        if claims is None:
+replace_once('SKM/backend/tests/worker/test_receipt_sequence_experiment.py',
+    '        self.claims = claims or [self._claim() for _ in range(count)]\n',
+    '''        if claims is None:
             first = self._claim()
             self.claims = [replace(first, effect_execution_id=uuid4(), proposal_id=uuid4())
                            for _ in range(count)]
         else:
             self.claims = claims
 ''')
-p.write_text(t)
+replace_once('SKM/backend/src/skillmind/agent/audit_export.py',
+    '"meaning": "Saved observations and effect receipts; not a business verdict or current remote state.",',
+    '"meaning": ("Saved observations and effect receipts; "\n                    "not a business verdict or current remote state."),')
+replace_once('SKM/backend/src/skillmind/agent/audit_source.py',
+    '"request_content": "Only the stored arguments summary is available for this ToolCall; exact effect payloads remain in proposal records.",',
+    '"request_content": ("Only the stored arguments summary is available for this ToolCall; "\n                            "exact effect payloads remain in proposal records."),')
+replace_once('SKM/backend/tests/worker/test_receipt_sequence_experiment.py',
+    '"CREATE TABLE IF NOT EXISTS steps (position INTEGER PRIMARY KEY, identity TEXT, fingerprint TEXT, attempted INTEGER, receipt TEXT)"',
+    '("CREATE TABLE IF NOT EXISTS steps (position INTEGER PRIMARY KEY, "\n             "identity TEXT, fingerprint TEXT, attempted INTEGER, receipt TEXT)")')
 # tracked 差分と追加ファイルだけを選び、既存ファイルを大規模に整形しない。
 changed = set(subprocess.check_output(['git', 'diff', '--name-only'], text=True).splitlines())
 changed.update(subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard'], text=True).splitlines())
