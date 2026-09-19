@@ -41,6 +41,28 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python .github/prepare_runtime_changes.py
+      - name: Capture applied source without credentials
+        if: matrix.group == 'api'
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from zipfile import ZipFile, ZIP_DEFLATED
+          root = Path(os.environ['RUNNER_TEMP'])
+          paths = json.loads((root/'runtime-paths.json').read_text())
+          with ZipFile(root/'runtime-prepared-source.zip', 'w', ZIP_DEFLATED) as archive:
+              for path in paths:
+                  assert path.startswith(('SKM/', 'docs/'))
+                  archive.write(path, path)
+              archive.write(root/'source-fingerprint.json', 'source-fingerprint.json')
+          PY
+      - name: Keep prepared source for independent review
+        if: matrix.group == 'api'
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-prepared-source
+          path: ${{ runner.temp }}/runtime-prepared-source.zip
+          retention-days: 7
       - name: Verify new functionality first
         working-directory: SKM/backend
         run: python -m pytest tests/agent/test_audit_export.py tests/agent/test_result_proposal_lookup.py tests/agent/test_result_references.py tests/worker/test_receipt_sequence_experiment.py --junitxml="$RUNNER_TEMP/focused.xml"
