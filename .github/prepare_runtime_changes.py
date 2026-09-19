@@ -74,7 +74,7 @@ replace_once('SKM/backend/src/skillmind/agent/audit_source.py',
     '"request_content": ("Only the stored arguments summary is available for this ToolCall; "\n                            "exact effect payloads remain in proposal records."),')
 replace_once('SKM/backend/tests/worker/test_receipt_sequence_experiment.py',
     '"CREATE TABLE IF NOT EXISTS steps (position INTEGER PRIMARY KEY, identity TEXT, fingerprint TEXT, attempted INTEGER, receipt TEXT)"',
-    '("CREATE TABLE IF NOT EXISTS steps (position INTEGER PRIMARY KEY, "\n             "identity TEXT, fingerprint TEXT, attempted INTEGER, receipt TEXT)")')
+    '"CREATE TABLE IF NOT EXISTS steps (position INTEGER PRIMARY KEY, "\n            "identity TEXT, fingerprint TEXT, attempted INTEGER, receipt TEXT)"')
 # tracked 差分と追加ファイルだけを選び、既存ファイルを大規模に整形しない。
 changed = set(subprocess.check_output(['git', 'diff', '--name-only'], text=True).splitlines())
 changed.update(subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard'], text=True).splitlines())
