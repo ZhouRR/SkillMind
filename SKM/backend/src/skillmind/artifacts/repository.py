@@ -150,6 +150,9 @@ def _metadata(
         or response.get("artifact_refs") != [value.artifact_ref]
     ):
         raise _invalid()
+    if row["capability_version"] == "audit.export/v1":
+        _validate_export_row(row, value, response)
+        return value
     if row["capability_version"] == "document.convert/v1":
         _validate_conversion_row(row, value, response)
         return value
@@ -214,3 +217,32 @@ def _invalid() -> ArtifactIntegrityError:
     """内部 identity や原 response を HTTP/監査 error に混入させない。"""
 
     return ArtifactIntegrityError("Artifact does not match its saved identity or content")
+
+
+def _validate_export_row(row: RowMapping, value: ArtifactMetadata, response: dict[str, Any]) -> None:
+    """監査 exporter の公開回执を元 Evidence/Tool に照合する。外部 I/O はしない。"""
+    metadata, locator = row["metadata_json"], row["source_locator"]
+    if (
+        row["provider"] != "platform" or row["integration_id"] is not None
+        or row["tool_name"] != "mcp__skillmind__audit_export_v1"
+        or row["evidence_type"] != "audit-export" or row["snapshot_uri"] is not None
+        or row["source_uri"] != f"workspace://runs/{value.run_id}/{quote(value.path, safe='/')}"
+        or locator != {"path": value.path, "bytes": value.size_bytes}
+        or not isinstance(locator, dict) or type(locator.get("bytes")) is not int
+        or not isinstance(metadata, dict) or set(metadata) != {"audit_version", "selection"}
+        or metadata.get("audit_version") != "skillmind.audit-export/v1"
+        or response.get("provider") != "platform" or response.get("path") != value.path
+        or response.get("content_hash") != value.checksum
+        or type(response.get("bytes_written")) is not int
+        or response.get("bytes_written") != value.size_bytes
+        or response.get("evidence_refs") != [value.evidence_ref]
+    ):
+        raise _invalid()
+    from skillmind.agent.audit_export import export_selection
+
+    try:
+        selected = export_selection(metadata["selection"])
+    except (ValueError, TypeError, KeyError) as error:
+        raise _invalid() from error
+    if response.get("counts") != {"evidence": len(selected[0]), "proposals": len(selected[1])}:
+        raise _invalid()

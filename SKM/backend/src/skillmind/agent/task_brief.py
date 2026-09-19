@@ -552,6 +552,16 @@ def _finish_task_prompt(
             "external dedicated-desktop confirmation separately. Do not infer environment/build "
             "values or application readiness from a tool catalog."
         )
+    if any(tool.get("capability") == "audit.export/v1" for tool in brief["allowed_tools"]):
+        sections.append(
+            "Use audit.export/v1 for a generic copy of already-saved observations and effect "
+            "receipts; select exact references instead of transcribing their contents. It returns "
+            "an Artifact that can be saved through the existing approved document path. The export "
+            "is not a replacement for a Skill-specific result schema, required explanations or "
+            "external record-saving checkpoints. Missing raw arguments remain missing, not inferred. "
+            "In the final outcome, reference saved artifacts and retain necessary conclusions and "
+            "limitations without repeating full files or receipt bodies."
+        )
     sections.append(f"Task input (JSON): {canonical_json(input_json)}")
     properties = output_schema.get("properties", {})
     outcome_version = properties.get("outcome_version") if isinstance(properties, Mapping) else None

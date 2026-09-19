@@ -89,52 +89,42 @@ class PostgresArtifactLookup:
             return await ArtifactRepository(session).verified_refs(run_id, refs)
 
 
+@dataclass(frozen=True, slots=True)
+class ProposalReferenceState:
+    """一つの query snapshot で確認した参照の所有と進行状態。"""
+
+    existing: frozenset[str]
+    incomplete: frozenset[str]
+
+
 class ProposalLookup(Protocol):
-    """OutcomeEnvelope の ChangeProposal reference 所有/終状態を確認する port。"""
+    """Outcome の提案集合を同じ時点の読取で確認する port。"""
 
-    async def existing_refs(self, run_id: UUID, refs: frozenset[str]) -> frozenset[str]:
-        """指定 Run に属する Proposal reference だけを返す。"""
-
-        ...
-
-    async def incomplete_refs(self, run_id: UUID, refs: frozenset[str]) -> frozenset[str]:
-        """まだ批准/apply 待機中の Proposal reference を返す。"""
-
+    async def inspect_refs(self, run_id: UUID, refs: frozenset[str]) -> ProposalReferenceState:
+        """所有と未完了状態を一緒に返す。別々の SELECT の間に状態を混ぜない。"""
         ...
 
 
 class PostgresProposalLookup:
-    """PostgreSQL の ChangeProposal index から ownership と lifecycle を確認する。"""
+    """大量の Proposal 本文を読まず、必要な二列を一回だけ取得する。"""
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         """Read transaction 用 session factory を保持する。"""
-
         self._session_factory = session_factory
 
-    async def existing_refs(self, run_id: UUID, refs: frozenset[str]) -> frozenset[str]:
-        """Run/ref の複合条件に一致する Proposal reference を返す。"""
-
+    async def inspect_refs(self, run_id: UUID, refs: frozenset[str]) -> ProposalReferenceState:
+        """空集合を短絡し、同 Run の正確な状態を集合で返す。"""
         if not refs:
-            return frozenset()
+            return ProposalReferenceState(frozenset(), frozenset())
         async with self._session_factory() as session:
-            statement = select(ChangeProposal.proposal_ref).where(
-                ChangeProposal.run_id == run_id,
-                ChangeProposal.proposal_ref.in_(refs),
+            rows = (await session.execute(select(
+                ChangeProposal.proposal_ref, ChangeProposal.status
+            ).where(ChangeProposal.run_id == run_id, ChangeProposal.proposal_ref.in_(refs)))).all()
+            return ProposalReferenceState(
+                frozenset(ref for ref, _ in rows),
+                frozenset(ref for ref, status in rows
+                          if status in {"PENDING_APPROVAL", "APPROVED", "APPLYING"}),
             )
-            return frozenset(await session.scalars(statement))
-
-    async def incomplete_refs(self, run_id: UUID, refs: frozenset[str]) -> frozenset[str]:
-        """User/effect 待機 status の Proposal reference を返す。"""
-
-        if not refs:
-            return frozenset()
-        async with self._session_factory() as session:
-            statement = select(ChangeProposal.proposal_ref).where(
-                ChangeProposal.run_id == run_id,
-                ChangeProposal.proposal_ref.in_(refs),
-                ChangeProposal.status.in_({"PENDING_APPROVAL", "APPROVED", "APPLYING"}),
-            )
-            return frozenset(await session.scalars(statement))
 
 
 @dataclass(frozen=True, slots=True)
@@ -352,20 +342,17 @@ class ResultValidator:
                         "change_proposal_reference_invalid",
                         "Agent result referenced unavailable ChangeProposal items",
                     )
-                existing_proposals = await self._proposal_lookup.existing_refs(
+                proposal_state = await self._proposal_lookup.inspect_refs(
                     run_id, change_proposal_refs
                 )
-                missing_proposals = change_proposal_refs - existing_proposals
+                missing_proposals = change_proposal_refs - proposal_state.existing
                 if missing_proposals:
                     raise ResultValidationError(
                         "change_proposal_reference_invalid",
                         "Agent result referenced "
                         f"{len(missing_proposals)} unavailable ChangeProposal item(s)",
                     )
-                incomplete = await self._proposal_lookup.incomplete_refs(
-                    run_id, change_proposal_refs
-                )
-                if incomplete:
+                if proposal_state.incomplete:
                     raise ResultValidationError(
                         "change_proposal_incomplete",
                         "Agent result referenced a ChangeProposal that is still awaiting "

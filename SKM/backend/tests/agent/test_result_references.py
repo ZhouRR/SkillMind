@@ -7,13 +7,16 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
-
 from skillmind.agent.outcome import compile_outcome_schema
 from skillmind.agent.result_references import (
     EffectSummaryClaim,
     collect_result_references,
 )
-from skillmind.agent.result_validation import ResultValidationError, ResultValidator
+from skillmind.agent.result_validation import (
+    ProposalReferenceState,
+    ResultValidationError,
+    ResultValidator,
+)
 from tests.agent.test_result_validation import MemoryEvidenceLookup, _outcome
 
 
@@ -26,16 +29,12 @@ class ProposalLookup:
         self.run_id, self.exists, self.incomplete = run_id, exists, incomplete
         self.seen: list[frozenset[str]] = []
 
-    async def existing_refs(self, run_id: UUID, refs: frozenset[str]) -> frozenset[str]:
-        """別 Run や欠落の値を通さず、nested ref の照会を記録する。"""
-
+    async def inspect_refs(self, run_id: UUID, refs: frozenset[str]) -> ProposalReferenceState:
+        """同一の所有と状態を返し、query が一回だけであることを記録する。"""
         self.seen.append(refs)
-        return refs if run_id == self.run_id and self.exists else frozenset()
-
-    async def incomplete_refs(self, run_id: UUID, refs: frozenset[str]) -> frozenset[str]:
-        """同 Run の未完了記録だけを返す。"""
-
-        return refs if run_id == self.run_id and self.incomplete else frozenset()
+        existing = refs if run_id == self.run_id and self.exists else frozenset()
+        incomplete = existing if self.incomplete else frozenset()
+        return ProposalReferenceState(existing, incomplete)
 
 
 def effect_claim(**overrides: Any) -> dict[str, Any]:

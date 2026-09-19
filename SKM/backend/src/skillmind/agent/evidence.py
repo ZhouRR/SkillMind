@@ -256,7 +256,7 @@ class PostgresToolAuditWriter:
                     or tool_call.result_json is None
                 ):
                     raise ValueError("Tool replay does not match its saved result")
-                if invocation.tool.capability == "workspace.write/v2" or (
+                if invocation.tool.capability in {"workspace.write/v2", "audit.export/v1"} or (
                     invocation.tool.capability == "document.convert/v1"
                     and invocation.arguments.get("publish_artifact") is True
                 ):
@@ -552,6 +552,11 @@ def validate_artifact_publication(
         and invocation.arguments.get("publish_artifact") is True
     ):
         _validate_conversion_publication(invocation, result=result, evidence=evidence)
+        return
+    if invocation.tool.capability == "audit.export/v1":
+        from skillmind.agent.audit_export import validate_export_artifact
+
+        validate_export_artifact(invocation, result=result, evidence=evidence)
         return
     if invocation.tool.capability != "workspace.write/v2":
         if "artifact_refs" in result or any(

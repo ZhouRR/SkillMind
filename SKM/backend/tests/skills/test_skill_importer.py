@@ -341,6 +341,7 @@ def test_capability_catalog_is_sorted_unique_and_checksum_bound() -> None:
 
     loaded = load_capability_catalog(CONTRACTS / "examples" / "skill-capability-catalog.v1.json")
     assert [item.capability for item in loaded.capabilities] == [
+        "audit.export/v1",
         "change.propose/v1",
         "database.read/v1",
         "database.write/v1",
@@ -374,7 +375,7 @@ def test_capability_catalog_is_sorted_unique_and_checksum_bound() -> None:
         if definition.installed and issue.capability in definition.capabilities
     }
     assert loaded.checksum == (
-        "sha256:3f1c1bc1e365cf3c56fa59288b681f5512cf8949a07d0f20b4ed6a04cb69e766"
+        "sha256:5357daca88fc023cfc3b7d7961454b38bec86d16b6675b21b1411f875fa06b9f"
     )
     duplicate = CapabilityCatalogEntry(
         capability="issue.read/v1",

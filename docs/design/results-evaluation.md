@@ -185,3 +185,14 @@ pointer 以 / 指向既有目标，支持 ~0/~1；空值、缺字段、非法数
 ## 验收条件
 
 覆盖 PARTIAL/技术终态/人工判断分离、冻结 Schema、所有跨 Run/缺失引用、模型假称 APPLIED、两次评价原值不变、非法 pointer 整条回滚、合法 null/转义、提交丢响应与上下文切换。真实 commit/rollback 和浏览器时序分别验证；入口见[代码根 README](../../SKM/README.md)。
+
+
+## 保存済み監査のファイル出力
+
+`audit.export/v1` は現在の Run に属する Evidence と Proposal 参照を明示選択し、既存 ToolCall・Approval・Effect の保存値を中立な JSON Artifact にする。公開前後に現在の Project 読取権を確認し、別 Run・欠落参照は同じ不在応答とする。原改行、空観測、失敗・未確認状態を保持し、保存されていない生の読取引数を要約から復元しない。過去記録は現在の遠端状態や業務 PASS の証明ではない。
+
+要求は `output/` の保存先、目的、最大合計 50 参照。出力は 1 MiB 以内、超過は分割選択を求め、本文を切り捨てない。レスポンスは path/hash/counts/参照だけを返し、全文をモデルへ再送しない。原記録に機密らしい値があれば新しい公開 Artifact を作らない。Artifact は既存の一 ToolCall / 一 Evidence / 一保存内容の検証と保存上限を通し、同一 SDK request の再送は原保存結果を返す。
+
+新 Run の既存 `workspace.write/v2` と SUPERVISED 以上の範囲にだけ補助 Tool を固定し、または Skill が明示宣言する。過去 Run へ権限を追加しない。外部保存・承認は原文書 Effect のままで、export 自体は外部データを読み直したり書き込んだりしない。汎用監査 JSON は業務固有の実行結果や操作説明の代替ではなく、元 Skill の保存頻度・必須項目・検証条件は変更しない。
+
+最終結果の Proposal 参照は帰属と状態を同一 SELECT で読む。未存在、別 Run、承認待ち、実行待ちの拒否は従来どおりであり、Artifact/Evidence/Effect 照合を省略しない。

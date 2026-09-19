@@ -1,7 +1,17 @@
 {
   "catalog_version": "skillmind.tool-catalog/1",
-  "checksum": "sha256:3f1c1bc1e365cf3c56fa59288b681f5512cf8949a07d0f20b4ed6a04cb69e766",
+  "checksum": "sha256:5357daca88fc023cfc3b7d7961454b38bec86d16b6675b21b1411f875fa06b9f",
   "capabilities": [
+    {
+      "capability": "audit.export/v1",
+      "description": "Export selected saved Evidence and Proposal/Effect facts from this Run to a committed output Artifact without model transcription. Does not call external tools or assign business verdicts.",
+      "request_schema": "tools/audit.export/v1/request.schema.json",
+      "response_schema": "tools/audit.export/v1/response.schema.json",
+      "error_schema": "tools/audit.export/v1/error.schema.json",
+      "providers": [
+        "platform"
+      ]
+    },
     {
       "capability": "change.propose/v1",
       "description": "Create an audited ChangeProposal without applying an external effect.",

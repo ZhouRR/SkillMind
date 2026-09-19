@@ -10,6 +10,7 @@ from uuid import UUID
 
 from jsonschema import Draft202012Validator, FormatChecker
 
+from skillmind.agent.audit_export import AuditExportProvider
 from skillmind.agent.database_provider import DatabaseReadProvider
 from skillmind.agent.document_inspection import DocumentInspectProvider
 from skillmind.agent.document_listing import DocumentListProvider
@@ -314,6 +315,7 @@ def create_run_tool_registry(
     document_source: ProjectDocumentSource,
     document_observations: DocumentObservationLookup | None = None,
     document_readiness_provider: ToolProvider | None = None,
+    audit_export_provider: ToolProvider | None = None,
     redmine_issue_provider: ToolProvider | None = None,
     database_provider: ToolProvider | None = None,
     mcp_provider: ToolProvider | None = None,
@@ -358,6 +360,20 @@ def create_run_tool_registry(
                 unbound_provider="platform",
             ),
             *_workspace_tool_definitions(contracts),
+            ToolDefinition(
+                capability="audit.export/v1",
+                description=("Export selected saved Evidence and Proposal/Effect facts from this Run "
+                    "directly to an immutable output Artifact. Use evidence_refs and proposal_refs "
+                    "already returned by Tools; never rewrite original receipts to make an audit file. "
+                    "Returns only path/hash/counts/references, not the full export. Publish the returned "
+                    "artifact_ref using the existing approved document save when required. This generic "
+                    "audit JSON is not a Skill-specific execution-result schema or a business verdict."),
+                request_schema=contracts.load("tools/audit.export/v1/request.schema.json"),
+                response_schema=contracts.load("tools/audit.export/v1/response.schema.json"),
+                error_schema=contracts.load("tools/audit.export/v1/error.schema.json"),
+                providers={"platform": audit_export_provider or AuditExportProvider(None)},
+                unbound_provider="platform", minimum_execution_profile="SUPERVISED",
+            ),
             _interaction_tool_definition(contracts),
             *((_change_propose_tool_definition(contracts),)
               if deferred_features_enabled or database_writes_enabled
@@ -1008,6 +1024,8 @@ def _resolve_source_tools(
                 execution_profile=execution_profile,
             )
         )
+    if "audit.export/v1" in allowed and "audit.export/v1" not in resolved_capabilities:
+        tools.append(registry.resolve_unbound("audit.export/v1", execution_profile=execution_profile))
     return tools, repository_bindings
 
 

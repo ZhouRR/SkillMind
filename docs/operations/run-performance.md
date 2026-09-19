@@ -38,3 +38,12 @@
 MCP catalog 和 Schema 的结构检查按完整 canonical 内容做有界进程内复用；真实调用参数和结果仍逐次验证，权限、凭据、业务响应不缓存。单工具 query 只解析目标工具，discovery 才投影全授权列表。相同 Schema 不再在每个子节点和每个工具上重复 meta-schema 校验。外部工具目录仍在真实调用前核对，不以缓存代替远端契约检查。
 
 每个 Attempt 的 TEXT_DELTA 通过独立有界队列配送：最多 32 条、每条 16,384 字符，正常结束最多等待 100ms，取消时直接清理。仅过载的即时文字可丢弃，完整消息、结果、批准和持久事件不进入该队列。`realtime_publish` 现在与引擎消费并行，不能再与 `engine_wait` 相加解释总耗时；原授权、事件顺序和终态保存不减项。此项减少显示通道的反压，不宣称消除模型思考或 Effect 续行开销。
+
+
+## 审计导出与结果收尾
+
+新运行中已有工作区成果写入权限时，可用 `audit.export/v1` 将当前 Run 的已存 Evidence/Proposal 引用直接导出为 Artifact。模型不再为生成原始记录而重写回执、时间或参数摘要；输出仍保留原观测和 UNKNOWN，不合成缺失内容。通用导出不替代业务结果 JSON、必需解释或文档保存，保存频率与审批不变。工具返回路径、hash、计数和引用；运行日志不记录正文。
+
+结果校验将 Proposal 归属与待处理状态合并为一个作用域查询，减少一次数据库往返，未移除任何校验。这不代表减少了模型 turn，需分别比较导出前后的生成字节、保存阶段耗时及 `result_references`。
+
+连续回执与短序列仅做隔离实验：`tests/worker/test_receipt_sequence_experiment.py` 使用真实通用 MCP Provider、固定工具契约、模拟授权/通信和本地 SQLite journal，检验原操作 ID 回读、保存后交付、失败停止、取消、等待及中断恢复。没有接入 SDK、生产 PostgreSQL/Outbox、Agent lease 或 Web；不能把这些测试当作线上暂停次数已减少或跨 Worker 恢复已保证。当前生产提案仍正常暂停、批准并续行。

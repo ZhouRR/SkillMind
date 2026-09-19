@@ -19,6 +19,8 @@ from arq.worker import Function
 from arq.worker import func as arq_function
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from skillmind.agent.audit_export import AuditExportProvider
+from skillmind.agent.audit_source import PostgresAuditExportSource
 from skillmind.agent.claude import ClaudeRuntimeConfiguration
 from skillmind.agent.codex_engine import CodexAgentSdkEngine
 from skillmind.agent.codex_runtime import CodexRuntimeConfiguration
@@ -247,6 +249,7 @@ async def startup(ctx: dict[str, Any], *, maintenance_only: bool = False) -> Non
         document_source=document_source,
         document_observations=PostgresDocumentObservationLookup(ctx["database_session_factory"]),
         document_readiness_provider=DocumentReadinessProvider(ctx["database_session_factory"]),
+        audit_export_provider=AuditExportProvider(PostgresAuditExportSource(ctx["database_session_factory"])),
         mcp_provider=McpReadProvider(
             ctx["database_session_factory"], source=StreamableHttpMcpSource(),
             secret_resolver=DeploymentSecretResolver(cipher=secret_cipher),
