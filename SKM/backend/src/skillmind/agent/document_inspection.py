@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -13,7 +14,11 @@ from skillmind.agent.evidence import EvidenceDraft
 from skillmind.agent.tool_gateway import ProviderToolResult, RunToolContext, ToolProviderError
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.documents.domain import DocumentContentError
-from skillmind.documents.snapshot import DOCUMENT_INSPECT_CAPABILITY, DocumentSnapshotError
+from skillmind.documents.snapshot import (
+    DOCUMENT_INSPECT_CAPABILITY,
+    DocumentSnapshotError,
+    same_document_content,
+)
 from skillmind.documents.source import (
     InspectableProjectDocumentSource,
     ProjectDocumentObservation,
@@ -67,14 +72,14 @@ class DocumentInspectProvider:
         if (
             observed is None
             or observed.project_id != context.project_id
-            or observed.document != document
+            or not same_document_content(observed.document, document)
             or observed.observation.size != document.size
             or resolve_frozen_document(context, arguments) != document
         ):
             raise ToolProviderError(
                 "unavailable", "Frozen document metadata no longer matches", retryable=False
             )
-        return document_observation_result(context.project_id, observed)
+        return document_observation_result(context.project_id, replace(observed, document=document))
 
 
 def document_observation_result(

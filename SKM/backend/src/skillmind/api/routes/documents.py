@@ -587,12 +587,15 @@ async def list_documents(
     request: Request,
     project_id: UUID,
     actor: ProjectReadActor,
+    trashed: bool = False,
 ) -> DocumentListResponse:
     """Project 成員に文書 metadata の一覧を返す。"""
 
     await authorize_project_access(request, actor, project_id)
     service: DocumentService = request.app.state.document_service
-    documents = await service.list_documents(project_id=project_id)
+    documents = await service.list_documents(
+        project_id=project_id, **({"trashed": True} if trashed else {})
+    )
     return DocumentListResponse(documents=[_document_response(item) for item in documents])
 
 
@@ -698,6 +701,7 @@ async def delete_document(
     project_id: UUID,
     document_id: UUID,
     actor: ProjectWriteActor,
+    purge: bool = False,
 ) -> Response:
     """原会話・Project・参照の門禁を同じ業務 transaction に渡す。"""
 
@@ -705,7 +709,10 @@ async def delete_document(
     service: DocumentService = request.app.state.document_service
     try:
         await service.delete_document(
-            project_id=project_id, document_id=document_id, access=user_access(request, actor)
+            project_id=project_id,
+            document_id=document_id,
+            access=user_access(request, actor),
+            **({"purge": True} if purge else {}),
         )
     except UnauthorizedSessionError as error:
         raise authentication_required_problem() from error
@@ -827,3 +834,140 @@ def _document_not_found(error: Exception) -> ProblemException:
         detail="Document is not available in this project",
         code="document_not_found",
     )
+
+
+class DocumentPathChange(BaseModel):
+    """原 path の比較を伴う文書 identity 単位の改名・移動。"""
+
+    model_config = ConfigDict(extra="forbid")
+    document_id: UUID
+    expected_folder: str = Field(max_length=200)
+    expected_name: str = Field(min_length=1, max_length=200)
+    folder: str = Field(max_length=200)
+    name: str = Field(min_length=1, max_length=200)
+
+
+class DocumentManagementRequest(BaseModel):
+    """目录操作または有界な複数文書移動を同じ transaction で行う。"""
+
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["CREATE_FOLDER", "MOVE", "MOVE_FOLDER", "DELETE_FOLDER", "TRASH", "RESTORE"]
+    changes: list[DocumentPathChange] = Field(default_factory=list, max_length=500)
+    source: str | None = Field(default=None, max_length=200)
+    target: str | None = Field(default=None, max_length=200)
+
+
+class DocumentFoldersResponse(BaseModel):
+    """空目录を含む正規相対 path の一覧。"""
+
+    model_config = ConfigDict(extra="forbid")
+    folders: list[str]
+
+
+@router.get(
+    "/projects/{project_id}/document-folders",
+    response_model=DocumentFoldersResponse,
+    tags=["documents"],
+)
+async def list_document_folders(
+    request: Request, response: Response, project_id: UUID, actor: ProjectReadActor
+) -> DocumentFoldersResponse:
+    """認可済み Project の目录だけを列挙する。"""
+    await authorize_project_access(request, actor, project_id)
+    response.headers["Cache-Control"] = "no-store"
+    return DocumentFoldersResponse(
+        folders=await request.app.state.document_service.list_folders(project_id=project_id)
+    )
+
+
+@router.post(
+    "/projects/{project_id}/document-operations",
+    status_code=204,
+    response_class=Response,
+    tags=["documents"],
+    responses={
+        **_ACCESS_PROBLEMS,
+        409: problem_openapi_response("Path conflict or folder not empty"),
+        422: problem_openapi_response("Invalid document operation"),
+    },
+)
+async def manage_documents(
+    request: Request, project_id: UUID, body: DocumentManagementRequest, actor: ProjectWriteActor
+) -> Response:
+    """共通認可と元 path の条件付きで改名・移動・空目录操作を受け付ける。"""
+    valid = (
+        (
+            body.action in {"MOVE", "TRASH", "RESTORE"}
+            and bool(body.changes)
+            and body.source is None
+            and body.target is None
+        )
+        or (
+            body.action == "CREATE_FOLDER"
+            and not body.changes
+            and body.source is None
+            and bool(body.target)
+        )
+        or (
+            body.action == "MOVE_FOLDER"
+            and not body.changes
+            and bool(body.source)
+            and bool(body.target)
+        )
+        or (
+            body.action == "DELETE_FOLDER"
+            and not body.changes
+            and bool(body.source)
+            and body.target is None
+        )
+    )
+    if not valid:
+        raise ProblemException(
+            status=422,
+            code="invalid_document_operation",
+            title="Invalid operation",
+            detail="Document operation arguments are invalid",
+        )
+    try:
+        await request.app.state.document_service.manage_documents(
+            project_id=project_id,
+            access=user_access(request, actor),
+            action=body.action,
+            changes=[item.model_dump() for item in body.changes],
+            source=body.source,
+            target=body.target,
+        )
+    except UnauthorizedSessionError as error:
+        raise authentication_required_problem() from error
+    except CsrfRejectedError as error:
+        raise csrf_rejected_problem() from error
+    except ProjectNotFoundError as error:
+        raise project_not_found_problem() from error
+    except ProjectArchivedError as error:
+        raise project_archived_problem() from error
+    except DocumentNotFoundError as error:
+        raise ProblemException(
+            status=404,
+            code="document_not_found",
+            title="Document not found",
+            detail="Document or folder is not accessible",
+        ) from error
+    except (DocumentInUseError, DocumentReferencesUnavailableError) as error:
+        raise ProblemException(
+            status=409,
+            code="document_in_use",
+            title="Document is in use",
+            detail="A retained execution or schedule references this document",
+        ) from error
+    except DocumentConflictError as error:
+        raise ProblemException(
+            status=409,
+            code="document_conflict",
+            title="Document path conflict",
+            detail="Check current source and destination paths; folders must be empty to delete",
+        ) from error
+    except UploadRejectedError as error:
+        raise ProblemException(
+            status=422, code=error.code, title="Invalid document path", detail=str(error)
+        ) from error
+    return Response(status_code=204, headers={"Cache-Control": "no-store"})

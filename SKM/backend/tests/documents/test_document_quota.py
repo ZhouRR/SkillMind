@@ -42,9 +42,12 @@ def _tables(connection: sqlite3.Connection) -> None:
     connection.execute(
         "CREATE TABLE document_upload_intents (project_id TEXT, size INTEGER, state TEXT)"
     )
-    connection.execute("CREATE TABLE document_effect_uploads (project_id TEXT, size INTEGER)")
     connection.execute(
-        "CREATE TABLE document_blob_cleanups (project_id TEXT, upload_intent_id TEXT, size INTEGER)"
+        "CREATE TABLE document_effect_uploads (project_id TEXT, size INTEGER, document_id TEXT)"
+    )
+    connection.execute(
+        "CREATE TABLE document_blob_cleanups "
+        "(project_id TEXT, upload_intent_id TEXT, size INTEGER, document_id TEXT)"
     )
 
 
@@ -129,9 +132,9 @@ async def test_legacy_cleanup_transfers_charge_and_linked_cleanup_does_not_dupli
         assert await repository.project_usage_bytes(project_id) == 15
         connection.execute("DELETE FROM project_documents")
         connection.executemany(
-            "INSERT INTO document_blob_cleanups VALUES (?, ?, ?)",
-            [(project_id.hex, None, 5), (project_id.hex, uuid4().hex, 10),
-             (other.hex, None, 100)],
+            "INSERT INTO document_blob_cleanups (project_id, upload_intent_id, size) "
+            "VALUES (?, ?, ?)",
+            [(project_id.hex, None, 5), (project_id.hex, uuid4().hex, 10), (other.hex, None, 100)],
         )
         assert await repository.project_usage_bytes(project_id) == 15
     finally:

@@ -1,11 +1,15 @@
+import { purgeProjectDocument } from '../api'
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import {
   loadProjectDocuments,
+  loadDocumentFolders,
+  manageDocuments,
   loadProjectDocumentText,
   projectDocumentContentHref,
   type ProjectDocumentRecord,
 } from '../api'
+import { DocumentOrganizeDialog, type DocumentEdit } from './DocumentOrganizeDialog'
 import { useMessages } from '../i18n'
 import { useDocumentDeletion } from '../hooks/useDocumentDeletion'
 import { useDocumentUpload } from '../hooks/useDocumentUpload'
@@ -95,97 +99,114 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
   const confirmPending = useRef(false)
   const [confirming, setConfirming] = useState(false)
   const [targetFolder, setTargetFolder] = useState('')
+  const [trashed, setTrashed] = useState(false)
+  const [search, setSearch] = useState('')
+  const [sort, setSort] = useState('name')
+  const [edit, setEdit] = useState<DocumentEdit | null>(null)
+  const [manageBusy, setManageBusy] = useState(false)
+  const managePending = useRef(false)
+  const manageController = useRef<AbortController | null>(null)
+  const [manageFailure, setManageFailure] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
-  const batchActive = useRef(false)
-  const [batchProgress, setBatchProgress] = useState<{ deleted: number; total: number; running: boolean } | null>(null)
   const refresh = useCallback(() => setRevision((current) => current + 1), [])
   const deletion = useDocumentDeletion({ projectId, csrfToken, readOnly, onSessionEnded, onDeleted: refresh })
   const { observeFailure } = deletion
   const closureGate = useRef<() => boolean>(() => false)
   const closeClosureLookup = useRef<() => void>(() => undefined)
   const upload = useDocumentUpload({ actorId, projectId, csrfToken, readOnly: readOnly || !!deletion.denied,
-    canWrite: () => deletion.canWrite() && !confirmPending.current && !batchActive.current && !closureGate.current(),
+    canWrite: () => deletion.canWrite() && !confirmPending.current && !closureGate.current() && !managePending.current,
     canRead: () => deletion.canRead() && !confirmPending.current,
     onDenied: deletion.observeDenial, onPublished: refresh, beforeBatchAction: () => closeClosureLookup.current() })
   const closure = useDocumentUploadClosure({ actorId, projectId, csrfToken,
     readOnly: readOnly || !!deletion.denied || !!upload.denied,
-    canRead: () => upload.canRead(), canWrite: () => deletion.canWrite() && !confirmPending.current && !batchActive.current && !upload.denied,
+    canRead: () => upload.canRead(), canWrite: () => deletion.canWrite() && !confirmPending.current && !managePending.current && !upload.denied,
     claim: upload.claimClosure, claimRecovery: upload.claimRecoveredClosure,
     release: upload.releaseClosure, accept: upload.acceptClosure, acceptRecovery: upload.acceptRecoveredClosure,
     beforeAction: upload.closeRecovery,
     onDenied: upload.observeDenial })
   closureGate.current = closure.locked
   closeClosureLookup.current = closure.recovery.close
-  const loader = useCallback((signal: AbortSignal) => loadProjectDocuments(projectId, signal), [projectId])
-  const list = useResourceQuery(`${projectId}:${revision}`, loader, () => undefined, DOCUMENT_REQUEST_POLICY,
+  const loader = useCallback((signal: AbortSignal) => loadProjectDocuments(projectId, signal, trashed), [projectId, trashed])
+  const folderLoader = useCallback((signal: AbortSignal) => loadDocumentFolders(projectId, signal), [projectId])
+  const folderQuery = useResourceQuery(`${projectId}:${revision}`, folderLoader, () => undefined, DOCUMENT_REQUEST_POLICY, true, observeFailure)
+  const list = useResourceQuery(`${projectId}:${revision}:${trashed}`, loader, () => undefined, DOCUMENT_REQUEST_POLICY,
     true, observeFailure)
   const documentsState = list.failure ? { status: 'error' as const, message: messages.documentsPanel.failures[list.failure.key] }
     : list.data ? { status: 'ready' as const, documents: list.data } : { status: 'loading' as const }
-  const blocked = readOnly || !!deletion.denied || deletion.phase !== 'idle' || confirming || batchActive.current || upload.isLocked() || closure.locked()
+  const blocked = manageBusy || readOnly || !!deletion.denied || deletion.phase !== 'idle' || confirming || upload.isLocked() || closure.locked()
   const busyId = deletion.phase === 'sending' ? deletion.intent?.document_id ?? '__blocked__' : blocked ? '__blocked__' : null
 
   useLayoutEffect(() => {
     mounted.current = true
     return () => {
       mounted.current = false
+      manageController.current?.abort()
       previewRequest.current = null
     }
   }, [])
 
-  /** 所有確認は backend に委ね、UI では明示確認の上で 1 件を削除する。 */
-  async function handleDelete(document: ProjectDocumentRecord): Promise<void> {
-    if (!mounted.current || !deletion.canWrite() || confirmPending.current || batchActive.current || upload.isLocked() || closure.locked()) return
-    closure.recovery.close()
-    upload.closeRecovery()
-    confirmPending.current = true
-    setConfirming(true)
-    const confirmed = await confirm({
-      title: messages.documentsPanel.remove,
-      message: messages.documentsPanel.deleteConfirm(document.name),
-      confirmLabel: messages.documentsPanel.remove,
-      destructive: true,
-    })
-    confirmPending.current = false
-    if (!mounted.current) return
-    setConfirming(false)
-    if (confirmed) deletion.submit(document)
+  /** 原対象を保持した単一 request。未知を自動再送せず、現状確認へ戻す。 */
+  async function performManagement(body: Parameters<typeof manageDocuments>[1]): Promise<void> {
+    if (!mounted.current || blocked || managePending.current || !deletion.canWrite()) return
+    managePending.current = true
+    setManageBusy(true)
+    setManageFailure(false)
+    const controller = new AbortController()
+    manageController.current = controller
+    const timeout = window.setTimeout(() => controller.abort(), 30_000)
+    try {
+      await manageDocuments(projectId, body, csrfToken, controller.signal)
+      if (!mounted.current) return
+      setEdit(null)
+      setSelectedIds(new Set())
+      refresh()
+    } catch (error) {
+      if (mounted.current) { setManageFailure(true); observeFailure(error); setEdit(null); refresh() }
+    } finally {
+      window.clearTimeout(timeout)
+      if (mounted.current) { managePending.current = false; setManageBusy(false) }
+    }
   }
 
-  /** 一括確認した原 ID を直列削除する。拒否・未知では残りを送らず選択を残す。 */
-  async function handleDeleteSelected(): Promise<void> {
-    if (!deletion.canWrite() || confirmPending.current || batchActive.current || upload.isLocked() || closure.locked()) return
-    const originals = documents.filter((item) => selectedIds.has(item.document_id)).map((item) => ({ ...item }))
-    if (!originals.length) return
-    closure.recovery.close()
-    upload.closeRecovery()
+  /** 対象を一度確認し、複数件も同一 transaction で回収箱へ移す。 */
+  async function recycle(items: ProjectDocumentRecord[], restore = false): Promise<void> {
+    if (blocked || confirmPending.current || !items.length) return
     confirmPending.current = true
     setConfirming(true)
-    const confirmed = await confirm({ title: messages.documentsPanel.deleteSelected,
-      message: messages.documentsPanel.deleteSelectedConfirm(originals.length),
-      confirmLabel: messages.documentsPanel.remove, destructive: true })
+    const confirmed = await confirm({ title: restore ? messages.fileManagement.restore : messages.fileManagement.trashAction,
+      message: items.map((d) => d.name).join('、'), confirmLabel: restore ? messages.fileManagement.restore : messages.fileManagement.trashAction, destructive: !restore })
     confirmPending.current = false
     if (!mounted.current) return
     setConfirming(false)
-    if (!confirmed || !deletion.canWrite()) return
-    batchActive.current = true
-    let deleted = 0
-    const publish = (): void => setBatchProgress({ deleted, total: originals.length, running: batchActive.current })
-    const next = (): void => {
-      if (!mounted.current) return
-      const original = originals[deleted]
-      if (!original) { batchActive.current = false; publish(); return }
-      const accepted = deletion.submit(original, (success) => {
-        if (!mounted.current) return
-        if (!success) { batchActive.current = false; publish(); return }
-        deleted += 1
-        setSelectedIds((current) => { const remaining = new Set(current); remaining.delete(original.document_id); return remaining })
-        publish()
-        next()
-      })
-      if (!accepted) batchActive.current = false
-      publish()
-    }
-    next()
+    if (confirmed) await performManagement({ action: restore ? 'RESTORE' : 'TRASH', changes: items.map((d) => ({ document_id: d.document_id, expected_folder: d.folder, expected_name: d.name, folder: d.folder, name: d.name })) })
+  }
+
+  /** 明示確認した原 ID のみ逐次削除し、一件でも未知/失敗なら停止する。 */
+  async function purge(items: ProjectDocumentRecord[]): Promise<void> {
+    if (blocked || confirmPending.current || !items.length) return
+    confirmPending.current = true; setConfirming(true)
+    const confirmed = await confirm({ title: messages.fileManagement.purge, message: messages.fileManagement.purgeDocuments + '\n' + items.map((d) => d.name).join('、'), confirmLabel: messages.fileManagement.purge, destructive: true })
+    confirmPending.current = false
+    if (!mounted.current) return
+    setConfirming(false)
+    if (!confirmed || !deletion.canWrite() || managePending.current) return
+    managePending.current = true; setManageBusy(true); setManageFailure(false)
+    const request = new AbortController(); manageController.current = request
+    try {
+      for (const document of items) {
+        if (!mounted.current || !deletion.canWrite()) break
+        const timeout = window.setTimeout(() => request.abort(), 30_000)
+        try { await purgeProjectDocument(projectId, document.document_id, csrfToken, request.signal) }
+        finally { window.clearTimeout(timeout) }
+      }
+    } catch (error) { if (mounted.current) { setManageFailure(true); observeFailure(error) } }
+    finally { if (mounted.current) { managePending.current = false; setManageBusy(false); setSelectedIds(new Set()); refresh() } }
+  }
+
+  function saveEdit(folder: string, name: string): void {
+    if (!edit) return
+    if (edit.mode === 'MOVE') void performManagement({ action: 'MOVE', changes: edit.documents.map((d) => ({ document_id: d.document_id, expected_folder: d.folder, expected_name: d.name, folder, name: edit.documents.length === 1 ? name : d.name })) })
+    else void performManagement({ action: edit.mode, source: edit.source, target: folder })
   }
 
   /** HTTP 待機は共通 query に委ね、クリックと同時に前 request の所有権を閉じる。 */
@@ -207,8 +228,9 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
 
   const documents = documentsState.status === 'ready' ? documentsState.documents : []
   const selectedDocuments = documents.filter((item) => selectedIds.has(item.document_id))
-  const tree = buildDocumentTree(documents)
-  const folders = new Set<string>()
+  const visible = documents.filter((d) => `${d.folder}/${d.name}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()))
+  const tree = buildDocumentTree(visible, trashed || search ? [] : folderQuery.data ?? [], sort)
+  const folders = new Set<string>(trashed ? [] : folderQuery.data ?? [])
   for (const item of documents) {
     const segments = item.folder.split('/').filter(Boolean)
     while (segments.length) { folders.add(segments.join('/')); segments.pop() }
@@ -219,7 +241,13 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
       if (checked) next.add(id)
       else next.delete(id)
       return next
-    }), onFolder: setTargetFolder }
+    }), onFolder: setTargetFolder,
+    edit: trashed ? undefined : (d) => setEdit({ mode: 'MOVE', documents: [d], folder: d.folder }),
+    folderEdit: trashed ? undefined : (path) => setEdit({ mode: 'MOVE_FOLDER', documents: [], source: path, folder: path }),
+    folderSelect: (path) => setSelectedIds(new Set(visible.filter((d) => d.folder === path || d.folder.startsWith(path + '/')).map((d) => d.document_id))),
+    folderDelete: trashed ? undefined : (path) => { void performManagement({ action: 'DELETE_FOLDER', source: path }) },
+    purge: trashed ? (document) => { void purge([document]) } : undefined,
+    trashed }
   return (
     <section className="panel documentPanel" aria-label={messages.documentsPanel.panelAria}>
       {/* 画面見出し(项目文档)との二重表示を避け、panel は一覧の性格を示す。 */}
@@ -227,7 +255,17 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
         <h2>{messages.documentsPanel.listTitle}</h2>
         {documentsState.status === 'ready' && <span className="eventCount">{documents.length}</span>}
       </div>
-      <div className="documentUpload documentToolbar">
+      <div className="formRow documentManagementToolbar">
+        <button type="button" className="secondaryButton" disabled={blocked} aria-pressed={!trashed} onClick={() => { setTrashed(false); setSelectedIds(new Set()) }}>{messages.fileManagement.active}</button>
+        <button type="button" className="secondaryButton" disabled={blocked} aria-pressed={trashed} onClick={() => { setTrashed(true); setSelectedIds(new Set()) }}>{messages.fileManagement.trash}</button>
+        <input aria-label={messages.fileManagement.search} placeholder={messages.fileManagement.search} value={search} onChange={(e) => { setSearch(e.target.value); setSelectedIds(new Set()) }} />
+        <select aria-label={messages.fileManagement.sort} value={sort} onChange={(e) => setSort(e.target.value)}><option value="name">{messages.fileManagement.byName}</option><option value="date">{messages.fileManagement.byDate}</option><option value="size">{messages.fileManagement.bySize}</option></select>
+        {!trashed && <button className="secondaryButton" type="button" disabled={blocked} onClick={() => setEdit({ mode: 'CREATE_FOLDER', documents: [], folder: targetFolder ? targetFolder + '/' : '' })}>{messages.fileManagement.newFolder}</button>}
+      </div>
+      {trashed && <p className="hint">{messages.fileManagement.recycleHint}</p>}
+      {folderQuery.failure && <p role="alert" className="error">{messages.fileManagement.failure}</p>}
+      {manageFailure && <p role="alert" className="error">{messages.fileManagement.failure}</p>}
+      {!trashed && <div className="documentUpload documentToolbar">
         <label className="documentTargetFolder">{messages.documentsPanel.targetFolder}
           <input type="text" list="document-upload-folders" value={targetFolder} maxLength={200} disabled={blocked}
             placeholder={messages.documentsPanel.rootFolder} onChange={(event) => setTargetFolder(event.target.value)} />
@@ -265,20 +303,20 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
         <button type="button" className="secondaryButton documentRefresh" onClick={refresh} disabled={list.pending}>
           {messages.documentsPanel.refresh}
         </button>
-      </div>
+      </div>}
       {documents.length > 0 && <div className="documentSelectionToolbar">
-        <label><input type="checkbox" disabled={blocked} checked={selectedDocuments.length === documents.length}
-          ref={(element) => { if (element) element.indeterminate = selectedDocuments.length > 0 && selectedDocuments.length < documents.length }}
-          onChange={(event) => setSelectedIds(event.target.checked ? new Set(documents.map((item) => item.document_id)) : new Set())} />
+        <label><input type="checkbox" disabled={blocked} checked={visible.length > 0 && selectedDocuments.length === visible.length}
+          ref={(element) => { if (element) element.indeterminate = selectedDocuments.length > 0 && selectedDocuments.length < visible.length }}
+          onChange={(event) => setSelectedIds(event.target.checked ? new Set(visible.map((item) => item.document_id)) : new Set())} />
           {messages.documentsPanel.selectAll}</label>
         <span role="status">{messages.documentsPanel.selectedCount(selectedDocuments.length)}</span>
         <button type="button" className="secondaryButton compactButton" disabled={blocked || selectedDocuments.length === 0}
-          onClick={() => void handleDeleteSelected()}>{messages.documentsPanel.deleteSelected}</button>
+          onClick={() => void recycle(selectedDocuments, trashed)}>{trashed ? messages.fileManagement.restore : messages.fileManagement.trashAction}</button>
+        {trashed && <button className="secondaryButton compactButton" type="button" disabled={blocked || selectedDocuments.length === 0} onClick={() => void purge(selectedDocuments)}>{messages.fileManagement.purge}</button>}
+        {!trashed && <button className="secondaryButton compactButton" type="button" disabled={blocked || selectedDocuments.length === 0} onClick={() => setEdit({ mode: 'MOVE', documents: selectedDocuments, folder: targetFolder })}>{messages.fileManagement.moveSelected}</button>}
         <button type="button" className="secondaryButton compactButton" disabled={blocked || selectedDocuments.length === 0}
           onClick={() => setSelectedIds(new Set())}>{messages.documentsPanel.clearSelection}</button>
       </div>}
-      {batchProgress && <p role="status">{messages.documentsPanel.batchDeleted(batchProgress.deleted, batchProgress.total)}
-        {!batchProgress.running && batchProgress.deleted < batchProgress.total && ` ${messages.documentsPanel.batchStopped}`}</p>}
       <DocumentUploadStatus upload={upload} canRead={deletion.canRead() && !confirming} />
       <DocumentUploadClosure upload={upload} closure={closure} />
       {readOnly && <p className="hint">{messages.documentsPanel.failures.archived}</p>}
@@ -301,16 +339,16 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
       </section>}
       {documentsState.status === 'loading' && <LoadingSkeleton label={messages.documentsPanel.loadingDocs} rows={2} />}
       {documentsState.status === 'error' && <p className="error" role="alert">{documentsState.message}</p>}
-      {documentsState.status === 'ready' && documents.length === 0 && (
+      {documentsState.status === 'ready' && visible.length === 0 && (trashed || search || !folderQuery.data?.length) && (
         <EmptyState text={messages.documentsPanel.emptyDocs} />
       )}
-      {documentsState.status === 'ready' && documents.length > 0 && (
+      {documentsState.status === 'ready' && (visible.length > 0 || (!trashed && (folderQuery.data?.length ?? 0) > 0)) && (
         <DocumentTree
           root={tree}
           projectId={projectId}
           busyId={busyId}
           selection={selection}
-          onDelete={(document) => void handleDelete(document)}
+          onDelete={(document) => void recycle([document], trashed)}
           onPreview={(document, kind) => void handlePreview(document, kind)}
         />
       )}
@@ -322,6 +360,7 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
       {preview && <DocumentPreviewLoader key={preview.id} request={preview} projectId={projectId}
         isCurrent={() => mounted.current && previewRequest.current === preview}
         observeFailure={observeFailure} onClose={closePreview} />}
+      {edit && <DocumentOrganizeDialog edit={edit} folders={[...folders].sort()} busy={manageBusy} onClose={() => setEdit(null)} onSave={saveEdit} />}
       {confirmDialog}
     </section>
   )
@@ -362,6 +401,12 @@ interface DocumentTreeSelection {
   disabled: boolean
   toggle: (id: string, checked: boolean) => void
   onFolder: (path: string) => void
+  edit?: (document: ProjectDocumentRecord) => void
+  folderEdit?: (path: string) => void
+  folderDelete?: (path: string) => void
+  folderSelect?: (path: string) => void
+  purge?: (document: ProjectDocumentRecord) => void
+  trashed?: boolean
 }
 
 /** 文書一覧を folder path の実階層で表示する presentational tree。folder 先行・file 後続で安定表示する。 */
@@ -427,7 +472,12 @@ function FolderNode({ folder, depth, projectId, busyId, onDelete, onPreview, sel
         <span className="docFolderCount">{countDocuments(folder)}</span>
       </summary>
       <div className="docFolderBody">
-        {selection && <button type="button" className="secondaryButton compactButton" disabled={selection.disabled}
+        {selection && <div className="formRow documentFolderToolbar">
+          <button className="secondaryButton compactButton" type="button" disabled={selection.disabled} onClick={() => selection.folderSelect?.(folder.path)}>{messages.fileManagement.selectFolder}</button>
+          {selection.folderEdit && <button className="secondaryButton compactButton" type="button" disabled={selection.disabled} onClick={() => selection.folderEdit?.(folder.path)}>{messages.fileManagement.rename} / {messages.fileManagement.move}</button>}
+          {countDocuments(folder) === 0 && selection.folderDelete && <button className="secondaryButton compactButton" type="button" disabled={selection.disabled} onClick={() => selection.folderDelete?.(folder.path)}>{messages.fileManagement.emptyFolder}</button>}
+        </div>}
+        {selection && !selection.trashed && <button type="button" className="secondaryButton compactButton" disabled={selection.disabled}
           onClick={() => selection.onFolder(folder.path)}>{messages.documentsPanel.uploadHere}</button>}
         {folder.folders.map((child) => (
           <FolderNode
@@ -486,6 +536,8 @@ function FileRow({ document, projectId, busyId, onDelete, onPreview, selection }
         </span>
       </div>
       <div className="documentActions">
+        {selection?.purge && <button className="secondaryButton compactButton" type="button" disabled={selection.disabled} onClick={() => selection.purge?.(document)}>{messages.fileManagement.purge}</button>}
+        {selection?.edit && <button className="secondaryButton compactButton" type="button" disabled={selection.disabled} onClick={() => selection.edit?.(document)}>{messages.fileManagement.rename} / {messages.fileManagement.move}</button>}
         {kind !== null && (
           <button
             className="secondaryButton compactButton"
@@ -510,7 +562,7 @@ function FileRow({ document, projectId, busyId, onDelete, onPreview, selection }
           onClick={() => onDelete(document)}
           type="button"
         >
-          {busyId === document.document_id ? messages.documentsPanel.deleting : messages.documentsPanel.remove}
+          {busyId === document.document_id ? messages.documentsPanel.deleting : selection?.trashed ? messages.fileManagement.restore : messages.fileManagement.trashAction}
         </button>
       </div>
     </li>
@@ -567,7 +619,7 @@ export function DocumentPreviewDialog({ preview, projectId, onClose }: {
 }
 
 /** 文書一覧から folder path の実階層 tree を構築する。folder・file とも名称昇順で安定させる。 */
-export function buildDocumentTree(documents: ProjectDocumentRecord[]): DocumentTreeNode {
+export function buildDocumentTree(documents: ProjectDocumentRecord[], emptyFolders: string[] = [], sort = 'name'): DocumentTreeNode {
   const root: DocumentTreeNode = { name: '', path: '', folders: [], files: [] }
   const nodes = new Map<string, DocumentTreeNode>([['', root]])
   const ensureFolder = (path: string): DocumentTreeNode => {
@@ -580,12 +632,13 @@ export function buildDocumentTree(documents: ProjectDocumentRecord[]): DocumentT
     nodes.set(path, node)
     return node
   }
+  for (const path of emptyFolders) ensureFolder(path)
   for (const document of documents) {
     ensureFolder(document.folder).files.push(document)
   }
   const sortNode = (node: DocumentTreeNode): void => {
     node.folders.sort((left, right) => left.name.localeCompare(right.name))
-    node.files.sort((left, right) => left.name.localeCompare(right.name))
+    node.files.sort((left, right) => (sort === 'size' ? right.size - left.size : sort === 'date' ? Date.parse(right.created_at) - Date.parse(left.created_at) : 0) || left.name.localeCompare(right.name))
     node.folders.forEach(sortNode)
   }
   sortNode(root)

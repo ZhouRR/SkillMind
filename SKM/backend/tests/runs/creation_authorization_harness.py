@@ -37,6 +37,7 @@ from skillmind.db.models import (
     ResourceBinding,
     Run,
     RunBudgetAccount,
+    RunDeletionAudit,
     RunEvent,
     RunSegment,
     RunSkillSnapshot,
@@ -295,6 +296,16 @@ class CreationAuthorizationHarness:
         """組織/Project/所属を実 SQL の完全な scope 条件で検索する。"""
 
         entity, params = self.query(statement)
+        if entity is RunDeletionAudit:
+            assert set(params) == {"project_id_1", "task_id_1", "idempotency_key_1"}
+            assert statement.whereclause.compare(
+                and_(
+                    RunDeletionAudit.project_id == params["project_id_1"],
+                    RunDeletionAudit.task_id == params["task_id_1"],
+                    RunDeletionAudit.idempotency_key == params["idempotency_key_1"],
+                )
+            )
+            return None
         if entity in (SkillVersion, ProjectSkillVersion):
             if entity is SkillVersion:
                 self.step("skill")

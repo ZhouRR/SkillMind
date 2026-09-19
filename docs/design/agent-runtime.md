@@ -195,6 +195,14 @@ observe → Evidence → propose → 精确批准/允许的预授权 → 独立 
 
 停写须覆盖所有 job/cron/实例，dispatch 开关不等于全局停止；见[发布边界](../operations/deployment.md)。
 
+## 执行履历回收站
+
+历史列表提供回收站、恢复和完全删除。默认历史及每个任务的最新报告排除回收站，仍可按原 ID 查看其详情。只有终态且没有活动 Attempt/Session、未决 Effect、桌面待核对操作、活动核对请求或未结预算的 Run 可以删除。
+
+移入回收站可同时处理本次公开成果，原始输入和被其他历史/定期任务引用的成果保留；恢复只恢复同次删除标记的成果，同名冲突全事务拒绝。完全删除仅接受回收站 Run：清理其结果、证据、提案/批准、执行段、快照、输入准备记录、队列投递及附属 occurrence，保留定期任务配置、共享文件和外部业务数据库。未公开成果预约先核对，不能消失以换取删除成功。
+
+完全删除解除本 Run 对 Skill 版本的外键引用；其他执行、定期任务或组合的引用仍阻止版本删除。独立最小删除审计保留执行/任务 ID、执行者、时间、请求 ID、成果数及原幂等键，不保留 Skill 外键，也不允许迟到的原启动请求重新执行。对象字节清理与目录删除分开确认，参见[文档生命周期](document-lifecycle.md#整理与回收站)。Worker/SDK 本地缓存仍按部署保留策略管理，不能将数据库删除解释成服务器磁盘全面清理。
+
 ## Claude Agent SDK 实现要求
 
 锁定 SDK/CLI 版本并记录模型/options checksum，SessionStore 镜像 transcript。Run 与 Skill 解释显式选用固定 SDK 的随包 CLI；[文件身份校验](../../SKM/backend/src/skillmind/agent/claude_build.py)核对安装归属及 RECORD 的大小/SHA-256，拒绝缺失、替换或系统 CLI 回退。配布目录在进程生命周期内须保持不可变；此校验不等于计量或停止证明。Hook 执行平台策略，SDK allowed tools 与 structured output 不替代参数和结果校验。人工等待须收束收费进程，不长期占 Worker。

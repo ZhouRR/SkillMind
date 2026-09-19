@@ -10,6 +10,9 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import Select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from skillmind.agent.domain import AgentEvent, AgentEventType
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.db.models import (
@@ -20,6 +23,7 @@ from skillmind.db.models import (
     ProjectSkillVersion,
     Run,
     RunAttempt,
+    RunDeletionAudit,
     RunEvent,
     RunResult,
     RunSegment,
@@ -50,8 +54,6 @@ from skillmind.runs.domain import (
 )
 from skillmind.runs.interaction import InteractionRequestDraft
 from skillmind.runs.repository import RunRepository
-from sqlalchemy import Select
-from sqlalchemy.ext.asyncio import AsyncSession
 from tests.runs.task_binding_fakes import TaskBindingRows
 
 
@@ -80,6 +82,7 @@ def mock_session(*, inserted: bool, existing: Run | None = None) -> MagicMock:
     """PostgreSQL statement の結果だけを置き換えた AsyncSession mock を返す。"""
 
     session = MagicMock(spec=AsyncSession)
+    session.scalar = AsyncMock(return_value=None)
     execute_result = MagicMock()
     execute_result.scalar_one_or_none.return_value = uuid4() if inserted else None
     session.execute = AsyncMock(return_value=execute_result)
@@ -147,6 +150,8 @@ async def test_create_freezes_explicit_published_skill_version() -> None:
     async def scalar(statement: Select[Any]) -> object:
         """元 Project の組織と実共有 guard の二つの SQL だけを評価する。"""
 
+        if statement.column_descriptions[0]["entity"] is RunDeletionAudit:
+            return None
         if statement.column_descriptions[0]["expr"] is Project.organization_id:
             assert statement.compile().params == {"id_1": command.project_id}
             return project.organization_id

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol, runtime_checkable
 from uuid import UUID
 
@@ -186,10 +186,23 @@ class DatabaseProjectDocumentSource:
             return None
         document, reference = resolved
         if observed is not None and (
-            _frozen_metadata(document) != observed.document
+            (
+                _frozen_metadata(document).document_id,
+                document.mime,
+                document.size,
+                document.checksum,
+            )
+            != (
+                observed.document.document_id,
+                observed.document.mime,
+                observed.document.size,
+                observed.document.content_hash,
+            )
             or _reference_checksum(reference) != observed.reference_checksum
-            or (observed.source_object_key is not None
-                and observed.source_object_key != reference.key)
+            or (
+                observed.source_object_key is not None
+                and observed.source_object_key != reference.key
+            )
         ):
             raise DocumentSnapshotError("Document no longer matches its observed metadata")
         data, observation = await read_document_content(
@@ -198,8 +211,8 @@ class DatabaseProjectDocumentSource:
         )
         return ProjectDocumentContent(
             document_id=document.document_id,
-            folder=document.folder,
-            name=document.name,
+            folder=observed.document.folder if observed else document.folder,
+            name=observed.document.name if observed else document.name,
             mime=document.mime,
             checksum=document.checksum,
             size=document.size,
@@ -253,7 +266,8 @@ async def read_frozen_document(
     if content is None:
         raise DocumentSnapshotError("Frozen document is no longer available")
     verify_frozen_content(document, content)
-    return content
+    # 表示 path が変更されても、凍結 Run の入力 path は当時の値を使う。
+    return replace(content, folder=document.folder, name=document.name)
 
 
 def verify_frozen_content(document: FrozenDocument, content: ProjectDocumentContent) -> None:
@@ -261,8 +275,6 @@ def verify_frozen_content(document: FrozenDocument, content: ProjectDocumentCont
 
     if (
         content.document_id != document.document_id
-        or content.folder != document.folder
-        or content.name != document.name
         or content.mime != document.mime
         or content.size != document.size
         or content.checksum != document.content_hash

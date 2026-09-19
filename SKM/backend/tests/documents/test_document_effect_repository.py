@@ -9,11 +9,15 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import Column, MetaData, Table, UniqueConstraint, create_engine, select
+from sqlalchemy.orm import Session
+
 from skillmind.artifacts.repository import ArtifactRepository
 from skillmind.db.models import (
     ProjectDocument,
     ProjectDocumentCleanup,
     ProjectDocumentEffectUpload,
+    ProjectDocumentFolder,
     ProjectDocumentUpload,
 )
 from skillmind.documents.domain import (
@@ -27,8 +31,6 @@ from skillmind.documents.repository import DocumentRepository
 from skillmind.documents.upload_repository import DocumentUploadRepository
 from skillmind.storage.effect_write import ObjectWriteReceipt, build_object_write
 from skillmind.storage.validation import UploadLimits, UploadRejectedError
-from sqlalchemy import Column, MetaData, Table, UniqueConstraint, create_engine, select
-from sqlalchemy.orm import Session
 from tests.storage.test_object_effect import fixture as object_fixture
 
 
@@ -48,6 +50,10 @@ class SqlSession:
                 if timestamp is not None and timestamp.tzinfo is None:
                     setattr(value, name, timestamp.replace(tzinfo=UTC))
         return value
+
+    async def scalars(self, statement):
+        """目录名前空間の検索も実 SQL で評価する。"""
+        return self.session.scalars(statement)
 
     async def get(self, model, identifier):
         """通常文書の取得/削除拒否にも同じ transaction を使う。"""
@@ -69,6 +75,7 @@ def database(monkeypatch):
         ProjectDocumentEffectUpload,
         ProjectDocumentUpload,
         ProjectDocumentCleanup,
+        ProjectDocumentFolder,
     ):
         source = model.__table__
         table = Table(

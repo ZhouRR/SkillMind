@@ -70,9 +70,10 @@ export async function loadDocumentUpload(
 export async function loadProjectDocuments(
   projectId: string,
   signal?: AbortSignal,
+  trashed = false,
 ): Promise<ProjectDocumentRecord[]> {
   return parseDocumentList(await requestApiJson(
-    `${API_BASE}/projects/${encodeURIComponent(projectId)}/documents`,
+    `${API_BASE}/projects/${encodeURIComponent(projectId)}/documents${trashed ? '?trashed=true' : ''}`,
     { signal, cache: 'no-store' }, 200,
   ), projectId).documents
 }
@@ -212,4 +213,28 @@ function isDocument(value: unknown): value is ProjectDocumentRecord {
     && Array.from(value.folder as string).length <= 200
     && Array.from(value.name as string).length >= 1 && Array.from(value.name as string).length <= 200
     && Array.from(value.mime as string).length >= 1 && Array.from(value.mime as string).length <= 128
+}
+
+/** 空目录を含む現在の Project の目录一覧。 */
+export async function loadDocumentFolders(projectId: string, signal?: AbortSignal): Promise<string[]> {
+  const value = await requestApiJson(`${API_BASE}/projects/${encodeURIComponent(projectId)}/document-folders`, { signal, cache: 'no-store' }, 200)
+  if (!isRecord(value) || !Array.isArray(value.folders) || !value.folders.every((v: unknown) => typeof v === 'string')) throw new Error('Invalid folder list')
+  return value.folders as string[]
+}
+
+/** 原 path 条件付きの目录操作。自動再送しない。 */
+export async function manageDocuments(projectId: string, body: {
+  action: 'CREATE_FOLDER' | 'MOVE' | 'MOVE_FOLDER' | 'DELETE_FOLDER' | 'TRASH' | 'RESTORE'
+  changes?: { document_id: string; expected_folder: string; expected_name: string; folder: string; name: string }[]
+  source?: string; target?: string
+}, csrfToken: string, signal?: AbortSignal): Promise<void> {
+  await requestApiEmpty(`${API_BASE}/projects/${encodeURIComponent(projectId)}/document-operations`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+    body: JSON.stringify(body), signal, cache: 'no-store',
+  }, 204)
+}
+
+/** 回収箱の文書だけを完全削除する。履歴による参照保護は解除しない。 */
+export async function purgeProjectDocument(projectId: string, documentId: string, csrfToken: string, signal?: AbortSignal): Promise<void> {
+  await requestApiEmpty(`${API_BASE}/projects/${encodeURIComponent(projectId)}/documents/${encodeURIComponent(documentId)}?purge=true`, { method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken }, signal, cache: 'no-store' }, 204)
 }

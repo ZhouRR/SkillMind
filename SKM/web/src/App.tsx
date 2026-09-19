@@ -491,7 +491,7 @@ function renderPage(
         actorId={session.user.user_id} projectId={projectId} moduleId={activeModuleId}
         csrfToken={session.csrf_token} initialRunId={initialRunId}
         projectReadOnly={currentProject?.status !== 'ACTIVE'} onSessionExpired={onSessionEnded}
-      /> : <HistoryPage projectId={projectId} />
+      /> : <HistoryPage key={`${session.user.user_id}:${projectId}:${session.csrf_token}`} projectId={projectId} csrfToken={session.csrf_token} readOnly={currentProject?.status !== 'ACTIVE'} />
     case 'home':
       return <HomePage metaState={metaState} project={currentProject} projectId={projectId} />
   }

@@ -93,6 +93,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     features = configured_execution_features(settings)
     app.state.run_service = RunService(
         app.state.database_session_factory,
+        file_storage=app.state.file_storage,
         scheduling_enabled=settings.scheduling_enabled,
         deferred_features_enabled=features.deferred,
         database_writes_enabled=features.database_writes,

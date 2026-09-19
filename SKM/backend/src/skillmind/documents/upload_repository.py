@@ -74,17 +74,27 @@ class DocumentUploadRepository:
     async def path_reserved(self, *, project_id: UUID, folder: str, name: str) -> bool:
         """未公開原要求が占有する展示 path を、次の PUT より前に保護する。"""
 
-        return bool(await self._session.scalar(select(or_(exists().where(
-            ProjectDocumentUpload.project_id == project_id,
-            ProjectDocumentUpload.folder == folder,
-            ProjectDocumentUpload.name == name,
-            ProjectDocumentUpload.state == "PENDING",
-            ProjectDocumentUpload.publication_closed_at.is_(None),
-        ), exists().where(
-            ProjectDocumentEffectUpload.project_id == project_id,
-            ProjectDocumentEffectUpload.folder == folder,
-            ProjectDocumentEffectUpload.name == name,
-        )))))
+        return bool(
+            await self._session.scalar(
+                select(
+                    or_(
+                        exists().where(
+                            ProjectDocumentUpload.project_id == project_id,
+                            ProjectDocumentUpload.folder == folder,
+                            ProjectDocumentUpload.name == name,
+                            ProjectDocumentUpload.state == "PENDING",
+                            ProjectDocumentUpload.publication_closed_at.is_(None),
+                        ),
+                        exists().where(
+                            ProjectDocumentEffectUpload.project_id == project_id,
+                            ProjectDocumentEffectUpload.folder == folder,
+                            ProjectDocumentEffectUpload.name == name,
+                            ProjectDocumentEffectUpload.state != "PUBLISHED",
+                        ),
+                    )
+                )
+            )
+        )
 
     def reserve(
         self, *, upload_key: UUID, organization_id: UUID,

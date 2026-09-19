@@ -151,6 +151,8 @@ detail/history 的 selected_sources 仅公开 provider/capability/resource_kind/
 | live Tool 无法取原 ID | 返回不可用；已存副本与 live 可达性分别判断 |
 | 旧 Run 无清单/回执 | 终态只读且标未知；非终态不自动授权全集，需新输入则新建 Run |
 
+整理目录只改变当前 folder/name；历史文档观察与读取按原 ID、MIME、大小、内容 hash 验证，并继续输出原冻结路径，不重算历史快照 checksum。
+
 删除须经[原 Run/调度/occurrence 引用门禁](document-lifecycle.md#删除事务与引用判定)，未知历史拒绝；恢复不得任意删除缓存。
 
 ### 创建重放与调度

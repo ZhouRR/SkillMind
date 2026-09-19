@@ -23,6 +23,7 @@ from skillmind.db.models import (
     Project,
     ProjectDocument,
     ProjectDocumentEffectUpload,
+    ProjectDocumentFolder,
     ProjectDocumentUpload,
     ProjectDocumentUploadClosure,
     ProjectMember,
@@ -88,6 +89,28 @@ class UploadDatabase(DeletionDatabase):
             assert statement.get_execution_options()["populate_existing"] is True
         super().observe_lock(statement)
 
+    async def scalars(self, statement: Select[Any]) -> Any:
+        """目录冲突查询的 Project/active 条件保持精确。"""
+        entity = statement.column_descriptions[0]["entity"]
+        params = statement.compile().params
+        if entity is ProjectDocumentFolder:
+            assert statement.whereclause.compare(
+                ProjectDocumentFolder.project_id == params["project_id_1"]
+            )
+            return []
+        if entity is ProjectDocument and statement.whereclause.compare(
+            and_(
+                ProjectDocument.project_id == params["project_id_1"],
+                ProjectDocument.deleted_at.is_(None),
+            )
+        ):
+            return [
+                d
+                for d in self.documents
+                if d.project_id == params["project_id_1"] and d.deleted_at is None
+            ]
+        return await super().scalars(statement)
+
     async def scalar(self, statement: Select[Any]) -> Any:
         """新 query は実 SQL を局部評価し、認証や旧文書 lock の判定を弱めない。"""
 
@@ -131,12 +154,17 @@ class UploadDatabase(DeletionDatabase):
                 "(project_id TEXT, size INTEGER, upload_intent_id TEXT, effect_upload_id TEXT)"
             )
             database.execute("CREATE TABLE document_upload_intents (project_id TEXT, size INTEGER)")
-            database.execute("CREATE TABLE document_effect_uploads (project_id TEXT, size INTEGER)")
-            database.executemany("INSERT INTO document_effect_uploads VALUES (?, ?)",
-                                 [(row.project_id.hex, row.size) for row in self.effects])
+            database.execute(
+                "CREATE TABLE document_effect_uploads "
+                "(project_id TEXT, size INTEGER, document_id TEXT)"
+            )
+            database.executemany(
+                "INSERT INTO document_effect_uploads VALUES (?, ?, ?)",
+                [(row.project_id.hex, row.size, row.document_id.hex) for row in self.effects],
+            )
             database.execute(
                 "CREATE TABLE document_blob_cleanups "
-                "(project_id TEXT, size INTEGER, upload_intent_id TEXT)"
+                "(project_id TEXT, size INTEGER, upload_intent_id TEXT, document_id TEXT)"
             )
             database.executemany(
                 "INSERT INTO project_documents VALUES (?, ?, ?, ?)",
@@ -155,12 +183,13 @@ class UploadDatabase(DeletionDatabase):
                 [(row.project_id.hex, row.size) for row in self.intents],
             )
             database.executemany(
-                "INSERT INTO document_blob_cleanups VALUES (?, ?, ?)",
+                "INSERT INTO document_blob_cleanups VALUES (?, ?, ?, ?)",
                 [
                     (
                         row.project_id.hex,
                         row.size,
                         (None if row.upload_intent_id is None else row.upload_intent_id.hex),
+                        row.document_id.hex,
                     )
                     for row in self.cleanups
                 ],
@@ -190,7 +219,8 @@ class UploadDatabase(DeletionDatabase):
             assert set(params) == {"project_id_1", "folder_1", "name_1"}
         elif table == "document_effect_uploads":
             model, rows = ProjectDocumentEffectUpload, self.effects
-            assert set(params) == {"project_id_1", "folder_1", "name_1"}
+            assert set(params) == {"project_id_1", "folder_1", "name_1", "state_1"}
+            assert params["state_1"] == "PUBLISHED"
         else:
             assert table == "document_upload_intents"
             model, rows = ProjectDocumentUpload, self.intents
@@ -201,6 +231,8 @@ class UploadDatabase(DeletionDatabase):
             model.folder == params["folder_1"],
             model.name == params["name_1"],
         ]
+        if model is ProjectDocumentEffectUpload:
+            clauses.append(ProjectDocumentEffectUpload.state != "PUBLISHED")
         if model is ProjectDocumentUpload:
             clauses.append(ProjectDocumentUpload.state == "PENDING")
             clauses.append(ProjectDocumentUpload.publication_closed_at.is_(None))
@@ -209,6 +241,7 @@ class UploadDatabase(DeletionDatabase):
             row.project_id == params["project_id_1"]
             and row.folder == params["folder_1"]
             and row.name == params["name_1"]
+            and (not isinstance(row, ProjectDocumentEffectUpload) or row.state != "PUBLISHED")
             and (
                 not isinstance(row, ProjectDocumentUpload)
                 or (row.state == "PENDING" and row.publication_closed_at is None)

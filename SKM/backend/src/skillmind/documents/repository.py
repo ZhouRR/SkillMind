@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import BigInteger, case, cast, exists, func, select
@@ -36,6 +37,23 @@ class DocumentRepository:
 
         self._session = session
 
+    async def manage(
+        self,
+        *,
+        project_id: UUID,
+        action: str,
+        changes: list[dict[str, Any]],
+        source: str | None,
+        target: str | None,
+        actor_id: UUID,
+    ) -> None:
+        """保持 session を目录管理へ渡し、transaction や権限を分岐させない。"""
+        from skillmind.documents.management import DocumentManagementRepository
+
+        await DocumentManagementRepository(self._session).apply(
+            project_id, action, changes, source, target, actor_id=actor_id
+        )
+
     async def project_usage_bytes(self, project_id: UUID) -> int:
         """未公開・公開・清理待ちを同じ占用とし、旧目録だけを別途加算する。"""
 
@@ -50,9 +68,16 @@ class DocumentRepository:
         reserved = select(func.coalesce(func.sum(ProjectDocumentUpload.size), 0)).where(
             ProjectDocumentUpload.project_id == project_id,
         ).scalar_subquery()
-        effects = select(func.coalesce(func.sum(ProjectDocumentEffectUpload.size), 0)).where(
-            ProjectDocumentEffectUpload.project_id == project_id,
-        ).scalar_subquery()
+        effects = (
+            select(func.coalesce(func.sum(ProjectDocumentEffectUpload.size), 0))
+            .where(
+                ProjectDocumentEffectUpload.project_id == project_id,
+                ~exists().where(
+                    ProjectDocumentCleanup.document_id == ProjectDocumentEffectUpload.document_id
+                ),
+            )
+            .scalar_subquery()
+        )
         legacy_cleanup = select(func.coalesce(func.sum(ProjectDocumentCleanup.size), 0)).where(
             ProjectDocumentCleanup.project_id == project_id,
             ProjectDocumentCleanup.upload_intent_id.is_(None),
@@ -93,18 +118,23 @@ class DocumentRepository:
     async def path_exists(self, *, project_id: UUID, folder: str, name: str) -> bool:
         """既存目録の保存先を解決せず、同じ表示 path への新しい PUT を拒否する。"""
 
-        return bool(await self._session.scalar(select(exists().where(
-            ProjectDocument.project_id == project_id,
-            ProjectDocument.folder == folder,
-            ProjectDocument.name == name,
-        ))))
+        from skillmind.documents.management import path_conflicts
 
-    async def list_for_project(self, project_id: UUID) -> list[StoredDocument]:
+        return await path_conflicts(self._session, project_id, folder, name)
+
+    async def list_for_project(
+        self, project_id: UUID, *, trashed: bool = False
+    ) -> list[StoredDocument]:
         """Project 内文書を folder/name 昇順で列挙する。"""
 
         statement = (
             select(ProjectDocument)
-            .where(ProjectDocument.project_id == project_id)
+            .where(
+                ProjectDocument.project_id == project_id,
+                ProjectDocument.deleted_at.is_not(None)
+                if trashed
+                else ProjectDocument.deleted_at.is_(None),
+            )
             .order_by(ProjectDocument.folder, ProjectDocument.name)
         )
         return [_to_stored(row) for row in await self._session.scalars(statement)]
@@ -118,6 +148,7 @@ class DocumentRepository:
             ProjectDocument.project_id == project_id,
             ProjectDocument.folder == folder,
             ProjectDocument.name == name,
+            ProjectDocument.deleted_at.is_(None),
         )
         document = (await self._session.scalars(statement)).first()
         if document is None:
@@ -127,7 +158,10 @@ class DocumentRepository:
     async def get(self, *, project_id: UUID, document_id: UUID) -> StoredDocument:
         """所有 Project 内の文書 metadata を取得する。越権/不存在は 404 相当へ畳む。"""
 
-        return _to_stored(await self._require(project_id=project_id, document_id=document_id))
+        document = await self._require(project_id=project_id, document_id=document_id)
+        if document.deleted_at is not None:
+            raise DocumentNotFoundError("Document is in the recycle bin")
+        return _to_stored(document)
 
     async def get_for_download(
         self, *, project_id: UUID, document_id: UUID
@@ -138,12 +172,17 @@ class DocumentRepository:
         return _to_stored(document), _blob_reference(document)
 
     async def delete(
-        self, *, project_id: UUID, document_id: UUID, cleanup_actor: DocumentCleanupActor,
+        self,
+        *,
+        project_id: UUID,
+        document_id: UUID,
+        cleanup_actor: DocumentCleanupActor,
+        allow_effect: bool = False,
     ) -> BlobReference:
         """service の原会話・文書 lock と無参照確認後に、同一 transaction で行を除く。"""
 
         document = await self._require(project_id=project_id, document_id=document_id)
-        if document.effect_upload_id is not None:
+        if document.effect_upload_id is not None and not allow_effect:
             raise DocumentInUseError("Document is referenced by a retained effect receipt")
         reference = _blob_reference(document)
         if document.upload_intent_id is not None:

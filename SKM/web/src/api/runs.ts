@@ -426,11 +426,13 @@ export async function loadRunHistory(
   signal?: AbortSignal,
   statuses: readonly RunStatus[] = [],
   taskId?: string,
+  trashed = false,
 ): Promise<RunHistoryPageRecord> {
   const query = new URLSearchParams({ limit: String(limit), offset: String(offset) })
   // 絞り込みは server 側で行う。先頭 page を client で filter すると、待機中の Run が
   // 古い page にあるときに取りこぼす。
   for (const status of statuses) query.append('status', status)
+  if (trashed) query.set('trashed', 'true')
   if (taskId !== undefined) query.set('task_id', taskId)
   return parseRunHistory(await requestApiJson(
     `${API_BASE}/projects/${encodeURIComponent(projectId)}/runs?${query.toString()}`,

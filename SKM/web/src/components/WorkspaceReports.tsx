@@ -8,12 +8,12 @@ import { INTERACTION_REQUEST_POLICY } from '../lib/interactionResponse'
 import { formatLocalTimestamp } from '../lib/presentation'
 import { routeHref } from '../lib/routing'
 import { EmptyState, LoadingSkeleton, StatusBadge } from './PageElements'
-import { RunResultPanel } from './RunResultPanel'
+import { RunSummaryReport } from './RunSummaryReport'
 
 const FINISHED: readonly RunStatus[] = ['SUCCEEDED', 'FAILED', 'CANCELLED']
 
 /** Module の精確 Task ごとに直近の終端 Run を読み、旧成功結果へ差し替えず表示する。 */
-export function WorkspaceReports({ projectId, tasks, actorId, csrfToken, projectReadOnly, onSessionExpired }: {
+export function WorkspaceReports({ projectId, tasks, actorId, csrfToken, onSessionExpired }: {
   projectId: string; tasks: PublishedTaskRecord[]; actorId: string; csrfToken: string;
   projectReadOnly: boolean; onSessionExpired: SessionEnded
 }) {
@@ -70,11 +70,11 @@ export function WorkspaceReports({ projectId, tasks, actorId, csrfToken, project
                 <a className="secondaryButton compactButton" href={routeHref('history', projectId, { runId: detail.run_id })}>
                   {messages.workspace.executionDetail}</a>
               </div>
-              <RunResultPanel state={query.failure
-                ? { status: 'error', detail, message: failureMessage }
-                : { status: 'ready', detail }} actorId={actorId} csrfToken={csrfToken}
-                projectId={projectId} runId={detail.run_id} projectReadOnly={projectReadOnly} reportOnly
-                onSessionExpired={onSessionExpired} />
+              {query.failure && <p className="error" role="alert">{failureMessage}</p>}
+              <div className="resultView">
+                {detail.result ? <RunSummaryReport detail={detail} />
+                  : <EmptyState text={messages.runResult.noValidatedResult(messages.enums.runStatus[detail.status] ?? detail.status)} />}
+              </div>
             </>}
   </div>
 }

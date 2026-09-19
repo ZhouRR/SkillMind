@@ -238,6 +238,7 @@ async def test_insert_conflict_returns_first_snapshot_without_adding_another_dis
     original = creation_command(intent)
     row = stored_creation(original)
     session = MagicMock(spec=AsyncSession)
+    session.scalar = AsyncMock(return_value=None)
     inserted = MagicMock()
     inserted.scalar_one_or_none.return_value = None
     session.execute = AsyncMock(return_value=inserted)

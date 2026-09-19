@@ -8,7 +8,7 @@ A 的 document ID/hash 被 Run 冻结后，删除元数据再删 blob 是两步�
 
 ## 身份、目录与公开面
 
-ProjectDocument 元数据在 PostgreSQL，内部 storage_key 定位 blob。document_id 是身份，folder/name 仅展示路径；同 Project/路径唯一、不按内容去重。无覆盖、移动、改名、版本或恢复 API；目录由 folder 投影，不保存空目录。
+ProjectDocument 元数据在 PostgreSQL，内部 storage_key 定位 blob。document_id 是身份，folder/name 仅展示路径；当前列表内同 Project/路径唯一、不按内容去重。目录合并空目录记录和当前文档路径；支持改名、移动、批量移动、空目录创建/删除及文档回收站，不提供覆盖写或内容版本管理。
 
 默认上传白名单包含 `.xlsx` 和 `.xls` 的标准 MIME，浏览器未提供 MIME 时按扩展名补齐；显式配置 `SKILLMIND_DOCUMENT_ALLOWED_CONTENT_TYPES` 的部署也需包含这两项。上传仅保存原本，Excel 转换仍由 Worker 的 `document.convert/v1` 执行。
 
@@ -17,11 +17,20 @@ ProjectDocument 元数据在 PostgreSQL，内部 storage_key 定位 blob。docum
 | POST documents | 原 Idempotency-Key + 单 file/可选 folder；201 原发布元数据，同名 409 document_conflict |
 | GET document-uploads/{upload_key} | 原 actor/Project 上传记录；PENDING 未确认发布，PUBLISHED 返回历史回执，不是当前目录 |
 | POST / GET document-uploads/{upload_key}/closure | 原作者显式停止发布 / 查询关闭回执；不停止 PUT、删 blob 或退配额 |
-| GET documents / document | 完整数组按 folder/name 排序 / Project + 原 ID 当前元数据；无分页/Folder 契约，不是删除回执 |
+| GET documents / document | 完整数组按 folder/name 排序；`trashed=true` 查询回收站 / Project + 原 ID 当前元数据，不是删除回执 |
 | GET document content | 精确 ID 授权并核验实际 size/hash 后返回附件，不公开 blob URL |
-| DELETE document | 元数据 commit 后尝试删 blob；204 不保证完整清理 |
+| GET document-folders / POST document-operations | 空目录列表 / 条件改名、移动、目录操作、TRASH、RESTORE；不改变文档 ID、内容和 blob key |
+| DELETE document | 旧物理删除入口；`purge=true` 要求文档已在回收站，允许已终止执行的无其他引用成果；元数据 commit 后尝试删 blob，204 不保证完整清理 |
 
 公开字段仅身份、路径、size/MIME/checksum、上传者/时间；读用 ProjectReadActor，写用要求 ACTIVE 的 ProjectWriteActor，越权/不存在统一 404，已处理响应 no-store。上传、原请求查询和删除另经业务事务复核当前会话/Project/成员。
+
+### 整理与回收站
+
+改名/移动按文档 ID 和原 folder/name 比较，批量操作同事务提交，碰撞全部回滚；目录移动保留后代关系，禁止覆盖、自身子目录目标及待发布上传冲突。新文档选择只包含当前列表，历史读取仍按原 ID、实际字节和冻结内容哈希校验，以冻结路径向 Agent 提供文件。
+
+TRASH 保留原字节、审计和配额占用；RESTORE 不覆盖同名新文件。Run、Schedule、occurrence 的现存输入引用（包括回收站 Run）阻止文档删除，无法可靠解析的引用也阻止删除。批量完全删除逐项执行，第一项失败或响应未知即停止并刷新；不自动重发。
+
+执行履历的删除/恢复/完全删除见[执行生命周期](agent-runtime.md#执行履历回收站)。完全删除成果时先同事务保存原对象清理要求，再在确认 commit 后尝试删 byte；失败不会反向恢复已删除履历。响应明确给出未确认清理数量，持久重试与配额结算仍属下文存储清理缺口。
 
 ### 存储归属与配置切换
 
@@ -76,9 +85,9 @@ UNCONDITIONAL_V1 的一次 application PUT 不等于一次 wire PUT，仍可能 
 
 Provider 在锁外调用对象存储；核对回执与发布由 Service 在同事务中保存，失败回滚后从原 SENT 或已存回执继续。发送标记提交响应未知时不发送 PUT，恢复只 GET；发布提交响应未知时读取原回执，不重传。保存过的回执只证明原核对与公开事实，不证明对象当前仍存在。
 
-新成果使用 v2 协议，物理 key 位于 `projects/{projectId}/documents/effects-v2/`，由原 Effect 和完整命令身份摘要派生；展示仍为项目文档库内的 folder/name。不同 Effect 和不同内容不复用物理 key，逻辑同名创建仍在数据库拒绝。v1 原记录保持 `projects/{projectId}/documents/effects/{folder}/{name}` 及原 checksum，只允许历史读取/核对，旧待写不自动升级或重新发送。0048 允许台账协议 1/2 共存，存在 v2 记录或 revision 2 文档库 binding 时拒绝降级。路径须保持规范原值；成果记录持续保留路径和占用，与浏览器上传共同拒绝同名冲突。文档的可空 `effect_upload_id` 通过原文档/Project 复合外键关联，不能同时关联浏览器上传意图；公开字段保持原契约。发布后仍只计原占用，旧文档不补造成果历史。
+新成果使用 v2 协议，物理 key 位于 `projects/{projectId}/documents/effects-v2/`，由原 Effect 和完整命令身份摘要派生；展示仍为项目文档库内的 folder/name。不同 Effect 和不同内容不复用物理 key，逻辑同名创建仍在数据库拒绝。v1 原记录保持 `projects/{projectId}/documents/effects/{folder}/{name}` 及原 checksum，只允许历史读取/核对，旧待写不自动升级或重新发送。0048 允许台账协议 1/2 共存，存在 v2 记录或 revision 2 文档库 binding 时拒绝降级。成果回执持续保留原规范路径和占用；现存目录和未公开预约共同拒绝同名冲突，已公开回执的旧路径不再阻止改名、移走或回收后的新建。文档的可空 `effect_upload_id` 通过原文档/Project 复合外键关联，不能同时关联浏览器上传意图；公开字段保持原契约。发布后仍只计原占用，旧文档不补造成果历史。
 
-这些成果由保留的 Effect 回执引用，普通删除返回 `document_in_use`，不转交旧无条件 blob DELETE 或创建假浏览器清理来源。任意成果记录均阻止整项目配置删除；降级在排他锁下拒绝删除非空台账。SENT 不证明请求已到达或停止，核对缺失不释放配额；MinIO 条件创建和结果未知边界见[受控写入](repository-effects.md#minio-条件创建与原结果核对)。
+这些成果由保留的 Effect 回执引用，旧普通删除仍返回 `document_in_use`。回收站完全删除须确认生成执行已终止且无待核对操作；原回执不改写，独立清理要求保留原归属，不创建浏览器上传意图。任意成果记录均阻止整项目配置删除；降级在排他锁下拒绝删除非空台账。SENT 不证明请求已到达或停止，核对缺失不释放配额；MinIO 条件创建和结果未知边界见[受控写入](repository-effects.md#minio-条件创建与原结果核对)。
 
 路径冲突返回前复核期限；failed flush 只以锁内授权副本作拒绝分类，禁止失效 ORM 隐式查询或凭副本续写。上述门禁限本版 writer，不覆盖任意 SQL/旧实例。
 
@@ -116,7 +125,7 @@ POST 重放仍验当前接收策略/ACTIVE，但不要求存储可达或重新�
 
 ## 读取、下载与预览
 
-普通下载和冻结读取共用实际字节校验：按原 ID 取元数据，锁外读对象，size/SHA-256 一致才返回完整内容；冻结另比原快照 ID/路径/MIME/hash，不以同路径新文件替代。
+普通下载和冻结读取共用实际字节校验：按原 ID 取元数据，锁外读对象，size/SHA-256 一致才返回完整内容；冻结另比原快照 ID/MIME/size/hash，改名或移动后仍使用原冻结路径，不以同路径新文件替代。
 
 S3 同一次 GET 最多读取声明 size + 1 bytes，不先 stat；连接/读取/关闭在线程内，线程自行关闭响应。取消等待不证明线程/远端已停，也不等于全服务内存/并发/网络 deadline。
 

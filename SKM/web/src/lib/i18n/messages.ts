@@ -581,6 +581,40 @@ export interface UiMessages {
     noWritableIntegration: string
   }
   /** 項目文書 panel(DocumentManagerPanel)。 */
+  fileManagement: {
+    purge: string
+    purgeConfirm: string
+    purgeDocuments: string
+    cleanupPending: string
+    rename: string
+    move: string
+    newFolder: string
+    folder: string
+    name: string
+    save: string
+    cancel: string
+    search: string
+    sort: string
+    byName: string
+    byDate: string
+    bySize: string
+    restore: string
+    trash: string
+    active: string
+    trashAction: string
+    emptyFolder: string
+    moveSelected: string
+    selectFolder: string
+    failure: string
+    unknown: string
+    runConfirm: string
+    includeOutputs: string
+    purgeOutputs: string
+    runBlocked: string
+    outputs: string
+    protected: string
+    recycleHint: string
+  }
   documentsPanel: {
     targetFolder: string
     rootFolder: string

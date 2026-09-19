@@ -12,13 +12,16 @@ export type RunHistoryState =
   | { status: 'error'; message: string }
 
 /** Project 内の Run history、pagination、再表示 action を提供する。 */
-export function RunHistoryPanel({ state, selectedRunId, onOpen, onPrevious, onNext, onRefresh }: {
+export function RunHistoryPanel({ state, selectedRunId, onOpen, onPrevious, onNext, onRefresh, onDelete, onPurge, trashed = false }: {
   state: RunHistoryState
   selectedRunId: string | null
   onOpen: (item: RunHistoryItemRecord) => void
   onPrevious: () => void
   onNext: () => void
   onRefresh: () => void
+  onDelete?: (item: RunHistoryItemRecord) => void
+  onPurge?: (item: RunHistoryItemRecord) => void
+  trashed?: boolean
 }) {
   const messages = useMessages()
   if (state.status === 'loading') {
@@ -44,6 +47,8 @@ export function RunHistoryPanel({ state, selectedRunId, onOpen, onPrevious, onNe
                 <span>{sourceLabel(item, messages.runHistory.sourceUnavailable)}</span>
               </div>
             </button>
+            {onDelete && <button className="secondaryButton compactButton historyDelete" type="button" disabled={!['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(item.status)} onClick={() => onDelete(item)}>{trashed ? messages.fileManagement.restore : messages.fileManagement.trashAction}</button>}
+            {trashed && onPurge && <button className="secondaryButton compactButton historyDelete" type="button" onClick={() => onPurge(item)}>{messages.fileManagement.purge}</button>}
             <details className="detailDisclosure historyTechnical"><summary>{messages.elements.technicalDetails}</summary>
               <p><code>{item.run_id}</code></p>
               {item.result_confidence !== null && <p>{messages.runResult.reading.confidenceHint} {Math.round(item.result_confidence * 100)}%</p>}

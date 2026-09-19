@@ -289,3 +289,13 @@ def _parse_document(value: Any) -> FrozenDocument:
     ):
         raise DocumentSnapshotError("Frozen document path is invalid")
     return FrozenDocument(document_id, folder, name, mime, size, checksum)
+
+
+def same_document_content(left: FrozenDocument, right: FrozenDocument) -> bool:
+    """表示 path の整理を許可し、ID・MIME・size・原 byte hash の一致は維持する。"""
+    return (left.document_id, left.mime, left.size, left.content_hash) == (
+        right.document_id,
+        right.mime,
+        right.size,
+        right.content_hash,
+    )

@@ -12,6 +12,7 @@ from uuid import uuid4
 
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
+
 from skillmind.agent.context_builder import ContractStore, document_inspect_tool_definition
 from skillmind.agent.document_inspection import DocumentInspectProvider
 from skillmind.agent.tool_gateway import ToolProviderError, ToolRegistry
@@ -175,7 +176,7 @@ async def test_untrusted_or_missing_metadata_is_not_a_successful_observation(
         inspect.return_value = None
     elif case == "document":
         inspect.return_value = replace(
-            observed, document=replace(observed.document, name="changed.xlsx")
+            observed, document=replace(observed.document, content_hash="sha256:" + "b" * 64)
         )
     elif case == "project":
         inspect.return_value = replace(observed, project_id=uuid4())
@@ -250,3 +251,15 @@ async def test_gateway_commits_metadata_evidence_and_replays_the_same_observatio
     saved = writer.completed[0][1][0]
     assert saved.draft.metadata["observation"]["content_verified"] is False
     assert saved.draft.content_hash == results[0]["observation_checksum"]
+
+
+async def test_rename_retains_original_frozen_path_in_observation(monkeypatch):
+    """改名後も同じ内容の観測を元凍結 path に結び付け、後段の読取契約を保つ。"""
+    context, source, inspect, observed = _case(monkeypatch)
+    inspect.return_value = replace(
+        observed, document=replace(observed.document, name="renamed.xlsx", folder="new")
+    )
+    result = await DocumentInspectProvider(source).execute(
+        context, {"path": observed.document.path}
+    )
+    assert result.response["document"] == observed.document.to_json()

@@ -125,6 +125,17 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
 
         now = datetime.now(UTC)
         run_id = uuid4()
+        from skillmind.db.models import RunDeletionAudit
+
+        deleted = await self._session.scalar(
+            select(RunDeletionAudit.run_id).where(
+                RunDeletionAudit.project_id == command.project_id,
+                RunDeletionAudit.task_id == command.task_id,
+                RunDeletionAudit.idempotency_key == command.idempotency_key,
+            )
+        )
+        if deleted is not None:
+            raise IdempotencyConflictError("The original execution was permanently deleted")
         fingerprint = request_hash(command)
         statement = (
             insert(Run)
@@ -557,7 +568,7 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
                 .label("rank"),
             )
             .outerjoin(RunResult, RunResult.run_id == Run.id)
-            .where(Run.project_id == project_id)
+            .where(Run.project_id == project_id, Run.deleted_at.is_(None))
             .subquery()
         )
         rows = (await self._session.execute(select(ranked).where(ranked.c.rank == 1))).all()
@@ -583,6 +594,7 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
         offset: int,
         statuses: tuple[RunStatus, ...] = (),
         task_id: UUID | None = None,
+        trashed: bool = False,
     ) -> RunHistoryPage:
         """Project 内の Run と任意 Result summary を新しい順にページ取得する。
 
@@ -597,14 +609,24 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
             # 一覧で使う列だけ取得する。DTO/元の権限・ページ条件は変更しない。
             .options(
                 load_only(
-                    Run.id, Run.project_id, Run.task_id, Run.status, Run.row_version,
-                    Run.created_at, Run.input_json, Run.selected_sources_json,
-                    Run.started_at, Run.finished_at,
+                    Run.id,
+                    Run.project_id,
+                    Run.task_id,
+                    Run.status,
+                    Run.row_version,
+                    Run.created_at,
+                    Run.input_json,
+                    Run.selected_sources_json,
+                    Run.started_at,
+                    Run.finished_at,
                 ),
                 load_only(RunResult.summary, RunResult.confidence, RunResult.needs_review),
             )
             .outerjoin(RunResult, RunResult.run_id == Run.id)
-            .where(Run.project_id == project_id)
+            .where(
+                Run.project_id == project_id,
+                Run.deleted_at.is_not(None) if trashed else Run.deleted_at.is_(None),
+            )
             .order_by(Run.created_at.desc(), Run.id.desc())
             .offset(offset)
             .limit(limit + 1)

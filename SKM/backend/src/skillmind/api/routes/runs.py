@@ -662,6 +662,7 @@ async def list_run_history(
     offset: Annotated[int, Query(ge=0)] = 0,
     status: Annotated[list[RunStatus] | None, Query()] = None,
     task_id: Annotated[UUID | None, Query()] = None,
+    trashed: bool = False,
 ) -> RunHistoryResponse:
     """Project access 検証後の Run history だけを返す。
 
@@ -678,6 +679,7 @@ async def list_run_history(
         offset=offset,
         statuses=tuple(status or ()),
         task_id=task_id,
+        **({"trashed": True} if trashed else {}),
     )
     return _run_history_response(page)
 
@@ -1158,3 +1160,144 @@ def _run_history_response(page: RunHistoryPage) -> RunHistoryResponse:
         offset=page.offset,
         has_more=page.has_more,
     )
+
+
+class RunDeletionOutput(BaseModel):
+    """削除前に表示する当該 Run の公開成果。"""
+
+    model_config = ConfigDict(extra="forbid")
+    document_id: UUID
+    name: str
+    folder: str
+    protected: bool
+
+
+class RunDeletionResponse(BaseModel):
+    """回収箱の状態と、参照のため残す成果件数。"""
+
+    model_config = ConfigDict(extra="forbid")
+    run_id: UUID
+    deleted: bool
+    output_count: int
+    cleanup_pending: int = 0
+    protected_output_count: int
+    outputs: list[RunDeletionOutput]
+
+
+class RunDeletionRequest(BaseModel):
+    """公開成果の回収箱移動を利用者が選択する。"""
+
+    model_config = ConfigDict(extra="forbid")
+    include_outputs: bool = False
+
+
+async def _manage_history(
+    request: Request,
+    actor: AuthenticatedActor,
+    project_id: UUID,
+    run_id: UUID,
+    action: str,
+    include_outputs: bool = False,
+) -> RunDeletionResponse:
+    """共有 service の拒否を固定 Problem へ変換する。"""
+    from skillmind.documents.domain import DocumentConflictError, DocumentStorageUnavailableError
+    from skillmind.runs.history_deletion import RunHistoryConflict
+
+    try:
+        data = await request.app.state.run_service.manage_history(
+            project_id=project_id,
+            run_id=run_id,
+            access=user_access(request, actor),
+            action=action,
+            include_outputs=include_outputs,
+        )
+    except UnauthorizedSessionError as error:
+        raise authentication_required_problem() from error
+    except CsrfRejectedError as error:
+        raise csrf_rejected_problem() from error
+    except ProjectNotFoundError as error:
+        raise project_not_found_problem() from error
+    except ProjectArchivedError as error:
+        raise project_archived_problem() from error
+    except RunNotFoundError as error:
+        raise run_not_found_problem(RunNotFoundError("Run is not available")) from error
+    except (RunHistoryConflict, DocumentConflictError) as error:
+        raise ProblemException(
+            status=409,
+            code="run_history_conflict",
+            title="Run history conflict",
+            detail="Active or unresolved operations cannot be removed; restore paths must be free",
+        ) from error
+    except DocumentStorageUnavailableError as error:
+        raise ProblemException(
+            status=503,
+            code="document_storage_unavailable",
+            title="Document storage unavailable",
+            detail="The original storage could not be verified",
+        ) from error
+    return RunDeletionResponse.model_validate(data)
+
+
+@router.get(
+    "/projects/{project_id}/runs/{run_id}/deletion-preview",
+    response_model=RunDeletionResponse,
+    tags=["runs"],
+)
+async def preview_run_deletion(
+    request: Request, response: Response, project_id: UUID, run_id: UUID, actor: ProjectReadActor
+) -> RunDeletionResponse:
+    """削除対象と他の履歴・定期実行が使う成果を確認する。"""
+    response.headers["Cache-Control"] = "no-store"
+    return await _manage_history(request, actor, project_id, run_id, "PREVIEW")
+
+
+@router.delete(
+    "/projects/{project_id}/runs/{run_id}",
+    response_model=RunDeletionResponse,
+    tags=["runs"],
+    responses={409: problem_openapi_response("Run or output cleanup conflict")},
+)
+async def delete_run_history(
+    request: Request,
+    response: Response,
+    project_id: UUID,
+    run_id: UUID,
+    body: RunDeletionRequest,
+    actor: ProjectWriteActor,
+) -> RunDeletionResponse:
+    """終了履歴を回収箱へ移し、外部 DB・操作回执を消さない。"""
+    response.headers["Cache-Control"] = "no-store"
+    return await _manage_history(request, actor, project_id, run_id, "TRASH", body.include_outputs)
+
+
+@router.post(
+    "/projects/{project_id}/runs/{run_id}/restore",
+    response_model=RunDeletionResponse,
+    tags=["runs"],
+    responses={409: problem_openapi_response("Restore path conflict")},
+)
+async def restore_run_history(
+    request: Request, response: Response, project_id: UUID, run_id: UUID, actor: ProjectWriteActor
+) -> RunDeletionResponse:
+    """同じ削除操作で移した成果と履歴を元 ID のまま復元する。"""
+    response.headers["Cache-Control"] = "no-store"
+    return await _manage_history(request, actor, project_id, run_id, "RESTORE")
+
+
+@router.delete(
+    "/projects/{project_id}/runs/{run_id}/purge",
+    response_model=RunDeletionResponse,
+    tags=["runs"],
+    responses={409: problem_openapi_response("Permanent deletion conflict")},
+)
+async def purge_run_history(
+    request: Request,
+    response: Response,
+    project_id: UUID,
+    run_id: UUID,
+    body: RunDeletionRequest,
+    actor: ProjectWriteActor,
+) -> RunDeletionResponse:
+    """回収箱の実行本体と専有成果を完全削除し、Skill 版への参照を解除する。"""
+    response.headers["Cache-Control"] = "no-store"
+    return await _manage_history(request, actor, project_id, run_id, "PURGE", body.include_outputs)

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy.exc import IntegrityError
@@ -357,6 +358,9 @@ class DocumentService:
             except (
                 UploadRejectedError,
                 DocumentConflictError,
+                DocumentNotFoundError,
+                DocumentInUseError,
+                DocumentReferencesUnavailableError,
                 DocumentStorageUnavailableError,
                 DocumentUploadError,
             ):
@@ -377,11 +381,42 @@ class DocumentService:
                     ) from error
                 raise
 
-    async def list_documents(self, *, project_id: UUID) -> list[StoredDocument]:
+    async def list_folders(self, *, project_id: UUID) -> list[str]:
+        """Project の空目录と既存目录を返す。"""
+        from skillmind.documents.management import DocumentManagementRepository
+
+        async with self._session_factory() as session:
+            return await DocumentManagementRepository(session).folders(project_id)
+
+    async def manage_documents(
+        self,
+        *,
+        project_id: UUID,
+        access: UserAccess,
+        action: str,
+        changes: list[dict[str, Any]],
+        source: str | None,
+        target: str | None,
+    ) -> None:
+        """既存 upload と同じ認可門禁で表示 path だけを変更する。"""
+        validate_user_access(access)
+        async with self._upload_transaction(access, project_id) as (repository, _, _session_id):
+            await repository.manage(
+                action=action,
+                changes=changes,
+                source=source,
+                target=target,
+                project_id=project_id,
+                actor_id=access.actor.user_id,
+            )
+
+    async def list_documents(
+        self, *, project_id: UUID, trashed: bool = False
+    ) -> list[StoredDocument]:
         """Project 内文書 metadata の一覧を取得する。"""
 
         async with self._session_factory() as session:
-            return await DocumentRepository(session).list_for_project(project_id)
+            return await DocumentRepository(session).list_for_project(project_id, trashed=trashed)
 
     async def download_document(
         self, *, project_id: UUID, document_id: UUID
@@ -406,7 +441,7 @@ class DocumentService:
             )
 
     async def delete_document(
-        self, *, project_id: UUID, document_id: UUID, access: UserAccess
+        self, *, project_id: UUID, document_id: UUID, access: UserAccess, purge: bool = False
     ) -> None:
         """原資格と参照を同じ門禁で確認し、commit が確認できてから blob 削除を試みる。"""
 
@@ -436,6 +471,15 @@ class DocumentService:
             try:
                 await repository.lock_for_deletion(project_id=project_id, document_id=document_id)
                 require_current_access()
+                if purge:
+                    from skillmind.documents.management import require_output_finished
+
+                    document = await repository._require(
+                        project_id=project_id, document_id=document_id
+                    )
+                    if document.deleted_at is None:
+                        raise DocumentInUseError("Move the document to the recycle bin first")
+                    await require_output_finished(session, document)
                 await DocumentReferenceRepository(session).require_unreferenced(
                     project_id=project_id, document_id=document_id
                 )
@@ -456,6 +500,7 @@ class DocumentService:
                 deleted_reference = await repository.delete(
                     project_id=project_id,
                     document_id=document_id,
+                    **({"allow_effect": True} if purge else {}),
                     cleanup_actor=DocumentCleanupActor(
                         organization_id=access.actor.organization_id,
                         actor_id=access.actor.user_id,

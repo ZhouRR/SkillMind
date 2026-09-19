@@ -126,11 +126,9 @@
 .reportToolbar > button { flex-shrink: 0; white-space: nowrap; }
 .reportRunMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 24px; color: var(--text-muted); }
 .reportRunMeta > a { margin-left: auto; }
-.workspaceReports .outcomeReportFrame { height: 75vh; min-height: 32rem; max-height: none; }
 @media (max-width: 600px) {
   .reportToolbar { flex-wrap: wrap; }
   .reportRunMeta > a { margin-left: 0; }
-  .workspaceReports .outcomeReportFrame { min-height: 24rem; }
 }
 
 /* プラットフォームの監査要約は report 本文と区別し、展開後も狭幅で折り返す。 */
@@ -160,13 +158,6 @@
 .resultReportBody .outcomeColumns > .outcomeGroup > h4 { border-bottom: 0; padding-bottom: 0; }
 .resultReportBody .outcomeColumns > .outcomeGroup:only-child { grid-column: 1 / -1; }
 
-/* レポート閲覧中の起動入口は上段に収め、左 rail の幅を本文へ戻す。 */
-.workspace:has(.workspaceReports) { grid-template-columns: minmax(0, 1fr); gap: 12px; }
-.workspace:has(.workspaceReports) > .workspaceRail { position: static; display: flex; flex-direction: row; justify-content: flex-end; max-height: none; }
-.workspace:has(.workspaceReports) .runLauncher { display: flex; flex: 0 1 auto; align-items: center; flex-wrap: wrap; gap: 12px; margin: 0; padding: 0; border: 0; background: transparent; box-shadow: none; }
-.workspace:has(.workspaceReports) .runLauncher > button { width: auto; margin: 0; }
-.workspace:has(.workspaceReports) .runLauncher .panelHeader,
-.workspace:has(.workspaceReports) .launcherTaskCount { display: none; }
 .resultActions .runDuration { margin-right: auto; align-self: center; font-size: 13px; color: var(--text-muted); }
 .deliverableContent { min-width: 0; }
 .outcomeCardActions { display: flex; flex-wrap: wrap; gap: 8px; }

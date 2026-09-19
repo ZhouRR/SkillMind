@@ -392,8 +392,12 @@ class ApiKey(Base):
     """API key の公開管理 metadata。資格原値は共通台帳にも保存しない。"""
 
     __tablename__ = "api_keys"
-    id: Mapped[UUID] = mapped_column(ForeignKey("auth_sessions.id", ondelete="RESTRICT"), primary_key=True)
-    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True)
+    id: Mapped[UUID] = mapped_column(
+        ForeignKey("auth_sessions.id", ondelete="RESTRICT"), primary_key=True
+    )
+    organization_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     key_prefix: Mapped[str] = mapped_column(String(16), nullable=False)
 
@@ -781,12 +785,34 @@ class Run(IdentityMixin, TimestampMixin, Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_by: Mapped[UUID | None] = mapped_column(nullable=True)
+
     attempts: Mapped[list[RunAttempt]] = relationship(
         back_populates="run", cascade="all, delete-orphan", order_by="RunAttempt.created_at"
     )
     segments: Mapped[list[RunSegment]] = relationship(
         back_populates="run", cascade="all, delete-orphan", order_by="RunSegment.segment_no"
     )
+
+
+class RunDeletionAudit(IdentityMixin, Base):
+    """完全削除の実施者・原 ID の最小監査。削除した版への FK は持たない。"""
+
+    __tablename__ = "run_deletion_audits"
+    __table_args__ = (
+        UniqueConstraint("project_id", "task_id", "idempotency_key", name="uq_run_deletion_key"),
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="RESTRICT"), index=True
+    )
+    run_id: Mapped[UUID] = mapped_column(nullable=False, unique=True)
+    task_id: Mapped[UUID] = mapped_column(nullable=False)
+    actor_id: Mapped[UUID] = mapped_column(nullable=False)
+    request_id: Mapped[UUID] = mapped_column(nullable=False)
+    output_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class RunSkillSnapshot(IdentityMixin, Base):
@@ -1997,7 +2023,14 @@ class ProjectDocumentEffectUpload(IdentityMixin, Base):
         UniqueConstraint(
             "storage_namespace_id", "storage_key", name="uq_document_effect_upload_object"
         ),
-        UniqueConstraint("project_id", "folder", "name", name="uq_document_effect_upload_path"),
+        Index(
+            "uq_document_effect_upload_path",
+            "project_id",
+            "folder",
+            "name",
+            unique=True,
+            postgresql_where=text("state <> 'PUBLISHED'"),
+        ),
         CheckConstraint("protocol_version IN (1, 2)", name="protocol_version"),
         CheckConstraint("size > 0 AND size <= 1048576", name="size"),
         CheckConstraint("storage_is_durable", name="durable"),
@@ -2070,6 +2103,17 @@ class ProjectDocumentEffectUpload(IdentityMixin, Base):
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class ProjectDocumentFolder(IdentityMixin, Base):
+    """空目录を含む Project 内の表示目录。blob と文書の identity は持たない。"""
+
+    __tablename__ = "project_document_folders"
+    __table_args__ = (UniqueConstraint("project_id", "path", name="uq_document_folders_path"),)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    path: Mapped[str] = mapped_column(String(200), nullable=False)
+
+
 class ProjectDocument(IdentityMixin, Base):
     """Project 内にアップロードした文書の metadata。blob 正文は object storage に置く。
 
@@ -2082,27 +2126,34 @@ class ProjectDocument(IdentityMixin, Base):
         ForeignKeyConstraint(
             ["effect_upload_id", "id", "project_id"],
             [
-                "document_effect_uploads.id", "document_effect_uploads.document_id",
+                "document_effect_uploads.id",
+                "document_effect_uploads.document_id",
                 "document_effect_uploads.project_id",
             ],
-            name="fk_project_documents_effect_upload", ondelete="RESTRICT",
+            name="fk_project_documents_effect_upload",
+            ondelete="RESTRICT",
         ),
         CheckConstraint(
-            "upload_intent_id IS NULL OR effect_upload_id IS NULL", name="single_upload_origin",
+            "upload_intent_id IS NULL OR effect_upload_id IS NULL",
+            name="single_upload_origin",
         ),
-        UniqueConstraint(
+        Index(
+            "uq_project_documents_project_folder_name",
             "project_id",
             "folder",
             "name",
-            name="uq_project_documents_project_folder_name",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
         ),
         ForeignKeyConstraint(
             ["upload_intent_id", "id", "project_id"],
             [
-                "document_upload_intents.id", "document_upload_intents.document_id",
+                "document_upload_intents.id",
+                "document_upload_intents.document_id",
                 "document_upload_intents.project_id",
             ],
-            name="fk_project_documents_upload_intent", ondelete="RESTRICT",
+            name="fk_project_documents_upload_intent",
+            ondelete="RESTRICT",
         ),
         CheckConstraint(
             "(storage_namespace_id IS NULL AND storage_descriptor_checksum IS NULL "
@@ -2131,6 +2182,14 @@ class ProjectDocument(IdentityMixin, Base):
     checksum: Mapped[str] = mapped_column(String(71), nullable=False)
     uploaded_by: Mapped[UUID] = mapped_column(nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_by: Mapped[UUID | None] = mapped_column(nullable=True)
+    deleted_by_run_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("runs.id", name="fk_documents_deleted_by_run", ondelete="RESTRICT"),
+        nullable=True,
+    )
+
+
 class TaskSchedule(IdentityMixin, TimestampMixin, Base):
     """Task の設定と摘要を保持し、発火の原設定と結果は occurrence に分離する。
 

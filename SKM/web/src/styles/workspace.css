@@ -511,7 +511,7 @@
 /* 現在開いている Run は sidebar の現在地表示と同じ「accent 面+左縦棒」で示し、hover と明確に区別する。 */
 .historySelected { border-color: var(--accent-border); background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent-strong); }
 .historySelected:hover { border-color: var(--accent-border); background: var(--accent-soft); }
-.historyItem > button { width: 100%; border: 0; padding: 11px 12px; color: inherit; background: transparent; cursor: pointer; text-align: left; }
+.historyItem > button:not(.historyDelete) { width: 100%; border: 0; padding: 11px 12px; color: inherit; background: transparent; cursor: pointer; text-align: left; }
 .historyPrimary { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .historyPrimary > span:first-child { display: grid; gap: 3px; min-width: 0; }
 .historyPrimary strong { overflow: hidden; color: var(--text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
@@ -656,3 +656,12 @@
 
 /* 時刻と所要時間を併記し、狭いカードでも duration 自体は途中で折らない。 */
 .runDuration { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* 文書整理と回収箱の操作は履歴の主リンクから分離する。 */
+.historyItem > .historyDelete { margin: 0 0 10px 10px; }
+.formRow.documentManagementToolbar, .formRow.documentFolderToolbar, .formRow.historyManagementToolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.documentManagementToolbar { margin-bottom: 12px; }
+.documentManagementToolbar select { width: auto; }
+.documentManagementToolbar input { flex: 1 1 220px; min-width: 160px; }
+.documentManagementToolbar [aria-pressed='true'] { background: var(--surface-raised); border-color: var(--border-strong); }
+.documentActions { flex-wrap: wrap; }

@@ -1,4 +1,5 @@
 import { RunDuration } from './RunDuration'
+import { RunSummaryReport } from './RunSummaryReport'
 import { observeRunPaint } from '../lib/runPerformance'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
@@ -138,20 +139,7 @@ function RunResultContent({ reportOnly, state, csrfToken, onProposalDecided, art
         onDecided={onProposalDecided}
         proposals={decidableProposals}
       />
-      {result && <>
-      {/* 要約は本文として全文表示し、長文を巨大な見出しにしない。 */}
-      <section className="resultSummary reportSummary">
-        <div>
-          <h3>{messages.runResult.reportTitle}</h3>
-          <MarkdownText text={result.summary} />
-        </div>
-        <dl>
-          <div><dt>{messages.runResult.platformStatus}</dt><dd>{messages.enums.runStatus[detail.status] ?? detail.status}</dd></div>
-          <div className={result.needs_review ? 'reviewRequired' : undefined}><dt>{messages.runResult.reviewLabel}</dt><dd>{result.needs_review ? messages.runResult.needsReview : messages.runResult.noExtraReview}</dd></div>
-          {!reportOnly && <div><dt>{messages.runResult.schemaCheckLabel}</dt><dd>{result.validation.schema_valid === true ? messages.runResult.schemaValidText : messages.runResult.schemaCheckRequiredText}</dd></div>}
-        </dl>
-      </section>
-      </>}
+      {result && <RunSummaryReport detail={detail} showValidation={!reportOnly} />}
       <div className="resultActions" aria-label={messages.workspace.tabResult}>
         {!reportOnly && <RunDuration run={detail} />}
         {result && <button className="secondaryButton compactButton" type="button" onClick={onEvaluate}>{messages.runResult.manualEvaluation}</button>}

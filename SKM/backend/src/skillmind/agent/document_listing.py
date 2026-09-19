@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any
 
 from skillmind.agent.document_inspection import document_observation_result
@@ -17,6 +18,7 @@ from skillmind.documents.snapshot import (
     DOCUMENT_LIST_CAPABILITY,
     DocumentSnapshotError,
     FrozenDocument,
+    same_document_content,
 )
 from skillmind.documents.source import InspectableProjectDocumentSource, ProjectDocumentSource
 from skillmind.storage import FileStorageError
@@ -75,12 +77,14 @@ class DocumentListProvider:
                     if (
                         observed is None
                         or observed.project_id != context.project_id
-                        or observed.document != document
+                        or not same_document_content(observed.document, document)
                         or observed.observation.size != document.size
                         or _listing_documents(context) != documents
                     ):
                         raise DocumentSnapshotError("Frozen document metadata no longer matches")
-                    result = document_observation_result(context.project_id, observed)
+                    result = document_observation_result(
+                        context.project_id, replace(observed, document=document)
+                    )
                     entries.append(
                         {
                             **{

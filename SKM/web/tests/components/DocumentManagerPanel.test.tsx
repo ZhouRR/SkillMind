@@ -99,7 +99,7 @@ describe('DocumentTree display', () => {
     expect(html).toContain('/documents/doc-root/content')
     expect(html).toContain('download="readme.md"')
     expect(html).toContain('下载')
-    expect(html).toContain('删除')
+    expect(html).toContain('移入回收站')
   })
 
   it('offers preview only for registered extensions and disables it beyond the size cap', () => {
@@ -185,4 +185,20 @@ describe('DocumentPreviewDialog', () => {
     expect(html).toContain('previewFrame')
     expect(html).not.toContain('<h1>Report</h1>')
   })
+})
+
+it('preserves empty directories and sorts files by size or date', () => {
+  const older = document({ document_id: 'a', size: 30, name: 'a.md' })
+  const newer = document({ document_id: 'b', size: 10, name: 'b.md', created_at: '2026-09-19T00:00:00Z' })
+  const tree = buildDocumentTree([older, newer], ['empty/nested'], 'size')
+  expect(tree.folders[0]?.folders[0]?.path).toBe('empty/nested')
+  expect(tree.files.map((d) => d.document_id)).toEqual(['a', 'b'])
+  expect(buildDocumentTree([older, newer], [], 'date').files.map((d) => d.document_id)).toEqual(['b', 'a'])
+})
+
+it('shows restore and permanent deletion only in the recycle-bin tree', () => {
+  const html = renderToStaticMarkup(<DocumentTree root={buildDocumentTree([document()])} projectId={PROJECT_ID} busyId={null} onDelete={vi.fn()} onPreview={vi.fn()} selection={{ selectedIds: new Set(), disabled: false, toggle: vi.fn(), onFolder: vi.fn(), trashed: true, purge: vi.fn() }} />)
+  expect(html).toContain('恢复')
+  expect(html).toContain('完全删除')
+  expect(html).not.toContain('重命名')
 })

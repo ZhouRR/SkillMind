@@ -28,6 +28,7 @@ from skillmind.db.models import (
     ProjectSkillVersion,
     ResourceBinding,
     Run,
+    RunDeletionAudit,
     SecretReference,
     TaskSchedule,
     User,
@@ -338,8 +339,11 @@ class ProjectRepository:
             )
         # 新旧目録と清理/原 upload の監査は設定ではない。どれか一件でもあれば保全する。
         for document_model in (
-            ProjectDocumentUpload, ProjectDocumentCleanup,
-            ProjectDocument, ProjectDocumentEffectUpload,
+            ProjectDocumentUpload,
+            ProjectDocumentCleanup,
+            ProjectDocument,
+            ProjectDocumentEffectUpload,
+            RunDeletionAudit,
         ):
             if await self._session.scalar(select(exists().where(
                 document_model.project_id == project_id,

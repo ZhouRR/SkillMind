@@ -61,7 +61,7 @@
 [data-page='documents'] .docFolderBody .documentItem { border: 0; border-radius: 0; background: transparent; }
 [data-page='history'] .historyList { gap: 0; }
 [data-page='history'] .historyItem { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; }
-[data-page='history'] .historyItem > button { padding: 18px 8px; }
+[data-page='history'] .historyItem > button:not(.historyDelete) { padding: 18px 8px; }
 [data-page='history'] .historyItem:hover { background: var(--surface-raised); }
 [data-page='history'] .historyPrimary strong { font-size: 15px; white-space: normal; }
 [data-page='history'] .historyMeta { margin-top: 10px; }

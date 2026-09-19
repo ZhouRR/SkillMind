@@ -10,6 +10,8 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
 from skillmind.documents.domain import (
     DocumentContentInvalidError,
     DocumentContentMissingError,
@@ -23,7 +25,6 @@ from skillmind.documents.snapshot import DocumentSnapshotError
 from skillmind.documents.source import DatabaseProjectDocumentSource, read_frozen_document
 from skillmind.storage import BlobReference, FileStorageError, InMemoryFileStorage, UploadLimits
 from skillmind.storage.observation import BlobObservation, ObservedBlob
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from tests.documents.fakes import document_content, document_snapshot, stored_document
 
 _ORIGINAL_KEY = "original/identity"
@@ -308,7 +309,8 @@ async def test_document_inspection_and_later_acquisition_keep_original_identity(
     acquired.assert_not_called()
     if failure == "metadata":
         lookup.return_value = (
-            replace(document, name="replaced.md"), BlobReference(_ORIGINAL_KEY, storage.namespace)
+            replace(document, mime="application/json"),
+            BlobReference(_ORIGINAL_KEY, storage.namespace),
         )
     elif failure == "key":
         lookup.return_value = (document, BlobReference("replaced/key", storage.namespace))

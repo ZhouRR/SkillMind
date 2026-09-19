@@ -134,6 +134,8 @@ export type {
   StoredSkillPreviewRecord,
 } from './skills'
 export {
+  loadDocumentFolders,
+  manageDocuments,
   deleteProjectDocument,
   loadProjectDocuments,
   loadProjectDocument,
@@ -219,3 +221,8 @@ export type {
 
 export { loadApiKeys, createApiKey, revokeApiKey } from './apiKeys'
 export type { ApiKeyRecord, CreatedApiKeyRecord } from './apiKeys'
+
+export { previewRunDeletion, changeRunDeletion } from './runDeletion'
+export type { RunDeletionPreview } from './runDeletion'
+
+export { purgeProjectDocument } from './documents'

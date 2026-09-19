@@ -81,6 +81,7 @@ from skillmind.skills.domain import PublishedTaskNotFoundError
 from skillmind.skills.execution import is_source_execution, resolve_skill_definition
 from skillmind.skills.resource_binding import is_write_capability, required_resource_keys
 from skillmind.skills.task_catalog import ResolvedTaskRun
+from skillmind.storage import FileStorage
 from skillmind.users.access import authorize_user_access, validate_user_access
 from skillmind.users.domain import UserAccess
 from skillmind.users.repository import UserRepository
@@ -103,6 +104,7 @@ class RunService:
         self,
         session_factory: async_sessionmaker[AsyncSession],
         *,
+        file_storage: FileStorage | None = None,
         deferred_features_enabled: bool = True,
         scheduling_enabled: bool = False,
         database_writes_enabled: bool = False,
@@ -115,6 +117,7 @@ class RunService:
         """既存内部呼出しの互換性を保ち、API/Worker は配備 policy を必ず注入する。"""
 
         self._session_factory = session_factory
+        self._file_storage = file_storage
         self._deferred_features_enabled = deferred_features_enabled
         self._scheduling_enabled = scheduling_enabled or deferred_features_enabled
         self._execution_features = ExecutionFeatures(
@@ -554,6 +557,28 @@ class RunService:
                 run_id=run_id,
             )
 
+    async def manage_history(
+        self,
+        *,
+        project_id: UUID,
+        run_id: UUID,
+        access: UserAccess,
+        action: str,
+        include_outputs: bool = False,
+    ) -> dict[str, Any]:
+        """元 actor の認可を伴う回収箱操作へ委譲する。"""
+        from skillmind.runs.history_deletion import manage_history
+
+        return await manage_history(
+            self._session_factory,
+            project_id=project_id,
+            run_id=run_id,
+            access=access,
+            action=action,
+            include_outputs=include_outputs,
+            storage=self._file_storage,
+        )
+
     async def list_run_history(
         self,
         *,
@@ -562,6 +587,7 @@ class RunService:
         offset: int,
         statuses: tuple[RunStatus, ...] = (),
         task_id: UUID | None = None,
+        trashed: bool = False,
     ) -> RunHistoryPage:
         """Project 内の Run history page を read-only transaction で取得する。"""
 
@@ -572,6 +598,7 @@ class RunService:
                 offset=offset,
                 statuses=statuses,
                 task_id=task_id,
+                trashed=trashed,
             )
 
     async def latest_run_by_task(self, *, project_id: UUID) -> dict[UUID, TaskLastRun]:
