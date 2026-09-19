@@ -104,6 +104,13 @@ snapshot = CapabilityCatalogSnapshot.build(
 )
 catalog_path.write_text(json.dumps(snapshot.to_dict(), ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 assert load_capability_catalog(catalog_path) == snapshot
+# 全項目の厳密な順序と checksum の固定 assertion を更新し、検査の範囲は弱めない。
+replace_once('SKM/backend/tests/skills/test_skill_importer.py',
+    '    assert [item.capability for item in loaded.capabilities] == [\n',
+    '    assert [item.capability for item in loaded.capabilities] == [\n        "audit.export/v1",\n')
+replace_once('SKM/backend/tests/skills/test_skill_importer.py',
+    'sha256:3f1c1bc1e365cf3c56fa59288b681f5512cf8949a07d0f20b4ed6a04cb69e766',
+    'sha256:5357daca88fc023cfc3b7d7961454b38bec86d16b6675b21b1411f875fa06b9f')
 with Path('SKM/backend/tests/agent/test_audit_export.py').open('a', encoding='utf-8') as stream:
     stream.write('''\n\ndef test_export_catalog_keeps_interpreter_identity_loadable():
     """新 Tool を追加しても catalog の旧 checksum で解釈器を利用不能にしない。"""
