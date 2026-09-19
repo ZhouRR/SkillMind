@@ -75,6 +75,19 @@ replace_once('SKM/backend/src/skillmind/agent/audit_source.py',
 replace_once('SKM/backend/tests/worker/test_receipt_sequence_experiment.py',
     '"CREATE TABLE IF NOT EXISTS steps (position INTEGER PRIMARY KEY, identity TEXT, fingerprint TEXT, attempted INTEGER, receipt TEXT)"',
     '"CREATE TABLE IF NOT EXISTS steps (position INTEGER PRIMARY KEY, "\n            "identity TEXT, fingerprint TEXT, attempted INTEGER, receipt TEXT)"')
+# 実 AsyncSession の __aexit__ は例外を握り潰さない。SQL Row も tuple として反復可能。
+replace_once('SKM/backend/tests/agent/test_audit_export.py',
+    'session.begin.return_value.__aexit__ = AsyncMock()',
+    'session.begin.return_value.__aexit__ = AsyncMock(return_value=False)')
+replace_once('SKM/backend/tests/agent/test_result_proposal_lookup.py',
+    'factory.return_value.__aexit__ = AsyncMock()',
+    'factory.return_value.__aexit__ = AsyncMock(return_value=False)')
+replace_once('SKM/backend/tests/agent/test_result_proposal_lookup.py',
+    'SimpleNamespace(proposal_ref="cp_applied", status="APPLIED")',
+    '("cp_applied", "APPLIED")')
+replace_once('SKM/backend/tests/agent/test_result_proposal_lookup.py',
+    'SimpleNamespace(proposal_ref="cp_waiting", status="APPROVED")',
+    '("cp_waiting", "APPROVED")')
 # tracked 差分と追加ファイルだけを選び、既存ファイルを大規模に整形しない。
 changed = set(subprocess.check_output(['git', 'diff', '--name-only'], text=True).splitlines())
 changed.update(subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard'], text=True).splitlines())
