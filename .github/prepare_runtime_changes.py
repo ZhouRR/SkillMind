@@ -88,6 +88,37 @@ replace_once('SKM/backend/tests/agent/test_result_proposal_lookup.py',
 replace_once('SKM/backend/tests/agent/test_result_proposal_lookup.py',
     'SimpleNamespace(proposal_ref="cp_waiting", status="APPROVED")',
     '("cp_waiting", "APPROVED")')
+# 本番と同じ唯一の builder で新 catalog を安定順化・署名する。旧 hash の流用をしない。
+from skillmind.skills.interpreter import (
+    CapabilityCatalogEntry, CapabilityCatalogSnapshot, load_capability_catalog,
+)
+catalog_path = Path('SKM/contracts/examples/skill-capability-catalog.v1.json')
+catalog = json.loads(catalog_path.read_text(encoding='utf-8'))
+entries = [CapabilityCatalogEntry(
+    capability=item['capability'], description=item['description'],
+    request_schema=item['request_schema'], response_schema=item['response_schema'],
+    error_schema=item['error_schema'], providers=tuple(item['providers']),
+) for item in catalog['capabilities']]
+snapshot = CapabilityCatalogSnapshot.build(
+    catalog_version=catalog['catalog_version'], capabilities=entries,
+)
+catalog_path.write_text(json.dumps(snapshot.to_dict(), ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+assert load_capability_catalog(catalog_path) == snapshot
+with Path('SKM/backend/tests/agent/test_audit_export.py').open('a', encoding='utf-8') as stream:
+    stream.write('''\n\ndef test_export_catalog_keeps_interpreter_identity_loadable():
+    """新 Tool を追加しても catalog の旧 checksum で解釈器を利用不能にしない。"""
+    from pathlib import Path
+
+    from skillmind.skills.interpreter import load_capability_catalog
+
+    catalog = load_capability_catalog(
+        Path(__file__).resolve().parents[3] / "contracts/examples/skill-capability-catalog.v1.json"
+    )
+    entries = [item for item in catalog.capabilities if item.capability == "audit.export/v1"]
+    assert len(entries) == 1
+    assert entries[0].providers == ("platform",)
+    assert entries[0].request_schema == "tools/audit.export/v1/request.schema.json"
+''')
 # tracked 差分と追加ファイルだけを選び、既存ファイルを大規模に整形しない。
 changed = set(subprocess.check_output(['git', 'diff', '--name-only'], text=True).splitlines())
 changed.update(subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard'], text=True).splitlines())
