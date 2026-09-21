@@ -6,6 +6,7 @@ on:
       - .github/prepare_inline.py
       - .github/publish_inline.py
       - .github/repair_inline.py
+      - .github/finish_inline.py
       - .github/workflows/inline-effect-review.yml
 permissions:
   contents: read
@@ -70,6 +71,12 @@ jobs:
         if: matrix.group == 'runtime'
         working-directory: SKM/backend
         run: python -m mypy --no-incremental src/skillmind
+      - name: Check migration graph and generate SQL without a database connection
+        if: matrix.group == 'runtime'
+        working-directory: SKM/backend
+        run: |
+          python -m alembic heads
+          python -m alembic upgrade 0055_run_deletion_audit:0056_inline_effect_owner --sql > "$RUNNER_TEMP/inline-migration.sql"
       - name: Related backend regression
         working-directory: SKM/backend
         run: python -m pytest ${{ matrix.scope }} --junitxml="$RUNNER_TEMP/results.xml"
@@ -82,6 +89,7 @@ jobs:
             ${{ runner.temp }}/source-fingerprint.json
             ${{ runner.temp }}/focused.xml
             ${{ runner.temp }}/results.xml
+            ${{ runner.temp }}/inline-migration.sql
           retention-days: 7
   finalize:
     needs: regression
