@@ -66,6 +66,7 @@ jobs:
           python -m pytest tests/effects/test_compact_proposal.py
           tests/worker/test_inline_effects.py tests/runs/test_inline_effect_lane.py
           tests/agent/test_codex_native.py::test_native_inline_effect_returns_receipt_without_interrupting_turn
+          tests/agent/test_task_brief.py::test_old_report_prompt_remains_byte_identical
           --junitxml="$RUNNER_TEMP/focused.xml"
       - name: Check all application types
         if: matrix.group == 'runtime'
