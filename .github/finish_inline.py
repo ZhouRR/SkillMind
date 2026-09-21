@@ -100,3 +100,79 @@ def test_inline_success_preserves_confirmed_business_failure(status):
     assert result["effect_result"]["verification"]["business_verdict"] == "NOT_EVALUATED"
 '''
 p.write_text(t)
+
+
+def replace_once(path, old, new):
+    """同じ原コードにだけ時限予約を加える。"""
+    p = Path(path)
+    t = p.read_text()
+    assert t.count(old) == 1, (path, old[:80], t.count(old))
+    p.write_text(t.replace(old, new, 1))
+
+
+replace_once('SKM/backend/src/skillmind/worker/tool_authority.py',
+    '    _active: bool = True\n',
+    '    _active: bool = True\n'
+    '    # 最適化の経路選択だけに使う。既存 supervisor の期限は変更しない。\n'
+    '    deadline: float | None = field(default=None, repr=False)\n')
+replace_once('SKM/backend/src/skillmind/worker/tool_authority.py',
+    'def bind_tool_authority(claimed: ClaimedRun) -> Iterator[None]:',
+    'def bind_tool_authority(claimed: ClaimedRun, *, deadline: float | None = None) -> Iterator[None]:')
+replace_once('SKM/backend/src/skillmind/worker/tool_authority.py',
+    '    authority = ToolExecutionAuthority(claimed)\n',
+    '    authority = ToolExecutionAuthority(claimed, deadline=deadline)\n')
+replace_once('SKM/backend/src/skillmind/worker/executor.py',
+    '                bind_tool_authority(claimed),\n',
+    '                bind_tool_authority(\n'
+    '                    claimed, deadline=asyncio.get_running_loop().time() + context.limits.wall_timeout_seconds\n'
+    '                ),\n')
+replace_once('SKM/backend/src/skillmind/worker/effects.py',
+    '    async def execute(self, effect_execution_id: object, *, inline_parent: ClaimedRun | None = None) -> str:',
+    '    @property\n'
+    '    def wall_timeout_seconds(self) -> float:\n'
+    '        """直接交付の経路選択へ既存の監督時間を読み取り専用で渡す。"""\n'
+    '        return self._wall_timeout_seconds\n\n'
+    '    async def execute(self, effect_execution_id: object, *, inline_parent: ClaimedRun | None = None) -> str:')
+replace_once('SKM/backend/src/skillmind/worker/inline_effects.py',
+    '        claimed = self._authority.claimed\n',
+    '        claimed = self._authority.claimed\n'
+    '        # 長い Run を一 Attempt に詰めて時間切れにしない。送信/提案作成の前に\n'
+    '        # 既存 Effect 上限と交付余量を予約できなければ通常の継続へ戻す。\n'
+    '        deadline = self._authority.deadline\n'
+    '        if deadline is not None and (\n'
+    '            deadline - asyncio.get_running_loop().time() <= self._executor.wall_timeout_seconds + 30\n'
+    '        ):\n'
+    '            return None\n')
+p = Path('SKM/backend/tests/worker/test_inline_effects.py')
+t = p.read_text()
+t += '''
+
+@pytest.mark.parametrize("remaining", [0, 300, 329])
+async def test_low_attempt_time_selects_deferred_before_creating_effect(remaining):
+    """最適化のために親期限を延長せず、元の通常継続へ未送信で戻す。"""
+    h, s, e, a, p, f = fixture()
+    e.wall_timeout_seconds = 300
+    deadline = asyncio.get_running_loop().time() + remaining
+    a.deadline = deadline
+    assert await h.invoke({}, "call", str(uuid4())) is None
+    assert a.deadline == deadline
+    s.begin_inline_effect.assert_not_awaited()
+    e.execute.assert_not_awaited()
+
+
+async def test_inline_uses_remaining_attempt_time_without_resetting_it():
+    """十分な原余量がある操作だけを実行し、次呼出しのために時刻をリセットしない。"""
+    h, s, e, a, p, f = fixture()
+    e.wall_timeout_seconds = 300
+    deadline = asyncio.get_running_loop().time() + 600
+    a.deadline = deadline
+    result = await h.invoke({}, "call", str(uuid4()))
+    assert result.proposal_id == p
+    assert a.deadline == deadline
+    e.execute.assert_awaited_once_with(f, inline_parent=a.claimed)
+'''
+p.write_text(t)
+p = Path('docs/development/runtime-guide.md')
+t = p.read_text()
+t += '\n直接回执只在原 Attempt 剩余时间足够容纳既有 Effect 监督上限与交付余量时尝试；不足时在创建操作前走原延期路径，不延长或重置期限，也不因开启优化把长任务强行塞进一个 Attempt。\n'
+p.write_text(t)
