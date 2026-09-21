@@ -79,6 +79,7 @@ class SyntheticEndpoint(ThreadingHTTPServer):
         self.stream_text = False
         self.whitespace_loop = False
         self.native_candidate: dict[str, Any] | None = None
+        self.tool_arguments: dict[int, dict[str, Any]] = {}
 
     def handle_error(self, request: object, client_address: tuple[str, int]) -> None:
         """取消による接続終了だけを許容し、その他の fixture 障害は表示する。"""
@@ -148,7 +149,7 @@ def endpoint() -> Iterator[tuple[SyntheticEndpoint, list[dict[str, Any]]]]:
                     "call_id": f"call_fixture_{len(requests)}",
                     "name": "issue_read_v1",
                     "namespace": "mcp__skillmind",
-                    "arguments": json.dumps({"issue_ref": "TICKET-1", "purpose": "analysis"}),
+                    "arguments": json.dumps(server.tool_arguments.get(len(requests), {"issue_ref": "TICKET-1", "purpose": "analysis"})),
                     "status": "completed",
                 }
             elif len(requests) == 1 and "mcp__skillmind.change_propose_v1" in _wire_tool_names(
@@ -789,3 +790,34 @@ async def test_native_inline_effect_returns_receipt_without_interrupting_turn(tm
     assert not any(e.event_type is AgentEventType.CHANGE_PROPOSED for e in events)
     assert any(e.event_type is AgentEventType.EFFECT_APPLIED for e in events)
     assert len(calls)==1 and len(requests)==2
+
+
+async def test_native_same_capability_routes_two_resources_in_one_turn(tmp_path, monkeypatch, endpoint):
+    """固定 CLI へ一工具/二 selector を広告し、各要求を原 binding で監査する。"""
+    from tests.agent.test_resource_tool_routing import routed_runtime
+
+    server, requests = endpoint
+    _local_client(monkeypatch, server)
+    server.tool_request_numbers = {1, 2}
+    server.tool_arguments = {n: {"issue_ref": "TICKET-1", "purpose": "fixture", "resource_key": key}
+                             for n, key in enumerate(("source", "result"), 1)}
+    context, runtime, writer, recording = routed_runtime(tmp_path, "issue.read/v1", "redmine")
+    context = replace(context, model="gpt-5.6-terra", result_schema={
+        "type": "object", "properties": {"ok": {"type": "boolean"}},
+        "required": ["ok"], "additionalProperties": False,
+    })
+    engine = CodexAgentSdkEngine(
+        configuration=CodexRuntimeConfiguration("gpt-5.6-terra", "max", tmp_path / "codex"),
+        runtime_factory=lambda run: runtime, transcript_backend=MemoryTranscriptBackend(),
+    )
+    async with asyncio.timeout(30):
+        events = [event async for event in engine.execute(context)]
+    assert events[-1].event_type is AgentEventType.RESULT_COMPLETED, [e.payload for e in events]
+    assert [c.tool.resource_key for c, _ in recording.calls] == ["source", "result"]
+    assert len(writer.completed) == 2 and len(requests) == 3
+    tools = []
+    for t in _wire_tools(requests[0]):
+        tools.extend(t.get("tools", []) if t.get("type") == "namespace" else [t])
+    advertised = [t for t in tools if t.get("name") == "issue_read_v1"]
+    assert len(advertised) == 1
+    assert advertised[0]["parameters"]["properties"]["resource_key"]["enum"] == ["source", "result"]

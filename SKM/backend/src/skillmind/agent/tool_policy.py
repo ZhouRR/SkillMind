@@ -9,6 +9,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from skillmind.agent.domain import RegisteredTool
+from skillmind.agent.tool_routing import ToolRouteError, ToolRouting, provider_arguments
 from skillmind.effects.proposal import CHANGE_PROPOSE_CAPABILITY
 
 DENIED_BUILTIN_TOOLS = frozenset(
@@ -44,6 +45,7 @@ class ToolExecutionPolicy:
     ) -> None:
         """Tool 名、capability、Schema の整合性を起動前に検証する。"""
 
+        self._routing = ToolRouting(tools)
         self._tools: dict[str, RegisteredTool] = {}
         for tool in tools:
             if allowed_capabilities is not None and tool.capability not in allowed_capabilities:
@@ -57,10 +59,13 @@ class ToolExecutionPolicy:
                 )
             if not tool.read_only:
                 raise ValueError(f"M0 only accepts read-only tools: {tool.capability}")
-            if tool.sdk_name in self._tools:
-                raise ValueError(f"Duplicate SDK tool name: {tool.sdk_name}")
             Draft202012Validator.check_schema(tool.input_schema)
             self._tools[tool.sdk_name] = tool
+
+    @property
+    def sdk_tools(self) -> tuple[RegisteredTool, ...]:
+        """SDK へ渡す一能力一件の selector 付き契約。"""
+        return self._routing.sdk_tools
 
     @property
     def allowed_sdk_names(self) -> tuple[str, ...]:
@@ -71,14 +76,15 @@ class ToolExecutionPolicy:
     def registered(self, tool_name: str) -> RegisteredTool | None:
         """監査用に SDK 名へ対応する Run-scoped Tool を返す。"""
 
-        return self._tools.get(tool_name)
+        return self._routing.unambiguous(tool_name)
 
     def authorize(self, tool_name: str, tool_input: Mapping[str, Any]) -> RegisteredTool:
         """Tool 名、parameter Schema、境界変更用 field を実行直前に検証する。"""
 
-        tool = self._tools.get(tool_name)
-        if tool is None:
-            raise ToolPolicyViolation(f"Tool is not registered for this run: {tool_name}")
+        try:
+            tool = self._routing.resolve(tool_name, tool_input)
+        except ToolRouteError as error:
+            raise ToolPolicyViolation(str(error)) from None
         boundary_input = (
             _proposal_control_arguments(tool_input)
             if tool.capability == CHANGE_PROPOSE_CAPABILITY else tool_input
@@ -88,7 +94,7 @@ class ToolExecutionPolicy:
             fields = ", ".join(sorted(boundary_fields))
             raise ToolPolicyViolation(f"Tool input attempts to change run boundary: {fields}")
         errors = sorted(
-            Draft202012Validator(tool.input_schema).iter_errors(dict(tool_input)),
+            Draft202012Validator(tool.input_schema).iter_errors(provider_arguments(tool, tool_input)),
             key=lambda error: tuple(str(part) for part in error.absolute_path),
         )
         if errors:

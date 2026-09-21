@@ -65,6 +65,12 @@
       "type": "boolean",
       "default": false,
       "description": "Also return complete column attributes and ordered primary keys for the bound ordinary or partitioned table, even if empty. Requires table SELECT privilege; failure is an error, not a partial schema."
+    },
+    "resource_key": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "maxLength": 128,
+      "description": "This Run's frozen resource slot key. Required when several resources provide this capability; omit only when exactly one is available. Does not grant access or accept a connection address."
     }
   },
   "$id": "https://schemas.skillmind.local/tools/database.read/v1/request.schema.json",

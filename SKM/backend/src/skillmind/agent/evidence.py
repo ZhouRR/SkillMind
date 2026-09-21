@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from skillmind.agent.database_observations import database_audit_identity
 from skillmind.agent.domain import RegisteredTool
 from skillmind.agent.tool_diagnostics import safe_tool_diagnostic
+from skillmind.agent.tool_routing import resource_identity
 from skillmind.artifacts.conversion import conversion_artifact, conversion_artifact_description
 from skillmind.artifacts.domain import MAX_RUN_ARTIFACT_BYTES, MAX_RUN_ARTIFACTS, ArtifactDraft
 from skillmind.core.hashing import canonical_json, sha256_hex
@@ -496,6 +497,8 @@ class PostgresToolAuditWriter:
             or tool_call.provider != invocation.tool.provider
             or tool_call.integration_id != invocation.tool.integration_id
             or tool_call.request_fingerprint != invocation.request_fingerprint
+            or (invocation.tool.resource_key is not None and
+                tool_call.arguments_summary.get("resource") != resource_identity(invocation.tool))
         ):
             raise ValueError("ToolCall does not match its original invocation")
         if tool_call.run_attempt_id == invocation.run_attempt_id:
@@ -675,6 +678,7 @@ def _new_tool_call(
         integration_id=invocation.tool.integration_id,
         arguments_summary={
             **_arguments_summary(invocation.arguments),
+            **({"resource": resource_identity(invocation.tool)} if invocation.tool.resource_key is not None else {}),
             **(
                 {
                     "database": database_audit_identity(

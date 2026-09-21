@@ -322,7 +322,7 @@ def _resolve_source_tools(
     """
 
     tools: list[RegisteredTool] = []
-    bound_tool_sources: dict[str, RegisteredTool] = {}
+    bound_tool_sources: dict[str, list[RegisteredTool]] = {}
     repository_bindings: dict[str, RepositoryBindingRef] = {}
     blueprint = resolve_skill_definition(manifest)
     requirements = (
@@ -376,6 +376,7 @@ def _resolve_source_tools(
             provider=provider,
             integration_id=integration_id,
             binding_id=binding_id,
+            resource_key=str(requirement_key) if integration_id is not None and binding_id is not None else None,
             execution_profile=execution_profile,
         )
         if capability in DOCUMENT_CAPABILITIES and any(
@@ -394,12 +395,9 @@ def _resolve_source_tools(
                     or declared in EFFECT_CAPABILITIES
                 ):
                     continue
-                previous = bound_tool_sources.get(declared)
-                if previous is not None and (
-                    previous.provider, previous.integration_id, previous.binding_id
-                ) != (provider, integration_id, binding_id):
-                    raise LookupError(f"Tool capability has multiple resource bindings: {declared}")
-                bound_tool_sources[declared] = resolved
+                sources = bound_tool_sources.setdefault(declared, [])
+                if all(item.resource_key != resolved.resource_key for item in sources):
+                    sources.append(resolved)
     if uses_modern_runtime(claimed_run.task_snapshot_json):
         for original in tuple(tools):
             if original.capability != "database.read/v1":
@@ -410,6 +408,7 @@ def _resolve_source_tools(
                 tools.append(registry.resolve(
                     capability, provider=original.provider,
                     integration_id=original.integration_id, binding_id=original.binding_id,
+                    resource_key=original.resource_key,
                     execution_profile=execution_profile,
                 ))
             tools.remove(original)
@@ -420,7 +419,27 @@ def _resolve_source_tools(
         if not isinstance(tool_requirement, Mapping):
             continue
         tool_capability = tool_requirement.get("capability")
-        if not isinstance(tool_capability, str) or tool_capability in resolved_capabilities:
+        if not isinstance(tool_capability, str):
+            continue
+        if tool_capability in bound_tool_sources and tool_capability in allowed:
+            for source in bound_tool_sources[tool_capability]:
+                equivalent = {tool_capability}
+                if tool_capability == "database.read/v1" and uses_modern_runtime(claimed_run.task_snapshot_json):
+                    equivalent.add("database.read/v2")
+                if any(t.capability in equivalent and t.resource_key == source.resource_key for t in tools):
+                    continue
+                try:
+                    tools.append(registry.resolve(
+                        tool_capability, provider=source.provider,
+                        integration_id=source.integration_id, binding_id=source.binding_id,
+                        resource_key=source.resource_key, execution_profile=execution_profile,
+                    ))
+                except LookupError:
+                    if bool(tool_requirement.get("required", False)):
+                        raise
+            resolved_capabilities.update(t.capability for t in tools)
+            continue
+        if tool_capability in resolved_capabilities:
             continue
         if tool_capability not in allowed:
             if bool(tool_requirement.get("required", False)):
@@ -435,13 +454,6 @@ def _resolve_source_tools(
                     raise LookupError("Document Tool requires a frozen document selection")
                 resolved = registry.resolve(
                     tool_capability, provider=DOCUMENT_PROVIDER, integration_id=None,
-                    execution_profile=execution_profile,
-                )
-            elif tool_capability in bound_tool_sources:
-                source = bound_tool_sources[tool_capability]
-                resolved = registry.resolve(
-                    tool_capability, provider=source.provider,
-                    integration_id=source.integration_id, binding_id=source.binding_id,
                     execution_profile=execution_profile,
                 )
             else:

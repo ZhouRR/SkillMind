@@ -83,6 +83,12 @@
           "pattern": "^ev_[a-zA-Z0-9_-]+$"
         }
       }
+    },
+    "resource_key": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "maxLength": 128,
+      "description": "This Run's frozen resource slot key. Required when several resources provide this capability; omit only when exactly one is available. Does not grant access or accept a connection address."
     }
   },
   "$id": "https://schemas.skillmind.local/tools/database.read/v2/request.schema.json",
