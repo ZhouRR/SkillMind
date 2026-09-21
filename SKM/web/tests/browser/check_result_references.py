@@ -206,9 +206,12 @@ async def check_view(page: Page, mode: str, labels: dict) -> None:
             ).to_be_visible()
     await page.keyboard.press("Escape")
     if mode not in ("structured", "contract"):
-        await expect(page.locator(".outcomeStatus")).to_contain_text("PARTIAL")
+        await expect(page.locator(".outcomeStatus")).to_contain_text(
+            texts["completionStates"]["PARTIAL"]
+        )
+        await page.locator(".outcomeEffects > summary").click()
         await expect(page.get_by_text(texts["modelEffectsHint"], exact=True)).to_be_visible()
-        await expect(page.locator(".outcomeGroup > p").filter(has_text=INJECTION)).to_be_visible()
+        await expect(page.locator(".outcomeEffects > p").filter(has_text=INJECTION)).to_be_visible()
         await page.get_by_role("button", name=texts["reading"]["details"], exact=True).click()
         await page.get_by_role("button", name=texts["technicalDetails"], exact=True).click()
         await page.keyboard.press("Escape")

@@ -4,11 +4,9 @@ import { describe, expect, it } from 'vitest'
 import type { AgentSessionDetail, EvidenceDetail, RunDetailRecord } from '../../src/api'
 import {
   RunResultPanel,
-  collectSubagentDispatches,
-  groupSessionsByLineage,
-  hasIncompleteBranch,
   type RunDetailState,
 } from '../../src/components/RunResultPanel'
+import { collectSubagentDispatches, groupSessionsByLineage, hasIncompleteBranch } from '../../src/lib/runAudit'
 
 /** Result view test 用の Project-scoped detail を生成する。 */
 function detail(result: RunDetailRecord['result']): RunDetailRecord {

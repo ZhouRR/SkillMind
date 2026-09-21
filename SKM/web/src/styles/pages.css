@@ -195,6 +195,11 @@
 .skillLibrary { display: grid; gap: 14px; }
 .skillLibrary .panelHeader { align-items: flex-start; }
 .skillLibrary .panelHeader p { max-width: 760px; margin: 5px 0 0; }
+.skillLibraryFilters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.skillLibraryFilters label { flex: 1 1 200px; min-width: 0; margin: 0; }
+.skillLibraryFilters label:first-child { flex-basis: 300px; }
+.skillLibraryFilters input, .skillLibraryFilters select { width: 100%; min-width: 0; }
+.skillLibraryFilters > .hint { margin: 0; align-self: center; }
 .skillLibraryList { display: grid; gap: 9px; margin: 0; padding: 0; list-style: none; }
 .skillLibraryList > li {
   display: grid;
@@ -280,6 +285,10 @@
 .readinessList strong { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
 .readinessDisclosure > summary { cursor: pointer; color: var(--text-muted); font-size: 12px; font-weight: 600; }
 .readinessDisclosure[open] > summary { margin-bottom: 8px; }
+.readinessCandidates { min-width: 0; }
+.readinessCandidates > summary { cursor: pointer; color: var(--text-muted); }
+.readinessCandidates > ul { max-height: 240px; overflow-y: auto; margin: 8px 0 0; padding-left: 20px; }
+.readinessCandidates > ul > li { display: list-item; overflow-wrap: anywhere; margin: 0 0 6px; }
 .readinessList strong code { color: var(--text-faint); font: 400 12px var(--font-mono); opacity: .75; }
 .readinessGuidance { color: var(--text-faint) !important; font-size: 12px !important; font-style: italic; }
 .sourceTraceList code { color: var(--accent); font-size: 12px; }

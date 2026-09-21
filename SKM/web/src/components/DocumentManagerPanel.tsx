@@ -10,6 +10,7 @@ import {
   type ProjectDocumentRecord,
 } from '../api'
 import { DocumentOrganizeDialog, type DocumentEdit } from './DocumentOrganizeDialog'
+import { ActionMenu, type ActionMenuItem } from './ActionMenu'
 import { useMessages } from '../i18n'
 import { useDocumentDeletion } from '../hooks/useDocumentDeletion'
 import { useDocumentUpload } from '../hooks/useDocumentUpload'
@@ -247,7 +248,10 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
   const documents = documentsState.status === 'ready' ? documentsState.documents : []
   const selectedDocuments = documents.filter((item) => selectedIds.has(item.document_id))
   const visible = documents.filter((d) => `${d.folder}/${d.name}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()))
-  const tree = buildDocumentTree(visible, trashed || search ? [] : folderQuery.data ?? [], sort)
+  const visibleFolders = trashed ? [] : (folderQuery.data ?? [])
+    .filter((folder) => folder.toLocaleLowerCase().includes(search.toLocaleLowerCase()))
+  const tree = buildDocumentTree(visible, visibleFolders, sort)
+  const hasVisibleItems = tree.files.length > 0 || tree.folders.length > 0
   const folders = new Set<string>(trashed ? [] : folderQuery.data ?? [])
   for (const item of documents) {
     const segments = item.folder.split('/').filter(Boolean)
@@ -262,7 +266,16 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
     }), onFolder: setTargetFolder,
     edit: trashed ? undefined : (d) => setEdit({ mode: 'MOVE', documents: [d], folder: d.folder }),
     folderEdit: trashed ? undefined : (path) => setEdit({ mode: 'MOVE_FOLDER', documents: [], source: path, folder: path }),
-    folderSelect: (path) => setSelectedIds(new Set(visible.filter((d) => d.folder === path || d.folder.startsWith(path + '/')).map((d) => d.document_id))),
+    folderSelect: (path, checked) => setSelectedIds((current) => {
+      const next = new Set(current)
+      // 検索結果の subtree だけを変更し、別フォルダーの選択を保つ。
+      for (const document of visible) {
+        if (document.folder !== path && !document.folder.startsWith(path + '/')) continue
+        if (checked) next.add(document.document_id)
+        else next.delete(document.document_id)
+      }
+      return next
+    }),
     folderDelete: trashed ? undefined : (path) => { void performManagement({ action: 'DELETE_FOLDER', source: path }) },
     purge: trashed ? (document) => { void purge([document]) } : undefined,
     trashed }
@@ -328,12 +341,12 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
           onChange={(event) => setSelectedIds(event.target.checked ? new Set(visible.map((item) => item.document_id)) : new Set())} />
           {messages.documentsPanel.selectAll}</label>
         <span role="status">{messages.documentsPanel.selectedCount(selectedDocuments.length)}</span>
-        <button type="button" className="secondaryButton compactButton" disabled={blocked || selectedDocuments.length === 0}
+        {selectedDocuments.length > 0 && <><button type="button" className="secondaryButton compactButton" disabled={blocked}
           onClick={() => void recycle(selectedDocuments, trashed)}>{trashed ? messages.fileManagement.restore : messages.fileManagement.trashAction}</button>
-        {trashed && <button className="secondaryButton compactButton" type="button" disabled={blocked || selectedDocuments.length === 0} onClick={() => void purge(selectedDocuments)}>{messages.fileManagement.purge}</button>}
-        {!trashed && <button className="secondaryButton compactButton" type="button" disabled={blocked || selectedDocuments.length === 0} onClick={() => setEdit({ mode: 'MOVE', documents: selectedDocuments, folder: targetFolder })}>{messages.fileManagement.moveSelected}</button>}
-        <button type="button" className="secondaryButton compactButton" disabled={blocked || selectedDocuments.length === 0}
-          onClick={() => setSelectedIds(new Set())}>{messages.documentsPanel.clearSelection}</button>
+        {trashed && <button className="secondaryButton compactButton" type="button" disabled={blocked} onClick={() => void purge(selectedDocuments)}>{messages.fileManagement.purge}</button>}
+        {!trashed && <button className="secondaryButton compactButton" type="button" disabled={blocked} onClick={() => setEdit({ mode: 'MOVE', documents: selectedDocuments, folder: targetFolder })}>{messages.fileManagement.moveSelected}</button>}
+        <button type="button" className="secondaryButton compactButton" disabled={blocked}
+          onClick={() => setSelectedIds(new Set())}>{messages.documentsPanel.clearSelection}</button></>}
       </div>}
       <DocumentUploadStatus upload={upload} canRead={deletion.canRead() && !confirming} />
       <DocumentUploadClosure upload={upload} closure={closure} />
@@ -357,13 +370,14 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
       </section>}
       {documentsState.status === 'loading' && <LoadingSkeleton label={messages.documentsPanel.loadingDocs} rows={2} />}
       {documentsState.status === 'error' && <p className="error" role="alert">{documentsState.message}</p>}
-      {documentsState.status === 'ready' && visible.length === 0 && (trashed || search || !folderQuery.data?.length) && (
+      {documentsState.status === 'ready' && !hasVisibleItems && (
         <EmptyState text={search ? messages.fileManagement.noMatches
           : trashed ? messages.fileManagement.emptyTrash : messages.documentsPanel.emptyDocs} />
       )}
-      {documentsState.status === 'ready' && (visible.length > 0 || (!trashed && (folderQuery.data?.length ?? 0) > 0)) && (
+      {documentsState.status === 'ready' && hasVisibleItems && (
         <DocumentTree
           root={tree}
+          expandFolders={search.length > 0}
           projectId={projectId}
           busyId={busyId}
           selection={selection}
@@ -424,14 +438,15 @@ interface DocumentTreeSelection {
   edit?: (document: ProjectDocumentRecord) => void
   folderEdit?: (path: string) => void
   folderDelete?: (path: string) => void
-  folderSelect?: (path: string) => void
+  folderSelect?: (path: string, checked: boolean) => void
   purge?: (document: ProjectDocumentRecord) => void
   trashed?: boolean
 }
 
 /** 文書一覧を folder path の実階層で表示する presentational tree。folder 先行・file 後続で安定表示する。 */
-export function DocumentTree({ root, projectId, busyId, onDelete, onPreview, selection }: {
+export function DocumentTree({ root, projectId, busyId, onDelete, onPreview, selection, expandFolders = false }: {
   root: DocumentTreeNode
+  expandFolders?: boolean
   projectId: string
   busyId: string | null
   selection?: DocumentTreeSelection
@@ -445,6 +460,7 @@ export function DocumentTree({ root, projectId, busyId, onDelete, onPreview, sel
           key={folder.path}
           folder={folder}
           depth={0}
+          expandFolders={expandFolders}
           projectId={projectId}
           busyId={busyId}
           selection={selection}
@@ -472,9 +488,10 @@ export function DocumentTree({ root, projectId, busyId, onDelete, onPreview, sel
 }
 
 /** 一つの folder を開閉可能な節として描画し、子 folder → file の順で内容を並べる。 */
-function FolderNode({ folder, depth, projectId, busyId, onDelete, onPreview, selection }: {
+function FolderNode({ folder, depth, projectId, busyId, onDelete, onPreview, selection, expandFolders }: {
   folder: DocumentTreeNode
   depth: number
+  expandFolders: boolean
   projectId: string
   busyId: string | null
   selection?: DocumentTreeSelection
@@ -482,28 +499,39 @@ function FolderNode({ folder, depth, projectId, busyId, onDelete, onPreview, sel
   onPreview: (document: ProjectDocumentRecord, kind: DocumentPreviewKind) => void
 }) {
   const messages = useMessages()
+  const total = countDocuments(folder)
+  const selected = selection ? countSelectedDocuments(folder, selection.selectedIds) : 0
+  const actions: ActionMenuItem[] = []
+  if (selection && !selection.trashed) actions.push({ id: 'upload', label: messages.documentsPanel.uploadHere,
+    disabled: selection.disabled, onSelect: () => selection.onFolder(folder.path) })
+  if (selection?.folderEdit) actions.push({ id: 'organize', label: `${messages.fileManagement.rename} / ${messages.fileManagement.move}`,
+    disabled: selection.disabled, onSelect: () => selection.folderEdit?.(folder.path) })
+  if (total === 0 && selection?.folderDelete) actions.push({ id: 'delete', label: messages.fileManagement.emptyFolder,
+    disabled: selection.disabled, danger: true, separatorBefore: true, onSelect: () => selection.folderDelete?.(folder.path) })
   return (
-    <details className="docFolder" open={depth === 0}>
+    <details className="docFolder" open={expandFolders || depth === 0}>
       <summary>
-        <svg viewBox="0 0 16 16" aria-hidden="true">
+        {selection?.folderSelect && <input type="checkbox" checked={total > 0 && selected === total}
+          disabled={selection.disabled || total === 0}
+          aria-label={`${messages.fileManagement.selectFolder}: ${folder.name}`}
+          ref={(element) => { if (element) element.indeterminate = selected > 0 && selected < total }}
+          onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}
+          onChange={(event) => selection.folderSelect?.(folder.path, event.target.checked)} />}
+        <svg className="docFolderIcon" viewBox="0 0 16 16" aria-hidden="true">
           <path d="M1.8 4.2a1 1 0 0 1 1-1h3.4l1.6 1.8h5.4a1 1 0 0 1 1 1v6.2a1 1 0 0 1-1 1H2.8a1 1 0 0 1-1-1Z" />
         </svg>
-        <strong>{folder.name}</strong>
-        <span className="docFolderCount">{countDocuments(folder)}</span>
+        <strong title={folder.path}>{folder.name}</strong>
+        <span className="docFolderCount">{total}</span>
+        <ActionMenu id={`document-folder-actions-${projectId}-${encodeURIComponent(folder.path)}`}
+          label={messages.common.moreActions(folder.name)} ownerKey={folder.path} items={actions} />
       </summary>
       <div className="docFolderBody">
-        {selection && <div className="formRow documentFolderToolbar">
-          <button className="secondaryButton compactButton" type="button" disabled={selection.disabled} onClick={() => selection.folderSelect?.(folder.path)}>{messages.fileManagement.selectFolder}</button>
-          {selection.folderEdit && <button className="secondaryButton compactButton" type="button" disabled={selection.disabled} onClick={() => selection.folderEdit?.(folder.path)}>{messages.fileManagement.rename} / {messages.fileManagement.move}</button>}
-          {countDocuments(folder) === 0 && selection.folderDelete && <button className="secondaryButton compactButton" type="button" disabled={selection.disabled} onClick={() => selection.folderDelete?.(folder.path)}>{messages.fileManagement.emptyFolder}</button>}
-        </div>}
-        {selection && !selection.trashed && <button type="button" className="secondaryButton compactButton" disabled={selection.disabled}
-          onClick={() => selection.onFolder(folder.path)}>{messages.documentsPanel.uploadHere}</button>}
         {folder.folders.map((child) => (
           <FolderNode
             key={child.path}
             folder={child}
             depth={depth + 1}
+            expandFolders={expandFolders}
             projectId={projectId}
             busyId={busyId}
             selection={selection}
@@ -531,6 +559,19 @@ function FolderNode({ folder, depth, projectId, busyId, onDelete, onPreview, sel
   )
 }
 
+/** 検索で絞った tree 内だけを数え、非表示の文書を一括操作へ混入させない。 */
+function countSelectedDocuments(folder: DocumentTreeNode, selectedIds: ReadonlySet<string>): number {
+  return folder.files.filter((document) => selectedIds.has(document.document_id)).length
+    + folder.folders.reduce((sum, child) => sum + countSelectedDocuments(child, selectedIds), 0)
+}
+
+/** 一覧では簡潔な種別を使い、完全な MIME は tooltip と preview に残す。 */
+function documentTypeLabel(name: string): string | null {
+  const extension = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1).toLowerCase() : ''
+  const names: Record<string, string> = { xlsx: 'Excel', xls: 'Excel', doc: 'Word', docx: 'Word', ppt: 'PowerPoint', pptx: 'PowerPoint', md: 'Markdown', markdown: 'Markdown', html: 'HTML', htm: 'HTML' }
+  return names[extension] ?? (extension && extension.length <= 10 ? extension.toUpperCase() : null)
+}
+
 /** 一つの文書 row。preview は登録拡張子かつ上限内のときだけ有効化する。 */
 function FileRow({ document, projectId, busyId, onDelete, onPreview, selection }: {
   document: ProjectDocumentRecord
@@ -543,47 +584,37 @@ function FileRow({ document, projectId, busyId, onDelete, onPreview, selection }
   const messages = useMessages()
   const kind = documentPreviewKind(document.name)
   const oversized = document.size > PREVIEW_MAX_BYTES
+  const downloadHref = projectDocumentContentHref(projectId, document.document_id)
+  const typeLabel = documentTypeLabel(document.name)
+  const actions: ActionMenuItem[] = [{ id: 'download', label: messages.documentsPanel.download, href: downloadHref, download: document.name }]
+  if (selection?.edit) actions.push({ id: 'organize', label: `${messages.fileManagement.rename} / ${messages.fileManagement.move}`,
+    disabled: selection.disabled, onSelect: () => selection.edit?.(document) })
+  actions.push({ id: 'recycle', label: busyId === document.document_id ? messages.documentsPanel.deleting
+    : selection?.trashed ? messages.fileManagement.restore : messages.fileManagement.trashAction,
+    disabled: busyId !== null || selection?.disabled, danger: !selection?.trashed, separatorBefore: true,
+    onSelect: () => onDelete(document) })
+  if (selection?.purge) actions.push({ id: 'purge', label: messages.fileManagement.purge,
+    disabled: selection.disabled, danger: true, onSelect: () => selection.purge?.(document) })
   return (
     <li className="documentItem">
       {selection && <input type="checkbox" checked={selection.selectedIds.has(document.document_id)} disabled={selection.disabled}
         aria-label={messages.documentsPanel.selectFile(document.name)}
         onChange={(event) => selection.toggle(document.document_id, event.target.checked)} />}
       <div className="documentInfo">
-        <strong title={document.name}>{document.name}</strong>
-        <span>
-          {formatByteSize(document.size)} · {document.mime}
+        {kind !== null && !oversized ? <button className="documentName" type="button" title={document.name}
+          aria-label={`${messages.documentsPanel.previewButton}: ${document.name}`}
+          onClick={() => onPreview(document, kind)}>{document.name}</button>
+          : <a className="documentName" href={downloadHref} download={document.name}
+            aria-label={`${messages.documentsPanel.download}: ${document.name}`}
+            title={oversized ? messages.documentsPanel.oversizedTitle : document.name}>{document.name}</a>}
+        <span title={document.mime}>
+          {formatByteSize(document.size)}{typeLabel ? ` · ${typeLabel}` : ''}
           {' · '}{formatLocalTimestamp(document.created_at)}
         </span>
       </div>
       <div className="documentActions">
-        {selection?.purge && <button className="secondaryButton compactButton" type="button" disabled={selection.disabled} onClick={() => selection.purge?.(document)}>{messages.fileManagement.purge}</button>}
-        {selection?.edit && <button className="secondaryButton compactButton" type="button" disabled={selection.disabled} onClick={() => selection.edit?.(document)}>{messages.fileManagement.rename} / {messages.fileManagement.move}</button>}
-        {kind !== null && (
-          <button
-            className="secondaryButton compactButton"
-            disabled={oversized}
-            title={oversized ? messages.documentsPanel.oversizedTitle : undefined}
-            type="button"
-            onClick={() => onPreview(document, kind)}
-          >
-            {messages.documentsPanel.previewButton}
-          </button>
-        )}
-        <a
-          className="secondaryButton compactButton"
-          download={document.name}
-          href={projectDocumentContentHref(projectId, document.document_id)}
-        >
-          {messages.documentsPanel.download}
-        </a>
-        <button
-          className="secondaryButton compactButton"
-          disabled={busyId !== null}
-          onClick={() => onDelete(document)}
-          type="button"
-        >
-          {busyId === document.document_id ? messages.documentsPanel.deleting : selection?.trashed ? messages.fileManagement.restore : messages.fileManagement.trashAction}
-        </button>
+        <ActionMenu id={`document-actions-${projectId}-${document.document_id}`}
+          label={messages.common.moreActions(document.name)} ownerKey={document.document_id} items={actions} />
       </div>
     </li>
   )

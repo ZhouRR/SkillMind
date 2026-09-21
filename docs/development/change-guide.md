@@ -9,13 +9,13 @@ Backend 路径相对 `SKM/backend/src/skillmind/`。
 | 场景 | 主要入口 | 核对重点 |
 | --- | --- | --- |
 | 登录、账户、项目权限 | auth/、projects/、api/auth_dependencies.py | 原身份、撤权、CSRF/API Key、资源隔离 |
-| Skill 导入与发布 | skills/、agent/interpreter*、skills/skillmind-skill-interpreter | 原文、最小声明、版本和发布校验 |
+| Skill 导入与发布 | skills/service.py、skills/source_loader.py、skills/source_storage.py；agent/interpreter* | 预览/保存/重建共用源包解析与字节存储；授权和事务留在 Service，原文 hash 与发布校验不变 |
 | 任务、调度、输入 | runs/、schedules/、agent/context_builder.py | 精确任务、原请求幂等、冻结选择与物化 |
 | 执行、等待、恢复 | agent/、worker/、runs/ | Segment/Attempt、lease、事件、取消、未知结果 |
 | 数据库、Git、MCP 写入 | effects/、agent/*_provider.py、agent/*_source.py | 绑定、批准、冲突、原操作回执与回读 |
 | 文档、目录、回收站 | documents/、storage/、runs/ | 原始输入、共享引用、恢复与完全删除 |
 | 结果与评价 | agent/result_validation.py、evaluations/ | 原结果不变、引用、追加评价 |
-| 页面与交互 | web/src/pages、components、api、lib | [UI 指南](../design/workspace.md)、共享状态与响应验证 |
+| 页面与交互 | web/src/pages、components、hooks、api、lib | 页面组合、请求生命周期、纯数据转换分开；[UI 指南](../design/workspace.md)、原请求及响应验证 |
 | 配置、迁移与恢复 | core/settings.py、backend/migrations、compose.yml | [部署](../operations/deployment.md)与[恢复](../operations/backup-recovery.md) |
 
 ## 保持改动与问题相称

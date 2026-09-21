@@ -10,7 +10,9 @@ from uuid import uuid4
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
 
-from skillmind.agent.context_builder import ContractStore
+from skillmind.agent.contract_store import (
+    ContractStore,
+)
 from skillmind.agent.domain import RegisteredTool
 from skillmind.agent.tool_gateway import RunToolContext, ToolProviderError
 from skillmind.agent.workspace import WorkspaceManager

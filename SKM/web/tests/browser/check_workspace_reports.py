@@ -105,7 +105,8 @@ async def check(url: str, output: Path) -> None:
                     await expect(page.locator('.workspaceQueue .pendingItem')).to_have_count(1)
                     await expect(page.get_by_role('tab', name=work['tabEvents'], exact=True)).to_have_count(0)
                     await page.get_by_role('tab', name=work['queue']['reports'], exact=True).click()
-                    await expect(page.locator('.workspaceReports .deliverableContent')).to_have_count(2)
+                    await expect(page.locator('.workspaceReports .reportSummary')).to_be_visible()
+                    await expect(page.locator('.workspaceReports .deliverableContent, .workspaceReports .runArtifacts')).to_have_count(0)
                     await expect(page.locator('.workspaceReports iframe.outcomeReportFrame')).to_have_count(0)
                     await expect(page.locator('.workspaceQueue .pendingItem')).to_have_count(0)
                     await expect(page.locator('.workspaceQueue .pagination')).to_have_count(0)
@@ -122,13 +123,35 @@ async def check(url: str, output: Path) -> None:
                     await expect(page.get_by_role('tab', name=work['tabConversation'], exact=True)).to_have_count(0)
                     await expect(page.get_by_role('tab', name=work['tabEvents'], exact=True)).to_have_count(0)
                     await expect(page.locator('.runFacts')).to_have_count(0)
+                    # Workspace は要約のみ。最新の失敗と scope 拒否をここで確認し、全文は詳細へ進む。
+                    api.failed = True
+                    await page.locator('.reportToolbar button').click()
+                    await expect(page.locator('.reportRunMeta .statusBadge')).to_have_text(labels['enums']['runStatus']['FAILED'])
+                    await expect(page.locator('.reportSummary')).to_have_count(0)
+                    api.failed = False
+                    await page.locator('.reportToolbar button').click()
+                    await expect(page.locator('.reportSummary .readingMarkdown')).to_have_text(api.body['result']['summary'])
+                    api.wrong_scope = True
+                    await page.locator('.reportToolbar button').click()
+                    await expect(page.locator('.workspaceReports [role="alert"]')).to_be_visible()
+                    await expect(page.locator('.workspaceReports .deliverableContent, .workspaceReports .runArtifacts')).to_have_count(0)
+                    assert api.queries[-1]['task_id'] == [TASK]
+                    api.wrong_scope = False
+                    await page.locator('.reportToolbar button').click()
+                    await expect(page.locator('.workspaceReports [role="alert"]')).to_have_count(0)
+                    await page.get_by_role('link', name=work['executionDetail'], exact=True).click()
+                    assert '#/history?' in page.url and f'run={RUN}' in page.url
+                    await expect(page.get_by_role('tab', name=work['tabConversation'], exact=True)).to_be_visible()
+                    await expect(page.get_by_role('tab', name=work['tabEvents'], exact=False)).to_be_visible()
+                    await page.get_by_role('tab', name=work['tabResult'], exact=True).click()
+                    await expect(page.locator('.deliverableContent')).to_have_count(2)
                     await page.locator('.deliverableContent > summary').first.click()
                     await expect(page.locator('.deliverableContent .readingMarkdown').get_by_role('heading', name='Desktop login report')).to_be_visible()
                     report = page.frame_locator('iframe.outcomeReportFrame')
                     structured = page.locator('.outcomeCard details').filter(has_text='"passed":17')
                     await expect(structured).to_have_count(1)
                     assert not await structured.evaluate('(element) => element.open')
-                    await expect(page.get_by_text(labels['runResult']['toolCalls'], exact=True)).to_have_count(0)
+                    await expect(page.get_by_text(labels['runResult']['toolCalls'], exact=True)).to_be_visible()
                     preview = page.locator('.runArtifacts').get_by_role('button', name=labels['runResult']['artifacts']['preview'], exact=True)
                     await preview.click()
                     frame = page.frame_locator('iframe.runReportPreview')
@@ -144,7 +167,8 @@ async def check(url: str, output: Path) -> None:
                         '<script>parent.document.body.dataset.injected="yes";fetch("https://forbidden.invalid")</script>'
                         '<img src="https://forbidden.invalid/x"><a href="https://forbidden.invalid">Evidence</a></body></html>')
                     api.body['result']['data']['deliverables'][0]['content'] = html
-                    await page.locator('.reportToolbar button').click()
+                    await page.reload()
+                    await page.get_by_role('tab', name=work['tabResult'], exact=True).click()
                     await expect(report.get_by_role('heading', name='HTML login report')).to_be_visible()
                     assert await report.locator('.metrics').evaluate('(e) => getComputedStyle(e).display') == 'grid'
                     await expect(report.locator('svg rect')).to_have_count(1)
@@ -159,31 +183,11 @@ async def check(url: str, output: Path) -> None:
                         await layout(page)
                     await page.set_viewport_size({'width': 1440, 'height': 1000})
                     await page.screenshot(path=str(output / f'inline-html-{language}.png'))
-                    api.failed = True
-                    await page.locator('.reportToolbar button').click()
-                    await expect(page.locator('iframe.outcomeReportFrame')).to_have_count(0)
-                    await expect(page.locator('.reportRunMeta .statusBadge')).to_be_visible()
-                    assert api.queries[-1]['task_id'] == [TASK]
-                    api.failed = False
-                    await page.locator('.reportToolbar button').click()
-                    await expect(report.get_by_role('heading', name='HTML login report')).to_be_visible()
-                    # 他 Task の誤応答はレポートとして受け入れず、旧結果も最新扱いしない。
-                    api.wrong_scope = True
-                    await page.locator('.reportToolbar button').click()
-                    await expect(page.locator('.workspaceReports [role="alert"]')).to_be_visible()
-                    await expect(page.locator('iframe.outcomeReportFrame')).to_have_count(0)
-                    api.wrong_scope = False
-                    await page.locator('.reportToolbar button').click()
-                    await expect(report.get_by_role('heading', name='HTML login report')).to_be_visible()
-                    await page.get_by_role('link', name=work['executionDetail'], exact=True).click()
-                    assert '#/history?' in page.url and f'run={RUN}' in page.url
-                    await expect(page.get_by_role('tab', name=work['tabConversation'], exact=True)).to_be_visible()
-                    await expect(page.get_by_role('tab', name=work['tabEvents'], exact=False)).to_be_visible()
                     await page.reload()
                     await expect(page.locator('.runFacts')).to_be_visible()
                     await page.get_by_role('link', name=labels['routes']['history']['label'], exact=True).last.click()
                     await expect(page.locator('.historyItem')).to_have_count(1)
-                    await page.locator('.historyItem > button').click()
+                    await page.locator('.historyItem > button').first.click()
                     assert '#/history?' in page.url and f'run={RUN}' in page.url
                     await expect(page.locator('.runFacts')).to_be_visible()
                     await layout(page)
@@ -194,6 +198,7 @@ async def check(url: str, output: Path) -> None:
                     await page.goto(f'{url}#/workspace?project={PROJECT}&run={RUN}')
                     # 別 fixture の本文へ変えたので索引も再取得する。同一 hash の頁移動だけでは更新されない。
                     await page.reload()
+                    await page.get_by_role('tab', name=work['tabResult'], exact=True).click()
                     await preview.click()
                     await expect(frame.get_by_role('heading', name='HTML login report')).to_be_visible()
                     assert not errors and not api.failures and not api.unexpected, (errors, api.failures, api.unexpected)

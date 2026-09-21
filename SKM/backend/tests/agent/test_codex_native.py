@@ -18,13 +18,19 @@ from uuid import uuid4
 import pytest
 from jsonschema import Draft202012Validator
 from openai_codex.client import CodexConfig
+
 from skillmind.agent import codex_completion, codex_engine
 from skillmind.agent.codex_completion import CodexCompletionClient
 from skillmind.agent.codex_engine import CodexAgentSdkEngine
 from skillmind.agent.codex_runtime import CodexRuntimeConfiguration, create_codex_client
-from skillmind.agent.context_builder import ContractStore, _change_propose_tool_definition
+from skillmind.agent.contract_store import (
+    ContractStore,
+)
 from skillmind.agent.domain import AgentEventType, AgentSessionRef, ResumeContext
 from skillmind.agent.session_store import TranscriptKey
+from skillmind.agent.tool_catalog import (
+    _change_propose_tool_definition,
+)
 from skillmind.agent.tool_gateway import ToolRegistry
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.runs.proposal_continuation import ResolvedProposal

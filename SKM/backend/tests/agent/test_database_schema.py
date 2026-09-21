@@ -10,7 +10,9 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from jsonschema import Draft202012Validator
 
-from skillmind.agent.context_builder import ContractStore
+from skillmind.agent.contract_store import (
+    ContractStore,
+)
 from skillmind.agent.postgres_schema import validate_table_schema
 from skillmind.agent.postgres_source import (
     MAX_DATABASE_BYTES,

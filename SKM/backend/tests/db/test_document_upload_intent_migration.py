@@ -64,7 +64,7 @@ def _indexes(table: sa.Table) -> set[tuple[str, tuple[str, ...], bool, str | Non
 def test_0038_and_complete_document_migration_chain_match_model(
     migration: ModuleType, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """0014→0037→0038 を実 DDL から合成し、旧列を含む最新の二表契約と一致させる。"""
+    """0014→0037→0038 を実 DDL から合成し、後続変更を除いた二表契約と一致させる。"""
 
     metadata = sa.MetaData(naming_convention=Base.metadata.naming_convention)
     for parent in ("organizations", "projects", "users"):
@@ -124,6 +124,13 @@ def test_0038_and_complete_document_migration_chain_match_model(
             constraint_names -= {
                 "fk_project_documents_effect_upload", "ck_project_documents_single_upload_origin",
             }
+            # 0054 の回収箱追加と部分 index 化は別回帰に任せ、0038 の制約を維持する。
+            for column in ("deleted_at", "deleted_by", "deleted_by_run_id"):
+                model_contract["columns"].pop(column)
+            model_contract["foreign_keys"].remove(("deleted_by_run_id", "runs.id", "RESTRICT"))
+            model_contract["unique"].add(("project_id", "folder", "name"))
+            constraint_names.remove("fk_documents_deleted_by_run")
+            constraint_names.add("uq_project_documents_project_folder_name")
         assert _contract(migrated) == model_contract
         assert {str(item.name) for item in migrated.constraints} == constraint_names
         assert all(len(str(item.name)) <= 63 for item in migrated.constraints)
@@ -199,6 +206,7 @@ def database() -> Iterator[sqlite3.Connection]:
         )
         for table, identifiers in (
             ("organizations", (101, 102)), ("projects", (201, 202)), ("users", (301, 302)),
+            ("runs", (401, 402)),
         ):
             connection.execute(f"CREATE TABLE {table} (id TEXT PRIMARY KEY)")
             connection.executemany(

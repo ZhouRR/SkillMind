@@ -2,56 +2,34 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 from jsonschema import Draft202012Validator, FormatChecker
 
-from skillmind.agent.audit_export import AuditExportProvider
 from skillmind.agent.database_provider import DatabaseReadProvider
-from skillmind.agent.document_inspection import DocumentInspectProvider
-from skillmind.agent.document_listing import DocumentListProvider
-from skillmind.agent.document_provider import DocumentConvertProvider, DocumentProvider
 from skillmind.agent.domain import (
     MaterializedResource,
     RegisteredTool,
     RunContext,
     RunLimits,
 )
-from skillmind.agent.evidence import EvidenceDraft
-from skillmind.agent.json_schema_provider import JsonSchemaValidateProvider
-from skillmind.agent.repository_provider import RepositoryReadProvider
 from skillmind.agent.repository_source import (
     RepositoryBindingRef,
-    RepositorySnapshotSource,
 )
 from skillmind.agent.runtime_policy import uses_modern_runtime
 from skillmind.agent.skill_files import SKILL_FILE_CAPABILITIES
-from skillmind.agent.subagent import SUBAGENT_DISPATCH_CAPABILITY
 from skillmind.agent.task_brief import (
     build_agent_task_brief,
     render_task_brief_prompt,
     resolve_execution_profile,
 )
 from skillmind.agent.tool_gateway import (
-    ProviderToolResult,
-    RunToolContext,
-    ToolDefinition,
-    ToolProvider,
-    ToolProviderError,
     ToolRegistry,
 )
 from skillmind.agent.workspace import WorkspaceManager
 from skillmind.agent.workspace_materializer import WorkspaceMaterializer
-from skillmind.agent.workspace_provider import (
-    WorkspaceReadProvider,
-    WorkspaceSearchProvider,
-    WorkspaceWriteProvider,
-)
-from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.documents.library import (
     DOCUMENT_LIBRARY_REVISION,
     DOCUMENT_WRITE_CAPABILITY,
@@ -60,17 +38,12 @@ from skillmind.documents.library import (
     parse_document_library_reference,
     parse_document_library_source,
 )
-from skillmind.documents.observation_repository import DocumentObservationLookup
 from skillmind.documents.snapshot import (
     DOCUMENT_CAPABILITIES,
-    DOCUMENT_CONVERT_CAPABILITY,
-    DOCUMENT_INSPECT_CAPABILITY,
-    DOCUMENT_LIST_CAPABILITY,
     DOCUMENT_PROVIDER,
     document_preparation_policy,
     selected_document_snapshots,
 )
-from skillmind.documents.source import ProjectDocumentSource
 from skillmind.effects.catalog import EFFECT_CAPABILITIES
 from skillmind.effects.proposal import CHANGE_PROPOSE_CAPABILITY
 from skillmind.effects.release import ExecutionFeatures
@@ -86,528 +59,6 @@ from skillmind.skills.document_prerequisites import (
 from skillmind.skills.execution import resolve_skill_definition
 from skillmind.skills.frozen_manifest import verified_run_manifest
 from skillmind.skills.resource_binding import required_resource_keys
-
-
-class ContractStore:
-    """Configured contracts root 下の JSON object だけを読み込む。"""
-
-    def __init__(self, root: Path) -> None:
-        """Existence を検証し、contract path 解決の root を固定する。"""
-
-        self._root = root.resolve(strict=True)
-
-    @property
-    def root(self) -> Path:
-        """Tool 契約を解決する read-only root を返す。"""
-
-        return self._root
-
-    def load(self, relative_path: str) -> dict[str, Any]:
-        """Traversal と non-object JSON を拒否し、契約の defensive copy を返す。"""
-
-        path = (self._root / relative_path).resolve(strict=True)
-        if not path.is_relative_to(self._root) or path.is_symlink():
-            raise ValueError("Contract path escapes the configured root")
-        value = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(value, dict):
-            raise ValueError("Contract JSON must be an object")
-        return value
-
-
-def _read_tool_definitions(
-    contracts: ContractStore,
-    *,
-    redmine_issue_provider: ToolProvider | None = None,
-    database_provider: ToolProvider | None = None,
-    mcp_provider: ToolProvider | None = None,
-    mcp_tools_provider: ToolProvider | None = None,
-    mcp_query_provider: ToolProvider | None = None,
-    repository_source: RepositorySnapshotSource | None = None,
-) -> tuple[ToolDefinition, ...]:
-    """注入済みの実 Provider だけを公開し、未設定の資源を合成 data で補わない。"""
-
-    definitions: list[ToolDefinition] = []
-    for capability, provider, description in (
-        (
-            "mcp.tools/v1",
-            mcp_tools_provider,
-            "Discover frozen MCP schemas, server version and connection references. "
-            "Use reserve_desktop=true before planning desktop execution "
-            "to obtain a Run reservation. "
-            "This only excludes other SKM Runs at the same endpoint; "
-            "external exclusivity is not verified. "
-            "Does not start an app or provide unobserved environment/build configuration. "
-            + str(contracts.load("tools/mcp.call/v1/request.schema.json")["description"]),
-        ),
-        (
-            "mcp.query/v1",
-            mcp_query_provider,
-            "Call tools explicitly authorized as read in the frozen catalog. Other tools require "
-            "change.propose approval; never call them here.",
-        ),
-    ):
-        if provider is not None:
-            definitions.append(
-                ToolDefinition(
-                    capability=capability,
-                    description=description,
-                    request_schema=contracts.load(f"tools/{capability}/request.schema.json"),
-                    response_schema=contracts.load(f"tools/{capability}/response.schema.json"),
-                    error_schema=contracts.load(f"tools/{capability}/error.schema.json"),
-                    providers={"mcp": provider},
-                )
-            )
-    if mcp_provider is not None:
-        definitions.append(
-            ToolDefinition(
-                capability="mcp.read/v1",
-                description="Read text or Base64 content from one allowed MCP resource URI",
-                request_schema=contracts.load("tools/mcp.read/v1/request.schema.json"),
-                response_schema=contracts.load("tools/mcp.read/v1/response.schema.json"),
-                error_schema=contracts.load("tools/mcp.read/v1/error.schema.json"),
-                providers={"mcp": mcp_provider},
-            )
-        )
-    if database_provider is not None:
-        definitions.append(
-            ToolDefinition(
-                capability="database.read/v1",
-                description=(
-                    "Read allowed PostgreSQL tables with columns, equality filters "
-                    "and bounded rows; use include_schema to inspect columns and primary keys "
-                    "even for empty tables before proposing a write; no SQL input"
-                ),
-                request_schema=contracts.load("tools/database.read/v1/request.schema.json"),
-                response_schema=contracts.load("tools/database.read/v1/response.schema.json"),
-                error_schema=contracts.load("tools/database.read/v1/error.schema.json"),
-                providers={"postgres": database_provider},
-            )
-        )
-    if database_provider is not None:
-        for capability, description in (
-            (
-                "database.read/v2",
-                "Read the exact authorized PostgreSQL table; no SQL. Use "
-                "database.describe/v1 when columns or keys are unknown. Preserve query "
-                "meaning. After one correctable failure, link a corrected read with "
-                "recovery.failed_tool_call_id and schema_evidence_ref. Do not repeat "
-                "unchanged queries.",
-            ),
-            (
-                "database.describe/v1",
-                "Inspect only the named authorized table's columns and ordered primary key, "
-                "without reading rows. Reuse Run observations unless refresh=true or "
-                "correcting a structural error. recovery_from links the original failed "
-                "ToolCall. Cached structure is not current DDL or write permission.",
-            ),
-        ):
-            name, version = capability.split("/")
-            definitions.append(
-                ToolDefinition(
-                    capability=capability,
-                    description=description,
-                    request_schema=contracts.load(f"tools/{name}/{version}/request.schema.json"),
-                    response_schema=contracts.load(f"tools/{name}/{version}/response.schema.json"),
-                    error_schema=contracts.load(f"tools/{name}/{version}/error.schema.json"),
-                    providers={"postgres": database_provider},
-                )
-            )
-    if redmine_issue_provider is not None:
-        definitions.append(
-            ToolDefinition(
-                capability="issue.read/v1",
-                description="Read one issue from the bound Integration",
-                request_schema=contracts.load("tools/issue.read/v1/request.schema.json"),
-                response_schema=contracts.load("tools/issue.read/v1/response.schema.json"),
-                error_schema=contracts.load("tools/issue.read/v1/error.schema.json"),
-                providers={"redmine": redmine_issue_provider},
-            )
-        )
-    if repository_source is not None:
-        bound = RepositoryReadProvider(repository_source)
-        definitions.append(
-            ToolDefinition(
-                capability="repository.read/v1",
-                description="Read one UTF-8 file from the bound repository at a fixed revision",
-                request_schema=contracts.load("tools/repository.read/v1/request.schema.json"),
-                response_schema=contracts.load("tools/repository.read/v1/response.schema.json"),
-                error_schema=contracts.load("tools/repository.read/v1/error.schema.json"),
-                providers={"git": bound, "svn": bound},
-            )
-        )
-    return tuple(definitions)
-
-
-def document_read_tool_definition(
-    contracts: ContractStore, source: ProjectDocumentSource
-) -> ToolDefinition:
-    """Project 文書を読む document.read/v1 の Tool 定義を組み立てる。"""
-
-    return ToolDefinition(
-        capability="document.read/v1",
-        description="Read one UTF-8 project document at a fixed content hash",
-        request_schema=contracts.load("tools/document.read/v1/request.schema.json"),
-        response_schema=contracts.load("tools/document.read/v1/response.schema.json"),
-        error_schema=contracts.load("tools/document.read/v1/error.schema.json"),
-        providers={DOCUMENT_PROVIDER: DocumentProvider(source)},
-    )
-
-
-def document_convert_tool_definition(
-    contracts: ContractStore, source: ProjectDocumentSource,
-    *, observations: DocumentObservationLookup | None = None,
-) -> ToolDefinition:
-    """凍結 Excel を Worker 内で明示変換する Tool を登録する。"""
-
-    return ToolDefinition(
-        capability=DOCUMENT_CONVERT_CAPABILITY,
-        description=(
-            "Convert one frozen Excel using Worker MarkItDown. Set publish_artifact=true to "
-            "save the exact Markdown as a Run Artifact for approved document backup; use its "
-            "artifact_refs and artifact size/hash instead of rewriting the Markdown."
-        ),
-        request_schema=contracts.load("tools/document.convert/v1/request.schema.json"),
-        response_schema=contracts.load("tools/document.convert/v1/response.schema.json"),
-        error_schema=contracts.load("tools/document.convert/v1/error.schema.json"),
-        providers={DOCUMENT_PROVIDER: DocumentConvertProvider(source, observations=observations)},
-    )
-
-
-def document_inspect_tool_definition(
-    contracts: ContractStore, source: ProjectDocumentSource
-) -> ToolDefinition:
-    """凍結範囲の実 storage metadata だけを観測する Tool を登録する。"""
-
-    return ToolDefinition(
-        capability=DOCUMENT_INSPECT_CAPABILITY,
-        description=(
-            "Inspect storage LastModified, Version ID and ETag of one frozen document "
-            "without downloading its bytes"
-        ),
-        request_schema=contracts.load("tools/document.inspect/v1/request.schema.json"),
-        response_schema=contracts.load("tools/document.inspect/v1/response.schema.json"),
-        error_schema=contracts.load("tools/document.inspect/v1/error.schema.json"),
-        providers={DOCUMENT_PROVIDER: DocumentInspectProvider(source)},
-    )
-
-
-def document_list_tool_definition(
-    contracts: ContractStore, source: ProjectDocumentSource
-) -> ToolDefinition:
-    """凍結集合の directory 分頁・実 metadata 条件を明示能力として登録する。"""
-
-    return ToolDefinition(
-        capability=DOCUMENT_LIST_CAPABILITY,
-        description=(
-            "Page through frozen authorized documents by directory and storage LastModified; "
-            "follow every next_cursor and convert matches using each entry's observation Evidence"
-        ),
-        request_schema=contracts.load("tools/document.list/v1/request.schema.json"),
-        response_schema=contracts.load("tools/document.list/v1/response.schema.json"),
-        error_schema=contracts.load("tools/document.list/v1/error.schema.json"),
-        providers={DOCUMENT_PROVIDER: DocumentListProvider(source)},
-    )
-
-
-def create_run_tool_registry(
-    contracts: ContractStore,
-    *,
-    document_source: ProjectDocumentSource,
-    document_observations: DocumentObservationLookup | None = None,
-    document_readiness_provider: ToolProvider | None = None,
-    audit_export_provider: ToolProvider | None = None,
-    redmine_issue_provider: ToolProvider | None = None,
-    database_provider: ToolProvider | None = None,
-    mcp_provider: ToolProvider | None = None,
-    mcp_tools_provider: ToolProvider | None = None,
-    mcp_query_provider: ToolProvider | None = None,
-    repository_source: RepositorySnapshotSource | None = None,
-    subagent_provider: ToolProvider | None = None,
-    deferred_features_enabled: bool = True,
-    database_writes_enabled: bool = False,
-    document_writes_enabled: bool = False,
-    git_writes_enabled: bool = False,
-    mcp_tools_enabled: bool = False,
-) -> ToolRegistry:
-    """Project 文書、実 Integration と platform 能力を registry へ登録する。"""
-
-    return ToolRegistry(
-        (
-            *_read_tool_definitions(
-                contracts,
-                redmine_issue_provider=redmine_issue_provider,
-                database_provider=database_provider,
-                mcp_provider=mcp_provider,
-                mcp_tools_provider=mcp_tools_provider,
-                mcp_query_provider=mcp_query_provider,
-                repository_source=repository_source,
-            ),
-            document_read_tool_definition(contracts, document_source),
-            document_convert_tool_definition(
-                contracts, document_source, observations=document_observations
-            ),
-            document_inspect_tool_definition(contracts, document_source),
-            document_list_tool_definition(contracts, document_source),
-            ToolDefinition(
-                capability=DOCUMENT_READINESS_CAPABILITY,
-                description="Check original Run controlled effects required before document access",
-                request_schema=contracts.load("tools/document.readiness/v1/request.schema.json"),
-                response_schema=contracts.load("tools/document.readiness/v1/response.schema.json"),
-                error_schema=contracts.load("tools/document.readiness/v1/error.schema.json"),
-                providers={
-                    "platform": document_readiness_provider or UnavailableDocumentReadiness()
-                },
-                unbound_provider="platform",
-            ),
-            *_workspace_tool_definitions(contracts),
-            ToolDefinition(
-                capability="audit.export/v1",
-                description=("Export selected saved Evidence and Proposal/Effect facts from this Run "
-                    "directly to an immutable output Artifact. Use evidence_refs and proposal_refs "
-                    "already returned by Tools; never rewrite original receipts to make an audit file. "
-                    "Returns only path/hash/counts/references, not the full export. Publish the returned "
-                    "artifact_ref using the existing approved document save when required. This generic "
-                    "audit JSON is not a Skill-specific execution-result schema or a business verdict."),
-                request_schema=contracts.load("tools/audit.export/v1/request.schema.json"),
-                response_schema=contracts.load("tools/audit.export/v1/response.schema.json"),
-                error_schema=contracts.load("tools/audit.export/v1/error.schema.json"),
-                providers={"platform": audit_export_provider or AuditExportProvider(None)},
-                unbound_provider="platform", minimum_execution_profile="SUPERVISED",
-            ),
-            _interaction_tool_definition(contracts),
-            *((_change_propose_tool_definition(contracts),)
-              if deferred_features_enabled or database_writes_enabled
-              or document_writes_enabled or git_writes_enabled or mcp_tools_enabled else ()),
-            *(_subagent_tool_definitions(contracts, subagent_provider)
-              if deferred_features_enabled else ()),
-        )
-    )
-
-
-class UnavailableDocumentReadiness:
-    """正本照会が未装配なら、前置条件を ready と推測しない。"""
-
-    async def execute(
-        self, context: RunToolContext, arguments: Mapping[str, Any]
-    ) -> ProviderToolResult:
-        """接続不足を安定した unavailable として扱う。"""
-        raise ToolProviderError("unavailable", "Document readiness is unavailable", retryable=False)
-
-
-class DeferredInteractionProvider:
-    """PreToolUse defer が破られた場合に fail closed する control Provider。"""
-
-    async def execute(
-        self, context: RunToolContext, arguments: Mapping[str, Any]
-    ) -> ProviderToolResult:
-        """Interaction は Worker transaction だけが保存できるため直接実行を拒否する。"""
-
-        del context, arguments
-        raise ToolProviderError(
-            "unavailable",
-            "Interaction request must be deferred by Skillmind",
-            retryable=False,
-        )
-
-
-class DeferredChangeProposalProvider:
-    """新提案は拒否し、処理済みの原 control 呼出しだけを読取完了する。"""
-
-    async def execute(
-        self, context: RunToolContext, arguments: Mapping[str, Any]
-    ) -> ProviderToolResult:
-        """原要求へ最新 Brief を返す。Proposal 作成や外部 Provider 呼出しはしない。"""
-
-        run = context.run
-        resolved = run.resolved_proposal if run is not None else None
-        if (
-            run is not None and resolved is not None
-            and context.run_id == run.run_id
-            and context.run_attempt_id == run.run_attempt_id
-            and context.project_id == run.project_id
-            and context.user_id == run.user_id
-            and context.tool.capability == CHANGE_PROPOSE_CAPABILITY
-            and resolved.matches(arguments, resolved.sdk_session_id)
-        ):
-            # CLI は deferred replay 後、queued user prompt より先に自動で再開する。
-            # その最初の model turn に確定回执と現 Brief を届け、古い段階の指示を使わせない。
-            response = {
-                "status": "success", "deferred": False,
-                "proposal_ref": resolved.proposal_ref, "outcome": resolved.outcome,
-                "continuation_prompt": run.prompt,
-                "task_brief_checksum": run.task_brief_checksum,
-            }
-            return ProviderToolResult(
-                response=response,
-                evidence=(EvidenceDraft(
-                    evidence_type="proposal_continuation",
-                    source_uri=f"run://{run.run_id}/proposals/{resolved.proposal_ref}",
-                    source_locator={"proposal_ref": resolved.proposal_ref},
-                    content_hash="sha256:" + sha256_hex(canonical_json(response)),
-                    metadata={"outcome": resolved.outcome,
-                              "task_brief_checksum": run.task_brief_checksum},
-                    excerpt="Read the original proposal outcome; no change was applied here.",
-                ),),
-            )
-        raise ToolProviderError(
-            "unavailable",
-            "ChangeProposal request must be deferred by Skillmind",
-            retryable=False,
-        )
-
-
-def _subagent_tool_definitions(
-    contracts: ContractStore, provider: ToolProvider | None
-) -> tuple[ToolDefinition, ...]:
-    """扇出 control Tool を登録する。engine を持たない環境 (API 側) では登録しない。
-
-    Provider が無いのに Tool だけ出すと、Agent が呼べる面はあるのに必ず失敗する状態になる。
-    実行できない能力は最初から見せない。
-    """
-
-    if provider is None:
-        return ()
-    return (
-        ToolDefinition(
-            capability=SUBAGENT_DISPATCH_CAPABILITY,
-            description=(
-                "Fan out bounded read-only sub-analyses of independent aspects and collect "
-                "their conclusions; sub-agents cannot write, ask, propose, or fan out again"
-            ),
-            request_schema=contracts.load("tools/subagent.dispatch/v1/request.schema.json"),
-            response_schema=contracts.load("tools/subagent.dispatch/v1/response.schema.json"),
-            error_schema=contracts.load("tools/subagent.dispatch/v1/error.schema.json"),
-            providers={"platform": provider},
-            unbound_provider="platform",
-            minimum_execution_profile="SUPERVISED",
-        ),
-    )
-
-
-def _interaction_tool_definition(contracts: ContractStore) -> ToolDefinition:
-    """ユーザー入力前に SDK を停止する platform control Tool を登録する。"""
-
-    return ToolDefinition(
-        capability=INTERACTION_REQUEST_CAPABILITY,
-        description=(
-            "Pause this run and request structured user input when a required fact, choice, "
-            "review, or approval cannot be decided safely"
-        ),
-        request_schema=contracts.load("tools/interaction.request/v1/request.schema.json"),
-        response_schema=contracts.load("tools/interaction.request/v1/response.schema.json"),
-        error_schema=contracts.load("tools/interaction.request/v1/error.schema.json"),
-        providers={"platform": DeferredInteractionProvider()},
-        unbound_provider="platform",
-        minimum_execution_profile="GUIDED",
-        defer_execution=True,
-    )
-
-
-def _change_propose_tool_definition(contracts: ContractStore) -> ToolDefinition:
-    """Agent の提案を外部 write から切り離して Worker へ defer する control Tool。"""
-
-    # 直接登録しない Effect の payload 契約も、提案者が知る必要がある。
-    # Provider 側と別の形式を発明せず、既存契約の Agent 向け説明を再利用する。
-    payload_guidance = "\n".join(
-        str(contracts.load(f"tools/{capability}/request.schema.json")["description"])
-        for capability in ("database.write/v1", "document.write/v1")
-    )
-    return ToolDefinition(
-        capability=CHANGE_PROPOSE_CAPABILITY,
-        description=(
-            "Create a structured external change proposal; this never applies the change and "
-            "Skillmind independently validates approval and scope. Use the exact resource slot key "
-            "and authorized operation from the task brief. When operations are listed, omit "
-            "effect_intent_key and use at least minimum_risk; for legacy declared intents, "
-            "copy the exact intent key and risk. "
-            "capability_version identifies the write effect declared by that resource "
-            "(database.write/v1 for database rows, document.write/v1 for library documents), "
-            "not this change.propose/v1 control tool. "
-            "For database writes, first read using filters equal to the complete primary key, "
-            "columns=[] and offset=0; the result must be untruncated. INSERT requires no rows, "
-            "expected=null and revision=absent. UPDATE requires the complete observed row as "
-            "expected and its row_hashes entry as revision (not the response content_hash). "
-            "The /row SET value must contain exactly key, values and expected. Put revision "
-            "only in precondition.revision, never inside that value object. "
-            "For UPDATE, copy the entire observed row unchanged into expected, including all "
-            "primary-key, generated/identity and null-valued fields. expected is a read-only "
-            "comparison snapshot, not the columns to write. Put primary-key fields in key "
-            "and exclude them from values; omit generated/identity columns from values only. "
-            "Include that exact read's Evidence reference. Rollback text does not authorize "
-            "DELETE or any other compensation.\n" + payload_guidance
-        ),
-        request_schema=contracts.load("tools/change.propose/v1/request.schema.json"),
-        response_schema=contracts.load("tools/change.propose/v1/response.schema.json"),
-        error_schema=contracts.load("tools/change.propose/v1/error.schema.json"),
-        providers={"platform": DeferredChangeProposalProvider()},
-        unbound_provider="platform",
-        minimum_execution_profile="GUIDED",
-        defer_execution=True,
-    )
-
-
-def _workspace_tool_definitions(contracts: ContractStore) -> tuple[ToolDefinition, ...]:
-    """Run 内の読取と制限付き書込を精確な capability version ごとに登録する。"""
-
-    return (
-        ToolDefinition(
-            capability="json.schema.validate/v1",
-            description=("Validate Run-local JSON against a Draft 2020-12 Schema, including "
-                         "format assertions. Read schema_path and instance_path from "
-                         "input/workspace/output only; fragment refs within the schema are "
-                         "allowed, external refs are denied. Returns exact file hashes and "
-                         "bounded JSON Pointer errors. Does not validate business semantics."),
-            request_schema=contracts.load("tools/json.schema.validate/v1/request.schema.json"),
-            response_schema=contracts.load("tools/json.schema.validate/v1/response.schema.json"),
-            error_schema=contracts.load("tools/json.schema.validate/v1/error.schema.json"),
-            providers={"workspace": JsonSchemaValidateProvider()},
-            unbound_provider="workspace",
-            minimum_execution_profile="GUIDED",
-        ),
-        ToolDefinition(
-            capability="workspace.read/v1",
-            description="Read one UTF-8 file from the isolated Run workspace",
-            request_schema=contracts.load("tools/workspace.read/v1/request.schema.json"),
-            response_schema=contracts.load("tools/workspace.read/v1/response.schema.json"),
-            error_schema=contracts.load("tools/workspace.read/v1/error.schema.json"),
-            providers={"workspace": WorkspaceReadProvider()},
-            unbound_provider="workspace",
-            minimum_execution_profile="GUIDED",
-        ),
-        ToolDefinition(
-            capability="workspace.search/v1",
-            description="Search UTF-8 files in the isolated Run workspace",
-            request_schema=contracts.load("tools/workspace.search/v1/request.schema.json"),
-            response_schema=contracts.load("tools/workspace.search/v1/response.schema.json"),
-            error_schema=contracts.load("tools/workspace.search/v1/error.schema.json"),
-            providers={"workspace": WorkspaceSearchProvider()},
-            unbound_provider="workspace",
-            minimum_execution_profile="SUPERVISED",
-        ),
-        ToolDefinition(
-            capability="workspace.write/v1",
-            description="Write one UTF-8 file to the isolated Run workspace or output",
-            request_schema=contracts.load("tools/workspace.write/v1/request.schema.json"),
-            response_schema=contracts.load("tools/workspace.write/v1/response.schema.json"),
-            error_schema=contracts.load("tools/workspace.write/v1/error.schema.json"),
-            providers={"workspace": WorkspaceWriteProvider()},
-            unbound_provider="workspace",
-            minimum_execution_profile="SUPERVISED",
-        ),
-        ToolDefinition(
-            capability="workspace.write/v2",
-            description=(
-                "Write one UTF-8 file within the isolated Run; output files receive an "
-                "immutable Artifact reference only after their exact bytes are committed"
-            ),
-            request_schema=contracts.load("tools/workspace.write/v2/request.schema.json"),
-            response_schema=contracts.load("tools/workspace.write/v2/response.schema.json"),
-            error_schema=contracts.load("tools/workspace.write/v2/error.schema.json"),
-            providers={"workspace": WorkspaceWriteProvider()},
-            unbound_provider="workspace",
-            minimum_execution_profile="SUPERVISED",
-        ),
-    )
 
 
 class ProductionRunContextBuilder:
@@ -1025,7 +476,9 @@ def _resolve_source_tools(
             )
         )
     if "audit.export/v1" in allowed and "audit.export/v1" not in resolved_capabilities:
-        tools.append(registry.resolve_unbound("audit.export/v1", execution_profile=execution_profile))
+        tools.append(registry.resolve_unbound(
+            "audit.export/v1", execution_profile=execution_profile,
+        ))
     return tools, repository_bindings
 
 

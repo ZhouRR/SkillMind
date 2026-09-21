@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 from check_accounts import OTHER, PASSWORD, ResponseGate, self_revoke
-from check_document_management import PRIVATE, delete_first, document
+from check_document_management import PRIVATE, assert_document_writes, delete_first, document, row_menu
 from check_document_upload import UploadBrowserAudit, UploadMockApi, upload_request
 from check_projects import (
     ARCHIVED,
@@ -184,8 +184,7 @@ async def new_write_closed(page: Page, labels: dict) -> None:
     """upload 未知は DELETE と新 file 選択の両方を閉じる。"""
     panel = page.locator(".documentPanel")
     await expect(panel.locator('input[type="file"]').first).to_be_disabled()
-    for button in await panel.get_by_role("button", name=labels["remove"], exact=True).all():
-        await expect(button).to_be_disabled()
+    await assert_document_writes(page, disabled=True)
 
 
 async def inject_selection(page: Page, name: str) -> None:
@@ -424,18 +423,12 @@ async def manual_scenario(
             await close_recovery(page, labels)
             await summary(page, [], labels)
             assert len(api.reads) == 5 and not api.uploads
-            for control in [
-                panel.locator('input[type="file"]').first,
-                *await panel.get_by_role(
-                    "button",
-                    name=labels["remove"],
-                    exact=True,
-                ).all(),
-            ]:
-                if mode == "manual-archived":
-                    await expect(control).to_be_disabled()
-                else:
-                    await expect(control).to_be_enabled()
+            control = panel.locator('input[type="file"]').first
+            if mode == "manual-archived":
+                await expect(control).to_be_disabled()
+            else:
+                await expect(control).to_be_enabled()
+            await assert_document_writes(page, disabled=mode == "manual-archived")
         await settle(page)
         if not mode.startswith("manual-kept-") and mode != "manual-unknown":
             assert not api.uploads
@@ -550,7 +543,8 @@ async def scenario(
             assert not api.uploads and len(api.delete_calls) == 1
         else:
             if mode == "same-tick":
-                await page.evaluate("""() => {
+                actions = await row_menu(page, page.locator(".documentItem").first)
+                await actions.get_by_role("menuitem").last.evaluate("""removal => {
                   const input = document.querySelector('.documentPanel input[type=file]');
                   for (const name of ['first.md', 'must-not-send.md']) {
                     const transfer = new DataTransfer();
@@ -558,7 +552,7 @@ async def scenario(
                     input.files = transfer.files;
                     input.dispatchEvent(new Event('change', {bubbles:true}));
                   }
-                  document.querySelector('.documentItem button:last-child').click();
+                  removal.click();
                 }""")
             else:
                 await choose(

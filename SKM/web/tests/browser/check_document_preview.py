@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from check_accounts import OTHER, PASSWORD, ResponseGate, self_revoke
-from check_document_management import DOCUMENT, SECOND, document
+from check_document_management import DOCUMENT, SECOND, assert_document_writes, document, row_menu
 from check_projects import NEXT_PROJECT, PROJECT, ProjectsApi, messages, privacy, settle
 from playwright.async_api import Browser, Page, Route, async_playwright, expect
 
@@ -105,6 +105,10 @@ class PreviewApi(ProjectsApi):
             await route.abort()
             return
         parts = address.path.removeprefix(self.prefix).split("/")
+        if len(parts) == 3 and parts[0] == "projects" and parts[2] == "document-folders":
+            assert request.method == "GET" and parts[1] in (PROJECT, NEXT_PROJECT)
+            await route.fulfill(json={"folders": [document(parts[1])["folder"]]})
+            return
         if len(parts) < 3 or parts[0] != "projects" or parts[2] != "documents":
             await super().respond(route)
             return
@@ -298,14 +302,25 @@ async def scenario(
     name = f"{mode}-{language}-{width}"
     try:
         await page.goto(f"{url}#/documents?project={PROJECT}")
-        labels = (await messages(page, language))["documentsPanel"]
+        catalog = await messages(page, language)
+        labels = catalog["documentsPanel"]
         panel = page.locator(".documentPanel")
         await expect(page.locator(".documentItem")).to_have_count(2)
-        previews = panel.get_by_role("button", name=labels["previewButton"], exact=True)
+        previews = panel.locator("button.documentName")
+        filename = "preview.md" if mode == "markdown" else "preview.html"
         if mode == "metadata-large":
-            await expect(previews.first).to_be_disabled()
+            fallback = panel.get_by_role("link", name=f'{labels["download"]}: {filename}', exact=True)
+            await expect(fallback).to_have_attribute("download", filename)
+            await expect(fallback).to_have_attribute(
+                "href", f"{api.prefix}projects/{PROJECT}/documents/{DOCUMENT}/content"
+            )
+            await expect(fallback).to_have_attribute("title", labels["oversizedTitle"])
+            await expect(panel.get_by_role(
+                "button", name=f'{labels["previewButton"]}: {filename}', exact=True
+            )).to_have_count(0)
             assert not api.content_calls
         else:
+            await expect(previews.first).to_have_accessible_name(f'{labels["previewButton"]}: {filename}')
             if mode == "timeout":
                 await page.clock.install()
             if mode == "same-tick":
@@ -369,13 +384,14 @@ async def scenario(
                     assert await page.evaluate("window.previewDeadlineCallbacks") == 0
                     await page.keyboard.press("Escape")
                     await expect(panel.locator('input[type="file"]').first).to_be_enabled()
-                    remove = panel.get_by_role("button", name=labels["remove"], exact=True).first
+                    actions = await row_menu(page, page.locator(".documentItem").first)
+                    remove = actions.get_by_role("menuitem", name=catalog["fileManagement"]["trashAction"], exact=True)
                     await expect(remove).to_be_enabled()
                     await remove.click()
                     await expect(page.get_by_role("dialog")).to_be_visible()
                     await expect(
                         page.get_by_role("dialog").get_by_role(
-                            "button", name=labels["remove"], exact=True
+                            "button", name=catalog["fileManagement"]["trashAction"], exact=True
                         )
                     ).to_be_enabled()
                     await page.keyboard.press("Escape")
@@ -438,10 +454,7 @@ async def scenario(
                     await panel.get_by_role("button", name=labels["refresh"], exact=True).click()
                     await settle(page)
                     await expect(panel.locator('input[type="file"]').first).to_be_disabled()
-                    for button in await panel.get_by_role(
-                        "button", name=labels["remove"], exact=True
-                    ).all():
-                        await expect(button).to_be_disabled()
+                    await assert_document_writes(page, disabled=True)
         if mode.startswith("headers-"):
             assert not api.content_calls
             assert await page.evaluate("window.previewStream") == {

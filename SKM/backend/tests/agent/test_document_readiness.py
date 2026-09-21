@@ -8,8 +8,13 @@ from uuid import uuid4
 
 import pytest
 
-from skillmind.agent.context_builder import ContractStore, create_run_tool_registry
+from skillmind.agent.contract_store import (
+    ContractStore,
+)
 from skillmind.agent.document_readiness import DocumentReadinessProvider
+from skillmind.agent.tool_catalog import (
+    create_run_tool_registry,
+)
 from skillmind.db.models import EffectExecution
 from tests.agent.test_document_provider import CONTRACTS, _context, _FakeSource
 from tests.agent.test_tool_gateway import MemoryAuditWriter

@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from check_artifacts import ARTIFACT
-from check_projects import PROJECT, layout, messages
+from check_projects import PROJECT, layout, messages, settle
 from check_workspace_reports import WorkspaceApi
 from playwright.async_api import async_playwright, expect
 
@@ -102,6 +102,11 @@ async def check(url: str, output: Path) -> None:
                             f"{url}#/workspace?project={PROJECT}&module=00000000-0000-4000-8000-000000000501"
                         )
                         labels = await messages(page, language)
+                        await expect(page.locator(".runLauncher > button")).to_be_enabled()
+                        await settle(page)
+                        queue_width = await page.locator(".workspaceQueue").evaluate(
+                            "e => e.getBoundingClientRect().width"
+                        )
                         await page.get_by_role(
                             "tab", name=labels["workspace"]["queue"]["reports"], exact=True
                         ).click()
@@ -111,6 +116,19 @@ async def check(url: str, output: Path) -> None:
                         await expect(page.locator(".reportSummary strong")).to_contain_text(
                             "期待結果の補足が必要"
                         )
+                        # Workspace は要約のみ。同じ幅を保ち、全文は実行詳細で読む。
+                        await settle(page)
+                        report_width = await page.locator(".workspaceQueue").evaluate(
+                            "e => e.getBoundingClientRect().width"
+                        )
+                        assert abs(report_width - queue_width) < 1, (queue_width, report_width)
+                        await expect(page.locator(".outcomeEnvelope")).to_have_count(0)
+                        await page.get_by_role(
+                            "link", name=labels["workspace"]["executionDetail"], exact=True
+                        ).click()
+                        await page.get_by_role(
+                            "tab", name=labels["workspace"]["tabResult"], exact=True
+                        ).click()
                         await expect(page.locator(".outcomePartial")).to_contain_text(
                             labels["runResult"]["completionStates"]["PARTIAL"]
                         )
@@ -118,7 +136,7 @@ async def check(url: str, output: Path) -> None:
                         await page.locator(".deliverableContent > summary").click()
                         await expect(page.locator(".resultReportBody table")).to_be_visible()
                         assert (
-                            await page.locator(".workspaceReports").evaluate(
+                            await page.locator(".resultReportBody").evaluate(
                                 "e => e.getBoundingClientRect().width"
                             )
                             > 1000
@@ -144,12 +162,7 @@ async def check(url: str, output: Path) -> None:
                             0
                         )
                         await expect(page.locator(".outcomeReportFrame")).to_have_count(0)
-                        assert (
-                            await page.locator(".runLauncher > button").evaluate(
-                                "e => e.getBoundingClientRect().width"
-                            )
-                            < 400
-                        )
+                        await expect(page.locator(".runLauncher")).to_have_count(0)
                         for width in (1366, 1920, 390):
                             await page.set_viewport_size({"width": width, "height": 1000})
                             await layout(page)
@@ -226,7 +239,10 @@ async def check(url: str, output: Path) -> None:
                         api.body["result"]["data"]["deliverables"][0]["title"] = (
                             "Unmatched deliverable"
                         )
-                        await page.locator(".reportToolbar button").click()
+                        await page.reload()
+                        await page.get_by_role(
+                            "tab", name=labels["workspace"]["tabResult"], exact=True
+                        ).click()
                         await expect(page.locator(".outcomeCardHeading h5").first).to_have_text(
                             "Unmatched deliverable"
                         )

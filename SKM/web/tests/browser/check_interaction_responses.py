@@ -251,7 +251,17 @@ class InteractionApi:
                         await route.fulfill(json={"modules": []})
                         return
                     if parts[2] == "schedules" and address.query == "limit=100&offset=0":
-                        await route.fulfill(json={"schedules": [], "total": 0, "limit": 100, "offset": 0})
+                        await route.fulfill(json={
+                            "schedules": [], "total": 0, "limit": 100, "offset": 0,
+                        })
+                        return
+                    if parts[2] == "runs" and address.query == (
+                        "limit=10&offset=0&status=WAITING_FOR_INPUT"
+                        "&status=WAITING_FOR_APPROVAL&status=WAITING_PERMISSION"
+                    ):
+                        await route.fulfill(json={
+                            "items": [], "has_more": False, "limit": 10, "offset": 0,
+                        })
                         return
                 if len(parts) == 2 and parts[0] == "runs" and parts[1] in self.details:
                     await route.fulfill(json=self.run(parts[1]))
@@ -319,6 +329,9 @@ class InteractionApi:
                         return
                     if parts[4] == "evaluations":
                         await route.fulfill(json={"evaluations": []})
+                        return
+                    if parts[4] == "artifacts" and not address.query:
+                        await route.fulfill(json=[])
                         return
             if (
                 request.method == "POST"
@@ -1261,8 +1274,11 @@ async def exercise(
     try:
         await page.goto(f"{url}?run={RUN}")
         await page.wait_for_function("Boolean(window.updateSubmissionTestContext)")
-        await page.evaluate("language => window.updateSubmissionTestContext({language})", language)
-        await expect(card(page)).to_be_visible()
+        # 実 App と同じ履歴詳細で回答する。要約表示は回答済みカードを隠すため、
+        # 旧 Workspace 埋込のまま成功通知へ focus を要求しない。
+        await page.evaluate(
+            "language => window.updateSubmissionTestContext({language, detailView: true})", language
+        )
         labels = await page.evaluate(
             """async language => {
           const {MESSAGES} = await import('/skillmind/src/lib/i18n/messages.ts');
@@ -1272,6 +1288,10 @@ async def exercise(
         }""",
             language,
         )
+        await page.get_by_role(
+            "tab", name=labels["workspace"]["tabResult"], exact=True
+        ).click()
+        await expect(card(page)).to_be_visible()
         await action(page, api, labels)
         await settle(page)
         assert not api.unexpected, api.unexpected

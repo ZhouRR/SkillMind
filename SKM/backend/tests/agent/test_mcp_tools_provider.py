@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
+
 from skillmind.agent.mcp_tools_provider import McpToolsProvider
 from skillmind.agent.tool_gateway import ToolProviderError
 from skillmind.effects.catalog import resolve_effect_capability
@@ -176,7 +177,12 @@ def test_mcp_wiring_has_read_tools_and_supervised_effect_without_direct_action()
     from pathlib import Path
     from uuid import uuid4
 
-    from skillmind.agent.context_builder import ContractStore, create_run_tool_registry
+    from skillmind.agent.contract_store import (
+        ContractStore,
+    )
+    from skillmind.agent.tool_catalog import (
+        create_run_tool_registry,
+    )
     from skillmind.effects.wiring import create_effect_provider_registry
 
     contracts = ContractStore(Path(__file__).resolve().parents[3] / "contracts")

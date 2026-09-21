@@ -514,7 +514,9 @@ async def exercise_case(
             await settle(page)
             await page.screenshot(path=str(output / f"{name}-entry.png"), full_page=True)
         if role == "ADMIN":
-            disclosure = page.locator(".accountDirectorySection")
+            disclosure = page.locator(".accountDirectorySection").filter(
+                has=page.locator("[data-account-directory]")
+            )
             if await disclosure.get_attribute("open") is None:
                 await disclosure.locator(":scope > summary").click()
         await action(page, api, messages)
@@ -640,11 +642,15 @@ async def version_conflict(page: Page, api: AccountsApi, messages: dict) -> None
     api.users[TARGET]["display_name"] = "New server facts"
     api.failure = (409, "user_version_conflict")
     api.hold = True
-    directory = page.locator(".accountDirectorySection")
+    directory = page.locator(".accountDirectorySection").filter(
+        has=page.locator("[data-account-directory]")
+    )
     await directory.locator(":scope > summary").click()
     await expect(form).not_to_be_visible()
     await directory.locator(":scope > summary").click()
-    await expect(form.get_by_label(messages["fields"]["name"], exact=True)).to_have_value("Unsaved original draft")
+    await expect(form.get_by_label(messages["fields"]["name"], exact=True)).to_have_value(
+        "Unsaved original draft"
+    )
     await double_submit(form)
     await asyncio.wait_for(api.received.wait(), 10)
     await directory.locator(":scope > summary").click()

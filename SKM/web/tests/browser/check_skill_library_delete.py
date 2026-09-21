@@ -90,6 +90,7 @@ async def check(url: str, output: Path) -> None:
         browser = await p.chromium.launch()
         try:
             await check_draft_publication(browser, url, output)
+            await check_library_filters(browser, url, output)
             for language in ("ja", "zh", "en"):
                 api = LibraryApi(url, language)
                 context = await browser.new_context(viewport={"width": 1440, "height": 1000})
@@ -101,12 +102,16 @@ async def check(url: str, output: Path) -> None:
                     await page.goto(f"{url}#/skills?project={PROJECT}")
                     labels = await messages(page, language)
                     rows = page.locator(".skillLibraryList > li")
+                    original = rows.filter(has=page.locator(".skillLibraryIdentity strong", has_text=f"v{VERSION['version']}"))
+                    other = rows.filter(has=page.locator(".skillLibraryIdentity strong", has_text="v0.2.0"))
                     await expect(rows).to_have_count(2)
                     for succeeds in (False, True):
                         api.reject_delete = not succeeds
-                        await rows.first.get_by_role(
-                            "button", name=labels["skills"]["deleteVersion"], exact=True
+                        await original.locator('button[aria-haspopup="menu"]').click()
+                        await page.get_by_role(
+                            "menuitem", name=labels["skills"]["deleteVersion"], exact=True
                         ).click()
+                        assert len(api.deletes) == int(succeeds)
                         await (
                             page.get_by_role("dialog")
                             .get_by_role(
@@ -117,13 +122,11 @@ async def check(url: str, output: Path) -> None:
                         await expect(page.locator('.skillLibrary [role="alert"]')).to_be_visible()
                         await expect(rows).to_have_count(2)
                         if not succeeds:
-                            await expect(rows.first).to_contain_text(
+                            await expect(original).to_contain_text(
                                 labels["skills"]["deleteBlocked"]
                             )
                             await expect(
-                                rows.last.get_by_role(
-                                    "button", name=labels["skills"]["deleteVersion"], exact=True
-                                )
+                                other.locator('button[aria-haspopup="menu"]')
                             ).to_be_enabled()
                             for width in (1366, 1920, 390):
                                 await page.set_viewport_size({"width": width, "height": 1000})
@@ -134,9 +137,7 @@ async def check(url: str, output: Path) -> None:
                             )
                         else:
                             await expect(
-                                rows.first.get_by_role(
-                                    "button", name=labels["skills"]["deleteVersion"], exact=True
-                                )
+                                original.locator('button[aria-haspopup="menu"]')
                             ).to_be_disabled()
                     assert len(api.deletes) == 2
                     api.reject_read = False
@@ -174,7 +175,7 @@ async def check_draft_publication(browser, url: str, output: Path) -> None:
             await page.goto(f"{url}#/skills?project={PROJECT}")
             labels = await messages(page, language)
             await page.reload()
-            draft = page.locator(".skillLibraryList > li").last
+            draft = page.locator(".skillLibraryList > li").filter(has=page.locator(".skillLibraryIdentity strong", has_text="v0.2.0"))
             await expect(draft.locator(".skillLibraryDraft > summary")).to_have_text(labels["skills"]["reviewDraft"])
             await draft.locator(".skillLibraryDraft > summary").click()
             publish = draft.get_by_role("button", name=labels["skills"]["publishVersion"], exact=True)
@@ -208,6 +209,49 @@ async def check_draft_publication(browser, url: str, output: Path) -> None:
             assert api.publishes == [{"accepted_warnings": ["assisted_review_required"]}] * 2
             assert not api.deletes and not errors and not api.failures and not api.unexpected
             print(f"PASS draft publication {language}", flush=True)
+        finally:
+            await context.close()
+
+
+async def check_library_filters(browser, url: str, output: Path) -> None:
+    """公開版の優先表示・検索・空態からの解除を実 UI の三語で確認する。"""
+    for language in ("ja", "zh", "en"):
+        api = LibraryApi(url, language)
+        api.versions[1]["status"] = "PUBLISHED"
+        context = await browser.new_context(viewport={"width": 1440, "height": 1000})
+        await context.route("**/*", api.route)
+        page = await context.new_page()
+        try:
+            await page.goto(f"{url}#/skills?project={PROJECT}")
+            labels = (await messages(page, language))["skills"]
+            rows = page.locator(".skillLibraryList > li")
+            await expect(rows).to_have_count(2)
+            await expect(rows.first).to_contain_text("v0.2.0")
+            search = page.get_by_role("searchbox", name=labels["librarySearch"], exact=True)
+            status = page.get_by_role("combobox", name=labels["libraryStatus"], exact=True)
+            await search.fill("  " + api.versions[0]["skill_key"].upper() + "  ")
+            await expect(rows).to_have_count(2)
+            await status.select_option("DEPRECATED")
+            await expect(rows).to_have_count(1)
+            await expect(rows).to_contain_text(f"v{VERSION['version']}")
+            await page.get_by_role("tab", name=labels["tabWorkbench"], exact=True).click()
+            await page.get_by_role("tab", name=labels["libraryTitle"]).click()
+            await expect(rows).to_have_count(1)
+            await search.fill("no-matching-synthetic-skill")
+            await expect(rows).to_have_count(0)
+            await expect(page.get_by_text(labels["libraryNoMatches"], exact=True)).to_be_visible()
+            await page.get_by_role("button", name=labels["libraryClearFilters"], exact=True).click()
+            await expect(rows).to_have_count(2)
+            await expect(search).to_have_value("")
+            await expect(status).to_have_value("all")
+            for width in (1440, 390):
+                await page.set_viewport_size({"width": width, "height": 1000})
+                for theme in ("light", "dark"):
+                    await page.evaluate("value => document.documentElement.dataset.theme = value", theme)
+                    await layout(page)
+                    await page.screenshot(path=str(output / f"filter-{language}-{width}-{theme}.png"))
+            assert not api.deletes and not api.publishes and not api.unexpected and not api.failures
+            print(f"PASS skill library filters {language}", flush=True)
         finally:
             await context.close()
 

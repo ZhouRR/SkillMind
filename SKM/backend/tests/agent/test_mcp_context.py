@@ -11,8 +11,12 @@ from uuid import UUID
 import pytest
 
 from skillmind.agent.context_builder import (
-    ContractStore,
     ProductionRunContextBuilder,
+)
+from skillmind.agent.contract_store import (
+    ContractStore,
+)
+from skillmind.agent.tool_catalog import (
     create_run_tool_registry,
 )
 from skillmind.agent.workspace import WorkspaceManager

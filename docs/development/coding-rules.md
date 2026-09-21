@@ -23,7 +23,7 @@ route 只做认证/入出参，业务在 domain/service，查询/锁/持久化�
 
 documents/__init__.py 只导出 domain 类型，service/repository/source 显式导入，避免 DB → Run → 文档循环。
 
-repository.write/v1 不支持项目级事先授权；原 Run 可按明确的 Git 启动同意自动批准。direct 仅默认 branch fast-forward；branch 仅新建 skillmind/ 命名空间 branch；禁止 force、覆盖既有 branch 或任意 branch 写入。协议见[受控写入](runtime-guide.md)。
+Git 写入沿用上述共享实现；direct 仅默认 branch fast-forward，branch 仅新建 skillmind/ 命名空间 branch。授权、批准与未知结果统一见[外部效果](runtime-guide.md#外部效果)。
 
 ## Run lifecycle
 
@@ -44,6 +44,7 @@ repository.write/v1 不支持项目级事先授权；原 Run 可按明确的 Git
 - TasksPage 选任务，WorkspacePage 管理待办与报告，Run 详情归属历史；不重造 SSE/取消/终态 lifecycle。即时/调度共用 taskDraft.ts / TaskLaunchFields.tsx。
 - 不在前端重算服务端 ID（如 derive_task_id）。筛选/分页在服务端，不能过滤第一页冒充全量。
 - 三语统一 src/lib/i18n/{zh,ja,en}.ts，同步 UiMessages / MESSAGES；画面用 useMessages()。
+- 请求状态由对应 hook/组件持有，提交中的同步防重入与迟到响应归属检查不能只靠按钮 disabled。子组件定义放模块级，避免父组件编辑草稿时重建子树、丢失焦点或展开状态。
 - 实现生成 FrontendModule 时先完成威胁模型与 CSP/iframe 隔离回归，且不继承应用权限，见[后置能力](runtime-guide.md#后置能力)；普通 Web 页面不套用 builder/Host 门禁。
 
 ## 同步点
@@ -54,9 +55,9 @@ repository.write/v1 不支持项目级事先授权；原 Run 可按明确的 Git
 | --- | --- |
 | Settings | core/settings.py 的 Field 范围 → .env.example → API lifespan / Worker startup 注入 |
 | AgentEventType | agent/domain.py → engine.py mapper → Web RUN_EVENT_NAMES → RunEvent Schema |
-| Blueprint / Brief / OutcomeEnvelope | contract → DTO/validator/projector → frozen checksum → Worker/Web → example/test；不加业务专属字段 |
+| SkillExecution / Brief / OutcomeEnvelope / 旧 Blueprint | contract → DTO/validator/projector → frozen checksum → Worker/Web → example/test；不加业务专属字段 |
 | Segment / Interaction / Proposal | transition → DB/repository → event/outbox/SSE → 授权/幂等 → Web → recovery/Compose |
-| Tool capability | versioned request/response/error → Provider → context_builder.py registry → allowed_capabilities → 回归 |
+| Tool capability | versioned request/response/error → Provider → tool_catalog.py 注册 → context_builder.py 冻结绑定/allowed_capabilities → 回归 |
 | endpoint | 资源 route/actor alias → response allowlist/Problem → Schema/example/OpenAPI → Web validator/barrel → 回归 |
 | DB model | db/models.py → migration → repository DTO/projection → 回归；无 relationship 的 FK 父子同事务新增时，父行后显式 flush() |
 | Schema / example | 同时注册 scripts/validate_contracts.py 和 backend/tests/contracts/test_contracts.py；保持 Problem 兼容 |
@@ -68,7 +69,5 @@ tests/ 镜像模块职责，测试名说明验证的行为。API 测试按资源
 
 ## Ingress
 
-- 复用共享 Traefik，不新增其 service/静态配置、证书 resolver、dashboard 或 Docker socket mount。
-- 不发布 host port；只有 web/api 进入外部 edge network，其余 service 仅内部网络。
-- 外部 URL 在 SKILLMIND_CONTEXT_PATH 下：{contextPath}/api 归 API，其余归 Web。Traefik 去掉 context path，内部 API 保持 /api、Web 保持 /。
-- 配置与停写/迁移/放行见[发布手册](../operations/deployment.md)，功能开关不能代替全局停写证明。
+复用共享 Traefik，不新增其管理配置或 Docker socket mount；只有 web/api 进入 edge network，不发布 host port。
+外部入口统一在 SKILLMIND_CONTEXT_PATH 下，API 转发时去掉前缀。配置、网络与迁移操作见[发布手册](../operations/deployment.md)，功能开关不能代替停写证明。

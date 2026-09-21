@@ -26,6 +26,7 @@ from skillmind.skills.source_documents import (
     validate_manifest_source_locations,
     validate_source_documents,
 )
+from skillmind.skills.source_loader import load_inline_text_files as load_inline_text_files
 from skillmind.skills.task_contract import MAX_CONTRACT_DEPTH, compile_task_contract
 
 _VERSIONED_CAPABILITY = re.compile(r"^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$")
@@ -713,25 +714,6 @@ class InterpreterFixtureRunner:
                     f"{f.path or '/'}: {f.code}" for f in errors
                 ),
             )
-
-
-
-def load_inline_text_files(
-    root: Path, package: NormalizedSkillPackage
-) -> tuple[InlineSkillFile, ...]:
-    """Parser が index 済みの text file だけを offline runner 用に再読込する。"""
-
-    resolved_root = root.resolve(strict=True)
-    files: list[InlineSkillFile] = []
-    for indexed in package.files:
-        if indexed.binary:
-            continue
-        path = (resolved_root / indexed.path).resolve(strict=True)
-        if not path.is_relative_to(resolved_root) or path.is_symlink():
-            raise ValueError("Indexed Skill file escapes the source root")
-        # source index の SHA-256 と同じ UTF-8 bytes を analyzer へ渡し、CRLF を LF へ変換しない。
-        files.append(InlineSkillFile(path=indexed.path, content=path.read_bytes().decode("utf-8")))
-    return tuple(files)
 
 
 def _validated_source_texts(

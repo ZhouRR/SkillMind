@@ -18,7 +18,7 @@ from check_projects import (
     privacy,
     settle,
 )
-from playwright.async_api import Browser, Page, Route, async_playwright, expect
+from playwright.async_api import Browser, Locator, Page, Route, async_playwright, expect
 
 DOCUMENT = "00000000-0000-4000-8000-000000000091"
 SECOND = "00000000-0000-4000-8000-000000000092"
@@ -68,6 +68,16 @@ class DocumentsApi(ProjectsApi):
         request = route.request
         address = urlsplit(request.url)
         parts = address.path.removeprefix(self.prefix).split("/")
+        if (
+            len(parts) == 3 and parts[0] == "projects" and parts[2] == "document-folders"
+            and request.method == "GET" and parts[1] in self.rows
+            and f"{address.scheme}://{address.netloc}" == self.origin
+        ):
+            # 整理 UI が読む目录も、同じ fixture 文書から投影して外部へ出さない。
+            await route.fulfill(json={
+                "folders": sorted({row["folder"] for row in self.rows[parts[1]] if row["folder"]}),
+            })
+            return
         if len(parts) < 3 or parts[0] != "projects" or parts[2] != "documents":
             await super().respond(route)
             return
@@ -138,18 +148,45 @@ class DocumentsApi(ProjectsApi):
         self.gate.returned.set()
 
 
+async def row_menu(page: Page, row: Locator) -> Locator:
+    """対象行の実入口を開き、Portal に描画された同じ名前の menu を取得する。"""
+    trigger = row.locator('button[aria-haspopup="menu"]')
+    label = await trigger.get_attribute("aria-label")
+    assert label
+    await trigger.click()
+    result = page.get_by_role("menu", name=label, exact=True)
+    await expect(result).to_be_visible()
+    return result
+
+
 async def delete_first(page: Page, labels: dict) -> None:
-    """同 tick の別文書 click と確認の二重 click でも原 ID 一件だけを送る。"""
+    """行 menu の同 tick 二重 click でも原 ID 一件だけを確認対象にする。"""
     await expect(page.locator(".documentItem")).to_have_count(2)
-    await page.locator(".documentItem button").evaluate_all("""buttons => {
-      const removal = buttons.filter(button => button.textContent === buttons.at(-1).textContent);
-      removal[0].click(); removal[1].click();
-    }""")
+    actions = await row_menu(page, page.locator(".documentItem").first)
+    action = actions.get_by_role("menuitem").last
+    label = await action.inner_text()
+    await action.evaluate(
+        "button => { button.click(); button.click(); }"
+    )
     dialog = page.get_by_role("dialog")
     await expect(dialog).to_be_visible()
-    confirm = dialog.get_by_role("button", name=labels["remove"], exact=True)
+    confirm = dialog.get_by_role("button", name=label, exact=True)
     await confirm.focus()
     await page.keyboard.press("Enter")
+
+
+async def assert_document_writes(page: Page, *, disabled: bool) -> None:
+    """メニューを実際に開き、空 locator を成功扱いせず各行の変更門禁を確認する。"""
+    rows = page.locator(".documentItem")
+    assert await rows.count() > 0
+    for row in await rows.all():
+        actions = await row_menu(page, row)
+        action = actions.get_by_role("menuitem").last
+        if disabled:
+            await expect(action).to_be_disabled()
+        else:
+            await expect(action).to_be_enabled()
+        await page.keyboard.press("Escape")
 
 
 async def scenario(
@@ -173,10 +210,7 @@ async def scenario(
         await expect(page.locator(".documentItem")).to_have_count(2)
         panel = page.locator(".documentPanel")
         if mode == "archived":
-            for button in await panel.get_by_role(
-                "button", name=labels["remove"], exact=True
-            ).all():
-                await expect(button).to_be_disabled()
+            await assert_document_writes(page, disabled=True)
             await expect(panel.locator('input[type="file"]').first).to_be_disabled()
             assert not api.delete_calls
         else:
@@ -235,17 +269,13 @@ async def scenario(
                 await expect(panel.get_by_role("alert")).to_have_text(labels["failures"][key])
                 if mode == "denied":
                     await panel.get_by_role("button", name=labels["refresh"], exact=True).click()
-                    await expect(
-                        panel.get_by_role("button", name=labels["remove"], exact=True).first
-                    ).to_be_disabled()
+                    await assert_document_writes(page, disabled=True)
             else:
                 await expect(panel.get_by_text(labels["unknownTitle"], exact=True)).to_be_visible()
                 assert not api.exact_reads, "Unknown automatically queried or resent"
                 await panel.get_by_role("button", name=labels["refresh"], exact=True).click()
                 await settle(page)
-                await expect(
-                    panel.get_by_role("button", name=labels["remove"], exact=True).first
-                ).to_be_disabled()
+                await assert_document_writes(page, disabled=True)
                 await expect(panel.locator('input[type="file"]').first).to_be_disabled()
                 await panel.get_by_role("button", name=labels["checkOriginal"], exact=True).click()
                 if mode in {"read-timeout-401", "read-absolute-401"}:

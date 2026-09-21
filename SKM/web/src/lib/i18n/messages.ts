@@ -16,6 +16,8 @@ export type UiLanguage = (typeof UI_LANGUAGES)[number]
     の型検査が欠落を compile error として検出する。 */
 export interface UiMessages {
   theme: { label: string; light: string; dark: string }
+  /** 一覧で共有する対象別の操作入口。 */
+  common: { moreActions: (name: string) => string }
   /** Route ごとの表示名と概要。導航、browser title、概览 card が共有する。 */
   routes: Record<AppRoute, { label: string; description: string }>
   /** Project 非依存の本人操作・組織ユーザー管理。Server error 本文は表示しない。 */
@@ -297,6 +299,7 @@ export interface UiMessages {
     archiveFailed: string
     createTitle: string
     keyLabel: string
+    keyHint: string
     nameLabel: string
     descriptionLabel: string
     retentionLabel: string
@@ -1059,6 +1062,7 @@ export interface UiMessages {
     requiredLabel: string
     optionalLabel: string
     candidatesLine: (labels: string[]) => string
+    candidateCount: (count: number) => string
     guidanceOnlyHint: string
     connFinished: string
     connReconnecting: string
@@ -1236,6 +1240,12 @@ export interface UiMessages {
     interpretAction: string
     createDraftFromAssisted: string
     libraryTitle: string
+    librarySearch: string
+    libraryStatus: string
+    libraryAllStatuses: string
+    libraryMatches: (shown: number, total: number) => string
+    libraryNoMatches: string
+    libraryClearFilters: string
     libraryHint: string
     enabledCount: (count: number) => string
     noProjectBadge: string

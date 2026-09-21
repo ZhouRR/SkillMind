@@ -174,7 +174,12 @@ async def test_invalid_effect_input_returns_tool_error_then_corrected_proposal_p
 ) -> None:
     """実 Bridge は誤った能力を model に返し、保存・停止は修正された要求だけで行う。"""
 
-    from skillmind.agent.context_builder import ContractStore, _change_propose_tool_definition
+    from skillmind.agent.contract_store import (
+        ContractStore,
+    )
+    from skillmind.agent.tool_catalog import (
+        _change_propose_tool_definition,
+    )
     from skillmind.agent.tool_gateway import ToolRegistry
     from tests.agent.test_tool_policy import _database_proposal
 

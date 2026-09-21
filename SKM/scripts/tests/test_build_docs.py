@@ -387,21 +387,13 @@ class DocumentationBuildTests(unittest.TestCase):
                 self.assertIn(target, source)
         self.assertEqual(build_docs.GROUPS["design"], "界面规范")
 
-    def test_roadmap_uses_current_report_with_all_work_items(self) -> None:
-        """現状・検証境界・改善方針と旧 ID を残し、割合や固定待項目を要求しない。"""
+    def test_roadmap_keeps_current_status_and_verification_navigation(self) -> None:
+        """現状・検証境界・改善方針へ案内し、旧作業 ID の維持を要求しない。"""
 
         document = self.parse("docs/planning/roadmap.md")
         self.assertTrue(
             {"当前执行状态", "已实现的主要能力", "当前仍需核实的事项", "后续推进方式", "交付判断"}
             <= document.anchors
-        )
-        tasks = next(
-            section for section in build_docs.search_sections(document)
-            if section["anchor"] == "原任务编号定位"
-        )
-        self.assertEqual(
-            set(re.findall(r"\bR\d{2}\b", tasks["text"])),
-            {f"R{number:02d}" for number in range(1, 14)},
         )
         self.assertNotIn("delivery-history", document.source)
 

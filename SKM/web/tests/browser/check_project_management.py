@@ -156,6 +156,8 @@ class ManagementApi(ProjectsApi):
                         await self.problem(route, (409, "project_delete_requires_archive"))
                         return
                     del self.details[parts[1]]
+                    if self.preference == parts[1]:
+                        self.preference = None
                     result = None
                 else:
                     changes = (
@@ -195,9 +197,14 @@ async def tab(page: Page, name: str) -> None:
 
 async def action(page: Page, project_id: str, operation: str) -> None:
     """行の原Projectから操作を選び、選択だけではmutationしない。"""
-    await page.locator(
-        f'[data-project-row="{project_id}"] [data-project-action="{operation}"]'
-    ).click()
+    row = page.locator(f'[data-project-row="{project_id}"]')
+    if operation in {"edit", "select"}:
+        await row.locator(f'[data-project-action="{operation}"]').click()
+        return
+    language = (await page.locator("html").get_attribute("lang")).split("-")[0]
+    labels = (await messages(page, language))["projects"]
+    await row.locator('button[aria-haspopup="menu"]').click()
+    await page.get_by_role("menuitem", name=labels["deleteProject" if operation == "delete" else operation], exact=True).click()
 
 
 async def form(page: Page, *, creating: bool = False) -> Locator:
@@ -244,7 +251,9 @@ async def basic_flow(page: Page, api: ManagementApi, _: dict) -> None:
     """作成・編集・アーカイブ・復元・削除を原版で辿り、同tick確認を毎回一通にする。"""
     # HTML pattern は modern browser の v flag でも有効で、誤入力を拒否する。
     key = page.locator('[data-project-form] input[name="key"]')
-    for value, valid in (("UPPERCASE", False), ("bad_key", False), ("-prefix", False), ("fixture-01", True)):
+    for value, valid in (
+        ("UPPERCASE", False), ("bad_key", False), ("-prefix", False), ("fixture-01", True)
+    ):
         await key.fill(value)
         assert await key.evaluate("input => input.checkValidity()") is valid
     await freeze(page, operation="create")
@@ -283,7 +292,7 @@ async def basic_flow(page: Page, api: ManagementApi, _: dict) -> None:
         await expect(
             page.locator(
                 ".archivedProjects .panelHeader h2"
-                if operation in {"restore", "delete"}
+                if operation == "restore"
                 else ".projectSidePanel > h2"
             )
         ).to_be_focused()
@@ -295,6 +304,28 @@ async def basic_flow(page: Page, api: ManagementApi, _: dict) -> None:
         ) == expected
     assert CREATED not in api.details
     assert len(api.project_mutations()) == 6
+    assert urlsplit(page.url).fragment == "/projects"
+    await expect(page.locator('[data-project-context="unselected"]')).to_be_visible()
+    await selected(page, "")
+    await expect(page.locator('[data-project-context="unavailable"]')).to_have_count(0)
+
+
+async def delete_other_project(page: Page, api: ManagementApi, _: dict) -> None:
+    """別 Project の確認済み削除は現在の対象や保存済み選択を変更しない。"""
+    await freeze(page, ARCHIVED, "delete")
+    await confirm(page)
+    await success(page)
+    await selected(page, PROJECT)
+    assert urlsplit(page.url).fragment == api.fragment
+    assert ARCHIVED not in api.details
+    await expect(page.locator('[data-project-context="unselected"]')).to_have_count(0)
+
+
+async def unknown_current_deletion(page: Page, api: ManagementApi, labels: dict) -> None:
+    """元対象の削除が未知なら、再照合の後でも成功時の URL 清理を代用しない。"""
+    await unknown(page, api, labels, "delete")
+    assert urlsplit(page.url).fragment == api.fragment
+    await expect(page.locator('[data-project-context="unselected"]')).to_have_count(0)
 
 
 async def conflict(
@@ -396,7 +427,7 @@ async def unknown(page: Page, api: ManagementApi, _: dict, operation: str) -> No
     assert len(api.project_mutations()) == 1
 
 
-async def refusal(page: Page, api: ManagementApi, _: dict) -> None:
+async def refusal(page: Page, api: ManagementApi, labels: dict) -> None:
     """既知拒否は元草稿を保持し、401以外を会話失効やunknownへ読み替えない。"""
     deleting = bool(api.write_failure and "delete_blocked" in api.write_failure[1])
     await freeze(page, ARCHIVED if deleting else PROJECT, "delete" if deleting else "edit")
@@ -409,6 +440,14 @@ async def refusal(page: Page, api: ManagementApi, _: dict) -> None:
         await expect(page.locator("[data-project-intent]")).to_contain_text(
             api.details[ARCHIVED]["key"] if deleting else DRAFT_NAME
         )
+        if api.write_failure == (409, "project_delete_blocked_by_runs"):
+            await expect(
+                page.locator("[data-project-management] [role=alert]")
+            ).to_have_text(labels["projectManagement"]["failures"]["blockedByRuns"])
+            await expect(page.locator("[data-project-intent]")).to_contain_text(
+                labels["projectManagement"]["deleteHint"]
+            )
+            assert ARCHIVED in api.details
     assert len(api.project_mutations()) == 1
 
 
@@ -620,6 +659,7 @@ async def exercise(
 ) -> None:
     """本番Appを一度だけmountし、未知HTTP・JS error・機密・横溢れを全caseで検査する。"""
     api = ManagementApi(url, language, role)
+    api.fragment = fragment.removeprefix("#")
     api.screenshot = output / f"{name}.png" if output else None
     if setup:
         setup(api)
@@ -645,6 +685,15 @@ async def exercise(
         assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), (
             "Page overflow"
         )
+        if width <= 600 and role == "ADMIN":
+            # 狭幅では操作群を次行に置き、名称を数文字幅へ押し潰さない。
+            for row in await page.locator(".projectItem:visible").all():
+                title = await row.locator(".projectSelect").bounding_box()
+                actions = await row.locator(".projectItemActions").bounding_box()
+                bounds = await row.bounding_box()
+                assert title and actions and bounds
+                assert actions["y"] >= title["y"] + title["height"] - 1
+                assert title["width"] >= bounds["width"] - 40
         assert not api.unexpected, api.unexpected
         assert not api.failures, api.failures
         assert not errors, errors
@@ -698,6 +747,23 @@ async def check(url: str, output: Path | None, only: str | None) -> None:
                         f"management-{language}-{width}", basic_flow, language=language, width=width
                     )
             await run("version-conflict", conflict)
+            for language in ("zh", "ja", "en"):
+                await run(
+                    f"deletion-audit-{language}",
+                    refusal,
+                    language=language,
+                    width=390,
+                    setup=lambda api: setattr(
+                        api, "write_failure", (409, "project_delete_blocked_by_runs")
+                    ),
+                )
+            await run("delete-other-project", delete_other_project)
+            await run(
+                "delete-current-unknown",
+                unknown_current_deletion,
+                fragment=f"#/projects?project={ARCHIVED}",
+                setup=lambda api: setattr(api, "write_mode", "drop"),
+            )
 
             async def adopted_unknown(page: Page, api: ManagementApi, labels: dict) -> None:
                 """再送信のunknownが最初の競合版ではなく採用した版を原値として保持する。"""

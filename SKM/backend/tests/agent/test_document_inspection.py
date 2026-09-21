@@ -13,8 +13,13 @@ from uuid import uuid4
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
 
-from skillmind.agent.context_builder import ContractStore, document_inspect_tool_definition
+from skillmind.agent.contract_store import (
+    ContractStore,
+)
 from skillmind.agent.document_inspection import DocumentInspectProvider
+from skillmind.agent.tool_catalog import (
+    document_inspect_tool_definition,
+)
 from skillmind.agent.tool_gateway import ToolProviderError, ToolRegistry
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.documents.source import ProjectDocumentObservation

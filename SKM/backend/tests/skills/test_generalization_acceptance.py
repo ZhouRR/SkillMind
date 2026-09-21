@@ -46,6 +46,7 @@ RESPONSE = CONTRACTS / "examples" / "skill-interpreter-response.v1.json"
 GENERIC_MODULES = (
     ROOT / "backend" / "src" / "skillmind" / "skills" / "task_catalog.py",
     ROOT / "backend" / "src" / "skillmind" / "agent" / "context_builder.py",
+    ROOT / "backend" / "src" / "skillmind" / "agent" / "tool_catalog.py",
     ROOT / "backend" / "src" / "skillmind" / "agent" / "result_validation.py",
 )
 BUSINESS_DISPATCH_CONSTANTS = ("fixture.issue.review", "fixture-001")

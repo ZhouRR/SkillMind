@@ -9,9 +9,10 @@ export function ProjectContextNotice({ access, onRefresh }: { access: ProjectAcc
     : null
   const text = access.status === 'loading' ? messages.elements.loadingProjects
     : access.status === 'empty' ? messages.elements.noAccessibleProjects
-      : access.status === 'unavailable' ? messages.app.projectUnavailable : messages.app.projectReadFailed
+      : access.status === 'unselected' ? messages.elements.selectProject
+        : access.status === 'unavailable' ? messages.app.projectUnavailable : messages.app.projectReadFailed
   return <section className="panel projectContextNotice" data-project-context={access.status} aria-busy={access.status === 'loading'}>
     <p role={access.status === 'error' || access.status === 'unavailable' ? 'alert' : 'status'}>{text}</p>
-    {access.status !== 'loading' && <button className="secondaryButton" type="button" onClick={onRefresh}>{messages.runHistory.retry}</button>}
+    {access.status !== 'loading' && access.status !== 'unselected' && <button className="secondaryButton" type="button" onClick={onRefresh}>{messages.runHistory.retry}</button>}
   </section>
 }

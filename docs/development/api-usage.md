@@ -21,11 +21,14 @@ API Key は ADMIN が `/api-keys` で作成・一覧・失効でき、token 全�
 
 SSE の `Last-Event-ID` / `after` は持続 event の再開に使う。一時 TEXT_DELTA で再開位置を進めない。キャンセルは Run の cancel endpoint を使い、受付後も終態を確認する。
 
+終了履歴は Project 配下の `/runs/{run_id}` を DELETE して回収する。このパスに付ける `/deletion-preview` の GET で対象を確認でき、`/restore` の POST で復元、`/purge` の DELETE で完全削除する。完全削除は回収後に行い、原入力・共有参照・最小監査を保護する。外部 DB や Git のデータは削除されない。
+
 ## 文書とディレクトリ
 
 [documents route](../../SKM/backend/src/skillmind/api/routes/documents.py) と OpenAPI から、一覧・アップロード・元 byte 取得、`document-folders`、`document-operations` を利用する。改名、移動、directory 作成、回収・復元は共通操作契約を使う。完全削除は `DELETE /projects/{project_id}/documents/{document_id}?purge=true` を使い、参照保護と回収状態を確認する。表示 path を blob key として組み立てない。
 
-タスク入力は単一文書、directory 配下の集合、明示した全体から選ぶ。任意 slot 未使用は省略する。Run detail の document_snapshots は作成時の範囲であり、現在の内容可読性を保証しない。LEGACY_UNAVAILABLE/INVALID を空の正常 snapshot に置換しない。
+タスクの文書入力用 `sources` 値は `document:<UUID>`、`documents:<UUID>,<UUID>...`、明示的な `project-documents:all` を使う。directory 選択は、候補一覧からその配下の文書 ID を集合にして送る。directory path 自体は指定せず、作成後に追加された文書を旧 Run に含めない。任意 slot 未使用は省略する。
+Run detail の document_snapshots は作成時の範囲であり、現在の内容可読性を保証しない。LEGACY_UNAVAILABLE/INVALID を空の正常 snapshot に置換しない。
 
 ## 回答・批准・評価
 

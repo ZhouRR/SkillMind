@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock, call
@@ -18,8 +17,8 @@ from skillmind.core.settings import Settings
 from skillmind.documents.library import configured_document_library
 from skillmind.documents.service import DocumentService
 from skillmind.documents.source import DatabaseProjectDocumentSource
-from skillmind.effects.release import configured_execution_features
 from skillmind.skills.service import SkillService
+from skillmind.skills.service_wiring import build_skill_service
 from skillmind.storage import FileStorage
 from skillmind.storage.factory import create_file_storage
 from skillmind.storage.namespace import make_s3_namespace
@@ -34,7 +33,9 @@ class OfflineSettings(Settings):
     model_config = SettingsConfigDict(env_file=None)
 
 
-def _settings(tmp_path: Path, namespace_id: UUID | None) -> Settings:
+def _settings(
+    tmp_path: Path, namespace_id: UUID | None, *, document_enabled: bool = False,
+) -> Settings:
     """外部設定 file と実宛先を使わず、constructor に必要な値を明示する。"""
 
     return OfflineSettings(
@@ -47,6 +48,7 @@ def _settings(tmp_path: Path, namespace_id: UUID | None) -> Settings:
         object_storage_secret_key="synthetic-secret",
         object_storage_namespace_id=namespace_id,
         managed_secret_kek=None,
+        document_writes_enabled=document_enabled,
         redis_url="redis://127.0.0.1:6379/15",
     )
 
@@ -60,7 +62,7 @@ async def test_api_and_worker_inject_same_factory_namespace_into_real_consumers(
 ) -> None:
     """DB/SDK/queue を完全に止めたまま、公開 upload と Worker source/Skill の実装配を通す。"""
 
-    settings = _settings(tmp_path, namespace_id)
+    settings = _settings(tmp_path, namespace_id, document_enabled=document_enabled)
     sessions = MagicMock(side_effect=AssertionError("Composition must not query a database"))
     engine = MagicMock()
     engine.dispose = AsyncMock()
@@ -85,13 +87,6 @@ async def test_api_and_worker_inject_same_factory_namespace_into_real_consumers(
         return storage
 
     for module in (main, worker):
-        if document_enabled:
-            monkeypatch.setattr(
-                module, "configured_execution_features",
-                lambda settings: replace(
-                    configured_execution_features(settings), document_writes=True
-                ),
-            )
         monkeypatch.setattr(module, "get_settings", lambda: settings)
         monkeypatch.setattr(module, "configure_logging", lambda _: None)
         monkeypatch.setattr(module, "create_database_engine", lambda _: engine)
@@ -102,29 +97,30 @@ async def test_api_and_worker_inject_same_factory_namespace_into_real_consumers(
             Mock(return_value=(None, None, None, "synthetic-model")),
         )
     api_document = Mock(wraps=DocumentService)
-    api_skill = Mock(wraps=SkillService)
+    api_skill = Mock(wraps=build_skill_service)
     worker_document = Mock(wraps=DatabaseProjectDocumentSource)
-    worker_skill = Mock(wraps=SkillService)
+    worker_skill = Mock(wraps=build_skill_service)
     monkeypatch.setattr(main, "DocumentService", api_document)
-    monkeypatch.setattr(main, "SkillService", api_skill)
+    monkeypatch.setattr(main, "build_skill_service", api_skill)
     monkeypatch.setattr(worker, "DatabaseProjectDocumentSource", worker_document)
-    monkeypatch.setattr(worker, "SkillService", worker_skill)
+    monkeypatch.setattr(worker, "build_skill_service", worker_skill)
     app = FastAPI()
     context: dict[str, Any] = {"redis": redis}
     async with main.lifespan(app):
         try:
             await worker.startup(context)
-            assert len(storages) == 3
+            # 各 process の共有 storage が文書と Skill の両方に届くことを検証する。
+            assert len(storages) == 2
             expected = None if namespace_id is None else make_s3_namespace(
                 namespace_id=namespace_id, endpoint="https://storage.invalid",
                 bucket="synthetic-documents",
             )
-            assert [storage.namespace for storage in storages] == [expected] * 3
+            assert [storage.namespace for storage in storages] == [expected] * 2
             assert app.state.file_storage is storages[0]
             assert api_document.call_args.kwargs["file_storage"] is storages[0]
             assert api_skill.call_args.kwargs["file_storage"] is storages[0]
             assert worker_document.call_args.kwargs["file_storage"] is storages[1]
-            assert worker_skill.call_args.kwargs["file_storage"] is storages[2]
+            assert worker_skill.call_args.kwargs["file_storage"] is storages[1]
             expected_library = configured_document_library(
                 storages[0], bucket=settings.object_storage_bucket
             )
@@ -148,7 +144,7 @@ async def test_api_and_worker_inject_same_factory_namespace_into_real_consumers(
             "storage.invalid", access_key="synthetic-access", secret_key="synthetic-secret",
             secure=True,
         )
-    ] * 3
+    ] * 2
     assert not sdk.method_calls
     sessions.assert_not_called()
     redis.aclose.assert_awaited_once()

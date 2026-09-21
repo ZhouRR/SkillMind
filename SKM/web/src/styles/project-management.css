@@ -26,6 +26,8 @@
 @media (max-width: 960px) { .projectComparison { grid-template-columns: 1fr; } }
 @media (max-width: 600px) {
   .projectManagement .panel { padding: 14px; }
+  .projectManagement .projectItem { grid-template-columns: minmax(0, 1fr); }
+  .projectManagement .projectItemActions { justify-content: flex-start; }
   .projectManagement button, .projectManagement input { min-height: 44px; }
   .projectAcknowledgment input { min-height: 18px; }
 }

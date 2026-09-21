@@ -12,8 +12,13 @@ from uuid import uuid4
 
 import pytest
 
-from skillmind.agent.context_builder import ContractStore, document_list_tool_definition
+from skillmind.agent.contract_store import (
+    ContractStore,
+)
 from skillmind.agent.document_listing import DocumentListProvider
+from skillmind.agent.tool_catalog import (
+    document_list_tool_definition,
+)
 from skillmind.agent.tool_gateway import ToolProviderError, ToolRegistry
 from skillmind.documents.source import ProjectDocumentObservation
 from skillmind.storage import FileStorageError

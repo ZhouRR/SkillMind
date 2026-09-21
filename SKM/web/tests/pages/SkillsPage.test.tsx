@@ -4,16 +4,11 @@ import { describe, expect, it, vi } from 'vitest'
 import type { InterpretationExecutionRecord, SkillParseResult, SkillVersionRecord } from '../../src/api'
 import { LanguageProvider } from '../../src/i18n'
 import type { UiLanguage } from '../../src/lib/i18n/messages'
-import {
-  InterpretStreamView,
-  InterpretationExecutionView,
-  SkillLibraryPanel,
-  SkillParseSummary,
-  SkillsPage,
-  SkillVersionDetail,
-  UploadedSourceFiles,
-  readUploadedSourcePreview,
-} from '../../src/pages/SkillsPage'
+import { SkillsPage } from '../../src/pages/SkillsPage'
+import { InterpretStreamView, InterpretationExecutionView } from '../../src/components/SkillInterpretationPreview'
+import { SkillLibraryPanel, SkillVersionDetail } from '../../src/components/SkillLibraryPanel'
+import { SkillParseSummary, UploadedSourceFiles } from '../../src/components/SkillSourcePreview'
+import { readUploadedSourcePreview } from '../../src/lib/skillUpload'
 
 const PREVIEW = {
   normalized_package: {
@@ -570,10 +565,11 @@ describe('SkillLibraryPanel version identity and cleanup', () => {
     expect(html).not.toContain(version().skill_version_id)
   })
 
-  it('offers cleanup for drafts and deprecated versions', () => {
-    /** 廃止済みは行が残り続けて一覧が伸びる。草稿と廃止版に片付け経路を出す。 */
-    expect(renderLibrary('DEPRECATED')).toContain('彻底删除')
-    expect(renderLibrary('PUBLISHED')).not.toContain('彻底删除')
-    expect(renderLibrary('DRAFT')).toContain('彻底删除')
+  it.each(['DEPRECATED', 'PUBLISHED', 'DRAFT'] as const)('keeps secondary lifecycle actions in a named menu for %s', (status) => {
+    /** メニュー内の確認/原削除は browser suite で検証し、閉時は一覧を圧迫しない。 */
+    const html = renderLibrary(status)
+    expect(html).toContain('aria-haspopup="menu"')
+    expect(html).not.toContain('彻底删除')
+    expect(html).not.toContain('role="menuitem"')
   })
 })

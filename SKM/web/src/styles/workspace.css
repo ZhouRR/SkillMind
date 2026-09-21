@@ -294,11 +294,13 @@
 .interactionOption strong { color: var(--text); font-size: 13px; }
 .proposalList, .effectTimeline { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 .proposalCard, .effectTimeline > li { display: grid; gap: 9px; border: 1px solid var(--warn-border); border-radius: var(--radius-small); padding: 13px; background: var(--warn-soft); }
+/* 承認時に必要な hash・revision は隠さず、狭幅でも枠内で全文を折り返す。 */
+.proposalCard { min-width: 0; overflow-wrap: anywhere; }
 .proposalCard h4, .proposalCard p, .effectTimeline p { margin: 0; }
 .proposalCard h4 { color: var(--text-hi); font-size: 13px; line-height: 1.5; }
 .proposalCard pre { overflow: auto; max-height: 280px; margin: 0; border: 1px solid var(--border); border-radius: var(--radius-tiny); padding: 9px; color: var(--text-muted); background: var(--surface-input); font-size: 12px; }
 /* 代码変更の審査面。承認は唯一の闸門なので、path・操作・本文が一目で読める密度を保つ。 */
-.proposalChanges { display: grid; gap: 7px; }
+.proposalChanges { display: grid; gap: 7px; min-width: 0; }
 .proposalFile { border: 1px solid var(--border); border-radius: var(--radius-tiny); background: var(--surface-input); }
 .proposalFile > summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 7px 9px; cursor: pointer; font-size: 12px; }
 .proposalFile > summary code { color: var(--text-hi); font-size: 12px; }
@@ -557,15 +559,12 @@
   transition: border-color .15s ease;
 }
 .documentItem:hover { border-color: var(--border-strong); }
-.documentInfo { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; min-width: 0; }
-.documentInfo strong { color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
+.documentInfo { display: grid; flex: 1; grid-template-columns: minmax(0, 1fr); gap: 3px; min-width: 0; }
+.documentName { display: block; width: fit-content; max-width: 100%; margin: 0; border: 0; padding: 0; background: none; color: var(--text); font: 600 13px/1.5 var(--font-body); text-align: left; text-decoration: none; overflow-wrap: anywhere; cursor: pointer; }
+.documentName:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.documentName:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
 .documentInfo span { overflow: hidden; color: var(--text-faint); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .documentActions { display: flex; flex-shrink: 0; gap: 8px; }
-/* 寸法は .compactButton が持つ。ここは download 用の <a> を button と同じ行に揃える分だけ。 */
-.documentActions .secondaryButton { display: inline-flex; align-items: center; text-decoration: none; }
-.documentActions .secondaryButton:disabled { cursor: wait; opacity: .5; }
-/* Preview 上限超過は待機ではなく不可の合図。 */
-.documentActions .secondaryButton[title]:disabled { cursor: not-allowed; }
 
 /* ---- 文書 tree:folder path を実階層として開閉表示する ---- */
 .documentTree { display: grid; gap: 8px; }
@@ -585,8 +584,9 @@
 .docFolder summary::-webkit-details-marker { display: none; }
 .docFolder summary::before { content: "▸"; color: var(--text-faint); font-size: 12px; }
 .docFolder[open] > summary::before { content: "▾"; }
-.docFolder summary svg { flex-shrink: 0; width: 15px; height: 15px; fill: none; stroke: var(--accent); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
-.docFolder summary strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.docFolderIcon { flex-shrink: 0; width: 15px; height: 15px; fill: none; stroke: var(--accent); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.docFolder summary strong { flex: 1; min-width: 0; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.docFolder summary > input[type='checkbox'] { flex: 0 0 16px; width: 16px; height: 16px; min-height: 0; margin: 0; padding: 0; accent-color: var(--accent-strong); }
 .docFolderCount { margin-left: auto; color: var(--text-faint); font: 600 12px var(--font-mono); }
 .docFolderBody { display: grid; gap: 8px; border-top: 1px solid var(--border); padding: 10px 10px 10px 24px; }
 
@@ -620,10 +620,12 @@
   .runPanel .runFacts { grid-template-columns: minmax(0, 1fr); }
   .runPanel .runFacts div { border: 0; padding: 6px 0; }
   .outcomeColumns { grid-template-columns: 1fr; }
-  .documentItem { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; }
-  .documentItem:has(> input[type='checkbox']) { grid-template-columns: 16px minmax(0, 1fr); }
+  .documentItem { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; }
+  .documentItem:has(> input[type='checkbox']) { grid-template-columns: 16px minmax(0, 1fr) auto; }
   .documentItem > input[type='checkbox'] { margin-top: 2px; }
-  .documentActions { grid-column: 1 / -1; justify-content: flex-end; min-width: 0; }
+  .documentActions { justify-content: flex-end; min-width: 0; }
+  .docFolder summary { gap: 6px; padding: 8px; }
+  .docFolderBody { padding: 8px 8px 8px 12px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -659,11 +661,13 @@
 /* 時刻と所要時間を併記し、狭いカードでも duration 自体は途中で折らない。 */
 .runDuration { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
-/* 文書整理と回収箱の操作は履歴の主リンクから分離する。 */
-.historyItem > .historyDelete { margin: 0 0 10px 10px; }
-.formRow.documentManagementToolbar, .formRow.documentFolderToolbar, .formRow.historyManagementToolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+/* 補助操作は主リンクの右に置き、単独のボタン行を増やさない。 */
+.historyItem.historyHasActions { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+.historyHasActions > button { min-width: 0; }
+.historyHasActions > .historyTechnical { grid-column: 1 / -1; }
+.historyItem > .historyDelete { margin: 12px 8px 0 0; }
+.formRow.documentManagementToolbar, .formRow.historyManagementToolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .documentManagementToolbar { margin-bottom: 12px; }
 .documentManagementToolbar select { width: auto; }
 .documentManagementToolbar input { flex: 1 1 220px; min-width: 160px; }
 .documentManagementToolbar [aria-pressed='true'] { background: var(--surface-raised); border-color: var(--border-strong); }
-.documentActions { flex-wrap: wrap; }

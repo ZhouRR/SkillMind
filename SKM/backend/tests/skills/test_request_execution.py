@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from skillmind.db.models import OutboxMessage, SkillInterpretationCall, SkillInterpretationRequest
 from skillmind.skills.domain import SkillInterpretationStatus, SkillSourceIntegrityError
+from skillmind.skills.importer import HTTP_SKILL_IMPORT_LIMITS, SkillPackageParser
 from skillmind.skills.interpretation_requests import InterpretationRequestDeniedError
 from skillmind.skills.interpreter import (
     load_capability_catalog,
@@ -84,7 +85,7 @@ def service(session: RequestSession, client: CompletionClient) -> SkillService:
 async def accept(session: RequestSession, workflow: SkillService):
     """既存の合成 Skill を本番 import 経路で保存し、原请求を受理する。"""
 
-    package = workflow._parser.parse_directory(GENERIC_SKILL)
+    package = SkillPackageParser(limits=HTTP_SKILL_IMPORT_LIMITS).parse_directory(GENERIC_SKILL)
     source = await workflow.save_inline(
         access=session.access, files=load_inline_text_files(GENERIC_SKILL, package)
     )

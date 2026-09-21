@@ -60,7 +60,8 @@ async def check(url, output):
                     card = page.locator('.skillLibraryList > li').first
                     actions = card.locator('.skillActions')
                     await expect(actions.get_by_role('button', name=labels['skills']['enableForProject'], exact=True)).to_be_visible()
-                    await expect(actions.get_by_role('button', name=labels['skills']['deprecateVersion'], exact=True)).to_be_visible()
+                    await expect(actions.locator('button[aria-haspopup="menu"]')).to_be_visible()
+                    await expect(actions.get_by_role('button', name=labels['skills']['deprecateVersion'], exact=True)).to_have_count(0)
                     for theme in ('dark', 'light'):
                         await page.set_viewport_size({'width': 1440, 'height': 900})
                         await page.locator('.themeToggle').get_by_role('button', name=labels['theme'][theme], exact=True).click()
@@ -73,7 +74,11 @@ async def check(url, output):
                             identity = await card.locator('.skillLibraryIdentity').bounding_box()
                             action_box = await actions.bounding_box()
                             assert action_box['y'] >= identity['y'] + identity['height']
+                        await actions.locator('button[aria-haspopup="menu"]').click()
+                        await expect(page.get_by_role('menuitem', name=labels['skills']['deprecateVersion'], exact=True)).to_be_visible()
+                        await layout(page)
                         await page.screenshot(path=str(output / f'library-{language}-{theme}-{width}.png'))
+                        await page.keyboard.press('Escape')
                     assert not api.failures and not api.unexpected
                     await context.close()
                 print(f'PASS navigation and Skill actions {language}', flush=True)

@@ -34,6 +34,7 @@ describe('Project management role and form projection', () => {
     expect(html).toContain(PROJECT.name)
     expect(html).not.toContain('data-project-form')
     expect(html).not.toContain('data-project-action="archive"')
+    expect(html).not.toContain('aria-haspopup="menu"')
   })
 
   it('preserves editable values while making identity and settings non-editable', () => {
@@ -53,20 +54,21 @@ describe('Project management role and form projection', () => {
     expect(html).toContain(PROJECT.name)
   })
 
-  it('shows original row identities, versions and status with lifecycle-specific actions', () => {
+  it('keeps row identities and versions visible while lifecycle controls use a labeled menu', () => {
     const archived = { ...PROJECT, project_id: '00000000-0000-4000-8000-000000000011', row_version: 9, status: 'ARCHIVED' as const }
     const html = render(<ProjectRows projects={[PROJECT, archived]} projectId={PROJECT.project_id} locked={false} admin onSelect={vi.fn()} onAction={vi.fn()} />)
     expect(html).toContain(`data-project-row="${PROJECT.project_id}"`)
     expect(html).toContain(`data-project-row="${archived.project_id}"`)
-    expect(html).toContain('data-project-action="archive"')
-    expect(html).toContain('data-project-action="restore"')
-    expect(html).toContain('data-project-action="delete"')
+    expect(html.match(/aria-haspopup="menu"/g)).toHaveLength(2)
+    expect(html).toContain(MESSAGES.zh.common.moreActions(PROJECT.name))
+    expect(html).not.toContain('data-project-action="archive"')
+    expect(html).toContain('data-project-action="edit"')
     expect(html).toContain(`${MESSAGES.zh.projectManagement.version}: 9`)
   })
 
   it('keeps lifecycle actions available for a legal historical whitespace name', () => {
     const html = render(<ProjectRows projects={[{ ...PROJECT, name: '   ' }]} projectId={PROJECT.project_id} locked={false} admin onSelect={vi.fn()} onAction={vi.fn()} />)
-    expect(html).toContain('data-project-action="archive"')
+    expect(html).toContain('aria-haspopup="menu"')
     expect(html).not.toContain('disabled=""')
     expect(html).toContain(PROJECT.project_id)
   })

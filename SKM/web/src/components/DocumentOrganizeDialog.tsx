@@ -10,7 +10,7 @@ export interface DocumentEdit {
   folder: string
 }
 
-/** 同じ文書 ID の表示 path だけを変更する共通 form。 */
+/** 同じ文書 ID の表示 path だけを変更する共通 form。焦点の開始・復帰は ModalDialog に委ねる。 */
 export function DocumentOrganizeDialog({ edit, folders, busy, error, onClose, onSave }: {
   edit: DocumentEdit; folders: string[]; busy: boolean; error?: string | null; onClose: () => void
   onSave: (folder: string, name: string) => void
@@ -22,7 +22,7 @@ export function DocumentOrganizeDialog({ edit, folders, busy, error, onClose, on
   return <ModalDialog open title={title} onClose={() => { if (!busy) onClose() }}>
     <form className="formStack" onSubmit={(event) => { event.preventDefault(); if (!busy) onSave(folder, name) }}>
       {error && <p role="alert" className="error">{error}</p>}
-      <label>{m.folder}<input autoFocus value={folder} maxLength={200} disabled={busy} list="organize-folders" required={edit.mode !== 'MOVE'} onChange={(e) => setFolder(e.target.value)} /></label>
+      <label>{m.folder}<input value={folder} maxLength={200} disabled={busy} list="organize-folders" required={edit.mode !== 'MOVE'} onChange={(e) => setFolder(e.target.value)} /></label>
       <datalist id="organize-folders">{folders.map((path) => <option key={path} value={path} />)}</datalist>
       {edit.mode === 'MOVE' && edit.documents.length === 1 && <label>{m.name}<input value={name} maxLength={200} required disabled={busy} onChange={(e) => setName(e.target.value)} /></label>}
       <div className="formRow"><button className="primaryButton" disabled={busy} type="submit">{m.save}</button><button className="secondaryButton" disabled={busy} type="button" onClick={onClose}>{m.cancel}</button></div>

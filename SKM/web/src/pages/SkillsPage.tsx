@@ -1,85 +1,32 @@
-import { SourceExecutionPreview } from '../components/SourceExecutionPreview'
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
 
 import {
   ApiProblemError,
-  adjustInterpretation,
-  confirmInterpretationRequest,
   createSkillVersionDraft,
   deleteSkillVersion,
   deprecateSkillVersion,
   disableProjectSkillVersion,
   enableProjectSkillVersion,
-  interpretSkillSource,
   listProjectSkillVersions,
   listSkillVersions,
-  loadInterpretationExecution,
   parseSkillSource,
   publishSkillVersion,
   saveSkillImport,
-  subscribeInterpretEvents,
   uploadSkillFiles,
-  type InterpretationExecutionRecord,
-  type InterpretationLaunchRecord,
-  type BlueprintNote,
-  type CapabilityBlueprintView,
-  type InterpretEventRecord,
-  type InterpretEventSubscription,
-  type ProjectSkillVersionRecord,
-  type SkillDiagnostic,
   type SkillParseResult,
   type SkillSourceFile,
   type SkillVersionRecord,
-  type SourceTrace,
   type StoredSkillPreviewRecord,
 } from '../api'
-import { DetailDrawer, EmptyState, LoadingSkeleton, PageHeader, useConfirmDialog } from '../components/PageElements'
+import { EmptyState, PageHeader, useConfirmDialog } from '../components/PageElements'
 import { useMessages } from '../i18n'
+import { useSkillInterpretation } from '../hooks/useSkillInterpretation'
 import { apiErrorMessage } from '../lib/apiFeedback'
-import type { UiMessages } from '../lib/i18n/messages'
-import { formatByteSize } from '../lib/presentation'
-import { createIdempotencyKey } from '../lib/idempotency'
-import { isNearBottom } from '../lib/scroll'
-import { normalizedSkillUploadPaths } from '../lib/skillUpload'
-import { clearInterpretationReceipt, loadInterpretationReceipt, saveInterpretationReceipt } from '../lib/interpretationReceipt'
-import { sameUuid } from '../lib/validation'
-
-/** 上传目录の読取専用 preview entry。text は内容を持ち、binary/過大は種別だけ示す。 */
-export interface UploadedSourceFile {
-  path: string
-  size: number
-  kind: 'text' | 'binary' | 'oversized'
-  content?: string
-}
-
-/** 拡張子で text 判定する許可リスト。mime が text/* の file はこの表になくても text 扱いにする。 */
-const TEXT_PREVIEW_EXTENSIONS = new Set([
-  'md', 'markdown', 'txt', 'json', 'yaml', 'yml', 'toml', 'csv', 'xml',
-  'html', 'htm', 'css', 'js', 'jsx', 'ts', 'tsx', 'py', 'sh',
-])
-
-/** 1 file あたりの text preview 上限。超過は内容を読まず oversized として扱う。 */
-const TEXT_PREVIEW_MAX_BYTES = 262_144
-
-/** 上传 file 群を preview entry へ変換する。SKILL.md を先頭に固定し、残りは path 昇順。 */
-export async function readUploadedSourcePreview(
-  files: readonly File[],
-): Promise<UploadedSourceFile[]> {
-  const paths = normalizedSkillUploadPaths(files)
-  const entries = await Promise.all(files.map(async (file, index): Promise<UploadedSourceFile> => {
-    const path = paths[index] ?? file.name
-    const extension = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
-    const isText = file.type.startsWith('text/') || TEXT_PREVIEW_EXTENSIONS.has(extension)
-    if (!isText) return { path, size: file.size, kind: 'binary' }
-    if (file.size > TEXT_PREVIEW_MAX_BYTES) return { path, size: file.size, kind: 'oversized' }
-    return { path, size: file.size, kind: 'text', content: await file.text() }
-  }))
-  return entries.sort((left, right) => {
-    const leftRank = left.path.endsWith('SKILL.md') ? 0 : 1
-    const rightRank = right.path.endsWith('SKILL.md') ? 0 : 1
-    return leftRank !== rightRank ? leftRank - rightRank : left.path.localeCompare(right.path)
-  })
-}
+import { readUploadedSourcePreview, type UploadedSourceFile } from '../lib/skillUpload'
+import { SkillLibraryPanel, SkillVersionDetail, type SkillLibraryState, type ProjectEnablementState } from '../components/SkillLibraryPanel'
+import { SavedSkillIdentity, SkillParseSummary, UploadedSourceFiles } from '../components/SkillSourcePreview'
+import { InterpretationExecutionView, InterpretStreamView } from '../components/SkillInterpretationPreview'
+import { SkillTabButton } from '../components/SkillTabButton'
 
 /** Skill parser panel の非同期状態。 */
 type SkillParseState =
@@ -95,17 +42,6 @@ type SkillSaveState =
   | { status: 'ready'; stored: StoredSkillPreviewRecord }
   | { status: 'error'; message: string }
 
-/** Model interpret/reinterpret の非同期状態。 */
-type InterpretState =
-  | { status: 'idle' }
-  | { status: 'unknown'; message: string }
-  | { status: 'interpreting'; prompt: string; output: string; attempt: number }
-  | { status: 'ready'; execution: InterpretationExecutionRecord }
-  | { status: 'error'; message: string }
-
-/** 追加調整（reinterpretation）の非同期状態。 */
-type AdjustState = { status: 'idle' } | { status: 'adjusting' } | { status: 'error'; message: string }
-
 /** SkillVersion DRAFT 作成・publish の非同期状態。 */
 type SkillVersionState =
   | { status: 'idle' }
@@ -113,21 +49,8 @@ type SkillVersionState =
   | { status: 'ready'; version: SkillVersionRecord }
   | { status: 'error'; message: string }
 
-/** Organization Skill library 一覧の非同期状態。 */
-type SkillLibraryState =
-  | { status: 'loading'; versions?: SkillVersionRecord[] }
-  | { status: 'ready'; versions: SkillVersionRecord[] }
-  | { status: 'error'; message: string; versions?: SkillVersionRecord[] }
-
 /** 画面の 2 大区分。取込〜発行の作業台と、組織 library の管理を同時に一つだけ見せる。 */
 type SkillsPageTab = 'workbench' | 'library'
-
-/** 選択 Project の精確版有効化一覧の非同期状態。 */
-type ProjectEnablementState =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'ready'; enablements: ProjectSkillVersionRecord[] }
-  | { status: 'error'; message: string }
 
 /** Organization Skill library の解析、model 解釈、修訂と発行を担当する画面。 */
 export function SkillsPage({ projectId, csrfToken }: {
@@ -140,9 +63,6 @@ export function SkillsPage({ projectId, csrfToken }: {
   const [uploadedSource, setUploadedSource] = useState<UploadedSourceFile[] | null>(null)
   const [parseState, setParseState] = useState<SkillParseState>({ status: 'idle' })
   const [saveState, setSaveState] = useState<SkillSaveState>({ status: 'idle' })
-  const [interpretState, setInterpretState] = useState<InterpretState>({ status: 'idle' })
-  const [adjustState, setAdjustState] = useState<AdjustState>({ status: 'idle' })
-  const [instruction, setInstruction] = useState('')
   const [versionState, setVersionState] = useState<SkillVersionState>({ status: 'idle' })
   const [libraryState, setLibraryState] = useState<SkillLibraryState>({ status: 'loading' })
   const [enablementState, setEnablementState] = useState<ProjectEnablementState>({ status: 'idle' })
@@ -153,40 +73,24 @@ export function SkillsPage({ projectId, csrfToken }: {
   const parseController = useRef<AbortController | null>(null)
   const saveController = useRef<AbortController | null>(null)
   const uploadController = useRef<AbortController | null>(null)
-  const interpretController = useRef<AbortController | null>(null)
   const versionController = useRef<AbortController | null>(null)
   const libraryController = useRef<AbortController | null>(null)
   const enablementController = useRef<AbortController | null>(null)
   const libraryMutationController = useRef<AbortController | null>(null)
-  const interpretStream = useRef<InterpretEventSubscription | null>(null)
-  const pendingInterpretation = useRef<string | null>(null)
-  const [pendingRequestId, setPendingRequestId] = useState<string | null>(null)
+  const { interpretState, adjustState, instruction, setInstruction, pendingRequestId,
+    resetInterpretation, confirmPendingInterpretation, dismissInterpretation, handleInterpret,
+    handleAdjust, acknowledgeDraft } = useSkillInterpretation(csrfToken,
+      () => { versionController.current?.abort(); setVersionState({ status: 'idle' }) }, () => setPageTab('workbench'))
 
-  useEffect(() => {
-    try {
-      const originalId = loadInterpretationReceipt()
-      if (originalId !== null) {
-        pendingInterpretation.current = originalId
-        setPendingRequestId(originalId)
-        setPageTab('workbench')
-        void confirmPendingInterpretation()
-      }
-    } catch {
-      setPageTab('workbench')
-      setInterpretState({ status: 'unknown', message: messages.skills.interpretStorageFailure })
-    }
-  }, [])
-
-  useEffect(() => () => {
+  // DOM が切り替わった commit で旧要求を閉じ、passive cleanup 前の成功も破棄する。
+  useLayoutEffect(() => () => {
     parseController.current?.abort()
     saveController.current?.abort()
     uploadController.current?.abort()
-    interpretController.current?.abort()
     versionController.current?.abort()
     libraryController.current?.abort()
     enablementController.current?.abort()
     libraryMutationController.current?.abort()
-    interpretStream.current?.close()
   }, [])
 
   useEffect(() => {
@@ -249,15 +153,10 @@ export function SkillsPage({ projectId, csrfToken }: {
     ]
   }
 
-  /** 後続 state を idle へ戻し、古い解釈/版本を残さないようにする。 */
+  /** 原文を替えたときだけ、確認済みの下流表示を無効にする。未決 UUID は hook が保持する。 */
   function resetDownstream(): void {
-    interpretController.current?.abort()
-    interpretStream.current?.close()
-    interpretStream.current = null
-    setInterpretState(pendingInterpretation.current === null
-      ? { status: 'idle' }
-      : { status: 'unknown', message: messages.skills.interpretUnknown })
-    setAdjustState({ status: 'idle' })
+    resetInterpretation()
+    versionController.current?.abort()
     setVersionState({ status: 'idle' })
   }
 
@@ -271,10 +170,9 @@ export function SkillsPage({ projectId, csrfToken }: {
     setSaveState({ status: 'idle' })
     resetDownstream()
     try {
-      setParseState({
-        status: 'ready',
-        result: await parseSkillSource(currentFiles(), csrfToken, controller.signal),
-      })
+      const result = await parseSkillSource(currentFiles(), csrfToken, controller.signal)
+      if (parseController.current !== controller || controller.signal.aborted) return
+      setParseState({ status: 'ready', result })
     } catch (error: unknown) {
       if (!controller.signal.aborted) {
         setParseState({ status: 'error', message: apiErrorMessage(error, 'Unknown parser error', messages) })
@@ -290,10 +188,9 @@ export function SkillsPage({ projectId, csrfToken }: {
     setSaveState({ status: 'saving' })
     resetDownstream()
     try {
-      setSaveState({
-        status: 'ready',
-        stored: await saveSkillImport(currentFiles(), csrfToken, controller.signal),
-      })
+      const stored = await saveSkillImport(currentFiles(), csrfToken, controller.signal)
+      if (saveController.current !== controller || controller.signal.aborted) return
+      setSaveState({ status: 'ready', stored })
     } catch (error: unknown) {
       if (!controller.signal.aborted) {
         setSaveState({ status: 'error', message: apiErrorMessage(error, 'Unknown persistence error', messages) })
@@ -326,179 +223,6 @@ export function SkillsPage({ projectId, csrfToken }: {
     }
   }
 
-  /** 実行中の observer だけを更新し、旧対象/旧 controller の遅延通知を捨てる。 */
-  function currentInterpretation(controller: AbortController): boolean {
-    return interpretController.current === controller && !controller.signal.aborted
-  }
-
-  /** 原 UUID は送信より先に保持し、重複内容の応答では元の UUID に付け替える。 */
-  function rememberInterpretation(requestId: string): void {
-    pendingInterpretation.current = requestId
-    setPendingRequestId(requestId)
-    saveInterpretationReceipt(requestId)
-  }
-
-  /** 通信不明は元 UUID の確認だけを許し、FAILED として再生成ボタンへ流さない。 */
-  function interpretationUnknown(message = messages.skills.interpretUnknown): void {
-    interpretStream.current?.close()
-    interpretStream.current = null
-    setAdjustState({ status: 'idle' })
-    setInterpretState({ status: 'unknown', message })
-  }
-
-  /** 確認済み終態か明示した観測終了でのみ手元の原 UUID を片付ける。 */
-  function forgetInterpretation(): void {
-    clearInterpretationReceipt()
-    pendingInterpretation.current = null
-    setPendingRequestId(null)
-  }
-
-  /** 元要求の read で進行を再確認し、書込や nonce 生成は行わない。 */
-  async function confirmPendingInterpretation(): Promise<void> {
-    const originalId = pendingInterpretation.current
-    if (originalId === null) return
-    interpretController.current?.abort()
-    interpretStream.current?.close()
-    const controller = new AbortController()
-    interpretController.current = controller
-    setInterpretState({ status: 'interpreting', prompt: '', output: '', attempt: 0 })
-    try {
-      const state = await confirmInterpretationRequest(originalId, controller.signal)
-      if (currentInterpretation(controller)) await driveLaunch(state, controller)
-    } catch (error: unknown) {
-      if (currentInterpretation(controller)) interpretationUnknown(
-        `${messages.skills.interpretUnknown} ${apiErrorMessage(error, '', messages)}`,
-      )
-    }
-  }
-
-  /** 元要求から observer を外すだけで、model の取消や失敗は宣言しない。 */
-  function dismissInterpretation(): void {
-    interpretController.current?.abort()
-    interpretStream.current?.close()
-    interpretStream.current = null
-    try {
-      forgetInterpretation()
-      setInterpretState({ status: 'idle' })
-      setAdjustState({ status: 'idle' })
-    } catch {
-      interpretationUnknown(messages.skills.interpretStorageFailure)
-    }
-  }
-
-  /** 持久状態を唯一の終態根拠にし、SSE は prompt/delta の表示だけに使う。 */
-  async function driveLaunch(launch: InterpretationLaunchRecord, controller: AbortController): Promise<void> {
-    if (!currentInterpretation(controller)) return
-    interpretStream.current?.close()
-    interpretStream.current = null
-    rememberInterpretation(launch.request_id)
-    if (launch.status === 'SUCCEEDED' || (launch.status === 'FAILED' && launch.interpretation_id !== null)) {
-      if (launch.interpretation_id === null) throw new Error('Missing interpretation result')
-      const execution = await loadInterpretationExecution(launch.interpretation_id, controller.signal)
-      if (!currentInterpretation(controller)) return
-      if (!sameUuid(execution.interpretation_id, launch.interpretation_id)
-        || !sameUuid(execution.skill_source_id, launch.skill_source_id)
-        || execution.execution_key !== launch.execution_key
-        || execution.status !== (launch.status === 'SUCCEEDED' ? 'PREVIEW_READY' : 'FAILED')) {
-        throw new Error('Interpretation result did not match')
-      }
-      forgetInterpretation()
-      setAdjustState({ status: 'idle' })
-      setInterpretState({ status: 'ready', execution })
-      return
-    }
-    if (launch.status === 'FAILED' || launch.status === 'REVOKED') {
-      forgetInterpretation()
-      setAdjustState({ status: 'idle' })
-      setInterpretState({ status: 'error', message: messages.skills.interpretFailedCode(launch.error_code ?? 'unknown') })
-      return
-    }
-    if (launch.status === 'UNKNOWN') {
-      interpretationUnknown()
-      return
-    }
-    setAdjustState({ status: 'idle' })
-    setInterpretState({ status: 'interpreting', prompt: '', output: '', attempt: 0 })
-    interpretStream.current = subscribeInterpretEvents(
-      launch.request_id, launch.execution_key,
-      (event) => {
-        if (currentInterpretation(controller) && pendingInterpretation.current === launch.request_id) {
-          handleInterpretEvent(event)
-        }
-      },
-      () => { if (currentInterpretation(controller)) interpretationUnknown() },
-    )
-  }
-
-  /** 終端通知も元要求を GET して確認し、通知の result ID を直接採用しない。 */
-  function handleInterpretEvent(event: InterpretEventRecord): void {
-    if (event.event === 'interpret.prompt') {
-      const system = typeof event.data.system_prompt === 'string' ? event.data.system_prompt : ''
-      const user = typeof event.data.user_message === 'string' ? event.data.user_message : ''
-      setInterpretState((current) => current.status === 'interpreting'
-        ? { ...current, prompt: `${system}\n\n---\n\n${user}`, output: '', attempt: current.attempt + 1 }
-        : current)
-    } else if (event.event === 'interpret.delta') {
-      const text = typeof event.data.text === 'string' ? event.data.text : ''
-      setInterpretState((current) => current.status === 'interpreting'
-        ? { ...current, output: current.output + text } : current)
-    } else if (event.event === 'interpret.completed' || event.event === 'interpret.failed') {
-      void confirmPendingInterpretation()
-    } else if (event.event === 'interpret.unknown' || event.event === 'interpret.disconnected') {
-      interpretationUnknown()
-    }
-  }
-
-  /** 新しい明示要求だけに UUID を生成し、保留中の要求を上書きしない。 */
-  async function handleInterpret(skillSourceId: string, forceRegenerate = false): Promise<void> {
-    if (pendingInterpretation.current !== null || interpretState.status === 'unknown') return
-    interpretController.current?.abort()
-    const controller = new AbortController()
-    interpretController.current = controller
-    const requestId = createIdempotencyKey()
-    try { rememberInterpretation(requestId) } catch {
-      interpretationUnknown(messages.skills.interpretStorageFailure)
-      return
-    }
-    setInterpretState({ status: 'interpreting', prompt: '', output: '', attempt: 0 })
-    setAdjustState({ status: 'idle' })
-    setVersionState({ status: 'idle' })
-    try {
-      const launch = await interpretSkillSource(skillSourceId, requestId, csrfToken, controller.signal, forceRegenerate)
-      if (currentInterpretation(controller)) await driveLaunch(launch, controller)
-    } catch (error: unknown) {
-      if (currentInterpretation(controller)) interpretationUnknown(
-        `${messages.skills.interpretUnknown} ${apiErrorMessage(error, '', messages)}`,
-      )
-    }
-  }
-
-  /** 調整も先に元 UUID を保持し、不明な応答を自動再送しない。 */
-  async function handleAdjust(interpretationId: string): Promise<void> {
-    const text = instruction.trim()
-    if (!text || pendingInterpretation.current !== null || interpretState.status === 'unknown') return
-    interpretController.current?.abort()
-    const controller = new AbortController()
-    interpretController.current = controller
-    const requestId = createIdempotencyKey()
-    try { rememberInterpretation(requestId) } catch {
-      interpretationUnknown(messages.skills.interpretStorageFailure)
-      return
-    }
-    setAdjustState({ status: 'adjusting' })
-    setVersionState({ status: 'idle' })
-    try {
-      const launch = await adjustInterpretation(interpretationId, text, requestId, csrfToken, controller.signal)
-      if (!currentInterpretation(controller)) return
-      setInstruction('')
-      await driveLaunch(launch, controller)
-    } catch (error: unknown) {
-      if (currentInterpretation(controller)) interpretationUnknown(
-        `${messages.skills.interpretUnknown} ${apiErrorMessage(error, '', messages)}`,
-      )
-    }
-  }
-
   /** 指定 Interpretation を gate report 付き frozen DRAFT へ変換する。 */
   async function handleCreateDraft(interpretationId: string): Promise<void> {
     versionController.current?.abort()
@@ -511,6 +235,9 @@ export function SkillsPage({ projectId, csrfToken }: {
         csrfToken,
         controller.signal,
       )
+      if (versionController.current !== controller || controller.signal.aborted) return
+      // 同じ解釈が下書きになった場合だけ片付け、新しい調整要求の UUID は消さない。
+      acknowledgeDraft(interpretationId)
       setVersionState({ status: 'ready', version })
       await refreshLibrary()
     } catch (error: unknown) {
@@ -828,715 +555,4 @@ export function SkillsPage({ projectId, csrfToken }: {
       {confirmDialog}
     </>
   )
-}
-
-/** 画面と解釈詳細の tab を同じ keyboard 操作で切り替え、非表示の草稿は保持する。 */
-function SkillTabButton<T extends string>({ current, tab, onSelect, children }: {
-  current: T
-  tab: T
-  onSelect: (tab: T) => void
-  children: ReactNode
-}) {
-  return (
-    <button
-      aria-selected={current === tab}
-      className="tab"
-      onClick={() => onSelect(tab)}
-      onKeyDown={(event) => {
-        const buttons = Array.from(event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [])
-        const index = buttons.indexOf(event.currentTarget)
-        const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1
-          : event.key === 'ArrowRight' ? (index + 1) % buttons.length
-            : event.key === 'ArrowLeft' ? (index + buttons.length - 1) % buttons.length : null
-        if (next === null) return
-        event.preventDefault()
-        buttons[next]?.focus()
-        buttons[next]?.click()
-      }}
-      role="tab"
-      tabIndex={current === tab ? 0 : -1}
-      type="button"
-    >
-      {children}
-    </button>
-  )
-}
-
-/** Organization version 一覧と選択 Project の明示有効化関係を同じ精確版単位で表示する。 */
-export function SkillLibraryPanel({
-  libraryState,
-  actionError,
-  onRefresh,
-  enablementState,
-  projectId,
-  busyVersionId,
-  onPublish,
-  onDeprecate,
-  onDelete,
-  onEnable,
-  onDisable,
-}: {
-  libraryState: SkillLibraryState
-  actionError?: { versionId: string; message: string } | null
-  onRefresh?: () => void
-  enablementState: ProjectEnablementState
-  projectId: string
-  busyVersionId: string | null
-  onPublish: (version: SkillVersionRecord) => void
-  onDeprecate: (version: SkillVersionRecord) => void
-  onDelete: (version: SkillVersionRecord) => void
-  onEnable: (version: SkillVersionRecord) => void
-  onDisable: (version: SkillVersionRecord) => void
-}) {
-  const messages = useMessages()
-  const versions = libraryState.versions ?? []
-  const enablements = enablementState.status === 'ready' ? enablementState.enablements : []
-  const activeIds = new Set(enablements
-    .filter(({ disabled_at }) => disabled_at === null)
-    .map(({ skill_version }) => skill_version.skill_version_id))
-  const disabledIds = new Set(enablements
-    .filter(({ disabled_at }) => disabled_at !== null)
-    .map(({ skill_version }) => skill_version.skill_version_id))
-
-  return (
-    <section className="panel skillLibrary" aria-label={messages.skills.libraryAria}>
-      <div className="panelHeader">
-        <div>
-          <h2>{messages.skills.libraryTitle}</h2>
-          <p className="hint">{messages.skills.libraryHint}</p>
-        </div>
-        {projectId
-          ? <span className="scopeBadge">{messages.skills.enabledCount(activeIds.size)}</span>
-          : <span className="scopeBadge">{messages.skills.noProjectBadge}</span>}
-      </div>
-      {!projectId && <p className="hint">{messages.skills.libraryNoProjectHint}</p>}
-      {enablementState.status === 'error' && <p className="error" role="alert">{enablementState.message}</p>}
-      {/* 読み込み中は「空(点線枠)」ではなく骨格行を出す。空態と loading の意味を取り違えさせない。 */}
-      {((libraryState.status === 'loading' && versions.length === 0) || enablementState.status === 'loading') && (
-        <LoadingSkeleton
-          label={libraryState.status === 'loading' ? messages.skills.loadingLibrary : messages.skills.loadingEnablements}
-          rows={3}
-        />
-      )}
-      {libraryState.status === 'error' && <div>
-        <p className="error" role="alert">{libraryState.message}</p>
-        {onRefresh && <button className="secondaryButton" type="button" onClick={onRefresh}>{messages.runHistory.retry}</button>}
-      </div>}
-      {libraryState.status === 'ready' && libraryState.versions.length === 0 && (
-        <EmptyState text={messages.skills.emptyLibrary} />
-      )}
-      {versions.length > 0 && (
-        <ul className="skillLibraryList">
-          {versions.map((version) => {
-            const active = activeIds.has(version.skill_version_id)
-            const disabled = disabledIds.has(version.skill_version_id)
-            const busy = busyVersionId === version.skill_version_id
-            const unavailable = busyVersionId !== null || libraryState.status !== 'ready'
-            return (
-              <li key={version.skill_version_id}>
-                {/* 内部 UUID は利用者の判断材料にならないため出さない。読める識別は
-                    「名称 + 版 + SKILL.md 原文の説明」で足り、skill_key は追跡用に残す。 */}
-                <div className="skillLibraryIdentity">
-                  <strong>{version.name} <span className="mono">v{version.version}</span></strong>
-                  {version.description && <p className="skillLibraryDescription">{version.description}</p>}
-                  <span className="mono">{version.skill_key}</span>
-                  {actionError?.versionId === version.skill_version_id && <p className="error" role="alert">{actionError.message}</p>}
-                </div>
-                <div className="skillLibraryStatus">
-                  <span className="statusBadge">{messages.enums.skillVersionStatus[version.status] ?? version.status}</span>
-                  {projectId && active && <span className="scopeBadge">{messages.skills.enabledBadge}</span>}
-                  {projectId && disabled && <span className="scopeBadge">{messages.skills.disabledBadge}</span>}
-                </div>
-                <div className="skillActions">
-                  {projectId && active && (
-                    <button className="secondaryButton" type="button" disabled={unavailable} onClick={() => onDisable(version)}>
-                      {busy ? messages.elements.processing : messages.skills.disableFromProject}
-                    </button>
-                  )}
-                  {projectId && !active && !disabled && version.status === 'PUBLISHED' && (
-                    <button className="primaryButton" type="button" disabled={unavailable} onClick={() => onEnable(version)}>
-                      {busy ? messages.elements.processing : messages.skills.enableForProject}
-                    </button>
-                  )}
-                  {projectId && disabled && (
-                    <span className="hint">{messages.skills.disabledAuditHint}</span>
-                  )}
-                  {version.status === 'PUBLISHED' && (
-                    <button className="secondaryButton" type="button" disabled={unavailable} onClick={() => onDeprecate(version)}>
-                      {busy ? messages.elements.processing : messages.skills.deprecateVersion}
-                    </button>
-                  )}
-                  {/* 廃止しただけでは行が残り続けるため、監査参照のない版に限り片付け経路を出す。
-                      参照が残る版は backend が 409 で拒否し、その理由を一覧の error 欄へ出す。 */}
-                  {(version.status === 'DRAFT' || version.status === 'DEPRECATED') && (
-                    <button className="dangerButton" type="button" disabled={unavailable} onClick={() => onDelete(version)}>
-                      {busy ? messages.elements.processing : messages.skills.deleteVersion}
-                    </button>
-                  )}
-                </div>
-                {version.status === 'DRAFT' && (
-                  <details className="skillLibraryDraft">
-                    <summary>{messages.skills.reviewDraft}</summary>
-                    <SkillVersionDetail version={version} disabled={unavailable} onPublish={() => onPublish(version)} />
-                  </details>
-                )}
-              </li>
-            )
-          })}
-        </ul>
-      )}
-    </section>
-  )
-}
-
-/** 上传済み目录の内容を「Skill 源文件」module 内で確認する読取専用 preview。 */
-export function UploadedSourceFiles({ files, onClear }: {
-  files: UploadedSourceFile[]
-  onClear: () => void
-}) {
-  const messages = useMessages()
-  return (
-    <div className="sourcePreview">
-      <div className="sourcePreviewHeader">
-        <span>{messages.skills.uploadedCount(files.length)}</span>
-        <button className="secondaryButton compactButton" type="button" onClick={onClear}>{messages.skills.clearUseManual}</button>
-      </div>
-      <ul className="sourcePreviewList">
-        {files.map((file) => (
-          <li key={file.path}>
-            {file.kind === 'text' ? (
-              <details className="sourcePreviewFile" open={file.path.endsWith('SKILL.md')}>
-                <summary><code>{file.path}</code><span>{formatByteSize(file.size)}</span></summary>
-                <pre>{file.content}</pre>
-              </details>
-            ) : (
-              <div className="sourcePreviewOpaque">
-                <code>{file.path}</code>
-                <span>
-                  {file.kind === 'binary' ? messages.skills.binaryStored : messages.skills.textTooLarge}
-                  {' · '}{formatByteSize(file.size)}
-                </span>
-              </div>
-            )}
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
-}
-
-/** Worker 実行中の model 解釈を、実際の prompt と流式出力として表示する。 */
-export function InterpretStreamView({ prompt, output, attempt = 1 }: {
-  prompt: string
-  output: string
-  attempt?: number
-}) {
-  const messages = useMessages()
-  const outputRef = useRef<HTMLPreElement>(null)
-  const pinnedToBottom = useRef(true)
-  // 出力の伸長に追随して末尾へスクロールする。ただしユーザーが上へ離れている間は追随しない。
-  useEffect(() => {
-    const element = outputRef.current
-    if (element && pinnedToBottom.current) element.scrollTop = element.scrollHeight
-  }, [output])
-  return (
-    <div className="interpretStream" aria-live="polite">
-      <div className="interpretStreamHead">
-        <span className="streamDot" aria-hidden="true" />
-        <strong>{messages.skills.interpretRunning}</strong>
-        <span className="interpretStreamHint">{messages.skills.interpretRunningHint}</span>
-      </div>
-      {attempt > 1 && (
-        <p className="hint" role="status">
-          {messages.skills.attemptLine(attempt)}
-        </p>
-      )}
-      {prompt !== '' && (
-        <details className="interpretPrompt">
-          <summary>{messages.skills.promptSent}</summary>
-          <pre>{prompt}</pre>
-        </details>
-      )}
-      <div className="interpretOutput">
-        <span>{messages.skills.modelOutput}</span>
-        {output === ''
-          ? <p className="interpretOutputWaiting">{messages.skills.waitingModelOutput}</p>
-          : (
-            <pre ref={outputRef} onScroll={(event) => { pinnedToBottom.current = isNearBottom(event.currentTarget) }}>
-              {output}<span className="streamCursor" />
-            </pre>
-          )}
-      </div>
-    </div>
-  )
-}
-
-/** 解釈詳細内の観測区分。要約と操作は tab の外に常置し、詳細だけを切り替える。 */
-type InterpretationDetailTab = 'report' | 'blueprint' | 'contracts' | 'diff'
-
-/** Model interpretation の report、source trace、confidence、diff、追加調整を表示する。
- *
- *  詳細(報告・蓝图・契約・差分)は縦へ全部積むと発行判断に要る要約と操作が埋もれるため、
- *  tab で同時に一つだけ見せる。非活性 tab も hidden で mount したままにする(測試断言と状態保持)。 */
-export function InterpretationExecutionView({ execution, instruction, onInstructionChange, onAdjust, onRegenerate, onCreateDraft, adjustState, versionBusy }: {
-  execution: InterpretationExecutionRecord
-  instruction: string
-  onInstructionChange: (value: string) => void
-  onAdjust: () => void
-  onRegenerate: () => void
-  onCreateDraft: () => void
-  adjustState: AdjustState
-  versionBusy: boolean
-}) {
-  const messages = useMessages()
-  const [detailTab, setDetailTab] = useState<InterpretationDetailTab>('report')
-  const report = execution.report
-  const failed = execution.status !== 'PREVIEW_READY'
-  const validationAttempts = execution.status === 'FAILED' ? execution.validation_attempts : undefined
-  const parentInstruction = readAdjustmentInstruction(execution.adjustment)
-  const blueprint = execution.preview.capability_blueprint
-  const hasBlueprint = blueprint !== null && (blueprint.capabilities.length > 0 || blueprint.tasks.length > 0)
-  const sourceExecution = execution.preview.source_execution
-  const manifest = execution.preview.runtime_manifest_draft
-  const hasContracts = Array.isArray(manifest.tasks) && manifest.tasks.some(isPlainRecord)
-  return (
-    <section className="interpretationPanel">
-      <div className="subsectionHeader">
-        <h3>{messages.skills.interpretationTitle}</h3>
-        <span className="scopeBadge">{execution.compatibility_level}</span>
-      </div>
-      <dl className="runFacts">
-        <div><dt>{messages.skills.interpretationIdLabel}</dt><dd className="mono">{execution.interpretation_id}</dd></div>
-        <div><dt>{messages.skills.interpretationStatusLabel}</dt><dd>{execution.status}{execution.reused ? messages.skills.reusedSuffix : ''}</dd></div>
-        <div><dt>{messages.skills.interpretationModelLabel}</dt><dd className="mono">{execution.model ?? '—'}</dd></div>
-        {!sourceExecution && <div><dt>{messages.skills.interpretationConfidenceLabel}</dt><dd>{execution.confidence.toFixed(2)}</dd></div>}
-      </dl>
-      {failed && <p className="error" role="alert">{messages.skills.interpretationFailedLine(execution.error_code ?? 'unknown')}</p>}
-      {validationAttempts && validationAttempts.length > 0 && (
-        <details className="rawResult">
-          <summary>{messages.skills.validationErrorDetails}</summary>
-          <ol>
-            {validationAttempts.slice(0, 2).map((attempt, index) => <li key={index}><pre>{attempt}</pre></li>)}
-          </ol>
-        </details>
-      )}
-      {execution.parent_interpretation_id && (
-        <p className="hint">{messages.skills.parentPrefix}<code className="mono">{execution.parent_interpretation_id}</code>{parentInstruction ? messages.skills.adjustQuote(parentInstruction) : ''}</p>
-      )}
-      {report && !sourceExecution && <p className="interpretationSummary">{report.summary}</p>}
-      {sourceExecution && <SourceExecutionPreview preview={sourceExecution} />}
-      {!sourceExecution && <div className="tabBar" role="tablist" aria-label={messages.skills.detailTabsAria}>
-        <SkillTabButton current={detailTab} tab="report" onSelect={setDetailTab}>{messages.skills.tabReport}</SkillTabButton>
-        <SkillTabButton current={detailTab} tab="blueprint" onSelect={setDetailTab}>{messages.skills.blueprintTitle}</SkillTabButton>
-        <SkillTabButton current={detailTab} tab="contracts" onSelect={setDetailTab}>{messages.skills.generatedContractsTitle}</SkillTabButton>
-        <SkillTabButton current={detailTab} tab="diff" onSelect={setDetailTab}>
-          {messages.skills.revisionDiffTitle}
-          {/* 構造差分がある時だけ点を出し、他 tab からも「見るべき差分がある」ことを示す。 */}
-          {execution.diff.has_changes === true && <i className="tabAlert" aria-hidden="true" />}
-        </SkillTabButton>
-      </div>}
-      <div className="tabPanel" role="tabpanel" hidden={!sourceExecution && detailTab !== 'report'}>
-        {report ? (
-          <div className="interpretationDetailStack">
-            {!sourceExecution && <ConfidenceGrid confidence={report.confidence} />}
-            {!sourceExecution && <NoteBlock title={messages.skills.assumptionsTitle} items={report.assumptions} />}
-            <NoteBlock title={messages.skills.questionsTitle} items={report.questions.map((q) => ({ key: q.key, text: q.required ? `${q.text}${messages.skills.requiredAnswerSuffix}` : q.text }))} />
-            {!sourceExecution && report.source_traces.length > 0 && (
-              <div className="noteBlock">
-                <h4>{messages.skills.sourceTracesTitle}</h4>
-                <ul className="sourceTraceList">
-                  {report.source_traces.map((trace, index) => <SourceTraceItem key={`${trace.target}-${index}`} trace={trace} />)}
-                </ul>
-              </div>
-            )}
-            {report.diagnostics.length > 0 && (
-              <ul className="diagnostics">
-                {report.diagnostics.map((diagnostic, index) => (
-                  <li key={`${diagnostic.code}-${index}`}>
-                    <strong>{diagnostic.severity} · {diagnostic.code}</strong>
-                    <span>{diagnostic.message}{diagnostic.path ? ` (${diagnostic.path}${diagnostic.line ? `:${diagnostic.line}` : ''})` : ''}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        ) : <p className="hint">{messages.skills.reportEmpty}</p>}
-      </div>
-      <div className="tabPanel" role="tabpanel" hidden={!!sourceExecution || detailTab !== 'blueprint'}>
-        {hasBlueprint
-          ? <CapabilityBlueprintPreview blueprint={blueprint} />
-          : <p className="hint">{messages.skills.blueprintEmpty}</p>}
-      </div>
-      <div className="tabPanel" role="tabpanel" hidden={!!sourceExecution || detailTab !== 'contracts'}>
-        {hasContracts
-          ? <GeneratedContractPreview manifest={manifest} />
-          : <p className="hint">{messages.skills.contractsEmpty}</p>}
-      </div>
-      <div className="tabPanel" role="tabpanel" hidden={!!sourceExecution || detailTab !== 'diff'}>
-        <RevisionDiffView diff={execution.diff} hasParent={execution.parent_interpretation_id !== null} />
-      </div>
-      {sourceExecution && execution.parent_interpretation_id && <details className="rawResult"><summary>{messages.skills.revisionDiffTitle}</summary><RevisionDiffView diff={execution.diff} hasParent /></details>}
-      <form className="adjustForm" onSubmit={(event) => { event.preventDefault(); onAdjust() }}>
-        <label>{messages.skills.adjustLabel}<textarea className="compactTextarea" value={instruction} onChange={(event) => onInstructionChange(event.target.value)} placeholder={messages.skills.adjustPlaceholder} spellCheck={false} /></label>
-        {adjustState.status === 'error' && <p className="error" role="alert">{adjustState.message}</p>}
-        <div className="skillActions">
-          <button className="secondaryButton" type="submit" disabled={adjustState.status === 'adjusting' || !instruction.trim()}>{adjustState.status === 'adjusting' ? messages.skills.adjusting : messages.skills.adjustAndReinterpret}</button>
-          <button className="secondaryButton" type="button" disabled={versionBusy} onClick={onRegenerate}>{messages.skills.forceRegenerate}</button>
-          <button className="primaryButton" type="button" disabled={failed || versionBusy} onClick={onCreateDraft}>{versionBusy ? messages.skills.processing : messages.skills.createDraftFromThis}</button>
-        </div>
-      </form>
-    </section>
-  )
-}
-
-/** Skill の能力・目標・資源・規則・交付物・効果を業務固有分岐なしで公開前に示す。
- *
- * 業務 Schema と gate finding だけでは「この Skill が何をできるのか」が読めない。蓝图は
- * 資源前提と効果意図を明示し、効果が意図であって権限ではないことを利用者へ示す。
- */
-function CapabilityBlueprintPreview({ blueprint }: { blueprint: CapabilityBlueprintView | null }) {
-  // 蓝图は Interpreter の産物であり、解釈前は存在しない。空の枠を出すより、まだ無いことを
-  // 示さないほうが「解釈したのに能力を抽出できなかった」との誤読を避けられる。
-  const messages = useMessages()
-  if (blueprint === null) return null
-  const { capabilities, tasks, resource_requirements: resources, guidance } = blueprint
-  if (capabilities.length === 0 && tasks.length === 0) return null
-  return (
-    <div className="noteBlock">
-      {/* 見出しは親の詳細 tab(能力蓝图)が担うため、ここでは重複させない。 */}
-      {capabilities.map((capability) => (
-        <section key={capability.key}>
-          <strong>{capability.title}</strong>
-          <span className="mono">{capability.key}</span>
-          {capability.summary && <p className="hint">{capability.summary}</p>}
-        </section>
-      ))}
-      {tasks.map((task) => (
-        <section key={task.key}>
-          <strong>{messages.skills.objectivePrefix(task.key)}</strong>
-          <p className="hint">{task.objective}</p>
-          {(task.document_prerequisites ?? []).length > 0 && (
-            <p className="hint">
-              {messages.skills.documentPrerequisites}: {task.document_prerequisites?.join(', ')}
-            </p>
-          )}
-          <BlueprintNoteList title={messages.skills.successCriteria} notes={task.success_criteria ?? []} />
-          {(task.deliverables ?? []).length > 0 && (
-            <ul className="noteList">
-              {(task.deliverables ?? []).map((deliverable) => (
-                <li key={deliverable.key}>
-                  <strong>{messages.skills.deliverablePrefix(deliverable.kind)}</strong>
-                  <span>{deliverable.description}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      ))}
-      {resources.length > 0 && (
-        <section>
-          <strong>{messages.skills.resourcePrereq}</strong>
-          <ul className="noteList">
-            {resources.map((resource) => (
-              <li key={resource.key}>
-                <strong>{resource.key} · {resource.kind}</strong>
-                <span>
-                  {resource.required ? messages.skills.requiredLabel : messages.skills.optionalLabel} · {resource.access}
-                  {(resource.capabilities ?? []).length > 0
-                    ? ` · ${(resource.capabilities ?? []).join(', ')}`
-                    : ''}
-                  {resource.selection_guidance ? ` — ${resource.selection_guidance}` : ''}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-      <BlueprintNoteList title={messages.skills.requiredRules} notes={guidance.required_rules} />
-      <BlueprintNoteList title={messages.skills.recommendedSteps} notes={guidance.recommended_steps} />
-      <BlueprintNoteList title={messages.skills.qualityCriteria} notes={guidance.quality_criteria} />
-      <BlueprintNoteList title={messages.skills.prohibited} notes={guidance.prohibited_actions} />
-      {blueprint.interaction_points.length > 0 && (
-        <section>
-          <strong>{messages.skills.interactionPoints}</strong>
-          <ul className="noteList">
-            {blueprint.interaction_points.map((point) => (
-              <li key={point.key}>
-                <strong>{point.type}</strong>
-                <span>{point.condition}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-      {blueprint.effect_intents.length > 0 && (
-        <section>
-          <strong>{messages.skills.effectIntents}</strong>
-          <ul className="noteList">
-            {blueprint.effect_intents.map((intent) => (
-              <li key={intent.key}>
-                <strong>{intent.mode} · risk {intent.risk}</strong>
-                <span>
-                  {intent.operation}
-                  {intent.resource_key ? ` · ${intent.resource_key}` : ''}
-                </span>
-              </li>
-            ))}
-          </ul>
-          <p className="hint">{messages.skills.effectIntentHint}</p>
-        </section>
-      )}
-    </div>
-  )
-}
-
-/** 蓝图の note 群を空なら描画せずに一覧化する。 */
-function BlueprintNoteList({ title, notes }: { title: string; notes: BlueprintNote[] }) {
-  if (notes.length === 0) return null
-  return (
-    <div>
-      <span>{title}</span>
-      <ul className="noteList">
-        {notes.map((note) => (
-          <li key={note.key}>
-            <strong>{note.key}</strong>
-            <span>{note.text}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
-}
-
-/** Interpreter が生成し platform がコンパイルした task field を公開前に確認可能にする。 */
-function GeneratedContractPreview({ manifest }: { manifest: Record<string, unknown> }) {
-  const messages = useMessages()
-  const tasks = Array.isArray(manifest.tasks)
-    ? manifest.tasks.filter(isPlainRecord)
-    : []
-  if (tasks.length === 0) return null
-  return (
-    <div className="noteBlock">
-      {/* 見出しは親の詳細 tab(生成的任务契约)が担うため、ここでは重複させない。 */}
-      {tasks.map((task, index) => (
-        <section key={typeof task.key === 'string' ? task.key : index}>
-          <strong>{typeof task.key === 'string' ? task.key : `task-${index + 1}`}</strong>
-          <ContractFieldList contract={task.input_contract} title={messages.skills.contractInputTitle} />
-          <ContractFieldList contract={task.output_contract} title={messages.skills.contractOutputTitle} />
-        </section>
-      ))}
-    </div>
-  )
-}
-
-/** TaskContractDraft の field/type/required を business 固有分岐なしで一覧化する。 */
-function ContractFieldList({ contract, title }: { contract: unknown; title: string }) {
-  const messages = useMessages()
-  if (!isPlainRecord(contract)) return null
-  const fields = Array.isArray(contract.fields) ? contract.fields.filter(isPlainRecord) : []
-  return (
-    <div>
-      <span>{title} · {String(contract.type ?? 'unknown')}</span>
-      {fields.length > 0 && (
-        <ul className="noteList">
-          {fields.map((field, index) => (
-            <li key={typeof field.key === 'string' ? field.key : index}>
-              <strong>{String(field.key ?? index)}</strong>
-              <span>{String(field.type ?? 'unknown')} · {field.required === true ? messages.skills.contractFieldRequired : messages.skills.contractFieldOptional}{typeof field.description === 'string' ? ` — ${field.description}` : ''}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  )
-}
-
-/** 分項 confidence を小さな metric grid で表示する。 */
-function ConfidenceGrid({ confidence }: { confidence: Record<string, number> }) {
-  const entries = Object.entries(confidence)
-  if (entries.length === 0) return null
-  return (
-    <div className="resourceGrid">
-      {entries.map(([area, value]) => (
-        <div className="metric" key={area}><span>{area}</span><strong>{value.toFixed(2)}</strong></div>
-      ))}
-    </div>
-  )
-}
-
-/** key/text の note list（assumptions・questions）を表示する。 */
-function NoteBlock({ title, items }: { title: string; items: Array<{ key: string; text: string }> }) {
-  if (items.length === 0) return null
-  return (
-    <div className="noteBlock">
-      <h4>{title}</h4>
-      <ul className="noteList">
-        {items.map((item, index) => (
-          <li key={`${item.key}-${index}`}><strong>{item.key}</strong><span>{item.text}</span></li>
-        ))}
-      </ul>
-    </div>
-  )
-}
-
-/** 一つの source trace を target と位置付きで表示する。 */
-function SourceTraceItem({ trace }: { trace: SourceTrace }) {
-  return (
-    <li>
-      <code className="mono">{trace.target}</code>
-      <span>{trace.path}{trace.line ? `:${trace.line}` : ''} — {trace.reason}</span>
-    </li>
-  )
-}
-
-/** 親との revision diff を dimension 別に要約し、原始 JSON も併記する。 */
-function RevisionDiffView({ diff, hasParent }: { diff: Record<string, unknown>; hasParent: boolean }) {
-  const messages = useMessages()
-  const lines = summarizeDiff(messages, diff)
-  const changed = diff.has_changes === true && lines.length > 0
-  return (
-    <div className="revisionDiff">
-      {/* 見出しは親の詳細 tab(修订差异)が担う。差分有無の badge だけをここに残す。 */}
-      {changed && <span className="scopeBadge">{messages.skills.hasDiff}</span>}
-      {!hasParent && <p className="hint">{messages.skills.firstInterpretation}</p>}
-      {hasParent && !changed && <p className="hint">{messages.skills.noStructuralDiff}</p>}
-      {changed && <ul className="diffLines">{lines.map((line, index) => <li key={index}>{line}</li>)}</ul>}
-      {hasParent && (
-        <details className="rawResult"><summary>{messages.skills.viewRawDiff}</summary><pre>{JSON.stringify(diff, null, 2)}</pre></details>
-      )}
-    </div>
-  )
-}
-
-/** Frozen Manifest identity、diff、gate finding と publish control を表示する。 */
-export function SkillVersionDetail({ version, onPublish, disabled = false }: {
-  version: SkillVersionRecord
-  onPublish: () => void
-  disabled?: boolean
-}) {
-  const messages = useMessages()
-  return (
-    <section className="skillVersionDetail">
-      <div className="subsectionHeader"><h3>{messages.skills.versionHeading(version.version)}</h3><span>{messages.enums.skillVersionStatus[version.status] ?? version.status}</span></div>
-      <dl className="runFacts"><div><dt>{messages.skills.gateLabel}</dt><dd>{version.gate_passed ? messages.skills.gatePassed : messages.skills.gateFailed}</dd></div></dl>
-      <DetailDrawer title={messages.elements.technicalDetails}>
-        <dl className="runFacts"><div><dt>{messages.skills.versionIdLabel}</dt><dd className="mono">{version.skill_version_id}</dd></div><div><dt>{messages.skills.manifestChecksumLabel}</dt><dd className="mono">{version.manifest_checksum}</dd></div></dl>
-      </DetailDrawer>
-      <ul className="diagnostics">{version.gate_findings.map((finding, index) => <li key={`${finding.code}-${index}`}><strong>{finding.severity} · {finding.code}</strong><span>{finding.message}</span></li>)}</ul>
-      <details className="rawResult"><summary>{messages.skills.viewInterpretationDiff}</summary><pre>{JSON.stringify(version.interpretation_diff, null, 2)}</pre></details>
-      <button className="primaryButton" disabled={disabled || !version.gate_passed || version.status !== 'DRAFT'} type="button" onClick={onPublish}>{version.status === 'PUBLISHED' ? messages.skills.published : messages.skills.publishVersion}</button>
-      {!version.gate_passed && <p className="hint">{messages.skills.hardGateHint}</p>}
-    </section>
-  )
-}
-
-/** Skill parser response から安全境界と draft identity を要約する。 */
-export function SkillParseSummary({ result }: { result: SkillParseResult }) {
-  const messages = useMessages()
-  const normalized = result.normalized_package
-  const manifest = result.runtime_manifest_draft
-  // Package 診断は manifest compatibility 側へ複製されるため、単純結合すると同一診断が二重表示される。
-  const diagnostics = dedupeDiagnostics([...normalized.diagnostics, ...manifest.compatibility.diagnostics])
-  return (
-    <div className="skillSummary">
-      <dl className="runFacts">
-        <div><dt>{messages.skills.parseNameLabel}</dt><dd>{normalized.metadata.name}</dd></div>
-      </dl>
-      <details className="technicalResultDetails">
-        <summary>{messages.skills.technicalDetails}</summary>
-        <dl className="runFacts">
-        <div><dt>{messages.skills.parseAdapterLabel}</dt><dd>{normalized.source.detected_adapter}</dd></div>
-        <div><dt>{messages.skills.parseSkillKeyLabel}</dt><dd className="mono">{manifest.identity.skill_key}</dd></div>
-        <div><dt>{messages.skills.parseConfidenceLabel}</dt><dd>{manifest.compatibility.confidence}</dd></div>
-        <div><dt>{messages.skills.parseToolsLabel}</dt><dd>{manifest.tools.length === 0 ? messages.skills.toolsUnauthorized : manifest.tools.length}</dd></div>
-        </dl>
-        {normalized.declared_tools.length > 0 && <p className="hint">{messages.skills.declaredToolsLine(normalized.declared_tools.join(', '))}</p>}
-        {diagnostics.length > 0 && <ul className="diagnostics">{diagnostics.map((diagnostic, index) => <li key={`${diagnostic.code}-${index}`}><strong>{diagnostic.code}</strong><span>{diagnostic.message}</span></li>)}</ul>}
-      </details>
-      <div className="resourceGrid">
-        <Metric label={messages.skills.metricFiles} value={normalized.source.files.length} />
-        <Metric label={messages.skills.metricReferences} value={normalized.resources.references.length} />
-        <Metric label={messages.skills.metricScripts} value={normalized.resources.scripts.length} />
-        <Metric label={messages.skills.metricAssets} value={normalized.resources.assets.length} />
-      </div>
-    </div>
-  )
-}
-
-/** 保存済み source と interpretation の不変 identity を表示する。 */
-function SavedSkillIdentity({ stored }: { stored: StoredSkillPreviewRecord }) {
-  const messages = useMessages()
-  return (
-    <div className="savedSkill">
-      <div className="savedSkillStatus"><span>{messages.skills.savedInterpretationStatus}</span><strong>{stored.interpretation_status}</strong></div>
-      <DetailDrawer title={messages.elements.technicalDetails}>
-        <dl className="runFacts">
-          <div><dt>{messages.skills.savedSourceId}</dt><dd className="mono">{stored.skill_source_id}</dd></div>
-          <div><dt>{messages.skills.savedInterpretationId}</dt><dd className="mono">{stored.interpretation_id}</dd></div>
-        </dl>
-      </DetailDrawer>
-    </div>
-  )
-}
-
-/** Small numeric metric を parser summary で揃えて表示する。 */
-function Metric({ label, value }: { label: string; value: number }) {
-  return <div className="metric"><span>{label}</span><strong>{value}</strong></div>
-}
-
-/** 同一内容の診断を code・message・位置で一意化する。severity は同一 code 内で変わらない前提。 */
-function dedupeDiagnostics(items: SkillDiagnostic[]): SkillDiagnostic[] {
-  const seen = new Set<string>()
-  return items.filter((item) => {
-    const key = [item.code, item.message, item.path ?? '', item.line ?? ''].join('\u0000')
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-}
-
-/** Revision diff を dimension 別の短い行へ要約する。 */
-function summarizeDiff(messages: UiMessages, diff: Record<string, unknown>): string[] {
-  const lines: string[] = []
-  for (const dimension of ['capabilities', 'tasks', 'data_sources', 'tools', 'workflows']) {
-    const value = diff[dimension]
-    if (!isPlainRecord(value)) continue
-    const added = countArray(value.added)
-    const removed = countArray(value.removed)
-    const changed = countArray(value.changed)
-    if (added + removed + changed > 0) lines.push(`${dimension}: +${added} / -${removed} / ~${changed}`)
-  }
-  const level = diff.compatibility_level
-  if (isPlainRecord(level)) lines.push(`compatibility_level: ${String(level.from)} → ${String(level.to)}`)
-  for (const dimension of ['identity', 'permissions', 'ui', 'confidence', 'skill_execution']) {
-    const value = diff[dimension]
-    if (isPlainRecord(value) && isPlainRecord(value.changed)) {
-      const count = Object.keys(value.changed).length
-      if (count > 0) lines.push(`${dimension}: ${messages.skills.changedCount(count)}`)
-    }
-  }
-  const diagnostics = diff.diagnostics
-  if (isPlainRecord(diagnostics)) {
-    const added = countArray(diagnostics.added)
-    const removed = countArray(diagnostics.removed)
-    if (added + removed > 0) lines.push(`diagnostics: +${added} / -${removed}`)
-  }
-  return lines
-}
-
-/** Adjustment record から人が読める instruction を安全に取り出す。 */
-function readAdjustmentInstruction(adjustment: Record<string, unknown> | null): string | null {
-  if (adjustment === null) return null
-  const value = adjustment.instruction
-  return typeof value === 'string' ? value : null
-}
-
-/** Object を厳密に判定する（配列や null を除く）。 */
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-/** 配列なら長さを、そうでなければ 0 を返す。 */
-function countArray(value: unknown): number {
-  return Array.isArray(value) ? value.length : 0
 }

@@ -9,10 +9,15 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
 
-from skillmind.agent.context_builder import ContractStore, _read_tool_definitions
+from skillmind.agent.contract_store import (
+    ContractStore,
+)
 from skillmind.agent.mcp_provider import McpReadProvider
 from skillmind.agent.mcp_source import McpReadError
 from skillmind.agent.run_binding import RunBindingError
+from skillmind.agent.tool_catalog import (
+    _read_tool_definitions,
+)
 from skillmind.agent.tool_gateway import ToolProviderError
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.integrations.domain import INSTALLED_PROVIDER_CAPABILITIES

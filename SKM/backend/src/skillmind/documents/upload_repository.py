@@ -227,7 +227,13 @@ class DocumentUploadRepository:
         await self.get_closure(intent)
         if (
             intent.receipt.state != "PUBLISHED"
-            or intent.receipt.document != document
+            or intent.receipt.document is None
+            # 表示 path は公開後に変更できる。原回执は変更せず、不変 identity を照合する。
+            or intent.receipt.document != replace(
+                document,
+                folder=intent.receipt.document.folder,
+                name=intent.receipt.document.name,
+            )
             or reference != BlobReference(
                 intent.command.storage_key, intent.command.storage_namespace,
             )

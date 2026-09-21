@@ -292,6 +292,19 @@ export function App() {
     // 編集・復元の response だけで継続認可とは扱わず、現在対象を再読取する。
     projectContext.refresh()
   }
+  /** 成功確認済みの削除だけは旧リンクを閉じ、別 Project を暗黙選択しない。 */
+  const deletedProject = (project: ProjectRecord): void => {
+    if (!isCurrentSession(authState.session)) return
+    const request = projectRequestFromHash(window.location.hash)
+    if (projectContext.selectionId.toLowerCase() === project.project_id.toLowerCase()
+      && (request.kind === 'absent' || request.kind === 'explicit'
+        && request.projectId.toLowerCase() === project.project_id.toLowerCase())) {
+      projectContext.choose('')
+      navigateHash(routeHref(route))
+    }
+    // 削除 transaction が該当する保存済み preference を解除済み。別の設定を上書きせず再取得する。
+    projectContext.refresh()
+  }
   /** 初回一覧の到着は草稿を壊さず、人が Project を替えた時だけ Account 文脈を捨てる。 */
   const selectProject = (next: string): void => {
     if (!isCurrentSession(authState.session)) return
@@ -410,6 +423,7 @@ export function App() {
             projectState,
             replaceProject,
             replaceProject,
+            deletedProject,
             currentModuleId,
             routeContext.runId,
             routeContext.taskId,
@@ -435,6 +449,7 @@ function renderPage(
   projectState: ProjectState,
   onProjectChanged: (project: ProjectRecord) => void,
   onProjectArchived: (project: ProjectRecord) => void,
+  onProjectDeleted: (project: ProjectRecord) => void,
   activeModuleId: string,
   initialRunId: string | null,
   initialTaskId: string | null,
@@ -455,7 +470,7 @@ function renderPage(
         managementContextKey={managementContextKey}
         onSessionEnded={onSessionEnded}
         onProjectArchived={onProjectArchived}
-        onProjectDeleted={onProjectArchived}
+        onProjectDeleted={onProjectDeleted}
         onProjectChanged={onProjectChanged}
         projectId={projectId}
         projectState={projectState}

@@ -4,6 +4,7 @@ import { useMessages } from '../i18n'
 import { normalizeSelectedSources } from '../lib/agentStream'
 import { formatLocalTimestamp, runHistoryTitle } from '../lib/presentation'
 import { EmptyState, LoadingSkeleton, StatusBadge } from './PageElements'
+import { ActionMenu } from './ActionMenu'
 
 /** Project Run history 読み込みの排他的 UI state。 */
 export type RunHistoryState =
@@ -37,7 +38,7 @@ export function RunHistoryPanel({ state, selectedRunId, onOpen, onPrevious, onNe
         : trashed ? messages.runHistory.emptyTrash : messages.runHistory.empty} />}
       <div className="historyList">
         {state.page.items.map((item) => (
-          <article className={`historyItem${selectedRunId === item.run_id ? ' historySelected' : ''}`} key={item.run_id}>
+          <article className={`historyItem${selectedRunId === item.run_id ? ' historySelected' : ''}${onDelete || (trashed && onPurge) ? ' historyHasActions' : ''}`} key={item.run_id}>
             <button type="button" onClick={() => onOpen(item)}>
               <div className="historyPrimary">
                 <span><strong>{runHistoryTitle(item, messages.elements.unnamedRunTitle)}</strong><small>{formatLocalTimestamp(item.started_at ?? item.created_at)} · <RunDuration run={item} /></small></span>
@@ -49,8 +50,11 @@ export function RunHistoryPanel({ state, selectedRunId, onOpen, onPrevious, onNe
                 <span>{sourceLabel(item, messages.runHistory.sourceUnavailable)}</span>
               </div>
             </button>
-            {onDelete && <button className="secondaryButton compactButton historyDelete" type="button" disabled={!['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(item.status)} onClick={() => onDelete(item)}>{trashed ? messages.fileManagement.restore : messages.fileManagement.trashAction}</button>}
-            {trashed && onPurge && <button className="secondaryButton compactButton historyDelete" type="button" onClick={() => onPurge(item)}>{messages.fileManagement.purge}</button>}
+            {(onDelete || (trashed && onPurge)) && <div className="historyDelete"><ActionMenu label={messages.common.moreActions(runHistoryTitle(item, messages.elements.unnamedRunTitle))} items={[
+              ...(onDelete ? [{ id: trashed ? 'restore' : 'trash', label: trashed ? messages.fileManagement.restore : messages.fileManagement.trashAction,
+                onSelect: () => onDelete(item), disabled: !['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(item.status), danger: !trashed }] : []),
+              ...(trashed && onPurge ? [{ id: 'purge', label: messages.fileManagement.purge, onSelect: () => onPurge(item), danger: true, separatorBefore: Boolean(onDelete) }] : []),
+            ]} /></div>}
             <details className="detailDisclosure historyTechnical"><summary>{messages.elements.technicalDetails}</summary>
               <p><code>{item.run_id}</code></p>
               {item.result_confidence !== null && <p>{messages.runResult.reading.confidenceHint} {Math.round(item.result_confidence * 100)}%</p>}

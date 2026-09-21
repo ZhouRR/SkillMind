@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from skillmind.agent.context_builder import (
+from skillmind.agent.contract_store import (
     ContractStore,
+)
+from skillmind.agent.tool_catalog import (
     _change_propose_tool_definition,
     _interaction_tool_definition,
 )

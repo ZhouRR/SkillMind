@@ -11,6 +11,7 @@ import { routeHref } from '../lib/routing'
 import { EmptyState, LoadingSkeleton } from './PageElements'
 import { ProjectDraftFacts, ProjectFacts, ProjectIntentConfirmation, ProjectResponseNotice } from './ProjectManagementElements'
 import { ProjectManagementReview } from './ProjectManagementReview'
+import { ActionMenu } from './ActionMenu'
 import '../styles/project-management.css'
 
 /** Platform 管理は選択 Project の資格に依存せず、原 session と context で隔離する。 */
@@ -146,10 +147,12 @@ export function ProjectRows({ projects, projectId, locked, admin, onSelect, onAc
       <small>{messages.projectManagement.states[project.status]}</small>
     </button>
     {admin && <div className="projectItemActions"><button className="secondaryButton" type="button" data-project-action="edit" disabled={locked} onClick={() => onAction('edit', project)}>{messages.projects.edit}</button>
-      {project.status === 'ACTIVE'
-        ? <button className="dangerButton" type="button" data-project-action="archive" disabled={locked} onClick={() => onAction('archive', project)}>{messages.projects.archive}</button>
-        : <><button className="secondaryButton" type="button" data-project-action="restore" disabled={locked} onClick={() => onAction('restore', project)}>{messages.projects.restore}</button>
-          <button className="dangerButton" type="button" data-project-action="delete" disabled={locked} onClick={() => onAction('delete', project)}>{messages.projects.deleteProject}</button></>}
+      <ActionMenu label={messages.common.moreActions(project.name)} disabled={locked} items={project.status === 'ACTIVE'
+        ? [{ id: 'archive', label: messages.projects.archive, onSelect: () => onAction('archive', project), danger: true }]
+        : [
+          { id: 'restore', label: messages.projects.restore, onSelect: () => onAction('restore', project) },
+          { id: 'delete', label: messages.projects.deleteProject, onSelect: () => onAction('delete', project), danger: true, separatorBefore: true },
+        ]} />
     </div>}
     <details className="detailDisclosure projectRowDetails"><summary>{messages.elements.technicalDetails}</summary>
       <p className="mono">{project.project_id}</p><p>{messages.projectManagement.version}: {project.row_version}</p>
@@ -164,7 +167,8 @@ export function ProjectMetadataForm({ draft, editing, locked, onChange, onSubmit
 }) {
   const messages = useMessages()
   return <form data-project-form="" onSubmit={onSubmit}><fieldset disabled={locked}>
-    {!editing && <label>{messages.projects.keyLabel}<input name="key" maxLength={100} pattern="[a-z0-9][a-z0-9\-]*" value={draft.key} required onChange={(event) => onChange({ ...draft, key: event.target.value })} /></label>}
+    {!editing && <label>{messages.projects.keyLabel}<input name="key" maxLength={100} pattern="[a-z0-9][a-z0-9\-]*" value={draft.key} required onChange={(event) => onChange({ ...draft, key: event.target.value })} aria-describedby="project-key-hint" />
+      <span id="project-key-hint" className="hint">{messages.projects.keyHint}</span></label>}
     <label>{messages.projects.nameLabel}<input name="name" maxLength={200} value={draft.name} required onChange={(event) => onChange({ ...draft, name: event.target.value })} /></label>
     <label>{messages.projects.descriptionLabel}<textarea className="compactTextarea" name="description" maxLength={4000} value={draft.description} onChange={(event) => onChange({ ...draft, description: event.target.value })} /></label>
     <label>{messages.projects.retentionLabel}<input name="retention_days" type="number" min={1} max={3650} value={draft.retentionDays} required onChange={(event) => onChange({ ...draft, retentionDays: event.target.value })} /></label>

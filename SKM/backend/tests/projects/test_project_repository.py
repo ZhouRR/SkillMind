@@ -20,6 +20,7 @@ from skillmind.db.models import (
     ProjectDocumentUpload,
     ProjectMember,
     ProjectMemberEvent,
+    RunDeletionAudit,
     TaskSchedule,
     User,
 )
@@ -358,6 +359,33 @@ async def test_delete_is_blocked_while_run_history_exists() -> None:
     assert raised.value.blockers == ("run_history_exists",)
     session.delete.assert_not_called()
     session.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execution_deletion_audit_is_checked_as_run_history_before_writes() -> None:
+    """Run 本体の purge 後も削除監査を同じ拒否分類で保持し、文書問題に誤分類しない。"""
+
+    actor = _actor(role="ADMIN")
+    project = _project(organization_id=actor.organization_id, status="ARCHIVED")
+    session = MagicMock(spec=AsyncSession)
+    session.scalar = AsyncMock(return_value=True)
+
+    with pytest.raises(ProjectDeleteBlockedError) as raised:
+        await ProjectRepository(session).delete(project=project, expected_row_version=1)
+
+    assert raised.value.blockers == ("run_history_exists",)
+    assert str(raised.value) == (
+        "Project still has execution history or execution-deletion audit records"
+    )
+    compiled = session.scalar.call_args.args[0].compile(dialect=_POSTGRESQL)
+    statement = str(compiled)
+    assert "FROM runs" in statement and "FROM run_deletion_audits" in statement
+    assert " OR " in statement and statement.count("EXISTS") == 2
+    assert list(compiled.params.values()) == [project.id, project.id]
+    assert RunDeletionAudit not in _PROJECT_OWNED_MODELS
+    session.scalar.assert_awaited_once()
+    session.execute.assert_not_called()
+    session.delete.assert_not_called()
 
 
 @pytest.mark.asyncio

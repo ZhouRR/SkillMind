@@ -10,13 +10,18 @@ from unittest.mock import Mock
 
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
+
 from skillmind.agent.context_builder import (
-    ContractStore,
     ProductionRunContextBuilder,
-    create_run_tool_registry,
+)
+from skillmind.agent.contract_store import (
+    ContractStore,
 )
 from skillmind.agent.mcp_lease import McpDesktopBusyError
 from skillmind.agent.mcp_tools_source import McpToolsError, _request_failure
+from skillmind.agent.tool_catalog import (
+    create_run_tool_registry,
+)
 from skillmind.agent.tool_diagnostics import safe_tool_diagnostic
 from skillmind.agent.tool_gateway import ToolProviderError
 from skillmind.agent.workspace import WorkspaceManager

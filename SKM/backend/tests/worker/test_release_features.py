@@ -7,7 +7,13 @@ from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
-from skillmind.agent.context_builder import ContractStore, create_run_tool_registry
+
+from skillmind.agent.contract_store import (
+    ContractStore,
+)
+from skillmind.agent.tool_catalog import (
+    create_run_tool_registry,
+)
 from skillmind.core.settings import Settings
 from skillmind.worker.settings import (
     execute_effect,

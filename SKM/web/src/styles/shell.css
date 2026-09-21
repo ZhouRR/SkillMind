@@ -153,7 +153,8 @@
   padding-bottom: 4px;
 }
 .pageHeader > div:first-child { min-width: 0; }
-.pageHeader h1 { margin: 0; color: var(--text-hi); font-size: clamp(25px, 2.2vw, 32px); font-weight: 700; letter-spacing: -.04em; overflow-wrap: anywhere; }
+/* 長い見出しの末尾だけが孤立しないように行幅を均し、長い識別子の折返しも保つ。 */
+.pageHeader h1 { margin: 0; color: var(--text-hi); font-size: clamp(25px, 2.2vw, 32px); font-weight: 700; letter-spacing: -.04em; overflow-wrap: anywhere; text-wrap: balance; }
 .pageDescription { margin: 10px 0 0; max-width: 760px; color: var(--text-muted); font-size: 14px; line-height: 1.75; }
 .pageActions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 10px; min-width: 0; max-width: 48%; padding-top: 4px; }
 .pageActions > * { max-width: 100%; }

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import delete, exists, func, select, update
+from sqlalchemy import delete, exists, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -299,7 +299,7 @@ class ProjectRepository:
         """実行参照・所属監査・原 upload を持たない ARCHIVED Project と設定を削除する。
 
         key の一意制約は status を区別しないため、archive しただけでは key を再利用できない。
-        ここは「作成し直したい」用途のための唯一の解放手段であり、Run または所属監査が
+        ここは「作成し直したい」用途のための唯一の解放手段であり、Run・削除監査・所属監査が
         一件でもあれば削除しない。未発火/認領中の Schedule と原 upload の占用も残す。
         設定削除は全ての検査後に同一 transaction で行い、FK RESTRICT を最後の防壁に保つ。
         """
@@ -312,12 +312,16 @@ class ProjectRepository:
                 f"Project must be archived before deletion: {project_id}",
                 blockers=("project_not_archived",),
             )
-        run_count = await self._session.scalar(
-            select(func.count()).select_from(Run).where(Run.project_id == project_id)
+        # purge 後の最小監査も実行履歴の保護に属し、文書資産の問題として案内しない。
+        has_run_history = await self._session.scalar(
+            select(
+                exists().where(Run.project_id == project_id)
+                | exists().where(RunDeletionAudit.project_id == project_id)
+            )
         )
-        if run_count:
+        if has_run_history:
             raise ProjectDeleteBlockedError(
-                f"Project still has {run_count} run(s): {project_id}",
+                "Project still has execution history or execution-deletion audit records",
                 blockers=("run_history_exists",),
             )
         # status、発火実績、next_run_at による絞込は、停止済み・未発火・認領中の参照を漏らす。
@@ -343,7 +347,6 @@ class ProjectRepository:
             ProjectDocumentCleanup,
             ProjectDocument,
             ProjectDocumentEffectUpload,
-            RunDeletionAudit,
         ):
             if await self._session.scalar(select(exists().where(
                 document_model.project_id == project_id,

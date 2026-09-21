@@ -229,7 +229,27 @@ async def test_publish_cannot_replace_another_request_or_change_original_metadat
         await repository.publish(intent, document)
 
 
-@pytest.mark.parametrize("changed", ["document", "key", "namespace"])
+@pytest.mark.parametrize("path", [{"name": "renamed.md"}, {"folder": "moved"},
+                                   {"name": "renamed.md", "folder": "moved/nested"}])
+async def test_cleanup_accepts_moved_document_without_rewriting_publication(path: dict) -> None:
+    """改名・移動後も同一内容を削除でき、元 upload の公開回执は不変に保つ。"""
+
+    repository, _, row, intent = _reservation()
+    original = _document(intent)
+    await repository.publish(intent, original)
+    await repository.request_cleanup(
+        intent_id=intent.intent_id,
+        document=replace(original, **path),
+        reference=BlobReference(intent.command.storage_key, intent.command.storage_namespace),
+        now=original.created_at + timedelta(seconds=1),
+    )
+    cleaned = await _find(repository, intent)
+    assert cleaned.receipt.document == original
+    assert row.cleanup_requested_at is not None
+
+
+@pytest.mark.parametrize("changed", ["document", "document_id", "project_id", "uploaded_by",
+                                    "created_at", "size", "mime", "key", "namespace"])
 async def test_cleanup_requires_original_metadata_and_exact_storage_reference(changed: str) -> None:
     """文書 ID・内容と原 namespace/key が違う清理要求を保存しない。"""
 
@@ -239,6 +259,14 @@ async def test_cleanup_requires_original_metadata_and_exact_storage_reference(ch
     reference = BlobReference(intent.command.storage_key, intent.command.storage_namespace)
     if changed == "document":
         document = replace(document, checksum="sha256:" + "0" * 64)
+    elif changed in {"document_id", "project_id", "uploaded_by"}:
+        document = replace(document, **{changed: uuid4()})
+    elif changed == "created_at":
+        document = replace(document, created_at=document.created_at + timedelta(seconds=1))
+    elif changed == "size":
+        document = replace(document, size=document.size + 1)
+    elif changed == "mime":
+        document = replace(document, mime="application/json")
     elif changed == "key":
         reference = replace(reference, key="unrelated")
     else:

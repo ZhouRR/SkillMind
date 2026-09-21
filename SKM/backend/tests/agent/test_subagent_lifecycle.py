@@ -14,9 +14,14 @@ from uuid import UUID, uuid4
 import pytest
 from claude_agent_sdk.types import Message, SystemMessage
 
-from skillmind.agent.context_builder import ContractStore, _subagent_tool_definitions
+from skillmind.agent.contract_store import (
+    ContractStore,
+)
 from skillmind.agent.domain import AgentEvent, AgentEventType, RunContext
 from skillmind.agent.subagent_provider import SubagentDispatchProvider
+from skillmind.agent.tool_catalog import (
+    _subagent_tool_definitions,
+)
 from skillmind.agent.tool_gateway import RunToolRuntime, ToolRegistry
 from tests.agent.test_claude_engine import ClientFactory, _engine, _result, _session_id
 from tests.agent.test_subagent_provider import (

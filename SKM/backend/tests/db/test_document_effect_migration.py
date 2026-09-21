@@ -14,10 +14,11 @@ import pytest
 import sqlalchemy as sa
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from skillmind.db.base import Base
-from skillmind.db.models import ProjectDocument, ProjectDocumentEffectUpload
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.schema import CreateTable
+
+from skillmind.db.base import Base
+from skillmind.db.models import ProjectDocument, ProjectDocumentEffectUpload
 from tests.db.test_input_snapshot_migration import _contract
 
 
@@ -34,7 +35,7 @@ def migration(filename="0045_document_effect_uploads.py"):
 
 
 def test_migration_matches_model_and_adds_only_nullable_document_origin(monkeypatch):
-    """0045 の履歴構造へ 0048 の制約変更を適用して現 model と照合する。"""
+    """0045 に 0048 を適用し、0054 より前の path 一意性を含む契約と照合する。"""
     module = migration()
     monkeypatch.setattr(module, "op", Mock())
     module.op.f.side_effect = sa.schema.conv
@@ -61,10 +62,13 @@ def test_migration_matches_model_and_adds_only_nullable_document_origin(monkeypa
     new_name, new_target, condition = protocol.op.create_check_constraint.call_args.args
     assert new_target == table.name
     table.append_constraint(sa.CheckConstraint(condition, name=new_name))
-    assert _contract(table) == _contract(ProjectDocumentEffectUpload.__table__)
+    expected = _contract(ProjectDocumentEffectUpload.__table__)
+    # 0054 の部分 index 化は別回帰で検証し、0048 時点の全面一意制約を保持する。
+    expected["unique"].add(("project_id", "folder", "name"))
+    assert _contract(table) == expected
     assert {item.name for item in table.constraints} == {
         item.name for item in ProjectDocumentEffectUpload.__table__.constraints
-    }
+    } | {"uq_document_effect_upload_path"}
     target, column = module.op.add_column.call_args.args
     assert target == "project_documents" and column.name == "effect_upload_id" and column.nullable
     assert column.default is None and column.server_default is None

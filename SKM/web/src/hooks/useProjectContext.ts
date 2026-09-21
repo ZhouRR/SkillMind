@@ -9,7 +9,7 @@ const PROJECT_READ_TIMEOUT_MS = 30_000
 
 /** 対象の認可が未確認の間は、以前の Project を業務画面へ渡さない。 */
 export type ProjectAccess =
-  | { status: 'loading' | 'empty' | 'unavailable' | 'error' }
+  | { status: 'loading' | 'empty' | 'unselected' | 'unavailable' | 'error' }
   | { status: 'ready'; project: ProjectRecord }
 
 /** 一覧と詳細は別々に確認し、一方の失敗で他方の認可結果を代用しない。 */
@@ -72,7 +72,7 @@ export function useProjectContext(session: AuthSessionRecord | null, hash: strin
   const preference = useProjectRead(owner, session ? loadProjectPreference : null, () => session !== null && isCurrentSession(session), onSessionEnded)
   const projects = list.state?.status === 'ready' ? list.state.data : []
   const candidate = request.kind === 'invalid' ? '' : request.kind === 'explicit' ? request.projectId
-    : remembered.owner === owner && remembered.projectId ? remembered.projectId
+    : remembered.owner === owner ? remembered.projectId
       : preference.state ? resolveProjectSelection(projects, null, preference.state.status === 'ready' ? preference.state.data.project_id : null) : ''
   const target = candidate.toLowerCase()
   const detailLoader = useCallback((signal: AbortSignal) => loadProject(target, signal), [target])
@@ -91,7 +91,7 @@ export function useProjectContext(session: AuthSessionRecord | null, hash: strin
   let access: ProjectAccess
   if (!session) access = { status: 'loading' }
   else if (request.kind === 'invalid') access = { status: 'unavailable' }
-  else if (!target) access = { status: !list.state || !preference.state ? 'loading' : list.state.status === 'ready' ? 'empty' : 'error' }
+  else if (!target) access = { status: !list.state || !preference.state ? 'loading' : list.state.status === 'ready' ? projects.length ? 'unselected' : 'empty' : 'error' }
   else if (!detail.state) access = { status: 'loading' }
   else access = detail.state.status === 'ready' ? { status: 'ready', project: detail.state.data } : { status: detail.state.status }
 
@@ -107,7 +107,7 @@ export function useProjectContext(session: AuthSessionRecord | null, hash: strin
 
   /** 再読取は同じ明示 URL を保持し、一覧と認可の両方を更新する。 */
   const refresh = (): void => { list.refresh(); preference.refresh(); detail.refresh() }
-  /** 明示選択だけが Account からも共有選択を変更できる。詳細は選択後に確認する。 */
+  /** 明示選択だけが共有対象を変更し、空は確認済み削除後の未選択として保持する。 */
   const choose = (projectId: string): void => { setRemembered({ owner, projectId }) }
   const preferenceFailed = preference.state !== null && preference.state.status !== 'ready'
   return { access, projectId, selectionId, selectionState, projectState, refresh, choose, preferenceFailed }

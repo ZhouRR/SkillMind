@@ -73,6 +73,8 @@ def test_new_installation_offline_sql_creates_schema_without_business_seeds(
     config.set_main_option("script_location", str(backend_dir / "migrations"))
     connect = Mock(side_effect=AssertionError("offline migration must not create a DB engine"))
     monkeypatch.setattr("sqlalchemy.ext.asyncio.async_engine_from_config", connect)
+    # Alembic 専用 logging 設定で同一 process の後続試験の logger を無効化しない。
+    monkeypatch.setattr("logging.config.fileConfig", Mock())
 
     command.upgrade(config, "head", sql=True)
 
@@ -104,7 +106,7 @@ def test_migration_chain_has_a_single_expected_head() -> None:
     config.set_main_option("script_location", str(backend_dir / "migrations"))
     scripts = ScriptDirectory.from_config(config)
 
-    assert scripts.get_heads() == ["0052_mcp_desktop_leases"]
+    assert scripts.get_heads() == ["0055_run_deletion_audit"]
     assert scripts.get_revision("0017_skill_library_org_scope").down_revision == (
         "0015_skill_compositions"
     )

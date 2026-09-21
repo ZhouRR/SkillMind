@@ -38,14 +38,4 @@ Web / API 调用方 → Traefik → FastAPI → 领域服务 → PostgreSQL
 | Evidence / Artifact | 可追溯的观测证据与已保存文件 |
 | Result / Evaluation | 不可变执行结果与追加式人工评价/修订 |
 
-## 实现入口
-
-| 责任 | 代码 |
-| --- | --- |
-| 认证与公开 API | [routes](../../SKM/backend/src/skillmind/api/routes/) / [auth_dependencies](../../SKM/backend/src/skillmind/api/auth_dependencies.py) |
-| 规则、事务与迁移 | 各领域 service/repository、[db](../../SKM/backend/src/skillmind/db/) 与 [migrations](../../SKM/backend/migrations/) |
-| 执行与维护 | [agent](../../SKM/backend/src/skillmind/agent/) / [worker](../../SKM/backend/src/skillmind/worker/) / [effects](../../SKM/backend/src/skillmind/effects/) |
-| 页面与接口形状 | [Web](../../SKM/README.md#web) / [Contracts](../../SKM/README.md#contracts) |
-
-维护时遵守[运行边界](../development/runtime-guide.md)，按[变更指南](../development/change-guide.md)选择消费者和验证范围。
-部署复用共享 Traefik，仅 Web/API 接入 edge network；外部 context path 与 Web build path、API root_path 保持一致，详见[部署指南](../operations/deployment.md)。
+代码定位统一见[变更指南](../development/change-guide.md)，详细接口见 [Contracts](../../SKM/README.md#contracts)。修改时核对[运行边界](../development/runtime-guide.md)，部署拓扑与路径配置见[部署指南](../operations/deployment.md)，此处不另列模块规格。

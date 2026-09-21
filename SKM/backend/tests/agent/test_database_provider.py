@@ -12,7 +12,9 @@ from uuid import uuid4
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
 
-from skillmind.agent.context_builder import ContractStore, _read_tool_definitions
+from skillmind.agent.contract_store import (
+    ContractStore,
+)
 from skillmind.agent.database_provider import DatabaseReadProvider
 from skillmind.agent.domain import RegisteredTool, RunWorkspace
 from skillmind.agent.postgres_source import (
@@ -25,6 +27,9 @@ from skillmind.agent.postgres_source import (
     read_database_rows,
 )
 from skillmind.agent.run_binding import BoundRunResource, RunBindingError
+from skillmind.agent.tool_catalog import (
+    _read_tool_definitions,
+)
 from skillmind.agent.tool_gateway import RunToolContext, ToolProviderError
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.integrations.domain import (

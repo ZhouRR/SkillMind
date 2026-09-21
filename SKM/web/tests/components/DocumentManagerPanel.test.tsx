@@ -80,7 +80,9 @@ describe('DocumentTree display', () => {
       expect(html).toContain('预览')
       expect(html).not.toContain('disabled')
     }
-    expect(renderTree([document({ name: 'large.json', size: 1_000_001 })])).toContain('disabled')
+    const oversized = renderTree([document({ name: 'large.json', size: 1_000_001 })])
+    expect(oversized).toContain('aria-label="下载: large.json"')
+    expect(oversized).not.toContain('aria-label="预览: large.json"')
   })
 
   it('renders nested folders as collapsible nodes with file rows and actions', () => {
@@ -96,34 +98,42 @@ describe('DocumentTree display', () => {
     expect(html).toContain('overview.md')
     expect(html).toContain('2.0 KB')
     expect(html).toContain('5.0 MB')
-    expect(html).toContain('/documents/doc-root/content')
-    expect(html).toContain('download="readme.md"')
-    expect(html).toContain('下载')
-    expect(html).toContain('移入回收站')
+    expect(html).toContain('aria-label="预览: readme.md"')
+    expect(html).toContain('/documents/doc-spec/content')
+    expect(html).toContain('download="overview.md"')
+    expect(html).toContain('aria-haspopup="menu"')
+    expect(html).not.toContain('移入回收站')
   })
 
-  it('offers preview only for registered extensions and disables it beyond the size cap', () => {
+  it('uses filenames for preview and keeps unsupported or oversized files downloadable', () => {
     const html = renderTree([
       document({ document_id: 'doc-md', name: 'small.md', size: 100 }),
       document({ document_id: 'doc-zip', name: 'assets.zip', size: 100, mime: 'application/zip' }),
     ])
     // md には预览、zip には出ない(1 件だけ)。
     expect(html.split('预览').length - 1).toBe(1)
+    expect(html).toContain('aria-label="下载: assets.zip"')
+    expect(html).toContain('/documents/doc-zip/content')
+    expect(html).toContain('download="assets.zip"')
 
     const oversized = renderTree([
       document({ document_id: 'doc-big', name: 'big.md', size: 2_000_000 }),
     ])
-    // 上限超過は disabled + 誘導 title で残す。
-    expect(oversized).toContain('预览')
-    expect(oversized).toContain('disabled')
+    // 上限を超えた本文は preview 取得せず、原 download URL と誘導を残す。
+    expect(oversized).not.toContain('预览')
+    expect(oversized).toContain('aria-label="下载: big.md"')
+    expect(oversized).toContain('download="big.md"')
+    expect(oversized).toContain('/documents/doc-big/content')
     expect(oversized).toContain('文件超过 1MB')
   })
 
-  it('marks the document under deletion as busy and disables its delete button', () => {
+  it('retains the read entry while mutation status is owned by the closed action menu', () => {
     const html = renderTree([document({ document_id: 'doc-busy', name: 'note.txt' })], 'doc-busy')
 
-    expect(html).toContain('删除中…')
-    expect(html).toContain('disabled')
+    expect(html).toContain('aria-label="预览: note.txt"')
+    expect(html).toContain('aria-haspopup="menu"')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).not.toContain('role="menuitem"')
   })
 })
 
@@ -196,9 +206,21 @@ it('preserves empty directories and sorts files by size or date', () => {
   expect(buildDocumentTree([older, newer], [], 'date').files.map((d) => d.document_id)).toEqual(['b', 'a'])
 })
 
-it('shows restore and permanent deletion only in the recycle-bin tree', () => {
+it('keeps recycle-bin actions inside the row menu instead of the file-name entry', () => {
   const html = renderToStaticMarkup(<DocumentTree root={buildDocumentTree([document()])} projectId={PROJECT_ID} busyId={null} onDelete={vi.fn()} onPreview={vi.fn()} selection={{ selectedIds: new Set(), disabled: false, toggle: vi.fn(), onFolder: vi.fn(), trashed: true, purge: vi.fn() }} />)
-  expect(html).toContain('恢复')
-  expect(html).toContain('完全删除')
+  expect(html).toContain('aria-label="预览: note.txt"')
+  expect(html).toContain('aria-haspopup="menu"')
+  expect(html).not.toContain('role="menuitem"')
   expect(html).not.toContain('重命名')
+})
+
+it('gives directories independent selection controls and disables empty directory selection', () => {
+  const html = renderToStaticMarkup(<DocumentTree
+    root={buildDocumentTree([document({ folder: 'specs/nested' })], ['empty'])}
+    projectId={PROJECT_ID} busyId={null} onDelete={vi.fn()} onPreview={vi.fn()}
+    selection={{ selectedIds: new Set(), disabled: false, toggle: vi.fn(),
+      onFolder: vi.fn(), folderSelect: vi.fn() }} />)
+  expect(html).toContain('aria-label="选择此文件夹: specs"')
+  expect(html).toContain('aria-label="选择此文件夹: nested"')
+  expect(html).toMatch(/<input[^>]*disabled=""[^>]*aria-label="选择此文件夹: empty"/)
 })

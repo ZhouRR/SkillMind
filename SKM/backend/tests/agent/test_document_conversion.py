@@ -16,7 +16,9 @@ from openpyxl import Workbook
 
 from skillmind.agent import binary_text
 from skillmind.agent.binary_text import BinaryTextError, convert_excel_to_markdown
-from skillmind.agent.context_builder import ContractStore
+from skillmind.agent.contract_store import (
+    ContractStore,
+)
 from skillmind.agent.document_provider import DocumentConvertProvider
 from skillmind.agent.tool_gateway import RunToolContext, ToolProviderError
 from skillmind.core.hashing import sha256_hex

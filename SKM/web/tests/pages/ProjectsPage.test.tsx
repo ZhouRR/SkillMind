@@ -47,13 +47,16 @@ describe('ProjectsPage role projection', () => {
     expect(html).toContain('普通成员只能访问已加入的活动项目')
     expect(html).not.toContain('创建项目')
     expect(html).not.toContain('>归档<')
+    expect(html).not.toContain('aria-haspopup="menu"')
   })
 
-  it('shows create, edit and archive controls to ADMIN', () => {
+  it('shows create, edit and a named lifecycle menu to ADMIN', () => {
     const html = renderToStaticMarkup(page('ADMIN'))
 
     expect(html).toContain('创建项目')
-    expect(html).toContain('>归档<')
+    expect(html).toContain('aria-haspopup="menu"')
+    expect(html).toContain(MESSAGES.zh.common.moreActions(PROJECT.name))
+    expect(html).not.toContain('>归档<')
     // 作成後に名称・説明・保持日数を直せないと、作り直すしか手が無くなる。
     expect(html).toContain('>编辑<')
   })

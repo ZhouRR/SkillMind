@@ -32,7 +32,6 @@ export function ProjectDraftFacts({ draft, action }: { draft: ProjectDraft; acti
     <dl><div><dt>{messages.projectManagement.action}</dt><dd>{messages.projectManagement.actions[action]}</dd></div>
       <div><dt>{messages.projects.descriptionLabel}</dt><dd>{draft.description || messages.projects.noDescription}</dd></div>
       <div><dt>{messages.projects.retentionLabel}</dt><dd>{draft.retentionDays}</dd></div></dl>
-    <p className="hint">{messages.projectManagement.settingsPreserved}</p>
   </div>
 }
 

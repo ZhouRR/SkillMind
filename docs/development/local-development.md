@@ -4,7 +4,7 @@
 
 ## 前提と設定
 
-Python 3.12、Node.js 26 / pnpm 11.7.0 を使用する。Backend 依存は user site に導入し、lockfile は手編集しない。
+Python 3.12、Node.js 26 / pnpm 11.7.0 を使用する。既存依存を優先して再利用し、新規導入例を以下に示す。lockfile は手編集せず、Python 検証は `PYTHONDONTWRITEBYTECODE=1` を付ける。
 `.env.example` は production 雛形。localhost では development、許可 Origin、専用接続先と書込可能な Run workspace を設定する。Backend の `.env` は実行 directory 基準。Compose は[設定入口](../operations/deployment.md#环境文件与配置边界)の ENV_FILE を使う。
 
 ## Backend
@@ -73,11 +73,11 @@ python3 tests/browser/check_projects.py \
 | 対象 | 主な runner（check_*.py） |
 | --- | --- |
 | 全体の見た目・読みやすさ | visual_style、reading |
-| Project・アカウント | projects、project_members、project_management、login、accounts |
-| 提出・待機・履歴 | run_submission、interaction_responses、run_history、evaluation_submissions |
+| Project・アカウント | projects、project_members、project_management、login、accounts、api_keys |
+| 提出・待機・履歴 | run_submission、interaction_responses、proposal_decisions、run_history、evaluation_submissions |
 | レポート・証拠 | report_reading、workspace_reports、result_references、artifacts |
 | 文書・directory | document_organization、document_management、document_preview、document_upload、document_batches |
-| 接続・Skill・調度 | resource_editing、resource_connections、interpretation_requests、task_schedules、schedule_times |
+| 接続・Skill・調度 | resource_editing、resource_request_lifecycle、mcp_tools、interpretation_requests、skill_library_delete、task_launch_identity、task_schedules、schedule_times |
 
 全 runner は [tests/browser](../../SKM/web/tests/browser/) にある。harness URL と `--output` 等の必須引数は各 runner を参照する。主に projects.html、提出系は run-submission.html を使う。
 外置依存は PYTHONPATH、browser は PLAYWRIGHT_BROWSERS_PATH を指定する。使用中 port を奪わず、終了時は自分の Vite だけを止める。mock は実 DB の競合/撤権、blob、外部 write や複数 Worker の証明ではない。

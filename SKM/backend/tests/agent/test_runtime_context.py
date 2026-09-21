@@ -12,14 +12,18 @@ import pytest
 from jsonschema import Draft202012Validator, FormatChecker
 
 from skillmind.agent.context_builder import (
-    ContractStore,
     ProductionRunContextBuilder,
+)
+from skillmind.agent.contract_store import (
+    ContractStore,
+)
+from skillmind.agent.domain import RunWorkspace
+from skillmind.agent.repository_source import RepositorySnapshotSource
+from skillmind.agent.tool_catalog import (
     _change_propose_tool_definition,
     _read_tool_definitions,
     create_run_tool_registry,
 )
-from skillmind.agent.domain import RunWorkspace
-from skillmind.agent.repository_source import RepositorySnapshotSource
 from skillmind.agent.tool_gateway import RunToolContext, ToolProviderError
 from skillmind.agent.workspace import WorkspaceManager
 from skillmind.agent.workspace_materializer import WorkspaceMaterializer

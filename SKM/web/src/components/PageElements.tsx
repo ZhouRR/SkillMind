@@ -165,7 +165,11 @@ export function ModalDialog({ open, title, meta, actions, wide = false, drawer =
     return () => {
       window.removeEventListener('keydown', handleKey)
       body.style.overflow = previousOverflow
-      restoreFocusTo.current?.focus()
+      const original = restoreFocusTo.current
+      // エラー後の一覧再取得で行が置換されても、同じ安定 ID の入口だけへ戻す。
+      const target = original?.isConnected ? original
+        : original?.id ? window.document.getElementById(original.id) : null
+      target?.focus()
     }
   }, [open])
   return (

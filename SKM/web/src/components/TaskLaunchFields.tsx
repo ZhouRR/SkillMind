@@ -89,12 +89,18 @@ export function TaskReadinessPanel({ readiness, collapsible = false }: {
                 {messages.workspace.requirementStatus[requirement.status] ?? requirement.status}
                 {' — '}
                 {messages.workspace.requirementReason[requirement.status] ?? ''}
-                {requirement.candidates.length > 0
+                {requirement.candidates.length > 0 && requirement.candidates.length <= 3
                   ? messages.workspace.candidatesLine(requirement.candidates.map((item) => item.key === ALL_DOCUMENTS_SELECTION
                     ? messages.workspace.documentSelection.all : item.key === PROJECT_DOCUMENT_LIBRARY_SELECTION
                       ? messages.workspace.documentSelection.library : item.label))
                   : ''}
               </span>
+              {requirement.candidates.length > 3 && <details className="readinessCandidates">
+                <summary>{messages.workspace.candidateCount(requirement.candidates.length)}</summary>
+                <ul>{requirement.candidates.map((item) => <li key={item.key}>{item.key === ALL_DOCUMENTS_SELECTION
+                  ? messages.workspace.documentSelection.all : item.key === PROJECT_DOCUMENT_LIBRARY_SELECTION
+                    ? messages.workspace.documentSelection.library : item.label}</li>)}</ul>
+              </details>}
               {/* 選択指針は Skill 原文由来でレポート言語に従うため、平台文言とは行を分ける。 */}
               {requirement.selection_guidance && (
                 <span className="readinessGuidance">{requirement.selection_guidance}</span>

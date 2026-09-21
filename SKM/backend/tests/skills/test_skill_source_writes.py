@@ -11,11 +11,8 @@ import pytest
 
 from skillmind.skills.domain import InlineSkillFile, SkillPreview, UploadSkillFile
 from skillmind.skills.importer import SkillImportError
-from skillmind.skills.service import (
-    SkillService,
-    _write_inline_skill_files,
-    _write_upload_skill_files,
-)
+from skillmind.skills.service import SkillService
+from skillmind.skills.source_storage import write_skill_source_files
 from tests.skills.skill_import_authorization_harness import INLINE_FILES, ImportSession
 
 Entry = Literal["preview-inline", "preview-upload", "write-inline", "write-upload"]
@@ -47,9 +44,9 @@ def invoke(
     if entry == "preview-upload":
         return service.preview_upload(uploads)
     if entry == "write-inline":
-        _write_inline_skill_files(files, root)
+        write_skill_source_files(files, root)
     else:
-        _write_upload_skill_files(uploads, root)
+        write_skill_source_files(uploads, root)
     return None
 
 

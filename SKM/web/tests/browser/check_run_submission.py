@@ -287,7 +287,14 @@ async def exercise(
 ) -> None:
     """原要求・草稿・認証 context・遅い応答の競争を、実 React event で再現する。"""
 
-    if case in {"ready-details", "missing-resource-details"}:
+    if case in {"ready-details", "missing-resource-details", "many-resource-details"}:
+        if case == "many-resource-details":
+            candidates = api.catalog["tasks"][0]["readiness"]["requirements"][0]["candidates"]
+            candidates.extend({
+                "key": f"document:00000000-0000-4000-8000-{index:012d}",
+                "kind": "document", "provider": "project-documents",
+                "label": f"資料/{'long-name-' * 14}/{index}/仕様書.md",
+            } for index in range(40))
         if case == "missing-resource-details":
             readiness = api.catalog["tasks"][0]["readiness"]
             readiness["level"] = "CONFIGURATION_REQUIRED"
@@ -296,11 +303,34 @@ async def exercise(
         await page.locator(".runLauncher > button").click()
         disclosure = page.locator(".readinessDisclosure")
         await expect(disclosure).to_be_visible()
-        if case == "ready-details":
+        if case in {"ready-details", "many-resource-details"}:
             await expect(disclosure.locator(".readinessList")).not_to_be_visible()
             await expect(page.locator(".documentSourceField")).to_be_visible()
-            await disclosure.locator("summary").click()
+            await disclosure.locator(":scope > summary").click()
             await expect(disclosure.locator(".readinessList")).to_be_visible()
+            if case == "many-resource-details":
+                choices = disclosure.locator(".readinessCandidates")
+                await expect(choices.locator("summary")).to_have_text("查看 42 个候选资源")
+                for width in (1440, 390):
+                    await page.set_viewport_size({"width": width, "height": 1000})
+                    for theme in ("light", "dark"):
+                        await page.evaluate(
+                            "theme => document.documentElement.dataset.theme = theme", theme
+                        )
+                        await expect(choices.locator("ul")).not_to_be_visible()
+                        await choices.locator("summary").focus()
+                        await page.keyboard.press("Enter")
+                        await expect(choices.locator("li")).to_have_count(42)
+                        assert await choices.locator("ul").evaluate(
+                            "e => e.scrollWidth <= e.clientWidth + 1 && e.clientHeight <= 240"
+                        )
+                        await choices.locator("ul").evaluate("e => e.scrollTop = e.scrollHeight")
+                        if output:
+                            await page.screenshot(
+                                path=str(output / f"candidates-{width}-{theme}.png")
+                            )
+                        await choices.locator("summary").click()
+                        await expect(choices.locator("ul")).not_to_be_visible()
         else:
             await expect(disclosure.locator(".readinessList")).to_be_visible()
             await expect(disclosure).to_contain_text("缺少资源")
@@ -462,6 +492,7 @@ async def check(url: str, output: Path | None, selected_case: str | None) -> Non
     cases = {
         "ready-details": [],
         "missing-resource-details": [],
+        "many-resource-details": [],
         "auto-approval": ["drop"],
         "manual-approval": ["drop"],
         "lost-response": ["drop"],

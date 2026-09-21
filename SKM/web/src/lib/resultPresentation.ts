@@ -44,3 +44,8 @@ export function artifactTitle(artifact: RunArtifactRecord, result: RunResultDeta
     }))] : []
   return titles.length === 1 ? titles[0]! : artifact.path.split('/').at(-1) || artifact.path
 }
+
+/** Unknown 公開値を安全な表示文字列へ絞る。 */
+export function displayText(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value ? value : fallback
+}

@@ -230,8 +230,17 @@ async def check(url: str, output: Path) -> None:
                         await expect(page.locator(".interpretationPanel")).to_contain_text(RESULT)
                         assert (
                             await page.evaluate("key => sessionStorage.getItem(key)", RECEIPT)
-                            is None
+                            == api.original
                         )
+                        # 完了後の refresh と往復でも、保存済み結果を原 GET で復元する。
+                        # 進行中から一度だけ復元できても、公開前に結果を失う回帰は許さない。
+                        await page.reload()
+                        await expect(page.locator(".interpretationPanel")).to_contain_text(RESULT)
+                        await page.goto(f"{url}#/projects?project={PROJECT}")
+                        await page.locator('[data-project-form]').wait_for()
+                        await page.goto(f"{url}#/skills?project={PROJECT}")
+                        await expect(page.locator(".interpretationPanel")).to_contain_text(RESULT)
+                        assert api.posts == 1 and api.reads[-1] == api.original
                         await settle(page)
                         assert (
                             api.posts == 1

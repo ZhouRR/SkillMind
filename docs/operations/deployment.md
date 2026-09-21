@@ -16,14 +16,7 @@ Windows 构建镜像，Linux 用 Docker Compose + GNU make 部署。首次与更
 
 API、业务 `worker` 和 `maintenance` 共用 Backend 镜像与 `.env`。业务 Worker 执行模型与工具；维护 Worker 在独立队列运行 Outbox、回收和定时触发，不挂载 Run/Codex 卷。更新须包含三个服务。
 
-`SKILLMIND_AGENT_SDK` 选择解释器与 Run 引擎，默认 Codex。下列是配置雏形，更新时保留已有模型与思考强度：
-
-```dotenv
-SKILLMIND_AGENT_SDK=codex
-SKILLMIND_CODEX_MODEL=gpt-5.6-terra
-SKILLMIND_CODEX_REASONING_EFFORT=max
-SKILLMIND_CODEX_HOME=/var/lib/skillmind/codex
-```
+`SKILLMIND_AGENT_SDK` 选择解释器与 Run 引擎，默认 Codex；模型、思考强度与 Codex 数据目录配置见[环境模板](../../SKM/.env.example)。更新时保留服务器已有值，只补缺失字段，不用模板默认值覆盖已选模型或代理。
 
 部署后执行设备登录，在命令给出的网页输入一次性代码并等待成功；第二条只检查登录状态：
 
@@ -69,7 +62,7 @@ docker compose build api web
 
 再次导出加 `-Force`。导出固定应用 tag `skillmind/backend:0.1.0` 和 `skillmind/web:0.1.0`，不执行 build/pull；失败保留旧 archive，`.partial` 不是成品。只改 Web 可仅构建 `web`，导出仍需两个应用镜像。构建架构须匹配服务器，导出不转换架构。
 
-将 `images/images.tar`、`compose.yml`、`Makefile` 可信传输至服务器，保留服务器 `.env`。基建镜像缺失时部署会拉取；完全离线的初次部署先在 Windows 准备并同包导出：
+按[环境文件布局](#环境文件与配置边界)移送导出包。基建镜像缺失时部署会拉取；完全离线的初次部署先在 Windows 准备并同包导出：
 
 ```powershell
 docker compose pull postgres redis object-storage object-storage-init
@@ -103,10 +96,6 @@ docker compose --env-file "${ENV_FILE:-.env}" run --rm -T --no-deps migrate alem
 ## 迁移与回退审查
 
 只核本次实际涉及的 [migration](../../SKM/backend/migrations/versions/) 与协议消费者。未知 revision、多 head 或迁移失败时先核 DB 状态，不 stamp、删审计或清队列。旧镜像仅在兼容当前 schema、快照和队列时可恢复使用，见[应用版本回退](backup-recovery.md#应用版本回退)。
-
-## 启动与放行
-
-首次成功后执行 `make bootstrap-admin`。业务验收检查登录、权限、Skill、Run 成果与外部保存，使用获准输入与环境；健康检查只证明其覆盖的服务状态。数据恢复后按恢复结果分别放行后台与业务入口。
 
 ## 仅更新 Web
 

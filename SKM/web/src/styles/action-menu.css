@@ -1,0 +1,57 @@
+.actionMenuTrigger {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.actionMenuTrigger:hover, .actionMenuTrigger[aria-expanded="true"] { background: var(--surface-hover); color: var(--text); }
+.actionMenuTrigger:disabled { opacity: .5; cursor: not-allowed; }
+.actionMenuTrigger svg { width: 20px; height: 20px; fill: currentColor; }
+.actionMenuPanel {
+  position: fixed;
+  z-index: 120;
+  box-sizing: border-box;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-pop);
+}
+.actionMenuItem {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: left;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.actionMenuItem:hover, .actionMenuItem:focus { background: var(--surface-hover); outline-offset: -2px; }
+.actionMenuItem:disabled, .actionMenuItem[aria-disabled="true"] { opacity: .5; cursor: not-allowed; background: transparent; }
+.actionMenuDanger { color: var(--danger); }
+.actionMenuSeparator { height: 1px; margin: 5px; background: var(--border); }
+@media (pointer: coarse) {
+  .actionMenuTrigger { width: 44px; height: 44px; }
+  .actionMenuItem { min-height: 44px; }
+}

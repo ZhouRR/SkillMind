@@ -13,6 +13,8 @@ from urllib.parse import quote
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.dialects.postgresql import dialect
+
 from skillmind.agent.audit_export import (
     AUDIT_EXPORT_CAPABILITY,
     AuditExportProvider,
@@ -20,12 +22,16 @@ from skillmind.agent.audit_export import (
     validate_export_artifact,
 )
 from skillmind.agent.audit_source import PostgresAuditExportSource, _evidence
-from skillmind.agent.context_builder import ContractStore, create_run_tool_registry
+from skillmind.agent.contract_store import (
+    ContractStore,
+)
+from skillmind.agent.tool_catalog import (
+    create_run_tool_registry,
+)
 from skillmind.agent.tool_gateway import ToolProviderError
 from skillmind.agent.workspace import WorkspaceManager
 from skillmind.artifacts.repository import ArtifactRepository
 from skillmind.core.hashing import canonical_json, sha256_hex
-from sqlalchemy.dialects.postgresql import dialect
 from tests.agent.test_tool_gateway import CsvIssueProvider, MemoryAuditWriter, _context, _registry
 from tests.agent.test_workspace_provider import CONTRACTS
 from tests.agent.test_workspace_provider import _context as tool_context

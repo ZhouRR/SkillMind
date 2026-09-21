@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import errno
 import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
@@ -11,10 +10,8 @@ from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from pathlib import Path, PurePosixPath, PureWindowsPath
-from tempfile import TemporaryDirectory
+from pathlib import Path
 from typing import Any, cast
-from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 from jsonschema import Draft202012Validator, FormatChecker, ValidationError
@@ -40,7 +37,6 @@ from skillmind.skills.domain import (
     InlineSkillFile,
     PublishedTaskNotFoundError,
     SaveModelInterpretationCommand,
-    SaveSkillPreviewCommand,
     SkillInterpretationNotFoundError,
     SkillInterpretationNotReadyError,
     SkillInterpretationStatus,
@@ -65,11 +61,7 @@ from skillmind.skills.domain import (
 )
 from skillmind.skills.execution import resolve_skill_definition
 from skillmind.skills.importer import (
-    HTTP_SKILL_IMPORT_LIMITS,
-    DeterministicManifestDraftBuilder,
     NormalizedSkillPackage,
-    SkillImportError,
-    SkillPackageParser,
 )
 from skillmind.skills.interpretation_diff import diff_interpretations
 from skillmind.skills.interpretation_requests import (
@@ -84,7 +76,6 @@ from skillmind.skills.interpreter import (
     SkillStaticAnalyzer,
     UnsafeSkillSourceError,
     build_interpreter_request,
-    load_inline_text_files,
 )
 from skillmind.skills.interpreter_execution import (
     MODEL_OUTPUT_WHITESPACE_LIMIT,
@@ -108,6 +99,8 @@ from skillmind.skills.resource_binding import (
 )
 from skillmind.skills.runtime_profile import validate_interpreter_parameters
 from skillmind.skills.source_documents import SourceTraceLocationError
+from skillmind.skills.source_loader import SkillSourceLoader
+from skillmind.skills.source_storage import SkillSourceStorage
 from skillmind.skills.task_catalog import (
     PublishedTaskDescriptor,
     ResolvedTaskRun,
@@ -115,7 +108,7 @@ from skillmind.skills.task_catalog import (
 )
 from skillmind.skills.task_contract import TaskContractCompilationError
 from skillmind.skills.task_flow_preview import TaskFlowPreview, project_task_flow_preview
-from skillmind.storage import FileStorage, FileStorageError, StoredBlob, sanitize_object_key
+from skillmind.storage import FileStorage
 from skillmind.users.access import authorize_user_access, validate_user_access
 from skillmind.users.domain import UserAccess
 from skillmind.users.repository import LockedUsers, UserRepository, authorization_failure_snapshot
@@ -163,11 +156,8 @@ class SkillService:
 
         self._session_factory = session_factory
         self._contracts_dir = contracts_dir.resolve()
-        schema_path = self._contracts_dir / "runtime-manifest" / "v1alpha1.schema.json"
-        schema = json.loads(schema_path.read_text(encoding="utf-8"))
-        if not isinstance(schema, dict):
-            raise ValueError("RuntimeManifest Schema must be a JSON object")
-        self._manifest_builder = DeterministicManifestDraftBuilder(schema)
+        self._source_storage = SkillSourceStorage(file_storage, storage_bucket)
+        self._source_loader = SkillSourceLoader(self._contracts_dir, self._source_storage)
         self._manifest_validator = ManifestValidator(contracts_dir)
         # 就緒度は publish gate と同じ Tool catalog を正本にする。二重管理すると「発行できるが
         # 永遠に CONFIGURATION_REQUIRED」のような食い違いが生まれる。
@@ -179,31 +169,17 @@ class SkillService:
         # 就緒度は「catalog 登録」だけでなく「実装配線済み Provider」まで見る (計画 §19 W1)。
         # None のままなら Provider 検査を省く従来挙動 (offline/未配線環境) を保つ。
         self._installed_provider_capabilities = installed_provider_capabilities
-        self._parser = SkillPackageParser(limits=HTTP_SKILL_IMPORT_LIMITS)
         # interpret は import と分離した明示操作であり、未配線なら呼び出し時に閉じる。
         self._interpreter = interpreter
         self._capability_catalog = capability_catalog
         self._interpreter_identity = interpreter_identity
         self._default_model = default_model
         self._fixture_runner: InterpreterFixtureRunner | None = None
-        # Upload import は binary bundle を object storage へ保存する。
-        # 未配線のまま upload されたら実行時に閉じる。
-        self._file_storage = file_storage
-        self._storage_bucket = storage_bucket
 
     def preview_inline(self, files: Sequence[InlineSkillFile]) -> SkillPreview:
-        """Inline text files を一時 directory で解析し、非永続 preview を返す。"""
+        """共通 source loader で解析し、非永続 preview を返す。"""
 
-        normalized_files = tuple(files)
-        with TemporaryDirectory(prefix="skillmind-skill-") as temporary:
-            source_root = Path(temporary).resolve()
-            _write_inline_skill_files(normalized_files, source_root)
-            package = self._parser.parse_directory(source_root)
-            manifest = self._manifest_builder.build(package)
-        return SkillPreview(
-            normalized_package=package.to_dict(),
-            runtime_manifest_draft=manifest,
-        )
+        return self._source_loader.prepare_inline(files).preview
 
     async def save_inline(
         self,
@@ -214,30 +190,18 @@ class SkillService:
         """Inline source と deterministic interpretation を同じ transaction で保存する。"""
 
         access = deepcopy(access)
-        normalized_files = deepcopy(tuple(files))
-        preview = self.preview_inline(normalized_files)
+        prepared = self._source_loader.prepare_inline(files)
         async with self._admin_transaction(access) as (repository, locked, authorize):
-            command = _save_command(
+            command = prepared.save_command(
                 organization_id=locked.actor.organization_id,
                 imported_by=locked.actor.id,
-                files=normalized_files,
-                preview=preview,
             )
             return await repository.save_preview(command, authorize=authorize)
 
     def preview_upload(self, files: Sequence[UploadSkillFile]) -> SkillPreview:
-        """Multipart upload (binary 可) を一時 directory で解析し、非永続 preview を返す。"""
+        """保存と同じ root 正規化、binary 判定、parser で upload preview を作る。"""
 
-        normalized_files = _normalize_upload_skill_root(tuple(files))
-        with TemporaryDirectory(prefix="skillmind-skill-") as temporary:
-            source_root = Path(temporary).resolve()
-            _write_upload_skill_files(normalized_files, source_root)
-            package = self._parser.parse_directory(source_root)
-            manifest = self._manifest_builder.build(package)
-        return SkillPreview(
-            normalized_package=package.to_dict(),
-            runtime_manifest_draft=manifest,
-        )
+        return self._source_loader.prepare_upload(files).preview
 
     async def save_upload(
         self,
@@ -245,40 +209,14 @@ class SkillService:
         access: UserAccess,
         files: Sequence[UploadSkillFile],
     ) -> StoredSkillPreview:
-        """Upload source を正規化し、binary bundle を object storage へ保存して永続化する。
+        """原 bytes の準備と外部 PUT を DB transaction から分離して upload を保存する。"""
 
-        Inline 経路と同じ deterministic parser を通すため、正規化結果は inline と一致する。
-        binary asset は text snapshot に載せられないため raw bundle を object storage に保存し、
-        SkillSource.storage_uri を s3:// に固定する。text file は従来通り snapshot にも残す。
-        """
-
-        # frozen dataclass の外形だけで bytes/配列の不変性を仮定せず、最初の待機前に固定する。
         access = deepcopy(access)
-        normalized_files = _normalize_upload_skill_root(
-            tuple(
-                UploadSkillFile(
-                    path=file.path, data=bytes(file.data), content_type=file.content_type
-                )
-                for file in files
-            )
-        )
-        with TemporaryDirectory(prefix="skillmind-skill-") as temporary:
-            source_root = Path(temporary).resolve()
-            _write_upload_skill_files(normalized_files, source_root)
-            package = self._parser.parse_directory(source_root)
-            manifest = self._manifest_builder.build(package)
-            preview = SkillPreview(
-                normalized_package=package.to_dict(),
-                runtime_manifest_draft=manifest,
-            )
-            text_files = _upload_text_source_files(package, source_root)
+        prepared = self._source_loader.prepare_upload(files)
         async with self._admin_transaction(access) as (repository, locked, authorize):
             organization_id = locked.actor.organization_id
-            command = _save_command(
-                organization_id=organization_id,
-                imported_by=locked.actor.id,
-                files=text_files,
-                preview=preview,
+            command = prepared.save_command(
+                organization_id=organization_id, imported_by=locked.actor.id,
             )
             exists = await repository.source_exists(
                 organization_id=organization_id, source_hash=command.source_hash
@@ -288,32 +226,23 @@ class SkillService:
                 # 原 URI/導入者/時刻を維持する。現在の blob へ修復 PUT する権限ではない。
                 return await repository.save_preview(command, authorize=authorize)
 
-        storage = self._require_storage()
-        # 原 hash/key 形式は保つが、内容アドレスを原要求の冪等回执とはみなさない。
-        hash_segment = package.content_hash.replace(":", "-")
-        key_prefix = f"organizations/{organization_id}/skill-sources/{hash_segment}"
-
         async def authorize_upload() -> None:
             """外部 I/O を鎖内に置かず、毎回同じ原会話の現在資格を短 transaction で確認する。"""
 
             async with self._admin_transaction(access):
                 pass
 
-        await _store_upload_bundle(
-            storage, key_prefix, normalized_files, authorize=authorize_upload
+        storage_uri = await self._source_storage.store(
+            organization_id=organization_id,
+            source_hash=command.source_hash,
+            files=prepared.upload_files,
+            authorize=authorize_upload,
         )
         async with self._admin_transaction(access) as (repository, _locked, authorize):
             return await repository.save_preview(
-                replace(command, storage_uri=f"s3://{self._storage_bucket}/{key_prefix}"),
-                authorize=authorize,
+                replace(command, storage_uri=storage_uri), authorize=authorize,
             )
 
-    def _require_storage(self) -> FileStorage:
-        """Object storage が未配線なら upload を閉じて 503 相当の error を送出する。"""
-
-        if self._file_storage is None:
-            raise SkillStorageUnavailableError("Object storage is not configured for uploads")
-        return self._file_storage
 
     async def get_interpretation(
         self, *, organization_id: UUID, interpretation_id: UUID
@@ -889,7 +818,8 @@ class SkillService:
                         if direct_candidates:
                             path = (
                                 _json_pointer(error.absolute_path)
-                                if isinstance(error, ValidationError) else getattr(error, "path", "")
+                                if isinstance(error, ValidationError)
+                                    else getattr(error, "path", "")
                             )
                             code = (
                                 str(error.validator) if isinstance(error, ValidationError)
@@ -1430,16 +1360,9 @@ class SkillService:
     ) -> tuple[NormalizedSkillPackage, SkillStaticAnalysis, dict[str, Any] | None]:
         """保存済み snapshot を再正規化し、静的解析と frozen request を offline で作る。"""
 
-        with TemporaryDirectory(prefix="skillmind-interpret-") as temporary:
-            root = Path(temporary).resolve()
-            await self._materialize_source(source, root)
-            package = self._parser.parse_directory(root)
-            source_files = load_inline_text_files(root, package)
-            analysis = SkillStaticAnalyzer().analyze(package, source_files)
-        if package.content_hash != source.source_hash:
-            raise SkillSourceIntegrityError(
-                "Stored SkillSource content hash drifted from its snapshot"
-            )
+        loaded = await self._source_loader.load_stored(source)
+        package, source_files = loaded.package, loaded.source_files
+        analysis = SkillStaticAnalyzer().analyze(package, source_files)
         try:
             request = build_interpreter_request(
                 package=package,
@@ -1454,46 +1377,6 @@ class SkillService:
             return package, analysis, None
         return package, analysis, request
 
-    async def _materialize_source(self, source: StoredSkillSource, root: Path) -> None:
-        """保存時の storage URI に応じて、元の source bytes を一時 root へ再構築する。"""
-
-        if source.storage_uri.startswith("database://") or not source.storage_uri:
-            _write_inline_skill_files(source.source_files, root)
-            return
-        if not source.storage_uri.startswith("s3://"):
-            raise SkillSourceIntegrityError("Stored SkillSource storage URI is invalid")
-        await self._materialize_stored_bundle(source, root)
-
-    async def _materialize_stored_bundle(self, source: StoredSkillSource, root: Path) -> None:
-        """Object storage の全 file を per-file checksum 検証後に source root へ展開する。"""
-
-        storage = self._file_storage
-        if storage is None:
-            raise SkillStorageUnavailableError(
-                "Object storage is not configured for stored SkillSource reconstruction"
-            )
-        prefix = _storage_uri_prefix(source.storage_uri, self._storage_bucket)
-        if not source.source_file_index:
-            raise SkillSourceIntegrityError("Stored SkillSource file manifest is missing")
-        seen: set[str] = set()
-        for item in source.source_file_index:
-            path, expected_size, expected_hash = _validate_source_file_index(item, seen)
-            try:
-                data = await storage.get(f"{prefix}/{path}")
-            except FileStorageError as error:
-                # Storage adapter は BlobNotFoundError を含む backend error を返す。本文をログへ
-                # 出さず、source を再利用できない不変性違反として上位へ伝える。
-                raise SkillSourceIntegrityError(
-                    f"Stored SkillSource file is unavailable: {path}"
-                ) from error
-            actual_hash = f"sha256:{sha256_hex(data)}"
-            if len(data) != expected_size or actual_hash != expected_hash:
-                raise SkillSourceIntegrityError(f"Stored SkillSource file checksum drifted: {path}")
-            target = (root / path).resolve()
-            if not target.is_relative_to(root):
-                raise SkillSourceIntegrityError("Stored SkillSource file path escapes source root")
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(data)
 
     def _blocked_execution_key(
         self,
@@ -1690,46 +1573,6 @@ async def save_execution_idempotently(
             return existing
 
 
-def _write_inline_skill_files(files: Sequence[InlineSkillFile], root: Path) -> None:
-    """Browser 入力を root 配下へ限定し、同名 path の曖昧さを拒否して書き込む。"""
-
-    seen: set[str] = set()
-    for file in files:
-        relative = _safe_skill_file_path(file.path)
-        if relative in seen:
-            raise SkillImportError(
-                "duplicate_file_path",
-                "Skill source contains duplicate file paths",
-                path=relative,
-            )
-        seen.add(relative)
-        # parser の source hash は UTF-8 bytes を対象にするため、text writer の改行変換を避ける。
-        _write_skill_source_file(root, relative, file.content.encode("utf-8"))
-
-
-def _write_skill_source_file(root: Path, relative: str, data: bytes) -> None:
-    """原 byte の一時展開を共有し、入力由来の path 衝突だけを安定した拒否へ変換する。"""
-
-    try:
-        target = (root / relative).resolve()
-        if not target.is_relative_to(root):
-            raise SkillImportError(
-                "invalid_file_path",
-                "Skill source file path must stay inside the source root",
-                path=relative,
-            )
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(data)
-    except OSError as error:
-        # UTF-8 の実 filename 上限や file/directory の衝突は文字数では判定できない。
-        # disk full/permission/I/O 障害を入力拒否と偽らず、storage key 規則も複製しない。
-        if error.errno not in {errno.ENAMETOOLONG, errno.EEXIST, errno.ENOTDIR, errno.EISDIR}:
-            raise
-        raise SkillImportError(
-            "invalid_file_path", "Skill source contains a path that cannot be materialized"
-        ) from error
-
-
 @dataclass(frozen=True, slots=True)
 class _PreparedRequest:
     """受理段階で構築した決定的成果物。model 実行と失敗記録が再利用する。"""
@@ -1842,243 +1685,6 @@ async def _emit_terminal(
         else "interpret.failed"
     )
     await on_event(event, data)
-
-
-def _write_upload_skill_files(files: Sequence[UploadSkillFile], root: Path) -> None:
-    """Upload された bytes を root 配下へ限定し、重複 path を拒否して書き込む。"""
-
-    seen: set[str] = set()
-    for file in files:
-        relative = _safe_skill_file_path(file.path)
-        if relative in seen:
-            raise SkillImportError(
-                "duplicate_file_path",
-                "Skill source contains duplicate file paths",
-                path=relative,
-            )
-        seen.add(relative)
-        _write_skill_source_file(root, relative, file.data)
-
-
-def _normalize_upload_skill_root(
-    files: tuple[UploadSkillFile, ...],
-) -> tuple[UploadSkillFile, ...]:
-    """Browser directory 選択が付与する共通 root 名だけを除去する。
-
-    直下に SKILL.md が既にある入力は変更しない。全 file が同じ先頭 directory を共有し、
-    その directory を除去した結果だけが SKILL.md を root に置く場合に限定することで、通常の
-    nested resource directory を誤って source root と解釈しない。
-    """
-
-    if not files:
-        return files
-    safe_paths = tuple(_safe_skill_file_path(file.path) for file in files)
-    if "SKILL.md" in safe_paths:
-        return files
-    parts = tuple(PurePosixPath(path).parts for path in safe_paths)
-    common_root = parts[0][0]
-    if any(len(item) < 2 or item[0] != common_root for item in parts):
-        return files
-    stripped = tuple(PurePosixPath(*item[1:]).as_posix() for item in parts)
-    if "SKILL.md" not in stripped:
-        return files
-    return tuple(replace(file, path=path) for file, path in zip(files, stripped, strict=True))
-
-
-def _upload_text_source_files(
-    package: NormalizedSkillPackage, root: Path
-) -> tuple[InlineSkillFile, ...]:
-    """Parser が text と判定した file だけを DB snapshot 用の InlineSkillFile に戻す。
-
-    binary asset は snapshot に載せず object storage の bundle に委ねる。text/binary の判定は
-    parser を唯一の権威とし、ここでは複製しない。
-    """
-
-    text_files: list[InlineSkillFile] = []
-    for file in package.files:
-        if file.binary:
-            continue
-        # hash は raw bytes を対象にするため、read_text の newline 変換で CRLF を壊さない。
-        text = (root / file.path).read_bytes().decode("utf-8")
-        text_files.append(InlineSkillFile(path=file.path, content=text))
-    return tuple(text_files)
-
-
-async def _store_upload_bundle(
-    storage: FileStorage,
-    key_prefix: str,
-    files: Sequence[UploadSkillFile],
-    *,
-    authorize: Callable[[], Awaitable[None]],
-) -> None:
-    """原資格の短 transaction の間で raw bundle を書き、応答を原 byte と照合する。"""
-
-    targets: list[tuple[str, UploadSkillFile]] = []
-    for file in files:
-        relative = _safe_skill_file_path(file.path)
-        key = f"{key_prefix}/{relative}"
-        try:
-            if sanitize_object_key(key) != key:
-                raise FileStorageError("Object key must already be normalized")
-        except FileStorageError as error:
-            # 後半 file の不正 key で前半だけ PUT することを避け、全 target を先に検証する。
-            raise SkillImportError(
-                "invalid_file_path", "Skill source file path cannot be stored"
-            ) from error
-        targets.append((key, file))
-    for key, file in targets:
-        await authorize()
-        content_type = file.content_type or "application/octet-stream"
-        try:
-            stored = await storage.put(key, file.data, content_type=content_type)
-        except FileStorageError as error:
-            # SDK 失敗でも byte が残り得る。原資格を再検証し、共有 key の補償削除はしない。
-            await authorize()
-            raise SkillStorageUnavailableError("Skill source storage is unavailable") from error
-        await authorize()
-        if (
-            not isinstance(stored, StoredBlob)
-            or stored.key != key
-            or type(stored.size) is not int
-            or stored.size != len(file.data)
-            or stored.content_type != content_type
-            or stored.sha256 != f"sha256:{sha256_hex(file.data)}"
-        ):
-            raise SkillStorageUnavailableError("Skill source storage is unavailable")
-
-
-def _safe_skill_file_path(value: str) -> str:
-    """POSIX 形式の相対 file path だけを API input として受理する。"""
-
-    candidate = value.replace("\\", "/").strip()
-    path = PurePosixPath(candidate)
-    if (
-        path.is_absolute()
-        or PureWindowsPath(candidate).drive
-        or not candidate
-        or candidate.endswith("/")
-        or not candidate.isprintable()
-    ):
-        raise SkillImportError(
-            "invalid_file_path",
-            "Skill source file path must be a relative file path",
-            path=value,
-        )
-    # PurePath は dot/重複 separator を畳むため、正規化する前の segment で拒否する。
-    if any(part in {"", ".", ".."} for part in candidate.split("/")):
-        raise SkillImportError(
-            "invalid_file_path",
-            "Skill source file path must not contain dot segments",
-            path=value,
-        )
-    return path.as_posix()
-
-
-def _save_command(
-    *,
-    organization_id: UUID,
-    imported_by: UUID,
-    files: tuple[InlineSkillFile, ...],
-    preview: SkillPreview,
-    storage_uri: str | None = None,
-) -> SaveSkillPreviewCommand:
-    """Parser output の固定 field を persistence command へ抽出する。"""
-
-    package = preview.normalized_package
-    manifest = preview.runtime_manifest_draft
-    source = _mapping(package, "source")
-    metadata = _mapping(package, "metadata")
-    identity = _mapping(manifest, "identity")
-    compatibility = _mapping(manifest, "compatibility")
-    extensions = _mapping(manifest, "extensions")
-    diagnostics = compatibility.get("diagnostics")
-    if not isinstance(diagnostics, list) or not all(isinstance(item, dict) for item in diagnostics):
-        raise RuntimeError("RuntimeManifest diagnostics must be an object array")
-    confidence = compatibility.get("confidence")
-    if not isinstance(confidence, int | float):
-        raise RuntimeError("RuntimeManifest confidence must be numeric")
-    return SaveSkillPreviewCommand(
-        organization_id=organization_id,
-        imported_by=imported_by,
-        name=_string(metadata, "name"),
-        source_type=_string(source, "type"),
-        source_hash=_string(source, "content_hash"),
-        source_files=files,
-        interpreter_version=_string(identity, "interpreter_version"),
-        compatibility_level=_string(compatibility, "level"),
-        confidence=float(confidence),
-        diagnostics=tuple(cast(dict[str, Any], item) for item in diagnostics),
-        checksum=_string(extensions, "normalized_package_hash"),
-        preview=preview,
-        storage_uri=storage_uri,
-        source_file_index=_package_file_index_from_source(source),
-    )
-
-
-def _package_file_index_from_source(source: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
-    """Parser の source.files を型検証し、binary を含む file index を返す。"""
-
-    files = source.get("files")
-    if not isinstance(files, list) or not all(isinstance(item, dict) for item in files):
-        raise RuntimeError("Normalized package source.files must be an object array")
-    return tuple(dict(cast(dict[str, Any], item)) for item in files)
-
-
-def _storage_uri_prefix(storage_uri: str, bucket: str) -> str:
-    """保存時 bucket と一致する s3 URI から安全な object key prefix を取り出す。"""
-
-    parsed = urlsplit(storage_uri)
-    prefix = parsed.path.lstrip("/").rstrip("/")
-    if (
-        parsed.scheme != "s3"
-        or parsed.netloc != bucket
-        or not prefix
-        or parsed.query
-        or parsed.fragment
-    ):
-        raise SkillSourceIntegrityError("Stored SkillSource storage URI is invalid")
-    try:
-        return sanitize_object_key(prefix)
-    except FileStorageError as error:
-        raise SkillSourceIntegrityError("Stored SkillSource storage URI is invalid") from error
-
-
-def _validate_source_file_index(item: Mapping[str, Any], seen: set[str]) -> tuple[str, int, str]:
-    """Persisted file index の path、size、checksum を検証し、重複を拒否する。"""
-
-    path = item.get("path")
-    size = item.get("size")
-    checksum = item.get("sha256")
-    if not isinstance(path, str) or isinstance(size, bool) or not isinstance(size, int) or size < 0:
-        raise SkillSourceIntegrityError("Stored SkillSource file manifest is invalid")
-    if not isinstance(checksum, str) or not checksum.startswith("sha256:"):
-        raise SkillSourceIntegrityError("Stored SkillSource file manifest is invalid")
-    try:
-        normalized = _safe_skill_file_path(path)
-    except SkillImportError as error:
-        raise SkillSourceIntegrityError("Stored SkillSource file manifest is invalid") from error
-    if normalized in seen:
-        raise SkillSourceIntegrityError("Stored SkillSource file manifest contains duplicates")
-    seen.add(normalized)
-    return normalized, size, checksum
-
-
-def _mapping(value: Mapping[str, Any], key: str) -> Mapping[str, Any]:
-    """Parser output の object field を型付きで取得する。"""
-
-    nested = value.get(key)
-    if not isinstance(nested, dict):
-        raise RuntimeError(f"Parser output field must be an object: {key}")
-    return cast(dict[str, Any], nested)
-
-
-def _string(value: Mapping[str, Any], key: str) -> str:
-    """Parser output の必須 string field を取得する。"""
-
-    item = value.get(key)
-    if not isinstance(item, str):
-        raise RuntimeError(f"Parser output field must be a string: {key}")
-    return item
 
 
 def _json_pointer(path: Any) -> str:

@@ -26,13 +26,7 @@ Schema 不验证授权/并发，OpenAPI 一致性不证明声明覆盖真实响�
 
 ## 遇到未接齐的交付链
 
-| 断点 | 接续动作 |
-| --- | --- |
-| DTO/model 有，route 未调用 | 接装配与用例，不把字段当 API |
-| route 有，OpenAPI 缺失 | 核对后生成，不重造 API |
-| API 有，页面缺失 | 接 validator/barrel，再验用户流程 |
-| example 通过，一致性失败 | 保留两项结论，查生产与声明差异 |
-| 单模块通过，合跑收集失败 | 修 fixture/import 后重跑同组合 |
+从实际 route、装配和消费者定位缺口。DTO、example 或单模块测试存在，都不等于用户流程已接通；一致性或合跑失败须修复原断点，不能关闭校验来消除错误。
 
 读检查不启动 lifespan、不连 DB、不回写。Backend 依赖就绪后，在 `SKM/` 执行 `python3 scripts/validate_contracts.py`；在 `SKM/backend/` 执行：
 
@@ -41,7 +35,7 @@ python3 -m pytest -p no:cacheprovider -o addopts= -q \
   tests/contracts/test_contracts.py::test_exported_openapi_is_current
 ```
 
-文档整理只报告断点。获准改 API 后才在 `SKM/` 运行 `python3 scripts/export_openapi.py`，并同步消费者和测试；不关校验或改 example 掩盖失败。
+公开 API 变更时在 `SKM/` 运行 `python3 scripts/export_openapi.py`，并同步消费者和测试；只读审查和文档整理不重导出。
 
 ## 历史数据兼容不等于前后端版本兼容
 
@@ -55,4 +49,4 @@ python3 -m pytest -p no:cacheprovider -o addopts= -q \
 ## 怎样记录验证结论
 
 按本次范围报告文档、契约、Backend/Web、真实事务与部署/模型结果，明确 mock、失败、skip 和未执行。
-真实 DB/外部 write 只用获准的隔离目标；断点写计划，不追加历史日志或借用旧通过次数。
+真实 DB/外部 write 只用获准的隔离目标。持续能力缺口更新计划，临时诊断留在交付结果，不追加历史文档或借用旧通过次数。

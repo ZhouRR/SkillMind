@@ -7,7 +7,7 @@ import asyncio
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from check_document_management import DOCUMENT, SECOND, document
+from check_document_management import DOCUMENT, SECOND, document, row_menu
 from check_document_upload import UploadMockApi, upload_request
 from check_projects import NEXT_PROJECT, PROJECT, messages, settle
 from playwright.async_api import Browser, Page, Route, async_playwright, expect
@@ -66,7 +66,7 @@ async def selection_layout(page: Page, width: int) -> None:
     toolbar = page.locator(".documentSelectionToolbar")
     centers = await toolbar.evaluate("""element => {
       const selectors = ['label', 'input[type="checkbox"]', '[role="status"]', 'button'];
-      return selectors.map(selector => {
+      return selectors.filter(selector => element.querySelector(selector)).map(selector => {
         const box = element.querySelector(selector).getBoundingClientRect();
         return box.top + box.height / 2;
       });
@@ -93,11 +93,14 @@ async def scenario(
     name = f"{mode}-{language}-{width}-{theme}"
     try:
         await page.goto(f"{url}#/documents?project={PROJECT}")
-        labels = (await messages(page, language))["documentsPanel"]
+        catalog = await messages(page, language)
+        labels = catalog["documentsPanel"]
         await expect(page.locator(".documentItem")).to_have_count(3)
         await selection_layout(page, width)
+        await expect(page.locator(".documentSelectionToolbar").get_by_role("button")).to_have_count(0)
         if mode == "upload":
-            await page.get_by_role("button", name=labels["uploadHere"], exact=True).click()
+            actions = await row_menu(page, page.locator(".docFolder > summary").first)
+            await actions.get_by_role("menuitem", name=labels["uploadHere"], exact=True).click()
             destination = page.get_by_role("combobox", name=labels["targetFolder"], exact=True)
             await expect(destination).to_have_value("specs")
             await destination.fill("specs/new/nested")
@@ -118,11 +121,13 @@ async def scenario(
             await page.get_by_role("button", name=labels["clearSelection"], exact=True).click()
             await expect(page.locator(".documentItem input:checked")).to_have_count(0)
             await page.get_by_role("checkbox", name=labels["selectAll"], exact=True).check()
-            action = page.get_by_role("button", name=labels["deleteSelected"], exact=True)
+            action = page.locator(".documentSelectionToolbar").get_by_role(
+                "button", name=catalog["fileManagement"]["trashAction"], exact=True
+            )
             await action.evaluate("button => { button.click(); button.click(); }")
             await expect(page.get_by_label(labels["uploadFilesAria"], exact=True)).to_be_disabled()
             confirm = page.get_by_role("dialog").get_by_role(
-                "button", name=labels["remove"], exact=True
+                "button", name=catalog["fileManagement"]["trashAction"], exact=True
             )
             await confirm.focus()
             await page.keyboard.press("Enter")

@@ -124,7 +124,8 @@ async def check(url: str, output: Path) -> None:
                     assert len(api.secret_updates) == 1
                     assert api.secret_updates[0]["secret_value"] == "  replacement-fixture  "
                     assert len(api.updates) == 2
-                    await panel.get_by_role("button", name=labels["delete"], exact=True).click()
+                    await panel.locator('button[aria-haspopup="menu"]').click()
+                    await page.get_by_role("menuitem", name=labels["delete"], exact=True).click()
                     await dialog.get_by_role("button", name=labels["delete"], exact=True).click()
                     await expect(dialog.get_by_role("alert")).to_contain_text(labels["resourceInUse"])
                     # 削除の失敗は確認中の dialog だけへ表示し、背面へ重複しない。
@@ -134,7 +135,8 @@ async def check(url: str, output: Path) -> None:
                     await page.screenshot(path=str(output / f"resource-edit-{language}.png"))
                     await dialog.get_by_role("button", name=labels["cancel"], exact=True).click()
                     api.refuse_delete = False
-                    await panel.get_by_role("button", name=labels["delete"], exact=True).click()
+                    await panel.locator('button[aria-haspopup="menu"]').click()
+                    await page.get_by_role("menuitem", name=labels["delete"], exact=True).click()
                     await dialog.get_by_role("button", name=labels["delete"], exact=True).click()
                     await expect(dialog).to_have_count(0)
                     await expect(panel.get_by_text("Review DB", exact=True)).to_have_count(0)
@@ -147,7 +149,8 @@ async def check(url: str, output: Path) -> None:
                     await expect(dialog).to_have_count(0)
                     assert "secret_value" not in api.secret_updates[1]
                     row = advanced.locator(".resourceItem").filter(has_text="Renamed password")
-                    await row.get_by_role("button", name=labels["delete"], exact=True).click()
+                    await row.locator('button[aria-haspopup="menu"]').click()
+                    await page.get_by_role("menuitem", name=labels["delete"], exact=True).click()
                     await dialog.get_by_role("button", name=labels["delete"], exact=True).click()
                     await expect(dialog).to_have_count(0)
                     assert api.deletes == ["integrations", "secret-references"]

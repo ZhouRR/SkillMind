@@ -7,8 +7,14 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from skillmind.agent.context_builder import ContractStore, document_convert_tool_definition
+
+from skillmind.agent.contract_store import (
+    ContractStore,
+)
 from skillmind.agent.document_provider import DocumentConvertProvider
+from skillmind.agent.tool_catalog import (
+    document_convert_tool_definition,
+)
 from skillmind.agent.tool_gateway import ToolRegistry
 from skillmind.artifacts.domain import ArtifactIntegrityError
 from skillmind.artifacts.repository import ArtifactRepository

@@ -289,6 +289,9 @@ async def scenario(
         catalog = await messages(page, language)
         labels = catalog["runResult"]["artifacts"]
         panel = page.locator(".runArtifacts")
+        # 履歴詳細は会話 tab から始まる。添付・検証範囲は結果 tab で確認する。
+        await expect(page.locator(f'.runFacts dd[title="{RUN}"]')).to_be_visible()
+        await page.get_by_role("tab", name=catalog["workspace"]["tabResult"], exact=True).click()
         if mode in ("v1-conflict", "v2-missing-flag"):
             await expect(page.locator(f'.runFacts dd[title="{RUN}"]')).to_be_visible()
             await page.get_by_role(
@@ -347,6 +350,7 @@ async def scenario(
                         await expect(
                             page.locator(".workspace .runFacts dd.mono")
                         ).to_have_attribute("title", NEXT_RUN)
+                        await page.get_by_role("tab", name=catalog["workspace"]["tabResult"], exact=True).click()
                         await expect(panel.locator(".artifactDownload")).to_have_count(0)
                         await expect(buttons).to_have_count(2)
                         assert api.index_calls[-1] == (NEXT_PROJECT, NEXT_RUN)
@@ -358,6 +362,7 @@ async def scenario(
                         await expect(
                             page.locator(".workspace .runFacts dd.mono")
                         ).to_have_attribute("title", NEXT_RUN)
+                        await page.get_by_role("tab", name=catalog["workspace"]["tabResult"], exact=True).click()
                         await expect(panel.locator(".artifactDownload")).to_have_count(0)
                         await expect(buttons).to_have_count(2)
                         assert api.index_calls[-1] == (PROJECT, NEXT_RUN)
@@ -423,6 +428,7 @@ async def scenario(
                         urls["revoked"]
                     )
                     await page.reload()
+                    await page.get_by_role("tab", name=catalog["workspace"]["tabResult"], exact=True).click()
                     await expect(page.locator(".artifactList > li")).to_have_count(2)
                     assert api.content_calls == [(PROJECT, RUN, ARTIFACT)]
                 if mode.startswith(("stream-", "headers-")):

@@ -72,7 +72,7 @@ def _check() -> str:
 def test_0037_matches_original_0014_plus_nullable_columns_without_history_rewrites(
     migration: ModuleType, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """0014 の既存形を保ち、後続 0038 の列/FK を除いた 0037 到達形と照合する。"""
+    """0014 の既存形を保ち、後続 revision の追加を除いた 0037 到達形と照合する。"""
 
     original = _migration("0014_project_documents.py")
     operations = Mock()
@@ -107,16 +107,22 @@ def test_0037_matches_original_0014_plus_nullable_columns_without_history_rewrit
         key for key in expected["foreign_keys"]
         if not key[1].startswith(("document_upload_intents.", "document_effect_uploads."))
     }
+    # 0054 の回収箱列/FK・部分 index 化を除き、0037 当時の全面一意制約を比較する。
+    for column in ("deleted_at", "deleted_by", "deleted_by_run_id"):
+        expected["columns"].pop(column)
+    expected["foreign_keys"].remove(("deleted_by_run_id", "runs.id", "RESTRICT"))
+    expected["unique"].add(("project_id", "folder", "name"))
     assert _contract(migrated) == expected
     assert {str(item.name) for item in migrated.constraints} == {
         str(item.name) for item in _TABLE.constraints
         if item.name not in {
             "fk_project_documents_upload_intent", "fk_project_documents_effect_upload",
-            "ck_project_documents_single_upload_origin",
+            "ck_project_documents_single_upload_origin", "fk_documents_deleted_by_run",
         }
-    }
+    } | {"uq_project_documents_project_folder_name"}
     assert {
         (str(item.name), tuple(column.name for column in item.columns)) for item in _TABLE.indexes
+        if item.name != "uq_project_documents_project_folder_name"
     } == {
         (operation.args[0], tuple(operation.args[2]))
         for operation in operations.create_index.call_args_list

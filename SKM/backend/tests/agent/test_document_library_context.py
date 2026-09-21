@@ -10,12 +10,17 @@ from uuid import uuid4
 
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
+
 from skillmind.agent.context_builder import (
-    ContractStore,
     ProductionRunContextBuilder,
-    create_run_tool_registry,
+)
+from skillmind.agent.contract_store import (
+    ContractStore,
 )
 from skillmind.agent.task_brief import _resources
+from skillmind.agent.tool_catalog import (
+    create_run_tool_registry,
+)
 from skillmind.agent.workspace import WorkspaceManager
 from skillmind.agent.workspace_materializer import WorkspaceMaterializer
 from skillmind.core.hashing import canonical_json

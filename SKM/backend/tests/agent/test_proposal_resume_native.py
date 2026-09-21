@@ -15,9 +15,14 @@ import pytest
 from claude_agent_sdk.types import SessionStore
 
 from skillmind.agent.claude import ClaudeRuntimeConfiguration
-from skillmind.agent.context_builder import ContractStore, _change_propose_tool_definition
+from skillmind.agent.contract_store import (
+    ContractStore,
+)
 from skillmind.agent.domain import AgentEventType, AgentSessionRef, ResumeContext
 from skillmind.agent.engine import ClaudeAgentSdkEngine
+from skillmind.agent.tool_catalog import (
+    _change_propose_tool_definition,
+)
 from skillmind.agent.tool_gateway import ToolRegistry
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.runs.proposal_continuation import ResolvedProposal
