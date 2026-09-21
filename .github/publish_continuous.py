@@ -47,7 +47,7 @@ for path in sorted(set(expected) | {'docs/index.html'}):
     assert blob['sha'] == hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
     entries.append({'path': path, 'mode': '100644', 'type': 'blob', 'sha': blob['sha']})
 for path in ('.github/prepare_continuous.py', '.github/publish_continuous.py',
-             '.github/workflows/continuous-execution-review.yml'):
+             '.github/review_continuous.py', '.github/workflows/continuous-execution-review.yml'):
     entries.append({'path': path, 'mode': '100644', 'type': 'blob', 'sha': None})
 tree = api('git/trees', {'base_tree': api('git/commits/' + parent)['tree']['sha'], 'tree': entries})
 commit = api('git/commits', {'tree': tree['sha'], 'parents': [parent], 'message':
