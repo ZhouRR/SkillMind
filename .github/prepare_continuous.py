@@ -54,6 +54,9 @@ new_python = [p for p in python_paths if subprocess.run(['git', 'cat-file', '-e'
 ruff = [sys.executable, '-m', 'ruff']
 subprocess.run([*ruff, 'check', '--config', 'SKM/backend/pyproject.toml', '--select', 'I,F401', '--fix', *python_paths], check=True)
 subprocess.run([*ruff, 'format', '--config', 'SKM/backend/pyproject.toml', *new_python], check=True)
+subprocess.run([sys.executable, '.github/review_continuous.py'], check=True)
+subprocess.run([*ruff, 'check', '--config', 'SKM/backend/pyproject.toml', '--select', 'I,F401', '--fix', *python_paths], check=True)
+subprocess.run([*ruff, 'format', '--config', 'SKM/backend/pyproject.toml', *new_python], check=True)
 subprocess.run([*ruff, 'check', '--config', 'SKM/backend/pyproject.toml', '--select', 'F,I', *python_paths], check=True)
 root = Path(os.environ['RUNNER_TEMP'])
 (root / 'continuous-paths.json').write_text(json.dumps(paths))
