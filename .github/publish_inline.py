@@ -47,7 +47,7 @@ for path in sorted(set(expected) | {'docs/index.html'}):
     assert blob['sha'] == hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
     entries.append({'path': path, 'mode': '100644', 'type': 'blob', 'sha': blob['sha']})
 for path in ('.github/prepare_inline.py', '.github/publish_inline.py', '.github/repair_inline.py',
-             '.github/workflows/inline-effect-review.yml'):
+             '.github/finish_inline.py', '.github/workflows/inline-effect-review.yml'):
     if Path(path).exists():
         entries.append({'path': path, 'mode': '100644', 'type': 'blob', 'sha': None})
 tree = api('git/trees', {'base_tree': api('git/commits/' + parent)['tree']['sha'], 'tree': entries})
