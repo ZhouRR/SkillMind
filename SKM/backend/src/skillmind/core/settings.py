@@ -57,6 +57,8 @@ class Settings(BaseSettings):
     document_writes_enabled: bool = False
     git_writes_enabled: bool = False
     mcp_tools_enabled: bool = False
+    # 段階公開。未設定なら従来の deferred 経路を維持する。
+    inline_effects_enabled: bool = False
     outbox_batch_size: int = Field(default=20, ge=1, le=100)
     run_lease_seconds: int = Field(default=60, ge=30, le=300)
     run_max_attempts: int = Field(default=3, ge=1, le=10)

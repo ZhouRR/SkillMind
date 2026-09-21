@@ -756,3 +756,36 @@ async def test_native_warm_resume_replaces_gateway_without_restarting_client(tmp
         assert len(requests) == 4
     assert not engine._active
     assert clients[0]._proc is None
+
+
+async def test_native_inline_effect_returns_receipt_without_interrupting_turn(tmp_path, monkeypatch, endpoint):
+    """固定 native SDK が一つの turn 内で原回执を受取り、次のモデル応答へ進む。"""
+    from skillmind.effects.inline import InlineEffectResult
+    from tests.runs.test_effect_continuation import receipt
+    server, requests = endpoint
+    _local_client(monkeypatch, server)
+    contracts = Path(__file__).resolve().parents[3] / "contracts"
+    registry = ToolRegistry((_change_propose_tool_definition(ContractStore(contracts)),))
+    base = _context(tmp_path, _registry(CsvIssueProvider()))
+    context = replace(base, model="gpt-5.6-terra",
+        tools=(registry.resolve_unbound("change.propose/v1", execution_profile="GUIDED"),),
+        permission_snapshot={"allowed_capabilities":["change.propose/v1"]})
+    backend = MemoryTranscriptBackend()
+    calls = []
+    async def complete(arguments, call_id, session_id):
+        """このテストは native 接線のみ。DB/apply の保証は repository/Provider 回帰で確認する。"""
+        calls.append((call_id,session_id))
+        return InlineEffectResult(uuid4(),receipt())
+    def runtime(run):
+        """各 Run にだけ completion callback を配線する。"""
+        value=registry.build_gateway_runtime(run,audit_writer=MemoryAuditWriter())
+        return replace(value,mcp=replace(value.mcp,on_inline_effect=complete))
+    engine=CodexAgentSdkEngine(configuration=CodexRuntimeConfiguration("gpt-5.6-terra","max",tmp_path/"codex"),
+        runtime_factory=runtime,transcript_backend=backend)
+    async with asyncio.timeout(30):
+        events=[event async for event in engine.execute(context)]
+    assert events[-1].event_type is AgentEventType.RESULT_COMPLETED, [e.payload for e in events]
+    assert sum(e.event_type is AgentEventType.SESSION_STARTED for e in events)==1
+    assert not any(e.event_type is AgentEventType.CHANGE_PROPOSED for e in events)
+    assert any(e.event_type is AgentEventType.EFFECT_APPLIED for e in events)
+    assert len(calls)==1 and len(requests)==2

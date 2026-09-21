@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import secrets
 import socket
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
@@ -21,6 +22,7 @@ from starlette.types import Receive, Scope, Send
 from skillmind.agent.domain import AgentEventType, RunContext
 from skillmind.agent.tool_gateway import RunToolRuntime
 from skillmind.agent.tool_policy import ToolExecutionPolicy
+from skillmind.effects.inline import inline_success
 
 BridgeEvent = tuple[AgentEventType, dict[str, Any]]
 DeferredHandler = Callable[[str, Mapping[str, Any], str, str], Awaitable[None]]
@@ -129,6 +131,25 @@ class CodexToolBridge:
                 # Provider を呼ばない。原要求を保存してから native turn を停止し、Worker が
                 # 通常の parse/transaction で Interaction/Proposal を作成する。
                 await self._on_deferred(name, arguments, call_id, self.session_id)
+                inline_proposal_id = None
+                if (name == _PREFIX + "change_propose_v1"
+                    and self.runtime.mcp.on_inline_effect is not None):
+                    try:
+                        inline = await self.runtime.mcp.on_inline_effect(arguments, call_id, self.session_id)
+                    except ValueError:
+                        return _tool_error("Controlled operation does not match its frozen contract or scope.")
+                    if inline is not None:
+                        inline_proposal_id = str(inline.proposal_id)
+                        if inline.receipt is not None:
+                            # 事実は DB に確定済み。Engine が順序を採番して通常 event を配送する。
+                            await self.events.put((AgentEventType.EFFECT_APPLIED, {
+                                "proposal_id": inline_proposal_id,
+                                "proposal_ref": inline.receipt["proposal_ref"],
+                                "effect_execution_id": inline.receipt["effect_execution_id"],
+                                "status": "APPLIED", "before_ref": inline.receipt["before_ref"],
+                                "after_ref": inline.receipt["after_ref"], "delivery": "INLINE",
+                            }))
+                            return CallToolResult(content=[TextContent(type="text", text=json.dumps(inline_success(inline.receipt), ensure_ascii=False))])
                 event_type = (
                     AgentEventType.CHANGE_PROPOSED
                     if name == _PREFIX + "change_propose_v1"
@@ -143,6 +164,7 @@ class CodexToolBridge:
                     event_type,
                     {
                         key: arguments,
+                        **({"inline_proposal_id": inline_proposal_id} if inline_proposal_id else {}),
                         "deferred_tool": {
                             "tool_use_id": call_id,
                             "tool_name": name,

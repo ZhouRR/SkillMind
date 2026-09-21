@@ -902,6 +902,8 @@ class RunAttempt(IdentityMixin, TimestampMixin, Base):
         ),
     )
 
+    # 逆参照の hint。使用時には Proposal の Run/Attempt/owner を全て再検証する。
+    inline_proposal_id: Mapped[UUID | None] = mapped_column(nullable=True)
     run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="RESTRICT"), index=True)
     # 歴史 Run は null のまま読み、Release G 以降の新規 Attempt だけが明示 Segment を持つ。
     run_segment_id: Mapped[UUID | None] = mapped_column(
@@ -1487,6 +1489,8 @@ class ChangeProposal(IdentityMixin, TimestampMixin, Base):
         ),
     )
 
+    # SDK への直接交付の所有者。権限は原 Attempt/批准の現在値で再検証する。
+    inline_owner_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     proposal_ref: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     project_id: Mapped[UUID] = mapped_column(
         ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True

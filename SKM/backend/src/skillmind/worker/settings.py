@@ -9,6 +9,7 @@ import os
 import socket
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar, cast
 from uuid import UUID
@@ -117,6 +118,7 @@ from skillmind.storage.factory import (
 )
 from skillmind.worker.effects import ApprovedEffectExecutor
 from skillmind.worker.executor import AgentRunExecutor, RunExecutor
+from skillmind.worker.inline_effects import InlineEffectCoordinator
 from skillmind.worker.tool_authority import require_tool_authority
 
 logger = logging.getLogger(__name__)
@@ -283,13 +285,19 @@ async def startup(ctx: dict[str, Any], *, maintenance_only: bool = False) -> Non
         """現在の Worker claim を一度だけ捕捉し、別 Run の audit writer を共有しない。"""
 
         authority = require_tool_authority(context)
-        return registry.build_gateway_runtime(
+        runtime = registry.build_gateway_runtime(
             context,
             audit_writer=PostgresToolAuditWriter(
                 ctx["database_session_factory"], claimed_run=authority.claimed,
                 authority_check=authority.require_active,
             ),
         )
+        executor = ctx.get("effect_executor")
+        if (settings.agent_sdk == "codex" and getattr(settings, "inline_effects_enabled", False)
+            and isinstance(executor, ApprovedEffectExecutor)):
+            handler = InlineEffectCoordinator(ctx["run_service"], executor, context, authority)
+            runtime = replace(runtime, mcp=replace(runtime.mcp, on_inline_effect=handler.invoke))
+        return runtime
 
     def create_authorized_runtime(context: RunContext) -> RunMcpRuntime:
         """Claude は同じ認可済み Gateway の in-process MCP adapter を使う。"""

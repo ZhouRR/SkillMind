@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -15,7 +16,7 @@ from skillmind.effects.domain import (
     ChangeProposalValidationError,
     EffectRiskLevel,
 )
-from skillmind.effects.operation_policy import operation_authorization_key
+from skillmind.effects.operation_policy import operation_authorization_key, operation_risk
 
 CHANGE_PROPOSE_CAPABILITY = "change.propose/v1"
 CHANGE_PROPOSE_SDK_NAME = "mcp__skillmind__change_propose_v1"
@@ -37,14 +38,6 @@ CHANGE_PROPOSE_REQUEST_SCHEMA: dict[str, Any] = {
         "precondition",
         "summary",
         "evidence_refs",
-        "risk_level",
-        "reversible",
-        "rollback",
-        "verification",
-        "idempotency_key",
-        "expires_in_seconds",
-        "continuation_mode",
-        "checkpoint",
     ],
     "properties": {
         "effect_intent_key": {"$ref": "#/$defs/key"},
@@ -73,11 +66,7 @@ CHANGE_PROPOSE_REQUEST_SCHEMA: dict[str, Any] = {
                 "additionalProperties": False,
                 "required": ["path", "action", "value"],
                 "properties": {
-                    "path": {
-                        "type": "string",
-                        "pattern": "^/[a-zA-Z0-9_.~/-]+$",
-                        "maxLength": 512,
-                    },
+                    "path": {"type": "string", "pattern": "^/[a-zA-Z0-9_.~/-]+$", "maxLength": 512},
                     "action": {"enum": ["SET", "REMOVE", "APPEND"]},
                     "value": {},
                 },
@@ -124,20 +113,13 @@ CHANGE_PROPOSE_REQUEST_SCHEMA: dict[str, Any] = {
                 },
             },
         },
-        "idempotency_key": {
-            "type": "string",
-            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{7,127}$",
-        },
+        "idempotency_key": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{7,127}$"},
         "expires_in_seconds": {"type": "integer", "minimum": 300, "maximum": 86400},
         "continuation_mode": {"enum": ["RESUME", "FORK", "REPLACE"]},
         "checkpoint": {"$ref": "#/$defs/checkpoint"},
     },
     "$defs": {
-        "key": {
-            "type": "string",
-            "pattern": "^[a-z][a-z0-9_.-]*$",
-            "maxLength": 128,
-        },
+        "key": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]*$", "maxLength": 128},
         "checkpoint": {
             "type": "object",
             "additionalProperties": False,
@@ -180,11 +162,44 @@ CHANGE_PROPOSE_REQUEST_SCHEMA: dict[str, Any] = {
 
 
 def parse_change_proposal_request(
-    value: Mapping[str, Any], *, now: datetime | None = None
+    value: Mapping[str, Any], *, now: datetime | None = None, request_identity: str | None = None
 ) -> ChangeProposalDraft:
     """Agent の deferred Tool input を Proposal candidate へ検証・正規化する。"""
 
-    payload = dict(value)
+    original = deepcopy(dict(value))
+    payload = deepcopy(original)
+    if not Draft202012Validator(CHANGE_PROPOSE_REQUEST_SCHEMA).is_valid(original):
+        raise ChangeProposalValidationError("ChangeProposal request did not match its contract")
+    # モデルは業務目的と正確な値/根拠を指定し、既知の管理項目は platform が生成する。
+    # request identity は SDK/Worker 由来。同じ内容の別操作を hash だけで重複除去しない。
+    paths = [
+        str(item.get("path", ""))
+        for item in payload.get("changes", [])
+        if isinstance(item, Mapping)
+    ]
+    if "idempotency_key" not in payload:
+        if not request_identity:
+            raise ChangeProposalValidationError("Platform request identity is required")
+        payload["idempotency_key"] = "sdk:" + sha256_hex(request_identity)
+    payload.setdefault("risk_level", operation_risk(str(payload.get("capability_version", ""))))
+    payload.setdefault("reversible", False)
+    payload.setdefault(
+        "rollback",
+        {"description": "No automatic compensation; preserve the original operation receipt."},
+    )
+    payload.setdefault("verification", {"method": "READ_BACK", "paths": paths})
+    payload.setdefault("expires_in_seconds", 3600)
+    payload.setdefault("continuation_mode", "RESUME")
+    payload.setdefault(
+        "checkpoint",
+        {
+            "summary": payload.get("summary", "Continue the original task."),
+            "confirmed_facts": [],
+            "evidence_refs": [],
+            "artifact_refs": [],
+            "change_proposal_refs": [],
+        },
+    )
     errors = sorted(
         Draft202012Validator(CHANGE_PROPOSE_REQUEST_SCHEMA).iter_errors(payload),
         key=lambda error: tuple(str(part) for part in error.absolute_path),
@@ -204,7 +219,7 @@ def parse_change_proposal_request(
         )
     checkpoint = dict(payload["checkpoint"])
     current = (now or datetime.now(UTC)).astimezone(UTC)
-    fingerprint = sha256_hex(canonical_json(payload))
+    fingerprint = sha256_hex(canonical_json(original))
     return ChangeProposalDraft(
         effect_intent_key=str(
             payload.get("effect_intent_key")

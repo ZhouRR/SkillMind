@@ -513,6 +513,7 @@ class CodexAgentSdkEngine:
                 if entry.get("type") == "codex_deferred"
                 and entry.get("tool_name") == "mcp__skillmind__change_propose_v1"
                 and resolved.matches(entry["arguments"], parent.session_id)
+                and (resolved.tool_use_id is None or entry.get("tool_use_id") == resolved.tool_use_id)
             ]
             if len(matches) != 1:
                 raise ValueError("Original Codex proposal identity is missing or ambiguous")

@@ -32,7 +32,7 @@ from skillmind.integrations.domain import ResolvedSecretReference
 from skillmind.integrations.repository import IntegrationRepository
 from skillmind.integrations.secrets import DeploymentSecretResolver
 from skillmind.projects.domain import ProjectArchivedError, ProjectNotFoundError
-from skillmind.runs.domain import lease_token_hash
+from skillmind.runs.domain import ClaimedRun, lease_token_hash
 from skillmind.runs.repository import RunRepository
 
 
@@ -93,6 +93,7 @@ class EffectService:
         worker_id: str,
         lease_seconds: int,
         max_attempts: int,
+        inline_parent: ClaimedRun | None = None,
     ) -> ClaimedEffectExecution | None:
         """Raw token を返し、database には hash だけを保存して effect を claim する。"""
 
@@ -108,6 +109,7 @@ class EffectService:
                 lease_token_hash_value=lease_token_hash(lease_token),
                 lease_seconds=lease_seconds,
                 max_attempts=max_attempts,
+                **({"inline_parent": inline_parent} if inline_parent is not None else {}),
             )
 
     async def pending_effect_for_attempt(self, *, run_id: UUID, attempt_id: UUID) -> UUID | None:

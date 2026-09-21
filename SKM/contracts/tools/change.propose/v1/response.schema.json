@@ -4,24 +4,145 @@
   "title": "change.propose/v1 response",
   "type": "object",
   "additionalProperties": false,
-  "required": ["status", "deferred"],
+  "required": [
+    "status",
+    "deferred"
+  ],
   "properties": {
-    "status": { "const": "success" },
-    "deferred": { "type": "boolean" },
-    "proposal_ref": { "type": "string", "pattern": "^cp_[a-zA-Z0-9_-]+$" },
-    "outcome": { "enum": ["APPLIED", "REJECTED", "EXPIRED", "STALE", "FAILED", "VERIFICATION_FAILED"] },
-    "continuation_prompt": { "type": "string", "minLength": 1 },
-    "task_brief_checksum": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "status": {
+      "const": "success"
+    },
+    "deferred": {
+      "type": "boolean"
+    },
+    "proposal_ref": {
+      "type": "string",
+      "pattern": "^cp_[a-zA-Z0-9_-]+$"
+    },
+    "outcome": {
+      "enum": [
+        "APPLIED",
+        "REJECTED",
+        "EXPIRED",
+        "STALE",
+        "FAILED",
+        "VERIFICATION_FAILED"
+      ]
+    },
+    "continuation_prompt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task_brief_checksum": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
     "evidence_refs": {
-      "type": "array", "minItems": 1, "uniqueItems": true,
-      "items": { "type": "string", "pattern": "^ev_[a-zA-Z0-9_-]+$" }
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^ev_[a-zA-Z0-9_-]+$"
+      }
+    },
+    "delivery": {
+      "const": "INLINE"
+    },
+    "effect_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "effect_execution_id",
+        "proposal_ref",
+        "capability_version",
+        "status",
+        "after_ref",
+        "after_content_hash",
+        "after",
+        "verification"
+      ],
+      "properties": {
+        "effect_execution_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "proposal_ref": {
+          "type": "string",
+          "pattern": "^cp_[a-zA-Z0-9_-]+$"
+        },
+        "capability_version": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$"
+        },
+        "status": {
+          "const": "APPLIED"
+        },
+        "before_ref": {
+          "type": "string",
+          "pattern": "^ev_[a-zA-Z0-9_-]+$"
+        },
+        "after_ref": {
+          "type": "string",
+          "pattern": "^ev_[a-zA-Z0-9_-]+$"
+        },
+        "after_content_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "after": {
+          "type": "object"
+        },
+        "verification": {
+          "type": "object"
+        }
+      }
     }
   },
   "oneOf": [
-    { "properties": { "deferred": { "const": true } }, "maxProperties": 2 },
     {
-      "properties": { "deferred": { "const": false } },
-      "required": ["proposal_ref", "outcome", "continuation_prompt", "task_brief_checksum", "evidence_refs"]
+      "properties": {
+        "deferred": {
+          "const": true
+        }
+      },
+      "maxProperties": 2
+    },
+    {
+      "properties": {
+        "deferred": {
+          "const": false
+        }
+      },
+      "required": [
+        "proposal_ref",
+        "outcome",
+        "continuation_prompt",
+        "task_brief_checksum",
+        "evidence_refs"
+      ],
+      "not": {
+        "required": [
+          "delivery"
+        ]
+      }
+    },
+    {
+      "properties": {
+        "deferred": {
+          "const": false
+        },
+        "outcome": {
+          "const": "APPLIED"
+        }
+      },
+      "required": [
+        "delivery",
+        "effect_result",
+        "proposal_ref",
+        "outcome",
+        "evidence_refs"
+      ]
     }
   ]
 }

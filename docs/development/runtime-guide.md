@@ -65,4 +65,16 @@
 
 本地/只读短序列由 `agent/tool_sequence.py` 经原 `ToolGateway` 执行。注册项必须显式 `sequence_safe`，子工具仍须在原 Run 冻结集合中；改变注册不扩大历史权限。取消传播、未决不重放，外部写入与控制工具不能进入此序列。
 
-Codex 的 `agent/warm_codex.py` 只在同一 Worker job 的原 Run 内复用 transport，绝不复用 Tool 权限或跨用户会话。`claim_for_execution(expected_previous=...)` 在原 Run 锁内校验相邻 Segment、原 Effect 和自动批准，仍经普通 claim 创建新 Attempt。回收及跨 Worker 处理保留原 Outbox。直接回执与多写操作序列仍未交付，不以暖续行混称。
+Codex 的 `agent/warm_codex.py` 只在同一 Worker job 的原 Run 内复用 transport，绝不复用 Tool 权限或跨用户会话。`claim_for_execution(expected_previous=...)` 在原 Run 锁内校验相邻 Segment、原 Effect 和自动批准，仍经普通 claim 创建新 Attempt。回收及跨 Worker 处理保留原 Outbox。可选的直接回执见下节，它与暖续行分别验收；多写操作序列仍未交付。
+
+## 自动批准操作的直接回执
+
+`SKILLMIND_INLINE_EFFECTS_ENABLED` 默认关闭；数据库迁移 `0056_inline_effect_owner` 随正常部署执行后，可在隔离验证通过的 Codex Worker 上启用。未启用、无原 Run 自动批准同意、不支持分阶段授权或要求非 RESUME 的操作保留原延期路径，不新增用户确认。Claude 继续使用原延期方式。
+
+`change.propose/v1` 保留业务目标、修改、前提、说明与依据；管理字段可省略。平台按原 SDK 调用身份生成幂等键（不按内容去重），补充风险下限、回读路径和默认恢复字段；显式业务条件不覆盖。提案、批准、Effect 与原 ToolCall 仍逐项保存。
+
+启用时，当前原 Attempt 保持 RUNNING，通过共享 `ApprovedEffectExecutor` 认领并核验自动批准操作，只有原回执提交后才作为当前工具结果返回。不跳过权限、lease、读回或业务检查，也不承诺外部操作恰好一次。数据层用原 Attempt 反向引用和提案中的内部交付身份防止重复认领。
+
+失败、取消、未知响应或 Worker 中断时保留原 ID：停止原 native turn 后迁回原 Effect 等待/核对流程；恢复不能创建一个新写操作。原 Agent lease 失效时，新的外部阶段不可沿旧权继续；回执已确认不等于业务 PASS。两次相同参数但不同 SDK 调用仍是两次独立意图。
+
+直接回执只在原 Attempt 剩余时间足够容纳既有 Effect 监督上限与交付余量时尝试；不足时在创建操作前走原延期路径，不延长或重置期限，也不因开启优化把长任务强行塞进一个 Attempt。

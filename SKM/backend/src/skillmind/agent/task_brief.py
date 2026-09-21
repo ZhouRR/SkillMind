@@ -513,6 +513,18 @@ def _finish_task_prompt(
             "Keep progress prose to meaningful stages, decisions, exceptions and completion. "
             "Do not repeat tool parameters, SQL, IDs or receipt bodies as narration."
         )
+    if runtime_policy(brief) == "skillmind.runtime/v4":
+        sections.append(
+            "For change.propose, provide the business target, changes, precondition, summary and "
+            "evidence. Idempotency, minimum risk, READ_BACK paths, expiry, rollback and an empty "
+            "RESUME checkpoint may be derived by the platform. Preserve explicit business "
+            "checkpoint facts when needed. A direct INLINE response contains the committed original "
+            "effect_result; it is not a current-state observation or business PASS. A confirmed "
+            "delivery does not satisfy the Skill's business continuation conditions by itself. "
+            "Apply required checks and stop on known failures or unmet conditions even when "
+            "the Effect is APPLIED. Do not pause merely to request the same acknowledged receipt; "
+            "always stop this native turn when the tool returns paused."
+        )
     sections.append(
         "For RESUME checkpoints, provide a short current summary and only newly learned "
         "business facts or new references needed to continue. The platform merges them with "

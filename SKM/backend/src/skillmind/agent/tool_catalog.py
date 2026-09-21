@@ -381,7 +381,13 @@ def _change_propose_tool_definition(contracts: ContractStore) -> ToolDefinition:
     return _tool_definition(contracts,
         capability=CHANGE_PROPOSE_CAPABILITY,
         description=(
-            "Create a structured external change proposal; this never applies the change and "
+            "Submit one controlled external operation. Supply resource_key, capability_version, "
+            "operation, target, changes, precondition, summary and evidence_refs. Platform-derived "
+            "idempotency_key, risk_level, verification, rollback, expiry and RESUME checkpoint may "
+            "be omitted; include actual new business checkpoint facts when required. With explicit "
+            "Run-start approval and direct-delivery support, the original committed receipt is "
+            "returned in this call. Otherwise stop when paused and await the original operation. "
+            "The model request alone never authorizes a change and "
             "Skillmind independently validates approval and scope. Use the exact resource slot key "
             "and authorized operation from the task brief. When operations are listed, omit "
             "effect_intent_key and use at least minimum_risk; for legacy declared intents, "

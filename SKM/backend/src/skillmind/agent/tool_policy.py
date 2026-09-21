@@ -121,7 +121,8 @@ class ToolExecutionPolicy:
             try:
                 row = validate_database_proposal_shape(
                     changes=tuple(tool_input["changes"]),
-                    verification=tool_input["verification"],
+                    verification=tool_input.get("verification", {"method": "READ_BACK", "paths": [
+                        item["path"] for item in tool_input["changes"]]}),
                 )
                 validate_database_proposal_revision(
                     expected=row["expected"], precondition=tool_input["precondition"],

@@ -12,15 +12,7 @@
     "changes",
     "precondition",
     "summary",
-    "evidence_refs",
-    "risk_level",
-    "reversible",
-    "rollback",
-    "verification",
-    "idempotency_key",
-    "expires_in_seconds",
-    "continuation_mode",
-    "checkpoint"
+    "evidence_refs"
   ],
   "properties": {
     "effect_intent_key": {
