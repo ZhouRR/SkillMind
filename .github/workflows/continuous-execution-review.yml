@@ -2,21 +2,119 @@ name: Continuous execution review
 on:
   push:
     branches: [perf/continuous-tool-execution]
-    paths: [.github/workflows/continuous-execution-review.yml]
+    paths:
+      - .github/workflows/continuous-execution-review.yml
+      - .github/prepare_continuous.py
+      - .github/publish_continuous.py
 permissions:
   contents: read
+env:
+  SKILLMIND_ENVIRONMENT: test
+  SKILLMIND_DATABASE_URL: postgresql+asyncpg://skillmind:skillmind@127.0.0.1:1/skillmind_test
+  SKILLMIND_REDIS_URL: redis://127.0.0.1:1/15
+  PYTHONDONTWRITEBYTECODE: '1'
 jobs:
-  source:
+  regression:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: api
+            scope: tests/api
+          - group: skills
+            scope: tests/skills tests/core tests/contracts
+          - group: runtime
+            scope: tests/agent tests/worker tests/runs tests/effects tests/artifacts
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Archive tracked source only
-        run: git archive --format=zip --output="$RUNNER_TEMP/skillmind-source.zip" HEAD
-      - uses: actions/upload-artifact@v4
+      - uses: actions/setup-python@v5
         with:
-          name: continuous-review-source
-          path: ${{ runner.temp }}/skillmind-source.zip
-          retention-days: 3
+          python-version: '3.12'
+      - name: Install locked dependencies
+        working-directory: SKM/backend
+        run: python -m pip install -q -r dev-requirements.lock && python -m pip install -q --no-deps -e .
+      - name: Prepare exact source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/prepare_continuous.py
+      - name: Preserve prepared application source
+        if: matrix.group == 'runtime'
+        run: |
+          python - <<'PY'
+          import json, os, zipfile
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP'])
+          with zipfile.ZipFile(root/'prepared-source.zip','w',zipfile.ZIP_DEFLATED) as archive:
+              for path in json.loads((root/'continuous-paths.json').read_text()):
+                  archive.write(path, path)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: matrix.group == 'runtime'
+        with:
+          name: continuous-prepared-source
+          path: ${{ runner.temp }}/prepared-source.zip
+          retention-days: 7
+      - name: Verify bounded execution and native SDK reuse
+        working-directory: SKM/backend
+        run: >-
+          python -m pytest tests/agent/test_audit_export.py
+          tests/agent/test_tool_sequence.py tests/agent/test_warm_codex.py
+          tests/agent/test_codex_native.py::test_native_warm_resume_replaces_gateway_without_restarting_client
+          tests/worker/test_warm_continuation.py tests/runs/test_warm_claim.py
+          --junitxml="$RUNNER_TEMP/focused.xml"
+      - name: Check application types
+        if: matrix.group == 'runtime'
+        working-directory: SKM/backend
+        run: python -m mypy --no-incremental src/skillmind
+      - name: Run backend regression
+        working-directory: SKM/backend
+        run: python -m pytest ${{ matrix.scope }} --junitxml="$RUNNER_TEMP/results.xml"
+      - name: Keep regression evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: continuous-regression-${{ matrix.group }}
+          path: |
+            ${{ runner.temp }}/source-fingerprint.json
+            ${{ runner.temp }}/focused.xml
+            ${{ runner.temp }}/results.xml
+          retention-days: 7
+  finalize:
+    needs: regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        working-directory: SKM/backend
+        run: python -m pip install -q -r dev-requirements.lock && python -m pip install -q --no-deps -e .
+      - name: Reproduce tested source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/prepare_continuous.py
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: continuous-regression-*
+          path: ${{ runner.temp }}/groups
+      - name: Verify contracts and documentation
+        working-directory: SKM
+        run: |
+          python -m pip install -q -r scripts/docs-requirements.txt
+          python scripts/validate_contracts.py
+          python scripts/build_docs.py
+          python scripts/build_docs.py --check
+      - name: Commit verified source to review branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/publish_continuous.py
