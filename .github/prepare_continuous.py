@@ -39,6 +39,13 @@ assert len(patch) == 89658
 assert hashlib.sha256(patch).hexdigest() == '7ba34ed029f81c1d633cfcffc59a6b1113a862375c1ad6042c246fd8dc088ede'
 subprocess.run(['git', 'apply', '--check', '-'], input=patch, check=True)
 subprocess.run(['git', 'apply', '-'], input=patch, check=True)
+# Test fixture も production と同じ必須 profile を明示し、認可の default を追加しない。
+p = Path('SKM/backend/tests/agent/test_tool_sequence.py')
+t = p.read_text()
+old = 'registry.resolve_unbound("tool.sequence/v1")'
+assert t.count(old) == 1
+t = t.replace(old, 'registry.resolve_unbound("tool.sequence/v1", execution_profile="SUPERVISED")')
+p.write_text(t)
 changed = set(subprocess.check_output(['git', 'diff', '--name-only'], text=True).splitlines())
 changed.update(subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard'], text=True).splitlines())
 paths = sorted(p for p in changed if p.startswith(('SKM/', 'docs/', 'real-flow-test/')))
