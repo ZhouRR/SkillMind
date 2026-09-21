@@ -1487,6 +1487,10 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
         now = datetime.now(UTC)
         self._validate_claimed_lease(attempt, claimed, now=now)
         current = RunStatus(run.status)
+        pending_inline = await self._pending_inline_proposal(run.id, attempt)
+        if pending_inline is not None and segment is not None and current is RunStatus.RUNNING:
+            await self.detach_inline_effect(run, segment, attempt, pending_inline, now=now)
+            return RunStatus(run.status)
         if current is not RunStatus.RUNNING:
             if current is target and attempt.status == attempt_status.value:
                 return current
@@ -1767,6 +1771,12 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
                 attempt.finished_at = now
                 attempt.updated_at = now
                 await self._close_attempt_sessions(attempt.id, status="FAILED", now=now)
+                continue
+
+            pending_inline = await self._pending_inline_proposal(run.id, attempt)
+            if pending_inline is not None and segment is not None and current is RunStatus.RUNNING:
+                await self.detach_inline_effect(run, segment, attempt, pending_inline, now=now)
+                recovered += 1
                 continue
 
             cancellation_requested = await self.is_cancellation_requested(run.id)

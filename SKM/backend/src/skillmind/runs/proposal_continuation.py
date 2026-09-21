@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from skillmind.agent.runtime_policy import uses_modern_runtime
@@ -113,6 +113,17 @@ class ProposalContinuationReader:
                         ChangeProposal.project_id == claimed.project_id,
                         ChangeProposal.agent_session_id == parent.id,
                         ChangeProposal.run_segment_id == parent.run_segment_id,
+                        or_(
+                            ChangeProposal.id.in_(select(EffectExecution.proposal_id).where(
+                                EffectExecution.id == segment.trigger_ref,
+                                EffectExecution.run_id == claimed.run_id)),
+                            ChangeProposal.id.in_(select(ChangeApproval.proposal_id).where(
+                                ChangeApproval.id == segment.trigger_ref,
+                                ChangeApproval.run_id == claimed.run_id)),
+                            ChangeProposal.id.in_(select(UserInteraction.change_proposal_id).where(
+                                UserInteraction.id == segment.trigger_ref,
+                                UserInteraction.run_id == claimed.run_id)),
+                        ),
                     )
                 )
             ).one_or_none()
@@ -124,6 +135,7 @@ class ProposalContinuationReader:
                 sdk_session_id=str(parent.sdk_session_id),
                 proposal_ref=proposal.proposal_ref,
                 outcome=outcome,
+                tool_use_id=(getattr(proposal, "inline_owner_json", None) or {}).get("tool_use_id"),
             )
 
 

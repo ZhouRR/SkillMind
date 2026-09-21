@@ -17,6 +17,8 @@ class ToolExecutionAuthority:
 
     claimed: ClaimedRun = field(repr=False)
     _active: bool = True
+    # 最適化の経路選択だけに使う。既存 supervisor の期限は変更しない。
+    deadline: float | None = field(default=None, repr=False)
 
     def require_active(self) -> None:
         """ContextVar の reset だけでは残る孤立 task の遅延呼出しを拒否する。"""
@@ -31,10 +33,10 @@ _TOOL_AUTHORITY: ContextVar[ToolExecutionAuthority | None] = ContextVar(
 
 
 @contextmanager
-def bind_tool_authority(claimed: ClaimedRun) -> Iterator[None]:
+def bind_tool_authority(claimed: ClaimedRun, *, deadline: float | None = None) -> Iterator[None]:
     """Stream を所有する一つの task に束縛し、派生 task に原 identity だけを継承させる。"""
 
-    authority = ToolExecutionAuthority(claimed)
+    authority = ToolExecutionAuthority(claimed, deadline=deadline)
     token = _TOOL_AUTHORITY.set(authority)
     try:
         yield

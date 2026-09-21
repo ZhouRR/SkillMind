@@ -75,7 +75,12 @@ class ApprovedEffectExecutor:
         self._heartbeat_interval_seconds = interval
         self._wall_timeout_seconds = wall_timeout_seconds
 
-    async def execute(self, effect_execution_id: object) -> str:
+    @property
+    def wall_timeout_seconds(self) -> float:
+        """直接交付の経路選択へ既存の監督時間を読み取り専用で渡す。"""
+        return self._wall_timeout_seconds
+
+    async def execute(self, effect_execution_id: object, *, inline_parent: ClaimedRun | None = None) -> str:
         """通常結果を永続化し、監督失敗では原実行の照合を回収処理へ委ねる。"""
 
         from uuid import UUID
@@ -91,6 +96,7 @@ class ApprovedEffectExecutor:
                 worker_id=self._worker_id,
                 lease_seconds=self._lease_seconds,
                 max_attempts=self._max_attempts,
+                **({"inline_parent": inline_parent} if inline_parent is not None else {}),
             )
         except ExecutionFeatureDisabledError:
             return "disabled"

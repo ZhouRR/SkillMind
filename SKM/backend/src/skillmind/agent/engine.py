@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
-from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import aclosing
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -67,6 +67,7 @@ from skillmind.agent.metering import (
 from skillmind.agent.proposal_resume import prepare_proposal_resume
 from skillmind.core.cancellation import check_pending_cancellation
 from skillmind.core.json_text import strip_code_fence, strip_json_object_preamble
+from skillmind.effects.inline import InlineEffectResult
 from skillmind.effects.proposal import CHANGE_PROPOSE_SDK_NAME
 from skillmind.runs.budget import BudgetUnavailableError
 from skillmind.runs.interaction import INTERACTION_REQUEST_SDK_NAME
@@ -112,6 +113,7 @@ class RunMcpRuntime:
     on_tool_denied: ToolDenialCallback | None = None
     deferred_tool_names: frozenset[str] = frozenset()
     on_tool_attempt: Callable[[], None] | None = None
+    on_inline_effect: Callable[[Mapping[str, Any], str, str], Awaitable[InlineEffectResult | None]] | None = None
 
 
 def _default_client_factory(options: ClaudeAgentOptions) -> ClaudeClient:

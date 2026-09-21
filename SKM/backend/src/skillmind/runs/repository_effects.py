@@ -24,6 +24,7 @@ from skillmind.db.models import (
     PermissionDecision,
     ResourceBinding,
     Run,
+    RunAttempt,
     RunEvent,
     RunSegment,
     ToolCall,
@@ -69,6 +70,7 @@ from skillmind.effects.domain import (
     StoredEffectExecution,
 )
 from skillmind.effects.git_receipt import GitCommitCommand, git_effect_commit_message
+from skillmind.effects.inline import InlineUnavailable
 from skillmind.effects.mcp_diagnostics import diagnostic_message
 from skillmind.effects.mcp_receipt import McpOperationCommand
 from skillmind.effects.operation_policy import operation_authorization_key, operation_risk
@@ -120,6 +122,130 @@ from skillmind.users.repository import lock_organization
 class EffectOperationsMixin(_RunRepositoryBase):
     """observe → propose → apply の承認境界と effect 実行を担う mixin。"""
 
+    async def _pending_inline_proposal(self, run_id: UUID, attempt: RunAttempt) -> ChangeProposal | None:
+        """原 Attempt の逆参照から核対し、通常の deferred 経路に追加 query を入れない。"""
+        identity = getattr(attempt, "inline_proposal_id", None)
+        if identity is None:
+            return None
+        proposal = await self._session.get(ChangeProposal, identity, populate_existing=True)
+        if (proposal is None or proposal.id != identity or proposal.run_id != run_id
+            or proposal.run_attempt_id != attempt.id
+            or (proposal.inline_owner_json or {}).get("phase") != "ACTIVE"):
+            raise EffectLeaseValidationError("Original inline operation is unavailable")
+        return proposal
+
+    async def _inline_parent_active(self, run: Run, segment: RunSegment, proposal: ChangeProposal) -> bool:
+        """Effect lease に加えて、呼出し元 Attempt の現在の所有権を検証する。"""
+        owner = getattr(proposal, "inline_owner_json", None) or {}
+        if owner.get("phase") not in {"ACTIVE", "DELIVERED"}:
+            return False
+        parent = await self._session.get(RunAttempt, proposal.run_attempt_id, populate_existing=True)
+        if (parent is None or parent.run_id != run.id or parent.run_segment_id != segment.id
+            or run.status != RunStatus.RUNNING.value or segment.status != RunSegmentStatus.RUNNING.value
+            or parent.status != RunAttemptStatus.RUNNING.value
+            or (owner.get("phase") == "ACTIVE" and getattr(parent, "inline_proposal_id", None) != proposal.id)
+            or (owner.get("phase") == "DELIVERED" and getattr(parent, "inline_proposal_id", None) not in {None, proposal.id})
+            or not parent.lease_token_hash or parent.lease_expires_at is None
+            or parent.lease_expires_at <= datetime.now(UTC)
+            or not hmac.compare_digest(parent.lease_token_hash, str(owner.get("lease_hash", "")))):
+            raise EffectLeaseValidationError("Inline parent authority is unavailable")
+        return True
+
+    async def inline_receipt(self, claimed: ClaimedRun, proposal_id: UUID) -> dict[str, Any] | None:
+        """既存 Effect/Evidence の原値だけを返す。確認 commit 前に SDK へ成功を返さない。"""
+        run, segment, attempt = await self._lock_claimed_execution(claimed)
+        self._validate_claimed_lease(attempt, claimed, now=datetime.now(UTC))
+        await self._reject_cancelled_execution(run.id)
+        proposal = await self._session.get(ChangeProposal, proposal_id, populate_existing=True)
+        if (proposal is None or segment is None or proposal.run_id != run.id
+            or proposal.run_attempt_id != attempt.id or not await self._inline_parent_active(run, segment, proposal)):
+            raise EffectLeaseValidationError("Inline proposal identity changed")
+        execution = await self._session.scalar(select(EffectExecution).where(
+            EffectExecution.proposal_id == proposal.id, EffectExecution.run_id == run.id,
+        ))
+        if execution is None or execution.status != EffectExecutionStatus.APPLIED.value:
+            return None
+        if not isinstance(execution.before_ref, str) or not isinstance(execution.after_ref, str):
+            raise EffectLeaseValidationError("Inline receipt references are unavailable")
+        after = await self._session.scalar(select(Evidence).where(
+            Evidence.run_id == run.id, Evidence.evidence_ref == execution.after_ref,
+            Evidence.tool_call_id == execution.tool_call_id,
+        ))
+        if after is None or after.content_hash != "sha256:" + sha256_hex(canonical_json(after.metadata_json["snapshot"])):
+            raise EffectLeaseValidationError("Inline receipt is unavailable")
+        receipt = validated_effect_result({
+            "effect_execution_id": str(execution.id), "proposal_ref": proposal.proposal_ref,
+            "capability_version": proposal.capability_version, "status": "APPLIED",
+            "before_ref": execution.before_ref, "after_ref": execution.after_ref,
+            "after_content_hash": after.content_hash, "after": after.metadata_json["snapshot"],
+            "verification": dict(execution.verification_json),
+        })
+        proposal.inline_owner_json = {**(proposal.inline_owner_json or {}), "phase": "DELIVERED"}
+        attempt.inline_proposal_id = None
+        # 次の人工待ち checkpoint にも原参照を保持。原 Brief/Skill は変更しない。
+        checkpoint = merge_checkpoint(segment.checkpoint_json or {}, proposal.checkpoint_json)
+        checkpoint["change_proposal_refs"] = list(dict.fromkeys([
+            *checkpoint.get("change_proposal_refs", []), proposal.proposal_ref,
+        ]))
+        checkpoint["evidence_refs"] = list(dict.fromkeys([
+            *checkpoint.get("evidence_refs", []), execution.before_ref, execution.after_ref,
+        ]))
+        segment.checkpoint_json = checkpoint
+        return receipt
+
+    async def detach_inline_effect(self, run: Run, segment: RunSegment, attempt: RunAttempt,
+                                   proposal: ChangeProposal, *, now: datetime) -> None:
+        """native turn 停止後または原親の失効時だけ、同じ原操作を通常待機へ移す。"""
+        if (proposal.run_id != run.id or proposal.run_segment_id != segment.id
+            or proposal.run_attempt_id != attempt.id
+            or (getattr(proposal, "inline_owner_json", None) or {}).get("phase") != "ACTIVE"):
+            raise EffectLeaseValidationError("Inline detach identity changed")
+        transition = plan_run_transition(current=RunStatus(run.status),
+            target=RunStatus.WAITING_FOR_APPROVAL, row_version=run.row_version,
+            started_at=run.started_at, finished_at=run.finished_at, now=now)
+        run.status, run.row_version, run.updated_at = transition.status.value, transition.row_version, now
+        segment.status, segment.updated_at = RunSegmentStatus.WAITING.value, now
+        attempt.status, attempt.finished_at, attempt.updated_at = RunAttemptStatus.DEFERRED.value, now, now
+        attempt.lease_token_hash = attempt.lease_expires_at = None
+        proposal.inline_owner_json = {**(proposal.inline_owner_json or {}), "phase": "DETACHED"}
+        attempt.inline_proposal_id = None
+        session = await self._session.get(AgentSession, proposal.agent_session_id)
+        if session is not None:
+            session.status, session.updated_at = "IDLE", now
+        execution = await self._session.scalar(select(EffectExecution).where(
+            EffectExecution.proposal_id == proposal.id, EffectExecution.run_id == run.id,
+        ).with_for_update())
+        if execution is None:
+            raise EffectLeaseValidationError("Inline effect is missing")
+        if execution.status in {"APPLIED", "FAILED", "STALE", "VERIFICATION_FAILED"}:
+            result = None
+            if execution.status == "APPLIED":
+                if not isinstance(execution.before_ref, str) or not isinstance(execution.after_ref, str):
+                    raise EffectLeaseValidationError("Inline receipt references are unavailable")
+                after = await self._session.scalar(select(Evidence).where(
+                    Evidence.run_id == run.id, Evidence.evidence_ref == execution.after_ref))
+                if (after is None or after.tool_call_id != execution.tool_call_id
+                    or after.content_hash != "sha256:" + sha256_hex(canonical_json(after.metadata_json["snapshot"]))):
+                    raise EffectLeaseValidationError("Inline receipt is missing")
+                result = validated_effect_result({
+                    "effect_execution_id": str(execution.id), "proposal_ref": proposal.proposal_ref,
+                    "capability_version": proposal.capability_version, "status": "APPLIED",
+                    "before_ref": execution.before_ref, "after_ref": execution.after_ref,
+                    "after_content_hash": after.content_hash, "after": after.metadata_json["snapshot"],
+                    "verification": dict(execution.verification_json),
+                })
+            failure = None if result is not None else EffectFailure(
+                status=EffectExecutionStatus(execution.status),
+                code=(execution.error_json or {}).get("code", "effect_result_unknown"),
+                retryable=(execution.error_json or {}).get("retryable") is True,
+            )
+            await self._finish_effect_continuation(run=run, segment=segment, proposal=proposal,
+                execution=execution, failure=failure, effect_result=result,
+                evidence_refs=(result["before_ref"], result["after_ref"]) if result else (), now=now)
+        else:
+            # APPLYING も同じ identity で配送。通常 claim は有効 lease を奪わない。
+            self._session.add(self._effect_dispatch_outbox(execution, occurred_at=now))
+
     async def pending_effect_for_attempt(self, *, run_id: UUID, attempt_id: UUID) -> UUID | None:
         """即時配送は原 Attempt の承認済み候補だけを返し、実行権は通常 claim に委ねる。"""
 
@@ -141,8 +267,9 @@ class EffectOperationsMixin(_RunRepositoryBase):
         claimed: ClaimedRun,
         *,
         event: AgentEvent,
-        session_metadata: AgentSessionMetadata,
+        session_metadata: AgentSessionMetadata | None,
         draft: ChangeProposalDraft,
+        inline_tool_id: str | None = None,
     ) -> UUID:
         """Proposal を保存し、既定 approval または exact preauthorization へ分岐する。"""
 
@@ -161,7 +288,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
             raise ValueError("Proposal suspension requires CHANGE_PROPOSED")
         await self._reject_cancelled_execution(run.id)
         next_sequence = await self._next_sequence(run.id)
-        if event.sequence < next_sequence:
+        if inline_tool_id is None and event.sequence < next_sequence:
             raise ConcurrentRunUpdateError("ChangeProposal event sequence is not monotonic")
         existing_open = await self._session.scalar(
             select(UserInteraction.id).where(
@@ -188,15 +315,46 @@ class EffectOperationsMixin(_RunRepositoryBase):
         checkpoint["evidence_refs"] = list(dict.fromkeys([
             *checkpoint.get("evidence_refs", []), *draft.evidence_refs,
         ]))
-        agent_session = await self._ensure_agent_session(
-            claimed,
-            sdk_session_id=UUID(event.agent_session_id),
-            metadata=session_metadata,
-            now=now,
-        )
-        self._merge_session_usage(agent_session, event)
-        agent_session.status = "IDLE"
-        agent_session.updated_at = now
+        if inline_tool_id is None:
+            if session_metadata is None:
+                raise ValueError("Deferred proposal requires session metadata")
+            agent_session = await self._ensure_agent_session(
+                claimed, sdk_session_id=UUID(event.agent_session_id),
+                metadata=session_metadata, now=now,
+            )
+            self._merge_session_usage(agent_session, event)
+            agent_session.status = "IDLE"
+            agent_session.updated_at = now
+        else:
+            capability = resolve_effect_capability(draft.capability_version)
+            if (draft.continuation_mode != "RESUME"
+                or run_auto_approval_actor(run, draft.capability_version, provider=binding.provider) is None
+                or not capability.supports_supervision(binding.provider)):
+                raise InlineUnavailable()
+            active_session = await self._session.scalar(select(AgentSession).where(
+                AgentSession.run_id == run.id, AgentSession.run_attempt_id == attempt.id,
+                AgentSession.sdk_session_id == UUID(event.agent_session_id),
+                AgentSession.status == "ACTIVE", AgentSession.session_kind == "PRIMARY",
+            ))
+            if active_session is None:
+                raise LeaseValidationError("Inline SDK session is not active")
+            agent_session = active_session
+            previous = await self._session.scalar(select(ChangeProposal).where(
+                ChangeProposal.run_id == run.id,
+                ChangeProposal.idempotency_key == draft.idempotency_key,
+            ))
+            if previous is not None:
+                owner = previous.inline_owner_json or {}
+                if (owner.get("tool_use_id") != inline_tool_id
+                    or owner.get("lease_hash") != lease_token_hash(claimed.lease_token)
+                    or previous.run_attempt_id != attempt.id
+                    or previous.agent_session_id != agent_session.id
+                    or previous.request_fingerprint != draft.request_fingerprint):
+                    raise ChangeProposalConflictError("Original inline request differs")
+                return previous.id
+            pending = await self._pending_inline_proposal(run.id, attempt)
+            if pending is not None:
+                raise ChangeProposalConflictError("Original inline operation must be resolved")
 
         proposal_id = uuid4()
         proposal_ref = f"cp_{uuid4().hex}"
@@ -281,6 +439,12 @@ class EffectOperationsMixin(_RunRepositoryBase):
             created_at=now,
             updated_at=now,
         )
+
+        if inline_tool_id is not None:
+            proposal.inline_owner_json = {
+                "phase": "ACTIVE", "tool_use_id": inline_tool_id,
+                "lease_hash": lease_token_hash(claimed.lease_token),
+            }
 
         approval: ChangeApproval | None = None
         execution: EffectExecution | None = None
@@ -377,6 +541,20 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 created_at=now,
                 updated_at=now,
             )
+
+        if inline_tool_id is not None:
+            if approval is None or execution is None or approval.source != ApprovalSource.RUN_START.value:
+                raise InlineUnavailable()
+            # 原提案/批准/Effect を先行 commit。Agent の lease と native tool call は維持する。
+            # 専用 executor が直接 claim するため、この時点では Queue を二重 dispatch しない。
+            attempt.inline_proposal_id = proposal.id
+            self._session.add(proposal)
+            await self._session.flush()
+            self._session.add(approval)
+            await self._session.flush()
+            self._session.add(execution)
+            await self._session.flush()
+            return proposal.id
 
         transition = plan_run_transition(
             current=RunStatus.RUNNING,
@@ -936,6 +1114,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
         lease_token_hash_value: str,
         lease_seconds: int,
         max_attempts: int,
+        inline_parent: ClaimedRun | None = None,
     ) -> ClaimedEffectExecution | None:
         """Approved effect を Run → Segment → Effect の lock 順で idempotent に claim する。"""
 
@@ -987,7 +1166,14 @@ class EffectOperationsMixin(_RunRepositoryBase):
             and execution.lease_expires_at > now
         ):
             return None
-        if RunStatus(run.status) is not RunStatus.WAITING_FOR_APPROVAL:
+        inline = (getattr(proposal, "inline_owner_json", None) or {}).get("phase") == "ACTIVE"
+        if inline:
+            if (inline_parent is None or inline_parent.run_id != run.id
+                or inline_parent.run_attempt_id != proposal.run_attempt_id
+                or lease_token_hash(inline_parent.lease_token) != (getattr(proposal, "inline_owner_json", None) or {}).get("lease_hash")):
+                return None
+            await self._inline_parent_active(run, segment, proposal)
+        elif RunStatus(run.status) is not RunStatus.WAITING_FOR_APPROVAL:
             raise EffectLeaseValidationError("Run is not waiting for the approved effect")
         if proposal.status not in {
             ChangeProposalStatus.APPROVED.value,
@@ -1256,8 +1442,9 @@ class EffectOperationsMixin(_RunRepositoryBase):
             or proposal is None
             or execution is None
             or approval is None
-            or run.status != RunStatus.WAITING_FOR_APPROVAL.value
-            or segment.status != RunSegmentStatus.WAITING.value
+            or (not await self._inline_parent_active(run, segment, proposal) and (
+                run.status != RunStatus.WAITING_FOR_APPROVAL.value
+                or segment.status != RunSegmentStatus.WAITING.value))
             or run.permission_snapshot_json.get("actor_id") != str(actor_id)
             # Agent は提案だけを許可され、apply 能力は独立した凍結意図/束縛/批准で検証する。
             or CHANGE_PROPOSE_CAPABILITY
@@ -1561,7 +1748,8 @@ class EffectOperationsMixin(_RunRepositoryBase):
             return self._stored_effect_execution(execution)
         now = datetime.now(UTC)
         self._validate_effect_lease(execution, claimed, now=now)
-        if RunStatus(run.status) is not RunStatus.WAITING_FOR_APPROVAL:
+        inline = await self._inline_parent_active(run, segment, proposal)
+        if not inline and RunStatus(run.status) is not RunStatus.WAITING_FOR_APPROVAL:
             raise EffectLeaseValidationError("Run left effect waiting state")
         tool_call = (
             await self._session.get(ToolCall, execution.tool_call_id, with_for_update=True)
@@ -1619,9 +1807,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 "replayed": result.replayed,
             }
             tool_call.error_json = None
-            outcome = "APPLIED"
             evidence_refs = (before_ref, after_ref)
-            event_type = AgentEventType.EFFECT_APPLIED
         else:
             assert failure is not None
             execution.status = failure.status.value
@@ -1653,8 +1839,6 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 retryable=failure.retryable,
                 diagnostic=execution.error_json.get("diagnostic"),
             )
-            outcome = failure.status.value
-            event_type = AgentEventType.EFFECT_FAILED
         execution.executed_at = now
         execution.lease_token_hash = None
         execution.lease_expires_at = None
@@ -1663,6 +1847,24 @@ class EffectOperationsMixin(_RunRepositoryBase):
         proposal.updated_at = now
         tool_call.duration_ms = duration_ms
         tool_call.updated_at = now
+        if inline:
+            # 同じ Tool call へ交付する。失敗/不明は native 停止後に通常の待機へ移管する。
+            return self._stored_effect_execution(execution)
+        return await self._finish_effect_continuation(
+            run=run, segment=segment, proposal=proposal, execution=execution,
+            failure=failure, effect_result=effect_result, evidence_refs=evidence_refs,
+            now=now, trace_id=trace_id,
+        )
+
+    async def _finish_effect_continuation(
+        self, *, run: Run, segment: RunSegment, proposal: ChangeProposal,
+        execution: EffectExecution, failure: EffectFailure | None,
+        effect_result: dict[str, Any] | None, evidence_refs: tuple[str, ...], now: datetime,
+        trace_id: str | None = None,
+    ) -> StoredEffectExecution:
+        """通常 Worker と inline 停止が同じ取消/UNKNOWN/再照会/Segment 遷移を使う。"""
+        outcome = execution.status
+        event_type = AgentEventType.EFFECT_APPLIED if failure is None else AgentEventType.EFFECT_FAILED
         cancellation_requested = await self._session.scalar(
             select(RunEvent.id).where(
                 RunEvent.run_id == run.id,
@@ -1931,6 +2133,8 @@ class EffectOperationsMixin(_RunRepositoryBase):
             )
             tool_call.updated_at = now
 
+        if (getattr(proposal, "inline_owner_json", None) or {}).get("phase") == "ACTIVE":
+            return
         cancellation_requested = await self.is_cancellation_requested(run.id)
         if effect_requires_reconciliation(error):
             await self._stop_run_for_unknown_effect(

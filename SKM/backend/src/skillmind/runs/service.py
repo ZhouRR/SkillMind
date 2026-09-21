@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import secrets
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import replace
@@ -12,15 +12,18 @@ from functools import partial
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from skillmind.agent.domain import AgentEvent
+from skillmind.agent.domain import AgentEvent, AgentEventType
 from skillmind.agent.runtime_policy import RUNTIME_POLICY
 from skillmind.agent.subagent import SUBAGENT_DISPATCH_CAPABILITY
 from skillmind.agent.task_brief import resolve_execution_profile
 from skillmind.agent.tool_policy import DENIED_BUILTIN_TOOLS
 from skillmind.auth.sessions import UnauthorizedSessionError
+from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.core.timing import timed_async
+from skillmind.db.models import AgentSession, ChangeProposal, EffectExecution, User
 from skillmind.documents.binding import resolve_document_binding
 from skillmind.documents.library import (
     DOCUMENT_LIBRARY_SELECTION,
@@ -39,7 +42,8 @@ from skillmind.effects.domain import (
     DecideProposalCommand,
     ProposalDecisionResult,
 )
-from skillmind.effects.proposal import CHANGE_PROPOSE_CAPABILITY
+from skillmind.effects.inline import InlineUnavailable
+from skillmind.effects.proposal import CHANGE_PROPOSE_CAPABILITY, parse_change_proposal_request
 from skillmind.effects.release import ExecutionFeatures
 from skillmind.integrations.domain import (
     IntegrationStatus,
@@ -740,6 +744,67 @@ class RunService:
                 session_metadata=session_metadata,
                 request=interaction,
             )
+
+    async def begin_inline_effect(
+        self, claimed: ClaimedRun, *, arguments: Mapping[str, Any],
+        tool_use_id: str, session_id: str,
+    ) -> tuple[UUID, UUID] | None:
+        """同意と原実行権を検証し、精確提案/批准/Effect が commit された後にだけ返す。"""
+        now = datetime.now(UTC)
+        draft = parse_change_proposal_request(arguments, now=now,
+            request_identity=f"{claimed.run_id}:{claimed.run_attempt_id}:{tool_use_id}")
+        event = AgentEvent(claimed.run_id, claimed.run_attempt_id, session_id, 0,
+                           now, AgentEventType.CHANGE_PROPOSED, {})
+        try:
+            async with self._session_factory() as session, session.begin():
+                repository = RunRepository(session, execution_features=self._execution_features,
+                    document_library_target=self._document_library_target)
+                proposal_id = await repository.suspend_for_proposal(
+                    claimed, event=event, session_metadata=None, draft=draft,
+                    inline_tool_id=tool_use_id)
+                effect_id = await session.scalar(select(EffectExecution.id).where(
+                    EffectExecution.proposal_id == proposal_id,
+                    EffectExecution.run_id == claimed.run_id))
+                if effect_id is None:
+                    raise ValueError("Inline effect was not persisted")
+            return proposal_id, effect_id
+        except InlineUnavailable:
+            return None
+
+    async def inline_effect_receipt(self, claimed: ClaimedRun, proposal_id: UUID) -> dict[str, Any] | None:
+        """同一親実行に原回执を交付し、欠落を成功補完しない。"""
+        async with self._session_factory() as session, session.begin():
+            actor = await session.get(User, claimed.actor_id)
+            if actor is None or actor.status != "ACTIVE":
+                raise PermissionError("Inline actor is unavailable")
+            projects = ProjectRepository(session)
+            access = await projects.lock_write_access(user=actor, project_id=claimed.project_id)
+            projects.require_active_write_access(access)
+            return await RunRepository(session, execution_features=self._execution_features,
+                document_library_target=self._document_library_target).inline_receipt(claimed, proposal_id)
+
+    async def suspend_inline_effect(self, claimed: ClaimedRun, *, event: AgentEvent,
+                                    proposal_id: UUID) -> UUID:
+        """SDK 終端後にだけ、元要求の未完了処理を通常の承認/核対 lifecycle へ戻す。"""
+        async with self._session_factory() as session, session.begin():
+            repository = RunRepository(session, execution_features=self._execution_features,
+                document_library_target=self._document_library_target)
+            run, segment, attempt = await repository._lock_claimed_execution(claimed)
+            repository._validate_claimed_lease(attempt, claimed, now=datetime.now(UTC))
+            repository._validate_agent_event(event, claimed)
+            proposal = await session.get(ChangeProposal, proposal_id)
+            request = event.payload.get("change_proposal_request")
+            origin = event.payload.get("deferred_tool")
+            agent = await session.get(AgentSession, proposal.agent_session_id) if proposal is not None else None
+            if (proposal is None or segment is None or not isinstance(request, Mapping)
+                or not isinstance(origin, Mapping) or agent is None
+                or agent.run_id != claimed.run_id or agent.run_attempt_id != claimed.run_attempt_id
+                or str(agent.sdk_session_id) != str(event.agent_session_id)
+                or origin.get("tool_use_id") != (proposal.inline_owner_json or {}).get("tool_use_id")
+                or proposal.request_fingerprint != sha256_hex(canonical_json(dict(request)))):
+                raise ValueError("Inline continuation differs from original request")
+            await repository.detach_inline_effect(run, segment, attempt, proposal, now=datetime.now(UTC))
+            return proposal.id
 
     async def suspend_for_proposal(
         self,

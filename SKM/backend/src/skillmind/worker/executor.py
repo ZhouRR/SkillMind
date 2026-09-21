@@ -200,7 +200,9 @@ class AgentRunExecutor:
                     if coordinator is not None and budget is not None
                     else nullcontext()
                 ),
-                bind_tool_authority(claimed),
+                bind_tool_authority(
+                    claimed, deadline=asyncio.get_running_loop().time() + context.limits.wall_timeout_seconds
+                ),
             ):
                 await self._consume_engine(claimed, context, done, session_ref, cancellation)
         except BudgetError as error:
@@ -507,6 +509,8 @@ class AgentRunExecutor:
                         proposal = parse_change_proposal_request(
                             request_payload,
                             now=event.occurred_at,
+                            request_identity=(f"{claimed.run_id}:{claimed.run_attempt_id}:"
+                                + str(event.payload.get("deferred_tool", {}).get("tool_use_id", ""))),
                         )
                     except ValueError:
                         await self._finalize_stream_failure(
@@ -519,12 +523,14 @@ class AgentRunExecutor:
                         )
                         return
                     try:
-                        proposal_id = await self._run_service.suspend_for_proposal(
-                            claimed,
-                            event=event,
-                            session_metadata=metadata,
-                            proposal=proposal,
-                        )
+                        inline_id = event.payload.get("inline_proposal_id")
+                        if inline_id is not None:
+                            proposal_id = await self._run_service.suspend_inline_effect(
+                                claimed, event=event, proposal_id=UUID(str(inline_id)))
+                        else:
+                            proposal_id = await self._run_service.suspend_for_proposal(
+                                claimed, event=event, session_metadata=metadata, proposal=proposal)
+
                     except ValueError:
                         await self._finalize_stream_failure(
                             claimed,
