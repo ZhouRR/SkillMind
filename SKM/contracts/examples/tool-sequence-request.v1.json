@@ -1,0 +1,12 @@
+{
+  "steps": [
+    {
+      "capability": "workspace.read/v1",
+      "arguments": {
+        "path": "input/spec.md",
+        "purpose": "Read frozen input"
+      }
+    }
+  ],
+  "purpose": "Read known input before analysis"
+}

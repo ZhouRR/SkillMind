@@ -6,10 +6,11 @@ import asyncio
 import logging
 import math
 from collections.abc import AsyncIterator, Mapping
-from contextlib import nullcontext, suppress
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext, suppress
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
+from uuid import UUID
 
 from skillmind.agent.domain import (
     AgentEngine,
@@ -48,6 +49,14 @@ from skillmind.worker.primary_budget import PrimaryBudgetCoordinator
 from skillmind.worker.tool_authority import bind_tool_authority
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class ContinuationEngine(Protocol):
+    """業務状態を変更せず、確認済み続行間の transport 再利用を提供する Engine。"""
+    def continuation_scope(self, run_id: UUID) -> AbstractAsyncContextManager[None]:
+        """一 job に限定された共有 resource の寿命を返す。"""
+        ...
 
 
 class RunExecutor(Protocol):
@@ -111,6 +120,20 @@ class AgentRunExecutor:
         ):
             raise ValueError("Primary budget requires matching Engine invocation callbacks")
         self._budget_coordinator = budget_coordinator
+
+    @property
+    def supports_warm_continuation(self) -> bool:
+        """対応しない Engine は従来の単一 Attempt path を使う。"""
+        return isinstance(self._engine, ContinuationEngine)
+
+    @asynccontextmanager
+    async def continuation_scope(self, run_id: UUID) -> AsyncIterator[None]:
+        """SDK の寿命だけを共有し、各 execute の claim/heartbeat は独立させる。"""
+        if isinstance(self._engine, ContinuationEngine):
+            async with self._engine.continuation_scope(run_id):
+                yield
+        else:
+            yield
 
     async def execute(self, claimed_run: ClaimedRun) -> None:
         """準備から実行終了まで監督し、実行権を失った Worker は書き込まず退く。"""

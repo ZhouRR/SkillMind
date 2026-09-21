@@ -79,6 +79,40 @@
         "pattern": "^art_[a-zA-Z0-9_-]{1,60}$"
       },
       "minItems": 1
+    },
+    "record_index": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reference",
+          "record_hash"
+        ],
+        "properties": {
+          "reference": {
+            "type": "string",
+            "pattern": "^(ev|cp)_[a-zA-Z0-9_-]{1,60}$"
+          },
+          "record_hash": {
+            "type": "string",
+            "pattern": "^sha256:[a-f0-9]{64}$"
+          },
+          "recorded_status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "artifact_ref": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
     }
   }
 }

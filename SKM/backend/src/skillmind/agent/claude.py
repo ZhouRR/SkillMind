@@ -132,6 +132,7 @@ def build_claude_agent_options(
     on_tool_authorized: ToolAuthorizationCallback | None = None,
     on_tool_denied: ToolDenialCallback | None = None,
     deferred_tool_names: frozenset[str] = frozenset(),
+    on_tool_attempt: Callable[[], None] | None = None,
 ) -> ClaudeAgentOptions:
     """Run snapshot を SDK の最小権限 option に変換する。"""
 
@@ -182,6 +183,8 @@ def build_claude_agent_options(
                 }
             }
         try:
+            if on_tool_attempt is not None:
+                on_tool_attempt()
             policy.authorize(
                 str(input_data.get("tool_name", "")),
                 cast(dict[str, Any], input_data.get("tool_input", {})),

@@ -25,6 +25,7 @@ from skillmind.agent.tool_gateway import (
     ToolProvider,
     ToolRegistry,
 )
+from skillmind.agent.tool_sequence import ToolSequenceProvider
 from skillmind.agent.workspace_provider import (
     WorkspaceReadProvider,
     WorkspaceSearchProvider,
@@ -54,6 +55,7 @@ def _tool_definition(
     unbound_provider: str | None = None,
     minimum_execution_profile: str = "GUIDED",
     defer_execution: bool = False,
+    sequence_safe: bool = False,
 ) -> ToolDefinition:
     """三つの Schema を同じ capability/version から取得し、登録情報のずれを防ぐ。"""
 
@@ -67,6 +69,7 @@ def _tool_definition(
         unbound_provider=unbound_provider,
         minimum_execution_profile=minimum_execution_profile,
         defer_execution=defer_execution,
+        sequence_safe=sequence_safe and not defer_execution,
     )
 
 
@@ -105,6 +108,7 @@ def _read_tool_definitions(
         if provider is not None:
             definitions.append(
                 _tool_definition(contracts,
+                    sequence_safe=True,
                     capability=capability,
                     description=description,
                     providers={"mcp": provider},
@@ -113,6 +117,7 @@ def _read_tool_definitions(
     if mcp_provider is not None:
         definitions.append(
             _tool_definition(contracts,
+                sequence_safe=True,
                 capability="mcp.read/v1",
                 description="Read text or Base64 content from one allowed MCP resource URI",
                 providers={"mcp": mcp_provider},
@@ -121,6 +126,7 @@ def _read_tool_definitions(
     if database_provider is not None:
         definitions.append(
             _tool_definition(contracts,
+                sequence_safe=True,
                 capability="database.read/v1",
                 description=(
                     "Read allowed PostgreSQL tables with columns, equality filters "
@@ -150,6 +156,7 @@ def _read_tool_definitions(
         ):
             definitions.append(
                 _tool_definition(contracts,
+                    sequence_safe=True,
                     capability=capability,
                     description=description,
                     providers={"postgres": database_provider},
@@ -158,6 +165,7 @@ def _read_tool_definitions(
     if redmine_issue_provider is not None:
         definitions.append(
             _tool_definition(contracts,
+                sequence_safe=True,
                 capability="issue.read/v1",
                 description="Read one issue from the bound Integration",
                 providers={"redmine": redmine_issue_provider},
@@ -167,6 +175,7 @@ def _read_tool_definitions(
         bound = RepositoryReadProvider(repository_source)
         definitions.append(
             _tool_definition(contracts,
+                sequence_safe=True,
                 capability="repository.read/v1",
                 description="Read one UTF-8 file from the bound repository at a fixed revision",
                 providers={"git": bound, "svn": bound},
@@ -181,6 +190,7 @@ def document_read_tool_definition(
     """Project 文書を読む document.read/v1 の Tool 定義を組み立てる。"""
 
     return _tool_definition(contracts,
+        sequence_safe=True,
         capability="document.read/v1",
         description="Read one UTF-8 project document at a fixed content hash",
         providers={DOCUMENT_PROVIDER: DocumentProvider(source)},
@@ -194,6 +204,7 @@ def document_convert_tool_definition(
     """凍結 Excel を Worker 内で明示変換する Tool を登録する。"""
 
     return _tool_definition(contracts,
+        sequence_safe=True,
         capability=DOCUMENT_CONVERT_CAPABILITY,
         description=(
             "Convert one frozen Excel using Worker MarkItDown. Set publish_artifact=true to "
@@ -210,6 +221,7 @@ def document_inspect_tool_definition(
     """凍結範囲の実 storage metadata だけを観測する Tool を登録する。"""
 
     return _tool_definition(contracts,
+        sequence_safe=True,
         capability=DOCUMENT_INSPECT_CAPABILITY,
         description=(
             "Inspect storage LastModified, Version ID and ETag of one frozen document "
@@ -225,6 +237,7 @@ def document_list_tool_definition(
     """凍結集合の directory 分頁・実 metadata 条件を明示能力として登録する。"""
 
     return _tool_definition(contracts,
+        sequence_safe=True,
         capability=DOCUMENT_LIST_CAPABILITY,
         description=(
             "Page through frozen authorized documents by directory and storage LastModified; "
@@ -274,6 +287,7 @@ def create_run_tool_registry(
             document_inspect_tool_definition(contracts, document_source),
             document_list_tool_definition(contracts, document_source),
             _tool_definition(contracts,
+                sequence_safe=True,
                 capability=DOCUMENT_READINESS_CAPABILITY,
                 description="Check original Run controlled effects required before document access",
                 providers={
@@ -283,6 +297,7 @@ def create_run_tool_registry(
             ),
             *_workspace_tool_definitions(contracts),
             _tool_definition(contracts,
+                sequence_safe=True,
                 capability="audit.export/v1",
                 description=(
                     "Export selected saved Evidence and Proposal/Effect facts from this Run "
@@ -295,6 +310,12 @@ def create_run_tool_registry(
                 ),
                 providers={"platform": audit_export_provider or AuditExportProvider(None)},
                 unbound_provider="platform", minimum_execution_profile="SUPERVISED",
+            ),
+            _tool_definition(contracts,
+                capability="tool.sequence/v1",
+                description="Execute 1-5 already-determined read or local calls in order, with fixed arguments and optional exact result checks. Each call retains its own permission, audit and tool budget. Stops at the first error or failed check. Does not accept effects, interaction, nested sequences or model dispatch. Do not cross required external-saving or reasoning checkpoints.",
+                providers={"platform": ToolSequenceProvider()}, unbound_provider="platform",
+                minimum_execution_profile="SUPERVISED", sequence_safe=False,
             ),
             _interaction_tool_definition(contracts),
             *((_change_propose_tool_definition(contracts),)
@@ -320,6 +341,7 @@ def _subagent_tool_definitions(
     return (
         _tool_definition(contracts,
             capability=SUBAGENT_DISPATCH_CAPABILITY,
+            sequence_safe=False,
             description=(
                 "Fan out bounded read-only sub-analyses of independent aspects and collect "
                 "their conclusions; sub-agents cannot write, ask, propose, or fan out again"
@@ -392,6 +414,7 @@ def _workspace_tool_definitions(contracts: ContractStore) -> tuple[ToolDefinitio
 
     return (
         _tool_definition(contracts,
+            sequence_safe=True,
             capability="json.schema.validate/v1",
             description=("Validate Run-local JSON against a Draft 2020-12 Schema, including "
                          "format assertions. Read schema_path and instance_path from "
@@ -403,6 +426,7 @@ def _workspace_tool_definitions(contracts: ContractStore) -> tuple[ToolDefinitio
             minimum_execution_profile="GUIDED",
         ),
         _tool_definition(contracts,
+            sequence_safe=True,
             capability="workspace.read/v1",
             description="Read one UTF-8 file from the isolated Run workspace",
             providers={"workspace": WorkspaceReadProvider()},
@@ -410,6 +434,7 @@ def _workspace_tool_definitions(contracts: ContractStore) -> tuple[ToolDefinitio
             minimum_execution_profile="GUIDED",
         ),
         _tool_definition(contracts,
+            sequence_safe=True,
             capability="workspace.search/v1",
             description="Search UTF-8 files in the isolated Run workspace",
             providers={"workspace": WorkspaceSearchProvider()},
@@ -417,6 +442,7 @@ def _workspace_tool_definitions(contracts: ContractStore) -> tuple[ToolDefinitio
             minimum_execution_profile="SUPERVISED",
         ),
         _tool_definition(contracts,
+            sequence_safe=True,
             capability="workspace.write/v1",
             description="Write one UTF-8 file to the isolated Run workspace or output",
             providers={"workspace": WorkspaceWriteProvider()},
@@ -424,6 +450,7 @@ def _workspace_tool_definitions(contracts: ContractStore) -> tuple[ToolDefinitio
             minimum_execution_profile="SUPERVISED",
         ),
         _tool_definition(contracts,
+            sequence_safe=True,
             capability="workspace.write/v2",
             description=(
                 "Write one UTF-8 file within the isolated Run; output files receive an "

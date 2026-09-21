@@ -1,0 +1,22 @@
+{
+  "status": "success",
+  "provider": "platform",
+  "outcome": "COMPLETED",
+  "steps": [
+    {
+      "position": 0,
+      "capability": "workspace.read/v1",
+      "response": {
+        "status": "success",
+        "evidence_refs": [
+          "ev_source"
+        ]
+      }
+    }
+  ],
+  "not_run": [],
+  "stop_reason": null,
+  "evidence_refs": [
+    "ev_sequence"
+  ]
+}

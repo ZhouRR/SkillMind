@@ -7,7 +7,8 @@ import json
 import logging
 import os
 import socket
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar, cast
 from uuid import UUID
@@ -519,6 +520,12 @@ async def relay_outbox(ctx: dict[str, Any]) -> dict[str, int | str]:
     }
 
 
+@asynccontextmanager
+async def _single_execution_scope() -> AsyncIterator[None]:
+    """未対応 Engine の元の寿命を変えずに共通 job 処理へ適合する。"""
+    yield
+
+
 async def execute_run(ctx: dict[str, Any], run_id: str) -> dict[str, str | int]:
     """Queue job を idempotent に claim し、注入済み RunExecutor へ引き渡す。"""
 
@@ -531,6 +538,7 @@ async def execute_run(ctx: dict[str, Any], run_id: str) -> dict[str, str | int]:
     settings = ctx["settings"]
     if not settings.worker_dispatch_enabled:
         return {"status": "disabled", "reason": "run_dispatch_disabled"}
+    job_started = asyncio.get_running_loop().time()
     claimed = await service.claim_run(
         UUID(run_id),
         worker_id=ctx["worker_id"],
@@ -559,13 +567,37 @@ async def execute_run(ctx: dict[str, Any], run_id: str) -> dict[str, str | int]:
         status="PREPARING",
     )
     try:
-        await executor.execute(claimed)
-        effect_executor = cast(ApprovedEffectExecutor | None, ctx.get("effect_executor"))
-        if effect_executor is not None and configured_execution_features(settings).effects_enabled:
-            # モデル/Tool の清理完了後、保存済み承認を通常 Effect executor で再検証する。
-            # 人工待ち・未決効果・他 Attempt は対象外。既存 Outbox は障害時の回収に残す。
-            await effect_executor.execute_pending_for_attempt(claimed)
-        await _relay_after_execution(ctx)
+        # 一 job の上限内でしか次 Segment を認領しない。各 Attempt の元の予算は延長しない。
+        loop = asyncio.get_running_loop()
+        job_deadline = job_started + 1500 + settings.run_preparation_timeout_seconds - 30
+        warm_executor = executor if isinstance(executor, AgentRunExecutor) and executor.supports_warm_continuation else None
+        scope = warm_executor.continuation_scope(claimed.run_id) if warm_executor else _single_execution_scope()
+        async with scope:
+            for position in range(5):
+                await executor.execute(claimed)
+                effect_executor = cast(ApprovedEffectExecutor | None, ctx.get("effect_executor"))
+                effect_status = None
+                if effect_executor is not None and configured_execution_features(settings).effects_enabled:
+                    # Provider/批准/回読は原経路。Queue Outbox は失敗時の回収として残す。
+                    effect_status = await effect_executor.execute_pending_for_attempt(claimed)
+                await _relay_after_execution(ctx)
+                # 最悪の一 Attempt と Effect の時間を確保できなければ、従来の Queue に戻る。
+                if warm_executor is None or effect_status != "APPLIED" or position == 4:
+                    break
+                wall_limit = claimed.limits_snapshot_json.get("wall_timeout_seconds", 900)
+                if type(wall_limit) is not int or wall_limit <= 0:
+                    break
+                reserve = settings.run_preparation_timeout_seconds + wall_limit + 360
+                if loop.time() + reserve >= job_deadline:
+                    break
+                following = await service.claim_run(
+                    claimed.run_id, worker_id=ctx["worker_id"],
+                    lease_seconds=settings.run_lease_seconds,
+                    max_attempts=settings.run_max_attempts, expected_previous=claimed,
+                )
+                if following is None:
+                    break
+                claimed = following
     except Exception as error:
         # ARQ job 境界では再送判断のため例外を維持し、秘密を含まない型名だけを記録する。
         log_event(

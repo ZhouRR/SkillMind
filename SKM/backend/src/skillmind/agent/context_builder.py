@@ -475,10 +475,9 @@ def _resolve_source_tools(
                 execution_profile=execution_profile,
             )
         )
-    if "audit.export/v1" in allowed and "audit.export/v1" not in resolved_capabilities:
-        tools.append(registry.resolve_unbound(
-            "audit.export/v1", execution_profile=execution_profile,
-        ))
+    for auxiliary in ("audit.export/v1", "tool.sequence/v1"):
+        if auxiliary in allowed and auxiliary not in resolved_capabilities:
+            tools.append(registry.resolve_unbound(auxiliary, execution_profile=execution_profile))
     return tools, repository_bindings
 
 

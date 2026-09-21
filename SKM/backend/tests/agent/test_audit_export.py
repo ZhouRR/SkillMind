@@ -13,8 +13,6 @@ from urllib.parse import quote
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.dialects.postgresql import dialect
-
 from skillmind.agent.audit_export import (
     AUDIT_EXPORT_CAPABILITY,
     AuditExportProvider,
@@ -32,6 +30,7 @@ from skillmind.agent.tool_gateway import ToolProviderError
 from skillmind.agent.workspace import WorkspaceManager
 from skillmind.artifacts.repository import ArtifactRepository
 from skillmind.core.hashing import canonical_json, sha256_hex
+from sqlalchemy.dialects.postgresql import dialect
 from tests.agent.test_tool_gateway import CsvIssueProvider, MemoryAuditWriter, _context, _registry
 from tests.agent.test_workspace_provider import CONTRACTS
 from tests.agent.test_workspace_provider import _context as tool_context
@@ -302,3 +301,28 @@ def test_export_catalog_keeps_interpreter_identity_loadable():
     assert len(entries) == 1
     assert entries[0].providers == ("platform",)
     assert entries[0].request_schema == "tools/audit.export/v1/request.schema.json"
+
+
+async def test_optional_index_does_not_change_raw_artifact_or_repeat_values(tmp_path):
+    """索引を返しても原成果 byte は不変で、改行値をモデル応答へ再送しない。"""
+    from skillmind.agent.audit_export import record_index
+    source, context = MemorySource(), context_at(tmp_path)
+    provider = AuditExportProvider(source)
+    raw = await provider.execute(context, arguments())
+    indexed = await provider.execute(context, arguments(include_index=True))
+    assert raw.evidence[0].artifact.content == indexed.evidence[0].artifact.content
+    document = json.loads(raw.evidence[0].artifact.content)
+    assert indexed.response["record_index"] == record_index(document)
+    assert "hallo" not in canonical_json(indexed.response)
+    assert indexed.response["record_index"][1]["recorded_status"] == "FAILED"
+    assert indexed.response["record_index"][0]["record_hash"] == "sha256:" + sha256_hex(canonical_json(document["evidence"][0]))
+    assert "record_index" not in raw.response
+
+
+@pytest.mark.parametrize("value", ["true", 1, None])
+async def test_invalid_index_flag_is_rejected_before_read(tmp_path, value):
+    """任意 truthy を採用せず、契約違反時に監査本文へアクセスしない。"""
+    source = MemorySource()
+    with pytest.raises(ToolProviderError):
+        await AuditExportProvider(source).execute(context_at(tmp_path), arguments(include_index=value))
+    assert source.reads == 0

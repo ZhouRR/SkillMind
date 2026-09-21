@@ -49,6 +49,7 @@ class RunToolContext:
     # 権限縮小は共有 resolver、監査の提交権は Worker-private scope と DB lease で検証する。
     run: RunContext | None = None
     tool_call_id: UUID | None = None
+    agent_session_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +104,7 @@ class ToolDefinition:
     minimum_execution_profile: str = "GUIDED"
     # True の control Tool は PreToolUse で SDK を停止し、Provider handler へ到達させない。
     defer_execution: bool = False
+    sequence_safe: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +144,10 @@ class ToolInvocationCoordinator:
         self._audit_writer = audit_writer
         self._pending: dict[tuple[str, str], deque[ToolAuditLease]] = defaultdict(deque)
         self._lock = asyncio.Lock()
+
+    def validate_request(self, tool_name: str, arguments: Mapping[str, Any]) -> None:
+        """実行権を発行せず、凍結済み Tool の静的境界だけを検査する。"""
+        self._policy.authorize(tool_name, arguments)
 
     async def register_authorized(
         self,
@@ -241,6 +247,47 @@ class ToolGateway:
         self._coordinator = coordinator
         self._audit_writer = audit_writer
         self._dispatched: set[UUID] = set()
+        from skillmind.agent.tool_sequence import ToolSequenceProvider, ToolStepBudget
+        self.step_budget = ToolStepBudget(context.limits.max_turns)
+        for name, binding in tuple(self._bindings.items()):
+            if isinstance(binding.provider, ToolSequenceProvider):
+                self._bindings[name] = replace(binding, provider=binding.provider.bind(self))
+
+    def validate_sequence_step(self, name: str, arguments: Mapping[str, Any]) -> None:
+        """子能力を同じ frozen policy へ通し、制御/再帰/外部 write を拒否する。"""
+        binding = self._bindings[name]
+        if not binding.definition.sequence_safe or binding.definition.defer_execution:
+            raise PermissionError("Tool does not support sequence execution")
+        self._coordinator.validate_request(name, arguments)
+
+    async def invoke_sequence_step(
+        self, parent: RunToolContext, step: Mapping[str, Any], *, position: int,
+    ) -> dict[str, Any]:
+        """各子に原 parent ID 由来の identity と監査を割当て、予算も個別に消費する。"""
+        if (parent.run_id != self._context.run_id
+            or parent.run_attempt_id != self._context.run_attempt_id
+            or parent.project_id != self._context.project_id
+            or parent.user_id != self._context.user_id
+            or parent.tool.capability != "tool.sequence/v1"
+            or parent.agent_session_id is None or parent.tool_call_id not in self._dispatched):
+            raise ToolProviderError("unavailable", "Sequence authority is unavailable", retryable=False)
+        name = capability_to_sdk_name(step["capability"])
+        args = deepcopy(dict(step["arguments"]))
+        try:
+            self.validate_sequence_step(name, args)
+            self.step_budget.consume()
+            await self._coordinator.register_authorized(
+                name, args, f"sequence:{parent.tool_call_id}:{position}", str(parent.agent_session_id),
+            )
+            return await self._invoke(self._bindings[name], args)
+        except PermissionError:
+            await self._coordinator.register_denied(
+                name, args, f"sequence:{parent.tool_call_id}:{position}",
+                str(parent.agent_session_id), "Sequence authority or tool budget is unavailable",
+            )
+            return {"status": "error", "code": "scope_denied", "message": "Sequence authority or tool budget is unavailable", "retryable": False}
+        except ToolGatewayError as error:
+            return {"status": "error", "code": error.code, "message": error.message, "retryable": False}
 
     async def invoke_mcp(self, tool_name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         """MCP SDK が要求する content/is_error 形式へ結果を変換する。"""
@@ -312,6 +359,7 @@ class ToolGateway:
                     workspace=self._context.workspace,
                     run=self._context,
                     tool_call_id=lease.tool_call_id,
+                    agent_session_id=lease.invocation.agent_session_id if lease.invocation else None,
                 ),
                 arguments,
             )
@@ -571,6 +619,7 @@ class ToolRegistry:
             mcp=RunMcpRuntime(
                 server=server,
                 on_tool_authorized=coordinator.register_authorized,
+                on_tool_attempt=gateway.step_budget.consume,
                 on_tool_denied=coordinator.register_denied,
                 deferred_tool_names=frozenset(
                     registered.sdk_name

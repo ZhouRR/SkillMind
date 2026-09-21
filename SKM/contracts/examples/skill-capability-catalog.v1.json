@@ -1,6 +1,6 @@
 {
   "catalog_version": "skillmind.tool-catalog/1",
-  "checksum": "sha256:5357daca88fc023cfc3b7d7961454b38bec86d16b6675b21b1411f875fa06b9f",
+  "checksum": "sha256:51a88ff58fb2f1887e18ac9d9ec505a67aee7e313bb42b490b27df676162c9f4",
   "capabilities": [
     {
       "capability": "audit.export/v1",
@@ -209,6 +209,16 @@
       "request_schema": "tools/subagent.dispatch/v1/request.schema.json",
       "response_schema": "tools/subagent.dispatch/v1/response.schema.json",
       "error_schema": "tools/subagent.dispatch/v1/error.schema.json",
+      "providers": [
+        "platform"
+      ]
+    },
+    {
+      "capability": "tool.sequence/v1",
+      "description": "Run a bounded sequence of already-authorized read or local calls with fixed arguments and exact checks; no external writes or recursive model calls.",
+      "request_schema": "tools/tool.sequence/v1/request.schema.json",
+      "response_schema": "tools/tool.sequence/v1/response.schema.json",
+      "error_schema": "tools/tool.sequence/v1/error.schema.json",
       "providers": [
         "platform"
       ]

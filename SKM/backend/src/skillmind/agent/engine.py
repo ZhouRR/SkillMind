@@ -111,6 +111,7 @@ class RunMcpRuntime:
     on_tool_authorized: ToolAuthorizationCallback | None = None
     on_tool_denied: ToolDenialCallback | None = None
     deferred_tool_names: frozenset[str] = frozenset()
+    on_tool_attempt: Callable[[], None] | None = None
 
 
 def _default_client_factory(options: ClaudeAgentOptions) -> ClaudeClient:
@@ -593,6 +594,7 @@ class ClaudeAgentSdkEngine:
             on_tool_authorized=on_tool_authorized,
             on_tool_denied=on_tool_denied,
             deferred_tool_names=deferred_tool_names,
+            on_tool_attempt=runtime.on_tool_attempt if isinstance(runtime, RunMcpRuntime) else None,
         )
 
     async def _run(

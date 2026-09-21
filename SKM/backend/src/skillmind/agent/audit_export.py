@@ -109,6 +109,28 @@ def export_document(
     return data
 
 
+def record_index(document: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """原記録の参照と hash だけを返し、本文を模型の履歴へ再複製しない。"""
+    index: list[dict[str, Any]] = []
+    for key, reference in (("evidence", "evidence_ref"), ("proposals", "proposal_ref")):
+        for record in document[key]:
+            item = {
+                "reference": record[reference],
+                "record_hash": "sha256:" + sha256_hex(canonical_json(record)),
+            }
+            # Tool 成功は業務成功でない。値の由来を recorded_status として区別する。
+            status = record.get("status") if key == "proposals" else (
+                record.get("tool_call", {}).get("status")
+            )
+            if isinstance(status, str):
+                item["recorded_status"] = status
+            artifact = record.get("artifact_ref")
+            if isinstance(artifact, str):
+                item["artifact_ref"] = artifact
+            index.append(item)
+    return index
+
+
 class AuditExportProvider:
     """既存 workspace 出力と Artifact 提交を使い、外部保存は原 Effect に委ねる。"""
 
@@ -136,6 +158,9 @@ class AuditExportProvider:
             raise ToolProviderError(
                 "invalid_request", "Audit export requires output/", retryable=False
             )
+        include_index = arguments.get("include_index", False)
+        if type(include_index) is not bool:
+            raise ToolProviderError("invalid_request", "Invalid audit index option", retryable=False)
         try:
             selection = export_selection(arguments)
             await self._source.authorize(context)
@@ -187,6 +212,7 @@ class AuditExportProvider:
                 "bytes_written": len(data),
                 "created": created,
                 "counts": {"evidence": len(selection[0]), "proposals": len(selection[1])},
+                **({"record_index": record_index(json.loads(data))} if include_index else {}),
             },
             evidence=(evidence,),
         )
@@ -241,5 +267,7 @@ def validate_export_artifact(
         or not isinstance(record.artifact_ref, str)
         or re.fullmatch(r"art_[a-zA-Z0-9_-]{1,60}", record.artifact_ref) is None
         or result.get("artifact_refs") != [record.artifact_ref]
+        or ("record_index" in result) != (invocation.arguments.get("include_index") is True)
+        or ("record_index" in result and result["record_index"] != record_index(payload))
     ):
         raise ValueError("Export Artifact differs from its original selection")

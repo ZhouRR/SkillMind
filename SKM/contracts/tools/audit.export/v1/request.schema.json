@@ -37,6 +37,11 @@
         "type": "string",
         "pattern": "^cp_[a-zA-Z0-9_-]{1,60}$"
       }
+    },
+    "include_index": {
+      "type": "boolean",
+      "default": false,
+      "description": "Return a compact index of the exported records, not their raw contents. The full Artifact remains unchanged."
     }
   },
   "anyOf": [
