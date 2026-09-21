@@ -6,11 +6,11 @@ import asyncio
 import json
 import time
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
-from contextlib import aclosing, suppress
+from contextlib import AbstractAsyncContextManager, aclosing, suppress
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from openai_codex.client import CodexClient
 from openai_codex.generated.v2_all import (
@@ -44,7 +44,8 @@ from skillmind.agent.domain import (
 )
 from skillmind.agent.session_store import SessionTranscriptBackend, TranscriptKey
 from skillmind.agent.tool_gateway import RunToolRuntime
-from skillmind.core.timing import observe_phase
+from skillmind.agent.warm_codex import current_warm_session, warm_codex_scope
+from skillmind.core.timing import observe_phase, safe_observation
 from skillmind.runs.budget import BudgetUnavailableError
 from skillmind.runs.capacity_retry import MODEL_CAPACITY_CODE
 
@@ -76,6 +77,10 @@ class CodexAgentSdkEngine:
         self._runtime_factory = runtime_factory
         self._transcripts = transcript_backend
         self._active: dict[AgentSessionRef, _Execution] = {}
+
+    def continuation_scope(self, run_id: UUID) -> AbstractAsyncContextManager[None]:
+        """新しい Attempt の gateway/lease を保持せず SDK transport だけ短期再利用する。"""
+        return warm_codex_scope(run_id, self)
 
     async def health(self) -> EngineHealth:
         """モデルを呼ばず固定 SDK/CLI の配布 identity を返す。"""
@@ -160,6 +165,7 @@ class CodexAgentSdkEngine:
             context, prompt, previous if not fork else None,
         )
         runtime = self._runtime_factory(context)
+        warm = current_warm_session(context.run_id, self) if not fork else None
 
         async def save_deferred(
             name: str,
@@ -202,13 +208,29 @@ class CodexAgentSdkEngine:
             return result
 
         async with serve_codex_tools(bridge) as mcp:
-            client = create_codex_client(self._configuration.client_config(mcp=mcp))
+            if warm is None:
+                client = create_codex_client(self._configuration.client_config(mcp=mcp))
+                needs_start = True
+            else:
+                client, needs_start = await warm.acquire(
+                    lambda: create_codex_client(self._configuration.client_config()),
+                    parent.session_id if parent else None,
+                )
+            safe_observation(
+                "run.performance.sdk_reuse", run_id=context.run_id,
+                run_attempt_id=context.run_attempt_id,
+                status="new" if needs_start else "reused",
+            )
+            terminal_confirmed = False
             active = _Execution(client, bridge, done=bridge.closed)
             session_ref: AgentSessionRef | None = None
             stop_task: asyncio.Task[None] | None = None
             try:
                 output = CodexOutputSchema(context.result_schema)
-                await start_codex(client)
+                if needs_start:
+                    with observe_phase("run.performance.sdk_start", run_id=context.run_id,
+                                       run_attempt_id=context.run_attempt_id):
+                        await start_codex(client)
                 options: dict[str, Any] = {
                     "model": context.model,
                     "sandbox": "read-only",
@@ -223,15 +245,23 @@ class CodexAgentSdkEngine:
                         + output.instructions
                     ),
                 }
+                if warm is not None:
+                    # 前 thread は明示 unsubscribe 済み。各 Attempt に新しい秘密 URL を固定する。
+                    options["config"] = {"mcp_servers": {"skillmind": mcp}}
                 thread: ThreadStartResponse | ThreadResumeResponse | ThreadForkResponse
-                if parent is None:
-                    thread = await asyncio.to_thread(client.thread_start, options)
-                elif fork:
-                    thread = await asyncio.to_thread(client.thread_fork, parent.session_id, options)
-                else:
-                    thread = await asyncio.to_thread(
-                        client.thread_resume, parent.session_id, {**options, "excludeTurns": True}
-                    )
+                with observe_phase(
+                    "run.performance.sdk_thread", run_id=context.run_id,
+                    run_attempt_id=context.run_attempt_id,
+                    status="start" if parent is None else "fork" if fork else "resume",
+                ):
+                    if parent is None:
+                        thread = await asyncio.to_thread(client.thread_start, options)
+                    elif fork:
+                        thread = await asyncio.to_thread(client.thread_fork, parent.session_id, options)
+                    else:
+                        thread = await asyncio.to_thread(
+                            client.thread_resume, parent.session_id, {**options, "excludeTurns": True}
+                        )
                 session_id = thread.thread.id
                 if (
                     thread.model != context.model
@@ -270,16 +300,20 @@ class CodexAgentSdkEngine:
                         AgentEventType.SESSION_INTERRUPTED, {"reason": "cancelled_before_turn"}
                     )
                     return
-                turn = await asyncio.to_thread(
-                    client.turn_start,
-                    session_id,
-                    prompt,
-                    {
-                        "model": context.model,
-                        "effort": self._configuration.effort,
-                        "outputSchema": output.schema,
-                    },
-                )
+                with observe_phase(
+                    "run.performance.sdk_turn_start", run_id=context.run_id,
+                    run_attempt_id=context.run_attempt_id,
+                ):
+                    turn = await asyncio.to_thread(
+                        client.turn_start,
+                        session_id,
+                        prompt,
+                        {
+                            "model": context.model,
+                            "effort": self._configuration.effort,
+                            "outputSchema": output.schema,
+                        },
+                    )
                 active.turn_id = turn.turn.id
                 if active.interrupted:
                     await asyncio.to_thread(client.turn_interrupt, session_id, turn.turn.id)
@@ -371,6 +405,7 @@ class CodexAgentSdkEngine:
                                     "attempt_id": str(context.run_attempt_id),
                                 },
                             )
+                            terminal_confirmed = True
                             if active.interrupted:
                                 yield event(AgentEventType.SESSION_INTERRUPTED, {"status": status})
                             elif limit_exceeded or bridge.stop_reason is not None:
@@ -428,10 +463,13 @@ class CodexAgentSdkEngine:
                 if stop_task is not None:
                     stop_task.cancel()
                 try:
-                    await asyncio.to_thread(client.close)
                     if stop_task is not None:
                         with suppress(asyncio.CancelledError):
                             await stop_task
+                    if warm is None:
+                        await asyncio.to_thread(client.close)
+                    else:
+                        await warm.release(client, session_id, terminal=terminal_confirmed)
                 finally:
                     if session_ref is not None and self._active.get(session_ref) is active:
                         del self._active[session_ref]

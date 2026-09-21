@@ -18,7 +18,6 @@ from uuid import uuid4
 import pytest
 from jsonschema import Draft202012Validator
 from openai_codex.client import CodexConfig
-
 from skillmind.agent import codex_completion, codex_engine
 from skillmind.agent.codex_completion import CodexCompletionClient
 from skillmind.agent.codex_engine import CodexAgentSdkEngine
@@ -716,3 +715,44 @@ async def test_native_skill_candidate_uses_unencoded_schema_and_original_model(
     assert requests[0]["reasoning"]["effort"] == "medium"
     assert requests[0]["text"]["format"]["schema"] == schema
     assert not _wire_tool_names(requests[0]) - {"update_plan", "request_user_input"}
+
+
+async def test_native_warm_resume_replaces_gateway_without_restarting_client(tmp_path, monkeypatch, endpoint):
+    """固定 CLI が同じ process で次 Attempt の新 MCP server と監査権を使用する。"""
+    server, requests = endpoint
+    _local_client(monkeypatch, server)
+    factory = codex_engine.create_codex_client
+    clients = []
+
+    def capture(configuration):
+        """実 process の生成数だけを記録し、model 通信は原 loopback のままにする。"""
+        client = factory(configuration)
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(codex_engine, "create_codex_client", capture)
+    provider, writer, backend = CsvIssueProvider(), MemoryAuditWriter(), MemoryTranscriptBackend()
+    registry = _registry(provider)
+    context = replace(context_with_brief(tmp_path), model="gpt-5.6-terra")
+    engine = CodexAgentSdkEngine(
+        configuration=CodexRuntimeConfiguration("gpt-5.6-terra", "max", tmp_path / "codex"),
+        runtime_factory=lambda run: registry.build_gateway_runtime(run, audit_writer=writer),
+        transcript_backend=backend,
+    )
+    async with asyncio.timeout(50), engine.continuation_scope(context.run_id):
+        first = [event async for event in engine.execute(context)]
+        assert first[-1].event_type is AgentEventType.RESULT_COMPLETED, [e.payload for e in first]
+        session = AgentSessionRef(context.run_id, context.run_attempt_id, first[0].agent_session_id)
+        next_brief = deepcopy(context.task_brief)
+        next_brief["identity"]["segment_no"] = 2
+        next_brief["checkpoint"]["summary"] = "Continue without repeating the saved call."
+        following = compiled(replace(context, run_attempt_id=uuid4()), next_brief)
+        second = [event async for event in engine.resume(ResumeContext(following, session))]
+        assert second[-1].event_type is AgentEventType.RESULT_COMPLETED, [e.payload for e in second]
+        assert second[0].agent_session_id == session.session_id
+        assert len(clients) == 1
+        assert provider.calls == 2 and len(writer.completed) == 2
+        assert [c.run_attempt_id for c in provider.contexts] == [context.run_attempt_id, following.run_attempt_id]
+        assert len(requests) == 4
+    assert not engine._active
+    assert clients[0]._proc is None

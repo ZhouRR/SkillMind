@@ -972,6 +972,7 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
         lease_expires_at: datetime,
         max_attempts: int,
         trace_id: str | None = None,
+        expected_previous: ClaimedRun | None = None,
     ) -> ClaimedRun | None:
         """Queued/Retry Run を lock し、新しい RunAttempt と lease を原子的に作成する。
 
@@ -1008,6 +1009,36 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
             RunSegmentStatus.RUNNING,
         }:
             return None
+
+        if expected_previous is not None:
+            previous = expected_previous
+            if (current is not RunStatus.QUEUED
+                or previous.run_id != run_id or previous.project_id != run.project_id
+                or segment.segment_no != previous.segment_no + 1
+                or segment.continuation_mode != SessionContinuationMode.RESUME.value
+                or segment.trigger_type != RunSegmentTrigger.APPROVAL_RESPONSE.value
+                or segment.parent_agent_session_id is None or segment.trigger_ref is None
+                or run.permission_snapshot_json.get("actor_id") != str(previous.actor_id)):
+                return None
+            # 別人の回答/人工批准/別 Attempt の完了を自動続行として引き取らない。
+            parent = await self._session.get(AgentSession, segment.parent_agent_session_id)
+            effect = await self._session.get(EffectExecution, segment.trigger_ref)
+            proposal = await self._session.get(ChangeProposal, effect.proposal_id) if effect else None
+            approval = await self._session.get(ChangeApproval, effect.approval_id) if effect else None
+            if (parent is None or effect is None or proposal is None or approval is None
+                or parent.run_id != run_id or parent.run_attempt_id != previous.run_attempt_id
+                or parent.run_segment_id != previous.run_segment_id
+                or effect.run_id != run_id or effect.status != "APPLIED" or effect.error_json
+                or proposal.run_id != run_id or proposal.project_id != run.project_id
+                or proposal.run_attempt_id != previous.run_attempt_id
+                or proposal.run_segment_id != previous.run_segment_id
+                or effect.proposal_id != proposal.id or effect.approval_id != approval.id
+                or proposal.agent_session_id != parent.id or proposal.status != "APPLIED"
+                or approval.run_id != run_id or approval.proposal_id != proposal.id
+                or approval.decision != "APPROVED" or approval.source not in {"RUN_START", "PREAUTHORIZATION"}
+                or approval.proposal_version != proposal.version
+                or approval.proposal_checksum != proposal.checksum):
+                return None
 
         active_statement = select(RunAttempt.id).where(
             RunAttempt.run_id == run_id,

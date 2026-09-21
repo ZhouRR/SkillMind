@@ -58,5 +58,11 @@
 | Run 统一预算 | [primary_budget](../../SKM/backend/src/skillmind/worker/primary_budget.py)尚未接入生产 coordinator；Codex 启动前拒绝美元限额，局部 turns/output/timeout 不等于完整计费上限。接入时须主子共享、收费前预留、可信计量，未知费用不退额。 |
 | 子 Agent | [Provider](../../SKM/backend/src/skillmind/agent/subagent_provider.py)仅局部实现，共享消费、停止与审计恢复未闭合；权限经 [resolve_subagent_capabilities](../../SKM/backend/src/skillmind/agent/subagent.py)收窄，禁止写入、交互和递归 dispatch。 |
 | 生成 UI | [Manifest](../../SKM/contracts/runtime-manifest/v1alpha1.schema.json)仍不允许 frontend_module，builder/Host 未接。未来开放须验证隔离：bundle 使用 CSP sandbox allow-scripts，iframe 禁止 allow-same-origin；静态报告不算生成应用。 |
-| 连续回执与短序列 | [局部实验](../../SKM/backend/tests/worker/test_receipt_sequence_experiment.py)未接生产 SDK、PostgreSQL 和 Outbox，不能当作正式运行模式。 |
+| 外部写操作序列 | [局部实验](../../SKM/backend/tests/worker/test_receipt_sequence_experiment.py)仍未接入生产。已接入的同 job SDK 复用和本地/只读短序列见下节；它们不等于取消逐次 Effect/Segment，也不执行批量外部写入。 |
 | 其他扩展 | Task Flow 只读预览；完整编排、SVN/Redmine 写入交付、PR 自动创建及更广的 Shell/network 能力按实际需求明确权限、恢复与验收范围。 |
+
+## 有限工具序列与暖续行
+
+本地/只读短序列由 `agent/tool_sequence.py` 经原 `ToolGateway` 执行。注册项必须显式 `sequence_safe`，子工具仍须在原 Run 冻结集合中；改变注册不扩大历史权限。取消传播、未决不重放，外部写入与控制工具不能进入此序列。
+
+Codex 的 `agent/warm_codex.py` 只在同一 Worker job 的原 Run 内复用 transport，绝不复用 Tool 权限或跨用户会话。`claim_for_execution(expected_previous=...)` 在原 Run 锁内校验相邻 Segment、原 Effect 和自动批准，仍经普通 claim 创建新 Attempt。回收及跨 Worker 处理保留原 Outbox。直接回执与多写操作序列仍未交付，不以暖续行混称。

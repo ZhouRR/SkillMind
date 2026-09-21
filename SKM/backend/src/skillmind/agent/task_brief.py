@@ -562,6 +562,15 @@ def _finish_task_prompt(
             "In the final outcome, reference saved artifacts and retain necessary conclusions and "
             "limitations without repeating full files or receipt bodies."
         )
+    if any(tool.get("capability") == "tool.sequence/v1" for tool in brief["allowed_tools"]):
+        sections.append(
+            "Use tool.sequence/v1 for up to five already-determined reads or local file operations "
+            "whose complete arguments are known now. Exact checks stop the sequence; use them "
+            "when later steps depend on a returned status or value. It does not execute proposals, "
+            "external writes, user interactions or nested model calls. Never cross a Skill-required "
+            "external save or a point requiring fresh reasoning. Results and references remain "
+            "individually audited. Do not replay a failed sequence from its beginning."
+        )
     sections.append(f"Task input (JSON): {canonical_json(input_json)}")
     properties = output_schema.get("properties", {})
     outcome_version = properties.get("outcome_version") if isinstance(properties, Mapping) else None

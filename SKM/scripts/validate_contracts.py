@@ -14,6 +14,8 @@ CONTRACTS = ROOT / "contracts"
 
 EXAMPLE_CONTRACTS = {
     "examples/audit-export-request.v1.json": "tools/audit.export/v1/request.schema.json",
+    "examples/tool-sequence-request.v1.json": "tools/tool.sequence/v1/request.schema.json",
+    "examples/tool-sequence-response.v1.json": "tools/tool.sequence/v1/response.schema.json",
     "examples/audit-export-response.v1.json": "tools/audit.export/v1/response.schema.json",
     "examples/skill-execution.v1.json": "skill-execution/v1.schema.json",
     "examples/agent-task-brief.v2.json": "agent-task-brief/v2.schema.json",

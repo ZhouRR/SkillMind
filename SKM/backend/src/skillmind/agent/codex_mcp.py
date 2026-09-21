@@ -102,6 +102,8 @@ class CodexToolBridge:
                 return _tool_error("Run tool step limit exceeded")
             self._calls += 1
             try:
+                if self.runtime.mcp.on_tool_attempt is not None:
+                    self.runtime.mcp.on_tool_attempt()
                 self._policy.authorize(name, arguments)
             except PermissionError as error:
                 if self.runtime.mcp.on_tool_denied is not None:

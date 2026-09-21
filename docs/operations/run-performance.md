@@ -34,3 +34,13 @@ INFO JSON 日志使用 `run.performance.` 前缀。实现入口为[计时器](..
 每次只调整已确认瓶颈，比较多次执行的耗时、输出完整性和业务准确性；需要真实模型/写入时使用获准环境。查询列减少或测试变快不证明真实任务提速，隔离实验也不代表生产恢复能力已闭环。
 
 观测不记录正文或凭据，不为提速跳过授权、批准、read-back、持久事件或结果校验。质量缺陷与耗时问题分别记录，实施验证见[本地开发](../development/local-development.md)。
+
+## 连续处理的边界
+
+`audit.export/v1` 可通过 `include_index: true` 返回精确引用/hash 的小索引，完整导出 Artifact 不变。直接引用该 Artifact 保存原记录，避免为了汇总再次把全文送回模型。索引不是实测正文，也不替代业务 Schema 或必要外部保存。
+
+`tool.sequence/v1` 将 1–5 个参数已确定的只读/本地工具交给同一 Gateway 逐项执行，每个子调用单独授权、审计和计量；可用 JSON Pointer 完全一致检查决定是否继续。失败、条件不成立或聚合上限时停止后续。没有脚本、循环、动态参数、外部写入、审批、递归或子模型。已有单步路径仍保留；这不是 MCP 写操作序列。
+
+Codex Worker 对同一 Run 的确认自动批准续行，可在一个有限 job 中复用 SDK 进程。每个 Attempt 仍有新 lease、Gateway 和秘密 MCP URL，原 Segment/审批/回读/Outbox 不变。旧 native turn 终态已保存、thread 已 unsubscribe 后才复用；不重放未确认操作。至多连续五段，无法为下一段预留原完整时间、人工等待、非 APPLIED 或竞争认领时退回原 Queue。`sdk_start` 可用于观察进程启动次数；本优化减少重建，不等于生产 inline 回执或减少每段的模型判断。
+
+SDK 生命周期还分别记录 `sdk_start`、`sdk_thread`、`sdk_turn_start`；`sdk_reuse` 的 `status` 区分 `new` / `reused`，不包含正文。它们属于 engine 等待内的子区间，不能与 `engine_wait` 重复相加。暖续行保留原 Segment/Attempt 和每步心跳，仅减少进程启动；不把一次复用写成少一次模型决策。

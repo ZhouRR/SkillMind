@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "$id": "https://schemas.skillmind.local/tools/tool.sequence/v1/response.schema.json",
+  "title": "tool.sequence/v1 response",
+  "required": [
+    "status",
+    "provider",
+    "outcome",
+    "steps",
+    "not_run",
+    "stop_reason",
+    "evidence_refs"
+  ],
+  "properties": {
+    "status": {
+      "const": "success"
+    },
+    "provider": {
+      "const": "platform"
+    },
+    "outcome": {
+      "enum": [
+        "COMPLETED",
+        "STOPPED"
+      ]
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "position",
+          "capability",
+          "response"
+        ],
+        "properties": {
+          "position": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4
+          },
+          "capability": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_.-]*/v[0-9][a-zA-Z0-9_.-]*$",
+            "maxLength": 128
+          },
+          "response": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "not_run": {
+      "type": "array",
+      "maxItems": 5,
+      "uniqueItems": true,
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4
+      }
+    },
+    "stop_reason": {
+      "enum": [
+        null,
+        "tool_failed",
+        "condition_failed",
+        "aggregate_byte_limit"
+      ]
+    },
+    "evidence_refs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "type": "string",
+        "pattern": "^ev_[a-zA-Z0-9_-]+$"
+      }
+    }
+  }
+}

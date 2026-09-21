@@ -292,7 +292,7 @@ class RunService:
                                 else set()
                             ),
                             # 原 write-v2 の出力能力に、同 Run の保存済み監査を転記する補助 Tool を固定する。
-                            *({"audit.export/v1"} if "workspace.write/v2" in resolved.allowed_capabilities
+                            *({"audit.export/v1", "tool.sequence/v1"} if "workspace.write/v2" in resolved.allowed_capabilities
                               and execution_profile in {"SUPERVISED", "DELEGATED"} else set()),
                             INTERACTION_REQUEST_CAPABILITY,
                             *(
@@ -643,6 +643,7 @@ class RunService:
         lease_seconds: int,
         max_attempts: int,
         trace_id: str | None = None,
+        expected_previous: ClaimedRun | None = None,
     ) -> ClaimedRun | None:
         """Worker 用 lease token を発行し、RunAttempt と PREPARING 状態を原子的に作成する。"""
 
@@ -657,6 +658,7 @@ class RunService:
                 lease_expires_at=lease_expires_at,
                 max_attempts=max_attempts,
                 trace_id=trace_id,
+                **({"expected_previous": expected_previous} if expected_previous is not None else {}),
             )
 
     async def heartbeat_run_attempt(
