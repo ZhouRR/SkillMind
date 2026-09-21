@@ -41,9 +41,8 @@ assert len(patch) == 93458
 assert hashlib.sha256(patch).hexdigest() == '8949fc8a8391cbe489cffab8ee2b0a3152bee0d2eec859c93e383c44c2a154bc'
 subprocess.run(['git', 'apply', '--check', '-'], input=patch, check=True)
 subprocess.run(['git', 'apply', '-'], input=patch, check=True)
-repair = Path('.github/repair_inline.py')
-if repair.exists():
-    subprocess.run([sys.executable, str(repair)], check=True)
+for script in ('.github/repair_inline.py', '.github/finish_inline.py'):
+    subprocess.run([sys.executable, script], check=True)
 changed = set(subprocess.check_output(['git', 'diff', '--name-only'], text=True).splitlines())
 changed.update(subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard'], text=True).splitlines())
 paths = sorted(p for p in changed if p.startswith(('SKM/', 'docs/')))
