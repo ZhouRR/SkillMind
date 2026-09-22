@@ -11,14 +11,14 @@ description: 文書庫の Excel テスト仕様書を Markdown に変換・保�
 
 対象は必須の文書読取リソース「文書範囲」で選択する。タスク入力は `{}` とし、`input_path`、`source_prefix`、`file_name`、ID、Markdown 本文を再入力させない。対象パス・文書 ID・版は選択情報と文書メタデータから取得する。未選択なら「文書範囲」の設定を求め、文書庫全体へ自動拡大しない。
 
-接続済みの MinIO、PostgreSQL、MarkItDown を使う。プロジェクト、文書庫、bucket、タイムゾーン（既定 `Asia/Tokyo`）、`output_prefix`（既定 `レビュー/`）は実行環境から取得する。以下の保存パスの `レビュー/` は、明示されたプロジェクト設定があれば置き換える。既存文書・ID・JSON キーは維持し、元仕様は依頼なく変更しない。他の Skill は呼び出さず、次工程の起動はプラットフォームに任せる。
+接続済みの MinIO、PostgreSQL、MarkItDown を使う。プロジェクト、文書庫、bucket、タイムゾーン（既定 `Asia/Tokyo`）、`output_prefix`（既定 `レビュー/`）は実行環境から取得する。以下の保存パスの `レビュー/` は、明示されたプロジェクト設定があれば置き換える。既存文書・ID・JSON キーは維持し、元仕様は依頼なく変更しない。他の Skill は呼び出さず、本タスクはレビューと成果保存までを扱う。
 
 ## 処理
 
 1. **実行登録**：新しい依頼ごとに `testRunId`（UUID）を生成し、`test_automation.test_run` にプロジェクト、文書庫、bucket、対象パス・抽出条件、タイムゾーン、対象日、抽出基準日時、開始日時、`RUNNING`、`output_prefix` を登録する。登録失敗時は文書処理を開始しない。同一実行の継続は後述の規則に従う。
 2. **対象選択**：承認された範囲内の `.xlsx` / `.xls` を対象とし、`~$` 一時ファイルと成果物保存先を除外する。個別ファイルと展開・凍結済みの文書集合は更新日を問わない。実行コンテキストにディレクトリ条件が明示されている場合だけ、`/` 終端の prefix（ルートは空文字）で再帰列挙・全ページ取得し、`LastModified` が当日 00:00 以上、翌日 00:00 未満かつ抽出基準日時以前の文書を選ぶ。日付はプロジェクトのタイムゾーンで判定し、件数や共通フォルダーから選択方式を推測しない。
 3. **文書登録・変換**：対象ごとに `documentId`（UUID）を生成して `test_automation.test_document` へ登録し、選択した版の Excel を取得する。Version ID を固定できなければ一覧と取得時のメタデータを照合し、途中で変更された文書は処理異常とする。取得内容の SHA-256（小文字 16 進数 64 桁）に `sha256:` を付けて `specVersion` とし、更新日時・Version ID・ETag・変換ツールの版を取得可能な範囲で記録する。同じ内容を MarkItDown で変換し、`レビュー/{testRunId}/{documentId}/テスト仕様書.md` に保存してからレビューする。ケース、操作、データ、期待結果と出典を保持し、要約・補完で原文を置き換えない。内容に影響しない空列や変換表記は整理してよい。
-4. **レビュー・結果保存**：下記の規則で文書ごとに判定し、FAIL の場合だけ `レビュー/{testRunId}/{documentId}/レビュー報告.md` を生成・保存する。PASS ではレビュー報告を生成・保存せず、空の報告や `RV_RESULT` の成果物記録・参照も作らない。詳細な指摘は FAIL の報告にまとめ、独立したレビュー JSON ファイルは生成しない。判定は PASS / FAIL とも `test_automation.test_document` の対象 `test_run_id`・`document_id` の同一行へ保存する。`verdict` は text 列、`rv_result` は同じ表の jsonb 列であり、別テーブルではない。既存 DB 制約との互換性のため、`rv_result` は `{"verdict":"PASS"}` または `{"verdict":"FAIL"}` の最小記録だけとし、列の判定と一致させる。`database.write/v1` の一つの提案の `values` に両列を含め、一回の UPDATE と承認・適用後の回読で確認する。生成列 `spec_status`（FAIL から `NEEDS_SPEC_REVISION` を導出）には書き込まない。
+4. **レビュー・結果保存**：下記の規則で文書ごとに判定し、FAIL の場合だけ `レビュー/{testRunId}/{documentId}/レビュー報告.md` を生成・保存する。PASS ではレビュー報告を生成・保存せず、空の報告や `RV_RESULT` の成果物記録・参照も作らない。詳細な指摘は FAIL の報告にまとめ、独立したレビュー JSON ファイルは生成しない。判定は PASS / FAIL とも `test_automation.test_document` の対象 `test_run_id`・`document_id` の同一行へ保存する。`verdict` は text 列、`rv_result` は同じ表の jsonb 列であり、別テーブルではない。既存 DB 制約との互換性のため、`rv_result` は `{"verdict":"PASS"}` または `{"verdict":"FAIL"}` の最小記録だけとし、列の判定と一致させる。両列は同一行の一回の UPDATE で同時に保存し、回読で一致を確認する。生成列 `spec_status`（FAIL から `NEEDS_SPEC_REVISION` を導出）には書き込まない。
 5. **集計・報告**：仕様書 Markdown、判定と成果物参照（FAIL の場合はレビュー報告も）の保存を終えた文書は、判定が FAIL でも処理状態を `COMPLETED` にする。文書・実行の終了時は `status` と `finished_at` を同時に更新し、対象・PASS・FAIL・処理異常の件数を集計する。完了報告に実行 ID、文書ごとの ID・版・判定・処理状態・実際に保存した成果物パスを含める。次工程へ進めるのは `COMPLETED` ＋ `PASS` ＋保存済み仕様書 Markdown を満たす文書だけとする。
 
 MinIO への保存成功ごとに `test_automation.test_artifact` へ、`テスト仕様書.md` は `MARKDOWN`、`レビュー報告.md` は `RV_RESULT` として登録する。成果物種別は用途を表すため、報告の形式が Markdown でも既存の `RV_RESULT` を使う。参照は `documentLibraryId`、`bucket`、`objectKey`（文書庫内相対パス）とし、SQL の項目名は snake_case に対応付ける。
@@ -42,7 +42,7 @@ MinIO への保存成功ごとに `test_automation.test_artifact` へ、`テス�
 - **指摘一覧と詳細**：一覧は番号・重要度・対象箇所・問題の短い表とする。詳細は指摘ごとの見出しに分け、原文の引用、問題と影響、具体的な修正案を記す。長文を表へ詰め込まず、指摘番号で対応付ける。
 - **次の対応と参照**：修正・確認すべき事項と次工程へ進める条件を示し、末尾に元文書のパス、`testRunId`、`documentId`、`specVersion`、保存済み仕様書 Markdown の参照を記す。ID を報告のタイトルにしない。
 
-報告の判定・件数・参照は保存記録と一致させる。レビュー JSON の詳細構造や追加の出力 Schema は要求しない。プラットフォームの HTML 完了報告はタスク全体の実行報告として別に扱い、FAIL 文書のレビュー報告の保存を代替しない。
+報告の判定・件数・参照は保存記録と一致させる。レビュー JSON の詳細構造や追加の出力 Schema は要求しない。タスク全体の完了報告で、FAIL 文書の `レビュー報告.md` の保存を代替しない。
 
 ## 異常と同一実行の継続
 
