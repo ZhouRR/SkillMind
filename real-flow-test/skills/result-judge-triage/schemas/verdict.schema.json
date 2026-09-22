@@ -27,7 +27,7 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": "2.0"
+      "const": "3.0"
     },
     "testRunId": {
       "type": "string",
@@ -96,7 +96,8 @@
           "minLength": 1,
           "description": "実行 Skill の固定公開版または checksum。実行・判定へ同じ値を引き継ぐ。"
         }
-      }
+      },
+      "description": "test_execution.version_snapshot の登録値を使用する。実行モデルと判定モデル、異なる版体系を混同しない。"
     },
     "judgementModelVersion": {
       "type": "string",
@@ -162,8 +163,10 @@
               "ERROR",
               "TIMEOUT",
               "ABORTED",
-              "NOT_RUN"
-            ]
+              "NOT_RUN",
+              null
+            ],
+            "description": "原記録と送信履歴で確認した状態。記録不足・結果不明は null。見つからないだけで NOT_RUN にしない。"
           },
           "satisfied": {
             "type": [
@@ -175,28 +178,7 @@
             "type": "array",
             "minItems": 0,
             "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "documentLibraryId",
-                "bucket",
-                "objectKey"
-              ],
-              "properties": {
-                "documentLibraryId": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "bucket": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "objectKey": {
-                  "type": "string",
-                  "minLength": 1,
-                  "pattern": "^(?!/)(?![A-Za-z][A-Za-z0-9+.-]*://).+"
-                }
-              }
+              "$ref": "#/$defs/runnerEvidence"
             }
           }
         }
@@ -306,7 +288,7 @@
     }
   },
   "title": "ケース別の実測判定",
-  "description": "PASS は全必須条件の証拠を必要とする。対応と版の一致は Schema に加えて確認する。",
+  "description": "登録済み Markdown・実行根拠と Runner 原記録から判定する。中間実行結果ファイルを要求しない。参照の所有、原バイト列、全ステップ対応は別途照合する。",
   "allOf": [
     {
       "if": {
@@ -352,6 +334,9 @@
                 }
               }
             }
+          },
+          "counterEvidence": {
+            "maxItems": 0
           }
         }
       },
@@ -379,177 +364,24 @@
     }
   ],
   "$defs": {
-    "defectPayload": {
+    "runnerRecord": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "schemaVersion",
-        "executionId",
-        "testRunId",
-        "documentId",
-        "testCaseId",
-        "classification",
-        "failureFingerprint",
-        "disposition",
-        "title",
-        "expectedResult",
-        "actualResult",
-        "reproductionSteps",
-        "evidenceRefs",
-        "versionSnapshot",
-        "knownIssues",
-        "sourceMarkdown"
+        "locator"
       ],
       "properties": {
-        "schemaVersion": {
-          "const": "2.0"
-        },
-        "executionId": {
+        "locator": {
           "type": "string",
-          "format": "uuid"
+          "minLength": 1,
+          "description": "原サービスが返す記録識別子/取得入口。opaque な値であり、任意 URL アクセス権ではない。"
         },
-        "testRunId": {
+        "sha256": {
           "type": "string",
-          "format": "uuid"
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "原記録のバイト列を取得できた場合の hash。推測しない。"
         },
-        "documentId": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "testCaseId": {
-          "type": "string",
-          "minLength": 1
-        },
-        "classification": {
-          "const": "PRODUCT"
-        },
-        "failureFingerprint": {
-          "type": "string",
-          "pattern": "^sha256:[0-9a-f]{64}$"
-        },
-        "disposition": {
-          "enum": [
-            "NEW_CANDIDATE",
-            "KNOWN_ISSUE",
-            "CHECK_REQUIRED"
-          ]
-        },
-        "title": {
-          "type": "string",
-          "minLength": 1
-        },
-        "expectedResult": {
-          "type": "string",
-          "minLength": 1
-        },
-        "actualResult": {
-          "type": "string",
-          "minLength": 1
-        },
-        "reproductionSteps": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "evidenceRefs": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "documentLibraryId",
-              "bucket",
-              "objectKey"
-            ],
-            "properties": {
-              "documentLibraryId": {
-                "type": "string",
-                "minLength": 1
-              },
-              "bucket": {
-                "type": "string",
-                "minLength": 1
-              },
-              "objectKey": {
-                "type": "string",
-                "minLength": 1,
-                "pattern": "^(?!/)(?![A-Za-z][A-Za-z0-9+.-]*://).+"
-              }
-            }
-          }
-        },
-        "versionSnapshot": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "skillVersion",
-            "environmentVersion",
-            "sutBuild",
-            "runnerVersions",
-            "modelVersion"
-          ],
-          "properties": {
-            "environmentVersion": {
-              "type": "string",
-              "minLength": 1
-            },
-            "sutBuild": {
-              "type": "string",
-              "minLength": 1
-            },
-            "runnerVersions": {
-              "type": "object",
-              "minProperties": 1,
-              "additionalProperties": {
-                "type": "string",
-                "minLength": 1
-              }
-            },
-            "modelVersion": {
-              "type": "string",
-              "minLength": 1
-            },
-            "skillVersion": {
-              "type": "string",
-              "minLength": 1,
-              "description": "実行 Skill の固定公開版または checksum。実行・判定へ同じ値を引き継ぐ。"
-            }
-          }
-        },
-        "knownIssues": {
-          "type": "array",
-          "minItems": 0,
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "id",
-              "url",
-              "matchReason"
-            ],
-            "properties": {
-              "id": {
-                "type": "string",
-                "minLength": 1
-              },
-              "url": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "matchReason": {
-                "type": "string",
-                "minLength": 1
-              }
-            }
-          }
-        },
-        "sourceMarkdown": {
+        "archive": {
           "type": "object",
           "additionalProperties": false,
           "required": [
@@ -577,9 +409,33 @@
               "pattern": "^sha256:[0-9a-f]{64}$"
             }
           },
-          "description": "RV 済み Markdown の取得元と原バイト列の SHA-256。実行登録値と照合する。"
+          "description": "実際に取得して原バイト列のまま保存した退避先。原ファイルと hash を照合する。"
         }
-      }
+      },
+      "description": "Runner の原記録への参照。本文を複写しない。取得・保存・内容確認は別々に検証する。"
+    },
+    "runnerEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "connectionRef",
+        "requestId",
+        "record"
+      ],
+      "properties": {
+        "connectionRef": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "record": {
+          "$ref": "#/$defs/runnerRecord"
+        }
+      },
+      "description": "このケースの参照索引と照合し、実際に読めた Runner 原記録/原画像だけを引用する。原接続・原要求の対応は Schema だけでは証明できない。"
     }
   }
 }
