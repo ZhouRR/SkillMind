@@ -182,8 +182,10 @@ class DocumentConvertProvider:
                 **({"source_object_key": validate_source_object_key(content.source_object_key)}
                    if content.source_object_key is not None else {}),
                 "warnings": [
-                    "Conversion may omit formatting, drawings, merged-cell structure and formulas. "
-                    "Review conversion loss separately; do not infer original cell coordinates."
+                    "See the Markdown's format coverage and per-sheet style facts. Static XLSX "
+                    "strikethrough and fills are not final conditional formatting or business "
+                    "scope. Legacy XLS styles are not inspected. Drawings, calculated formatting "
+                    "and formula evaluation are not preserved; original bytes remain authoritative."
                 ],
             },
             evidence=(EvidenceDraft(
@@ -197,6 +199,7 @@ class DocumentConvertProvider:
                 excerpt=converted.markdown[:2_000],
                 metadata={
                     **_source_metadata(content), "converter": converter,
+                    "conversion_profile": converted.profile,
                     "markdown_checksum": markdown_hash,
                     **({"observation_ref": observation_ref} if observation_ref is not None else {}),
                 },

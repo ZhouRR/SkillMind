@@ -25,6 +25,8 @@
 - 改名/移动只改变展示路径，保留 ID、原字节、存储引用和原上传回执；清理时校验不变身份，不能要求当前路径仍等于上传路径。回收站仍占用存储；完全删除先检查回收状态、生成执行已结束、无未决操作及其他引用。[引用查询](../../SKM/backend/src/skillmind/documents/reference_repository.py)覆盖 Run、Schedule、occurrence，未知历史拒绝删除。
 - 删除须在同一事务保存原对象清理要求，再在确认提交后尝试删 blob。204、目录消失或一次读不到对象都不证明全部版本、在途 PUT 和配额已结清；持久清理重试与结算仍待补齐。执行履历 purge 沿 [history_purge](../../SKM/backend/src/skillmind/runs/history_purge.py)，保留共享成果与最小删除审计，不删除外部业务数据或重做操作。
 
+Excel→Markdown 的 `.xlsx` 路径使用 `excel-styles/v1`：同一文档保留原行列、静态整格/局部删除线和任意填充色，重复样式按实际连续范围合并。色值保留原 RGB/theme/indexed/tint 表示；无法解色不假定白色。条件格式与表格样式只标记范围和未求值状态，不据此自动排除业务步骤。合并区域记录 anchor 与范围，不展开复制正文。旧 `.xls` 仍为值转换，并在保存的 Markdown 明示未检查样式。转换 profile 写入 Evidence，原文件/冻结版本、Artifact 原字节校验及既有限制不变。
+
 ## 执行与恢复
 
 - 按[架构与术语](../overview/architecture.md)区分 Run、Segment 和 Attempt；生产入口为 [worker/settings](../../SKM/backend/src/skillmind/worker/settings.py)与 [executor](../../SKM/backend/src/skillmind/worker/executor.py)。同阶段技术恢复使用新 Attempt，不替换 Run，不改原快照、权限上限或 Result。
