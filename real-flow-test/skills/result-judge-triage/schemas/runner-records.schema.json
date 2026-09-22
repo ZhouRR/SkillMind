@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Runner 原記録の参照索引",
+  "description": "test_execution.result_ref に終了/中断時に保存する業務引渡し値。原記録の Schema でも報告書でもない。実行根拠・版・状態は既存 DB 行、実測は Runner 原記録にある。対応と同一実行の所有は別途照合する。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "executionId",
+    "operations",
+    "notRun",
+    "gaps"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "executionId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "operations": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "testCaseId",
+          "stepId",
+          "role",
+          "connectionRef",
+          "requestId",
+          "confirmation",
+          "records"
+        ],
+        "properties": {
+          "testCaseId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "stepId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "role": {
+            "enum": [
+              "BUSINESS",
+              "PREPARATION",
+              "OBSERVATION"
+            ]
+          },
+          "connectionRef": {
+            "type": "string",
+            "minLength": 1,
+            "description": "実操作に使った固定接続の参照。別判定 Run の resource_key と混同しない。"
+          },
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "実際に発行された原要求 ID。予想値・新規 ID は使わない。"
+          },
+          "confirmation": {
+            "enum": [
+              "CONFIRMED",
+              "UNCONFIRMED"
+            ],
+            "description": "原操作結果が確定したか。CONFIRMED は失敗終端も含み、業務成功や現在状態ではない。"
+          },
+          "records": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/$defs/record"
+            },
+            "description": "未取得の参照は空配列とし gaps に不足を残す。"
+          }
+        }
+      }
+    },
+    "notRun": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/stepNote"
+      },
+      "description": "未送信と確認できた業務ステップだけ。記録不在/結果不明から推定しない。"
+    },
+    "gaps": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/stepNote"
+      },
+      "description": "原 ID・記録・画像・対応の不足。対象を特定し、成功や NOT_RUN で埋めない。"
+    }
+  },
+  "$defs": {
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "locator"
+      ],
+      "properties": {
+        "locator": {
+          "type": "string",
+          "minLength": 1,
+          "description": "原サービスが返す記録識別子/取得入口。opaque な値であり、任意 URL アクセス権ではない。"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "原記録のバイト列を取得できた場合の hash。推測しない。"
+        },
+        "archive": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "documentLibraryId",
+            "bucket",
+            "objectKey",
+            "sha256"
+          ],
+          "properties": {
+            "documentLibraryId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "bucket": {
+              "type": "string",
+              "minLength": 1
+            },
+            "objectKey": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!/)(?![A-Za-z][A-Za-z0-9+.-]*://).+"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          },
+          "description": "実際に取得して原バイト列のまま保存した退避先。原ファイルと hash を照合する。"
+        }
+      },
+      "description": "Runner の原記録への参照。本文を複写しない。取得・保存・内容確認は別々に検証する。"
+    },
+    "stepNote": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "testCaseId",
+        "stepId",
+        "reason"
+      ],
+      "properties": {
+        "testCaseId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "stepId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Markdown 直接実行の根拠",
+  "description": "実行登録の execution_basis に保存する。独立した計画成果物や状態管理は作らない。ID・行範囲・全件対応・依存関係は原文と別途照合する。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sourceMarkdown",
+    "specVersion",
+    "cases",
+    "environment"
+  ],
+  "properties": {
+    "sourceMarkdown": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "documentLibraryId",
+        "bucket",
+        "objectKey",
+        "sha256"
+      ],
+      "properties": {
+        "documentLibraryId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bucket": {
+          "type": "string",
+          "minLength": 1
+        },
+        "objectKey": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?![A-Za-z][A-Za-z0-9+.-]*://).+"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "description": "RV 済み Markdown の取得元と原バイト列の SHA-256。実行登録値と照合する。"
+    },
+    "specVersion": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "testCaseId",
+          "steps"
+        ],
+        "properties": {
+          "testCaseId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "steps": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "stepId",
+                "sourceLines",
+                "expectedLines",
+                "dependsOn"
+              ],
+              "properties": {
+                "stepId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sourceLines": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "start",
+                    "end"
+                  ],
+                  "properties": {
+                    "start": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "end": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "description": "UTF-8 Markdown の 1 始まりの包含行範囲。end >= start と文書内の範囲を別途検証する。"
+                },
+                "expectedLines": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "start",
+                    "end"
+                  ],
+                  "properties": {
+                    "start": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "end": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "description": "UTF-8 Markdown の 1 始まりの包含行範囲。end >= start と文書内の範囲を別途検証する。"
+                },
+                "dependsOn": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "testCaseId",
+                      "stepId"
+                    ],
+                    "properties": {
+                      "testCaseId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "stepId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "appId",
+        "connectionRef",
+        "environmentLease",
+        "maxParallelism",
+        "caseTimeoutSeconds"
+      ],
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "connectionRef": {
+          "type": "string",
+          "minLength": 1
+        },
+        "environmentLease": {
+          "type": "string",
+          "minLength": 1
+        },
+        "maxParallelism": {
+          "const": 1
+        },
+        "caseTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}
