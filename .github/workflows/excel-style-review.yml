@@ -1,0 +1,93 @@
+name: Excel style conversion review
+on:
+  push:
+    branches: [feat/excel-style-markdown]
+permissions:
+  contents: write
+concurrency:
+  group: excel-style-review
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SKILLMIND_ENVIRONMENT: test
+      SKILLMIND_DATABASE_URL: postgresql+asyncpg://test:test@127.0.0.1:1/test
+      SKILLMIND_REDIS_URL: redis://127.0.0.1:1/15
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        working-directory: SKM/backend
+        run: python -m pip install -q -r dev-requirements.lock && python -m pip install -q --no-deps -e .
+      - name: Connect reviewed converter to existing boundaries
+        id: prepare
+        run: |
+          test "$GITHUB_REF" = refs/heads/feat/excel-style-markdown
+          python .github/prepare_excel_styles.py
+          python -m ruff check --select F,I --fix SKM/backend/src/skillmind/agent/excel_markdown.py SKM/backend/tests/agent/test_excel_markdown.py
+          python -m ruff format SKM/backend/src/skillmind/agent/excel_markdown.py SKM/backend/tests/agent/test_excel_markdown.py
+          python -m ruff check --select F,I SKM/backend/src/skillmind/agent/excel_markdown.py SKM/backend/src/skillmind/agent/binary_text.py SKM/backend/src/skillmind/agent/document_provider.py SKM/backend/tests/agent/test_excel_markdown.py
+          mkdir -p /tmp/style-validation
+      - name: Conversion and affected regression
+        id: tests
+        working-directory: SKM/backend
+        run: |
+          set -o pipefail
+          python -m pytest tests/agent/test_excel_markdown.py tests/agent/test_document_conversion.py tests/agent/test_observed_document_conversion.py tests/agent/test_binary_text.py tests/agent/test_document_provider.py tests/agent/test_document_on_demand.py tests/agent/test_document_materialization.py tests/agent/test_document_inspection.py tests/agent/test_document_listing.py tests/artifacts tests/contracts --junitxml=/tmp/style-validation/results.xml | tee /tmp/style-validation/pytest.log
+      - name: Application type checks
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        working-directory: SKM/backend
+        run: |
+          set -o pipefail
+          python -m mypy --no-incremental src/skillmind | tee /tmp/style-validation/mypy.log
+      - name: Contracts and documentation
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        working-directory: SKM
+        run: |
+          python -m pip install -q -r scripts/docs-requirements.txt
+          python scripts/validate_contracts.py
+          python scripts/build_docs.py
+          python scripts/build_docs.py --check
+      - name: Preserve reviewed source and evidence
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json, zipfile
+          paths = [
+              'SKM/backend/src/skillmind/agent/excel_markdown.py',
+              'SKM/backend/src/skillmind/agent/binary_text.py',
+              'SKM/backend/src/skillmind/agent/document_provider.py',
+              'SKM/backend/tests/agent/test_excel_markdown.py',
+              'docs/development/runtime-guide.md', 'docs/index.html',
+          ]
+          hashes = {p: hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in paths}
+          Path('/tmp/style-validation/source-fingerprint.json').write_text(json.dumps(hashes, indent=2))
+          with zipfile.ZipFile('/tmp/style-validation/prepared-source.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
+              for p in paths:
+                  archive.write(p, p)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: excel-style-validation
+          path: /tmp/style-validation/
+          retention-days: 7
+      - name: Commit only verified application changes
+        if: success()
+        run: |
+          test "$GITHUB_REF" = refs/heads/feat/excel-style-markdown
+          test "$(git ls-remote origin refs/heads/feat/excel-style-markdown | cut -f1)" = "$GITHUB_SHA"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add SKM/backend/src/skillmind/agent/excel_markdown.py SKM/backend/src/skillmind/agent/binary_text.py SKM/backend/src/skillmind/agent/document_provider.py SKM/backend/tests/agent/test_excel_markdown.py docs/development/runtime-guide.md docs/index.html
+          git rm .github/prepare_excel_styles.py .github/workflows/excel-style-review.yml
+          git diff --cached --check
+          git commit -m 'feat(excel): integrate verified style-preserving Markdown conversion'
+          git push origin HEAD:refs/heads/feat/excel-style-markdown
+          echo FINAL_COMMIT=$(git rev-parse HEAD)
