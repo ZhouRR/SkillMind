@@ -28,6 +28,12 @@ from skillmind.agent.evidence import (
 )
 from skillmind.agent.tool_diagnostics import safe_tool_diagnostic
 from skillmind.agent.tool_policy import ToolExecutionPolicy, capability_to_sdk_name
+from skillmind.agent.tool_routing import (
+    ToolRouteError,
+    ToolRouting,
+    provider_arguments,
+    resource_identity,
+)
 from skillmind.core.hashing import canonical_json
 from skillmind.core.redaction import find_sensitive_key
 
@@ -236,7 +242,7 @@ class ToolGateway:
     def __init__(
         self,
         context: RunContext,
-        bindings: Mapping[str, _ResolvedBinding],
+        bindings: Mapping[tuple[str, str | None], _ResolvedBinding],
         coordinator: ToolInvocationCoordinator,
         audit_writer: ToolAuditWriter,
     ) -> None:
@@ -244,6 +250,7 @@ class ToolGateway:
 
         self._context = context
         self._bindings = dict(bindings)
+        self._routing = ToolRouting(tuple(binding.registered for binding in bindings.values()))
         self._coordinator = coordinator
         self._audit_writer = audit_writer
         self._dispatched: set[UUID] = set()
@@ -255,7 +262,7 @@ class ToolGateway:
 
     def validate_sequence_step(self, name: str, arguments: Mapping[str, Any]) -> None:
         """子能力を同じ frozen policy へ通し、制御/再帰/外部 write を拒否する。"""
-        binding = self._bindings[name]
+        binding = self._resolve_binding(name, arguments)
         if not binding.definition.sequence_safe or binding.definition.defer_execution:
             raise PermissionError("Tool does not support sequence execution")
         self._coordinator.validate_request(name, arguments)
@@ -279,7 +286,7 @@ class ToolGateway:
             await self._coordinator.register_authorized(
                 name, args, f"sequence:{parent.tool_call_id}:{position}", str(parent.agent_session_id),
             )
-            return await self._invoke(self._bindings[name], args)
+            return await self._invoke(self._resolve_binding(name, args), args)
         except PermissionError:
             await self._coordinator.register_denied(
                 name, args, f"sequence:{parent.tool_call_id}:{position}",
@@ -289,10 +296,21 @@ class ToolGateway:
         except ToolGatewayError as error:
             return {"status": "error", "code": error.code, "message": error.message, "retryable": False}
 
+    def _resolve_binding(self, name: str, arguments: Mapping[str, Any]) -> _ResolvedBinding:
+        """選択を一箇所で解決し、原承認引数と同じ binding だけを実行する。"""
+        selected = self._routing.resolve(name, arguments)
+        return self._bindings[(name, selected.resource_key)]
+
     async def invoke_mcp(self, tool_name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         """MCP SDK が要求する content/is_error 形式へ結果を変換する。"""
 
-        binding = self._bindings[tool_name]
+        try:
+            binding = self._resolve_binding(tool_name, arguments)
+        except ToolRouteError as error:
+            return {"content": [{"type": "text", "text": _compact_json({
+                "status": "error", "code": "invalid_request",
+                "message": str(error), "retryable": False,
+            })}], "is_error": True}
         try:
             response = await self._invoke(binding, deepcopy(dict(arguments)))
             return {"content": [{"type": "text", "text": _compact_json(response)}]}
@@ -324,6 +342,11 @@ class ToolGateway:
         """初回の実行権だけを消費し、既存の未決/失敗を再実行しない。"""
 
         lease = await self._coordinator.claim(binding.registered.sdk_name, arguments)
+        if lease.invocation is not None and (
+            lease.invocation.tool != binding.registered
+            or lease.invocation.request_fingerprint != invocation_fingerprint(binding.registered.sdk_name, arguments)
+        ):
+            raise ToolGatewayError("invalid_request", "Tool resource differs from the authorized request", retryable=False)
         replay = lease.status == "SUCCEEDED" and lease.result is not None
         replay_result = deepcopy(lease.result) if replay else None
         if not replay:
@@ -361,7 +384,7 @@ class ToolGateway:
                     tool_call_id=lease.tool_call_id,
                     agent_session_id=lease.invocation.agent_session_id if lease.invocation else None,
                 ),
-                arguments,
+                provider_arguments(binding.registered, arguments),
             )
             if not result.evidence:
                 raise ToolGatewayError("unavailable", "Tool returned no evidence", retryable=False)
@@ -377,7 +400,9 @@ class ToolGateway:
                     draft=replace(
                         draft,
                         source_locator=deepcopy(dict(draft.source_locator)),
-                        metadata=deepcopy(dict(draft.metadata or {})),
+                        metadata={**deepcopy(dict(draft.metadata or {})),
+                            **({"tool_resource": resource_identity(binding.registered)}
+                               if binding.registered.resource_key is not None else {})},
                         artifact=replace(draft.artifact) if draft.artifact else None,
                     ),
                     artifact_ref=f"art_{uuid4().hex}" if draft.artifact else None,
@@ -525,6 +550,7 @@ class ToolRegistry:
         provider: str,
         integration_id: UUID | None,
         binding_id: UUID | None = None,
+        resource_key: str | None = None,
         execution_profile: str = "GUIDED",
     ) -> RegisteredTool:
         """Project binding から AgentEngine 用 RegisteredTool を生成する。"""
@@ -542,6 +568,7 @@ class ToolRegistry:
             integration_id=integration_id,
             input_schema=dict(definition.request_schema),
             binding_id=binding_id,
+            resource_key=resource_key,
         )
 
     def resolve_unbound(
@@ -582,7 +609,7 @@ class ToolRegistry:
             context.tools,
             allowed_capabilities=frozenset(raw_capabilities),
         )
-        bindings: dict[str, _ResolvedBinding] = {}
+        bindings: dict[tuple[str, str | None], _ResolvedBinding] = {}
         raw_profile = context.permission_snapshot.get("execution_profile", "GUIDED")
         if not isinstance(raw_profile, str) or raw_profile not in _EXECUTION_PROFILE_ORDER:
             raise ValueError("Permission snapshot contains an invalid execution profile")
@@ -598,22 +625,21 @@ class ToolRegistry:
                 raise LookupError(
                     f"Tool Provider is not installed: {registered.capability}/{registered.provider}"
                 )
-            if registered.sdk_name in bindings:
-                # MCP 名は capability から一意に決まる。別 ResourceBinding を黙って上書きすると
-                # Agent が監査された scope と異なる Provider を呼ぶため、multiplex contract が
-                # 導入されるまでは曖昧な同一 capability を fail closed にする。
-                raise ValueError(
-                    f"Run resolves multiple bindings for one Tool: {registered.capability}"
-                )
-            bindings[registered.sdk_name] = _ResolvedBinding(
-                registered=registered,
-                definition=definition,
-                provider=provider,
+            key = (registered.sdk_name, registered.resource_key)
+            if key in bindings:
+                raise ValueError(f"Run resolves duplicate resource Tool: {registered.capability}")
+            bindings[key] = _ResolvedBinding(
+                registered=registered, definition=definition, provider=provider,
             )
 
         coordinator = ToolInvocationCoordinator(context, policy, audit_writer)
         gateway = ToolGateway(context, bindings, coordinator, audit_writer)
-        sdk_tools = [_build_sdk_tool(binding, gateway) for binding in bindings.values()]
+        # SDK は一つの工具定義、実行時は (name, resource_key) で元 Provider を選択する。
+        public = policy.sdk_tools
+        representatives = {name: next(b for (n, _), b in bindings.items() if n == name)
+                           for name in policy.allowed_sdk_names}
+        sdk_tools = [_build_sdk_tool(representatives[t.sdk_name], gateway, input_schema=t.input_schema)
+                     for t in public]
         server = create_sdk_mcp_server("skillmind", version="0.1.0", tools=sdk_tools)
         return RunToolRuntime(
             mcp=RunMcpRuntime(
@@ -624,16 +650,18 @@ class ToolRegistry:
                 deferred_tool_names=frozenset(
                     registered.sdk_name
                     for registered in context.tools
-                    if bindings[registered.sdk_name].definition.defer_execution
+                    if bindings[(registered.sdk_name, registered.resource_key)].definition.defer_execution
                 ),
             ),
             gateway=gateway,
             tool_descriptions={name: binding.definition.description
-                               for name, binding in bindings.items()},
+                               for name, binding in representatives.items()},
         )
 
 
-def _build_sdk_tool(binding: _ResolvedBinding, gateway: ToolGateway) -> SdkMcpTool[Any]:
+def _build_sdk_tool(
+    binding: _ResolvedBinding, gateway: ToolGateway, *, input_schema: Mapping[str, Any]
+) -> SdkMcpTool[Any]:
     """Full SDK 名から MCP server 内の local tool handler を作成する。"""
 
     local_name = binding.registered.sdk_name.removeprefix(_MCP_TOOL_PREFIX)
@@ -663,7 +691,7 @@ def _build_sdk_tool(binding: _ResolvedBinding, gateway: ToolGateway) -> SdkMcpTo
     return tool(
         local_name,
         binding.definition.description,
-        dict(binding.definition.request_schema),
+        dict(input_schema),
     )(handler)
 
 

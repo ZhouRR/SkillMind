@@ -199,7 +199,8 @@ def build_agent_task_brief(
                 project_id=project_id,
             ),
             "allowed_tools": [
-                {"capability": t.capability, "provider": t.provider, "read_only": t.read_only}
+                {"capability": t.capability, "provider": t.provider, "read_only": t.read_only,
+                 **({"resource_key": t.resource_key} if t.resource_key is not None else {})}
                 for t in tools
             ],
             "effect_policy": {
@@ -278,6 +279,7 @@ def build_agent_task_brief(
                 "capability": tool.capability,
                 "provider": tool.provider,
                 "read_only": tool.read_only,
+                **({"resource_key": tool.resource_key} if tool.resource_key is not None else {}),
             }
             for tool in tools
         ],
@@ -737,6 +739,10 @@ def _tool_instruction(allowed_tools: Sequence[Any]) -> str:
         f"Use the available read-only tools ({', '.join(capabilities)}) to gather Evidence "
         "before drawing conclusions. Every factual conclusion must cite Evidence references "
         "returned by tools."
+        + (" Select resource_key from Available Tools when a capability has multiple resources; "
+           "omit it only for a unique resource. This selects an existing frozen slot, not a new "
+           "connection. Keep the selector inside each tool.sequence step's arguments."
+           if any(item.get("resource_key") for item in allowed_tools) else "")
     )
 
 

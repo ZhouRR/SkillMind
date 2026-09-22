@@ -78,3 +78,11 @@ Codex 的 `agent/warm_codex.py` 只在同一 Worker job 的原 Run 内复用 tra
 失败、取消、未知响应或 Worker 中断时保留原 ID：停止原 native turn 后迁回原 Effect 等待/核对流程；恢复不能创建一个新写操作。原 Agent lease 失效时，新的外部阶段不可沿旧权继续；回执已确认不等于业务 PASS。两次相同参数但不同 SDK 调用仍是两次独立意图。
 
 直接回执只在原 Attempt 剩余时间足够容纳既有 Effect 监督上限与交付余量时尝试；不足时在创建操作前走原延期路径，不延长或重置期限，也不因开启优化把长任务强行塞进一个 Attempt。
+
+## 同一任务的同类多资源
+
+Run 可按 Skill 的不同资源槽位绑定多个同类连接。`database.*`、`mcp.*`、`repository.read` 和 `issue.read` 的顶层 `resource_key` 选择已经冻结的槽位；同一能力有多个绑定时必须明确选择，只有一个时可省略。平台不接受通过 selector 提供 URL、Integration ID 或凭据，也不按表名、远端工具名或路径猜连接。
+
+SDK 每个能力仍只公开一个工具定义，并列出当前可选 key；内部执行与审计按 `(capability, resource_key)` 保留原 binding、当前授权和原调用身份。Provider 只收到去除顶层 selector 后的业务参数，嵌套的同名业务字段保留。`tool.sequence` 的每一步在 `arguments.resource_key` 中选择资源；全部静态选择先验证，子调用继续独立审计、计量及检查撤权。写入仍通过原 `change.propose.resource_key` 与 Effect，不把读取、目录发现或其他连接的证据当作目标写权限。
+
+新增能力无需复制 Provider；接入原工具注册与资源声明即可复用路由。扩充项目连接或更新配置不补进已冻结 Run。上线后以新建 Run 验证至少两个数据库、两个 MCP 服务或两个仓库的准确选择、相同表名/工具名/path 的隔离、原回执重放及缺失 selector 的明确错误；测试替身不能代替真实多连接验收。

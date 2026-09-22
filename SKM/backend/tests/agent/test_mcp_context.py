@@ -9,7 +9,6 @@ from unittest.mock import Mock
 from uuid import UUID
 
 import pytest
-
 from skillmind.agent.context_builder import (
     ProductionRunContextBuilder,
 )
@@ -167,8 +166,28 @@ async def test_mcp_disabled_feature_still_rejects_context(tmp_path):
         await builder.build(mcp_claim(), sequence_start=1)
 
 
-async def test_mcp_ambiguous_resources_never_choose_first_binding(tmp_path):
-    """同名 SDK Tool の scope を二つの接続から混ぜず、曖昧さを準備時に拒否する。"""
-    builder, _, _, _ = context_builder(tmp_path)
-    with pytest.raises(LookupError, match='multiple resource bindings'):
-        await builder.build(mcp_claim(extra_resource=True), sequence_start=1)
+async def test_mcp_multiple_resources_are_explicit_and_never_choose_first_binding(tmp_path):
+    """複数接続の準備は許可し、呼出し時の曖昧さは未実行で拒否する。"""
+    from skillmind.agent.tool_policy import (
+        ToolExecutionPolicy,
+        ToolPolicyViolation,
+        capability_to_sdk_name,
+    )
+
+    builder, registry, _, _ = context_builder(tmp_path)
+    claimed = mcp_claim(extra_resource=True)
+    original = deepcopy(claimed.selected_sources_json)
+    context = await builder.build(claimed, sequence_start=1)
+    registry.build_gateway_runtime(context, audit_writer=Mock())
+    policy = ToolExecutionPolicy(context.tools)
+    for capability in READS:
+        tools = [tool for tool in context.tools if tool.capability == capability]
+        assert {t.resource_key for t in tools} == {"runner", "other-runner"}
+        args = {"purpose": "fixture"} if capability == "mcp.tools/v1" else {"name": "inspect_window", "arguments": {}}
+        with pytest.raises(ToolPolicyViolation, match="resource_key"):
+            policy.authorize(capability_to_sdk_name(capability), args)
+        for key in ("runner", "other-runner"):
+            selected = policy.authorize(capability_to_sdk_name(capability), {**args, "resource_key": key})
+            assert str(selected.integration_id) == original[key]["integration_id"]
+            assert str(selected.binding_id) == original[key]["binding_id"]
+    assert claimed.selected_sources_json == original

@@ -4,17 +4,43 @@
   "title": "repository.read/v1 request",
   "type": "object",
   "additionalProperties": false,
-  "required": ["revision", "path", "purpose"],
+  "required": [
+    "revision",
+    "path",
+    "purpose"
+  ],
   "properties": {
-    "revision": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "revision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
     "path": {
       "type": "string",
       "minLength": 1,
       "maxLength": 4096,
-      "not": { "pattern": "(^/|(^|/)\\.\\.(/|$))" }
+      "not": {
+        "pattern": "(^/|(^|/)\\.\\.(/|$))"
+      }
     },
-    "line_start": { "type": "integer", "minimum": 1 },
-    "line_end": { "type": "integer", "minimum": 1 },
-    "purpose": { "type": "string", "minLength": 1, "maxLength": 500 }
+    "line_start": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "line_end": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "resource_key": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "maxLength": 128,
+      "description": "This Run's frozen resource slot key. Required when several resources provide this capability; omit only when exactly one is available. Does not grant access or accept a connection address."
+    }
   }
 }

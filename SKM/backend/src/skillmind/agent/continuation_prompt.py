@@ -8,6 +8,7 @@ from typing import Any
 
 from skillmind.agent.domain import RunContext
 from skillmind.agent.task_brief import render_task_brief_prompt
+from skillmind.agent.tool_routing import resource_identity
 from skillmind.core.hashing import canonical_json, sha256_hex
 
 
@@ -40,7 +41,9 @@ def continuation_prompt(
                 "prompt": static_prompt,
                 "permission": dict(context.permission_snapshot),
                 "tools": [
-                    {"name": tool.sdk_name, "schema": tool.input_schema} for tool in context.tools
+                    {"name": tool.sdk_name, "schema": tool.input_schema,
+                     **({"resource": resource_identity(tool)} if tool.resource_key is not None else {})}
+                    for tool in context.tools
                 ],
             }
         )

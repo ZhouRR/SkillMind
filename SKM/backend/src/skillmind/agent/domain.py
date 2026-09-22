@@ -159,6 +159,8 @@ class RegisteredTool:
     input_schema: Mapping[str, Any]
     read_only: bool = True
     binding_id: UUID | None = None
+    # 同一能力を提供する資源を区別する Run の原 requirement key。
+    resource_key: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

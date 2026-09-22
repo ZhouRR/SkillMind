@@ -516,6 +516,9 @@
           },
           "read_only": {
             "type": "boolean"
+          },
+          "resource_key": {
+            "$ref": "#/$defs/key"
           }
         }
       }

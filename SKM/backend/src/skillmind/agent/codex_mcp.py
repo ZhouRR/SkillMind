@@ -73,7 +73,7 @@ class CodexToolBridge:
                     description=runtime.tool_descriptions.get(tool.sdk_name, tool.capability),
                     inputSchema=dict(tool.input_schema),
                 )
-                for tool in context.tools
+                for tool in self._policy.sdk_tools
             ]
 
         @self.server.call_tool(validate_input=False)  # type: ignore[untyped-decorator]
@@ -263,7 +263,7 @@ async def serve_codex_tools(bridge: CodexToolBridge) -> AsyncIterator[dict[str, 
                     "required": True,
                     "default_tools_approval_mode": "approve",
                     "enabled_tools": [
-                        tool.sdk_name.removeprefix(_PREFIX) for tool in bridge.context.tools
+                        tool.sdk_name.removeprefix(_PREFIX) for tool in bridge._policy.sdk_tools
                     ],
                     "startup_timeout_sec": 10,
                     "tool_timeout_sec": 300,
