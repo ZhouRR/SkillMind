@@ -9,7 +9,7 @@ description: 実行前に固定した RV 済み Markdown のステップ索引�
 
 必要な入力は `testRunId`、`executionId`、または実行結果のディレクトリ名・ファイル名。実行完了からの継続では追加入力を求めず、実行根拠、期待結果、版、ログ、Evidence を接続済みシステムから取得する。
 
-PostgreSQL、MinIO、Evidence 読み取り、JSON Schema 検証ツールを使う。入力は [execution-result.schema.json](schemas/execution-result.schema.json)、出力は [verdict.schema.json](schemas/verdict.schema.json)（`schemaVersion: 2.0`）に従う。独立した計画ファイル・`sourcePlan`・`test_execution_plan` を要求しない。旧形式は当時の凍結 Skill・Schema で扱い、根拠を後付けして変換しない。既知 Issue の参照機能は利用できる場合に使用する。他の Skill は参照・呼び出しせず、工程の起動はワークフロープラットフォームに任せる。
+PostgreSQL、MinIO、Evidence 読み取り、JSON Schema 検証ツールを使う。入力は [execution-result.schema.json](schemas/execution-result.schema.json)、出力は [verdict.schema.json](schemas/verdict.schema.json)（`schemaVersion: 2.0`）に従う。独立した計画ファイル・`sourcePlan`・`test_execution_plan` を要求しない。旧形式は当時の凍結 Skill・Schema で扱い、根拠を後付けして変換しない。既知 Issue の参照機能は利用できる場合に使用する。他の Skill は参照・呼び出しせず、本タスクは実行後の判定・分類と成果保存までを扱う。
 
 ## 前処理
 
@@ -17,7 +17,7 @@ PostgreSQL、MinIO、Evidence 読み取り、JSON Schema 検証ツールを使�
 2. `QUEUED` / `RUNNING` は待機として返す。`COMPLETED` / `ERROR` / `TIMEOUT` / `ABORTED` の実行を判定対象とする。
 3. 外部参照を使わず結果の Schema・format を検証する。`executionBasis` と `versionSnapshot` が実行前の DB 登録値と完全一致し、実行・文書 ID と `specVersion` が対応することを確認する。`executionBasis.sourceMarkdown` の文書を許可範囲で取得し、原バイト列の SHA-256 を検証する。取得不能・不一致は `BLOCKED` とし、現在の文書や旧計画へ置換しない。
 4. 登録された全ケース・ステップの ID、依存関係、原文行範囲を確認する。`sourceLines` は操作、`expectedLines` は元の期待条件を指す。範囲の妥当性、ID の一意性、依存先の存在・非循環と対象 Markdown の全件対応を照合する。結果のケース・ステップ集合は索引と完全一致させ、欠落・重複・追加 ID は不整合として扱う。未実行は `NOT_RUN` のまま判定対象に含める。Runner の期待値や実行後の要約で原文の条件を置き換えず、候補 IR・Git の正式 IR を要求しない。
-5. `test_case_judgement` の同じ `(execution_id, test_case_id)` を確認し、ケースごとに `RUNNING` で登録して `model_version` を保存する。実行中の処理を重ねず、完了済み判定は入力と成果物を照合して再利用する。DB 書込みは現状確認・提案・承認と適用・回読を経て行う。
+5. `test_case_judgement` の同じ `(execution_id, test_case_id)` を確認し、ケースごとに `RUNNING` で登録して `model_version` を保存する。実行中の処理を重ねず、完了済み判定は入力と成果物を照合して再利用する。登録内容は回読で確認する。
 
 ## 判定と分類
 
