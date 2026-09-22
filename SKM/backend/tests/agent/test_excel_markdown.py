@@ -9,7 +9,7 @@ from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.cell.text import InlineFont
 from openpyxl.formatting.rule import CellIsRule, ColorScaleRule
@@ -50,7 +50,9 @@ def _convert(book: Workbook) -> str:
     return render_excel_markdown(".xlsx", _bytes(book))
 
 
-@pytest.mark.parametrize("rgb", ["FFFF0000", "FFFFFF00", "FF00FF00", "FFD9D9D9", "FF1234AB", "FFFFFFFF"])
+@pytest.mark.parametrize(
+    "rgb", ["FFFF0000", "FFFFFF00", "FF00FF00", "FFD9D9D9", "FF1234AB", "FFFFFFFF"]
+)
 def test_any_solid_fill_preserves_raw_and_resolved_color(rgb: str) -> None:
     """灰色以外と明示白色も保持し、色を理由に行を除外しない。"""
     book = _book()
@@ -80,9 +82,11 @@ def test_rich_text_keeps_exact_struck_span_and_explicit_false() -> None:
     book = _book()
     cell = book["Cases"]["B2"]
     cell.font = Font(strike=True)
-    cell.value = CellRichText(TextBlock(InlineFont(strike=False), "入力 "),
-                             TextBlock(InlineFont(strike=True), "旧😀"),
-                             TextBlock(InlineFont(strike=False), " 新しい値"))
+    cell.value = CellRichText(
+        TextBlock(InlineFont(strike=False), "入力 "),
+        TextBlock(InlineFont(strike=True), "旧😀"),
+        TextBlock(InlineFont(strike=False), " 新しい値"),
+    )
     markdown = _convert(book)
     assert "~~旧😀~~" in markdown
     assert "~~入力" not in markdown and "~~新しい" not in markdown
@@ -120,7 +124,7 @@ def test_compaction_preserves_holes_and_blank_color_legends() -> None:
 def test_theme_color_uses_workbook_theme_and_hls_tint(tint: float, expected: str) -> None:
     """固定の Office palette を仮定せず、原 theme と tint を残す。"""
     book = _book()
-    book.loaded_theme = b'''<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:themeElements><a:clrScheme name="test"><a:lt1><a:srgbClr val="112233"/></a:lt1><a:dk1><a:srgbClr val="334455"/></a:dk1><a:accent1><a:srgbClr val="FF0000"/></a:accent1></a:clrScheme></a:themeElements></a:theme>'''
+    book.loaded_theme = b"""<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:themeElements><a:clrScheme name="test"><a:lt1><a:srgbClr val="112233"/></a:lt1><a:dk1><a:srgbClr val="334455"/></a:dk1><a:accent1><a:srgbClr val="FF0000"/></a:accent1></a:clrScheme></a:themeElements></a:theme>"""
     book["Cases"]["B2"].fill = PatternFill("solid", fgColor=Color(theme=4, tint=tint))
     color = _facts(_convert(book))["cell_styles"][0]["fill"]["foreground"]
     assert color["type"] == "theme" and color["value"] == 4
@@ -155,8 +159,9 @@ def test_pattern_and_gradient_are_not_flattened_to_one_color() -> None:
     book = _book()
     sheet = book["Cases"]
     sheet["B2"].fill = PatternFill("darkGrid", fgColor="FFFF0000", bgColor="FF0000FF")
-    sheet["B3"].fill = GradientFill(degree=45, stop=[
-        Stop(Color(rgb="FFFF0000"), 0), Stop(Color(rgb="FF00FF00"), 1)])
+    sheet["B3"].fill = GradientFill(
+        degree=45, stop=[Stop(Color(rgb="FFFF0000"), 0), Stop(Color(rgb="FF00FF00"), 1)]
+    )
     values = _facts(_convert(book))["cell_styles"]
     by_range = {item["ranges"][0]: item["fill"] for item in values}
     assert by_range["B2"]["background"]["rgb"] == "#0000FF"
@@ -169,10 +174,20 @@ def test_conditional_fill_and_strike_are_explicitly_unevaluated() -> None:
     book = _book()
     sheet = book["Cases"]
     sheet["B2"].fill = PatternFill("solid", fgColor="FFFFFF00")
-    sheet.conditional_formatting.add("A2:C3", CellIsRule(operator="equal", formula=['"obsolete"'],
-        fill=PatternFill("solid", fgColor="FFFF0000"), font=Font(strike=True), stopIfTrue=True))
-    sheet.conditional_formatting.add("A5:A8", ColorScaleRule(start_type="min", start_color="FF0000",
-                                                            end_type="max", end_color="00FF00"))
+    sheet.conditional_formatting.add(
+        "A2:C3",
+        CellIsRule(
+            operator="equal",
+            formula=['"obsolete"'],
+            fill=PatternFill("solid", fgColor="FFFF0000"),
+            font=Font(strike=True),
+            stopIfTrue=True,
+        ),
+    )
+    sheet.conditional_formatting.add(
+        "A5:A8",
+        ColorScaleRule(start_type="min", start_color="FF0000", end_type="max", end_color="00FF00"),
+    )
     markdown = _convert(book)
     facts = _facts(markdown)
     assert all(item["evaluation"] == "NOT_EVALUATED" for item in facts["conditional_formats"])
@@ -202,7 +217,23 @@ def test_original_special_values_are_not_html_or_markdown_instructions() -> None
     sheet = book["Cases"]
     sheet["B2"] = "  001|<script>\r\nNA\t~~old~~  "
     sheet["B3"] = "SKMCELLTOKEN0END"
-    markdown = _convert(book)
+    # stdlib XML writer は CR を生で出力し、再読時に LF へ正規化される。
+    # fixture 自体が原 CR を保存するよう文字参照にし、converter の断言は弱めない。
+    raw = _bytes(book)
+    target = BytesIO()
+    with ZipFile(BytesIO(raw)) as source, ZipFile(target, "w", ZIP_DEFLATED) as archive:
+        for item in source.infolist():
+            data = source.read(item.filename)
+            if item.filename == "xl/worksheets/sheet1.xml":
+                data = data.replace(b"\r", b"&#13;")
+            archive.writestr(item.filename, data)
+    prepared = target.getvalue()
+    verified = load_workbook(BytesIO(prepared), data_only=True, rich_text=True)
+    try:
+        assert verified["Cases"]["B2"].value == "  001|<script>\r\nNA\t~~old~~  "
+    finally:
+        verified.close()
+    markdown = render_excel_markdown(".xlsx", prepared)
     assert "&#32;&#32;001\\|&lt;script&gt;&#13;<br>NA&#9;\\~\\~old\\~\\~&#32;&#32;" in markdown
     assert "<script>" not in markdown
     assert "SKMCELLTOKEN0END" in markdown
@@ -238,12 +269,20 @@ def test_shared_string_rich_text_is_not_limited_to_inline_strings() -> None:
         for item in source.infolist():
             data = source.read(item.filename)
             if item.filename == "xl/worksheets/sheet1.xml":
-                data = data.replace(b'<c r="B2" t="inlineStr"><is><t>old action</t></is></c>',
-                                    b'<c r="B2" t="s"><v>0</v></c>')
+                data = data.replace(
+                    b'<c r="B2" t="inlineStr"><is><t>old action</t></is></c>',
+                    b'<c r="B2" t="s"><v>0</v></c>',
+                )
             elif item.filename == "[Content_Types].xml":
-                data = data.replace(b'</Types>', b'<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>')
+                data = data.replace(
+                    b"</Types>",
+                    b'<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>',
+                )
             result.writestr(item.filename, data)
-        result.writestr("xl/sharedStrings.xml", '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><r><rPr><strike/></rPr><t>old</t></r><r><t> action</t></r></si></sst>')
+        result.writestr(
+            "xl/sharedStrings.xml",
+            '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><r><rPr><strike/></rPr><t>old</t></r><r><t> action</t></r></si></sst>',
+        )
     markdown = render_excel_markdown(".xlsx", target.getvalue())
     assert "~~old~~" in markdown and " action" in markdown
 
@@ -291,3 +330,23 @@ async def test_legacy_xls_values_remain_available_without_claiming_style_support
     result = await convert_excel_to_markdown("legacy.xls", raw)
     assert result.profile == "excel-values/v1"
     assert "NOT inspected" in result.markdown and "正常終了" in result.markdown
+
+
+def test_repeated_cell_style_is_resolved_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """同色の長い表でセル数に比例した fill 複製/解色を繰り返さない。"""
+    book = _book()
+    for row in range(2, 502):
+        book["Cases"].cell(row, 2, "item").fill = PatternFill("solid", fgColor="FFABCDEF")
+    calls = 0
+    original = _Colors.fill
+
+    def counted(self: _Colors, fill: Any) -> dict[str, Any]:
+        """解色の実呼出しを計測し、処理内容は変えない。"""
+        nonlocal calls
+        calls += 1
+        return original(self, fill)
+
+    monkeypatch.setattr(_Colors, "fill", counted)
+    markdown = _convert(book)
+    assert calls == 2
+    assert _facts(markdown)["cell_styles"][0]["ranges"] == ["B2:B501"]

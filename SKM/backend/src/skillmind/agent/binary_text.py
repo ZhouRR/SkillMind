@@ -40,6 +40,8 @@ _MAX_ENTRY_BYTES = 16_777_216
 MAX_EXCEL_INPUT_BYTES = 8_388_608
 MAX_MARKDOWN_BYTES = 1_048_576
 MARKITDOWN_VERSION = "0.1.7"
+EXCEL_STYLE_PROFILE = "excel-styles/v1"
+EXCEL_VALUE_PROFILE = "excel-values/v1"
 _CONVERSION_TIMEOUT_SECONDS = 30
 
 
@@ -57,6 +59,7 @@ class MarkdownConversion:
 
     markdown: str
     converter_version: str = MARKITDOWN_VERSION
+    profile: str = EXCEL_STYLE_PROFILE
 
 
 async def convert_excel_to_markdown(path: str, data: bytes) -> MarkdownConversion:
@@ -101,7 +104,9 @@ async def convert_excel_to_markdown(path: str, data: bytes) -> MarkdownConversio
         raise BinaryTextError(
             "Excel conversion was unavailable or exceeded its deadline"
         ) from error
-    return MarkdownConversion(markdown)
+    return MarkdownConversion(
+        markdown, profile=EXCEL_STYLE_PROFILE if suffix == ".xlsx" else EXCEL_VALUE_PROFILE
+    )
 
 
 async def _exchange_markdown(process: asyncio.subprocess.Process, data: bytes) -> str:
@@ -144,16 +149,28 @@ def render_excel_markdown(suffix: str, data: bytes) -> str:
     # 文字列の 001 や 1 を数値へ変える。同じ表変換経路を使い、読取だけを固定する。
     # 出力後の NaN 置換では、原文の NaN と変換による欠損を区別できない。
     sheets = pd.read_excel(
-        BytesIO(data), sheet_name=None,
+        BytesIO(data), sheet_name=None, header=None if suffix == ".xlsx" else 0,
         engine="openpyxl" if suffix == ".xlsx" else "xlrd",
         dtype=str, keep_default_na=False,
     )
     converter = HtmlConverter()
-    sections = [
-        f"## {name}\n{converter.convert_string(sheet.to_html(index=False)).markdown.strip()}"
-        for name, sheet in sheets.items()
-    ]
-    markdown = "\n\n".join(sections).strip()
+    if suffix == ".xlsx":
+        from skillmind.agent.excel_markdown import render_styled_sheets
+
+        markdown = render_styled_sheets(
+            data, sheets, lambda html: converter.convert_string(html, strict=True).markdown.strip()
+        )
+    else:
+        sections = [
+            f"## {name}\n{converter.convert_string(sheet.to_html(index=False)).markdown.strip()}"
+            for name, sheet in sheets.items()
+        ]
+        markdown = "\n\n".join(sections).strip()
+        markdown += (
+            "\n\n> Excel format coverage: excel-values/v1. Legacy XLS cell values only; "
+            "strikethrough, fills and conditional formatting were NOT inspected. "
+            "Do not infer absence of formatting or exclude rows from colors alone."
+        )
     if len(markdown.encode("utf-8")) > MAX_MARKDOWN_BYTES:
         raise BinaryTextError("Converted Markdown exceeds the output limit")
     return markdown
