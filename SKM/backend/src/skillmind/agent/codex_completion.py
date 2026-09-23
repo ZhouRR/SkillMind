@@ -33,7 +33,6 @@ from skillmind.skills.model_interpreter import (
     ModelInvalidOutputError,
     ModelProviderError,
 )
-
 from skillmind.skills.runtime_profile import validate_interpreter_parameters
 
 logger = logging.getLogger(__name__)
@@ -43,7 +42,7 @@ _INTERRUPT_TIMEOUT_SECONDS = 5
 def _close_completion_client(client: CodexClient) -> None:
     """固定 SDK の kill 後も子を reap し、呼出し終了後に process を残さない。"""
 
-    # SDK 0.154.0 の close は terminate 待機に失敗すると kill だけで戻る。元 handle を保持し、
+    # SDK 0.156.0 の close は terminate 待機に失敗すると kill だけで戻る。元 handle を保持し、
     # 同じ呼出しの子だけを wait する。PID 再検索や別 Worker の停止は行わない。
     process = client._proc
     try:

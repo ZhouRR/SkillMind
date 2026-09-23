@@ -18,8 +18,8 @@ from openai_codex.models import Notification, UnknownNotification
 from skillmind.agent.codex_catalog import platform_model_catalog
 from skillmind.agent.runtime_distribution import _stamp, _verify_binary
 
-CODEX_SDK_VERSION = "0.154.0"
-CODEX_CLI_VERSION = "0.154.0"
+CODEX_SDK_VERSION = "0.156.0"
+CODEX_CLI_VERSION = "0.156.0"
 
 # 固定 CLI の機能リストと実 wire 検証に対応する。資源操作は platform MCP だけを使う。
 _DISABLED_FEATURES = (
