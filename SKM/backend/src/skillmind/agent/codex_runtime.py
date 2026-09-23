@@ -7,6 +7,7 @@ import json
 import os
 import re
 from collections.abc import AsyncGenerator, Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
@@ -107,7 +108,9 @@ class CodexRuntimeConfiguration:
 
         return self.model
 
-    def client_config(self, *, mcp: Mapping[str, Any] | None = None) -> CodexConfig:
+    def client_config(
+        self, *, mcp: Mapping[str, Any] | None = None, for_login: bool = False,
+    ) -> CodexConfig:
         """認証 cache だけを共有し、OS 環境・host instructions・builtin Tools を閉じる。"""
 
         self.home.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -133,12 +136,9 @@ class CodexRuntimeConfiguration:
             {"HOME": str(cwd), "USERPROFILE": str(cwd), "CODEX_HOME": str(self.home)}
         )
         cli = pinned_codex_cli()
-        catalog = platform_model_catalog(
-            cli=cli,
-            cwd=cwd,
-            environment=environment,
-            model=self.model,
-            effort=self.effort,
+        # Login には thread/turn が無い。未認証での catalog discovery をログインの前提にしない。
+        catalog = None if for_login else platform_model_catalog(
+            cli=cli, cwd=cwd, environment=environment, model=self.model, effort=self.effort,
         )
         overrides = [f"features.{feature}=false" for feature in _DISABLED_FEATURES]
         overrides.extend(
@@ -153,10 +153,11 @@ class CodexRuntimeConfiguration:
                 'model_provider="openai"',
                 f"model={json.dumps(self.model)}",
                 f"model_reasoning_effort={json.dumps(self.effort)}",
-                f"model_catalog_json={json.dumps(str(catalog))}",
                 "mcp_servers={}",
             )
         )
+        if catalog is not None:
+            overrides.append(f"model_catalog_json={json.dumps(str(catalog))}")
         if mcp is not None:
             # URL/token は呼出しごとの loopback MCP のみ。外部接続設定は受け入れない。
             for key, value in mcp.items():
@@ -170,6 +171,26 @@ class CodexRuntimeConfiguration:
             client_title="Skillmind",
             client_version="0.1.0",
         )
+
+
+async def prepare_codex_config(
+    configuration: CodexRuntimeConfiguration, *, mcp: Mapping[str, Any] | None = None,
+    for_login: bool = False,
+) -> CodexConfig:
+    """Discovery 待機中も heartbeat を動かし、取消時は有界 subprocess の回収を待つ。"""
+    kwargs: dict[str, Any] = {}
+    if mcp is not None:
+        kwargs["mcp"] = mcp
+    if for_login:
+        kwargs["for_login"] = True
+    pending = asyncio.create_task(asyncio.to_thread(configuration.client_config, **kwargs))
+    try:
+        return await asyncio.shield(pending)
+    except asyncio.CancelledError:
+        # subprocess.run の timeout/回収を完了させ、取消後に SDK/model を起動しない。
+        with suppress(Exception):
+            await pending
+        raise
 
 
 def pinned_codex_cli() -> str:

@@ -821,3 +821,39 @@ async def test_native_same_capability_routes_two_resources_in_one_turn(tmp_path,
     advertised = [t for t in tools if t.get("name") == "issue_read_v1"]
     assert len(advertised) == 1
     assert advertised[0]["parameters"]["properties"]["resource_key"]["enum"] == ["source", "result"]
+
+
+async def test_native_discovered_model_keeps_high_and_platform_tool_boundary(
+    tmp_path, monkeypatch, endpoint,
+):
+    """同梱外の合成 discovery entry を実 CLI に渡し、model/effort と wire Tool を確認する。"""
+    from skillmind.agent import codex_catalog
+
+    server, requests = endpoint
+    _local_client(monkeypatch, server)
+    read_catalog = codex_catalog._read_catalog
+    discoveries = []
+
+    def catalog(cli, cwd, environment, *, bundled):
+        """実同梱 metadata の能力で新 slug を模擬し、外部 model API は呼ばない。"""
+        models = read_catalog(cli, cwd, environment, bundled=True)
+        if bundled:
+            return [item for item in models if item["slug"] != "gpt-6-sol"]
+        discoveries.append("refresh")
+        original = next(item for item in models if item["slug"] == "gpt-6-astra")
+        return [{**original, "slug": "gpt-6-sol"}]
+
+    monkeypatch.setattr(codex_catalog, "_read_catalog", catalog)
+    config = CodexRuntimeConfiguration("gpt-6-sol", "high", tmp_path / "codex")
+    async with asyncio.timeout(30):
+        result = await CodexCompletionClient(config).complete(
+            system_prompt="Return JSON.", user_message="Return ok true.",
+            response_schema={"type": "object", "properties": {"ok": {"type": "boolean"}},
+                             "required": ["ok"], "additionalProperties": False},
+            model="gpt-6-sol", parameters={},
+        )
+    assert result.structured_output == {"ok": True} and discoveries == ["refresh"]
+    assert len(requests) == 1
+    assert requests[0]["model"] == "gpt-6-sol"
+    assert requests[0]["reasoning"]["effort"] == "high"
+    assert not _wire_tool_names(requests[0]) - {"update_plan", "request_user_input"}

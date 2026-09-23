@@ -9,6 +9,7 @@ import json
 from skillmind.agent.codex_runtime import (
     CodexRuntimeConfiguration,
     create_codex_client,
+    prepare_codex_config,
     start_codex,
 )
 from skillmind.core.settings import Settings
@@ -23,7 +24,7 @@ async def run_login(*, status_only: bool) -> None:
         settings.codex_reasoning_effort,
         settings.codex_home,
     )
-    client = create_codex_client(configuration.client_config())
+    client = create_codex_client(await prepare_codex_config(configuration, for_login=True))
     try:
         await start_codex(client)
         if status_only:

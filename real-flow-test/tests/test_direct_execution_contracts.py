@@ -308,6 +308,10 @@ def test_ref_contracts_have_one_record_definition() -> None:
     "画像不足だけで実際に完了した操作を未実行へ変更しない",
     "UI 操作を再送しない",
     "終端状態、`finished_at` を一回の UPDATE で同時保存・回読する",
+    "タスク終了時に `RUNNING` を残さない",
+    "索引検証が失敗しても終端登録を止めず",
+    "業務実行の終端化を遠隔操作の停止・成功や予約解消の証明にしない",
+    "実行登録前の終了では行や executionId を新設しない",
     "同じ行の観測と仕様上の対象",
 ])
 def test_execution_prompt_preserves_business_boundaries(phrase: str) -> None:

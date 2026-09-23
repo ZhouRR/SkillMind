@@ -11,11 +11,13 @@ from typing import Any
 
 from openai_codex.client import CodexClient
 
+from skillmind.agent.codex_catalog import CodexCatalogError
 from skillmind.agent.codex_diagnostics import codex_failure_detail
 from skillmind.agent.codex_runtime import (
     CodexRuntimeConfiguration,
     codex_notifications,
     create_codex_client,
+    prepare_codex_config,
     start_codex,
 )
 from skillmind.agent.codex_schema import (
@@ -99,7 +101,19 @@ class CodexCompletionClient:
             if response_schema.get("$id") in {CANDIDATE_SCHEMA_ID, DIRECT_SCHEMA_ID}
             else CodexOutputSchema(response_schema)
         )
-        client = create_codex_client(self._configuration.client_config())
+        try:
+            client = create_codex_client(await prepare_codex_config(self._configuration))
+        except Exception as error:
+            # まだ model/thread を開始していない準備失敗も、台帳が return を確定できる型にする。
+            detail = (
+                error.detail if isinstance(error, CodexCatalogError)
+                else "codex:runtime_preparation_failed"
+            )
+            log_event(
+                logger, logging.WARNING, "skill.interpret.completion_diagnostic",
+                error_code="provider_error", detail=detail,
+            )
+            raise ModelProviderError("Codex runtime preparation failed", detail=detail) from error
         try:
             await start_codex(client)
             thread = await asyncio.to_thread(

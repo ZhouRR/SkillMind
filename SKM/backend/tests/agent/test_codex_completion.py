@@ -7,6 +7,7 @@ import threading
 from types import SimpleNamespace
 
 import pytest
+
 from skillmind.agent import codex_completion
 from skillmind.skills.interpreter_execution import MODEL_OUTPUT_WHITESPACE_LIMIT
 from skillmind.skills.model_interpreter import ModelProviderError
@@ -99,3 +100,67 @@ async def test_stall_closes_and_reaps_even_when_interrupt_fails_or_never_acknowl
     assert "private" not in str(caught.value)
     assert await asyncio.to_thread(interrupt_returned.wait, .5)
     assert calls == ["start", "interrupt", "close", "kill", "reap"]
+
+
+@pytest.mark.parametrize("failure", ["catalog", "configuration"])
+async def test_preparation_failure_is_a_returned_provider_error(monkeypatch, failure):
+    """開始許可取得後の準備例外が UNKNOWN へ漏れず、model 開始なしで確定可能になる。"""
+    from skillmind.agent.codex_catalog import CodexCatalogError
+
+    def configure():
+        """model RPC の前に発生する例外を再現する。"""
+        if failure == "catalog":
+            raise CodexCatalogError("codex:model_catalog_model_not_found")
+        raise ValueError("private-runtime-configuration")
+
+    def unexpected(config):
+        """準備失敗後に SDK client を開始していないことを確認する。"""
+        raise AssertionError("SDK must not be created")
+
+    monkeypatch.setattr(codex_completion, "create_codex_client", unexpected)
+    configuration = SimpleNamespace(model="gpt-6-sol", effort="high", client_config=configure)
+    with pytest.raises(ModelProviderError) as caught:
+        await codex_completion.CodexCompletionClient(configuration).complete(
+            system_prompt="JSON", user_message="JSON", response_schema={"type": "object"},
+            model="gpt-6-sol", parameters={},
+        )
+    assert caught.value.detail == (
+        "codex:model_catalog_model_not_found" if failure == "catalog"
+        else "codex:runtime_preparation_failed"
+    )
+    assert "private-runtime" not in str(caught.value)
+
+
+async def test_catalog_preparation_failure_finishes_original_request_without_unknown():
+    """実 Interpreter/control/台帳の局部回帰。準備失敗は一回の既知 FAILED として保存する。"""
+    from skillmind.agent.codex_catalog import CodexCatalogError
+    from skillmind.skills.interpreter_execution import InterpreterExecutionError
+    from skillmind.skills.request_execution import RequestCallControl
+    from tests.skills.interpretation_request_harness import RequestSession
+    from tests.skills.test_interpretation_requests import INPUT, accept, command
+    from tests.skills.test_model_interpreter import _interpreter, _request
+
+    def configure():
+        """CLI がモデルを見つけず、thread 開始前に失敗したことを再現する。"""
+        raise CodexCatalogError("codex:model_catalog_model_not_found")
+
+    session = RequestSession()
+    request = await accept(session)
+    ledger = session.ledger()
+    owner = await ledger.claim(request.request_id)
+    assert owner is not None
+    client = codex_completion.CodexCompletionClient(SimpleNamespace(
+        model=INPUT["model"], effort="high", client_config=configure,
+    ))
+    with pytest.raises(InterpreterExecutionError) as caught:
+        await _interpreter(client).interpret(
+            _request(), model=INPUT["model"], parameters={},
+            control=RequestCallControl(ledger, owner),
+        )
+    assert caught.value.code.value == "provider_error"
+    assert caught.value.detail == "codex:model_catalog_model_not_found"
+    assert len(session.calls) == 1 and session.calls[0].returned_at is not None
+    saved = await ledger.finish(owner, command(request))
+    assert session.requests[0].status == "FAILED"
+    assert session.requests[0].interpretation_id == saved.interpretation_id
+    assert await ledger.claim(request.request_id) is None

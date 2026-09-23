@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 from contextvars import ContextVar
 from uuid import UUID
@@ -24,7 +24,7 @@ class WarmCodexSession:
         self.session_id: str | None = None
 
     async def acquire(
-        self, factory: Callable[[], CodexClient], parent: str | None
+        self, factory: Callable[[], Awaitable[CodexClient]], parent: str | None
     ) -> tuple[CodexClient, bool]:
         """既知の原親以外は共有せず、新 model 呼出しより前に cold path へ戻す。"""
         if not self.active or self.busy:
@@ -33,7 +33,15 @@ class WarmCodexSession:
             await self.close_client()
         is_new = self.client is None
         if is_new:
-            self.client = factory()
+            self.busy = True
+            try:
+                self.client = await factory()
+                if not self.active:
+                    await self.close_client()
+                    raise RuntimeError("Warm Codex scope ended during preparation")
+            except BaseException:
+                self.busy = False
+                raise
         assert self.client is not None
         self.busy = True
         return self.client, is_new

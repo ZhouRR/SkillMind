@@ -92,8 +92,8 @@ def test_execution_keeps_source_locations_and_frozen_scope() -> None:
     assert "空の根拠や架空の操作・完了件数を作らない" in section
 
 
-def test_execution_retains_native_records_without_excel_reread() -> None:
-    """追加の変換・報告・承認なしで既存の原記録引渡しを維持する。"""
+def test_execution_summarizes_receipts_without_artifact_prerequisites() -> None:
+    """成果物の取得/保持を前提にせず、回执・原文・終端化の境界を維持する。"""
     text = skill_text("execution-plan-generator")
     section = style_section("execution-plan-generator")
     assert "元 Excel を取得・再変換せず" in section
@@ -101,6 +101,14 @@ def test_execution_retains_native_records_without_excel_reread() -> None:
     assert "追加承認・毎ステップの文書保存は増やさない" in section
     assert "ステップごとの追加報告書" in text
     assert "中間の `実行結果.json` は生成しない" in text
-    assert "FlaUI MCP が生成した操作記録・報告・スクリーンショットを実測の正本" in text
+    assert "実際に取得した MCP 回执と画面観測に基づき" in text
+    assert "成果物へ接続できないこと、保持期限・取得経路が不明なことを理由に停止・質問しない" in text
+    assert "操作回执の照合や現在画面の確認を省略する指示ではない" in text
+    assert "成果物未取得だけで確認済み回执を不明へ変更しない" in text
+    assert "各業務ステップの操作概要と確認できた結果" in text
+    assert "操作完了だけから仕様全体の PASS や未観測の送達を主張しない" in text
+    assert "タスク終了時に `RUNNING` を残さない" in text
+    assert "## 原記録の保持と引渡し" not in text
+    assert "原ファイルの必須退避" not in text
     assert "登録後は根拠・期待条件・固定版を変更せず" in text
     assert "結果未知のまま完了扱いにせず" in text

@@ -28,6 +28,7 @@ from skillmind.agent.codex_runtime import (
     codex_notifications,
     create_codex_client,
     pinned_codex_cli,
+    prepare_codex_config,
     start_codex,
 )
 from skillmind.agent.codex_schema import CodexOutputError, CodexOutputSchema
@@ -208,12 +209,19 @@ class CodexAgentSdkEngine:
             return result
 
         async with serve_codex_tools(bridge) as mcp:
+            async def new_client() -> CodexClient:
+                """Cold 起動時だけ catalog を準備し、暖機再利用に discovery を追加しない。"""
+                config = await prepare_codex_config(
+                    self._configuration, mcp=mcp if warm is None else None,
+                )
+                return create_codex_client(config)
+
             if warm is None:
-                client = create_codex_client(self._configuration.client_config(mcp=mcp))
+                client = await new_client()
                 needs_start = True
             else:
                 client, needs_start = await warm.acquire(
-                    lambda: create_codex_client(self._configuration.client_config()),
+                    new_client,
                     parent.session_id if parent else None,
                 )
             safe_observation(
@@ -257,10 +265,13 @@ class CodexAgentSdkEngine:
                     if parent is None:
                         thread = await asyncio.to_thread(client.thread_start, options)
                     elif fork:
-                        thread = await asyncio.to_thread(client.thread_fork, parent.session_id, options)
+                        thread = await asyncio.to_thread(
+                            client.thread_fork, parent.session_id, options,
+                        )
                     else:
                         thread = await asyncio.to_thread(
-                            client.thread_resume, parent.session_id, {**options, "excludeTurns": True}
+                            client.thread_resume, parent.session_id,
+                            {**options, "excludeTurns": True},
                         )
                 session_id = thread.thread.id
                 if (
@@ -513,7 +524,9 @@ class CodexAgentSdkEngine:
                 if entry.get("type") == "codex_deferred"
                 and entry.get("tool_name") == "mcp__skillmind__change_propose_v1"
                 and resolved.matches(entry["arguments"], parent.session_id)
-                and (resolved.tool_use_id is None or entry.get("tool_use_id") == resolved.tool_use_id)
+                and (
+                    resolved.tool_use_id is None or entry.get("tool_use_id") == resolved.tool_use_id
+                )
             ]
             if len(matches) != 1:
                 raise ValueError("Original Codex proposal identity is missing or ambiguous")
