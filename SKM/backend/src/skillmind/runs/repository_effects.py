@@ -266,10 +266,11 @@ class EffectOperationsMixin(_RunRepositoryBase):
         self,
         claimed: ClaimedRun,
         *,
-        event: AgentEvent,
+        event: AgentEvent | None,
         session_metadata: AgentSessionMetadata | None,
         draft: ChangeProposalDraft,
         inline_tool_id: str | None = None,
+        inline_session_id: str | None = None,
     ) -> UUID:
         """Proposal を保存し、既定 approval または exact preauthorization へ分岐する。"""
 
@@ -283,11 +284,24 @@ class EffectOperationsMixin(_RunRepositoryBase):
         self._validate_claimed_lease(attempt, claimed, now=now)
         if RunStatus(run.status) is not RunStatus.RUNNING:
             raise LeaseValidationError(f"Run cannot propose a change from {run.status}")
-        self._validate_agent_event(event, claimed)
-        if event.event_type is not AgentEventType.CHANGE_PROPOSED:
-            raise ValueError("Proposal suspension requires CHANGE_PROPOSED")
+        if event is not None:
+            self._validate_agent_event(event, claimed)
+            if event.event_type is not AgentEventType.CHANGE_PROPOSED:
+                raise ValueError("Proposal suspension requires CHANGE_PROPOSED")
+            if inline_session_id is not None:
+                raise ValueError("Proposal event already identifies its session")
+        elif inline_tool_id is None or inline_session_id is None:
+            raise ValueError("Inline proposal requires its original Tool and session")
         await self._reject_cancelled_execution(run.id)
         next_sequence = await self._next_sequence(run.id)
+        if event is None:
+            assert inline_session_id is not None
+            # 元 Run の lock 内で採番し、不正な sequence=0 の仮 event を Service で作らない。
+            event = AgentEvent(
+                claimed.run_id, claimed.run_attempt_id, inline_session_id,
+                next_sequence, now, AgentEventType.CHANGE_PROPOSED, {},
+            )
+            self._validate_agent_event(event, claimed)
         if inline_tool_id is None and event.sequence < next_sequence:
             raise ConcurrentRunUpdateError("ChangeProposal event sequence is not monotonic")
         existing_open = await self._session.scalar(

@@ -31,6 +31,7 @@ from skillmind.agent.tool_catalog import (
     _read_tool_definitions,
 )
 from skillmind.agent.tool_gateway import RunToolContext, ToolProviderError
+from skillmind.agent.tool_policy import ToolExecutionPolicy
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.integrations.domain import (
     INSTALLED_PROVIDER_CAPABILITIES,
@@ -137,6 +138,33 @@ async def test_bound_read_returns_valid_content_hash_and_evidence(provider, cont
         assert call.kwargs["run_id"] == context.run_id
         assert call.kwargs["binding_id"] == context.tool.binding_id
         assert call.kwargs["capability"] == "database.read/v1"
+
+
+@pytest.mark.asyncio
+async def test_business_project_filter_reaches_query_without_changing_binding(provider, context):
+    """ToolPolicy から Provider まで業務 project_id を保持し、認可は元 Run に固定する。"""
+    implementation, source, bound, _ = provider
+    schema = ContractStore(ROOT / "contracts").load("tools/database.read/v1/request.schema.json")
+    tool = replace(context.tool, input_schema=schema)
+    context = replace(context, tool=tool)
+    business_project = str(uuid4())
+    arguments = {"table": "public.reports", "purpose": "Review",
+                 "filters": {"project_id": business_project}}
+    assert ToolExecutionPolicy((tool,)).authorize(tool.sdk_name, arguments) is tool
+    await implementation.execute(context, arguments)
+    assert source.read.await_args.args[2].filters == {"project_id": business_project}
+    assert bound.await_count == 2
+    for call in bound.await_args_list:
+        assert call.kwargs["project_id"] == context.project_id
+        assert call.kwargs["integration_id"] == tool.integration_id
+        assert call.kwargs["binding_id"] == tool.binding_id
+    source.read.reset_mock()
+    arguments["table"] = "private.reports"
+    ToolExecutionPolicy((tool,)).authorize(tool.sdk_name, arguments)
+    with pytest.raises(ToolProviderError) as failure:
+        await implementation.execute(context, arguments)
+    assert failure.value.code == "scope_denied"
+    source.read.assert_not_called()
 
 
 @pytest.mark.asyncio

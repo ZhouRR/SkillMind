@@ -89,12 +89,17 @@ class ToolExecutionPolicy:
             _proposal_control_arguments(tool_input)
             if tool.capability == CHANGE_PROPOSE_CAPABILITY else tool_input
         )
+        if tool.capability in {"database.read/v1", "database.read/v2"}:
+            # filters は業務列と値。原入力の Schema と Provider の binding/scope 検証は残す。
+            boundary_input = {key: value for key, value in tool_input.items() if key != "filters"}
         boundary_fields = _find_boundary_fields(boundary_input)
         if boundary_fields:
             fields = ", ".join(sorted(boundary_fields))
             raise ToolPolicyViolation(f"Tool input attempts to change run boundary: {fields}")
         errors = sorted(
-            Draft202012Validator(tool.input_schema).iter_errors(provider_arguments(tool, tool_input)),
+            Draft202012Validator(tool.input_schema).iter_errors(
+                provider_arguments(tool, tool_input),
+            ),
             key=lambda error: tuple(str(part) for part in error.absolute_path),
         )
         if errors:

@@ -82,7 +82,7 @@ class Settings(BaseSettings):
 
     # git/svn command 1 回あたりの上限。準備全体・モデル実行の期限とは別に remote を打ち切る。
     repository_command_timeout_seconds: int = Field(default=120, ge=5, le=600)
-    # 扇出子 Agent 一 branch あたりの打ち切り時間。Run の wall timeout(900 秒)より必ず短くし、
+    # 扇出子 Agent 一 branch あたりの打ち切り時間。Run の wall timeout より必ず短くし、
     # 一路の停滞が Run 全体の期限を食い潰さないようにする (計画 §23 D6)。
     subagent_branch_timeout_seconds: int = Field(default=300, ge=30, le=600)
 

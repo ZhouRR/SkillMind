@@ -9,7 +9,7 @@ description: RV を通過した保存済み Markdown から業務テストの手
 
 公開タスクは「テスト実行」の一つとし、RV 済み Markdown を直接実行し、MCP の操作回执と必要な画面観測からタスクの実行結果をまとめる。Runner が生成した成果物ファイルの取得・検証・保存や後続判定への引渡しは本タスクの完了条件にしない。既存登録との対応のため Skill 識別子は維持する。独立した実行計画の生成・検証・保存・状態管理は行わず、`test_execution_plan` への新規登録・旧計画の再利用を前提にしない。内部工程の起動や画面情報ファイルの事前提出を利用者に求めない。他の Skill は呼び出さず、最終判定は本タスクの対象外とする。ステップごとの追加報告書、総括の `操作記録.json`、モデルが再構成する中間の `実行結果.json` は生成しない。
 
-対象は「文書範囲」で選択した RV 済み Markdown、または実行コンテキストの文書参照から特定する。選択済みならタスク入力は `{}` とし、パス・ID・本文を再入力させない。`test_automation.test_run`、`test_document`、`test_artifact` の保存記録から、選択した Markdown に対応する `testRunId`、`documentId`、`specVersion` を引き継ぐ。一意でなければ対象を確認し、過去の PASS を暗黙に選ばない。
+対象は「文書範囲」で選択した RV 済み Markdown、または実行コンテキストの文書参照から特定する。選択済みならタスク入力は `{}` とし、パス・ID・本文を再入力させない。文書庫の文書 ID と業務 DB の `document_id` は同一とは限らない。まず選択済み Markdown の正確な保存先を `test_automation.test_artifact` の `object_key` と照合し、文書庫・bucket の対応も確認する。その記録の `test_run_id`・`document_id` で `test_run`・`test_document` を参照し、RV 状態と `specVersion` を引き継ぐ。パス中の UUID から業務 ID を推測しない。一意でなければ対象を確認し、過去の PASS を暗黙に選ばない。
 
 仕様本文の入力はこの Markdown のみとする。元 Excel の取得・読取・再変換・版照合を行わず、利用者に Excel の提出やパス・シート・セル情報の入力を求めない。元 Excel のファイル・保存先・Version ID・ETag・シート名・セル座標が提供されなくても、それを理由に停止しない。
 
@@ -44,7 +44,7 @@ description: RV を通過した保存済み Markdown から業務テストの手
 1. 上記の書式・改訂規則を適用し、Markdown 全体から有効な対象範囲の全ケース・業務ステップと元の期待条件を確認する。ケース・ステップ ID がなければ文書内の順序から安定した ID を付ける。対象範囲を後から実行済み操作だけに狭めず、前提条件・データ・後処理も原文に従う。
 2. [execution-basis.schema.json](schemas/execution-basis.schema.json) に従う小さな `executionBasis` を作る。`sourceMarkdown` は取得元の文書参照と原バイト列の SHA-256、`specVersion` は RV 登録値とする。改行・空白を正規化してハッシュを作らない。`cases[].steps[]` に ID、原文の操作位置 `sourceLines`、期待条件の位置 `expectedLines`、必要な先行ステップ `dependsOn` だけを記録する。行番号は取得した UTF-8 Markdown の先頭を 1 とする包含範囲。範囲が実在し原文を正確に指すこと、全対象の網羅、ID の一意性、依存先の存在と非循環を実行前に検証する。期待条件が特定できなければ不足を確認し、創作しない。全文・手順配列・MCP 引数の写しを別の計画ファイルにしない。
 3. `environment` に確認済みの appId・接続参照・予約参照、並列度 1、ケース時間制限を保持する。環境・タスクの指定を優先し、指定がなければケース 1800 秒、単独操作 15 秒を既定として工具上限内に収める。ケース時間は最初のアプリ準備から測り、承認・中断待ちを含め継続時にリセットしない。期限後は新操作を提案せず、進行中の操作は原 ID で照合する。送信・登録等の非冪等操作は自動再試行せず、仕様にない削除・終了を追加しない。
-4. `versionSnapshot` に Skill の固定版または checksum、確認済み環境・対象ビルド・Runner・モデル版を保持する。`executionBasis` の Schema・format と原文対応を検証し、次項の実行登録に `execution_basis`、`version_snapshot` として一度に保存・回読する。実行前に永続化できなければ操作しない。独立した根拠ファイルの公開・完了状態・計画生成試行回数は作らない。登録後は根拠・期待条件・固定版を変更せず、実行結果をこの登録値へ対応付ける。参照索引へ本文や同じ根拠全体を複写しない。
+4. `versionSnapshot.skillVersion` には Brief の `identity.skill_version_id` を固定版識別子としてそのまま保存する。`skillChecksum` を併記してもよいが、`skillVersion` の代わりにしない。確認済みの環境版 `environmentVersion`、対象ビルド `sutBuild`、Runner 版 `runnerVersions`、モデル版 `modelVersion` も保持する。`executionBasis` の Schema・format と原文対応を検証し、次項の実行登録に `execution_basis`、`version_snapshot` として一度に保存・回読する。実行前に永続化できなければ操作しない。独立した根拠ファイルの公開・完了状態・計画生成試行回数は作らない。登録後は根拠・期待条件・固定版を変更せず、実行結果をこの登録値へ対応付ける。参照索引へ本文や同じ根拠全体を複写しない。
 
 ## 画面確認と MCP 実行
 

@@ -345,7 +345,9 @@ async def test_create_task_run_freezes_generic_snapshot() -> None:
             }
         },
     )
-    assert command.limits_snapshot_json["wall_timeout_seconds"] == 900
+    assert command.limits_snapshot_json["wall_timeout_seconds"] == 3600
+    assert command.limits_snapshot_json["max_turns"] == 1000
+    assert command.limits_snapshot_json["max_output_bytes"] == 104_857_600
     assert command.skill_snapshots_json == (resolved.skill_snapshot,)
     assert database.transactions == database.commits == 1
     database.session.flush.assert_awaited_once()

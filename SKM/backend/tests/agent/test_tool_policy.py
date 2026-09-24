@@ -102,6 +102,68 @@ def test_nested_boundary_argument_is_denied_before_schema_validation() -> None:
         )
 
 
+def _database_read_tool(version: str) -> RegisteredTool:
+    """実契約を使い、業務 filter と固定接続の境界を検証する。"""
+    root = Path(__file__).resolve().parents[3] / "contracts"
+    capability = f"database.read/{version}"
+    return RegisteredTool(
+        capability=capability, sdk_name=capability_to_sdk_name(capability),
+        provider="postgres", integration_id=uuid4(), binding_id=uuid4(),
+        input_schema=json.loads((root / f"tools/{capability}/request.schema.json").read_text()),
+    )
+
+
+@pytest.mark.parametrize("version", ["v1", "v2"])
+@pytest.mark.parametrize("column", ["project_id", "integration_id", "provider", "cwd"])
+def test_database_filter_columns_preserve_query_and_frozen_connection(version, column):
+    """同名の業務列を落とさず通し、モデル値を接続・Run identity に採用しない。"""
+    tool = _database_read_tool(version)
+    policy = ToolExecutionPolicy((tool,))
+    arguments = {"table": "public.reports", "purpose": "Review",
+                 "filters": {column: "business-reference"}}
+    original = deepcopy(arguments)
+    assert policy.authorize(tool.sdk_name, arguments) is tool
+    assert arguments == original
+
+
+@pytest.mark.parametrize("version", ["v1", "v2"])
+@pytest.mark.parametrize("extra", [
+    {"project_id": "other-project"},
+    {"options": {"integration_id": "other-connection"}},
+])
+def test_database_filter_exception_does_not_allow_control_overrides(version, extra):
+    """filters 外の境界変更は、業務 filter が合法でも引き続き拒否する。"""
+    tool = _database_read_tool(version)
+    with pytest.raises(ToolPolicyViolation, match="run boundary"):
+        ToolExecutionPolicy((tool,)).authorize(tool.sdk_name, {
+            "table": "public.reports", "purpose": "Review",
+            "filters": {"project_id": "business-reference"}, **extra,
+        })
+
+
+@pytest.mark.parametrize("version", ["v1", "v2"])
+@pytest.mark.parametrize("filters", [
+    {"project_id": {"integration_id": "other-connection"}},
+    {"project_id": ["one", "two"]}, {"invalid.column": "value"},
+])
+def test_database_filters_still_require_scalar_values_and_valid_column_names(version, filters):
+    """境界検査の投影で原 filters の Schema 検証を省略しない。"""
+    tool = _database_read_tool(version)
+    with pytest.raises(ToolPolicyViolation, match="registered schema"):
+        ToolExecutionPolicy((tool,)).authorize(tool.sdk_name, {
+            "table": "public.reports", "purpose": "Review", "filters": filters,
+        })
+
+
+def test_other_tools_do_not_inherit_database_filter_exception():
+    """別能力の filters に隠した境界引数は database の例外を使えない。"""
+    with pytest.raises(ToolPolicyViolation, match="project_id"):
+        ToolExecutionPolicy((_issue_tool(),)).authorize("mcp__skillmind__issue_read_v1", {
+            "issue_ref": "ISSUE-1234", "purpose": "Review",
+            "filters": {"project_id": "other-project"},
+        })
+
+
 @pytest.mark.parametrize("capability", ["issue.read", "Issue.read/v1", "issue.read/v0"])
 def test_capability_name_requires_explicit_version(capability: str) -> None:
     """Tool capability ID に明示 version がない場合は SDK 名へ変換しない。"""

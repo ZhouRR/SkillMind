@@ -95,9 +95,9 @@ M0_DENIED_BUILTIN_TOOLS = tuple(sorted(DENIED_BUILTIN_TOOLS))
 
 # M0 の実行 limit は Manifest ではなく platform policy として固定する。
 M0_LIMITS_SNAPSHOT = {
-    "wall_timeout_seconds": 900,
-    "max_turns": 20,
-    "max_output_bytes": 1_048_576,
+    "wall_timeout_seconds": 3600,
+    "max_turns": 1000,
+    "max_output_bytes": 100 * 1024 * 1024,
 }
 
 
@@ -753,15 +753,13 @@ class RunService:
         now = datetime.now(UTC)
         draft = parse_change_proposal_request(arguments, now=now,
             request_identity=f"{claimed.run_id}:{claimed.run_attempt_id}:{tool_use_id}")
-        event = AgentEvent(claimed.run_id, claimed.run_attempt_id, session_id, 0,
-                           now, AgentEventType.CHANGE_PROPOSED, {})
         try:
             async with self._session_factory() as session, session.begin():
                 repository = RunRepository(session, execution_features=self._execution_features,
                     document_library_target=self._document_library_target)
                 proposal_id = await repository.suspend_for_proposal(
-                    claimed, event=event, session_metadata=None, draft=draft,
-                    inline_tool_id=tool_use_id)
+                    claimed, event=None, session_metadata=None, draft=draft,
+                    inline_tool_id=tool_use_id, inline_session_id=session_id)
                 effect_id = await session.scalar(select(EffectExecution.id).where(
                     EffectExecution.proposal_id == proposal_id,
                     EffectExecution.run_id == claimed.run_id))

@@ -201,5 +201,5 @@ def test_only_run_job_reserves_additional_preparation_time() -> None:
     assert len(registered) == 1
     run_job = registered[0]
     assert run_job.name == "execute_run" and run_job.coroutine is worker.execute_run
-    assert run_job.timeout_s == 1500 + worker._settings.run_preparation_timeout_seconds
+    assert run_job.timeout_s == 3600 + 600 + worker._settings.run_preparation_timeout_seconds
     assert worker.WorkerSettings.job_timeout == 1200

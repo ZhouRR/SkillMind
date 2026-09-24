@@ -69,9 +69,10 @@ def fixture(count=2, status="APPLIED", wall=30):
     return context, claims
 
 
-async def test_warm_job_claims_each_successor_with_exact_previous_identity():
+@pytest.mark.parametrize("wall", [30, 3600])
+async def test_warm_job_claims_each_successor_with_exact_previous_identity(wall):
     """前の保存済み Effect と一致する後継だけを repository に要求する。"""
-    context, claims = fixture()
+    context, claims = fixture(wall=wall)
     result = await execute_run(context, str(claims[0].run_id))
     assert result["status"] == "accepted"
     assert context["run_executor"].calls == claims

@@ -97,7 +97,7 @@ from skillmind.runs.outbox import OutboxRelay
 from skillmind.runs.proposal_continuation import ProposalContinuationReader
 from skillmind.runs.realtime import RedisPublisher, RedisRunRealtimePublisher
 from skillmind.runs.repository_inputs import PostgresInputSnapshotStore
-from skillmind.runs.service import RunService
+from skillmind.runs.service import M0_LIMITS_SNAPSHOT, RunService
 from skillmind.schedules import ScheduleService
 from skillmind.skills import (
     SkillService,
@@ -122,6 +122,9 @@ from skillmind.worker.inline_effects import InlineEffectCoordinator
 from skillmind.worker.tool_authority import require_tool_authority
 
 logger = logging.getLogger(__name__)
+
+# Run の既定期限に清理・Effect の余白を加え、ARQ と暖機続行の期限を同じ値にする。
+_RUN_JOB_EXECUTION_TIMEOUT_SECONDS = M0_LIMITS_SNAPSHOT["wall_timeout_seconds"] + 600
 
 
 async def startup(ctx: dict[str, Any], *, maintenance_only: bool = False) -> None:
@@ -577,7 +580,10 @@ async def execute_run(ctx: dict[str, Any], run_id: str) -> dict[str, str | int]:
     try:
         # 一 job の上限内でしか次 Segment を認領しない。各 Attempt の元の予算は延長しない。
         loop = asyncio.get_running_loop()
-        job_deadline = job_started + 1500 + settings.run_preparation_timeout_seconds - 30
+        job_deadline = (
+            job_started + _RUN_JOB_EXECUTION_TIMEOUT_SECONDS
+            + settings.run_preparation_timeout_seconds - 30
+        )
         warm_executor = executor if isinstance(executor, AgentRunExecutor) and executor.supports_warm_continuation else None
         scope = warm_executor.continuation_scope(claimed.run_id) if warm_executor else _single_execution_scope()
         async with scope:
@@ -592,7 +598,9 @@ async def execute_run(ctx: dict[str, Any], run_id: str) -> dict[str, str | int]:
                 # 最悪の一 Attempt と Effect の時間を確保できなければ、従来の Queue に戻る。
                 if warm_executor is None or effect_status != "APPLIED" or position == 4:
                     break
-                wall_limit = claimed.limits_snapshot_json.get("wall_timeout_seconds", 900)
+                wall_limit = claimed.limits_snapshot_json.get(
+                    "wall_timeout_seconds", M0_LIMITS_SNAPSHOT["wall_timeout_seconds"],
+                )
                 if type(wall_limit) is not int or wall_limit <= 0:
                     break
                 reserve = settings.run_preparation_timeout_seconds + wall_limit + 360
@@ -858,7 +866,10 @@ class WorkerSettings:
     functions: ClassVar[tuple[Callable[..., Awaitable[Any]] | Function, ...]] = (
         worker_probe,
         # 準備と清理後の一回の Effect に余白を取り、元のモデル/Effect 上限は延ばさない。
-        arq_function(execute_run, timeout=1500 + _settings.run_preparation_timeout_seconds),
+        arq_function(
+            execute_run,
+            timeout=_RUN_JOB_EXECUTION_TIMEOUT_SECONDS + _settings.run_preparation_timeout_seconds,
+        ),
         execute_effect,
         execute_interpretation_request_job,
         execute_reconciliation_request_job,
@@ -876,8 +887,7 @@ class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(_settings.redis_url)
     queue_name = _settings.queue_name
     max_jobs = 1
-    # Run 自体の打ち切りは wall_timeout_seconds (900 秒) を Executor が強制する。
-    # ARQ の job timeout はその graceful 終態化が完了する余白を持たせた最終防衛線とする。
+    # execute_run は上記の個別 timeout を使う。以下は他 job の既定期限を維持する。
     job_timeout = 1200
     keep_result = 3600
     health_check_interval = 30

@@ -27,10 +27,36 @@ deploy:
 	trap 'exit 130' INT
 	trap 'exit 143' TERM
 	step() { skm_stage="$$1"; printf '\n[%s]\n' "$$skm_stage"; }
+	# 使用中判定は停止済み container も含める。Docker の非 force 削除も最終防壁にする。
+	skm_image_in_use() {
+		skm_container_ids=$$(docker ps -aq) || return 2
+		[ -n "$$skm_container_ids" ] || return 1
+		skm_used_ids=$$(docker inspect --format '{{.Image}}' $$skm_container_ids) || return 2
+		printf '%s\n' "$$skm_used_ids" | grep -Fxq "$$1"
+	}
+	skm_cleanup_unused_tags() {
+		for skm_repository in skillmind/backend skillmind/web; do
+			skm_refs=$$(docker image ls --no-trunc --format '{{.Repository}}:{{.Tag}}' "$$skm_repository") || return
+			for skm_ref in $$skm_refs; do
+				case "$$skm_ref" in "$$skm_repository":'<none>') continue ;; "$$skm_repository":*) ;; *) continue ;; esac
+				skm_image_id=$$(docker image inspect "$$skm_ref" --format '{{.Id}}') || return
+				if skm_image_in_use "$$skm_image_id"; then continue; else
+					skm_use_code=$$?
+					[ "$$skm_use_code" -eq 1 ] || return "$$skm_use_code"
+				fi
+				docker image rm "$$skm_ref" || return
+			done
+		done
+	}
 	step configuration
 	test -f "$(ENV_FILE)" && test -s "$(ENV_FILE)" || { echo 'Missing or empty environment file.' >&2; exit 1; }
 	test -f images.tar && test -s images.tar || { echo 'Missing or empty images.tar. Copy the exported archive here.' >&2; exit 1; }
 	$(COMPOSE) config --quiet
+	step cleanup-old-images
+	skm_old_backend_ids=$$(docker image ls --no-trunc --format '{{.ID}}' skillmind/backend)
+	skm_old_web_ids=$$(docker image ls --no-trunc --format '{{.ID}}' skillmind/web)
+	skm_old_image_ids="$$skm_old_backend_ids $$skm_old_web_ids"
+	skm_cleanup_unused_tags
 	step load-images
 	docker image load --input images.tar
 	step prepare-images
@@ -64,7 +90,20 @@ deploy:
 	step runtime-check
 	$(MAKE) --no-print-directory runtime-check
 	step web
-	$(COMPOSE) up -d --no-build --no-deps --pull never --wait --wait-timeout 120 web
+	$(COMPOSE) up -d --no-build --no-deps --pull never --force-recreate --wait --wait-timeout 120 web
+	step cleanup-replaced-images
+	skm_cleanup_unused_tags
+	# tag の付け替えで無名になった旧 image だけを、全 container の参照確認後に削除する。
+	for skm_image_id in $$skm_old_image_ids; do
+		if docker image inspect "$$skm_image_id" --format '{{.Id}}' >/dev/null 2>&1; then
+			if skm_image_in_use "$$skm_image_id"; then continue; else
+				skm_use_code=$$?
+				[ "$$skm_use_code" -eq 1 ] || exit "$$skm_use_code"
+			fi
+			skm_tags=$$(docker image inspect "$$skm_image_id" --format '{{json .RepoTags}}')
+			case "$$skm_tags" in null|'[]') docker image rm "$$skm_image_id" ;; esac
+		fi
+	done
 	step complete
 	$(COMPOSE) ps --all
 

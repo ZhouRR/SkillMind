@@ -75,10 +75,12 @@ docker compose pull postgres redis object-storage object-storage-init
 
 | 阶段 | 行为 |
 | --- | --- |
-| configuration / load-images / prepare-images | 校验配置、导入应用镜像、补齐基建并检查架构 |
+| configuration / cleanup-old-images / load-images / prepare-images | 校验配置；先清理未被任何容器引用的旧应用镜像，再导入镜像、补齐基建并检查架构 |
 | stop-application / infrastructure / initialize-storage | 停止当前应用、启动基建、创建 bucket |
 | migration-check / migrate / readiness | 核合法迁移路径、upgrade head、核 DB head/Redis/存储配置 |
-| backend / runtime-check / web | 同批重建 API/Worker/Maintenance，核一致性后恢复 Web |
+| backend / runtime-check / web / cleanup-replaced-images | 同批重建 API/Worker/Maintenance，核一致性后恢复 Web，并清理替换后不再被容器引用的旧应用镜像 |
+
+镜像清理仅针对 `skillmind/backend` 和 `skillmind/web`，检查范围包含已停止容器；仍被容器引用的镜像会保留。清理使用非强制删除，不处理其他仓库镜像、容器或数据卷。
 
 失败会显示原始错误、阶段和退出码并停止后续步骤；已完成步骤不会自动回滚，已启动后台可能继续运行。先检查再决定重试：
 
