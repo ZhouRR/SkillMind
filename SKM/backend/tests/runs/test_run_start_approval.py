@@ -164,7 +164,7 @@ async def test_proposal_creates_one_audited_effect_or_one_manual_interaction(
     )
     monkeypatch.setattr(repository, "_next_sequence", AsyncMock(return_value=1))
     monkeypatch.setattr(
-        repository, "_validate_proposal_draft", AsyncMock(return_value=(None, binding, None, {}))
+        repository, "_validate_proposal_draft", AsyncMock(return_value=(draft, binding, None, {}))
     )
     monkeypatch.setattr(repository, "_validate_checkpoint_refs", AsyncMock())
     monkeypatch.setattr(repository, "_validate_evidence_refs", AsyncMock())

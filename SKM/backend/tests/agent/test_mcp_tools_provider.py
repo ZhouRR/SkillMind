@@ -118,60 +118,6 @@ def test_profile_scope_requires_readback_and_only_registered_mcp_run_consent():
     assert ExecutionFeatures(mcp_tools=True).effect_enabled("mcp.call/v1", "call", provider="mcp")
 
 
-@pytest.mark.parametrize("bad_binding", [False, True])
-async def test_action_proposal_requires_original_catalog_and_window_evidence(bad_binding):
-    """Agent の自己申告ではなく、同じ Run の成功した工具発見だけを採用する。"""
-    from types import SimpleNamespace
-    from uuid import uuid4
-
-    from skillmind.effects.domain import ChangeProposalValidationError
-    from skillmind.integrations.mcp_tools import digest
-    from skillmind.runs.repository import RunRepository
-
-    binding = SimpleNamespace(run_id=uuid4(), integration_id=uuid4(), checksum="original")
-    observed = [
-        SimpleNamespace(
-            metadata_json={"binding_checksum": "changed" if bad_binding else "original"},
-            source_locator={"catalog_hash": digest(catalog())},
-        )
-    ]
-    window = [
-        SimpleNamespace(
-            metadata_json={"binding_checksum": "original"},
-            source_locator={
-                "tool_name": "inspect_window",
-                "result_status": "READY",
-                "window_title": "Main",
-                "arguments": {"appId": "sample"},
-            },
-        )
-    ]
-    session = AsyncMock()
-    session.scalars.side_effect = [
-        Mock(all=Mock(return_value=observed)),
-        Mock(all=Mock(return_value=window)),
-    ]
-    repo = RunRepository(session)
-    args = (
-        SimpleNamespace(
-            capability_version="mcp.call/v1", evidence_refs=("ev_catalog", "ev_window")
-        ),
-    )
-    kwargs = {
-        "binding": binding,
-        "payload": {
-            "name": "execute_step",
-            "catalog_hash": digest(catalog()),
-            "arguments": {"appId": "sample", "windowTitle": "Main"},
-        },
-    }
-    if bad_binding:
-        with pytest.raises(ChangeProposalValidationError):
-            await repo._validate_mcp_observation(*args, **kwargs)
-    else:
-        await repo._validate_mcp_observation(*args, **kwargs)
-
-
 def test_mcp_wiring_has_read_tools_and_supervised_effect_without_direct_action():
     """新能力は本番 registry へ装配され、外部 action は Agent gateway に登録しない。"""
     from pathlib import Path

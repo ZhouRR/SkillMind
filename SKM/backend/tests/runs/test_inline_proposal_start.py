@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -80,10 +81,18 @@ async def test_service_starts_inline_proposal_with_locked_sequence(monkeypatch, 
     session.scalar.side_effect = scalar
     repository = RunRepository(session, execution_features=ExecutionFeatures(database_writes=True))
     monkeypatch.setattr(repository, "_lock_claimed_execution", lock)
-    monkeypatch.setattr(repository, "_validate_proposal_draft", AsyncMock(return_value=(
-        {}, binding, None, {"table": "public.reports", "operation": "INSERT",
-                           "key": {"id": "fixture"}, "values": {"status": "RUNNING"}},
-    )))
+    validated = []
+
+    async def validate(*args, draft, **kwargs):
+        """検証で補われた参照を保存し、原 SDK 要求の識別は維持する。"""
+        validated.append(draft)
+        return (
+            replace(draft, evidence_refs=(*draft.evidence_refs, "ev_catalog")),
+            binding, None, {"table": "public.reports", "operation": "INSERT",
+                            "key": {"id": "fixture"}, "values": {"status": "RUNNING"}},
+        )
+
+    monkeypatch.setattr(repository, "_validate_proposal_draft", validate)
     monkeypatch.setattr(repository, "_validate_checkpoint_refs", AsyncMock())
     monkeypatch.setattr(repository, "_validate_evidence_refs", AsyncMock())
     validate_event = MagicMock(wraps=repository._validate_agent_event)
@@ -115,6 +124,12 @@ async def test_service_starts_inline_proposal_with_locked_sequence(monkeypatch, 
     assert isinstance(proposal, ChangeProposal) and isinstance(approval, ChangeApproval)
     assert isinstance(effect, EffectExecution)
     assert result == (proposal.id, effect.id)
+    assert proposal.evidence_refs_json == ["ev_original", "ev_catalog"]
+    assert proposal.request_fingerprint == validated[0].request_fingerprint
+    assert proposal.idempotency_key == validated[0].idempotency_key
+    assert validated[0].evidence_refs == ("ev_original",)
+    assert approval.proposal_checksum == proposal.checksum
+    assert arguments["evidence_refs"] == ["ev_original"]
     assert approval.source == "RUN_START" and approval.proposal_id == proposal.id
     assert effect.approval_id == approval.id and effect.proposal_id == proposal.id
     assert proposal.inline_owner_json["tool_use_id"] == "call-original"

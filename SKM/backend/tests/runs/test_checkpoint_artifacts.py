@@ -62,7 +62,9 @@ async def test_wait_keeps_original_checkpoint_and_rechecks_lease_after_artifact_
 
     monkeypatch.setattr(repository, "_lock_claimed_execution", lock)
     monkeypatch.setattr(repository, "_next_sequence", AsyncMock(return_value=1))
-    monkeypatch.setattr(repository, "_validate_proposal_draft", AsyncMock(return_value=(None,) * 4))
+    monkeypatch.setattr(repository, "_validate_proposal_draft", AsyncMock(
+        side_effect=lambda *a, **kw: (kw["draft"], None, None, None),
+    ))
     observed: list[frozenset[str]] = []
 
     async def verify(

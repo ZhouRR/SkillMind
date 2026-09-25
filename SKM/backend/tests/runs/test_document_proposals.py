@@ -283,9 +283,10 @@ async def test_initial_proposal_uses_the_same_library_and_artifact_checks(monkey
     h.session.scalars = AsyncMock(
         side_effect=lambda _: SimpleNamespace(one_or_none=lambda: answers.pop(0))
     )
-    _intent, binding, integration, payload = await h.repository._validate_proposal_draft(
+    validated, binding, integration, payload = await h.repository._validate_proposal_draft(
         claimed, run=h.run, draft=h.draft
     )
+    assert validated == h.draft
     assert binding.id == h.binding.id and integration is None
     assert payload["path"] == h.draft.target["locator"] and "object_key" not in payload
     h.read_artifact.assert_awaited_once()

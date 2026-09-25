@@ -43,6 +43,7 @@ Excel→Markdown 的 `.xlsx` 路径使用 `excel-styles/v1`：同一文档保留
 - 自动批准只能来自原 Run 启动时明确记录的同意，或适用能力的既有预授权规则；Git/MCP 的额外同意不从旧 Run 补推。`repository.write/v1` 禁止 Project 预授权与 force，Git 仍核对精确 ref 和原提交，不把启动同意当作任意仓库写权限。
 - 实际能力由 [ExecutionFeatures](../../SKM/backend/src/skillmind/effects/release.py)与 [Provider registry](../../SKM/backend/src/skillmind/effects/wiring.py)共同限定：PostgreSQL INSERT/UPDATE、文档 CREATE、Git commit、MCP 调用各有独立开关；开启一项不开放其余。旧队列也须检查当前开关，历史读取与获授权的原结果核对保持独立。
 - 写入前观察、并发冲突检查、原操作幂等和 read-back 均须保留。原回执证明原操作；当前同名、同值或当前画面不能代替原回执。数据库、对象存储、仓库、MCP 与平台数据库之间没有统一原子事务。
+- MCP 提案创建时自动关联同 Run、同连接、同绑定 checksum 和目录哈希的成功工具目录证据，并纳入提案 checksum 与批准；保存后的提案只核对原引用，不补换证据。复用目录证据不替代当前授权、动态画面观察或操作回执。
 - 写入结果未知时停止主处理，保留原 Effect 与已发生事实；失败状态不证明未写入，不据此重做写入或补偿删除。原结果只读核对走 [reconciliation_service](../../SKM/backend/src/skillmind/effects/reconciliation_service.py)。取消、lease 到期或核对未检出都不证明未执行；MCP 的回读重试不能重发修改操作，入口见 [mcp_provider](../../SKM/backend/src/skillmind/effects/mcp_provider.py)。
 
 ## 结果与评价

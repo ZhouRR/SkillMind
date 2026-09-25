@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hmac
 from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
@@ -313,7 +314,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
         if existing_open is not None:
             raise ChangeProposalConflictError("Run already has an open interaction")
 
-        _intent, binding, _integration, provider_payload = await self._validate_proposal_draft(
+        draft, binding, _integration, provider_payload = await self._validate_proposal_draft(
             claimed,
             run=run,
             draft=draft,
@@ -2420,11 +2421,12 @@ class EffectOperationsMixin(_RunRepositoryBase):
             raise ChangeProposalValidationError("ChangeProposal references foreign Evidence")
 
     async def _validate_mcp_observation(
-        self, draft: ChangeProposalDraft, *, binding: ResourceBinding, payload: dict[str, Any]
-    ) -> None:
-        """同 Run・同 binding の発見証拠だけを call の前提にする。"""
+        self, draft: ChangeProposalDraft, *, binding: ResourceBinding, payload: dict[str, Any],
+        allow_lookup: bool = False,
+    ) -> str | None:
+        """作成時だけ既存の発見証拠を補い、保存後は承認対象の参照だけを照合する。"""
         if draft.capability_version != "mcp.call/v1":
-            return
+            return None
         if "cancel_target" in payload:
             original = (await self._session.scalars(
                 select(EffectExecution)
@@ -2441,27 +2443,30 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 raise ChangeProposalValidationError(
                     "MCP cancellation requires an original Run effect"
                 )
-        evidence = (
-            await self._session.scalars(
-                select(Evidence)
-                .join(ToolCall, ToolCall.id == Evidence.tool_call_id)
-                .where(
-                    Evidence.run_id == binding.run_id,
-                    Evidence.evidence_ref.in_(draft.evidence_refs),
-                    ToolCall.run_id == binding.run_id,
-                    ToolCall.integration_id == binding.integration_id,
-                    ToolCall.provider == "mcp",
-                    ToolCall.capability_version == "mcp.tools/v1",
-                    ToolCall.status == "SUCCEEDED",
-                )
+        statement = (
+            select(Evidence.evidence_ref)
+            .join(ToolCall, ToolCall.id == Evidence.tool_call_id)
+            .where(
+                Evidence.run_id == binding.run_id,
+                ToolCall.run_id == binding.run_id,
+                ToolCall.integration_id == binding.integration_id,
+                ToolCall.provider == "mcp",
+                ToolCall.capability_version == "mcp.tools/v1",
+                ToolCall.status == "SUCCEEDED",
+                Evidence.metadata_json["binding_checksum"].as_string() == binding.checksum,
+                Evidence.source_locator["catalog_hash"].as_string() == payload["catalog_hash"],
             )
-        ).all()
-        if not any(
-            item.metadata_json.get("binding_checksum") == binding.checksum
-            and item.source_locator.get("catalog_hash") == payload["catalog_hash"]
-            for item in evidence
-        ):
+        )
+        if not allow_lookup:
+            statement = statement.where(Evidence.evidence_ref.in_(draft.evidence_refs))
+        # 指定済みの証拠を優先し、同じ契約の再発見があっても一件だけを安定して選ぶ。
+        evidence_ref = (await self._session.scalars(statement.order_by(
+            Evidence.evidence_ref.in_(draft.evidence_refs).desc(),
+            Evidence.created_at, Evidence.id,
+        ).limit(1))).first()
+        if evidence_ref is None:
             raise ChangeProposalValidationError("MCP call requires original catalog Evidence")
+        return evidence_ref
 
     async def _validate_database_observation(
         self, draft: ChangeProposalDraft, *, binding: ResourceBinding, payload: dict[str, Any]
@@ -2597,8 +2602,8 @@ class EffectOperationsMixin(_RunRepositoryBase):
         *,
         run: Run,
         draft: ChangeProposalDraft,
-    ) -> tuple[dict[str, Any], ResourceBinding, Integration | None, dict[str, Any]]:
-        """Blueprint intent、Run binding、Integration scope と Provider payload を再検証する。"""
+    ) -> tuple[ChangeProposalDraft, ResourceBinding, Integration | None, dict[str, Any]]:
+        """権限と Provider を検証し、監査可能な既存証拠を関連付けた候補を返す。"""
 
         existing = (
             await self._session.scalars(
@@ -2622,7 +2627,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
         blueprint = resolve_skill_definition(manifest)
         if blueprint is None:
             raise ChangeProposalValidationError("Run CapabilityBlueprint is unavailable")
-        intent = self._validate_effect_intent(
+        self._validate_effect_intent(
             blueprint, effect_intent_key=draft.effect_intent_key, resource_key=draft.resource_key,
             operation=draft.operation, risk_level=draft.risk_level.value,
             capability_version=draft.capability_version,
@@ -2650,9 +2655,15 @@ class EffectOperationsMixin(_RunRepositoryBase):
             dict(integration.config_json) if integration is not None else {}
         )
         await self._validate_database_observation(draft, binding=binding, payload=provider_payload)
-        await self._validate_mcp_observation(draft, binding=binding, payload=provider_payload)
+        catalog_ref = await self._validate_mcp_observation(
+            draft, binding=binding, payload=provider_payload, allow_lookup=True,
+        )
+        if catalog_ref is not None and catalog_ref not in draft.evidence_refs:
+            # 原 SDK 要求の fingerprint/冪等 key は維持する。補完参照は保存内容の
+            # checksum と批准に含め、Agent の原入力や確定済み提案は変更しない。
+            draft = replace(draft, evidence_refs=(*draft.evidence_refs, catalog_ref))
         await self._validate_effect_artifact(run=run, draft=draft, payload=provider_payload)
-        return intent, binding, integration, provider_payload
+        return draft, binding, integration, provider_payload
 
     @staticmethod
     def _validate_effect_intent(
