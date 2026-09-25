@@ -362,10 +362,26 @@ trap 'printf "attempts=%s\\n" "$calls"' 0
         self.assertEqual({p.name for p in output.iterdir()}, {"images.tar"})
         self.assertEqual(set(json.loads((output / "images.tar").read_text())), set(APP_IMAGES))
         self.assertTrue(
-            all(args[:2] in (["image", "inspect"], ["image", "save"]) for args in self.trace())
+            all(
+                args[:2] in (["image", "ls"], ["image", "inspect"], ["image", "save"])
+                for args in self.trace()
+            )
         )
         self.assertTrue(
             (ROOT / "scripts/export-images.ps1").read_bytes().startswith(b"\xef\xbb\xbf")
+        )
+
+    def test_export_web_only_does_not_inspect_backend(self) -> None:
+        """Web のみ構築済みなら Backend 不在を妨げにせず Web だけ保存する。"""
+
+        self.state["images"].pop(APP_IMAGES[0])
+        self.save_state()
+        result = self.export("-Force")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        archive = self.windows / "images/images.tar"
+        self.assertEqual(set(json.loads(archive.read_text())), {APP_IMAGES[1]})
+        self.assertFalse(
+            any(args[:2] == ["image", "inspect"] and APP_IMAGES[0] in args for args in self.trace())
         )
 
     def test_export_force_replaces_only_archive_and_preserves_old_on_failure(self) -> None:

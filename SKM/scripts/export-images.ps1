@@ -38,7 +38,14 @@ function Invoke-Docker {
     if ($code -ne 0) { throw "Docker '$($DockerArgs[0]) $($DockerArgs[1])' failed (exit code $code)." }
     return $result
 }
-$images = @("skillmind/backend:0.1.0", "skillmind/web:0.1.0")
+$localTags = @(Invoke-Docker @("image", "ls", "--format", "{{.Repository}}:{{.Tag}}"))
+$images = @()
+foreach ($reference in @("skillmind/backend:0.1.0", "skillmind/web:0.1.0")) {
+    if ($localTags -contains $reference) { $images += $reference }
+}
+if ($images.Count -eq 0) {
+    throw "No local Skillmind application image found. Build backend and/or web before exporting."
+}
 if ($IncludeInfrastructure) {
     # 基盤 tag は Compose 正本から取得し、設定の補間・dotenv 読取は無効化する。
     $environment = @{
@@ -79,4 +86,5 @@ if ($Force -and (Test-Path -LiteralPath $archivePath)) {
     [System.IO.File]::Move($temporaryPath, $archivePath)
 }
 Write-Host "Exported: $archivePath"
-Write-Host "Copy images.tar, compose.yml and Makefile to the server; keep its .env."
+Write-Host "Included images: $($images -join ', ')"
+Write-Host "Copy images.tar to the server; update compose.yml and Makefile if changed, and keep its .env."

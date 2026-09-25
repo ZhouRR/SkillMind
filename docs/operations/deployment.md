@@ -60,7 +60,7 @@ docker compose build api web
 .\scripts\export-images.ps1
 ```
 
-再次导出加 `-Force`。导出固定应用 tag `skillmind/backend:0.1.0` 和 `skillmind/web:0.1.0`，不执行 build/pull；失败保留旧 archive，`.partial` 不是成品。只改 Web 可仅构建 `web`，导出仍需两个应用镜像。构建架构须匹配服务器，导出不转换架构。
+再次导出加 `-Force`。脚本仅导出本机已有的应用 tag（`skillmind/backend:0.1.0`、`skillmind/web:0.1.0`）；至少需要一个，不执行 build/pull。失败保留旧 archive，`.partial` 不是成品。只改 Web 可仅构建 `web` 并导出 Web 镜像；服务器必须已保留 Backend 镜像。构建架构须匹配服务器，导出不转换架构。
 
 按[环境文件布局](#环境文件与配置边界)移送导出包。基建镜像缺失时部署会拉取；完全离线的初次部署先在 Windows 准备并同包导出：
 
@@ -80,7 +80,7 @@ docker compose pull postgres redis object-storage object-storage-init
 | migration-check / migrate / readiness | 核合法迁移路径、upgrade head、核 DB head/Redis/存储配置 |
 | backend / runtime-check / web / cleanup-replaced-images | 同批重建 API/Worker/Maintenance，核一致性后恢复 Web，并清理替换后不再被容器引用的旧应用镜像 |
 
-镜像清理仅针对 `skillmind/backend` 和 `skillmind/web`，检查范围包含已停止容器；仍被容器引用的镜像会保留。清理使用非强制删除，不处理其他仓库镜像、容器或数据卷。
+镜像清理仅针对 `skillmind/backend` 和 `skillmind/web`，检查范围包含已停止容器；仍被容器引用的镜像会保留。导入前还会保留当前应用 tag，以支持只含 Web 或 Backend 的镜像包。清理使用非强制删除，不处理其他仓库镜像、容器或数据卷。
 
 失败会显示原始错误、阶段和退出码并停止后续步骤；已完成步骤不会自动回滚，已启动后台可能继续运行。先检查再决定重试：
 
@@ -101,4 +101,4 @@ docker compose --env-file "${ENV_FILE:-.env}" run --rm -T --no-deps migrate alem
 
 ## 仅更新 Web
 
-仅构建 Web 后仍正常导出并执行 `make deploy`，包含未变的 Backend 镜像；此流程会停机、检查迁移并重启应用。发布前确认 API/契约/context path 兼容。
+仅构建 Web 后可导出 Web 镜像并执行 `make deploy`，前提是服务器已有 `skillmind/backend:0.1.0`。如果构建机上还保留 Backend tag，默认导出会一并包含它。`make deploy` 仍会停机、检查迁移并重启应用。发布前确认 API/契约/context path 兼容。

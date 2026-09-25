@@ -35,10 +35,13 @@ deploy:
 		printf '%s\n' "$$skm_used_ids" | grep -Fxq "$$1"
 	}
 	skm_cleanup_unused_tags() {
+		skm_preserve_current=$$1
 		for skm_repository in skillmind/backend skillmind/web; do
 			skm_refs=$$(docker image ls --no-trunc --format '{{.Repository}}:{{.Tag}}' "$$skm_repository") || return
 			for skm_ref in $$skm_refs; do
 				case "$$skm_ref" in "$$skm_repository":'<none>') continue ;; "$$skm_repository":*) ;; *) continue ;; esac
+				# 部分 archive が含まない現行 tag は load 前に消さない。
+				if [ "$$skm_preserve_current" = true ] && [ "$$skm_ref" = "$$skm_repository:0.1.0" ]; then continue; fi
 				skm_image_id=$$(docker image inspect "$$skm_ref" --format '{{.Id}}') || return
 				if skm_image_in_use "$$skm_image_id"; then continue; else
 					skm_use_code=$$?
@@ -56,7 +59,7 @@ deploy:
 	skm_old_backend_ids=$$(docker image ls --no-trunc --format '{{.ID}}' skillmind/backend)
 	skm_old_web_ids=$$(docker image ls --no-trunc --format '{{.ID}}' skillmind/web)
 	skm_old_image_ids="$$skm_old_backend_ids $$skm_old_web_ids"
-	skm_cleanup_unused_tags
+	skm_cleanup_unused_tags true
 	step load-images
 	docker image load --input images.tar
 	step prepare-images
@@ -92,7 +95,7 @@ deploy:
 	step web
 	$(COMPOSE) up -d --no-build --no-deps --pull never --force-recreate --wait --wait-timeout 120 web
 	step cleanup-replaced-images
-	skm_cleanup_unused_tags
+	skm_cleanup_unused_tags false
 	# tag の付け替えで無名になった旧 image だけを、全 container の参照確認後に削除する。
 	for skm_image_id in $$skm_old_image_ids; do
 		if docker image inspect "$$skm_image_id" --format '{{.Id}}' >/dev/null 2>&1; then

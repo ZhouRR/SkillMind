@@ -28,7 +28,11 @@ def main(args: list[str]) -> int:
         print("fixture docker failure: requested operation failed", file=sys.stderr)
         return 17
     services = state["config"]["services"]
-    if args[:2] == ["image", "save"]:
+    if args[:2] == ["image", "ls"]:
+        assert args[2:] == ["--format", "{{.Repository}}:{{.Tag}}"], args
+        for reference in state["images"]:
+            print(reference)
+    elif args[:2] == ["image", "save"]:
         output = Path(args[args.index("--output") + 1])
         references = args[args.index("--output") + 2 :]
         output.write_text(json.dumps({ref: state["images"][ref] for ref in references}))

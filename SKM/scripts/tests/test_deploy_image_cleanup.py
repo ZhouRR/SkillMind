@@ -219,6 +219,53 @@ class DeployImageCleanupTests(unittest.TestCase):
                 any("--force" in args for args in trace if args[:2] == ["image", "rm"])
             )
 
+    def test_web_only_archive_preserves_unused_backend_image(self) -> None:
+        """Web のみ移送しても、未使用の現行 Backend tag を導入前に消さない。"""
+
+        with tempfile.TemporaryDirectory(prefix="skm web only deploy ") as directory:
+            root = Path(directory)
+            (root / ".env").write_text("FIXTURE=1\n")
+            (root / "images.tar").write_text("fixture archive")
+            infrastructure = "sha256:" + "0" * 64
+            state = {
+                "images": [OLD_BACKEND, NEW_WEB, infrastructure],
+                "tags": {
+                    BACKEND: OLD_BACKEND,
+                    "postgres:17": infrastructure,
+                    "redis:8": infrastructure,
+                    "minio:latest": infrastructure,
+                },
+                "containers": {},
+                "archive": {WEB: NEW_WEB},
+            }
+            (root / "state.json").write_text(json.dumps(state))
+            docker = root / "docker"
+            docker.write_text(f"#!{sys.executable}\n" + FAKE_DOCKER)
+            docker.chmod(0o700)
+            environment = {
+                **os.environ,
+                "PATH": f"{root}:{os.environ['PATH']}",
+                "SKM_FAKE_ROOT": str(root),
+                "ENV_FILE": ".env",
+            }
+            for name in ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES"):
+                environment.pop(name, None)
+            result = subprocess.run(
+                ["sh", "-euc", self.deploy_script()], cwd=root, env=environment,
+                capture_output=True, text=True, timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            trace = [json.loads(line) for line in (root / "trace.jsonl").read_text().splitlines()]
+            load_at = next(i for i, args in enumerate(trace) if args[:2] == ["image", "load"])
+            self.assertFalse(
+                any(args[:3] == ["image", "rm", BACKEND] for args in trace[:load_at])
+            )
+            current = json.loads((root / "state.json").read_text())
+            self.assertEqual(current["tags"][BACKEND], OLD_BACKEND)
+            self.assertEqual(current["tags"][WEB], NEW_WEB)
+            self.assertEqual(current["containers"]["api-1"], OLD_BACKEND)
+            self.assertEqual(current["containers"]["web-1"], NEW_WEB)
+
 
 if __name__ == "__main__":
     unittest.main()
