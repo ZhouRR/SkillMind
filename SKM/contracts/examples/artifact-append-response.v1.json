@@ -1,0 +1,19 @@
+{
+  "status": "success",
+  "provider": "platform",
+  "path": "output/source.md",
+  "content_hash": "sha256:fd858d8cb2368afe5a01adbaf877f2a486301b212581efc0ca6b4df397c03a87",
+  "bytes_written": 30,
+  "created": false,
+  "source_artifact_ref": "art_original",
+  "source_content_hash": "sha256:319efd27df6095a2899023fffeaea06b96f99ceb6fd16023e7c46a3842adbf89",
+  "source_bytes": 10,
+  "appended_bytes": 20,
+  "append_hash": "sha256:26ba5ed0e1ed5e262aff95f3539cd056d1aeeb24ca0115162d4dd348c43320f1",
+  "evidence_refs": [
+    "ev_appended"
+  ],
+  "artifact_refs": [
+    "art_appended"
+  ]
+}

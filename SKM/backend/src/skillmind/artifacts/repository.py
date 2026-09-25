@@ -150,6 +150,9 @@ def _metadata(
         or response.get("artifact_refs") != [value.artifact_ref]
     ):
         raise _invalid()
+    if row["capability_version"] == "artifact.append/v1":
+        _validate_append_row(row, value, response)
+        return value
     if row["capability_version"] == "audit.export/v1":
         _validate_export_row(row, value, response)
         return value
@@ -246,3 +249,36 @@ def _validate_export_row(row: RowMapping, value: ArtifactMetadata, response: dic
         raise _invalid() from error
     if response.get("counts") != {"evidence": len(selected[0]), "proposals": len(selected[1])}:
         raise _invalid()
+
+
+def _validate_append_row(
+    row: RowMapping, value: ArtifactMetadata, response: dict[str, Any],
+) -> None:
+    """同 path の更新後も、保存時の producer と原文/付記の hash を固定する。"""
+    proof = row["metadata_json"]
+    if (
+        row["provider"] != "platform" or row["integration_id"] is not None
+        or row["tool_name"] != "mcp__skillmind__artifact_append_v1"
+        or row["evidence_type"] != "artifact-append" or row["snapshot_uri"] is not None
+        or row["source_uri"] != f"workspace://runs/{value.run_id}/{quote(value.path, safe='/')}"
+        or row["source_locator"] != {"path": value.path, "bytes": value.size_bytes}
+        or type(row["source_locator"].get("bytes")) is not int
+        or not isinstance(proof, dict)
+        or set(proof) != {"source_artifact_ref", "source_content_hash", "source_bytes",
+                             "appended_bytes", "append_hash"}
+        or any(response.get(key) != item for key, item in proof.items())
+        or response.get("provider") != "platform" or response.get("path") != value.path
+        or response.get("content_hash") != value.checksum
+        or type(response.get("bytes_written")) is not int
+        or response.get("bytes_written") != value.size_bytes
+        or response.get("evidence_refs") != [value.evidence_ref]
+    ):
+        raise _invalid()
+    from skillmind.agent.artifact_append import validate_append_bytes, validate_append_proof
+
+    try:
+        validate_append_proof(proof, value.size_bytes)
+        if "content" in row:
+            validate_append_bytes(row["content"], proof)
+    except (ValueError, TypeError, KeyError) as error:
+        raise _invalid() from error

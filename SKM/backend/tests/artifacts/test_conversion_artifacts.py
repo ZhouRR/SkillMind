@@ -195,3 +195,56 @@ async def test_conversion_commit_loss_does_not_deliver_unconfirmed_artifact(monk
     else:
         assert replay.get("is_error") is True and not db.rows(Evidence)
     assert len(source.calls) == 1
+
+
+async def test_conversion_append_persist_and_result_use_the_same_verified_bytes(
+    monkeypatch, tmp_path,
+):
+    """実変換→追記→監査 commit→結果引用を接続し、file 不在から全文転記なしで保存する。"""
+    from unittest.mock import AsyncMock
+
+    from skillmind.agent.artifact_append import ArtifactAppendProvider
+    from skillmind.agent.audit_source import PostgresAuditExportSource
+    from skillmind.agent.tool_catalog import create_run_tool_registry
+    from skillmind.agent.workspace import WorkspaceManager
+
+    db, conversion, convert_tool, document_source = case(monkeypatch)
+    original = _payload(await invoke(conversion, convert_tool))
+    assert original["status"] == "success"
+    source = PostgresAuditExportSource(db)
+    # 認可は source の専用回帰で検証し、ここでは実 repository/byte/commit を接続する。
+    source._authorize = AsyncMock()
+    catalog = create_run_tool_registry(
+        ContractStore(CONTRACTS), document_source=document_source,
+        artifact_append_provider=ArtifactAppendProvider(source),
+    )
+    tool = catalog.resolve_unbound("artifact.append/v1", execution_profile="SUPERVISED")
+    workspace = WorkspaceManager((tmp_path / "runs").resolve()).initialize(db.run.id)
+    context = replace(conversion.gateway._context, tools=(tool,), workspace=workspace,
+                      permission_snapshot={"allowed_capabilities": ["artifact.append/v1"],
+                                           "execution_profile": "SUPERVISED"})
+    runtime = catalog.build_gateway_runtime(context, audit_writer=db.writer)
+    text = "\n\n## RV 確認済みの適用範囲\n除外なし。\n"
+    request = {"artifact_ref": original["artifact_refs"][0], "text": text, "purpose": "RV scope"}
+    session_id = "00000000-0000-4000-8000-000000000aaa"
+    await runtime.mcp.on_tool_authorized(tool.sdk_name, request, "append-original", session_id)
+    result = _payload(await runtime.gateway.invoke_mcp(tool.sdk_name, request))
+    assert result["status"] == "success", result
+    assert db.timeline[-1] == "commit"
+    reference, = result["artifact_refs"]
+    assert reference != request["artifact_ref"]
+    final = await ArtifactRepository(db()).get_content(
+        project_id=db.run.project_id, run_id=db.run.id, artifact_ref=reference,
+    )
+    assert final.content == original["markdown"].encode() + text.encode()
+    assert (workspace.root / final.metadata.path).read_bytes() == final.content
+    assert (await _result(db, reference)).artifact_refs == frozenset({reference})
+    await runtime.mcp.on_tool_authorized(tool.sdk_name, request, "append-original", session_id)
+    assert _payload(await runtime.gateway.invoke_mcp(tool.sdk_name, request)) == result
+    assert len(db.rows(Evidence)) == 3 and len(db.rows(ToolCall)) == 2
+    final_row = next(row for row in db.rows(Evidence) if row.artifact_ref == reference)
+    final_row.artifact_bytes = b"tampered"
+    await runtime.mcp.on_tool_authorized(tool.sdk_name, request, "append-original", session_id)
+    reply = await runtime.gateway.invoke_mcp(tool.sdk_name, request)
+    assert reply.get("is_error"), reply
+    assert len(db.rows(Evidence)) == 3

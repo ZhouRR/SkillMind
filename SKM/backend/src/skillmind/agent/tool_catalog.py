@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from skillmind.agent.artifact_append import ArtifactAppendProvider
 from skillmind.agent.audit_export import AuditExportProvider
 from skillmind.agent.contract_store import ContractStore
 from skillmind.agent.control_providers import (
@@ -254,6 +255,7 @@ def create_run_tool_registry(
     document_observations: DocumentObservationLookup | None = None,
     document_readiness_provider: ToolProvider | None = None,
     audit_export_provider: ToolProvider | None = None,
+    artifact_append_provider: ToolProvider | None = None,
     redmine_issue_provider: ToolProvider | None = None,
     database_provider: ToolProvider | None = None,
     mcp_provider: ToolProvider | None = None,
@@ -296,6 +298,22 @@ def create_run_tool_registry(
                 unbound_provider="platform",
             ),
             *_workspace_tool_definitions(contracts),
+            _tool_definition(contracts,
+                sequence_safe=True,
+                capability="artifact.append/v1",
+                description=(
+                    "Append short text to a saved Artifact from this Run using artifact_ref. "
+                    "Reads and verifies original bytes internally; provide only the suffix, "
+                    "including desired newlines. Overwrites the same local output path and "
+                    "returns a new Artifact reference, hash and size without returning the body. "
+                    "Use that returned reference for document saving. The source ref is fixed: "
+                    "repeating the same source and text does not append twice. Conversion "
+                    "Artifact paths are logical names, not files readable by workspace.read. "
+                    "Does not change external documents or existing audit references."
+                ),
+                providers={"platform": artifact_append_provider or ArtifactAppendProvider(None)},
+                unbound_provider="platform", minimum_execution_profile="SUPERVISED",
+            ),
             _tool_definition(contracts,
                 sequence_safe=True,
                 capability="audit.export/v1",

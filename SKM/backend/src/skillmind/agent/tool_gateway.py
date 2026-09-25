@@ -411,7 +411,9 @@ class ToolGateway:
             )
             response = deepcopy(dict(result.response))
             response["evidence_refs"] = [record.evidence_ref for record in records]
-            if binding.registered.capability in {"workspace.write/v2", "audit.export/v1"} or (
+            if binding.registered.capability in {
+                "workspace.write/v2", "audit.export/v1", "artifact.append/v1",
+            } or (
                 binding.registered.capability == "document.convert/v1"
                 and arguments.get("publish_artifact") is True
             ):
@@ -419,7 +421,10 @@ class ToolGateway:
                     record.artifact_ref for record in records if record.artifact_ref is not None
                 ]
             if (
-                binding.registered.capability in {"workspace.write/v2", "audit.export/v1", "document.convert/v1"}
+                binding.registered.capability in {
+                    "workspace.write/v2", "audit.export/v1",
+                    "artifact.append/v1", "document.convert/v1",
+                }
                 or any(record.artifact_ref is not None for record in records)
             ):
                 if lease.invocation is None:

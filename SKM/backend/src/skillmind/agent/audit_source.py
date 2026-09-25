@@ -12,6 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from skillmind.agent.tool_gateway import RunToolContext
+from skillmind.artifacts.domain import ArtifactContent
+from skillmind.artifacts.repository import ArtifactRepository
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.db.models import (
     ChangeApproval,
@@ -57,6 +59,17 @@ class PostgresAuditExportSource:
         """I/O 前後の現在の参照権限を独立 transaction で再確認する。"""
         async with self._sessions() as session, session.begin():
             await self._authorize(session, context)
+
+    async def read_artifact(self, context: RunToolContext, artifact_ref: str) -> ArtifactContent:
+        """同 Run の元 Artifact だけを共通の hash/producer 検証で読む。"""
+        async with self._sessions() as session, session.begin():
+            await self._authorize(session, context)
+            value = await ArtifactRepository(session).get_content(
+                project_id=context.project_id, run_id=context.run_id, artifact_ref=artifact_ref,
+            )
+            if value is None:
+                raise LookupError("Run Artifact unavailable")
+            return value
 
     async def read(
         self,

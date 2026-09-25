@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/artifact.append/v1/request.schema.json",
+  "title": "artifact.append/v1 request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_ref",
+    "text",
+    "purpose"
+  ],
+  "properties": {
+    "artifact_ref": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^art_[a-zA-Z0-9_-]+$"
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16384,
+      "description": "Exact UTF-8 suffix, including desired leading newlines. Do not repeat the original content."
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    }
+  }
+}

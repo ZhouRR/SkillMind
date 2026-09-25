@@ -591,7 +591,8 @@ async def test_context_builder_opens_registered_workspace_read_and_search(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "capability", ["workspace.write/v1", "workspace.write/v2", "json.schema.validate/v1"]
+    "capability", ["workspace.write/v1", "workspace.write/v2", "json.schema.validate/v1",
+                   "artifact.append/v1"]
 )
 async def test_context_builder_opens_registered_workspace_capability(
     tmp_path: Path, capability: str,
@@ -622,11 +623,15 @@ async def test_context_builder_opens_registered_workspace_capability(
     context = await builder.build(claimed, sequence_start=1)
 
     assert [tool.capability for tool in context.tools] == [capability]
-    assert context.tools[0].provider == "workspace"
+    assert context.tools[0].provider == (
+        "platform" if capability == "artifact.append/v1" else "workspace"
+    )
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("capability", ["workspace.search/v1", "workspace.write/v2"])
+@pytest.mark.parametrize(
+    "capability", ["workspace.search/v1", "workspace.write/v2", "artifact.append/v1"],
+)
 async def test_context_builder_denies_workspace_search_below_profile_or_without_snapshot(
     tmp_path: Path,
     capability: str,
@@ -661,7 +666,10 @@ async def test_context_builder_denies_workspace_search_below_profile_or_without_
         allowed=(capability,),
         manifest=manifest,
     )
-    with pytest.raises(ValueError, match="does not authorize workspace"):
+    error_type = LookupError if capability == "artifact.append/v1" else ValueError
+    message = ("unavailable for the execution profile" if capability == "artifact.append/v1"
+               else "does not authorize workspace")
+    with pytest.raises(error_type, match=message):
         await builder.build(historical, sequence_start=1)
 
 

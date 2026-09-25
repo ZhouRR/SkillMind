@@ -51,6 +51,7 @@ Excel→Markdown 的 `.xlsx` 路径使用 `excel-styles/v1`：同一文档保留
 - 技术终态、结果完整程度与业务 PASS/FAIL 分开表达。结果通过 [ResultValidator](../../SKM/backend/src/skillmind/agent/result_validation.py)校验冻结 Schema、引用归属、附件字节及保存的 Effect 事实；模型自称成功不构成 APPLIED，结构有效不证明业务正确。
 - Result/Evidence/Artifact 保留原值。人工修正追加 [Evaluation](../../SKM/backend/src/skillmind/evaluations/service.py)，不覆盖结果或自动采用建议；重复提交和未知响应沿原评价身份确认。
 - 附件只能发布经工具审计确认的原字节，下载核验归属和 hash。`audit.export/v1` 导出已存事实，不重新执行操作，不把通用审计 JSON 当作 Skill 规定的业务成果；入口见 [audit_export](../../SKM/backend/src/skillmind/agent/audit_export.py)。
+- `artifact.append/v1` 按当前 Run 的 Artifact 引用读取并核验原字节，只追加模型提供的短文本，覆盖同一本地 output 路径并发布新引用；保存文档使用新引用，原审计引用不改写。不要求模型转抄全文，也不增加外部写入权限。
 - 报告与预览按 [UI 指南](../design/workspace.md#报告与预览)展示；模板不替代 Skill 规定的业务成果，展示故障不重跑模型或改变业务状态。
 
 ## 后置能力

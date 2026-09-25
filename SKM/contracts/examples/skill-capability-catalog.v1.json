@@ -1,7 +1,17 @@
 {
   "catalog_version": "skillmind.tool-catalog/1",
-  "checksum": "sha256:51a88ff58fb2f1887e18ac9d9ec505a67aee7e313bb42b490b27df676162c9f4",
+  "checksum": "sha256:622b9f74812f215b0910fddd8ec54773cc74594fb980328be7aa1a6c207038da",
   "capabilities": [
+    {
+      "capability": "artifact.append/v1",
+      "description": "Append short text to an existing Run Artifact without model transcription. Overwrites the same local output path and returns a new committed Artifact reference. Use the returned reference for publication; no external document is changed.",
+      "request_schema": "tools/artifact.append/v1/request.schema.json",
+      "response_schema": "tools/artifact.append/v1/response.schema.json",
+      "error_schema": "tools/artifact.append/v1/error.schema.json",
+      "providers": [
+        "platform"
+      ]
+    },
     {
       "capability": "audit.export/v1",
       "description": "Export selected saved Evidence and Proposal/Effect facts from this Run to a committed output Artifact without model transcription. Does not call external tools or assign business verdicts.",

@@ -487,7 +487,7 @@ def _resolve_source_tools(
                 execution_profile=execution_profile,
             )
         )
-    for auxiliary in ("audit.export/v1", "tool.sequence/v1"):
+    for auxiliary in ("audit.export/v1", "tool.sequence/v1", "artifact.append/v1"):
         if auxiliary in allowed and auxiliary not in resolved_capabilities:
             tools.append(registry.resolve_unbound(auxiliary, execution_profile=execution_profile))
     return tools, repository_bindings

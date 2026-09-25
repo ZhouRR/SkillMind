@@ -225,10 +225,15 @@ class _Session:
 
 
 @pytest.mark.asyncio
-async def test_create_task_run_freezes_generic_snapshot() -> None:
+@pytest.mark.parametrize("with_output", [False, True])
+async def test_create_task_run_freezes_generic_snapshot(with_output: bool) -> None:
     """通用 Run が精確 version と Manifest 由来の権限・source を snapshot へ固定する。"""
 
     resolved = _resolved((_REPOSITORY_SOURCE,))
+    if with_output:
+        resolved = replace(
+            resolved, allowed_capabilities=("repository.read/v1", "workspace.write/v2"),
+        )
     captured: dict[str, CreateRunCommand] = {}
 
     async def _fake_create(self: RunRepository, command: CreateRunCommand) -> CreatedRun:
@@ -310,11 +315,11 @@ async def test_create_task_run_freezes_generic_snapshot() -> None:
     assert command.task_snapshot_json["skill_snapshots"] == [resolved.skill_snapshot]
     # 扇出は実行時判断のため無条件に付く (計画 §23 D2)。子は Run 予算を分け合うだけで
     # 上限を増やさないので、付与そのものが費用や権限の拡大にはならない。
-    assert command.permission_snapshot_json["allowed_capabilities"] == [
-        "interaction.request/v1",
-        "repository.read/v1",
-        "subagent.dispatch/v1",
-    ]
+    assert command.permission_snapshot_json["allowed_capabilities"] == sorted([
+        "interaction.request/v1", "repository.read/v1", "subagent.dispatch/v1",
+        *(["workspace.write/v2", "audit.export/v1", "tool.sequence/v1", "artifact.append/v1"]
+          if with_output else []),
+    ])
     assert command.permission_snapshot_json["denied_builtin_tools"] == list(M0_DENIED_BUILTIN_TOOLS)
     assert command.permission_snapshot_json["actor_id"] == str(actor_id)
     assert command.permission_snapshot_json["actor_system_role"] == "ADMIN"

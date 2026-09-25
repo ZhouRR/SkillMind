@@ -295,9 +295,13 @@ class RunService:
                                 if "database.read/v1" in resolved.allowed_capabilities
                                 else set()
                             ),
-                            # 原 write-v2 の出力能力に、同 Run の保存済み監査を転記する補助 Tool を固定する。
-                            *({"audit.export/v1", "tool.sequence/v1"} if "workspace.write/v2" in resolved.allowed_capabilities
-                              and execution_profile in {"SUPERVISED", "DELEGATED"} else set()),
+                            # 出力可能な新 Run に、原 byte を扱う補助 Tool を凍結する。
+                            *(
+                                {"audit.export/v1", "tool.sequence/v1", "artifact.append/v1"}
+                                if "workspace.write/v2" in resolved.allowed_capabilities
+                                and execution_profile in {"SUPERVISED", "DELEGATED"}
+                                else set()
+                            ),
                             INTERACTION_REQUEST_CAPABILITY,
                             *(
                                 {SUBAGENT_DISPATCH_CAPABILITY}
