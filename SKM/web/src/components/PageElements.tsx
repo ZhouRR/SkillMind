@@ -19,7 +19,10 @@ export function PageHeader({ title, description, aside }: {
   )
 }
 
-/** 共有 Project context を名称で選択する。UUID の手入力を廃し、選択中の ID は補助行に降格する。 */
+/** 共有 Project context を名称で選択する。UUID の手入力を廃し、選択中の ID は tooltip に降格する。
+ *
+ *  名称で特定できない対象(不存在・無権限・読込中)だけは、URL が指す相手を人が照合できるよう
+ *  UUID を補助行に残す。解決済みの Project では常設行にせず、sidebar の縦幅と読みやすさを守る。 */
 export function ProjectContextSelect({ projectState, projectId, currentProject, onSelect, onRefresh, label }: {
   projectState: ProjectState
   projectId: string
@@ -55,6 +58,7 @@ export function ProjectContextSelect({ projectState, projectId, currentProject, 
       <label>{resolvedLabel}
         <select
           disabled={projects.length === 0}
+          title={selectedProject ? `${selectedProject.name}\n${projectId}` : undefined}
           value={projectId}
           onChange={(event) => onSelect(event.target.value)}
         >
@@ -74,7 +78,7 @@ export function ProjectContextSelect({ projectState, projectId, currentProject, 
       {projectState.status === 'error' && onRefresh && (
         <button className="secondaryButton compactButton" onClick={onRefresh} type="button">{messages.runHistory.retry}</button>
       )}
-      {projectId !== '' && <p className="projectContextId" title={projectId}>{projectId}</p>}
+      {projectId !== '' && needsPlaceholder && <p className="projectContextId" title={projectId}>{projectId}</p>}
     </div>
   )
 }
@@ -113,7 +117,7 @@ export function EmptyState({ text, action }: { text: string; action?: ReactNode 
  *  実際に破棄すべき草稿は呼び出し元が明示的に破棄する。
  *  開いている間は Escape と遮罩 click で閉じられ、背面の scroll を止め、
  *  閉じた後は開いた時の要素へ焦点を戻す(keyboard 利用者が現在地を失わないため)。 */
-export function ModalDialog({ open, title, meta, actions, wide = false, drawer = false, viewport = false, onClose, children }: {
+export function ModalDialog({ open, title, meta, actions, wide = false, drawer = false, viewport = false, hideClose = false, onClose, children }: {
   open: boolean
   title: string
   /** 見出し横の補助情報(寸法・種別など)。 */
@@ -125,6 +129,8 @@ export function ModalDialog({ open, title, meta, actions, wide = false, drawer =
   drawer?: boolean
   /** 文書 preview は四辺に同じ余白を残して viewport を使う。 */
   viewport?: boolean
+  /** 本文側に「キャンセル」を持つ確認 dialog は見出しの「閉じる」を重ねない(Escape と遮罩 click は有効)。 */
+  hideClose?: boolean
   onClose: () => void
   children: ReactNode
 }) {
@@ -189,10 +195,10 @@ export function ModalDialog({ open, title, meta, actions, wide = false, drawer =
         <div className="modalHeader">
           <strong title={title}>{title}</strong>
           {meta && <small className="modalMeta">{meta}</small>}
-          <div className="modalHeaderActions">
+          {(actions || !hideClose) && <div className="modalHeaderActions">
             {actions}
-            <button className="secondaryButton compactButton" type="button" onClick={onClose}>{messages.elements.close}</button>
-          </div>
+            {!hideClose && <button className="secondaryButton compactButton" type="button" onClick={onClose}>{messages.elements.close}</button>}
+          </div>}
         </div>
         <div className="modalBody">{children}</div>
       </div>
@@ -266,6 +272,7 @@ export function ConfirmDialog({ request, onConfirm, onCancel }: {
   const messages = useMessages()
   return (
     <ModalDialog
+      hideClose
       open={request !== null}
       title={request?.title ?? ''}
       onClose={onCancel}

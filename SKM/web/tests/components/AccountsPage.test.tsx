@@ -67,7 +67,9 @@ describe.each(UI_LANGUAGES)('real account components in %s', (language) => {
     expect(html).toContain(`<option value="" selected="">${messages.rolePlaceholder}</option>`)
     expect(html).toContain(`<label>${messages.fields.email}<input`)
     expect(html).toContain(`<label>${messages.initialPassword}<input`)
-    expect(html).toContain(`<label>${messages.confirmPassword}<input`)
+    // 確認欄は初期パスワードの確認であることを明示する(「新しいパスワード」と呼ばない)。
+    expect(html).toContain(`<label>${messages.confirmInitialPassword}<input`)
+    expect(html).not.toContain(messages.confirmPassword)
     expect(html.match(/type="password"/g)).toHaveLength(2)
     expect(html.match(/autoComplete="new-password"/g)).toHaveLength(2)
     expect(html.match(/minLength="8"/g)).toHaveLength(2)

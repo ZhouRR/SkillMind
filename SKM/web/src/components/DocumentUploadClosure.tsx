@@ -36,7 +36,7 @@ export function DocumentUploadClosure({ upload, closure }: {
       <p role="status">{labels.phase[state.phase]}</p>
       {state.phase === 'confirming' && <>
         <p>{labels.confirmHint}</p><div className="buttonRow">
-          <button type="button" className="dangerButton" onClick={closure.submit} disabled={!closure.writable()}>{labels.confirm}</button>
+          <button type="button" className="destructiveButton" onClick={closure.submit} disabled={!closure.writable()}>{labels.confirm}</button>
           <button type="button" className="secondaryButton" onClick={closure.cancelPreparation}>{labels.cancelPreparation}</button>
         </div>
       </>}

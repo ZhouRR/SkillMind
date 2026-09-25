@@ -6,6 +6,7 @@ import { MESSAGES } from '../../src/lib/i18n/messages'
 import {
   ProjectsPage,
   projectDeleteErrorMessage,
+  sortSkillOptions,
   staleBindingIds,
 } from '../../src/pages/ProjectsPage'
 import { DEMO_PROJECT as PROJECT, demoSession } from '../fixtures'
@@ -118,6 +119,27 @@ describe('staleBindingIds', () => {
   it('returns nothing when every selection is still a candidate', () => {
     expect(staleBindingIds(['cfb24bbb'], options)).toEqual([])
     expect(staleBindingIds([], options)).toEqual([])
+  })
+})
+
+describe('sortSkillOptions', () => {
+  /** 表示 label は版番号を含むため、比較には skill_name と version だけを使う。 */
+  const option = (skill_name: string, version: string) => ({
+    skill_version_id: `${skill_name}-${version}`, skill_name, version, label: `${skill_name} v${version}`,
+  })
+
+  it('orders versions numerically with the newest first, grouped by skill name', () => {
+    const sorted = sortSkillOptions([
+      option('rv-reviewer', '0.1.2'), option('execution-plan-generator', '0.1.10'),
+      option('execution-plan-generator', '0.1.7'), option('execution-plan-generator', '0.1.12'),
+      option('rv-reviewer', '0.1.4'), option('execution-plan-generator', '0.1.9'),
+    ])
+    // 文字列順では v0.1.10 が v0.1.7 より前に来て、最新版が埋もれる。
+    expect(sorted.map((item) => item.label)).toEqual([
+      'execution-plan-generator v0.1.12', 'execution-plan-generator v0.1.10',
+      'execution-plan-generator v0.1.9', 'execution-plan-generator v0.1.7',
+      'rv-reviewer v0.1.4', 'rv-reviewer v0.1.2',
+    ])
   })
 })
 

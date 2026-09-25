@@ -7,6 +7,7 @@ import {
   type RunDetailState,
 } from '../../src/components/RunResultPanel'
 import { collectSubagentDispatches, groupSessionsByLineage, hasIncompleteBranch } from '../../src/lib/runAudit'
+import { MESSAGES } from '../../src/lib/i18n/messages'
 
 /** Result view test 用の Project-scoped detail を生成する。 */
 function detail(result: RunDetailRecord['result']): RunDetailRecord {
@@ -334,6 +335,8 @@ describe('Run Result view', () => {
     expect(html).toContain('结果概要')
     expect(html).toContain('Review report')
     expect(html).toContain('Authorization is missing')
+    // model の重要度 'high' は原文ではなく利用者言語の表示名で示す。
+    expect(html).toContain('data-severity="HIGH">重要度：高</span>')
     expect(html).toContain('The integration was not exercised.')
     expect(html).not.toContain('业务数据明细')
   })
@@ -479,13 +482,13 @@ describe('業務データ明細 (structured_data) rendering', () => {
   }
 
   it('labels fields with the schema description and hides contract keys by default', () => {
-    /** 通常表示では利用者語を主にし、技術 key は「技術項目を表示」操作へ退避する。 */
+    /** 通常表示では利用者語を主にし、技術 key は「技術情報」操作へ退避する。 */
     const html = render(structuredDetail())
 
     expect(html).toContain('評価対象のフィールド名')
     expect(html).not.toContain('<code class="mono">field_key</code>')
     expect(html).not.toContain('field_key · 評価対象のフィールド名')
-    expect(html).toContain('查看技术字段')
+    expect(html).toContain(MESSAGES.zh.runResult.technicalDetails)
   })
 
   it('keeps validation warnings inline and moves detailed checks off the report width', () => {

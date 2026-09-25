@@ -477,12 +477,23 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
     void handleRefresh()
   }
 
+  // 履歴・概要から開いた Run の record は task 名を持たないため、読込済みの公開 task 目録から
+  // 同じ task_id の名称を補う。目録に無い版(廃止・無効化)は推測せず、従来の汎用見出しに留める。
+  const runTaskTitle = run
+    ? promptSummary && promptSummary.taskTitle !== messages.elements.runFallbackTitle(shortRunId(run.run_id))
+      ? promptSummary.taskTitle
+      : tasks.find((task) => sameInteractionIdentity(task.task_id, run.task_id))?.title ?? null
+    : null
+  const conversationPrompt = promptSummary && runTaskTitle && promptSummary.taskTitle !== runTaskTitle
+    ? { ...promptSummary, taskTitle: runTaskTitle } : promptSummary
+
   return (
     <>
       <PageHeader
         title={detailView ? messages.workspace.executionDetail : activeModule ? messages.workspace.titleWithModule(activeModule.name) : messages.routes.workspace.label}
         description={detailView || run ? undefined : activeModule?.description || undefined}
-        aside={<span className="scopeBadge">{!detailView && activeModule ? activeModule.name : messages.workspace.projectWideScope}</span>}
+        /* Module 名は見出しに含まれるため重ねない。範囲表示は Project 全体を扱う時だけ残す。 */
+        aside={!detailView && activeModule ? undefined : <span className="scopeBadge">{messages.workspace.projectWideScope}</span>}
       />
       <section className={`workspace${run || detailView ? ' workspaceReading' : ''}`} aria-label={messages.workspace.taskExecutionAria}>
         {/* 左 rail は「実行の入口」と履歴へのショートカット、右 main は現在 Run の観測に責務を分離する。
@@ -534,7 +545,7 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
             }}>{messages.workspace.queueTitle}</button>}
           </div>
           <section className="panel runPanel" aria-live="polite">
-            <div className="panelHeader"><h2>{run && promptSummary?.taskTitle !== messages.elements.runFallbackTitle(shortRunId(run.run_id)) ? promptSummary?.taskTitle ?? messages.workspace.runStatus : messages.workspace.runStatus}</h2>{run && <StatusBadge status={run.status} />}</div>
+            <div className="panelHeader"><h2>{runTaskTitle ?? messages.workspace.runStatus}</h2>{run && <StatusBadge status={run.status} />}</div>
             {run && <time className="runTimestamp" dateTime={run.created_at}>{formatLocalTimestamp(run.created_at)}</time>}
             {!run && (
               <EmptyState
@@ -566,7 +577,7 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
             </div>}
             <div className="tabPanel" role={detailView ? "tabpanel" : undefined}>
               {detailView && observationTab === 'conversation'
-                && <AgentConversation prompt={promptSummary} events={events} runStatus={run?.status ?? null} />}
+                && <AgentConversation prompt={conversationPrompt} events={events} runStatus={run?.status ?? null} />}
               <div className="workspaceResultMount" hidden={detailView && observationTab !== 'result'}>
                 <RunResultPanel
                   reportOnly={!detailView}

@@ -213,6 +213,13 @@ describe('scopeEntries / summarizeScope', () => {
     )
   })
 
+  it('names known scope keys for people and keeps unknown keys as contract values', () => {
+    expect(summarizeScope(
+      { tool_names: ['cancel_step'], resource_uris: [], future_key: ['x'] },
+      { keyLabels: { tool_names: 'ツール', resource_uris: 'リソース URI' } },
+    )).toBe('future_key: x · リソース URI: — · ツール: cancel_step')
+  })
+
   it('replaces the wildcard token with a reader-facing label', () => {
     expect(summarizeScope(
       { issue_ids: ['*'], field_keys: ['status_id'] },

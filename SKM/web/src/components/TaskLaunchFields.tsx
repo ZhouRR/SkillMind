@@ -18,9 +18,12 @@ export function SourceRequirementField({ requirement, value, onChange }: {
 }) {
   const messages = useMessages()
   if (usesDocumentSelection(requirement)) return <DocumentSourceField requirement={requirement} value={value} onChange={onChange} />
+  const kindLabel = messages.workspace.resourceKind[requirement.kind]
+  // 「その他のリソース」は複数並ぶと区別できないため、候補の製品名が一つに定まる時は括弧で添える。
   const label = requirement.kind === 'document' && requirement.access === 'write'
     ? messages.workspace.documentSelection.library
-    : messages.workspace.resourceKind[requirement.kind] ?? requirement.key
+    : kindLabel === undefined ? requirement.key
+      : requirement.kind === 'other' && requirement.provider ? messages.workspace.sourceLabelWithProvider(kindLabel, requirement.provider) : kindLabel
   const optionLabel = (option: { value: string; label: string }) => option.value === PROJECT_DOCUMENT_LIBRARY_SELECTION
     ? messages.workspace.documentSelection.library : option.label
   const soleOption = requirement.options[0]
@@ -149,7 +152,9 @@ export function TaskLaunchFields({ task, inputText, sourceProviders, onInputText
           onChange={(value) => onSourceChange(requirement.key, value)}
         />
       ))}
-      {requirements.length > 0 && <p className="hint">{messages.workspace.freezeHint}</p>}
+      {requirements.length > 0 && <p className="hint">{messages.workspace.freezeHint}
+        {/* ブランチ名の注意はリポジトリ要求がある時だけ添え、無関係な task に常駐させない。 */}
+        {requirements.some((requirement) => requirement.kind === 'repository') && <> {messages.workspace.freezeRepositoryHint}</>}</p>}
       <SchemaTaskInput
         schema={task.input_schema}
         value={parseInputObject(inputText)}

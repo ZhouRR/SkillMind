@@ -25,6 +25,18 @@ export function ProjectFacts({ project }: { project: ProjectRecord }) {
   </div>
 }
 
+/** 編集 form の対象を示す。名称・説明・保持日数は直下の入力欄と重なるため繰り返さず、
+ *  照合用の ID と版は技術情報へ退避する(版の比較は確認・競合画面の ProjectFacts が担う)。 */
+export function ProjectEditTarget({ project }: { project: ProjectRecord }) {
+  const messages = useMessages()
+  return <div className="projectEditTarget">
+    <p><span className="mono">{project.key}</span> · {messages.projectManagement.states[project.status]}</p>
+    <details className="detailDisclosure"><summary>{messages.elements.technicalDetails}</summary>
+      <p className="mono">{project.project_id}</p><p>{messages.projectManagement.version}: {project.row_version}</p>
+    </details>
+  </div>
+}
+
 /** 未送信草稿は元 record と分離して表示し、settings は画面で編集しない。 */
 export function ProjectDraftFacts({ draft, action }: { draft: ProjectDraft; action: ProjectIntent['action'] }) {
   const messages = useMessages()
@@ -61,7 +73,7 @@ export function ProjectIntentConfirmation({ intent, busy, onConfirm, onCancel }:
     {intent.base && <ProjectFacts project={intent.base} />}
     {(intent.action === 'create' || intent.action === 'edit') && <ProjectDraftFacts draft={intent.draft} action={intent.action} />}
     <p className="hint">{boundaryHint}</p>
-    <div className="inlineActions"><button className={intent.action === 'delete' ? 'dangerButton' : 'primaryButton'} type="button" data-project-confirm="" disabled={busy} onClick={onConfirm}>{messages.projectManagement.confirm}</button>
+    <div className="inlineActions"><button className={intent.action === 'delete' ? 'destructiveButton' : 'primaryButton'} type="button" data-project-confirm="" disabled={busy} onClick={onConfirm}>{messages.projectManagement.confirm}</button>
       <button className="secondaryButton" type="button" data-project-cancel="" disabled={busy} onClick={onCancel}>{messages.elements.cancel}</button></div>
   </section>
 }

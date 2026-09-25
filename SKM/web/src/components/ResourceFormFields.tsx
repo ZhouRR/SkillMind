@@ -101,9 +101,9 @@ export function ResourceList({ items, emptyText, busy }: { busy: boolean; emptyT
             <small>{messages.enums.resourceStatus[item.status] ?? item.status} · {formatLocalTimestamp(item.updatedAt)}</small>
           </div>
           <div className="panelHeaderActions">
-            {item.onEdit && <button disabled={busy} className="secondaryButton" onClick={item.onEdit} type="button">{messages.resources.edit}</button>}
+            {item.onEdit && <button disabled={busy} className="secondaryButton compactButton" onClick={item.onEdit} type="button">{messages.resources.edit}</button>}
             {item.onDisable && !item.onEdit && !item.onDelete
-              ? <button disabled={busy} className="secondaryButton" onClick={item.onDisable} type="button">{messages.resources.disable}</button>
+              ? <button disabled={busy} className="secondaryButton compactButton" onClick={item.onDisable} type="button">{messages.resources.disable}</button>
               : <ActionMenu label={messages.common.moreActions(item.title)} disabled={busy} items={[
                 ...(item.onDisable ? [{ id: 'disable', label: messages.resources.disable, onSelect: item.onDisable }] : []),
                 ...(item.onDelete ? [{ id: 'delete', label: messages.resources.delete, onSelect: item.onDelete, danger: true, separatorBefore: Boolean(item.onDisable) }] : []),

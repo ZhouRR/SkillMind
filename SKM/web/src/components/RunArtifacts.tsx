@@ -4,10 +4,14 @@ import { RESOURCE_REQUEST_TIMEOUT_MS, useResourceQuery, type SessionEnded } from
 import { useMessages } from '../i18n'
 import { ModalDialog } from './PageElements'
 import { DOCUMENT_PREVIEW_MAX_BYTES, documentPreviewHtml } from '../lib/documentPreview'
-import { artifactTitle } from '../lib/resultPresentation'
+import { artifactLocation, artifactTitle } from '../lib/resultPresentation'
+import { documentTypeLabel, formatByteSize } from '../lib/presentation'
 import { MarkdownText } from './MarkdownText'
 import { ARTIFACT_REQUEST_POLICY, resultArtifactRefs } from '../lib/artifactFeedback'
 import { formatJsonPreview } from '../lib/jsonPreview'
+
+/** 未参照の添付をこの件数まではそのまま並べ、超えたら件数付きの開閉にまとめる。 */
+const INLINE_UNREFERENCED_LIMIT = 3
 
 /** 一つの明示 click に固定した回执。別索引や同名 path で上書きしない。 */
 interface DownloadRequest { mode: 'download' | 'preview'; id: number; artifact: RunArtifactRecord; title: string; deadline: number }
@@ -34,6 +38,13 @@ export function RunArtifacts({ projectId, runId, result, onSessionExpired, evide
   const refs = resultArtifactRefs(result)
   const records = !index.pending && !index.failure ? index.data ?? [] : []
   const unmatched = refs.filter((ref) => !records.some((record) => record.artifact_ref === ref))
+  const titles = new Map(records.map((record) => [record.artifact_ref, artifactTitle(record, result, evidence, snapshots)] as const))
+  const titleCounts = new Map<string, number>()
+  for (const title of titles.values()) titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1)
+  const referencedRecords = records.filter((record) => refs.includes(record.artifact_ref))
+  const otherRecords = records.filter((record) => !refs.includes(record.artifact_ref))
+  // 結果が参照した添付を先に読ませ、未参照が多い時は件数を示して畳む(一覧で頁を埋めない)。
+  const collapseOthers = referencedRecords.length > 0 && otherRecords.length > INLINE_UNREFERENCED_LIMIT
 
   /** 再描画前の同 tick 重複 click と、別添付への暗黙の中断を防ぐ。 */
   function start(artifact: RunArtifactRecord, mode: 'download' | 'preview' = 'download'): void {
@@ -65,18 +76,21 @@ export function RunArtifacts({ projectId, runId, result, onSessionExpired, evide
       ? <p className="error" role="alert">{labels.failures[index.failure.key]}</p>
       : <>
         {records.length === 0 && <p>{labels.empty}</p>}
-        <ul className="artifactList">{records.map((record) => <li key={record.artifact_ref}>
-          <div><strong>{artifactTitle(record, result, evidence, snapshots)}</strong><p>{record.size_bytes} B · {record.mime_type}</p>
-            <details className="artifactMetadata"><summary>{messages.technicalDetails}</summary><code>{record.path}</code><code>{record.checksum}</code></details>
-            <p className="hint">{refs.includes(record.artifact_ref) ? labels.referenced : labels.unreferenced}</p></div>
-          <div className="panelHeaderActions">
-            {/\.(md|markdown|html?|txt|json)$/i.test(record.path) && record.size_bytes <= DOCUMENT_PREVIEW_MAX_BYTES
-              && <button className="secondaryButton compactButton" type="button" disabled={request !== null}
-                onClick={() => start(record, 'preview')}>{labels.preview}</button>}
-            <button className="secondaryButton compactButton" type="button" disabled={request !== null}
-              onClick={() => start(record)}>{labels.download}</button>
-          </div>
-        </li>)}</ul>
+        <ul className="artifactList">{(collapseOthers ? referencedRecords : records).map((record) => {
+          const title = titles.get(record.artifact_ref) ?? record.path
+          return <ArtifactRow key={record.artifact_ref} record={record} title={title} duplicateTitle={(titleCounts.get(title) ?? 0) > 1}
+            referenced={refs.includes(record.artifact_ref)} disabled={request !== null}
+            onPreview={() => start(record, 'preview')} onDownload={() => start(record)} />
+        })}</ul>
+        {collapseOthers && <details className="artifactGroup">
+          <summary>{labels.unreferencedGroup(otherRecords.length)}</summary>
+          <ul className="artifactList">{otherRecords.map((record) => {
+            const title = titles.get(record.artifact_ref) ?? record.path
+            return <ArtifactRow key={record.artifact_ref} record={record} title={title} duplicateTitle={(titleCounts.get(title) ?? 0) > 1}
+              referenced={false} disabled={request !== null}
+              onPreview={() => start(record, 'preview')} onDownload={() => start(record)} />
+          })}</ul>
+        </details>}
         {unmatched.length > 0 && <div className="artifactUnmatched"><p className="hint">{labels.unavailableRefs}</p>
           <ul>{unmatched.map((ref) => <li key={ref}><code>{ref}</code></li>)}</ul></div>}
       </>}
@@ -88,6 +102,30 @@ export function RunArtifacts({ projectId, runId, result, onSessionExpired, evide
       request={request} isCurrent={() => mounted.current && active.current === request}
       onClose={close} onSessionExpired={onSessionExpired} />}
   </section>
+}
+
+/** 一つの公開添付の行。同名が並ぶ時だけ保存場所を添え、操作 button は行の右端へ揃える。 */
+function ArtifactRow({ record, title, duplicateTitle, referenced, disabled, onPreview, onDownload }: {
+  record: RunArtifactRecord; title: string; duplicateTitle: boolean; referenced: boolean; disabled: boolean
+  onPreview: () => void; onDownload: () => void
+}) {
+  const messages = useMessages().runResult
+  const labels = messages.artifacts
+  const typeLabel = documentTypeLabel(title) ?? documentTypeLabel(record.path)
+  const previewable = /\.(md|markdown|html?|txt|json)$/i.test(record.path) && record.size_bytes <= DOCUMENT_PREVIEW_MAX_BYTES
+  return <li>
+    <div className="artifactInfo"><strong>{title}</strong>
+      {duplicateTitle && <small className="artifactLocation" title={record.path}>{artifactLocation(record.path)}</small>}
+      <p title={record.mime_type}>{formatByteSize(record.size_bytes)}{typeLabel ? ` · ${typeLabel}` : ''}</p>
+      <details className="artifactMetadata"><summary>{messages.technicalDetails}</summary><code>{record.path}</code><code>{record.checksum}</code></details>
+      <p className="hint">{referenced ? labels.referenced : labels.unreferenced}</p></div>
+    <div className="panelHeaderActions">
+      {previewable && <button className="secondaryButton compactButton" type="button" disabled={disabled}
+        onClick={onPreview}>{labels.preview}</button>}
+      <button className="secondaryButton compactButton" type="button" disabled={disabled}
+        onClick={onDownload}>{labels.download}</button>
+    </div>
+  </li>
 }
 
 /** 検証済み公開添付だけを読み、既存の文書 sanitizer と同じ sandbox で表示する。 */

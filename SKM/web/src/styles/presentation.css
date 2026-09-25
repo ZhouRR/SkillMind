@@ -14,8 +14,9 @@
 .themeToggle button[aria-pressed='true'] { color: var(--accent); border-color: var(--accent-border); background: var(--accent-soft); }
 .themeToggle button:hover { color: var(--text-hi); }
 .themeToggle svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.6; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.sidebarFooter .themeToggle { width: 100%; }
-.sidebarFooter .themeToggle button { flex: 1; }
+/* sidebar では icon だけの小型切替にし、同じ行の言語 select と高さを揃える。 */
+.themeToggleCompact { flex-shrink: 0; gap: 2px; padding: 3px; border-radius: var(--radius-small); }
+.themeToggleCompact button { min-height: 30px; padding: 5px 9px; }
 .authAppearance { position: absolute; top: 24px; right: 28px; }
 .authShell { position: relative; padding-top: 88px; }
 .detailDisclosure { border: 0; border-top: 1px solid var(--border); border-radius: 0; padding: 12px 0; background: transparent; }
@@ -41,6 +42,11 @@
 [data-page='skills'] .skillForm textarea { min-height: 160px; }
 [data-page='skills'] .skillResult > .emptyState { min-height: 280px; }
 [data-page='resources'] .resourceList { gap: 0; }
+/* 詳細設定も一覧と同じ card に入れて見出しで開閉し、card の外に浮いた開閉を作らない。中の区画は枠を重ねない。 */
+.detailDisclosure.resourceAdvanced { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 22px; background: var(--surface); box-shadow: var(--shadow-panel); }
+.detailDisclosure.resourceAdvanced > summary { color: var(--text-hi); font-size: 15px; font-weight: 700; }
+.detailDisclosure.resourceAdvanced[open] > summary { margin-bottom: 14px; }
+.resourceAdvanced .resourceTabPanel > .panel { border: 0; border-radius: 0; padding: 0; background: transparent; box-shadow: none; }
 [data-page='resources'] .resourceItem { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 20px 4px; background: transparent; }
 [data-page='resources'] .resourceInfo { gap: 8px; }
 [data-page='resources'] .resourceInfo strong { font-size: 15px; }
@@ -57,7 +63,8 @@
 .documentHelp input { width: 100%; min-width: 0; box-sizing: border-box; }
 .documentHelp button { justify-self: start; max-width: 100%; white-space: normal; }
 [data-page='documents'] .docFolder { border-radius: 10px; }
-[data-page='documents'] .documentItem { padding-block: 14px; }
+/* 文書行の縦余白は一覧の密度を優先する(一件ごとに大きく間延びさせない)。 */
+[data-page='documents'] .documentTree > .documentList .documentItem { padding-block: 10px; }
 [data-page='documents'] .docFolderBody .documentItem { border: 0; border-radius: 0; background: transparent; }
 [data-page='history'] .historyList { gap: 0; }
 [data-page='history'] .historyItem { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; }
@@ -65,7 +72,11 @@
 [data-page='history'] .historyItem:hover { background: var(--surface-raised); }
 [data-page='history'] .historyPrimary strong { font-size: 15px; white-space: normal; }
 [data-page='history'] .historyMeta { margin-top: 10px; }
-[data-page='tasks'] .taskCards { grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 24px; }
+/* 状態 badge と行末の「⋯」を見出し一行目へ揃え、見出しの折返しで上下にずれないようにする。 */
+[data-page='history'] .historyPrimary { align-items: flex-start; }
+[data-page='history'] .historyItem > .historyDelete { margin: 14px 8px 0 0; }
+/* 一件だけでも全幅へ引き伸ばさず、card 幅を読みやすい範囲に保つ(auto-fill は空の列を残す)。 */
+[data-page='tasks'] .taskCards { grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 24px; }
 [data-page='tasks'] .taskCard { padding: 24px; }
 [data-page='schedules'] .scheduleManagerLayout { grid-template-columns: minmax(300px, .75fr) minmax(0, 1.35fr); gap: 24px; }
 [data-page='schedules'] .scheduleManagerDetail { background: var(--surface); }
@@ -73,8 +84,23 @@
 [data-page='schedules'] .scheduleFacts h3 { margin-top: 24px; }
 .accountUserCard { background: var(--surface-raised); }
 .accountEditor > .panel, .accountDirectory > .panel { padding: 24px; }
-.accountsLayout { grid-template-columns: minmax(0, 1fr); max-width: 1100px; }
+/* 本文幅は他画面と同じ shell 幅に揃え、見出しと区画の右端をずらさない。 */
+.accountsLayout { grid-template-columns: minmax(0, 1fr); }
 .accountDirectorySection > summary { color: var(--text-hi); font-size: 16px; }
+/* 管理区画(API キー・組織ユーザー)も本人区画と同じ card に入れ、見出しで開閉する。
+   中の区画は枠を重ねず(card の中に card を置かない)、区切り線だけで分ける。 */
+.detailDisclosure.accountDirectorySection { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 24px; background: var(--surface); box-shadow: var(--shadow-panel); }
+.detailDisclosure.accountDirectorySection > summary { font-size: 15px; font-weight: 700; }
+.detailDisclosure.accountDirectorySection[open] > summary { margin-bottom: 18px; border-bottom: 1px solid var(--border); padding-bottom: 14px; }
+.accountDirectorySection .accountDirectory > .panel { border: 0; border-radius: 0; padding: 0; background: transparent; box-shadow: none; }
+.accountDirectorySection .accountDirectory > .panel + .panel { border-top: 1px solid var(--border); padding-top: 18px; }
+.accountDirectorySection .apiKeyPanel > .hint:first-child, .accountDirectorySection .apiKeyPanel > p:first-child { margin-top: 0; }
+/* panelHeader を持たない区画見出し(例:ユーザー作成)も他の区画見出しと同じ寸法にする。 */
+.accountsLayout .panel > h2 { margin: 0 0 6px; color: var(--text-hi); font-size: 15px; font-weight: 700; }
+/* 項目名と値を近づけて読む。値の列を画面幅の半分まで離さない。 */
+.accountsLayout .accountFacts > div { grid-template-columns: minmax(6em, 11em) minmax(0, 1fr); }
+/* 開閉見出しが panelHeader の直下に来るため、二重の区切り線を作らない。 */
+.accountEvents > .detailDisclosure { border-top: 0; padding-top: 0; }
 .accountAction { margin-top: 20px; }
 .accountAction > summary { color: var(--text-hi); font-size: 14px; }
 .accountAction .accountForm { margin-top: 16px; }

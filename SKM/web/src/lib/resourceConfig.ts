@@ -292,17 +292,19 @@ export function scopeEntries(scope: Record<string, unknown>): ScopeEntry[] {
 /** 一覧の一行に収まる scope 要約を作る。長い列は先頭だけ見せて件数で畳む。 */
 export function summarizeScope(
   scope: Record<string, unknown>,
-  options?: { maxItems?: number; wildcardLabel?: string },
+  options?: { maxItems?: number; wildcardLabel?: string; keyLabels?: Readonly<Record<string, string>> },
 ): string {
   const maxItems = options?.maxItems ?? 3
   return scopeEntries(scope)
     .map((entry) => {
+      // 既知の key は利用者語の見出しへ置き換え、未知の key は契約値のまま示す。
+      const label = options?.keyLabels?.[entry.key] ?? entry.key
       if (entry.values.includes(SCOPE_WILDCARD)) {
-        return `${entry.key}: ${options?.wildcardLabel ?? SCOPE_WILDCARD}`
+        return `${label}: ${options?.wildcardLabel ?? SCOPE_WILDCARD}`
       }
       const shown = entry.values.slice(0, maxItems).join(', ')
       const rest = entry.values.length - maxItems
-      return `${entry.key}: ${entry.values.length === 0 ? '—' : shown}${rest > 0 ? ` +${rest}` : ''}`
+      return `${label}: ${entry.values.length === 0 ? '—' : shown}${rest > 0 ? ` +${rest}` : ''}`
     })
     .join(' · ')
 }

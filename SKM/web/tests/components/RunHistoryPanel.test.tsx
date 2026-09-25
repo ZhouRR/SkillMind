@@ -21,6 +21,26 @@ describe('run history empty pages', () => {
     expect(renderEmpty(language)).toContain(MESSAGES[language].runHistory.empty)
   })
 
+  it('omits unusable page buttons for a single page and names sources for people', () => {
+    const html = renderToStaticMarkup(<LanguageProvider language="ja"><RunHistoryPanel
+      state={{ status: 'ready', page: { items: [{
+        run_id: '00000000-0000-4000-8000-000000000501', project_id: '00000000-0000-4000-8000-000000000001',
+        task_id: 'task', task_title: 'Spec review', status: 'SUCCEEDED', row_version: 1, input: {},
+        created_at: '2026-09-25T03:14:05Z', started_at: '2026-09-25T03:14:05Z', finished_at: '2026-09-25T03:27:21Z',
+        result_summary: 'Done', result_confidence: null, result_needs_review: null,
+        selected_sources: { documents: 'project-documents', database: 'postgres', library: 'project-library', extra: 'future-provider' },
+      }], offset: 0, limit: 20, has_more: false } }}
+      selectedRunId={null} onOpen={() => {}} onNext={() => {}} onPrevious={() => {}} onRefresh={() => {}} />
+    </LanguageProvider>)
+    // 一頁で完結する一覧は前後 button を出さず、件数範囲だけを示す。
+    expect(html).not.toContain(MESSAGES.ja.runHistory.previous)
+    expect(html).not.toContain(MESSAGES.ja.runHistory.next)
+    expect(html).toContain('1–1')
+    // 取得元 ID は表示名へ変換し、未知の ID は原文のまま残す。
+    expect(html).toContain('プロジェクト文書 / PostgreSQL / プロジェクト文書庫 / future-provider')
+    expect(html).not.toContain('project-documents')
+  })
+
   it.each([false, true])('keeps an enabled previous-page action after rows disappear, trash=%s', (trashed) => {
     const html = renderEmpty('en', 20, trashed)
     expect(html).toContain(MESSAGES.en.runHistory.emptyPage)

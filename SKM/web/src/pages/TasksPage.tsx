@@ -324,15 +324,16 @@ function TaskCard({ row, projectId, projectReadOnly, schedulingEnabled, onSchedu
           ? <>{formatLocalTimestamp(row.task.last_run.started_at ?? row.task.last_run.created_at)} <StatusBadge status={row.task.last_run.status} /> <RunDuration run={row.task.last_run} /></>
           : messages.tasks.neverRun}
       </p>
+      {/* 主操作(すぐ実行)を先頭に置き、確認・設定の操作を後ろへ並べる。 */}
       <div className="taskCardActions">
-        <button className="secondaryButton compactButton" type="button" data-flow-open={taskCatalogId(row.task)}
-          aria-expanded={previewSelected} aria-controls="task-flow-preview" disabled={!previewAllowed}
-          onClick={(event) => onPreview(event.currentTarget)}>{messages.taskFlow.open}</button>
         {/* 「立即执行」は工作空间へ渡す。実行中の観測・応答・承認はすべて向こうの責務で、
             ここに二つ目の実行 lifecycle を作らない。 */}
         <a className="primaryButton compactButton" href={routeHref('workspace', projectId, { taskId: taskCatalogId(row.task) })}>
           {messages.tasks.runNow}
         </a>
+        <button className="secondaryButton compactButton" type="button" data-flow-open={taskCatalogId(row.task)}
+          aria-expanded={previewSelected} aria-controls="task-flow-preview" disabled={!previewAllowed}
+          onClick={(event) => onPreview(event.currentTarget)}>{messages.taskFlow.open}</button>
         {schedulingEnabled && <button
           className="secondaryButton compactButton"
           disabled={projectReadOnly || level === null || level === 'GUIDANCE_ONLY'}

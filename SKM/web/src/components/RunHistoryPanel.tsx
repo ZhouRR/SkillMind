@@ -3,6 +3,7 @@ import type { RunHistoryItemRecord, RunHistoryPageRecord } from '../api'
 import { useMessages } from '../i18n'
 import { normalizeSelectedSources } from '../lib/agentStream'
 import { formatLocalTimestamp, runHistoryTitle } from '../lib/presentation'
+import { sourceProviderLabel } from '../lib/resourceDrafts'
 import { EmptyState, LoadingSkeleton, StatusBadge } from './PageElements'
 import { ActionMenu } from './ActionMenu'
 
@@ -47,7 +48,7 @@ export function RunHistoryPanel({ state, selectedRunId, onOpen, onPrevious, onNe
               {item.task_title && item.result_summary && <p className="historySummary">{item.result_summary}</p>}
               {!item.result_summary && <p>{messages.runHistory.noSummary}</p>}
               <div className="historyMeta">
-                <span>{sourceLabel(item, messages.runHistory.sourceUnavailable)}</span>
+                <span>{sourceLabel(item, messages.runHistory.sourceUnavailable, messages.runHistory.documentSources)}</span>
               </div>
             </button>
             {(onDelete || (trashed && onPurge)) && <div className="historyDelete"><ActionMenu label={messages.common.moreActions(runHistoryTitle(item, messages.elements.unnamedRunTitle))} items={[
@@ -57,12 +58,15 @@ export function RunHistoryPanel({ state, selectedRunId, onOpen, onPrevious, onNe
             ]} /></div>}
             <details className="detailDisclosure historyTechnical"><summary>{messages.elements.technicalDetails}</summary>
               <p><code>{item.run_id}</code></p>
-              {item.result_confidence !== null && <p>{messages.runResult.reading.confidenceHint} {Math.round(item.result_confidence * 100)}%</p>}
+              {item.result_confidence !== null && <p>{messages.runResult.confidenceLabel} {Math.round(item.result_confidence * 100)}%
+                <small className="confidenceHint">{messages.runResult.reading.confidenceHint}</small></p>}
             </details>
           </article>
         ))}
       </div>
-      {(!empty || state.page.offset > 0) && <div className="historyPagination">
+      {/* 一頁に収まる一覧では押せない前後 button を並べず、件数範囲だけを示す。 */}
+      {!empty && state.page.offset === 0 && !state.page.has_more && <p className="historyRange">{state.page.offset + 1}–{state.page.offset + state.page.items.length}</p>}
+      {(state.page.offset > 0 || state.page.has_more) && <div className="historyPagination">
         <button className="secondaryButton compactButton" disabled={state.page.offset === 0} type="button" onClick={onPrevious}>{messages.runHistory.previous}</button>
         {!empty && <span>{state.page.offset + 1}–{state.page.offset + state.page.items.length}</span>}
         <button className="secondaryButton compactButton" disabled={!state.page.has_more} type="button" onClick={onNext}>{messages.runHistory.next}</button>
@@ -71,8 +75,10 @@ export function RunHistoryPanel({ state, selectedRunId, onOpen, onPrevious, onNe
   )
 }
 
-/** History item の選択 source を、歴史 flat snapshot と現行 object snapshot の双方から短く表示する。 */
-function sourceLabel(item: RunHistoryItemRecord, unavailable: string): string {
+/** History item の選択 source を、歴史 flat snapshot と現行 object snapshot の双方から短く表示する。
+ *  取得元 ID は利用者向けの表示名へ変換し、同じ表示名は一度だけ並べる。 */
+function sourceLabel(item: RunHistoryItemRecord, unavailable: string, documentLabels: { documents: string; library: string }): string {
   const providers = Object.values(normalizeSelectedSources(item.selected_sources))
-  return providers.join(' / ') || unavailable
+    .map((provider) => sourceProviderLabel(provider, documentLabels))
+  return [...new Set(providers)].join(' / ') || unavailable
 }

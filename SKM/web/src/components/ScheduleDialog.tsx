@@ -226,7 +226,8 @@ function ScheduleCreationForm({ open, projectId, csrfToken, task, onClose, onSav
           onChange={(event) => changeTiming({ timezone: event.target.value })} /></label>
         <p className="hint">{messages.schedules.ruleTimezoneHint}</p>
         {timing.kind === 'CRON' && <label>{messages.schedules.cronLabel}<input name="cron_expression" type="text"
-          maxLength={128} value={timing.cronExpression} onChange={(event) => changeTiming({ cronExpression: event.target.value })} /></label>}
+          maxLength={128} value={timing.cronExpression} onChange={(event) => changeTiming({ cronExpression: event.target.value })} />
+          <span className="hint">{messages.schedules.cronHint}</span></label>}
         <p className="hint" data-schedule-input-timezone>{messages.schedules.inputTimezone(inputTimezone)}</p>
         {timing.kind === 'ONCE' && <ScheduleDateField name="run_at" label={messages.schedules.runAtLabel}
           original={original && timing.runAt === initialTiming.runAt && timing.runAtChoice === initialTiming.runAtChoice ? original.run_at : null}
@@ -240,7 +241,7 @@ function ScheduleCreationForm({ open, projectId, csrfToken, task, onClose, onSav
           onChoice={(value) => changeTiming({ endAtChoice: value })} />
         <label>{messages.schedules.maxRunsLabel}<input name="max_runs" type="number" min={1} max={100000} step={1}
           value={timing.maxRuns} onChange={(event) => changeTiming({ maxRuns: event.target.value })} /></label>
-        <div className="formRow"><button className="secondaryButton" data-schedule-preview type="button"
+        <div className="schedulePreviewActions"><button className="secondaryButton" data-schedule-preview type="button"
           disabled={!definition || (!!request && preview.pending)} onClick={handlePreview}>
           {request && preview.pending ? messages.schedules.previewLoading : messages.schedules.preview}
         </button></div>

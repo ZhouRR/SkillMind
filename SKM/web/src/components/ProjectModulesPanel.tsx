@@ -12,9 +12,20 @@ type ModulesState =
   | { status: 'error'; message: string }
 
 /** 束縛候補となる PUBLISHED SkillVersion の表示用選択肢。 */
-interface SkillOption {
+export interface SkillOption {
   skill_version_id: string
+  skill_name: string
+  version: string
   label: string
+}
+
+/** 束縛候補を Skill 名順に、同じ Skill は新しい版から並べる。
+ *
+ *  版は数値として比べる(文字列順だと v0.1.10 が v0.1.7 より前に来て、最新版を見失う)。 */
+export function sortSkillOptions(options: readonly SkillOption[]): SkillOption[] {
+  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
+  return [...options].sort((left, right) => collator.compare(left.skill_name, right.skill_name)
+    || collator.compare(right.version, left.version))
 }
 
 /** 束縛済みだが候補一覧に無い version ID を返す。
@@ -25,7 +36,7 @@ interface SkillOption {
  */
 export function staleBindingIds(
   selected: readonly string[],
-  options: readonly SkillOption[],
+  options: readonly Pick<SkillOption, 'skill_version_id'>[],
 ): string[] {
   return selected.filter(
     (id) => !options.some((option) => option.skill_version_id === id),
@@ -89,11 +100,13 @@ export function ProjectModulesPanel({ projectId, session }: {
           if (!seen.has(task.skill_version_id)) {
             seen.set(task.skill_version_id, {
               skill_version_id: task.skill_version_id,
+              skill_name: task.skill_name,
+              version: task.version,
               label: `${task.skill_name} v${task.version}`,
             })
           }
         }
-        setOptions([...seen.values()])
+        setOptions(sortSkillOptions([...seen.values()]))
       })
       .catch(() => {
         if (!controller.signal.aborted) setOptions([])
@@ -205,7 +218,7 @@ export function ProjectModulesPanel({ projectId, session }: {
               </div>
               {isAdmin && (
                 <div className="moduleItemActions">
-                  <button className="secondaryButton" disabled={busy} type="button" onClick={() => startEdit(module)}>{messages.projects.modules.edit}</button>
+                  <button className="secondaryButton compactButton" disabled={busy} type="button" onClick={() => startEdit(module)}>{messages.projects.modules.edit}</button>
                   <button className="dangerButton" disabled={busy} type="button" onClick={() => void remove(module)}>{messages.projects.modules.remove}</button>
                 </div>
               )}

@@ -99,7 +99,9 @@ function formatInputValue(value: unknown): string {
   return JSON.stringify(value)
 }
 
-/** JSON 結果本文を raw で表示せず、会話向けの要約 card として表示する。 */
+/** JSON 結果本文を raw で表示せず、会話向けの要約 card として表示する。
+ *
+ *  利用者には本文を読む場所(結果 tab)を示し、JSON の構造件数は技術情報へ退避する。 */
 function StructuredResultMessage({ digest }: { digest: StructuredResultDigest }) {
   const messages = useMessages()
   const facts = [
@@ -111,7 +113,10 @@ function StructuredResultMessage({ digest }: { digest: StructuredResultDigest })
   return (
     <div className="structuredDigest">
       <p>{messages.conversation.structuredDone}</p>
-      {facts.length > 0 && <ul className="digestFacts">{facts.map((fact) => <li key={fact}>{fact}</li>)}</ul>}
+      <p className="hint">{messages.conversation.structuredWhere(messages.workspace.tabResult)}</p>
+      {facts.length > 0 && <details className="detailDisclosure"><summary>{messages.elements.technicalDetails}</summary>
+        <ul className="digestFacts">{facts.map((fact) => <li key={fact}>{fact}</li>)}</ul>
+      </details>}
     </div>
   )
 }

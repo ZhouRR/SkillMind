@@ -465,7 +465,7 @@ async def create_form(page: Page, messages: dict) -> Locator:
     await form.get_by_label(messages["fields"]["name"], exact=True).fill("Created browser account")
     await form.get_by_label(messages["fields"]["role"], exact=True).select_option("USER")
     await form.get_by_label(messages["initialPassword"], exact=True).fill(PASSWORD)
-    await form.get_by_label(messages["confirmPassword"], exact=True).fill(PASSWORD)
+    await form.get_by_label(messages["confirmInitialPassword"], exact=True).fill(PASSWORD)
     return form
 
 

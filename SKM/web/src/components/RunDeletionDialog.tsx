@@ -37,14 +37,15 @@ export function RunDeletionDialog({ projectId, runId, csrfToken, action, onClose
     catch { if (current.current) setError(true) }
     finally { window.clearTimeout(timer); if (current.current) { setBusy(false); writing.current = false } }
   }
-  return <ModalDialog open title={restore ? m.restore : purge ? m.purge : m.trashAction} onClose={() => { if (!busy) onClose() }}>
+  // 本文に「キャンセル」があるため見出しの「閉じる」は重ねず、取り消せない完全削除だけを danger 実心 button にする。
+  return <ModalDialog hideClose open title={restore ? m.restore : purge ? m.purge : m.trashAction} onClose={() => { if (!busy) onClose() }}>
     <p>{restore ? m.recycleHint : purge ? m.purgeConfirm : m.runConfirm}</p>
     {preview && <><p>{m.outputs}: {preview.output_count} · {m.protected}: {preview.protected_output_count}</p>
       <ul>{preview.outputs.map((d) => <li key={d.document_id}>{d.folder}/{d.name}{d.protected && ` (${m.protected})`}</li>)}</ul>
       {!restore && <label><input type="checkbox" checked={outputs} disabled={busy} onChange={(e) => setOutputs(e.target.checked)} />{purge ? m.purgeOutputs : m.includeOutputs}</label>}</>}
     {cleanupPending && <p role="status">{m.cleanupPending}</p>}
     {error && <p role="alert" className="error">{sent ? `${m.unknown} ${m.runBlocked}` : m.failure}</p>}
-    <div className="formRow"><button className="primaryButton" type="button" disabled={!preview || busy || sent} onClick={() => void submit()}>{restore ? m.restore : purge ? m.purge : m.trashAction}</button>
+    <div className="formRow"><button className={purge ? 'destructiveButton' : 'primaryButton'} type="button" disabled={!preview || busy || sent} onClick={() => void submit()}>{restore ? m.restore : purge ? m.purge : m.trashAction}</button>
       <button className="secondaryButton" type="button" disabled={busy} onClick={onClose}>{m.cancel}</button></div>
   </ModalDialog>
 }

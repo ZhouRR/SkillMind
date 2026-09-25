@@ -46,7 +46,8 @@ export function UserSecurityEvents({ userId, own, revision, onSessionEnded }: {
           </details>
         </li>)}
       </ul>
-      <UserPager offset={offset} limit={limit} count={query.data.items.length} total={query.data.total} pending={query.pending} onChange={setOffset} />
+      {/* 件数は開閉見出しが示すため、一頁に収まる間は同じ件数と押せない前後 button を繰り返さない。 */}
+      {(offset > 0 || query.data.total > limit) && <UserPager offset={offset} limit={limit} count={query.data.items.length} total={query.data.total} pending={query.pending} onChange={setOffset} />}
     </details>}
   </section>
 }

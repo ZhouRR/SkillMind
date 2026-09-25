@@ -70,6 +70,22 @@ describe('published Artifact view', () => {
     expect(html).toContain(phase === 'pending' ? MESSAGES.zh.runResult.artifacts.loading : MESSAGES.zh.runResult.artifacts.failures.denied)
   })
 
+  it('keeps referenced attachments first and folds a long unreferenced remainder behind its count', () => {
+    const other = (index: number): RunArtifactRecord => ({ ...artifact(`art_other_${index}`),
+      path: `output/document-conversions/0000000${index}-0000-4000-8000-000000000000/source.md`, size_bytes: 222420 })
+    state.data = [artifact('art_original'), other(1), other(2), other(3), other(4)]
+    const labels = MESSAGES.ja.runResult.artifacts
+    const html = render('ja')
+    expect(html).toContain(`<summary>${labels.unreferencedGroup(4)}</summary>`)
+    expect(html.indexOf('art_original') === -1 || html.indexOf(labels.referenced) < html.indexOf(labels.unreferencedGroup(4))).toBe(true)
+    // 生の byte 数と MIME ではなく、文書一覧と同じ概数と種別で示す。
+    expect(html).toContain('217.2 KB · Markdown')
+    expect(html).not.toContain('222420 B')
+    // 同名の添付は保存場所を添えて見分けられるようにする。
+    expect(html).toContain('document-conversions/00000001…')
+    expect(html).toContain('document-conversions/00000004…')
+  })
+
   it('shows real publications without inventing a final Result that adopted them', () => {
     state.data = [artifact('art_original')]
     expect(render('zh', null)).toContain(MESSAGES.zh.runResult.artifacts.unreferenced)

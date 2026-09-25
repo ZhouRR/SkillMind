@@ -131,12 +131,20 @@ button, input, select, textarea { font: inherit; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 h1, h2, h3 { font-weight: 650; line-height: 1.35; letter-spacing: -.025em; }
+/* 見出しは行幅を均し、本文は末尾に一・二文字だけが残る孤立行(例「ます。」)を避ける。
+   未対応 browser では通常の折返しに戻るだけで、内容は変わらない。 */
+h1, h2, h3, h4 { text-wrap: balance; }
+p, li, dd, .hint { text-wrap: pretty; }
 code, pre { font-family: var(--font-mono); }
 button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 
 /* Keyboard 操作の現在位置を全 interactive 要素で統一表示する。入力欄は border/影で示すため除外する。 */
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 input:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; }
+/* script が焦点を移すだけの見出し(tabindex=-1)は操作対象ではないため枠を描かない。
+   Chrome は初回表示の script focus も :focus-visible とみなし、黄色枠が隣の label に重なるため。
+   読み上げは移動先を伝え、次の Tab 操作からは通常の枠に戻る。 */
+:is(h1, h2, h3, h4, h5)[tabindex="-1"]:focus-visible { outline: none; }
 
 /* Scroll 領域は本文を隠さず、操作できる境界を保つ。 */
 * { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
@@ -267,6 +275,8 @@ select {
 .schemaInputForm > label:has(textarea), .schemaInputForm > .rawResult { grid-column: 1 / -1; }
 .schemaInputForm small { color: var(--text-faint); font-size: 12px; font-weight: 400; line-height: 1.5; }
 .hint { margin: 2px 0 12px; color: var(--text-faint); font-size: 13px; line-height: 1.55; }
+/* label 内の補足は label の太字を継がず、他の補足文と同じ通常字重にする。 */
+label .hint, label small { font-weight: 400; }
 .compactTextarea { min-height: 90px; font-family: inherit; }
 
 /* ---- Button ---- */
@@ -287,14 +297,17 @@ select {
 .secondaryButton { border-color: var(--border-strong); color: var(--text); background: var(--surface); }
 .secondaryButton:hover:not(:disabled) { border-color: var(--border-hover); background: var(--surface-raised); }
 .secondaryButton:disabled { cursor: not-allowed; opacity: .55; }
+/* 表示切替(例:現在の一覧 / ゴミ箱)の選択中を色と面で示し、どちらを見ているかを迷わせない。 */
+.secondaryButton[aria-pressed='true'] { border-color: var(--accent-border); color: var(--accent-deep); background: var(--accent-soft); }
 a.primaryButton, a.secondaryButton { display: inline-flex; justify-content: center; align-items: center; text-decoration: none; }
 .compactButton { min-height: 34px; padding: 5px 12px; font-size: 13px; }
 /* 破壊確認だけを赤い実心 button にし、通常の主操作と混同させない。 */
 .destructiveButton { width: auto; color: var(--destructive-ink); border-color: var(--danger-border); background: var(--destructive-bg); }
 .destructiveButton:hover:not(:disabled) { filter: brightness(.92); }
 .destructiveButton:disabled { cursor: not-allowed; opacity: .55; }
-/* 破壊操作は常時赤で並べず、通常は静かな中立表示、hover/focus した時だけ danger 色で警告する。 */
-.dangerButton { min-height: 0; border: 1px solid var(--border-strong); border-radius: var(--radius-tiny); padding: 6px 9px; color: var(--text-faint); background: transparent; font-size: 12px; }
+/* 一覧行の破壊操作の入口は常時赤で並べず、通常は静かな中立表示、hover/focus した時だけ danger 色で警告する。
+   隣の compact button と高さを揃える。取り消せない操作の最終確認は destructiveButton を使う。 */
+.dangerButton { min-height: 34px; border: 1px solid var(--border-strong); border-radius: var(--radius-small); padding: 5px 12px; color: var(--text-muted); background: transparent; font-size: 13px; }
 .dangerButton:hover, .dangerButton:focus-visible { border-color: var(--danger-border); color: var(--danger); background: var(--danger-soft); }
 .dangerButton:disabled { cursor: wait; opacity: .55; }
 /* File 選択は素の input を隠し、button 見た目の label を唯一の入口にする（文書 upload と Skill 目录 upload が共用）。 */
@@ -304,6 +317,8 @@ a.primaryButton, a.secondaryButton { display: inline-flex; justify-content: cent
 .error { color: var(--danger); font-size: 13px; line-height: 1.5; }
 
 .mono { font-family: var(--font-mono); }
+/* 画面上は省くが、読み上げ名・textContent・検索には残す見出し(例:sidebar の言語 label)。 */
+.visuallyHidden { position: absolute; width: 1px; height: 1px; overflow: hidden; margin: -1px; padding: 0; border: 0; clip-path: inset(50%); white-space: nowrap; }
 
 /* 一覧・tab の件数 badge。複数画面で使うため基盤側に置く。 */
 .eventCount {

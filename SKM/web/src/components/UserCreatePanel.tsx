@@ -70,7 +70,7 @@ export function UserCreatePanel({ session, onSessionEnded, onCreated, onSelect }
         </select></label>
         <label>{messages.initialPassword}<input type="password" autoComplete="new-password" required minLength={PASSWORD_MIN_LENGTH} maxLength={1024}
           value={password} onChange={(event) => setPassword(event.target.value)} /></label>
-        <label>{messages.confirmPassword}<input type="password" autoComplete="new-password" required minLength={PASSWORD_MIN_LENGTH} maxLength={1024}
+        <label>{messages.confirmInitialPassword}<input type="password" autoComplete="new-password" required minLength={PASSWORD_MIN_LENGTH} maxLength={1024}
           value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
         <p className="hint">{messages.passwordPolicy}</p>
         {issue && <p role="alert" className="error">{issue === 'invalidRequest' ? messages.failures.invalidRequest : messages[issue]}</p>}

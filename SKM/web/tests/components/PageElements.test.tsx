@@ -148,7 +148,7 @@ describe('ProjectContextSelect', () => {
     expect(html).not.toContain(MESSAGES.zh.elements.projectUnavailable)
   })
 
-  it('offers projects by name and shows the selected id as a secondary line', () => {
+  it('offers projects by name and keeps the resolved id in a tooltip instead of a permanent line', () => {
     const html = renderToStaticMarkup(
       <ProjectContextSelect
         projectId={PROJECT.project_id}
@@ -159,9 +159,9 @@ describe('ProjectContextSelect', () => {
 
     expect(html).toContain(`<option value="${PROJECT.project_id}" selected="">${PROJECT.name}</option>`)
     expect(html).not.toContain(PROJECT.key)
-    // UUID は手入力欄ではなく補助行として表示する。
-    expect(html).toContain('projectContextId')
-    expect(html).toContain(PROJECT.project_id)
+    // 名称で特定できる対象は UUID を常設行にせず、select の tooltip で照合できるようにする。
+    expect(html).not.toContain('projectContextId')
+    expect(html).toContain(`title="${PROJECT.name}\n${PROJECT.project_id}"`)
     expect(html).not.toContain('<input')
   })
 
@@ -315,5 +315,13 @@ describe('ConfirmDialog', () => {
 
     expect(html).toContain('primaryButton')
     expect(html).not.toContain('destructiveButton')
+  })
+
+  it('offers a single cancel action instead of repeating a header close button', () => {
+    const html = render({ title: '归档', message: '历史审计数据不会被删除。', confirmLabel: '归档' })
+
+    expect(html).toContain(`>${MESSAGES.zh.elements.cancel}</button>`)
+    expect(html).not.toContain(`>${MESSAGES.zh.elements.close}</button>`)
+    expect(html).not.toContain('modalHeaderActions')
   })
 })

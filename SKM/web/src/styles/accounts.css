@@ -21,7 +21,7 @@
 .accountComparison, .accountCreateReview { margin: 18px 0; border: 1px solid var(--warn); border-radius: var(--radius-small); padding: 14px; overflow-wrap: anywhere; }
 .accountNotice { margin: 12px 0; border-inline-start: 3px solid var(--warn); padding: 8px 12px; background: var(--warn-soft); overflow-wrap: anywhere; }
 .accountNotice p { margin: 4px 0; }
-.accountNotice:focus-visible, .accountsLayout [tabindex="-1"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.accountNotice:focus-visible, .accountsLayout [tabindex="-1"]:not(h1, h2, h3, h4, h5):focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 .accountDanger { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 12px; }
 .accountDanger .dangerButton { min-height: 38px; padding: 8px 14px; color: var(--danger); font-size: 13px; }
 .accountCheckbox { display: flex; gap: 10px; align-items: start; line-height: 1.7; font-weight: 400; }

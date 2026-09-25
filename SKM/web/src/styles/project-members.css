@@ -23,7 +23,8 @@
 .memberSearch label { flex: 1 1 240px; margin: 0; min-width: 0; }
 .memberSearch input { min-width: 0; }
 .memberNotice { border: 1px solid var(--danger); border-radius: var(--radius-small); padding: 12px; overflow-wrap: anywhere; }
-.memberNotice:focus, .projectMembersPanel h3:focus { outline: 2px solid var(--accent); outline-offset: 3px; }
+/* 焦点移動先の通知は keyboard 操作時だけ枠を出す(見出しの枠は base.css で描かない)。 */
+.memberNotice:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .memberReviewFacts { display: grid; gap: 12px; }
 .memberAcknowledgment { display: flex; gap: 10px; align-items: flex-start; margin: 0; }
 .memberAcknowledgment input { width: 18px; height: 18px; flex: 0 0 18px; margin-top: 3px; }

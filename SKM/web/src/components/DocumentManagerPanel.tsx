@@ -18,7 +18,7 @@ import { useDocumentUploadClosure } from '../hooks/useDocumentUploadClosure'
 import { useResourceQuery, type SessionEnded } from '../hooks/useResourceRequest'
 import { DOCUMENT_REQUEST_POLICY, documentFailure, type DocumentFailure } from '../lib/documentFeedback'
 import { DOCUMENT_PREVIEW_MAX_BYTES as PREVIEW_MAX_BYTES, documentPreviewHtml, documentMarkdownHtml } from '../lib/documentPreview'
-import { formatByteSize, formatLocalTimestamp } from '../lib/presentation'
+import { documentTypeLabel, formatByteSize, formatLocalTimestamp } from '../lib/presentation'
 import { formatJsonPreview } from '../lib/jsonPreview'
 import { EmptyState, LoadingSkeleton, ModalDialog, useConfirmDialog } from './PageElements'
 import { DocumentUploadStatus, DocumentUploadRecovery } from './DocumentUploadStatus'
@@ -521,7 +521,8 @@ function FolderNode({ folder, depth, projectId, busyId, onDelete, onPreview, sel
           <path d="M1.8 4.2a1 1 0 0 1 1-1h3.4l1.6 1.8h5.4a1 1 0 0 1 1 1v6.2a1 1 0 0 1-1 1H2.8a1 1 0 0 1-1-1Z" />
         </svg>
         <strong title={folder.path}>{folder.name}</strong>
-        <span className="docFolderCount">{total}</span>
+        {/* 数字だけだと何の数か分からないため、配下の文書数として単位を付ける。 */}
+        <span className="docFolderCount">{messages.workspace.documentSelection.memberCount(total)}</span>
         <ActionMenu id={`document-folder-actions-${projectId}-${encodeURIComponent(folder.path)}`}
           label={messages.common.moreActions(folder.name)} ownerKey={folder.path} items={actions} />
       </summary>
@@ -563,13 +564,6 @@ function FolderNode({ folder, depth, projectId, busyId, onDelete, onPreview, sel
 function countSelectedDocuments(folder: DocumentTreeNode, selectedIds: ReadonlySet<string>): number {
   return folder.files.filter((document) => selectedIds.has(document.document_id)).length
     + folder.folders.reduce((sum, child) => sum + countSelectedDocuments(child, selectedIds), 0)
-}
-
-/** 一覧では簡潔な種別を使い、完全な MIME は tooltip と preview に残す。 */
-function documentTypeLabel(name: string): string | null {
-  const extension = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1).toLowerCase() : ''
-  const names: Record<string, string> = { xlsx: 'Excel', xls: 'Excel', doc: 'Word', docx: 'Word', ppt: 'PowerPoint', pptx: 'PowerPoint', md: 'Markdown', markdown: 'Markdown', html: 'HTML', htm: 'HTML' }
-  return names[extension] ?? (extension && extension.length <= 10 ? extension.toUpperCase() : null)
 }
 
 /** 一つの文書 row。preview は登録拡張子かつ上限内のときだけ有効化する。 */

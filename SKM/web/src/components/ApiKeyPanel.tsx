@@ -59,13 +59,13 @@ export function ApiKeyPanel({ session, onSessionEnded }: { session: AuthSessionR
         <span className="muted">{text.lastUsed}: {key.last_used_at ? formatLocalTimestamp(key.last_used_at) : text.never}</span>
       </div>
       {!key.revoked_at && (confirmed === key.id ? <div className="apiKeyRevoke">
-        <span>{text.confirm}</span><button className="dangerButton" disabled={busy} onClick={() => {
+        <span>{text.confirm}</span><button className="destructiveButton compactButton" disabled={busy} onClick={() => {
           mutation.submit((signal) => revokeApiKey(key.id, session.csrf_token, signal), () => {
             if (created?.api_key.id === key.id) setCreated(null)
             setConfirmed(null); query.refresh()
           }, (failure) => { if (failure.key === 'unknown') setReviewRevision(query.revision + 1) })
         }}>{text.revoke}</button>
-        <button className="secondaryButton" disabled={busy} onClick={() => setConfirmed(null)}>{messages.account.close}</button>
+        <button className="secondaryButton compactButton" disabled={busy} onClick={() => setConfirmed(null)}>{messages.elements.cancel}</button>
       </div> : <button className="secondaryButton" disabled={busy} onClick={() => setConfirmed(key.id)}>{text.revoke}</button>)}
     </article>)}</div>
   </section>

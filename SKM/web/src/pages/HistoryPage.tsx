@@ -54,11 +54,12 @@ export function HistoryPage({ projectId, csrfToken, readOnly = false }: { projec
     <>
       <PageHeader
         title={messages.routes.history.label}
-        aside={<span className="scopeBadge">{messages.historyPage.scopeBadge}</span>}
+        aside={<span className="scopeBadge" title={messages.historyPage.hint}>{messages.historyPage.scopeBadge}</span>}
       />
       <section className="panel historyPage" aria-label={messages.historyPage.aria}>
         <div className="panelHeader">
-          <h2>{messages.routes.history.label}</h2>
+          {/* 頁見出しを繰り返さず、今見ているのが現在の一覧かゴミ箱かを示す。 */}
+          <h2>{trashed ? messages.fileManagement.trash : messages.historyPage.listTitle}</h2>
           <div className="formRow historyManagementToolbar">
             <button className="secondaryButton compactButton" type="button" aria-pressed={!trashed} onClick={() => setTrashed(false)}>{messages.fileManagement.active}</button>
             <button className="secondaryButton compactButton" type="button" aria-pressed={trashed} onClick={() => setTrashed(true)}>{messages.fileManagement.trash}</button>

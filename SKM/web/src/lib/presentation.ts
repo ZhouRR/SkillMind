@@ -20,7 +20,14 @@ export function formatLocalTime(value: string): string {
   return Number.isNaN(date.valueOf()) ? value : date.toLocaleTimeString()
 }
 
-/** Byte 数を人が読める 1 単位の概数へ変換する（文書一覧と Skill 上传 preview が共用）。 */
+/** 一覧では簡潔な種別を使い、完全な MIME は tooltip と preview に残す(文書一覧と実行の添付一覧が共用)。 */
+export function documentTypeLabel(name: string): string | null {
+  const extension = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1).toLowerCase() : ''
+  const names: Record<string, string> = { xlsx: 'Excel', xls: 'Excel', doc: 'Word', docx: 'Word', ppt: 'PowerPoint', pptx: 'PowerPoint', md: 'Markdown', markdown: 'Markdown', html: 'HTML', htm: 'HTML' }
+  return names[extension] ?? (extension && extension.length <= 10 ? extension.toUpperCase() : null)
+}
+
+/** Byte 数を人が読める 1 単位の概数へ変換する（文書一覧・添付一覧と Skill 上传 preview が共用）。 */
 export function formatByteSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`

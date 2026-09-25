@@ -139,12 +139,13 @@ function RunResultContent({ reportOnly, state, csrfToken, onProposalDecided, art
         {result && <button className="secondaryButton compactButton" type="button" onClick={() => setDrawer('checks')}>{messages.runResult.reading.checks}</button>}
         <button className="secondaryButton compactButton" type="button" onClick={() => setDrawer('details')}>{messages.runResult.reading.details}</button></>}
       </div>
-      <ModalDialog drawer open={drawer === 'details'} title={messages.runResult.reading.details} onClose={() => setDrawer(null)}>
+      {/* 同じ toolbar から開く補助 drawer(実行情報・検証の範囲・証拠・人手評価)は同じ幅に揃える。 */}
+      <ModalDialog drawer wide open={drawer === 'details'} title={messages.runResult.reading.details} onClose={() => setDrawer(null)}>
         <dl className="runDetailFacts">
           <div><dt>{messages.workspace.runIdLabel}</dt><dd><code>{detail.run_id}</code></dd></div>
           <div><dt>{messages.runResult.taskVersionLabel}</dt><dd><code>{versionId ?? '—'}</code></dd></div>
           {result && <>
-            <div><dt>{messages.runResult.confidenceLabel}</dt><dd>{formatConfidence(result.confidence)} · {messages.runResult.reading.confidenceHint}</dd></div>
+            <div><dt>{messages.runResult.confidenceLabel}</dt><dd>{formatConfidence(result.confidence)}<small className="confidenceHint">{messages.runResult.reading.confidenceHint}</small></dd></div>
             <div><dt>{messages.runResult.structuredResult}</dt><dd>{result.result_kind === 'OUTCOME_ENVELOPE' ? messages.runResult.formatBadgeOutcome : (detail.output_schema_checksum ? messages.runResult.formatBadgeSchema : messages.runResult.formatBadgeLegacy)}</dd></div>
           </>}
         </dl>
@@ -157,7 +158,7 @@ function RunResultContent({ reportOnly, state, csrfToken, onProposalDecided, art
           {showTechnicalDetails ? messages.runResult.hideTechnicalDetails : messages.runResult.technicalDetails}
         </button>
       </ModalDialog>
-      <ModalDialog drawer open={drawer === 'checks'} title={messages.runResult.reading.checks} onClose={() => setDrawer(null)}>
+      <ModalDialog drawer wide open={drawer === 'checks'} title={messages.runResult.reading.checks} onClose={() => setDrawer(null)}>
         {result && <ResultValidationScope result={result} />}
       </ModalDialog>
       <ModalDialog drawer wide open={drawer === 'evidence'} title={messages.runResult.evidenceTitle} onClose={() => setDrawer(null)}>

@@ -208,31 +208,41 @@ export function AppNavigation({ currentRoute, metaState, projectId, projectState
             )}
           />
         </nav>
+        {/* footer は 1366×768 でも導航と同じ画面に収まるよう、外観と言語、本人と退出、
+            接続状態と API 文書をそれぞれ一行へまとめる。全操作は従来どおり同じ panel に残す。 */}
         <div className="sidebarFooter">
-          <ThemeToggle />
-          <ServiceStatus state={metaState} />
-          {/* 言語切替は認証済み sidebar だけに置き、選択は user preference として保存される。 */}
-          <label className="sidebarLanguage">
-            <span>{messages.language.label}</span>
-            <select
-              value={language}
-              onChange={(event) => {
-                const next = asUiLanguage(event.target.value)
-                if (next) onSelectLanguage(next)
-              }}
-            >
-              {UI_LANGUAGES.map((candidate) => (
-                <option key={candidate} value={candidate}>{messages.language.names[candidate]}</option>
-              ))}
-            </select>
-          </label>
-          <div className="sidebarUser">
-            <span>{user.display_name}</span>
-            <small>{user.system_role} · {user.email}</small>
+          <div className="sidebarPreferences">
+            <ThemeToggle compact />
+            {/* 言語切替は認証済み sidebar だけに置き、選択は user preference として保存される。
+                選択値の言語名が内容を示すため、見出しは読み上げ名としてだけ残す。 */}
+            <label className="sidebarLanguage">
+              <span className="visuallyHidden">{messages.language.label}</span>
+              <select
+                title={messages.language.label}
+                value={language}
+                onChange={(event) => {
+                  const next = asUiLanguage(event.target.value)
+                  if (next) onSelectLanguage(next)
+                }}
+              >
+                {UI_LANGUAGES.map((candidate) => (
+                  <option key={candidate} value={candidate}>{messages.language.names[candidate]}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="sidebarAccount">
+            <div className="sidebarUser" title={`${user.display_name}\n${user.email}`}>
+              <span>{user.display_name}</span>
+              <small>{messages.account.roles[user.system_role] ?? user.system_role} · {user.email}</small>
+            </div>
+            <button className="sidebarLogout" disabled={logoutPending} onClick={onLogout} type="button">{messages.nav.logout}</button>
           </div>
           {logoutError && <small className="sidebarError" role="alert">{logoutError}</small>}
-          <button className="sidebarLogout" disabled={logoutPending} onClick={onLogout} type="button">{messages.nav.logout}</button>
-          <a className="sidebarLink" href={`${import.meta.env.BASE_URL}api/docs`} onClick={closeMenu}>{messages.nav.apiDocs}</a>
+          <div className="sidebarMeta">
+            <ServiceStatus state={metaState} />
+            <a className="sidebarLink" href={`${import.meta.env.BASE_URL}api/docs`} onClick={closeMenu}>{messages.nav.apiDocs}</a>
+          </div>
         </div>
       </div>
     </aside>

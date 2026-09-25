@@ -13,6 +13,14 @@
 .runLauncher .panelHeader { border-color: var(--accent-border); }
 .runLauncher .hint { line-height: 1.75; }
 .runLauncher .primaryButton { margin-top: 8px; }
+/* 一覧表示では実行入口を一行の帯にまとめ、待機・実行中・報告の区画へ全幅を渡す。
+   入口だけの左 rail を残すと、その下が常に空白になるため。Run 閲覧時(workspaceReading)は従来の toolbar 配置。 */
+.workspace:not(.workspaceReading) { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+.workspace:not(.workspaceReading) .workspaceRail { position: static; max-height: none; }
+.workspace:not(.workspaceReading) .runLauncher { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 16px 22px; }
+.workspace:not(.workspaceReading) .runLauncher > .panelHeader { margin: 0; border: 0; padding: 0; }
+.workspace:not(.workspaceReading) .runLauncher > .hint { flex: 1 1 260px; margin: 0; }
+.workspace:not(.workspaceReading) .runLauncher > button { width: auto; margin: 0 0 0 auto; }
 .historyShortcut { box-shadow: none; }
 .observationPanel { min-height: 340px; }
 .observationPanel > .tabBar { gap: 8px; margin-bottom: 22px; }
@@ -55,7 +63,8 @@
 /* ---- 監査 event timeline ---- */
 /* Scrollbar が右端の「详情」hint に重ならないよう、常に gutter 分の余白を確保する。
    高さは viewport に追随させ、大画面で固定 440px に切り詰めない。 */
-.timeline { max-height: clamp(360px, 58vh, 720px); overflow: auto; margin: 0; padding: 0 10px 0 0; list-style: none; scrollbar-gutter: stable; }
+/* 監査 event は数百件になるため内部 scroll を保つが、高さは画面の残りを使い、下に空白を残したまま一覧だけを切らない。 */
+.timeline { max-height: clamp(360px, calc(100vh - 280px), 1400px); overflow: auto; margin: 0; padding: 0 10px 0 0; list-style: none; scrollbar-gutter: stable; }
 .timeline li { position: relative; margin-left: 6px; border-left: 1px solid var(--border-strong); padding-left: 18px; }
 .timeline li::before { content: ""; position: absolute; top: 22px; left: -4px; width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); box-shadow: 0 0 0 4px var(--surface); }
 .timeline li:last-child { border-bottom: 0; }
@@ -102,7 +111,8 @@
 .submissionNotice { display: grid; gap: 10px; min-width: 0; margin-bottom: 16px; padding: 14px; border: 1px solid var(--accent-border); border-radius: var(--radius-small); background: var(--surface-raised); overflow-wrap: anywhere; }
 .submissionNotice h3 { margin: 0 0 8px; font-size: 14px; }
 .submissionNotice p { margin: 4px 0; line-height: 1.6; }
-.submissionAcknowledgement { display: flex; align-items: flex-start; gap: 9px; margin: 0; font-size: 13px; line-height: 1.6; }
+/* 同意の checkbox は直後の送信 button と密着させず、確認してから押す間を取る。 */
+.submissionAcknowledgement { display: flex; align-items: flex-start; gap: 9px; margin: 4px 0 14px; font-size: 13px; line-height: 1.6; }
 .submissionAcknowledgement input { flex: 0 0 auto; width: 16px; height: 16px; min-height: 0; margin-top: 3px; padding: 0; accent-color: var(--accent-strong); }
 .message { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; background: var(--surface-input); }
 /* User と Agent は同じ幅で左右を揃え、役割は背景と左縁の色で区別する。 */
@@ -244,7 +254,15 @@
 .runArtifacts h3, .runArtifacts p { margin: 0; }
 .artifactList { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
 .artifactList > li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--border); border-radius: var(--radius-small); padding: 12px; }
-.artifactList > li > div { flex: 1 1 200px; min-width: 0; }
+.artifactList > li > .artifactInfo { flex: 1 1 260px; min-width: 0; }
+/* 操作 button は行の右端へ寄せ、名称欄と幅を等分しない(等分すると button が行の中央に浮く)。 */
+.artifactList > li > .panelHeaderActions { flex: 0 0 auto; margin-left: auto; }
+.artifactInfo > p { margin: 4px 0; }
+.artifactLocation { display: block; margin-top: 2px; color: var(--text-faint); font: 12px var(--font-mono); overflow-wrap: anywhere; }
+/* 未参照の添付が多い時の開閉。件数を見出しに示し、既定では閉じる。 */
+.artifactGroup { margin: 12px 0; }
+.artifactGroup > summary { color: var(--text-muted); font-size: 13px; font-weight: 600; cursor: pointer; }
+.artifactGroup[open] > summary { margin-bottom: 10px; }
 .artifactList strong, .artifactDownload strong, .artifactUnmatched code { overflow-wrap: anywhere; }
 .artifactDownload { display: grid; gap: 10px; min-width: 0; border: 1px solid var(--border); padding: 12px; border-radius: var(--radius-small); }
 .artifactDownload button, .runArtifacts > button { justify-self: start; }
@@ -255,6 +273,10 @@
 .documentChoices input[type="checkbox"] { flex: 0 0 auto; width: 16px; height: 16px; min-height: 0; margin-top: 2px; padding: 0; accent-color: var(--accent-strong); }
 .scheduleConfiguration { display: grid; gap: 12px; min-width: 0; border: 0; padding: 0; margin: 0; }
 .frozenDocumentSlot { min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-small); overflow-wrap: anywhere; }
+/* subsectionHeader の span は件数用の小型枠のため、題名と状態文言は専用の寸法で上書きする。 */
+.subsectionHeader .frozenDocumentTitle { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; height: auto; min-width: 0; color: var(--text); background: transparent; font: inherit; place-items: normal; }
+.frozenDocumentTitle code { color: var(--text-faint); font-size: 12px; }
+.subsectionHeader .frozenDocumentStatus { display: inline-flex; flex-shrink: 0; height: auto; padding: 3px 9px; border-radius: 999px; font: 600 12px var(--font-body); }
 .frozenDocumentSlot summary { cursor: pointer; color: var(--accent-strong); }
 .frozenDocumentFacts { display: grid; gap: 6px; margin: 8px 0; }
 .frozenDocumentFacts dt { color: var(--text-muted); font-size: 12px; }
@@ -529,7 +551,11 @@
 .historyPage .panelHeader { align-items: flex-start; }
 .historyPage .panelHeader > div:first-child { min-width: 0; }
 .historyPage .panelHeader .hint { margin: 5px 0 0; }
-.historyPage .historyList { max-height: none; }
+/* 履歴画面は頁全体が scroll するため一覧自身は scroll せず、scrollbar 用の余白で右端を欠けさせない。 */
+.historyPage .historyList { max-height: none; overflow-y: visible; padding-right: 0; scrollbar-gutter: auto; }
+.historyRange { margin: 12px 0 0; color: var(--text-faint); font: 12px var(--font-mono); text-align: center; }
+/* 確信度の数値と「正答率ではない」注記を一文に混ぜず、注記を補足行へ分ける。 */
+.confidenceHint { display: block; color: var(--text-faint); font-size: 12px; }
 
 /* ---- 项目文档管理器:project 文書を一覧・upload・download・削除する(upload button の見た目は base.css の .fileUploadButton) ---- */
 .documentUpload { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
@@ -566,14 +592,16 @@
 .documentInfo span { overflow: hidden; color: var(--text-faint); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .documentActions { display: flex; flex-shrink: 0; gap: 8px; }
 
-/* ---- 文書 tree:folder path を実階層として開閉表示する ---- */
-.documentTree { display: grid; gap: 8px; }
+/* ---- 文書 tree:folder path を実階層として開閉表示する ----
+   行の左右余白・開閉記号の幅・字下げを変数で共有し、階層が深くなっても
+   checkbox と行末「⋯」の位置が folder 行とファイル行で揃うようにする。 */
+.documentTree { --tree-row-pad: 12px; --tree-marker: 20px; --tree-indent: 20px; display: grid; gap: 8px; }
 .docFolder { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-small); background: var(--surface-input); }
 .docFolder summary {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 9px 12px;
+  padding: 9px var(--tree-row-pad);
   color: var(--text);
   cursor: pointer;
   font-size: 13px;
@@ -582,13 +610,17 @@
 }
 .docFolder summary:hover { background: var(--surface-hover); }
 .docFolder summary::-webkit-details-marker { display: none; }
-.docFolder summary::before { content: "▸"; color: var(--text-faint); font-size: 12px; }
+.docFolder summary::before { content: "▸"; flex: 0 0 calc(var(--tree-marker) - 8px); color: var(--text-faint); font-size: 12px; }
 .docFolder[open] > summary::before { content: "▾"; }
 .docFolderIcon { flex-shrink: 0; width: 15px; height: 15px; fill: none; stroke: var(--accent); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 .docFolder summary strong { flex: 1; min-width: 0; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .docFolder summary > input[type='checkbox'] { flex: 0 0 16px; width: 16px; height: 16px; min-height: 0; margin: 0; padding: 0; accent-color: var(--accent-strong); }
 .docFolderCount { margin-left: auto; color: var(--text-faint); font: 600 12px var(--font-mono); }
-.docFolderBody { display: grid; gap: 8px; border-top: 1px solid var(--border); padding: 10px 10px 10px 24px; }
+/* 入れ子の folder は枠を重ねず行として並べ、右余白を持たないことで行末の操作列を最上位 folder と揃える。 */
+.docFolderBody { display: grid; gap: 2px; border-top: 1px solid var(--border); padding: 6px 0 6px var(--tree-indent); }
+.docFolderBody .docFolder { border: 0; border-radius: 0; background: transparent; }
+.docFolderBody .documentList { gap: 2px; }
+.docFolderBody .documentItem { padding: 8px var(--tree-row-pad) 8px calc(var(--tree-row-pad) + var(--tree-marker)); }
 
 /* ---- 文書 preview:枠は共通 modal(base.css)に委ね、本文の見せ方だけをここで持つ ---- */
 .previewText { margin: 0; color: var(--text-muted); font: 12px/1.65 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -624,8 +656,9 @@
   .documentItem:has(> input[type='checkbox']) { grid-template-columns: 16px minmax(0, 1fr) auto; }
   .documentItem > input[type='checkbox'] { margin-top: 2px; }
   .documentActions { justify-content: flex-end; min-width: 0; }
-  .docFolder summary { gap: 6px; padding: 8px; }
-  .docFolderBody { padding: 8px 8px 8px 12px; }
+  .documentTree { --tree-row-pad: 8px; --tree-marker: 18px; --tree-indent: 12px; }
+  .docFolder summary { gap: 6px; }
+  .docFolder summary::before { flex-basis: calc(var(--tree-marker) - 6px); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -660,6 +693,8 @@
 
 /* 時刻と所要時間を併記し、狭いカードでも duration 自体は途中で折らない。 */
 .runDuration { font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* 所要時間などの見出しは値より一段控えめにし、区切り記号なしでも見出しと値を読み分けられるようにする。 */
+.runDurationLabel { color: var(--text-faint); }
 
 /* 補助操作は主リンクの右に置き、単独のボタン行を増やさない。 */
 .historyItem.historyHasActions { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
@@ -670,4 +705,3 @@
 .documentManagementToolbar { margin-bottom: 12px; }
 .documentManagementToolbar select { width: auto; }
 .documentManagementToolbar input { flex: 1 1 220px; min-width: 160px; }
-.documentManagementToolbar [aria-pressed='true'] { background: var(--surface-raised); border-color: var(--border-strong); }

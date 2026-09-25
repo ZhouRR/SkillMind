@@ -1,5 +1,7 @@
 import type { ProjectModuleRecord, PublishedTaskRecord } from '../api'
 import { validDocumentSelection } from './documentSelection'
+import { asResourceProvider } from './resourceConfig'
+import { PROVIDER_LABELS } from './resourceDrafts'
 
 /** 一つの Run 下書き。「どの task を、どの入力と来源で走らせるか」だけを持つ。
  *
@@ -23,6 +25,14 @@ export interface SourceRequirementChoice {
   access: string
   required: boolean
   options: Array<{ value: string; label: string }>
+  /** 全候補が同じ接続先製品の時だけ、その表示名(例 PostgreSQL)。同種の要求を見分ける見出しに使う。 */
+  provider?: string
+}
+
+/** 接続先 provider ID を製品の表示名へ変換する。未知の ID は原文のまま返す。 */
+function providerDisplayName(provider: string): string {
+  const known = asResourceProvider(provider)
+  return known ? PROVIDER_LABELS[known] : provider
 }
 
 /** Catalog 内で task を一意に識別する合成 key（精確 version + task key）。 */
@@ -36,16 +46,20 @@ export function taskCatalogId(task: PublishedTaskRecord): string {
  * 以前は manifest `data_sources` へ退避していたが、二重宣言が key ずれの原因だった。
  */
 export function sourceRequirements(task: PublishedTaskRecord): SourceRequirementChoice[] {
-  return (task.readiness?.requirements ?? []).map((requirement) => ({
-    key: requirement.key,
-    kind: requirement.kind,
-    access: requirement.access,
-    required: requirement.required,
-    options: requirement.candidates.map((candidate) => ({
-      value: candidate.key,
-      label: requirement.kind === 'document' ? candidate.label : `${candidate.label} · ${candidate.provider}`,
-    })),
-  }))
+  return (task.readiness?.requirements ?? []).map((requirement) => {
+    const providers = [...new Set(requirement.candidates.map((candidate) => candidate.provider))]
+    return {
+      key: requirement.key,
+      kind: requirement.kind,
+      access: requirement.access,
+      required: requirement.required,
+      options: requirement.candidates.map((candidate) => ({
+        value: candidate.key,
+        label: requirement.kind === 'document' ? candidate.label : `${candidate.label} · ${providerDisplayName(candidate.provider)}`,
+      })),
+      ...(requirement.kind !== 'document' && providers.length === 1 ? { provider: providerDisplayName(providers[0]!) } : {}),
+    }
+  })
 }
 
 /** 入力文書だけに単体/集合/全集を使う。成果保存先を入力の全集へ変換しない。 */

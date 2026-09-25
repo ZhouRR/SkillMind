@@ -37,6 +37,8 @@
 /* Run 選択後は作成 rail を補助 toolbar へ縮め、PC の横幅を報告本文へ渡す。 */
 .workspaceReading { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; max-width: 1320px; margin-inline: auto; }
 .workspaceReading .workspaceMain { display: contents; }
+/* 履歴へ戻る等の導線は右列へ寄せる。二列 grid のままだと空の列が残り、button が右端から浮く。 */
+.workspaceReading .workspaceMain > .formRow { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; }
 .workspaceReading .workspaceRail { grid-column: 2; grid-row: 1; position: static; display: flex; flex-direction: row; align-items: start; justify-content: space-between; gap: 12px; max-height: none; margin: 0; }
 .workspaceReading .workspaceRail .runLauncher, .workspaceReading .historyShortcut { min-width: 0; border: 0; border-radius: 0; padding: 0; background: transparent; box-shadow: none; }
 .workspaceReading .runLauncher { flex: 1; }
@@ -85,6 +87,12 @@
 .resultReportBody .subsectionHeader h3 { font-size: 16px; font-weight: 700; }
 .resultReportBody .outcomeStatus { justify-self: start; border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; color: var(--text-muted); background: var(--surface-raised); }
 .resultReportBody .outcomePartial { border-color: var(--warn-border); color: var(--warn); background: var(--warn-soft); }
+/* 完成度は状態色で読み分ける。完了は成功色、続行不可は危険色、一部完了・未確認は注意色とし、
+   主操作の琥珀色(accent)と混同させない。 */
+.outcomeStatus[data-status='COMPLETED'] { border-color: var(--ok-border); background: var(--ok-soft); }
+.outcomeStatus[data-status='COMPLETED'] strong { color: var(--ok); }
+.outcomeStatus[data-status='BLOCKED'] { border-color: var(--danger-border); background: var(--danger-soft); }
+.outcomeStatus[data-status='BLOCKED'] strong { color: var(--danger); }
 .resultReportBody .outcomeGroup { gap: 14px; }
 .resultReportBody .outcomeGroup h4 { font-size: 13px; color: var(--text-muted); }
 .resultReportBody .outcomeCard { gap: 12px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 0 0 22px; background: transparent; }
@@ -132,8 +140,14 @@
 }
 
 /* プラットフォームの監査要約は report 本文と区別し、展開後も狭幅で折り返す。 */
-.executionMetrics { margin: 8px 0 18px; color: var(--text-muted); font-size: 13px; }
-.executionMetrics summary { cursor: pointer; line-height: 1.7; }
+/* 実行診断も直下の備査区画(.resultCollapse)と同じ枠付きの開閉にし、見た目の違う開閉を隣接させない。 */
+.executionMetrics { overflow: hidden; margin: 8px 0 18px; border: 1px solid var(--border); border-radius: var(--radius-small); color: var(--text-muted); background: var(--surface-input); font-size: 13px; }
+.executionMetrics > summary { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; padding: 11px 13px; color: var(--text-hi); font-weight: 600; line-height: 1.6; cursor: pointer; list-style: none; }
+.executionMetrics > summary::-webkit-details-marker { display: none; }
+.executionMetrics > summary::before { content: "▸"; flex-shrink: 0; color: var(--text-faint); font-size: 12px; }
+.executionMetrics[open] > summary::before { content: "▾"; }
+.executionMetrics > summary:hover { background: var(--surface-hover); }
+.executionMetrics > .runFacts { margin: 0; border-top: 1px solid var(--border); padding: 13px; }
 .outcomePartial strong { color: var(--warn); }
 
 /* 原 Outcome の内容を、見出し・要約・根拠の順に読む共通の報告書式。 */

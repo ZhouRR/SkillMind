@@ -9,7 +9,7 @@ import { ProjectModulesPanel } from '../components/ProjectModulesPanel'
 import type { SessionEnded } from '../hooks/useResourceRequest'
 import { useMessages } from '../i18n'
 
-export { staleBindingIds } from '../components/ProjectModulesPanel'
+export { sortSkillOptions, staleBindingIds } from '../components/ProjectModulesPanel'
 export { projectDeleteErrorMessage } from '../lib/projectFeedback'
 
 /** tab は表示だけを切り替え、CRUD と membership の原要求を破棄しない。 */

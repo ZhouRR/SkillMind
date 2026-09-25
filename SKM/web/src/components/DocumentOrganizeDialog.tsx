@@ -19,7 +19,8 @@ export function DocumentOrganizeDialog({ edit, folders, busy, error, onClose, on
   const [folder, setFolder] = useState(edit.mode === 'MOVE_FOLDER' ? edit.source ?? '' : edit.folder)
   const [name, setName] = useState(edit.documents.length === 1 ? edit.documents[0]?.name ?? '' : '')
   const title = edit.mode === 'CREATE_FOLDER' ? m.newFolder : edit.mode === 'MOVE_FOLDER' ? `${m.rename} / ${m.move}` : edit.documents.length === 1 ? `${m.rename} / ${m.move}` : m.moveSelected
-  return <ModalDialog open title={title} onClose={() => { if (!busy) onClose() }}>
+  // 本文に「キャンセル」があるため、見出しの「閉じる」は重ねない(Escape と遮罩 click は有効)。
+  return <ModalDialog hideClose open title={title} onClose={() => { if (!busy) onClose() }}>
     <form className="formStack" onSubmit={(event) => { event.preventDefault(); if (!busy) onSave(folder, name) }}>
       {error && <p role="alert" className="error">{error}</p>}
       <label>{m.folder}<input value={folder} maxLength={200} disabled={busy} list="organize-folders" required={edit.mode !== 'MOVE'} onChange={(e) => setFolder(e.target.value)} /></label>

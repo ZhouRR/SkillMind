@@ -25,6 +25,8 @@ export interface UiMessages {
   account: {
     myAccount: string
     manageUsers: string
+    /** 組織ユーザー区画内の一覧見出し。区画の開閉見出し(manageUsers)と重ねない。 */
+    userListTitle: string
     draftMemoryOnly: string
     create: string
     edit: string
@@ -44,6 +46,8 @@ export interface UiMessages {
     newPassword: string
     confirmPassword: string
     initialPassword: string
+    /** ユーザー作成時の初期パスワード確認欄。 */
+    confirmInitialPassword: string
     passwordPolicy: string
     passwordMismatch: string
     changePassword: string
@@ -239,6 +243,8 @@ export interface UiMessages {
     noAgentText: string
     waitingAgentText: string
     structuredDone: string
+    /** 構造化結果の本文を読む場所の案内。tab 名は workspace.tabResult を渡し、文言の二重管理を避ける。 */
+    structuredWhere: (tab: string) => string
     factTopLevel: (count: number) => string
     factArrays: (count: number, items: number) => string
     factObjects: (count: number) => string
@@ -259,12 +265,16 @@ export interface UiMessages {
     emptyPage: string
     noSummary: string
     sourceUnavailable: string
+    /** 文書系の取得元 ID(project-documents / project-library)の表示名。外部製品名は翻訳しない。 */
+    documentSources: { documents: string; library: string }
     previous: string
     next: string
   }
   /** Project 全体の実行記録を Workspace から切り離して閲覧する画面。 */
   historyPage: {
     hint: string
+    /** 一覧 panel の見出し。頁見出しと重ねず、ゴミ箱表示との違いを示す。 */
+    listTitle: string
     scopeBadge: string
     openWorkspace: string
     aria: string
@@ -439,6 +449,10 @@ export interface UiMessages {
     delete: string
     cancel: string
     deleteConfirm: string
+    /** 削除確認で対象名の下に示す影響(取り消せないこと)。 */
+    deleteConfirmHint: string
+    /** 編集 drawer の見出し。何を編集中かを名前で示す。 */
+    editTitle: (name: string) => string
     keepSecret: string
     databaseHost: string
     databasePort: string
@@ -574,6 +588,8 @@ export interface UiMessages {
     scopeKeepAllOption: string
     scopeNarrowHint: string
     scopeUnrestrictedLabel: string
+    /** 一覧の範囲要約で使う scope key の見出し(tables・tool_names など)。 */
+    scopeKeyLabels: Record<string, string>
     pleaseSelect: string
     selectValidIntegration: string
     saveBinding: string
@@ -839,6 +855,8 @@ export interface UiMessages {
       previewUnavailable: string
       preview: string
       title: string; loading: string; empty: string; referenced: string; unreferenced: string
+      /** 未参照の添付が多い時に畳む見出し。件数を先に示し、参照された添付を埋もれさせない。 */
+      unreferencedGroup: (count: number) => string
       unavailableRefs: string; download: string; refresh: string; preparing: string; delivered: string; cancel: string; close: string
       failures: Record<'sessionExpired' | 'denied' | 'notFound' | 'contentInvalid' | 'storageUnavailable' | 'tooLarge' | 'loadFailed' | 'timeout', string>
     }
@@ -899,6 +917,8 @@ export interface UiMessages {
     deliverables: string
     noDeliverables: string
     findingsTitle: string
+    /** 発見事項の重要度表示。model が返す大文字小文字の揺れは呼出側で吸収し、未知の値は原文で示す。 */
+    severityLabels: Record<'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO' | 'WARNING' | 'ERROR', string>
     noFindings: string
     openQuestions: string
     noOpenQuestions: string
@@ -991,8 +1011,12 @@ export interface UiMessages {
     /** 資源種別の友好名。文書は候補が一件でも明示選択を要求する。 */
     resourceKind: Record<string, string>
     willUseSource: (label: string) => string
+    /** 同じ種別の要求が複数並ぶ時に、接続先の製品名で見分ける見出し。 */
+    sourceLabelWithProvider: (kind: string, provider: string) => string
     sourceNotConfigured: string
     freezeHint: string
+    /** リポジトリ要求がある時だけ添える注意。 */
+    freezeRepositoryHint: string
     /** 即時実行・調度が共用する文書範囲の選択と失効案内。 */
     documentSelection: {
       library: string
@@ -1146,6 +1170,8 @@ export interface UiMessages {
     kindLabel: string
     timezoneLabel: string
     cronLabel: string
+    /** cron 式の入力例。規則の書き方を知らない利用者が手本から始められるようにする。 */
+    cronHint: string
     runAtLabel: string
     endAtLabel: string
     maxRunsLabel: string

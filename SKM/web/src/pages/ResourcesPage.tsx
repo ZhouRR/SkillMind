@@ -404,7 +404,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                 return {
                   id: item.integration_id,
                   title: item.name,
-                  detail: `${provider === null ? item.provider : PROVIDER_LABELS[provider]} · ${accessText} · ${summarizeScope(item.scope, { wildcardLabel: messages.resources.scopeUnrestrictedLabel })}`,
+                  detail: `${provider === null ? item.provider : PROVIDER_LABELS[provider]} · ${accessText} · ${summarizeScope(item.scope, { wildcardLabel: messages.resources.scopeUnrestrictedLabel, keyLabels: messages.resources.scopeKeyLabels })}`,
                   status: item.status,
                   updatedAt: item.updated_at,
                   onEdit: () => void editIntegration(item),
@@ -415,19 +415,20 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
             </section>
           </section>
 
-          <ModalDialog open={deleteTarget !== null} title={messages.resources.deleteConfirm}
+          {/* 取り消せない削除の最終確認。対象名と影響を示し、実行 button は danger 実心で「キャンセル」と区別する。 */}
+          <ModalDialog hideClose open={deleteTarget !== null} title={messages.resources.deleteConfirm}
             onClose={() => { if (busy === null) setDeleteTarget(null) }}>
-            <p>{deleteTarget?.name}</p>
+            <p className="confirmMessage"><strong>{deleteTarget?.name}</strong>{'\n'}{messages.resources.deleteConfirmHint}</p>
             {error && deleteTarget !== null && <p className="error" role="alert">{error}</p>}
-            <div className="panelHeaderActions">
+            <div className="confirmActions">
               <button className="secondaryButton" disabled={busy !== null} onClick={() => setDeleteTarget(null)} type="button">{messages.resources.cancel}</button>
-              <button className="dangerButton" disabled={busy !== null} onClick={() => void removeResource()} type="button">{messages.resources.delete}</button>
+              <button className="destructiveButton" disabled={busy !== null} onClick={() => void removeResource()} type="button">{messages.resources.delete}</button>
             </div>
           </ModalDialog>
           <ModalDialog
             open={openDialog === 'connect'}
             drawer
-            title={editingIntegration === null ? messages.resources.connectTitle : messages.resources.edit}
+            title={editingIntegration === null ? messages.resources.connectTitle : messages.resources.editTitle(editingIntegration.name)}
             wide
             onClose={() => { if (busy === null) setOpenDialog(null) }}
           >
@@ -457,23 +458,29 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                   </div>
                 </div>
                 <p className="hint">{messages.resources.secretAdvancedHint}</p>
-                <ResourceList busy={busy !== null} items={secrets.map((item) => ({
+                <ResourceList busy={busy !== null} items={secrets.map((item) => {
+                  // 契約値(mcp / MANAGED)をそのまま並べず、製品名・読み取り方式・鍵バージョンの見出しで示す。
+                  const provider = asResourceProvider(item.provider)
+                  const resolver = item.resolver === 'ENVIRONMENT' ? messages.resources.resolverEnvOption
+                    : item.resolver === 'FILE' ? messages.resources.resolverFileOption
+                      : item.resolver === 'MANAGED' ? messages.resources.resolverManagedOption : item.resolver
+                  return {
                   id: item.secret_reference_id,
                   title: item.name,
-                  detail: `${item.provider} · ${item.resolver} · ${item.key_version}`,
+                  detail: `${provider === null ? item.provider : PROVIDER_LABELS[provider]} · ${resolver} · ${messages.resources.keyVersionLabel} ${item.key_version}`,
                   status: item.status,
                   updatedAt: item.updated_at,
                   onEdit: () => editSecret(item),
                   onDelete: () => { setError(null); setDeleteTarget(item) },
                   onDisable: item.status === 'ACTIVE' ? () => void perform(`secret-${item.secret_reference_id}`, (signal) => disableSecretReference(projectId, item.secret_reference_id, csrfToken, signal)) : undefined,
-                }))} />
+                }})} />
               </section>
             </section>
 
             <ModalDialog
               open={openDialog === 'secret'}
               drawer
-              title={editingSecret === null ? messages.resources.registerLocator : messages.resources.edit}
+              title={editingSecret === null ? messages.resources.registerLocator : messages.resources.editTitle(editingSecret.name)}
               onClose={() => { if (busy === null) setOpenDialog(null) }}
             >
               <form className="resourceForm" onSubmit={(event) => void submitSecret(event)}>
@@ -519,7 +526,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                 <ResourceList busy={busy !== null} items={bindings.map((item) => ({
                   id: item.binding_id,
                   title: `${item.requirement_key} · ${bindingLevelText(item.scope_level)}`,
-                  detail: `${item.provider} ${item.capability_version} · ${summarizeScope(item.scope, { wildcardLabel: messages.resources.scopeUnrestrictedLabel })}`,
+                  detail: `${item.provider} ${item.capability_version} · ${summarizeScope(item.scope, { wildcardLabel: messages.resources.scopeUnrestrictedLabel, keyLabels: messages.resources.scopeKeyLabels })}`,
                   status: item.run_id ? 'FROZEN' : 'ACTIVE',
                   updatedAt: item.updated_at,
                 }))} />
@@ -701,7 +708,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                 <ResourceList busy={busy !== null} items={policies.map((item) => ({
                   id: item.preauthorization_id,
                   title: `${item.capability_version} · ${item.operation}`,
-                  detail: `LOW · v${item.policy_version} · ${summarizeScope(item.scope, { wildcardLabel: messages.resources.scopeUnrestrictedLabel })}`,
+                  detail: `LOW · v${item.policy_version} · ${summarizeScope(item.scope, { wildcardLabel: messages.resources.scopeUnrestrictedLabel, keyLabels: messages.resources.scopeKeyLabels })}`,
                   status: item.status,
                   updatedAt: item.updated_at,
                   onDisable: item.status === 'ACTIVE' ? () => void perform(`policy-${item.preauthorization_id}`, (signal) => disableEffectPreauthorization(projectId, item.preauthorization_id, item.policy_version, csrfToken, signal)) : undefined,

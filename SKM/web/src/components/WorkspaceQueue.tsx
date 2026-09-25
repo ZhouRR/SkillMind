@@ -58,10 +58,13 @@ export function WorkspaceQueue(props: Parameters<typeof WorkspaceReports>[0]) {
           </a>
         </li>)}</ul>}
       <div className="pagination">
-        <button className="secondaryButton compactButton" disabled={offset === 0} type="button"
-          onClick={() => setOffset((value) => Math.max(0, value - PAGE_SIZE))}>{messages.runHistory.previous}</button>
-        <button className="secondaryButton compactButton" disabled={!page?.has_more} type="button"
-          onClick={() => setOffset((value) => value + PAGE_SIZE)}>{messages.runHistory.next}</button>
+        {/* 一頁に収まる間は押せない前後 button を並べず、再読込だけを残す。 */}
+        {(offset > 0 || page?.has_more) && <>
+          <button className="secondaryButton compactButton" disabled={offset === 0} type="button"
+            onClick={() => setOffset((value) => Math.max(0, value - PAGE_SIZE))}>{messages.runHistory.previous}</button>
+          <button className="secondaryButton compactButton" disabled={!page?.has_more} type="button"
+            onClick={() => setOffset((value) => value + PAGE_SIZE)}>{messages.runHistory.next}</button>
+        </>}
         <button className="secondaryButton compactButton" type="button"
           onClick={() => setRevision((value) => value + 1)}>{messages.runHistory.retry}</button>
       </div>

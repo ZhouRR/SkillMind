@@ -45,6 +45,16 @@ export function artifactTitle(artifact: RunArtifactRecord, result: RunResultDeta
   return titles.length === 1 ? titles[0]! : artifact.path.split('/').at(-1) || artifact.path
 }
 
+/** 同名の添付を見分けるための保存場所を短く示す。
+ *
+ *  先頭の output/ と末尾のファイル名を除き、UUID の区画は先頭 8 文字に縮める。
+ *  表示名の推測には使わない(名称は artifactTitle の厳密な照合だけが決める)。 */
+export function artifactLocation(path: string): string {
+  const segments = path.split('/').slice(0, -1)
+  if (segments[0] === 'output') segments.shift()
+  return segments.map((segment) => /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(segment) ? `${segment.slice(0, 8)}…` : segment).join('/')
+}
+
 /** Unknown 公開値を安全な表示文字列へ絞る。 */
 export function displayText(value: unknown, fallback: string): string {
   return typeof value === 'string' && value ? value : fallback

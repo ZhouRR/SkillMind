@@ -187,7 +187,9 @@ async def check_draft_publication(browser, url: str, output: Path) -> None:
             await publish.click()
             confirmation = page.get_by_role("dialog", name=labels["skills"]["publishVersion"], exact=True)
             await expect(confirmation).to_be_visible()
-            await confirmation.get_by_role("button", name=labels["elements"]["close"], exact=True).click()
+            # 確認 dialog は見出しの「閉じる」を持たず、本文の「キャンセル」で閉じる。
+            await expect(confirmation.get_by_role("button", name=labels["elements"]["close"], exact=True)).to_have_count(0)
+            await confirmation.get_by_role("button", name=labels["elements"]["cancel"], exact=True).click()
             await expect(publish).to_be_enabled()
             assert not api.publishes
             api.reject_publish = True

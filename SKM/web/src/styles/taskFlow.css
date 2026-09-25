@@ -1,6 +1,5 @@
 .taskFlowPanel { margin-top: 1.25rem; min-width: 0; }
 .taskFlowPanel > .panelHeader { align-items: start; flex-wrap: wrap; gap: .75rem; }
-.taskFlowPanel h2:focus { outline: 2px solid var(--accent, #29668a); outline-offset: .3rem; }
 .taskFlowPreview { min-width: 0; line-height: 1.65; }
 .taskFlowPreview p { white-space: pre-wrap; }
 .taskFlowPreview :is(p, strong, code, small, dd, summary) { overflow-wrap: anywhere; word-break: normal; }

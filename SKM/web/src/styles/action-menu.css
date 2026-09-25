@@ -3,10 +3,11 @@
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  /* 一覧行で隣に並ぶ compact button と同じ高さ・枠色にし、行内の操作列を揃える。 */
+  width: 34px;
+  height: 34px;
   padding: 6px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-small);
   background: transparent;
   color: var(--text-muted);

@@ -27,7 +27,7 @@ export function OutcomeEnvelopeResult({ data, schema, showTechnicalDetails, onEv
     : null
   return (
     <div className="outcomeEnvelope">
-      <div className={`outcomeStatus${data.status !== 'COMPLETED' ? ' outcomePartial' : ''}`}><strong>{messages.runResult.completionStatus} · {messages.runResult.completionStates[displayText(data.status, '')] ?? displayText(data.status, messages.runResult.outcomeUnknown)}</strong>{showTechnicalDetails && <span>{displayText(data.outcome_version, '—')}</span>}</div>
+      <div className={`outcomeStatus${data.status !== 'COMPLETED' ? ' outcomePartial' : ''}`} data-status={displayText(data.status, 'UNKNOWN')}><strong>{messages.runResult.completionStatus} · {messages.runResult.completionStates[displayText(data.status, '')] ?? displayText(data.status, messages.runResult.outcomeUnknown)}</strong>{showTechnicalDetails && <span>{displayText(data.outcome_version, '—')}</span>}</div>
       <OutcomeCollection title={messages.runResult.deliverables} empty={messages.runResult.noDeliverables} singleHeading>
         {deliverables.map((item, index) => (
           <article className="outcomeCard" key={displayText(item.key, `deliverable-${index}`)}>
@@ -45,7 +45,7 @@ export function OutcomeEnvelopeResult({ data, schema, showTechnicalDetails, onEv
       <OutcomeCollection title={messages.runResult.findingsTitle} empty={messages.runResult.noFindings}>
         {findings.map((item, index) => (
           <article className="outcomeCard" key={displayText(item.key, `finding-${index}`)}>
-            <div className="outcomeCardHeading"><h5>{displayText(item.title, displayText(item.key, messages.runResult.untitledLabel))}</h5>{typeof item.severity === 'string' && <span className="outcomeSeverity">{item.severity}</span>}</div>
+            <div className="outcomeCardHeading"><h5>{displayText(item.title, displayText(item.key, messages.runResult.untitledLabel))}</h5>{typeof item.severity === 'string' && <span className="outcomeSeverity" data-severity={item.severity.toUpperCase()}>{severityLabel(item.severity, messages.runResult.severityLabels)}</span>}</div>
             <MarkdownText text={displayText(item.detail, '—')} />
             {renderOutcomeRefs(stringItems(item.evidence_refs), showTechnicalDetails, messages.runResult.evidenceTitle)}
             {stringItems(item.evidence_refs).length > 0 && <button className="secondaryButton compactButton" type="button" onClick={() => onEvidence(stringItems(item.evidence_refs))}>{messages.runResult.viewExcerpt}</button>}
@@ -250,4 +250,9 @@ function schemaFieldLabel(value: unknown, fallback: string): string {
 /** Array 以外の JSON object を型付きへ絞り込む。 */
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Model が返す重要度(大文字小文字の揺れを含む)を利用者言語の表示名へ変換する。未知の値は推測せず原文で示す。 */
+function severityLabel(severity: string, labels: Record<string, string>): string {
+  return labels[severity.trim().toUpperCase()] ?? severity
 }

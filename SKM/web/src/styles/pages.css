@@ -322,15 +322,14 @@
   .streamDot { animation: none; }
 }
 
-/* ---- 项目文档画面:現在 Project の文書管理器のみの単列 layout(Project 切替は sidebar) ---- */
-.documentsPage { display: grid; gap: 16px; align-content: start; max-width: 1080px; }
+/* ---- 项目文档画面:現在 Project の文書管理器のみの単列 layout(Project 切替は sidebar) ----
+   本文幅は他画面と同じ shell 幅に揃え、見出し右端と一覧の右端をずらさない。 */
+.documentsPage { display: grid; gap: 16px; align-content: start; }
 
 /* ---- リソース管理:認証情報と権限を主画面に置き、個別管理は高度設定へ ---- */
 .resourceAdmin { display: grid; gap: 12px; }
 .resourceAdminError { margin: 0; }
-/* 一覧 panel が全幅に伸びて行が読みにくくならない程度に幅を抑える。 */
-.resourceTabPanel { max-width: 1080px; }
-.resourceAdvanced { max-width: 1080px; }
+/* 本文幅は他画面と同じ shell 幅に揃える(見出しと一覧の右端を一致させる)。 */
 .resourceAdvanced > .tabBar { margin-bottom: 16px; }
 .resourceForm { display: grid; gap: 11px; }
 .resourceForm textarea { min-height: 112px; }
@@ -357,7 +356,8 @@
 .resourceItem:hover { border-color: var(--border-strong); }
 .resourceInfo { display: grid; gap: 3px; min-width: 0; }
 .resourceInfo strong { overflow: hidden; color: var(--text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.resourceValue { overflow: hidden; color: var(--text-muted); font: 12px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+/* 範囲要約は利用者語の見出しを含むため本文 font で表示し、狭幅でも省略せず折り返して読ませる。 */
+.resourceValue { color: var(--text-muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .resourceInfo small { color: var(--text-faint); font-size: 12px; }
 /* 権限档位・scope 部分集合の radio/checkbox 群。moduleSkillPicker と同じ見た目規則を踏襲する。 */
 .scopePicker { display: grid; gap: 7px; margin: 0; border: 1px solid var(--border); border-radius: var(--radius-small); padding: 11px 12px; }
@@ -420,6 +420,8 @@
 .taskScheduleList .mono { overflow-wrap: anywhere; font-size: 12px; }
 .taskScheduleList small { color: var(--text-faint); font-size: 12px; }
 .scheduleActions { display: inline-flex; gap: 6px; margin-left: auto; }
+/* 予定確認 button は二列 grid の半分に押し込めず、内容幅で置く。 */
+.schedulePreviewActions { display: flex; flex-wrap: wrap; gap: 10px; margin: 4px 0 12px; }
 .schedulePreview { display: grid; gap: 4px; margin: 0 0 12px; padding-left: 20px; }
 .schedulePreview li { min-width: 0; overflow-wrap: anywhere; }
 
@@ -472,6 +474,9 @@
 /* Task の検索は一列の toolbar、狭幅では自然に折り返す。詳細 owner は一覧の filter で消さない。 */
 .taskFilters { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 24px; }
 .taskFilters label { flex: 1 1 220px; min-width: 0; margin: 0; }
+/* 自由入力の検索欄を主にし、選択肢の短い状態 select は必要な幅に留める。 */
+.taskFilters label:first-of-type { flex: 2 1 320px; }
+.taskFilters label:has(select) { flex: 0 1 240px; }
 .taskFilters input, .taskFilters select { width: 100%; min-width: 0; }
 .taskFilters > button { flex: 0 0 auto; width: auto; min-height: 42px; margin: 0; }
 [data-task-schedule-panel] { margin-top: 24px; }
@@ -493,6 +498,11 @@
 .apiKeyRevoke { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 /* 工具権限は名称と選択欄を同じ行で対応させる。 */
-.resourceToolPermission { display: grid; grid-template-columns: minmax(0, 1fr) minmax(10rem, 16rem); align-items: center; gap: 1rem; }
+/* MCP ツール区画:取得 button・有効化・説明・一覧を詰めずに縦へ並べる。 */
+.resourceFormSection { display: grid; gap: 10px; margin: 4px 0 8px; }
+.resourceFormSection > button { justify-self: start; }
+.resourceFormSection > .hint, .resourceFormSection > .scopeOption { margin: 0; }
+/* ツール名と許可の二列。許可を画面の右端まで離さず、名前の近くで読めるようにする。 */
+.resourceToolPermission { display: grid; grid-template-columns: minmax(8rem, 20rem) minmax(0, 1fr); align-items: center; gap: 1rem; }
 .resourceToolPermission code { overflow-wrap: anywhere; }
 @media (max-width: 640px) { .resourceToolPermission { grid-template-columns: 1fr; gap: .35rem; } }

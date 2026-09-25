@@ -13,9 +13,10 @@ export function RunDocumentSnapshots({ snapshots }: { snapshots: readonly RunDoc
       <p className="hint">{labels.hint}</p>
       {snapshots.map((entry) => (
         <div className="frozenDocumentSlot" key={entry.requirement_key}>
+          {/* 見出しは取得元の種別を利用者語で示し、Skill 側の要求 key は照合用の補助表示に留める。 */}
           <div className="subsectionHeader">
-            <strong>{entry.requirement_key}</strong>
-            <span>{labels.status[entry.status]}</span>
+            <span className="frozenDocumentTitle"><strong>{messages.workspace.resourceKind.document}</strong><code>{entry.requirement_key}</code></span>
+            <span className="frozenDocumentStatus">{labels.status[entry.status]}</span>
           </div>
           {entry.status === 'FROZEN' ? <>
             <p>{entry.snapshot.selection_mode === 'SINGLE' ? modes.single : entry.snapshot.selection_mode === 'SET' ? modes.set : modes.all}</p>

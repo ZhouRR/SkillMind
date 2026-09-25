@@ -17,6 +17,15 @@ export const PROVIDER_LABELS: Record<ResourceProvider, string> = {
   mcp: 'MCP',
 }
 
+/** Run の取得元 ID(資源 provider または文書系 ID)を画面表示名へ変換する。
+ *  未知の ID は推測で言い換えず原文のまま示す(新しい provider を隠さないため)。 */
+export function sourceProviderLabel(provider: string, documentLabels: { documents: string; library: string }): string {
+  if (provider === 'project-documents') return documentLabels.documents
+  if (provider === 'project-library') return documentLabels.library
+  const known = asResourceProvider(provider)
+  return known ? PROVIDER_LABELS[known] : provider
+}
+
 /** 「凭据を新規登録する」select 値。既存 SecretReference の UUID と衝突しない前綴を使う。 */
 export const NEW_CREDENTIAL = '__new__'
 

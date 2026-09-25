@@ -16,7 +16,8 @@ export function RunDuration({ run }: { run: { status: string; started_at?: strin
   const value = duration.kind === 'waiting' ? labels.durationWaiting
     : duration.kind === 'unknown' ? '—'
       : labels.durationValue(Math.floor(duration.seconds / 3600), Math.floor(duration.seconds / 60) % 60, duration.seconds % 60)
+  // 見出しと値は区切り記号で並べず(「·」は並列項目に見える)、見出しを控えめな色にして続ける。
   return <span className="runDuration" title={labels.durationHint}>
-    {duration.kind === 'elapsed' ? labels.elapsedLabel : labels.durationLabel} · {value}
+    <span className="runDurationLabel">{duration.kind === 'elapsed' ? labels.elapsedLabel : labels.durationLabel}</span> {value}
   </span>
 }

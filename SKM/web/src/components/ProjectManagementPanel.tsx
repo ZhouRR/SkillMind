@@ -9,7 +9,7 @@ import { PROJECT_REQUEST_POLICY } from '../lib/projectFeedback'
 import { validProjectDraft, type ProjectDraft, type ProjectIntent } from '../lib/projectManagement'
 import { routeHref } from '../lib/routing'
 import { EmptyState, LoadingSkeleton } from './PageElements'
-import { ProjectDraftFacts, ProjectFacts, ProjectIntentConfirmation, ProjectResponseNotice } from './ProjectManagementElements'
+import { ProjectDraftFacts, ProjectEditTarget, ProjectFacts, ProjectIntentConfirmation, ProjectResponseNotice } from './ProjectManagementElements'
 import { ProjectManagementReview } from './ProjectManagementReview'
 import { ActionMenu } from './ActionMenu'
 import '../styles/project-management.css'
@@ -117,10 +117,10 @@ function AdminProjectManagement(props: ProjectManagementProps) {
       </section>
       <aside className="panel projectSidePanel">
         <h2 ref={formHeading} tabIndex={-1}>{manager.editor.original ? messages.projects.editTitle : messages.projects.createTitle}</h2>
-        {manager.editor.original && <ProjectFacts project={manager.editor.original} />}
+        {manager.editor.original && <ProjectEditTarget project={manager.editor.original} />}
+        {/* 作成・編集 form の直下に画面移動の link を並べない。移動は sidebar が担う。 */}
         <ProjectMetadataForm draft={manager.editor.draft} editing={!!manager.editor.original} locked={manager.locked}
           onChange={manager.change} onSubmit={submit} onReset={() => { manager.edit(null); focusLanding() }} />
-        <ProjectLinks />
       </aside>
     </section>
     <section className="panel archivedProjects tabPanel" id="project-panel-archived" aria-labelledby="project-tab-archived" role="tabpanel" hidden={props.tab !== 'archived'} aria-busy={list.pending}>
@@ -146,7 +146,7 @@ export function ProjectRows({ projects, projectId, locked, admin, onSelect, onAc
       <strong>{project.name}</strong><span>{project.key}</span><small>{project.description || messages.projects.noDescription}</small>
       <small>{messages.projectManagement.states[project.status]}</small>
     </button>
-    {admin && <div className="projectItemActions"><button className="secondaryButton" type="button" data-project-action="edit" disabled={locked} onClick={() => onAction('edit', project)}>{messages.projects.edit}</button>
+    {admin && <div className="projectItemActions"><button className="secondaryButton compactButton" type="button" data-project-action="edit" disabled={locked} onClick={() => onAction('edit', project)}>{messages.projects.edit}</button>
       <ActionMenu label={messages.common.moreActions(project.name)} disabled={locked} items={project.status === 'ACTIVE'
         ? [{ id: 'archive', label: messages.projects.archive, onSelect: () => onAction('archive', project), danger: true }]
         : [

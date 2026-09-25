@@ -42,7 +42,8 @@ export function UserDirectory({ session, revision, onSessionEnded, onChanged }: 
   }
   return <div className="accountDirectory" data-account-directory="">
     <section className="panel" aria-busy={query.pending}>
-      <div className="panelHeader"><h2 ref={directoryHeading} tabIndex={-1}>{messages.manageUsers}</h2>
+      {/* 開閉見出し(組織ユーザー)と同じ語を繰り返さず、区画内は一覧であることだけを示す。 */}
+      <div className="panelHeader"><h2 ref={directoryHeading} tabIndex={-1}>{messages.userListTitle}</h2>
         <button type="button" className="secondaryButton" disabled={query.pending} onClick={query.refresh}>{messages.refresh}</button>
       </div>
       <form className="accountSearch" data-account-form="search" onSubmit={submitSearch}>

@@ -10,6 +10,11 @@
 .projectManagement .projectItemActions, .projectManagement .projectFormActions, .projectManagement .inlineActions { flex-wrap: wrap; }
 .projectManagement fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .projectIntent, .projectReview { display: grid; gap: 14px; border-color: var(--border-strong); background: var(--warn-soft); }
+/* panelHeader を持たない区画見出しも他 panel と同じ寸法・区切りにし、直下の入力 label と密着させない。 */
+.projectManagementLayout > .panel > h2 { margin: 0 0 18px; border-bottom: 1px solid var(--border); padding-bottom: 14px; color: var(--text-hi); font-size: 16px; font-weight: 700; }
+.projectEditTarget { display: grid; gap: 4px; margin: -6px 0 14px; color: var(--text-muted); font-size: 13px; }
+.projectEditTarget > p { margin: 0; }
+.projectEditTarget .detailDisclosure { padding: 8px 0 0; }
 .projectFacts { display: grid; gap: 6px; min-width: 0; }
 .projectFacts p { margin: 0; }
 .projectFacts dl { display: grid; gap: 8px; margin: 6px 0; }
@@ -21,7 +26,8 @@
 .projectAcknowledgment { display: flex; align-items: flex-start; gap: 10px; }
 .projectAcknowledgment input { width: 18px; height: 18px; flex: 0 0 18px; }
 .projectResponse { padding: 12px; border: 1px solid var(--danger); border-radius: var(--radius-small); overflow-wrap: anywhere; }
-.projectResponse:focus, .projectManagement h2:focus, .projectManagement h3:focus { outline: 2px solid var(--accent); outline-offset: 3px; }
+/* 焦点移動先の通知は keyboard 操作時だけ枠を出す(見出しの枠は base.css で描かない)。 */
+.projectResponse:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .projectPreviousUnknown summary { cursor: pointer; }
 @media (max-width: 960px) { .projectComparison { grid-template-columns: 1fr; } }
 @media (max-width: 600px) {
