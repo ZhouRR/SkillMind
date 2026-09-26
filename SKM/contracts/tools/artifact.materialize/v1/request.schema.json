@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_ref",
+    "purpose"
+  ],
+  "properties": {
+    "artifact_ref": {
+      "type": "string",
+      "pattern": "^art_[a-zA-Z0-9_-]+$",
+      "maxLength": 64
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/artifact.materialize/v1/request.schema.json",
+  "title": "artifact.materialize/v1 request"
+}

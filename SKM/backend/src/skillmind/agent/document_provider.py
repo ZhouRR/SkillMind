@@ -18,7 +18,12 @@ from skillmind.agent.tool_gateway import (
     RunToolContext,
     ToolProviderError,
 )
-from skillmind.artifacts.conversion import conversion_artifact, conversion_artifact_description
+from skillmind.agent.workspace_provider import _resolve_writable_path, _write_workspace_file
+from skillmind.artifacts.conversion import (
+    conversion_artifact,
+    conversion_artifact_description,
+    conversion_file_description,
+)
 from skillmind.core.hashing import sha256_hex
 from skillmind.documents.domain import DocumentContentError
 from skillmind.documents.observation_repository import (
@@ -144,6 +149,20 @@ class DocumentConvertProvider:
             )
         observation_ref = arguments.get("observation_ref")
         publish_artifact = arguments.get("publish_artifact", False)
+        response_mode = arguments.get("response_mode", "inline")
+        if not isinstance(response_mode, str) or response_mode not in {"inline", "file"} or (
+            response_mode == "file" and (
+                publish_artifact is not True
+                or "workspace.read/v1" not in context.run.permission_snapshot.get(
+                    "allowed_capabilities", []
+                )
+            )
+        ):
+            raise ToolProviderError(
+                "invalid_request",
+                "File delivery requires Artifact publication and workspace.read/v1",
+                retryable=False,
+            )
         if type(publish_artifact) is not bool:
             raise ToolProviderError(
                 "invalid_request", "Artifact publication flag must be boolean", retryable=False,
@@ -208,8 +227,18 @@ class DocumentConvertProvider:
         if not publish_artifact:
             return result
         artifact, fields = conversion_artifact(result.response, run_id=context.run_id)
+        response = {**result.response, "artifact": conversion_artifact_description(artifact)}
+        if response_mode == "file":
+            file = conversion_file_description(artifact)
+            _, _, target = await asyncio.to_thread(_resolve_writable_path, context, file["path"])
+            await asyncio.to_thread(
+                _write_workspace_file, context.workspace.root, target, artifact.content
+            )
+            # 原 byte は Artifact に保存する。モデルへの応答には本文を複製しない。
+            response.pop("markdown")
+            response["file"] = file
         return ProviderToolResult(
-            response={**result.response, "artifact": conversion_artifact_description(artifact)},
+            response=response,
             evidence=(*result.evidence, EvidenceDraft(**fields, artifact=artifact)),
         )
 

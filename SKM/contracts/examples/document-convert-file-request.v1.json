@@ -1,0 +1,6 @@
+{
+  "path": "specs/cases.xlsx",
+  "purpose": "Read converted file",
+  "publish_artifact": true,
+  "response_mode": "file"
+}

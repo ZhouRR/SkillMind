@@ -592,7 +592,7 @@ async def test_context_builder_opens_registered_workspace_read_and_search(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "capability", ["workspace.write/v1", "workspace.write/v2", "json.schema.validate/v1",
-                   "artifact.append/v1"]
+                   "artifact.append/v1", "artifact.materialize/v1"]
 )
 async def test_context_builder_opens_registered_workspace_capability(
     tmp_path: Path, capability: str,
@@ -624,7 +624,9 @@ async def test_context_builder_opens_registered_workspace_capability(
 
     assert [tool.capability for tool in context.tools] == [capability]
     assert context.tools[0].provider == (
-        "platform" if capability == "artifact.append/v1" else "workspace"
+        "platform"
+        if capability in {"artifact.append/v1", "artifact.materialize/v1"}
+        else "workspace"
     )
 
 

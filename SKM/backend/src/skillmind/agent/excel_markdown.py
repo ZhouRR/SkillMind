@@ -29,7 +29,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from skillmind.core.hashing import canonical_json
 
-STYLE_PROFILE = "excel-styles/v1"
+STYLE_PROFILE = "excel-styles/v2"
 VALUE_PROFILE = "excel-values/v1"
 _THEME_KEYS = (
     "lt1",
@@ -250,7 +250,9 @@ def _style_facts(sheet: Worksheet, colors: _Colors) -> dict[str, Any]:
                 if strike and text:
                     spans.append([offset, offset + len(text)])
                 offset += len(text)
-            rich_strikes.append({"cell": cell.coordinate, "strike_spans": spans})
+            # 削除線なしの rich text を列挙しない。base=true の明示解除だけは空範囲を残す。
+            if spans or cell.font.strike:
+                rich_strikes.append({"cell": cell.coordinate, "strike_spans": spans})
     facts: dict[str, Any] = {
         "profile": STYLE_PROFILE,
         "cell_styles": [
@@ -337,6 +339,98 @@ def _rich_segments(value: Any, strike: bool) -> list[tuple[str, bool]]:
     return pieces
 
 
+def _color_text(color: Mapping[str, Any]) -> str:
+    """原色指定と解決結果を短く併記し、未解決と tint の意味を保持する。"""
+    parts = [f"{color['type']}={color['value']}"]
+    if color.get("tint"):
+        parts.append(f"tint={color['tint']}")
+    if "rgb" in color:
+        parts.append(str(color["rgb"]))
+    if color.get("base_rgb") != color.get("rgb") and "base_rgb" in color:
+        parts.append(f"base={color['base_rgb']}")
+    parts.append(str(color["resolution"]))
+    return "; ".join(parts)
+
+
+def _fill_text(fill: Mapping[str, Any]) -> str:
+    """通常の塗りを文章化し、稀な gradient の詳細も失わない。"""
+    if fill["type"] == "none":
+        return "none"
+    if fill["type"] == "pattern":
+        text = f"{fill['pattern']}: {_color_text(fill['foreground'])}"
+        if "background" in fill:
+            text += f" / background: {_color_text(fill['background'])}"
+        return text
+    return json.dumps(fill, ensure_ascii=False, separators=(",", ":"))
+
+
+def _facts_table(headers: Sequence[str], rows: Iterable[Sequence[str]]) -> str:
+    """原文字を escape して、外部内容が Markdown の列や HTML を作らない表を返す。"""
+    lines = ["| " + " | ".join(headers) + " |", "| " + " | ".join("---" for _ in headers) + " |"]
+    lines.extend("| " + " | ".join(markdown_literal(value) for value in row) + " |" for row in rows)
+    return "\n".join(lines)
+
+
+def _style_markdown(facts: Mapping[str, Any]) -> str:
+    """書式事実を範囲表へ投影する。共通色は一回、巨大な range 配列は短い行へ分ける。"""
+    lines = ["### Excel style facts", "", f"Profile: {STYLE_PROFILE}"]
+    if "style_status" in facts:
+        lines.append(str(facts["style_status"]))
+    styles = facts.get("cell_styles", [])
+    fills: dict[str, str] = {}
+    for entry in styles:
+        key = canonical_json(entry["fill"])
+        fills.setdefault(key, f"F{len(fills) + 1}")
+    if fills:
+        lines.extend(["", _facts_table(
+            ["Fill", "Definition"],
+            ((label, _fill_text(json.loads(key))) for key, label in fills.items()),
+        )])
+    rows = []
+    for entry in styles:
+        ranges = entry["ranges"]
+        strike = entry.get("base_font_strike")
+        for start in range(0, len(ranges), 12):
+            rows.append((
+                ", ".join(ranges[start:start + 12]), fills[canonical_json(entry["fill"])],
+                "true" if strike is True else "false" if strike is False else "unspecified",
+            ))
+    if rows:
+        lines.extend(["", _facts_table(["Cells", "Fill", "Base strike"], rows)])
+    else:
+        lines.append("No explicit cell fill/strike entries." if "style_status" not in facts
+                     else "Cell formatting was not inspected.")
+    if "rich_text" in facts:
+        lines.extend(["", str(facts["rich_text_offsets"]), _facts_table(
+            ["Rich text cell", "Strike spans"],
+            ((item["cell"], ", ".join(f"[{a},{b})" for a, b in item["strike_spans"]) or "none")
+             for item in facts["rich_text"]),
+        )])
+    if "dimension_defaults" in facts:
+        lines.extend(["", str(facts["dimension_note"]), _facts_table(
+            ["Axis", "Key / bounds", "Fill", "Strike"],
+            ((item["axis"],
+              item["key"] + (f" ({item['min']}:{item['max']})" if "min" in item else ""),
+              _fill_text(item["fill"]), json.dumps(item["strike"]))
+             for item in facts["dimension_defaults"]),
+        )])
+    if "merged_ranges" in facts:
+        lines.extend(["", str(facts["merge_note"])])
+        merges = facts["merged_ranges"]
+        lines.extend("Merged: " + ", ".join(merges[i:i + 12]) for i in range(0, len(merges), 12))
+    # 条件式など複雑な例外だけ JSON 表記を残す。内容を評価済みとして扱わない。
+    for key in ("conditional_formats", "table_styles"):
+        if key in facts:
+            lines.extend(["", key + " (NOT_EVALUATED)", _facts_table(
+                ["Range", "Details"],
+                ((item["range"], json.dumps({k: v for k, v in item.items() if k != "range"},
+                  ensure_ascii=False, separators=(",", ":"))) for item in facts[key]),
+            )])
+    if "sheet_state" in facts:
+        lines.append("Sheet state: " + str(facts["sheet_state"]))
+    return "\n".join(lines)
+
+
 def _sheet_table(
     rows: Sequence[Sequence[str]],
     sheet: Worksheet | None,
@@ -411,17 +505,12 @@ def render_styled_sheets(
                 if sheet is not None and colors is not None
                 else {"profile": STYLE_PROFILE, "style_status": "NOT_INSPECTED"}
             )
-            facts["limitations"] = limitations
-            encoded = json.dumps(facts, ensure_ascii=False, indent=2)
-            # 原式に backtick が含まれても code fence の外へ出ない。
-            fence = "`" * max(
-                3, 1 + max((len(run) for run in re.findall(r"`+", encoded)), default=0)
-            )
             sections.append(
                 f"## {markdown_literal(name)}\n{body}\n\n"
-                f"### Excel style facts\n\n{fence}json\n{encoded}\n{fence}"
+                + _style_markdown(facts)
             )
-        return "\n\n".join(sections).strip()
+        coverage = "> Excel format coverage: " + STYLE_PROFILE + ". " + " ".join(limitations)
+        return coverage + "\n\n" + "\n\n".join(sections).strip()
     finally:
         if book is not None:
             book.close()

@@ -1,0 +1,39 @@
+{
+  "status": "success",
+  "provider": "project",
+  "document": {
+    "document_id": "11111111-1111-4111-8111-111111111111",
+    "folder": "specs",
+    "name": "sample.xlsx",
+    "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "checksum": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "size": 1200
+  },
+  "converter": {
+    "name": "markitdown",
+    "version": "0.1.7"
+  },
+  "evidence_refs": [
+    "ev_conversion_001",
+    "ev_conversion_artifact_001"
+  ],
+  "warnings": [
+    "Conversion may omit formatting and drawings; do not infer original cell coordinates."
+  ],
+  "markdown_checksum": "sha256:fb030efad22cb77e3658163c36e833ef34c7fcbc5f3a70214cfdfa288f2d4b0b",
+  "artifact": {
+    "path": "output/document-conversions/11111111-1111-4111-8111-111111111111/source.md",
+    "size_bytes": 59,
+    "content_hash": "sha256:fb030efad22cb77e3658163c36e833ef34c7fcbc5f3a70214cfdfa288f2d4b0b",
+    "mime_type": "text/plain"
+  },
+  "artifact_refs": [
+    "art_conversion_001"
+  ],
+  "file": {
+    "path": "workspace/document-conversions/fb030efad22cb77e3658163c36e833ef34c7fcbc5f3a70214cfdfa288f2d4b0b.md",
+    "content_hash": "sha256:fb030efad22cb77e3658163c36e833ef34c7fcbc5f3a70214cfdfa288f2d4b0b",
+    "size_bytes": 59,
+    "total_lines": 4
+  }
+}

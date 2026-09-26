@@ -9,7 +9,6 @@
     "provider",
     "document",
     "converter",
-    "markdown",
     "markdown_checksum",
     "evidence_refs",
     "warnings"
@@ -145,6 +144,36 @@
       "minLength": 1,
       "maxLength": 512,
       "description": "Exact source object key from the authorized project document storage reference. Not a user-supplied path, URL or permission. Absent from historical responses and sources that do not expose it. A new verified acquisition may return it even when using a legacy observation."
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "content_hash",
+        "size_bytes",
+        "total_lines"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^workspace/",
+          "maxLength": 4096
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576
+        },
+        "total_lines": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
     }
   },
   "dependentRequired": {
@@ -154,5 +183,29 @@
     "artifact_refs": [
       "artifact"
     ]
-  }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "markdown"
+      ],
+      "not": {
+        "required": [
+          "file"
+        ]
+      }
+    },
+    {
+      "required": [
+        "file",
+        "artifact",
+        "artifact_refs"
+      ],
+      "not": {
+        "required": [
+          "markdown"
+        ]
+      }
+    }
+  ]
 }

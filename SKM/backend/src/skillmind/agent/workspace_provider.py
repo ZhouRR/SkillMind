@@ -58,6 +58,15 @@ class WorkspaceReadProvider:
             _read_workspace_bytes, context, relative, path, max_bytes=_MAX_FILE_BYTES
         )
         content = _decode_content(data)
+        expected_hash = arguments.get("expected_hash")
+        if expected_hash is not None and expected_hash != content.checksum:
+            raise ToolProviderError(
+                "invalid_request",
+                "Workspace file changed; restore the original Artifact or verify its new version",
+                retryable=False,
+            )
+        if "offset" in arguments or "max_chars" in arguments:
+            return _character_page(context, relative, content, arguments)
         window = select_line_window(
             content.text,
             arguments,
@@ -91,6 +100,41 @@ class WorkspaceReadProvider:
                 ),
             ),
         )
+
+
+def _character_page(
+    context: RunToolContext, relative: str, content: _TextContent, arguments: Mapping[str, Any],
+) -> ProviderToolResult:
+    """長い一行も欠落なく読める Unicode offset と正確な次位置を返す。"""
+    offset, limit = arguments.get("offset", 0), arguments.get("max_chars", 12_000)
+    if (type(offset) is not int or not 0 <= offset <= len(content.text)
+        or type(limit) is not int or not 1 <= limit <= 16_000
+        or "line_start" in arguments or "line_end" in arguments):
+        raise ToolProviderError("invalid_request", "Invalid file page range", retryable=False)
+    end = min(len(content.text), offset + limit)
+    text = content.text[offset:end]
+    # 行範囲は位置案内であり、部分行の続行には必ず offset を使う。
+    start_line = 1 + len(content.text[:offset].splitlines()) - (
+        1 if offset and not content.text[:offset].endswith(("\r", "\n")) else 0
+    )
+    end_line = len(content.text[:end].splitlines())
+    page = {"offset": offset, "next_offset": end if end < len(content.text) else None,
+            "total_chars": len(content.text)}
+    return ProviderToolResult(
+        response={
+            "status": "success", "provider": "workspace", "path": relative,
+            "content": text, "content_hash": content.checksum,
+            "line_start": start_line, "line_end": end_line,
+            "truncated": end < len(content.text), "warnings": [], **page,
+        },
+        evidence=(EvidenceDraft(
+            evidence_type="workspace-file", source_uri=_workspace_uri(context, relative),
+            source_locator={"path": relative, "offset": offset, "end_offset": end,
+                            "line_start": start_line, "line_end": end_line},
+            content_hash=content.checksum, excerpt=text[:2_000],
+            metadata={"scope": "run-workspace", "read_only": True},
+        ),),
+    )
 
 
 class WorkspaceSearchProvider:

@@ -1,6 +1,6 @@
 {
   "catalog_version": "skillmind.tool-catalog/1",
-  "checksum": "sha256:622b9f74812f215b0910fddd8ec54773cc74594fb980328be7aa1a6c207038da",
+  "checksum": "sha256:e5944a2f9d7a9e561ca4fca5205fd00afb7b7fd163679ea248db14283775c1d0",
   "capabilities": [
     {
       "capability": "artifact.append/v1",
@@ -8,6 +8,16 @@
       "request_schema": "tools/artifact.append/v1/request.schema.json",
       "response_schema": "tools/artifact.append/v1/response.schema.json",
       "error_schema": "tools/artifact.append/v1/error.schema.json",
+      "providers": [
+        "platform"
+      ]
+    },
+    {
+      "capability": "artifact.materialize/v1",
+      "description": "Copy exact saved bytes of an Artifact from this Run to a readable workspace file, returning only path/hash/size. Restores missing local files without re-conversion or model transcription. Read in bounded pages with workspace.read.",
+      "request_schema": "tools/artifact.materialize/v1/request.schema.json",
+      "response_schema": "tools/artifact.materialize/v1/response.schema.json",
+      "error_schema": "tools/artifact.materialize/v1/error.schema.json",
       "providers": [
         "platform"
       ]
@@ -54,7 +64,7 @@
     },
     {
       "capability": "document.convert/v1",
-      "description": "Convert frozen XLSX/XLS with Worker MarkItDown; return full Markdown, source/output hashes, version and conversion warnings. observation_ref pins acquisition to same-Run inspect/list Evidence; mismatches fail. For exact backup, publish_artifact=true persists the returned Markdown as a Run Artifact. Use artifact_refs and artifact size/hash in an approved document.write proposal; do not retype Markdown. Conversion does not upload to MinIO.",
+      "description": "Convert frozen Excel with Worker MarkItDown. Prefer response_mode=file and publish_artifact=true: returns a readable file path/hash/size and immutable Artifact refs, not the full body. Read via workspace.read offset/max_chars/expected_hash, following next_offset until null. Publish original Artifact bytes with approved document.write. observation_ref pins acquisition to same-Run inspect/list Evidence; mismatches fail. Inline remains available when workspace reading is unavailable.",
       "request_schema": "tools/document.convert/v1/request.schema.json",
       "response_schema": "tools/document.convert/v1/response.schema.json",
       "error_schema": "tools/document.convert/v1/error.schema.json",
@@ -235,7 +245,7 @@
     },
     {
       "capability": "workspace.read/v1",
-      "description": "Read one UTF-8 file from the isolated Run workspace.",
+      "description": "Read one UTF-8 file from the isolated Run workspace. For bounded reading use offset=0, max_chars=12000 and expected_hash; follow next_offset until null. Offsets count Unicode characters, not bytes.",
       "request_schema": "tools/workspace.read/v1/request.schema.json",
       "response_schema": "tools/workspace.read/v1/response.schema.json",
       "error_schema": "tools/workspace.read/v1/error.schema.json",

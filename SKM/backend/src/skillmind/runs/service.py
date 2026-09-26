@@ -302,6 +302,11 @@ class RunService:
                                 and execution_profile in {"SUPERVISED", "DELEGATED"}
                                 else set()
                             ),
+                            *(
+                                {"artifact.materialize/v1"}
+                                if "workspace.read/v1" in resolved.allowed_capabilities
+                                else set()
+                            ),
                             INTERACTION_REQUEST_CAPABILITY,
                             *(
                                 {SUBAGENT_DISPATCH_CAPABILITY}

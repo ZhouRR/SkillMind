@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from skillmind.agent.artifact_append import ArtifactAppendProvider
+from skillmind.agent.artifact_materialize import ArtifactMaterializeProvider
 from skillmind.agent.audit_export import AuditExportProvider
 from skillmind.agent.contract_store import ContractStore
 from skillmind.agent.control_providers import (
@@ -210,7 +211,13 @@ def document_convert_tool_definition(
         description=(
             "Convert one frozen Excel using Worker MarkItDown. Set publish_artifact=true to "
             "save the exact Markdown as a Run Artifact for approved document backup; use its "
-            "artifact_refs and artifact size/hash instead of rewriting the Markdown."
+            "artifact_refs and artifact size/hash instead of rewriting the Markdown. "
+            "When workspace.read/v1 is allowed, use response_mode=file with publish_artifact=true: "
+            "returns a readable file path, checksum and line count without the full body. "
+            "Read that file with workspace.read offset=0, max_chars=12000 and expected_hash; "
+            "follow next_offset until null to cover the full document. If the local copy is "
+            "missing or changed, restore the same artifact_ref using artifact.materialize/v1. "
+            "Inline is the legacy fallback when file reading is unavailable."
         ),
         providers={DOCUMENT_PROVIDER: DocumentConvertProvider(source, observations=observations)},
     )
@@ -256,6 +263,7 @@ def create_run_tool_registry(
     document_readiness_provider: ToolProvider | None = None,
     audit_export_provider: ToolProvider | None = None,
     artifact_append_provider: ToolProvider | None = None,
+    artifact_materialize_provider: ToolProvider | None = None,
     redmine_issue_provider: ToolProvider | None = None,
     database_provider: ToolProvider | None = None,
     mcp_provider: ToolProvider | None = None,
@@ -298,6 +306,22 @@ def create_run_tool_registry(
                 unbound_provider="platform",
             ),
             *_workspace_tool_definitions(contracts),
+            _tool_definition(contracts,
+                sequence_safe=True,
+                capability="artifact.materialize/v1",
+                description=(
+                    "Download exact saved UTF-8 bytes from an Artifact of this Run to a readable "
+                    "workspace file. Returns file metadata only, never the body. "
+                    "Use workspace.read "
+                    "with offset=0, max_chars=12000 and expected_hash, following next_offset. "
+                    "Restores missing or modified local copies without re-conversion "
+                    "or publication."
+                ),
+                providers={
+                    "platform": artifact_materialize_provider or ArtifactMaterializeProvider(None)
+                },
+                unbound_provider="platform", minimum_execution_profile="GUIDED",
+            ),
             _tool_definition(contracts,
                 sequence_safe=True,
                 capability="artifact.append/v1",
@@ -452,7 +476,10 @@ def _workspace_tool_definitions(contracts: ContractStore) -> tuple[ToolDefinitio
         _tool_definition(contracts,
             sequence_safe=True,
             capability="workspace.read/v1",
-            description="Read one UTF-8 file from the isolated Run workspace",
+            description=("Read one UTF-8 Run file. For large files use offset=0, max_chars=12000 "
+                         "and expected_hash; follow next_offset until null. Offsets count Unicode "
+                         "characters, not bytes. Line ranges are an alternative. Never infer full "
+                         "coverage from a truncated response or search matches alone."),
             providers={"workspace": WorkspaceReadProvider()},
             unbound_provider="workspace",
             minimum_execution_profile="GUIDED",

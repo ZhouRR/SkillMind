@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from copy import copy
 from io import BytesIO
 from typing import Any
@@ -17,7 +16,7 @@ from openpyxl.styles import Color, Font, GradientFill, PatternFill
 from openpyxl.styles.fills import Stop
 
 from skillmind.agent.binary_text import convert_excel_to_markdown, render_excel_markdown
-from skillmind.agent.excel_markdown import _CellTokens, _Colors, _compact_ranges
+from skillmind.agent.excel_markdown import _CellTokens, _Colors, _compact_ranges, markdown_literal
 
 
 def _bytes(book: Workbook) -> bytes:
@@ -40,11 +39,6 @@ def _book() -> Workbook:
     return book
 
 
-def _facts(markdown: str) -> dict[str, Any]:
-    """一枚の sheet の JSON 事実を本文から取得する。"""
-    return json.loads(markdown.split("```json\n", 1)[1].split("\n```", 1)[0])
-
-
 def _convert(book: Workbook) -> str:
     """本番の MarkItDown 経路まで通す。"""
     return render_excel_markdown(".xlsx", _bytes(book))
@@ -58,10 +52,9 @@ def test_any_solid_fill_preserves_raw_and_resolved_color(rgb: str) -> None:
     book = _book()
     book["Cases"]["B2"].fill = PatternFill("solid", fgColor=rgb)
     markdown = _convert(book)
-    facts = _facts(markdown)
-    color = facts["cell_styles"][0]["fill"]["foreground"]
-    assert facts["cell_styles"][0]["ranges"] == ["B2"]
-    assert color["value"] == rgb and color["rgb"] == "#" + rgb[-6:]
+    assert "| B2 | F1 | unspecified |" in markdown
+    assert f"rgb={rgb}" in markdown and "#" + rgb[-6:] in markdown
+    assert "```json" not in markdown
     assert "old action" in markdown and "new action" in markdown
     assert "~~old action~~" not in markdown
 
@@ -74,7 +67,7 @@ def test_whole_cell_strike_and_literal_tildes_are_distinct() -> None:
     markdown = _convert(book)
     assert "~~old action~~" in markdown
     assert r"\~\~literal\~\~" in markdown
-    assert _facts(markdown)["cell_styles"][0]["base_font_strike"] is True
+    assert "| B2 | F1 | true |" in markdown
 
 
 def test_rich_text_keeps_exact_struck_span_and_explicit_false() -> None:
@@ -90,7 +83,7 @@ def test_rich_text_keeps_exact_struck_span_and_explicit_false() -> None:
     markdown = _convert(book)
     assert "~~旧😀~~" in markdown
     assert "~~入力" not in markdown and "~~新しい" not in markdown
-    assert _facts(markdown)["rich_text"] == [{"cell": "B2", "strike_spans": [[3, 5]]}]
+    assert "| B2 | " + markdown_literal("[3,5)") + " |" in markdown
 
 
 def test_empty_and_duplicate_headers_keep_original_row_and_columns() -> None:
@@ -116,7 +109,7 @@ def test_compaction_preserves_holes_and_blank_color_legends() -> None:
     for coordinate in ("A2", "B2", "A3", "B3", "D8"):
         sheet[coordinate].fill = PatternFill("solid", fgColor="FF00AABB")
     markdown = _convert(book)
-    assert _facts(markdown)["cell_styles"][0]["ranges"] == ["A2:B3", "D8"]
+    assert "| A2:B3, D8 | F1 | unspecified |" in markdown
     assert _compact_ranges([(1, 1), (1, 3), (2, 1), (2, 2), (2, 3)]) == ["A1", "C1", "A2:C2"]
 
 
@@ -126,9 +119,10 @@ def test_theme_color_uses_workbook_theme_and_hls_tint(tint: float, expected: str
     book = _book()
     book.loaded_theme = b"""<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:themeElements><a:clrScheme name="test"><a:lt1><a:srgbClr val="112233"/></a:lt1><a:dk1><a:srgbClr val="334455"/></a:dk1><a:accent1><a:srgbClr val="FF0000"/></a:accent1></a:clrScheme></a:themeElements></a:theme>"""
     book["Cases"]["B2"].fill = PatternFill("solid", fgColor=Color(theme=4, tint=tint))
-    color = _facts(_convert(book))["cell_styles"][0]["fill"]["foreground"]
-    assert color["type"] == "theme" and color["value"] == 4
-    assert color["tint"] == tint and color["rgb"] == expected
+    markdown = _convert(book)
+    assert "theme=4" in markdown and expected in markdown
+    if tint:
+        assert f"tint={tint}" in markdown
 
 
 def test_custom_indexed_palette_and_reserved_system_colors() -> None:
@@ -139,11 +133,10 @@ def test_custom_indexed_palette_and_reserved_system_colors() -> None:
     sheet["A2"].fill = PatternFill("solid", fgColor=Color(indexed=1))
     sheet["B2"].fill = PatternFill("solid", fgColor=Color(indexed=64))
     sheet["C2"].fill = PatternFill("solid", fgColor=Color(auto=True))
-    facts = _facts(_convert(book))
-    by_range = {item["ranges"][0]: item["fill"]["foreground"] for item in facts["cell_styles"]}
-    assert by_range["A2"]["rgb"] == "#ABCDEF"
-    assert by_range["B2"]["resolution"] == "UNRESOLVED" and "rgb" not in by_range["B2"]
-    assert by_range["C2"]["resolution"] == "UNRESOLVED"
+    markdown = _convert(book)
+    assert markdown_literal("indexed=1; #ABCDEF; RESOLVED") in markdown
+    assert "indexed=64; UNRESOLVED" in markdown
+    assert "auto=True; UNRESOLVED" in markdown
 
 
 def test_missing_theme_keeps_unresolved_number() -> None:
@@ -162,11 +155,10 @@ def test_pattern_and_gradient_are_not_flattened_to_one_color() -> None:
     sheet["B3"].fill = GradientFill(
         degree=45, stop=[Stop(Color(rgb="FFFF0000"), 0), Stop(Color(rgb="FF00FF00"), 1)]
     )
-    values = _facts(_convert(book))["cell_styles"]
-    by_range = {item["ranges"][0]: item["fill"] for item in values}
-    assert by_range["B2"]["background"]["rgb"] == "#0000FF"
-    assert by_range["B3"]["type"] == "gradient" and by_range["B3"]["degree"] == 45
-    assert len(by_range["B3"]["stops"]) == 2
+    markdown = _convert(book)
+    assert "darkGrid" in markdown and "background: rgb=FF0000FF" in markdown
+    assert '"type":"gradient"' in markdown and '"degree":45' in markdown
+    assert '"position":0' in markdown and '"position":1' in markdown
 
 
 def test_conditional_fill_and_strike_are_explicitly_unevaluated() -> None:
@@ -189,12 +181,11 @@ def test_conditional_fill_and_strike_are_explicitly_unevaluated() -> None:
         ColorScaleRule(start_type="min", start_color="FF0000", end_type="max", end_color="00FF00"),
     )
     markdown = _convert(book)
-    facts = _facts(markdown)
-    assert all(item["evaluation"] == "NOT_EVALUATED" for item in facts["conditional_formats"])
-    rule = facts["conditional_formats"][0]["rules"][0]
-    assert rule["formulas"] == ['"obsolete"'] and rule["strike"] is True
+    assert "NOT_EVALUATED" in markdown
+    assert "| A2:C3 |" in markdown and "| A5:A8 |" in markdown
+    assert "obsolete" in markdown and '"strike":true' in markdown
     assert "~~old action~~" not in markdown
-    assert facts["cell_styles"][0]["fill"]["foreground"]["rgb"] == "#FFFF00"
+    assert "#FFFF00" in markdown
 
 
 def test_merged_anchors_and_dimension_defaults_are_not_expanded() -> None:
@@ -205,10 +196,9 @@ def test_merged_anchors_and_dimension_defaults_are_not_expanded() -> None:
     sheet["B2"].fill = PatternFill("solid", fgColor="FFFF0000")
     sheet.row_dimensions[4].fill = PatternFill("solid", fgColor="FF00FF00")
     sheet.column_dimensions["D"].font = Font(strike=True)
-    facts = _facts(_convert(book))
-    assert facts["merged_ranges"] == ["B2:C2"]
-    assert facts["cell_styles"][0]["ranges"] == ["B2"]
-    assert len(facts["dimension_defaults"]) == 2
+    markdown = _convert(book)
+    assert "Merged: B2:C2" in markdown and "| B2 | F1 | unspecified |" in markdown
+    assert "| row | 4 |" in markdown and "| column | D" in markdown
 
 
 def test_original_special_values_are_not_html_or_markdown_instructions() -> None:
@@ -257,7 +247,7 @@ def test_style_reader_failure_is_visible_in_saved_markdown(monkeypatch: pytest.M
     monkeypatch.setattr(excel_markdown, "load_workbook", fail)
     markdown = _convert(_book())
     assert "old action" in markdown
-    assert _facts(markdown)["style_status"] == "NOT_INSPECTED"
+    assert "NOT_INSPECTED" in markdown
     assert "STYLE_EXTRACTION_UNAVAILABLE" in markdown
 
 
@@ -295,7 +285,7 @@ async def test_style_conversion_uses_real_bounded_subprocess() -> None:
     data = _bytes(book)
     before = copy(data)
     result = await convert_excel_to_markdown("sample.xlsx", data)
-    assert data == before and result.profile == "excel-styles/v1"
+    assert data == before and result.profile == "excel-styles/v2"
     assert "~~old action~~" in result.markdown and "#FF0000" in result.markdown
 
 
@@ -317,7 +307,7 @@ async def test_published_artifact_contains_styles_and_keeps_source_identity() ->
     artifact = result.evidence[-1].artifact
     assert artifact is not None and artifact.content.decode("utf-8") == result.response["markdown"]
     assert result.response["document"]["checksum"] == content.checksum
-    assert result.evidence[0].metadata["conversion_profile"] == "excel-styles/v1"
+    assert result.evidence[0].metadata["conversion_profile"] == "excel-styles/v2"
     assert result.response["markdown_checksum"] == artifact.checksum
     assert "#FF0000" in artifact.content.decode("utf-8")
 
@@ -349,4 +339,33 @@ def test_repeated_cell_style_is_resolved_once(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(_Colors, "fill", counted)
     markdown = _convert(book)
     assert calls == 2
-    assert _facts(markdown)["cell_styles"][0]["ranges"] == ["B2:B501"]
+    assert "| B2:B501 | F1 | unspecified |" in markdown
+
+
+def test_plain_rich_text_does_not_expand_style_report_but_strike_override_remains() -> None:
+    """無装飾 rich text の空配列は省略し、基底削除線の解除を明示する。"""
+    book = _book()
+    for row in range(2, 102):
+        book["Cases"].cell(row, 2).value = CellRichText(TextBlock(InlineFont(), "text"))
+    cell = book["Cases"]["C2"]
+    cell.font = Font(strike=True)
+    cell.value = CellRichText(TextBlock(InlineFont(strike=False), "active"))
+    markdown = _convert(book)
+    facts = markdown.split("### Excel style facts", 1)[1]
+    assert "| C2 | none |" in facts
+    assert "| B2 | none |" not in facts
+    assert "~~active~~" not in markdown
+    assert "```json" not in facts and len(facts) < 1200
+
+
+def test_many_disjoint_ranges_are_readable_without_giant_json_lines() -> None:
+    """穴を潰さず範囲行を分け、色定義は一度だけ載せる。"""
+    book = _book()
+    for row in range(2, 302, 2):
+        book["Cases"].cell(row, 2, "item").fill = PatternFill("solid", fgColor="FFD9D9D9")
+    markdown = _convert(book)
+    facts = markdown.split("### Excel style facts", 1)[1]
+    assert facts.count("rgb=FFD9D9D9") == 1
+    assert "B2:B300" not in facts
+    assert max(map(len, facts.splitlines())) < 300
+    assert "B300" in facts

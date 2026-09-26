@@ -29,7 +29,7 @@ from tests.documents.fakes import document_content
 CAPABILITY = "document.convert/v1"
 
 
-def case(monkeypatch, *, source_key=None):
+def case(monkeypatch, *, source_key=None, workspace=None):
     """合成 XLS を、実 Tool/Audit と元の Project/Run/Attempt に接続する。"""
     db = ArtifactDatabase(monkeypatch)
     manifest = _document_manifest()
@@ -56,13 +56,19 @@ def case(monkeypatch, *, source_key=None):
         resolved_sources={key: {**value, "capability": CAPABILITY}
                           for key, value in original.resolved_sources.items()},
     )
+    if workspace is not None:
+        run = replace(run, workspace=workspace, permission_snapshot={
+            "allowed_capabilities": [CAPABILITY, "workspace.read/v1"],
+        })
     runtime = registry.build_gateway_runtime(run, audit_writer=db.writer)
     return db, runtime, tool, source
 
 
-async def invoke(runtime, tool, *, publish=True, use_id="convert-original"):
+async def invoke(runtime, tool, *, publish=True, use_id="convert-original", response_mode=None):
     """同じ SDK use ID は原結果を読み、別 use は別の変換として処理する。"""
     args = {"path": "specs/cases.xls", "purpose": "Back up exact Markdown"}
+    if response_mode is not None:
+        args["response_mode"] = response_mode
     if publish is not None:
         args["publish_artifact"] = publish
     await runtime.mcp.on_tool_authorized(
@@ -248,3 +254,47 @@ async def test_conversion_append_persist_and_result_use_the_same_verified_bytes(
     reply = await runtime.gateway.invoke_mcp(tool.sdk_name, request)
     assert reply.get("is_error"), reply
     assert len(db.rows(Evidence)) == 3
+
+
+@pytest.mark.parametrize("large", [False, True])
+async def test_file_delivery_keeps_exact_bytes_without_full_tool_body(monkeypatch, tmp_path, large):
+    """実変換から監査/原 byte 読取まで通し、旧 inline と同じ成果を小応答で渡す。"""
+    from uuid import uuid4
+
+    from skillmind.agent.workspace import WorkspaceManager
+
+    workspace = WorkspaceManager(tmp_path / "runs").initialize(uuid4())
+    db, runtime, tool, source = case(monkeypatch, workspace=workspace)
+    if large:
+        from unittest.mock import AsyncMock
+
+        from skillmind.agent.binary_text import MarkdownConversion
+
+        monkeypatch.setattr(
+            "skillmind.agent.document_provider.convert_excel_to_markdown",
+            AsyncMock(return_value=MarkdownConversion("日本語😀" * 20000 + "\n")),
+        )
+    reply = await invoke(runtime, tool, response_mode="file")
+    assert not reply.get("is_error"), reply
+    response = _payload(reply)
+    assert "markdown" not in response
+    assert len(json.dumps(response, ensure_ascii=False)) < 4000
+    local = workspace.root / response["file"]["path"]
+    repository = ArtifactRepository(db())
+    saved = await repository.get_content(
+        project_id=db.claimed.project_id, run_id=db.claimed.run_id,
+        artifact_ref=response["artifact_refs"][0],
+    )
+    assert saved is not None and saved.content == local.read_bytes()
+    assert response["file"]["content_hash"] == saved.metadata.checksum
+    assert len(await repository.list_metadata(
+        project_id=db.claimed.project_id, run_id=db.claimed.run_id,
+    )) == 1
+    assert _payload(await invoke(runtime, tool, response_mode="file")) == response
+    assert len(source.calls) == 1
+    await _result(db, saved.metadata.artifact_ref)
+    # 保存 metadata の改変を本文取得・一覧の両方で拒否する。
+    call = db.rows(ToolCall)[0]
+    call.result_json["file"]["content_hash"] = "sha256:" + "0" * 64
+    with pytest.raises(ArtifactIntegrityError):
+        await repository.list_metadata(project_id=db.claimed.project_id, run_id=db.claimed.run_id)

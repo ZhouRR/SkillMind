@@ -22,6 +22,7 @@ from arq.worker import func as arq_function
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from skillmind.agent.artifact_append import ArtifactAppendProvider
+from skillmind.agent.artifact_materialize import ArtifactMaterializeProvider
 from skillmind.agent.audit_export import AuditExportProvider
 from skillmind.agent.audit_source import PostgresAuditExportSource
 from skillmind.agent.claude import ClaudeRuntimeConfiguration
@@ -261,6 +262,9 @@ async def startup(ctx: dict[str, Any], *, maintenance_only: bool = False) -> Non
         document_observations=PostgresDocumentObservationLookup(ctx["database_session_factory"]),
         document_readiness_provider=DocumentReadinessProvider(ctx["database_session_factory"]),
         audit_export_provider=AuditExportProvider(PostgresAuditExportSource(ctx["database_session_factory"])),
+        artifact_materialize_provider=ArtifactMaterializeProvider(
+            PostgresAuditExportSource(ctx["database_session_factory"])
+        ),
         artifact_append_provider=ArtifactAppendProvider(
             PostgresAuditExportSource(ctx["database_session_factory"])
         ),

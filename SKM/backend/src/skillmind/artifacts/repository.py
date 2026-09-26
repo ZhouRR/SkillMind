@@ -10,7 +10,11 @@ from sqlalchemy import Select, func, or_, select
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from skillmind.artifacts.conversion import conversion_artifact, conversion_artifact_description
+from skillmind.artifacts.conversion import (
+    conversion_artifact,
+    conversion_artifact_description,
+    conversion_evidence_fields,
+)
 from skillmind.artifacts.domain import (
     MAX_ARTIFACT_BYTES,
     MAX_RUN_ARTIFACT_BYTES,
@@ -185,7 +189,37 @@ def _validate_conversion_row(
     """原変換 Tool と二つの Evidence 参照を照合し、別 producer の保存行を流用しない。"""
 
     try:
-        artifact, fields = conversion_artifact(response, run_id=value.run_id)
+        if "file" in response:
+            file = response["file"]
+            if (
+                "markdown" in response or not isinstance(file, dict)
+                or set(file) != {"path", "content_hash", "size_bytes", "total_lines"}
+                or file.get("path") != f"workspace/document-conversions/{value.checksum[7:]}.md"
+                or file.get("content_hash") != value.checksum
+                or type(file.get("size_bytes")) is not int or file["size_bytes"] != value.size_bytes
+                or type(file.get("total_lines")) is not int or file["total_lines"] < 1
+            ):
+                raise ValueError("Invalid converted file")
+            fields = conversion_evidence_fields(
+                response, run_id=value.run_id, path=value.path,
+                size=value.size_bytes, checksum=value.checksum,
+            )
+            description = {
+                "path": value.path, "size_bytes": value.size_bytes,
+                "content_hash": value.checksum, "mime_type": value.mime_type,
+            }
+            if ("content" in row and (
+                not isinstance(row["content"], bytes)
+                or len(row["content"].decode("utf-8").splitlines()) != file["total_lines"]
+            )):
+                raise ValueError("Converted line count differs")
+        else:
+            artifact, fields = conversion_artifact(response, run_id=value.run_id)
+            if (artifact.path != value.path or artifact.checksum != value.checksum
+                or len(artifact.content) != value.size_bytes
+                or artifact.mime_type != value.mime_type):
+                raise ValueError("Converted Artifact differs")
+            description = conversion_artifact_description(artifact)
     except (ValueError, TypeError, KeyError) as error:
         raise _invalid() from error
     refs = response.get("evidence_refs")
@@ -195,9 +229,7 @@ def _validate_conversion_row(
         or response.get("provider") != "project"
         or not isinstance(refs, list) or len(refs) != 2 or refs[1] != value.evidence_ref
         or not isinstance(refs[0], str) or not refs[0].startswith("ev_") or refs[0] == refs[1]
-        or artifact.path != value.path or artifact.checksum != value.checksum
-        or len(artifact.content) != value.size_bytes or artifact.mime_type != value.mime_type
-        or response.get("artifact") != conversion_artifact_description(artifact)
+        or response.get("artifact") != description
         or any(row["metadata_json" if key == "metadata" else key] != expected
                for key, expected in fields.items())
         or type(row["source_locator"].get("bytes")) is not int

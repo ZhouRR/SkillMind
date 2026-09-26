@@ -28,7 +28,39 @@
     "publish_artifact": {
       "type": "boolean",
       "default": false,
-      "description": "Explicitly persist the exact converted UTF-8 Markdown as an immutable Run Artifact for later approved document.write. Uses existing Artifact quotas; no workspace or MinIO write. Default conversion behavior remains unchanged."
+      "description": "Persist exact converted UTF-8 Markdown as an immutable Run Artifact for approved document.write. File mode also creates a local readable copy; no external document write."
+    },
+    "response_mode": {
+      "enum": [
+        "inline",
+        "file"
+      ],
+      "default": "inline",
+      "description": "Use file with publish_artifact=true and workspace.read permission to receive only a readable file path and metadata; full bytes are saved as an Artifact. Inline preserves the legacy response."
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "response_mode": {
+            "const": "file"
+          }
+        },
+        "required": [
+          "response_mode"
+        ]
+      },
+      "then": {
+        "properties": {
+          "publish_artifact": {
+            "const": true
+          }
+        },
+        "required": [
+          "publish_artifact"
+        ]
+      }
+    }
+  ]
 }

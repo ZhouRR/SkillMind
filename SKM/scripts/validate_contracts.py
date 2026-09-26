@@ -52,6 +52,18 @@ EXAMPLE_CONTRACTS = {
     "examples/document-upload-closure-request.v1.json": (
         "documents/v1/upload-closure-request.schema.json"
     ),
+    "examples/document-convert-file-request.v1.json": (
+        "tools/document.convert/v1/request.schema.json"
+    ),
+    "examples/document-convert-file-response.v1.json": (
+        "tools/document.convert/v1/response.schema.json"
+    ),
+    "examples/artifact-materialize-request.v1.json": (
+        "tools/artifact.materialize/v1/request.schema.json"
+    ),
+    "examples/artifact-materialize-response.v1.json": (
+        "tools/artifact.materialize/v1/response.schema.json"
+    ),
     "examples/document-convert-request.v1.json": "tools/document.convert/v1/request.schema.json",
     "examples/document-convert-artifact-request.v1.json": (
         "tools/document.convert/v1/request.schema.json"

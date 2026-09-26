@@ -240,3 +240,18 @@ async def test_cancel_and_timeout_kill_and_reap_conversion_process(
     with pytest.raises(asyncio.CancelledError if cancel else BinaryTextError):
         await task
     assert len(processes) == 1 and processes[0].returncode is not None
+
+
+@pytest.mark.parametrize("mode,publish", [("file", True), ("file", False), ([], True)])
+async def test_file_delivery_requires_read_permission_before_fetch(
+    excel_bytes: bytes, mode: object, publish: bool,
+) -> None:
+    """file mode でも変換権から workspace の読取権を推測せず、事前に拒否する。"""
+    content = document_content(excel_bytes, name="cases.xlsx")
+    context = _conversion_context(content)
+    source = _FakeSource(project_id=context.project_id, content=content)
+    with pytest.raises(ToolProviderError) as error:
+        await DocumentConvertProvider(source).execute(context, {
+            "path": "specs/cases.xlsx", "response_mode": mode, "publish_artifact": publish,
+        })
+    assert error.value.code == "invalid_request" and source.calls == []

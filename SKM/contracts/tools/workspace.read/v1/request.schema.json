@@ -4,17 +4,82 @@
   "title": "workspace.read/v1 request",
   "type": "object",
   "additionalProperties": false,
-  "required": ["path", "purpose"],
+  "required": [
+    "path",
+    "purpose"
+  ],
   "properties": {
     "path": {
       "type": "string",
       "minLength": 7,
       "maxLength": 4096,
       "pattern": "^(?:input|workspace)/",
-      "not": { "pattern": "(^/|(^|/)\\.\\.(/|$))" }
+      "not": {
+        "pattern": "(^/|(^|/)\\.\\.(/|$))"
+      }
     },
-    "line_start": { "type": "integer", "minimum": 1 },
-    "line_end": { "type": "integer", "minimum": 1 },
-    "purpose": { "type": "string", "minLength": 1, "maxLength": 500 }
-  }
+    "line_start": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "line_end": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "offset": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Zero-based Unicode character offset; use next_offset for continuation."
+    },
+    "max_chars": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 16000,
+      "default": 12000
+    },
+    "expected_hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$",
+      "description": "Reject changed file bytes; use the hash from conversion or materialization."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "anyOf": [
+          {
+            "required": [
+              "offset"
+            ]
+          },
+          {
+            "required": [
+              "max_chars"
+            ]
+          }
+        ]
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "line_start"
+              ]
+            },
+            {
+              "required": [
+                "line_end"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
 }

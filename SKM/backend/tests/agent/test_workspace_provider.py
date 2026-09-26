@@ -399,3 +399,40 @@ async def test_search_counts_binary_bytes_against_the_shared_scan_limit(
     assert result.response["matches"] == []
     assert result.response["scanned_files"] == 1
     assert result.response["truncated"] is True
+
+
+async def test_character_pages_reconstruct_long_unicode_line_and_check_hash(tmp_path: Path) -> None:
+    """長大一行/CRLF/日本語も境界で落とさず、途中の改変は次ページを返す前に拒否する。"""
+    context = _context(tmp_path, "workspace.read/v1")
+    original = "日本語😀" * 9000 + "\r\nlast\n"
+    path = context.workspace.cwd / "large.md"
+    path.write_bytes(original.encode())
+    digest = "sha256:" + sha256_hex(original.encode())
+    offset, parts = 0, []
+    while offset is not None:
+        result = await WorkspaceReadProvider().execute(context, {
+            "path": "workspace/large.md", "offset": offset,
+            "max_chars": 12000, "expected_hash": digest,
+        })
+        _validate_response("tools/workspace.read/v1/response.schema.json", dict(result.response))
+        assert len(result.response["content"]) <= 12000
+        parts.append(result.response["content"])
+        offset = result.response["next_offset"]
+    assert "".join(parts) == original and len(parts) > 1
+    path.write_text("changed")
+    with pytest.raises(ToolProviderError, match="changed"):
+        await WorkspaceReadProvider().execute(context, {
+            "path": "workspace/large.md", "offset": 0, "expected_hash": digest,
+        })
+
+
+@pytest.mark.parametrize("args", [
+    {"offset": -1}, {"offset": True}, {"offset": 100}, {"max_chars": 16001},
+    {"offset": 0, "line_start": 1}, {"max_chars": 0},
+])
+async def test_character_page_rejects_invalid_or_mixed_ranges(tmp_path: Path, args: dict) -> None:
+    """曖昧な行/文字範囲と上限外を補正しない。"""
+    context = _context(tmp_path, "workspace.read/v1")
+    (context.workspace.cwd / "file.md").write_text("value")
+    with pytest.raises(ToolProviderError):
+        await WorkspaceReadProvider().execute(context, {"path": "workspace/file.md", **args})

@@ -627,8 +627,19 @@ def _validate_conversion_publication(
         or result.get("provider") != "project"
     ):
         raise ValueError("Conversion Artifact publication identity is invalid")
-    artifact, fields = conversion_artifact(result, run_id=invocation.run_id)
     source, converted = evidence
+    content = None
+    if invocation.arguments.get("response_mode") == "file":
+        from skillmind.artifacts.conversion import conversion_file_description
+
+        if converted.draft.artifact is None or "markdown" in result:
+            raise ValueError("File conversion requires saved bytes without inline content")
+        content = converted.draft.artifact.content
+        if result.get("file") != conversion_file_description(converted.draft.artifact):
+            raise ValueError("Conversion file does not match its Artifact")
+    elif "file" in result:
+        raise ValueError("Inline conversion cannot claim file delivery")
+    artifact, fields = conversion_artifact(result, run_id=invocation.run_id, content=content)
     if (
         source.draft.evidence_type != "document"
         or source.draft.content_hash != fields["source_locator"]["source_checksum"]
