@@ -66,7 +66,7 @@ CHANGE_PROPOSE_REQUEST_SCHEMA: dict[str, Any] = {
                 "additionalProperties": False,
                 "required": ["path", "action", "value"],
                 "properties": {
-                    "path": {"type": "string", "pattern": "^/[a-zA-Z0-9_.~/-]+$", "maxLength": 512},
+                    "path": {"type": "string", "pattern": r"^/[^\x00-\x1f\x7f]+$", "maxLength": 512},
                     "action": {"enum": ["SET", "REMOVE", "APPEND"]},
                     "value": {},
                 },
@@ -107,7 +107,7 @@ CHANGE_PROPOSE_REQUEST_SCHEMA: dict[str, Any] = {
                     "uniqueItems": True,
                     "items": {
                         "type": "string",
-                        "pattern": "^/[a-zA-Z0-9_.~/-]+$",
+                        "pattern": r"^/[^\x00-\x1f\x7f]+$",
                         "maxLength": 512,
                     },
                 },
@@ -161,6 +161,19 @@ CHANGE_PROPOSE_REQUEST_SCHEMA: dict[str, Any] = {
 }
 
 
+CHANGE_PROPOSE_INLINE_SCHEMA = deepcopy(CHANGE_PROPOSE_REQUEST_SCHEMA)
+CHANGE_PROPOSE_REQUEST_SCHEMA = {
+    key: value for key, value in CHANGE_PROPOSE_INLINE_SCHEMA.items()
+    if key in {"$schema", "$id", "title", "$defs"}
+}
+CHANGE_PROPOSE_REQUEST_SCHEMA["type"] = "object"
+CHANGE_PROPOSE_REQUEST_SCHEMA["oneOf"] = [
+    {key: value for key, value in CHANGE_PROPOSE_INLINE_SCHEMA.items()
+     if key not in {"$schema", "$id", "title", "$defs"}},
+    {'type': 'object', 'additionalProperties': False, 'properties': {'request_file': {'type': 'string', 'pattern': '^(workspace|output)/'}, 'expected_hash': {'type': 'string', 'pattern': '^sha256:[a-f0-9]{64}$'}, 'evidence_refs': {'type': 'array', 'minItems': 1, 'maxItems': 200, 'uniqueItems': True, 'items': {'type': 'string', 'pattern': '^ev_[a-zA-Z0-9_-]+$'}}}, 'required': ['request_file', 'expected_hash']},
+]
+
+
 def parse_change_proposal_request(
     value: Mapping[str, Any], *, now: datetime | None = None, request_identity: str | None = None
 ) -> ChangeProposalDraft:
@@ -168,7 +181,7 @@ def parse_change_proposal_request(
 
     original = deepcopy(dict(value))
     payload = deepcopy(original)
-    if not Draft202012Validator(CHANGE_PROPOSE_REQUEST_SCHEMA).is_valid(original):
+    if not Draft202012Validator(CHANGE_PROPOSE_INLINE_SCHEMA).is_valid(original):
         raise ChangeProposalValidationError("ChangeProposal request did not match its contract")
     # モデルは業務目的と正確な値/根拠を指定し、既知の管理項目は platform が生成する。
     # request identity は SDK/Worker 由来。同じ内容の別操作を hash だけで重複除去しない。
@@ -201,7 +214,7 @@ def parse_change_proposal_request(
         },
     )
     errors = sorted(
-        Draft202012Validator(CHANGE_PROPOSE_REQUEST_SCHEMA).iter_errors(payload),
+        Draft202012Validator(CHANGE_PROPOSE_INLINE_SCHEMA).iter_errors(payload),
         key=lambda error: tuple(str(part) for part in error.absolute_path),
     )
     if errors:

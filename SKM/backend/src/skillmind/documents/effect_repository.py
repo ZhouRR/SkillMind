@@ -19,6 +19,7 @@ from skillmind.documents.domain import (
     DocumentUploadInvalidError,
     StoredDocument,
 )
+from skillmind.documents.file_state import observe_file_state
 from skillmind.documents.repository import DocumentRepository
 from skillmind.documents.upload_repository import DocumentUploadRepository
 from skillmind.storage.effect_write import ObjectWriteCommand, ObjectWriteReceipt
@@ -43,6 +44,7 @@ class DocumentEffectRepository:
         name: str,
         limits: UploadLimits,
         now: datetime,
+        expected_revision: str | None = None,
     ) -> ProjectDocumentEffectUpload:
         """同 Run の原 Artifact と path/配額を確認し、再受付では元予約だけを返す。"""
 
@@ -59,6 +61,10 @@ class DocumentEffectRepository:
         row = await self._find(command.effect_id)
         if row is not None:
             _validate(row, command)
+            if row.publication_closed_at is not None:
+                raise DocumentConflictError("Original publication was closed after a conflict")
+            if row.expected_document_revision != expected_revision:
+                raise _invalid()
             if (row.organization_id, row.actor_id, row.folder, row.name) != (
                 organization_id,
                 actor_id,
@@ -77,7 +83,18 @@ class DocumentEffectRepository:
         if artifact is None or artifact.content != command.content:
             raise _invalid()
         documents = DocumentRepository(self._session)
-        if await documents.path_exists(project_id=command.project_id, folder=folder, name=name) or (
+        replaced = None
+        if expected_revision is not None:
+            current = await observe_file_state(
+                self._session, project_id=command.project_id, path=command.logical_path
+            )
+            if current["revision"] != expected_revision or current["document"] is None:
+                raise DocumentConflictError("Document changed before replacement")
+            replaced = UUID(current["document"]["document_id"])
+        if (
+            replaced is None
+            and await documents.path_exists(project_id=command.project_id, folder=folder, name=name)
+        ) or (
             await DocumentUploadRepository(self._session).path_reserved(
                 project_id=command.project_id,
                 folder=folder,
@@ -92,6 +109,8 @@ class DocumentEffectRepository:
             project_usage_bytes=await documents.project_usage_bytes(command.project_id),
         )
         row = ProjectDocumentEffectUpload(
+            replaces_document_id=replaced,
+            expected_document_revision=expected_revision,
             id=uuid4(),
             effect_id=command.effect_id,
             project_id=command.project_id,
@@ -135,6 +154,8 @@ class DocumentEffectRepository:
         """初回だけ送信開始を記録する。True の transaction commit 確認前は送信不可。"""
 
         row = await self.require(command)
+        if row.publication_closed_at is not None:
+            raise DocumentConflictError("Original publication was closed after a conflict")
         if command.protocol_version != 2:
             raise _invalid()
         if (
@@ -160,6 +181,8 @@ class DocumentEffectRepository:
         """原 client の核対済み事実だけを保存し、404/同名/申告 hash を回执にしない。"""
 
         row = await self.require(command)
+        if row.publication_closed_at is not None:
+            raise DocumentConflictError("Original publication was closed after a conflict")
         if command.protocol_version != 2:
             raise _invalid()
         if not _aware(now) or row.sent_at is None or now < row.sent_at:
@@ -196,6 +219,8 @@ class DocumentEffectRepository:
         row = await self.require(command)
         if row.state == "PUBLISHED":
             return _document(row)
+        if row.publication_closed_at is not None:
+            raise DocumentConflictError("Original publication was closed after a conflict")
         if command.protocol_version != 2:
             raise _invalid()
         if (
@@ -205,6 +230,18 @@ class DocumentEffectRepository:
             or now < row.verified_at
         ):
             raise _invalid()
+        if row.replaces_document_id is not None:
+            current = await observe_file_state(
+                self._session, project_id=row.project_id, path=command.logical_path
+            )
+            if current["revision"] != row.expected_document_revision:
+                raise DocumentConflictError("Document changed before publication")
+            previous = await self._session.get(ProjectDocument, row.replaces_document_id)
+            if previous is None or previous.project_id != row.project_id:
+                raise DocumentConflictError("Original document is unavailable")
+            # 公開成功時だけ旧版を回収へ移す。凍結 Run の ID/byte と復元画面を保持する。
+            previous.deleted_at, previous.deleted_by = now, row.actor_id
+            await self._session.flush()
         if await DocumentRepository(self._session).path_exists(
             project_id=row.project_id,
             folder=row.folder,
@@ -254,8 +291,14 @@ class DocumentEffectRepository:
         if row.etag is None:
             raise _invalid()
         return ObjectWriteReceipt(
-            row.effect_id, row.request_checksum, row.storage_key, row.checksum,
-            row.size, row.mime, row.etag, row.version_id,
+            row.effect_id,
+            row.request_checksum,
+            row.storage_key,
+            row.checksum,
+            row.size,
+            row.mime,
+            row.etag,
+            row.version_id,
         )
 
     async def _find(self, effect_id: UUID) -> ProjectDocumentEffectUpload | None:

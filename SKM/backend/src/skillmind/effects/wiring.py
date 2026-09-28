@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import partial
 
+from skillmind.agent.http_source import HttpResourceSource
 from skillmind.agent.mcp_lease import McpDesktopLeases
 from skillmind.agent.mcp_tools_source import StreamableHttpMcpToolsSource
 from skillmind.agent.repository_client import (
@@ -12,22 +13,18 @@ from skillmind.agent.repository_client import (
 )
 from skillmind.documents.library import DOCUMENT_LIBRARY_PROVIDER, DOCUMENT_WRITE_CAPABILITY
 from skillmind.effects.catalog import resolve_effect_capability
-from skillmind.effects.database_provider import DatabaseWriteProvider
-from skillmind.effects.database_write import (
-    DATABASE_WRITE_CAPABILITY,
-    DATABASE_WRITE_PROVIDER_VERSION,
-)
 from skillmind.effects.document_provider import DocumentWriteProvider
 from skillmind.effects.document_service import DocumentEffectService
+from skillmind.effects.http_provider import HttpWriteProvider
+from skillmind.effects.http_write import HTTP_VERSION, HTTP_WRITE
 from skillmind.effects.mcp_call import MCP_CALL, MCP_PROVIDER_VERSION
 from skillmind.effects.mcp_provider import McpCallProvider
-from skillmind.effects.postgres_write import PostgresDatabaseWriteSource
+from skillmind.effects.postgres_native import SQL_VERSION, SQL_WRITE, NativeDatabaseWriteProvider
 from skillmind.effects.provider import (
     EffectProvider,
     EffectProviderDefinition,
     EffectProviderRegistry,
 )
-from skillmind.effects.redmine import create_redmine_effect_provider
 from skillmind.effects.release import ExecutionFeatures
 from skillmind.effects.repository_effect import (
     GitRepositoryWriteProvider,
@@ -53,6 +50,21 @@ def create_effect_provider_registry(
     """API readiness と同じ capability 上限、catalog の原 version でだけ登録する。"""
 
     implementations: list[tuple[str, str, EffectProvider]] = []
+    if features.http_writes:
+        implementations.append(
+            (
+                HTTP_WRITE,
+                "http",
+                HttpWriteProvider(
+                    source=HttpResourceSource(),
+                    authorize=partial(
+                        effect_service.authorize_effect_step,
+                        provider_version=HTTP_VERSION,
+                        secret_resolver=secret_resolver,
+                    ),
+                ),
+            )
+        )
     if features.mcp_tools:
         if mcp_leases is None:
             raise ValueError("MCP calls require persistent desktop ownership")
@@ -74,7 +86,6 @@ def create_effect_provider_registry(
     if features.deferred:
         implementations.extend(
             [
-                ("issue.update/v1", "redmine", create_redmine_effect_provider()),
                 ("repository.write/v1", "svn", SvnRepositoryWriteProvider(svn_client)),
             ]
         )
@@ -96,15 +107,14 @@ def create_effect_provider_registry(
     if features.database_writes:
         implementations.append(
             (
-                DATABASE_WRITE_CAPABILITY,
+                SQL_WRITE,
                 "postgres",
-                DatabaseWriteProvider(
-                    source=PostgresDatabaseWriteSource(),
-                    authorize=partial(
+                NativeDatabaseWriteProvider(
+                    partial(
                         effect_service.authorize_effect_step,
-                        provider_version=DATABASE_WRITE_PROVIDER_VERSION,
+                        provider_version=SQL_VERSION,
                         secret_resolver=secret_resolver,
-                    ),
+                    )
                 ),
             )
         )
@@ -125,7 +135,7 @@ def create_effect_provider_registry(
                 provider=provider,
                 provider_version=resolve_effect_capability(capability).provider_versions[provider],
                 implementation=implementation,
-                requires_secret=capability != DOCUMENT_WRITE_CAPABILITY,
+                requires_secret=capability not in {DOCUMENT_WRITE_CAPABILITY, HTTP_WRITE},
                 supervised=resolve_effect_capability(capability).supports_supervision(provider),
             )
             for capability, provider, implementation in implementations

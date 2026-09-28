@@ -20,6 +20,7 @@ export function useProjectManagement({ session, onSessionEnded, onSaved }: {
   const submitted = useRef(false)
   const [previousUnknown, setPreviousUnknown] = useState<ProjectIntent | null>(null)
   const [saved, setSaved] = useState(false)
+  const [cleanupPending, setCleanupPending] = useState(0)
   const [attempted, setAttempted] = useState(false)
   const locked = !!intent || mutation.busy
 
@@ -56,6 +57,7 @@ export function useProjectManagement({ session, onSessionEnded, onSaved }: {
     if (!candidate || currentPhase.current !== 'confirm' || submitted.current) return
     // 新版採用後の別送信は、その送信版を原事実とする。以前の拒否版と混同しない。
     const original: ProjectIntent = { ...candidate, original: candidate.base }
+    let pending = 0
     const accepted = mutation.submit(async (signal) => {
       const { action, base, draft } = original
       if (action === 'create') return createProject(projectCreateInput(draft), session.csrf_token, signal)
@@ -63,13 +65,14 @@ export function useProjectManagement({ session, onSessionEnded, onSaved }: {
       if (action === 'edit') return updateProject(base.project_id, projectUpdateInput(original), session.csrf_token, signal)
       if (action === 'archive') return archiveProject(base.project_id, base.row_version, session.csrf_token, signal)
       if (action === 'restore') return unarchiveProject(base.project_id, base.row_version, session.csrf_token, signal)
-      await deleteProject(base.project_id, base.row_version, session.csrf_token, signal)
+      pending = await deleteProject(base.project_id, base.row_version, session.csrf_token, signal)
       return base
     }, (project) => {
       submitted.current = false
       activeIntent.current = null
       setIntent(null)
       setSaved(true)
+      setCleanupPending(pending)
       setEditor({ original: null, draft: projectDraft() })
       onSaved(original.action, project)
     }, (failure) => {
@@ -118,5 +121,5 @@ export function useProjectManagement({ session, onSessionEnded, onSaved }: {
     setEditor({ original: null, draft: projectDraft() })
     mutation.acknowledge()
   }
-  return { editor, intent, phase, previousUnknown, saved, locked, failure: attempted ? mutation.failure : null, mutation, edit, change, choose, confirm, cancel, adopt, acknowledge }
+  return { editor, intent, phase, previousUnknown, saved, cleanupPending, locked, failure: attempted ? mutation.failure : null, mutation, edit, change, choose, confirm, cancel, adopt, acknowledge }
 }

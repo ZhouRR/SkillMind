@@ -1,0 +1,6 @@
+{
+  "action": "list",
+  "library_key": "outputs",
+  "path": "results",
+  "purpose": "Inspect the save directory"
+}

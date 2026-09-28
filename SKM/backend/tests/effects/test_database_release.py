@@ -16,8 +16,8 @@ from tests.runs.effect_authorization_harness import AuthorizationHarness
 def test_database_and_deferred_capabilities_have_independent_limits(deferred, database):
     """後置 switch では DB が開かず、DB switch では他 write と子が開かない。"""
     features = ExecutionFeatures(deferred, database)
-    assert features.effect_enabled("database.write/v1", "INSERT") is database
-    assert features.effect_enabled("database.write/v1", "UPDATE") is database
+    assert features.effect_enabled("database.execute/v1", "INSERT") is database
+    assert features.effect_enabled("database.execute/v1", "UPDATE") is database
     assert not features.effect_enabled("database.write/v1", "DELETE")
     assert not features.effect_enabled("unregistered.write/v1", "INSERT")
     assert features.effect_enabled("issue.update/v1", "update_fields") is deferred
@@ -30,8 +30,8 @@ def test_database_and_deferred_capabilities_have_independent_limits(deferred, da
 @pytest.mark.parametrize(
     "capability,operation,expected",
     [
-        ("database.write/v1", "INSERT", True),
-        ("database.write/v1", "UPDATE", True),
+        ("database.execute/v1", "INSERT", True),
+        ("database.execute/v1", "UPDATE", True),
         ("database.write/v1", "DELETE", False),
         ("database.write/v2", "INSERT", False),
         ("repository.write/v1", "commit", False),

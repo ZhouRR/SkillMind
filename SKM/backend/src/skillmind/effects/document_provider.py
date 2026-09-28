@@ -1,10 +1,18 @@
-"""文書庫 CREATE を原 ledger の一回送信と回执照会へ接続する approved-effect Provider。"""
+"""文書庫の保存・目录操作を原 ledger の一回送信と回执照会へ接続する approved-effect Provider。"""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
+from typing import Any
 
-from skillmind.documents.domain import DocumentConflictError, StoredDocument
+from skillmind.documents.domain import (
+    DocumentConflictError,
+    DocumentInUseError,
+    DocumentNotFoundError,
+    StoredDocument,
+)
+from skillmind.documents.file_state import FILE_OPERATIONS
 from skillmind.documents.library import (
     DOCUMENT_LIBRARY_PROVIDER,
     DOCUMENT_WRITE_CAPABILITY,
@@ -53,6 +61,8 @@ class DocumentWriteProvider:
         ):
             raise ValueError("Document library effect has no Integration credential")
         try:
+            if frozen.operation in FILE_OPERATIONS:
+                return await self._service.apply_management(frozen)
             prepared = await self._service.prepare(frozen)
             command, receipt = prepared.command, prepared.receipt
             if command.namespace != self._source.namespace:
@@ -82,8 +92,21 @@ class DocumentWriteProvider:
             raise EffectProviderTransportError(
                 "effect_authority_revoked", retryable=False
             ) from error
-        except (DocumentConflictError, ObjectWriteConflictError) as error:
-            # 占用/SENT は残す。競合を理由に対象の削除・上書き・quota 解放を行わない。
+        except (
+            DocumentConflictError,
+            DocumentInUseError,
+            DocumentNotFoundError,
+            ObjectWriteConflictError,
+        ) as error:
+            # UPDATE の確定競合だけ公開を閉じる。結果未知はこの分岐へ流さない。
+            if frozen.operation == "UPDATE":
+                try:
+                    await self._service.close_conflicted_replacement(frozen)
+                except Exception as closure_error:
+                    raise EffectProviderTransportError(
+                        "document_effect_uncertain", retryable=True
+                    ) from closure_error
+            # 原 object/SENT/配額は保持し、別 Effect の新規保存を妨げる path 占用だけ解放する。
             raise EffectProviderStaleError("Original document target conflicts") from error
         except UploadRejectedError as error:
             raise EffectProviderTransportError(error.code, retryable=False) from error
@@ -95,7 +118,9 @@ class DocumentWriteProvider:
             raise EffectProviderTransportError(
                 "document_effect_uncertain", retryable=True
             ) from error
-        return _result(command, receipt, document, replayed=replayed)
+        return _result(
+            command, receipt, document, replayed=replayed, precondition=frozen.precondition
+        )
 
 
 def _result(
@@ -104,6 +129,7 @@ def _result(
     document: StoredDocument,
     *,
     replayed: bool,
+    precondition: Mapping[str, Any] | None = None,
 ) -> EffectProviderResult:
     """原回执と公開 metadata を証拠化し、現在の存在や未観測の事前状態を断定しない。"""
 
@@ -123,7 +149,7 @@ def _result(
             evidence_type="document",
             source_uri=uri,
             source_locator={**locator, "phase": "approved_precondition"},
-            content={"precondition": {"revision": "absent"}},
+            content={"precondition": precondition or {"revision": "absent"}},
             excerpt=None,
             metadata={**metadata, "observed_remote_absence": False},
         ),
@@ -137,7 +163,8 @@ def _result(
                     "path": locator["path"],
                     "storage": {
                         "document_library_id": DocumentLibraryTarget(
-                            command.namespace, command.bucket,
+                            command.namespace,
+                            command.bucket,
                         ).reference(command.project_id)["document_library_id"],
                         "bucket": command.bucket,
                         "object_key": command.object_key,

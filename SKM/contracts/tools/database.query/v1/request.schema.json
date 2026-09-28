@@ -1,0 +1,71 @@
+{
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sql": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536
+        },
+        "parameters": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "purpose": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      },
+      "required": [
+        "sql"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request_file": {
+          "type": "string",
+          "pattern": "^(workspace|output)/"
+        },
+        "expected_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "purpose": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "response_mode": {
+          "enum": [
+            "file",
+            "inline"
+          ]
+        }
+      },
+      "required": [
+        "request_file",
+        "expected_hash"
+      ]
+    }
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/database.query/v1/request.schema.json",
+  "title": "database.query/v1 request",
+  "type": "object"
+}

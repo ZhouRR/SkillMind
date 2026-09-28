@@ -71,10 +71,13 @@ def test_cleanup_migration_and_model_preserve_exact_independent_contract(
     index_name, table, columns = migration.op.create_index.call_args.args
     assert table == name
     sa.Index(index_name, *(migrated.c[column] for column in columns))
-    assert _contract(migrated) == _contract(_TABLE)
+    current = _contract(_TABLE)
+    # 0057 の分離前を比較し、公開済み旧 migration は変更しない。
+    current["foreign_keys"].add(("project_id", "projects.id", "RESTRICT"))
+    assert _contract(migrated) == current
     assert {str(item.name) for item in migrated.constraints} == {
         str(item.name) for item in _TABLE.constraints
-    }
+    } | {"fk_document_blob_cleanups_project_id_projects"}
     assert all(len(str(item.name)) <= 63 for item in migrated.constraints)
     assert _indexes(migrated) == _indexes(_TABLE) == {
         ("ix_document_blob_cleanups_project_id", ("project_id",), False, None),
@@ -105,7 +108,6 @@ def test_cleanup_shape_has_no_completion_release_or_implicit_history() -> None:
     assert contract["unique"] == {("document_id",)}
     assert contract["foreign_keys"] == {
         ("organization_id", "organizations.id", "RESTRICT"),
-        ("project_id", "projects.id", "RESTRICT"),
         ("requested_by", "users.id", "RESTRICT"),
         ("upload_intent_id", "document_upload_intents.id", "RESTRICT"),
         ("document_id", "document_upload_intents.document_id", "RESTRICT"),
@@ -280,8 +282,12 @@ def test_cleanup_audit_restricts_parent_removal(database: sqlite3.Connection, pa
     """清理要求を Project/actor/原意図と一緒に cascade して監査と占用を失わない。"""
 
     _insert(database, _row(upload_intent_id=str(UUID(int=1)), source_protocol="UPLOAD_INTENT_V1"))
-    with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY"):
-        database.execute(f"DELETE FROM {parent}")
+    if parent == "projects":
+        database.execute("DELETE FROM projects")
+        assert database.execute("SELECT count(*) FROM document_blob_cleanups").fetchone() == (1,)
+    else:
+        with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY"):
+            database.execute(f"DELETE FROM {parent}")
 
 
 @pytest.mark.parametrize("retained", [False, True])

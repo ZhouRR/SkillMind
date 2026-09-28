@@ -108,3 +108,25 @@ async def test_inline_uses_remaining_attempt_time_without_resetting_it():
     assert result.proposal_id == p
     assert a.deadline == deadline
     e.execute.assert_awaited_once_with(f, inline_parent=a.claimed)
+
+
+async def test_file_proposal_is_expanded_before_shared_approval_and_changed_file_is_rejected(tmp_path):
+    """承認対象には file envelope でなく、hash で固定した原 byte の提案を渡す。"""
+    from skillmind.core.hashing import sha256_hex
+    from tests.agent.test_workspace_provider import _context
+    h, service, executor, authority, proposal, effect = fixture()
+    workspace = _context(tmp_path, "workspace.read/v1").workspace
+    h._context = SimpleNamespace(workspace=workspace,
+        permission_snapshot={"allowed_capabilities": ["workspace.read/v1"]})
+    raw = b'{"resource_key":"api","summary":"original","changes":[]}'
+    path = workspace.cwd / "proposal.json"
+    path.write_bytes(raw)
+    args = {"request_file": "workspace/proposal.json", "expected_hash": "sha256:" + sha256_hex(raw)}
+    await h.invoke(args, "call", str(uuid4()))
+    assert service.begin_inline_effect.await_args.kwargs["arguments"] == {
+        "resource_key": "api", "summary": "original", "changes": []}
+    path.write_bytes(b'{}')
+    with pytest.raises(ValueError, match="changed"):
+        await h.invoke(args, "next-call", str(uuid4()))
+    assert service.begin_inline_effect.await_count == 1
+    assert executor.execute.await_count == 1

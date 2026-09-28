@@ -188,12 +188,9 @@ class ProjectMemberEvent(IdentityMixin, Base):
     organization_id: Mapped[UUID] = mapped_column(
         ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    project_id: Mapped[UUID] = mapped_column(
-        ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True
-    )
-    member_id: Mapped[UUID] = mapped_column(
-        ForeignKey("project_members.id", ondelete="RESTRICT"), nullable=False
-    )
+    # Project 完全削除後も原 ID と監査/清理対象を保持する。
+    project_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    member_id: Mapped[UUID] = mapped_column(nullable=False)
     user_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
@@ -796,6 +793,40 @@ class Run(IdentityMixin, TimestampMixin, Base):
     )
 
 
+class DocumentMutationReceipt(IdentityMixin, Base):
+    """文書目录変更と同一 transaction の回执。応答喪失時に元 Effect を再適用しない。"""
+
+    __tablename__ = "document_mutation_receipts"
+    effect_id: Mapped[UUID] = mapped_column(
+        ForeignKey("effect_executions.id", ondelete="RESTRICT"), unique=True
+    )
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="RESTRICT"), index=True)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="RESTRICT"), index=True
+    )
+    request_checksum: Mapped[str] = mapped_column(String(71))
+    result_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ProjectDeletionAudit(IdentityMixin, Base):
+    """Project の元 ID・組織・実施者を、削除対象への FK なしで保持する。"""
+
+    __tablename__ = "project_deletion_audits"
+    organization_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    project_id: Mapped[UUID] = mapped_column(nullable=False, unique=True)
+    project_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    actor_id: Mapped[UUID] = mapped_column(nullable=False)
+    request_id: Mapped[UUID] = mapped_column(nullable=False)
+    run_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    document_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class RunDeletionAudit(IdentityMixin, Base):
     """完全削除の実施者・原 ID の最小監査。削除した版への FK は持たない。"""
 
@@ -804,9 +835,8 @@ class RunDeletionAudit(IdentityMixin, Base):
         UniqueConstraint("project_id", "task_id", "idempotency_key", name="uq_run_deletion_key"),
     )
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
-    project_id: Mapped[UUID] = mapped_column(
-        ForeignKey("projects.id", ondelete="RESTRICT"), index=True
-    )
+    # Project 完全削除後も原 ID と監査/清理対象を保持する。
+    project_id: Mapped[UUID] = mapped_column(index=True)
     run_id: Mapped[UUID] = mapped_column(nullable=False, unique=True)
     task_id: Mapped[UUID] = mapped_column(nullable=False)
     actor_id: Mapped[UUID] = mapped_column(nullable=False)
@@ -1470,7 +1500,8 @@ class ChangeProposal(IdentityMixin, TimestampMixin, Base):
     __tablename__ = "change_proposals"
     __table_args__ = (
         CheckConstraint(
-            "(capability_version = 'document.write/v1' AND operation = 'CREATE' "
+            "(capability_version = 'document.write/v1' AND operation IN ('CREATE', 'UPDATE', "
+            "'MOVE', 'MOVE_FOLDER', 'CREATE_FOLDER', 'DELETE_FOLDER', 'TRASH', 'RESTORE') "
             "AND integration_id IS NULL) OR "
             "(capability_version <> 'document.write/v1' AND integration_id IS NOT NULL)",
             name="document_library_integration",
@@ -1798,19 +1829,31 @@ class ProjectDocumentUpload(IdentityMixin, Base):
     __tablename__ = "document_upload_intents"
     __table_args__ = (
         UniqueConstraint(
-            "organization_id", "project_id", "actor_id", "upload_key",
+            "organization_id",
+            "project_id",
+            "actor_id",
+            "upload_key",
             name="uq_document_upload_intent_request",
         ),
         UniqueConstraint("document_id", name="uq_document_upload_intent_document"),
         UniqueConstraint(
-            "storage_namespace_id", "storage_key", name="uq_document_upload_intent_object",
+            "storage_namespace_id",
+            "storage_key",
+            name="uq_document_upload_intent_object",
         ),
         UniqueConstraint(
-            "id", "document_id", "project_id", name="uq_document_upload_intent_binding",
+            "id",
+            "document_id",
+            "project_id",
+            name="uq_document_upload_intent_binding",
         ),
         Index(
-            "uq_document_upload_intent_pending_path", "project_id", "folder", "name",
-            unique=True, postgresql_where=text(
+            "uq_document_upload_intent_pending_path",
+            "project_id",
+            "folder",
+            "name",
+            unique=True,
+            postgresql_where=text(
                 "state = 'PENDING' AND publication_closed_at IS NULL",
             ),
         ),
@@ -1847,13 +1890,17 @@ class ProjectDocumentUpload(IdentityMixin, Base):
     )
 
     organization_id: Mapped[UUID] = mapped_column(
-        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False,
+        ForeignKey("organizations.id", ondelete="RESTRICT"),
+        nullable=False,
     )
+    # Project 完全削除後も原 ID と監査/清理対象を保持する。
     project_id: Mapped[UUID] = mapped_column(
-        ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True,
+        nullable=False,
+        index=True,
     )
     actor_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False,
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     upload_key: Mapped[UUID] = mapped_column(nullable=False)
     original_request_id: Mapped[UUID] = mapped_column(nullable=False)
@@ -1877,11 +1924,13 @@ class ProjectDocumentUpload(IdentityMixin, Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cleanup_requested_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True,
+        DateTime(timezone=True),
+        nullable=True,
     )
     # 旧 writer も公開へ進めない制約で守り、占用や原 PENDING 回答は書き換えない。
     publication_closed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True,
+        DateTime(timezone=True),
+        nullable=True,
     )
 
 
@@ -1897,10 +1946,12 @@ class ProjectDocumentUploadClosure(IdentityMixin, Base):
         ForeignKeyConstraint(
             ["upload_intent_id", "document_id", "project_id"],
             [
-                "document_upload_intents.id", "document_upload_intents.document_id",
+                "document_upload_intents.id",
+                "document_upload_intents.document_id",
                 "document_upload_intents.project_id",
             ],
-            name="fk_document_upload_closures_upload_intent", ondelete="RESTRICT",
+            name="fk_document_upload_closures_upload_intent",
+            ondelete="RESTRICT",
         ),
         CheckConstraint(
             "id <> '00000000-0000-0000-0000-000000000000' AND "
@@ -1922,20 +1973,25 @@ class ProjectDocumentUploadClosure(IdentityMixin, Base):
 
     upload_intent_id: Mapped[UUID] = mapped_column(nullable=False)
     organization_id: Mapped[UUID] = mapped_column(
-        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False,
+        ForeignKey("organizations.id", ondelete="RESTRICT"),
+        nullable=False,
     )
+    # Project 完全削除後も原 ID と監査/清理対象を保持する。
     project_id: Mapped[UUID] = mapped_column(
-        ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True,
+        nullable=False,
+        index=True,
     )
     actor_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False,
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     upload_key: Mapped[UUID] = mapped_column(nullable=False)
     document_id: Mapped[UUID] = mapped_column(nullable=False)
     protocol_version: Mapped[int] = mapped_column(Integer, nullable=False)
     binding_checksum: Mapped[str] = mapped_column(String(71), nullable=False)
     requested_by: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False,
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     # Session の保留規則で原閉鎖要求を消さず、秘密ではない元 ID だけを保持する。
     request_id: Mapped[UUID] = mapped_column(nullable=False)
@@ -1955,10 +2011,12 @@ class ProjectDocumentCleanup(IdentityMixin, Base):
         ForeignKeyConstraint(
             ["upload_intent_id", "document_id", "project_id"],
             [
-                "document_upload_intents.id", "document_upload_intents.document_id",
+                "document_upload_intents.id",
+                "document_upload_intents.document_id",
                 "document_upload_intents.project_id",
             ],
-            name="fk_document_blob_cleanups_upload_intent", ondelete="RESTRICT",
+            name="fk_document_blob_cleanups_upload_intent",
+            ondelete="RESTRICT",
         ),
         CheckConstraint(
             "document_id <> '00000000-0000-0000-0000-000000000000' AND "
@@ -1985,13 +2043,17 @@ class ProjectDocumentCleanup(IdentityMixin, Base):
     )
 
     organization_id: Mapped[UUID] = mapped_column(
-        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False,
+        ForeignKey("organizations.id", ondelete="RESTRICT"),
+        nullable=False,
     )
+    # Project 完全削除後も原 ID と監査/清理対象を保持する。
     project_id: Mapped[UUID] = mapped_column(
-        ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True,
+        nullable=False,
+        index=True,
     )
     requested_by: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False,
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     # 目録や旧 Session を消しても清理の帰属を失わないよう、原 ID は独立して保持する。
     document_id: Mapped[UUID] = mapped_column(nullable=False)
@@ -2033,7 +2095,7 @@ class ProjectDocumentEffectUpload(IdentityMixin, Base):
             "folder",
             "name",
             unique=True,
-            postgresql_where=text("state <> 'PUBLISHED'"),
+            postgresql_where=text("state <> 'PUBLISHED' AND publication_closed_at IS NULL"),
         ),
         CheckConstraint("protocol_version IN (1, 2)", name="protocol_version"),
         CheckConstraint("size > 0 AND size <= 1048576", name="size"),
@@ -2070,6 +2132,9 @@ class ProjectDocumentEffectUpload(IdentityMixin, Base):
         ),
     )
 
+    publication_closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    replaces_document_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    expected_document_revision: Mapped[str | None] = mapped_column(String(71), nullable=True)
     organization_id: Mapped[UUID] = mapped_column(
         ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False
     )

@@ -139,25 +139,23 @@ export async function unarchiveProject(
   return changeProjectStatus(projectId, expectedRowVersion, 'ACTIVE', csrfToken, signal)
 }
 
-/** ADMIN が Run/Schedule のない ARCHIVED Project を物理削除し key を解放する。
- *
- * 削除できない場合の理由は `ApiProblemError.code` で区別する
- * 版競合、未帰档、Run/Schedule/成員監査の各拒否を保持する。
- * 拒否されても参照を削除したり版を更新して自動再送したりしない。
- */
+/** 明示確認した ARCHIVED Project と関連内容を削除し、blob 清理待ち件数を返す。 */
 export async function deleteProject(
   projectId: string,
   expectedRowVersion: number,
   csrfToken: string,
   signal?: AbortSignal,
-): Promise<void> {
+): Promise<number> {
   signal?.throwIfAborted()
   const version = projectVersion(expectedRowVersion)
-  const query = new URLSearchParams({ expected_row_version: String(version.expected_row_version) })
-  await requestApiEmpty(`${projectPath(projectId)}?${query}`, {
-    method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken }, signal, cache: 'no-store',
-  }, 204)
+  const value = await requestApiJson(`${projectPath(projectId)}/purge`, projectMutation(version, csrfToken, signal), 200)
   signal?.throwIfAborted()
+  if (!isRecord(value) || !exactFields(value, ['project_id', 'cleanup_pending'])
+    || value.project_id !== projectId || !Number.isSafeInteger(value.cleanup_pending)
+    || typeof value.cleanup_pending !== 'number' || value.cleanup_pending < 0) {
+    throw new Error('Project purge response did not match its contract')
+  }
+  return value.cleanup_pending
 }
 
 /** UUID 以外を URL の path/query として解釈しない。 */

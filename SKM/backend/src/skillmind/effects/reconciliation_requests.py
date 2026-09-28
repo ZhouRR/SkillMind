@@ -9,8 +9,13 @@ from uuid import UUID
 
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.effects.database_write import DatabaseWriteCommand
+from skillmind.effects.document_management import (
+    DocumentManagementCommand,
+    DocumentManagementReceipt,
+)
 from skillmind.effects.git_receipt import GitCommitCommand, GitCommitReceipt, validate_git_receipt
 from skillmind.effects.mcp_receipt import McpOperationCommand, McpOperationReceipt, validate_receipt
+from skillmind.effects.postgres_native import NativeSqlReceiptCommand, validate_native_receipt
 from skillmind.effects.postgres_write import DatabaseWriteReceipt, validate_database_write_receipt
 from skillmind.effects.reconciliation_domain import (
     EffectReconciliationObservation,
@@ -74,9 +79,11 @@ def reconciliation_kind(
         return "MCP_OPERATION"
     if isinstance(target.command, GitCommitCommand):
         return "GIT_COMMIT"
+    if isinstance(target.command, DocumentManagementCommand):
+        return "DATABASE_TRANSACTION"
     return (
         "DATABASE_TRANSACTION"
-        if isinstance(target.command, DatabaseWriteCommand)
+        if isinstance(target.command, (DatabaseWriteCommand, NativeSqlReceiptCommand))
         else "DOCUMENT_OBJECT"
     )
 
@@ -122,7 +129,15 @@ def reconciliation_receipt_json(
     if observation.status != "CONFIRMED":
         raise ValueError("Reconciliation observation status is invalid")
     command = target.command
-    if isinstance(command, McpOperationCommand):
+    if isinstance(command, DocumentManagementCommand):
+        if (
+            not isinstance(receipt, DocumentManagementReceipt)
+            or receipt.effect_id != command.effect_id
+            or receipt.request_checksum != command.request_checksum
+        ):
+            raise ValueError("Original document management receipt is invalid")
+        result = {**asdict(receipt), "effect_id": str(receipt.effect_id)}
+    elif isinstance(command, McpOperationCommand):
         if not isinstance(receipt, McpOperationReceipt):
             raise ValueError("Original MCP receipt is invalid")
         validate_receipt(command, receipt)
@@ -132,6 +147,11 @@ def reconciliation_receipt_json(
             raise ValueError("Original Git receipt is invalid")
         validate_git_receipt(command, receipt)
         result = {**asdict(receipt), "effect_id": str(receipt.effect_id)}
+    elif isinstance(command, NativeSqlReceiptCommand):
+        if not isinstance(receipt, DatabaseWriteReceipt):
+            raise ValueError("Original SQL receipt is invalid")
+        validate_native_receipt(command, receipt)
+        result = asdict(receipt)
     elif isinstance(command, DatabaseWriteCommand):
         if not isinstance(receipt, DatabaseWriteReceipt):
             raise ValueError("Original database receipt is invalid")

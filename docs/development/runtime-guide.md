@@ -28,7 +28,24 @@
 
 Excel→Markdown 的 `.xlsx` 路径使用 `excel-styles/v2`：同一文档保留原行列、静态整格/局部删除线和任意填充色，重复样式按实际连续范围合并，以 Markdown 颜色定义与范围表展示，复杂条件格式保留紧凑结构；不重复列举无删除线的普通富文本。色值保留原 RGB/theme/indexed/tint 表示；无法解色不假定白色。条件格式与表格样式只标记范围和未求值状态，不据此自动排除业务步骤。合并区域记录 anchor 与范围，不展开复制正文。旧 `.xls` 仍为值转换，并在保存的 Markdown 明示未检查样式。转换 profile 写入 Evidence，原文件/冻结版本、Artifact 原字节校验及既有限制不变。
 
+文档正文优先通过 `document.read/v1` 的 `response_mode=file` 交付为 Worker 内本 Run 的文件，响应只给路径、大小和哈希；Agent 再分段读取或检索。目录仍以平台 metadata 和 MinIO 内容为正本，本地是工作副本，不是实时同步盘。冻结选择的 ID/hash 不随目录变化扩张。
+
+`workspace.edit/v1` 支持按原哈希复制、追加、唯一文本替换和发布已有输出文件，不要求模型复写全文。沿用 Artifact 的 UTF-8、大小及配额限制；发布输出后，`document.files/v1` 在已授权文档库内列举/观察目录、按原 Artifact 引用准备保存或改名、移动、建目录、删除空目录、回收及恢复提案，实际修改仍走共享 Effect。目录查询不授予额外正文读取权，画面与 Agent 使用同一份文档目录。旧 Run 的冻结工具和操作范围保持原样；新操作需新 Run 的对应权限。
+
+覆盖保存采用原版本校验：先保存并核验新对象，发布事务再将旧文档移入回收站并切换正式目录。旧字节保留给冻结输入，成功回执证明原操作而非当前文件状态；并发改名、删除、替换和目录子集合变化均拒绝旧提案。确认冲突的更新会永久关闭原发布并释放逻辑路径占位，保留原对象、配额和审计；未知结果仍保持原占位，不借此重发。直接在 MinIO 改写内容会在原字节核验时被拒绝，但绕过平台的并行操作不享有平台事务隔离，不将其宣称为原子同步。
+
 文档转换优先使用 `response_mode=file` 与 `publish_artifact=true`：完整 Markdown 保存为本 Run Artifact 并复制到可读 workspace，响应仅含文件信息。`workspace.read/v1` 使用 `offset`、`max_chars` 和 `expected_hash` 分段读取，按 `next_offset` 继续；偏移量以 Unicode 字符计，文件变化则拒绝混读。本地副本缺失或变化时，`artifact.materialize/v1` 从同 Run 的已验证原字节恢复，不重新转换或发布。文档库保存仍引用 Artifact，权限、审批和回读不变；旧 inline 调用继续兼容。
+
+## 资源文件与原生客户端
+
+网络访问由 Worker 内的共享客户端执行，与 Codex/Claude 等引擎无关；平台仍核验绑定、权限和操作回执，不把凭据交给模型或开放任意 Shell。请求文件使用 `request_file` + `expected_hash`，完整响应保存到 `workspace/resources/`；Agent 按路径读取所需部分。`change.propose` 可直接提交已准备的 JSON 文件，批准绑定其实际内容，文件发生变化则拒绝。
+
+- Git：`repository.workspace/v1` 将授权 UTF-8 文件放到可编辑目录；`prepare_commit` 按本地文件哈希准备提案，不要求模型重新输出正文。提交仍检查分支、路径、原 revision 和回读；本地编辑不会自动推送。
+- MCP：使用发现并冻结的原生参数 Schema；读调用支持文件输入/输出，修改调用仍经原 Effect、批准和原操作 ID。文件方式不改变工具权限或桌面占用规则。
+- PostgreSQL：新连接使用 `database.query/v1` 和 `database.execute/v1`，表／列权限由原数据库账号决定，不再维护平台表／列 DSL。支持单条 SELECT 与批准的 INSERT/UPDATE/DELETE、JOIN/CTE 和 `$1` 参数；不开放 DDL、事务控制或多语句。写入、必要回读与既有 `skillmind_effects.execution_receipts` 在同一事务提交；未知结果只核对原回执，不重发 SQL。
+- HTTP API：替代 Redmine 专用入口，设置基础地址、路径范围、方法和 Bearer/API Key header；认证值仍保存在 Secret。读取支持 GET/HEAD，修改支持批准后的 POST/PUT/PATCH/DELETE，并指定 GET 回读与结果条件。禁止改目标域和自动跟随重定向；超时、202 或未确认回读不算完成，也不自动重发。
+
+迁移 `0059_native_resource_clients` 沿用 PostgreSQL 原账号和凭据，旧写连接转为 SELECT/INSERT/UPDATE/DELETE，旧只读连接保留 SELECT；不执行数据库 GRANT。Redmine 转为 HTTP，原 issue 范围和 PUT 权限保留，凭据正文不变。旧默认绑定停用，原 Run 快照不改写；部署前结束在途任务，新流程重新解析 Skill 并使用新绑定。HTTP 结果未知暂不提供通用自动核对协议，须保留原操作事实。
 
 ## 执行与恢复
 
@@ -43,7 +60,7 @@ Excel→Markdown 的 `.xlsx` 路径使用 `excel-styles/v2`：同一文档保留
 
 - 外部写入沿 observe → propose → approve → apply；Agent 提案不等于远端执行。批准绑定精确 Proposal version/checksum、Provider、操作与 scope；[EffectService](../../SKM/backend/src/skillmind/effects/service.py)与独立 Worker 核对当前资格、冻结 binding、lease、取消和期限，不在业务锁内等待远端 I/O。
 - 自动批准只能来自原 Run 启动时明确记录的同意，或适用能力的既有预授权规则；Git/MCP 的额外同意不从旧 Run 补推。`repository.write/v1` 禁止 Project 预授权与 force，Git 仍核对精确 ref 和原提交，不把启动同意当作任意仓库写权限。
-- 实际能力由 [ExecutionFeatures](../../SKM/backend/src/skillmind/effects/release.py)与 [Provider registry](../../SKM/backend/src/skillmind/effects/wiring.py)共同限定：PostgreSQL INSERT/UPDATE、文档 CREATE、Git commit、MCP 调用各有独立开关；开启一项不开放其余。旧队列也须检查当前开关，历史读取与获授权的原结果核对保持独立。
+- 实际能力由 [ExecutionFeatures](../../SKM/backend/src/skillmind/effects/release.py)与 [Provider registry](../../SKM/backend/src/skillmind/effects/wiring.py)共同限定：PostgreSQL DML、文档保存与目录管理、Git commit、MCP 调用保留独立开关；HTTP API 按连接的路径、方法与读写权限开放。旧队列也须检查当前开关，历史读取与获授权的原结果核对保持独立。
 - 写入前观察、并发冲突检查、原操作幂等和 read-back 均须保留。原回执证明原操作；当前同名、同值或当前画面不能代替原回执。数据库、对象存储、仓库、MCP 与平台数据库之间没有统一原子事务。
 - MCP 提案创建时自动关联同 Run、同连接、同绑定 checksum 和目录哈希的成功工具目录证据，并纳入提案 checksum 与批准；保存后的提案只核对原引用，不补换证据。复用目录证据不替代当前授权、动态画面观察或操作回执。
 - 写入结果未知时停止主处理，保留原 Effect 与已发生事实；失败状态不证明未写入，不据此重做写入或补偿删除。原结果只读核对走 [reconciliation_service](../../SKM/backend/src/skillmind/effects/reconciliation_service.py)。取消、lease 到期或核对未检出都不证明未执行；MCP 的回读重试不能重发修改操作，入口见 [mcp_provider](../../SKM/backend/src/skillmind/effects/mcp_provider.py)。
@@ -66,7 +83,7 @@ Excel→Markdown 的 `.xlsx` 路径使用 `excel-styles/v2`：同一文档保留
 | 子 Agent | [Provider](../../SKM/backend/src/skillmind/agent/subagent_provider.py)仅局部实现，共享消费、停止与审计恢复未闭合；权限经 [resolve_subagent_capabilities](../../SKM/backend/src/skillmind/agent/subagent.py)收窄，禁止写入、交互和递归 dispatch。 |
 | 生成 UI | [Manifest](../../SKM/contracts/runtime-manifest/v1alpha1.schema.json)仍不允许 frontend_module，builder/Host 未接。未来开放须验证隔离：bundle 使用 CSP sandbox allow-scripts，iframe 禁止 allow-same-origin；静态报告不算生成应用。 |
 | 外部写操作序列 | [局部实验](../../SKM/backend/tests/worker/test_receipt_sequence_experiment.py)仍未接入生产。已接入的同 job SDK 复用和本地/只读短序列见下节；它们不等于取消逐次 Effect/Segment，也不执行批量外部写入。 |
-| 其他扩展 | Task Flow 只读预览；完整编排、SVN/Redmine 写入交付、PR 自动创建及更广的 Shell/network 能力按实际需求明确权限、恢复与验收范围。 |
+| 其他扩展 | Task Flow 只读预览；完整编排、SVN 写入交付、PR 自动创建及更广的 Shell/network 能力按实际需求明确权限、恢复与验收范围。 |
 
 ## 有限工具序列与暖续行
 

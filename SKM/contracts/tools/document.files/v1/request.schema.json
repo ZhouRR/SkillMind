@@ -1,0 +1,197 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/document.files/v1/request.schema.json",
+  "title": "document.files/v1 request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "action",
+    "library_key",
+    "purpose"
+  ],
+  "properties": {
+    "action": {
+      "enum": [
+        "list",
+        "stat",
+        "prepare"
+      ]
+    },
+    "library_key": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]{0,127}$"
+    },
+    "path": {
+      "type": "string",
+      "maxLength": 400,
+      "not": {
+        "pattern": "(^/|(^|/)\\.\\.(/|$))"
+      }
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "kind": {
+      "enum": [
+        "file",
+        "directory"
+      ]
+    },
+    "trashed": {
+      "type": "boolean"
+    },
+    "offset": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50
+    },
+    "expected_revision": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "operation": {
+      "enum": [
+        "CREATE",
+        "UPDATE",
+        "MOVE",
+        "MOVE_FOLDER",
+        "CREATE_FOLDER",
+        "DELETE_FOLDER",
+        "TRASH",
+        "RESTORE"
+      ]
+    },
+    "destination": {
+      "type": "string",
+      "maxLength": 400,
+      "not": {
+        "pattern": "(^/|(^|/)\\.\\.(/|$))"
+      },
+      "minLength": 1
+    },
+    "artifact_ref": {
+      "type": "string",
+      "pattern": "^art_[a-zA-Z0-9_-]{1,60}$"
+    },
+    "mime_type": {
+      "enum": [
+        "text/plain",
+        "text/markdown",
+        "application/json"
+      ]
+    },
+    "document_id": {
+      "type": "string",
+      "format": "uuid"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "stat",
+              "prepare"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "prepare"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "operation"
+        ]
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "operation"
+        ],
+        "properties": {
+          "operation": {
+            "enum": [
+              "CREATE",
+              "UPDATE"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "artifact_ref",
+          "mime_type"
+        ]
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "operation"
+        ],
+        "properties": {
+          "operation": {
+            "enum": [
+              "MOVE",
+              "MOVE_FOLDER"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "destination"
+        ]
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "operation"
+        ],
+        "properties": {
+          "operation": {
+            "enum": [
+              "UPDATE",
+              "MOVE",
+              "MOVE_FOLDER",
+              "DELETE_FOLDER",
+              "TRASH",
+              "RESTORE"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "expected_revision"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "action": "checkout",
+  "revision": "main",
+  "paths": [
+    "plans"
+  ]
+}

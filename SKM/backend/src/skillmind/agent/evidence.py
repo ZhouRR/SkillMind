@@ -548,7 +548,10 @@ def _snapshot_evidence(evidence: tuple[EvidenceRecord, ...]) -> tuple[EvidenceRe
 
 
 def validate_artifact_publication(
-    invocation: ToolInvocation, *, result: Mapping[str, Any], evidence: tuple[EvidenceRecord, ...],
+    invocation: ToolInvocation,
+    *,
+    result: Mapping[str, Any],
+    evidence: tuple[EvidenceRecord, ...],
 ) -> None:
     """新 Tool だけが元の UTF-8 出力を発行でき、保存回执と応答を同一内容に固定する。"""
 
@@ -562,6 +565,11 @@ def validate_artifact_publication(
         from skillmind.agent.artifact_append import validate_append_publication
 
         validate_append_publication(invocation, result=result, evidence=evidence)
+        return
+    if invocation.tool.capability == "workspace.edit/v1":
+        from skillmind.agent.workspace_edit import validate_edit_publication
+
+        validate_edit_publication(invocation, result=result, evidence=evidence)
         return
     if invocation.tool.capability == "audit.export/v1":
         from skillmind.agent.audit_export import validate_export_artifact
@@ -577,8 +585,11 @@ def validate_artifact_publication(
     path = invocation.arguments.get("path")
     content = invocation.arguments.get("content")
     if (
-        invocation.tool.provider != "workspace" or invocation.tool.integration_id is not None
-        or not isinstance(path, str) or not isinstance(content, str) or len(evidence) != 1
+        invocation.tool.provider != "workspace"
+        or invocation.tool.integration_id is not None
+        or not isinstance(path, str)
+        or not isinstance(content, str)
+        or len(evidence) != 1
     ):
         raise ValueError("Artifact publication identity is invalid")
     record = evidence[0]
@@ -586,11 +597,15 @@ def validate_artifact_publication(
     data = content.encode("utf-8")
     checksum = f"sha256:{sha256_hex(data)}"
     if (
-        result.get("status") != "success" or result.get("provider") != "workspace"
-        or result.get("path") != path or result.get("content_hash") != checksum
-        or type(result.get("bytes_written")) is not int or result.get("bytes_written") != len(data)
+        result.get("status") != "success"
+        or result.get("provider") != "workspace"
+        or result.get("path") != path
+        or result.get("content_hash") != checksum
+        or type(result.get("bytes_written")) is not int
+        or result.get("bytes_written") != len(data)
         or result.get("evidence_refs") != [record.evidence_ref]
-        or draft.evidence_type != "workspace-write" or draft.content_hash != checksum
+        or draft.evidence_type != "workspace-write"
+        or draft.content_hash != checksum
         or draft.source_locator != {"path": path, "bytes": len(data)}
         or type(draft.source_locator.get("bytes")) is not int
         or draft.source_uri != f"workspace://runs/{invocation.run_id}/{quote(path, safe='/')}"
@@ -603,13 +618,16 @@ def validate_artifact_publication(
         if (
             not isinstance(record.artifact_ref, str)
             or re.fullmatch(r"art_[a-f0-9]{32}", record.artifact_ref) is None
-            or draft.artifact is None or draft.artifact.path != path
-            or draft.artifact.content != data or draft.artifact.mime_type != "text/plain"
+            or draft.artifact is None
+            or draft.artifact.path != path
+            or draft.artifact.content != data
+            or draft.artifact.mime_type != "text/plain"
             or result.get("artifact_refs") != [record.artifact_ref]
         ):
             raise ValueError("Artifact snapshot is missing or inconsistent")
     elif not path.startswith("workspace/") or (
-        record.artifact_ref is not None or draft.artifact is not None
+        record.artifact_ref is not None
+        or draft.artifact is not None
         or result.get("artifact_refs") != []
     ):
         raise ValueError("Workspace intermediate files are not Artifact publications")

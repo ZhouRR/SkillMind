@@ -772,7 +772,9 @@
       "enum": [
         "skillmind.runtime/v2",
         "skillmind.runtime/v3",
-        "skillmind.runtime/v4"
+        "skillmind.runtime/v4",
+        "skillmind.runtime/v5",
+        "skillmind.runtime/v6"
       ]
     },
     "runtime_metadata": {

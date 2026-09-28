@@ -9,7 +9,7 @@ import type { PublishedTaskRecord } from '../api'
  */
 
 /** Platform が認識する接続先の種類。backend の Provider registry と一致させる。 */
-export type ResourceProvider = 'redmine' | 'git' | 'svn' | 'postgres' | 'mcp'
+export type ResourceProvider = 'http' | 'redmine' | 'git' | 'svn' | 'postgres' | 'mcp'
 
 /** Scope list の予約 token。管理者が明示的に付与した「全許可」を表す(backend と同値)。 */
 export const SCOPE_WILDCARD = '*'
@@ -34,8 +34,9 @@ export interface ProviderFormDefinition {
 
 /** Backend PROVIDER_DEFINITIONS の UI mirror。ここ以外に capability 文字列を書かない。 */
 export const PROVIDER_FORMS: Record<ResourceProvider, ProviderFormDefinition> = {
+  http: { provider: 'http', kind: 'other', readCapability: 'http.read/v1', writeCapability: 'http.write/v1', requiresSecret: false, credentialKind: 'apiKey', environmentLocatorExample: 'HTTP_API_KEY', fileLocatorExample: '/run/secrets/http-api-key' },
   postgres: {
-    provider: 'postgres', kind: 'other', readCapability: 'database.read/v1', writeCapability: 'database.write/v1',
+    provider: 'postgres', kind: 'other', readCapability: 'database.query/v1', writeCapability: 'database.execute/v1',
     requiresSecret: true, credentialKind: 'password', environmentLocatorExample: 'POSTGRES_PASSWORD', fileLocatorExample: '/run/secrets/postgres-password',
   },
   mcp: {
@@ -76,7 +77,7 @@ export const PROVIDER_FORMS: Record<ResourceProvider, ProviderFormDefinition> = 
 }
 
 /** 画面に並べる Provider の安定順。 */
-export const RESOURCE_PROVIDERS: readonly ResourceProvider[] = ['redmine', 'git', 'svn', 'postgres', 'mcp']
+export const RESOURCE_PROVIDERS: readonly ResourceProvider[] = ['http', 'git', 'svn', 'postgres', 'mcp']
 
 /** Redmine write 時に checkbox で提示する代表的な標準 field。自由追記で補える。 */
 export const COMMON_REDMINE_FIELD_KEYS: readonly string[] = [
@@ -91,7 +92,7 @@ export const COMMON_REDMINE_FIELD_KEYS: readonly string[] = [
 
 /** Unknown 文字列を Provider へ絞る。list 表示で契約外値を安全に扱うための narrowing。 */
 export function asResourceProvider(value: string): ResourceProvider | null {
-  return value === 'redmine' || value === 'git' || value === 'svn' || value === 'postgres' || value === 'mcp' ? value : null
+  return value === 'http' || value === 'redmine' || value === 'git' || value === 'svn' || value === 'postgres' || value === 'mcp' ? value : null
 }
 
 /** 改行・カンマ区切りの自由入力を重複なしの値 list へ変換する。 */
@@ -136,11 +137,10 @@ export function accessForCapabilities(capabilities: readonly string[]): Resource
 /** 構造化入力から server の scope allowlist 形へ組み立てる。形は Provider ごとに固定。 */
 export function buildIntegrationScope(
   provider: ResourceProvider,
-  input: { issueIds: string[]; fieldKeys: string[]; paths: string[]; revisions: string[]; tables?: string[]; resourceUris?: string[]; mcpTools?: boolean; mcpPermissions?: Record<string, string>; writeEnabled?: boolean; writeColumns?: string[]; operations?: string[] },
+  input: { issueIds: string[]; fieldKeys: string[]; paths: string[]; revisions: string[]; tables?: string[]; resourceUris?: string[]; mcpTools?: boolean; mcpPermissions?: Record<string, string>; writeEnabled?: boolean; writeColumns?: string[]; operations?: string[]; httpMethods?: string[] },
 ): Record<string, string[]> {
-  if (provider === 'postgres') return input.writeEnabled
-    ? { tables: input.tables ?? [], write_columns: input.writeColumns ?? [], operations: input.operations ?? [] }
-    : { tables: input.tables ?? [] }
+  if (provider === 'postgres') return { statements: input.writeEnabled ? ['SELECT', ...(input.operations ?? [])] : ['SELECT'] }
+  if (provider === 'http') return { paths: input.paths, methods: ['GET', 'HEAD', ...(input.writeEnabled ? input.httpMethods ?? [] : [])] }
   if (provider === 'mcp') return { resource_uris: input.resourceUris ?? [], ...(input.mcpTools
     ? { tool_names: Object.entries(input.mcpPermissions ?? {}).filter(([, mode]) => mode === 'read' || (mode === 'call' && input.writeEnabled)).map(([name]) => name).sort() } : {}) }
   if (provider === 'redmine') {
@@ -169,6 +169,8 @@ export interface RepositoryWriteInput {
 export function buildIntegrationConfig(
   provider: ResourceProvider,
   input: {
+    httpAuthMode?: string
+    httpAuthHeader?: string
     baseUrl: string
     repositoryUri: string
     defaultRevision: string
@@ -184,7 +186,8 @@ export function buildIntegrationConfig(
     write?: RepositoryWriteInput
   },
 ): Record<string, unknown> {
-  if (provider === 'postgres') return { host: input.host?.trim() ?? '', port: Number(input.port ?? '5432'),
+  if (provider === 'http') return { base_url: input.baseUrl.trim(), auth_mode: input.httpAuthMode ?? 'bearer', ...(input.httpAuthMode === 'header' ? { credential_header: input.httpAuthHeader?.trim() ?? '' } : {}) }
+  if (provider === 'postgres') return { access_mode: 'native_sql', host: input.host?.trim() ?? '', port: Number(input.port ?? '5432'),
     database: input.database?.trim() ?? '', username: input.username?.trim() ?? '', sslmode: input.sslmode ?? 'verify-full' }
   if (provider === 'mcp') return { server_url: input.serverUrl?.trim() ?? '', transport: 'streamable_http',
     ...(input.mcpTools && input.mcpCatalog ? { tool_profile: 'mcp-tools/v1', tool_catalog: input.mcpCatalog, tool_permissions: Object.fromEntries(Object.entries(input.mcpPermissions ?? {}).filter(([, mode]) => mode === 'read' || (mode === 'call' && input.write?.writeEnabled))) } : {}) }
@@ -226,7 +229,7 @@ export function findWriteConfigIssue(
   input: { defaultRevision: string; write: RepositoryWriteInput },
 ): WriteConfigIssue | null {
   const { write } = input
-  if (provider === 'redmine' || !write.writeEnabled) return null
+  if (provider === 'redmine' || provider === 'http' || provider === 'postgres' || provider === 'mcp' || !write.writeEnabled) return null
   const revision = input.defaultRevision.trim() === '' ? 'HEAD' : input.defaultRevision.trim()
   // git の direct は「既定 branch そのもの」へ commit する。HEAD は branch 名ではない。
   if (provider === 'git' && write.writeMode === 'direct' && revision.toUpperCase() === 'HEAD') {
@@ -258,12 +261,8 @@ export function findScopeIssue(
   scope: Record<string, string[]>,
   writeEnabled: boolean,
 ): ScopeIssue | null {
-  if (provider === 'postgres') {
-    if (!scope.tables?.length) return 'tables_required'
-    if (writeEnabled && !scope.write_columns?.length) return 'write_columns_required'
-    if (writeEnabled && !scope.operations?.length) return 'database_operations_required'
-    return null
-  }
+  if (provider === 'postgres') return writeEnabled && (scope.statements?.length ?? 0) < 2 ? 'database_operations_required' : null
+  if (provider === 'http') return !scope.paths?.length ? 'paths_required' : null
   if (provider === 'mcp') return scope.tool_names !== undefined && scope.tool_names.length === 0 ? 'mcp_tools_required' : null
   if (provider === 'redmine') {
     if ((scope.issue_ids ?? []).length === 0) return 'issue_ids_required'

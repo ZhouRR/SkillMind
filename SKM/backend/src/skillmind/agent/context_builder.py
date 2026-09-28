@@ -331,9 +331,7 @@ def _resolve_source_tools(
     required_keys = (
         required_resource_keys(blueprint) if isinstance(blueprint, Mapping) else frozenset()
     )
-    requirement_keys = {
-        item.get("key") for item in requirements if isinstance(item, Mapping)
-    }
+    requirement_keys = {item.get("key") for item in requirements if isinstance(item, Mapping)}
     if any(
         key not in requirement_keys and is_document_library_source(value)
         for key, value in claimed_run.selected_sources_json.items()
@@ -376,7 +374,9 @@ def _resolve_source_tools(
             provider=provider,
             integration_id=integration_id,
             binding_id=binding_id,
-            resource_key=str(requirement_key) if integration_id is not None and binding_id is not None else None,
+            resource_key=str(requirement_key)
+            if integration_id is not None and binding_id is not None
+            else None,
             execution_profile=execution_profile,
         )
         if capability in DOCUMENT_CAPABILITIES and any(
@@ -398,6 +398,12 @@ def _resolve_source_tools(
                 sources = bound_tool_sources.setdefault(declared, [])
                 if all(item.resource_key != resolved.resource_key for item in sources):
                     sources.append(resolved)
+    if "repository.workspace/v1" in allowed:
+        for original in tuple(tools):
+            if original.capability == "repository.read/v1" and original.provider == "git":
+                tools.append(registry.resolve("repository.workspace/v1", provider="git",
+                    integration_id=original.integration_id, binding_id=original.binding_id,
+                    resource_key=original.resource_key, execution_profile=execution_profile))
     if uses_modern_runtime(claimed_run.task_snapshot_json):
         for original in tuple(tools):
             if original.capability != "database.read/v1":
@@ -405,12 +411,16 @@ def _resolve_source_tools(
             for capability in ("database.read/v2", "database.describe/v1"):
                 if capability not in allowed:
                     raise ValueError("Database assistance requires frozen permission")
-                tools.append(registry.resolve(
-                    capability, provider=original.provider,
-                    integration_id=original.integration_id, binding_id=original.binding_id,
-                    resource_key=original.resource_key,
-                    execution_profile=execution_profile,
-                ))
+                tools.append(
+                    registry.resolve(
+                        capability,
+                        provider=original.provider,
+                        integration_id=original.integration_id,
+                        binding_id=original.binding_id,
+                        resource_key=original.resource_key,
+                        execution_profile=execution_profile,
+                    )
+                )
             tools.remove(original)
     resolved_capabilities = {tool.capability for tool in tools}
     if "database.read/v2" in resolved_capabilities:
@@ -424,16 +434,26 @@ def _resolve_source_tools(
         if tool_capability in bound_tool_sources and tool_capability in allowed:
             for source in bound_tool_sources[tool_capability]:
                 equivalent = {tool_capability}
-                if tool_capability == "database.read/v1" and uses_modern_runtime(claimed_run.task_snapshot_json):
+                if tool_capability == "database.read/v1" and uses_modern_runtime(
+                    claimed_run.task_snapshot_json
+                ):
                     equivalent.add("database.read/v2")
-                if any(t.capability in equivalent and t.resource_key == source.resource_key for t in tools):
+                if any(
+                    t.capability in equivalent and t.resource_key == source.resource_key
+                    for t in tools
+                ):
                     continue
                 try:
-                    tools.append(registry.resolve(
-                        tool_capability, provider=source.provider,
-                        integration_id=source.integration_id, binding_id=source.binding_id,
-                        resource_key=source.resource_key, execution_profile=execution_profile,
-                    ))
+                    tools.append(
+                        registry.resolve(
+                            tool_capability,
+                            provider=source.provider,
+                            integration_id=source.integration_id,
+                            binding_id=source.binding_id,
+                            resource_key=source.resource_key,
+                            execution_profile=execution_profile,
+                        )
+                    )
                 except LookupError:
                     if bool(tool_requirement.get("required", False)):
                         raise
@@ -453,7 +473,9 @@ def _resolve_source_tools(
                 if not any(tool.capability in DOCUMENT_CAPABILITIES for tool in tools):
                     raise LookupError("Document Tool requires a frozen document selection")
                 resolved = registry.resolve(
-                    tool_capability, provider=DOCUMENT_PROVIDER, integration_id=None,
+                    tool_capability,
+                    provider=DOCUMENT_PROVIDER,
+                    integration_id=None,
                     execution_profile=execution_profile,
                 )
             else:
@@ -488,7 +510,12 @@ def _resolve_source_tools(
             )
         )
     for auxiliary in (
-        "audit.export/v1", "tool.sequence/v1", "artifact.append/v1", "artifact.materialize/v1",
+        "audit.export/v1",
+        "tool.sequence/v1",
+        "artifact.append/v1",
+        "artifact.materialize/v1",
+        "workspace.edit/v1",
+        "document.files/v1",
     ):
         if auxiliary in allowed and auxiliary not in resolved_capabilities:
             tools.append(registry.resolve_unbound(auxiliary, execution_profile=execution_profile))

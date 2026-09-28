@@ -95,7 +95,8 @@ function AdminProjectManagement(props: ProjectManagementProps) {
   }
 
   return <div className="projectManagement" data-project-management="" hidden={props.tab !== 'projects' && props.tab !== 'archived'}>
-    {manager.saved && <p role="status">{messages.projectManagement.saved}</p>}
+    {manager.saved && <p role="status">{manager.cleanupPending > 0
+      ? messages.projectManagement.cleanupPending(manager.cleanupPending) : messages.projectManagement.saved}</p>}
     {manager.previousUnknown && <details className="panel projectPreviousUnknown"><summary>{messages.projectManagement.acknowledgedHint}</summary>
       {manager.previousUnknown.original && <ProjectFacts project={manager.previousUnknown.original} />}
       <ProjectDraftFacts draft={manager.previousUnknown.draft} action={manager.previousUnknown.action} />

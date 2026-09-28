@@ -13,6 +13,7 @@ from skillmind.agent.control_providers import (
     DeferredInteractionProvider,
     UnavailableDocumentReadiness,
 )
+from skillmind.agent.document_files import DocumentFilesProvider
 from skillmind.agent.document_inspection import DocumentInspectProvider
 from skillmind.agent.document_listing import DocumentListProvider
 from skillmind.agent.document_provider import DocumentConvertProvider, DocumentProvider
@@ -21,6 +22,7 @@ from skillmind.agent.repository_provider import RepositoryReadProvider
 from skillmind.agent.repository_source import (
     RepositorySnapshotSource,
 )
+from skillmind.agent.repository_workspace import RepositoryWorkspaceProvider
 from skillmind.agent.subagent import SUBAGENT_DISPATCH_CAPABILITY
 from skillmind.agent.tool_gateway import (
     ToolDefinition,
@@ -28,6 +30,7 @@ from skillmind.agent.tool_gateway import (
     ToolRegistry,
 )
 from skillmind.agent.tool_sequence import ToolSequenceProvider
+from skillmind.agent.workspace_edit import WorkspaceEditProvider
 from skillmind.agent.workspace_provider import (
     WorkspaceReadProvider,
     WorkspaceSearchProvider,
@@ -61,6 +64,18 @@ def _tool_definition(
 ) -> ToolDefinition:
     """三つの Schema を同じ capability/version から取得し、登録情報のずれを防ぐ。"""
 
+    if capability in {"repository.read/v1", "mcp.tools/v1", "mcp.query/v1", "mcp.read/v1"}:
+        from skillmind.agent.resource_files import ResourceFileProvider
+        schema = contracts.load(f"tools/{capability}/request.schema.json")
+        inline = {**schema["oneOf"][0], **({"$defs": schema["$defs"]} if "$defs" in schema else {})}
+        providers = {
+            key: ResourceFileProvider(provider, inline) for key, provider in providers.items()
+        }
+        description += (
+            " Prefer response_mode=file; complete data stays in the Run workspace. "
+            "A JSON request_file with expected_hash may replace inline arguments. "
+            "Native MCP arguments are passed without renaming their fields."
+        )
     return ToolDefinition(
         capability=capability,
         description=description,
@@ -78,6 +93,8 @@ def _tool_definition(
 def _read_tool_definitions(
     contracts: ContractStore,
     *,
+    native_database_provider: ToolProvider | None = None,
+    http_provider: ToolProvider | None = None,
     redmine_issue_provider: ToolProvider | None = None,
     database_provider: ToolProvider | None = None,
     mcp_provider: ToolProvider | None = None,
@@ -164,6 +181,25 @@ def _read_tool_definitions(
                     providers={"postgres": database_provider},
                 )
             )
+    if native_database_provider is not None:
+        definitions.append(_tool_definition(contracts, sequence_safe=True, capability="database.query/v1",
+            description=(
+                'Execute one native PostgreSQL SELECT with positional $1 parameters using the '
+                'bound database account. JOIN/CTE/schema queries are supported. For date/UUID/JSON string parameters use $1::text::type. Complete bounded '
+                'results are saved as a local JSON file; inspect rows with workspace tools. '
+                'Mutating SQL requires database.execute/v1 approval. Database roles enforce '
+                'table/column access.'
+            ),
+            providers={"postgres": native_database_provider}))
+    if http_provider is not None:
+        definitions.append(_tool_definition(contracts, sequence_safe=True, capability="http.read/v1",
+            description=(
+                'Request GET/HEAD from the bound HTTP API using a relative path. Complete '
+                'response bytes are saved as a Run file; read them with workspace tools. '
+                'Mutations require http.write/v1 approval. Never supply credentials or a full '
+                'URL.'
+            ),
+            providers={"http": http_provider}))
     if redmine_issue_provider is not None:
         definitions.append(
             _tool_definition(contracts,
@@ -174,6 +210,15 @@ def _read_tool_definitions(
             )
         )
     if repository_source is not None:
+        definitions.append(_tool_definition(contracts, capability="repository.workspace/v1",
+            description=(
+                'Check out scoped Git text files to an editable Run directory. prepare_commit '
+                'reads exact local file bytes and writes a proposal JSON file without '
+                'retranscribing content. Submit that file using change.propose '
+                'request_file/expected_hash plus evidence_refs; remote updates still require '
+                'approval and read-back.'
+            ),
+            providers={"git": RepositoryWorkspaceProvider(repository_source)}, minimum_execution_profile="SUPERVISED"))
         bound = RepositoryReadProvider(repository_source)
         definitions.append(
             _tool_definition(contracts,
@@ -191,10 +236,19 @@ def document_read_tool_definition(
 ) -> ToolDefinition:
     """Project 文書を読む document.read/v1 の Tool 定義を組み立てる。"""
 
-    return _tool_definition(contracts,
+    return _tool_definition(
+        contracts,
         sequence_safe=True,
         capability="document.read/v1",
-        description="Read one UTF-8 project document at a fixed content hash",
+        description=(
+            "Open a frozen project document by path. Prefer response_mode=file: copies the "
+            "verified original bytes to this Run and returns a local path/hash without body. "
+            "Read or search the file as needed. When available, use workspace.edit/v1 to copy, "
+            "append, "
+            "edit or publish without repeating its full text. Inline remains available for "
+            "short reads. Local file changes do not update the library; save using the approved "
+            "document write flow."
+        ),
         providers={DOCUMENT_PROVIDER: DocumentProvider(source)},
     )
 
@@ -261,9 +315,12 @@ def create_run_tool_registry(
     document_source: ProjectDocumentSource,
     document_observations: DocumentObservationLookup | None = None,
     document_readiness_provider: ToolProvider | None = None,
+    document_files_provider: ToolProvider | None = None,
     audit_export_provider: ToolProvider | None = None,
     artifact_append_provider: ToolProvider | None = None,
     artifact_materialize_provider: ToolProvider | None = None,
+    native_database_provider: ToolProvider | None = None,
+    http_provider: ToolProvider | None = None,
     redmine_issue_provider: ToolProvider | None = None,
     database_provider: ToolProvider | None = None,
     mcp_provider: ToolProvider | None = None,
@@ -283,6 +340,8 @@ def create_run_tool_registry(
         (
             *_read_tool_definitions(
                 contracts,
+                native_database_provider=native_database_provider,
+                http_provider=http_provider,
                 redmine_issue_provider=redmine_issue_provider,
                 database_provider=database_provider,
                 mcp_provider=mcp_provider,
@@ -291,12 +350,30 @@ def create_run_tool_registry(
                 repository_source=repository_source,
             ),
             document_read_tool_definition(contracts, document_source),
+            _tool_definition(
+                contracts,
+                sequence_safe=True,
+                capability="document.files/v1",
+                description=(
+                    "List/stat the authorized library's current files and directories "
+                    "using library_key and relative paths. For changes, prepare a proposal "
+                    "with the observed expected_revision; CREATE/UPDATE use a published "
+                    "local file's artifact_ref, never its full content. Submit the returned "
+                    "proposal to change.propose with this response's evidence_refs. "
+                    "Preparation alone does not save or modify anything. Follow listing "
+                    "next_offset with expected_revision; frozen document reads remain separate."
+                ),
+                providers={"platform": document_files_provider or DocumentFilesProvider()},
+                unbound_provider="platform",
+                minimum_execution_profile="SUPERVISED",
+            ),
             document_convert_tool_definition(
                 contracts, document_source, observations=document_observations
             ),
             document_inspect_tool_definition(contracts, document_source),
             document_list_tool_definition(contracts, document_source),
-            _tool_definition(contracts,
+            _tool_definition(
+                contracts,
                 sequence_safe=True,
                 capability=DOCUMENT_READINESS_CAPABILITY,
                 description="Check original Run controlled effects required before document access",
@@ -306,7 +383,8 @@ def create_run_tool_registry(
                 unbound_provider="platform",
             ),
             *_workspace_tool_definitions(contracts),
-            _tool_definition(contracts,
+            _tool_definition(
+                contracts,
                 sequence_safe=True,
                 capability="artifact.materialize/v1",
                 description=(
@@ -320,9 +398,11 @@ def create_run_tool_registry(
                 providers={
                     "platform": artifact_materialize_provider or ArtifactMaterializeProvider(None)
                 },
-                unbound_provider="platform", minimum_execution_profile="GUIDED",
+                unbound_provider="platform",
+                minimum_execution_profile="GUIDED",
             ),
-            _tool_definition(contracts,
+            _tool_definition(
+                contracts,
                 sequence_safe=True,
                 capability="artifact.append/v1",
                 description=(
@@ -336,9 +416,11 @@ def create_run_tool_registry(
                     "Does not change external documents or existing audit references."
                 ),
                 providers={"platform": artifact_append_provider or ArtifactAppendProvider(None)},
-                unbound_provider="platform", minimum_execution_profile="SUPERVISED",
+                unbound_provider="platform",
+                minimum_execution_profile="SUPERVISED",
             ),
-            _tool_definition(contracts,
+            _tool_definition(
+                contracts,
                 sequence_safe=True,
                 capability="audit.export/v1",
                 description=(
@@ -351,20 +433,40 @@ def create_run_tool_registry(
                     "schema or a business verdict."
                 ),
                 providers={"platform": audit_export_provider or AuditExportProvider(None)},
-                unbound_provider="platform", minimum_execution_profile="SUPERVISED",
+                unbound_provider="platform",
+                minimum_execution_profile="SUPERVISED",
             ),
-            _tool_definition(contracts,
+            _tool_definition(
+                contracts,
                 capability="tool.sequence/v1",
-                description="Execute 1-5 already-determined read or local calls in order, with fixed arguments and optional exact result checks. Each call retains its own permission, audit and tool budget. Stops at the first error or failed check. Does not accept effects, interaction, nested sequences or model dispatch. Do not cross required external-saving or reasoning checkpoints.",
-                providers={"platform": ToolSequenceProvider()}, unbound_provider="platform",
-                minimum_execution_profile="SUPERVISED", sequence_safe=False,
+                description=(
+                'Execute 1-5 already-determined read or local calls in order, with fixed '
+                'arguments and optional exact result checks. Each call retains its own '
+                'permission, audit and tool budget. Stops at the first error or failed check. '
+                'Does not accept effects, interaction, nested sequences or model dispatch. Do not '
+                'cross required external-saving or reasoning checkpoints.'
+            ),
+                providers={"platform": ToolSequenceProvider()},
+                unbound_provider="platform",
+                minimum_execution_profile="SUPERVISED",
+                sequence_safe=False,
             ),
             _interaction_tool_definition(contracts),
-            *((_change_propose_tool_definition(contracts),)
-              if deferred_features_enabled or database_writes_enabled
-              or document_writes_enabled or git_writes_enabled or mcp_tools_enabled else ()),
-            *(_subagent_tool_definitions(contracts, subagent_provider)
-              if deferred_features_enabled else ()),
+            *(
+                (_change_propose_tool_definition(contracts),)
+                if deferred_features_enabled
+                or database_writes_enabled
+                or document_writes_enabled
+                or git_writes_enabled
+                or mcp_tools_enabled
+                or http_provider is not None
+                else ()
+            ),
+            *(
+                _subagent_tool_definitions(contracts, subagent_provider)
+                if deferred_features_enabled
+                else ()
+            ),
         )
     )
 
@@ -418,7 +520,7 @@ def _change_propose_tool_definition(contracts: ContractStore) -> ToolDefinition:
     # Provider 側と別の形式を発明せず、既存契約の Agent 向け説明を再利用する。
     payload_guidance = "\n".join(
         str(contracts.load(f"tools/{capability}/request.schema.json")["description"])
-        for capability in ("database.write/v1", "document.write/v1")
+        for capability in ("database.execute/v1", "http.write/v1", "document.write/v1")
     )
     return _tool_definition(contracts,
         capability=CHANGE_PROPOSE_CAPABILITY,
@@ -435,20 +537,13 @@ def _change_propose_tool_definition(contracts: ContractStore) -> ToolDefinition:
             "effect_intent_key and use at least minimum_risk; for legacy declared intents, "
             "copy the exact intent key and risk. "
             "capability_version identifies the write effect declared by that resource "
-            "(database.write/v1 for database rows, document.write/v1 for library documents), "
-            "not this change.propose/v1 control tool. "
-            "For database writes, first read using filters equal to the complete primary key, "
-            "columns=[] and offset=0; the result must be untruncated. INSERT requires no rows, "
-            "expected=null and revision=absent. UPDATE requires the complete observed row as "
-            "expected and its row_hashes entry as revision (not the response content_hash). "
-            "The /row SET value must contain exactly key, values and expected. Put revision "
-            "only in precondition.revision, never inside that value object. "
-            "For UPDATE, copy the entire observed row unchanged into expected, including all "
-            "primary-key, generated/identity and null-valued fields. expected is a read-only "
-            "comparison snapshot, not the columns to write. Put primary-key fields in key "
-            "and exclude them from values; omit generated/identity columns from values only. "
-            "Include that exact read's Evidence reference. Rollback text does not authorize "
-            "DELETE or any other compensation.\n" + payload_guidance
+            "(database.execute/v1 for SQL, http.write/v1 for HTTP APIs, document.write/v1 for documents), "
+            "not this change.propose/v1 control tool. Include the original read's Evidence reference. "
+            "Alternatively supply request_file, expected_hash and optional evidence_refs for an exact "
+            "prepared JSON proposal in workspace/ or output/. The Worker loads and validates that file "
+            "before approval; it does not publish edited files automatically. "
+            "Read-back must validate the original business requirements. Rollback text alone does not "
+            "authorize compensation.\n" + payload_guidance
         ),
         providers={"platform": DeferredChangeProposalProvider()},
         unbound_provider="platform",
@@ -461,30 +556,37 @@ def _workspace_tool_definitions(contracts: ContractStore) -> tuple[ToolDefinitio
     """Run 内の読取と制限付き書込を精確な capability version ごとに登録する。"""
 
     return (
-        _tool_definition(contracts,
+        _tool_definition(
+            contracts,
             sequence_safe=True,
             capability="json.schema.validate/v1",
-            description=("Validate Run-local JSON against a Draft 2020-12 Schema, including "
-                         "format assertions. Read schema_path and instance_path from "
-                         "input/workspace/output only; fragment refs within the schema are "
-                         "allowed, external refs are denied. Returns exact file hashes and "
-                         "bounded JSON Pointer errors. Does not validate business semantics."),
+            description=(
+                "Validate Run-local JSON against a Draft 2020-12 Schema, including "
+                "format assertions. Read schema_path and instance_path from "
+                "input/workspace/output only; fragment refs within the schema are "
+                "allowed, external refs are denied. Returns exact file hashes and "
+                "bounded JSON Pointer errors. Does not validate business semantics."
+            ),
             providers={"workspace": JsonSchemaValidateProvider()},
             unbound_provider="workspace",
             minimum_execution_profile="GUIDED",
         ),
-        _tool_definition(contracts,
+        _tool_definition(
+            contracts,
             sequence_safe=True,
             capability="workspace.read/v1",
-            description=("Read one UTF-8 Run file. For large files use offset=0, max_chars=12000 "
-                         "and expected_hash; follow next_offset until null. Offsets count Unicode "
-                         "characters, not bytes. Line ranges are an alternative. Never infer full "
-                         "coverage from a truncated response or search matches alone."),
+            description=(
+                "Read one UTF-8 Run file. For large files use offset=0, max_chars=12000 "
+                "and expected_hash; follow next_offset until null. Offsets count Unicode "
+                "characters, not bytes. Line ranges are an alternative. Never infer full "
+                "coverage from a truncated response or search matches alone."
+            ),
             providers={"workspace": WorkspaceReadProvider()},
             unbound_provider="workspace",
             minimum_execution_profile="GUIDED",
         ),
-        _tool_definition(contracts,
+        _tool_definition(
+            contracts,
             sequence_safe=True,
             capability="workspace.search/v1",
             description="Search UTF-8 files in the isolated Run workspace",
@@ -492,7 +594,8 @@ def _workspace_tool_definitions(contracts: ContractStore) -> tuple[ToolDefinitio
             unbound_provider="workspace",
             minimum_execution_profile="SUPERVISED",
         ),
-        _tool_definition(contracts,
+        _tool_definition(
+            contracts,
             sequence_safe=True,
             capability="workspace.write/v1",
             description="Write one UTF-8 file to the isolated Run workspace or output",
@@ -500,7 +603,8 @@ def _workspace_tool_definitions(contracts: ContractStore) -> tuple[ToolDefinitio
             unbound_provider="workspace",
             minimum_execution_profile="SUPERVISED",
         ),
-        _tool_definition(contracts,
+        _tool_definition(
+            contracts,
             sequence_safe=True,
             capability="workspace.write/v2",
             description=(
@@ -508,6 +612,23 @@ def _workspace_tool_definitions(contracts: ContractStore) -> tuple[ToolDefinitio
                 "immutable Artifact reference only after their exact bytes are committed"
             ),
             providers={"workspace": WorkspaceWriteProvider()},
+            unbound_provider="workspace",
+            minimum_execution_profile="SUPERVISED",
+        ),
+        _tool_definition(
+            contracts,
+            sequence_safe=True,
+            capability="workspace.edit/v1",
+            description=(
+                "Copy, append, precisely edit or publish a Run file by path and expected "
+                "source hash. A different destination must be absent; edit an existing target "
+                "in place with its own hash. Original text stays in the file; "
+                "only send new text or "
+                "unique replacements. output/ targets publish verified Artifact bytes. "
+                "This does not change the document library; submit its Artifact through "
+                "the approved document write flow."
+            ),
+            providers={"workspace": WorkspaceEditProvider()},
             unbound_provider="workspace",
             minimum_execution_profile="SUPERVISED",
         ),

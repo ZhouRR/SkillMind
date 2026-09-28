@@ -1,0 +1,21 @@
+{
+  "status": "success",
+  "provider": "project",
+  "document": {
+    "folder": "knowledge",
+    "name": "INDEX.md",
+    "mime": "text/markdown",
+    "checksum": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "size": 12
+  },
+  "file": {
+    "path": "workspace/documents/00000000-0000-4000-8000-000000000001/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/INDEX.md",
+    "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "size_bytes": 12
+  },
+  "evidence_refs": [
+    "ev_document_1"
+  ],
+  "warnings": [],
+  "truncated": false
+}

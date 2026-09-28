@@ -106,7 +106,7 @@ def test_migration_chain_has_a_single_expected_head() -> None:
     config.set_main_option("script_location", str(backend_dir / "migrations"))
     scripts = ScriptDirectory.from_config(config)
 
-    assert scripts.get_heads() == ["0055_run_deletion_audit"]
+    assert scripts.get_heads() == ["0059_native_resource_clients"]
     assert scripts.get_revision("0017_skill_library_org_scope").down_revision == (
         "0015_skill_compositions"
     )

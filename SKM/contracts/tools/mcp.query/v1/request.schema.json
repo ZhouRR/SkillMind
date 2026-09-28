@@ -1,32 +1,71 @@
 {
-  "type": "object",
-  "additionalProperties": false,
-  "properties": {
-    "name": {
-      "type": "string",
-      "pattern": "^[a-zA-Z0-9_.-]{1,128}$"
-    },
-    "arguments": {
-      "type": "object"
-    },
-    "purpose": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 1000
-    },
-    "resource_key": {
-      "type": "string",
-      "pattern": "^[a-z][a-z0-9_.-]*$",
-      "maxLength": 128,
-      "description": "This Run's frozen resource slot key. Required when several resources provide this capability; omit only when exactly one is available. Does not grant access or accept a connection address."
-    }
-  },
-  "required": [
-    "name",
-    "arguments"
-  ],
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.skillmind.local/tools/mcp.query/v1/request.schema.json",
   "title": "mcp.query/v1 request",
-  "description": "Call a tool explicitly authorized as read in mcp.tools/v1. Validate arguments against its frozen input_schema. Other tools require change.propose/v1 approval."
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_.-]{1,128}$"
+        },
+        "arguments": {
+          "type": "object"
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "resource_key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "maxLength": 128,
+          "description": "This Run's frozen resource slot key. Required when several resources provide this capability; omit only when exactly one is available. Does not grant access or accept a connection address."
+        },
+        "response_mode": {
+          "enum": [
+            "inline",
+            "file"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "arguments"
+      ],
+      "description": "Call a tool explicitly authorized as read in mcp.tools/v1. Validate arguments against its frozen input_schema. Other tools require change.propose/v1 approval."
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request_file": {
+          "type": "string",
+          "pattern": "^(workspace|output)/"
+        },
+        "expected_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "purpose": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "response_mode": {
+          "enum": [
+            "file",
+            "inline"
+          ]
+        }
+      },
+      "required": [
+        "request_file",
+        "expected_hash"
+      ]
+    }
+  ],
+  "type": "object"
 }

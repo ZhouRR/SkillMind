@@ -44,6 +44,7 @@ class ManagementApi(ProjectsApi):
         self.initial_gate: ResponseGate | None = None
         self.write_failure: tuple[int, str] | None = None
         self.write_mode = "success"
+        self.cleanup_pending = 0
 
     def sync_list(self) -> None:
         """同じ正本から活動一覧を投影し、status変更後の読取を整合させる。"""
@@ -128,7 +129,7 @@ class ManagementApi(ProjectsApi):
                     assert len(body) >= 2 and all(value is not None for value in body.values())
                 else:
                     assert method == "POST" and len(parts) == 3
-                    assert parts[2] in {"archive", "unarchive"}
+                    assert parts[2] in {"archive", "unarchive", "purge"}
                     assert set(body) == {"expected_row_version"}
         gate, failure, mode = self.write_gate, self.write_failure, self.write_mode
         if gate:
@@ -151,14 +152,14 @@ class ManagementApi(ProjectsApi):
                 if expected != original["row_version"]:
                     await self.problem(route, (409, "project_version_conflict"))
                     return
-                if method == "DELETE":
+                if method == "DELETE" or parts[-1] == "purge":
                     if original["status"] != "ARCHIVED":
                         await self.problem(route, (409, "project_delete_requires_archive"))
                         return
                     del self.details[parts[1]]
                     if self.preference == parts[1]:
                         self.preference = None
-                    result = None
+                    result = {"project_id": parts[1], "cleanup_pending": self.cleanup_pending}
                 else:
                     changes = (
                         {key: value for key, value in body.items() if key != "expected_row_version"}
@@ -298,9 +299,7 @@ async def basic_flow(page: Page, api: ManagementApi, _: dict) -> None:
         ).to_be_focused()
         call = api.project_mutations()[-1]
         assert (
-            int(call[2]["expected_row_version"][0])
-            if operation == "delete"
-            else call[3]["expected_row_version"]
+            call[3]["expected_row_version"]
         ) == expected
     assert CREATED not in api.details
     assert len(api.project_mutations()) == 6
@@ -326,6 +325,17 @@ async def unknown_current_deletion(page: Page, api: ManagementApi, labels: dict)
     await unknown(page, api, labels, "delete")
     assert urlsplit(page.url).fragment == api.fragment
     await expect(page.locator('[data-project-context="unselected"]')).to_have_count(0)
+
+
+async def pending_cleanup(page: Page, api: ManagementApi, _: dict) -> None:
+    """Project 削除確定後の blob 清理失敗を再送・完全成功に読み替えない。"""
+    api.cleanup_pending = 2
+    await freeze(page, ARCHIVED, "delete")
+    await confirm(page)
+    await expect(page.locator('[data-project-management] > p[role="status"]')).to_contain_text("2")
+    assert ARCHIVED not in api.details
+    assert len(api.project_mutations()) == 1
+    await expect(page.locator("[data-project-unknown]")).to_have_count(0)
 
 
 async def conflict(
@@ -536,7 +546,7 @@ async def late_actor(page: Page, api: ManagementApi, labels: dict, status: int) 
     await asyncio.wait_for(gate.returned.wait(), 10)
     await settle(page)
     await expect(page.locator('input[name="email"]')).to_have_count(0)
-    await expect(page.locator(".sidebarUser")).to_contain_text(api.users[OTHER]["email"])
+    await expect(page.locator(".sidebarUser")).to_contain_text(api.users[OTHER]["display_name"])
 
 
 async def deadline(page: Page, api: ManagementApi, _: dict) -> None:
@@ -592,9 +602,7 @@ async def legacy_lifecycle(page: Page, api: ManagementApi, _: dict) -> None:
         await success(page)
         call = api.project_mutations()[-1]
         version = (
-            int(call[2]["expected_row_version"][0])
-            if operation == "delete"
-            else call[3]["expected_row_version"]
+            call[3]["expected_row_version"]
         )
         assert version == expected
         if operation != "delete":
@@ -758,6 +766,7 @@ async def check(url: str, output: Path | None, only: str | None) -> None:
                     ),
                 )
             await run("delete-other-project", delete_other_project)
+            await run("delete-cleanup-pending", pending_cleanup)
             await run(
                 "delete-current-unknown",
                 unknown_current_deletion,
@@ -820,8 +829,6 @@ async def check(url: str, output: Path | None, only: str | None) -> None:
                 )
             for operation in ("create", "edit", "archive", "restore", "delete"):
                 for mode in ("drop", "invalid", "unexpected-status", "unexpected-204", "500"):
-                    if operation == "delete" and mode == "unexpected-204":
-                        continue
 
                     def configure(api: ManagementApi, mode: str = mode) -> None:
                         """500と異常成功を区別し、元の操作が適用されたかは別に保持する。"""

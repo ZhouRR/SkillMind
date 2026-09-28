@@ -85,10 +85,13 @@ def test_0042_composes_with_unchanged_0038_and_matches_current_models(
         target = metadata.tables[table]
         sa.Index(index_name, *(target.c[column] for column in columns), **invocation.kwargs)
     for migrated, model in ((intents, _INTENTS), (closures, _CLOSURES)):
-        assert _contract(migrated) == _contract(model)
+        current = _contract(model)
+        # 0057 の Project FK 分離を旧版の比較にだけ戻す。
+        current["foreign_keys"].add(("project_id", "projects.id", "RESTRICT"))
+        assert _contract(migrated) == current
         assert {str(item.name) for item in migrated.constraints} == {
             str(item.name) for item in model.constraints
-        }
+        } | {f"fk_{model.name}_project_id_projects"}
         assert all(len(str(item.name)) <= 63 for item in migrated.constraints)
         assert _indexes(migrated) == _indexes(model)
     assert _indexes(intents) == {
@@ -126,7 +129,6 @@ def test_closure_has_exact_binding_without_invented_storage_history_or_release_f
     assert contract["unique"] == {("upload_intent_id",)}
     assert contract["foreign_keys"] == {
         ("organization_id", "organizations.id", "RESTRICT"),
-        ("project_id", "projects.id", "RESTRICT"),
         ("actor_id", "users.id", "RESTRICT"),
         ("requested_by", "users.id", "RESTRICT"),
         ("upload_intent_id", "document_upload_intents.id", "RESTRICT"),
@@ -256,8 +258,12 @@ def test_closure_keeps_original_parents_restricted(
     """閉鎖済みだからと原帰属を cascade で消すことを許可しない。"""
 
     _save(database, _closure())
-    with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY"):
-        database.execute(f"DELETE FROM {parent}")
+    if parent == "projects":
+        database.execute("DELETE FROM projects")
+        assert database.execute("SELECT count(*) FROM document_upload_closures").fetchone() == (1,)
+    else:
+        with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY"):
+            database.execute(f"DELETE FROM {parent}")
 
 
 @pytest.mark.parametrize(("state", "published_at", "closed_at", "allowed"), [

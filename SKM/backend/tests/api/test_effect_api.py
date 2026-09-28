@@ -16,7 +16,7 @@ from skillmind.api.routes.effects import ChangeProposalResponse
 from tests.api.fakes import FakeEffectService, FakeProposalDecisionService
 
 
-async def _library_decision(service, command, *, access):
+async def _library_decision(service, command, *, access, operation="CREATE"):
     """承認ロジックは mock に限定し、実 response projection に内部文書庫の形を渡す。"""
 
     result = await FakeProposalDecisionService.decide_change_proposal(
@@ -28,15 +28,16 @@ async def _library_decision(service, command, *, access):
             result.proposal,
             integration_id=None,
             capability_version="document.write/v1",
-            operation="CREATE",
+            operation=operation,
             target={"locator": "rv/fixture/source.md"},
             summary="Save the original Artifact",
         ),
     )
 
 
+@pytest.mark.parametrize("operation", ["CREATE", "UPDATE", "MOVE", "MOVE_FOLDER", "CREATE_FOLDER", "DELETE_FOLDER", "TRASH", "RESTORE"])
 def test_document_proposal_response_preserves_null_and_rejects_other_null_targets(
-    client, monkeypatch
+    client, monkeypatch, operation
 ):
     """実 HTTP serializer、response model と共有 detail Schema が同じ NULL 境界を持つ。"""
 
@@ -44,7 +45,7 @@ def test_document_proposal_response_preserves_null_and_rejects_other_null_target
     monkeypatch.setattr(
         service,
         "decide_change_proposal",
-        lambda command, access: _library_decision(service, command, access=access),
+        lambda command, access: _library_decision(service, command, access=access, operation=operation),
     )
     client.app.state.run_service = service
     response = client.post(
@@ -68,7 +69,7 @@ def test_document_proposal_response_preserves_null_and_rejects_other_null_target
     for changes in (
         {"capability_version": "database.write/v1"},
         {"integration_id": str(uuid4())},
-        {"operation": "UPDATE"},
+        {"operation": "PURGE"},
     ):
         with pytest.raises(ValidationError):
             ChangeProposalResponse.model_validate({**value, **changes})

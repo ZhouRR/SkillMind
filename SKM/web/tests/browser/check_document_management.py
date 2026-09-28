@@ -244,7 +244,7 @@ async def scenario(
                     await settle(page)
                     await expect(page.locator('input[name="email"]')).to_have_count(0)
                     await expect(page.locator(".sidebarUser")).to_contain_text(
-                        api.users[OTHER]["email"]
+                        api.users[OTHER]["display_name"]
                     )
                 else:
                     await page.clock.run_for(30_001)

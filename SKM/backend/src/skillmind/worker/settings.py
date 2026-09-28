@@ -35,17 +35,21 @@ from skillmind.agent.contract_store import (
     ContractStore,
 )
 from skillmind.agent.database_provider import DatabaseReadProvider
+from skillmind.agent.document_files import DocumentFilesProvider
 from skillmind.agent.document_readiness import DocumentReadinessProvider
 from skillmind.agent.domain import AgentEngine, RunContext
 from skillmind.agent.engine import ClaudeAgentSdkEngine, RunMcpRuntime
 from skillmind.agent.evidence import PostgresToolAuditWriter
+from skillmind.agent.http_provider import HttpReadProvider
+from skillmind.agent.http_source import HttpResourceSource
 from skillmind.agent.mcp_lease import McpDesktopLeases
 from skillmind.agent.mcp_provider import McpReadProvider
 from skillmind.agent.mcp_source import StreamableHttpMcpSource
 from skillmind.agent.mcp_tools_provider import McpToolsProvider
 from skillmind.agent.mcp_tools_source import StreamableHttpMcpToolsSource
+from skillmind.agent.postgres_native import NativePostgresSource
+from skillmind.agent.postgres_native_provider import NativeDatabaseProvider
 from skillmind.agent.postgres_source import PostgresDatabaseSource
-from skillmind.agent.redmine_provider import RedmineIssueReadProvider
 from skillmind.agent.repository_client import (
     GitCommandRepositoryClient,
     SvnCommandRepositoryClient,
@@ -87,9 +91,6 @@ from skillmind.effects.reconciliation_requests import (
     ReconciliationRequestNotFoundError,
 )
 from skillmind.effects.reconciliation_service import EffectReconciliationService
-from skillmind.effects.redmine import (
-    UrllibRedmineTransport,
-)
 from skillmind.effects.release import configured_execution_features
 from skillmind.effects.service import EffectService
 from skillmind.effects.wiring import create_effect_provider_registry
@@ -261,6 +262,9 @@ async def startup(ctx: dict[str, Any], *, maintenance_only: bool = False) -> Non
         document_source=document_source,
         document_observations=PostgresDocumentObservationLookup(ctx["database_session_factory"]),
         document_readiness_provider=DocumentReadinessProvider(ctx["database_session_factory"]),
+        document_files_provider=DocumentFilesProvider(
+            ctx["database_session_factory"], target=document_library_target,
+        ),
         audit_export_provider=AuditExportProvider(PostgresAuditExportSource(ctx["database_session_factory"])),
         artifact_materialize_provider=ArtifactMaterializeProvider(
             PostgresAuditExportSource(ctx["database_session_factory"])
@@ -285,11 +289,10 @@ async def startup(ctx: dict[str, Any], *, maintenance_only: bool = False) -> Non
             leases=McpDesktopLeases(ctx["database_session_factory"]),
         ) if features.mcp_tools else None,
         database_provider=database_provider,
-        redmine_issue_provider=RedmineIssueReadProvider(
-            ctx["database_session_factory"],
-            transport=UrllibRedmineTransport(),
-            secret_resolver=DeploymentSecretResolver(cipher=secret_cipher),
-        ),
+        native_database_provider=NativeDatabaseProvider(ctx["database_session_factory"], source=NativePostgresSource(),
+            secret_resolver=DeploymentSecretResolver(cipher=secret_cipher)),
+        http_provider=HttpReadProvider(ctx["database_session_factory"], source=HttpResourceSource(),
+            secret_resolver=DeploymentSecretResolver(cipher=secret_cipher)),
         repository_source=repository_source,
     )
     def create_authorized_gateway(context: RunContext) -> RunToolRuntime:
@@ -367,7 +370,7 @@ async def startup(ctx: dict[str, Any], *, maintenance_only: bool = False) -> Non
             document_effect_source = document_receipt_source
             document_effect_service = DocumentEffectService(
                 ctx["database_session_factory"], features=features, target=document_library_target,
-                limits=create_document_upload_limits(settings),
+                limits=create_document_upload_limits(settings), document_source=document_source,
             )
         ctx["effect_executor"] = ApprovedEffectExecutor(
             effect_service=ctx["effect_service"],

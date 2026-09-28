@@ -1,7 +1,7 @@
 import type { Dispatch, FormEvent, SetStateAction } from 'react'
 import type { IntegrationRecord, SecretReferenceRecord } from '../api'
 import { useMessages } from '../i18n'
-import { COMMON_REDMINE_FIELD_KEYS, PROVIDER_FORMS, RESOURCE_PROVIDERS, SCOPE_WILDCARD,
+import { PROVIDER_FORMS, RESOURCE_PROVIDERS,
   mcpPermissionsForAccess, mcpToolNames, supportsMcpCatalog,
   type RepositoryWriteMode, type ResourceProvider } from '../lib/resourceConfig'
 import { NEW_CREDENTIAL, PROVIDER_LABELS, emptyConnectDraft, type ConnectDraft } from '../lib/resourceDrafts'
@@ -69,17 +69,17 @@ export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets,
                 <label>{messages.resources.mcpServerUrl}<input type="url" required maxLength={2048}
                   placeholder="https://mcp.example.com/mcp" value={connectDraft.serverUrl}
                   onChange={(event) => setConnectDraft((value) => ({ ...value, serverUrl: event.target.value, mcpCatalog: null, mcpTools: false }))} /></label>
-              ) : connectDraft.provider === 'redmine' ? (
-                <label>{messages.resources.baseUrlLabel}
-                  <input
-                    className="mono"
-                    placeholder="https://redmine.example.com"
-                    required
-                    type="url"
-                    value={connectDraft.baseUrl}
-                    onChange={(event) => setConnectDraft((value) => ({ ...value, baseUrl: event.target.value }))}
-                  />
-                </label>
+              ) : connectDraft.provider === 'http' ? (
+                <>
+                  <label>{messages.resources.baseUrlLabel}<input type="url" required value={connectDraft.baseUrl}
+                    onChange={(event) => setConnectDraft((value) => ({ ...value, baseUrl: event.target.value }))} /></label>
+                  <label>{messages.resources.httpAuthentication}<select value={connectDraft.httpAuthMode}
+                    onChange={(event) => setConnectDraft((value) => ({ ...value, httpAuthMode: event.target.value as ConnectDraft['httpAuthMode'], credentialChoice: event.target.value === 'none' ? '' : value.credentialChoice }))}>
+                    <option value="none">{messages.resources.notUsed}</option><option value="bearer">Bearer</option><option value="header">API Key header</option>
+                  </select></label>
+                  {connectDraft.httpAuthMode === 'header' && <label>{messages.resources.httpCredentialHeader}<input required value={connectDraft.httpAuthHeader}
+                    placeholder="X-Redmine-API-Key" onChange={(event) => setConnectDraft((value) => ({ ...value, httpAuthHeader: event.target.value }))} /></label>}
+                </>
               ) : (
                 <>
                   <label>{messages.resources.repositoryUriLabel}
@@ -131,7 +131,7 @@ export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets,
               )}
               <label>{messages.resources.credentialLabel}
                 <select
-                  required={connectForm.requiresSecret || (connectDraft.provider === 'mcp' && connectDraft.mcpTools && connectDraft.access === 'read_write')}
+                  required={connectForm.requiresSecret || (connectDraft.provider === 'http' && connectDraft.httpAuthMode !== 'none') || (connectDraft.provider === 'mcp' && connectDraft.mcpTools && connectDraft.access === 'read_write')}
                   value={connectDraft.credentialChoice}
                   onChange={(event) => setConnectDraft((value) => ({ ...value, credentialChoice: event.target.value, secretValue: '', locator: '' }))}
                 >
@@ -193,42 +193,16 @@ export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets,
                 </fieldset>
               )}
               {connectDraft.provider === 'postgres' ? (
-                <><fieldset className="scopePicker"><legend>{messages.resources.databaseTables}</legend>
-                  <label className="scopeOption"><input type="checkbox"
-                    checked={connectDraft.tables === SCOPE_WILDCARD}
-                    onChange={(event) => setConnectDraft((value) => ({ ...value, tables: event.target.checked ? SCOPE_WILDCARD : '' }))} />
-                    <span>{messages.resources.databaseAllTables}</span>
-                  </label>
-                  {connectDraft.tables !== SCOPE_WILDCARD && <label>{messages.resources.scopeExplicitValues}
-                    <textarea required className="mono compactTextarea"
-                      placeholder={'public.reports\npublic.items'} value={connectDraft.tables}
-                      onChange={(event) => setConnectDraft((value) => ({ ...value, tables: event.target.value }))} />
-                  </label>}
-                  <span className="hint">{connectDraft.tables === SCOPE_WILDCARD || connectDraft.writeColumns === SCOPE_WILDCARD
-                    ? messages.resources.databaseAllHint : connectWriteEnabled && connectDraft.access === 'read_write'
-                    ? messages.resources.databaseWriteHint : messages.resources.databaseReadHint}</span></fieldset>
-                {connectWriteEnabled && connectDraft.access === 'read_write' && <>
-                  <fieldset className="scopePicker"><legend>{messages.resources.databaseWriteColumns}</legend>
-                    <label className="scopeOption"><input type="checkbox"
-                      checked={connectDraft.writeColumns === SCOPE_WILDCARD}
-                      onChange={(event) => setConnectDraft((value) => ({ ...value, writeColumns: event.target.checked ? SCOPE_WILDCARD : '' }))} />
-                      <span>{messages.resources.databaseAllColumns}</span>
-                    </label>
-                    {connectDraft.writeColumns !== SCOPE_WILDCARD && <label>{messages.resources.scopeExplicitValues}
-                      <textarea required className="mono compactTextarea"
-                        placeholder={'public.reports.id\npublic.reports.status'} value={connectDraft.writeColumns}
-                        onChange={(event) => setConnectDraft((value) => ({ ...value, writeColumns: event.target.value }))} />
-                    </label>}
-                  </fieldset>
-                  <fieldset className="scopePicker"><legend>{messages.resources.databaseOperations}</legend>
-                    {['INSERT', 'UPDATE'].map((operation) => <label className="scopeOption" key={operation}>
+                <>
+                  <p className="hint">{messages.resources.nativeSqlHint}</p>
+                  {connectWriteEnabled && connectDraft.access === 'read_write' && <fieldset className="scopePicker"><legend>{messages.resources.databaseOperations}</legend>
+                    {['INSERT', 'UPDATE', 'DELETE'].map((operation) => <label className="scopeOption" key={operation}>
                       <input type="checkbox" checked={connectDraft.databaseOperations.includes(operation)}
-                        onChange={(event) => setConnectDraft((value) => ({ ...value, databaseOperations: event.target.checked
-                          ? [...value.databaseOperations, operation] : value.databaseOperations.filter((item) => item !== operation) }))} />
+                        onChange={(event) => setConnectDraft((value) => ({ ...value, databaseOperations: event.target.checked ? [...value.databaseOperations, operation] : value.databaseOperations.filter((v) => v !== operation) }))} />
                       <span>{operation}</span>
                     </label>)}
-                  </fieldset>
-                </>}</>
+                  </fieldset>}
+                </>
               ) : connectDraft.provider === 'mcp' ? (
                 <>
                 {mcpToolsEnabled && <div className="resourceFormSection">
@@ -254,93 +228,17 @@ export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets,
                   onChange={(event) => setConnectDraft((value) => ({ ...value, resourceUris: event.target.value }))} />
                   <span className="hint">{messages.resources.mcpReadHint}</span></label>
                 </>
-              ) : connectDraft.provider === 'redmine' ? (
+              ) : connectDraft.provider === 'http' ? (
                 <>
-                  <fieldset className="scopePicker">
-                    <legend>{messages.resources.issueScopeLabel}</legend>
-                    <label className="scopeOption">
-                      <input
-                        checked={connectDraft.issueScope === 'all'}
-                        name="connect-issue-scope"
-                        type="radio"
-                        onChange={() => setConnectDraft((value) => ({ ...value, issueScope: 'all' }))}
-                      />
-                      <span>{messages.resources.issueScopeAllOption}</span>
-                    </label>
-                    <label className="scopeOption">
-                      <input
-                        checked={connectDraft.issueScope === 'list'}
-                        name="connect-issue-scope"
-                        type="radio"
-                        onChange={() => setConnectDraft((value) => ({ ...value, issueScope: 'list' }))}
-                      />
-                      <span>{messages.resources.issueScopeListOption}</span>
-                    </label>
-                    {connectDraft.issueScope === 'list' && (
-                      <>
-                        <label>{messages.resources.issueIdsLabel}
-                          <textarea
-                            className="mono compactTextarea"
-                            placeholder={'1001\n1002'}
-                            required
-                            value={connectDraft.issueIds}
-                            onChange={(event) => setConnectDraft((value) => ({ ...value, issueIds: event.target.value }))}
-                          />
-                        </label>
-                        <p className="hint">{messages.resources.issueIdsHint}</p>
-                      </>
-                    )}
-                  </fieldset>
-                  {connectDraft.access === 'read_write' && (
-                    <fieldset className="scopePicker">
-                      <legend>{messages.resources.fieldScopeLabel}</legend>
-                      <label className="scopeOption">
-                        <input
-                          checked={connectDraft.fieldScope === 'all'}
-                          name="connect-field-scope"
-                          type="radio"
-                          onChange={() => setConnectDraft((value) => ({ ...value, fieldScope: 'all' }))}
-                        />
-                        <span>{messages.resources.fieldScopeAllOption}</span>
-                      </label>
-                      <label className="scopeOption">
-                        <input
-                          checked={connectDraft.fieldScope === 'list'}
-                          name="connect-field-scope"
-                          type="radio"
-                          onChange={() => setConnectDraft((value) => ({ ...value, fieldScope: 'list' }))}
-                        />
-                        <span>{messages.resources.fieldScopeListOption}</span>
-                      </label>
-                      {connectDraft.fieldScope === 'list' && (
-                        <>
-                          {COMMON_REDMINE_FIELD_KEYS.map((fieldKey) => (
-                            <label className="scopeOption" key={fieldKey}>
-                              <input
-                                checked={connectDraft.fieldKeys.includes(fieldKey)}
-                                type="checkbox"
-                                onChange={(event) => setConnectDraft((value) => ({
-                                  ...value,
-                                  fieldKeys: event.target.checked
-                                    ? [...value.fieldKeys, fieldKey]
-                                    : value.fieldKeys.filter((item) => item !== fieldKey),
-                                }))}
-                              />
-                              <span className="mono">{fieldKey}</span>
-                            </label>
-                          ))}
-                          <p className="hint">{messages.resources.fieldKeysHint}</p>
-                          <label>{messages.resources.customFieldKeysLabel}
-                            <input
-                              className="mono"
-                              value={connectDraft.customFieldKeys}
-                              onChange={(event) => setConnectDraft((value) => ({ ...value, customFieldKeys: event.target.value }))}
-                            />
-                          </label>
-                        </>
-                      )}
-                    </fieldset>
-                  )}
+                  <label>{messages.resources.httpPaths}<textarea required className="mono compactTextarea" value={connectDraft.paths}
+                    onChange={(event) => setConnectDraft((value) => ({ ...value, paths: event.target.value }))} /></label>
+                  {connectWriteEnabled && connectDraft.access === 'read_write' && <fieldset className="scopePicker"><legend>{messages.resources.httpMethods}</legend>
+                    {['POST', 'PUT', 'PATCH', 'DELETE'].map((method) => <label className="scopeOption" key={method}>
+                      <input type="checkbox" checked={connectDraft.httpMethods.includes(method)}
+                        onChange={(event) => setConnectDraft((value) => ({ ...value, httpMethods: event.target.checked ? [...value.httpMethods, method] : value.httpMethods.filter((v) => v !== method) }))} />
+                      <span>{method}</span>
+                    </label>)}
+                  </fieldset>}
                 </>
               ) : (
                 <>

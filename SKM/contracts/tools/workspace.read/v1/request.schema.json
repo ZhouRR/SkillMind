@@ -13,7 +13,7 @@
       "type": "string",
       "minLength": 7,
       "maxLength": 4096,
-      "pattern": "^(?:input|workspace)/",
+      "pattern": "^(?:input|workspace|output)/",
       "not": {
         "pattern": "(^/|(^|/)\\.\\.(/|$))"
       }

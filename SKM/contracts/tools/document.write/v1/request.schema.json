@@ -2,17 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.skillmind.local/tools/document.write/v1/request.schema.json",
   "title": "document.write/v1 approved payload",
-  "description": "Effect-only CREATE of an existing Run Artifact into the project document library. Agent proposes target.locator=relative path and one /document SET with artifact_ref, content_hash, size_bytes, mime_type; precondition revision=absent and READ_BACK /document. object_key is derived by the platform from the frozen project library, never accepted from an Agent proposal. No directly callable Agent Tool.",
+  "description": "Effect-only document management. CREATE publishes a Run Artifact at an absent path; UPDATE requires the observed revision and retains original bytes for frozen inputs. Metadata operations use exact source/destination paths and an observed revision. Approval, current authority, conflict checks and read-back remain mandatory. No directly callable Agent Tool.",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "path",
-    "object_key",
-    "artifact_ref",
-    "content_hash",
-    "size_bytes",
-    "mime_type"
-  ],
   "properties": {
     "path": {
       "type": "string",
@@ -43,6 +35,143 @@
         "text/markdown",
         "application/json"
       ]
+    },
+    "expected_revision": {
+      "type": "string",
+      "pattern": "^(absent|sha256:[a-f0-9]{64})$"
+    },
+    "operation": {
+      "enum": [
+        "MOVE",
+        "MOVE_FOLDER",
+        "CREATE_FOLDER",
+        "DELETE_FOLDER",
+        "TRASH",
+        "RESTORE"
+      ]
+    },
+    "destination": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 401
+    },
+    "document_id": {
+      "type": "string",
+      "format": "uuid"
     }
-  }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "path",
+        "object_key",
+        "artifact_ref",
+        "content_hash",
+        "size_bytes",
+        "mime_type"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "operation"
+            ]
+          },
+          {
+            "required": [
+              "destination"
+            ]
+          },
+          {
+            "required": [
+              "document_id"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "required": [
+        "path",
+        "operation",
+        "expected_revision"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "artifact_ref"
+            ]
+          },
+          {
+            "required": [
+              "content_hash"
+            ]
+          },
+          {
+            "required": [
+              "size_bytes"
+            ]
+          },
+          {
+            "required": [
+              "mime_type"
+            ]
+          },
+          {
+            "required": [
+              "object_key"
+            ]
+          }
+        ]
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "enum": [
+                  "MOVE",
+                  "MOVE_FOLDER"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "destination"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "destination"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "RESTORE"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "document_id"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "document_id"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
 }

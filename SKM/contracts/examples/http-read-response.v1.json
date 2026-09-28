@@ -1,0 +1,14 @@
+{
+  "status": "success",
+  "provider": "http",
+  "http_status": 200,
+  "headers": {},
+  "file": {
+    "path": "workspace/resources/example/response.txt",
+    "size_bytes": 2,
+    "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "evidence_refs": [
+    "ev_example"
+  ]
+}

@@ -119,11 +119,14 @@ class ProviderDefinition:
 
 
 PROVIDER_DEFINITIONS: dict[str, ProviderDefinition] = {
+    "http": ProviderDefinition(kind="other", provider="http",
+        capabilities=frozenset({"http.read/v1", "http.write/v1"}),
+        write_capabilities=frozenset({"http.write/v1"}), requires_secret=False, installed=True),
     "postgres": ProviderDefinition(
         kind="other",
         provider="postgres",
-        capabilities=frozenset({"database.read/v1", "database.write/v1"}),
-        write_capabilities=frozenset({"database.write/v1"}),
+        capabilities=frozenset({"database.query/v1", "database.execute/v1"}),
+        write_capabilities=frozenset({"database.execute/v1"}),
         requires_secret=True,
         installed=True,
     ),
@@ -134,14 +137,6 @@ PROVIDER_DEFINITIONS: dict[str, ProviderDefinition] = {
         write_capabilities=frozenset({"mcp.call/v1"}),
         requires_secret=False,
         installed=True,  # tools は独立した配備 switch と凍結 profile の scope で制限する。
-    ),
-    "redmine": ProviderDefinition(
-        kind="issue",
-        provider="redmine",
-        capabilities=frozenset({"issue.read/v1", "issue.update/v1"}),
-        write_capabilities=frozenset({"issue.update/v1"}),
-        requires_secret=True,
-        installed=True,
     ),
     "git": ProviderDefinition(
         kind="repository",
@@ -426,6 +421,12 @@ def normalize_integration_command(command: CreateIntegrationCommand) -> CreateIn
     ):
         raise IntegrationValidationError("Integration metadata contains a credential-like field")
     config = _validate_provider_config(command.provider, command.config)
+    if command.provider == "postgres":
+        config["access_mode"] = "native_sql"
+        if "statements" not in command.scope:
+            raise IntegrationValidationError("PostgreSQL now requires native SQL statement permissions")
+        if "database.execute/v1" in capabilities and "database.query/v1" not in capabilities:
+            raise IntegrationValidationError("SQL execution requires its query capability")
     if (
         command.provider == "git"
         and "repository.write/v1" in capabilities
@@ -436,9 +437,11 @@ def normalize_integration_command(command: CreateIntegrationCommand) -> CreateIn
         # 要求する。既定 mode が direct なので、この取りこぼしは「repository_uri だけ設定した
         # git Integration」で必ず起きる——登録段階で閉じる。読取専用 Integration は対象外。
         raise IntegrationValidationError("Direct write requires an explicit default branch name")
-    if (command.provider == "postgres" and "database.write/v1" in capabilities
-            and "database.read/v1" not in capabilities):
-        raise IntegrationValidationError("Database write requires its observe capability")
+    if command.provider == "http":
+        if config["auth_mode"] != "none" and command.secret_reference_id is None:
+            raise IntegrationValidationError("HTTP authentication requires a credential")
+        if "http.write/v1" in capabilities and "http.read/v1" not in capabilities:
+            raise IntegrationValidationError("HTTP write requires read-back access")
     scope = normalize_provider_scope(
         command.provider,
         command.scope,
@@ -490,6 +493,12 @@ def normalize_provider_scope(
     引き続き承認または explicit 事前許可(wildcard 不可)で gate される。
     """
 
+    if provider == "http":
+        from skillmind.integrations.http_resource import normalize_scope
+        try:
+            return normalize_scope(scope, write_enabled=write_enabled)
+        except ValueError as error:
+            raise IntegrationValidationError(str(error)) from None
     if provider == "mcp" and "tool_names" in scope:
         if set(scope) != {"resource_uris", "tool_names"}:
             raise IntegrationValidationError("MCP tool scope contains unknown fields")
@@ -502,6 +511,12 @@ def normalize_provider_scope(
             "mcp", {"resource_uris": scope["resource_uris"]}, write_enabled=False
         )
         return {**resources, "tool_names": names}
+    if provider == "postgres" and "statements" in scope:
+        values = scope.get("statements")
+        allowed = {"SELECT", "INSERT", "UPDATE", "DELETE"} if write_enabled else {"SELECT"}
+        if set(scope) != {"statements"} or not isinstance(values, list) or not values or any(not isinstance(v, str) or v not in allowed for v in values) or "SELECT" not in values:
+            raise IntegrationValidationError("Native SQL scope requires allowed statements including SELECT")
+        return {"statements": sorted(set(values))}
     if provider == "postgres" and write_enabled:
         if set(scope) != {"tables", "write_columns", "operations"}:
             raise IntegrationValidationError(
@@ -697,8 +712,14 @@ def binding_checksum(
 def _validate_provider_config(provider: str, config: dict[str, Any]) -> dict[str, Any]:
     """Provider の非機密 connection metadata を最小 allowlist で検証する。"""
 
+    if provider == "http":
+        from skillmind.integrations.http_resource import normalize_config
+        try:
+            return normalize_config(config)
+        except ValueError as error:
+            raise IntegrationValidationError(str(error)) from None
     if provider == "postgres":
-        if set(config) != {"host", "port", "database", "username", "sslmode"}:
+        if set(config) not in ({"host", "port", "database", "username", "sslmode"}, {"host", "port", "database", "username", "sslmode", "access_mode"}):
             raise IntegrationValidationError("PostgreSQL config contains invalid fields")
         for key in ("host", "database", "username"):
             value = config[key]

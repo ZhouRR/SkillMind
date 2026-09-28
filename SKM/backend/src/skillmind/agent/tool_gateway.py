@@ -344,9 +344,14 @@ class ToolGateway:
         lease = await self._coordinator.claim(binding.registered.sdk_name, arguments)
         if lease.invocation is not None and (
             lease.invocation.tool != binding.registered
-            or lease.invocation.request_fingerprint != invocation_fingerprint(binding.registered.sdk_name, arguments)
+            or lease.invocation.request_fingerprint
+            != invocation_fingerprint(binding.registered.sdk_name, arguments)
         ):
-            raise ToolGatewayError("invalid_request", "Tool resource differs from the authorized request", retryable=False)
+            raise ToolGatewayError(
+                "invalid_request",
+                "Tool resource differs from the authorized request",
+                retryable=False,
+            )
         replay = lease.status == "SUCCEEDED" and lease.result is not None
         replay_result = deepcopy(lease.result) if replay else None
         if not replay:
@@ -382,7 +387,9 @@ class ToolGateway:
                     workspace=self._context.workspace,
                     run=self._context,
                     tool_call_id=lease.tool_call_id,
-                    agent_session_id=lease.invocation.agent_session_id if lease.invocation else None,
+                    agent_session_id=lease.invocation.agent_session_id
+                    if lease.invocation
+                    else None,
                 ),
                 provider_arguments(binding.registered, arguments),
             )
@@ -400,9 +407,14 @@ class ToolGateway:
                     draft=replace(
                         draft,
                         source_locator=deepcopy(dict(draft.source_locator)),
-                        metadata={**deepcopy(dict(draft.metadata or {})),
-                            **({"tool_resource": resource_identity(binding.registered)}
-                               if binding.registered.resource_key is not None else {})},
+                        metadata={
+                            **deepcopy(dict(draft.metadata or {})),
+                            **(
+                                {"tool_resource": resource_identity(binding.registered)}
+                                if binding.registered.resource_key is not None
+                                else {}
+                            ),
+                        },
                         artifact=replace(draft.artifact) if draft.artifact else None,
                     ),
                     artifact_ref=f"art_{uuid4().hex}" if draft.artifact else None,
@@ -412,7 +424,10 @@ class ToolGateway:
             response = deepcopy(dict(result.response))
             response["evidence_refs"] = [record.evidence_ref for record in records]
             if binding.registered.capability in {
-                "workspace.write/v2", "audit.export/v1", "artifact.append/v1",
+                "workspace.write/v2",
+                "workspace.edit/v1",
+                "audit.export/v1",
+                "artifact.append/v1",
             } or (
                 binding.registered.capability == "document.convert/v1"
                 and arguments.get("publish_artifact") is True
@@ -420,13 +435,13 @@ class ToolGateway:
                 response["artifact_refs"] = [
                     record.artifact_ref for record in records if record.artifact_ref is not None
                 ]
-            if (
-                binding.registered.capability in {
-                    "workspace.write/v2", "audit.export/v1",
-                    "artifact.append/v1", "document.convert/v1",
-                }
-                or any(record.artifact_ref is not None for record in records)
-            ):
+            if binding.registered.capability in {
+                "workspace.write/v2",
+                "workspace.edit/v1",
+                "audit.export/v1",
+                "artifact.append/v1",
+                "document.convert/v1",
+            } or any(record.artifact_ref is not None for record in records):
                 if lease.invocation is None:
                     raise ValueError("Artifact publication requires the original invocation")
                 validate_artifact_publication(lease.invocation, result=response, evidence=records)

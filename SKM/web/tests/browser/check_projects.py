@@ -616,7 +616,7 @@ async def late_actor(page: Page, api: ProjectsApi, labels: dict) -> None:
     gate.release.set()
     await asyncio.wait_for(gate.returned.wait(), 10)
     await settle(page)
-    await expect(page.locator(".sidebarUser")).to_contain_text(api.users[OTHER]["email"])
+    await expect(page.locator(".sidebarUser")).to_contain_text(api.users[OTHER]["display_name"])
     await expect(page.locator('input[name="email"]')).to_have_count(0)
     assert not api.project_reads(ARCHIVED)
 

@@ -381,7 +381,7 @@ def test_registry_only_exposes_injected_postgres_provider(provider):
 def test_postgres_catalog_is_publishable_and_runnable_with_bound_resource(resource):
     """Interpreter・発行 gate・資源就緒度が同じ登録済み能力を利用できる。"""
     catalog = load_capability_catalog(ROOT / "contracts/examples/skill-capability-catalog.v1.json")
-    entry = next(item for item in catalog.capabilities if item.capability == "database.read/v1")
+    entry = next(item for item in catalog.capabilities if item.capability == "database.query/v1")
     assert entry.providers == ("postgres",)
     contracts = ContractStore(ROOT / "contracts")
     for path in (entry.request_schema, entry.response_schema, entry.error_schema):

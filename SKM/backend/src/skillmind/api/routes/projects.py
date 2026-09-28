@@ -159,6 +159,14 @@ class ProjectResponse(BaseModel):
     updated_at: datetime
 
 
+class ProjectPurgeResponse(BaseModel):
+    """Project の DB 削除確定と外部 byte 清理の未完了件数を分けて返す。"""
+
+    model_config = ConfigDict(extra="forbid")
+    project_id: UUID
+    cleanup_pending: int = Field(ge=0)
+
+
 class ProjectListResponse(BaseModel):
     """Actor が参照可能な Project 一覧 response。"""
 
@@ -377,6 +385,27 @@ async def delete_project(
             expected_row_version=expected_row_version,
         )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/projects/{project_id}/purge",
+    response_model=ProjectPurgeResponse,
+    responses={**_PROJECT_PROBLEMS, 409: problem_openapi_response(
+        "Archive/version required; active or unresolved operations prevent deletion",
+        headers=NO_STORE_PROBLEM_HEADERS,
+    )},
+)
+async def purge_project(
+    request: Request, project_id: UUID, payload: ProjectVersionRequest, actor: AdminWriteActor,
+) -> ProjectPurgeResponse:
+    """ADMIN が確認した ARCHIVED Project と終了済みの関連内容を完全削除する。"""
+    service: ProjectService = request.app.state.project_service
+    with _project_errors():
+        pending = await service.purge_project(
+            access=user_access(request, actor), project_id=project_id,
+            expected_row_version=payload.expected_row_version,
+        )
+    return ProjectPurgeResponse(project_id=project_id, cleanup_pending=pending)
 
 
 @router.get(

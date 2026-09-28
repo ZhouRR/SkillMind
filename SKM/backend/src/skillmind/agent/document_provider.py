@@ -61,7 +61,18 @@ class DocumentProvider:
     ) -> ProviderToolResult:
         """Run の project 内で path に一致する文書を、行範囲と content hash 付きで返す。"""
 
+        if arguments.get("response_mode") == "file" and (
+            context.run is None
+            or "workspace.read/v1"
+            not in context.run.permission_snapshot.get("allowed_capabilities", [])
+            or "line_start" in arguments or "line_end" in arguments
+        ):
+            raise ToolProviderError(
+                "invalid_request", "File delivery requires workspace reading", retryable=False
+            )
         content = await _load_frozen_content(self._source, context, arguments)
+        if arguments.get("response_mode") == "file":
+            return await _document_file(context, content, arguments)
         try:
             text = content.data.decode("utf-8")
         except UnicodeDecodeError as error:
@@ -105,6 +116,54 @@ class DocumentProvider:
                 ),
             ),
         )
+
+
+async def _document_file(
+    context: RunToolContext,
+    content: ProjectDocumentContent,
+    arguments: Mapping[str, Any],
+) -> ProviderToolResult:
+    """凍結原 byte を作業用コピーへ渡し、モデル応答へ本文を複写しない。"""
+    # コピー名は元 ID/hash に固定する。読取権限を持つ原 path の別版へ切り替えない。
+    path = f"workspace/documents/{content.document_id}/{content.checksum[7:]}/{content.name}"
+    _, _, target = await asyncio.to_thread(_resolve_writable_path, context, path)
+    await asyncio.to_thread(
+        _write_workspace_file,
+        context.workspace.root,
+        target,
+        content.data,
+        expected_hash="absent",
+        reuse_identical=True,
+    )
+    return ProviderToolResult(
+        response={
+            "status": "success",
+            "provider": "project",
+            "document": {
+                "folder": content.folder,
+                "name": content.name,
+                "mime": content.mime,
+                "checksum": content.checksum,
+                "size": content.size,
+            },
+            "file": {"path": path, "content_hash": content.checksum, "size_bytes": content.size},
+            "warnings": [],
+            "truncated": False,
+        },
+        evidence=(
+            EvidenceDraft(
+                evidence_type="document",
+                source_uri=f"document://projects/{context.project_id}/{content.checksum}",
+                source_locator={
+                    "document_id": str(content.document_id),
+                    "folder": content.folder,
+                    "name": content.name,
+                },
+                content_hash=content.checksum,
+                metadata={**_source_metadata(content), "file_delivery": {"path": path}},
+            ),
+        ),
+    )
 
 
 def _split_document_path(value: Any) -> tuple[str, str]:

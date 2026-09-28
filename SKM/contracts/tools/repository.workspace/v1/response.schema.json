@@ -1,0 +1,66 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "const": "success"
+    },
+    "provider": {
+      "const": "git"
+    },
+    "action": {
+      "enum": [
+        "checkout",
+        "prepare_commit"
+      ]
+    },
+    "revision": {
+      "type": "string"
+    },
+    "root": {
+      "type": "string"
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^workspace/resources/"
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "path",
+        "content_hash",
+        "size_bytes"
+      ]
+    },
+    "evidence_refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "status",
+    "provider",
+    "action",
+    "revision",
+    "root",
+    "file",
+    "evidence_refs"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/repository.workspace/v1/response.schema.json",
+  "title": "repository.workspace/v1 response"
+}

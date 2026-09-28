@@ -1,43 +1,100 @@
 {
-  "type": "object",
-  "additionalProperties": false,
-  "properties": {
-    "status": {
-      "const": "success"
-    },
-    "provider": {
-      "const": "mcp"
-    },
-    "evidence_refs": {
-      "type": "array",
-      "minItems": 1,
-      "uniqueItems": true,
-      "items": {
-        "type": "string",
-        "pattern": "^ev_[a-zA-Z0-9_-]+$"
-      }
-    },
-    "observed_at": {
-      "type": "string",
-      "format": "date-time"
-    },
-    "name": {
-      "type": "string",
-      "pattern": "^[a-zA-Z0-9_.-]{1,128}$"
-    },
-    "result": {
-      "type": "object"
-    }
-  },
-  "required": [
-    "status",
-    "provider",
-    "evidence_refs",
-    "observed_at",
-    "name",
-    "result"
-  ],
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.skillmind.local/tools/mcp.query/v1/response.schema.json",
-  "title": "mcp.query/v1 response"
+  "title": "mcp.query/v1 response",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "const": "success"
+        },
+        "provider": {
+          "const": "mcp"
+        },
+        "evidence_refs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^ev_[a-zA-Z0-9_-]+$"
+          }
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_.-]{1,128}$"
+        },
+        "result": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "status",
+        "provider",
+        "evidence_refs",
+        "observed_at",
+        "name",
+        "result"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "const": "success"
+        },
+        "provider": {
+          "enum": [
+            "git",
+            "svn",
+            "mcp"
+          ]
+        },
+        "file": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "pattern": "^workspace/resources/"
+            },
+            "content_hash": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "path",
+            "content_hash",
+            "size_bytes"
+          ]
+        },
+        "evidence_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^ev_"
+          }
+        }
+      },
+      "required": [
+        "status",
+        "provider",
+        "file",
+        "evidence_refs"
+      ]
+    }
+  ]
 }

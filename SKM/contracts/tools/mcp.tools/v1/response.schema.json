@@ -1,171 +1,228 @@
 {
-  "type": "object",
-  "additionalProperties": false,
-  "properties": {
-    "status": {
-      "const": "success"
-    },
-    "provider": {
-      "const": "mcp"
-    },
-    "evidence_refs": {
-      "type": "array",
-      "minItems": 1,
-      "uniqueItems": true,
-      "items": {
-        "type": "string",
-        "pattern": "^ev_[a-zA-Z0-9_-]+$"
-      }
-    },
-    "observed_at": {
-      "type": "string",
-      "format": "date-time"
-    },
-    "profile": {
-      "const": "mcp-tools/v1"
-    },
-    "catalog_hash": {
-      "type": "string",
-      "pattern": "^sha256:[0-9a-f]{64}$"
-    },
-    "tools": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 100,
-      "items": {
-        "type": "object",
-        "required": [
-          "name",
-          "description",
-          "input_schema",
-          "output_schema",
-          "access"
-        ],
-        "properties": {
-          "name": {
-            "type": "string",
-            "pattern": "^[a-zA-Z0-9_.-]{1,128}$"
-          },
-          "description": {
-            "type": "string"
-          },
-          "input_schema": {
-            "type": "object"
-          },
-          "output_schema": {
-            "type": [
-              "object",
-              "null"
-            ]
-          },
-          "access": {
-            "enum": [
-              "read",
-              "call"
-            ]
-          },
-          "read_only_hint": {
-            "type": "boolean"
-          }
-        },
-        "additionalProperties": false
-      }
-    },
-    "server": {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/mcp.tools/v1/response.schema.json",
+  "title": "mcp.tools/v1 response",
+  "oneOf": [
+    {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "name",
-        "version"
-      ],
       "properties": {
-        "name": {
-          "type": "string",
-          "minLength": 1
+        "status": {
+          "const": "success"
         },
-        "version": {
-          "type": "string",
-          "minLength": 1
-        }
-      }
-    },
-    "connection_ref": {
-      "type": "string",
-      "format": "uuid"
-    },
-    "binding_ref": {
-      "type": "string",
-      "format": "uuid"
-    },
-    "desktop": {
-      "oneOf": [
-        {
-          "type": "null"
+        "provider": {
+          "const": "mcp"
         },
-        {
+        "evidence_refs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^ev_[a-zA-Z0-9_-]+$"
+          }
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "profile": {
+          "const": "mcp-tools/v1"
+        },
+        "catalog_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "tools": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "description",
+              "input_schema",
+              "output_schema",
+              "access"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9_.-]{1,128}$"
+              },
+              "description": {
+                "type": "string"
+              },
+              "input_schema": {
+                "type": "object"
+              },
+              "output_schema": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "access": {
+                "enum": [
+                  "read",
+                  "call"
+                ]
+              },
+              "read_only_hint": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "server": {
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "lease_ref",
-            "run_id",
-            "status",
-            "pending_operation",
-            "scope",
-            "external_exclusivity"
+            "name",
+            "version"
           ],
           "properties": {
-            "lease_ref": {
+            "name": {
               "type": "string",
-              "pattern": "^mcp-desktop:[0-9a-f]{64}:[0-9a-f-]{36}$"
+              "minLength": 1
             },
-            "run_id": {
+            "version": {
               "type": "string",
-              "format": "uuid"
+              "minLength": 1
+            }
+          }
+        },
+        "connection_ref": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "binding_ref": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "desktop": {
+          "oneOf": [
+            {
+              "type": "null"
             },
-            "status": {
-              "const": "HELD_BY_RUN"
-            },
-            "pending_operation": {
-              "type": "boolean"
-            },
-            "scope": {
-              "const": "SKM_ENDPOINT_ONLY"
-            },
-            "external_exclusivity": {
-              "const": "NOT_VERIFIED"
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "lease_ref",
+                "run_id",
+                "status",
+                "pending_operation",
+                "scope",
+                "external_exclusivity"
+              ],
+              "properties": {
+                "lease_ref": {
+                  "type": "string",
+                  "pattern": "^mcp-desktop:[0-9a-f]{64}:[0-9a-f-]{36}$"
+                },
+                "run_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "status": {
+                  "const": "HELD_BY_RUN"
+                },
+                "pending_operation": {
+                  "type": "boolean"
+                },
+                "scope": {
+                  "const": "SKM_ENDPOINT_ONLY"
+                },
+                "external_exclusivity": {
+                  "const": "NOT_VERIFIED"
+                }
+              }
+            }
+          ]
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tool_call_timeout_seconds"
+          ],
+          "properties": {
+            "tool_call_timeout_seconds": {
+              "const": 90
             }
           }
         }
+      },
+      "required": [
+        "status",
+        "provider",
+        "evidence_refs",
+        "observed_at",
+        "profile",
+        "catalog_hash",
+        "tools",
+        "server",
+        "connection_ref",
+        "binding_ref",
+        "desktop",
+        "limits"
       ]
     },
-    "limits": {
+    {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "tool_call_timeout_seconds"
-      ],
       "properties": {
-        "tool_call_timeout_seconds": {
-          "const": 90
+        "status": {
+          "const": "success"
+        },
+        "provider": {
+          "enum": [
+            "git",
+            "svn",
+            "mcp"
+          ]
+        },
+        "file": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "pattern": "^workspace/resources/"
+            },
+            "content_hash": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "path",
+            "content_hash",
+            "size_bytes"
+          ]
+        },
+        "evidence_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^ev_"
+          }
         }
-      }
+      },
+      "required": [
+        "status",
+        "provider",
+        "file",
+        "evidence_refs"
+      ]
     }
-  },
-  "required": [
-    "status",
-    "provider",
-    "evidence_refs",
-    "observed_at",
-    "profile",
-    "catalog_hash",
-    "tools",
-    "server",
-    "connection_ref",
-    "binding_ref",
-    "desktop",
-    "limits"
-  ],
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.skillmind.local/tools/mcp.tools/v1/response.schema.json",
-  "title": "mcp.tools/v1 response"
+  ]
 }

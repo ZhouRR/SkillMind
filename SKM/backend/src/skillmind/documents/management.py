@@ -287,6 +287,7 @@ async def pending_paths(session: AsyncSession, project_id: UUID) -> list[str]:
         select(ProjectDocumentEffectUpload).where(
             ProjectDocumentEffectUpload.project_id == project_id,
             ProjectDocumentEffectUpload.state != "PUBLISHED",
+            ProjectDocumentEffectUpload.publication_closed_at.is_(None),
         )
     )
     return ["/".join(filter(None, (row.folder, row.name))) for row in [*uploads, *effects]]

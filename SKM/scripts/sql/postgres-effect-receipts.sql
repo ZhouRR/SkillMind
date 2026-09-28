@@ -1,4 +1,4 @@
--- 承認済み database.write/v1 の原実行を、業務行と同じ DB transaction で記録する。
+-- 承認済み database.execute/v1 の原実行を、業務行と同じ DB transaction で記録する。
 -- 対象 DB の管理者が専用 owner で適用する。Worker は DDL/所有権を必要としない。
 -- 業務 table や接続先、login/password は定義しない。
 BEGIN;

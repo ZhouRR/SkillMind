@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from skillmind.auth.service import AuthenticatedActor
 from skillmind.db.models import Project
+from skillmind.documents.content import require_document_storage
+from skillmind.documents.domain import DocumentCleanupActor, DocumentStorageUnavailableError
 from skillmind.projects.domain import (
     CreateProjectCommand,
     ProjectMemberNotFoundError,
@@ -25,6 +27,7 @@ from skillmind.projects.domain import (
     validate_project_version,
 )
 from skillmind.projects.repository import ProjectRepository
+from skillmind.storage import FileStorage, FileStorageError
 from skillmind.users.access import authorize_user_access, validate_user_access
 from skillmind.users.domain import UserAccess
 from skillmind.users.repository import LockedUsers, UserRepository
@@ -33,10 +36,16 @@ from skillmind.users.repository import LockedUsers, UserRepository
 class ProjectService:
     """Actor の system role と membership を適用して Project use case を実行する。"""
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+    def __init__(
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+        *,
+        file_storage: FileStorage | None = None,
+    ) -> None:
         """Database session factory を保持する。"""
 
         self._session_factory = session_factory
+        self._file_storage = file_storage
 
     async def list_projects(
         self,
@@ -167,6 +176,43 @@ class ProjectService:
             await repository.delete(
                 project=project, expected_row_version=expected_row_version,
             )
+
+    async def purge_project(
+        self,
+        *,
+        access: UserAccess,
+        project_id: UUID,
+        expected_row_version: int,
+    ) -> int:
+        """明示一括削除を commit 後に blob 清理へ進め、未清理件数を結果に残す。"""
+        validate_project_version(expected_row_version)
+        async with self._admin_transaction(access, write=True) as (repository, locked):
+            project = await repository.lock_project(
+                organization_id=locked.actor.organization_id,
+                project_id=project_id,
+            )
+            self._authorize_admin(access, locked, write=True)
+            references = await repository.purge(
+                project=project,
+                expected_row_version=expected_row_version,
+                actor=DocumentCleanupActor(
+                    organization_id=locked.actor.organization_id,
+                    actor_id=locked.actor.id,
+                    request_id=access.request_id,
+                    session_id=locked.current_session.id,
+                ),
+                storage=self._file_storage,
+            )
+        pending = 0
+        for reference in references:
+            assert self._file_storage is not None
+            try:
+                require_document_storage(self._file_storage, reference)
+                await self._file_storage.delete(reference.key)
+            except (FileStorageError, DocumentStorageUnavailableError):
+                # DB 削除は確定済み。永続清理要求を残し、全成功や rollback と偽らない。
+                pending += 1
+        return pending
 
     async def list_members(
         self,

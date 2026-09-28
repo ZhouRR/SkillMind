@@ -13,6 +13,7 @@ from skillmind.auth.service import AuthenticatedActor
 from skillmind.projects import ProjectPermissionDeniedError, ProjectService
 from skillmind.projects.domain import ProjectDeleteBlockedError
 from skillmind.projects.repository import ProjectRepository
+from skillmind.storage import BlobReference, FileStorageError, InMemoryFileStorage
 from skillmind.users.domain import UserAccess
 from tests.projects.project_harness import Members
 
@@ -53,6 +54,10 @@ async def test_user_cannot_create_or_manage_members_before_database_access() -> 
         await service.delete_project(
             access=UserAccess(actor, uuid4(), "", ""), project_id=uuid4(), expected_row_version=1,
         )
+    with pytest.raises(ProjectPermissionDeniedError):
+        await service.purge_project(
+            access=UserAccess(actor, uuid4(), "", ""), project_id=uuid4(), expected_row_version=1,
+        )
 
 
 @pytest.mark.asyncio
@@ -83,3 +88,37 @@ async def test_delete_keeps_repository_failure_inside_the_single_transaction_bou
     )
     transaction.__aexit__.assert_awaited_once()
     assert transaction.__aexit__.call_args.args[:2] == (type(failure), failure)
+
+
+@pytest.mark.parametrize("fail_commit,fail_storage", [(False, False), (False, True), (True, False)])
+async def test_purge_cleans_bytes_only_after_commit(
+    monkeypatch, members: Members, fail_commit: bool, fail_storage: bool,
+) -> None:
+    """commit 失敗なら byte を触らず、清理失敗なら確定削除と未清理を区別する。"""
+    storage = InMemoryFileStorage()
+    members.service._file_storage = storage
+    members.session.scalar.side_effect = [members.project]
+    reference = BlobReference("objects/example", storage.namespace)
+    monkeypatch.setattr(ProjectRepository, "purge", AsyncMock(return_value=[reference]))
+
+    async def remove(key):
+        """外部書込の前に transaction を退出したことを確認する。"""
+        members.transaction.__aexit__.assert_awaited_once()
+        assert key == reference.key
+        if fail_storage:
+            raise FileStorageError("synthetic")
+
+    storage.delete = AsyncMock(side_effect=remove)
+    if fail_commit:
+        members.transaction.__aexit__.side_effect = RuntimeError("commit failed")
+        with pytest.raises(RuntimeError, match="commit failed"):
+            await members.service.purge_project(
+                access=members.access, project_id=members.project.id, expected_row_version=1,
+            )
+        storage.delete.assert_not_awaited()
+    else:
+        pending = await members.service.purge_project(
+            access=members.access, project_id=members.project.id, expected_row_version=1,
+        )
+        assert pending == int(fail_storage)
+        storage.delete.assert_awaited_once()

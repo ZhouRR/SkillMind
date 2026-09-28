@@ -107,15 +107,20 @@ describe('versioned project transport', () => {
     }
   })
 
-  it('puts the deletion version in query and requires exactly 204', async () => {
-    const transport = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }))
+  it('explicitly purges related content with the original version and validates cleanup status', async () => {
+    const transport = vi.fn<typeof fetch>().mockResolvedValue(json({ project_id: PROJECT.project_id, cleanup_pending: 2 }))
     vi.stubGlobal('fetch', transport)
-    await expect(deleteProject(PROJECT.project_id, 7, CSRF)).resolves.toBeUndefined()
-    expect(String(transport.mock.calls[0]?.[0])).toMatch(/\?expected_row_version=7$/u)
-    expect(transport.mock.calls[0]?.[1]).toMatchObject({ method: 'DELETE', cache: 'no-store' })
-    for (const status of [200, 202, 205]) {
+    await expect(deleteProject(PROJECT.project_id, 7, CSRF)).resolves.toBe(2)
+    expect(String(transport.mock.calls[0]?.[0])).toMatch(/\/purge$/u)
+    expect(transport.mock.calls[0]?.[1]).toMatchObject({ method: 'POST', body: JSON.stringify({ expected_row_version: 7 }) })
+    for (const status of [201, 202, 204, 205]) {
       transport.mockResolvedValueOnce(new Response(null, { status }))
       await expect(deleteProject(PROJECT.project_id, 7, CSRF)).rejects.toMatchObject({ status })
+    }
+    for (const value of [{ project_id: PROJECT.project_id }, { project_id: PROJECT.project_id, cleanup_pending: -1 },
+      { project_id: PROJECT.project_id, cleanup_pending: true }, { project_id: 'wrong', cleanup_pending: 0 }]) {
+      transport.mockResolvedValueOnce(json(value))
+      await expect(deleteProject(PROJECT.project_id, 7, CSRF)).rejects.toThrow('Project purge response')
     }
   })
 

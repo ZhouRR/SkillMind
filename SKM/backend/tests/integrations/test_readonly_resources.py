@@ -22,8 +22,8 @@ def command(provider: str) -> CreateIntegrationCommand:
         name="Read-only reports",
         kind="other",
         provider=provider,
-        capabilities=("database.read/v1" if postgres else "mcp.read/v1",),
-        scope={"tables": ["public.reports"]}
+        capabilities=("database.query/v1" if postgres else "mcp.read/v1",),
+        scope={"statements": ["SELECT"]}
         if postgres
         else {"resource_uris": ["resource://reports/current"]},
         config={
@@ -32,6 +32,7 @@ def command(provider: str) -> CreateIntegrationCommand:
             "database": "reports",
             "username": "reader",
             "sslmode": "verify-full",
+            "access_mode": "native_sql",
         }
         if postgres
         else {"server_url": "https://mcp.example.test/mcp", "transport": "streamable_http"},
@@ -72,7 +73,7 @@ def test_resource_scope_rejects_missing_wildcard_and_malformed_values(
     values: list[object],
 ) -> None:
     """不正な識別子を登録で拒否する。"""
-    key = "tables" if provider == "postgres" else "resource_uris"
+    key = "statements" if provider == "postgres" else "resource_uris"
     with pytest.raises(IntegrationValidationError):
         normalize_integration_command(replace(command(provider), scope={key: values}))
 
@@ -134,55 +135,19 @@ def test_mcp_connection_rejects_credential_urls_and_non_http_targets(url: str) -
         )
 
 
-def test_database_write_requires_read_and_explicit_flat_column_scope():
-    """読み取り設定をそのまま書込み許可へ拡張せず、列と操作を明示する。"""
+def test_native_sql_uses_original_account_and_explicit_operations():
+    """元 account を維持し、表/列 DSL や新 account 確認を要求しない。"""
     original = command("postgres")
-    capabilities = ("database.read/v1", "database.write/v1")
-    scope = {
-        "tables": ["public.reports"],
-        "write_columns": ["public.reports.id", "public.reports.status"],
-        "operations": ["INSERT", "UPDATE"],
-    }
-    writable = replace(original, capabilities=capabilities, scope=scope)
-    assert normalize_integration_command(writable).scope == scope
-    with pytest.raises(IntegrationValidationError):
-        normalize_integration_command(replace(writable, capabilities=("database.write/v1",)))
-    for altered in (
-        original.scope,
-        {**scope, "write_columns": ["other.reports.id"]},
-        {**scope, "operations": ["DELETE"]},
-        {**scope, "write_columns": []},
-        {**scope, "operations": []},
-        {**scope, "tables": ["skillmind_effects.execution_receipts"]},
-    ):
+    writable = replace(original, capabilities=("database.query/v1", "database.execute/v1"),
+                       scope={"statements": ["SELECT", "UPDATE", "INSERT", "DELETE"]})
+    normalized = normalize_integration_command(writable)
+    assert normalized.config == original.config
+    assert normalized.secret_reference_id == original.secret_reference_id
+    assert normalized.scope == {"statements": ["DELETE", "INSERT", "SELECT", "UPDATE"]}
+    for invalid in ({"tables": ["*"]}, {"statements": []}, {"statements": ["SELECT", "DROP"]}):
         with pytest.raises(IntegrationValidationError):
-            normalize_integration_command(replace(writable, scope=altered))
-
-
-@pytest.mark.parametrize("tables,columns", [
-    (["*"], ["*"]),
-    (["public.reports"], ["*"]),
-    (["*"], ["public.reports.status"]),
-])
-def test_postgres_accepts_separate_all_table_and_column_permissions(tables, columns):
-    """全許可は表と列で独立し、操作の許可を暗黙追加しない。"""
-    scope = {"tables": tables, "write_columns": columns, "operations": ["INSERT"]}
-    original = replace(command("postgres"), scope=scope,
-                       capabilities=("database.read/v1", "database.write/v1"))
-    assert normalize_integration_command(original).scope == scope
-
-
-def test_postgres_wildcard_normalization_does_not_enable_other_providers():
-    """明示した星だけ全許可へ正規化し、MCP や空範囲へ波及させない。"""
-    original = command("postgres")
-    assert normalize_integration_command(replace(original, scope={
-        "tables": ["*", "public.reports"],
-    })).scope == {"tables": ["*"]}
+            normalize_integration_command(replace(writable, scope=invalid))
     with pytest.raises(IntegrationValidationError):
-        normalize_integration_command(replace(command("mcp"), scope={"resource_uris": ["*"]}))
-    for column in ("invalid schema.reports.status", "skillmind_effects.receipts.status"):
-        with pytest.raises(IntegrationValidationError):
-            normalize_integration_command(replace(original,
-                capabilities=("database.read/v1", "database.write/v1"),
-                scope={"tables": ["*"], "write_columns": [column], "operations": ["UPDATE"]},
-            ))
+        normalize_integration_command(replace(writable, capabilities=("database.execute/v1",)))
+    with pytest.raises(IntegrationValidationError):
+        normalize_integration_command(replace(original, capabilities=("database.read/v1",)))

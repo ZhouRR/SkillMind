@@ -95,7 +95,7 @@ async def check(url: str, output: Path) -> None:
                     advanced = page.locator("details.resourceAdvanced")
                     await expect(advanced).not_to_have_attribute("open", "")
                     await expect(page.get_by_role("tab")).to_have_count(0)
-                    for provider in ("postgres", "mcp"):
+                    for provider in ("postgres", "mcp", "http"):
                         await page.get_by_role(
                             "button", name=labels["connectTitle"], exact=True
                         ).click()
@@ -106,7 +106,6 @@ async def check(url: str, output: Path) -> None:
                         await dialog.get_by_label(labels["nameLabel"], exact=True).fill(
                             f"{provider} reports"
                         )
-                        await expect(dialog.get_by_role("radio")).to_have_count(0)
                         if provider == "postgres":
                             for key, value in (
                                 ("databaseHost", "db.example.test"),
@@ -119,12 +118,16 @@ async def check(url: str, output: Path) -> None:
                             )
                             await expect(password).to_have_attribute("type", "password")
                             await password.fill("fixture-only")
-                            await dialog.locator("textarea").fill("public.reports\npublic.items")
-                        else:
+                            await expect(dialog.locator("textarea")).to_have_count(0)
+                        elif provider == "mcp":
                             await dialog.get_by_label(labels["mcpServerUrl"], exact=True).fill(
                                 "https://mcp.example.test/mcp"
                             )
                             await dialog.locator("textarea").fill("resource://reports/current")
+                        else:
+                            await dialog.get_by_label(labels["baseUrlLabel"], exact=True).fill("https://api.example.test")
+                            await dialog.get_by_role("combobox", name=labels["httpAuthentication"], exact=True).select_option("none")
+                            await dialog.locator("textarea").fill("/issues")
                         await page.screenshot(
                             path=str(output / f"{provider}-{language}-{theme}-{width}.png")
                         )
@@ -137,15 +140,20 @@ async def check(url: str, output: Path) -> None:
                                 "region", name=labels["integrationListTitle"]
                             ).get_by_text(f"{provider} reports", exact=True)
                         ).to_be_visible()
-                    postgres, mcp = api.created
+                    postgres, mcp, http = api.created
                     assert postgres["config"] == {
                         "host": "db.example.test",
                         "port": 5432,
                         "database": "reports",
                         "username": "reader",
                         "sslmode": "verify-full",
+                        "access_mode": "native_sql",
                     }
-                    assert postgres["scope"] == {"tables": ["public.reports", "public.items"]}
+                    assert postgres["scope"] == {"statements": ["SELECT"]}
+                    assert postgres["capabilities"] == ["database.query/v1"]
+                    assert http["config"] == {"base_url": "https://api.example.test", "auth_mode": "none"}
+                    assert http["scope"] == {"paths": ["/issues"], "methods": ["GET", "HEAD"]}
+                    assert http["secret_reference_id"] is None
                     assert postgres["secret_reference_id"] == api.secrets[0]["secret_reference_id"]
                     assert mcp["config"] == {
                         "server_url": "https://mcp.example.test/mcp",

@@ -33,6 +33,7 @@ from skillmind.db.models import (
     TaskSchedule,
     User,
 )
+from skillmind.documents.domain import DocumentCleanupActor
 from skillmind.projects.domain import (
     CreateProjectCommand,
     ProjectArchivedError,
@@ -49,6 +50,7 @@ from skillmind.projects.domain import (
     next_project_version,
     require_project_version,
 )
+from skillmind.storage import BlobReference, FileStorage
 from skillmind.users.repository import lock_organization
 
 # Project 削除時に一緒に消す設定 row を FK の葉から根の順で並べる。
@@ -367,6 +369,25 @@ class ProjectRepository:
         for model in _PROJECT_OWNED_MODELS:
             await self._session.execute(delete(model).where(model.project_id == project_id))
         await self._session.delete(project)
+
+    async def purge(
+        self,
+        *,
+        project: Project,
+        expected_row_version: int,
+        actor: DocumentCleanupActor,
+        storage: FileStorage | None,
+    ) -> list[BlobReference]:
+        """明示的な一括削除だけを既存の管理 transaction に接続する。"""
+        from skillmind.projects.purge import purge_project
+
+        return await purge_project(
+            self._session,
+            project=project,
+            expected_row_version=expected_row_version,
+            actor=actor,
+            storage=storage,
+        )
 
     async def list_members(
         self,

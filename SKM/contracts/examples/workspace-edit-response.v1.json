@@ -1,0 +1,15 @@
+{
+  "status": "success",
+  "provider": "workspace",
+  "path": "output/review.md",
+  "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "bytes_written": 31,
+  "created": true,
+  "evidence_refs": [
+    "ev_file_1"
+  ],
+  "artifact_refs": [
+    "art_file_1"
+  ],
+  "warnings": []
+}

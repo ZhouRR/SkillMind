@@ -501,8 +501,13 @@ async def test_document_assets_block_project_delete_without_state_or_cleanup_exc
     assert model.__tablename__ not in {
         model.__tablename__ for model in _PROJECT_OWNED_MODELS
     }
-    if model is not ProjectDocument:
+    if model is ProjectDocumentEffectUpload:
         assert {fk.ondelete for fk in model.__table__.c.project_id.foreign_keys} == {"RESTRICT"}
+    else:
+        # 明示 purge 後も intent/cleanup は原 ID とともに独立保持する。
+        assert "projects.id" not in {
+            fk.target_fullname for fk in model.__table__.c.project_id.foreign_keys
+        }
     session.execute.assert_not_called()
     session.delete.assert_not_called()
 

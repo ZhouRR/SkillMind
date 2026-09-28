@@ -1,0 +1,7 @@
+{
+  "sql": "SELECT id, status FROM public.items WHERE id = $1",
+  "parameters": [
+    1
+  ],
+  "limit": 10
+}

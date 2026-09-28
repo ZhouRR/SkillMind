@@ -1,4 +1,4 @@
-import { marked } from 'marked'
+import { marked, type Token } from 'marked'
 
 /** 一覧 metadata と実 HTTP stream に適用する同じ preview byte 上限。 */
 export const DOCUMENT_PREVIEW_MAX_BYTES = 1_000_000
@@ -47,7 +47,12 @@ const DROP_CONTENTS = new Set([
 
 /** Markdown の構造を解析した後、HTML と同じ静的 allowlist/CSP に通す。 */
 export function documentMarkdownHtml(source: string): string {
-  return documentPreviewHtml(envelope(marked.parse(source, { async: false, gfm: true })))
+  return documentPreviewHtml(envelope(marked.parse(source, { async: false, gfm: true })), 'document', source)
+}
+
+/** 分割済み token も同じ安全境界を通す。fallback に中間 HTML を渡さない。 */
+export function documentMarkdownPageHtml(tokens: Token[], source: string): string {
+  return documentPreviewHtml(envelope(marked.parser(tokens)), 'document', source)
 }
 
 /** HTML 完了報告は埋め込み用の余白に揃え、既存 Markdown は従来の静的描画を使う。 */
@@ -57,8 +62,8 @@ export function reportPreviewHtml(source: string): string {
 }
 
 /** 埋め込み CSS と静的 SVG は保持し、能動要素を除いた専用 document を sandbox へ渡す。 */
-export function documentPreviewHtml(source: string, layout: 'document' | 'report' = 'document'): string {
-  if (typeof document === 'undefined') return envelope(`<pre>${escapeText(source)}</pre>`)
+export function documentPreviewHtml(source: string, layout: 'document' | 'report' = 'document', fallbackSource = source): string {
+  if (typeof document === 'undefined') return envelope(`<pre>${escapeText(fallbackSource)}</pre>`)
   // browsing context のない document で head/body の構造と属性を保持する。原 tree は live DOM に移さない。
   const inert = document.implementation.createHTMLDocument('')
   inert.documentElement.innerHTML = source
@@ -72,7 +77,7 @@ export function documentPreviewHtml(source: string, layout: 'document' | 'report
   while (pending.length) {
     const item = pending.pop()!
     // 深い/巨大な tree は再帰や部分表示にせず、上限内の原文を inert text として残す。
-    if (++visited > 20_000) return envelope(`<pre>${escapeText(source)}</pre>`)
+    if (++visited > 20_000) return envelope(`<pre>${escapeText(fallbackSource)}</pre>`)
     if (item.node.nodeType === 3) {
       item.parent.appendChild(inert.createTextNode(item.node.textContent ?? ''))
       continue
@@ -113,14 +118,17 @@ export function documentPreviewHtml(source: string, layout: 'document' | 'report
   return '<!doctype html>' + root.outerHTML
 }
 
-/** 非 DOM/過大 tree の原文 fallback にだけ最小の読み取り用 CSS を添える。 */
+/** Markdown と原文 fallback の静的 CSS。文書 preview は親の配色 token で上書きする。 */
 function envelope(body: string): string {
   return '<!doctype html><html><head><meta charset="utf-8">'
     + `<meta http-equiv="Content-Security-Policy" content="${PREVIEW_POLICY}">`
     + '<meta name="referrer" content="no-referrer">'
-    + '<style>body{font:16px/1.6 system-ui,sans-serif;margin:1rem;overflow-wrap:anywhere}'
+    + '<style>:root{color-scheme:light;color:CanvasText;background:Canvas;--border:color-mix(in srgb,CanvasText 25%,Canvas);--raised:color-mix(in srgb,CanvasText 6%,Canvas)}'
+    + '@media(prefers-color-scheme:dark){:root{color-scheme:dark}}'
+    + 'body{font:16px/1.6 system-ui,sans-serif;margin:1rem;overflow-wrap:anywhere}'
     + 'pre{white-space:pre-wrap}table{border-collapse:collapse;display:block;max-width:100%;overflow:auto}'
-    + 'td,th{border:1px solid #ccc;padding:.3rem .5rem}blockquote{margin:1rem;border-left:3px solid #ccc;padding-left:1rem}'
+    + 'td,th{border:1px solid var(--border);padding:.3rem .5rem;min-width:5rem;overflow-wrap:break-word}th,pre,code{background:var(--raised)}'
+    + 'pre{padding:.75rem;border-radius:6px}pre code{background:transparent}blockquote{margin:1rem;border-left:3px solid var(--border);padding-left:1rem}'
     + '</style></head><body>' + body + '</body></html>'
 }
 

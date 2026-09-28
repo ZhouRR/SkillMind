@@ -33,6 +33,15 @@ MARKDOWN = """# Original Markdown
 [Readable link](https://preview.invalid/markdown)
 <script>parent.document.body.dataset.previewMutated='yes'</script>
 """
+# 列数による DOM 膨張と、単一 cell が上限を超える場合を別々に検証する。
+WIDE_MARKDOWN = (
+    "# Wide sheet\n\n| " + " | ".join(f"C{col}" for col in range(40)) + " |\n"
+    + "| " + " | ".join(["---"] * 40) + " |\n"
+    + "".join("| " + " | ".join(f"R{row}C{col}" for col in range(40)) + " |\n" for row in range(320))
+    + "\n## Final note\n\nLast paragraph.\n"
+)
+COMPLEX_MARKDOWN = "| Cell |\n| --- |\n| " + "<span>safe</span>" * 11000 + "<img src='/preview-probe/complex'> |\n"
+MARKDOWN_CASES = {"markdown": MARKDOWN, "markdown-wide": WIDE_MARKDOWN, "markdown-complex": COMPLEX_MARKDOWN}
 DELAYED_TIMERS = ("timeout-delayed-timer-401", "timeout-delayed-timer-403")
 LATE_RESPONSES = ("close-late", "project-late", "actor-late", "timeout", *DELAYED_TIMERS)
 MALICIOUS = """<!doctype html><html><head>
@@ -115,8 +124,8 @@ class PreviewApi(ProjectsApi):
         assert request.method == "GET" and parts[1] in (PROJECT, NEXT_PROJECT)
         if len(parts) == 3:
             size = 1_000_001 if self.mode == "metadata-large" else 10
-            filename = "preview.md" if self.mode == "markdown" else "preview.html"
-            mime = "text/markdown" if self.mode == "markdown" else "text/html"
+            filename = "preview.md" if self.mode in MARKDOWN_CASES else "preview.html"
+            mime = "text/markdown" if self.mode in MARKDOWN_CASES else "text/html"
             await route.fulfill(
                 json={
                     "documents": [
@@ -166,8 +175,8 @@ class PreviewApi(ProjectsApi):
             )
         elif self.mode == "invalid-success":
             await route.fulfill(status=202, content_type="text/html", body=MALICIOUS)
-        elif self.mode == "markdown":
-            await route.fulfill(content_type="text/markdown", body=MARKDOWN)
+        elif self.mode in MARKDOWN_CASES:
+            await route.fulfill(content_type="text/markdown", body=MARKDOWN_CASES[self.mode])
         else:
             await route.fulfill(content_type="text/html", body=MALICIOUS)
         self.gate.returned.set()
@@ -289,7 +298,7 @@ async def static_html(page: Page) -> None:
 
 
 async def scenario(
-    browser: Browser, url: str, mode: str, language: str, width: int, output: Path
+    browser: Browser, url: str, mode: str, language: str, width: int, output: Path, theme: str = "light"
 ) -> None:
     """本番 App/client/modal を通し、成功・拒否・読取上限・古い応答を検証する。"""
     api = PreviewApi(url, language, mode)
@@ -298,16 +307,21 @@ async def scenario(
     page = await context.new_page()
     errors: list[str] = []
     page.on("pageerror", lambda error: errors.append(error.stack))
+    await page.add_init_script(f"if (window === window.top) localStorage.setItem('skillmind.theme', {json.dumps(theme)})")
     await install_transport(page, mode)
-    name = f"{mode}-{language}-{width}"
+    name = f"{mode}-{language}-{width}-{theme}"
     try:
         await page.goto(f"{url}#/documents?project={PROJECT}")
         catalog = await messages(page, language)
         labels = catalog["documentsPanel"]
         panel = page.locator(".documentPanel")
         await expect(page.locator(".documentItem")).to_have_count(2)
+        user = api.users[api.actor]
+        await expect(page.locator(".sidebarUser span")).to_have_text(user["display_name"])
+        await expect(page.locator(".sidebarUser small")).to_have_text(catalog["account"]["roles"][user["system_role"]])
+        await expect(page.locator(".sidebarUser")).not_to_contain_text(user["email"])
         previews = panel.locator("button.documentName")
-        filename = "preview.md" if mode == "markdown" else "preview.html"
+        filename = "preview.md" if mode in MARKDOWN_CASES else "preview.html"
         if mode == "metadata-large":
             fallback = panel.get_by_role("link", name=f'{labels["download"]}: {filename}', exact=True)
             await expect(fallback).to_have_attribute("download", filename)
@@ -375,7 +389,7 @@ async def scenario(
                     await expect(panel.locator('input[type="file"]').first).to_be_enabled()
                 elif mode == "actor-late":
                     await expect(page.locator(".sidebarUser")).to_contain_text(
-                        api.users[OTHER]["email"]
+                        api.users[OTHER]["display_name"]
                     )
                 elif mode in DELAYED_TIMERS:
                     await expect(page.get_by_role("dialog").get_by_role("alert")).to_have_text(
@@ -400,6 +414,45 @@ async def scenario(
                     await expect(page.get_by_role("dialog").get_by_role("alert")).to_be_visible()
             elif mode == "malicious":
                 await static_html(page)
+            elif mode == "markdown-wide":
+                frame = page.frame_locator("iframe.previewFrame")
+                selector = page.get_by_role("combobox", name=labels["previewPages"])
+                await expect(selector).to_be_visible()
+                total = await selector.locator("option").count()
+                assert total > 10
+                await expect(page.get_by_role("button", name=catalog["runHistory"]["previous"], exact=True)).to_be_disabled()
+                assert await frame.locator("thead th").first.evaluate("el => el.getBoundingClientRect().width") >= 80
+                assert await frame.locator("table").first.evaluate("el => el.scrollWidth > el.clientWidth")
+                await page.get_by_role("button", name=catalog["runHistory"]["next"], exact=True).click()
+                await expect(selector).to_have_value("1")
+                # 各頁に表頭を保持し、全行が重複も欠落もなく一度ずつ読める。
+                rows: list[str] = []
+                for index in range(total):
+                    await selector.select_option(str(index))
+                    await expect(frame.locator("body")).to_be_visible()
+                    await expect(frame.locator("body > pre")).to_have_count(0)
+                    cells = await frame.locator("tbody tr td:first-child").all_text_contents()
+                    if cells:
+                        await expect(frame.locator("thead th").first).to_have_text("C0")
+                    rows.extend(cells)
+                    assert await frame.locator("html").evaluate("el => {const w=document.createTreeWalker(el,NodeFilter.SHOW_ALL);let n=1;while(w.nextNode())n++;return n}") < 20000
+                assert rows == [f"R{row}C0" for row in range(320)]
+                await expect(frame.get_by_text("Last paragraph.", exact=True)).to_be_visible()
+                await expect(page.get_by_role("button", name=catalog["runHistory"]["next"], exact=True)).to_be_disabled()
+                await page.get_by_role("button", name=labels["viewSource"], exact=True).click()
+                await expect(page.locator(".previewText")).to_have_text(WIDE_MARKDOWN)
+                await page.get_by_role("dialog").get_by_role("button", name=labels["previewButton"], exact=True).click()
+                await expect(selector).to_have_value(str(total - 1))
+                # toolbar が狭幅でも切れず、再オープン時は先頭頁へ戻る。
+                assert await page.locator(".markdownPreviewToolbar").evaluate("el => el.scrollWidth <= el.clientWidth + 1")
+                await page.keyboard.press("Escape")
+                await previews.first.click()
+                await expect(selector).to_have_value("0")
+            elif mode == "markdown-complex":
+                frame = page.frame_locator("iframe.previewFrame")
+                await expect(frame.locator("body > pre")).to_have_text(COMPLEX_MARKDOWN)
+                await expect(frame.locator("span, img, script")).to_have_count(0)
+                await expect(page.locator("iframe.previewFrame")).to_have_attribute("sandbox", "")
             elif mode == "markdown":
                 frame = page.frame_locator("iframe.previewFrame")
                 await expect(frame.get_by_role("heading", name="Original Markdown")).to_be_visible()
@@ -462,6 +515,22 @@ async def scenario(
                 "pulls": 0,
                 "cancelled": 1,
             }
+        if mode in MARKDOWN_CASES:
+            # OS 設定ではなく親 App に追従し、開いたまま切替えても再取得しない。
+            frame = page.frame_locator("iframe.previewFrame")
+            calls = list(api.content_calls)
+            colors = {}
+            for value in ("light", "dark", theme):
+                await page.evaluate("""value => window.dispatchEvent(new StorageEvent('storage', {
+                    key: 'skillmind.theme', newValue: value,
+                }))""", value)
+                await expect(page.locator("html")).to_have_attribute("data-theme", value)
+                expected_color = await page.locator("html").evaluate("el => getComputedStyle(el).color")
+                await expect(frame.locator("html")).to_have_css("color", expected_color)
+                colors[value] = await frame.locator("html").evaluate("el => getComputedStyle(el).backgroundColor")
+            assert colors["light"] != colors["dark"]
+            assert api.content_calls == calls
+            await expect(page.locator("iframe.previewFrame")).to_have_attribute("sandbox", "")
         await settle(page)
         await privacy(page)
         assert PRIVATE not in await page.locator("body").inner_text()
@@ -513,12 +582,17 @@ async def check(url: str, output: Path) -> None:
                 "actor-late",
                 "timeout",
                 "markdown",
+                "markdown-complex",
                 "same-tick",
                 "headers-expired",
                 "headers-denied",
                 *DELAYED_TIMERS,
             ):
                 await scenario(browser, url, mode, "zh", 390, output)
+            for language in ("zh", "ja", "en"):
+                for theme in ("light", "dark"):
+                    for width in (390, 1440):
+                        await scenario(browser, url, "markdown-wide", language, width, output, theme)
         finally:
             await browser.close()
 

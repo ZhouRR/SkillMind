@@ -78,7 +78,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         login_protection_timeout_seconds=settings.auth_login_protection_timeout_seconds,
     )
     app.state.api_key_service = ApiKeyService(app.state.database_session_factory)
-    app.state.project_service = ProjectService(app.state.database_session_factory)
     app.state.user_service = UserService(app.state.database_session_factory)
     # MANAGED SecretReference 封入用の KEK cipher。未設定なら MANAGED 作成は fail closed。
     app.state.integration_service = IntegrationService(
@@ -87,6 +86,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     # 遅延接続の MinIO/S3 client。Skill upload と文書層が同じ保存先を共有する。
     app.state.file_storage = create_file_storage(settings)
+    app.state.project_service = ProjectService(
+        app.state.database_session_factory, file_storage=app.state.file_storage,
+    )
     document_library_target = configured_document_library(
         app.state.file_storage, bucket=settings.object_storage_bucket
     )

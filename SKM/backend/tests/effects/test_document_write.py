@@ -30,13 +30,15 @@ def test_existing_switches_cannot_enable_document_effects(deferred, database):
     assert not ExecutionFeatures(deferred, database).effect_enabled("document.write/v1", "CREATE")
 
 
-def test_internal_document_switch_is_create_only_and_does_not_open_other_writers():
-    """文書庫の内部门禁は原 CREATE と提案だけを有効化する。"""
+def test_internal_document_switch_allows_file_operations_without_other_writers():
+    """文書庫の内部门禁は目录操作を開き、他 Provider の write を開かない。"""
 
     features = ExecutionFeatures(document_writes=True)
     assert features.write_capabilities == frozenset({"document.write/v1"})
     assert features.effect_enabled("document.write/v1", "CREATE")
-    assert not features.effect_enabled("document.write/v1", "UPDATE")
+    assert features.effect_enabled("document.write/v1", "UPDATE")
+    assert features.effect_enabled("document.write/v1", "MOVE")
+    assert not features.effect_enabled("database.write/v1", "UPDATE")
     assert features.capability_enabled("change.propose/v1")
     assert not features.capability_enabled("subagent.dispatch/v1")
 

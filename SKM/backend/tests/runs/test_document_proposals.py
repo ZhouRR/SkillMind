@@ -36,7 +36,7 @@ from tests.effects.test_document_write import request
 from tests.runs.effect_authorization_harness import AuthorizationHarness
 
 
-async def document_proposal(monkeypatch, *, revision="2"):
+async def document_proposal(monkeypatch, *, revision="2", operation="CREATE"):
     """SQL/外部 I/O を double にし、原 checksum と Artifact byte の本番 validator を通す。"""
 
     h = AuthorizationHarness()
@@ -47,6 +47,11 @@ async def document_proposal(monkeypatch, *, revision="2"):
     value["changes"][0]["value"].update(
         content_hash=f"sha256:{sha256_hex(content)}", size_bytes=len(content)
     )
+    value["operation"] = operation
+    if operation != "CREATE":
+        value["precondition"] = {"revision": "sha256:" + "b" * 64}
+    if operation == "MOVE":
+        value["changes"][0]["value"] = {"destination": "results/renamed.md"}
     h.draft = replace(parse_change_proposal_request(value), expires_at=now + timedelta(minutes=2))
     h.artifact = ArtifactContent(
         ArtifactMetadata(
@@ -84,7 +89,7 @@ async def document_proposal(monkeypatch, *, revision="2"):
         integration_id=None,
         binding_id=h.binding.id,
         capability_version="document.write/v1",
-        operation="CREATE",
+        operation=operation,
         target=deepcopy(h.draft.target),
         changes=deepcopy(h.draft.changes),
         precondition=deepcopy(h.draft.precondition),
@@ -100,7 +105,7 @@ async def document_proposal(monkeypatch, *, revision="2"):
     p = h.proposal
     p.integration_id, p.target_binding_id = None, h.binding.id
     p.skill_version_id, p.effect_intent_key = uuid4(), h.draft.effect_intent_key
-    p.capability_version, p.operation = "document.write/v1", "CREATE"
+    p.capability_version, p.operation = "document.write/v1", operation
     p.target_json, p.preview_json = (
         deepcopy(h.draft.target),
         {"changes": deepcopy(list(h.draft.changes))},

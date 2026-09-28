@@ -1,0 +1,113 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "enum": [
+        "checkout",
+        "prepare_commit"
+      ]
+    },
+    "revision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "paths": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {
+        "type": "string"
+      }
+    },
+    "branch": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "action": {
+            "enum": [
+              "SET",
+              "REMOVE"
+            ]
+          },
+          "source_path": {
+            "type": "string"
+          },
+          "expected_hash": {
+            "type": "string",
+            "pattern": "^sha256:[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "path",
+          "action"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "const": "SET"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "source_path",
+                "expected_hash"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "purpose": {
+      "type": "string",
+      "maxLength": 2000
+    }
+  },
+  "required": [
+    "action",
+    "revision"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "prepare_commit"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "files",
+          "branch",
+          "summary"
+        ]
+      }
+    }
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/repository.workspace/v1/request.schema.json",
+  "title": "repository.workspace/v1 request"
+}

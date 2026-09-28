@@ -63,6 +63,9 @@ def test_migration_matches_model_and_adds_only_nullable_document_origin(monkeypa
     assert new_target == table.name
     table.append_constraint(sa.CheckConstraint(condition, name=new_name))
     expected = _contract(ProjectDocumentEffectUpload.__table__)
+    # 0058 の任意更新条件は旧版比較から除外する。
+    for name in ("replaces_document_id", "expected_document_revision", "publication_closed_at"):
+        expected["columns"].pop(name)
     # 0054 の部分 index 化は別回帰で検証し、0048 時点の全面一意制約を保持する。
     expected["unique"].add(("project_id", "folder", "name"))
     assert _contract(table) == expected

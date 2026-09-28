@@ -938,7 +938,7 @@ async def app_sign_in_other(page: Page, api: AccountsApi) -> None:
     await page.locator('input[name="email"]').fill(api.users[OTHER]["email"])
     await page.locator('input[name="password"]').fill(PASSWORD)
     await page.locator('button[type="submit"]').click()
-    await expect(page.locator(".sidebarUser")).to_contain_text(api.users[OTHER]["email"])
+    await expect(page.locator(".sidebarUser")).to_contain_text(api.users[OTHER]["display_name"])
     await expect(page.locator(".sidebarLanguage select")).to_have_value("en")
 
 
@@ -959,7 +959,7 @@ async def app_late_session(
     gate.release.set()
     await asyncio.wait_for(gate.returned.wait(), 10)
     await settle(page)
-    await expect(page.locator(".sidebarUser")).to_contain_text(api.users[OTHER]["email"])
+    await expect(page.locator(".sidebarUser")).to_contain_text(api.users[OTHER]["display_name"])
     await expect(page.locator(".sidebarLanguage select")).to_have_value("en")
     await expect(page.locator(".sideNavProject select option")).to_have_count(1)
     await expect(page.locator(".sidebarError")).to_have_count(0)

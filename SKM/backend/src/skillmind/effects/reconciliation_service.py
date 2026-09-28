@@ -16,6 +16,11 @@ from skillmind.agent.run_binding import load_bound_run_resource, resolve_binding
 from skillmind.auth.sessions import UnauthorizedSessionError, validate_session_state
 from skillmind.documents.library import DocumentLibraryTarget
 from skillmind.effects.database_write import DatabaseWriteCommand
+from skillmind.effects.document_management import (
+    DocumentManagementCommand,
+    DocumentManagementReceipt,
+    lookup_management_receipt,
+)
 from skillmind.effects.git_receipt import (
     GitCommitCommand,
     GitCommitConflictError,
@@ -23,6 +28,7 @@ from skillmind.effects.git_receipt import (
     GitCommitReceipt,
 )
 from skillmind.effects.mcp_receipt import McpOperationCommand, McpOperationReceipt, lookup_operation
+from skillmind.effects.postgres_native import NativeSqlReceiptCommand, lookup_native_receipt
 from skillmind.effects.postgres_write import DatabaseWriteConflictError, DatabaseWriteReceipt
 from skillmind.effects.reconciliation_domain import (
     EffectReconciliationDeniedError,
@@ -136,19 +142,33 @@ class EffectReconciliationService:
                         raise EffectReconciliationDeniedError("Original read target changed")
 
                 command = original.target.command
-                receipt: (DatabaseWriteReceipt | ObjectWriteReceipt | GitCommitReceipt
-                          | McpOperationReceipt | None) = None
+                receipt: (
+                    DatabaseWriteReceipt
+                    | ObjectWriteReceipt
+                    | GitCommitReceipt
+                    | McpOperationReceipt
+                    | DocumentManagementReceipt
+                    | None
+                ) = None
                 observed: Literal["CONFIRMED", "NOT_OBSERVED", "CONFLICT"] = "NOT_OBSERVED"
                 kind = reconciliation_kind(original.target)
                 try:
-                    if isinstance(command, McpOperationCommand):
+                    if isinstance(command, DocumentManagementCommand):
+                        await authorize()
+                        async with self._session_factory() as session:
+                            receipt = await lookup_management_receipt(session, command)
+                    elif isinstance(command, McpOperationCommand):
                         if original.credential is None:
                             raise EffectReconciliationUnavailableError(
                                 "Original MCP credential unavailable"
                             )
                         await authorize()
-                        receipt = await lookup_operation(StreamableHttpMcpToolsSource(),
-                            json.loads(original.target.config_json), original.credential, command)
+                        receipt = await lookup_operation(
+                            StreamableHttpMcpToolsSource(),
+                            json.loads(original.target.config_json),
+                            original.credential,
+                            command,
+                        )
                     elif isinstance(command, GitCommitCommand):
                         if self._git_reader is None or original.credential is None:
                             raise EffectReconciliationUnavailableError("Original Git unavailable")
@@ -158,6 +178,11 @@ class EffectReconciliationService:
                             command,
                             authorize=authorize,
                         )
+                    elif isinstance(command, NativeSqlReceiptCommand):
+                        if original.credential is None:
+                            raise EffectReconciliationUnavailableError("Original credential unavailable")
+                        receipt = await lookup_native_receipt(json.loads(original.target.config_json),
+                            original.credential, command, authorize=authorize)
                     elif isinstance(command, DatabaseWriteCommand):
                         if original.credential is None:
                             raise EffectReconciliationUnavailableError(
@@ -231,7 +256,7 @@ class EffectReconciliationService:
             )
             credential = None
             if isinstance(
-                target.command, (DatabaseWriteCommand, GitCommitCommand, McpOperationCommand)
+                target.command, (DatabaseWriteCommand, NativeSqlReceiptCommand, GitCommitCommand, McpOperationCommand)
             ):
                 bound = await load_bound_run_resource(
                     session,
@@ -244,6 +269,7 @@ class EffectReconciliationService:
                         "mcp.call/v1" if isinstance(target.command, McpOperationCommand) else
                         "repository.write/v1"
                         if isinstance(target.command, GitCommitCommand)
+                        else "database.execute/v1" if isinstance(target.command, NativeSqlReceiptCommand)
                         else "database.write/v1"
                     ),
                 )

@@ -90,6 +90,7 @@ class DocumentUploadRepository:
                             ProjectDocumentEffectUpload.folder == folder,
                             ProjectDocumentEffectUpload.name == name,
                             ProjectDocumentEffectUpload.state != "PUBLISHED",
+                            ProjectDocumentEffectUpload.publication_closed_at.is_(None),
                         ),
                     )
                 )

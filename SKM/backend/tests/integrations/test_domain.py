@@ -23,53 +23,53 @@ from skillmind.integrations.domain import (
 )
 
 
-def _redmine_command() -> CreateIntegrationCommand:
+def _http_command() -> CreateIntegrationCommand:
     """明示 scope と SecretReference を持つ Redmine write Integration を返す。"""
 
     return CreateIntegrationCommand(
         project_id=uuid4(),
         name="Project tracker",
-        kind="issue",
-        provider="redmine",
-        capabilities=("issue.update/v1", "issue.read/v1"),
-        scope={"issue_ids": ["42"], "field_keys": ["status_id", "done_ratio"]},
-        config={"base_url": "https://redmine.example.test/"},
+        kind="other",
+        provider="http",
+        capabilities=("http.write/v1", "http.read/v1"),
+        scope={"paths": ["/issues/42.json"], "methods": ["PUT", "GET"]},
+        config={"base_url": "https://redmine.example.test/", "auth_mode": "header", "credential_header": "X-Redmine-API-Key"},
         secret_reference_id=uuid4(),
         created_by=uuid4(),
     )
 
 
-def test_redmine_write_integration_normalizes_exact_scope_and_url() -> None:
+def test_http_write_integration_normalizes_exact_scope_and_url() -> None:
     """Write capability は明示 issue/field allowlist と正規化済み origin に固定する。"""
 
-    normalized = normalize_integration_command(_redmine_command())
+    normalized = normalize_integration_command(_http_command())
 
-    assert normalized.capabilities == ("issue.read/v1", "issue.update/v1")
+    assert normalized.capabilities == ("http.read/v1", "http.write/v1")
     assert normalized.scope == {
-        "issue_ids": ["42"],
-        "field_keys": ["done_ratio", "status_id"],
+        "paths": ["/issues/42.json"],
+        "methods": ["GET", "PUT"],
     }
-    assert normalized.config == {"base_url": "https://redmine.example.test"}
+    assert normalized.config == {"base_url": "https://redmine.example.test", "auth_mode": "header", "credential_header": "X-Redmine-API-Key"}
 
 
 @pytest.mark.parametrize(
     ("scope", "message"),
     [
-        ({"issue_ids": ["42"], "field_keys": []}, "write scope"),
-        ({"issue_ids": [], "field_keys": ["status_id"]}, "explicit issue_ids"),
+        ({"paths": ["/issues"], "methods": []}, "scope"),
+        ({"paths": [], "methods": ["GET", "PUT"]}, "scope"),
         (
-            {"issue_ids": ["42"], "field_keys": ["status_id"], "all_projects": True},
-            "unknown fields",
+            {"paths": ["/issues"], "methods": ["GET"], "all_projects": True},
+            "scope",
         ),
     ],
 )
-def test_redmine_write_scope_cannot_be_unbounded(
+def test_http_write_scope_cannot_be_unbounded(
     scope: dict[str, object], message: str
 ) -> None:
     """空または未知 field を使った scope 拡張を Integration 作成時に拒否する。"""
 
     with pytest.raises(IntegrationValidationError, match=message):
-        normalize_integration_command(replace(_redmine_command(), scope=scope))
+        normalize_integration_command(replace(_http_command(), scope=scope))
 
 
 @pytest.mark.parametrize(
@@ -81,13 +81,13 @@ def test_redmine_write_scope_cannot_be_unbounded(
         {"base_url": "https://redmine.example.test", "api_key": "hidden"},
     ],
 )
-def test_redmine_config_rejects_credentials_and_non_http_targets(
+def test_http_config_rejects_credentials_and_non_http_targets(
     config: dict[str, str],
 ) -> None:
     """Credential-like metadata と非 HTTP target を永続 config に入れない。"""
 
     with pytest.raises(IntegrationValidationError):
-        normalize_integration_command(replace(_redmine_command(), config=config))
+        normalize_integration_command(replace(_http_command(), config=config))
 
 
 def test_git_may_declare_the_registered_write_capability() -> None:
@@ -196,7 +196,7 @@ def test_registered_providers_are_installed() -> None:
 
     assert PROVIDER_DEFINITIONS["svn"].installed is True
     assert PROVIDER_DEFINITIONS["git"].installed is True
-    assert PROVIDER_DEFINITIONS["redmine"].installed is True
+    assert PROVIDER_DEFINITIONS["http"].installed is True
     assert PROVIDER_DEFINITIONS["postgres"].installed is True
     assert PROVIDER_DEFINITIONS["mcp"].installed is True
 
@@ -205,8 +205,8 @@ def test_installed_provider_index_binds_capabilities_to_wired_providers() -> Non
     """installed 索引は配線済み Provider だけを能力へ束ねる。"""
 
     assert INSTALLED_PROVIDER_CAPABILITIES["repository.read/v1"] == frozenset({"git", "svn"})
-    assert INSTALLED_PROVIDER_CAPABILITIES["issue.read/v1"] == frozenset({"redmine"})
-    assert INSTALLED_PROVIDER_CAPABILITIES["database.read/v1"] == frozenset({"postgres"})
+    assert INSTALLED_PROVIDER_CAPABILITIES["http.read/v1"] == frozenset({"http"})
+    assert INSTALLED_PROVIDER_CAPABILITIES["database.query/v1"] == frozenset({"postgres"})
     assert INSTALLED_PROVIDER_CAPABILITIES["mcp.read/v1"] == frozenset({"mcp"})
     # 全ての値が実際に installed な Provider 名だけで構成される。
     installed_names = {
@@ -232,7 +232,7 @@ def test_secret_locator_stays_in_deployment_owned_namespaces(
     command = CreateSecretReferenceCommand(
         project_id=uuid4(),
         name="Tracker credential",
-        provider="redmine",
+        provider="http",
         resolver=resolver,
         locator=locator,
         key_version="2026-07",
@@ -250,7 +250,7 @@ def test_secret_reference_accepts_locator_without_storing_secret_body() -> None:
         CreateSecretReferenceCommand(
             project_id=uuid4(),
             name="Tracker credential",
-            provider="redmine",
+            provider="http",
             resolver=SecretResolver.ENVIRONMENT,
             locator="SKILLMIND_REDMINE_TOKEN",
             key_version="2026-07",
@@ -265,7 +265,7 @@ def _managed_command(**overrides: object) -> CreateSecretReferenceCommand:
     fields: dict[str, object] = {
         "project_id": uuid4(),
         "name": "Tracker credential",
-        "provider": "redmine",
+        "provider": "http",
         "resolver": SecretResolver.MANAGED,
         "locator": MANAGED_SECRET_LOCATOR,
         "key_version": "2026-07",
@@ -308,7 +308,7 @@ def test_deployment_resolvers_reject_inline_secret_value(resolver: SecretResolve
     command = CreateSecretReferenceCommand(
         project_id=uuid4(),
         name="Tracker credential",
-        provider="redmine",
+        provider="http",
         resolver=resolver,
         locator="SKILLMIND_REDMINE_TOKEN" if resolver is SecretResolver.ENVIRONMENT
         else "/run/secrets/token",
@@ -321,17 +321,17 @@ def test_deployment_resolvers_reject_inline_secret_value(resolver: SecretResolve
         validate_secret_reference(command)
 
 
-def test_redmine_scope_accepts_explicit_wildcard_and_collapses_to_canonical() -> None:
+def test_http_scope_accepts_explicit_root_and_deduplicates() -> None:
     """明示 wildcard は個別値との混在を正準形 ["*"] へ畳み、write でも受理する。"""
 
     normalized = normalize_integration_command(
         replace(
-            _redmine_command(),
-            scope={"issue_ids": ["*", "42"], "field_keys": ["*"]},
+            _http_command(),
+            scope={"paths": ["/", "/"], "methods": ["GET", "PUT"]},
         )
     )
 
-    assert normalized.scope == {"issue_ids": ["*"], "field_keys": ["*"]}
+    assert normalized.scope == {"paths": ["/"], "methods": ["GET", "PUT"]}
 
 
 def test_repository_scope_rejects_reserved_wildcard_token() -> None:

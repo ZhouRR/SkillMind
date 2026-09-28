@@ -238,13 +238,13 @@ async def test_invalid_library_context_stops_before_materialization(tmp_path: Pa
         ({"access": "read"}, "CREATE"),
         ({"kind": "other"}, "CREATE"),
         ({"capabilities": ["document.write/v1", "document.read/v1"]}, "CREATE"),
-        ({}, "UPDATE"),
+        ({}, "PURGE"),
     ],
 )
-async def test_library_requires_exact_document_create_declaration(
+async def test_library_requires_document_write_declaration_and_supported_operation(
     tmp_path: Path, changes, operation
 ):
-    """既存 read/他種別 slot と CREATE 以外の intent に保存 binding を流用しない。"""
+    """既存 read/他種別 slot と未対応 intent に保存 binding を流用しない。"""
 
     claimed, library = library_run(requirement_changes=changes, operation=operation)
     with pytest.raises(ValueError):
@@ -457,3 +457,14 @@ async def test_source_execution_context_resolves_library_without_blueprint(tmp_p
     assert "document.write/v1" not in {tool.capability for tool in context.tools}
     assert "change.propose/v1" in {tool.capability for tool in context.tools}
     assert context.task_brief["source_documents"] == manifest["source_documents"]
+
+
+@pytest.mark.parametrize("operation", ["UPDATE", "MOVE", "CREATE_FOLDER", "TRASH", "RESTORE"])
+async def test_declared_file_operations_keep_binding_and_only_expose_proposal(tmp_path, operation):
+    """新規に宣言した目录操作も、直接 write でなく元 binding と提案経路を使用する。"""
+    claimed, library = library_run(operation=operation)
+    claimed.permission_snapshot_json["allowed_capabilities"].append("document.files/v1")
+    context = await builder(tmp_path, library).build(claimed, sequence_start=1)
+    capabilities = {tool.capability for tool in context.tools}
+    assert "document.files/v1" in capabilities and "change.propose/v1" in capabilities
+    assert "document.write/v1" not in capabilities

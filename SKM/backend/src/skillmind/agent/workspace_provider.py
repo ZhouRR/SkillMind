@@ -30,11 +30,12 @@ from skillmind.artifacts.domain import MAX_ARTIFACT_BYTES, ArtifactDraft
 from skillmind.core.hashing import sha256_hex
 
 _MAX_FILE_BYTES = MAX_ARTIFACT_BYTES
+_MAX_READ_BYTES = 104_857_600
 _MAX_SEARCH_FILES = 500
 _MAX_SEARCH_BYTES = 10_485_760
 _MAX_SEARCH_ENTRIES = 5_000
 _MAX_EXCERPT_CHARACTERS = 1_000
-_ALLOWED_ROOT_NAMES = frozenset({"input", "workspace"})
+_ALLOWED_ROOT_NAMES = frozenset({"input", "workspace", "output"})
 # 書き込み面は Agent 自身の中間産物と成果物に限る。物化済み input/ は冻结证据であり書き込み対象
 # にしない (計画 §19 W2)。read/search とは別語彙で、逃さないよう root 集合を明示分離する。
 _WRITABLE_ROOT_NAMES = frozenset({"workspace", "output"})
@@ -55,7 +56,13 @@ class WorkspaceReadProvider:
             require_file=True,
         )
         data = await asyncio.to_thread(
-            _read_workspace_bytes, context, relative, path, max_bytes=_MAX_FILE_BYTES
+            _read_workspace_bytes,
+            context,
+            relative,
+            path,
+            max_bytes=_MAX_READ_BYTES
+            if relative.startswith(("workspace/documents/", "workspace/resources/", "workspace/repositories/"))
+            else _MAX_FILE_BYTES,
         )
         content = _decode_content(data)
         expected_hash = arguments.get("expected_hash")
@@ -390,14 +397,29 @@ def _resolve_writable_path(context: RunToolContext, value: Any) -> tuple[str, Pa
     return relative.as_posix(), base, candidate
 
 
-def _write_workspace_file(root: Path, target: Path, data: bytes) -> bool:
+def _write_workspace_file(
+    root: Path,
+    target: Path,
+    data: bytes,
+    *,
+    expected_hash: str | None = None,
+    reuse_identical: bool = False,
+) -> bool:
     """固定 Run root を使う安全 I/O の失敗を、公開 error へ変換する。"""
 
     try:
-        return write_safe_workspace_file(root, target.relative_to(root).as_posix(), data)
+        return write_safe_workspace_file(
+            root,
+            target.relative_to(root).as_posix(),
+            data,
+            expected_hash=expected_hash,
+            reuse_identical=reuse_identical,
+        )
     except (ValueError, UnsafeWorkspaceFileError) as error:
         raise ToolProviderError(
-            "invalid_request", "Workspace target is not a safe file", retryable=False
+            "invalid_request",
+            "Workspace target changed or is not a safe file; read its current hash",
+            retryable=False,
         ) from error
     except MaterializationError as error:
         raise ToolProviderError(

@@ -14,11 +14,11 @@ from skillmind.db.models import ProjectMemberEvent
 
 
 def test_member_audit_foreign_keys_are_restrict_and_no_credential_columns_exist() -> None:
-    """Project/Member/User の参照を残し、削除 CASCADE と秘密の自由列を許可しない。"""
+    """Project/Member の元 ID は独立保持し、組織/User の CASCADE と秘密列を許可しない。"""
 
     table = ProjectMemberEvent.__table__
     assert {key.target_fullname for key in table.foreign_keys} == {
-        "organizations.id", "projects.id", "project_members.id", "users.id",
+        "organizations.id", "users.id",
     }
     assert {key.ondelete for key in table.foreign_keys} == {"RESTRICT"}
     assert set(table.c.keys()) == {

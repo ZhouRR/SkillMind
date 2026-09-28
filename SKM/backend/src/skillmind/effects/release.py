@@ -24,6 +24,7 @@ def configured_execution_features(settings: Settings) -> ExecutionFeatures:
         document_writes=settings.document_writes_enabled,
         git_writes=settings.git_writes_enabled,
         mcp_tools=settings.mcp_tools_enabled,
+        http_writes=True,
     )
 
 
@@ -41,6 +42,7 @@ class ExecutionFeatures:
     document_writes: bool = False
     git_writes: bool = False
     mcp_tools: bool = False
+    http_writes: bool = False
 
     @property
     def effects_enabled(self) -> bool:
@@ -51,6 +53,7 @@ class ExecutionFeatures:
             or self.document_writes
             or self.git_writes
             or self.mcp_tools
+            or self.http_writes
         )
 
     @property
@@ -62,9 +65,11 @@ class ExecutionFeatures:
 
     def capability_enabled(self, capability: str) -> bool:
         """Interpreter、Run permission、実 Tool 準備で同じ上限を使う。"""
+        if capability == "http.write/v1":
+            return self.http_writes
         if capability in {"mcp.tools/v1", "mcp.query/v1", "mcp.call/v1"}:
             return self.mcp_tools
-        if capability == DATABASE_WRITE_CAPABILITY:
+        if capability in {DATABASE_WRITE_CAPABILITY, "database.execute/v1"}:
             return self.database_writes
         if capability == DOCUMENT_WRITE_CAPABILITY:
             return self.document_writes
@@ -87,9 +92,23 @@ class ExecutionFeatures:
         return (
             capability in self.write_capabilities
             and (capability != DATABASE_WRITE_CAPABILITY or operation in {"INSERT", "UPDATE"})
-            and (capability != DOCUMENT_WRITE_CAPABILITY or operation == "CREATE")
+            and (
+                capability != DOCUMENT_WRITE_CAPABILITY
+                or operation
+                in {
+                    "CREATE",
+                    "UPDATE",
+                    "MOVE",
+                    "MOVE_FOLDER",
+                    "CREATE_FOLDER",
+                    "DELETE_FOLDER",
+                    "TRASH",
+                    "RESTORE",
+                }
+            )
             and self.provider_enabled(capability, provider)
             and (capability != "repository.write/v1" or operation == "commit")
+            and (capability != "http.write/v1" or operation in {"POST", "PUT", "PATCH", "DELETE"})
         )
 
     def require_effect(
@@ -117,8 +136,7 @@ class ExecutionFeatures:
             ]
             if "capability_version" in effect:
                 writes = (
-                    [effect["capability_version"]]
-                    if effect["capability_version"] in writes else []
+                    [effect["capability_version"]] if effect["capability_version"] in writes else []
                 )
             if not writes or not all(
                 self.effect_enabled(cap, str(effect.get("operation", ""))) for cap in writes

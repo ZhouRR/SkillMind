@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/projects/v1/purge-response.schema.json",
+  "title": "Skillmind Project Purge Response v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["project_id", "cleanup_pending"],
+  "properties": {
+    "project_id": { "type": "string", "format": "uuid" },
+    "cleanup_pending": { "type": "integer", "minimum": 0 }
+  }
+}

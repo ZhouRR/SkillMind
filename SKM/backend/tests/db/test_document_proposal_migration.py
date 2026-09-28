@@ -51,7 +51,9 @@ def test_migration_uses_exact_model_constraint_and_refuses_nonempty_downgrade():
     assert ChangeProposal.__table__.c.integration_id.nullable
     upgrade = migration_sql("upgrade")
     assert "DROP NOT NULL" in upgrade
-    assert str(constraint.sqltext) in upgrade
+    # 0046 の CREATE 制約を保持し、0058 の拡張は別 migration で検証する。
+    assert "operation = 'CREATE'" in upgrade
+    assert "operation IN" in str(constraint.sqltext)
     assert "ck_change_proposals_ck_" not in upgrade
     assert "ADD CONSTRAINT ck_change_proposals_document_library_integration" in upgrade
     downgrade = migration_sql("downgrade")
@@ -67,13 +69,15 @@ def test_migration_uses_exact_model_constraint_and_refuses_nonempty_downgrade():
     [
         ("document.write/v1", "CREATE", False, True),
         ("document.write/v1", "CREATE", True, False),
-        ("document.write/v1", "UPDATE", False, False),
+        ("document.write/v1", "UPDATE", False, True),
+        ("document.write/v1", "MOVE", False, True),
+        ("document.write/v1", "PURGE", False, False),
         ("database.write/v1", "INSERT", False, False),
         ("database.write/v1", "INSERT", True, True),
         ("repository.write/v1", "commit", False, False),
     ],
 )
-def test_model_constraint_restricts_null_to_document_create(
+def test_model_constraint_restricts_null_to_supported_document_operations(
     capability, operation, has_integration, valid
 ):
     """SQLite で CHECK の NULL 真理値を確認する。PG lock/FK の検証は別途行う。"""

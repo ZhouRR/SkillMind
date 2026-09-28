@@ -27,6 +27,7 @@ from skillmind.agent.stream_lifecycle import close_async_stream
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.core.logging import log_event
 from skillmind.core.timing import ExecutionTimings, safe_observation, timed_async
+from skillmind.agent.proposal_files import expand_proposal_file
 from skillmind.effects.proposal import parse_change_proposal_request
 from skillmind.runs.budget import BudgetError, BudgetExhaustedError, BudgetUnavailableError
 from skillmind.runs.capacity_retry import MODEL_CAPACITY_CODE, capacity_retry_delay
@@ -506,6 +507,7 @@ class AgentRunExecutor:
                         )
                         return
                     try:
+                        request_payload = await expand_proposal_file(context, request_payload)
                         proposal = parse_change_proposal_request(
                             request_payload,
                             now=event.occurred_at,

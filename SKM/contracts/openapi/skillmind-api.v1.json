@@ -4967,6 +4967,28 @@
         "title": "ProjectPreferenceResponse",
         "type": "object"
       },
+      "ProjectPurgeResponse": {
+        "additionalProperties": false,
+        "description": "Project の DB 削除確定と外部 byte 清理の未完了件数を分けて返す。",
+        "properties": {
+          "cleanup_pending": {
+            "minimum": 0.0,
+            "title": "Cleanup Pending",
+            "type": "integer"
+          },
+          "project_id": {
+            "format": "uuid",
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "cleanup_pending"
+        ],
+        "title": "ProjectPurgeResponse",
+        "type": "object"
+      },
       "ProjectResponse": {
         "additionalProperties": false,
         "description": "内部 organization field を含まない Project response。",
@@ -23610,6 +23632,560 @@
         "summary": "Update Module",
         "tags": [
           "modules"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/purge": {
+      "post": {
+        "description": "ADMIN が確認した ARCHIVED Project と終了済みの関連内容を完全削除する。",
+        "operationId": "purge_project_api_v1_projects__project_id__purge_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectVersionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectPurgeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$id": "https://schemas.skillmind.local/errors/problem/v1.schema.json",
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "pattern": "^[a-z][a-z0-9_]*$",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "errors": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "location",
+                          "message",
+                          "kind"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "instance": {
+                      "pattern": "^/",
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "maximum": 599,
+                      "minimum": 400,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": {
+                      "format": "uri",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail",
+                    "instance",
+                    "code",
+                    "request_id"
+                  ],
+                  "title": "Skillmind Problem Details v1",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "A valid session is required",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "required": true,
+                "schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$id": "https://schemas.skillmind.local/errors/problem/v1.schema.json",
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "pattern": "^[a-z][a-z0-9_]*$",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "errors": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "location",
+                          "message",
+                          "kind"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "instance": {
+                      "pattern": "^/",
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "maximum": 599,
+                      "minimum": 400,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": {
+                      "format": "uri",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail",
+                    "instance",
+                    "code",
+                    "request_id"
+                  ],
+                  "title": "Skillmind Problem Details v1",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ADMIN or CSRF rejected",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "required": true,
+                "schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$id": "https://schemas.skillmind.local/errors/problem/v1.schema.json",
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "pattern": "^[a-z][a-z0-9_]*$",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "errors": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "location",
+                          "message",
+                          "kind"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "instance": {
+                      "pattern": "^/",
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "maximum": 599,
+                      "minimum": 400,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": {
+                      "format": "uri",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail",
+                    "instance",
+                    "code",
+                    "request_id"
+                  ],
+                  "title": "Skillmind Problem Details v1",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Project not found or inaccessible",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "required": true,
+                "schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$id": "https://schemas.skillmind.local/errors/problem/v1.schema.json",
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "pattern": "^[a-z][a-z0-9_]*$",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "errors": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "location",
+                          "message",
+                          "kind"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "instance": {
+                      "pattern": "^/",
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "maximum": 599,
+                      "minimum": 400,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": {
+                      "format": "uri",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail",
+                    "instance",
+                    "code",
+                    "request_id"
+                  ],
+                  "title": "Skillmind Problem Details v1",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Archive/version required; active or unresolved operations prevent deletion",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "required": true,
+                "schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$id": "https://schemas.skillmind.local/errors/problem/v1.schema.json",
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "pattern": "^[a-z][a-z0-9_]*$",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "errors": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "location",
+                          "message",
+                          "kind"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "instance": {
+                      "pattern": "^/",
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "maximum": 599,
+                      "minimum": 400,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": {
+                      "format": "uri",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail",
+                    "instance",
+                    "code",
+                    "request_id"
+                  ],
+                  "title": "Skillmind Problem Details v1",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Invalid Project identity, version or request",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "required": true,
+                "schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyBearer": []
+          },
+          {
+            "ApiKeyHeader": []
+          }
+        ],
+        "summary": "Purge Project",
+        "tags": [
+          "projects",
+          "auth"
         ]
       }
     },

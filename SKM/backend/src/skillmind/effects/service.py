@@ -167,7 +167,9 @@ class EffectService:
                     if claimed.integration_id is not None or credential is not None:
                         raise PermissionError("Document library has no Integration credential")
                 else:
-                    if claimed.integration_id is None or credential is None:
+                    anonymous_http = (claimed.provider == "http"
+                                      and claimed.integration_config.get("auth_mode") == "none")
+                    if claimed.integration_id is None or (credential is None and not anonymous_http):
                         raise PermissionError("Integration credential is required")
                     bound = await load_bound_run_resource(
                         session,
@@ -180,16 +182,16 @@ class EffectService:
                     )
                     current = await resolve_binding_secret(
                         session, resolver=secret_resolver,
-                        integration=bound.integration, required=True,
+                        integration=bound.integration, required=not anonymous_http,
                     )
                     if (
                         bound.integration.config != claimed.integration_config
                         or bound.integration.revision != claimed.integration_revision
                         or bound.integration.secret_reference_id != claimed.secret_reference_id
                         or bound.scope != claimed.integration_scope
-                        or current is None
+                        or (current is None and not anonymous_http)
                         or not hmac.compare_digest(
-                            current.encode("utf-8"), credential.encode("utf-8")
+                            (current or "").encode("utf-8"), (credential or "").encode("utf-8")
                         )
                     ):
                         raise PermissionError("Effect binding or credential changed after claim")

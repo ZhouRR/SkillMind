@@ -12,8 +12,8 @@ describe('resource connection preparation', () => {
       writeColumns: '*', secretValue: 'fixture-secret', locator: '/fixture/secret' }, resourceWriteEnabled('postgres', closed))
     expect(result.valid).toBe(true)
     if (!result.valid) throw new Error('Expected connection payload')
-    expect(result.input.capabilities).toEqual(['database.read/v1'])
-    expect(result.input.scope).toEqual({ tables: ['public.items'] })
+    expect(result.input.capabilities).toEqual(['database.query/v1'])
+    expect(result.input.scope).toEqual({ statements: ['SELECT'] })
     expect(JSON.stringify(result.input)).not.toContain('fixture-secret')
     expect(JSON.stringify(result.input)).not.toContain('/fixture/secret')
   })
@@ -23,13 +23,13 @@ describe('resource connection preparation', () => {
       access: 'read_write', writeColumns: 'public.items.status', databaseOperations: ['UPDATE'] }, true)
     expect(result.valid).toBe(true)
     if (!result.valid) throw new Error('Expected connection payload')
-    expect(result.input.scope).toEqual({ tables: ['public.items'], write_columns: ['public.items.status'], operations: ['UPDATE'] })
-    expect(result.input.capabilities).toEqual(['database.read/v1', 'database.write/v1'])
+    expect(result.input.scope).toEqual({ statements: ['SELECT', 'UPDATE'] })
+    expect(result.input.capabilities).toEqual(['database.query/v1', 'database.execute/v1'])
   })
 
-  it('reports missing write columns before any credential can be saved', () => {
-    expect(prepareResourceConnection({ ...emptyConnectDraft('postgres'), tables: 'public.items', access: 'read_write' }, true))
-      .toEqual({ valid: false, scopeIssue: 'write_columns_required' })
+  it('reports missing SQL operations before any credential can be saved', () => {
+    expect(prepareResourceConnection({ ...emptyConnectDraft('postgres'), tables: 'public.items', access: 'read_write', databaseOperations: [] }, true))
+      .toEqual({ valid: false, scopeIssue: 'database_operations_required' })
   })
 
   it('retains the exact repository branch and path restrictions', () => {

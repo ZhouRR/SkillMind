@@ -160,7 +160,7 @@ def is_write_capability(capability: str) -> bool:
     """
 
     return (".update/" in capability or ".apply/" in capability or ".write/" in capability
-            or capability == "mcp.call/v1")
+            or capability in {"mcp.call/v1", "database.execute/v1"})
 
 
 def _bind_requirement(

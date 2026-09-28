@@ -8,8 +8,13 @@ from typing import Literal
 from uuid import UUID
 
 from skillmind.effects.database_write import DatabaseWriteCommand
+from skillmind.effects.document_management import (
+    DocumentManagementCommand,
+    DocumentManagementReceipt,
+)
 from skillmind.effects.git_receipt import GitCommitCommand, GitCommitReceipt
 from skillmind.effects.mcp_receipt import McpOperationCommand, McpOperationReceipt
+from skillmind.effects.postgres_native import NativeSqlReceiptCommand
 from skillmind.effects.postgres_write import DatabaseWriteReceipt
 from skillmind.storage.effect_write import ObjectWriteCommand, ObjectWriteReceipt
 
@@ -44,7 +49,12 @@ class EffectReconciliationTarget:
     provider: str
     provider_version: str
     command: (
-        DatabaseWriteCommand | ObjectWriteCommand | GitCommitCommand | McpOperationCommand
+        DatabaseWriteCommand
+        | NativeSqlReceiptCommand
+        | ObjectWriteCommand
+        | GitCommitCommand
+        | McpOperationCommand
+        | DocumentManagementCommand
     ) = field(repr=False)
     config_json: str = field(repr=False)
     secret_reference_id: UUID | None = field(repr=False)
@@ -68,5 +78,10 @@ class EffectReconciliationObservation:
     observed_at: datetime
     request_checksum: str
     receipt: (
-        DatabaseWriteReceipt | ObjectWriteReceipt | GitCommitReceipt | McpOperationReceipt | None
+        DatabaseWriteReceipt
+        | ObjectWriteReceipt
+        | GitCommitReceipt
+        | McpOperationReceipt
+        | DocumentManagementReceipt
+        | None
     ) = field(repr=False)

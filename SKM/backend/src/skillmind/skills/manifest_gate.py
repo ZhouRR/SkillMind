@@ -44,6 +44,8 @@ _RUN_SCOPED_PLATFORM_CAPABILITIES = frozenset(
         "workspace.search/v1",
         "workspace.write/v1",
         "workspace.write/v2",
+        "workspace.edit/v1",
+        "document.files/v1",
         "audit.export/v1",
         "artifact.append/v1",
         "artifact.materialize/v1",

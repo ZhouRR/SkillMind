@@ -5,8 +5,10 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 from typing import Any
+from uuid import UUID
 
 from skillmind.artifacts.domain import MAX_ARTIFACT_BYTES
+from skillmind.documents.file_state import FILE_OPERATIONS
 from skillmind.documents.library import (
     DOCUMENT_WRITE_CAPABILITY,
     document_library_revision,
@@ -23,7 +25,11 @@ LEGACY_DOCUMENT_WRITE_PROVIDER_VERSION = "project-library-receipt/v1"
 def document_write_scope_from_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     """精確な相対 path だけを scope 摘要へ写す。事前許可は別途常に禁止する。"""
 
-    return {"paths": [payload["path"]]}
+    return {
+        "paths": sorted(
+            {payload["path"], *([payload["destination"]] if payload.get("destination") else [])}
+        )
+    }
 
 
 def validate_document_write_proposal(
@@ -42,16 +48,28 @@ def validate_document_write_proposal(
 
 
 def document_proposal_payload(
-    *, operation: str, target: Mapping[str, Any], changes: Sequence[Mapping[str, Any]],
-    precondition: Mapping[str, Any], verification: Mapping[str, Any], scope: Mapping[str, Any],
+    *,
+    operation: str,
+    target: Mapping[str, Any],
+    changes: Sequence[Mapping[str, Any]],
+    precondition: Mapping[str, Any],
+    verification: Mapping[str, Any],
+    scope: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """提案と Worker で同じ Artifact/path/CREATE 契約を使用する。"""
+    """提案と Worker で同じ Artifact/path/版付き変更契約を使用する。"""
 
     try:
         project_id, _target = document_library_scope(scope)
         if (
-            operation != "CREATE"
-            or precondition != {"revision": "absent"}
+            operation not in {"CREATE", "UPDATE", *FILE_OPERATIONS}
+            or (operation != "CREATE" and document_library_revision(scope) != "2")
+            or set(precondition) != {"revision"}
+            or not isinstance(precondition["revision"], str)
+            or (
+                precondition["revision"] != "absent"
+                if operation in {"CREATE", "CREATE_FOLDER"}
+                else re.fullmatch(r"sha256:[0-9a-f]{64}", precondition["revision"]) is None
+            )
             or verification != {"method": "READ_BACK", "paths": ["/document"]}
             or len(changes) != 1
         ):
@@ -65,6 +83,8 @@ def document_proposal_payload(
         ):
             raise ValueError("Invalid document change")
         value = change["value"]
+        if operation in FILE_OPERATIONS:
+            return _management_payload(project_id, operation, target, value, precondition)
         if set(value) != {"artifact_ref", "content_hash", "size_bytes", "mime_type"}:
             raise ValueError("Invalid document Artifact reference")
         for key, pattern in (
@@ -84,7 +104,8 @@ def document_proposal_payload(
             raise ValueError("Invalid document target")
         folder, _, name = path.rpartition("/")
         if validate_document_path(project_id=project_id, folder=folder, name=name) != (
-            folder, name
+            folder,
+            name,
         ):
             raise ValueError("Document target is not canonical")
     except (ValueError, TypeError, KeyError, FileStorageError) as error:
@@ -92,8 +113,45 @@ def document_proposal_payload(
             "Document proposal is outside the Artifact contract"
         ) from error
     payload = {"path": path, **dict(value)}
+    if operation == "UPDATE":
+        payload["expected_revision"] = precondition["revision"]
     # v1 回执の再構築だけが旧 key を必要とする。v2 の物理 key は批准後に確定する
     # Effect ID と実 Artifact byte に束縛し、提案時には生成しない。
     if document_library_revision(scope) == "1":
         payload["object_key"] = document_effect_storage_key(project_id, folder, name)
+    return payload
+
+
+def _management_payload(
+    project_id: UUID, operation: str, target: Mapping[str, Any],
+    value: Mapping[str, Any], precondition: Mapping[str, Any],
+) -> dict[str, Any]:
+    """目录操作は対象 path と必要な移動先だけ。任意 metadata や正文を通さない。"""
+    path = target.get("locator")
+    folder, _, name = str(path).rpartition("/")
+    if not isinstance(path, str) or validate_document_path(
+        project_id=project_id, folder=folder, name=name
+    ) != (folder, name):
+        raise ValueError("Invalid management path")
+    moving = operation in {"MOVE", "MOVE_FOLDER"}
+    if set(value) != (
+        {"destination"} if moving else {"document_id"} if operation == "RESTORE" else set()
+    ):
+        raise ValueError("Invalid management fields")
+    payload = {"path": path, "expected_revision": precondition["revision"], "operation": operation}
+    if operation == "RESTORE":
+        if not isinstance(value["document_id"], str):
+            raise ValueError("Invalid recycled document identity")
+        identifier = UUID(value["document_id"])
+        if str(identifier) != value["document_id"] or identifier.int == 0:
+            raise ValueError("Invalid recycled document identity")
+        payload["document_id"] = str(identifier)
+    if moving:
+        destination = value["destination"]
+        folder, _, name = str(destination).rpartition("/")
+        if not isinstance(destination, str) or validate_document_path(
+            project_id=project_id, folder=folder, name=name
+        ) != (folder, name):
+            raise ValueError("Invalid destination path")
+        payload["destination"] = destination
     return payload

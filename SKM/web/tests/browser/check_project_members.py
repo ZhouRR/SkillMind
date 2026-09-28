@@ -560,7 +560,7 @@ async def late_actor(page: Page, api: MembersApi, labels: dict, status: int) -> 
     await asyncio.wait_for(gate.returned.wait(), 10)
     await settle(page)
     await expect(page.locator('input[name="email"]')).to_have_count(0)
-    await expect(page.locator(".sidebarUser")).to_contain_text(api.users[OTHER]["email"])
+    await expect(page.locator(".sidebarUser")).to_contain_text(api.users[OTHER]["display_name"])
 
 
 async def exercise(

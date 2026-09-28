@@ -1,0 +1,8 @@
+{
+  "operation": "append",
+  "source_path": "workspace/source.md",
+  "path": "output/review.md",
+  "expected_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "text": "\nReview completed.\n",
+  "purpose": "Append the review conclusion"
+}

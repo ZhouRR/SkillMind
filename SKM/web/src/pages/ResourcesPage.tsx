@@ -78,7 +78,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
   const features = { deferredFeaturesEnabled, databaseWritesEnabled, gitWritesEnabled, mcpToolsEnabled }
   const { secrets, integrations, bindings, policies, tasks, loading, busy, error, setError,
     perform, recordSecret } = useResourceAdministration(projectId, deferredFeaturesEnabled)
-  const [connectDraft, setConnectDraft] = useState<ConnectDraft>(() => emptyConnectDraft('redmine'))
+  const [connectDraft, setConnectDraft] = useState<ConnectDraft>(() => emptyConnectDraft('http'))
   const [secretDraft, setSecretDraft] = useState<SecretDraft>(EMPTY_SECRET)
   const [bindingDraft, setBindingDraft] = useState<BindingDraft>(EMPTY_BINDING)
   const [policyDraft, setPolicyDraft] = useState<PolicyDraft>(EMPTY_POLICY)
@@ -91,7 +91,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
 
   useEffect(() => {
     setOpenDialog(null); setDeleteTarget(null); setEditingIntegration(null); setEditingSecret(null)
-    setConnectDraft(emptyConnectDraft('redmine')); setSecretDraft(EMPTY_SECRET)
+    setConnectDraft(emptyConnectDraft('http')); setSecretDraft(EMPTY_SECRET)
     setBindingDraft(EMPTY_BINDING); setPolicyDraft(EMPTY_POLICY)
   }, [projectId])
 

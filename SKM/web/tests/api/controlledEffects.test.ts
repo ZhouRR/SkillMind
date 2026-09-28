@@ -56,11 +56,12 @@ describe('controlled effect API client', () => {
     expect(isChangeApproval({ ...approval, source: 'MODEL' })).toBe(false)
   })
 
-  it('accepts null Integration only for the project library CREATE proposal', () => {
-    const document = { ...PROPOSAL, capability_version: 'document.write/v1', operation: 'CREATE', integration_id: null }
+  it.each(['CREATE', 'UPDATE', 'MOVE', 'MOVE_FOLDER', 'CREATE_FOLDER', 'DELETE_FOLDER', 'TRASH', 'RESTORE'])(
+    'accepts the library %s proposal without an external Integration', (operation) => {
+    const document = { ...PROPOSAL, capability_version: 'document.write/v1', operation, integration_id: null }
     expect(isChangeProposal(document)).toBe(true)
     expect(isChangeProposal({ ...document, integration_id: PROPOSAL.integration_id })).toBe(false)
-    expect(isChangeProposal({ ...document, operation: 'UPDATE' })).toBe(false)
+    expect(isChangeProposal({ ...document, operation: 'PURGE' })).toBe(false)
     expect(isChangeProposal({ ...PROPOSAL, integration_id: null })).toBe(false)
     expect(isChangeProposal({ ...document, integration_id: undefined })).toBe(false)
   })

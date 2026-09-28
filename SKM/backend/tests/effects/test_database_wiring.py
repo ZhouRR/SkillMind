@@ -26,46 +26,29 @@ def test_production_registry_matches_readiness_and_provider_versions(deferred, d
         git_client=MagicMock(),
         svn_client=MagicMock(),
     )
-    assert registry.write_capabilities == features.write_capabilities
+    assert registry.write_capabilities == features.write_capabilities - {"database.write/v1", "issue.update/v1"}
     for (capability, provider), definition in registry.snapshot().items():
         assert (
             definition.provider_version
             == resolve_effect_capability(capability).provider_versions[provider]
         )
         assert definition.requires_secret
-        assert definition.supervised == (capability == "database.write/v1" or provider == "git")
+        assert definition.supervised == (capability == "database.execute/v1" or provider == "git")
     if not database:
         with pytest.raises(LookupError):
-            registry.resolve(capability_version="database.write/v1", provider="postgres")
+            registry.resolve(capability_version="database.execute/v1", provider="postgres")
 
 
-async def test_database_factory_binds_original_service_and_resolver(monkeypatch):
-    """段階検査は dummy 成功 callback に置き換わらず、原 service/version/resolver に届く。"""
-    from skillmind.effects import wiring
-
-    source = AsyncMock()
-    source.apply.return_value = DatabaseWriteReceipt(
-        None, {"id": "row-1", "status": "RUNNING"}, False
-    )
-    monkeypatch.setattr(wiring, "PostgresDatabaseWriteSource", lambda: source)
+async def test_database_factory_binds_original_service_and_resolver():
+    """原生 SQL client の段階認可も共有 service/version/resolver を通す。"""
+    from skillmind.effects.postgres_native import SQL_VERSION
+    from tests.effects.test_native_resource_effects import sql_execution
     service, resolver = MagicMock(), MagicMock()
     service.authorize_effect_step = AsyncMock()
-    registry = create_effect_provider_registry(
-        features=ExecutionFeatures(database_writes=True),
-        effect_service=service,
-        secret_resolver=resolver,
-        git_client=MagicMock(),
-        svn_client=MagicMock(),
-    )
-    execution = database_execution()
-    await registry.resolve(
-        capability_version="database.write/v1", provider="postgres"
-    ).implementation.apply(execution, credential="unit-test-value")
-    await source.apply.call_args.kwargs["authorize"]()
-    assert service.authorize_effect_step.await_count == 2
-    service.authorize_effect_step.assert_awaited_with(
-        execution,
-        "unit-test-value",
-        provider_version=DATABASE_WRITE_PROVIDER_VERSION,
-        secret_resolver=resolver,
-    )
+    registry = create_effect_provider_registry(features=ExecutionFeatures(database_writes=True),
+        effect_service=service, secret_resolver=resolver, git_client=MagicMock(), svn_client=MagicMock())
+    provider = registry.resolve(capability_version="database.execute/v1", provider="postgres").implementation
+    execution = sql_execution()
+    await provider._authorize(execution, "fixture-value")
+    service.authorize_effect_step.assert_awaited_once_with(execution, "fixture-value",
+        provider_version=SQL_VERSION, secret_resolver=resolver)

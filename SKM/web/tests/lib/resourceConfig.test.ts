@@ -25,34 +25,27 @@ import {
 import { emptyConnectDraft } from '../../src/lib/resourceDrafts'
 
 describe('PostgreSQL and MCP connection configuration', () => {
-  it('preserves independently selected all-table and all-column permissions', () => {
-    const scope = buildIntegrationScope('postgres', { issueIds: [], fieldKeys: [], paths: [], revisions: [],
-      tables: ['public.reports'], writeEnabled: true, writeColumns: ['*'], operations: ['INSERT', 'UPDATE'] })
-    expect(scope).toEqual({ tables: ['public.reports'], write_columns: ['*'], operations: ['INSERT', 'UPDATE'] })
-    expect(findScopeIssue('postgres', scope, true)).toBeNull()
-    expect(scopeFromDraft(scopeDraftFromScope({ ...scope, tables: ['*'] }, { keepAll: true })))
-      .toEqual({ ...scope, tables: ['*'] })
-    expect(findScopeIssue('postgres', { ...scope, tables: [] }, true)).toBe('tables_required')
-  })
-
-  it('builds structured PostgreSQL metadata with a numeric port and explicit tables', () => {
+  it('uses the original account with native SQL operation scope', () => {
     const draft = { ...emptyConnectDraft('postgres'), host: ' db.example.test ', database: 'reports', username: 'reader' }
     expect(buildIntegrationConfig('postgres', draft)).toEqual({ host: 'db.example.test', port: 5432,
-      database: 'reports', username: 'reader', sslmode: 'verify-full' })
-    expect(buildIntegrationScope('postgres', { issueIds: [], fieldKeys: [], paths: [], revisions: [], tables: ['public.reports'] }))
-      .toEqual({ tables: ['public.reports'] })
-    expect(findScopeIssue('postgres', { tables: [] }, false)).toBe('tables_required')
+      database: 'reports', username: 'reader', sslmode: 'verify-full', access_mode: 'native_sql' })
+    expect(capabilitiesForAccess('postgres', 'read_write')).toEqual(['database.query/v1', 'database.execute/v1'])
+    expect(capabilitiesForAccess('postgres', 'read')).toEqual(['database.query/v1'])
+    const scope = buildIntegrationScope('postgres', { issueIds: [], fieldKeys: [], paths: [], revisions: [],
+      writeEnabled: true, operations: ['UPDATE', 'DELETE'] })
+    expect(scope).toEqual({ statements: ['SELECT', 'UPDATE', 'DELETE'] })
+    expect(findScopeIssue('postgres', scope, true)).toBeNull()
+    expect(findScopeIssue('postgres', { statements: ['SELECT'] }, true)).toBe('database_operations_required')
+    expect(buildIntegrationScope('postgres', { issueIds: [], fieldKeys: [], paths: [], revisions: [] }))
+      .toEqual({ statements: ['SELECT'] })
   })
 
-  it('requires explicit database columns and operations for read/write access', () => {
-    expect(capabilitiesForAccess('postgres', 'read_write')).toEqual(['database.read/v1', 'database.write/v1'])
-    expect(capabilitiesForAccess('postgres', 'read')).toEqual(['database.read/v1'])
-    const scope = buildIntegrationScope('postgres', { issueIds: [], fieldKeys: [], paths: [], revisions: [],
-      tables: ['public.reports'], writeEnabled: true, writeColumns: ['public.reports.status'], operations: ['UPDATE'] })
-    expect(scope).toEqual({ tables: ['public.reports'], write_columns: ['public.reports.status'], operations: ['UPDATE'] })
-    expect(findScopeIssue('postgres', scope, true)).toBeNull()
-    expect(findScopeIssue('postgres', { ...scope, write_columns: [] }, true)).toBe('write_columns_required')
-    expect(findScopeIssue('postgres', { ...scope, operations: [] }, true)).toBe('database_operations_required')
+  it('configures generic HTTP authentication and method/path scope without a secret body', () => {
+    expect(buildIntegrationConfig('http', { ...emptyConnectDraft('http'), baseUrl: ' https://api.example.test ',
+      httpAuthMode: 'header', httpAuthHeader: 'X-Redmine-API-Key' })).toEqual({ base_url: 'https://api.example.test', auth_mode: 'header', credential_header: 'X-Redmine-API-Key' })
+    expect(capabilitiesForAccess('http', 'read_write')).toEqual(['http.read/v1', 'http.write/v1'])
+    expect(buildIntegrationScope('http', { issueIds: [], fieldKeys: [], paths: ['/issues'], revisions: [],
+      writeEnabled: true, httpMethods: ['PUT'] })).toEqual({ paths: ['/issues'], methods: ['GET', 'HEAD', 'PUT'] })
   })
 
   it('builds MCP Streamable HTTP metadata and requires explicit resource URIs', () => {

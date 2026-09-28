@@ -52,6 +52,7 @@ from skillmind.effects import (
     StoredEffectExecution,
     StoredEffectPreauthorization,
 )
+from skillmind.effects.operation_policy import WRITE_OPERATIONS
 from skillmind.effects.reconciliation_request_service import ReconciliationRequestService
 from skillmind.effects.reconciliation_requests import (
     ReconciliationRequestConflictError,
@@ -289,7 +290,10 @@ class ChangeProposalResponse(BaseModel):
         """内部文書庫以外の欠落 Integration と、文書庫の偽接続を公開しない。"""
 
         if self.capability_version == "document.write/v1":
-            if self.integration_id is not None or self.operation != "CREATE":
+            if (
+                self.integration_id is not None
+                or self.operation not in WRITE_OPERATIONS["document.write/v1"]
+            ):
                 raise ValueError("Document library proposal target is invalid")
         elif self.integration_id is None:
             raise ValueError("External proposal requires an Integration")

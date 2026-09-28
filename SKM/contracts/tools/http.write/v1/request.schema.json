@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "description": "Approved HTTP effect only. change.propose: operation is POST/PUT/PATCH/DELETE; target.locator is the relative API path; one SET /request value contains request {method,path,query?,headers?,body?}, read_back {method:GET,path,query?,headers?}, checks [{pointer,equals}]. precondition.revision is the observed GET response file content_hash. No automatic mutation retry; 202 is not completion.",
+  "properties": {
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "enum": [
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "query": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "body": {}
+      },
+      "required": [
+        "method",
+        "path"
+      ]
+    },
+    "read_back": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "GET"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "query": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "path"
+      ]
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pointer": {
+            "type": "string",
+            "pattern": "^(?:/(?:[^~/]|~[01])*)*$"
+          },
+          "equals": {}
+        },
+        "required": [
+          "pointer",
+          "equals"
+        ]
+      }
+    },
+    "expected_revision": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    }
+  },
+  "required": [
+    "request",
+    "read_back",
+    "checks",
+    "expected_revision"
+  ],
+  "$id": "https://schemas.skillmind.local/tools/http.write/v1/request.schema.json",
+  "title": "http.write/v1 request"
+}

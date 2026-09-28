@@ -29,6 +29,8 @@ from skillmind.effects.document_write import (
     validate_document_write_proposal,
 )
 from skillmind.effects.domain import ChangeProposalDraft, ChangeProposalValidationError
+from skillmind.effects.postgres_native import SQL_WRITE, SQL_VERSION, validate_sql_proposal, sql_scope
+from skillmind.effects.http_write import HTTP_WRITE, HTTP_VERSION, validate_http_proposal, http_write_scope
 from skillmind.effects.issue_update import (
     ISSUE_UPDATE_CAPABILITY,
     ISSUE_UPDATE_PROVIDER_VERSION,
@@ -88,6 +90,14 @@ class EffectCapabilityDefinition:
 
 
 EFFECT_CAPABILITIES: Mapping[str, EffectCapabilityDefinition] = {
+    SQL_WRITE: EffectCapabilityDefinition(capability_version=SQL_WRITE,
+        provider_versions={"postgres": SQL_VERSION}, preauthorizable=False,
+        validate=validate_sql_proposal, requested_scope=sql_scope,
+        staged_authorization=True, run_auto_approvable=True),
+    HTTP_WRITE: EffectCapabilityDefinition(capability_version=HTTP_WRITE,
+        provider_versions={"http": HTTP_VERSION}, preauthorizable=False,
+        validate=validate_http_proposal, requested_scope=http_write_scope,
+        staged_authorization=True, run_auto_approvable=True),
     MCP_CALL: EffectCapabilityDefinition(
         capability_version=MCP_CALL,
         provider_versions={"mcp": MCP_PROVIDER_VERSION},

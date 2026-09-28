@@ -385,6 +385,7 @@ export interface UiMessages {
     archiveHint: string
     restoreHint: string
     deleteHint: string
+    cleanupPending: (count: number) => string
     saved: string
     conflictTitle: string
     conflictHint: string
@@ -443,6 +444,12 @@ export interface UiMessages {
   }
   /** 資源と統合の管理画面(ResourcesPage)。 */
   resources: {
+    httpAuthentication: string
+    httpCredentialHeader: string
+    httpPaths: string
+    httpMethods: string
+    nativeSqlHint: string
+
     resourceInUse: string
     edit: string
     save: string
@@ -651,6 +658,8 @@ export interface UiMessages {
     batchDeleted: (deleted: number, total: number) => string
     batchStopped: string
     viewSource: string
+    previewPages: string
+    previewPage: (page: number, total: number) => string
     uploadHelp: string
     unknownTitle: string
     factsOnly: string

@@ -4,11 +4,66 @@
   "title": "document.read/v1 request",
   "type": "object",
   "additionalProperties": false,
-  "required": ["path", "purpose"],
+  "required": [
+    "path",
+    "purpose"
+  ],
   "properties": {
-    "path": { "type": "string", "minLength": 1, "maxLength": 512 },
-    "line_start": { "type": "integer", "minimum": 1 },
-    "line_end": { "type": "integer", "minimum": 1 },
-    "purpose": { "type": "string", "minLength": 1, "maxLength": 500 }
-  }
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "line_start": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "line_end": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "response_mode": {
+      "type": "string",
+      "enum": [
+        "inline",
+        "file"
+      ],
+      "default": "inline"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "response_mode"
+        ],
+        "properties": {
+          "response_mode": {
+            "const": "file"
+          }
+        }
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "line_start"
+              ]
+            },
+            {
+              "required": [
+                "line_end"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
 }

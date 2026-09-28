@@ -215,7 +215,9 @@ export function isChangeProposal(value: unknown): value is ChangeProposalRecord 
       'expires_at', 'created_at', 'updated_at',
     ])
     && (value.capability_version === 'document.write/v1'
-      ? value.integration_id === null && value.operation === 'CREATE'
+      ? value.integration_id === null && [
+        'CREATE', 'UPDATE', 'MOVE', 'MOVE_FOLDER', 'CREATE_FOLDER', 'DELETE_FOLDER', 'TRASH', 'RESTORE',
+      ].includes(value.operation as string)
       : typeof value.integration_id === 'string')
     && isRecord(value.target)
     && Array.isArray(value.changes)

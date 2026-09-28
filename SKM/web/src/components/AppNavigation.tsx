@@ -232,9 +232,9 @@ export function AppNavigation({ currentRoute, metaState, projectId, projectState
             </label>
           </div>
           <div className="sidebarAccount">
-            <div className="sidebarUser" title={`${user.display_name}\n${user.email}`}>
+            <div className="sidebarUser" title={user.display_name}>
               <span>{user.display_name}</span>
-              <small>{messages.account.roles[user.system_role] ?? user.system_role} · {user.email}</small>
+              <small>{messages.account.roles[user.system_role] ?? user.system_role}</small>
             </div>
             <button className="sidebarLogout" disabled={logoutPending} onClick={onLogout} type="button">{messages.nav.logout}</button>
           </div>

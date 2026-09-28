@@ -31,18 +31,18 @@ def test_interpreter_catalog_respects_deployment_features(
     assert interpreter is not None and catalog is not None and identity is not None
     capabilities = {entry.capability for entry in catalog.capabilities}
     assert {
-        "database.read/v1", "mcp.read/v1", "workspace.write/v1",
+        "database.query/v1", "http.read/v1", "mcp.read/v1", "workspace.write/v1",
         "document.inspect/v1", "document.list/v1",
     } <= capabilities
     deferred = {
         "subagent.dispatch/v1",
-        "issue.update/v1",
         "repository.write/v1",
     }
     assert deferred <= capabilities if enabled else not deferred & capabilities
-    assert ("database.write/v1" in capabilities) is database
+    assert ("database.execute/v1" in capabilities) is database
     assert ("document.write/v1" in capabilities) is document
-    assert ("change.propose/v1" in capabilities) is (enabled or database or document or mcp)
+    assert {"change.propose/v1", "http.write/v1"} <= capabilities
+    assert not {"database.read/v1", "database.write/v1", "issue.read/v1", "issue.update/v1"} & capabilities
     for capability in ("mcp.tools/v1", "mcp.query/v1", "mcp.call/v1"):
         assert (capability in capabilities) is mcp
     original = load_capability_catalog(contracts / "examples/skill-capability-catalog.v1.json")

@@ -10,6 +10,7 @@ import type {
 
 /** 外部製品名は翻訳しないため catalog を通さない固定表示名。 */
 export const PROVIDER_LABELS: Record<ResourceProvider, string> = {
+  http: 'HTTP API',
   redmine: 'Redmine',
   git: 'Git',
   svn: 'SVN',
@@ -42,6 +43,9 @@ export type ResourceDialog = ResourceTab
 export interface ConnectDraft {
   provider: ResourceProvider
   name: string
+  httpAuthMode: 'none' | 'bearer' | 'header'
+  httpAuthHeader: string
+  httpMethods: string[]
   baseUrl: string
   repositoryUri: string
   defaultRevision: string
@@ -114,12 +118,12 @@ export function emptyConnectDraft(provider: ResourceProvider): ConnectDraft {
   return {
     provider,
     name: '',
-    baseUrl: '',
+    baseUrl: '', httpAuthMode: 'bearer', httpAuthHeader: 'X-API-Key', httpMethods: ['POST', 'PUT', 'PATCH', 'DELETE'],
     repositoryUri: '',
     defaultRevision: 'HEAD',
     host: '', port: '5432', database: '', username: '', sslmode: 'verify-full',
-    mcpCatalog: null, mcpTools: false, serverUrl: '', tables: '', resourceUris: '', writeColumns: '', databaseOperations: ['INSERT', 'UPDATE'],
-    credentialChoice: PROVIDER_FORMS[provider].requiresSecret ? NEW_CREDENTIAL : '',
+    mcpCatalog: null, mcpTools: false, serverUrl: '', tables: '', resourceUris: '', writeColumns: '', databaseOperations: ['INSERT', 'UPDATE', 'DELETE'],
+    credentialChoice: PROVIDER_FORMS[provider].requiresSecret || provider === 'http' ? NEW_CREDENTIAL : '',
     // 自助接入の黄金路径として、既定は平台托管(直接入力)。ENVIRONMENT/FILE は選択で残す。
     resolver: 'MANAGED',
     locator: '',
@@ -130,7 +134,7 @@ export function emptyConnectDraft(provider: ResourceProvider): ConnectDraft {
     issueIds: '',
     fieldKeys: [],
     customFieldKeys: '',
-    paths: '',
+    paths: provider === 'http' ? '/' : '',
     revisions: 'HEAD',
     writeMode: 'direct',
     writeBranchPrefix: '',
@@ -142,7 +146,7 @@ export function emptyConnectDraft(provider: ResourceProvider): ConnectDraft {
 
 /** 凭据登録 form の初期草稿。 */
 export const EMPTY_SECRET: SecretDraft = {
-  name: '', provider: 'redmine', resolver: 'MANAGED', locator: '', secret_value: '', key_version: 'v1',
+  name: '', provider: 'http', resolver: 'MANAGED', locator: '', secret_value: '', key_version: 'v1',
 }
 
 /** 草稿から server 送信用の SecretReference 入力を作る。MANAGED は明文のみ、他は locator のみ。 */
@@ -194,13 +198,16 @@ export function connectDraftFromIntegration(
     mcpCatalog: typeof config.tool_catalog === 'object' && config.tool_catalog !== null && !Array.isArray(config.tool_catalog) ? config.tool_catalog as Record<string, unknown> : null,
     mcpTools: item.capabilities.includes('mcp.tools/v1'), provider, name: item.name, credentialChoice: item.secret_reference_id ?? '',
     access: accessForCapabilities(item.capabilities),
+    httpAuthMode: text('auth_mode') === 'none' ? 'none' : text('auth_mode') === 'header' ? 'header' : 'bearer',
+    httpAuthHeader: text('credential_header', 'X-API-Key'),
+    httpMethods: values('methods').filter((m) => !['GET', 'HEAD'].includes(m)),
     baseUrl: text('base_url'), repositoryUri: text('repository_uri'),
     defaultRevision: text('default_revision', draft.defaultRevision),
     host: text('host'), port: text('port', draft.port), database: text('database'),
     username: text('username'), sslmode: text('sslmode', draft.sslmode), serverUrl: text('server_url'),
     tables: values('tables').join('\n'), resourceUris: values('resource_uris').join('\n'),
     writeColumns: values('write_columns').join('\n'),
-    databaseOperations: values('operations').length ? values('operations') : draft.databaseOperations,
+    databaseOperations: values('statements').length ? values('statements').filter((v) => v !== 'SELECT') : draft.databaseOperations,
     issueScope: values('issue_ids').includes('*') ? 'all' : 'list', issueIds: values('issue_ids').join('\n'),
     fieldScope: values('field_keys').includes('*') ? 'all' : 'list',
     fieldKeys: values('field_keys').filter((key) => COMMON_REDMINE_FIELD_KEYS.includes(key)),

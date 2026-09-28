@@ -86,6 +86,7 @@ from skillmind.effects.proposal import (
     proposal_checksum,
     proposal_content,
 )
+from skillmind.effects.postgres_native import NativeSqlReceiptCommand, native_request_checksum
 from skillmind.effects.reconciliation_domain import EffectReconciliationTarget
 from skillmind.effects.run_approval import has_actor_approval, run_auto_approval_actor
 from skillmind.integrations.domain import (
@@ -1605,7 +1606,11 @@ class EffectOperationsMixin(_RunRepositoryBase):
         return expires_at
 
     async def load_effect_reconciliation_target(
-        self, *, project_id: UUID, run_id: UUID, effect_execution_id: UUID,
+        self,
+        *,
+        project_id: UUID,
+        run_id: UUID,
+        effect_execution_id: UUID,
     ) -> EffectReconciliationTarget:
         """現在の参照認可を得た caller が、失効済み write lease に頼らず原要求を再構築する。"""
 
@@ -1614,17 +1619,27 @@ class EffectOperationsMixin(_RunRepositoryBase):
         if run is None or observed is None or observed.run_id != run.id:
             raise LookupError("Original effect was not found")
         proposal = await self._session.scalar(
-            select(ChangeProposal).where(ChangeProposal.id == observed.proposal_id)
-            .with_for_update(read=True).execution_options(populate_existing=True)
+            select(ChangeProposal)
+            .where(ChangeProposal.id == observed.proposal_id)
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
         )
         execution = await self._session.scalar(
-            select(EffectExecution).where(EffectExecution.id == effect_execution_id)
-            .with_for_update(read=True).execution_options(populate_existing=True)
+            select(EffectExecution)
+            .where(EffectExecution.id == effect_execution_id)
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
         )
-        if (proposal is None or execution is None or proposal.project_id != project_id
-            or proposal.run_id != run.id or execution.run_id != run.id
-            or execution.proposal_id != proposal.id or execution.attempt_no < 1
-            or not effect_requires_reconciliation(execution.error_json)):
+        if (
+            proposal is None
+            or execution is None
+            or proposal.project_id != project_id
+            or proposal.run_id != run.id
+            or execution.run_id != run.id
+            or execution.proposal_id != proposal.id
+            or execution.attempt_no < 1
+            or not effect_requires_reconciliation(execution.error_json)
+        ):
             raise ValueError("Original effect does not require reconciliation")
         capability = resolve_effect_capability(proposal.capability_version)
         approval = await self._session.get(ChangeApproval, execution.approval_id)
@@ -1633,17 +1648,24 @@ class EffectOperationsMixin(_RunRepositoryBase):
             and execution.provider == "project-library"
             and execution.provider_version == LEGACY_DOCUMENT_WRITE_PROVIDER_VERSION
         )
-        if (not capability.supports_supervision(execution.provider)
-            or (capability.provider_versions.get(execution.provider) != execution.provider_version
-                and not legacy_document)
+        if (
+            not capability.supports_supervision(execution.provider)
+            or (
+                capability.provider_versions.get(execution.provider) != execution.provider_version
+                and not legacy_document
+            )
             or execution.idempotency_key != proposal.idempotency_key
             or execution.request_fingerprint != proposal.request_fingerprint
-            or approval is None or approval.run_id != run.id or approval.proposal_id != proposal.id
-            or not has_actor_approval(run, approval, proposal.capability_version,
-                                      provider=execution.provider)
+            or approval is None
+            or approval.run_id != run.id
+            or approval.proposal_id != proposal.id
+            or not has_actor_approval(
+                run, approval, proposal.capability_version, provider=execution.provider
+            )
             or approval.decision != ApprovalDecision.APPROVED.value
             or approval.proposal_version != proposal.version
-            or approval.proposal_checksum != proposal.checksum):
+            or approval.proposal_checksum != proposal.checksum
+        ):
             raise ValueError("Original effect approval does not match")
         # 元批准の期限/発起人の会話失効は新書込を禁じる。現在の照会者による只読とは別判定。
         if proposal.capability_version == DOCUMENT_WRITE_CAPABILITY:
@@ -1656,6 +1678,16 @@ class EffectOperationsMixin(_RunRepositoryBase):
         binding = await self._session.get(ResourceBinding, proposal.target_binding_id)
         if binding is None:
             raise ValueError("Original effect binding is unavailable")
+        if proposal.capability_version == "database.execute/v1":
+            integration = await self._session.get(Integration, proposal.integration_id)
+            if integration is None:
+                raise ValueError("Original SQL Integration is unavailable")
+            command_sql = NativeSqlReceiptCommand(execution.id, project_id, run_id, integration.id,
+                native_request_checksum(run_id, integration.id, payload, proposal.precondition_json),
+                proposal.precondition_json["revision"], canonical_json(payload["checks"]))
+            return EffectReconciliationTarget(proposal.id, binding.id, proposal.checksum,
+                execution.provider, execution.provider_version, command_sql,
+                canonical_json(integration.config_json), integration.secret_reference_id)
         if proposal.capability_version == DATABASE_WRITE_CAPABILITY:
             if proposal.integration_id is None:
                 raise ValueError("Original database effect has no Integration")
@@ -1663,56 +1695,125 @@ class EffectOperationsMixin(_RunRepositoryBase):
             if integration is None:
                 raise ValueError("Original database Integration is unavailable")
             command = build_database_write(
-                effect_id=execution.id, project_id=project_id, run_id=run_id,
-                integration_id=integration.id, scope=binding.scope_json, **payload,
+                effect_id=execution.id,
+                project_id=project_id,
+                run_id=run_id,
+                integration_id=integration.id,
+                scope=binding.scope_json,
+                **payload,
             )
             return EffectReconciliationTarget(
-                proposal.id, binding.id, proposal.checksum,
-                execution.provider, execution.provider_version,
-                command, canonical_json(integration.config_json), integration.secret_reference_id,
+                proposal.id,
+                binding.id,
+                proposal.checksum,
+                execution.provider,
+                execution.provider_version,
+                command,
+                canonical_json(integration.config_json),
+                integration.secret_reference_id,
             )
         if proposal.capability_version == "mcp.call/v1":
             integration = await self._session.get(Integration, proposal.integration_id)
             if integration is None:
                 raise ValueError("Original MCP Integration is unavailable")
-            command_mcp = McpOperationCommand(execution.id, project_id, run_id, integration.id,
-                                              payload["name"], canonical_json(payload))
-            return EffectReconciliationTarget(proposal.id, binding.id, proposal.checksum,
-                execution.provider, execution.provider_version, command_mcp,
-                canonical_json(integration.config_json), integration.secret_reference_id)
+            command_mcp = McpOperationCommand(
+                execution.id,
+                project_id,
+                run_id,
+                integration.id,
+                payload["name"],
+                canonical_json(payload),
+            )
+            return EffectReconciliationTarget(
+                proposal.id,
+                binding.id,
+                proposal.checksum,
+                execution.provider,
+                execution.provider_version,
+                command_mcp,
+                canonical_json(integration.config_json),
+                integration.secret_reference_id,
+            )
         if proposal.capability_version == "repository.write/v1" and execution.provider == "git":
             integration = await self._session.get(Integration, proposal.integration_id)
             if integration is None:
                 raise ValueError("Original Git Integration is unavailable")
             git_command = GitCommitCommand(
-                execution.id, project_id, run_id, integration.id,
-                payload["target_branch"], payload["base_revision"],
+                execution.id,
+                project_id,
+                run_id,
+                integration.id,
+                payload["target_branch"],
+                payload["base_revision"],
                 git_effect_commit_message(
-                    display=proposal.target_json.get("display"), proposal_ref=proposal.proposal_ref,
-                    effect_id=execution.id, fingerprint=execution.request_fingerprint,
-                ), tuple(sorted(payload["files"].items())),
+                    display=proposal.target_json.get("display"),
+                    proposal_ref=proposal.proposal_ref,
+                    effect_id=execution.id,
+                    fingerprint=execution.request_fingerprint,
+                ),
+                tuple(sorted(payload["files"].items())),
             )
             return EffectReconciliationTarget(
-                proposal.id, binding.id, proposal.checksum,
-                execution.provider, execution.provider_version, git_command,
-                canonical_json(integration.config_json), integration.secret_reference_id,
+                proposal.id,
+                binding.id,
+                proposal.checksum,
+                execution.provider,
+                execution.provider_version,
+                git_command,
+                canonical_json(integration.config_json),
+                integration.secret_reference_id,
             )
         if proposal.capability_version != DOCUMENT_WRITE_CAPABILITY:
             raise ValueError("Original effect Provider does not support reconciliation")
         if self._document_library_target is None:
             raise ValueError("Original document storage is unavailable")
+        if proposal.operation not in {"CREATE", "UPDATE"}:
+            from types import SimpleNamespace
+
+            from skillmind.effects.document_management import (
+                DocumentManagementCommand,
+                mutation_checksum,
+            )
+
+            identity = SimpleNamespace(
+                effect_execution_id=execution.id,
+                project_id=project_id,
+                run_id=run_id,
+                operation=proposal.operation,
+            )
+            return EffectReconciliationTarget(
+                proposal.id,
+                binding.id,
+                proposal.checksum,
+                execution.provider,
+                execution.provider_version,
+                DocumentManagementCommand(
+                    execution.id, project_id, run_id, mutation_checksum(identity, payload)
+                ),
+                "{}",
+                None,
+            )
         revision = document_library_revision(binding.scope_json)
         if (revision == "1") != legacy_document:
             raise ValueError("Original document protocol does not match its binding")
         object_command = await load_document_effect_command(
-            self._session, effect_id=execution.id, project_id=project_id, run_id=run_id,
-            payload=payload, target=self._document_library_target,
+            self._session,
+            effect_id=execution.id,
+            project_id=project_id,
+            run_id=run_id,
+            payload=payload,
+            target=self._document_library_target,
             protocol_version=int(revision),
         )
         return EffectReconciliationTarget(
-            proposal.id, binding.id, proposal.checksum,
-            execution.provider, execution.provider_version,
-            object_command, "{}", None,
+            proposal.id,
+            binding.id,
+            proposal.checksum,
+            execution.provider,
+            execution.provider_version,
+            object_command,
+            "{}",
+            None,
         )
 
     async def finalize_effect_execution(
@@ -2578,6 +2679,8 @@ class EffectOperationsMixin(_RunRepositoryBase):
 
         if draft.capability_version != DOCUMENT_WRITE_CAPABILITY:
             return
+        if draft.operation not in {"CREATE", "UPDATE"}:
+            return
         try:
             artifact = await ArtifactRepository(self._session).get_content(
                 project_id=run.project_id, run_id=run.id, artifact_ref=payload["artifact_ref"]
@@ -2585,7 +2688,8 @@ class EffectOperationsMixin(_RunRepositoryBase):
             if artifact is None or any(
                 getattr(artifact.metadata, name) != payload[key]
                 for name, key in (
-                    ("checksum", "content_hash"), ("size_bytes", "size_bytes"),
+                    ("checksum", "content_hash"),
+                    ("size_bytes", "size_bytes"),
                 )
             ):
                 raise ValueError("Original Artifact does not match the proposed content")

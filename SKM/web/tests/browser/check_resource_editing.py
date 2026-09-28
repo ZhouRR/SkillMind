@@ -25,11 +25,11 @@ class EditingApi(ConnectionsApi):
         self.secrets = [{**base, "secret_reference_id": str(uuid4()), "name": "Review password",
                          "provider": "postgres", "resolver": "MANAGED", "key_version": "v1"}]
         self.config = {"host": "db.example.test", "port": 15432, "database": "reviews",
-                       "username": "reviewer", "sslmode": "require"}
+                       "username": "reviewer", "sslmode": "require", "access_mode": "native_sql"}
         self.integrations = [{**base, "integration_id": str(uuid4()), "name": "Review DB",
                               "kind": "other", "provider": "postgres", "revision": 1,
-                              "capabilities": ["database.read/v1"],
-                              "scope": {"tables": ["public.reports"]},
+                              "capabilities": ["database.query/v1"],
+                              "scope": {"statements": ["SELECT"]},
                               "config_keys": sorted(self.config),
                               "secret_reference_id": self.secrets[0]["secret_reference_id"]}]
         self.secret_updates: list[dict] = []
@@ -116,7 +116,7 @@ async def check(url: str, output: Path) -> None:
                     await expect(dialog).to_have_count(0)
                     assert api.config["host"] == "db-new.example.test" and len(api.updates) == 1
                     assert not api.secret_updates
-                    assert api.integrations[0]["scope"] == {"tables": ["public.reports"]}
+                    assert api.integrations[0]["scope"] == {"statements": ["SELECT"]}
                     await panel.get_by_role("button", name=labels["edit"], exact=True).click()
                     await password.fill("  replacement-fixture  ")
                     await dialog.get_by_role("button", name=labels["save"], exact=True).click()

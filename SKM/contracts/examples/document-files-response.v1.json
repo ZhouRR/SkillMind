@@ -1,0 +1,19 @@
+{
+  "status": "success",
+  "provider": "project-library",
+  "library_key": "outputs",
+  "listing": {
+    "entries": [
+      {
+        "kind": "directory",
+        "path": "results"
+      }
+    ],
+    "revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "next_offset": null,
+    "total": 1
+  },
+  "evidence_refs": [
+    "ev_listing_1"
+  ]
+}

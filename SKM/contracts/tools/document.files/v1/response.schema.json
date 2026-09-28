@@ -1,0 +1,518 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/document.files/v1/response.schema.json",
+  "title": "document.files/v1 response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "provider",
+    "library_key",
+    "evidence_refs"
+  ],
+  "properties": {
+    "status": {
+      "const": "success"
+    },
+    "provider": {
+      "const": "project-library"
+    },
+    "library_key": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]{0,127}$"
+    },
+    "evidence_refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "pattern": "^ev_[a-zA-Z0-9_-]+$"
+      }
+    },
+    "listing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entries",
+        "revision",
+        "next_offset",
+        "total"
+      ],
+      "properties": {
+        "entries": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "path"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "directory"
+                  },
+                  "path": {
+                    "type": "string",
+                    "maxLength": 400,
+                    "not": {
+                      "pattern": "(^/|(^|/)\\.\\.(/|$))"
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "document_id",
+                  "path",
+                  "content_hash",
+                  "size_bytes",
+                  "mime_type",
+                  "trashed"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "file"
+                  },
+                  "document_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "path": {
+                    "type": "string",
+                    "maxLength": 400,
+                    "not": {
+                      "pattern": "(^/|(^|/)\\.\\.(/|$))"
+                    }
+                  },
+                  "content_hash": {
+                    "type": "string",
+                    "pattern": "^sha256:[a-f0-9]{64}$"
+                  },
+                  "size_bytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "mime_type": {
+                    "type": "string"
+                  },
+                  "trashed": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "next_offset": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "path",
+        "revision"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "file",
+            "directory"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "maxLength": 400,
+          "not": {
+            "pattern": "(^/|(^|/)\\.\\.(/|$))"
+          }
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "document": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "document_id",
+                "path",
+                "content_hash",
+                "size_bytes",
+                "mime_type",
+                "trashed"
+              ],
+              "properties": {
+                "document_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "path": {
+                  "type": "string",
+                  "maxLength": 400,
+                  "not": {
+                    "pattern": "(^/|(^|/)\\.\\.(/|$))"
+                  }
+                },
+                "content_hash": {
+                  "type": "string",
+                  "pattern": "^sha256:[a-f0-9]{64}$"
+                },
+                "size_bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "mime_type": {
+                  "type": "string"
+                },
+                "trashed": {
+                  "type": "boolean"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exists": {
+          "type": "boolean"
+        },
+        "documents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "document_id",
+              "path",
+              "content_hash",
+              "size_bytes",
+              "mime_type",
+              "trashed"
+            ],
+            "properties": {
+              "document_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "path": {
+                "type": "string",
+                "maxLength": 400,
+                "not": {
+                  "pattern": "(^/|(^|/)\\.\\.(/|$))"
+                }
+              },
+              "content_hash": {
+                "type": "string",
+                "pattern": "^sha256:[a-f0-9]{64}$"
+              },
+              "size_bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "mime_type": {
+                "type": "string"
+              },
+              "trashed": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "directories": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 400,
+            "not": {
+              "pattern": "(^/|(^|/)\\.\\.(/|$))"
+            }
+          }
+        }
+      }
+    },
+    "proposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resource_key",
+        "capability_version",
+        "operation",
+        "target",
+        "changes",
+        "precondition",
+        "summary"
+      ],
+      "properties": {
+        "effect_intent_key": {
+          "$ref": "#/$defs/key"
+        },
+        "resource_key": {
+          "$ref": "#/$defs/key"
+        },
+        "capability_version": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]*/[vV][0-9][a-zA-Z0-9_.-]*$",
+          "maxLength": 128
+        },
+        "operation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "locator",
+            "display"
+          ],
+          "properties": {
+            "locator": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "display": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          }
+        },
+        "changes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "action",
+              "value"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "pattern": "^/[a-zA-Z0-9_.~/-]+$",
+                "maxLength": 512
+              },
+              "action": {
+                "enum": [
+                  "SET",
+                  "REMOVE",
+                  "APPEND"
+                ]
+              },
+              "value": {}
+            }
+          }
+        },
+        "precondition": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "revision"
+          ],
+          "properties": {
+            "revision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "risk_level": {
+          "enum": [
+            "LOW",
+            "MEDIUM",
+            "HIGH"
+          ]
+        },
+        "reversible": {
+          "type": "boolean"
+        },
+        "rollback": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "description"
+          ],
+          "properties": {
+            "description": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            }
+          }
+        },
+        "verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "method",
+            "paths"
+          ],
+          "properties": {
+            "method": {
+              "const": "READ_BACK"
+            },
+            "paths": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 50,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^/[a-zA-Z0-9_.~/-]+$",
+                "maxLength": 512
+              }
+            }
+          }
+        },
+        "idempotency_key": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{7,127}$"
+        },
+        "expires_in_seconds": {
+          "type": "integer",
+          "minimum": 300,
+          "maximum": 86400
+        },
+        "continuation_mode": {
+          "enum": [
+            "RESUME",
+            "FORK",
+            "REPLACE"
+          ]
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/checkpoint"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "key": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "maxLength": 128
+    },
+    "checkpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary",
+        "confirmed_facts",
+        "evidence_refs",
+        "artifact_refs",
+        "change_proposal_refs"
+      ],
+      "properties": {
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "confirmed_facts": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "evidence_refs": {
+          "type": "array",
+          "maxItems": 200,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^ev_[a-zA-Z0-9_-]+$"
+          }
+        },
+        "artifact_refs": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^art_[a-zA-Z0-9_-]+$"
+          }
+        },
+        "change_proposal_refs": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^cp_[a-zA-Z0-9_-]+$"
+          }
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "listing"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "required": [
+              "proposal"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "required": [
+        "state"
+      ],
+      "not": {
+        "required": [
+          "listing"
+        ]
+      }
+    }
+  ]
+}

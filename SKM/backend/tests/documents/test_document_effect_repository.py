@@ -59,6 +59,10 @@ class SqlSession:
         """通常文書の取得/削除拒否にも同じ transaction を使う。"""
         return self.session.get(model, identifier)
 
+    async def flush(self):
+        """更新時の原行退避と新行公開の順序を実 SQL で維持する。"""
+        self.session.flush()
+
     def add(self, row):
         """add 後は本物の flush/commit/rollback を Session に任せる。"""
         self.session.add(row)

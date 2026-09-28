@@ -8,6 +8,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from skillmind.db.models import ProjectDocument, ProjectDocumentEffectUpload
 from skillmind.documents.library import DocumentLibraryTarget
 from skillmind.effects.document_provider import DocumentWriteProvider
@@ -19,8 +22,6 @@ from skillmind.effects.wiring import create_effect_provider_registry
 from skillmind.runs.repository import RunRepository
 from skillmind.storage.s3_effect import S3ObjectWriteSource
 from skillmind.worker.effects import ApprovedEffectExecutor
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 from tests.documents.test_document_effect_repository import SqlSession
 from tests.documents.test_document_effect_repository import database as database
 from tests.effects.database_fixtures import database_execution
@@ -365,3 +366,120 @@ def test_factory_requires_explicit_document_ports_and_never_resolves_fake_secret
         assert not registry.resolve(
             capability_version="document.write/v1", provider="project-library"
         ).requires_secret
+
+
+@pytest.mark.parametrize("tampered", [False, True])
+async def test_update_checks_actual_original_bytes_without_holding_database_lock(database, monkeypatch, tampered):
+    """直接 storage 改変を byte hash で拒否し、正常更新後の再開は原回执だけを返す。"""
+    from skillmind.core.hashing import sha256_hex
+    from skillmind.documents.file_state import observe_file_state
+    from skillmind.documents.source import ProjectDocumentContent
+    from skillmind.effects.redmine import EffectProviderStaleError
+    from tests.documents.test_document_replacement import original
+
+    db = database
+    old, _ = await original(db)
+    data = b"original"
+    checksum = "sha256:" + sha256_hex(data)
+    with db.transaction() as session:
+        row = await session.get(ProjectDocument, old.id)
+        row.size, row.checksum = len(data), checksum
+    with db.transaction() as session:
+        observation = await observe_file_state(session, project_id=old.project_id, path="results/review/source.md")
+    provider, execution, factory, server = runtime(db, monkeypatch)
+    execution = replace(execution, operation="UPDATE", precondition={"revision": observation["revision"]})
+
+    async def fetch(**kwargs):
+        """外部読み込みの最中には短 transaction が閉じていることを確認する。"""
+        assert factory.active == 0
+        assert kwargs == {"project_id": old.project_id, "document_id": old.id}
+        return ProjectDocumentContent(old.id, old.folder, old.name, old.mime, checksum, len(data),
+                                      b"tampered" if tampered else data)
+
+    source = AsyncMock()
+    source.fetch.side_effect = fetch
+    provider._service._document_source = source
+    if tampered:
+        with pytest.raises(EffectProviderStaleError):
+            await provider.apply(execution, credential=None)
+        assert not server.calls
+        with db.transaction() as session:
+            assert (await session.get(ProjectDocument, old.id)).deleted_at is None
+    else:
+        result = await provider.apply(execution, credential=None)
+        assert result.before.content["precondition"] == execution.precondition
+        assert source.fetch.await_count == 2
+        replay = await provider.apply(execution, credential=None)
+        assert replay.replayed and source.fetch.await_count == 2
+        assert server.calls == ["PUT", "GET"]
+
+
+async def test_update_conflict_closes_publication_and_releases_only_path(database, monkeypatch):
+    """PUT 後の競合で原公開を永久に閉じ、新規要求は許すが旧 byte/占用量は保持する。"""
+    from skillmind.core.hashing import sha256_hex
+    from skillmind.documents.file_state import observe_file_state
+    from skillmind.documents.source import ProjectDocumentContent
+    from skillmind.documents.upload_repository import DocumentUploadRepository
+    from skillmind.effects.redmine import EffectProviderStaleError
+    from tests.documents.test_document_replacement import original
+
+    db = database
+    old, _ = await original(db)
+    data = b"original"
+    checksum = "sha256:" + sha256_hex(data)
+    with db.transaction() as session:
+        row = await session.get(ProjectDocument, old.id)
+        row.size, row.checksum = len(data), checksum
+    with db.transaction() as session:
+        state = await observe_file_state(session, project_id=old.project_id, path="results/review/source.md")
+    provider, execution, _, server = runtime(db, monkeypatch)
+    execution = replace(execution, operation="UPDATE", precondition={"revision": state["revision"]})
+    provider._service._document_source = AsyncMock()
+    provider._service._document_source.fetch.return_value = ProjectDocumentContent(
+        old.id, old.folder, old.name, old.mime, checksum, len(data), data,
+    )
+    publish = provider._service.publish
+    async def concurrent_rename(*args):
+        """実 source 送信と公開の間に画面の別編集を再現する。"""
+        with db.transaction() as session:
+            row = await session.get(ProjectDocument, old.id)
+            row.name = "changed.md"
+        return await publish(*args)
+    monkeypatch.setattr(provider._service, "publish", concurrent_rename)
+    with pytest.raises(EffectProviderStaleError):
+        await provider.apply(execution, credential=None)
+    with db.transaction() as session:
+        ledger = await session.scalar(select(ProjectDocumentEffectUpload))
+        assert ledger.publication_closed_at is not None and ledger.state == "SENT"
+        assert not await DocumentUploadRepository(session).path_reserved(
+            project_id=old.project_id, folder=old.folder, name=old.name,
+        )
+        row = await session.get(ProjectDocument, old.id)
+        assert row.deleted_at is None and row.storage_key == old.storage_key
+        row.name = old.name
+    with pytest.raises(EffectProviderStaleError):
+        await provider.apply(execution, credential=None)
+    assert server.calls == ["PUT", "GET"]
+
+
+async def test_unknown_update_put_keeps_original_reservation(database, monkeypatch):
+    """PUT 応答喪失は確定競合ではないため、公開を閉じず path を再利用させない。"""
+    from skillmind.documents.upload_repository import DocumentUploadRepository
+    from tests.documents.test_document_replacement import original
+
+    db = database
+    old, revision = await original(db)
+    provider, execution, _, server = runtime(db, monkeypatch)
+    execution = replace(execution, operation="UPDATE", precondition={"revision": revision})
+    # 原 byte 検証は別ケースで試験し、ここでは実 SQL/HTTP の未知状態に集中する。
+    monkeypatch.setattr(provider._service, "_verify_replacement", AsyncMock())
+    server.lose_put_response = True
+    with pytest.raises(EffectProviderTransportError, match="document_effect_uncertain"):
+        await provider.apply(execution, credential=None)
+    with db.transaction() as session:
+        row = await session.scalar(select(ProjectDocumentEffectUpload))
+        assert row.state == "SENT" and row.publication_closed_at is None
+        assert await DocumentUploadRepository(session).path_reserved(
+            project_id=old.project_id, folder=old.folder, name=old.name,
+        )
+        assert (await session.get(ProjectDocument, old.id)).deleted_at is None

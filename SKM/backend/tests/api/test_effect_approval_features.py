@@ -23,10 +23,10 @@ from tests.runs.test_document_proposals import document_proposal
 from tests.runs.test_interaction_authorization import AuthorizationDatabase
 
 
-async def prepare_approval(client, monkeypatch, features):
+async def prepare_approval(client, monkeypatch, features, operation="CREATE"):
     """HTTP→service→repository と原認証/提案検証を残し、SQL/Artifact だけを合成する。"""
 
-    harness = await document_proposal(monkeypatch)
+    harness = await document_proposal(monkeypatch, operation=operation)
     harness.proposal.status = "PENDING_APPROVAL"
     harness.proposal.created_at = harness.proposal.updated_at = datetime.now(UTC)
     harness.rows[ChangeApproval] = None
@@ -93,7 +93,8 @@ def post_decision(client, harness, *, decision="APPROVED"):
         (ExecutionFeatures(), "document.write/v1", "CREATE", 409),
         (ExecutionFeatures(database_writes=True), "document.write/v1", "CREATE", 409),
         (ExecutionFeatures(deferred=True), "document.write/v1", "CREATE", 409),
-        (ExecutionFeatures(document_writes=True), "document.write/v1", "UPDATE", 409),
+        (ExecutionFeatures(document_writes=True), "document.write/v1", "UPDATE", 200),
+        (ExecutionFeatures(document_writes=True), "document.write/v1", "MOVE", 200),
         (ExecutionFeatures(document_writes=True), "database.write/v1", "INSERT", 409),
         (ExecutionFeatures(document_writes=True), "issue.update/v1", "update_fields", 409),
     ],
@@ -101,9 +102,11 @@ def post_decision(client, harness, *, decision="APPROVED"):
 async def test_approval_uses_original_proposal_and_independent_capability_limit(
     client, monkeypatch, features, capability, operation, expected
 ):
-    """旧 switch は双方閉じ、内部文書庫の独立上限だけで原 CREATE を批准できる。"""
+    """旧 switch は双方閉じ、内部文書庫の独立上限だけで宣言済みの文書操作を批准できる。"""
 
-    harness = await prepare_approval(client, monkeypatch, features)
+    harness = await prepare_approval(
+        client, monkeypatch, features, operation if capability == "document.write/v1" else "CREATE",
+    )
     harness.proposal.capability_version = capability
     harness.proposal.operation = operation
     client.app.state.settings = client.app.state.settings.model_copy(
@@ -129,7 +132,10 @@ async def test_approval_uses_original_proposal_and_independent_capability_limit(
     staged = harness.session.add_all.call_args.args[0]
     assert sum(isinstance(row, ChangeApproval) for row in staged) == 1
     assert sum(isinstance(row, EffectExecution) for row in staged) == 1
-    harness.read_artifact.assert_awaited_once()
+    if operation == "MOVE":
+        harness.read_artifact.assert_not_awaited()
+    else:
+        harness.read_artifact.assert_awaited_once()
 
 
 async def test_disabled_deployment_does_not_disclose_missing_proposal_as_a_feature_error(

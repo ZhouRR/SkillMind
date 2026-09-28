@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Mapping
 from typing import Any
 
+from skillmind.agent.proposal_files import expand_proposal_file
 from skillmind.agent.domain import RunContext
 from skillmind.effects.inline import InlineEffectResult
 from skillmind.runs.service import RunService
@@ -40,6 +41,7 @@ class InlineEffectCoordinator:
             deadline - asyncio.get_running_loop().time() <= self._executor.wall_timeout_seconds + 30
         ):
             return None
+        arguments = await expand_proposal_file(self._context, arguments)
         prepared = await self._service.begin_inline_effect(
             claimed, arguments=arguments, tool_use_id=call_id, session_id=session_id
         )

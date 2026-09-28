@@ -295,9 +295,21 @@ class RunService:
                                 if "database.read/v1" in resolved.allowed_capabilities
                                 else set()
                             ),
+                            *(
+                                {"repository.workspace/v1"}
+                                if "repository.read/v1" in resolved.allowed_capabilities
+                                and "workspace.write/v2" in resolved.allowed_capabilities
+                                and execution_profile in {"SUPERVISED", "DELEGATED"}
+                                else set()
+                            ),
                             # 出力可能な新 Run に、原 byte を扱う補助 Tool を凍結する。
                             *(
-                                {"audit.export/v1", "tool.sequence/v1", "artifact.append/v1"}
+                                {
+                                    "audit.export/v1",
+                                    "tool.sequence/v1",
+                                    "artifact.append/v1",
+                                    "workspace.edit/v1",
+                                }
                                 if "workspace.write/v2" in resolved.allowed_capabilities
                                 and execution_profile in {"SUPERVISED", "DELEGATED"}
                                 else set()
@@ -305,6 +317,13 @@ class RunService:
                             *(
                                 {"artifact.materialize/v1"}
                                 if "workspace.read/v1" in resolved.allowed_capabilities
+                                else set()
+                            ),
+                            *(
+                                {"document.files/v1"}
+                                if "document.write/v1" in resolved.allowed_capabilities
+                                and self._execution_features.document_writes
+                                and execution_profile in {"SUPERVISED", "DELEGATED"}
                                 else set()
                             ),
                             INTERACTION_REQUEST_CAPABILITY,

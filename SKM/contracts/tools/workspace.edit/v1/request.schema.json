@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/workspace.edit/v1/request.schema.json",
+  "title": "workspace.edit/v1 request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "path",
+    "expected_hash",
+    "purpose"
+  ],
+  "properties": {
+    "operation": {
+      "enum": [
+        "copy",
+        "append",
+        "edit",
+        "publish"
+      ]
+    },
+    "path": {
+      "type": "string",
+      "minLength": 7,
+      "maxLength": 4096,
+      "pattern": "^(?:workspace|output)/",
+      "not": {
+        "pattern": "(^/|(^|/)\\.\\.(/|$))"
+      }
+    },
+    "source_path": {
+      "type": "string",
+      "minLength": 7,
+      "maxLength": 4096,
+      "pattern": "^(?:input|workspace|output)/",
+      "not": {
+        "pattern": "(^/|(^|/)\\.\\.(/|$))"
+      }
+    },
+    "expected_hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "text": {
+      "type": "string",
+      "maxLength": 1000000
+    },
+    "edits": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "old",
+          "new"
+        ],
+        "properties": {
+          "old": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64000
+          },
+          "new": {
+            "type": "string",
+            "maxLength": 1000000
+          }
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "operation": {
+          "const": "copy"
+        }
+      },
+      "required": [
+        "source_path"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "text"
+            ]
+          },
+          {
+            "required": [
+              "edits"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "operation": {
+          "const": "append"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "edits"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "operation": {
+          "const": "edit"
+        }
+      },
+      "required": [
+        "edits"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "text"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "operation": {
+          "const": "publish"
+        }
+      },
+      "required": [],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "text"
+            ]
+          },
+          {
+            "required": [
+              "edits"
+            ]
+          },
+          {
+            "required": [
+              "source_path"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -16,6 +16,7 @@ export interface ResourceFeatures {
 
 /** 表示と送信で同じ Provider の write 可否を使い、隠れた草稿値を送らない。 */
 export function resourceWriteEnabled(provider: ResourceProvider, features: ResourceFeatures): boolean {
+  if (provider === 'http') return true
   if (provider === 'mcp') return features.mcpToolsEnabled
   if (provider === 'postgres') return features.databaseWritesEnabled
   if (provider === 'git') return features.gitWritesEnabled || features.deferredFeaturesEnabled
@@ -39,7 +40,7 @@ export function prepareResourceConnection(draft: ConnectDraft, writeEnabled: boo
       ? [...new Set([...draft.fieldKeys, ...parseListInput(draft.customFieldKeys)])] : [SCOPE_WILDCARD],
     paths: parseListInput(draft.paths), revisions: parseListInput(draft.revisions),
     tables: parseListInput(draft.tables), writeEnabled: access === 'read_write',
-    writeColumns: parseListInput(draft.writeColumns), operations: draft.databaseOperations,
+    writeColumns: parseListInput(draft.writeColumns), operations: draft.databaseOperations, httpMethods: draft.httpMethods,
     resourceUris: parseListInput(draft.resourceUris), mcpTools: draft.mcpTools, mcpPermissions,
   })
   const scopeIssue = findScopeIssue(draft.provider, scope, access === 'read_write')

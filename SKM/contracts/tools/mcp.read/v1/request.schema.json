@@ -1,30 +1,69 @@
 {
-  "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "uri",
-    "purpose"
-  ],
-  "properties": {
-    "uri": {
-      "type": "string",
-      "format": "uri",
-      "minLength": 1,
-      "maxLength": 2048
-    },
-    "purpose": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 500
-    },
-    "resource_key": {
-      "type": "string",
-      "pattern": "^[a-z][a-z0-9_.-]*$",
-      "maxLength": 128,
-      "description": "This Run's frozen resource slot key. Required when several resources provide this capability; omit only when exactly one is available. Does not grant access or accept a connection address."
-    }
-  },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.skillmind.local/tools/mcp.read/v1/request.schema.json",
-  "title": "mcp.read/v1 request"
+  "title": "mcp.read/v1 request",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "uri",
+        "purpose"
+      ],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "uri",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "resource_key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "maxLength": 128,
+          "description": "This Run's frozen resource slot key. Required when several resources provide this capability; omit only when exactly one is available. Does not grant access or accept a connection address."
+        },
+        "response_mode": {
+          "enum": [
+            "inline",
+            "file"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request_file": {
+          "type": "string",
+          "pattern": "^(workspace|output)/"
+        },
+        "expected_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "purpose": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "response_mode": {
+          "enum": [
+            "file",
+            "inline"
+          ]
+        }
+      },
+      "required": [
+        "request_file",
+        "expected_hash"
+      ]
+    }
+  ],
+  "type": "object"
 }

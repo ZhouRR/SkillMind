@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "enum": [
+            "GET",
+            "HEAD"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "query": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "purpose": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      },
+      "required": [
+        "path"
+      ]
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request_file": {
+          "type": "string",
+          "pattern": "^(workspace|output)/"
+        },
+        "expected_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "purpose": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      },
+      "required": [
+        "request_file",
+        "expected_hash"
+      ]
+    }
+  ],
+  "$id": "https://schemas.skillmind.local/tools/http.read/v1/request.schema.json",
+  "title": "http.read/v1 request",
+  "type": "object"
+}

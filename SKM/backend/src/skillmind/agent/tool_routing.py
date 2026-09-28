@@ -103,15 +103,21 @@ class ToolRouting:
                 result.append(first)
                 continue
             schema = deepcopy(dict(first.input_schema))
-            schema.setdefault("properties", {})["resource_key"] = {
+            selector = {
                 "type": "string",
                 "enum": [tool.resource_key for tool in group],
                 "description": "Select this Run's frozen resource slot. Required when multiple resources provide this tool; never supply a connection URL or credentials.",
             }
+            schema.setdefault("properties", {})["resource_key"] = deepcopy(selector)
             if len(group) > 1:
-                schema["required"] = list(
-                    dict.fromkeys([*schema.get("required", []), "resource_key"])
-                )
+                schema["required"] = list(dict.fromkeys([*schema.get("required", []), "resource_key"]))
+            # File/inline の alternative でも selector が additionalProperties に拒否されない。
+            for variant in schema.get("oneOf", [schema]):
+                variant.setdefault("properties", {})["resource_key"] = deepcopy(selector)
+                if len(group) > 1:
+                    variant["required"] = list(
+                        dict.fromkeys([*variant.get("required", []), "resource_key"])
+                    )
             # SDK view は実行権でない。複数 binding の代表 identity を外へ流用させない。
             result.append(
                 replace(

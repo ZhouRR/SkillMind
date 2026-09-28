@@ -71,7 +71,7 @@ async def test_managed_material_is_added_only_after_parent_row_is_flushed() -> N
         CreateSecretReferenceCommand(
             project_id=uuid4(),
             name="Managed token",
-            provider="redmine",
+            provider="http",
             resolver=SecretResolver.MANAGED,
             locator=MANAGED_SECRET_LOCATOR,
             key_version="v1",
@@ -103,7 +103,7 @@ async def test_managed_creation_without_cipher_fails_closed_as_crypto_error() ->
             CreateSecretReferenceCommand(
                 project_id=uuid4(),
                 name="Managed token",
-                provider="redmine",
+                provider="http",
                 resolver=SecretResolver.MANAGED,
                 locator=MANAGED_SECRET_LOCATOR,
                 key_version="v1",
@@ -126,7 +126,7 @@ async def test_deployment_resolver_does_not_flush_or_store_material() -> None:
         CreateSecretReferenceCommand(
             project_id=uuid4(),
             name="Deployment token",
-            provider="redmine",
+            provider="http",
             resolver=SecretResolver.ENVIRONMENT,
             locator="REDMINE_API_KEY",
             key_version="v1",

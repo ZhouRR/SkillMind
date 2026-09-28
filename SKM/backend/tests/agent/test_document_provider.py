@@ -240,3 +240,38 @@ async def test_foreign_or_missing_run_context_is_denied_before_lookup(change: st
         )
     assert error.value.code == "scope_denied"
     assert source.calls == []
+
+
+async def test_file_delivery_uses_original_bytes_without_body_and_does_not_overwrite_draft(tmp_path):
+    """file 応答は hash/path のみ。再取得で作業中の変更を黙って消さない。"""
+    from skillmind.agent.workspace import WorkspaceManager
+
+    content = _content("# 日本語\n".encode() * 20000)
+    context = _context(uuid4(), content=content)
+    workspace = WorkspaceManager(tmp_path / "runs").initialize(context.run_id)
+    context = replace(context, workspace=workspace, run=replace(
+        context.run, workspace=workspace,
+        permission_snapshot={"allowed_capabilities": ["document.read/v1", "workspace.read/v1"]},
+    ))
+    source = _FakeSource(project_id=context.project_id, content=content)
+    provider = DocumentProvider(source)
+    args = {"path": "/".join(filter(None, (content.folder, content.name))), "response_mode": "file", "purpose": "Read"}
+    result = await provider.execute(context, args)
+    _validate_response(dict(result.response))
+    assert "content" not in result.response and not result.response["truncated"]
+    file = workspace.root / result.response["file"]["path"]
+    assert file.read_bytes() == content.data
+    assert (await provider.execute(context, args)).response == result.response
+    file.write_bytes(b"local draft")
+    with pytest.raises(ToolProviderError):
+        await provider.execute(context, args)
+    assert file.read_bytes() == b"local draft"
+
+
+async def test_file_mode_without_workspace_permission_stops_before_fetch():
+    """必要能力がない実行では原 byte を読み始めない。"""
+    context = _context(uuid4())
+    source = _FakeSource(project_id=context.project_id, content=_content())
+    with pytest.raises(ToolProviderError):
+        await DocumentProvider(source).execute(context, {"path": "source.md", "response_mode": "file"})
+    assert source.calls == []

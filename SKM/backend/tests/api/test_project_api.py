@@ -33,6 +33,47 @@ def _stored_project(project_id: UUID, status: ProjectStatus) -> StoredProject:
     )
 
 
+@pytest.mark.parametrize("pending", [0, 2])
+def test_explicit_purge_returns_cleanup_status(client: TestClient, pending: int) -> None:
+    """一括削除は元版を明示し、commit 後の未清理件数を返す。"""
+    project_id = uuid4()
+    service = MagicMock(spec=ProjectService)
+    service.purge_project = AsyncMock(return_value=pending)
+    client.app.state.project_service = service
+    response = client.post(f"/api/v1/projects/{project_id}/purge",
+                           json={"expected_row_version": 7})
+    assert response.status_code == 200
+    assert response.json() == {"project_id": str(project_id), "cleanup_pending": pending}
+    assert service.purge_project.call_args.kwargs["expected_row_version"] == 7
+    assert service.purge_project.call_args.kwargs["project_id"] == project_id
+    service.delete_project.assert_not_called()
+
+
+def test_explicit_purge_retains_reconciliation_blocker(client: TestClient) -> None:
+    """結果未確認の処理は成功や原履歴の消去として応答しない。"""
+    service = MagicMock(spec=ProjectService)
+    service.purge_project = AsyncMock(side_effect=ProjectDeleteBlockedError(
+        "unresolved", blockers=("run_history_exists",),
+    ))
+    client.app.state.project_service = service
+    response = client.post(f"/api/v1/projects/{uuid4()}/purge",
+                           json={"expected_row_version": 1})
+    assert response.status_code == 409
+    assert response.json()["code"] == "project_delete_blocked_by_runs"
+
+
+@pytest.mark.parametrize("header", ["Origin", "X-CSRF-Token"])
+def test_explicit_purge_requires_cookie_write_protection(client: TestClient, header: str) -> None:
+    """破壊的 endpoint にも既存 Origin/CSRF gate を適用する。"""
+    service = MagicMock(spec=ProjectService)
+    client.app.state.project_service = service
+    client.headers.pop(header)
+    response = client.post(f"/api/v1/projects/{uuid4()}/purge",
+                           json={"expected_row_version": 1})
+    assert response.status_code == (403 if header == "Origin" else 422)
+    service.purge_project.assert_not_called()
+
+
 @pytest.mark.parametrize("project_status", list(ProjectStatus))
 def test_exact_project_detail_reads_active_and_archived_with_authenticated_actor(
     client: TestClient, project_status: ProjectStatus,

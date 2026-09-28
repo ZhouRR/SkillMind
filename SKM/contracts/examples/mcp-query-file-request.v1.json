@@ -1,0 +1,5 @@
+{
+  "request_file": "workspace/request.json",
+  "expected_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "response_mode": "file"
+}

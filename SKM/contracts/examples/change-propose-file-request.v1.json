@@ -1,0 +1,7 @@
+{
+  "request_file": "workspace/proposal.json",
+  "expected_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "evidence_refs": [
+    "ev_original"
+  ]
+}

@@ -107,6 +107,7 @@ async def purge_run(
         .values(parent_agent_session_id=None, instruction_snapshot_id=None)
     )
     for owned_model in (
+        m.DocumentMutationReceipt,
         m.McpDesktopLease,
         m.ProjectDocumentEffectUpload,
         m.EffectReconciliationRequest,

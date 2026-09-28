@@ -38,6 +38,8 @@ Run detail の document_snapshots は作成時の範囲であり、現在の内�
 
 ## 再送と復旧
 
+帰档 Project 全体を完全削除する場合は `POST /projects/{project_id}/purge` に原 `expected_row_version` を送る。終了済み実行・回収箱・入力を含む Project 文書と設定を削除し、組織 Skill・外部 DB・独立監査は保持する。応答の `cleanup_pending` は Project 削除確定後も blob 清理が残る件数。既存 `DELETE /projects/{project_id}` は空 Project の削除として従来の参照制限を維持する。
+
 timeout/abort は取消や rollback の証明ではない。原 actor・内容・key を保って確認し、結果不明のまま別 key で再実行しない。409 は競合、410 は期限を確認し、Run/Interaction の現状を再読する。404 も原操作の未実行証明ではない。
 
 現在の認証と Project 授権は確認時にも必要。旧 Run を現在設定から再構成せず、[版互換](contract-workflow.md#历史数据兼容不等于前后端版本兼容)と[実行境界](runtime-guide.md)を維持する。

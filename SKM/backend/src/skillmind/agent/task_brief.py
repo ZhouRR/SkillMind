@@ -131,7 +131,7 @@ def _runtime_metadata(
     brief: dict[str, Any], snapshot: Mapping[str, Any], model: str | None
 ) -> None:
     """新方針だけに実際に選択したモデルを載せ、旧 Segment の本文を保持する。"""
-    if snapshot.get("runtime_policy") != "skillmind.runtime/v4":
+    if snapshot.get("runtime_policy") not in {"skillmind.runtime/v4", "skillmind.runtime/v5", "skillmind.runtime/v6"}:
         return
     if not isinstance(model, str) or not model.strip():
         raise ValueError("Runtime metadata requires the configured model")
@@ -482,7 +482,20 @@ def render_task_brief_prompt(
     _append_notes(sections, "Stop and report when", brief["execution"]["stop_conditions"])
     _append_notes(sections, "Expected deliverables", brief["deliverables"], key="description")
     _append_materialization(sections, brief["resources"], brief["allowed_tools"])
-    sections.append(_tool_instruction(brief["allowed_tools"]))
+    if runtime_policy(brief) == "skillmind.runtime/v6":
+        sections.append("Resource clients run in the Worker, independently of the Agent engine. "
+            "Use repository.workspace for editable scoped Git files and file-based commit proposals. "
+            "Use MCP's discovered native schemas without renaming arguments; request_file/expected_hash "
+            "and response_mode=file avoid copying full JSON through messages. "
+            "PostgreSQL uses database.query and approved database.execute with native SQL and $1 parameters; "
+            "the configured account enforces table/column permissions. HTTP APIs use relative paths and "
+            "runtime-injected credentials. Inspect response files by path. "
+            "A prepared proposal JSON file may be submitted with change.propose request_file, expected_hash "
+            "and evidence_refs. File edits alone do not publish remote changes. "
+            "Use original receipts after an unknown outcome; never resend mutations to discover whether they succeeded.")
+    sections.append(_tool_instruction(
+        brief["allowed_tools"], path_first=runtime_policy(brief) in {"skillmind.runtime/v5", "skillmind.runtime/v6"},
+    ))
     sections.append(_effect_instruction(brief["effect_policy"]))
     sections.append(_interaction_instruction(brief["interaction_policy"]))
     append_skill_file_guidance(sections, brief)
@@ -515,7 +528,7 @@ def _finish_task_prompt(
             "Keep progress prose to meaningful stages, decisions, exceptions and completion. "
             "Do not repeat tool parameters, SQL, IDs or receipt bodies as narration."
         )
-    if runtime_policy(brief) == "skillmind.runtime/v4":
+    if runtime_policy(brief) in {"skillmind.runtime/v4", "skillmind.runtime/v5", "skillmind.runtime/v6"}:
         sections.append(
             "For change.propose, provide the business target, changes, precondition, summary and "
             "evidence. Idempotency, minimum risk, READ_BACK paths, expiry, rollback and an empty "
@@ -555,10 +568,12 @@ def _finish_task_prompt(
             "Do not copy effect_result into a proposed checkpoint; preserve needed facts "
             "and references using the checkpoint fields accepted by the Tool."
         )
-    if runtime_policy(brief) == "skillmind.runtime/v4":
+    if runtime_policy(brief) in {"skillmind.runtime/v4", "skillmind.runtime/v5", "skillmind.runtime/v6"}:
         sections.append(
-            "Platform runtime metadata (JSON): " + canonical_json(brief["runtime_metadata"])
-            + "\nAgent attempt limits (JSON): " + canonical_json(brief["limits"])
+            "Platform runtime metadata (JSON): "
+            + canonical_json(brief["runtime_metadata"])
+            + "\nAgent attempt limits (JSON): "
+            + canonical_json(brief["limits"])
             + "\nThe model value identifies the configured model, not an immutable provider build. "
             "Agent attempt limits are not a desktop test deadline. MCP tools/v1 can return "
             "server version, connection references and an explicit desktop reservation. "
@@ -604,7 +619,12 @@ def _finish_task_prompt(
                 "collections "
                 "to shorten output; keep the evidence needed to assess each conclusion."
             )
-            if runtime_policy(brief) in {"skillmind.runtime/v3", "skillmind.runtime/v4"}:
+            if runtime_policy(brief) in {
+                "skillmind.runtime/v3",
+                "skillmind.runtime/v4",
+                "skillmind.runtime/v5",
+                "skillmind.runtime/v6",
+            }:
                 sections.append(
                     "Report readability: use concise Markdown paragraphs, lists and tables inside "
                     "the existing string fields. Put the business conclusion and scope first. "
@@ -652,6 +672,7 @@ def _append_legacy_report_instruction(sections: list[str]) -> None:
         "extra external writes to publish it. If the Skill requires a saved report, use "
         "only its existing authorized artifact workflow. Return the enclosing JSON as usual."
     )
+
 
 def _append_notes(
     sections: list[str], title: str, notes: Sequence[Any], *, key: str = "text"
@@ -722,7 +743,7 @@ def _append_materialization(
     sections.append("\n".join(lines))
 
 
-def _tool_instruction(allowed_tools: Sequence[Any]) -> str:
+def _tool_instruction(allowed_tools: Sequence[Any], *, path_first: bool = False) -> str:
     """許可 Tool と Evidence 引用義務を伝える指示文を返す。"""
 
     capabilities = [
@@ -739,10 +760,33 @@ def _tool_instruction(allowed_tools: Sequence[Any]) -> str:
         f"Use the available read-only tools ({', '.join(capabilities)}) to gather Evidence "
         "before drawing conclusions. Every factual conclusion must cite Evidence references "
         "returned by tools."
-        + (" Select resource_key from Available Tools when a capability has multiple resources; "
-           "omit it only for a unique resource. This selects an existing frozen slot, not a new "
-           "connection. Keep the selector inside each tool.sequence step's arguments."
-           if any(item.get("resource_key") for item in allowed_tools) else "")
+        + (
+            " Select resource_key from Available Tools when a capability has multiple resources; "
+            "omit it only for a unique resource. This selects an existing frozen slot, not a new "
+            "connection. Keep the selector inside each tool.sequence step's arguments."
+            if any(item.get("resource_key") for item in allowed_tools)
+            else ""
+        )
+        + (
+            " Open frozen library input with document.read response_mode=file and use "
+            "workspace.read/search to read only needed ranges. Full bytes stay in files. "
+            if path_first and {"document.read/v1", "workspace.read/v1"} <= set(capabilities)
+            else ""
+        )
+        + (
+            " Work with files by path: open library input with document.read response_mode=file, "
+            "then read/search only the content needed. Use workspace.edit to copy, append, edit "
+            "or publish verified original bytes without rewriting the whole file. Local edits "
+            "are drafts, not library updates. Use document.files to observe paths and prepare "
+            "a supported operation, then submit its proposal and evidence_refs through "
+            "change.propose. Save only after checking the receipt. A revision conflict means "
+            "someone changed the target: re-read and reconcile; never silently overwrite or "
+            "replay an unknown operation. Library metadata listings do not expand frozen "
+           "read scope. "
+           "If the replacement is outside frozen input scope, do not silently switch inputs."
+            if "document.files/v1" in capabilities
+            else ""
+        )
     )
 
 

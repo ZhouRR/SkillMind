@@ -115,6 +115,9 @@ def test_0038_and_complete_document_migration_chain_match_model(
                 "AND publication_closed_at >= created_at)",
             )
             constraint_names.remove("ck_document_upload_intents_publication_closure")
+            # 0057 で分離した Project FK を旧版比較にだけ復元する。
+            model_contract["foreign_keys"].add(("project_id", "projects.id", "RESTRICT"))
+            constraint_names.add("fk_document_upload_intents_project_id_projects")
         else:
             # 0045 の独立成果 origin は別回帰で検証し、0038 自体は不変に保つ。
             model_contract["columns"].pop("effect_upload_id")
@@ -150,7 +153,6 @@ def test_intent_contract_has_exact_identity_types_and_no_release_or_inferred_def
     contract = _contract(_INTENTS)
     assert contract["foreign_keys"] == {
         ("organization_id", "organizations.id", "RESTRICT"),
-        ("project_id", "projects.id", "RESTRICT"),
         ("actor_id", "users.id", "RESTRICT"),
     }
     assert contract["unique"] == {
@@ -383,11 +385,16 @@ def test_retained_intent_restricts_parent_deletion_in_every_state(
     """元 actor/Project/Organization を削除して、未決または公開済の帰属を失わせない。"""
 
     _insert(database, _row(state=state, published_at=_TIME if state == "PUBLISHED" else None))
-    with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY"):
-        database.execute(f"DELETE FROM {parent}")
+    if parent == "projects":
+        # Project purge の事前検査は service 層。保持監査は元 ID のまま独立する。
+        database.execute("DELETE FROM projects")
+        assert database.execute("SELECT count(*) FROM document_upload_intents").fetchone() == (1,)
+    else:
+        with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY"):
+            database.execute(f"DELETE FROM {parent}")
 
 
-@pytest.mark.parametrize("column", ["organization_id", "project_id", "actor_id"])
+@pytest.mark.parametrize("column", ["organization_id", "actor_id"])
 def test_intent_rejects_unknown_restrict_parent(database: sqlite3.Connection, column: str) -> None:
     """欠落親を保存してから後で関連を補う方式を許可しない。"""
 

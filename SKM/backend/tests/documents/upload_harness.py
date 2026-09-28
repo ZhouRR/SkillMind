@@ -233,6 +233,7 @@ class UploadDatabase(DeletionDatabase):
         ]
         if model is ProjectDocumentEffectUpload:
             clauses.append(ProjectDocumentEffectUpload.state != "PUBLISHED")
+            clauses.append(ProjectDocumentEffectUpload.publication_closed_at.is_(None))
         if model is ProjectDocumentUpload:
             clauses.append(ProjectDocumentUpload.state == "PENDING")
             clauses.append(ProjectDocumentUpload.publication_closed_at.is_(None))
@@ -241,7 +242,8 @@ class UploadDatabase(DeletionDatabase):
             row.project_id == params["project_id_1"]
             and row.folder == params["folder_1"]
             and row.name == params["name_1"]
-            and (not isinstance(row, ProjectDocumentEffectUpload) or row.state != "PUBLISHED")
+            and (not isinstance(row, ProjectDocumentEffectUpload)
+                 or (row.state != "PUBLISHED" and row.publication_closed_at is None))
             and (
                 not isinstance(row, ProjectDocumentUpload)
                 or (row.state == "PENDING" and row.publication_closed_at is None)

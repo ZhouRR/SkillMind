@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import os
 import stat
 from collections.abc import Generator, Iterator, Sequence, Set
@@ -149,11 +150,20 @@ def read_sealed_file(root: Path, *, path: str, seal: InputFileSeal, max_bytes: i
     return data
 
 
-def write_workspace_file(root: Path, path: str, data: bytes) -> bool:
+def write_workspace_file(
+    root: Path,
+    path: str,
+    data: bytes,
+    *,
+    expected_hash: str | None = None,
+    reuse_identical: bool = False,
+) -> bool:
     """同じ親 descriptor 内の新 inode へ書き、他の file を truncate せず原子的に置換する。"""
 
     try:
         with _parent_descriptor(root, path, create=True) as (parent, name):
+            # 全 workspace writer が同じ親 inode を lock し、CAS と置換を一体化する。
+            fcntl.flock(parent, fcntl.LOCK_EX)
             try:
                 info = os.stat(name, dir_fd=parent, follow_symlinks=False)
             except FileNotFoundError:
@@ -162,6 +172,15 @@ def write_workspace_file(root: Path, path: str, data: bytes) -> bool:
                 if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                     raise UnsafeWorkspaceFileError("Workspace target is not a safe regular file")
                 created = False
+            if expected_hash is not None or reuse_identical:
+                current = None if created else read_file(root, path, max_bytes=104_857_600)
+                if reuse_identical and current == data:
+                    return False
+                actual = "absent" if current is None else "sha256:" + sha256_hex(current)
+                if expected_hash is not None and actual != expected_hash:
+                    raise UnsafeWorkspaceFileError(
+                        "Workspace target changed; read its current hash"
+                    )
             temporary = f".skillmind-write-{uuid4().hex}"
             descriptor = os.open(
                 temporary,
