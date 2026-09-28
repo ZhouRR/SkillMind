@@ -122,6 +122,8 @@ describe('accessForCapabilities', () => {
   it('classifies stored integrations back into the two access levels', () => {
     expect(accessForCapabilities(['issue.read/v1'])).toBe('read')
     expect(accessForCapabilities(['issue.read/v1', 'issue.update/v1'])).toBe('read_write')
+    expect(accessForCapabilities(['database.query/v1'])).toBe('read')
+    expect(accessForCapabilities(['database.query/v1', 'database.execute/v1'])).toBe('read_write')
   })
 })
 

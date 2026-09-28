@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
-from check_accounts import ACTOR, CSRF
+from check_accounts import ACTOR, CSRF, session
 from check_projects import PROJECT, messages
 from check_resource_connections import ConnectionsApi
 from playwright.async_api import Route, async_playwright, expect
@@ -28,8 +28,8 @@ class EditingApi(ConnectionsApi):
                        "username": "reviewer", "sslmode": "require", "access_mode": "native_sql"}
         self.integrations = [{**base, "integration_id": str(uuid4()), "name": "Review DB",
                               "kind": "other", "provider": "postgres", "revision": 1,
-                              "capabilities": ["database.query/v1"],
-                              "scope": {"statements": ["SELECT"]},
+                              "capabilities": ["database.query/v1", "database.execute/v1"],
+                              "scope": {"statements": ["SELECT", "INSERT", "UPDATE", "DELETE"]},
                               "config_keys": sorted(self.config),
                               "secret_reference_id": self.secrets[0]["secret_reference_id"]}]
         self.secret_updates: list[dict] = []
@@ -41,6 +41,10 @@ class EditingApi(ConnectionsApi):
         """原 version、CSRF と省略値の意味を検証して結果を返す。"""
         request = route.request
         parsed = urlsplit(request.url)
+        if parsed.path == self.prefix + "auth/session":
+            await route.fulfill(json={**session(role="ADMIN"),
+                "database_writes_enabled": True, "deferred_features_enabled": False})
+            return
         suffix = parsed.path.removeprefix(f"{self.prefix}projects/{PROJECT}/")
         parts = suffix.split("/")
         if len(parts) != 2 or parts[0] not in {"integrations", "secret-references"}:
@@ -106,6 +110,7 @@ async def check(url: str, output: Path) -> None:
                     panel = page.get_by_role("region", name=labels["integrationListTitle"])
                     await panel.get_by_role("button", name=labels["edit"], exact=True).click()
                     dialog = page.get_by_role("dialog")
+                    await expect(dialog.get_by_label(labels["accessReadWrite"], exact=True)).to_be_checked()
                     await expect(dialog.get_by_label(labels["databasePort"], exact=True)).to_have_value("15432")
                     await expect(dialog.get_by_role("combobox", name=labels["databaseTls"], exact=True)).to_have_value("require")
                     password = dialog.get_by_label(labels["credentialValueLabels"]["password"], exact=True)
@@ -116,7 +121,10 @@ async def check(url: str, output: Path) -> None:
                     await expect(dialog).to_have_count(0)
                     assert api.config["host"] == "db-new.example.test" and len(api.updates) == 1
                     assert not api.secret_updates
-                    assert api.integrations[0]["scope"] == {"statements": ["SELECT"]}
+                    assert api.integrations[0]["scope"] == {
+                        "statements": ["SELECT", "INSERT", "UPDATE", "DELETE"]}
+                    assert api.integrations[0]["capabilities"] == [
+                        "database.query/v1", "database.execute/v1"]
                     await panel.get_by_role("button", name=labels["edit"], exact=True).click()
                     await password.fill("  replacement-fixture  ")
                     await dialog.get_by_role("button", name=labels["save"], exact=True).click()

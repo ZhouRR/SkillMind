@@ -1,6 +1,6 @@
 # 按改动类型查阅的实现细则
 
-按 [AGENTS](../../SKM/AGENTS.md)只读本次涉及的章节；领域规则见[变更指南](change-guide.md)，运行命令见[本地开发](local-development.md)。
+按 [AGENTS](../../AGENTS.md)只读本次涉及的章节；领域规则见[变更指南](change-guide.md)，运行命令见[本地开发](local-development.md)。
 Backend 路径相对 SKM/backend/src/skillmind/，Web 路径相对 SKM/web/。
 
 ## Backend

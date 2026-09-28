@@ -198,7 +198,7 @@ class DocumentParsingTests(unittest.TestCase):
         """docs 内の Skill 本文・参照・HTML は読まず、隣接する通常文書は維持する。"""
 
         self.document("# Page\n\nReadable project documentation.\n")
-        for relative in ("README.md", "SKM/README.md", "SKM/AGENTS.md"):
+        for relative in ("README.md", "SKM/README.md", "AGENTS.md"):
             path = self.root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("# Entry\n", encoding="utf-8")
@@ -355,7 +355,7 @@ class DocumentationBuildTests(unittest.TestCase):
             if not any(path.is_relative_to(root) for root in skill_roots)
         } | {
             build_docs.ROOT / relative
-            for relative in ("README.md", "SKM/README.md", "SKM/AGENTS.md")
+            for relative in ("README.md", "SKM/README.md", "AGENTS.md")
         }
         self.assertEqual(set(build_docs.source_paths()), expected)
         for directory in ("history", "acceptance"):

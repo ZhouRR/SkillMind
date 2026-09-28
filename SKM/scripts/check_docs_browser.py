@@ -23,7 +23,7 @@ HANDOFFS = (
     ("SKM/README.md", "scripts", "docs/development/documentation.md"),
     ("SKM/README.md", "skills", "docs/development/runtime-guide.md"),
     ("SKM/README.md", "images", "docs/operations/quickstart.md"),
-    ("SKM/AGENTS.md", "作業前に読むもの", "docs/development/coding-rules.md"),
+    ("AGENTS.md", "作業前に読むもの", "docs/development/coding-rules.md"),
     ("docs/planning/roadmap.md", "", "docs/development/runtime-guide.md"),
 )
 

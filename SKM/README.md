@@ -2,7 +2,7 @@
 
 Skill 原文をタスクとして実行し、入力、資源、結果、根拠、人工評価と外部変更を管理する AI Agent プラットフォーム。
 
-[文書ガイド](../docs/README.md) · [現在の進捗](../docs/planning/roadmap.md#当前执行状态) · [開発規約](AGENTS.md)
+[文書ガイド](../docs/README.md) · [現在の進捗](../docs/planning/roadmap.md#当前执行状态) · [開発規約](../AGENTS.md)
 
 ## はじめに
 

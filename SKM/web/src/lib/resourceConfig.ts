@@ -124,7 +124,7 @@ export function capabilitiesForAccess(
 
 /** Backend runs/service の write 判定 mirror。表示と capability 自動選択で共有する。 */
 export function isWriteCapability(capability: string): boolean {
-  return capability === 'mcp.call/v1' || capability.includes('.update/')
+  return capability === 'mcp.call/v1' || capability === 'database.execute/v1' || capability.includes('.update/')
     || capability.includes('.apply/')
     || capability.includes('.write/')
 }

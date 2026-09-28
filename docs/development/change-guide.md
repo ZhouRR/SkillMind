@@ -1,6 +1,6 @@
 # 代码变更指南
 
-先读 [AGENTS](../../SKM/AGENTS.md)与[当前状态](../planning/roadmap.md#当前执行状态)，明确用户场景、具体问题和完成标准，再查下表。规则边界集中在[运行维护指南](runtime-guide.md)，详细形状以源码与 Contracts 为准。
+先读 [AGENTS](../../AGENTS.md)与[当前状态](../planning/roadmap.md#当前执行状态)，明确用户场景、具体问题和完成标准，再查下表。规则边界集中在[运行维护指南](runtime-guide.md)，详细形状以源码与 Contracts 为准。
 
 ## 按问题定位代码
 

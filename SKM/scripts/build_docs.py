@@ -104,7 +104,7 @@ def source_paths() -> list[Path]:
     """文書だけを列挙し、Skill 入力・設定・依存 directory は読まない。"""
 
     paths = [path for path in DOCS.rglob("*.md") if not is_skill_asset(path)]
-    paths += [ROOT / "README.md", ROOT / "SKM/README.md", ROOT / "SKM/AGENTS.md"]
+    paths += [ROOT / "README.md", ROOT / "SKM/README.md", ROOT / "AGENTS.md"]
     # package 用の短い README は索引に重複させず、工程案内をコード root へ集約する。
     order = {name: index for index, name in enumerate(FIRST_PAGES)}
     return sorted(

@@ -13,9 +13,13 @@ depends_on = None
 
 def upgrade() -> None:
     """既存 byte/metadata を変更せず、原要求の照会可能な記録を追加する。"""
-    op.drop_constraint(
-        op.f("ck_change_proposals_document_library_integration"), "change_proposals", type_="check"
-    )
+    # 旧配備の 0046 には命名規約の二重適用・短縮後の名前も残っている。
+    # 対象の二名だけを置換し、欠落時も新 CHECK で既存行を検証する。
+    for name in (
+        "ck_change_proposals_document_library_integration",
+        "ck_change_proposals_ck_change_proposals_document_librar_b6af",
+    ):
+        op.drop_constraint(op.f(name), "change_proposals", type_="check", if_exists=True)
     op.create_check_constraint(
         op.f("ck_change_proposals_document_library_integration"),
         "change_proposals",
@@ -75,14 +79,16 @@ def upgrade() -> None:
 def downgrade() -> None:
     """使用した回执や更新の根拠を破棄する downgrade は拒否する。"""
     op.execute(
-        "LOCK TABLE change_proposals, document_mutation_receipts, document_effect_uploads IN ACCESS EXCLUSIVE MODE"
+        "LOCK TABLE change_proposals, document_mutation_receipts, "
+        "document_effect_uploads IN ACCESS EXCLUSIVE MODE"
     )
     op.execute(
         "DO $$ BEGIN IF EXISTS (SELECT 1 FROM document_mutation_receipts) OR EXISTS "
         "(SELECT 1 FROM document_effect_uploads WHERE replaces_document_id IS NOT NULL "
         "OR publication_closed_at IS NOT NULL) "
         "OR EXISTS (SELECT 1 FROM change_proposals WHERE capability_version = 'document.write/v1' "
-        "AND operation <> 'CREATE') THEN RAISE EXCEPTION 'Document mutation history prevents downgrade'; END IF; END $$"
+        "AND operation <> 'CREATE') THEN RAISE EXCEPTION "
+        "'Document mutation history prevents downgrade'; END IF; END $$"
     )
     op.drop_constraint(
         op.f("ck_change_proposals_document_library_integration"), "change_proposals", type_="check"
