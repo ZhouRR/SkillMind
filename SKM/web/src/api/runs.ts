@@ -233,6 +233,7 @@ export interface ExecutionMetrics {
 }
 
 export interface RunDetailRecord {
+  task_title?: string | null
   started_at?: string | null
   finished_at?: string | null
   execution_metrics?: ExecutionMetrics | null
@@ -495,8 +496,9 @@ function parseRunDetail(value: unknown): RunDetailRecord {
       'selected_sources', 'document_snapshots', 'output_schema', 'output_schema_checksum',
       'result', 'tool_calls', 'evidence', 'skill_snapshots', 'segments', 'attempts', 'sessions',
       'interactions', 'change_proposals', 'approvals', 'effect_executions',
-      ...(['execution_metrics', 'started_at', 'finished_at'].filter((key) => key in value)),
+      ...(['task_title', 'execution_metrics', 'started_at', 'finished_at'].filter((key) => key in value)),
     ])
+    || (value.task_title !== undefined && value.task_title !== null && typeof value.task_title !== 'string')
     || (value.execution_metrics !== undefined && value.execution_metrics !== null && !isExecutionMetrics(value.execution_metrics))
     || !['started_at', 'finished_at'].every((key) => value[key] === undefined || value[key] === null || isApiTimestamp(value[key]))
     || !hasStrings(value, ['run_id', 'project_id', 'task_id', 'created_at', 'status'])

@@ -54,7 +54,7 @@ export function HomePage({ metaState, project, projectId }: {
 
   return (
     <div className="homePage">
-      <PageHeader
+      <PageHeader reading
         title={messages.routes.home.label}
       />
       <section className="homeHero" aria-label={messages.home.currentProject}>

@@ -449,6 +449,8 @@ class ExecutionMetricsResponse(BaseModel):
 class RunDetailResponse(BaseModel):
     """Project-scoped Run、Result、ToolCall、Evidence の read response。"""
 
+    task_title: str | None = None
+
     model_config = ConfigDict(extra="forbid")
 
     run_id: UUID
@@ -918,6 +920,7 @@ def _run_detail_response(detail: RunDetail) -> RunDetailResponse:
 
     result = detail.result
     return RunDetailResponse(
+        task_title=detail.task_title,
         run_id=detail.run.run_id,
         project_id=detail.run.project_id,
         task_id=detail.run.task_id,

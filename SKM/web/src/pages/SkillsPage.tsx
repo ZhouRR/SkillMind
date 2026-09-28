@@ -434,7 +434,7 @@ export function SkillsPage({ projectId, csrfToken }: {
       <div className="tabBar" role="tablist" aria-label={messages.skills.pageTabsAria}>
         <SkillTabButton current={pageTab} tab="library" onSelect={setPageTab}>
           {messages.skills.libraryTitle}
-          {libraryState.status === 'ready' && <span className="eventCount">{libraryState.versions.length}</span>}
+          {libraryState.status === 'ready' && <span className="eventCount">{new Set(libraryState.versions.map((version) => version.skill_key)).size}</span>}
         </SkillTabButton>
         <SkillTabButton current={pageTab} tab="workbench" onSelect={setPageTab}>
           {messages.skills.tabWorkbench}

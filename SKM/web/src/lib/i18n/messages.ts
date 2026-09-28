@@ -416,6 +416,8 @@ export interface UiMessages {
     relationship: string
     joinedAt: string
     states: Record<'ACTIVE' | 'REMOVED' | 'ABSENT', string>
+    noEligibleOnPage: string
+    unavailableOnPage: (count: number) => string
     candidatesTitle: string
     search: string
     searchHint: string
@@ -791,6 +793,7 @@ export interface UiMessages {
     revisionHint: string
     revisionNumber: (number: number) => string
     removeRevision: string
+    lookupTitle: string
     lookupLabel: string
     lookupHint: string
     invalidKey: string
@@ -865,6 +868,7 @@ export interface UiMessages {
       preview: string
       title: string; loading: string; empty: string; referenced: string; unreferenced: string
       /** 未参照の添付が多い時に畳む見出し。件数を先に示し、参照された添付を埋もれさせない。 */
+      remainingGroup: (count: number) => string
       unreferencedGroup: (count: number) => string
       unavailableRefs: string; download: string; refresh: string; preparing: string; delivered: string; cancel: string; close: string
       failures: Record<'sessionExpired' | 'denied' | 'notFound' | 'contentInvalid' | 'storageUnavailable' | 'tooLarge' | 'loadFailed' | 'timeout', string>
@@ -1084,6 +1088,7 @@ export interface UiMessages {
     observationAria: string
     tabConversation: string
     tabResult: string
+    loadedEvents: (count: number) => string
     tabEvents: string
     sseEmpty: string
     readinessTitle: (label: string) => string
@@ -1178,6 +1183,11 @@ export interface UiMessages {
     nameLabel: string
     kindLabel: string
     timezoneLabel: string
+    recurrenceLabel: string
+    recurrenceModes: Record<'daily' | 'weekly' | 'custom', string>
+    timeLabel: string
+    weekdayLabel: string
+    weekdays: string[]
     cronLabel: string
     /** cron 式の入力例。規則の書き方を知らない利用者が手本から始められるようにする。 */
     cronHint: string
@@ -1274,6 +1284,8 @@ export interface UiMessages {
     forceRegenerate: string
     interpretAction: string
     createDraftFromAssisted: string
+    libraryListTitle: string
+    otherVersions: (count: number) => string
     libraryTitle: string
     librarySearch: string
     libraryStatus: string

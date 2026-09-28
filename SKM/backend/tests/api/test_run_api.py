@@ -287,6 +287,7 @@ def test_get_run_detail_returns_project_scoped_result_and_evidence(client: TestC
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["task_title"] == "Frozen review task"
     assert payload["result"]["summary"] == "completed"
     assert payload["tool_calls"][0]["capability"] == "repository.read/v1"
     assert "result_json" not in payload["tool_calls"][0]

@@ -78,3 +78,14 @@ describe('frozen document public projection', () => {
     expect(isRunDocumentSnapshots(body.document_snapshots, body.project_id, body.selected_sources)).toBe(false)
   })
 })
+
+
+it('accepts a frozen historical task title and rejects non-text titles', async () => {
+  for (const title of ['Archived review task', null, 123]) {
+    const body = { ...fixture, task_title: title }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body))))
+    const request = loadRunDetail(fixture.project_id, fixture.run_id)
+    if (typeof title === 'number') await expect(request).rejects.toThrow('contract')
+    else expect((await request).task_title).toBe(title)
+  }
+})

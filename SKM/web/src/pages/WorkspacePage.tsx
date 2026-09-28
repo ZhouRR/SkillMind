@@ -477,19 +477,19 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
     void handleRefresh()
   }
 
-  // 履歴・概要から開いた Run の record は task 名を持たないため、読込済みの公開 task 目録から
-  // 同じ task_id の名称を補う。目録に無い版(廃止・無効化)は推測せず、従来の汎用見出しに留める。
+  // 現在の有効版ではなく、元 Run と checksum が一致する不変 Manifest の名称を優先する。
   const runTaskTitle = run
-    ? promptSummary && promptSummary.taskTitle !== messages.elements.runFallbackTitle(shortRunId(run.run_id))
-      ? promptSummary.taskTitle
-      : tasks.find((task) => sameInteractionIdentity(task.task_id, run.task_id))?.title ?? null
+    ? retainedRunDetail(detailState, run)?.task_title
+      || (promptSummary && promptSummary.taskTitle !== messages.elements.runFallbackTitle(shortRunId(run.run_id))
+        ? promptSummary.taskTitle : tasks.find((task) => sameInteractionIdentity(task.task_id, run.task_id))?.title)
+      || messages.elements.runFallbackTitle(shortRunId(run.run_id))
     : null
   const conversationPrompt = promptSummary && runTaskTitle && promptSummary.taskTitle !== runTaskTitle
     ? { ...promptSummary, taskTitle: runTaskTitle } : promptSummary
 
   return (
     <>
-      <PageHeader
+      <PageHeader reading={Boolean(run || detailView)}
         title={detailView ? messages.workspace.executionDetail : activeModule ? messages.workspace.titleWithModule(activeModule.name) : messages.routes.workspace.label}
         description={detailView || run ? undefined : activeModule?.description || undefined}
         /* Module 名は見出しに含まれるため重ねない。範囲表示は Project 全体を扱う時だけ残す。 */
@@ -572,7 +572,7 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
                   && <i className="tabAlert" aria-hidden="true" />}
               </ObservationTabButton>
               <ObservationTabButton current={observationTab} tab="events" onSelect={setObservationTab}>
-                {messages.workspace.tabEvents}<span className="eventCount">{auditEvents.length}</span>
+                {messages.workspace.tabEvents}<span className="eventCount">{messages.workspace.loadedEvents(auditEvents.length)}</span>
               </ObservationTabButton>
             </div>}
             <div className="tabPanel" role={detailView ? "tabpanel" : undefined}>
@@ -596,7 +596,7 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
               {detailView && observationTab === 'events' && (
                 auditEvents.length === 0
                   ? <EmptyState text={messages.workspace.sseEmpty} />
-                  : <ol className="timeline">{auditEvents.map((item) => <EventTimelineItem key={item.sequence} event={item} />)}</ol>
+                  : <ol className="timeline" tabIndex={0} aria-label={messages.workspace.tabEvents}>{auditEvents.map((item) => <EventTimelineItem key={item.sequence} event={item} />)}</ol>
               )}
             </div>
           </section>

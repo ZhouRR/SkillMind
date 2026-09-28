@@ -6,13 +6,14 @@ import { useMessages } from '../i18n'
 import { formatLocalTime } from '../lib/presentation'
 
 /** 画面の目的と補助情報を統一した compact heading として表示する。 */
-export function PageHeader({ title, description, aside }: {
+export function PageHeader({ title, description, aside, reading = false }: {
+  reading?: boolean
   title: string
   description?: string
   aside?: ReactNode
 }) {
   return (
-    <header className="pageHeader">
+    <header className={`pageHeader${reading ? " readingHeader" : ""}`}>
       <div><h1>{title}</h1>{description && <p className="pageDescription">{description}</p>}</div>
       {aside && <div className="pageActions">{aside}</div>}
     </header>

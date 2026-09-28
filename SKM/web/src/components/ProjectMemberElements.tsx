@@ -4,7 +4,6 @@ import type { ProjectMemberRecord, ProjectRecord, UserAccountRecord } from '../a
 import { useMessages } from '../i18n'
 import type { ProjectMemberFailure } from '../lib/projectMemberFeedback'
 import { formatLocalTimestamp } from '../lib/presentation'
-import { sameUser } from '../lib/userFeedback'
 
 /** 確認画面と未知結果の核対が保持する、変更不能な元の操作対象。 */
 export interface MemberIntent {
@@ -33,19 +32,19 @@ export function ProjectMemberList({ members, locked, onRemove }: {
   return <ul className="memberList" aria-label={messages.projectMembers.membersTitle}>
     {members.map((member) => <li className="memberCard" data-member-id={member.user_id} key={member.user_id}>
       <div>
-        <strong>{member.display_name}</strong><p>{member.email}</p><p className="mono">{member.user_id}</p>
+        <strong>{member.display_name}</strong><p>{member.email}</p><details className="memberTechnical"><summary>{messages.elements.technicalDetails}</summary><code>{member.user_id}</code></details>
         <dl className="memberFacts">
           <div><dt>{messages.projectMembers.relationship}</dt><dd>{messages.projectMembers.states[member.status]}</dd></div>
           <div><dt>{messages.projectMembers.joinedAt}</dt><dd><time dateTime={member.joined_at}>{formatLocalTimestamp(member.joined_at)}</time></dd></div>
         </dl>
       </div>
-      {member.status === 'ACTIVE' && <button className="dangerButton" type="button" data-member-action="remove"
+      {member.status === 'ACTIVE' && <button className="dangerButton compactButton" type="button" data-member-action="remove"
         aria-label={`${messages.projectMembers.remove}: ${member.email}`} disabled={locked} onClick={() => onRemove(member)}>{messages.projectMembers.remove}</button>}
     </li>)}
   </ul>
 }
 
-/** 全候補を表示し、無効 account や既参加 user を一覧から黙って落とさない。 */
+/** Server が返した現在頁の候補を区分する。件数やページングを全組織の候補数へ読み替えない。 */
 export function ProjectMemberCandidateList({ accounts, members, locked, onAdd }: {
   accounts: UserAccountRecord[]
   members: ProjectMemberRecord[]
@@ -53,25 +52,34 @@ export function ProjectMemberCandidateList({ accounts, members, locked, onAdd }:
   onAdd: (account: UserAccountRecord) => void
 }) {
   const messages = useMessages()
-  if (accounts.length === 0) return <p>{messages.projectMembers.emptyCandidates}</p>
-  return <ul className="memberList" aria-label={messages.projectMembers.candidatesTitle}>
-    {accounts.map((account) => {
-      const joined = members.some((member) => sameUser(member.user_id, account.user_id) && member.status === 'ACTIVE')
-      return <li className="memberCard" data-member-candidate={account.user_id} key={account.user_id}>
-        <div>
-          <strong>{account.display_name}</strong><p>{account.email}</p><p className="mono">{account.user_id}</p>
-          <dl className="memberFacts">
-            <div><dt>{messages.account.fields.role}</dt><dd>{messages.account.roles[account.system_role]}</dd></div>
-            <div><dt>{messages.account.fields.status}</dt><dd>{messages.account.statuses[account.status]}</dd></div>
-          </dl>
-          {joined && <p className="hint">{messages.projectMembers.alreadyMember}</p>}
-          {account.status === 'DISABLED' && <p className="hint">{messages.projectMembers.disabledCandidate}</p>}
+  const joinedIds = new Set(members.filter((member) => member.status === 'ACTIVE').map((member) => member.user_id.toLowerCase()))
+  const available = accounts.filter((account) => account.status === 'ACTIVE' && !joinedIds.has(account.user_id.toLowerCase()))
+  const unavailable = accounts.filter((account) => !available.includes(account))
+  /** 表示区分によらず、元 account と参加状態で操作可否を確認する。 */
+  function row(account: UserAccountRecord) {
+    const joined = joinedIds.has(account.user_id.toLowerCase())
+    return <li className="memberCard" data-member-candidate={account.user_id} key={account.user_id}>
+      <div>
+        <strong>{account.display_name}</strong><p>{account.email}</p>
+        <div className="memberTags"><span>{messages.account.roles[account.system_role]}</span><span>{messages.account.statuses[account.status]}</span>
+          {joined && <span>{messages.projectMembers.alreadyMember}</span>}
+          {account.status === 'DISABLED' && <span>{messages.projectMembers.disabledCandidate}</span>}
         </div>
-        <button className="secondaryButton" type="button" data-member-action="add" aria-label={`${messages.projectMembers.add}: ${account.email}`}
-          disabled={locked || joined || account.status === 'DISABLED'} onClick={() => onAdd(account)}>{messages.projectMembers.add}</button>
-      </li>
-    })}
-  </ul>
+        <details className="memberTechnical"><summary>{messages.elements.technicalDetails}</summary><code>{account.user_id}</code></details>
+      </div>
+      <button className="secondaryButton compactButton" type="button" data-member-action="add" aria-label={`${messages.projectMembers.add}: ${account.email}`}
+        disabled={locked || joined || account.status === 'DISABLED'} onClick={() => onAdd(account)}>{messages.projectMembers.add}</button>
+    </li>
+  }
+  if (accounts.length === 0) return <p>{messages.projectMembers.emptyCandidates}</p>
+  return <div className="memberCandidateGroups">
+    {available.length > 0 ? <ul className="memberList" aria-label={messages.projectMembers.candidatesTitle}>{available.map(row)}</ul>
+      : <p>{messages.projectMembers.noEligibleOnPage}</p>}
+    {unavailable.length > 0 && <details className="detailDisclosure">
+      <summary>{messages.projectMembers.unavailableOnPage(unavailable.length)}</summary>
+      <ul className="memberList">{unavailable.map(row)}</ul>
+    </details>}
+  </div>
 }
 
 /** 元の project/account/関係を固定表示し、一覧更新で確認対象を差し替えない。 */

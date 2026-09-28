@@ -10,8 +10,8 @@ import { MarkdownText } from './MarkdownText'
 import { ARTIFACT_REQUEST_POLICY, resultArtifactRefs } from '../lib/artifactFeedback'
 import { formatJsonPreview } from '../lib/jsonPreview'
 
-/** 未参照の添付をこの件数まではそのまま並べ、超えたら件数付きの開閉にまとめる。 */
-const INLINE_UNREFERENCED_LIMIT = 3
+/** 参照添付を優先しつつ、長い一覧は段階的に開く。全件の取得・照合は維持する。 */
+const INLINE_ARTIFACT_LIMIT = 5
 
 /** 一つの明示 click に固定した回执。別索引や同名 path で上書きしない。 */
 interface DownloadRequest { mode: 'download' | 'preview'; id: number; artifact: RunArtifactRecord; title: string; deadline: number }
@@ -43,8 +43,9 @@ export function RunArtifacts({ projectId, runId, result, onSessionExpired, evide
   for (const title of titles.values()) titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1)
   const referencedRecords = records.filter((record) => refs.includes(record.artifact_ref))
   const otherRecords = records.filter((record) => !refs.includes(record.artifact_ref))
-  // 結果が参照した添付を先に読ませ、未参照が多い時は件数を示して畳む(一覧で頁を埋めない)。
-  const collapseOthers = referencedRecords.length > 0 && otherRecords.length > INLINE_UNREFERENCED_LIMIT
+  const orderedRecords = [...referencedRecords, ...otherRecords]
+  const shownRecords = orderedRecords.slice(0, INLINE_ARTIFACT_LIMIT)
+  const remainingRecords = orderedRecords.slice(INLINE_ARTIFACT_LIMIT)
 
   /** 再描画前の同 tick 重複 click と、別添付への暗黙の中断を防ぐ。 */
   function start(artifact: RunArtifactRecord, mode: 'download' | 'preview' = 'download'): void {
@@ -76,18 +77,18 @@ export function RunArtifacts({ projectId, runId, result, onSessionExpired, evide
       ? <p className="error" role="alert">{labels.failures[index.failure.key]}</p>
       : <>
         {records.length === 0 && <p>{labels.empty}</p>}
-        <ul className="artifactList">{(collapseOthers ? referencedRecords : records).map((record) => {
+        <ul className="artifactList">{shownRecords.map((record) => {
           const title = titles.get(record.artifact_ref) ?? record.path
           return <ArtifactRow key={record.artifact_ref} record={record} title={title} duplicateTitle={(titleCounts.get(title) ?? 0) > 1}
             referenced={refs.includes(record.artifact_ref)} disabled={request !== null}
             onPreview={() => start(record, 'preview')} onDownload={() => start(record)} />
         })}</ul>
-        {collapseOthers && <details className="artifactGroup">
-          <summary>{labels.unreferencedGroup(otherRecords.length)}</summary>
-          <ul className="artifactList">{otherRecords.map((record) => {
+        {remainingRecords.length > 0 && <details className="artifactGroup">
+          <summary>{labels.remainingGroup(remainingRecords.length)}</summary>
+          <ul className="artifactList">{remainingRecords.map((record) => {
             const title = titles.get(record.artifact_ref) ?? record.path
             return <ArtifactRow key={record.artifact_ref} record={record} title={title} duplicateTitle={(titleCounts.get(title) ?? 0) > 1}
-              referenced={false} disabled={request !== null}
+              referenced={refs.includes(record.artifact_ref)} disabled={request !== null}
               onPreview={() => start(record, 'preview')} onDownload={() => start(record)} />
           })}</ul>
         </details>}

@@ -573,3 +573,21 @@ describe('SkillLibraryPanel version identity and cleanup', () => {
     expect(html).not.toContain('role="menuitem"')
   })
 })
+
+
+describe('Skill library version groups', () => {
+  it('keeps the enabled version visible, folds other versions and reveals errors on their exact target', () => {
+    const versions = [version({ status: 'PUBLISHED' }), version({ skill_version_id: 'old-id', version: '0.9.0', status: 'DEPRECATED' })]
+    const props = { libraryState: { status: 'ready' as const, versions }, enablementState: { status: 'ready' as const, enablements: [] },
+      projectId: '', busyVersionId: null, onPublish: vi.fn(), onDeprecate: vi.fn(), onDelete: vi.fn(), onEnable: vi.fn(), onDisable: vi.fn() }
+    const html = renderToStaticMarkup(<SkillLibraryPanel {...props} />)
+    expect(html.match(/class="skillVersionGroup"/g)).toHaveLength(1)
+    expect(html).toContain('<details class="skillOtherVersions"><summary>')
+    expect(html.indexOf('v1.0.0')).toBeLessThan(html.indexOf('skillOtherVersions'))
+    expect(html).toContain('v0.9.0')
+    expect(html.split(versions[0]!.description)).toHaveLength(2)
+    const failed = renderToStaticMarkup(<SkillLibraryPanel {...props} actionError={{ versionId: 'old-id', message: 'Still referenced' }} />)
+    expect(failed).toContain('class="skillOtherVersions" open=""')
+    expect(failed).toContain('Still referenced')
+  })
+})

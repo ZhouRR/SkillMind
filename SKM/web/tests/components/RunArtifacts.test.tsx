@@ -73,11 +73,11 @@ describe('published Artifact view', () => {
   it('keeps referenced attachments first and folds a long unreferenced remainder behind its count', () => {
     const other = (index: number): RunArtifactRecord => ({ ...artifact(`art_other_${index}`),
       path: `output/document-conversions/0000000${index}-0000-4000-8000-000000000000/source.md`, size_bytes: 222420 })
-    state.data = [artifact('art_original'), other(1), other(2), other(3), other(4)]
+    state.data = [artifact('art_original'), other(1), other(2), other(3), other(4), other(5), other(6)]
     const labels = MESSAGES.ja.runResult.artifacts
     const html = render('ja')
-    expect(html).toContain(`<summary>${labels.unreferencedGroup(4)}</summary>`)
-    expect(html.indexOf('art_original') === -1 || html.indexOf(labels.referenced) < html.indexOf(labels.unreferencedGroup(4))).toBe(true)
+    expect(html).toContain(`<summary>${labels.remainingGroup(2)}</summary>`)
+    expect(html.indexOf('art_original') === -1 || html.indexOf(labels.referenced) < html.indexOf(labels.remainingGroup(2))).toBe(true)
     // 生の byte 数と MIME ではなく、文書一覧と同じ概数と種別で示す。
     expect(html).toContain('217.2 KB · Markdown')
     expect(html).not.toContain('222420 B')
@@ -90,4 +90,15 @@ describe('published Artifact view', () => {
     state.data = [artifact('art_original')]
     expect(render('zh', null)).toContain(MESSAGES.zh.runResult.artifacts.unreferenced)
   })
+})
+
+
+it.each(['all', 'none'] as const)('folds long attachments even when %s are referenced', (mode) => {
+  state.data = Array.from({ length: 18 }, (_, i) => artifact(`art_${i}`))
+  const value = result()
+  value.artifact_refs = mode === 'all' ? state.data.map((item) => item.artifact_ref) : []
+  const html = render('en', value)
+  expect(html).toContain(`<summary>${MESSAGES.en.runResult.artifacts.remainingGroup(13)}</summary>`)
+  expect(html.split('class="artifactGroup"')[0]!.match(/<li>/g)).toHaveLength(5)
+  expect(html.match(/<li>/g)).toHaveLength(18)
 })

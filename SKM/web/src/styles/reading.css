@@ -1,6 +1,6 @@
 /* 概览と単一 Run の PC 読書 layout。既存の取得・送信 lifecycle から独立させる。 */
 .homePage, .workspaceReading { font-synthesis: weight; }
-.homePage { max-width: 1320px; margin-inline: auto; }
+.homePage, .readingHeader { max-width: 1320px; margin-inline: auto; }
 .homeHero { display: flex; align-items: center; justify-content: space-between; gap: 32px; margin-bottom: 24px; padding: 24px 32px; border: 1px solid var(--accent-border); border-radius: 18px; background: var(--accent-soft); box-shadow: 0 3px 0 var(--accent-border); }
 .homeHeroBody { min-width: 0; }
 .homeEyebrow { color: var(--accent); font-size: 12px; font-weight: 650; letter-spacing: .06em; }

@@ -9,9 +9,9 @@
 .memberProjectIdentity, .memberOriginal { display: grid; gap: 6px; }
 .memberBoundaryHint, .memberIntent, .memberUnknown, .memberPreviousUnknown { border: 1px solid var(--border-strong); border-radius: var(--radius-small); padding: 14px; }
 .memberIntent, .memberUnknown { background: var(--warn-soft); }
-.memberList { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
-.memberCard { display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: 14px; border: 1px solid var(--border); border-radius: var(--radius-small); padding: 14px; }
-.memberCard > div { flex: 1 1 240px; min-width: 0; display: grid; gap: 6px; }
+.memberList { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.memberCard { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); padding: 12px 0; }
+.memberCard > div { flex: 1; min-width: 0; display: grid; gap: 3px; }
 .memberFacts { display: grid; gap: 8px; margin: 8px 0 0; }
 .memberFacts > div { display: grid; grid-template-columns: minmax(100px, .5fr) minmax(0, 1fr); gap: 12px; }
 .memberFacts dt { color: var(--text-muted); }
@@ -35,3 +35,14 @@
   .projectMembersPanel button, .memberSearch input { min-height: 44px; }
   .memberFacts > div { grid-template-columns: minmax(86px, .5fr) minmax(0, 1fr); gap: 8px; }
 }
+
+.memberCard:last-child { border-bottom: 0; }
+.memberCard .memberFacts { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 0; font-size: 12px; }
+.memberCard .memberFacts > div { display: flex; gap: 8px; }
+.memberCard > div > p, .memberTags, .memberTechnical { font-size: 12px; color: var(--text-muted); }
+.memberTags { display: flex; flex-wrap: wrap; gap: 6px 12px; }
+.memberTechnical > summary { cursor: pointer; }
+.memberTechnical code { overflow-wrap: anywhere; }
+.memberTechnical { order: 1; }
+.memberCandidateGroups { min-width: 0; }
+.memberCandidateGroups > details { margin-top: 12px; }

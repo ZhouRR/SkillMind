@@ -6418,6 +6418,17 @@
             "title": "Task Id",
             "type": "string"
           },
+          "task_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Title"
+          },
           "tool_calls": {
             "items": {
               "$ref": "#/components/schemas/ToolCallSummaryResponse"

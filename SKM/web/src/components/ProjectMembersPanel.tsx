@@ -153,7 +153,7 @@ function MembersContent({ projectId, currentProject, session, onSessionEnded }: 
     {/* 認可確認中は操作集合を隠して読取も止めるが、同対象の未知要求と草稿は破棄しない。 */}
     <div className="projectMembersContent" hidden={!authorized}>
       <div className="panelHeader"><h2>{messages.projectMembers.title}</h2></div>
-      <div className="memberProjectIdentity"><strong>{currentProject?.name} · {currentProject?.key}</strong><p className="mono">{projectId}</p></div>
+      <div className="memberProjectIdentity"><strong>{currentProject?.name} · {currentProject?.key}</strong><details className="memberTechnical"><summary>{messages.elements.technicalDetails}</summary><code>{projectId}</code></details></div>
       <p>{messages.projectMembers.description}</p>
       <p className="memberBoundaryHint">{messages.projectMembers.adminBypass}</p>
       {currentProject?.status === 'ARCHIVED' && <p className="memberBoundaryHint">{messages.projectMembers.archivedHint}</p>}

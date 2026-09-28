@@ -158,8 +158,9 @@ async def opened(page: Page, url: str, language: str = "en") -> None:
         "next => window.updateSubmissionTestContext(next)",
         {"screen": "tasks", "language": language},
     )
-    await page.locator(".taskCard .formRow button").first.click()
+    await page.locator(".taskCardActions button:not([data-flow-open])").first.click()
     await expect(page.locator("[data-schedule-form]")).to_be_visible()
+    await page.locator('[name="recurrence"]').select_option("custom")
 
 
 async def previewed(page: Page) -> None:
@@ -363,7 +364,7 @@ async def exercise(
         if change == "close":
             await page.keyboard.press("Escape")
             await expect(page.get_by_role("dialog")).to_have_count(0)
-            await page.locator(".taskCard .formRow button").first.click()
+            await page.locator(".taskCardActions button:not([data-flow-open])").first.click()
         else:
             next_context = {
                 "project": {"projectId": OTHER_PROJECT},
@@ -379,7 +380,7 @@ async def exercise(
                     await page.evaluate(
                         "projectId => window.updateSubmissionTestContext({projectId})", PROJECT
                     )
-                await page.locator(".taskCard .formRow button").first.click()
+                await page.locator(".taskCardActions button:not([data-flow-open])").first.click()
         await expect(confirm).to_have_count(0)
         api.release.set()
         await asyncio.wait_for(api.finished.wait(), 5)

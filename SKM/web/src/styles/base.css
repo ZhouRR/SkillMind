@@ -418,3 +418,9 @@ a.primaryButton, a.secondaryButton { display: inline-flex; justify-content: cent
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* CJK の漢字が別言語の字形へ先に一致しないよう、表示言語で優先する字体を選ぶ。 */
+:root:lang(ja) { --font-body: Inter, "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic UI", "Yu Gothic", "Meiryo", "Noto Sans JP", system-ui, sans-serif; }
+:root:lang(zh) { --font-body: Inter, "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif; }
+:root:lang(en) { --font-body: Inter, system-ui, sans-serif; }
+.fileUploadButton { justify-content: center; }

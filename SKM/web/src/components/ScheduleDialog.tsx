@@ -18,6 +18,7 @@ import { sameUuid } from '../lib/validation'
 import { ModalDialog } from './PageElements'
 import { TaskLaunchFields } from './TaskLaunchFields'
 import { ScheduleRevisionReview } from './ScheduleRevisionReview'
+import { ScheduleRecurrenceField } from './ScheduleRecurrenceField'
 
 /** 同じ精確 task の作成だけを扱い、編集や別の実行 API を増やさない。 */
 interface ScheduleDialogProps {
@@ -225,9 +226,8 @@ function ScheduleCreationForm({ open, projectId, csrfToken, task, onClose, onSav
         <label>{messages.schedules.timezoneLabel}<input name="timezone" type="text" maxLength={64} value={timing.timezone}
           onChange={(event) => changeTiming({ timezone: event.target.value })} /></label>
         <p className="hint">{messages.schedules.ruleTimezoneHint}</p>
-        {timing.kind === 'CRON' && <label>{messages.schedules.cronLabel}<input name="cron_expression" type="text"
-          maxLength={128} value={timing.cronExpression} onChange={(event) => changeTiming({ cronExpression: event.target.value })} />
-          <span className="hint">{messages.schedules.cronHint}</span></label>}
+        {timing.kind === 'CRON' && <ScheduleRecurrenceField value={timing.cronExpression}
+          onChange={(cronExpression) => changeTiming({ cronExpression })} />}
         <p className="hint" data-schedule-input-timezone>{messages.schedules.inputTimezone(inputTimezone)}</p>
         {timing.kind === 'ONCE' && <ScheduleDateField name="run_at" label={messages.schedules.runAtLabel}
           original={original && timing.runAt === initialTiming.runAt && timing.runAtChoice === initialTiming.runAtChoice ? original.run_at : null}

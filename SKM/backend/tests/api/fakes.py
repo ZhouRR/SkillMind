@@ -1043,6 +1043,7 @@ class FakeRunService:
         now = datetime(2026, 7, 2, 13, 0, tzinfo=UTC)
         tool_call_id = uuid4()
         return RunDetail(
+            task_title="Frozen review task",
             run=run,
             input=self.received_input or {"target": "main"},
             selected_sources=self.received_sources

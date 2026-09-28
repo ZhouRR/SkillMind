@@ -521,6 +521,7 @@ class RunDetail:
     result: StoredRunResult | None
     tool_calls: tuple[StoredToolCall, ...]
     evidence: tuple[StoredEvidence, ...]
+    task_title: str | None = None
     skill_snapshots: tuple[StoredRunSkillSnapshot, ...] = ()
     output_schema: dict[str, Any] | None = None
     output_schema_checksum: str | None = None

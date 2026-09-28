@@ -19,6 +19,8 @@ export interface TaskDraft {
 
 /** Run preflight selector に表示する requirement と具体候補。 */
 export interface SourceRequirementChoice {
+  ordinal?: number
+  guidance?: string | null
   key: string
   /** 資源種別(issue/repository/document)。友好名の索引に使う。 */
   kind: string
@@ -46,10 +48,14 @@ export function taskCatalogId(task: PublishedTaskRecord): string {
  * 以前は manifest `data_sources` へ退避していたが、二重宣言が key ずれの原因だった。
  */
 export function sourceRequirements(task: PublishedTaskRecord): SourceRequirementChoice[] {
-  return (task.readiness?.requirements ?? []).map((requirement) => {
+  const requirements = task.readiness?.requirements ?? []
+  return requirements.map((requirement) => {
     const providers = [...new Set(requirement.candidates.map((candidate) => candidate.provider))]
     return {
       key: requirement.key,
+      guidance: requirement.selection_guidance,
+      ordinal: requirements.filter((item) => item.kind === requirement.kind && item.access === requirement.access).length > 1
+        ? requirements.filter((item) => item.kind === requirement.kind && item.access === requirement.access).indexOf(requirement) + 1 : undefined,
       kind: requirement.kind,
       access: requirement.access,
       required: requirement.required,

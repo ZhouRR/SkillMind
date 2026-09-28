@@ -28,15 +28,14 @@ export function UserSecurityEvents({ userId, own, revision, onSessionEnded }: {
     </div>
     <UserResponseNotice failure={query.failure} />
     {query.pending && <p role="status">{messages.busy}</p>}
-    {query.data && <details className="detailDisclosure">
-      <summary>{messages.page(offset, query.data.items.length, query.data.total)}</summary>
+    {query.data && <div className="securityEventContent">
       <p className="hint">{messages.auditHint}</p>
       {query.data.items.length === 0 && <p>{messages.emptyEvents}</p>}
       <ul className="accountEventList" tabIndex={query.data.items.length > 0 ? 0 : undefined} aria-label={messages.securityEvents}>
         {query.data.items.map((event) => <li key={event.event_id}>
           <details>
-            <summary>{messages.eventActions[event.action]} · <time dateTime={event.created_at} title={event.created_at}>{formatLocalTimestamp(event.created_at)}</time> · {messages.fields.version} {event.row_version}</summary>
-            <dl className="accountFacts">
+            <summary>{messages.eventActions[event.action]} · <time dateTime={event.created_at} title={event.created_at}>{formatLocalTimestamp(event.created_at)}</time></summary>
+            <dl className="accountFacts"><div><dt>{messages.fields.version}</dt><dd>{event.row_version}</dd></div>
               <div><dt>{messages.eventActor}</dt><dd>{event.actor_id}</dd></div>
               <div><dt>{messages.eventRequest}</dt><dd>{event.request_id}</dd></div>
               <div><dt>{messages.eventPrevious}</dt><dd>{event.previous_role === null ? '—' : messages.roles[event.previous_role]} / {event.previous_status === null ? '—' : messages.statuses[event.previous_status]}</dd></div>
@@ -46,8 +45,8 @@ export function UserSecurityEvents({ userId, own, revision, onSessionEnded }: {
           </details>
         </li>)}
       </ul>
-      {/* 件数は開閉見出しが示すため、一頁に収まる間は同じ件数と押せない前後 button を繰り返さない。 */}
-      {(offset > 0 || query.data.total > limit) && <UserPager offset={offset} limit={limit} count={query.data.items.length} total={query.data.total} pending={query.pending} onChange={setOffset} />}
-    </details>}
+      {/* 件数は一か所へ集約し、一頁に収まる間は押せない前後 button を省く。 */}
+      <UserPager offset={offset} limit={limit} count={query.data.items.length} total={query.data.total} pending={query.pending} onChange={setOffset} />
+    </div>}
   </section>
 }

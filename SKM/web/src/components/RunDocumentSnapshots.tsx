@@ -11,13 +11,14 @@ export function RunDocumentSnapshots({ snapshots }: { snapshots: readonly RunDoc
     <section className="resultSection frozenDocuments" aria-label={labels.title}>
       <h3>{labels.title}</h3>
       <p className="hint">{labels.hint}</p>
-      {snapshots.map((entry) => (
+      {snapshots.map((entry, index) => (
         <div className="frozenDocumentSlot" key={entry.requirement_key}>
           {/* 見出しは取得元の種別を利用者語で示し、Skill 側の要求 key は照合用の補助表示に留める。 */}
           <div className="subsectionHeader">
-            <span className="frozenDocumentTitle"><strong>{messages.workspace.resourceKind.document}</strong><code>{entry.requirement_key}</code></span>
+            <span className="frozenDocumentTitle"><strong>{messages.workspace.resourceKind.document}{snapshots.length > 1 ? ` ${index + 1}` : ""}</strong></span>
             <span className="frozenDocumentStatus">{labels.status[entry.status]}</span>
           </div>
+          <details className="detailDisclosure"><summary>{messages.elements.technicalDetails}</summary><code>{entry.requirement_key}</code></details>
           {entry.status === 'FROZEN' ? <>
             <p>{entry.snapshot.selection_mode === 'SINGLE' ? modes.single : entry.snapshot.selection_mode === 'SET' ? modes.set : modes.all}</p>
             <details>

@@ -7,6 +7,7 @@ import { MemberIntentConfirmation, MemberIntentFacts, MemberResponseNotice, Proj
 import { ProjectMemberReview } from '../../src/components/ProjectMemberReview'
 import { ProjectMembersPanel } from '../../src/components/ProjectMembersPanel'
 import { LanguageProvider } from '../../src/i18n'
+import { UserPager } from '../../src/components/UserAccountElements'
 import { MESSAGES, type UiLanguage } from '../../src/lib/i18n/messages'
 import { DEMO_PROJECT as PROJECT, demoSession } from '../fixtures'
 
@@ -181,5 +182,19 @@ describe('Project member frozen intent and recovery', () => {
     const html = render(<MemberResponseNotice failure={{ key }} />)
     expect(html).toContain('role="alert"')
     expect(html).toContain(MESSAGES.zh.projectMembers.failures[key])
+  })
+})
+
+
+describe('single-page and depleted account pages', () => {
+  it('keeps the server count but omits unavailable paging actions on the first page', () => {
+    const html = render(<UserPager offset={0} count={1} total={1} limit={25} pending={false} onChange={vi.fn()} />)
+    expect(html).toContain(MESSAGES.zh.account.page(0, 1, 1))
+    expect(html).not.toContain('<button')
+  })
+  it('keeps a way back after the server removes the last page of users', () => {
+    const html = render(<UserPager offset={25} count={0} total={1} limit={25} pending={false} onChange={vi.fn()} />)
+    expect(html).toContain(`>${MESSAGES.zh.account.previous}</button>`)
+    expect(html).toMatch(new RegExp(`<button[^>]*disabled[^>]*>${MESSAGES.zh.account.next}</button>`))
   })
 })

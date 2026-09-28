@@ -64,8 +64,69 @@ export function SkillLibraryPanel({
     Number(activeIds.has(right.skill_version_id)) - Number(activeIds.has(left.skill_version_id))
     || statusOrder[left.status] - statusOrder[right.status]
     || left.name.localeCompare(right.name)
+    || right.version.localeCompare(left.version, undefined, { numeric: true })
     || right.created_at.localeCompare(left.created_at)
   ))
+
+  const bySkill = new Map<string, SkillVersionRecord[]>()
+  for (const version of visibleVersions) {
+    const group = bySkill.get(version.skill_key) ?? []
+    group.push(version)
+    bySkill.set(version.skill_key, group)
+  }
+  const groups = [...bySkill.entries()]
+  /** 版ごとの権限・失敗・操作先を変えず、表示する説明だけ重複を省く。 */
+  function renderVersion(version: SkillVersionRecord, primary?: SkillVersionRecord) {
+    const active = activeIds.has(version.skill_version_id)
+    const disabled = disabledIds.has(version.skill_version_id)
+    const busy = busyVersionId === version.skill_version_id
+    const unavailable = busyVersionId !== null || libraryState.status !== 'ready'
+    return (
+      <li key={version.skill_version_id}>
+        {/* 内部 UUID は利用者の判断材料にならないため出さない。読める識別は
+            「名称 + 版 + SKILL.md 原文の説明」で足り、skill_key は追跡用に残す。 */}
+        <div className="skillLibraryIdentity">
+          <strong>{version.name} <span className="mono">v{version.version}</span></strong>
+          {version.description && (!primary || primary.description !== version.description) && <p className="skillLibraryDescription">{version.description}</p>}
+          <details className="detailDisclosure"><summary>{messages.elements.technicalDetails}</summary><code>{version.skill_key}</code></details>
+          {actionError?.versionId === version.skill_version_id && <p className="error" role="alert">{actionError.message}</p>}
+        </div>
+        <div className="skillLibraryStatus">
+          <span className="statusBadge">{messages.enums.skillVersionStatus[version.status] ?? version.status}</span>
+          {projectId && active && <span className="scopeBadge">{messages.skills.enabledBadge}</span>}
+          {projectId && disabled && <span className="scopeBadge">{messages.skills.disabledBadge}</span>}
+        </div>
+        <div className="skillActions">
+          {projectId && active && (
+            <button className="secondaryButton" type="button" disabled={unavailable} onClick={() => onDisable(version)}>
+              {busy ? messages.elements.processing : messages.skills.disableFromProject}
+            </button>
+          )}
+          {projectId && !active && !disabled && version.status === 'PUBLISHED' && (
+            <button className="primaryButton" type="button" disabled={unavailable} onClick={() => onEnable(version)}>
+              {busy ? messages.elements.processing : messages.skills.enableForProject}
+            </button>
+          )}
+          {projectId && disabled && (
+            <span className="hint">{messages.skills.disabledAuditHint}</span>
+          )}
+          {/* 廃止しただけでは行が残り続けるため、監査参照のない版に限り片付け経路を出す。
+              参照が残る版は backend が 409 で拒否し、その理由を一覧の error 欄へ出す。 */}
+          <ActionMenu label={messages.common.moreActions(`${version.name} v${version.version}`)} disabled={unavailable} items={[
+            ...(version.status === 'PUBLISHED'
+              ? [{ id: 'deprecate', label: messages.skills.deprecateVersion, onSelect: () => onDeprecate(version) }]
+              : [{ id: 'delete', label: messages.skills.deleteVersion, onSelect: () => onDelete(version), danger: true }]),
+          ]} />
+        </div>
+        {version.status === 'DRAFT' && (
+          <details className="skillLibraryDraft">
+            <summary>{messages.skills.reviewDraft}</summary>
+            <SkillVersionDetail version={version} disabled={unavailable} onPublish={() => onPublish(version)} />
+          </details>
+        )}
+      </li>
+    )
+  }
 
   function clearFilters(): void {
     setQuery('')
@@ -76,7 +137,7 @@ export function SkillLibraryPanel({
     <section className="panel skillLibrary" aria-label={messages.skills.libraryAria}>
       <div className="panelHeader">
         <div>
-          <h2>{messages.skills.libraryTitle}</h2>
+          <h2>{messages.skills.libraryListTitle}</h2>
           <p className="hint">{messages.skills.libraryHint}</p>
         </div>
         {projectId
@@ -111,57 +172,13 @@ export function SkillLibraryPanel({
       {versions.length > 0 && visibleVersions.length === 0 && <EmptyState text={messages.skills.libraryNoMatches} />}
       {visibleVersions.length > 0 && (
         <ul className="skillLibraryList">
-          {visibleVersions.map((version) => {
-            const active = activeIds.has(version.skill_version_id)
-            const disabled = disabledIds.has(version.skill_version_id)
-            const busy = busyVersionId === version.skill_version_id
-            const unavailable = busyVersionId !== null || libraryState.status !== 'ready'
-            return (
-              <li key={version.skill_version_id}>
-                {/* 内部 UUID は利用者の判断材料にならないため出さない。読める識別は
-                    「名称 + 版 + SKILL.md 原文の説明」で足り、skill_key は追跡用に残す。 */}
-                <div className="skillLibraryIdentity">
-                  <strong>{version.name} <span className="mono">v{version.version}</span></strong>
-                  {version.description && <p className="skillLibraryDescription">{version.description}</p>}
-                  <span className="mono">{version.skill_key}</span>
-                  {actionError?.versionId === version.skill_version_id && <p className="error" role="alert">{actionError.message}</p>}
-                </div>
-                <div className="skillLibraryStatus">
-                  <span className="statusBadge">{messages.enums.skillVersionStatus[version.status] ?? version.status}</span>
-                  {projectId && active && <span className="scopeBadge">{messages.skills.enabledBadge}</span>}
-                  {projectId && disabled && <span className="scopeBadge">{messages.skills.disabledBadge}</span>}
-                </div>
-                <div className="skillActions">
-                  {projectId && active && (
-                    <button className="secondaryButton" type="button" disabled={unavailable} onClick={() => onDisable(version)}>
-                      {busy ? messages.elements.processing : messages.skills.disableFromProject}
-                    </button>
-                  )}
-                  {projectId && !active && !disabled && version.status === 'PUBLISHED' && (
-                    <button className="primaryButton" type="button" disabled={unavailable} onClick={() => onEnable(version)}>
-                      {busy ? messages.elements.processing : messages.skills.enableForProject}
-                    </button>
-                  )}
-                  {projectId && disabled && (
-                    <span className="hint">{messages.skills.disabledAuditHint}</span>
-                  )}
-                  {/* 廃止しただけでは行が残り続けるため、監査参照のない版に限り片付け経路を出す。
-                      参照が残る版は backend が 409 で拒否し、その理由を一覧の error 欄へ出す。 */}
-                  <ActionMenu label={messages.common.moreActions(`${version.name} v${version.version}`)} disabled={unavailable} items={[
-                    ...(version.status === 'PUBLISHED'
-                      ? [{ id: 'deprecate', label: messages.skills.deprecateVersion, onSelect: () => onDeprecate(version) }]
-                      : [{ id: 'delete', label: messages.skills.deleteVersion, onSelect: () => onDelete(version), danger: true }]),
-                  ]} />
-                </div>
-                {version.status === 'DRAFT' && (
-                  <details className="skillLibraryDraft">
-                    <summary>{messages.skills.reviewDraft}</summary>
-                    <SkillVersionDetail version={version} disabled={unavailable} onPublish={() => onPublish(version)} />
-                  </details>
-                )}
-              </li>
-            )
-          })}
+          {groups.map(([key, group]) => <li key={key} className="skillVersionGroup">
+            <ul className="skillLibraryList">{renderVersion(group[0]!)}</ul>
+            {group.length > 1 && <details className="skillOtherVersions" open={group.slice(1).some((version) => version.skill_version_id === actionError?.versionId) || undefined}>
+              <summary>{messages.skills.otherVersions(group.length - 1)}</summary>
+              <ul className="skillLibraryList">{group.slice(1).map((version) => renderVersion(version, group[0]))}</ul>
+            </details>}
+          </li>)}
         </ul>
       )}
     </section>

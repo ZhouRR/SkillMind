@@ -431,7 +431,9 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
         if not projected_segments:
             # Release G 前の Run は row を捏造せず、read model だけで implicit Segment 1 とする。
             projected_segments = (_implicit_segment(run),)
+        titles = await self._history_task_titles([run])
         return RunDetail(
+            task_title=titles.get(run.id),
             run=self._to_created_run(run, idempotent_replay=False),
             input=dict(run.input_json),
             selected_sources=dict(run.selected_sources_json),
@@ -1023,8 +1025,12 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
             # 別人の回答/人工批准/別 Attempt の完了を自動続行として引き取らない。
             parent = await self._session.get(AgentSession, segment.parent_agent_session_id)
             effect = await self._session.get(EffectExecution, segment.trigger_ref)
-            proposal = await self._session.get(ChangeProposal, effect.proposal_id) if effect else None
-            approval = await self._session.get(ChangeApproval, effect.approval_id) if effect else None
+            proposal = (
+                await self._session.get(ChangeProposal, effect.proposal_id) if effect else None
+            )
+            approval = (
+                await self._session.get(ChangeApproval, effect.approval_id) if effect else None
+            )
             if (parent is None or effect is None or proposal is None or approval is None
                 or parent.run_id != run_id or parent.run_attempt_id != previous.run_attempt_id
                 or parent.run_segment_id != previous.run_segment_id
@@ -1035,7 +1041,8 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
                 or effect.proposal_id != proposal.id or effect.approval_id != approval.id
                 or proposal.agent_session_id != parent.id or proposal.status != "APPLIED"
                 or approval.run_id != run_id or approval.proposal_id != proposal.id
-                or approval.decision != "APPROVED" or approval.source not in {"RUN_START", "PREAUTHORIZATION"}
+                or approval.decision != "APPROVED"
+                or approval.source not in {"RUN_START", "PREAUTHORIZATION"}
                 or approval.proposal_version != proposal.version
                 or approval.proposal_checksum != proposal.checksum):
                 return None

@@ -160,12 +160,12 @@ export function EvaluationSection({ scope, result, csrfToken, writable, accessFa
           <button className="secondaryButton" type="submit">{messages.runResult.addEvaluation}</button>
         </fieldset>
       </form>
-      {!pending && <form className="evaluationLookup" onSubmit={(event) => { event.preventDefault(); setLookupError(!submission.lookup(lookupKey.trim())) }}>
+      {!pending && <details className="detailDisclosure evaluationRecovery"><summary>{labels.lookupTitle}</summary><form className="evaluationLookup" onSubmit={(event) => { event.preventDefault(); setLookupError(!submission.lookup(lookupKey.trim())) }}>
         <label>{labels.lookupLabel}<input value={lookupKey} onChange={(event) => setLookupKey(event.target.value)} autoComplete="off" spellCheck={false} /></label>
         <p className="hint">{labels.lookupHint}</p>
         <button className="secondaryButton" type="submit" disabled={!readable}>{labels.confirm}</button>
         {lookupError && <p className="error" role="alert">{labels.invalidKey}</p>}
-      </form>}
+      </form></details>}
       <section className="evaluationHistory" aria-label={labels.history}>
         <h4>{labels.history}</h4><p className="hint">{labels.historyHint}</p>
         {history.pending && <p role="status">{messages.runResult.loadingEvaluations}</p>}

@@ -12,10 +12,10 @@ function page(projectId: string = PROJECT.project_id): string {
 }
 
 describe('ResourcesPage guided layout', () => {
-  it('omits write access and the policy tab when deferred features are disabled', () => {
+  it('keeps native resource access while hiding deferred policy tabs', () => {
     const html = renderToStaticMarkup(<ResourcesPage csrfToken="fixture" projectId={PROJECT.project_id} deferredFeaturesEnabled={false} />)
-    expect(html).toContain('添加认证信息')
-    expect(html).not.toContain('name="connect-access"')
+    expect(html).toContain('添加连接')
+    expect(html).toContain('name="connect-access"')
     expect(html).not.toMatch(/role="tab"[^>]*>自动批准规则</)
   })
 
@@ -23,18 +23,17 @@ describe('ResourcesPage guided layout', () => {
     const html = page('')
 
     expect(html).toContain('请先在侧栏选择项目。')
-    expect(html).not.toContain('添加认证信息')
+    expect(html).not.toContain('添加连接')
   })
 
-  it('renders the single connect form with structured Redmine inputs by default', () => {
+  it('renders the single connect form with generic HTTP inputs by default', () => {
     const html = page()
 
-    expect(html).toContain('添加认证信息')
+    expect(html).toContain('添加连接')
     expect(html).toContain('系统类型')
-    expect(html).toContain('Redmine 地址')
-    expect(html).toContain('工单范围')
-    expect(html).toContain('不限（以凭据可见范围为界）')
-    expect(html).toContain('指定工单列表')
+    expect(html).toContain('HTTP API 地址')
+    expect(html).toContain('允许访问的 API 路径')
+    expect(html).toContain('认证方式')
     expect(html).toContain('访问权限')
     expect(html).toContain('只读 + 允许提议修改')
     expect(html).toContain('凭据')
@@ -85,7 +84,7 @@ describe('ResourcesPage guided layout', () => {
   it('shows the empty-state guide for the connected system list', () => {
     const html = page()
 
-    expect(html).toContain('认证信息与权限')
+    expect(html).toContain('连接与权限')
     expect(html).toContain('尚未添加配置')
   })
 

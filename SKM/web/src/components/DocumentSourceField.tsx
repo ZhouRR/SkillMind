@@ -31,7 +31,8 @@ export function DocumentSourceField({ requirement, value, onChange }: {
   const selectedDocument = documents.find((option) => option.id.toLowerCase() === selection.ids[0]?.toLowerCase())
   return (
     <fieldset className="documentSourceField" aria-describedby={helpId}>
-      <legend>{messages.workspace.resourceKind.document} · {requirement.key}{requirement.required ? '' : messages.workspace.optionalSuffix}</legend>
+      <legend>{messages.workspace.resourceKind.document}{requirement.ordinal ? ` ${requirement.ordinal}` : ""}{requirement.required ? '' : messages.workspace.optionalSuffix}</legend>
+      {requirement.guidance && <p className="hint">{requirement.guidance}</p>}
       <label>{labels.mode}
         <select
           value={mode === 'NONE' ? '' : mode}
@@ -84,6 +85,7 @@ export function DocumentSourceField({ requirement, value, onChange }: {
       </>}
       <p className="hint" id={helpId}>{selection.mode === 'ALL' ? labels.allHint : labels.freezeHint}</p>
       {value !== '' && invalid && <p className="error" role="status">{labels.invalid}</p>}
+      <details className="detailDisclosure"><summary>{messages.elements.technicalDetails}</summary><code>{requirement.key}</code></details>
       {documents.length === 0 && <p className="hint">{messages.workspace.sourceNotConfigured}</p>}
     </fieldset>
   )

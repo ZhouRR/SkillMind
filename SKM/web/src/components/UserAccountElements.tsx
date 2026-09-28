@@ -71,9 +71,9 @@ export function UserPager({ offset, count, total, limit, pending, onChange }: {
   const messages = useMessages().account
   return <div className="accountPager">
     <p role="status">{messages.page(offset, count, total)}</p>
-    <div className="inlineActions">
+    {(offset > 0 || total > limit) && <div className="inlineActions">
       <button className="secondaryButton" type="button" disabled={pending || offset === 0} onClick={() => onChange(Math.max(0, offset - limit))}>{messages.previous}</button>
       <button className="secondaryButton" type="button" disabled={pending || offset + limit >= total} onClick={() => onChange(offset + limit)}>{messages.next}</button>
-    </div>
+    </div>}
   </div>
 }
