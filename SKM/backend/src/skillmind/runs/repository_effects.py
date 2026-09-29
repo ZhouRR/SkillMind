@@ -13,6 +13,7 @@ from sqlalchemy import func, or_, select
 
 from skillmind.agent.domain import AgentEvent, AgentEventType
 from skillmind.agent.evidence import new_evidence_ref
+from skillmind.agent.postgres_native import query_identity
 from skillmind.artifacts.repository import ArtifactRepository
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.db.models import (
@@ -81,12 +82,18 @@ from skillmind.effects.outcomes import (
     effect_requires_reconciliation,
 )
 from skillmind.effects.policy_repository import EffectPolicyRepository
+from skillmind.effects.postgres_native import (
+    SQL_PRECONDITION_MESSAGE,
+    SQL_WRITE,
+    NativeSqlReceiptCommand,
+    SqlObservationValidationError,
+    native_request_checksum,
+)
 from skillmind.effects.proposal import (
     CHANGE_PROPOSE_CAPABILITY,
     proposal_checksum,
     proposal_content,
 )
-from skillmind.effects.postgres_native import NativeSqlReceiptCommand, native_request_checksum
 from skillmind.effects.reconciliation_domain import EffectReconciliationTarget
 from skillmind.effects.run_approval import has_actor_approval, run_auto_approval_actor
 from skillmind.integrations.domain import (
@@ -263,6 +270,21 @@ class EffectOperationsMixin(_RunRepositoryBase):
             )
         )
         return effect_id
+
+    async def validate_native_sql_proposal(
+        self,
+        claimed: ClaimedRun,
+        draft: ChangeProposalDraft,
+    ) -> None:
+        """Agent を止める前に SQL 候補を検査する。提案・批准・外部操作は作成しない。"""
+        self._execution_features.require_effect(draft.capability_version, draft.operation)
+        run, segment, attempt = await self._lock_claimed_execution(claimed)
+        self._validate_claimed_lease(attempt, claimed, now=datetime.now(UTC))
+        if segment is None or RunStatus(run.status) is not RunStatus.RUNNING:
+            raise LeaseValidationError("Run cannot validate a proposal in this state")
+        await self._reject_cancelled_execution(run.id)
+        await self._validate_proposal_draft(claimed, run=run, draft=draft)
+        await self._validate_evidence_refs(run.id, draft.evidence_refs)
 
     async def suspend_for_proposal(
         self,
@@ -2574,6 +2596,9 @@ class EffectOperationsMixin(_RunRepositoryBase):
     ) -> None:
         """DB 提案は同じ Run/binding の成功した read Tool 証拠に束縛し、自己申告を拒否する。"""
 
+        if draft.capability_version == SQL_WRITE:
+            await self._validate_native_sql_observation(draft, binding=binding, payload=payload)
+            return
         if draft.capability_version != DATABASE_WRITE_CAPABILITY:
             return
         evidence = (
@@ -2600,6 +2625,40 @@ class EffectOperationsMixin(_RunRepositoryBase):
             for item in evidence
         ):
             raise ChangeProposalValidationError("Database proposal requires exact read Evidence")
+
+    async def _validate_native_sql_observation(
+        self,
+        draft: ChangeProposalDraft,
+        *,
+        binding: ResourceBinding,
+        payload: dict[str, Any],
+    ) -> None:
+        """同一 Run/binding の完全な SELECT 観測だけを DML の前提として受け入れる。"""
+        identity = query_identity(payload["read_back"], binding.scope_json)
+        evidence = (
+            await self._session.scalars(
+                select(Evidence)
+                .join(ToolCall, ToolCall.id == Evidence.tool_call_id)
+                .where(
+                    Evidence.run_id == binding.run_id,
+                    Evidence.evidence_ref.in_(draft.evidence_refs),
+                    Evidence.evidence_type == "resource",
+                    Evidence.content_hash == draft.precondition["revision"],
+                    ToolCall.run_id == binding.run_id,
+                    ToolCall.integration_id == binding.integration_id,
+                    ToolCall.provider == "postgres",
+                    ToolCall.capability_version == "database.query/v1",
+                    ToolCall.status == "SUCCEEDED",
+                )
+            )
+        ).all()
+        if binding.integration_id is None or not any(
+            item.source_locator.get("query_identity") == identity
+            and item.metadata_json.get("binding_checksum") == binding.checksum
+            and item.metadata_json.get("truncated") is False
+            for item in evidence
+        ):
+            raise SqlObservationValidationError("Native SQL requires matching query Evidence")
 
     async def _require_proposal_feature(self, proposal: ChangeProposal) -> None:
         """停止した Provider の過去提案を、新批准・claim から実行させない。"""
@@ -2958,6 +3017,11 @@ class EffectOperationsMixin(_RunRepositoryBase):
             facts.append(
                 f"Controlled effect failure: {effect_error.get('code', 'effect_provider_failed')}."
                 + diagnostic_message(effect_error.get("diagnostic"))
+                + (
+                    " " + SQL_PRECONDITION_MESSAGE
+                    if effect_error.get("code") == "sql_precondition_not_met"
+                    else ""
+                )
             )
         if rejection_reason is not None:
             if outcome != "REJECTED":
@@ -3345,10 +3409,16 @@ def _effect_tool_error(
 
     return {
         "status": "error",
-        "code": "invalid_request" if code == "mcp_request_not_sent" else code,
+        "code": "invalid_request"
+        if code in {"mcp_request_not_sent", "sql_precondition_not_met"}
+        else code,
         "message": (
             "Original external write result requires reconciliation"
-            if code == UNKNOWN_EFFECT_CODE else "Controlled effect could not be completed"
-        ) + diagnostic_message(diagnostic),
+            if code == UNKNOWN_EFFECT_CODE
+            else SQL_PRECONDITION_MESSAGE
+            if code == "sql_precondition_not_met"
+            else "Controlled effect could not be completed"
+        )
+        + diagnostic_message(diagnostic),
         "retryable": retryable,
     }

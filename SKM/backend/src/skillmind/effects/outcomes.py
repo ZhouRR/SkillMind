@@ -25,6 +25,16 @@ def effect_failure_record(
 
     if not resolve_effect_capability(capability).supports_supervision(provider) or attempt_no == 0:
         return {"code": code, "retryable": retryable}
+    if (
+        capability == "database.execute/v1"
+        and provider == "postgres"
+        and attempt_no == 1
+        and previous is None
+        and code == "sql_precondition_not_met"
+    ):
+        # Provider が初回 DML 未送信・rollback 完了を証明した専用 code だけを許す。
+        # 汎用 target_stale や、過去 attempt/回执の障害には拡張しない。
+        return {"code": code, "retryable": False}
     safe = safe_mcp_diagnostic(diagnostic)
     if (capability == "mcp.call/v1" and attempt_no == 1 and code == "mcp_request_not_sent"
         and not effect_requires_reconciliation(previous) and safe is not None

@@ -11,7 +11,10 @@ import pytest
 from skillmind.agent.http_source import HttpResourceError, HttpResponse
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.effects.http_provider import HttpWriteProvider
-from skillmind.effects.postgres_native import NativeDatabaseWriteProvider
+from skillmind.effects.postgres_native import (
+    NativeDatabaseWriteProvider,
+    SqlPreconditionNotMetError,
+)
 from skillmind.effects.redmine import EffectProviderStaleError, EffectProviderTransportError
 from tests.agent.test_mcp_tools import execution
 
@@ -206,14 +209,85 @@ async def test_sql_unknown_reclaim_without_original_receipt_does_not_execute(mon
     connection.driver.execute.assert_not_awaited()
 
 
+@pytest.mark.parametrize("failure", ["changed", "truncated", "rollback", "revoke", "cancel"])
+async def test_sql_precondition_only_proves_unsent_after_successful_cleanup(monkeypatch, failure):
+    """DML 前の不一致だけを修正可能とし、rollback/撤権/取消失敗は通常保護へ渡す。"""
+    import asyncio
+
+    from skillmind.effects import postgres_native as module
+
+    connection = Connection()
+    if failure == "rollback":
+
+        async def exit_failure(self, kind, value, traceback):
+            """transaction rollback の接続エラーを模擬する。"""
+            raise OSError("fixture rollback unavailable")
+
+        monkeypatch.setattr(Connection, "__aexit__", exit_failure)
+    monkeypatch.setattr(
+        module,
+        "create_database_engine",
+        lambda *a, **kw: SimpleNamespace(connect=lambda: connection, dispose=AsyncMock()),
+    )
+    monkeypatch.setattr(
+        module,
+        "query_rows",
+        AsyncMock(
+            return_value={
+                "rows": [{"done": True}],
+                "truncated": failure == "truncated",
+            }
+        ),
+    )
+    authorize = AsyncMock()
+    if failure == "revoke":
+        authorize.side_effect = [None, PermissionError("revoked")]
+    if failure == "cancel":
+        authorize.side_effect = [None, asyncio.CancelledError()]
+    expected = {
+        "rollback": EffectProviderTransportError,
+        "revoke": PermissionError,
+        "cancel": asyncio.CancelledError,
+    }.get(failure, SqlPreconditionNotMetError)
+    with pytest.raises(expected):
+        await NativeDatabaseWriteProvider(authorize).apply(
+            sql_execution(), credential="fixture-password"
+        )
+    connection.driver.execute.assert_not_awaited()
+    assert connection.saved is None
+
+
+async def test_sql_existing_receipt_conflict_is_never_marked_unsent(monkeypatch):
+    """回执がある原操作は、初回 attempt でも未送信の訂正経路へ戻さない。"""
+    from skillmind.effects import postgres_native as module
+
+    connection = Connection({"request_checksum": "different"})
+    monkeypatch.setattr(
+        module,
+        "create_database_engine",
+        lambda *a, **kw: SimpleNamespace(connect=lambda: connection, dispose=AsyncMock()),
+    )
+    with pytest.raises(EffectProviderStaleError) as error:
+        await NativeDatabaseWriteProvider(AsyncMock()).apply(
+            sql_execution(), credential="fixture-password"
+        )
+    assert not isinstance(error.value, SqlPreconditionNotMetError)
+    connection.driver.execute.assert_not_awaited()
+
+
 @pytest.mark.parametrize("outcome", ["found", "missing", "conflict"])
 async def test_native_sql_reconciliation_uses_readonly_original_receipt(monkeypatch, outcome):
     """公開された只読照会経路で元回执を確認し、不在でも SQL を再送しない。"""
     from uuid import uuid4
+
     from skillmind.effects import postgres_native as module
-    from skillmind.effects.reconciliation_domain import EffectReconciliationInput, EffectReconciliationReference, EffectReconciliationTarget
-    from skillmind.effects.reconciliation_service import EffectReconciliationService
+    from skillmind.effects.reconciliation_domain import (
+        EffectReconciliationInput,
+        EffectReconciliationReference,
+        EffectReconciliationTarget,
+    )
     from skillmind.effects.reconciliation_requests import reconciliation_receipt_json
+    from skillmind.effects.reconciliation_service import EffectReconciliationService
     original = sql_execution()
     payload = original.changes[0]["value"]
     command = module.NativeSqlReceiptCommand(original.effect_execution_id, original.project_id, original.run_id, original.integration_id,

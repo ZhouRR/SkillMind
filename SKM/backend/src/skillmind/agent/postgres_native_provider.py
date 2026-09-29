@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from skillmind.agent.database_errors import classify_database_error
 from skillmind.agent.evidence import EvidenceDraft
-from skillmind.agent.postgres_native import NativePostgresSource
+from skillmind.agent.postgres_native import NativePostgresSource, query_identity
 from skillmind.agent.resource_files import request_from_file, require_file_access, store_response
 from skillmind.agent.run_binding import (
     BoundRunResource,
@@ -129,10 +129,15 @@ class NativeDatabaseProvider:
                     evidence_type="resource",
                     source_uri=f"postgres-query://{context.tool.integration_id}/{context.tool_call_id}",
                     source_locator={
-                        "request_hash": "sha256:" + sha256_hex(canonical_json(request))
+                        "request_hash": "sha256:" + sha256_hex(canonical_json(request)),
+                        "query_identity": query_identity(request, bound.scope),
                     },
                     content_hash=file["content_hash"],
-                    metadata={"file": file, "truncated": result["truncated"]},
+                    metadata={
+                        "file": file,
+                        "truncated": result["truncated"],
+                        "binding_checksum": bound.checksum,
+                    },
                 ),
             ),
         )

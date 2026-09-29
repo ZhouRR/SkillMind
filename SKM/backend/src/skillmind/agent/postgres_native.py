@@ -12,6 +12,7 @@ from pglast.stream import RawStream
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from skillmind.agent.postgres_source import create_database_engine
+from skillmind.core.hashing import canonical_json, sha256_hex
 
 MAX_QUERY_BYTES = 16 * 1024 * 1024
 
@@ -85,6 +86,23 @@ def native_statement(
 
     check(tree(skip_none=True))
     return str(RawStream()(tree)), tuple(parameters), str(operation)
+
+
+def query_identity(request: Mapping[str, Any], scope: Mapping[str, Any]) -> str:
+    """表示目的や file 配送方式を除き、同じ SELECT・parameter・上限を一意に照合する。"""
+    sql, parameters, _ = native_statement(request, scope, write=False)
+    limit = request.get("limit", 1000)
+    if type(limit) is not int or not 1 <= limit <= 10000:
+        raise ValueError("Query limit must be between 1 and 10000")
+    return "sha256:" + sha256_hex(
+        canonical_json(
+            {
+                "sql": sql,
+                "parameters": list(parameters),
+                "limit": limit,
+            }
+        )
+    )
 
 
 async def query_rows(

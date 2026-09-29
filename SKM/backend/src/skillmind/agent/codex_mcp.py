@@ -128,6 +128,21 @@ class CodexToolBridge:
                 )
             )
             if name in self.runtime.mcp.deferred_tool_names:
+                validate = self.runtime.mcp.on_deferred_validation
+                if validate is not None:
+                    validation_error = await validate(name, arguments, call_id, self.session_id)
+                    if validation_error is not None:
+                        if self.runtime.mcp.on_tool_denied is not None:
+                            await self.runtime.mcp.on_tool_denied(
+                                name, arguments, call_id, self.session_id,
+                                str(validation_error["message"]),
+                            )
+                        await self.events.put(
+                            (AgentEventType.TOOL_FAILED, {"tool_use_id": call_id})
+                        )
+                        return CallToolResult(content=[TextContent(
+                            type="text", text=json.dumps(validation_error, ensure_ascii=False),
+                        )], isError=True)
                 # Provider を呼ばない。原要求を保存してから native turn を停止し、Worker が
                 # 通常の parse/transaction で Interaction/Proposal を作成する。
                 await self._on_deferred(name, arguments, call_id, self.session_id)

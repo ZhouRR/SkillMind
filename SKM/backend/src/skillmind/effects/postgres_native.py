@@ -31,6 +31,31 @@ from skillmind.effects.redmine import EffectProviderStaleError, EffectProviderTr
 SQL_WRITE = "database.execute/v1"
 SQL_VERSION = "postgres-native/v1"
 
+SQL_OBSERVATION_MESSAGE = (
+    "No matching SQL observation was found. Before proposing, call database.query on the same "
+    "resource with the exact read_back SELECT, parameters and limit. Use its non-truncated "
+    "response file content_hash as precondition.revision and include its evidence_refs. "
+    "For INSERT, observe the target row's absence. Schema, UUID and time queries are not target "
+    "observations. No write was submitted; correct this proposal."
+)
+SQL_PRECONDITION_MESSAGE = (
+    "The target query result changed before SQL execution; no write was sent. Read the same "
+    "read_back SELECT with the same parameters and limit again, reassess the intended change, "
+    "and submit a corrected proposal using that observation. Do not retry the unchanged proposal."
+)
+
+
+class SqlObservationValidationError(ChangeProposalValidationError):
+    """提案作成前に、別 query の hash や未確認の Evidence を修正可能として拒否する。"""
+
+
+class SqlPreconditionNotMetError(EffectProviderStaleError):
+    """初回 DML 未送信と transaction の終了を確認した前提不一致だけを表す。"""
+
+
+class _SqlObservationChanged(Exception):
+    """読取段階の不一致を rollback 完了後まで外へ公開しない内部 signal。"""
+
 
 def sql_payload(
     operation: str,
@@ -188,7 +213,7 @@ class NativeDatabaseWriteProvider:
                         or "sha256:" + sha256_hex(canonical_json(before))
                         != execution.precondition["revision"]
                     ):
-                        raise EffectProviderStaleError("Original SQL observation changed")
+                        raise _SqlObservationChanged()
                     sql, parameters, _ = native_statement(
                         payload["statement"], execution.integration_scope, write=True
                     )
@@ -229,6 +254,11 @@ class NativeDatabaseWriteProvider:
                 if credential in canonical_json([before, after]):
                     raise EffectProviderStaleError("SQL receipt contains connection credentials")
                 await self._authorize(execution, credential)
+        except _SqlObservationChanged:
+            # with の rollback が失敗した場合はこの分岐に来ない。旧回执の不一致や
+            # DML/commit 後の障害を「未送信」に変えず、撤権も先に確認する。
+            await self._authorize(execution, credential)
+            raise SqlPreconditionNotMetError(SQL_PRECONDITION_MESSAGE) from None
         except (SQLAlchemyError, PostgresError, OSError, TimeoutError):
             raise EffectProviderTransportError("sql_result_unconfirmed", retryable=False) from None
         finally:

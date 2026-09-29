@@ -122,6 +122,7 @@ from skillmind.storage.factory import (
 from skillmind.worker.effects import ApprovedEffectExecutor
 from skillmind.worker.executor import AgentRunExecutor, RunExecutor
 from skillmind.worker.inline_effects import InlineEffectCoordinator
+from skillmind.worker.proposal_preflight import ProposalPreflight
 from skillmind.worker.tool_authority import require_tool_authority
 
 logger = logging.getLogger(__name__)
@@ -305,6 +306,10 @@ async def startup(ctx: dict[str, Any], *, maintenance_only: bool = False) -> Non
                 ctx["database_session_factory"], claimed_run=authority.claimed,
                 authority_check=authority.require_active,
             ),
+        )
+        preflight = ProposalPreflight(ctx["run_service"], context, authority)
+        runtime = replace(
+            runtime, mcp=replace(runtime.mcp, on_deferred_validation=preflight.validate)
         )
         executor = ctx.get("effect_executor")
         if (settings.agent_sdk == "codex" and getattr(settings, "inline_effects_enabled", False)

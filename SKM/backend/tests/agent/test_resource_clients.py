@@ -13,7 +13,7 @@ import pytest
 
 from skillmind.agent.http_provider import HttpReadProvider
 from skillmind.agent.http_source import HttpResourceError, HttpResourceSource
-from skillmind.agent.postgres_native import native_statement
+from skillmind.agent.postgres_native import native_statement, query_identity
 from skillmind.agent.proposal_files import expand_proposal_file
 from skillmind.agent.resource_files import ResourceFileProvider, request_from_file
 from skillmind.agent.tool_gateway import ProviderToolResult, ToolProviderError
@@ -347,3 +347,44 @@ def test_native_upsert_cannot_bypass_update_permission():
     with pytest.raises(ValueError, match="UPDATE permission"):
         native_statement(statement, {"statements": ["SELECT", "INSERT"]}, write=True)
     assert native_statement(statement, {"statements": ["SELECT", "INSERT", "UPDATE"]}, write=True)[2] == "INSERT"
+
+
+@pytest.mark.parametrize("truncated", [False, True])
+async def test_native_query_evidence_preserves_exact_request_and_binding(tmp_path, truncated):
+    """配送方法や purpose を除いた query identity と元 binding を監査へ保存する。"""
+    from skillmind.agent.postgres_native_provider import NativeDatabaseProvider
+
+    context = file_context(tmp_path, "database.query/v1", "postgres")
+    request = {"sql": "SELECT status FROM public.items WHERE id=$1", "parameters": [1], "limit": 2}
+    result = {"rows": [], "truncated": truncated}
+    bound = SimpleNamespace(
+        integration=SimpleNamespace(config={}),
+        scope={"statements": ["SELECT"]},
+        checksum="sha256:" + "a" * 64,
+    )
+
+    async def read(*args, authorize):
+        """外部 I/O だけ省略し、Source の公開前権限確認を維持する。"""
+        await authorize()
+        return result
+
+    source = SimpleNamespace(read=AsyncMock(side_effect=read))
+    provider = NativeDatabaseProvider(Mock(), source=source, secret_resolver=Mock())
+    provider._bound = AsyncMock(return_value=(bound, "fixture-password"))
+    raw = json.dumps({**request, "purpose": "Check absence"}).encode()
+    (context.workspace.cwd / "query.json").write_bytes(raw)
+    response = await provider.execute(
+        context,
+        {
+            "request_file": "workspace/query.json",
+            "expected_hash": "sha256:" + sha256_hex(raw),
+            "response_mode": "file",
+        },
+    )
+    evidence = response.evidence[0]
+    assert evidence.source_locator["query_identity"] == query_identity(request, bound.scope)
+    assert evidence.metadata["binding_checksum"] == bound.checksum
+    assert evidence.metadata["truncated"] is truncated
+    assert evidence.content_hash == response.response["file"]["content_hash"]
+    assert evidence.content_hash == "sha256:" + sha256_hex(canonical_json(result))
+    assert provider._bound.await_count == 2

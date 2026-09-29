@@ -43,6 +43,7 @@ Excel→Markdown 的 `.xlsx` 路径使用 `excel-styles/v2`：同一文档保留
 - Git：`repository.workspace/v1` 将授权 UTF-8 文件放到可编辑目录；`prepare_commit` 按本地文件哈希准备提案，不要求模型重新输出正文。提交仍检查分支、路径、原 revision 和回读；本地编辑不会自动推送。
 - MCP：使用发现并冻结的原生参数 Schema；读调用支持文件输入/输出，修改调用仍经原 Effect、批准和原操作 ID。文件方式不改变工具权限或桌面占用规则。
 - PostgreSQL：新连接使用 `database.query/v1` 和 `database.execute/v1`，表／列权限由原数据库账号决定，不再维护平台表／列 DSL。支持单条 SELECT 与批准的 INSERT/UPDATE/DELETE、JOIN/CTE 和 `$1` 参数；不开放 DDL、事务控制或多语句。写入、必要回读与既有 `skillmind_effects.execution_receipts` 在同一事务提交；未知结果只核对原回执，不重发 SQL。
+- SQL 写入前，先对同一资源执行与 `read_back` 相同的 SELECT、参数和行数上限，将完整响应文件的 hash 和 Evidence 引用作为提案前提；INSERT 也要先读取目标行不存在的结果，不能引用 Schema、UUID 或时间查询的 hash。提案保存前在当前 Agent 会话中返回可修正诊断。实际执行时若确认首次 DML 尚未发送且事务已退出，前提变化允许重新读取后提交新提案；历史尝试、回执冲突及结果未知仍按原操作核对，不自动重放。
 - HTTP API：替代 Redmine 专用入口，设置基础地址、路径范围、方法和 Bearer/API Key header；认证值仍保存在 Secret。读取支持 GET/HEAD，修改支持批准后的 POST/PUT/PATCH/DELETE，并指定 GET 回读与结果条件。禁止改目标域和自动跟随重定向；超时、202 或未确认回读不算完成，也不自动重发。
 
 迁移 `0059_native_resource_clients` 沿用 PostgreSQL 原账号和凭据，旧写连接转为 SELECT/INSERT/UPDATE/DELETE，旧只读连接保留 SELECT；不执行数据库 GRANT。Redmine 转为 HTTP，原 issue 范围和 PUT 权限保留，凭据正文不变。旧默认绑定停用，原 Run 快照不改写；部署前结束在途任务，新流程重新解析 Skill 并使用新绑定。HTTP 结果未知暂不提供通用自动核对协议，须保留原操作事实。

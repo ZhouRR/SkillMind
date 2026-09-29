@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
+
 from skillmind.effects.domain import (
     ClaimedEffectExecution,
     EffectExecutionStatus,
@@ -15,6 +16,7 @@ from skillmind.effects.domain import (
     EffectProviderResult,
     StoredEffectExecution,
 )
+from skillmind.effects.postgres_native import SqlPreconditionNotMetError
 from skillmind.effects.provider import (
     EffectProviderDefinition,
     EffectProviderRegistry,
@@ -209,6 +211,12 @@ async def test_immediate_handoff_still_claims_and_never_applies_unclaimable_effe
 @pytest.mark.parametrize(
     ("error", "status", "code", "retryable"),
     [
+        (
+            SqlPreconditionNotMetError("unsent"),
+            EffectExecutionStatus.STALE,
+            "sql_precondition_not_met",
+            False,
+        ),
         (EffectProviderStaleError("stale"), EffectExecutionStatus.STALE, "target_stale", False),
         (
             EffectProviderVerificationError("mismatch"),

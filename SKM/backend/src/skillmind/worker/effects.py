@@ -17,6 +17,7 @@ from skillmind.effects.domain import (
     EffectLeaseValidationError,
 )
 from skillmind.effects.mcp_diagnostics import McpEffectFailure
+from skillmind.effects.postgres_native import SqlPreconditionNotMetError
 from skillmind.effects.provider import EffectProviderRegistry
 from skillmind.effects.redmine import (
     EffectProviderStaleError,
@@ -197,6 +198,12 @@ class ApprovedEffectExecutor:
             result = await definition.implementation.apply(
                 claimed,
                 credential=credential,
+            )
+        except SqlPreconditionNotMetError:
+            failure = EffectFailure(
+                status=EffectExecutionStatus.STALE,
+                code="sql_precondition_not_met",
+                retryable=False,
             )
         except EffectProviderStaleError:
             failure = EffectFailure(

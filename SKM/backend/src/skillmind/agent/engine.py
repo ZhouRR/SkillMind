@@ -114,6 +114,9 @@ class RunMcpRuntime:
     deferred_tool_names: frozenset[str] = frozenset()
     on_tool_attempt: Callable[[], None] | None = None
     on_inline_effect: Callable[[Mapping[str, Any], str, str], Awaitable[InlineEffectResult | None]] | None = None
+    on_deferred_validation: (
+        Callable[[str, Mapping[str, Any], str, str], Awaitable[dict[str, Any] | None]] | None
+    ) = None
 
 
 def _default_client_factory(options: ClaudeAgentOptions) -> ClaudeClient:
@@ -597,6 +600,9 @@ class ClaudeAgentSdkEngine:
             on_tool_denied=on_tool_denied,
             deferred_tool_names=deferred_tool_names,
             on_tool_attempt=runtime.on_tool_attempt if isinstance(runtime, RunMcpRuntime) else None,
+            on_deferred_validation=(
+                runtime.on_deferred_validation if isinstance(runtime, RunMcpRuntime) else None
+            ),
         )
 
     async def _run(

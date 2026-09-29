@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import pytest
 from jsonschema import Draft202012Validator
+
 from skillmind.db.models import EffectExecution, RunEvent, RunSegment, ToolCall
 from skillmind.effects.domain import (
     EffectEvidenceDraft,
@@ -214,7 +215,9 @@ def test_old_uncertain_code_is_preserved_when_recovery_stops():
     }
 
 
-@pytest.mark.parametrize("capability", ["database.write", "document.write", "mcp.call"])
+@pytest.mark.parametrize(
+    "capability", ["database.write", "database.execute", "document.write", "mcp.call"]
+)
 def test_unknown_tool_record_matches_public_error_contract(capability):
     """実保存用 Tool error を公開 schema で検証し、未登録 code を持ち出さない。"""
     schema_path = (
@@ -293,3 +296,63 @@ async def test_confirmed_unsent_mcp_failure_continues_with_diagnostic_for_skill_
     segment = next(row for row in added if isinstance(row, RunSegment))
     assert "effect_result" not in segment.checkpoint_json
     assert "desktop_busy" in segment.checkpoint_json["confirmed_facts"][-1]
+
+
+@pytest.mark.parametrize(
+    "attempt,previous,provider",
+    [
+        (1, None, "postgres"),
+        (2, None, "postgres"),
+        (1, {"code": "effect_result_unknown"}, "postgres"),
+        (1, {"code": "sql_result_unconfirmed"}, "postgres"),
+        (1, None, "other"),
+    ],
+)
+def test_only_first_confirmed_unsent_sql_failure_can_be_corrected(attempt, previous, provider):
+    """専用分類でも過去の不明操作や別 Provider を未送信へ上書きしない。"""
+    result = effect_failure_record(
+        capability="database.execute/v1",
+        provider=provider,
+        attempt_no=attempt,
+        code="sql_precondition_not_met",
+        retryable=False,
+        previous=previous,
+    )
+    assert result["code"] == (
+        "sql_precondition_not_met"
+        if attempt == 1 and previous is None and provider == "postgres"
+        else "effect_result_unknown"
+    )
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+async def test_unsent_sql_conflict_preserves_failure_and_resumes_only_active_run(cancelled):
+    """原失敗を監査へ残し、取消以外は原文脈に訂正可能な結果を渡す。"""
+    h = harness(capability="database.execute/v1", cancelled=cancelled)
+    h.execution.provider = "postgres"
+    del h.repository._next_effect_segment
+    h.proposal.checkpoint_json = {"summary": "Prepared inputs", "evidence_refs": []}
+    h.proposal.continuation_mode = "RESUME"
+    await h.repository.finalize_effect_execution(
+        h.claimed,
+        result=None,
+        failure=EffectFailure(EffectExecutionStatus.STALE, "sql_precondition_not_met", False),
+        duration_ms=1,
+    )
+    assert h.execution.status == "STALE" and h.proposal.status == "STALE"
+    assert h.tool.status == "FAILED" and h.tool.error_json["code"] == "invalid_request"
+    assert "no write was sent" in h.tool.error_json["message"]
+    assert h.run.status == ("CANCELLED" if cancelled else "QUEUED")
+    added = [row for call in h.session.add_all.call_args_list for row in call.args[0]]
+    segments = [row for row in added if isinstance(row, RunSegment)]
+    assert len(segments) == (0 if cancelled else 1)
+    if segments:
+        assert "effect_result" not in segments[0].checkpoint_json
+        assert "no write was sent" in segments[0].checkpoint_json["confirmed_facts"][-1]
+    schema = json.loads(
+        (
+            Path(__file__).resolve().parents[3]
+            / "contracts/tools/database.execute/v1/error.schema.json"
+        ).read_text()
+    )
+    Draft202012Validator(schema).validate(h.tool.error_json)

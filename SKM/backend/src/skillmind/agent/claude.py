@@ -31,6 +31,9 @@ STRUCTURED_OUTPUT_TOOL_NAME = "StructuredOutput"
 
 ToolAuthorizationCallback = Callable[[str, Mapping[str, Any], str, str], Awaitable[None]]
 ToolDenialCallback = Callable[[str, Mapping[str, Any], str, str, str], Awaitable[None]]
+DeferredValidationCallback = Callable[
+    [str, Mapping[str, Any], str, str], Awaitable[dict[str, Any] | None]
+]
 _AGENT_ENVIRONMENT_KEYS = (
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_BASE_URL",
@@ -132,6 +135,7 @@ def build_claude_agent_options(
     on_tool_authorized: ToolAuthorizationCallback | None = None,
     on_tool_denied: ToolDenialCallback | None = None,
     deferred_tool_names: frozenset[str] = frozenset(),
+    on_deferred_validation: DeferredValidationCallback | None = None,
     on_tool_attempt: Callable[[], None] | None = None,
 ) -> ClaudeAgentOptions:
     """Run snapshot を SDK の最小権限 option に変換する。"""
@@ -226,6 +230,39 @@ def build_claude_agent_options(
             )
         )
         if tool_name in deferred_tool_names and not resolved_proposal:
+            if on_deferred_validation is not None:
+                tool_use_id = input_data.get("tool_use_id") or _tool_use_id
+                session_id = input_data.get("session_id")
+                if not isinstance(tool_use_id, str) or not isinstance(session_id, str):
+                    return {
+                        "hookSpecificOutput": {
+                            "hookEventName": "PreToolUse",
+                            "permissionDecision": "deny",
+                            "permissionDecisionReason": "Missing Skillmind invocation identity",
+                        }
+                    }
+                validation_error = await on_deferred_validation(
+                    tool_name,
+                    cast(dict[str, Any], input_data.get("tool_input", {})),
+                    tool_use_id,
+                    session_id,
+                )
+                if validation_error is not None:
+                    if on_tool_denied is not None:
+                        await on_tool_denied(
+                            tool_name,
+                            cast(dict[str, Any], input_data.get("tool_input", {})),
+                            tool_use_id,
+                            session_id,
+                            str(validation_error["message"]),
+                        )
+                    return {
+                        "hookSpecificOutput": {
+                            "hookEventName": "PreToolUse",
+                            "permissionDecision": "deny",
+                            "permissionDecisionReason": str(validation_error["message"]),
+                        }
+                    }
             # Interaction 等の control Tool は Provider を実行せず、SDK Result に検証済み入力を
             # 引き渡して Worker transaction で待機状態へ確定する。
             return {
