@@ -1,4 +1,5 @@
 import type { RunEventRecord } from '../api'
+import { hasAppendOnlyPrefix } from './runEventBuffer'
 
 /** Agent conversation に表示する user task の安全な要約。任意 task に依存しない汎用形状。 */
 export interface AgentPromptSummary {
@@ -112,7 +113,7 @@ export function createAgentStreamProjector(): (events: RunEventRecord[]) => Agen
   return (events) => {
     if (events === previous) return view
     let incremental = events.length >= previous.length
-      && previous.every((event, index) => events[index] === event)
+      && (hasAppendOnlyPrefix(previous, events) || previous.every((event, index) => events[index] === event))
     if (incremental) {
       let sequence = lastSequence
       for (let index = previous.length; index < events.length; index += 1) {

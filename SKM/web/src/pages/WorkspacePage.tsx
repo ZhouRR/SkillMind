@@ -27,7 +27,7 @@ import { useMessages } from '../i18n'
 import type { UiMessages } from '../lib/i18n/messages'
 import { type AgentPromptSummary } from '../lib/agentStream'
 import { routeHref } from '../lib/routing'
-import { appendOrderedEvent } from '../lib/runEventBuffer'
+import { appendOrderedEvents, createAuditEventProjector, createEventBatcher } from '../lib/runEventBuffer'
 import { formatLocalTimestamp } from '../lib/presentation'
 import { applicableRunSnapshot } from '../lib/runReplay'
 import { applyInteractionSnapshot, interactionAccessFailure, interactionFailure, sameInteractionIdentity } from '../lib/interactionResponse'
@@ -128,10 +128,8 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
   function ownsSession(): boolean {
     return mounted.current && currentSessionIdentity.current === sessionIdentity
   }
-  const auditEvents = useMemo(
-    () => events.filter((event) => event.event_type !== 'TEXT_DELTA'),
-    [events],
-  )
+  const auditProjector = useMemo(() => createAuditEventProjector<RunEventRecord>(), [])
+  const auditEvents = useMemo(() => auditProjector(events), [auditProjector, events])
   const selectedTask = useMemo(
     () => tasksLoaded ? tasks.find((task) => taskCatalogId(task) === selectedTaskId) ?? null : null,
     [tasks, tasksLoaded, selectedTaskId],
@@ -254,15 +252,24 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
     const after = auditEvents.at(-1)?.sequence ?? 0
     let subscription: ReturnType<typeof subscribeRunEvents> | null = null
     let active = true
+    const ownsStream = () => mounted.current && active && currentRunIdentity.current === runIdentity
+    const batcher = createEventBatcher<RunEventRecord>((batch) => {
+      if (!ownsStream()) return
+      setUiState('streaming')
+      // React が updater を遅延実行しても、以前の Run/Session の event を混ぜない。
+      setEvents((current) => mounted.current && currentRunIdentity.current === runIdentity
+        ? appendOrderedEvents(current, batch) : current)
+    })
     subscription = subscribeRunEvents(
       run.run_id,
       after,
       (incoming) => {
-        if (!mounted.current || !active || currentRunIdentity.current !== runIdentity) return
-        setEvents((current) => appendEvent(current, incoming))
-        setUiState('streaming')
+        if (!ownsStream()) return
+        batcher.push(incoming)
         const snapshot = applicableRunSnapshot(incoming, run.row_version)
         if (snapshot !== null) {
+          // status 更新で effect が再作成される前に、完成本文と snapshot まで確定する。
+          batcher.flush()
           setRun((current) => current && snapshot.rowVersion >= current.row_version
             ? { ...current, status: snapshot.status, row_version: snapshot.rowVersion }
             : current)
@@ -274,7 +281,13 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
       },
       () => { if (mounted.current && active && currentRunIdentity.current === runIdentity) setUiState('reconnecting') },
     )
-    return () => { active = false; subscription?.close() }
+    return () => {
+      // 同じ Run の再接続では保留分を保存する。unmount/対象切替後は旧所有者を破棄する。
+      if (ownsStream()) batcher.flush()
+      active = false
+      batcher.dispose()
+      subscription?.close()
+    }
     // Subscription の再作成は Run identity と終態化だけに限定し、event 追加による再接続を防ぐ。
   }, [run?.run_id, run?.status, selectionRevision, runIdentity])
 
@@ -684,11 +697,6 @@ function ObservationTabButton({ current, tab, onSelect, children }: {
       {children}
     </button>
   )
-}
-
-/** Duplicate replay を sequence で排除し、常に昇順を保つ。 */
-function appendEvent(current: RunEventRecord[], incoming: RunEventRecord): RunEventRecord[] {
-  return appendOrderedEvent(current, incoming)
 }
 
 /** SSE UI state と terminal status から利用者向け表示を返す。 */

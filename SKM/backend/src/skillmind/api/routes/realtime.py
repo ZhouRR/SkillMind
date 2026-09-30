@@ -91,6 +91,7 @@ async def run_events(
         realtime_sequence = after
         last_activity = monotonic()
         last_database_poll = 0.0
+        replay_pending = True
         redis: Redis = request.app.state.redis
         pubsub = redis.pubsub()
         realtime_available = True
@@ -105,10 +106,11 @@ async def run_events(
             while not await request.is_disconnected():
                 events = []
                 polled = False
-                if monotonic() - last_database_poll >= 1:
+                if replay_pending or monotonic() - last_database_poll >= 1:
                     events = await service.list_events(run_id, after=persisted_sequence)
                     last_database_poll = monotonic()
                     polled = True
+                    replay_pending = bool(events)
                 for event in events:
                     persisted_sequence = event.sequence
                     last_activity = monotonic()
@@ -138,6 +140,13 @@ async def run_events(
                 if run_finished and polled and not events:
                     # 終態 event を配信し切った後は stream を閉じ、DB polling を止める。
                     return
+
+                if replay_pending:
+                    # 各 page は repository の 100 件上限で有界。切断確認と協調 yield は
+                    # 続けるが、backlog に idle polling/Redis 待機を挟まない。
+                    # DB replay が追い付くまで新しい一時 delta を先行させない。
+                    await asyncio.sleep(0)
+                    continue
 
                 message = None
                 if realtime_available:
