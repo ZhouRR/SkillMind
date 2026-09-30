@@ -10,6 +10,7 @@ INFO JSON 日志使用 `run.performance.` 前缀。实现入口为[计时器](..
 | --- | --- |
 | `history_query` / `detail_query` | 履历/详情读取与 DTO 投影 |
 | `prepare` | Context 准备和 Brief 冻结 |
+| `catalog_prepare` | 新建 Codex client 前的配置/catalog 准备（含缓存核验或 discovery），不含 SDK 启动 |
 | `engine_total` | engine 消费、工具、持久化、校验和 cleanup |
 | `engine_wait` | 等待 engine event 的累计时间，含 SDK/模型/工具等待 |
 | `event_persist` / `realtime_publish` | 持久事件保存 / 即时文字通知 |
@@ -43,6 +44,8 @@ INFO JSON 日志使用 `run.performance.` 前缀。实现入口为[计时器](..
 
 Codex Worker 对同一 Run 的确认自动批准续行，可在一个有限 job 中复用 SDK 进程。每个 Attempt 仍有新 lease、Gateway 和秘密 MCP URL，原 Segment/审批/回读/Outbox 不变。旧 native turn 终态已保存、thread 已 unsubscribe 后才复用；不重放未确认操作。至多连续五段，无法为下一段预留原完整时间、人工等待、非 APPLIED 或竞争认领时退回原 Queue。`sdk_start` 可用于观察进程启动次数；本优化减少重建，不等于生产 inline 回执或减少每段的模型判断。
 
-SDK 生命周期还分别记录 `sdk_start`、`sdk_thread`、`sdk_turn_start`；`sdk_reuse` 的 `status` 区分 `new` / `reused`，不包含正文。它们属于 engine 等待内的子区间，不能与 `engine_wait` 重复相加。暖续行保留原 Segment/Attempt 和每步心跳，仅减少进程启动；不把一次复用写成少一次模型决策。
+SDK 生命周期还分别记录 `catalog_prepare`、`sdk_start`、`sdk_thread`、`sdk_turn_start`；`catalog_prepare` 只在新建 client 时、`sdk_start` 之前计时，准备失败或取消也记录已等待区间，暖复用不重复记录。`sdk_reuse` 的 `status` 区分 `new` / `reused`，不包含正文。它们属于 engine 等待内的子区间，不能与 `engine_wait` 重复相加。暖续行保留原 Segment/Attempt 和每步心跳，仅减少进程启动；不把一次复用写成少一次模型决策。
+
+新建 client 仍核验固定 CLI 的版本/checksum、runtime/home 与生成的 catalog 文件。进程内只缓存成功的 bundled catalog 派生字节（最多 32 项、每项 1 MiB），按 CLI 文件身份、版本、model、effort 和工具策略隔离；不缓存远端 discovery 或失败，不共享 client、权限或 MCP endpoint。同 key 的首次准备短暂共享等待，不同 key 不串行；等待超时或并发占满时退回原 discovery，不新增拒绝。缓存命中仍属于 `catalog_prepare`，局部回归不代表生产耗时收益。
 
 直接回执试运行时，比较相同业务下的 `SESSION_STARTED`/`Segment` 数、模型调用间隔及 `EFFECT_APPLIED` 的 `delivery: INLINE`，同时核对 Proposal/Approval/Effect/Evidence 未减少。SDK 进程复用和一次工具内回执是不同机制。开关关闭时保留原运行路径；没有真实模型、桌面和生产事务验收前，不把局部测试通过写成实测提速。
