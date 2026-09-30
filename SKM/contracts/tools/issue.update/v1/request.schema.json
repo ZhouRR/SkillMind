@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.skillmind.local/tools/issue.update/v1/request.schema.json",
   "title": "issue.update/v1 request",
+  "description": "Legacy issue.update/v1 only when explicitly authorized; generic HTTP resources use http.write/v1 instead. Through change.propose/v1 use operation=update (or the exact legacy frozen intent operation), target.locator=the observed numeric issue ID as a string, precondition.revision=issue.read response issue.updated_at and its evidence_refs. Each change is SET /fields/<authorized-field-key> with the intended value; custom fields use /fields/custom_field.<numeric-id>. verification is READ_BACK over exactly those changed paths and may be omitted. Do not use raw Redmine request bodies, APPEND or comments. This effect does not grant additional issue or field access.",
   "type": "object",
   "additionalProperties": false,
   "required": ["target_locator", "changes", "expected_revision", "idempotency_key"],

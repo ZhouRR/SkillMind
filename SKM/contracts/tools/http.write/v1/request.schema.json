@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "description": "Approved HTTP effect only. change.propose: operation is POST/PUT/PATCH/DELETE; target.locator is the relative API path; one SET /request value contains request {method,path,query?,headers?,body?}, read_back {method:GET,path,query?,headers?}, checks [{pointer,equals}]. precondition.revision is the observed GET response file content_hash. No automatic mutation retry; 202 is not completion.",
+  "description": "http.write/v1 is an approved effect through change.propose/v1. operation=POST/PUT/PATCH/DELETE must match request.method; target.locator must equal request.path, a relative API path, never a full URL. Exactly one SET /request value={request:{method,path,query?,headers?,body?},read_back:{method:GET,path,query?,headers?},checks:[{pointer,equals}]}. First observe the same read_back GET and copy response.file.content_hash into precondition.revision, with its evidence_refs. The GET is repeated before and after the mutation; it must succeed before writing, so do not use absent or an expected 404 as a precondition. checks point into the parsed GET JSON body (for example /item/status), not the tool response envelope, HTTP status, headers or file metadata. verification is READ_BACK with paths=[/request] and may be omitted. Use only configured paths/methods and non-secret allowed headers; credentials are platform supplied. No automatic mutation retry; 202 is not completion and unknown outcomes are never resent.",
   "properties": {
     "request": {
       "type": "object",

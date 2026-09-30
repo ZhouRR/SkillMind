@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.skillmind.local/tools/database.write/v1/request.schema.json",
   "title": "database.write/v1 approved payload",
-  "description": "Effect-only payload. Agent uses change.propose/v1: target.locator=table, operation, one /row SET value={key,values,expected}, precondition.revision from full-row database.read evidence or absent; verification READ_BACK /row. Never a directly callable Agent Tool.",
+  "description": "Legacy database.write/v1 only when explicitly authorized; native SQL resources use database.execute/v1 instead. Through change.propose/v1 use target.locator=schema.table, operation=INSERT/UPDATE and exactly one /row SET value={key,values,expected}. key contains the complete primary key; values contains only intended writable columns (omit generated/identity columns from values only). For INSERT first observe absence, then expected=null and precondition.revision=absent. For UPDATE copy the complete observed row into expected, including all primary-key, generated/identity and null-valued fields; use its row_hashes entry as precondition.revision, not the whole response content_hash. Include original read Evidence. verification is READ_BACK with paths=[/row] and may be omitted. This is an effect, never a directly callable Agent Tool.",
   "type": "object",
   "additionalProperties": false,
   "required": [

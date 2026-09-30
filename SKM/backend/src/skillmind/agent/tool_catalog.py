@@ -115,7 +115,7 @@ def _read_tool_definitions(
             "This only excludes other SKM Runs at the same endpoint; "
             "external exclusivity is not verified. "
             "Does not start an app or provide unobserved environment/build configuration. "
-            + str(contracts.load("tools/mcp.call/v1/request.schema.json")["description"]),
+            "Write calls use the mcp.call/v1 proposal format documented on change.propose/v1.",
         ),
         (
             "mcp.query/v1",
@@ -182,19 +182,24 @@ def _read_tool_definitions(
                 )
             )
     if native_database_provider is not None:
-        definitions.append(_tool_definition(contracts, sequence_safe=True, capability="database.query/v1",
+        definitions.append(_tool_definition(
+            contracts, sequence_safe=True, capability="database.query/v1",
             description=(
                 'Execute one native PostgreSQL SELECT with positional $1 parameters using the '
-                'bound database account. JOIN/CTE/schema queries are supported. For date/UUID/JSON string parameters use $1::text::type. Complete bounded '
+                'bound database account. JOIN/CTE/schema queries are supported. Parameters are '
+                'JSON scalar values; use explicit SQL casts when needed (for example '
+                '$1::text::uuid or $1::text::jsonb). Complete bounded '
                 'results are saved as a local JSON file; inspect rows with workspace tools. '
                 'Mutating SQL requires database.execute/v1 approval. Database roles enforce '
                 'table/column access.'
             ),
             providers={"postgres": native_database_provider}))
     if http_provider is not None:
-        definitions.append(_tool_definition(contracts, sequence_safe=True, capability="http.read/v1",
+        definitions.append(_tool_definition(
+            contracts, sequence_safe=True, capability="http.read/v1",
             description=(
-                'Request GET/HEAD from the bound HTTP API using a relative path. Complete '
+                'Request GET/HEAD from the bound HTTP API using a relative path. Tool success '
+                'does not imply HTTP success: inspect http_status. Complete '
                 'response bytes are saved as a Run file; read them with workspace tools. '
                 'Mutations require http.write/v1 approval. Never supply credentials or a full '
                 'URL.'
@@ -218,7 +223,8 @@ def _read_tool_definitions(
                 'request_file/expected_hash plus evidence_refs; remote updates still require '
                 'approval and read-back.'
             ),
-            providers={"git": RepositoryWorkspaceProvider(repository_source)}, minimum_execution_profile="SUPERVISED"))
+            providers={"git": RepositoryWorkspaceProvider(repository_source)},
+            minimum_execution_profile="SUPERVISED"))
         bound = RepositoryReadProvider(repository_source)
         definitions.append(
             _tool_definition(contracts,
@@ -286,8 +292,9 @@ def document_inspect_tool_definition(
         sequence_safe=True,
         capability=DOCUMENT_INSPECT_CAPABILITY,
         description=(
-            "Inspect storage LastModified, Version ID and ETag of one frozen document "
-            "without downloading its bytes"
+            "Inspect storage LastModified, Version ID and ETag of one frozen input document "
+            "without downloading its bytes. This does not inspect new output destinations; "
+            "when available, use document.files stat/prepare for the output library."
         ),
         providers={DOCUMENT_PROVIDER: DocumentInspectProvider(source)},
     )
@@ -356,9 +363,14 @@ def create_run_tool_registry(
                 capability="document.files/v1",
                 description=(
                     "List/stat the authorized library's current files and directories "
-                    "using library_key and relative paths. For changes, prepare a proposal "
-                    "with the observed expected_revision; CREATE/UPDATE use a published "
-                    "local file's artifact_ref, never its full content. Submit the returned "
+                    "using library_key (the output resource_key) and relative paths. stat returns "
+                    "state.revision; use kind=directory for folders, trashed=true and document_id "
+                    "for a specific recycled file. For action=prepare supply operation, path and "
+                    "purpose. CREATE/CREATE_FOLDER need no expected_revision; all other operations "
+                    "use the observed state.revision, not the content hash or listing revision. "
+                    "CREATE/UPDATE also need a Run artifact_ref and mime_type; MOVE/MOVE_FOLDER "
+                    "need destination; RESTORE identifies the recycled document_id. "
+                    "The tool resolves original Artifact hash/size. Submit the returned "
                     "proposal to change.propose with this response's evidence_refs. "
                     "Preparation alone does not save or modify anything. Follow listing "
                     "next_offset with expected_revision; frozen document reads remain separate."
@@ -516,11 +528,14 @@ def _interaction_tool_definition(contracts: ContractStore) -> ToolDefinition:
 def _change_propose_tool_definition(contracts: ContractStore) -> ToolDefinition:
     """Agent の提案を外部 write から切り離して Worker へ defer する control Tool。"""
 
-    # 直接登録しない Effect の payload 契約も、提案者が知る必要がある。
-    # Provider 側と別の形式を発明せず、既存契約の Agent 向け説明を再利用する。
+    from skillmind.effects.catalog import EFFECT_CAPABILITIES
+
+    # Tool として直接公開しない Effect の形状も、同じ提案入口から読めるようにする。
+    # 単一の Effect 登録表から列挙し、新能力や旧 Run 用契約の説明漏れを防ぐ。
     payload_guidance = "\n".join(
-        str(contracts.load(f"tools/{capability}/request.schema.json")["description"])
-        for capability in ("database.execute/v1", "http.write/v1", "document.write/v1")
+        f"{capability}: "
+        + str(contracts.load(f"tools/{capability}/request.schema.json")["description"])
+        for capability in sorted(EFFECT_CAPABILITIES)
     )
     return _tool_definition(contracts,
         capability=CHANGE_PROPOSE_CAPABILITY,
@@ -537,13 +552,16 @@ def _change_propose_tool_definition(contracts: ContractStore) -> ToolDefinition:
             "effect_intent_key and use at least minimum_risk; for legacy declared intents, "
             "copy the exact intent key and risk. "
             "capability_version identifies the write effect declared by that resource "
-            "(database.execute/v1 for SQL, http.write/v1 for HTTP APIs, document.write/v1 for documents), "
-            "not this change.propose/v1 control tool. Include the original read's Evidence reference. "
-            "Alternatively supply request_file, expected_hash and optional evidence_refs for an exact "
-            "prepared JSON proposal in workspace/ or output/. The Worker loads and validates that file "
+            "(database.execute/v1 for SQL, http.write/v1 for HTTP APIs, "
+            "document.write/v1 for documents), not this change.propose/v1 control tool. "
+            "Include the original read's Evidence reference. Alternatively supply request_file, "
+            "expected_hash and optional evidence_refs for an exact prepared JSON proposal in "
+            "workspace/ or output/. The Worker loads and validates that file "
             "before approval; it does not publish edited files automatically. "
-            "Read-back must validate the original business requirements. Rollback text alone does not "
-            "authorize compensation.\n" + payload_guidance
+            "Read-back must validate the original business requirements. "
+            "Rollback text alone does not authorize compensation. "
+            "The formats below describe supported effects, not permission; "
+            "use only the capabilities and operations authorized in this Run.\n" + payload_guidance
         ),
         providers={"platform": DeferredChangeProposalProvider()},
         unbound_provider="platform",

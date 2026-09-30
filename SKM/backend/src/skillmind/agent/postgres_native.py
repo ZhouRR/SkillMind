@@ -7,6 +7,7 @@ import json
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
+from asyncpg import Connection
 from pglast import parse_sql
 from pglast.stream import RawStream
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -15,6 +16,15 @@ from skillmind.agent.postgres_source import create_database_engine
 from skillmind.core.hashing import canonical_json, sha256_hex
 
 MAX_QUERY_BYTES = 16 * 1024 * 1024
+
+# PostgreSQL 組込型の OID のみ。名称が同じ user-defined type は変換しない。
+_TEMPORAL_PARAMETER_TYPES = {
+    1082: "date",
+    1083: "time",
+    1114: "timestamp",
+    1184: "timestamptz",
+    1266: "timetz",
+}
 
 
 def native_statement(
@@ -105,6 +115,40 @@ def query_identity(request: Mapping[str, Any], scope: Mapping[str, Any]) -> str:
     )
 
 
+async def bind_native_parameters(
+    driver: Connection, sql: str, parameters: tuple[Any, ...]
+) -> tuple[Any, ...]:
+    """JSON の日時文字列を、実 SQL の parameter 型と同じ transaction で変換する。"""
+    if not any(isinstance(value, str) for value in parameters):
+        return parameters
+    types = (await driver.prepare(sql)).get_parameters()
+    if len(types) != len(parameters):
+        raise ValueError("SQL parameter count does not match the statement")
+    slots = [
+        (index, _TEMPORAL_PARAMETER_TYPES[parameter_type.oid])
+        for index, parameter_type in enumerate(types)
+        if parameter_type.oid in _TEMPORAL_PARAMETER_TYPES
+        and isinstance(parameters[index], str)
+    ]
+    if not slots:
+        return parameters
+    # 値を SQL に埋め込まない。PG の timezone/DateStyle/特殊日時の意味を保ち、
+    # Python のローカル時区や文字列の見た目で日時を推測しない。
+    expressions = [
+        f"${position}::text::pg_catalog.{type_name}"
+        for position, (_, type_name) in enumerate(slots, start=1)
+    ]
+    converted = await driver.fetchrow(
+        "SELECT " + ", ".join(expressions), *(parameters[index] for index, _ in slots)
+    )
+    if converted is None or len(converted) != len(slots):
+        raise ValueError("SQL temporal parameter conversion is incomplete")
+    values = list(parameters)
+    for (index, _), value in zip(slots, converted, strict=True):
+        values[index] = value
+    return tuple(values)
+
+
 async def query_rows(
     connection: AsyncConnection, request: Mapping[str, Any], scope: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -120,6 +164,7 @@ async def query_rows(
     driver = raw_connection.driver_connection
     if driver is None:
         raise ValueError("PostgreSQL driver is unavailable")
+    parameters = await bind_native_parameters(driver, sql, parameters)
     cursor = driver.cursor(
         "SELECT CASE WHEN octet_length(payload) <= "
         + str(MAX_QUERY_BYTES)

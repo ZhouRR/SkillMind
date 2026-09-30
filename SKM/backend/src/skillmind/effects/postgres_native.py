@@ -14,7 +14,7 @@ from asyncpg import PostgresError
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from skillmind.agent.postgres_native import native_statement, query_rows
+from skillmind.agent.postgres_native import bind_native_parameters, native_statement, query_rows
 from skillmind.agent.postgres_source import create_database_engine
 from skillmind.agent.tool_sequence import matches_checks
 from skillmind.core.hashing import canonical_json, sha256_hex
@@ -217,11 +217,12 @@ class NativeDatabaseWriteProvider:
                     sql, parameters, _ = native_statement(
                         payload["statement"], execution.integration_scope, write=True
                     )
-                    await self._authorize(execution, credential)
                     raw_connection = await connection.get_raw_connection()
                     driver = raw_connection.driver_connection
                     if driver is None:
                         raise ValueError("PostgreSQL driver is unavailable")
+                    parameters = await bind_native_parameters(driver, sql, parameters)
+                    await self._authorize(execution, credential)
                     await driver.execute(sql, *parameters)
                     after = await query_rows(
                         connection, payload["read_back"], execution.integration_scope

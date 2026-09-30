@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.skillmind.local/tools/repository.write/v1/request.schema.json",
   "title": "repository.write/v1 request",
+  "description": "repository.write/v1 is an approved effect through change.propose/v1. Prefer repository.workspace/v1 action=prepare_commit when available: pass the observed base revision, authorized branch, summary and files with repository-relative path, action=SET, source_path and expected_hash of the edited local file (REMOVE needs only path/action). Submit its returned file.path as request_file and file.content_hash as expected_hash, plus evidence_refs. For an inline proposal use operation=commit, target.locator=target branch, precondition.revision=the observed resolved repository revision, summary=commit message; changes use /files/<repository-relative-path>, action=SET with complete UTF-8 text or REMOVE with value=null. A local file path or Artifact reference is not inline file content. verification is READ_BACK over exactly the changed /files/ paths and may be omitted. Respect configured write_mode: branch creates a new authorized skillmind/ branch; direct targets only the configured default branch with fast-forward, never force. Local edits and prepare_commit do not commit or push. Frozen paths, approval, conflict checks and read-back still apply.",
   "type": "object",
   "additionalProperties": false,
   "required": ["target_branch", "changes", "base_revision", "commit_message", "idempotency_key"],

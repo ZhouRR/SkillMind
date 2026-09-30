@@ -42,7 +42,7 @@ Excel→Markdown 的 `.xlsx` 路径使用 `excel-styles/v2`：同一文档保留
 
 - Git：`repository.workspace/v1` 将授权 UTF-8 文件放到可编辑目录；`prepare_commit` 按本地文件哈希准备提案，不要求模型重新输出正文。提交仍检查分支、路径、原 revision 和回读；本地编辑不会自动推送。
 - MCP：使用发现并冻结的原生参数 Schema；读调用支持文件输入/输出，修改调用仍经原 Effect、批准和原操作 ID。文件方式不改变工具权限或桌面占用规则。
-- PostgreSQL：新连接使用 `database.query/v1` 和 `database.execute/v1`，表／列权限由原数据库账号决定，不再维护平台表／列 DSL。支持单条 SELECT 与批准的 INSERT/UPDATE/DELETE、JOIN/CTE 和 `$1` 参数；不开放 DDL、事务控制或多语句。写入、必要回读与既有 `skillmind_effects.execution_receipts` 在同一事务提交；未知结果只核对原回执，不重发 SQL。
+- PostgreSQL：新连接使用 `database.query/v1` 和 `database.execute/v1`，表／列权限由原数据库账号决定，不再维护平台表／列 DSL。支持单条 SELECT 与批准的 INSERT/UPDATE/DELETE、JOIN/CTE 和 `$1` 参数；不开放 DDL、事务控制或多语句。JSON 日期／时间字符串按 PostgreSQL 确认的参数类型在同一事务内转换，保留数据库时区语义，普通文本不自动转为日期。写入、必要回读与既有 `skillmind_effects.execution_receipts` 在同一事务提交；未知结果只核对原回执，不重发 SQL。
 - SQL 写入前，先对同一资源执行与 `read_back` 相同的 SELECT、参数和行数上限，将完整响应文件的 hash 和 Evidence 引用作为提案前提；INSERT 也要先读取目标行不存在的结果，不能引用 Schema、UUID 或时间查询的 hash。提案保存前在当前 Agent 会话中返回可修正诊断。实际执行时若确认首次 DML 尚未发送且事务已退出，前提变化允许重新读取后提交新提案；历史尝试、回执冲突及结果未知仍按原操作核对，不自动重放。
 - HTTP API：替代 Redmine 专用入口，设置基础地址、路径范围、方法和 Bearer/API Key header；认证值仍保存在 Secret。读取支持 GET/HEAD，修改支持批准后的 POST/PUT/PATCH/DELETE，并指定 GET 回读与结果条件。禁止改目标域和自动跟随重定向；超时、202 或未确认回读不算完成，也不自动重发。
 
@@ -58,6 +58,8 @@ Excel→Markdown 的 `.xlsx` 路径使用 `excel-styles/v2`：同一文档保留
 - 模型/会话恢复沿原记录与 [session_store](../../SKM/backend/src/skillmind/agent/session_store.py)，缺失依据时停止；不补造 transcript、自动改模型或从头重跑。定期执行同样保留原 occurrence 与创建身份，入口见 [schedules/service](../../SKM/backend/src/skillmind/schedules/service.py)。
 
 ## 外部效果
+
+受控写入的模型说明来自各 Effect request Schema 的 `description`，由同一提案工具统一交付。维护时同步准确的 `target`、`changes`、前提版本来源和回读格式；不能只描述用途，也不能把格式说明当作新增权限。文档与 Git 优先复用已提供的提案准备工具，直接提案使用同一契约；无需在业务 Skill 重复平台字段格式。
 
 - 外部写入沿 observe → propose → approve → apply；Agent 提案不等于远端执行。批准绑定精确 Proposal version/checksum、Provider、操作与 scope；[EffectService](../../SKM/backend/src/skillmind/effects/service.py)与独立 Worker 核对当前资格、冻结 binding、lease、取消和期限，不在业务锁内等待远端 I/O。
 - 自动批准只能来自原 Run 启动时明确记录的同意，或适用能力的既有预授权规则；Git/MCP 的额外同意不从旧 Run 补推。`repository.write/v1` 禁止 Project 预授权与 force，Git 仍核对精确 ref 和原提交，不把启动同意当作任意仓库写权限。
