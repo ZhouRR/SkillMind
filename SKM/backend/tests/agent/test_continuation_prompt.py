@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+
 from skillmind.agent.continuation_prompt import continuation_prompt
 from skillmind.agent.domain import RunContext
 from skillmind.agent.task_brief import render_task_brief_prompt

@@ -113,7 +113,9 @@ class RunMcpRuntime:
     on_tool_denied: ToolDenialCallback | None = None
     deferred_tool_names: frozenset[str] = frozenset()
     on_tool_attempt: Callable[[], None] | None = None
-    on_inline_effect: Callable[[Mapping[str, Any], str, str], Awaitable[InlineEffectResult | None]] | None = None
+    on_inline_effect: (
+        Callable[[Mapping[str, Any], str, str], Awaitable[InlineEffectResult | None]] | None
+    ) = None
     on_deferred_validation: (
         Callable[[str, Mapping[str, Any], str, str], Awaitable[dict[str, Any] | None]] | None
     ) = None

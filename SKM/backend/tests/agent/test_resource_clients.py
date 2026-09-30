@@ -169,7 +169,10 @@ def test_native_sql_preserves_join_cte_parameter_and_statement_permissions():
     """原生構文を表/列の独自 DSL へ変換しない。"""
     sql, parameters, operation = native_statement(
         {
-            "sql": "WITH a AS (SELECT * FROM public.items WHERE id=$1) SELECT a.id,b.name FROM a JOIN public.names b ON b.id=a.id",
+            'sql': (
+                'WITH a AS (SELECT * FROM public.items WHERE id=$1) SELECT a.id,b.name FROM a JOIN '
+                'public.names b ON b.id=a.id'
+            ),
             "parameters": [42],
         },
         {"statements": ["SELECT"]},
@@ -250,6 +253,7 @@ async def test_proposal_file_resolves_exact_bytes_without_model_transcription(tm
 async def test_git_workspace_prepares_exact_edited_bytes_and_preserves_drafts(tmp_path):
     """日本語 file の編集をそのまま提案にし、再 checkout で草稿を失わない。"""
     from contextlib import asynccontextmanager
+
     from skillmind.agent.repository_workspace import RepositoryWorkspaceProvider
     from skillmind.effects.proposal import parse_change_proposal_request
 
@@ -321,6 +325,7 @@ async def test_native_sql_diagnostics_do_not_regress_to_generic_connection_error
 ):
     """元 SQLSTATE に応じて修正/権限/接続を区別し、driver 本文は返さない。"""
     from sqlalchemy.exc import DBAPIError
+
     from skillmind.agent.postgres_native_provider import NativeDatabaseProvider
 
     underlying = Exception("private SQL and parameter values")
@@ -346,7 +351,10 @@ def test_native_upsert_cannot_bypass_update_permission():
     statement = {"sql": "INSERT INTO public.items(id) VALUES(1) ON CONFLICT(id) DO UPDATE SET id=2"}
     with pytest.raises(ValueError, match="UPDATE permission"):
         native_statement(statement, {"statements": ["SELECT", "INSERT"]}, write=True)
-    assert native_statement(statement, {"statements": ["SELECT", "INSERT", "UPDATE"]}, write=True)[2] == "INSERT"
+    assert (
+        native_statement(statement, {"statements": ["SELECT", "INSERT", "UPDATE"]}, write=True)[2]
+        == "INSERT"
+    )
 
 
 @pytest.mark.parametrize("truncated", [False, True])

@@ -181,9 +181,9 @@ class _Colors:
         return {
             "type": "pattern",
             "pattern": pattern,
-            "foreground": self.describe(getattr(fill, "fgColor")),
+            "foreground": self.describe(fill.fgColor),
             **(
-                {"background": self.describe(getattr(fill, "bgColor"))}
+                {"background": self.describe(fill.bgColor)}
                 if pattern != "solid"
                 else {}
             ),
@@ -476,7 +476,8 @@ def render_styled_sheets(
     book: Workbook | None = None
     limitations = [
         "Conditional formatting and table styles are not evaluated; static fill is not "
-        "the final displayed color. The converter infers no exclusions; interpret style facts using the source legend and business rules."
+        'the final displayed color. The converter infers no exclusions; interpret style facts '
+        'using the source legend and business rules.'
     ]
     try:
         with warnings.catch_warnings(record=True) as caught:

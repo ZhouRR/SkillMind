@@ -9,6 +9,7 @@ from unittest.mock import Mock
 from uuid import UUID
 
 import pytest
+
 from skillmind.agent.context_builder import (
     ProductionRunContextBuilder,
 )
@@ -183,11 +184,17 @@ async def test_mcp_multiple_resources_are_explicit_and_never_choose_first_bindin
     for capability in READS:
         tools = [tool for tool in context.tools if tool.capability == capability]
         assert {t.resource_key for t in tools} == {"runner", "other-runner"}
-        args = {"purpose": "fixture"} if capability == "mcp.tools/v1" else {"name": "inspect_window", "arguments": {}}
+        args = (
+            {"purpose": "fixture"}
+            if capability == "mcp.tools/v1"
+            else {"name": "inspect_window", "arguments": {}}
+        )
         with pytest.raises(ToolPolicyViolation, match="resource_key"):
             policy.authorize(capability_to_sdk_name(capability), args)
         for key in ("runner", "other-runner"):
-            selected = policy.authorize(capability_to_sdk_name(capability), {**args, "resource_key": key})
+            selected = policy.authorize(
+                capability_to_sdk_name(capability), {**args, "resource_key": key}
+            )
             assert str(selected.integration_id) == original[key]["integration_id"]
             assert str(selected.binding_id) == original[key]["binding_id"]
     assert claimed.selected_sources_json == original

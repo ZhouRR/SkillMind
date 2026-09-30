@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import pytest
 from jsonschema import Draft202012Validator
+
 from skillmind.agent.codex_mcp import CodexToolBridge
 from skillmind.agent.evidence import EvidenceDraft, _new_tool_call
 from skillmind.agent.tool_gateway import (
@@ -111,8 +112,10 @@ def routed_runtime(
     )
     context = replace(
         context,
-        tools=tools
-        + (registry.resolve_unbound("tool.sequence/v1", execution_profile="SUPERVISED"),),
+        tools=(
+            *tools,
+            registry.resolve_unbound("tool.sequence/v1", execution_profile="SUPERVISED"),
+        ),
         permission_snapshot={
             "mode": "auto_read_only",
             "execution_profile": "SUPERVISED",

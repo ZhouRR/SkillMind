@@ -631,8 +631,12 @@ def test_new_report_policy_keeps_references_without_technical_prose():
     """可読性の指示は既存 JSON 内に限定し、必須成果・参照を省略させない。"""
     manifest = _manifest(blueprint=_blueprint())
     compiled = build_agent_task_brief(
-        run_id=RUN_ID, task_snapshot={**_task_snapshot(manifest), "runtime_policy": "skillmind.runtime/v3"},
-        manifest=manifest, selected_sources={}, tools=_tools(), limits=_limits(),
+        run_id=RUN_ID,
+        task_snapshot={**_task_snapshot(manifest), "runtime_policy": "skillmind.runtime/v3"},
+        manifest=manifest,
+        selected_sources={},
+        tools=_tools(),
+        limits=_limits(),
     )
     schema = {"properties": {"outcome_version": {"const": "skillmind.outcome-envelope/v1"}}}
     prompt = render_task_brief_prompt(compiled.brief, input_json={}, output_schema=schema)

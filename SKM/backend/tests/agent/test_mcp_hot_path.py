@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from jsonschema import Draft202012Validator
+
 from skillmind.integrations import mcp_schema, mcp_tools
 
 

@@ -343,9 +343,13 @@ async def test_get_detail_projects_result_tool_calls_and_evidence() -> None:
             scalar_result(all_items=[]),
         ]
     )
+    title_result = MagicMock()
+    title_result.all.return_value = []
+    session.execute = AsyncMock(return_value=title_result)
 
     detail = await RunRepository(session).get_detail(project_id=run.project_id, run_id=run.id)
 
+    assert detail.task_title is None
     assert detail.result is not None
     assert detail.result.summary == "completed"
     assert detail.tool_calls[0].arguments_summary == {"ticket_id": "fixture-001"}

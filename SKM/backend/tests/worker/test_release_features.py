@@ -1,4 +1,4 @@
-"""首版 gate が古い queue、tick、回復と明示 Tool 注入にも適用されることを検証する。"""
+"""配備 gate が既存 queue、tick、回復と明示 Tool 注入にも適用されることを検証する。"""
 
 from __future__ import annotations
 
@@ -15,6 +15,8 @@ from skillmind.agent.tool_catalog import (
     create_run_tool_registry,
 )
 from skillmind.core.settings import Settings
+from skillmind.effects.release import ExecutionFeatures
+from skillmind.worker import settings as worker
 from skillmind.worker.settings import (
     execute_effect,
     execute_run,
@@ -43,13 +45,18 @@ async def test_existing_run_job_cannot_claim_after_dispatch_is_disabled():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("dispatch,deferred", [(False, True), (True, False), (False, False)])
-async def test_queued_effect_and_schedule_tick_stop_before_side_effects(dispatch, deferred):
-    """実 executor を誤って残しても、首版/dispatch gate を越えて呼び出さない。"""
+@pytest.mark.parametrize("dispatch,http", [(False, True), (True, False), (False, False)])
+async def test_queued_effect_and_schedule_tick_stop_before_side_effects(
+    monkeypatch, dispatch, http,
+):
+    """実 executor を残しても、全 Effect 停止または dispatch 停止時には呼び出さない。"""
+    monkeypatch.setattr(
+        worker, "configured_execution_features", lambda _: ExecutionFeatures(http_writes=http)
+    )
     effects, schedules = AsyncMock(), AsyncMock()
     context = {
         "settings": Settings(
-            _env_file=None, worker_dispatch_enabled=dispatch, deferred_features_enabled=deferred,
+            _env_file=None, worker_dispatch_enabled=dispatch, deferred_features_enabled=False,
             scheduling_enabled=False
         ),
         "effect_executor": effects,
@@ -62,8 +69,9 @@ async def test_queued_effect_and_schedule_tick_stop_before_side_effects(dispatch
 
 
 @pytest.mark.asyncio
-async def test_readonly_relay_preserves_effect_outbox_and_relays_manual_runs():
+async def test_disabled_effect_relay_preserves_effect_outbox_and_relays_manual_runs(monkeypatch):
     """外部 effect の未決回执は未配信のまま残し、主 Run と通知は継続する。"""
+    monkeypatch.setattr(worker, "configured_execution_features", lambda _: ExecutionFeatures())
     relay, redis = CapturingRelay(), AsyncMock()
     await relay_outbox(
         {
@@ -80,8 +88,11 @@ async def test_readonly_relay_preserves_effect_outbox_and_relays_manual_runs():
 
 
 @pytest.mark.asyncio
-async def test_readonly_recovery_does_not_redispatch_effects_or_resume_proposals():
+async def test_disabled_effect_recovery_does_not_redispatch_effects_or_resume_proposals(
+    monkeypatch,
+):
     """後置の未知実行を取消/完了に偽装せず、主 Run/interaction の回復だけを続ける。"""
+    monkeypatch.setattr(worker, "configured_execution_features", lambda _: ExecutionFeatures())
     runs, effects = AsyncMock(), AsyncMock()
     runs.recover_expired_attempts.return_value = 2
     runs.recover_expired_interactions.return_value = 3
@@ -118,7 +129,7 @@ def test_readonly_registry_omits_deferred_tools_even_when_provider_is_injected(c
     )
 
 
-async def test_database_only_dispatch_keeps_schedules_and_subagents_disabled():
+async def test_database_dispatch_keeps_schedules_and_subagents_disabled():
     """DB job の入口を開いても scheduler と子 Tool の入口を開かない。"""
     effects, schedules = AsyncMock(), AsyncMock()
     effects.execute.return_value = 'APPLIED'
@@ -141,11 +152,13 @@ async def test_database_only_dispatch_keeps_schedules_and_subagents_disabled():
             registry.resolve_unbound(capability, execution_profile='SUPERVISED')
 
 
-@pytest.mark.parametrize("document,dispatch", [(False, True), (True, False), (True, True)])
-async def test_document_gate_reaches_relay_job_and_recovery_without_opening_schedules(
+@pytest.mark.parametrize(
+    "document,dispatch", [(False, False), (False, True), (True, False), (True, True)]
+)
+async def test_http_effects_survive_document_switch_without_opening_schedules(
     document, dispatch,
 ):
-    """実 Settings の独立 switch を relay/job/recovery まで一貫して伝える。"""
+    """実 Settings の HTTP 配送・回復は文書 switch と独立し、dispatch と調度 gate は残る。"""
     effects, runs, executor, schedules = AsyncMock(), AsyncMock(), AsyncMock(), AsyncMock()
     executor.execute.return_value = "APPLIED"
     runs.recover_expired_attempts.return_value = 1
@@ -158,19 +171,21 @@ async def test_document_gate_reaches_relay_job_and_recovery_without_opening_sche
             _env_file=None, worker_dispatch_enabled=dispatch,
             deferred_features_enabled=False, database_writes_enabled=False,
             document_writes_enabled=document,
+            git_writes_enabled=False, mcp_tools_enabled=False,
         ),
         "run_service": runs, "effect_service": effects, "effect_executor": executor,
         "schedule_service": schedules, "redis": AsyncMock(), "outbox_relay": relay,
         "worker_id": "fixture-worker",
     }
     await relay_outbox(context)
-    assert ("effect.apply.requested/v1" in relay.topics) is (document and dispatch)
+    assert ("effect.apply.requested/v1" in relay.topics) is dispatch
     result = await execute_effect(context, str(uuid4()))
-    assert result["status"] == ("APPLIED" if document and dispatch else "disabled")
-    assert executor.execute.await_count == int(document and dispatch)
+    assert result["status"] == ("APPLIED" if dispatch else "disabled")
+    assert executor.execute.await_count == int(dispatch)
     report = await recover_expired_leases(context)
-    assert report["recovered_effects"] == (2 if document else 0)
-    assert report["recovered_proposals"] == (3 if document else 0)
-    assert effects.recover_expired_effects.await_count == int(document)
+    assert report["recovered_effects"] == 2
+    assert report["recovered_proposals"] == 3
+    effects.recover_expired_effects.assert_awaited_once()
+    effects.recover_expired_proposals.assert_awaited_once()
     assert (await trigger_due_schedules(context))["status"] == "disabled"
     schedules.run_due_schedules.assert_not_called()

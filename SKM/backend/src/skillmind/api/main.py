@@ -97,11 +97,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.database_session_factory,
         file_storage=app.state.file_storage,
         scheduling_enabled=settings.scheduling_enabled,
-        deferred_features_enabled=features.deferred,
-        database_writes_enabled=features.database_writes,
-        document_writes_enabled=features.document_writes,
-        git_writes_enabled=features.git_writes,
-        mcp_tools_enabled=features.mcp_tools,
+        execution_features=features,
         document_library_target=document_library_target,
     )
     app.state.artifact_service = ArtifactService(app.state.database_session_factory)

@@ -160,7 +160,9 @@ class AuditExportProvider:
             )
         include_index = arguments.get("include_index", False)
         if type(include_index) is not bool:
-            raise ToolProviderError("invalid_request", "Invalid audit index option", retryable=False)
+            raise ToolProviderError(
+                "invalid_request", "Invalid audit index option", retryable=False
+            )
         try:
             selection = export_selection(arguments)
             await self._source.authorize(context)

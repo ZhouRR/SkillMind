@@ -12,6 +12,7 @@ from uuid import uuid4
 
 import pytest
 from openpyxl import Workbook
+
 from skillmind.agent.document_provider import DocumentConvertProvider
 from skillmind.agent.tool_gateway import ToolProviderError
 from skillmind.documents.source import ProjectDocumentObservation

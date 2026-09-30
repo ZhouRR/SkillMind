@@ -73,13 +73,19 @@ async def test_production_repository_wiring_never_falls_back_to_fixture() -> Non
     definitions = _read_tool_definitions(
         ContractStore(CONTRACTS), repository_source=cast(RepositorySnapshotSource, source)
     )
-    assert len(definitions) == 1
-    definition = definitions[0]
+    assert len(definitions) == 2
+    definitions_by_capability = {definition.capability: definition for definition in definitions}
+    assert set(definitions_by_capability) == {
+        "repository.workspace/v1",
+        "repository.read/v1",
+    }
+    assert set(definitions_by_capability["repository.workspace/v1"].providers) == {"git"}
+    definition = definitions_by_capability["repository.read/v1"]
     assert set(definition.providers) == {"git", "svn"}
     with pytest.raises(ToolProviderError, match="binding is invalid"):
         await definition.providers["git"].execute(
             _provider_context("repository.read/v1", "git"),
-            {"revision": "1" * 40, "path": "src/example.py"},
+            {"revision": "1" * 40, "path": "src/example.py", "purpose": "test"},
         )
     source.open.assert_not_called()
 
@@ -1119,16 +1125,39 @@ async def test_new_runtime_exposes_schema_tools_only_with_frozen_read_scope(tmp_
         'key': 'reports', 'kind': 'other', 'required': True, 'access': 'read',
         'capabilities': ['database.read/v1'], 'accepted_providers': ['postgres'],
     }]
-    claimed = _generic_claimed(selected_sources={'reports': {'capability': 'database.read/v1', 'provider': 'postgres'}},
-        allowed=('database.read/v1', 'database.read/v2', 'database.describe/v1'), manifest=manifest)
-    claimed = replace(claimed, task_snapshot_json={**claimed.task_snapshot_json, 'runtime_policy': policy})
-    builder = ProductionRunContextBuilder(workspace_manager=WorkspaceManager((tmp_path/'runs').resolve()),
-        tool_registry=create_run_tool_registry(ContractStore(CONTRACTS), document_source=_NoopDocumentSource(), database_provider=Mock()), model='test-model')
+    claimed = _generic_claimed(
+        selected_sources={"reports": {"capability": "database.read/v1", "provider": "postgres"}},
+        allowed=("database.read/v1", "database.read/v2", "database.describe/v1"),
+        manifest=manifest,
+    )
+    claimed = replace(
+        claimed, task_snapshot_json={**claimed.task_snapshot_json, "runtime_policy": policy}
+    )
+    builder = ProductionRunContextBuilder(
+        workspace_manager=WorkspaceManager((tmp_path / "runs").resolve()),
+        tool_registry=create_run_tool_registry(
+            ContractStore(CONTRACTS),
+            document_source=_NoopDocumentSource(),
+            database_provider=Mock(),
+        ),
+        model="test-model",
+    )
     context = await builder.build(claimed, sequence_start=1)
-    assert {tool.capability for tool in context.tools} == {'database.read/v2', 'database.describe/v1'}
+    assert {tool.capability for tool in context.tools} == {
+        "database.read/v2",
+        "database.describe/v1",
+    }
     assert len({tool.binding_id for tool in context.tools}) == 1
-    assert str(context.tools[0].binding_id) == claimed.selected_sources_json['reports']['binding_id']
+    assert (
+        str(context.tools[0].binding_id) == claimed.selected_sources_json["reports"]["binding_id"]
+    )
     assert context.task_brief['runtime_policy'] == policy
-    denied = replace(claimed, permission_snapshot_json={**claimed.permission_snapshot_json, 'allowed_capabilities': ['database.read/v1']})
+    denied = replace(
+        claimed,
+        permission_snapshot_json={
+            **claimed.permission_snapshot_json,
+            "allowed_capabilities": ["database.read/v1"],
+        },
+    )
     with pytest.raises(ValueError, match='frozen permission'):
         await builder.build(denied, sequence_start=1)

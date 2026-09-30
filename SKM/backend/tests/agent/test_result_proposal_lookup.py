@@ -6,8 +6,9 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-from skillmind.agent.result_validation import PostgresProposalLookup, ProposalReferenceState
 from sqlalchemy.dialects.postgresql import dialect
+
+from skillmind.agent.result_validation import PostgresProposalLookup, ProposalReferenceState
 
 
 @pytest.mark.parametrize(

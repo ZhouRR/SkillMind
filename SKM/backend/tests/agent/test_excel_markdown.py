@@ -117,7 +117,14 @@ def test_compaction_preserves_holes_and_blank_color_legends() -> None:
 def test_theme_color_uses_workbook_theme_and_hls_tint(tint: float, expected: str) -> None:
     """固定の Office palette を仮定せず、原 theme と tint を残す。"""
     book = _book()
-    book.loaded_theme = b"""<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:themeElements><a:clrScheme name="test"><a:lt1><a:srgbClr val="112233"/></a:lt1><a:dk1><a:srgbClr val="334455"/></a:dk1><a:accent1><a:srgbClr val="FF0000"/></a:accent1></a:clrScheme></a:themeElements></a:theme>"""
+    book.loaded_theme = (
+        b'<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+        b'<a:themeElements><a:clrScheme name="test">'
+        b'<a:lt1><a:srgbClr val="112233"/></a:lt1>'
+        b'<a:dk1><a:srgbClr val="334455"/></a:dk1>'
+        b'<a:accent1><a:srgbClr val="FF0000"/></a:accent1>'
+        b'</a:clrScheme></a:themeElements></a:theme>'
+    )
     book["Cases"]["B2"].fill = PatternFill("solid", fgColor=Color(theme=4, tint=tint))
     markdown = _convert(book)
     assert "theme=4" in markdown and expected in markdown
@@ -266,12 +273,15 @@ def test_shared_string_rich_text_is_not_limited_to_inline_strings() -> None:
             elif item.filename == "[Content_Types].xml":
                 data = data.replace(
                     b"</Types>",
-                    b'<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>',
+                    b'<Override PartName="/xl/sharedStrings.xml" '
+                    b'ContentType="application/vnd.openxmlformats-officedocument.'
+                    b'spreadsheetml.sharedStrings+xml"/></Types>',
                 )
             result.writestr(item.filename, data)
         result.writestr(
             "xl/sharedStrings.xml",
-            '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><r><rPr><strike/></rPr><t>old</t></r><r><t> action</t></r></si></sst>',
+            '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            '<si><r><rPr><strike/></rPr><t>old</t></r><r><t> action</t></r></si></sst>',
         )
     markdown = render_excel_markdown(".xlsx", target.getvalue())
     assert "~~old~~" in markdown and " action" in markdown

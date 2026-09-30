@@ -13,6 +13,8 @@ from urllib.parse import quote
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.dialects.postgresql import dialect
+
 from skillmind.agent.audit_export import (
     AUDIT_EXPORT_CAPABILITY,
     AuditExportProvider,
@@ -30,7 +32,6 @@ from skillmind.agent.tool_gateway import ToolProviderError
 from skillmind.agent.workspace import WorkspaceManager
 from skillmind.artifacts.repository import ArtifactRepository
 from skillmind.core.hashing import canonical_json, sha256_hex
-from sqlalchemy.dialects.postgresql import dialect
 from tests.agent.test_tool_gateway import CsvIssueProvider, MemoryAuditWriter, _context, _registry
 from tests.agent.test_workspace_provider import CONTRACTS
 from tests.agent.test_workspace_provider import _context as tool_context
@@ -315,7 +316,9 @@ async def test_optional_index_does_not_change_raw_artifact_or_repeat_values(tmp_
     assert indexed.response["record_index"] == record_index(document)
     assert "hallo" not in canonical_json(indexed.response)
     assert indexed.response["record_index"][1]["recorded_status"] == "FAILED"
-    assert indexed.response["record_index"][0]["record_hash"] == "sha256:" + sha256_hex(canonical_json(document["evidence"][0]))
+    assert indexed.response["record_index"][0]["record_hash"] == "sha256:" + sha256_hex(
+        canonical_json(document["evidence"][0])
+    )
     assert "record_index" not in raw.response
 
 
@@ -324,5 +327,7 @@ async def test_invalid_index_flag_is_rejected_before_read(tmp_path, value):
     """任意 truthy を採用せず、契約違反時に監査本文へアクセスしない。"""
     source = MemorySource()
     with pytest.raises(ToolProviderError):
-        await AuditExportProvider(source).execute(context_at(tmp_path), arguments(include_index=value))
+        await AuditExportProvider(source).execute(
+            context_at(tmp_path), arguments(include_index=value)
+        )
     assert source.reads == 0

@@ -7,7 +7,9 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+
 from skillmind.core.settings import Settings
+from skillmind.effects.release import ExecutionFeatures
 from skillmind.runs.domain import ClaimedRun, PendingOutboxMessage, RelayResult
 from skillmind.runs.outbox import OutboxPublisher
 from skillmind.worker.settings import execute_run, relay_outbox
@@ -160,10 +162,16 @@ async def test_execute_run_claims_and_hands_off_snapshot() -> None:
 
 
 @pytest.mark.parametrize("effects_enabled", [False, True])
-async def test_saved_effect_handoff_happens_after_agent_cleanup_and_before_relay(effects_enabled):
+async def test_saved_effect_handoff_happens_after_agent_cleanup_and_before_relay(
+    monkeypatch, effects_enabled,
+):
     """自動承認済み候補を直接渡しても、モデル清理・feature gate・永続配送の順序を守る。"""
 
+    from skillmind.worker import settings as worker
     from tests.worker.test_agent_run_executor import _claimed
+
+    if not effects_enabled:
+        monkeypatch.setattr(worker, "configured_execution_features", lambda _: ExecutionFeatures())
 
     claimed = _claimed()
     order = []
@@ -194,7 +202,9 @@ async def test_saved_effect_handoff_happens_after_agent_cleanup_and_before_relay
         "run_executor": executor, "effect_executor": effects,
         "run_service": MagicMock(claim_run=AsyncMock(return_value=claimed)),
         "settings": Settings(
-            worker_dispatch_enabled=True, database_writes_enabled=effects_enabled, _env_file=None,
+            worker_dispatch_enabled=True, deferred_features_enabled=False,
+            database_writes_enabled=False, document_writes_enabled=False,
+            git_writes_enabled=False, mcp_tools_enabled=False, _env_file=None,
         ),
         "worker_id": "worker-test", "redis": MagicMock(),
         "outbox_relay": MagicMock(relay_once=AsyncMock(side_effect=relay_done)),

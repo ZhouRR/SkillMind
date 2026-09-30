@@ -277,24 +277,42 @@ class ToolGateway:
             or parent.user_id != self._context.user_id
             or parent.tool.capability != "tool.sequence/v1"
             or parent.agent_session_id is None or parent.tool_call_id not in self._dispatched):
-            raise ToolProviderError("unavailable", "Sequence authority is unavailable", retryable=False)
+            raise ToolProviderError(
+                "unavailable", "Sequence authority is unavailable", retryable=False
+            )
         name = capability_to_sdk_name(step["capability"])
         args = deepcopy(dict(step["arguments"]))
         try:
             self.validate_sequence_step(name, args)
             self.step_budget.consume()
             await self._coordinator.register_authorized(
-                name, args, f"sequence:{parent.tool_call_id}:{position}", str(parent.agent_session_id),
+                name,
+                args,
+                f"sequence:{parent.tool_call_id}:{position}",
+                str(parent.agent_session_id),
             )
             return await self._invoke(self._resolve_binding(name, args), args)
         except PermissionError:
             await self._coordinator.register_denied(
-                name, args, f"sequence:{parent.tool_call_id}:{position}",
-                str(parent.agent_session_id), "Sequence authority or tool budget is unavailable",
+                name,
+                args,
+                f"sequence:{parent.tool_call_id}:{position}",
+                str(parent.agent_session_id),
+                "Sequence authority or tool budget is unavailable",
             )
-            return {"status": "error", "code": "scope_denied", "message": "Sequence authority or tool budget is unavailable", "retryable": False}
+            return {
+                "status": "error",
+                "code": "scope_denied",
+                "message": "Sequence authority or tool budget is unavailable",
+                "retryable": False,
+            }
         except ToolGatewayError as error:
-            return {"status": "error", "code": error.code, "message": error.message, "retryable": False}
+            return {
+                "status": "error",
+                "code": error.code,
+                "message": error.message,
+                "retryable": False,
+            }
 
     def _resolve_binding(self, name: str, arguments: Mapping[str, Any]) -> _ResolvedBinding:
         """選択を一箇所で解決し、原承認引数と同じ binding だけを実行する。"""
@@ -658,8 +676,10 @@ class ToolRegistry:
         public = policy.sdk_tools
         representatives = {name: next(b for (n, _), b in bindings.items() if n == name)
                            for name in policy.allowed_sdk_names}
-        sdk_tools = [_build_sdk_tool(representatives[t.sdk_name], gateway, input_schema=t.input_schema)
-                     for t in public]
+        sdk_tools = [
+            _build_sdk_tool(representatives[t.sdk_name], gateway, input_schema=t.input_schema)
+            for t in public
+        ]
         server = create_sdk_mcp_server("skillmind", version="0.1.0", tools=sdk_tools)
         return RunToolRuntime(
             mcp=RunMcpRuntime(
@@ -670,12 +690,15 @@ class ToolRegistry:
                 deferred_tool_names=frozenset(
                     registered.sdk_name
                     for registered in context.tools
-                    if bindings[(registered.sdk_name, registered.resource_key)].definition.defer_execution
+                    if bindings[
+                        (registered.sdk_name, registered.resource_key)
+                    ].definition.defer_execution
                 ),
             ),
             gateway=gateway,
-            tool_descriptions={name: binding.definition.description
-                               for name, binding in representatives.items()},
+            tool_descriptions={
+                name: binding.definition.description for name, binding in representatives.items()
+            },
         )
 
 

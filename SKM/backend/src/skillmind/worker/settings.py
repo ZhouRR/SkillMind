@@ -149,11 +149,7 @@ async def startup(ctx: dict[str, Any], *, maintenance_only: bool = False) -> Non
     ctx["run_service"] = RunService(
         ctx["database_session_factory"],
         scheduling_enabled=settings.scheduling_enabled,
-        deferred_features_enabled=features.deferred,
-        database_writes_enabled=features.database_writes,
-        document_writes_enabled=features.document_writes,
-        git_writes_enabled=features.git_writes,
-        mcp_tools_enabled=features.mcp_tools,
+        execution_features=features,
         document_library_target=document_library_target,
     )
     ctx["effect_service"] = EffectService(
@@ -290,8 +286,10 @@ async def startup(ctx: dict[str, Any], *, maintenance_only: bool = False) -> Non
             leases=McpDesktopLeases(ctx["database_session_factory"]),
         ) if features.mcp_tools else None,
         database_provider=database_provider,
-        native_database_provider=NativeDatabaseProvider(ctx["database_session_factory"], source=NativePostgresSource(),
-            secret_resolver=DeploymentSecretResolver(cipher=secret_cipher)),
+        native_database_provider=NativeDatabaseProvider(
+            ctx["database_session_factory"], source=NativePostgresSource(),
+            secret_resolver=DeploymentSecretResolver(cipher=secret_cipher),
+        ),
         http_provider=HttpReadProvider(ctx["database_session_factory"], source=HttpResourceSource(),
             secret_resolver=DeploymentSecretResolver(cipher=secret_cipher)),
         repository_source=repository_source,
@@ -346,11 +344,7 @@ async def startup(ctx: dict[str, Any], *, maintenance_only: bool = False) -> Non
         tool_registry=registry,
         model=selected_model,
         materializer=materializer,
-        deferred_features_enabled=features.deferred,
-        database_writes_enabled=features.database_writes,
-        document_writes_enabled=features.document_writes,
-        git_writes_enabled=features.git_writes,
-        mcp_tools_enabled=features.mcp_tools,
+        execution_features=features,
         document_library_target=document_library_target,
         proposal_continuations=ProposalContinuationReader(ctx["database_session_factory"]),
         database_observations=database_provider,
@@ -600,14 +594,23 @@ async def execute_run(ctx: dict[str, Any], run_id: str) -> dict[str, str | int]:
             job_started + _RUN_JOB_EXECUTION_TIMEOUT_SECONDS
             + settings.run_preparation_timeout_seconds - 30
         )
-        warm_executor = executor if isinstance(executor, AgentRunExecutor) and executor.supports_warm_continuation else None
-        scope = warm_executor.continuation_scope(claimed.run_id) if warm_executor else _single_execution_scope()
+        warm_executor = (
+            executor if isinstance(executor, AgentRunExecutor)
+            and executor.supports_warm_continuation else None
+        )
+        scope = (
+            warm_executor.continuation_scope(claimed.run_id)
+            if warm_executor else _single_execution_scope()
+        )
         async with scope:
             for position in range(5):
                 await executor.execute(claimed)
                 effect_executor = cast(ApprovedEffectExecutor | None, ctx.get("effect_executor"))
                 effect_status = None
-                if effect_executor is not None and configured_execution_features(settings).effects_enabled:
+                if (
+                    effect_executor is not None
+                    and configured_execution_features(settings).effects_enabled
+                ):
                     # Provider/批准/回読は原経路。Queue Outbox は失敗時の回収として残す。
                     effect_status = await effect_executor.execute_pending_for_attempt(claimed)
                 await _relay_after_execution(ctx)

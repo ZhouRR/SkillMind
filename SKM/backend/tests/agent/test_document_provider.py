@@ -242,7 +242,9 @@ async def test_foreign_or_missing_run_context_is_denied_before_lookup(change: st
     assert source.calls == []
 
 
-async def test_file_delivery_uses_original_bytes_without_body_and_does_not_overwrite_draft(tmp_path):
+async def test_file_delivery_uses_original_bytes_without_body_and_does_not_overwrite_draft(
+    tmp_path,
+):
     """file 応答は hash/path のみ。再取得で作業中の変更を黙って消さない。"""
     from skillmind.agent.workspace import WorkspaceManager
 
@@ -255,7 +257,11 @@ async def test_file_delivery_uses_original_bytes_without_body_and_does_not_overw
     ))
     source = _FakeSource(project_id=context.project_id, content=content)
     provider = DocumentProvider(source)
-    args = {"path": "/".join(filter(None, (content.folder, content.name))), "response_mode": "file", "purpose": "Read"}
+    args = {
+        "path": "/".join(filter(None, (content.folder, content.name))),
+        "response_mode": "file",
+        "purpose": "Read",
+    }
     result = await provider.execute(context, args)
     _validate_response(dict(result.response))
     assert "content" not in result.response and not result.response["truncated"]
@@ -273,5 +279,7 @@ async def test_file_mode_without_workspace_permission_stops_before_fetch():
     context = _context(uuid4())
     source = _FakeSource(project_id=context.project_id, content=_content())
     with pytest.raises(ToolProviderError):
-        await DocumentProvider(source).execute(context, {"path": "source.md", "response_mode": "file"})
+        await DocumentProvider(source).execute(
+            context, {"path": "source.md", "response_mode": "file"}
+        )
     assert source.calls == []

@@ -9,6 +9,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+
 from skillmind.agent.tool_gateway import ToolDefinition, ToolRegistry
 from skillmind.agent.tool_sequence import ToolSequenceProvider, ToolStepBudget, matches_checks
 from tests.agent.test_tool_gateway import (
@@ -256,7 +257,7 @@ async def test_unconfirmed_outer_result_never_replays_children(tmp_path):
 
 async def test_identical_steps_are_distinct_operations_not_deduplicated(tmp_path):
     """同じ引数でも異なる position は別の原操作として記録する。"""
-    context, runtime, writer, provider = sequence_runtime(tmp_path)
+    context, runtime, _writer, provider = sequence_runtime(tmp_path)
     result = await invoke(context, runtime, [step(), step(), step()])
     assert result["outcome"] == "COMPLETED" and provider.calls == 3
     assert len({str(c.tool_call_id) for c in provider.contexts}) == 3

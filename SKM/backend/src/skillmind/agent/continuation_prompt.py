@@ -41,8 +41,15 @@ def continuation_prompt(
                 "prompt": static_prompt,
                 "permission": dict(context.permission_snapshot),
                 "tools": [
-                    {"name": tool.sdk_name, "schema": tool.input_schema,
-                     **({"resource": resource_identity(tool)} if tool.resource_key is not None else {})}
+                    {
+                        "name": tool.sdk_name,
+                        "schema": tool.input_schema,
+                        **(
+                            {"resource": resource_identity(tool)}
+                            if tool.resource_key is not None
+                            else {}
+                        ),
+                    }
                     for tool in context.tools
                 ],
             }
