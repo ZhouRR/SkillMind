@@ -69,8 +69,11 @@ def native_statement(
         """CTE 内の変更も検査し、SELECT INTO と row lock を読取へ混ぜない。"""
         if isinstance(node, dict):
             kind = node.get("@")
-            if (kind == "OnConflictClause" and node.get("action", {}).get("name") == "ONCONFLICT_UPDATE"
-                and "UPDATE" not in scope.get("statements", [])):
+            if (
+                kind == "OnConflictClause"
+                and node.get("action", {}).get("name") == "ONCONFLICT_UPDATE"
+                and "UPDATE" not in scope.get("statements", [])
+            ):
                 raise ValueError("SQL upsert requires UPDATE permission")
             if (
                 write

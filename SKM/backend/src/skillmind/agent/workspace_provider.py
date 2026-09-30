@@ -61,7 +61,9 @@ class WorkspaceReadProvider:
             relative,
             path,
             max_bytes=_MAX_READ_BYTES
-            if relative.startswith(("workspace/documents/", "workspace/resources/", "workspace/repositories/"))
+            if relative.startswith(
+                ("workspace/documents/", "workspace/resources/", "workspace/repositories/")
+            )
             else _MAX_FILE_BYTES,
         )
         content = _decode_content(data)

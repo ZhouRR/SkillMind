@@ -106,11 +106,16 @@ class ToolRouting:
             selector = {
                 "type": "string",
                 "enum": [tool.resource_key for tool in group],
-                "description": "Select this Run's frozen resource slot. Required when multiple resources provide this tool; never supply a connection URL or credentials.",
+                'description': (
+                    "Select this Run's frozen resource slot. Required when multiple resources "
+                    'provide this tool; never supply a connection URL or credentials.'
+                ),
             }
             schema.setdefault("properties", {})["resource_key"] = deepcopy(selector)
             if len(group) > 1:
-                schema["required"] = list(dict.fromkeys([*schema.get("required", []), "resource_key"]))
+                schema["required"] = list(
+                    dict.fromkeys([*schema.get("required", []), "resource_key"])
+                )
             # File/inline の alternative でも selector が additionalProperties に拒否されない。
             for variant in schema.get("oneOf", [schema]):
                 variant.setdefault("properties", {})["resource_key"] = deepcopy(selector)

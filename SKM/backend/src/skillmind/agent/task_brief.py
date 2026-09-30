@@ -131,7 +131,11 @@ def _runtime_metadata(
     brief: dict[str, Any], snapshot: Mapping[str, Any], model: str | None
 ) -> None:
     """新方針だけに実際に選択したモデルを載せ、旧 Segment の本文を保持する。"""
-    if snapshot.get("runtime_policy") not in {"skillmind.runtime/v4", "skillmind.runtime/v5", "skillmind.runtime/v6"}:
+    if snapshot.get("runtime_policy") not in {
+        "skillmind.runtime/v4",
+        "skillmind.runtime/v5",
+        "skillmind.runtime/v6",
+    }:
         return
     if not isinstance(model, str) or not model.strip():
         raise ValueError("Runtime metadata requires the configured model")
@@ -483,19 +487,30 @@ def render_task_brief_prompt(
     _append_notes(sections, "Expected deliverables", brief["deliverables"], key="description")
     _append_materialization(sections, brief["resources"], brief["allowed_tools"])
     if runtime_policy(brief) == "skillmind.runtime/v6":
-        sections.append("Resource clients run in the Worker, independently of the Agent engine. "
-            "Use repository.workspace for editable scoped Git files and file-based commit proposals. "
-            "Use MCP's discovered native schemas without renaming arguments; request_file/expected_hash "
+        sections.append(
+            "Resource clients run in the Worker, independently of the Agent engine. "
+            'Use repository.workspace for editable scoped Git files and file-based commit '
+            'proposals. '
+            "Use MCP's discovered native schemas without renaming arguments; "
+            'request_file/expected_hash '
             "and response_mode=file avoid copying full JSON through messages. "
-            "PostgreSQL uses database.query and approved database.execute with native SQL and $1 parameters; "
-            "the configured account enforces table/column permissions. HTTP APIs use relative paths and "
+            'PostgreSQL uses database.query and approved database.execute with native SQL and $1 '
+            'parameters; '
+            'the configured account enforces table/column permissions. HTTP APIs use relative '
+            'paths and '
             "runtime-injected credentials. Inspect response files by path. "
-            "A prepared proposal JSON file may be submitted with change.propose request_file, expected_hash "
+            'A prepared proposal JSON file may be submitted with change.propose request_file, '
+            'expected_hash '
             "and evidence_refs. File edits alone do not publish remote changes. "
-            "Use original receipts after an unknown outcome; never resend mutations to discover whether they succeeded.")
-    sections.append(_tool_instruction(
-        brief["allowed_tools"], path_first=runtime_policy(brief) in {"skillmind.runtime/v5", "skillmind.runtime/v6"},
-    ))
+            'Use original receipts after an unknown outcome; never resend mutations to discover '
+            'whether they succeeded.'
+        )
+    sections.append(
+        _tool_instruction(
+            brief["allowed_tools"],
+            path_first=runtime_policy(brief) in {"skillmind.runtime/v5", "skillmind.runtime/v6"},
+        )
+    )
     sections.append(_effect_instruction(brief["effect_policy"]))
     sections.append(_interaction_instruction(brief["interaction_policy"]))
     append_skill_file_guidance(sections, brief)
@@ -528,12 +543,17 @@ def _finish_task_prompt(
             "Keep progress prose to meaningful stages, decisions, exceptions and completion. "
             "Do not repeat tool parameters, SQL, IDs or receipt bodies as narration."
         )
-    if runtime_policy(brief) in {"skillmind.runtime/v4", "skillmind.runtime/v5", "skillmind.runtime/v6"}:
+    if runtime_policy(brief) in {
+        "skillmind.runtime/v4",
+        "skillmind.runtime/v5",
+        "skillmind.runtime/v6",
+    }:
         sections.append(
             "For change.propose, provide the business target, changes, precondition, summary and "
             "evidence. Idempotency, minimum risk, READ_BACK paths, expiry, rollback and an empty "
             "RESUME checkpoint may be derived by the platform. Preserve explicit business "
-            "checkpoint facts when needed. A direct INLINE response contains the committed original "
+            'checkpoint facts when needed. A direct INLINE response contains the committed '
+            'original '
             "effect_result; it is not a current-state observation or business PASS. A confirmed "
             "delivery does not satisfy the Skill's business continuation conditions by itself. "
             "Apply required checks and stop on known failures or unmet conditions even when "
@@ -568,7 +588,11 @@ def _finish_task_prompt(
             "Do not copy effect_result into a proposed checkpoint; preserve needed facts "
             "and references using the checkpoint fields accepted by the Tool."
         )
-    if runtime_policy(brief) in {"skillmind.runtime/v4", "skillmind.runtime/v5", "skillmind.runtime/v6"}:
+    if runtime_policy(brief) in {
+        "skillmind.runtime/v4",
+        "skillmind.runtime/v5",
+        "skillmind.runtime/v6",
+    }:
         sections.append(
             "Platform runtime metadata (JSON): "
             + canonical_json(brief["runtime_metadata"])
@@ -587,7 +611,8 @@ def _finish_task_prompt(
             "receipts; select exact references instead of transcribing their contents. It returns "
             "an Artifact that can be saved through the existing approved document path. The export "
             "is not a replacement for a Skill-specific result schema, required explanations or "
-            "external record-saving checkpoints. Missing raw arguments remain missing, not inferred. "
+            'external record-saving checkpoints. Missing raw arguments remain missing, not '
+            'inferred. '
             "In the final outcome, reference saved artifacts and retain necessary conclusions and "
             "limitations without repeating full files or receipt bodies."
         )
@@ -596,7 +621,8 @@ def _finish_task_prompt(
             "Use tool.sequence/v1 for up to five already-determined reads or local file operations "
             "whose complete arguments are known now. Exact checks stop the sequence; use them "
             "when later steps depend on a returned status or value. It does not execute proposals, "
-            "external writes, user interactions or nested model calls. Never cross a Skill-required "
+            'external writes, user interactions or nested model calls. Never cross a '
+            'Skill-required '
             "external save or a point requiring fresh reasoning. Results and references remain "
             "individually audited. Do not replay a failed sequence from its beginning."
         )

@@ -18,6 +18,7 @@ from uuid import uuid4
 import pytest
 from jsonschema import Draft202012Validator
 from openai_codex.client import CodexConfig
+
 from skillmind.agent import codex_completion, codex_engine
 from skillmind.agent.codex_completion import CodexCompletionClient
 from skillmind.agent.codex_engine import CodexAgentSdkEngine
@@ -149,7 +150,11 @@ def endpoint() -> Iterator[tuple[SyntheticEndpoint, list[dict[str, Any]]]]:
                     "call_id": f"call_fixture_{len(requests)}",
                     "name": "issue_read_v1",
                     "namespace": "mcp__skillmind",
-                    "arguments": json.dumps(server.tool_arguments.get(len(requests), {"issue_ref": "TICKET-1", "purpose": "analysis"})),
+                    "arguments": json.dumps(
+                        server.tool_arguments.get(
+                            len(requests), {"issue_ref": "TICKET-1", "purpose": "analysis"}
+                        )
+                    ),
                     "status": "completed",
                 }
             elif len(requests) == 1 and "mcp__skillmind.change_propose_v1" in _wire_tool_names(
@@ -718,7 +723,9 @@ async def test_native_skill_candidate_uses_unencoded_schema_and_original_model(
     assert not _wire_tool_names(requests[0]) - {"update_plan", "request_user_input"}
 
 
-async def test_native_warm_resume_replaces_gateway_without_restarting_client(tmp_path, monkeypatch, endpoint):
+async def test_native_warm_resume_replaces_gateway_without_restarting_client(
+    tmp_path, monkeypatch, endpoint
+):
     """固定 CLI が同じ process で次 Attempt の新 MCP server と監査権を使用する。"""
     server, requests = endpoint
     _local_client(monkeypatch, server)
@@ -753,13 +760,18 @@ async def test_native_warm_resume_replaces_gateway_without_restarting_client(tmp
         assert second[0].agent_session_id == session.session_id
         assert len(clients) == 1
         assert provider.calls == 2 and len(writer.completed) == 2
-        assert [c.run_attempt_id for c in provider.contexts] == [context.run_attempt_id, following.run_attempt_id]
+        assert [c.run_attempt_id for c in provider.contexts] == [
+            context.run_attempt_id,
+            following.run_attempt_id,
+        ]
         assert len(requests) == 4
     assert not engine._active
     assert clients[0]._proc is None
 
 
-async def test_native_inline_effect_returns_receipt_without_interrupting_turn(tmp_path, monkeypatch, endpoint):
+async def test_native_inline_effect_returns_receipt_without_interrupting_turn(
+    tmp_path, monkeypatch, endpoint
+):
     """固定 native SDK が一つの turn 内で原回执を受取り、次のモデル応答へ進む。"""
     from skillmind.effects.inline import InlineEffectResult
     from tests.runs.test_effect_continuation import receipt
@@ -792,7 +804,9 @@ async def test_native_inline_effect_returns_receipt_without_interrupting_turn(tm
     assert len(calls)==1 and len(requests)==2
 
 
-async def test_native_same_capability_routes_two_resources_in_one_turn(tmp_path, monkeypatch, endpoint):
+async def test_native_same_capability_routes_two_resources_in_one_turn(
+    tmp_path, monkeypatch, endpoint
+):
     """固定 CLI へ一工具/二 selector を広告し、各要求を原 binding で監査する。"""
     from tests.agent.test_resource_tool_routing import routed_runtime
 

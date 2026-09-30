@@ -150,5 +150,7 @@ async def test_revocation_during_metadata_read_prevents_publication(db, monkeypa
     provider, context, authorized = provider_context(db, monkeypatch)
     authorized.side_effect = [authorized.return_value, ValueError("Synthetic revocation")]
     with pytest.raises(ToolProviderError):
-        await provider.execute(context, {"library_key": "outputs", "purpose": "List", "action": "list"})
+        await provider.execute(
+            context, {"library_key": "outputs", "purpose": "List", "action": "list"}
+        )
     assert authorized.await_count == 2

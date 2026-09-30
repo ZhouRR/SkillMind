@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 from jsonschema import Draft202012Validator
+
 from skillmind.agent.codex_diagnostics import codex_failure_detail
 from skillmind.agent.codex_schema import CodexOutputError, CodexOutputSchema
 from skillmind.skills.interpreter import (

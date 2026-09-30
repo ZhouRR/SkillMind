@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 import pytest
+
 from skillmind.agent.json_output_guard import JSON_WHITESPACE_LIMIT, JsonWhitespaceGuard
 
 

@@ -714,15 +714,18 @@ def _new_tool_call(
         integration_id=invocation.tool.integration_id,
         arguments_summary={
             **_arguments_summary(invocation.arguments),
-            **({"resource": resource_identity(invocation.tool)} if invocation.tool.resource_key is not None else {}),
+            **(
+                {"resource": resource_identity(invocation.tool)}
+                if invocation.tool.resource_key is not None
+                else {}
+            ),
             **(
                 {
                     "database": database_audit_identity(
                         invocation.arguments, invocation.tool.binding_id
                     )
                 }
-                if invocation.tool.capability
-                in {"database.read/v2", "database.describe/v1"}
+                if invocation.tool.capability in {"database.read/v2", "database.describe/v1"}
                 else {}
             ),
         },

@@ -6,6 +6,7 @@ import json
 from copy import deepcopy
 
 import pytest
+
 from skillmind.agent.continuation_prompt import continuation_prompt
 from tests.agent.test_continuation_prompt import compiled, context_with_brief
 

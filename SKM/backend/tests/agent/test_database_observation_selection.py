@@ -7,10 +7,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
+from sqlalchemy.dialects import postgresql
+
 from skillmind.agent.database_observations import DatabaseObservations
 from skillmind.agent.database_provider import DatabaseReadProvider
 from skillmind.agent.runtime_policy import RUNTIME_POLICY
-from sqlalchemy.dialects import postgresql
 
 
 class CapturingSession:
