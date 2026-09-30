@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from arq.worker import Function
+
 from skillmind.core.settings import Settings
 from skillmind.storage import InMemoryFileStorage
 from skillmind.worker import settings as worker
@@ -51,17 +52,21 @@ async def test_maintenance_startup_has_no_model_or_effect_executor(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "enabled,effects", [(False, False), (False, True), (True, False), (True, True)]
+    "enabled,database", [(False, False), (False, True), (True, False), (True, True)]
 )
-async def test_maintenance_routes_only_enabled_work_to_execution_queue(enabled, effects):
-    """保守 Redis pool の既定 Queue に業務を誤配送せず、元の明示 Queue と gate を守る。"""
+async def test_maintenance_routes_http_effects_independently_of_database_switch(enabled, database):
+    """HTTP が有効なら DB 停止中も元 Queue へ配送し、dispatch 停止は全 job に適用する。"""
     relay = CapturingRelay()
     redis = MagicMock(publish=AsyncMock(), enqueue_job=AsyncMock())
     ctx = {
         "settings": Settings(
             _env_file=None,
             worker_dispatch_enabled=enabled,
-            database_writes_enabled=effects,
+            deferred_features_enabled=False,
+            database_writes_enabled=database,
+            document_writes_enabled=False,
+            git_writes_enabled=False,
+            mcp_tools_enabled=False,
             queue_name="fixture:runs",
         ),
         "redis": redis,
@@ -75,9 +80,8 @@ async def test_maintenance_routes_only_enabled_work_to_execution_queue(enabled, 
         "execute_run",
         "execute_interpretation_request_job",
         "execute_reconciliation_request_job",
+        "execute_effect",
     }
-    if effects:
-        expected.add("execute_effect")
     assert jobs == (expected if enabled else set())
     for call in redis.enqueue_job.await_args_list:
         assert call.kwargs["_queue_name"] == "fixture:runs"

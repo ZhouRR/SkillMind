@@ -71,6 +71,7 @@ class ProductionRunContextBuilder:
         tool_registry: ToolRegistry,
         model: str | None,
         materializer: WorkspaceMaterializer | None = None,
+        execution_features: ExecutionFeatures | None = None,
         deferred_features_enabled: bool = True,
         database_writes_enabled: bool = False,
         document_writes_enabled: bool = False,
@@ -84,6 +85,7 @@ class ProductionRunContextBuilder:
 
         ``materializer`` を渡すと Run 準備段階で冻结資源を input/ へ只読物化する (計画 §19 W3)。
         None のときは物化を行わない (offline/未配線環境の従来挙動)。
+        明示した execution_features を優先し、未指定時だけ旧 switch 群を用いる。
         """
 
         self._workspace_manager = workspace_manager
@@ -93,9 +95,15 @@ class ProductionRunContextBuilder:
         self._document_library_target = document_library_target
         self._proposal_continuations = proposal_continuations
         self._database_observations = database_observations
-        self._execution_features = ExecutionFeatures(
-            deferred_features_enabled, database_writes_enabled,
-            document_writes_enabled, git_writes_enabled, mcp_tools_enabled
+        # 明示した共有 policy を優先し、新規能力を旧 switch 群への分解で失わない。
+        self._execution_features = (
+            execution_features if execution_features is not None else ExecutionFeatures(
+                deferred=deferred_features_enabled,
+                database_writes=database_writes_enabled,
+                document_writes=document_writes_enabled,
+                git_writes=git_writes_enabled,
+                mcp_tools=mcp_tools_enabled,
+            )
         )
 
     async def build(self, claimed_run: ClaimedRun, *, sequence_start: int) -> RunContext:

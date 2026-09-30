@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
 from arq.worker import Function
+
 from skillmind.agent.codex_engine import CodexAgentSdkEngine
 from skillmind.agent.database_provider import DatabaseReadProvider
 from skillmind.agent.engine import ClaudeAgentSdkEngine, RunMcpRuntime
@@ -23,6 +25,7 @@ from skillmind.agent.workspace_materializer import WorkspaceMaterializer
 from skillmind.core.settings import Settings
 from skillmind.documents.library import configured_document_library
 from skillmind.effects.document_provider import DocumentWriteProvider
+from skillmind.effects.release import configured_execution_features
 from skillmind.runs.domain import LeaseValidationError
 from skillmind.runs.repository_inputs import PostgresInputSnapshotStore
 from skillmind.storage import InMemoryFileStorage
@@ -34,6 +37,7 @@ from tests.worker.test_agent_run_executor import _claimed, _context
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("http_enabled", [False, True])
 @pytest.mark.parametrize("agent_sdk", ["codex", "claude"])
 @pytest.mark.parametrize("deferred_enabled", [False, True])
 @pytest.mark.parametrize(
@@ -46,6 +50,7 @@ async def test_startup_injects_required_receipt_and_preparation_limits(
     document_enabled: bool,
     library_configured: bool,
     agent_sdk: str,
+    http_enabled: bool,
 ) -> None:
     """呼出しを記録しつつ実 constructor を通し、必須依存の渡し忘れを隠さない。"""
 
@@ -68,6 +73,8 @@ async def test_startup_injects_required_receipt_and_preparation_limits(
         document_max_bytes=123456,
         project_document_quota_bytes=987654,
     )
+    features = replace(configured_execution_features(settings), http_writes=http_enabled)
+    monkeypatch.setattr(worker, "configured_execution_features", lambda _: features)
     sessions = MagicMock()
     monkeypatch.setattr(worker, "get_settings", lambda: settings)
     monkeypatch.setattr(worker, "configure_logging", lambda _: None)
@@ -131,15 +138,16 @@ async def test_startup_injects_required_receipt_and_preparation_limits(
     assert isinstance(mcp._source, StreamableHttpMcpSource)
     assert registry.call_args.kwargs["deferred_features_enabled"] is deferred_enabled
     assert subagent.called is deferred_enabled
-    assert ("effect_executor" in context) is (deferred_enabled or document_enabled)
+    assert ("effect_executor" in context) is features.effects_enabled
     assert context["run_service"]._deferred_features_enabled is deferred_enabled
-    features = executor.call_args.kwargs["context_builder"]._execution_features
+    assert executor.call_args.kwargs["context_builder"]._execution_features is features
     assert features.deferred is deferred_enabled
+    assert features.http_writes is http_enabled
     assert features.database_writes is False
     assert features.document_writes is document_enabled
     assert executor.call_args.kwargs["context_builder"]._document_library_target == library
-    assert context["run_service"]._execution_features == features
-    assert context["effect_service"]._execution_features == features
+    assert context["run_service"]._execution_features is features
+    assert context["effect_service"]._execution_features is features
     assert registry.call_args.kwargs["document_writes_enabled"] is document_enabled
     if document_enabled:
         definition = context["effect_executor"]._provider_registry.resolve(

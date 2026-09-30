@@ -15,7 +15,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from skillmind.agent.domain import AgentEvent, AgentEventType
+from skillmind.agent.domain import AgentEvent
 from skillmind.agent.runtime_policy import RUNTIME_POLICY
 from skillmind.agent.subagent import SUBAGENT_DISPATCH_CAPABILITY
 from skillmind.agent.task_brief import resolve_execution_profile
@@ -109,6 +109,7 @@ class RunService:
         session_factory: async_sessionmaker[AsyncSession],
         *,
         file_storage: FileStorage | None = None,
+        execution_features: ExecutionFeatures | None = None,
         deferred_features_enabled: bool = True,
         scheduling_enabled: bool = False,
         database_writes_enabled: bool = False,
@@ -118,19 +119,25 @@ class RunService:
         budget_policy: BudgetPolicy | None = None,
         document_library_target: DocumentLibraryTarget | None = None,
     ) -> None:
-        """既存内部呼出しの互換性を保ち、API/Worker は配備 policy を必ず注入する。"""
+        """共有 policy を優先し、未指定時だけ旧 switch 群から互換 policy を作る。
+
+        API/Worker は完全な ExecutionFeatures を渡し、調度も同じ deferred 上限に従う。
+        """
 
         self._session_factory = session_factory
         self._file_storage = file_storage
-        self._deferred_features_enabled = deferred_features_enabled
-        self._scheduling_enabled = scheduling_enabled or deferred_features_enabled
-        self._execution_features = ExecutionFeatures(
-            deferred_features_enabled,
-            database_writes_enabled,
-            document_writes_enabled,
-            git_writes_enabled,
-            mcp_tools_enabled,
+        # 明示した共有 policy を優先し、新規能力を旧 switch 群への分解で失わない。
+        self._execution_features = (
+            execution_features if execution_features is not None else ExecutionFeatures(
+                deferred=deferred_features_enabled,
+                database_writes=database_writes_enabled,
+                document_writes=document_writes_enabled,
+                git_writes=git_writes_enabled,
+                mcp_tools=mcp_tools_enabled,
+            )
         )
+        self._deferred_features_enabled = self._execution_features.deferred
+        self._scheduling_enabled = scheduling_enabled or self._execution_features.deferred
         if budget_policy is not None and budget_policy.max_cost_nanos is not None:
             raise BudgetUnavailableError("Primary execution cost adapter is not configured")
         self._budget_policy = budget_policy
@@ -690,7 +697,10 @@ class RunService:
                 lease_expires_at=lease_expires_at,
                 max_attempts=max_attempts,
                 trace_id=trace_id,
-                **({"expected_previous": expected_previous} if expected_previous is not None else {}),
+                **(
+                    {"expected_previous": expected_previous}
+                    if expected_previous is not None else {}
+                ),
             )
 
     async def heartbeat_run_attempt(
@@ -819,7 +829,9 @@ class RunService:
         except InlineUnavailable:
             return None
 
-    async def inline_effect_receipt(self, claimed: ClaimedRun, proposal_id: UUID) -> dict[str, Any] | None:
+    async def inline_effect_receipt(
+        self, claimed: ClaimedRun, proposal_id: UUID,
+    ) -> dict[str, Any] | None:
         """同一親実行に原回执を交付し、欠落を成功補完しない。"""
         async with self._session_factory() as session, session.begin():
             actor = await session.get(User, claimed.actor_id)
@@ -828,8 +840,10 @@ class RunService:
             projects = ProjectRepository(session)
             access = await projects.lock_write_access(user=actor, project_id=claimed.project_id)
             projects.require_active_write_access(access)
-            return await RunRepository(session, execution_features=self._execution_features,
-                document_library_target=self._document_library_target).inline_receipt(claimed, proposal_id)
+            return await RunRepository(
+                session, execution_features=self._execution_features,
+                document_library_target=self._document_library_target,
+            ).inline_receipt(claimed, proposal_id)
 
     async def suspend_inline_effect(self, claimed: ClaimedRun, *, event: AgentEvent,
                                     proposal_id: UUID) -> UUID:
@@ -843,15 +857,21 @@ class RunService:
             proposal = await session.get(ChangeProposal, proposal_id)
             request = event.payload.get("change_proposal_request")
             origin = event.payload.get("deferred_tool")
-            agent = await session.get(AgentSession, proposal.agent_session_id) if proposal is not None else None
+            agent = (
+                await session.get(AgentSession, proposal.agent_session_id)
+                if proposal is not None else None
+            )
             if (proposal is None or segment is None or not isinstance(request, Mapping)
                 or not isinstance(origin, Mapping) or agent is None
                 or agent.run_id != claimed.run_id or agent.run_attempt_id != claimed.run_attempt_id
                 or str(agent.sdk_session_id) != str(event.agent_session_id)
-                or origin.get("tool_use_id") != (proposal.inline_owner_json or {}).get("tool_use_id")
+                or origin.get("tool_use_id")
+                != (proposal.inline_owner_json or {}).get("tool_use_id")
                 or proposal.request_fingerprint != sha256_hex(canonical_json(dict(request)))):
                 raise ValueError("Inline continuation differs from original request")
-            await repository.detach_inline_effect(run, segment, attempt, proposal, now=datetime.now(UTC))
+            await repository.detach_inline_effect(
+                run, segment, attempt, proposal, now=datetime.now(UTC),
+            )
             return proposal.id
 
     async def suspend_for_proposal(
