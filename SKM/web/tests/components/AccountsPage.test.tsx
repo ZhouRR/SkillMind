@@ -126,13 +126,22 @@ describe.each(UI_LANGUAGES)('real account components in %s', (language) => {
 })
 
 describe('server account pagination', () => {
+  it.each([0, 1, 25])('keeps the server count without paging buttons for a single page of %s accounts', (total) => {
+    const html = renderToStaticMarkup(<LanguageProvider language="zh">
+      <UserPager offset={0} count={total} total={total} limit={25} pending={false} onChange={() => {}} />
+    </LanguageProvider>)
+    expect(html).toContain(`<p role="status">${MESSAGES.zh.account.page(0, total, total)}</p>`)
+    expect(html).not.toContain('<button')
+  })
+
   it.each([
+    [0, 25, 26, 1],
     [0, 25, 51, 1],
     [25, 25, 51, 0],
     [50, 1, 51, 1],
-    [0, 0, 0, 2],
   ])('allows only available page transitions at offset %s', (offset, count, total, disabled) => {
     const html = renderToStaticMarkup(<UserPager offset={offset} count={count} total={total} limit={25} pending={false} onChange={() => {}} />)
+    expect(html.match(/<button\b/g) ?? []).toHaveLength(2)
     expect(html.match(/disabled=""/g) ?? []).toHaveLength(disabled)
   })
 
