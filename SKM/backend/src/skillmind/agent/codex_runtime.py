@@ -139,6 +139,7 @@ class CodexRuntimeConfiguration:
         # Login には thread/turn が無い。未認証での catalog discovery をログインの前提にしない。
         catalog = None if for_login else platform_model_catalog(
             cli=cli, cwd=cwd, environment=environment, model=self.model, effort=self.effort,
+            cli_version=CODEX_CLI_VERSION,
         )
         overrides = [f"features.{feature}=false" for feature in _DISABLED_FEATURES]
         overrides.extend(

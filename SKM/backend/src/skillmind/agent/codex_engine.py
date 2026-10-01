@@ -211,9 +211,13 @@ class CodexAgentSdkEngine:
         async with serve_codex_tools(bridge) as mcp:
             async def new_client() -> CodexClient:
                 """Cold 起動時だけ catalog を準備し、暖機再利用に discovery を追加しない。"""
-                config = await prepare_codex_config(
-                    self._configuration, mcp=mcp if warm is None else None,
-                )
+                with observe_phase(
+                    "run.performance.catalog_prepare", run_id=context.run_id,
+                    run_attempt_id=context.run_attempt_id,
+                ):
+                    config = await prepare_codex_config(
+                        self._configuration, mcp=mcp if warm is None else None,
+                    )
                 return create_codex_client(config)
 
             if warm is None:
