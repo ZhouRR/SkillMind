@@ -74,6 +74,33 @@ describe('documentPreviewKind', () => {
 })
 
 describe('DocumentTree display', () => {
+  it('starts all folder levels collapsed while retaining root files and empty folders', () => {
+    const html = renderToStaticMarkup(<DocumentTree
+      root={buildDocumentTree([
+        document({ document_id: 'root', name: 'readme.md' }),
+        document({ document_id: 'nested', folder: 'specs/api', name: 'overview.md' }),
+      ], ['empty/nested'])}
+      projectId={PROJECT_ID} busyId={null} onDelete={vi.fn()} onPreview={vi.fn()} />)
+
+    expect(html.match(/<details class="docFolder"[^>]*>/g)).toEqual(
+      Array(4).fill('<details class="docFolder">'),
+    )
+    expect(html).toContain('title="empty/nested"')
+    expect(html).toContain('aria-label="预览: overview.md"')
+    // Root 文書は閉じた directory の外に残し、内容を消さず native summary で辿れる。
+    expect(html.lastIndexOf('aria-label="预览: readme.md"')).toBeGreaterThan(html.lastIndexOf('</details>'))
+  })
+
+  it('expands all matching folder levels when search requests disclosure', () => {
+    const html = renderToStaticMarkup(<DocumentTree
+      root={buildDocumentTree([document({ folder: 'specs/nested/deep' })], ['empty/nested'])}
+      expandFolders projectId={PROJECT_ID} busyId={null} onDelete={vi.fn()} onPreview={vi.fn()} />)
+
+    expect(html.match(/<details class="docFolder"[^>]*>/g)).toEqual(
+      Array(5).fill('<details class="docFolder" open="">'),
+    )
+  })
+
   it('offers raw text preview for JSON results and common text documents', () => {
     for (const name of ['rv-result.JSON', 'events.jsonl', 'data.csv', 'data.tsv', 'worker.log', 'config.yaml', 'config.yml', 'report.xml']) {
       const html = renderTree([document({ name, mime: 'application/octet-stream' })])

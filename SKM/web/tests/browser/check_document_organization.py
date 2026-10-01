@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 from check_accounts import CSRF
 from check_document_management import SECOND, DocumentsApi, document, row_menu
-from check_projects import ARCHIVED, PROJECT, ProjectsApi, messages
+from check_projects import ARCHIVED, NEXT_PROJECT, PROJECT, ProjectsApi, messages
 from playwright.async_api import Route, async_playwright, expect
 
 
@@ -289,12 +289,25 @@ async def folder_selection(browser, url: str, output: Path, language: str, theme
         specs = page.get_by_role('checkbox', name=f"{m['selectFolder']}: specs", exact=True)
         summary = page.locator('.docFolder > summary').filter(has=page.locator('strong[title="specs"]'))
         folder = summary.locator('..')
-        await expect(folder).to_have_attribute('open', '')
+        await expect(page.locator('.docFolder[open]')).to_have_count(0)
         menu = await row_menu(page, summary)
-        await expect(folder).to_have_attribute('open', '')
+        await expect(folder).not_to_have_attribute('open', '')
         await menu.get_by_role('menuitem', name=d['uploadHere'], exact=True).click()
         await expect(page.get_by_role('combobox', name=d['targetFolder'], exact=True)).to_have_value('specs')
+        await expect(folder).not_to_have_attribute('open', '')
+        # 閉じた目录の選択と menu は開閉から独立し、keyboard と pointer の両方で開ける。
+        await specs.check()
+        await expect(page.locator('.documentItem input:checked')).to_have_count(2)
+        await expect(folder).not_to_have_attribute('open', '')
+        await specs.uncheck()
+        await summary.focus()
+        await page.keyboard.press('Enter')
         await expect(folder).to_have_attribute('open', '')
+        await summary.locator('strong').click()
+        await expect(folder).not_to_have_attribute('open', '')
+        await summary.locator('strong').click()
+        await expect(folder).to_have_attribute('open', '')
+        await page.locator('.docFolder > summary strong[title="elsewhere"]').click()
         outside = page.locator('.documentItem').filter(has=page.get_by_role('link', name=f"{d['download']}: archive.zip", exact=True))
         await expect(outside.get_by_role('link')).to_have_attribute('download', 'archive.zip')
         await expect(outside.get_by_role('link')).to_have_attribute('href', f'{api.prefix}projects/{PROJECT}/documents/{third}/content')
@@ -332,6 +345,16 @@ async def folder_selection(browser, url: str, output: Path, language: str, theme
         await search.fill('')
         await expect(page.locator('.documentItem input:checked')).to_have_count(0)
         await expect(toolbar.get_by_role('button')).to_have_count(0)
+        await expect(page.locator('.docFolder[open]')).to_have_count(0)
+        # 別 Project と戻る navigation で新しい目录も既定の閉状態から開始する。
+        await page.evaluate("project => { location.hash = '/documents?project=' + project }", NEXT_PROJECT)
+        await expect(page.locator('.documentItem')).to_have_count(2)
+        await expect(page.locator('.docFolder[open]')).to_have_count(0)
+        await page.locator('.docFolder > summary strong[title="specs"]').click()
+        await expect(page.locator('.docFolder[open]')).to_have_count(1)
+        await page.go_back()
+        await expect(page.locator('.documentItem')).to_have_count(3)
+        await expect(page.locator('.docFolder[open]')).to_have_count(0)
         assert not api.delete_calls and not api.unexpected and not api.failures and not errors, (
             api.delete_calls, api.unexpected, api.failures, errors,
         )
