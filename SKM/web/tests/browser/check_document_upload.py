@@ -91,7 +91,7 @@ class UploadBrowserAudit:
         )
 
 
-def upload_request(route: Route, origin: str) -> dict:
+def upload_request(route: Route, origin: str, *, replacement: bool = False) -> dict:
     """原 key と実 multipart を共通検証し、合成 file の完全な内容だけを返す。"""
     request = route.request
     assert request.headers.get("origin") == origin
@@ -104,16 +104,18 @@ def upload_request(route: Route, origin: str) -> dict:
     body = BytesParser(policy=default).parsebytes(envelope + (request.post_data_buffer or b""))
     assert body.is_multipart()
     parts = list(body.iter_parts())
-    assert [part.get_param("name", header="content-disposition") for part in parts] == [
-        "file",
-        "folder",
-    ]
+    expected = ["file", "folder"]
+    if replacement:
+        expected += ["replaces_document_id", "expected_checksum"]
+    assert [part.get_param("name", header="content-disposition") for part in parts] == expected
     return {
         "key": key,
         "name": parts[0].get_filename(),
         "mime": parts[0].get_content_type(),
         "body": parts[0].get_payload(decode=True),
         "folder": parts[1].get_payload(decode=True),
+        **({"replaces_document_id": parts[2].get_payload(decode=True).decode(),
+            "expected_checksum": parts[3].get_payload(decode=True).decode()} if replacement else {}),
     }
 
 

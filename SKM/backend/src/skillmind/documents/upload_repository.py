@@ -116,6 +116,8 @@ class DocumentUploadRepository:
             protocol_version=1,
             request_checksum=_command_checksum(organization_id, command),
             document_id=command.document_id,
+            replaces_document_id=command.replaces_document_id,
+            expected_checksum=command.expected_checksum,
             folder=command.folder,
             name=command.name,
             storage_key=command.storage_key,
@@ -275,6 +277,13 @@ def _to_intent(row: ProjectDocumentUpload) -> StoredUploadIntent:
         or not isinstance(row.storage_key, str) or not 1 <= len(row.storage_key) <= 512
         or not isinstance(row.mime, str) or not 1 <= len(row.mime) <= 128
         or not isinstance(row.checksum, str) or _CHECKSUM.fullmatch(row.checksum) is None
+        or (row.replaces_document_id is None) != (row.expected_checksum is None)
+        or (row.replaces_document_id is not None and (
+            not isinstance(row.replaces_document_id, UUID) or row.replaces_document_id.int == 0
+            or row.replaces_document_id == row.document_id
+            or not isinstance(row.expected_checksum, str)
+            or _CHECKSUM.fullmatch(row.expected_checksum) is None
+        ))
         or not _aware(row.created_at)
         or (row.publication_closed_at is not None and (
             not _aware(row.publication_closed_at) or row.publication_closed_at < row.created_at
@@ -299,6 +308,7 @@ def _to_intent(row: ProjectDocumentUpload) -> StoredUploadIntent:
         name=row.name, storage_key=row.storage_key, storage_namespace=namespace,
         upload_intent_id=row.id, size=row.size, mime=row.mime, checksum=row.checksum,
         uploaded_by=row.actor_id,
+        replaces_document_id=row.replaces_document_id, expected_checksum=row.expected_checksum,
     )
     if row.request_checksum != _command_checksum(row.organization_id, command):
         raise _invalid()
@@ -377,6 +387,8 @@ def _command_checksum(organization_id: UUID, command: UploadDocumentCommand) -> 
         organization_id=organization_id, project_id=command.project_id,
         actor_id=command.uploaded_by, folder=command.folder, name=command.name,
         size=command.size, mime=command.mime, checksum=command.checksum,
+        replaces_document_id=command.replaces_document_id,
+        expected_checksum=command.expected_checksum,
     )
 
 

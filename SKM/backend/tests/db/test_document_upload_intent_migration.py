@@ -108,6 +108,13 @@ def test_0038_and_complete_document_migration_chain_match_model(
         model_contract = _contract(model)
         constraint_names = {str(item.name) for item in model.constraints}
         if model is _INTENTS:
+            # 0060 の更新条件も発行済み 0038 へ逆移植しない。
+            for column in ("replaces_document_id", "expected_checksum"):
+                model_contract["columns"].pop(column)
+            replacement = next(item for item in model.constraints
+                               if item.name == "ck_document_upload_intents_replacement")
+            model_contract["checks"].remove(str(replacement.sqltext))
+            constraint_names.remove(str(replacement.name))
             # 0042 の追加は別回帰で合成し、発行済み 0038 の DDL を最新 model に合わせて変えない。
             model_contract["columns"].pop("publication_closed_at")
             model_contract["checks"].remove(
@@ -169,6 +176,7 @@ def test_intent_contract_has_exact_identity_types_and_no_release_or_inferred_def
         "storage_descriptor_checksum": "VARCHAR(71)", "storage_is_durable": "BOOLEAN",
         "write_protocol": "VARCHAR(32)", "size": "BIGINT", "mime": "VARCHAR(128)",
         "checksum": "VARCHAR(71)", "state": "VARCHAR(16)",
+        "replaces_document_id": "UUID", "expected_checksum": "VARCHAR(71)",
         **dict.fromkeys((
             "created_at", "published_at", "cleanup_requested_at", "publication_closed_at",
         ),
@@ -177,6 +185,7 @@ def test_intent_contract_has_exact_identity_types_and_no_release_or_inferred_def
     assert {name: value[0] for name, value in contract["columns"].items()} == expected_types
     assert {column.name for column in _INTENTS.c if column.nullable} == {
         "published_at", "cleanup_requested_at", "publication_closed_at",
+        "replaces_document_id", "expected_checksum",
     }
     assert all(column.server_default is None for column in _INTENTS.c)
     assert {column.name for column in _INTENTS.c if column.default is not None} == {"id"}
@@ -563,7 +572,10 @@ def test_postgresql_offline_sql_retains_exact_checks_fk_and_server_guard(
         for check in _INTENTS.constraints:
             if (
                 isinstance(check, sa.CheckConstraint)
-                and check.name != "ck_document_upload_intents_publication_closure"
+                and check.name not in {
+                    "ck_document_upload_intents_publication_closure",
+                    "ck_document_upload_intents_replacement",
+                }
             ):
                 assert f"CONSTRAINT {check.name} CHECK ({check.sqltext})" in sql
         assert "publication_closed_at" not in sql

@@ -234,12 +234,26 @@ UploadClosureKey = Annotated[
                         "properties": {
                             "file": {"type": "string", "format": "binary"},
                             "folder": {"type": "string", "default": "", "maxLength": 200},
+                            "replaces_document_id": {
+                                "type": "string", "format": "uuid", "minLength": 36,
+                                "maxLength": 36,
+                                "not": {"const": "00000000-0000-0000-0000-000000000000"},
+                            },
+                            "expected_checksum": {
+                                "type": "string", "pattern": "^sha256:[0-9a-f]{64}$",
+                            },
+                        },
+                        "dependentRequired": {
+                            "replaces_document_id": ["expected_checksum"],
+                            "expected_checksum": ["replaces_document_id"],
                         },
                     }
                 }
             },
             "description": (
-                "Exactly one file and optional UTF-8 folder; authentication precedes body reading. "
+                "Exactly one file and optional UTF-8 folder; paired replacement ID/checksum "
+                "update the same path while retaining the original version for frozen runs. "
+                "Authentication precedes body reading. "
                 "Actual file bytes are bounded by the configured document limit; total multipart "
                 "bytes may exceed that limit by at most 16 KiB. Duplicate fields are rejected."
             ),
@@ -267,6 +281,8 @@ async def upload_document(
             name=upload.name,
             data=upload.data,
             content_type=upload.content_type,
+            replaces_document_id=upload.replaces_document_id,
+            expected_checksum=upload.expected_checksum,
         )
     except UnauthorizedSessionError as error:
         raise authentication_required_problem() from error
@@ -283,11 +299,13 @@ async def upload_document(
             detail=str(error),
             code=error.code,
         ) from error
+    except DocumentNotFoundError as error:
+        raise _document_not_found(error) from error
     except DocumentConflictError as error:
         raise ProblemException(
             status=409,
-            title="Document already exists",
-            detail="Document with the same path already exists",
+            title="Document path conflict",
+            detail="The path already exists or the selected version changed before publication.",
             code="document_conflict",
         ) from error
     except DocumentUploadKeyConflictError as error:

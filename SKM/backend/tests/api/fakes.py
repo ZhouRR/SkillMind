@@ -1905,6 +1905,8 @@ class FakeDocumentService:
         name: str,
         data: bytes,
         content_type: str,
+        replaces_document_id: UUID | None = None,
+        expected_checksum: str | None = None,
     ) -> StoredDocument:
         """受信 upload を記録し、拒否 scenario では domain error を返す。"""
 

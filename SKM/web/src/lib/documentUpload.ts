@@ -2,7 +2,7 @@ import { withInferredContentType, type DocumentUploadBody, type DocumentUploadRe
 import type { ResourceRequestPolicy } from '../hooks/useResourceRequest'
 import { documentUploadFailure, type DocumentUploadFailure } from './documentFeedback'
 import { createIdempotencyKey } from './idempotency'
-import { isNonNilUuid } from './validation'
+import { isNonNilUuid, sameUuid } from './validation'
 
 /** Actor/Project と原 key/content の組。手動回復には File が無く、POST できない。 */
 export interface OriginalDocumentUpload {
@@ -36,7 +36,8 @@ export interface DocumentUploadRecovery {
 }
 
 /** File 本文は Blob の不変 snapshot とし、path/MIME/name も選択時に一度だけ固定する。 */
-export function freezeDocumentUpload(actorId: string, projectId: string, file: File, targetFolder = ''): OriginalDocumentUpload {
+export function freezeDocumentUpload(actorId: string, projectId: string, file: File, targetFolder = '',
+  replacements: readonly ProjectDocumentRecord[] = []): OriginalDocumentUpload {
   const folder = targetFolder.trim().replace(/\/+$/, '')
   if (folder.startsWith('/') || folder.includes('\\') || folder.split('/').some((part) => part === '.' || part === '..')
     || /[\u0000-\u001f\u007f]/.test(folder)) throw new Error('Invalid upload folder')
@@ -44,8 +45,13 @@ export function freezeDocumentUpload(actorId: string, projectId: string, file: F
   const segments = label.split('/').filter((part) => part.length > 0)
   const name = segments.at(-1) ?? file.name
   const copy = new File([file], name, { type: file.type, lastModified: file.lastModified })
+  const destination = segments.slice(0, -1).join('/')
+  const previous = replacements.find((document) => document.folder === destination && document.name === name)
+  if (previous && (!isNonNilUuid(previous.document_id) || !sameUuid(previous.project_id, projectId)
+    || !/^sha256:[0-9a-f]{64}$/.test(previous.checksum))) throw new Error('Invalid replacement identity')
   const body = Object.freeze({ file: Object.freeze(withInferredContentType(copy, name)), name,
-    folder: segments.slice(0, -1).join('/') })
+    folder: destination, ...(previous ? { replacement: Object.freeze({ documentId: previous.document_id,
+      checksum: previous.checksum }) } : {}) })
   const uploadKey = createIdempotencyKey()
   if (!isNonNilUuid(uploadKey)) throw new Error('Unable to create an original upload identity')
   return Object.freeze({ actorId, projectId, uploadKey, label, body })

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from uuid import UUID
 
 from fastapi import Request
 
@@ -26,6 +28,8 @@ class DocumentUpload:
     name: str
     data: bytes
     content_type: str
+    replaces_document_id: UUID | None = None
+    expected_checksum: str | None = None
 
 
 def _invalid_upload() -> ProblemException:
@@ -34,7 +38,7 @@ def _invalid_upload() -> ProblemException:
     return ProblemException(
         status=422,
         title="Invalid document upload",
-        detail="Expected one file and at most one UTF-8 folder in a complete multipart body.",
+        detail="Expected one file, optional folder, and paired replacement ID/checksum fields.",
         code="invalid_document_upload",
     )
 
@@ -77,15 +81,16 @@ class _MultipartUpload(MultipartReceiver[DocumentUpload]):
         self.max_bytes = max_bytes
         self.data = bytearray()
         self.folder = bytearray()
+        self.replacement = {b"replaces_document_id": bytearray(), b"expected_checksum": bytearray()}
         self.filename = ""
         self.content_type = "application/octet-stream"
         self.seen: set[bytes] = set()
         self.current = b""
 
     def begin_part(self) -> None:
-        """三つ目の part は名前や本文を蓄積する前に拒否する。"""
+        """未知 part を蓄積する前に拒否し、更新条件も有界 field として受け取る。"""
 
-        if len(self.seen) >= 2:
+        if len(self.seen) >= 4:
             raise _invalid_upload()
         self.current = b""
 
@@ -100,7 +105,7 @@ class _MultipartUpload(MultipartReceiver[DocumentUpload]):
         name = options.get(b"name", b"")
         if (
             disposition != b"form-data"
-            or name not in {b"file", b"folder"}
+            or name not in {b"file", b"folder", *self.replacement}
             or name in self.seen
             or (b"filename" in options) != (name == b"file")
         ):
@@ -124,6 +129,11 @@ class _MultipartUpload(MultipartReceiver[DocumentUpload]):
             if len(self.folder) + end - start > _FIELD_BYTES:
                 raise _invalid_upload()
             self.folder.extend(data[start:end])
+        elif self.current in self.replacement:
+            buffer = self.replacement[self.current]
+            if len(buffer) + end - start > _FIELD_BYTES:
+                raise _invalid_upload()
+            buffer.extend(data[start:end])
         else:
             raise _invalid_upload()
 
@@ -132,11 +142,27 @@ class _MultipartUpload(MultipartReceiver[DocumentUpload]):
 
         if not self.complete or b"file" not in self.seen:
             raise _invalid_upload()
+        replacement_id = None
+        expected_checksum = None
+        if self.seen.intersection(self.replacement):
+            if not set(self.replacement).issubset(self.seen):
+                raise _invalid_upload()
+            token = self.replacement[b"replaces_document_id"].decode("utf-8")
+            expected_checksum = self.replacement[b"expected_checksum"].decode("utf-8")
+            try:
+                replacement_id = UUID(token)
+            except ValueError as error:
+                raise _invalid_upload() from error
+            if (replacement_id.int == 0 or str(replacement_id) != token.lower()
+                or re.fullmatch(r"sha256:[0-9a-f]{64}", expected_checksum) is None):
+                raise _invalid_upload()
         return DocumentUpload(
             folder=self.folder.decode("utf-8"),
             name=self.filename,
             data=bytes(self.data),
             content_type=self.content_type,
+            replaces_document_id=replacement_id,
+            expected_checksum=expected_checksum,
         )
 
     def clear(self) -> None:
@@ -144,4 +170,6 @@ class _MultipartUpload(MultipartReceiver[DocumentUpload]):
 
         self.data.clear()
         self.folder.clear()
+        for buffer in self.replacement.values():
+            buffer.clear()
         super().clear()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -90,6 +91,8 @@ class DocumentService:
         name: str,
         data: bytes,
         content_type: str,
+        replaces_document_id: UUID | None = None,
+        expected_checksum: str | None = None,
     ) -> StoredDocument:
         """原要求と占用を先に commit し、その受付だけに一度の PUT と公開を許す。"""
 
@@ -97,6 +100,15 @@ class DocumentService:
             raise TypeError("Document upload requires the original user access")
         validate_user_access(access)
         _validate_upload_key(upload_key)
+        if (
+            (replaces_document_id is None) != (expected_checksum is None)
+            or (replaces_document_id is not None and (
+                not isinstance(replaces_document_id, UUID) or replaces_document_id.int == 0
+                or not isinstance(expected_checksum, str)
+                or re.fullmatch(r"sha256:[0-9a-f]{64}", expected_checksum) is None
+            ))
+        ):
+            raise UploadRejectedError("invalid_document_upload", "Invalid replacement conditions")
         # 呼出元の可変 buffer を await 後に再利用せず、検査/保存する本文を同一にする。
         payload = bytes(data)
         safe_folder, safe_name = self.validate_upload_path(
@@ -121,6 +133,8 @@ class DocumentService:
             size=len(payload),
             mime=normalized_mime,
             checksum=checksum,
+            replaces_document_id=replaces_document_id,
+            expected_checksum=expected_checksum,
         )
         async with self._upload_transaction(access, project_id) as transaction:
             repository, uploads, session_id = transaction
@@ -141,11 +155,18 @@ class DocumentService:
                     raise DocumentUploadInvalidError("Original upload receipt is unavailable")
                 # 目録が既に消えていても原公開回执を返す。現在の namespace は要求しない。
                 return original.receipt.document
-            if await repository.path_exists(
+            if replaces_document_id is not None:
+                await repository.require_replacement(
+                    project_id=project_id, document_id=replaces_document_id,
+                    folder=safe_folder, name=safe_name, checksum=expected_checksum,
+                )
+            elif await repository.path_exists(
                 project_id=project_id,
                 folder=safe_folder,
                 name=safe_name,
-            ) or await uploads.path_reserved(
+            ):
+                raise DocumentConflictError("Document with the same path already exists")
+            if await uploads.path_reserved(
                 project_id=project_id,
                 folder=safe_folder,
                 name=safe_name,
@@ -170,6 +191,8 @@ class DocumentService:
                 mime=normalized_mime,
                 checksum=checksum,
                 uploaded_by=access.actor.user_id,
+                replaces_document_id=replaces_document_id,
+                expected_checksum=expected_checksum,
             )
             admitted = uploads.reserve(
                 upload_key=upload_key,
@@ -191,6 +214,7 @@ class DocumentService:
             or blob.sha256 != checksum
         ):
             raise FileStorageError("Document storage acknowledgement did not match the upload")
+        publication_conflict = False
         async with self._upload_transaction(access, project_id) as transaction:
             repository, uploads, session_id = transaction
             original = await uploads.find(
@@ -211,9 +235,22 @@ class DocumentService:
                     "Project storage quota is exceeded",
                 )
             require_document_storage(self._file_storage, reference)
-            document = await repository.create(command)
-            await uploads.publish(admitted, document)
-            return document
+            try:
+                document = await repository.create(command)
+            except (DocumentConflictError, DocumentNotFoundError):
+                # PUT が確認済みでも競合した旧版へ公開しない。原意図と占用は監査用に残す。
+                await uploads.close_publication(
+                    admitted, actor=DocumentCleanupActor(
+                        organization_id=access.actor.organization_id, actor_id=access.actor.user_id,
+                        request_id=access.request_id, session_id=session_id,
+                    ), now=datetime.now(UTC),
+                )
+                publication_conflict = True
+            else:
+                await uploads.publish(admitted, document)
+        if publication_conflict:
+            raise DocumentConflictError("The selected document changed before replacement")
+        return document
 
     async def get_upload(
         self,

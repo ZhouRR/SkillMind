@@ -172,13 +172,18 @@ async def test_valid_run_without_selected_optional_documents_does_not_pin_assets
 
 
 @pytest.mark.parametrize(
-    "capability", ["mcp.read/v1", "mcp.tools/v1", "mcp.query/v1", "mcp.call/v1"]
+    "provider,capability", [
+        ("mcp", "mcp.read/v1"), ("mcp", "mcp.tools/v1"),
+        ("mcp", "mcp.query/v1"), ("mcp", "mcp.call/v1"),
+        ("postgres", "database.query/v1"), ("postgres", "database.execute/v1"),
+        ("http", "http.read/v1"), ("http", "http.write/v1"),
+    ]
 )
 @pytest.mark.parametrize("referenced", [False, True])
-async def test_mcp_run_preserves_exact_document_references(
-    capability: str, referenced: bool
+async def test_non_document_resources_preserve_exact_document_references(
+    provider: str, capability: str, referenced: bool
 ) -> None:
-    """MCP source の凍結済み契約を認識し、無関係な文書だけ削除を許可する。"""
+    """現行の外部 source 契約を認識し、無関係な文書だけ削除を許可する。"""
 
     db = DeletionDatabase()
     token = f"document:{db.document.id}"
@@ -192,7 +197,7 @@ async def test_mcp_run_preserves_exact_document_references(
         creation_command(intent),
         selected_sources_json={
             "docs": document_source,
-            "runner": {"provider": "mcp", "capability": capability},
+            "runner": {"provider": provider, "capability": capability},
         },
     )
     db.runs.append(stored_creation(command))
@@ -216,6 +221,23 @@ async def test_unknown_mcp_source_contract_still_blocks_document_deletion() -> N
         selected_sources_json={"runner": {"provider": "mcp", "capability": "mcp.query/v99"}},
     )
     db.runs.append(stored_creation(command))
+    with pytest.raises(DocumentReferencesUnavailableError):
+        await db.remove_document()
+    db.storage.delete.assert_not_called()
+
+
+@pytest.mark.parametrize("provider,capability", [
+    ("http", "database.query/v1"), ("postgres", "http.read/v1"),
+    ("postgres", "database.query/v2"), ("http", "http.read/v99"),
+])
+async def test_unverifiable_native_source_still_protects_documents(provider, capability):
+    """非文書に見える名前だけで、未知契約や provider 不整合の保護を外さない。"""
+    db = DeletionDatabase()
+    intent = replace(creation_intent(), project_id=db.project.id)
+    db.runs.append(stored_creation(replace(
+        creation_command(intent),
+        selected_sources_json={"resource": {"provider": provider, "capability": capability}},
+    )))
     with pytest.raises(DocumentReferencesUnavailableError):
         await db.remove_document()
     db.storage.delete.assert_not_called()

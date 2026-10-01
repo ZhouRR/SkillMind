@@ -50,6 +50,22 @@ function jsonFetch(body: unknown, status: number) {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Project document API contract', () => {
+  it('submits frozen same-path replacement identity without deleting the original', async () => {
+    const response = { ...DOCUMENT, document_id: UPLOAD_KEY, size: 3 }
+    const mock = jsonFetch(response, 201)
+    vi.stubGlobal('fetch', mock)
+    const original = freezeDocumentUpload(DOCUMENT.uploaded_by, PROJECT_ID,
+      new File(['new'], DOCUMENT.name), DOCUMENT.folder, [DOCUMENT])
+    expect(await uploadProjectDocument(PROJECT_ID, original.uploadKey, original.body!, CSRF)).toEqual(response)
+    expect(mock).toHaveBeenCalledTimes(1)
+    const request = mock.mock.calls[0]?.[1]
+    expect(request?.method).toBe('POST')
+    const form = request?.body as FormData
+    expect(form.get('replaces_document_id')).toBe(DOCUMENT_ID)
+    expect(form.get('expected_checksum')).toBe(DOCUMENT.checksum)
+    expect(form.get('folder')).toBe(DOCUMENT.folder)
+    expect((form.get('file') as File).name).toBe(DOCUMENT.name)
+  })
   it('reads only exact metadata with no cache and no mutation', async () => {
     const mock = jsonFetch(DOCUMENT, 200)
     vi.stubGlobal('fetch', mock)

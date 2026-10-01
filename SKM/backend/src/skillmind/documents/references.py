@@ -77,6 +77,10 @@ def run_document_ids(run: Run) -> frozenset[UUID]:
                     not capability.startswith(("issue.", "repository."))
                     and capability not in {
                         "database.read/v1",
+                        "database.query/v1",
+                        "database.execute/v1",
+                        "http.read/v1",
+                        "http.write/v1",
                         "mcp.read/v1",
                         "mcp.tools/v1",
                         "mcp.query/v1",
@@ -87,6 +91,15 @@ def run_document_ids(run: Run) -> frozenset[UUID]:
                 or not source["provider"]
             ):
                 raise ValueError("Stored non-document source is not verifiable")
+            # 新しい直接アクセス契約も文書ではない。未知 version や provider の偽装は除外する。
+            if (
+                capability in {"database.query/v1", "database.execute/v1"}
+                and source["provider"] != "postgres"
+            ) or (
+                capability in {"http.read/v1", "http.write/v1"}
+                and source["provider"] != "http"
+            ):
+                raise ValueError("Stored native source provider is not verifiable")
             continue
         actual_keys.add(key)
         value = source.get("document_snapshot")

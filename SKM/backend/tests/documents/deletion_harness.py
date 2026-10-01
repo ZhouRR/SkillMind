@@ -218,6 +218,11 @@ class DeletionDatabase(ScheduleAuthorizationDatabase):
         before, commits = list(self.documents), self.commits
         original_cleanups = list(self.cleanups)
         original_intents = list(self.intents)
+        document_snapshots = {
+            row.id: {column.name: deepcopy(getattr(row, column.name))
+                     for column in ProjectDocument.__table__.columns}
+            for row in before
+        }
         snapshots = {
             row.id: {
                 column.name: deepcopy(getattr(row, column.name))
@@ -231,6 +236,9 @@ class DeletionDatabase(ScheduleAuthorizationDatabase):
         except BaseException:
             if self.commits == commits:
                 self.documents = before
+                for row in before:
+                    for name, value in document_snapshots[row.id].items():
+                        setattr(row, name, value)
                 self.cleanups = original_cleanups
                 self.intents = original_intents
                 for row in self.intents:

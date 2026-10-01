@@ -32,6 +32,7 @@ export interface DocumentUploadBody {
   readonly file: File
   readonly name: string
   readonly folder: string
+  readonly replacement?: { readonly documentId: string; readonly checksum: string }
 }
 
 /** 現在目录とは独立した原 upload の公開受理記録。削除済み document も原 metadata を持つ。 */
@@ -130,6 +131,13 @@ export async function uploadProjectDocument(
   // filename は単一 segment にし、親 path は folder field で渡す (server は name に path segment を許可しない)。
   form.append('file', body.file, body.name)
   form.append('folder', body.folder)
+  if (body.replacement) {
+    if (!isNonNilUuid(body.replacement.documentId) || !/^sha256:[0-9a-f]{64}$/.test(body.replacement.checksum)) {
+      throw new Error('Valid original replacement conditions are required')
+    }
+    form.append('replaces_document_id', body.replacement.documentId)
+    form.append('expected_checksum', body.replacement.checksum)
+  }
   const document = parseDocument(await requestApiJson(
     `${API_BASE}/projects/${encodeURIComponent(projectId)}/documents`,
     {

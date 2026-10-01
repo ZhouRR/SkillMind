@@ -40,6 +40,9 @@ class UploadDocumentCommand:
     mime: str
     checksum: str
     uploaded_by: UUID
+    # 通常 upload は旧 descriptor のまま。更新は原 ID/本文 hash を二段階で照合する。
+    replaces_document_id: UUID | None = None
+    expected_checksum: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -17,10 +17,11 @@ from skillmind.documents.domain import (
 def upload_request_checksum(
     *, organization_id: UUID, project_id: UUID, actor_id: UUID,
     folder: str, name: str, size: int, mime: str, checksum: str,
+    replaces_document_id: UUID | None = None, expected_checksum: str | None = None,
 ) -> str:
     """新しい server request/session/object ID を除き、正規化済み原入力だけを固定する。"""
 
-    return f"sha256:{sha256_hex(canonical_json({
+    descriptor = {
         'protocol_version': 1,
         'organization_id': str(organization_id),
         'project_id': str(project_id),
@@ -30,7 +31,13 @@ def upload_request_checksum(
         'size': size,
         'mime': mime,
         'checksum': checksum,
-    }))}"
+    }
+    # 未指定の旧 upload hash は変更せず、更新対象も原要求の identity に含める。
+    if replaces_document_id is not None:
+        descriptor["replacement"] = {
+            "document_id": str(replaces_document_id), "checksum": expected_checksum,
+        }
+    return f"sha256:{sha256_hex(canonical_json(descriptor))}"
 
 
 @dataclass(frozen=True, slots=True)

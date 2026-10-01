@@ -648,6 +648,8 @@ export interface UiMessages {
     recycleHint: string
   }
   documentsPanel: {
+    updateFile: string
+    replaceSameName: string
     targetFolder: string
     rootFolder: string
     uploadHere: string

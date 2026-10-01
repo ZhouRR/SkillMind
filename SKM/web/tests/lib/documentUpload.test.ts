@@ -58,6 +58,21 @@ describe('immutable original document uploads', () => {
     expect(first.body?.file).not.toBe(second.body?.file)
   })
 
+  it('freezes replacement conditions only for the exact selected project path', () => {
+    const previous = { document_id: '00000000-0000-4000-8000-000000000090', project_id: PROJECT,
+      folder: 'knowledge/common', name: 'terms.md', size: 3, mime: 'text/markdown', checksum: `sha256:${'a'.repeat(64)}`,
+      uploaded_by: ACTOR, created_at: '2026-10-01T00:00:00Z' }
+    const file = new File(['new'], 'terms.md')
+    const original = freezeDocumentUpload(ACTOR, PROJECT, file, previous.folder, [previous])
+    previous.checksum = `sha256:${'b'.repeat(64)}`
+    expect(original.body?.replacement).toEqual({ documentId: previous.document_id, checksum: `sha256:${'a'.repeat(64)}` })
+    expect(Object.isFrozen(original.body?.replacement)).toBe(true)
+    expect(freezeDocumentUpload(ACTOR, PROJECT, file, 'other', [previous]).body?.replacement).toBeUndefined()
+    expect(freezeDocumentUpload(ACTOR, PROJECT, file, previous.folder).body?.replacement).toBeUndefined()
+    expect(() => freezeDocumentUpload(ACTOR, PROJECT, file, previous.folder,
+      [{ ...previous, project_id: ACTOR }])).toThrow('Invalid replacement')
+  })
+
   it.each([undefined, { randomUUID: () => '00000000-0000-0000-0000-000000000000' }])(
     'does not substitute a weak or nil identity when crypto fails', (crypto) => {
       vi.stubGlobal('crypto', crypto)

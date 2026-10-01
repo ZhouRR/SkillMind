@@ -86,12 +86,21 @@ def test_0042_composes_with_unchanged_0038_and_matches_current_models(
         sa.Index(index_name, *(target.c[column] for column in columns), **invocation.kwargs)
     for migrated, model in ((intents, _INTENTS), (closures, _CLOSURES)):
         current = _contract(model)
+        constraint_names = {str(item.name) for item in model.constraints}
+        if model is _INTENTS:
+            # 0060 の nullable 更新条件は旧 0042 の契約比較からだけ外す。
+            for column in ("replaces_document_id", "expected_checksum"):
+                current["columns"].pop(column)
+            replacement = next(item for item in model.constraints
+                               if item.name == "ck_document_upload_intents_replacement")
+            current["checks"].remove(str(replacement.sqltext))
+            constraint_names.remove(str(replacement.name))
         # 0057 の Project FK 分離を旧版の比較にだけ戻す。
         current["foreign_keys"].add(("project_id", "projects.id", "RESTRICT"))
         assert _contract(migrated) == current
-        assert {str(item.name) for item in migrated.constraints} == {
-            str(item.name) for item in model.constraints
-        } | {f"fk_{model.name}_project_id_projects"}
+        assert {str(item.name) for item in migrated.constraints} == (
+            constraint_names | {f"fk_{model.name}_project_id_projects"}
+        )
         assert all(len(str(item.name)) <= 63 for item in migrated.constraints)
         assert _indexes(migrated) == _indexes(model)
     assert _indexes(intents) == {

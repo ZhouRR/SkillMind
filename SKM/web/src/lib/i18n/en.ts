@@ -661,6 +661,8 @@ export const EN: UiMessages = {
     cleanupPending: "History was deleted, but some file cleanup could not be confirmed. Ask an administrator to check.",
   },
   documentsPanel: {
+    updateFile: 'Update file',
+    replaceSameName: 'Update matching files (keep previous versions)',
     targetFolder: 'Upload destination folder',
     rootFolder: 'Root folder (leave empty)',
     uploadHere: 'Upload to this folder',
@@ -733,7 +735,7 @@ export const EN: UiMessages = {
       uploadClosed: 'The server refused further publication of this original upload. Check its closure receipt; do not resend or assume its bytes were cleaned up.',
       uploadPending: 'The original upload remains unconfirmed. Later files are paused; check its original key without resending.',
       uploadKeyConflict: 'The upload key is bound to different content. Do not overwrite the original request; keep the outcome unknown and check its record.',
-      uploadConflict: 'This path is occupied by an existing document or upload. This new upload was refused; a same-name entry is not proof of its success.',
+      uploadConflict: 'A matching file exists or the selected version changed. Refresh the list, then select the file again using the update option.',
       uploadNotFound: 'The original upload was not found in this check. The in-flight POST may still be accepted later, so the unknown outcome and write gate remain.',
       uploadUnavailable: 'The original upload record cannot be verified. Check manually later; its outcome remains unknown.',
       uploadInvalidKey: 'Enter the complete original upload UUID. No replacement key will be generated.',

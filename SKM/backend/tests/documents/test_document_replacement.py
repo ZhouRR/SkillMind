@@ -7,9 +7,10 @@ from uuid import uuid4
 import pytest
 
 from skillmind.db.models import ProjectDocument
-from skillmind.documents.domain import DocumentConflictError
+from skillmind.documents.domain import DocumentConflictError, UploadDocumentCommand
 from skillmind.documents.effect_repository import DocumentEffectRepository
 from skillmind.documents.file_state import observe_file_state
+from skillmind.documents.repository import DocumentRepository
 from tests.documents.test_document_effect_repository import database as database
 
 
@@ -91,3 +92,27 @@ async def test_failed_publication_restores_original_visibility(database):
     with db.transaction() as session:
         assert (await session.get(ProjectDocument, old.id)).deleted_at is None
         assert (await DocumentEffectRepository(session).require(db.command)).state == "VERIFIED"
+
+
+async def test_human_upload_publication_rolls_back_replacement_atomically(database):
+    """画面更新も実 SQL rollback で旧可視性を戻し、凍結 ID を書き換えない。"""
+    db = database
+    old, _ = await original(db)
+    command = UploadDocumentCommand(
+        project_id=old.project_id, document_id=uuid4(), folder=old.folder, name=old.name,
+        storage_key="new/key", storage_namespace=db.command.namespace,
+        upload_intent_id=uuid4(), size=7, mime="text/markdown", checksum="sha256:" + "b" * 64,
+        uploaded_by=db.actor, replaces_document_id=old.id, expected_checksum=old.checksum,
+    )
+    with pytest.raises(RuntimeError), db.transaction() as session:
+        await DocumentRepository(session).create(command)
+        await session.flush()
+        raise RuntimeError("Synthetic publication rollback")
+    with db.transaction() as session:
+        assert (await session.get(ProjectDocument, old.id)).deleted_at is None
+        assert await session.get(ProjectDocument, command.document_id) is None
+        new = await DocumentRepository(session).create(command)
+    with db.transaction() as session:
+        previous = await session.get(ProjectDocument, old.id)
+        assert previous.deleted_at is not None and previous.storage_key == "original/key"
+        assert new.document_id != old.id

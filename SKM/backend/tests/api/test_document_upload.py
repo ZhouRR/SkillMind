@@ -20,7 +20,7 @@ from skillmind.api.document_upload import MULTIPART_OVERHEAD_BYTES, read_documen
 from skillmind.api.problems import ProblemException
 from skillmind.auth.domain import generate_session_credentials
 from skillmind.auth.sessions import CsrfRejectedError, UnauthorizedSessionError
-from skillmind.documents.domain import DocumentConflictError
+from skillmind.documents.domain import DocumentConflictError, DocumentNotFoundError
 from skillmind.projects.domain import ProjectArchivedError, ProjectNotFoundError, ProjectStatus
 from skillmind.users.domain import UserAccess
 from tests.api.fakes import DeniedProjectAuthorizationService, FakeDocumentService
@@ -212,6 +212,37 @@ async def test_invalid_multipart_is_a_static_refusal(body: bytes) -> None:
     with pytest.raises(ProblemException) as caught:
         await read_document_upload(request, max_bytes=2000)
     assert caught.value.status == 422 and caught.value.code == "invalid_document_upload"
+
+
+async def test_multipart_replacement_preserves_exact_original_conditions() -> None:
+    """更新の二 field を分断 ASGI byte から照合し、通常 file/folder と共に渡す。"""
+    original = uuid4()
+    checksum = b"sha256:" + b"a" * 64
+    prefix = _part(b'form-data; name="replaces_document_id"', str(original).encode())
+    prefix += _part(b'form-data; name="expected_checksum"', checksum)
+    request, _ = _request(prefix + _body(folder=b"knowledge"))
+    result = await read_document_upload(request, max_bytes=2000)
+    assert result.replaces_document_id == original and result.expected_checksum == checksum.decode()
+    assert result.folder == "knowledge" and result.data == b"body"
+
+
+@pytest.mark.parametrize("identity,checksum", [
+    (None, b"sha256:" + b"a" * 64), (b"00000000-0000-4000-8000-000000000090", None),
+    (b"00000000-0000-0000-0000-000000000000", b"sha256:" + b"a" * 64),
+    (b"invalid", b"sha256:" + b"a" * 64),
+    (b"00000000-0000-4000-8000-000000000090", b"invalid"),
+])
+async def test_incomplete_or_invalid_replacement_fields_are_rejected(identity, checksum):
+    """条件欠落を通常 upload に降格せず、本文保存前の明確な拒否にする。"""
+    prefix = b""
+    if identity is not None:
+        prefix += _part(b'form-data; name="replaces_document_id"', identity)
+    if checksum is not None:
+        prefix += _part(b'form-data; name="expected_checksum"', checksum)
+    request, _ = _request(prefix + _body())
+    with pytest.raises(ProblemException) as caught:
+        await read_document_upload(request, max_bytes=2000)
+    assert caught.value.status == 422
 
 
 @pytest.mark.parametrize("headers,status", [
@@ -453,6 +484,7 @@ def test_http_admission_refusal_never_calls_upload_service(
     (ProjectNotFoundError, 404, "project_not_found"),
     (ProjectArchivedError, 409, "project_archived"),
     (DocumentConflictError, 409, "document_conflict"),
+    (DocumentNotFoundError, 404, "document_not_found"),
 ])
 def test_upload_maps_original_transaction_refusals(
     client: TestClient, monkeypatch: pytest.MonkeyPatch,

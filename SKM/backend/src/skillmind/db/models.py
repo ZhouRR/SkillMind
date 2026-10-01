@@ -1866,6 +1866,14 @@ class ProjectDocumentUpload(IdentityMixin, Base):
             name="non_nil_identities",
         ),
         CheckConstraint("protocol_version = 1", name="protocol_version"),
+        CheckConstraint(
+            "(replaces_document_id IS NULL AND expected_checksum IS NULL) OR "
+            "(replaces_document_id IS NOT NULL AND expected_checksum IS NOT NULL AND "
+            "replaces_document_id <> '00000000-0000-0000-0000-000000000000' AND "
+            "replaces_document_id <> document_id AND "
+            "expected_checksum ~ '^sha256:[0-9a-f]{64}$')",
+            name="replacement",
+        ),
         CheckConstraint("request_checksum ~ '^sha256:[0-9a-f]{64}$'", name="request_checksum"),
         CheckConstraint(
             "storage_descriptor_checksum ~ '^sha256:[0-9a-f]{64}$'",
@@ -1909,6 +1917,9 @@ class ProjectDocumentUpload(IdentityMixin, Base):
     protocol_version: Mapped[int] = mapped_column(Integer, nullable=False)
     request_checksum: Mapped[str] = mapped_column(String(71), nullable=False)
     document_id: Mapped[UUID] = mapped_column(nullable=False)
+    # 旧原回执を残し、同名更新が選択した元文書を持続的に固定する。
+    replaces_document_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    expected_checksum: Mapped[str | None] = mapped_column(String(71), nullable=True)
     folder: Mapped[str] = mapped_column(String(200), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     storage_key: Mapped[str] = mapped_column(String(512), nullable=False)

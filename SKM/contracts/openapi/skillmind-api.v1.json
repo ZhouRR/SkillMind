@@ -17489,7 +17489,19 @@
             "multipart/form-data": {
               "schema": {
                 "additionalProperties": false,
+                "dependentRequired": {
+                  "expected_checksum": [
+                    "replaces_document_id"
+                  ],
+                  "replaces_document_id": [
+                    "expected_checksum"
+                  ]
+                },
                 "properties": {
+                  "expected_checksum": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
                   "file": {
                     "format": "binary",
                     "type": "string"
@@ -17497,6 +17509,15 @@
                   "folder": {
                     "default": "",
                     "maxLength": 200,
+                    "type": "string"
+                  },
+                  "replaces_document_id": {
+                    "format": "uuid",
+                    "maxLength": 36,
+                    "minLength": 36,
+                    "not": {
+                      "const": "00000000-0000-0000-0000-000000000000"
+                    },
                     "type": "string"
                   }
                 },
@@ -17507,7 +17528,7 @@
               }
             }
           },
-          "description": "Exactly one file and optional UTF-8 folder; authentication precedes body reading. Actual file bytes are bounded by the configured document limit; total multipart bytes may exceed that limit by at most 16 KiB. Duplicate fields are rejected.",
+          "description": "Exactly one file and optional UTF-8 folder; paired replacement ID/checksum update the same path while retaining the original version for frozen runs. Authentication precedes body reading. Actual file bytes are bounded by the configured document limit; total multipart bytes may exceed that limit by at most 16 KiB. Duplicate fields are rejected.",
           "required": true
         },
         "responses": {

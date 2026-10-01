@@ -101,6 +101,9 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
   const confirmPending = useRef(false)
   const [confirming, setConfirming] = useState(false)
   const [targetFolder, setTargetFolder] = useState('')
+  const [replaceSameName, setReplaceSameName] = useState(false)
+  const replacementInput = useRef<HTMLInputElement | null>(null)
+  const replacementTarget = useRef<ProjectDocumentRecord | null>(null)
   const [trashed, setTrashed] = useState(false)
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState('name')
@@ -265,6 +268,11 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
       else next.delete(id)
       return next
     }), onFolder: setTargetFolder,
+    replace: trashed ? undefined : (document) => {
+      if (blocked) return
+      replacementTarget.current = document
+      replacementInput.current?.click()
+    },
     edit: trashed ? undefined : (d) => setEdit({ mode: 'MOVE', documents: [d], folder: d.folder }),
     folderEdit: trashed ? undefined : (path) => setEdit({ mode: 'MOVE_FOLDER', documents: [], source: path, folder: path }),
     folderSelect: (path, checked) => setSelectedIds((current) => {
@@ -316,7 +324,7 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
             onChange={(event) => {
               const selected = event.currentTarget.files ? Array.from(event.currentTarget.files) : []
               event.currentTarget.value = ''
-              upload.start(selected, targetFolder)
+              upload.start(selected, targetFolder, replaceSameName ? documents : [])
             }}
           />
         </label>
@@ -331,10 +339,24 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
             onChange={(event) => {
               const selected = event.currentTarget.files ? Array.from(event.currentTarget.files) : []
               event.currentTarget.value = ''
-              upload.start(selected, targetFolder)
+              upload.start(selected, targetFolder, replaceSameName ? documents : [])
             }}
           />
         </label>
+        <label className="documentOverwriteOption"><input type="checkbox" checked={replaceSameName} disabled={blocked}
+          onChange={(event) => setReplaceSameName(event.target.checked)} />{messages.documentsPanel.replaceSameName}</label>
+        <input ref={replacementInput} type="file" hidden disabled={blocked} aria-label={messages.documentsPanel.updateFile}
+          onChange={(event) => {
+            const file = event.currentTarget.files?.[0]
+            const target = replacementTarget.current
+            event.currentTarget.value = ''
+            replacementTarget.current = null
+            if (file && target) {
+              // 更新先の名前を保ち、ローカル側の名前や directory 選択で対象を変えない。
+              const replacement = new File([file], target.name, { type: file.type, lastModified: file.lastModified })
+              upload.start([replacement], target.folder, [target])
+            }
+          }} />
       </div>}
       {documents.length > 0 && <div className="documentSelectionToolbar">
         <label><input type="checkbox" disabled={blocked} checked={visible.length > 0 && selectedDocuments.length === visible.length}
@@ -437,6 +459,7 @@ interface DocumentTreeSelection {
   toggle: (id: string, checked: boolean) => void
   onFolder: (path: string) => void
   edit?: (document: ProjectDocumentRecord) => void
+  replace?: (document: ProjectDocumentRecord) => void
   folderEdit?: (path: string) => void
   folderDelete?: (path: string) => void
   folderSelect?: (path: string, checked: boolean) => void
@@ -582,6 +605,8 @@ function FileRow({ document, projectId, busyId, onDelete, onPreview, selection }
   const downloadHref = projectDocumentContentHref(projectId, document.document_id)
   const typeLabel = documentTypeLabel(document.name)
   const actions: ActionMenuItem[] = [{ id: 'download', label: messages.documentsPanel.download, href: downloadHref, download: document.name }]
+  if (selection?.replace) actions.push({ id: 'update', label: messages.documentsPanel.updateFile,
+    disabled: selection.disabled, onSelect: () => selection.replace?.(document) })
   if (selection?.edit) actions.push({ id: 'organize', label: `${messages.fileManagement.rename} / ${messages.fileManagement.move}`,
     disabled: selection.disabled, onSelect: () => selection.edit?.(document) })
   actions.push({ id: 'recycle', label: busyId === document.document_id ? messages.documentsPanel.deleting

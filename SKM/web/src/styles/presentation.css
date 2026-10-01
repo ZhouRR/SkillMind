@@ -54,6 +54,8 @@
 .documentToolbar { align-items: end; }
 .documentToolbar .documentTargetFolder { margin: 0; }
 .documentToolbar .fileUploadButton { width: auto; margin: 0; }
+.documentToolbar .documentOverwriteOption { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; }
+.documentOverwriteOption input[type="checkbox"] { flex: none; width: auto; margin: 0; }
 .documentToolbar .documentRefresh { margin: 0 0 0 auto; }
 [data-page='documents'] .documentHelp { margin-top: 24px; }
 [data-page='documents'] .documentUploadStatus, [data-page='documents'] .documentUploadClosure { margin-bottom: 20px; }

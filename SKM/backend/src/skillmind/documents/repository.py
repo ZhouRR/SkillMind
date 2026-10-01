@@ -18,6 +18,7 @@ from skillmind.db.models import (
 from skillmind.documents.cleanup_repository import DocumentCleanupRepository
 from skillmind.documents.domain import (
     DocumentCleanupActor,
+    DocumentConflictError,
     DocumentInUseError,
     DocumentNotFoundError,
     DocumentStorageUnavailableError,
@@ -96,6 +97,15 @@ class DocumentRepository:
         """文書 metadata 行を追加し、read model を返す。"""
 
         now = datetime.now(UTC)
+        if command.replaces_document_id is not None:
+            previous = await self.require_replacement(
+                project_id=command.project_id, document_id=command.replaces_document_id,
+                folder=command.folder, name=command.name, checksum=command.expected_checksum,
+            )
+            # 原 ID/byte は凍結 Run のため保持し、新目録だけを公開する。削除検査は不要。
+            previous.deleted_at = now
+            previous.deleted_by = command.uploaded_by
+            await self._session.flush()
         document = ProjectDocument(
             id=command.document_id,
             project_id=command.project_id,
@@ -114,6 +124,21 @@ class DocumentRepository:
         )
         self._session.add(document)
         return _to_stored(document)
+
+    async def require_replacement(
+        self, *, project_id: UUID, document_id: UUID, folder: str, name: str,
+        checksum: str | None,
+    ) -> ProjectDocument:
+        """Organization の書込 lock 内で元 ID/path/hash を照合し、別の同名文書へ乗換えない。"""
+        row = await self._session.get(ProjectDocument, document_id)
+        if row is None or row.project_id != project_id:
+            raise DocumentNotFoundError("Document is not accessible")
+        if (
+            row.deleted_at is not None
+            or row.folder != folder or row.name != name or row.checksum != checksum
+        ):
+            raise DocumentConflictError("The selected document changed before replacement")
+        return row
 
     async def path_exists(self, *, project_id: UUID, folder: str, name: str) -> bool:
         """既存目録の保存先を解決せず、同じ表示 path への新しい PUT を拒否する。"""

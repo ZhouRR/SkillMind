@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
-import { loadDocumentUpload, uploadProjectDocument, type DocumentUploadRecord, type DocumentUploadClosureReceipt } from '../api'
+import { loadDocumentUpload, uploadProjectDocument, type DocumentUploadRecord, type DocumentUploadClosureReceipt, type ProjectDocumentRecord } from '../api'
 import { documentUploadFailure, type DocumentFailure, type DocumentUploadFailure } from '../lib/documentFeedback'
 import { DOCUMENT_UPLOAD_POLICY, freezeDocumentUpload, uploadBatchLocked, uploadIsUncertain,
   type DocumentUploadBatch, type DocumentUploadItem, type DocumentUploadRecovery, type OriginalDocumentUpload } from '../lib/documentUpload'
@@ -179,11 +179,11 @@ export function useDocumentUpload(options: UploadOptions) {
   }
 
   /** 選択時に全原 request を固定し、二度目の change が同 tick でも batch を上書きしない。 */
-  function start(files: File[], targetFolder = ''): boolean {
+  function start(files: File[], targetFolder = '', replacements: readonly ProjectDocumentRecord[] = []): boolean {
     if (!files.length || !canStart()) return false
     let items: DocumentUploadItem[]
     try {
-      items = files.map((file) => ({ original: freezeDocumentUpload(options.actorId, options.projectId, file, targetFolder),
+      items = files.map((file) => ({ original: freezeDocumentUpload(options.actorId, options.projectId, file, targetFolder, replacements),
         phase: 'queued', document: null, failure: null }))
     } catch {
       setNotice({ key: 'uploadPreparationFailed' }); return false
