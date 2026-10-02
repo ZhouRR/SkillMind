@@ -148,8 +148,17 @@ class DocumentsApi(ProjectsApi):
         self.gate.returned.set()
 
 
+async def open_ancestor_folders(row: Locator) -> None:
+    """既定で閉じた文書目录を外側から native summary で開く。"""
+    for folder in await row.locator('xpath=ancestor::details[@class="docFolder"]').all():
+        if await folder.get_attribute("open") is None:
+            await folder.locator(':scope > summary > strong').click()
+
+
 async def row_menu(page: Page, row: Locator) -> Locator:
     """対象行の実入口を開き、Portal に描画された同じ名前の menu を取得する。"""
+    if "documentItem" in (await row.get_attribute("class") or "").split():
+        await open_ancestor_folders(row)
     trigger = row.locator('button[aria-haspopup="menu"]')
     label = await trigger.get_attribute("aria-label")
     assert label

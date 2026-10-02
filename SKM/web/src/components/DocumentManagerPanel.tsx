@@ -483,7 +483,6 @@ export function DocumentTree({ root, projectId, busyId, onDelete, onPreview, sel
         <FolderNode
           key={folder.path}
           folder={folder}
-          depth={0}
           expandFolders={expandFolders}
           projectId={projectId}
           busyId={busyId}
@@ -512,9 +511,8 @@ export function DocumentTree({ root, projectId, busyId, onDelete, onPreview, sel
 }
 
 /** 一つの folder を開閉可能な節として描画し、子 folder → file の順で内容を並べる。 */
-function FolderNode({ folder, depth, projectId, busyId, onDelete, onPreview, selection, expandFolders }: {
+function FolderNode({ folder, projectId, busyId, onDelete, onPreview, selection, expandFolders }: {
   folder: DocumentTreeNode
-  depth: number
   expandFolders: boolean
   projectId: string
   busyId: string | null
@@ -533,7 +531,7 @@ function FolderNode({ folder, depth, projectId, busyId, onDelete, onPreview, sel
   if (total === 0 && selection?.folderDelete) actions.push({ id: 'delete', label: messages.fileManagement.emptyFolder,
     disabled: selection.disabled, danger: true, separatorBefore: true, onSelect: () => selection.folderDelete?.(folder.path) })
   return (
-    <details className="docFolder" open={expandFolders || depth === 0}>
+    <details className="docFolder" open={expandFolders}>
       <summary>
         {selection?.folderSelect && <input type="checkbox" checked={total > 0 && selected === total}
           disabled={selection.disabled || total === 0}
@@ -555,7 +553,6 @@ function FolderNode({ folder, depth, projectId, busyId, onDelete, onPreview, sel
           <FolderNode
             key={child.path}
             folder={child}
-            depth={depth + 1}
             expandFolders={expandFolders}
             projectId={projectId}
             busyId={busyId}

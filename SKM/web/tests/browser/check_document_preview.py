@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from check_accounts import OTHER, PASSWORD, ResponseGate, self_revoke
-from check_document_management import DOCUMENT, SECOND, assert_document_writes, document, row_menu
+from check_document_management import DOCUMENT, SECOND, assert_document_writes, document, open_ancestor_folders, row_menu
 from check_projects import NEXT_PROJECT, PROJECT, ProjectsApi, messages, privacy, settle
 from playwright.async_api import Browser, Page, Route, async_playwright, expect
 
@@ -316,6 +316,7 @@ async def scenario(
         labels = catalog["documentsPanel"]
         panel = page.locator(".documentPanel")
         await expect(page.locator(".documentItem")).to_have_count(2)
+        await open_ancestor_folders(page.locator(".documentItem").first)
         user = api.users[api.actor]
         await expect(page.locator(".sidebarUser span")).to_have_text(user["display_name"])
         await expect(page.locator(".sidebarUser small")).to_have_text(catalog["account"]["roles"][user["system_role"]])
@@ -357,6 +358,7 @@ async def scenario(
                     )
                     await expect(page.get_by_role("dialog")).to_have_count(0)
                     await expect(page.locator(".documentItem")).to_have_count(2)
+                    await open_ancestor_folders(page.locator(".documentItem").nth(1))
                     await previews.nth(1).click()
                     await expect(page.locator(".previewText")).to_have_text(SECOND_TEXT)
                 elif mode == "actor-late":

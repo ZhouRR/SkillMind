@@ -7,7 +7,7 @@ import asyncio
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from check_document_management import DOCUMENT, SECOND, document, row_menu
+from check_document_management import DOCUMENT, SECOND, document, open_ancestor_folders, row_menu
 from check_document_upload import UploadMockApi, upload_request
 from check_projects import NEXT_PROJECT, PROJECT, messages, settle
 from playwright.async_api import Browser, Page, Route, async_playwright, expect
@@ -148,6 +148,8 @@ async def scenario(
             else:
                 await expect(page.get_by_text(labels["batchStopped"], exact=False)).to_be_visible()
                 await expect(page.locator(".documentItem input:checked")).to_have_count(2)
+                for row in await page.locator(".documentItem").all():
+                    await open_ancestor_folders(row)
                 for filename in ("second.md", "third.md"):
                     await expect(
                         page.locator(".documentItem").get_by_text(filename, exact=True)
