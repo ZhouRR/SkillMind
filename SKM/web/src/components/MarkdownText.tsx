@@ -1,8 +1,6 @@
-import { useMemo } from 'react'
-import { readingMarkdown } from '../lib/markdown'
+import { MarkdownPreview } from './MarkdownPreview'
 
-/** Platform の固定書式で表示し、model に HTML/CSS を生成させない。 */
+/** 抜粋・報告も文書管理と同じ頁管理を使い、固定書式の安全な本文を表示する。 */
 export function MarkdownText({ text }: { text: string }) {
-  const html = useMemo(() => readingMarkdown(text), [text])
-  return <div className="readingMarkdown" dangerouslySetInnerHTML={{ __html: html }} />
+  return <MarkdownPreview source={text} mode="reading" />
 }

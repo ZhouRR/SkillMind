@@ -77,11 +77,19 @@ describe('documentPreviewKind', () => {
 describe('DocumentTree display', () => {
   it('previews raster images and keeps oversized or active image formats download-only', () => {
     const html = renderTree([document({ name: 'photo.PNG', mime: 'image/png' }),
-      document({ document_id: 'large', name: 'large.jpg', size: 1_000_001 }),
+      document({ document_id: 'large', name: 'large.jpg', size: 20_000_001 }),
       document({ document_id: 'svg', name: 'vector.svg', mime: 'image/svg+xml' })])
     expect(html).toContain('aria-label="预览: photo.PNG"')
     expect(html).toContain('aria-label="下载: large.jpg"')
     expect(html).toContain('aria-label="下载: vector.svg"')
+  })
+
+  it.each(['large.png', 'large.md', 'large.txt', 'large.html'])('admits %s at the shared exact 20 MB boundary', (name) => {
+    const exact = renderTree([document({ name, size: 20_000_000 })])
+    expect(exact).toContain(`aria-label="预览: ${name}"`)
+    const over = renderTree([document({ name, size: 20_000_001 })])
+    expect(over).toContain(`aria-label="下载: ${name}"`)
+    expect(over).toContain('20 MB')
   })
 
   it('starts all folder levels collapsed while retaining root files and empty folders', () => {
@@ -117,7 +125,7 @@ describe('DocumentTree display', () => {
       expect(html).toContain('预览')
       expect(html).not.toContain('disabled')
     }
-    const oversized = renderTree([document({ name: 'large.json', size: 1_000_001 })])
+    const oversized = renderTree([document({ name: 'large.json', size: 20_000_001 })])
     expect(oversized).toContain('aria-label="下载: large.json"')
     expect(oversized).not.toContain('aria-label="预览: large.json"')
   })
@@ -125,7 +133,7 @@ describe('DocumentTree display', () => {
   it('renders nested folders as collapsible nodes with file rows and actions', () => {
     const html = renderTree([
       document({ document_id: 'doc-root', name: 'readme.md', folder: '', size: 2048, mime: 'text/markdown' }),
-      document({ document_id: 'doc-spec', name: 'overview.md', folder: 'specs/api', size: 5 * 1024 * 1024 }),
+      document({ document_id: 'doc-spec', name: 'overview.md', folder: 'specs/api', size: 25 * 1024 * 1024 }),
     ])
 
     expect(html).toContain('docFolder')
@@ -134,7 +142,7 @@ describe('DocumentTree display', () => {
     expect(html).toContain('readme.md')
     expect(html).toContain('overview.md')
     expect(html).toContain('2.0 KB')
-    expect(html).toContain('5.0 MB')
+    expect(html).toContain('25.0 MB')
     expect(html).toContain('aria-label="预览: readme.md"')
     expect(html).toContain('/documents/doc-spec/content')
     expect(html).toContain('download="overview.md"')
@@ -154,14 +162,14 @@ describe('DocumentTree display', () => {
     expect(html).toContain('download="assets.zip"')
 
     const oversized = renderTree([
-      document({ document_id: 'doc-big', name: 'big.md', size: 2_000_000 }),
+      document({ document_id: 'doc-big', name: 'big.md', size: 20_000_001 }),
     ])
     // 上限を超えた本文は preview 取得せず、原 download URL と誘導を残す。
     expect(oversized).not.toContain('预览')
     expect(oversized).toContain('aria-label="下载: big.md"')
     expect(oversized).toContain('download="big.md"')
     expect(oversized).toContain('/documents/doc-big/content')
-    expect(oversized).toContain('文件超过 1MB')
+    expect(oversized).toContain('文件超过 20 MB')
   })
 
   it('retains the read entry while mutation status is owned by the closed action menu', () => {

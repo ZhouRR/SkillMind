@@ -93,7 +93,7 @@ class ImagePreviewApi(PreviewApi):
             await route.fulfill(json={"documents": [
                 {**document(parts[1]), "name": self.filename,
                  "mime": "text/html" if self.mode == "metadata-mime" else mime,
-                 "size": 1_000_001 if self.mode == "metadata-large" else len(body)},
+                 "size": 20_000_001 if self.mode == "metadata-large" else len(body)},
                 {**document(parts[1], SECOND), "name": "second.gif", "mime": "image/gif", "size": len(GIF)},
             ]})
             return
@@ -161,7 +161,7 @@ async def install_image_transport(page: Page, mode: str) -> None:
           const stream = new ReadableStream({
             pull(controller) {
               audit.pulls += 1;
-              controller.enqueue(new Uint8Array(400000).fill(65));
+              controller.enqueue(new Uint8Array(8000000).fill(65));
               if (audit.pulls === 20) controller.close();
             },
             cancel() { audit.cancelled += 1; }
@@ -169,7 +169,7 @@ async def install_image_transport(page: Page, mode: str) -> None:
           const headers = {...options.headers, 'Content-Type': 'image/png',
             'Content-Disposition': 'attachment; filename="preview.PNG"'};
           if (options.mode === 'stream-lying') headers['Content-Length'] = '10';
-          if (options.mode === 'headers-large') headers['Content-Length'] = '1000001';
+          if (options.mode === 'headers-large') headers['Content-Length'] = '20000001';
           return Promise.resolve(new Response(stream, {headers}));
         }
         return send(input, options.late ? {...init, signal: undefined} : init);

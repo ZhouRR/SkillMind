@@ -1,6 +1,7 @@
 /** JSON の空白だけを整形する。大きな数値、重複 key、escape と原ファイルは変更しない。 */
 export function formatJsonPreview(text: string, filename: string): string {
-  if (!/\.json$/i.test(filename)) return text
+  // 大きい本文は空白調整のために同期 parse/複製せず、共有原文頁へ渡す。
+  if (!/\.json$/i.test(filename) || text.length > 32_000) return text
   try { JSON.parse(text) } catch { return text }
   const tokens = text.match(/"(?:\\.|[^"\\])*"|[^\s{}\[\],:"]+|[{}\[\],:]/g) ?? []
   const chunks: string[] = []

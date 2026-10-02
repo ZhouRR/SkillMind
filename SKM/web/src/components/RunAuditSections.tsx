@@ -1,3 +1,4 @@
+import { SourcePreview } from './SourcePreview'
 import { useState } from 'react'
 
 import type { AgentSessionDetail, EvidenceDetail, RunDetailRecord } from '../api'
@@ -149,7 +150,7 @@ export function EvidenceCard({ evidence, snapshots, expanded = false }: { eviden
           <button className="secondaryButton compactButton" type="button" aria-pressed={!source} onClick={() => setSource(false)}>{messages.runResult.artifacts.preview}</button>
           <button className="secondaryButton compactButton" type="button" aria-pressed={source} onClick={() => setSource(true)}>{messages.runResult.excerptSource}</button>
         </div>
-        {source ? <pre className="excerptSource">{evidence.excerpt}</pre> : <MarkdownText text={evidence.excerpt} />}
+        {source ? <SourcePreview className="excerptSource" source={evidence.excerpt} /> : <MarkdownText text={evidence.excerpt} />}
       </>)}
     </details>
   )

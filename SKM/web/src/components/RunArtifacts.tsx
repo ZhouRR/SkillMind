@@ -1,9 +1,11 @@
+import { HtmlPreview } from './HtmlPreview'
+import { SourcePreview } from './SourcePreview'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { loadRunArtifactContent, loadRunArtifacts, type RunArtifactRecord, type RunResultDetail, type RunDetailRecord } from '../api'
 import { RESOURCE_REQUEST_TIMEOUT_MS, useResourceQuery, type SessionEnded } from '../hooks/useResourceRequest'
 import { useMessages } from '../i18n'
 import { ModalDialog } from './PageElements'
-import { DOCUMENT_PREVIEW_MAX_BYTES, documentPreviewHtml } from '../lib/documentPreview'
+import { DOCUMENT_PREVIEW_MAX_BYTES } from '../lib/documentPreview'
 import { artifactLocation, artifactTitle } from '../lib/resultPresentation'
 import { documentTypeLabel, formatByteSize } from '../lib/presentation'
 import { MarkdownText } from './MarkdownText'
@@ -144,7 +146,7 @@ function ArtifactPreview({ projectId, runId, request, isCurrent, onClose, onSess
     const text = new TextDecoder('utf-8', { fatal: true }).decode(await blob.arrayBuffer())
     signal.throwIfAborted()
     if (!current.current()) throw new DOMException('Preview is no longer current', 'AbortError')
-    return /\.html?$/i.test(request.artifact.path) ? { format: 'html', content: documentPreviewHtml(text) }
+    return /\.html?$/i.test(request.artifact.path) ? { format: 'html', content: text }
       : /\.(md|markdown)$/i.test(request.artifact.path) ? { format: 'markdown', content: text }
         : { format: 'text', content: formatJsonPreview(text, request.artifact.path) }
   }, [projectId, runId, request])
@@ -153,10 +155,9 @@ function ArtifactPreview({ projectId, runId, request, isCurrent, onClose, onSess
   return <ModalDialog open title={request.title} viewport onClose={onClose}>
     {query.pending ? <p role="status">{labels.preparing}</p>
       : query.failure ? <p className="error" role="alert">{labels.failures[query.failure.key]}</p>
-        : query.data?.format === 'html' ? <iframe className="runReportPreview" title={request.title}
-          sandbox="" referrerPolicy="no-referrer" srcDoc={query.data.content} />
+        : query.data?.format === 'html' ? <HtmlPreview className="runReportPreview" title={request.title} source={query.data.content} />
           : query.data?.format === 'markdown' ? <div className="artifactMarkdownPreview"><MarkdownText text={query.data.content} /></div>
-            : <pre className="previewText">{query.data?.content}</pre>}
+            : <SourcePreview source={query.data?.content ?? ''} />}
   </ModalDialog>
 }
 

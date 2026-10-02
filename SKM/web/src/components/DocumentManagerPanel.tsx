@@ -1,3 +1,5 @@
+import { HtmlPreview } from './HtmlPreview'
+import { SourcePreview } from './SourcePreview'
 import { ApiProblemError, purgeProjectDocument } from '../api'
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
@@ -18,7 +20,7 @@ import { useDocumentUpload } from '../hooks/useDocumentUpload'
 import { useDocumentUploadClosure } from '../hooks/useDocumentUploadClosure'
 import { useResourceQuery, type SessionEnded } from '../hooks/useResourceRequest'
 import { DOCUMENT_REQUEST_POLICY, documentFailure, type DocumentFailure } from '../lib/documentFeedback'
-import { DOCUMENT_PREVIEW_MAX_BYTES as PREVIEW_MAX_BYTES, documentPreviewHtml } from '../lib/documentPreview'
+import { DOCUMENT_PREVIEW_MAX_BYTES as PREVIEW_MAX_BYTES } from '../lib/documentPreview'
 import { MarkdownDocumentPreview } from './MarkdownDocumentPreview'
 import { documentTypeLabel, formatByteSize, formatLocalTimestamp } from '../lib/presentation'
 import { ImageDocumentPreview } from './ImageDocumentPreview'
@@ -659,8 +661,6 @@ export function DocumentPreviewDialog({ preview, projectId, onClose }: {
   const { document } = preview
   const text = useMemo(() => preview.status === 'ready' && preview.kind !== 'image'
     ? formatJsonPreview(preview.content, document.name) : '', [preview, document.name])
-  const html = useMemo(() => preview.status !== 'ready' ? ''
-    : preview.kind === 'html' ? documentPreviewHtml(preview.content) : '', [preview])
   return (
     <ModalDialog
       open
@@ -687,10 +687,10 @@ export function DocumentPreviewDialog({ preview, projectId, onClose }: {
         <MarkdownDocumentPreview source={preview.content} title={document.name} />
       )}
       {preview.status === 'ready' && preview.kind === 'text' && (
-        <pre className="previewText">{text}</pre>
+        <SourcePreview source={text} />
       )}
       {preview.status === 'ready' && preview.kind === 'html' && (
-        <iframe className="previewFrame" sandbox="" referrerPolicy="no-referrer" srcDoc={html} title={document.name} />
+        <HtmlPreview source={preview.content} title={document.name} />
       )}
     </ModalDialog>
   )

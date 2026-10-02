@@ -1,5 +1,8 @@
+import { marked } from 'marked'
 import { describe, expect, it } from 'vitest'
-import { readingMarkdown } from '../../src/lib/markdown'
+import { readingMarkdownPage } from '../../src/lib/markdown'
+
+const readingMarkdown = (source: string): string => readingMarkdownPage(marked.lexer(source, { gfm: true, breaks: true }), source)
 
 describe('static reading Markdown', () => {
   it('formats headings, tables, lists and code without changing source', () => {
@@ -37,8 +40,4 @@ describe('static reading Markdown', () => {
     expect(html).not.toContain('class="language-x"')
   })
 
-  it('keeps oversized text available without Markdown parsing', () => {
-    const source = '<script>' + 'x'.repeat(1_000_001)
-    expect(readingMarkdown(source)).toBe('<pre>&lt;script&gt;' + 'x'.repeat(1_000_001) + '</pre>')
-  })
 })

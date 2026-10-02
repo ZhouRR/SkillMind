@@ -741,6 +741,13 @@ export interface UiMessages {
     loadingDocs: string
     emptyDocs: string
     oversizedTitle: string
+    htmlSourcePages: string
+    mermaidLoading: string
+    mermaidFailed: string
+    mermaidTitle: string
+    sourcePageHint: string
+    markdownSourcePage: string
+    markdownPreviewFailed: string
     previewButton: string
     download: string
     deleting: string

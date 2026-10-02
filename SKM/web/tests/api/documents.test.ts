@@ -212,6 +212,25 @@ describe('Project document API contract', () => {
   })
 })
 
+describe('bounded document text previews', () => {
+  it('accepts exactly the same 20 MB boundary for text', async () => {
+    const source = 'a'.repeat(DOCUMENT_PREVIEW_MAX_BYTES)
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(source)))
+    await expect(loadProjectDocumentText(PROJECT_ID, DOCUMENT_ID)).resolves.toBe(source)
+  })
+  it.each([null, '1', 'invalid'])('stops a text stream above 20 MB despite Content-Length %s', async (declared) => {
+    const cancel = vi.fn(), headers = new Headers()
+    if (declared !== null) headers.set('Content-Length', declared)
+    let pulls = 0
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(new ReadableStream<Uint8Array>({
+      pull(controller) { controller.enqueue(new Uint8Array(++pulls === 1 ? DOCUMENT_PREVIEW_MAX_BYTES : 1)) }, cancel,
+    }, { highWaterMark: 0 }), { headers })))
+    await expect(loadProjectDocumentText(PROJECT_ID, DOCUMENT_ID)).rejects.toMatchObject({ code: 'response_too_large' })
+    expect(pulls).toBe(2)
+    expect(cancel).toHaveBeenCalledOnce()
+  })
+})
+
 describe('bounded document image previews', () => {
   /** API 境界の署名 fixture。完全な画像 decode は browser 回帰で別に検証する。 */
   const PNG = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])
@@ -283,14 +302,14 @@ describe('bounded document image previews', () => {
       .rejects.toMatchObject({ status: 409, code: 'document_content_invalid' })
   })
 
-  it('accepts the exact existing preview byte limit', async () => {
+  it('accepts the exact 20 MB image preview byte limit', async () => {
     const bytes = new Uint8Array(DOCUMENT_PREVIEW_MAX_BYTES)
     bytes.set(PNG)
     const headers = imageHeaders()
     headers.set('Content-Length', String(bytes.length))
     vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(bytes, { headers })))
     const blob = await loadProjectDocumentImage(PROJECT_ID, DOCUMENT_ID)
-    expect(DOCUMENT_PREVIEW_MAX_BYTES).toBe(1_000_000)
+    expect(DOCUMENT_PREVIEW_MAX_BYTES).toBe(20_000_000)
     expect(blob.size).toBe(DOCUMENT_PREVIEW_MAX_BYTES)
   })
 

@@ -25,6 +25,11 @@ describe('JSON preview whitespace formatting', () => {
     expect(formatJsonPreview(text, 'result.json')).toBe(text)
   })
 
+  it('leaves large JSON available as paged source without synchronous reformatting', () => {
+    const source = JSON.stringify({ text: 'a'.repeat(32_000) })
+    expect(formatJsonPreview(source, 'large.json')).toBe(source)
+  })
+
   it('leaves ordinary text and excessive nesting unchanged', () => {
     const text = '{"a":1}'
     expect(formatJsonPreview(text, 'result.txt')).toBe(text)

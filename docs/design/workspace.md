@@ -35,9 +35,21 @@ PC 1440×900 为主，兼顾 1366×768、1920×1080、三语及双主题；390px
 
 HTML 预览沿用 sanitizer 和无脚本 sandbox，禁止外部资源及导航。附件按原 Run、hash、大小和当前授权校验；不可用时明确说明，不推测内容或为展示重跑模型。
 
-文書庫の PNG/JPEG/GIF は既存の認証付き content endpoint から上限内の byte を読み、MIME・署名を検証して画像要素に表示する。SVG と未対応形式は download のまま保持する。画像も既存の 1 MB preview 上限を使い、読取・decode 失敗を表示し、閉鎖・対象切替で Blob URL を破棄する。
+文書庫の PNG/JPEG/GIF は認証付き content endpoint から byte を読み、MIME・署名を検証して画像要素に表示する。SVG と未対応形式は download のまま保持する。画像・文字文書の preview は共通の 20 MB（20,000,000 byte）上限を使い、metadata だけでなく実 byte も確認する。画像の読取・decode 失敗を表示し、閉鎖・対象切替で Blob URL を破棄する。Run 添付も共有 preview 表示を使うが、添付の公開・保存契約自体は従来の 1 MiB のまま変更しない。
 
-文档库的 Markdown 大表按行分段并重复表头，只渲染当前段；完整原文与下载保持可用。超过预览复杂度上限时显示对应 Markdown 原文，不显示转换产生的 HTML 源码，不放宽安全过滤或性能上限。
+文書管理・報告・抜粋は共有 Markdown preview を使う。JSON 内の抜粋は UTF-8 本文 byte で同じ入場上限を確認し、元 Office 文書の圧縮 file size や JavaScript の文字数とは混同しない。大きい Markdown の全文解析は取消可能な Worker に移し、表を行境界で分割して表頭を再掲し、現在頁だけを表示する。参照 link は全文解析で解決するが、報告・抜粋の raw HTML は従来通り実行せず文字として表示する。
+
+内部の頁量・token 複雑度予算は入場制限と別に維持する。不可分の巨大 block は理由付きの原文頁とし、解析失敗・Worker 非対応・期限切れも明示して原文頁へ降級する。原文・plain text も同じ頁部品を使い、全文を一度に DOM 化しない。大きい HTML は既存 sanitizer の主 thread 負荷を増やさず、説明付きの原文頁へ切り替える。原 file の download は保持する。
+
+明示的な `mermaid` code fence の基本 flowchart/graph は、文書・抜粋の共有 preview で静的なフローチャートとして表示する。通常の `A→B→C` 本文から図を推測しない。例：
+
+```mermaid
+flowchart LR
+  A[開始] --> B{確認}
+  B -->|成功| C[完了]
+```
+
+図の依存は現在頁に有効な図がある時だけ遅延読込する。DSL は基本ノード・矢印・短いラベルへ再構成し、click・URL・HTML・画像・設定指令・style 等の拡張構文は実行しない。出力 SVG も既存 sanitizer と無脚本 sandbox/CSP を通し、図の CSS をアプリ本文へ漏らさない。未対応構文・不正な図・描画予算超過・読込失敗は理由と元の code を表示する。Mermaid の layout は有界の main thread 処理であり、取消は遅延応答の採用と後続描画を止めるもので、実行中の同期 layout を強制中断するものではない。
 
 ## 管理操作与异步状态
 
