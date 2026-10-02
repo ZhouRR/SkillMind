@@ -6,6 +6,7 @@ import {
   loadDocumentFolders,
   manageDocuments,
   loadProjectDocumentText,
+  loadProjectDocumentImage,
   projectDocumentContentHref,
   type ProjectDocumentRecord,
 } from '../api'
@@ -20,16 +21,21 @@ import { DOCUMENT_REQUEST_POLICY, documentFailure, type DocumentFailure } from '
 import { DOCUMENT_PREVIEW_MAX_BYTES as PREVIEW_MAX_BYTES, documentPreviewHtml } from '../lib/documentPreview'
 import { MarkdownDocumentPreview } from './MarkdownDocumentPreview'
 import { documentTypeLabel, formatByteSize, formatLocalTimestamp } from '../lib/presentation'
+import { ImageDocumentPreview } from './ImageDocumentPreview'
 import { formatJsonPreview } from '../lib/jsonPreview'
 import { EmptyState, LoadingSkeleton, ModalDialog, useConfirmDialog } from './PageElements'
 import { DocumentUploadStatus, DocumentUploadRecovery } from './DocumentUploadStatus'
 import { DocumentUploadClosure, DocumentUploadClosureRecovery } from './DocumentUploadClosure'
 
 /** 画面内 preview の描画種別。拡張子登録で excel 等の viewer を後付けする拡張点。 */
-export type DocumentPreviewKind = 'text' | 'html' | 'markdown'
+export type DocumentPreviewKind = 'text' | 'html' | 'markdown' | 'image'
 
 /** 拡張子 → preview 種別の登録表。未登録拡張子は preview 対象外(download のみ)。 */
 const DOCUMENT_PREVIEWERS: Record<string, DocumentPreviewKind> = {
+  png: 'image',
+  jpg: 'image',
+  jpeg: 'image',
+  gif: 'image',
   txt: 'text',
   json: 'text',
   jsonl: 'text',
@@ -57,7 +63,8 @@ export function documentPreviewKind(name: string): DocumentPreviewKind | null {
 /** 文書 preview dialog の非同期状態。 */
 export type DocumentPreviewState =
   | { status: 'loading'; document: ProjectDocumentRecord }
-  | { status: 'ready'; document: ProjectDocumentRecord; kind: DocumentPreviewKind; content: string }
+  | { status: 'ready'; document: ProjectDocumentRecord; kind: Exclude<DocumentPreviewKind, 'image'>; content: string }
+  | { status: 'ready'; document: ProjectDocumentRecord; kind: 'image'; content: Blob }
   | { status: 'error'; document: ProjectDocumentRecord; message: string }
 
 /** 同じ ID の再読取も別 request として所有し、閉じる瞬間に旧応答を無効化する。 */
@@ -437,7 +444,9 @@ function DocumentPreviewLoader({ request, projectId, isCurrent, observeFailure, 
   const loader = useCallback(async (signal: AbortSignal) => {
     signal.throwIfAborted()
     if (!current.current()) throw new DOMException('Preview request is no longer current', 'AbortError')
-    const content = await loadProjectDocumentText(projectId, request.document.document_id, signal)
+    const content = request.kind === 'image'
+      ? { kind: request.kind, content: await loadProjectDocumentImage(projectId, request.document.document_id, signal) }
+      : { kind: request.kind, content: await loadProjectDocumentText(projectId, request.document.document_id, signal) }
     signal.throwIfAborted()
     if (!current.current()) throw new DOMException('Preview request is no longer current', 'AbortError')
     return content
@@ -448,7 +457,7 @@ function DocumentPreviewLoader({ request, projectId, isCurrent, observeFailure, 
   const preview: DocumentPreviewState = query.failure
     ? { status: 'error', document: request.document, message: messages.documentsPanel.failures[query.failure.key] }
     : query.pending || query.data === null ? { status: 'loading', document: request.document }
-      : { status: 'ready', document: request.document, kind: request.kind, content: query.data }
+      : { status: 'ready', document: request.document, ...query.data }
   return <DocumentPreviewDialog preview={preview} projectId={projectId} onClose={onClose} />
 }
 
@@ -648,7 +657,7 @@ export function DocumentPreviewDialog({ preview, projectId, onClose }: {
 }) {
   const messages = useMessages()
   const { document } = preview
-  const text = useMemo(() => preview.status === 'ready'
+  const text = useMemo(() => preview.status === 'ready' && preview.kind !== 'image'
     ? formatJsonPreview(preview.content, document.name) : '', [preview, document.name])
   const html = useMemo(() => preview.status !== 'ready' ? ''
     : preview.kind === 'html' ? documentPreviewHtml(preview.content) : '', [preview])
@@ -671,6 +680,9 @@ export function DocumentPreviewDialog({ preview, projectId, onClose }: {
     >
       {preview.status === 'loading' && <LoadingSkeleton label={messages.documentsPanel.loadingPreview} rows={3} />}
       {preview.status === 'error' && <p className="error" role="alert">{preview.message}</p>}
+      {preview.status === 'ready' && preview.kind === 'image' && (
+        <ImageDocumentPreview blob={preview.content} title={document.name} />
+      )}
       {preview.status === 'ready' && preview.kind === 'markdown' && (
         <MarkdownDocumentPreview source={preview.content} title={document.name} />
       )}

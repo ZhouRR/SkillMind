@@ -139,6 +139,7 @@ export {
   deleteProjectDocument,
   loadProjectDocuments,
   loadProjectDocument,
+  loadProjectDocumentImage,
   loadProjectDocumentText,
   loadDocumentUpload,
   withInferredContentType,

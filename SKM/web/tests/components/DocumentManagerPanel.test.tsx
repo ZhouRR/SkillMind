@@ -69,11 +69,21 @@ describe('documentPreviewKind', () => {
     expect(documentPreviewKind('notes.TXT')).toBe('text')
     expect(documentPreviewKind('report.html')).toBe('html')
     expect(documentPreviewKind('archive.zip')).toBeNull()
-    expect(documentPreviewKind('image.png')).toBeNull()
+    for (const name of ['image.png', 'photo.JPG', 'photo.jpeg', 'animation.gif']) expect(documentPreviewKind(name)).toBe('image')
+    for (const name of ['image.svg', 'image.webp', 'image.avif']) expect(documentPreviewKind(name)).toBeNull()
   })
 })
 
 describe('DocumentTree display', () => {
+  it('previews raster images and keeps oversized or active image formats download-only', () => {
+    const html = renderTree([document({ name: 'photo.PNG', mime: 'image/png' }),
+      document({ document_id: 'large', name: 'large.jpg', size: 1_000_001 }),
+      document({ document_id: 'svg', name: 'vector.svg', mime: 'image/svg+xml' })])
+    expect(html).toContain('aria-label="预览: photo.PNG"')
+    expect(html).toContain('aria-label="下载: large.jpg"')
+    expect(html).toContain('aria-label="下载: vector.svg"')
+  })
+
   it('starts all folder levels collapsed while retaining root files and empty folders', () => {
     const html = renderToStaticMarkup(<DocumentTree
       root={buildDocumentTree([
@@ -165,10 +175,23 @@ describe('DocumentTree display', () => {
 })
 
 describe('DocumentPreviewDialog', () => {
+  it('routes image blobs to their decoder while retaining download and close controls', () => {
+    const html = renderToStaticMarkup(<DocumentPreviewDialog
+      preview={{ status: 'ready', document: document({ name: 'photo.png', mime: 'image/png' }),
+        kind: 'image', content: new Blob([], { type: 'image/png' }) }}
+      projectId={PROJECT_ID} onClose={vi.fn()} />)
+    expect(html).toContain('class="imagePreview"')
+    expect(html).toContain('aria-busy="true"')
+    expect(html).toContain('download="photo.png"')
+    expect(html).toContain('关闭')
+    expect(html).not.toContain('<iframe')
+    expect(html).not.toContain('class="previewText"')
+  })
+
   it('preserves JSON numbers and displays embedded markup as literal text', () => {
     const record = document({ name: 'rv-result.json', mime: 'application/json' })
     const kind = documentPreviewKind(record.name)
-    if (kind === null) throw new Error('JSON preview unavailable')
+    if (kind !== 'text') throw new Error('JSON preview unavailable')
     const html = renderToStaticMarkup(<DocumentPreviewDialog
       preview={{ status: 'ready', document: record, kind,
         content: '{\n  "id": 9007199254740993,\n  "note": "<script>alert(1)</script>"\n}' }}
