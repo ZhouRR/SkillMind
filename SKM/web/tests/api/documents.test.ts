@@ -6,6 +6,7 @@ import {
   deleteProjectDocument,
   loadProjectDocuments,
   loadProjectDocument,
+  loadProjectDocumentImage,
   loadProjectDocumentText,
   loadDocumentUpload,
   projectDocumentContentHref,
@@ -13,6 +14,7 @@ import {
 } from '../../src/api/index'
 import { withInferredContentType } from '../../src/api/documents'
 import { freezeDocumentUpload } from '../../src/lib/documentUpload'
+import { DOCUMENT_PREVIEW_MAX_BYTES } from '../../src/lib/documentPreview'
 
 const CSRF = 's'.repeat(32)
 const PROJECT_ID = '00000000-0000-4000-8000-000000000020'
@@ -207,6 +209,196 @@ describe('Project document API contract', () => {
     vi.stubGlobal('fetch', jsonFetch({ detail: 'Document not found', code: 'document_not_found' }, 404))
     await expect(loadProjectDocumentText(PROJECT_ID, DOCUMENT_ID))
       .rejects.toThrow('Document not found')
+  })
+})
+
+describe('bounded document text previews', () => {
+  it('accepts exactly the same 20 MB boundary for text', async () => {
+    const source = 'a'.repeat(DOCUMENT_PREVIEW_MAX_BYTES)
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(source)))
+    await expect(loadProjectDocumentText(PROJECT_ID, DOCUMENT_ID)).resolves.toBe(source)
+  })
+  it.each([null, '1', 'invalid'])('stops a text stream above 20 MB despite Content-Length %s', async (declared) => {
+    const cancel = vi.fn(), headers = new Headers()
+    if (declared !== null) headers.set('Content-Length', declared)
+    let pulls = 0
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(new ReadableStream<Uint8Array>({
+      pull(controller) { controller.enqueue(new Uint8Array(++pulls === 1 ? DOCUMENT_PREVIEW_MAX_BYTES : 1)) }, cancel,
+    }, { highWaterMark: 0 }), { headers })))
+    await expect(loadProjectDocumentText(PROJECT_ID, DOCUMENT_ID)).rejects.toMatchObject({ code: 'response_too_large' })
+    expect(pulls).toBe(2)
+    expect(cancel).toHaveBeenCalledOnce()
+  })
+})
+
+describe('bounded document image previews', () => {
+  /** API 境界の署名 fixture。完全な画像 decode は browser 回帰で別に検証する。 */
+  const PNG = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])
+  const JPEG = new Uint8Array([255, 216, 255, 224])
+  const GIF87 = new TextEncoder().encode('GIF87a')
+  const GIF89 = new TextEncoder().encode('GIF89a')
+
+  /** 認可済み content endpoint が現在返す添付 metadata を再現する。 */
+  function imageHeaders(mime: string | null = 'image/png'): Headers {
+    const headers = new Headers({
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Disposition': 'attachment; filename="preview.png"',
+    })
+    if (mime !== null) headers.set('Content-Type', mime)
+    return headers
+  }
+
+  it.each([
+    ['image/png', PNG], ['IMAGE/PNG', PNG], ['image/jpeg', JPEG],
+    ['image/gif', GIF87], ['image/gif', GIF89],
+  ])('returns only the declared raster MIME with a matching signature: %s (case %#)', async (mime, bytes) => {
+    const controller = new AbortController()
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(bytes, { headers: imageHeaders(mime) }))
+    vi.stubGlobal('fetch', fetcher)
+    const blob = await loadProjectDocumentImage(PROJECT_ID, DOCUMENT_ID, controller.signal)
+    expect(blob.type).toBe(mime.toLowerCase())
+    expect(new Uint8Array(await blob.arrayBuffer())).toEqual(bytes)
+    expect(fetcher).toHaveBeenCalledExactlyOnceWith(projectDocumentContentHref(PROJECT_ID, DOCUMENT_ID), {
+      signal: controller.signal, cache: 'no-store', credentials: 'same-origin', redirect: 'error',
+    })
+  })
+
+  it.each([
+    null, '', 'image/svg+xml', 'text/html', 'application/octet-stream', 'image/webp', 'image/x-png',
+    'image/png, image/svg+xml', 'image/png; charset=utf-8',
+  ])('rejects unsupported or ambiguous MIME %s before reading the body', async (mime) => {
+    const pull = vi.fn(), cancel = vi.fn()
+    const body = new ReadableStream<Uint8Array>({ pull, cancel }, { highWaterMark: 0 })
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(body, { headers: imageHeaders(mime) })))
+    await expect(loadProjectDocumentImage(PROJECT_ID, DOCUMENT_ID)).rejects.toThrow('headers')
+    expect(pull).not.toHaveBeenCalled()
+    expect(cancel).toHaveBeenCalledOnce()
+  })
+
+  it.each(['Cache-Control', 'X-Content-Type-Options', 'Content-Disposition'])(
+    'requires the endpoint security metadata %s before reading the body', async (field) => {
+      const headers = imageHeaders()
+      headers.delete(field)
+      const pull = vi.fn(), cancel = vi.fn()
+      vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(
+        new ReadableStream<Uint8Array>({ pull, cancel }, { highWaterMark: 0 }), { headers },
+      )))
+      await expect(loadProjectDocumentImage(PROJECT_ID, DOCUMENT_ID)).rejects.toThrow('headers')
+      expect(pull).not.toHaveBeenCalled()
+      expect(cancel).toHaveBeenCalledOnce()
+    },
+  )
+
+  it.each([
+    ['image/png', new Uint8Array()], ['image/png', PNG.slice(0, -1)],
+    ['image/png', new TextEncoder().encode('<svg onload="alert(1)"></svg>')],
+    ['image/jpeg', new TextEncoder().encode('<html><script>alert(1)</script></html>')],
+    ['image/gif', new TextEncoder().encode('not an image')],
+    ['image/jpeg', PNG], ['image/png', GIF89], ['image/gif', JPEG],
+  ])('rejects empty, truncated or mislabeled raster content before returning a Blob (case %#)', async (mime, bytes) => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(bytes, { headers: imageHeaders(mime) })))
+    await expect(loadProjectDocumentImage(PROJECT_ID, DOCUMENT_ID))
+      .rejects.toMatchObject({ status: 409, code: 'document_content_invalid' })
+  })
+
+  it('accepts the exact 20 MB image preview byte limit', async () => {
+    const bytes = new Uint8Array(DOCUMENT_PREVIEW_MAX_BYTES)
+    bytes.set(PNG)
+    const headers = imageHeaders()
+    headers.set('Content-Length', String(bytes.length))
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(bytes, { headers })))
+    const blob = await loadProjectDocumentImage(PROJECT_ID, DOCUMENT_ID)
+    expect(DOCUMENT_PREVIEW_MAX_BYTES).toBe(20_000_000)
+    expect(blob.size).toBe(DOCUMENT_PREVIEW_MAX_BYTES)
+  })
+
+  it('rejects a declared oversized response without consuming its stream', async () => {
+    const pull = vi.fn(), cancel = vi.fn(), headers = imageHeaders()
+    headers.set('Content-Length', String(DOCUMENT_PREVIEW_MAX_BYTES + 1))
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      new ReadableStream<Uint8Array>({ pull, cancel }, { highWaterMark: 0 }), { headers },
+    )))
+    await expect(loadProjectDocumentImage(PROJECT_ID, DOCUMENT_ID)).rejects.toMatchObject({ code: 'response_too_large' })
+    expect(pull).not.toHaveBeenCalled()
+    expect(cancel).toHaveBeenCalledOnce()
+  })
+
+  it.each([null, '1', 'invalid'])('bounds actual stream bytes despite Content-Length %s', async (declared) => {
+    const headers = imageHeaders(), cancel = vi.fn()
+    if (declared !== null) headers.set('Content-Length', declared)
+    let pulls = 0
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1
+        const bytes = new Uint8Array(pulls === 1 ? DOCUMENT_PREVIEW_MAX_BYTES : 1)
+        if (pulls === 1) bytes.set(PNG)
+        controller.enqueue(bytes)
+      }, cancel,
+    }, { highWaterMark: 0 })
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(body, { headers })))
+    await expect(loadProjectDocumentImage(PROJECT_ID, DOCUMENT_ID)).rejects.toMatchObject({ code: 'response_too_large' })
+    expect(pulls).toBe(2)
+    expect(cancel).toHaveBeenCalledOnce()
+  })
+
+  it.each([201, 202, 204, 206])('rejects unexpected successful status %s', async (status) => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(status === 204 ? null : PNG,
+      { status, headers: imageHeaders() })))
+    await expect(loadProjectDocumentImage(PROJECT_ID, DOCUMENT_ID)).rejects.toMatchObject({ status })
+  })
+
+  it.each([401, 403])('surfaces access status %s without waiting on a stalled body', async (status) => {
+    const pull = vi.fn(), cancel = vi.fn()
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      new ReadableStream<Uint8Array>({ pull, cancel }, { highWaterMark: 0 }), { status },
+    ))
+    vi.stubGlobal('fetch', fetcher)
+    await expect(loadProjectDocumentImage(PROJECT_ID, DOCUMENT_ID)).rejects.toMatchObject({ status })
+    expect(pull).not.toHaveBeenCalled()
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(fetcher).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    [404, 'document_not_found'], [409, 'document_content_invalid'], [503, 'document_storage_unavailable'],
+  ])('preserves HTTP error %s/%s without retrying', async (status, code) => {
+    const fetcher = jsonFetch({ status, code, detail: 'Document unavailable' }, status)
+    vi.stubGlobal('fetch', fetcher)
+    await expect(loadProjectDocumentImage(PROJECT_ID, DOCUMENT_ID))
+      .rejects.toMatchObject({ name: 'ApiProblemError', status, code, message: 'Document unavailable' })
+    expect(fetcher).toHaveBeenCalledOnce()
+  })
+
+  it('bounds error bodies while retaining the original failure status', async () => {
+    const cancel = vi.fn()
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(new ReadableStream<Uint8Array>({
+      pull(controller) { controller.enqueue(new Uint8Array(65_537)) }, cancel,
+    }, { highWaterMark: 0 }), { status: 503 })))
+    await expect(loadProjectDocumentImage(PROJECT_ID, DOCUMENT_ID))
+      .rejects.toMatchObject({ status: 503, message: 'API returned 503' })
+    expect(cancel).toHaveBeenCalledOnce()
+  })
+
+  it('does not fetch an already aborted image request', async () => {
+    const controller = new AbortController(), fetcher = vi.fn<typeof fetch>()
+    controller.abort()
+    vi.stubGlobal('fetch', fetcher)
+    await expect(loadProjectDocumentImage(PROJECT_ID, DOCUMENT_ID, controller.signal))
+      .rejects.toMatchObject({ name: 'AbortError' })
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('cancels a stalled stream when the image request is aborted', async () => {
+    const controller = new AbortController(), cancel = vi.fn()
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      new ReadableStream<Uint8Array>({ cancel }, { highWaterMark: 0 }), { headers: imageHeaders() },
+    )))
+    const pending = loadProjectDocumentImage(PROJECT_ID, DOCUMENT_ID, controller.signal)
+    await Promise.resolve()
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(cancel).toHaveBeenCalledOnce()
   })
 })
 

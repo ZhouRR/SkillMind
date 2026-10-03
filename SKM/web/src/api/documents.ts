@@ -2,8 +2,10 @@ import { apiTimestampMicroseconds, isApiTimestamp, isNonNilUuid, isUuid, sameUui
 import { DOCUMENT_PREVIEW_MAX_BYTES } from '../lib/documentPreview'
 import {
   API_BASE,
+  ApiProblemError,
   hasStrings,
   isRecord,
+  requestApiBlob,
   requestApiEmpty,
   requestApiJson,
   requestApiText,
@@ -182,6 +184,44 @@ export async function loadProjectDocumentText(
 ): Promise<string> {
   return requestApiText(projectDocumentContentHref(projectId, documentId), { signal, cache: 'no-store' },
     { status: 200, maxBytes: DOCUMENT_PREVIEW_MAX_BYTES })
+}
+
+/** Server が保存を許可する raster MIME だけを img 専用 preview へ渡す。 */
+const DOCUMENT_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif'])
+
+/** 添付 header と実 byte 上限を検証し、HTML/SVG を object URL の生成前に拒否する。 */
+export async function loadProjectDocumentImage(
+  projectId: string,
+  documentId: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const blob = await requestApiBlob(projectDocumentContentHref(projectId, documentId), { signal, cache: 'no-store' },
+    { status: 200, maxBytes: DOCUMENT_PREVIEW_MAX_BYTES, validate: ({ headers }) => {
+      if (!DOCUMENT_IMAGE_TYPES.has((headers.get('Content-Type') ?? '').trim().toLowerCase())
+        || !(headers.get('Cache-Control') ?? '').split(',').some((part) => part.trim().toLowerCase() === 'no-store')
+        || headers.get('X-Content-Type-Options')?.toLowerCase() !== 'nosniff'
+        || !/^attachment(?:;|$)/i.test(headers.get('Content-Disposition') ?? '')) {
+        throw new Error('Document image content headers did not match its contract')
+      }
+    } })
+  signal?.throwIfAborted()
+  const mime = blob.type.trim().toLowerCase()
+  const prefix = new Uint8Array(await blob.slice(0, 8).arrayBuffer())
+  signal?.throwIfAborted()
+  // MIME の偽装は短い署名で拒否する。完全な decode は img に限定し、壊れた画像は onError で扱う。
+  if (!hasDocumentImageSignature(prefix, mime)) {
+    throw new ApiProblemError('Document image content is invalid', 409, 'document_content_invalid')
+  }
+  return new Blob([blob], { type: mime })
+}
+
+/** 宣言 MIME に一致する raster 署名だけを受け入れ、byte から別 MIME を推測しない。 */
+function hasDocumentImageSignature(prefix: Uint8Array, mime: string): boolean {
+  if (mime === 'image/png') return [137, 80, 78, 71, 13, 10, 26, 10].every((byte, index) => prefix[index] === byte)
+  if (mime === 'image/jpeg') return prefix[0] === 255 && prefix[1] === 216 && prefix[2] === 255
+  if (mime === 'image/gif') return ['GIF87a', 'GIF89a'].some((signature) =>
+    [...signature].every((character, index) => prefix[index] === character.charCodeAt(0)))
+  return false
 }
 
 /** Unknown JSON を文書一覧の公開 contract へ制限する。 */

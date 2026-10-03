@@ -76,7 +76,7 @@ python3 tests/browser/check_projects.py \
 | Project・アカウント | projects、project_members、project_management、login、accounts、api_keys |
 | 提出・待機・履歴 | run_submission、interaction_responses、proposal_decisions、run_history、evaluation_submissions |
 | レポート・証拠 | report_reading、workspace_reports、result_references、artifacts |
-| 文書・directory | document_organization、document_management、document_preview、document_upload、document_update、document_batches |
+| 文書・directory | document_organization、document_management、document_preview、document_image_preview、document_upload、document_update、document_batches |
 | 接続・Skill・調度 | resource_editing、resource_request_lifecycle、mcp_tools、interpretation_requests、skill_library_delete、task_launch_identity、task_schedules、schedule_times |
 
 全 runner は [tests/browser](../../SKM/web/tests/browser/) にある。harness URL と `--output` 等の必須引数は各 runner を参照する。主に projects.html、提出系は run-submission.html を使う。

@@ -1,7 +1,7 @@
 import { marked, type Tokens } from 'marked'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { documentMarkdownHtml, documentMarkdownPageHtml } from '../../src/lib/documentPreview'
-import { markdownPreviewPages } from '../../src/lib/markdownPreviewPages'
+import { MARKDOWN_PREVIEW_MAX_PAGES, MARKDOWN_PREVIEW_PAGE_CHARACTERS, markdownPreviewPages, markdownSourcePage, markdownSourcePageCount } from '../../src/lib/markdownPreviewPages'
 
 /** 幅広い表でも全行を順序通り保ち、Markdown 構文を途中で切らない。 */
 describe('Markdown preview pages', () => {
@@ -43,13 +43,93 @@ describe('Markdown preview pages', () => {
   })
 
   it('does not split fenced code, raw HTML or nested lists as if they were top-level tables', () => {
-    const source = '```md\n| A | B |\n| --- | --- |\n' + '| x | y |\n'.repeat(4000) + '```\n\n'
+    const source = '```md\n| A | B |\n| --- | --- |\n' + '| x | y |\n'.repeat(40) + '```\n\n'
       + '- outer\n  - inner\n\n<div>raw</div>\n'
     const tokens = markdownPreviewPages(source).flatMap((page) => page.tokens)
     expect(tokens.filter((token) => token.type === 'code')).toHaveLength(1)
     expect(tokens.some((token) => token.type === 'table')).toBe(false)
     expect(marked.parser(tokens)).toContain('<div>raw</div>')
     expect(marked.parser(tokens)).toContain('<li>inner</li>')
+  })
+
+  it.each([
+    (text: string) => `\`\`\`md\n${text}\n\`\`\`\n`,
+    (text: string) => text + '\n',
+    (text: string) => `<div>${text}</div>\n`,
+    (text: string) => `- ${text}\n`,
+  ])('bounds oversized atomic blocks as explicit source-only slices', (block) => {
+    const source = block('字'.repeat(100_000))
+    const pages = markdownPreviewPages(source)
+    expect(pages.length).toBeGreaterThan(3)
+    expect(pages.every((page) => page.sourceOnly && page.tokens.length === 0)).toBe(true)
+    expect(pages.every((page) => page.source.length <= MARKDOWN_PREVIEW_PAGE_CHARACTERS)).toBe(true)
+    expect(pages.map((page) => page.source).join('')).toBe(source)
+  })
+
+  it.each(['header', 'row'] as const)('bounds an oversized table %s without losing its text', (part) => {
+    const huge = 'cell'.repeat(20_000)
+    const source = `| ${part === 'header' ? huge : 'A'} | B |\n| --- | --- |\n| ${part === 'row' ? huge : 'x'} | y |\n`
+    const pages = markdownPreviewPages(source)
+    expect(pages.some((page) => page.sourceOnly)).toBe(true)
+    expect(pages.every((page) => page.source.length <= MARKDOWN_PREVIEW_PAGE_CHARACTERS)).toBe(true)
+    expect(pages.map((page) => page.source).join('')).toBe(source)
+  })
+
+  it('keeps surrogate pairs and every source character across fallback page boundaries', () => {
+    const source = 'a'.repeat(31_998) + '😀'.repeat(40_000) + 'tail'
+    const pages = Array.from({ length: markdownSourcePageCount(source) }, (_, index) => markdownSourcePage(source, index))
+    expect(pages.map((page) => page.source).join('')).toBe(source)
+    expect(pages.every((page) => page.source.length <= MARKDOWN_PREVIEW_PAGE_CHARACTERS && !/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/.test(page.source))).toBe(true)
+  })
+
+  it('limits a tiny reference token with a giant resolved destination before cloning or rendering', () => {
+    const source = '[x][r]\n\n[r]: https://example.invalid/' + 'a'.repeat(100_000)
+    const pages = markdownPreviewPages(source)
+    expect(pages[0]!.sourceOnly).toBe(true)
+    expect(pages[0]!.tokens).toHaveLength(0)
+    expect(pages.map((page) => page.source).join('')).toBe(source)
+    expect(pages.every((page) => page.source.length <= MARKDOWN_PREVIEW_PAGE_CHARACTERS)).toBe(true)
+  })
+
+  it('caps repeated resolved-reference page amplification and preserves the complete admitted source', () => {
+    const source = '[x][r]\n\n'.repeat(50_000) + '[r]: https://example.invalid/' + 'a'.repeat(16_000)
+    expect(source.length).toBeLessThan(1_000_000)
+    const pages = markdownPreviewPages(source)
+    expect(pages.length).toBeLessThanOrEqual(MARKDOWN_PREVIEW_MAX_PAGES)
+    expect(pages.length).toBe(markdownSourcePageCount(source))
+    expect(pages.every((page) => page.sourceOnly && page.tokens.length === 0)).toBe(true)
+    expect(pages.every((page) => page.source.length <= MARKDOWN_PREVIEW_PAGE_CHARACTERS)).toBe(true)
+    expect(pages.map((page) => page.source).join('')).toBe(source)
+  })
+
+  it('stops page generation at the metadata budget rather than allocating every amplified page', () => {
+    const href = 'https://example.invalid/' + 'a'.repeat(16_000)
+    const source = '[x][r]\n\n'.repeat(50_000) + '[r]: ' + href
+    let rawReads = 0
+    const token: Tokens.Paragraph = { type: 'paragraph', get raw() { rawReads++; return '[x][r]\n\n' }, text: '[x][r]',
+      tokens: [{ type: 'link', raw: '[x][r]', href, text: 'x', tokens: [{ type: 'text', raw: 'x', text: 'x' }] }] }
+    const tokens = Object.assign(Array.from({ length: 50_000 }, () => token), { links: {} })
+    const lexer = vi.spyOn(marked, 'lexer').mockReturnValueOnce(tokens)
+    try {
+      const pages = markdownPreviewPages(source)
+      expect(pages.every((page) => page.sourceOnly)).toBe(true)
+      expect(rawReads).toBeLessThan(MARKDOWN_PREVIEW_MAX_PAGES * 4)
+      expect(pages.map((page) => page.source).join('')).toBe(source)
+    } finally { lexer.mockRestore() }
+  })
+
+  it('keeps a smaller amplified document bounded on the synchronous preview path', () => {
+    const source = '[x][r]\n\n'.repeat(1000) + '[r]: https://example.invalid/' + 'a'.repeat(16_000)
+    expect(source.length).toBeLessThanOrEqual(MARKDOWN_PREVIEW_PAGE_CHARACTERS)
+    const pages = markdownPreviewPages(source)
+    expect(pages.length).toBeLessThanOrEqual(MARKDOWN_PREVIEW_MAX_PAGES)
+    expect(pages.map((page) => page.source).join('')).toBe(source)
+  })
+
+  it('preserves reading-mode newline breaks and document-mode paragraph semantics', () => {
+    const source = 'first\nsecond\n'
+    expect(marked.parser(markdownPreviewPages(source, 'reading')[0]!.tokens)).toContain('<br>')
+    expect(marked.parser(markdownPreviewPages(source)[0]!.tokens)).not.toContain('<br>')
   })
 
   it('falls back to Markdown rather than intermediate HTML without a DOM', () => {

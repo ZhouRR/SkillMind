@@ -32,6 +32,12 @@ document_id: example-001
 <style>body { display: none }</style>
 ![diagram](https://example.invalid/private.png)
 [external](https://example.invalid/)
+
+```mermaid
+flowchart LR
+A[Start] --> B{Check}
+B -->|Yes| C[Done]
+```
 """
 
 
@@ -193,9 +199,16 @@ async def check(url: str, output: Path) -> None:
                         ).to_be_visible()
                         await expect(preview.locator("table")).to_be_visible()
                         await expect(
-                            preview.locator("script, style, img, iframe, a, input")
+                            preview.locator("script, style, img, a, input")
                         ).to_have_count(0)
                         assert await page.evaluate("window.reportInjection === undefined")
+                        diagram = preview.locator("iframe.mermaidPreview")
+                        await expect(diagram).to_be_visible()
+                        await expect(diagram).to_have_attribute("sandbox", "")
+                        await expect(diagram).to_have_attribute("referrerpolicy", "no-referrer")
+                        chart = preview.frame_locator("iframe.mermaidPreview")
+                        await expect(chart.locator("svg")).to_contain_text("Done")
+                        await expect(chart.locator("script, foreignObject, image, a")).to_have_count(0)
                         await drawer.get_by_role(
                             "button", name=labels["runResult"]["excerptSource"], exact=True
                         ).click()

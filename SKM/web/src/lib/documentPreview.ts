@@ -1,7 +1,7 @@
-import { marked, type Token } from 'marked'
+import { Marked, marked, type Token } from 'marked'
+import { mermaidCodeHtml, type MermaidPreviews, type MermaidPreviewLabels } from './mermaidPreview'
 
-/** 一覧 metadata と実 HTTP stream に適用する同じ preview byte 上限。 */
-export const DOCUMENT_PREVIEW_MAX_BYTES = 1_000_000
+export { DOCUMENT_PREVIEW_MAX_BYTES } from './previewLimits'
 
 const HTML_NAMESPACE = 'http://www.w3.org/1999/xhtml'
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg'
@@ -51,8 +51,11 @@ export function documentMarkdownHtml(source: string): string {
 }
 
 /** 分割済み token も同じ安全境界を通す。fallback に中間 HTML を渡さない。 */
-export function documentMarkdownPageHtml(tokens: Token[], source: string): string {
-  return documentPreviewHtml(envelope(marked.parser(tokens)), 'document', source)
+export function documentMarkdownPageHtml(tokens: Token[], source: string, mermaid?: { previews: MermaidPreviews; labels: MermaidPreviewLabels }): string {
+  const parser = new Marked({ renderer: { code(token) {
+    return mermaid ? mermaidCodeHtml(token, mermaid.previews, 'document', mermaid.labels) : false
+  } } })
+  return documentPreviewHtml(envelope(parser.parser(tokens)), 'document', source)
 }
 
 /** HTML 完了報告は埋め込み用の余白に揃え、既存 Markdown は従来の静的描画を使う。 */

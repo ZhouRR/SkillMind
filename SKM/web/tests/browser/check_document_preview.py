@@ -41,7 +41,9 @@ WIDE_MARKDOWN = (
     + "\n## Final note\n\nLast paragraph.\n"
 )
 COMPLEX_MARKDOWN = "| Cell |\n| --- |\n| " + "<span>safe</span>" * 11000 + "<img src='/preview-probe/complex'> |\n"
-MARKDOWN_CASES = {"markdown": MARKDOWN, "markdown-wide": WIDE_MARKDOWN, "markdown-complex": COMPLEX_MARKDOWN}
+MERMAID_MARKDOWN = "# Flowchart\n\n```mermaid\nflowchart LR\nA[Start] --> B{Check}\nB -->|Yes| C[Done]\n```\n\nAfter diagram.\n"
+MERMAID_UNSAFE = "```mermaid\nflowchart LR\nA-->B\nclick A \"https://preview.invalid/diagram\"\n```"
+MARKDOWN_CASES = {"markdown-mermaid": MERMAID_MARKDOWN, "markdown-mermaid-unsafe": MERMAID_UNSAFE, "markdown": MARKDOWN, "markdown-wide": WIDE_MARKDOWN, "markdown-complex": COMPLEX_MARKDOWN}
 DELAYED_TIMERS = ("timeout-delayed-timer-401", "timeout-delayed-timer-403")
 LATE_RESPONSES = ("close-late", "project-late", "actor-late", "timeout", *DELAYED_TIMERS)
 MALICIOUS = """<!doctype html><html><head>
@@ -123,7 +125,7 @@ class PreviewApi(ProjectsApi):
             return
         assert request.method == "GET" and parts[1] in (PROJECT, NEXT_PROJECT)
         if len(parts) == 3:
-            size = 1_000_001 if self.mode == "metadata-large" else 10
+            size = 20_000_001 if self.mode == "metadata-large" else 10
             filename = "preview.md" if self.mode in MARKDOWN_CASES else "preview.html"
             mime = "text/markdown" if self.mode in MARKDOWN_CASES else "text/html"
             await route.fulfill(
@@ -219,7 +221,7 @@ async def install_transport(page: Page, mode: str) -> None:
               pull(controller) {
                 window.previewStream.pulls += 1;
                 if (mode.startsWith('headers-')) return;
-                controller.enqueue(new Uint8Array(400000).fill(65));
+                controller.enqueue(new Uint8Array(8000000).fill(65));
                 if (window.previewStream.pulls === 20) controller.close();
               },
               cancel() { window.previewStream.cancelled += 1; }
@@ -442,7 +444,12 @@ async def scenario(
                 await expect(frame.get_by_text("Last paragraph.", exact=True)).to_be_visible()
                 await expect(page.get_by_role("button", name=catalog["runHistory"]["next"], exact=True)).to_be_disabled()
                 await page.get_by_role("button", name=labels["viewSource"], exact=True).click()
-                await expect(page.locator(".previewText")).to_have_text(WIDE_MARKDOWN)
+                source_selector = page.get_by_role("combobox", name=labels["previewPages"])
+                source_parts = []
+                for source_index in range(await source_selector.locator("option").count()):
+                    await source_selector.select_option(str(source_index))
+                    source_parts.append(await page.locator(".previewText").text_content() or "")
+                assert "".join(source_parts) == WIDE_MARKDOWN
                 await page.get_by_role("dialog").get_by_role("button", name=labels["previewButton"], exact=True).click()
                 await expect(selector).to_have_value(str(total - 1))
                 # toolbar が狭幅でも切れず、再オープン時は先頭頁へ戻る。
@@ -451,10 +458,29 @@ async def scenario(
                 await previews.first.click()
                 await expect(selector).to_have_value("0")
             elif mode == "markdown-complex":
+                await expect(page.get_by_text(labels["markdownSourcePage"], exact=True)).to_be_visible()
+                await expect(page.locator("iframe.previewFrame")).to_have_count(0)
+                selector = page.get_by_role("combobox", name=labels["previewPages"])
+                parts = []
+                for index in range(await selector.locator("option").count()):
+                    await selector.select_option(str(index))
+                    await expect(page.locator(".previewText")).to_be_visible()
+                    parts.append(await page.locator(".previewText").text_content() or "")
+                assert "".join(parts) == COMPLEX_MARKDOWN
+                await expect(page.locator(".previewText span, .previewText img, .previewText script")).to_have_count(0)
+            elif mode == "markdown-mermaid":
                 frame = page.frame_locator("iframe.previewFrame")
-                await expect(frame.locator("body > pre")).to_have_text(COMPLEX_MARKDOWN)
-                await expect(frame.locator("span, img, script")).to_have_count(0)
-                await expect(page.locator("iframe.previewFrame")).to_have_attribute("sandbox", "")
+                await expect(frame.locator("svg")).to_be_visible()
+                await expect(frame.locator("svg")).to_contain_text("Start")
+                await expect(frame.locator("svg")).to_contain_text("Done")
+                await expect(frame.get_by_text("After diagram.", exact=True)).to_be_visible()
+                await expect(frame.locator("script, iframe, foreignObject, image, a")).to_have_count(0)
+                await expect(frame.locator("code.language-mermaid")).to_have_count(0)
+            elif mode == "markdown-mermaid-unsafe":
+                frame = page.frame_locator("iframe.previewFrame")
+                await expect(frame.get_by_text(labels["mermaidFailed"], exact=True)).to_be_visible()
+                await expect(frame.locator("code.language-mermaid")).to_contain_text("click A")
+                await expect(frame.locator("svg, script, iframe, image, a")).to_have_count(0)
             elif mode == "markdown":
                 frame = page.frame_locator("iframe.previewFrame")
                 await expect(frame.get_by_role("heading", name="Original Markdown")).to_be_visible()
@@ -517,7 +543,7 @@ async def scenario(
                 "pulls": 0,
                 "cancelled": 1,
             }
-        if mode in MARKDOWN_CASES:
+        if mode in MARKDOWN_CASES and mode != "markdown-complex":
             # OS 設定ではなく親 App に追従し、開いたまま切替えても再取得しない。
             frame = page.frame_locator("iframe.previewFrame")
             calls = list(api.content_calls)
@@ -585,6 +611,8 @@ async def check(url: str, output: Path) -> None:
                 "timeout",
                 "markdown",
                 "markdown-complex",
+                "markdown-mermaid",
+                "markdown-mermaid-unsafe",
                 "same-tick",
                 "headers-expired",
                 "headers-denied",
@@ -595,6 +623,7 @@ async def check(url: str, output: Path) -> None:
                 for theme in ("light", "dark"):
                     for width in (390, 1440):
                         await scenario(browser, url, "markdown-wide", language, width, output, theme)
+                        await scenario(browser, url, "markdown-mermaid", language, width, output, theme)
         finally:
             await browser.close()
 
