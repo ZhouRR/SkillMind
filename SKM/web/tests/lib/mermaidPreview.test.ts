@@ -71,6 +71,6 @@ describe('Mermaid fenced code rendering boundary', () => {
     expect(html).not.toContain('<style>')
     expect(mermaidCodeHtml(second, previews, 'reading', labels)).toContain(labels.loading)
     expect(mermaidCodeHtml(first, previews, 'document', labels)).toContain('<svg id="one"/>')
-    expect(mermaidCodeHtml(first, previews, 'document', labels)).toContain('overflow:auto;background:#fff')
+    expect(mermaidCodeHtml(first, previews, 'document', labels)).toContain('max-height:380px;overflow:auto;background:transparent')
   })
 })

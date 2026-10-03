@@ -87,6 +87,7 @@ from skillmind.runs.domain import (
     plan_run_transition,
     request_hash,
 )
+from skillmind.runs.evidence_preview import evidence_preview_metadata
 from skillmind.runs.execution_metrics import execution_metrics
 from skillmind.runs.execution_outcome import user_cancellation_event
 from skillmind.runs.repository_budgets import new_budget_account
@@ -432,6 +433,7 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
             # Release G 前の Run は row を捏造せず、read model だけで implicit Segment 1 とする。
             projected_segments = (_implicit_segment(run),)
         titles = await self._history_task_titles([run])
+        preview_metadata = evidence_preview_metadata(evidence, tool_calls)
         return RunDetail(
             task_title=titles.get(run.id),
             run=self._to_created_run(run, idempotent_replay=False),
@@ -478,7 +480,7 @@ class RunRepository(InteractionOperationsMixin, EffectOperationsMixin):
                     content_hash=item.content_hash,
                     snapshot_uri=item.snapshot_uri,
                     excerpt=item.excerpt,
-                    metadata=dict(item.metadata_json),
+                    metadata=preview_metadata.get(item.id, dict(item.metadata_json)),
                     created_at=item.created_at,
                 )
                 for item in evidence

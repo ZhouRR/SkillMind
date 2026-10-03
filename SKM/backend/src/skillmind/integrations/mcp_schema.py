@@ -16,6 +16,7 @@ from referencing import Registry
 from referencing.exceptions import Unresolvable
 
 from skillmind.core.hashing import canonical_json
+from skillmind.core.redaction import find_sensitive_key
 
 MAX_SCHEMA_BYTES = 262_144
 # 制約を黙って無視しない。外部取得・動的参照・任意正規表現はこの in-process 境界で開かない。
@@ -120,7 +121,7 @@ def _check_structure(root: Any) -> None:
     active: set[int] = set()
     visited_nodes = 0
 
-    def visit(value: Any, depth: int) -> None:
+    def visit(value: Any, depth: int, sensitive_name: str | None = None) -> None:
         """局所参照の循環とサイズを確認し、meta-schema 検証自体は根で一回だけ行う。"""
         nonlocal visited_nodes
         visited_nodes += 1
@@ -135,30 +136,49 @@ def _check_structure(root: Any) -> None:
             raise ValueError("MCP schema references must not be cyclic")
         if set(value) - _KEYWORDS:
             raise ValueError("MCP tool schema uses unsupported constraints or references")
+        # Schema の property/定義名は宣言。default/const/enum/examples は実値として検査する。
+        # 秘密らしい項目の局所 $ref にも同じ文脈を渡し、別名の定義で値を隠させない。
+        for keyword in {"default", "const", "enum", "examples"} & value.keys():
+            literal = value[keyword]
+            if find_sensitive_key(literal) is not None:
+                raise ValueError("MCP tool schema contains a credential-like literal")
+            candidates = (
+                literal
+                if keyword in {"enum", "examples"} and isinstance(literal, list)
+                else [literal]
+            )
+            if sensitive_name and any(
+                isinstance(candidate, str)
+                and candidate
+                and find_sensitive_key({sensitive_name: candidate}) is not None
+                for candidate in candidates
+            ):
+                raise ValueError("MCP tool schema contains a credential-like literal")
         active.add(identity)
         if "$ref" in value:
-            visit(_local_reference(root, value["$ref"]), depth + 1)
+            visit(_local_reference(root, value["$ref"]), depth + 1, sensitive_name)
         for key in _MAPS & value.keys():
             children = value[key]
             if not isinstance(children, dict) or len(children) > 100:
                 raise ValueError("MCP schema properties are invalid")
-            for child in children.values():
-                visit(child, depth + 1)
+            for name, child in children.items():
+                sensitive = find_sensitive_key({name: None})
+                visit(child, depth + 1, sensitive or sensitive_name)
         for key in _ARRAYS & value.keys():
             children = value[key]
             if not isinstance(children, list) or len(children) > 30:
                 raise ValueError("MCP schema alternatives exceed their limit")
             for child in children:
-                visit(child, depth + 1)
+                visit(child, depth + 1, sensitive_name)
         for key in _SINGLE & value.keys():
             child = value[key]
             if key == "items" and isinstance(child, list):
                 if len(child) > 30:
                     raise ValueError("MCP tuple schema exceeds its limit")
                 for item in child:
-                    visit(item, depth + 1)
+                    visit(item, depth + 1, sensitive_name)
             else:
-                visit(child, depth + 1)
+                visit(child, depth + 1, sensitive_name)
         active.remove(identity)
 
     visit(root, 0)

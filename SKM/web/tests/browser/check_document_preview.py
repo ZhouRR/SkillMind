@@ -43,7 +43,8 @@ WIDE_MARKDOWN = (
 COMPLEX_MARKDOWN = "| Cell |\n| --- |\n| " + "<span>safe</span>" * 11000 + "<img src='/preview-probe/complex'> |\n"
 MERMAID_MARKDOWN = "# Flowchart\n\n```mermaid\nflowchart LR\nA[Start] --> B{Check}\nB -->|Yes| C[Done]\n```\n\nAfter diagram.\n"
 MERMAID_UNSAFE = "```mermaid\nflowchart LR\nA-->B\nclick A \"https://preview.invalid/diagram\"\n```"
-MARKDOWN_CASES = {"markdown-mermaid": MERMAID_MARKDOWN, "markdown-mermaid-unsafe": MERMAID_UNSAFE, "markdown": MARKDOWN, "markdown-wide": WIDE_MARKDOWN, "markdown-complex": COMPLEX_MARKDOWN}
+MERMAID_TALL = "```mermaid\nflowchart TD\n" + "\n".join(f"N{i}[Step {i}] --> N{i+1}[Step {i+1}]" for i in range(12)) + "\n```\n"
+MARKDOWN_CASES = {"markdown-mermaid": MERMAID_MARKDOWN, "markdown-mermaid-tall": MERMAID_TALL, "markdown-mermaid-unsafe": MERMAID_UNSAFE, "markdown": MARKDOWN, "markdown-wide": WIDE_MARKDOWN, "markdown-complex": COMPLEX_MARKDOWN}
 DELAYED_TIMERS = ("timeout-delayed-timer-401", "timeout-delayed-timer-403")
 LATE_RESPONSES = ("close-late", "project-late", "actor-late", "timeout", *DELAYED_TIMERS)
 MALICIOUS = """<!doctype html><html><head>
@@ -189,6 +190,28 @@ async def install_transport(page: Page, mode: str) -> None:
     await page.add_init_script("""(() => {
       window.previewMessages = [];
       addEventListener('message', event => window.previewMessages.push(event.data));
+      if (window !== window.top) return;
+      window.previewMounts = [];
+      const seen = new WeakSet();
+      const capture = node => {
+        if (!(node instanceof Element)) return;
+        const frames = node.matches('iframe.previewFrame') ? [node] : node.querySelectorAll('iframe.previewFrame');
+        for (const frame of frames) {
+          if (seen.has(frame)) continue;
+          seen.add(frame);
+          window.previewMounts.push({visibility:frame.style.visibility});
+        }
+      };
+      // MutationObserver 配送前に load が終わる場合もあるため、接続直前を同期観測する。
+      const append = Node.prototype.appendChild, insert = Node.prototype.insertBefore;
+      Node.prototype.appendChild = function(node) {
+        if (this.isConnected) capture(node);
+        return append.call(this, node);
+      };
+      Node.prototype.insertBefore = function(node, before) {
+        if (this.isConnected) capture(node);
+        return insert.call(this, node, before);
+      };
     })();""")
     if mode in LATE_RESPONSES:
         await page.add_init_script("""(() => {
@@ -476,11 +499,46 @@ async def scenario(
                 await expect(frame.get_by_text("After diagram.", exact=True)).to_be_visible()
                 await expect(frame.locator("script, iframe, foreignObject, image, a")).to_have_count(0)
                 await expect(frame.locator("code.language-mermaid")).to_have_count(0)
+                # 初期 iframe と完成後の図の両方が親 theme に従い、全幅へ拡大しない。
+                outer = page.locator("iframe.previewFrame")
+                assert await outer.evaluate("e => getComputedStyle(e).backgroundColor") != "rgb(255, 255, 255)"
+                mounted = await page.evaluate("window.previewMounts")
+                assert mounted and all(frame["visibility"] == "hidden" for frame in mounted)
+                svg = frame.locator("svg")
+                natural = await svg.get_attribute("viewBox")
+                assert natural is not None
+                scaled_width = float((await svg.get_attribute("width")) or 0)
+                assert abs(scaled_width - float(natural.split()[2]) * 0.8) <= 1
+                assert await frame.locator("figure.mermaidPreview").evaluate(
+                    "e => getComputedStyle(e).backgroundColor"
+                ) == "rgba(0, 0, 0, 0)"
+                expected_mode = theme
+                assert await frame.locator("html").evaluate("e => getComputedStyle(e).colorScheme") == expected_mode
+                original_id = await svg.get_attribute("id")
+                alternate = "dark" if theme == "light" else "light"
+                await page.evaluate("value => document.documentElement.dataset.theme = value", alternate)
+                await expect(svg).to_be_visible()
+                await expect(svg).not_to_have_attribute("id", original_id or "")
+                assert await frame.locator("html").evaluate("e => getComputedStyle(e).colorScheme") == alternate
+                rect = svg.locator(".node rect").first
+                text = svg.locator("text").first
+                assert await rect.evaluate("e => getComputedStyle(e).fill") != await text.evaluate("e => getComputedStyle(e).fill")
+                await page.evaluate("value => document.documentElement.dataset.theme = value", theme)
+                await expect(svg).to_be_visible()
             elif mode == "markdown-mermaid-unsafe":
                 frame = page.frame_locator("iframe.previewFrame")
                 await expect(frame.get_by_text(labels["mermaidFailed"], exact=True)).to_be_visible()
                 await expect(frame.locator("code.language-mermaid")).to_contain_text("click A")
                 await expect(frame.locator("svg, script, iframe, image, a")).to_have_count(0)
+            elif mode == "markdown-mermaid-tall":
+                frame = page.frame_locator("iframe.previewFrame")
+                await expect(frame.locator("svg")).to_be_visible()
+                figure = frame.locator("figure.mermaidPreview")
+                dimensions = await figure.evaluate("e => ({height:e.getBoundingClientRect().height,scroll:e.scrollHeight})")
+                assert dimensions["height"] <= 381 and dimensions["scroll"] > dimensions["height"]
+                await figure.evaluate("e => e.scrollTop = e.scrollHeight")
+                await expect(frame.locator("svg")).to_contain_text("Step 12")
+                assert await frame.locator("svg").evaluate("e => e.getBoundingClientRect().width") < 500
             elif mode == "markdown":
                 frame = page.frame_locator("iframe.previewFrame")
                 await expect(frame.get_by_role("heading", name="Original Markdown")).to_be_visible()
@@ -612,6 +670,7 @@ async def check(url: str, output: Path) -> None:
                 "markdown",
                 "markdown-complex",
                 "markdown-mermaid",
+                "markdown-mermaid-tall",
                 "markdown-mermaid-unsafe",
                 "same-tick",
                 "headers-expired",

@@ -514,7 +514,7 @@ class ToolGateway:
         """新規/保存済み応答を同じ契約と出力上限で検証し、元の JSON を変更しない。"""
 
         candidate = deepcopy(dict(response))
-        _reject_sensitive_response_keys(candidate)
+        _reject_sensitive_response_keys(candidate, capability=binding.definition.capability)
         _validate_response(binding.definition.response_schema, candidate)
         try:
             size = len(_compact_json(candidate).encode("utf-8"))
@@ -763,10 +763,16 @@ def _duration_ms(started: float) -> int:
     return max(0, int((time.monotonic() - started) * 1_000))
 
 
-def _reject_sensitive_response_keys(value: Any) -> None:
-    """Provider response に credential field が混入した場合は Agent へ返さない。"""
+def _reject_sensitive_response_keys(value: Any, *, capability: str | None = None) -> None:
+    """資格を公開せず、工具一覧の検証済み Schema 宣言は通常データと区別する。"""
 
-    if find_sensitive_key(value) is not None:
+    if capability == "mcp.tools/v1":
+        from skillmind.integrations.mcp_tools import find_sensitive_tool_metadata
+
+        sensitive = find_sensitive_tool_metadata(value)
+    else:
+        sensitive = find_sensitive_key(value)
+    if sensitive is not None:
         raise ToolGatewayError(
             "unavailable", "Tool response contained a sensitive field", retryable=False
         )

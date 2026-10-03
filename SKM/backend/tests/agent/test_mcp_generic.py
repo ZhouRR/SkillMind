@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 
@@ -14,6 +15,56 @@ from skillmind.integrations.domain import IntegrationValidationError, normalize_
 from skillmind.integrations.mcp_tools import configured_tool, normalize_catalog, parse_result
 from tests.agent.test_mcp_tools import TOOLS, catalog, config, encoded, execution
 from tests.integrations.test_readonly_resources import command
+
+
+@pytest.mark.parametrize("attempt", [1, 2])
+async def test_login_control_references_keep_original_identity_and_readback(attempt):
+    """コントロール ID を原 Effect に保存し、再 claim は照会だけでログインを再送しない。"""
+    from skillmind.integrations.mcp_tools import digest
+    from tests.integrations.test_mcp_metadata import login_command
+
+    settings = normalize_integration_command(login_command())
+    payload = {
+        "arguments": {
+            "requestId": "${effect_id}", "appId": "sample", "windowId": str(uuid4()),
+            "usernameAutomationId": "username-input", "passwordAutomationId": "login-input",
+            "loginButtonAutomationId": "login-button",
+        },
+        "read_back": {
+            "name": "get_step_status",
+            "arguments": {"requestId": "${effect_id}"},
+            "checks": [
+                {"path": "/requestId", "equals": "${effect_id}"},
+                {"path": "/status", "equals": "COMPLETED"},
+            ],
+        },
+    }
+    run = replace(
+        execution("login", attempt=attempt),
+        integration_config=settings.config,
+        integration_scope=settings.scope,
+        changes=({"path": "/call", "action": "SET", "value": payload},),
+        precondition={"revision": digest(settings.config["tool_catalog"])},
+    )
+    source, leases, authorize = AsyncMock(), AsyncMock(), AsyncMock()
+    source.call.return_value = encoded(
+        {"requestId": str(run.effect_execution_id), "status": "COMPLETED"}
+    )
+    result = await McpCallProvider(source=source, leases=leases, authorize=authorize).apply(
+        run, credential="fixture-token"
+    )
+    assert [item.args[2] for item in source.call.await_args_list] == (
+        ["login", "get_step_status"] if attempt == 1 else ["get_step_status"]
+    )
+    assert all(
+        item.args[3]["requestId"] == str(run.effect_execution_id)
+        for item in source.call.await_args_list
+    )
+    assert result.before.content["arguments"]["passwordAutomationId"] == "login-input"
+    assert result.verification["business_verdict"] == "NOT_EVALUATED"
+    assert result.replayed is (attempt == 2)
+    assert authorize.await_count >= 4
+    leases.confirm.assert_awaited_once()
 
 
 def test_admin_can_authorize_more_than_five_arbitrary_tools():

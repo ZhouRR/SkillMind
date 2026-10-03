@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import replace
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 
-from skillmind.integrations.domain import IntegrationConflictError, IntegrationNotFoundError
+from skillmind.integrations.domain import (
+    CreateIntegrationCommand,
+    IntegrationConflictError,
+    IntegrationNotFoundError,
+    StoredIntegration,
+    normalize_integration_command,
+)
 from tests.api.fakes import FakeIntegrationService
+from tests.integrations.test_mcp_metadata import login_command
 
 
 def create_resource(client: TestClient) -> tuple[FakeIntegrationService, str, dict]:
@@ -55,6 +63,51 @@ def test_admin_edits_revision_and_reads_only_non_secret_config(client: TestClien
     args = service.update_integration.call_args
     assert args.kwargs["expected_revision"] == 1
     assert args.args[0].config == body["config"]
+
+
+def test_edit_saves_login_tool_schema_but_rejects_embedded_password(client: TestClient) -> None:
+    """実更新 route と domain 検証を通し、コントロール宣言を資格本文と分ける。"""
+    service, path, body = create_resource(client)
+    value = login_command()
+    body.update(
+        capabilities=list(value.capabilities),
+        config=value.config,
+        scope=value.scope,
+        secret_reference_id=str(value.secret_reference_id),
+    )
+
+    async def update(
+        command: CreateIntegrationCommand, *, integration_id: UUID, expected_revision: int
+    ) -> StoredIntegration:
+        """DB だけを代替し、保存前の本番 validator と原 revision を確認する。"""
+        normalized = normalize_integration_command(command)
+        current = service.integrations[0]
+        assert integration_id == current.integration_id and expected_revision == current.revision
+        service.received_config = normalized.config
+        service.integrations[0] = replace(
+            current,
+            config_keys=tuple(sorted(normalized.config)),
+            capabilities=normalized.capabilities,
+            scope=normalized.scope,
+            secret_reference_id=normalized.secret_reference_id,
+            revision=current.revision + 1,
+        )
+        return service.integrations[0]
+
+    service.update_integration = AsyncMock(side_effect=update)
+    response = client.put(path, json={**body, "expected_revision": 1})
+    assert response.status_code == 200 and response.json()["revision"] == 2
+    assert service.received_config == normalize_integration_command(value).config
+    assert "config" not in response.json()
+    saved_config = deepcopy(service.received_config)
+    bad = deepcopy(body)
+    tool = next(item for item in bad["config"]["tool_catalog"]["tools"] if item["name"] == "login")
+    tool["input_schema"]["properties"]["password"] = {"default": "synthetic-only"}
+    rejected = client.put(path, json={**bad, "expected_revision": 2})
+    assert rejected.status_code == 422
+    assert "synthetic-only" not in rejected.text
+    assert service.received_config == saved_config
+    assert service.integrations[0].revision == 2
 
 
 @pytest.mark.parametrize(

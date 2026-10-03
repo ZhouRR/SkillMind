@@ -827,6 +827,7 @@ export const JA: UiMessages = {
     completionStates: { COMPLETED: '完了', PARTIAL: '一部完了', BLOCKED: '続行不可', UNKNOWN: '未確認' },
     excerptDisplay: '抜粋の表示形式',
     excerptSource: '原文',
+    excerptContext: '原記録の表頭と完全な行を表示しています。途中で切れた行は原文で確認できます。',
     platformStatus: 'プラットフォーム実行',
     completionStatus: '結果の完成度',
     recoveryUnknown: '過去のエラーとの回復関係は確認できません。',

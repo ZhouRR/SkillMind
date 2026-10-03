@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MERMAID_PREVIEW_TIMEOUT_MS, useMermaidPreviews } from '../../src/hooks/useMermaidPreviews'
 import { MERMAID_MAX_PAGE_DIAGRAMS, mermaidCodeTokens, renderMermaidPreview, type MermaidPreview } from '../../src/lib/mermaidPreview'
 import { commitHooks, deferred, hookMicrotasks, hookPhases, unmountHooks } from '../fixtures/hookHarness'
+import { LIGHT_PREVIEW_THEME, type PreviewTheme } from '../../src/lib/previewTheme'
 
 vi.mock('react', async () => (await import('../fixtures/hookHarness')).hookReact)
 vi.mock('../../src/lib/mermaidPreview', async (original) => ({
@@ -11,7 +12,7 @@ vi.mock('../../src/lib/mermaidPreview', async (original) => ({
 const renderer = vi.mocked(renderMermaidPreview)
 /** 出力の内容より所有者の正しさを見る小さい fixture。 */
 function tokens(source = 'flowchart LR\nA-->B'): Token[] { return marked.lexer(`\`\`\`mermaid\n${source}\n\`\`\``) }
-function render(page?: Token[], enabled = true) { hookPhases.cursor = 0; return useMermaidPreviews(page, enabled) }
+function render(page?: Token[], enabled = true, theme: PreviewTheme = LIGHT_PREVIEW_THEME) { hookPhases.cursor = 0; return useMermaidPreviews(page, enabled, theme) }
 const ready: MermaidPreview = { status: 'ready', svg: '<svg/>', document: '<svg/>', height: 120 }
 afterEach(() => { unmountHooks(); vi.resetAllMocks(); vi.clearAllTimers(); vi.useRealTimers() })
 
@@ -43,6 +44,19 @@ describe('lazy Mermaid page lifecycle', () => {
     expect(signal.aborted).toBe(true)
     await hookMicrotasks()
     expect(render(second).get(mermaidCodeTokens(second)[0]!)).toEqual(ready)
+  })
+  it('redraws unchanged tokens for a new theme and discards completion in the previous palette', async () => {
+    const pending = deferred<MermaidPreview>(); renderer.mockReturnValueOnce(pending.promise)
+    const page = tokens(); render(page); commitHooks()
+    const original = renderer.mock.calls[0]![1]
+    const dark = { ...LIGHT_PREVIEW_THEME, mode: 'dark' as const, background: '#28251f' }
+    expect([...render(page, true, dark).values()]).toEqual([{ status: 'loading' }])
+    pending.resolve(ready); await hookMicrotasks()
+    expect([...render(page, true, dark).values()]).toEqual([{ status: 'loading' }])
+    renderer.mockResolvedValue(ready); commitHooks(); await hookMicrotasks()
+    expect(original.aborted).toBe(true)
+    expect(renderer.mock.calls.at(-1)![2]).toBe(dark)
+    expect([...render(page, true, dark).values()]).toEqual([ready])
   })
   it('aborts pending import/render on unmount and never starts the next diagram', async () => {
     const pending = deferred<MermaidPreview>(); renderer.mockReturnValue(pending.promise)

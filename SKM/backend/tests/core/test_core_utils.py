@@ -71,3 +71,27 @@ def test_find_sensitive_key_allows_plain_metadata() -> None:
     """通常の metadata が誤検出されないことを確認する。"""
 
     assert find_sensitive_key({"path": "src/a.py", "line": 1, "tags": ["a"]}) is None
+
+
+@pytest.mark.parametrize(
+    "name", ["passwordAutomationId", "PasswordAutomationId", "token_automation_id"]
+)
+def test_control_identifiers_are_references_not_credentials(name: str) -> None:
+    """操作引数や Evidence のコントロール ID を資格本文と誤認しない。"""
+    assert find_sensitive_key({"arguments": {name: "login-input"}}) is None
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"password": "synthetic-only"},
+        ["login-input"],
+        "password=synthetic-only",
+        "-----BEGIN PRIVATE KEY-----",
+        "login\ninput",
+        "x" * 513,
+    ],
+)
+def test_control_reference_exception_does_not_hide_credential_values(value: object) -> None:
+    """例外は短い文字列 ID だけとし、入れ子や秘密代入を拒否する。"""
+    assert find_sensitive_key({"passwordAutomationId": value}) == "passwordAutomationId"

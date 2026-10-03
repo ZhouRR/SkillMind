@@ -848,6 +848,7 @@ export const ZH: UiMessages = {
     completionStates: { COMPLETED: '完成', PARTIAL: '部分完成', BLOCKED: '受阻', UNKNOWN: '未确认' },
     excerptDisplay: '摘录显示方式',
     excerptSource: '原文',
+    excerptContext: '已补充原记录的表头，并显示完整行；截断的行可在原文中查看。',
     platformStatus: '平台执行状态',
     completionStatus: '结果完成程度',
     recoveryUnknown: '无法确认与历史错误的恢复关联。',

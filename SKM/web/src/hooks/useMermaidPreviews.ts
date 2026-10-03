@@ -2,18 +2,19 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Token, Tokens } from 'marked'
 import { MERMAID_MAX_PAGE_DIAGRAMS, mermaidCodeTokens, renderMermaidPreview,
   safeMermaidFlowchart, type MermaidPreview, type MermaidPreviews } from '../lib/mermaidPreview'
+import { LIGHT_PREVIEW_THEME, type PreviewTheme } from '../lib/previewTheme'
 
 export const MERMAID_PREVIEW_TIMEOUT_MS = 15_000
 
 /** 図は表示中の頁だけ遅延生成し、頁切替・非表示・unmount 後の応答を破棄する。 */
-export function useMermaidPreviews(tokens?: Token[], enabled = true): MermaidPreviews {
+export function useMermaidPreviews(tokens?: Token[], enabled = true, theme: PreviewTheme = LIGHT_PREVIEW_THEME): MermaidPreviews {
   const owner = useMemo(() => {
     const codes = enabled && tokens ? mermaidCodeTokens(tokens) : []
     const initial = new Map<Tokens.Code, MermaidPreview>()
     codes.forEach((token, index) => initial.set(token, { status:
       index < MERMAID_MAX_PAGE_DIAGRAMS && safeMermaidFlowchart(token.text) ? 'loading' : 'failed' }))
-    return { codes, initial }
-  }, [tokens, enabled])
+    return { codes, initial, theme }
+  }, [tokens, enabled, theme])
   const current = useRef(owner)
   current.current = owner
   const [state, setState] = useState({ owner, previews: owner.initial })
@@ -36,7 +37,7 @@ export function useMermaidPreviews(tokens?: Token[], enabled = true): MermaidPre
       for (const token of owner.codes) {
         if (!owns()) break
         if (previews.get(token)?.status !== 'loading') continue
-        const preview = await renderMermaidPreview(token.text, abort.signal)
+        const preview = await renderMermaidPreview(token.text, abort.signal, owner.theme)
         if (!owns()) break
         // 同期 layout は timer で割込めないため、timer 配送前の遅延成功も受付けない。
         if (performance.now() >= deadline) { fail(); break }

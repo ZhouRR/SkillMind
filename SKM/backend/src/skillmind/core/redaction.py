@@ -31,9 +31,10 @@ def find_sensitive_key(value: Any) -> str | None:
     if isinstance(value, Mapping):
         for key, nested in value.items():
             normalized = str(key).lower()
-            if normalized in SENSITIVE_KEY_NAMES or any(
-                fragment in normalized for fragment in _SENSITIVE_KEY_FRAGMENTS
-            ):
+            if (
+                normalized in SENSITIVE_KEY_NAMES
+                or any(fragment in normalized for fragment in _SENSITIVE_KEY_FRAGMENTS)
+            ) and not _control_identifier(key, nested):
                 return str(key)
             found = find_sensitive_key(nested)
             if found is not None:
@@ -44,3 +45,16 @@ def find_sensitive_key(value: Any) -> str | None:
             if found is not None:
                 return found
     return None
+
+
+def _control_identifier(key: Any, value: Any) -> bool:
+    """UI Automation のコントロール参照を秘密値と混同せず、入れ子の資格は除外しない。"""
+
+    normalized = str(key).lower().replace("_", "").replace("-", "")
+    return (
+        normalized.endswith("automationid")
+        and isinstance(value, str)
+        and 0 < len(value) <= 512
+        and not any(ord(character) < 32 for character in value)
+        and not contains_sensitive_content(value)
+    )

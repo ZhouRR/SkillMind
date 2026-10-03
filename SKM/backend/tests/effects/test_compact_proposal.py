@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from jsonschema import Draft202012Validator
+
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.effects.proposal import CHANGE_PROPOSE_REQUEST_SCHEMA, parse_change_proposal_request
 
@@ -73,6 +74,24 @@ def test_compact_requires_platform_identity():
         parse_change_proposal_request(compact())
 
 
+def test_control_references_survive_proposal_parsing_but_passwords_do_not():
+    """MCP のログイン提案はコントロール参照を保持し、資格本文を受け付けない。"""
+    value = compact()
+    value.update(
+        capability_version="mcp.call/v1",
+        operation="call",
+        target={"locator": "login", "display": "Login"},
+        changes=[
+            {"path": "/call", "action": "SET", "value": {"passwordAutomationId": "login-input"}}
+        ],
+    )
+    parsed = parse_change_proposal_request(value, request_identity="run:attempt:login-1")
+    assert parsed.changes == tuple(value["changes"])
+    value["changes"][0]["value"]["password"] = "synthetic-only"
+    with pytest.raises(ValueError, match="sensitive content"):
+        parse_change_proposal_request(value, request_identity="run:attempt:login-2")
+
+
 def test_explicit_semantics_are_not_overridden():
     """明示された expiry/復旧 mode/前提/期待を上書きしない。"""
     value = compact()
@@ -95,6 +114,7 @@ def test_inline_receipt_matches_public_response_contract():
     from pathlib import Path
 
     from jsonschema import Draft202012Validator
+
     from skillmind.effects.inline import inline_success
     from tests.runs.test_effect_continuation import receipt
 

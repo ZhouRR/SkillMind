@@ -415,16 +415,21 @@ def normalize_integration_command(command: CreateIntegrationCommand) -> CreateIn
         raise IntegrationValidationError("Integration declares an unregistered capability")
     if definition.requires_secret and command.secret_reference_id is None:
         raise IntegrationValidationError("Integration Provider requires a SecretReference")
-    if (
-        find_sensitive_key(command.config) is not None
-        or find_sensitive_key(command.scope) is not None
-    ):
+    if command.provider == "mcp":
+        from skillmind.integrations.mcp_tools import find_sensitive_tool_metadata
+
+        sensitive_config = find_sensitive_tool_metadata(command.config)
+    else:
+        sensitive_config = find_sensitive_key(command.config)
+    if sensitive_config is not None or find_sensitive_key(command.scope) is not None:
         raise IntegrationValidationError("Integration metadata contains a credential-like field")
     config = _validate_provider_config(command.provider, command.config)
     if command.provider == "postgres":
         config["access_mode"] = "native_sql"
         if "statements" not in command.scope:
-            raise IntegrationValidationError("PostgreSQL now requires native SQL statement permissions")
+            raise IntegrationValidationError(
+                "PostgreSQL now requires native SQL statement permissions"
+            )
         if "database.execute/v1" in capabilities and "database.query/v1" not in capabilities:
             raise IntegrationValidationError("SQL execution requires its query capability")
     if (
@@ -514,8 +519,16 @@ def normalize_provider_scope(
     if provider == "postgres" and "statements" in scope:
         values = scope.get("statements")
         allowed = {"SELECT", "INSERT", "UPDATE", "DELETE"} if write_enabled else {"SELECT"}
-        if set(scope) != {"statements"} or not isinstance(values, list) or not values or any(not isinstance(v, str) or v not in allowed for v in values) or "SELECT" not in values:
-            raise IntegrationValidationError("Native SQL scope requires allowed statements including SELECT")
+        if (
+            set(scope) != {"statements"}
+            or not isinstance(values, list)
+            or not values
+            or any(not isinstance(v, str) or v not in allowed for v in values)
+            or "SELECT" not in values
+        ):
+            raise IntegrationValidationError(
+                "Native SQL scope requires allowed statements including SELECT"
+            )
         return {"statements": sorted(set(values))}
     if provider == "postgres" and write_enabled:
         if set(scope) != {"tables", "write_columns", "operations"}:
@@ -719,7 +732,10 @@ def _validate_provider_config(provider: str, config: dict[str, Any]) -> dict[str
         except ValueError as error:
             raise IntegrationValidationError(str(error)) from None
     if provider == "postgres":
-        if set(config) not in ({"host", "port", "database", "username", "sslmode"}, {"host", "port", "database", "username", "sslmode", "access_mode"}):
+        if set(config) not in (
+            {"host", "port", "database", "username", "sslmode"},
+            {"host", "port", "database", "username", "sslmode", "access_mode"},
+        ):
             raise IntegrationValidationError("PostgreSQL config contains invalid fields")
         for key in ("host", "database", "username"):
             value = config[key]

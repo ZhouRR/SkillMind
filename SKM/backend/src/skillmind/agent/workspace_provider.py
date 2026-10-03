@@ -28,6 +28,7 @@ from skillmind.agent.tool_gateway import (
 )
 from skillmind.artifacts.domain import MAX_ARTIFACT_BYTES, ArtifactDraft
 from skillmind.core.hashing import sha256_hex
+from skillmind.core.markdown_excerpt import MAX_CONTEXT_CHARACTERS, markdown_table_preview
 
 _MAX_FILE_BYTES = MAX_ARTIFACT_BYTES
 _MAX_READ_BYTES = 104_857_600
@@ -82,6 +83,13 @@ class WorkspaceReadProvider:
             subject="Workspace file",
             allow_empty=True,
         )
+        # 位置確認も preview の予算内に限り、巨大 file を追加で全文 split しない。
+        context_lines = (content.text[:MAX_CONTEXT_CHARACTERS].splitlines(keepends=True)
+                         if relative.lower().endswith((".md", ".markdown")) else [])
+        excerpt_start = (
+            sum(len(line) for line in context_lines[:window.line_start - 1])
+            if window.line_start <= len(context_lines) else MAX_CONTEXT_CHARACTERS + 1
+        )
         return ProviderToolResult(
             response={
                 "status": "success",
@@ -105,7 +113,9 @@ class WorkspaceReadProvider:
                     },
                     content_hash=content.checksum,
                     excerpt=window.content[:2_000],
-                    metadata={"scope": "run-workspace", "read_only": True},
+                    metadata=_excerpt_metadata(
+                        relative, content.text, excerpt_start, len(window.content),
+                    ),
                 ),
             ),
         )
@@ -141,9 +151,20 @@ def _character_page(
             source_locator={"path": relative, "offset": offset, "end_offset": end,
                             "line_start": start_line, "line_end": end_line},
             content_hash=content.checksum, excerpt=text[:2_000],
-            metadata={"scope": "run-workspace", "read_only": True},
+            metadata=_excerpt_metadata(relative, content.text, offset, len(text)),
         ),),
     )
+
+
+def _excerpt_metadata(path: str, text: str, start: int, size: int) -> dict[str, Any]:
+    """生抜粋を変更せず、同じ検証済み file の表頭だけを表示用に保存する。"""
+
+    metadata: dict[str, Any] = {"scope": "run-workspace", "read_only": True}
+    if path.lower().endswith((".md", ".markdown")):
+        preview = markdown_table_preview(text, start, start + min(size, 2_000))
+        if preview is not None:
+            metadata["excerpt_preview"] = preview
+    return metadata
 
 
 class WorkspaceSearchProvider:

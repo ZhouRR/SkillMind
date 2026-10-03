@@ -6,6 +6,7 @@ import { useMessages } from '../i18n'
 import { formatLocalTimestamp } from '../lib/presentation'
 import { groupSessionsByLineage, type SessionLineage, type SubagentDispatch } from '../lib/runAudit'
 import { displayText, evidenceTitle } from '../lib/resultPresentation'
+import { evidencePreviewSource } from '../lib/evidencePreview'
 import { MarkdownText } from './MarkdownText'
 
 /** 一回の扇出を、各面が実際に調べられたかどうかが読める形で描画する。
@@ -140,6 +141,7 @@ export function EvidenceCard({ evidence, snapshots, expanded = false }: { eviden
   const messages = useMessages()
   const [opened, setOpened] = useState(expanded)
   const [source, setSource] = useState(false)
+  const preview = evidencePreviewSource(evidence)
   return (
     <details className="evidenceCard" open={opened} onToggle={(event) => setOpened(event.currentTarget.open)}>
       <summary><span><strong>{evidenceTitle(evidence, snapshots)}</strong><small>{messages.runResult.evidenceTypes[evidence.evidence_type] ?? evidence.evidence_type} · {formatLocalTimestamp(evidence.created_at)}{typeof evidence.source_locator.phase === 'string' && messages.runResult.evidencePhases[evidence.source_locator.phase] ? ` · ${messages.runResult.evidencePhases[evidence.source_locator.phase]}` : ''}</small></span><span>{evidence.excerpt ? messages.runResult.viewExcerpt : messages.runResult.viewLocator}</span></summary>
@@ -150,7 +152,10 @@ export function EvidenceCard({ evidence, snapshots, expanded = false }: { eviden
           <button className="secondaryButton compactButton" type="button" aria-pressed={!source} onClick={() => setSource(false)}>{messages.runResult.artifacts.preview}</button>
           <button className="secondaryButton compactButton" type="button" aria-pressed={source} onClick={() => setSource(true)}>{messages.runResult.excerptSource}</button>
         </div>
-        {source ? <SourcePreview className="excerptSource" source={evidence.excerpt} /> : <MarkdownText text={evidence.excerpt} />}
+        {source ? <SourcePreview className="excerptSource" source={evidence.excerpt} /> : <>
+          {preview && <p className="hint">{messages.runResult.excerptContext}</p>}
+          <MarkdownText text={preview ?? evidence.excerpt} />
+        </>}
       </>)}
     </details>
   )

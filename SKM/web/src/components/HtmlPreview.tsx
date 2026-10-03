@@ -3,6 +3,7 @@ import { documentPreviewHtml } from '../lib/documentPreview'
 import { previewTextExceedsLimit } from '../lib/previewLimits'
 import { useMessages } from '../i18n'
 import { SourcePreview } from './SourcePreview'
+import { StaticPreviewFrame } from './StaticPreviewFrame'
 
 /** 20 MB 入場制限と別に、主 thread の DOM 構築を従来の最大入力以下に保つ。 */
 const HTML_RENDER_MAX_CHARACTERS = 1_000_000
@@ -20,5 +21,5 @@ export function HtmlPreview({ source, title, className = 'previewFrame' }: {
     <p className="hint">{messages.documentsPanel.htmlSourcePages}</p>
     <SourcePreview source={source} />
   </>
-  return <iframe className={className} sandbox="" referrerPolicy="no-referrer" srcDoc={html} title={title} />
+  return <StaticPreviewFrame source={html} title={title} className={className} />
 }

@@ -828,6 +828,7 @@ export const EN: UiMessages = {
     completionStates: { COMPLETED: 'Completed', PARTIAL: 'Partially completed', BLOCKED: 'Blocked', UNKNOWN: 'Unconfirmed' },
     excerptDisplay: 'Excerpt display',
     excerptSource: 'Source',
+    excerptContext: 'Showing the original table header and complete rows. Partial rows remain available in Source.',
     platformStatus: 'Platform execution',
     completionStatus: 'Result completeness',
     recoveryUnknown: 'Recovery links for earlier errors are unknown.',

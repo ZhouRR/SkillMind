@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderMermaidPreview } from '../../src/lib/mermaidPreview'
+import { LIGHT_PREVIEW_THEME } from '../../src/lib/previewTheme'
 import { documentPreviewHtml } from '../../src/lib/documentPreview'
 import { deferred } from '../fixtures/hookHarness'
 
@@ -14,7 +15,7 @@ function documentFixture() {
     createElement: () => { const host = { remove: vi.fn(), setAttribute: vi.fn(), style: { cssText: '' } }; hosts.push(host); return host },
     body: { append: vi.fn() },
     implementation: { createHTMLDocument: () => ({ documentElement: { innerHTML: '' }, querySelector: () => ({
-      getAttribute: () => '0 0 200 100', outerHTML: '<svg id="sanitized"/>',
+      getAttribute: () => '0 0 200 100', setAttribute: vi.fn(), outerHTML: '<svg id="sanitized"/>',
     }) }) },
   })
   return hosts
@@ -51,9 +52,21 @@ describe('Mermaid renderer isolation lifecycle', () => {
     const result = await renderMermaidPreview('flowchart LR\nA-->B', new AbortController().signal)
     expect(documentPreviewHtml).toHaveBeenCalledWith(expect.stringContaining('<svg id="engine"/>'))
     expect(documentPreviewHtml).toHaveBeenCalledWith(expect.stringContaining('color-scheme:light'))
-    expect(documentPreviewHtml).toHaveBeenCalledWith(expect.stringContaining('max-width:none;background:#fff'))
-    expect(result).toMatchObject({ status: 'ready', svg: '<svg id="sanitized"/>', height: 124 })
+    expect(documentPreviewHtml).toHaveBeenCalledWith(expect.stringContaining('max-width:100%;height:auto;background:transparent'))
+    expect(result).toMatchObject({ status: 'ready', svg: '<svg id="sanitized"/>', height: 100 })
     expect(hosts[0]!.remove).toHaveBeenCalled()
+  })
+  it('uses dark colors for nodes, labels and edges without accepting source configuration', async () => {
+    documentFixture()
+    engine.render.mockResolvedValueOnce({ svg: '<svg/>' })
+    const theme = { ...LIGHT_PREVIEW_THEME, mode: 'dark' as const, background: '#28251f', foreground: '#e4dfd3' }
+    await renderMermaidPreview('flowchart LR\nA-->B', new AbortController().signal, theme)
+    expect(engine.initialize).toHaveBeenCalledWith(expect.objectContaining({ theme: 'base',
+      themeVariables: expect.objectContaining({ darkMode: true, primaryTextColor: theme.foreground, lineColor: theme.foreground }),
+      secure: expect.arrayContaining(['theme', 'themeVariables', 'securityLevel']),
+    }))
+    expect(documentPreviewHtml).toHaveBeenCalledWith(expect.stringContaining('color-scheme:dark'))
+    expect(documentPreviewHtml).toHaveBeenCalledWith(expect.stringContaining('background:#28251f'))
   })
   it('fails closed and removes temporary DOM if SVG sanitization throws', async () => {
     const hosts = documentFixture()

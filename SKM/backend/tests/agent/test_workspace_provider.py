@@ -96,6 +96,26 @@ async def test_read_returns_bounded_utf8_content_and_evidence(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
+async def test_markdown_page_keeps_raw_excerpt_and_table_context(tmp_path: Path) -> None:
+    """行中 offset の応答を変えず、表示用に原 file の表頭を再掲する。"""
+
+    context = _context(tmp_path, "workspace.read/v1")
+    source = "| Case | Expected |\n| --- | --- |\n| A | first |\n| B | second |\n| C | third |\n"
+    (context.workspace.cwd / "spec.md").write_text(source)
+    offset = source.index("first") + 2
+    result = await WorkspaceReadProvider().execute(context, {
+        "path": "workspace/spec.md", "offset": offset, "max_chars": 1000, "purpose": "Read steps",
+    })
+    _validate_response("tools/workspace.read/v1/response.schema.json", dict(result.response))
+    assert result.response["content"] == source[offset:]
+    assert result.evidence[0].excerpt == source[offset:]
+    assert result.evidence[0].metadata is not None
+    assert result.evidence[0].metadata["excerpt_preview"]["source"] == (
+        "| Case | Expected |\n| --- | --- |\n| B | second |\n| C | third |\n"
+    )
+
+
+@pytest.mark.asyncio
 async def test_read_rejects_traversal_symlink_binary_and_large_file(tmp_path: Path) -> None:
     """Root 逃逸、symlink、非 UTF-8 と per-file 上限を Provider 呼出し前後で閉じる。"""
 

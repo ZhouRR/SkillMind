@@ -1,10 +1,12 @@
 import { marked, type Token, type Tokens } from 'marked'
 import { documentPreviewHtml } from './documentPreview'
+import { LIGHT_PREVIEW_THEME, type PreviewTheme } from './previewTheme'
 
 export const MERMAID_MAX_CHARACTERS = 8_000
 export const MERMAID_MAX_NODES = 80
 export const MERMAID_MAX_EDGES = 120
 export const MERMAID_MAX_PAGE_DIAGRAMS = 8
+export const MERMAID_PREVIEW_SCALE = 0.8
 
 /** 図の生成状態は code token ごとに持ち、同一原文の図も SVG id を共有しない。 */
 export type MermaidPreview = { status: 'ready'; document: string; svg: string; height: number }
@@ -107,7 +109,7 @@ let nextDiagramId = 0
 let renderQueue: Promise<unknown> = Promise.resolve()
 
 /** Mermaid の共有設定と DOM を直列化し、取消済みの待ち行列は描画せずに捨てる。 */
-export function renderMermaidPreview(source: string, signal: AbortSignal): Promise<MermaidPreview> {
+export function renderMermaidPreview(source: string, signal: AbortSignal, theme: PreviewTheme = LIGHT_PREVIEW_THEME): Promise<MermaidPreview> {
   const safe = safeMermaidFlowchart(source)
   if (!safe || signal.aborted || typeof document === 'undefined') return Promise.resolve({ status: 'failed' })
   const result = renderQueue.then(async (): Promise<MermaidPreview> => {
@@ -117,9 +119,13 @@ export function renderMermaidPreview(source: string, signal: AbortSignal): Promi
     if (signal.aborted) return { status: 'failed' }
     mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', htmlLabels: false,
       maxTextSize: MERMAID_MAX_CHARACTERS * 3, maxEdges: MERMAID_MAX_EDGES,
-      suppressErrorRendering: true, theme: 'neutral',
+      suppressErrorRendering: true, theme: 'base',
+      themeVariables: { darkMode: theme.mode === 'dark', background: theme.background,
+        primaryColor: theme.raised, primaryTextColor: theme.foreground, primaryBorderColor: theme.border,
+        secondaryColor: theme.raised, tertiaryColor: theme.raised, lineColor: theme.foreground,
+        textColor: theme.foreground, edgeLabelBackground: theme.background },
       flowchart: { htmlLabels: false, useMaxWidth: false },
-      secure: ['secure', 'securityLevel', 'startOnLoad', 'maxTextSize', 'maxEdges', 'htmlLabels', 'flowchart', 'theme'],
+      secure: ['secure', 'securityLevel', 'startOnLoad', 'maxTextSize', 'maxEdges', 'htmlLabels', 'flowchart', 'theme', 'themeVariables'],
     })
     const host = document.createElement('div')
     host.setAttribute('aria-hidden', 'true')
@@ -132,16 +138,23 @@ export function renderMermaidPreview(source: string, signal: AbortSignal): Promi
       const { svg } = await mermaid.render(`skillmindMermaid${++nextDiagramId}`, safe, host)
       if (signal.aborted) return { status: 'failed' }
       const doc = documentPreviewHtml('<!doctype html><html><head><style>'
-        + ':root{color-scheme:light}body{margin:8px;background:#fff;color:#222;overflow:auto}'
-        + 'svg{display:block;max-width:none;background:#fff}'
+        + `:root{color-scheme:${theme.mode}}body{margin:8px;background:${theme.background};color:${theme.foreground};overflow:auto}`
+        + 'svg{display:block;max-width:100%;height:auto;background:transparent}'
         + '</style></head><body>' + svg + '</body></html>')
       const inert = document.implementation.createHTMLDocument('')
       inert.documentElement.innerHTML = doc
       const diagram = inert.querySelector('svg')
       if (!diagram) return { status: 'failed' }
       const viewBox = diagram.getAttribute('viewBox')?.split(/[ ,]+/).map(Number)
-      const height = viewBox?.length === 4 && Number.isFinite(viewBox[3]) ? Math.ceil(viewBox[3]! + 24) : 240
-      return { status: 'ready', document: doc, svg: diagram.outerHTML, height: Math.max(120, Math.min(520, height)) }
+      // width=100% の SVG を container 全幅へ拡大せず、元 viewBox の 80% を上限にする。
+      const dimensions = viewBox?.length === 4 && viewBox.every(Number.isFinite) && viewBox[2]! > 0 && viewBox[3]! > 0
+      const width = dimensions ? Math.ceil(viewBox[2]! * MERMAID_PREVIEW_SCALE) : 480
+      const height = dimensions ? Math.ceil(viewBox[3]! * MERMAID_PREVIEW_SCALE) : 240
+      diagram.setAttribute('width', String(width))
+      diagram.setAttribute('height', String(height))
+      diagram.setAttribute('style', `display:block;width:${width}px;max-width:100%;height:auto;background:transparent`)
+      const documentHtml = '<!doctype html>' + inert.documentElement.outerHTML
+      return { status: 'ready', document: documentHtml, svg: diagram.outerHTML, height: Math.max(100, Math.min(380, height + 16)) }
     } finally { signal.removeEventListener('abort', removeHost); host.remove() }
   }).catch((): MermaidPreview => ({ status: 'failed' })) // import/構文/layout 失敗は安全な原文 UI へ戻す。
   renderQueue = result
@@ -155,10 +168,10 @@ export function mermaidCodeHtml(token: Tokens.Code, previews: MermaidPreviews,
   const preview = previews.get(token)
   if (preview?.status === 'ready') {
     if (mode === 'document') return `<figure class="mermaidPreview" aria-label="${escapeMarkup(labels.title)}"`
-      + ' style="margin:1rem 0;max-width:100%;overflow:auto;background:#fff;color:#222;padding:8px;border-radius:6px">'
+      + ' style="margin:1rem 0;max-width:100%;box-sizing:border-box;max-height:380px;overflow:auto;background:transparent;color:inherit;padding:8px;border-radius:6px">'
       + preview.svg + '</figure>'
     return `<iframe class="mermaidPreview" sandbox="" referrerpolicy="no-referrer" title="${escapeMarkup(labels.title)}"`
-      + ` style="display:block;width:100%;height:${preview.height}px;border:0;background:#fff" srcdoc="${escapeMarkup(preview.document)}"></iframe>`
+      + ` style="display:block;width:100%;height:${preview.height}px;border:0;background:transparent" srcdoc="${escapeMarkup(preview.document)}"></iframe>`
   }
   return `<p class="hint" role="status">${escapeMarkup(preview?.status === 'failed' ? labels.failed : labels.loading)}</p>`
     + `<pre><code class="language-mermaid">${escapeMarkup(token.text)}</code></pre>`

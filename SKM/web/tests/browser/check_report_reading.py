@@ -97,7 +97,7 @@ async def check(url: str, output: Path) -> None:
                     api = ReadingApi(url, language)
                     context = await browser.new_context(viewport={"width": 1440, "height": 1000})
                     await context.add_init_script(
-                        f"localStorage.setItem('skillmind.theme', '{theme}')"
+                        f"if (window.top === window) localStorage.setItem('skillmind.theme', '{theme}')"
                     )
                     await context.route("**/*", api.route)
                     page = await context.new_page()
@@ -209,6 +209,9 @@ async def check(url: str, output: Path) -> None:
                         chart = preview.frame_locator("iframe.mermaidPreview")
                         await expect(chart.locator("svg")).to_contain_text("Done")
                         await expect(chart.locator("script, foreignObject, image, a")).to_have_count(0)
+                        assert await chart.locator("html").evaluate(
+                            "e => getComputedStyle(e).colorScheme"
+                        ) == theme
                         await drawer.get_by_role(
                             "button", name=labels["runResult"]["excerptSource"], exact=True
                         ).click()
@@ -228,6 +231,28 @@ async def check(url: str, output: Path) -> None:
                         await page.screenshot(path=str(output / f"excerpt-{language}-{theme}.png"))
                         await page.keyboard.press("Escape")
                         await expect(drawer).not_to_be_visible()
+                        # 保存済み context だけで部分表を表示し、原文切替では元の切断片を保持する。
+                        partial = "st |\n| B | Ready |\n| C | part"
+                        api.body["evidence"][0]["excerpt"] = partial
+                        api.body["evidence"][0]["metadata"]["excerpt_preview"] = {
+                            "version": "markdown-table/v1",
+                            "source": "| Case | Expected |\n| --- | --- |\n| B | Ready |\n",
+                            "header_line_start": 1, "line_start": 4, "line_end": 4,
+                        }
+                        await page.reload()
+                        await settle(page)
+                        await page.get_by_role("tab", name=labels["workspace"]["tabResult"], exact=True).click()
+                        await page.locator(".outcomeCard").first.get_by_role(
+                            "button", name=labels["runResult"]["viewExcerpt"], exact=True
+                        ).click()
+                        await expect(drawer.locator(".readingMarkdown table")).to_be_visible()
+                        await expect(drawer.locator(".readingMarkdown th").first).to_have_text("Case")
+                        await expect(drawer.get_by_text(labels["runResult"]["excerptContext"], exact=True)).to_be_visible()
+                        await drawer.get_by_role("button", name=labels["runResult"]["excerptSource"], exact=True).click()
+                        assert await drawer.locator(".excerptSource").text_content() == partial
+                        await page.keyboard.press("Escape")
+                        api.body["evidence"][0]["excerpt"] = EXCERPT
+                        del api.body["evidence"][0]["metadata"]["excerpt_preview"]
                         await (
                             page.locator(".outcomeCard")
                             .first.get_by_role(

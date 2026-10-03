@@ -10,6 +10,7 @@ from functools import lru_cache
 from typing import Any
 
 from skillmind.core.hashing import canonical_json, sha256_hex
+from skillmind.core.redaction import find_sensitive_key
 from skillmind.integrations.mcp_errors import local_diagnostic_id, safe_remote_detail
 from skillmind.integrations.mcp_schema import validate_schema, validate_value
 
@@ -94,6 +95,32 @@ def _catalog(value: Any) -> dict[str, Any]:
 def normalize_catalog(value: Any) -> dict[str, Any]:
     """公開する snapshot は私有 cache と分離し、呼出し側の変更を共有しない。"""
     return deepcopy(_catalog(value))
+
+
+def find_sensitive_tool_metadata(value: Any) -> str | None:
+    """検証済み Schema の宣言だけを検出対象から外し、通常 metadata の資格は拒否する。"""
+
+    def project(item: Any) -> Any:
+        """原 catalog を変更せず、既存 validator を通過した Schema だけ投影から除く。"""
+        if isinstance(item, Mapping):
+            result = {}
+            for key, nested in item.items():
+                if key in {"input_schema", "output_schema"} and nested is not None:
+                    try:
+                        validate_schema(nested)
+                    except ValueError:
+                        # 不正な構造や秘密値を含む Schema には例外を与えない。
+                        result[key] = nested
+                    else:
+                        result[key] = None
+                else:
+                    result[key] = project(nested)
+            return result
+        if isinstance(item, list | tuple):
+            return [project(nested) for nested in item]
+        return item
+
+    return find_sensitive_key(project(value))
 
 
 def configured_tool(

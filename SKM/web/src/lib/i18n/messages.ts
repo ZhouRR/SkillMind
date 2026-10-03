@@ -826,6 +826,7 @@ export interface UiMessages {
     completionStates: Record<string, string>
     excerptDisplay: string
     excerptSource: string
+    excerptContext: string
     platformStatus: string
     completionStatus: string
     recoveryUnknown: string
