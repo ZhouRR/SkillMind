@@ -72,7 +72,7 @@ python3 tests/browser/check_projects.py \
 
 | 対象 | 主な runner（check_*.py） |
 | --- | --- |
-| 全体の見た目・読みやすさ | visual_style、reading |
+| 全体の見た目・読みやすさ | visual_style、reading、dropdown（専用 dropdown.html） |
 | Project・アカウント | projects、project_members、project_management、login、accounts、api_keys |
 | 提出・待機・履歴 | run_submission、interaction_responses、proposal_decisions、run_history、evaluation_submissions |
 | レポート・証拠 | report_reading、workspace_reports、result_references、artifacts |

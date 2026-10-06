@@ -11,6 +11,7 @@ import {
 import { useMessages, useUiLanguage } from '../i18n'
 import { UI_LANGUAGES, type UiLanguage } from '../lib/i18n/messages'
 import { asUiLanguage } from '../lib/i18n/resolve'
+import { isOpenSelectPicker } from '../lib/selectPicker'
 import {
   APP_ROUTES,
   routeHref,
@@ -127,7 +128,7 @@ export function AppNavigation({ currentRoute, metaState, projectId, projectState
     if (!compact || !menuOpen) return
     /** 披露は modal ではないため Tab を閉じ込めず、Escape だけを閉操作にする。 */
     function handleEscape(event: KeyboardEvent): void {
-      if (event.key !== 'Escape') return
+      if (event.key !== 'Escape' || event.defaultPrevented || isOpenSelectPicker(event.target)) return
       event.preventDefault()
       setMenuOpen(false)
       menuToggle.current?.focus()

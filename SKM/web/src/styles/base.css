@@ -56,6 +56,8 @@
   --overlay: rgba(36, 42, 34, .32);
   --drawer-overlay: rgba(30, 25, 17, .18);
 
+  --picker-border: #363b31;
+  --picker-shadow: #363b31;
   --shadow-panel: 0 2px 0 rgba(48, 44, 29, .045);
   --shadow-pop: 0 24px 72px rgba(48, 44, 29, .16), 0 3px 12px rgba(48, 44, 29, .08);
   --ring: 0 0 0 3px rgba(121, 91, 27, .18);
@@ -115,6 +117,8 @@
   --info: #9ec4e3;
   --destructive-bg: #a13e36;
   --destructive-ink: #ffffff;
+  --picker-border: #a79b87;
+  --picker-shadow: #0d0c09;
   --shadow-panel: 0 2px 0 rgba(0, 0, 0, .18);
   --shadow-pop: 0 24px 72px rgba(0, 0, 0, .4);
   --ring: 0 0 0 3px rgba(232, 200, 121, .2);
@@ -262,12 +266,101 @@ input:user-invalid, select:user-invalid, textarea:user-invalid { border-color: v
 input:user-invalid:focus, select:user-invalid:focus, textarea:user-invalid:focus { box-shadow: 0 0 0 3px var(--danger-soft); }
 /* Browser 差のある native 矢印を消し、全環境で同じ chevron を右端に描く。 */
 select {
+  min-width: 0;
+  max-width: 100%;
   appearance: none;
   padding-right: 30px;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m2.5 4.5 3.5 3.5 3.5-3.5' fill='none' stroke='%235c6357' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 10px center;
 }
+/* 単一選択だけを段階的に拡張する。未対応 browser と multiple/size listbox は native のまま。
+   JS で選択状態や keyboard を再実装せず、name/required/disabled と label の契約を保つ。 */
+@supports (appearance: base-select) and selector(select::picker(select)) {
+  select:not([multiple]):is(:not([size]), [size='1']),
+  select:not([multiple]):is(:not([size]), [size='1'])::picker(select) {
+    appearance: base-select;
+  }
+  select:not([multiple]):is(:not([size]), [size='1']) {
+    gap: 10px;
+    padding-inline-end: 12px;
+    background-image: none;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: start;
+    cursor: pointer;
+  }
+  select::picker-icon {
+    content: '';
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
+    margin-inline-start: auto;
+    margin-block-start: -4px;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    color: var(--text-muted);
+    rotate: 45deg;
+  }
+  select:open { border-color: var(--accent-strong); box-shadow: var(--ring); }
+  select:open::picker-icon { rotate: 225deg; margin-block-start: 4px; }
+  select:disabled { cursor: not-allowed; }
+  select:disabled::picker-icon { color: var(--text-faint); }
+  select:not([multiple]):is(:not([size]), [size='1'])::picker(select) {
+    /* Browser の top layer と標準 anchor/fallback を使い、modal/overflow 親に切られない。
+       長い名前は picker 内で折返し、短い viewport は picker 自身を scroll させる。 */
+    box-sizing: border-box;
+    min-inline-size: min(anchor-size(self-inline), calc(100dvw - 20px));
+    inline-size: max(anchor-size(self-inline), 12rem);
+    max-inline-size: stretch;
+    max-block-size: stretch;
+    margin-block: 6px;
+    padding: 6px;
+    border: 2px solid var(--picker-border);
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: 3px 3px 0 var(--picker-shadow);
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.5;
+  }
+  select:not([multiple]):is(:not([size]), [size='1']) option {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-inline-size: 0;
+    min-block-size: 44px;
+    padding: 9px 12px;
+    border: 0;
+    border-radius: var(--radius-tiny);
+    background: transparent;
+    color: var(--text);
+    font-weight: 400;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+  }
+  select:not([multiple]):is(:not([size]), [size='1']) option:not(:disabled):hover { background: var(--surface-hover); }
+  select:not([multiple]):is(:not([size]), [size='1']) option:checked { background: var(--primary-bg); color: var(--primary-ink); font-weight: 650; }
+  select:not([multiple]):is(:not([size]), [size='1']) option:checked:not(:disabled):hover { background: var(--primary-hover); }
+  /* 現在値の塗りと移動中の focus 輪郭を分け、色だけで選択を示さない。 */
+  select:not([multiple]):is(:not([size]), [size='1']) option:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: -2px; }
+  select:not([multiple]):is(:not([size]), [size='1']) option::checkmark { order: 1; flex: 0 0 auto; margin-inline-start: auto; color: currentColor; }
+  select:not([multiple]):is(:not([size]), [size='1']) option:disabled { color: var(--text-faint); background: transparent; cursor: not-allowed; }
+  select:not([multiple]):is(:not([size]), [size='1']) optgroup { color: var(--text-muted); font-weight: 600; }
+}
+@media (forced-colors: active) {
+  select { border-color: ButtonText; }
+  select:not([multiple]):is(:not([size]), [size='1'])::picker(select) { border-color: ButtonText; box-shadow: none; }
+  select:not([multiple]):is(:not([size]), [size='1']) option:checked,
+  select:not([multiple]):is(:not([size]), [size='1']) option:checked:not(:disabled):hover { background: Highlight; color: HighlightText; }
+  select:not([multiple]):is(:not([size]), [size='1']) option:focus-visible { outline-color: Highlight; }
+}
+
 .formRow { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 /* Schema 駆動の task 入力。scalar field は幅に応じて 2 列へ流し、
    長文(textarea)と raw JSON editor だけ全幅を取る(弹窗内で縦に伸び続けないため)。 */
