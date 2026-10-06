@@ -12,6 +12,7 @@ from check_accounts import session
 from check_projects import PROJECT, messages
 from check_resource_connections import ConnectionsApi
 from playwright.async_api import Route, async_playwright, expect
+from select_helpers import select_option
 
 
 class DatabaseConnectionsApi(ConnectionsApi):
@@ -66,9 +67,9 @@ async def check(url: str, output: Path) -> None:
                         "button", name=labels["connectTitle"], exact=True
                     ).click()
                     dialog = page.get_by_role("dialog")
-                    await dialog.get_by_role(
+                    await select_option(dialog.get_by_role(
                         "combobox", name=labels["providerLabel"], exact=True
-                    ).select_option("postgres")
+                    ), "postgres")
                     await dialog.get_by_role(
                         "radio", name=labels["accessReadWrite"], exact=True
                     ).check()
@@ -117,9 +118,9 @@ async def check(url: str, output: Path) -> None:
                     await page.get_by_role(
                         "button", name=labels["connectTitle"], exact=True
                     ).click()
-                    await dialog.get_by_role(
+                    await select_option(dialog.get_by_role(
                         "combobox", name=labels["providerLabel"], exact=True
-                    ).select_option("redmine")
+                    ), "redmine")
                     await expect(dialog.locator('input[name="connect-access"]')).to_have_count(0)
                     # 逆の組合せも実会話の再取得で確認する。後置 switch は DB を開かない。
                     api.database = False
@@ -128,9 +129,9 @@ async def check(url: str, output: Path) -> None:
                     await page.get_by_role(
                         "button", name=labels["connectTitle"], exact=True
                     ).click()
-                    await dialog.get_by_role(
+                    await select_option(dialog.get_by_role(
                         "combobox", name=labels["providerLabel"], exact=True
-                    ).select_option("postgres")
+                    ), "postgres")
                     await expect(dialog.locator('input[name="connect-access"]')).to_have_count(0)
                     assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
                     assert not errors and not api.failures and not api.unexpected, (

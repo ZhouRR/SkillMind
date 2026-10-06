@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 from check_accounts import CSRF
 from check_projects import PROJECT, ProjectsApi, layout, messages
 from playwright.async_api import Route, async_playwright, expect
+from select_helpers import select_option
 
 CONTRACTS = Path(__file__).resolve().parents[3] / "contracts"
 VERSION = json.loads((CONTRACTS / "examples/skill-version.v1.json").read_text())
@@ -233,7 +234,7 @@ async def check_library_filters(browser, url: str, output: Path) -> None:
             status = page.get_by_role("combobox", name=labels["libraryStatus"], exact=True)
             await search.fill("  " + api.versions[0]["skill_key"].upper() + "  ")
             await expect(rows).to_have_count(2)
-            await status.select_option("DEPRECATED")
+            await select_option(status, "DEPRECATED")
             await expect(rows).to_have_count(1)
             await expect(rows).to_contain_text(f"v{VERSION['version']}")
             await page.get_by_role("tab", name=labels["tabWorkbench"], exact=True).click()
@@ -245,7 +246,7 @@ async def check_library_filters(browser, url: str, output: Path) -> None:
             await page.get_by_role("button", name=labels["libraryClearFilters"], exact=True).click()
             await expect(rows).to_have_count(2)
             await expect(search).to_have_value("")
-            await expect(status).to_have_value("all")
+            await expect(status).to_have_attribute("data-value", "all")
             for width in (1440, 390):
                 await page.set_viewport_size({"width": width, "height": 1000})
                 for theme in ("light", "dark"):

@@ -1,3 +1,4 @@
+import { Select } from './Select'
 import type { ChangeEvent } from 'react'
 
 import { useMessages } from '../i18n'
@@ -52,7 +53,7 @@ export function SchemaTaskInput({
   )
 }
 
-/** 一つの scalar field を type/enum に応じた native control へ変換する。 */
+/** 一つの scalar field を type/enum に応じた 共有 form control へ変換する。 */
 function SchemaField({ field, fieldKey, required, value, onChange }: {
   field: FieldSchema
   fieldKey: string
@@ -67,10 +68,10 @@ function SchemaField({ field, fieldKey, required, value, onChange }: {
   if (enums?.every((item) => ['string', 'number', 'boolean'].includes(typeof item))) {
     return (
       <label>{label}{required ? ' *' : ''}
-        <select required={required} value={scalarText(value)} onChange={(event) => onChange(enumValue(enums, event.target.value))}>
+        <Select required={required} value={scalarText(value)} onValueChange={(nextValue) => onChange(enumValue(enums, nextValue))}>
           {!required && <option value="">—</option>}
           {enums.map((item) => <option key={JSON.stringify(item)} value={scalarText(item)}>{scalarText(item)}</option>)}
-        </select>
+        </Select>
         {description && <small>{description}</small>}
       </label>
     )
@@ -78,10 +79,10 @@ function SchemaField({ field, fieldKey, required, value, onChange }: {
   if (field.type === 'boolean') {
     return (
       <label>{label}{required ? ' *' : ''}
-        <select required={required} value={typeof value === 'boolean' ? String(value) : ''} onChange={(event) => onChange(event.target.value === '' ? undefined : event.target.value === 'true')}>
+        <Select required={required} value={typeof value === 'boolean' ? String(value) : ''} onValueChange={(nextValue) => onChange(nextValue === '' ? undefined : nextValue === 'true')}>
           {!required && <option value="">—</option>}
           <option value="true">true</option><option value="false">false</option>
-        </select>
+        </Select>
         {description && <small>{description}</small>}
       </label>
     )

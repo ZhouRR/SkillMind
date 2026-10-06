@@ -198,7 +198,7 @@
 .skillLibraryFilters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
 .skillLibraryFilters label { flex: 1 1 200px; min-width: 0; margin: 0; }
 .skillLibraryFilters label:first-child { flex-basis: 300px; }
-.skillLibraryFilters input, .skillLibraryFilters select { width: 100%; min-width: 0; }
+.skillLibraryFilters input, .skillLibraryFilters :is(select, .selectTrigger) { width: 100%; min-width: 0; }
 .skillLibraryFilters > .hint { display: flex; align-items: center; min-height: 40px; margin: 0; }
 .skillLibraryList { display: grid; gap: 9px; margin: 0; padding: 0; list-style: none; }
 .skillLibraryList > li {
@@ -476,8 +476,8 @@
 .taskFilters label { flex: 1 1 220px; min-width: 0; margin: 0; }
 /* 自由入力の検索欄を主にし、選択肢の短い状態 select は必要な幅に留める。 */
 .taskFilters label:first-of-type { flex: 2 1 320px; }
-.taskFilters label:has(select) { flex: 0 1 240px; }
-.taskFilters input, .taskFilters select { width: 100%; min-width: 0; }
+.taskFilters label:has(:is(select, .selectTrigger)) { flex: 0 1 240px; }
+.taskFilters input, .taskFilters :is(select, .selectTrigger) { width: 100%; min-width: 0; }
 .taskFilters > button { flex: 0 0 auto; width: auto; min-height: 42px; margin: 0; }
 [data-task-schedule-panel] { margin-top: 24px; }
 [data-task-schedule-panel] > .formRow { justify-content: flex-end; margin-bottom: 12px; }

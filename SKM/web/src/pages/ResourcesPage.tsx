@@ -1,3 +1,4 @@
+import { Select } from '../components/Select'
 import { discoverMcpTools } from '../api/integrations'
 import { supportsMcpCatalog } from '../lib/resourceConfig'
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
@@ -486,11 +487,11 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
               <form className="resourceForm" onSubmit={(event) => void submitSecret(event)}>
                   <label>{messages.resources.nameLabel}<input required value={secretDraft.name} onChange={(event) => setSecretDraft((value) => ({ ...value, name: event.target.value }))} /></label>
                   <label>{messages.resources.providerLabel}
-                    <select disabled={editingSecret !== null} value={secretDraft.provider} onChange={(event) => setSecretDraft((value) => ({ ...value, provider: event.target.value as ResourceProvider, secret_value: '', locator: '' }))}>
+                    <Select disabled={editingSecret !== null} value={secretDraft.provider} onValueChange={(nextValue) => setSecretDraft((value) => ({ ...value, provider: nextValue as ResourceProvider, secret_value: '', locator: '' }))}>
                       {RESOURCE_PROVIDERS.map((provider) => (
                         <option key={provider} value={provider}>{PROVIDER_LABELS[provider]}</option>
                       ))}
-                    </select>
+                    </Select>
                   </label>
                   <SecretResolverFields
                     editing={editingSecret !== null}
@@ -543,31 +544,31 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
               <form className="resourceForm" onSubmit={(event) => void submitBinding(event)}>
                   <p className="hint">{messages.resources.bindingHint}</p>
                   <label>{messages.resources.levelLabel}
-                    <select
+                    <Select
                       value={bindingDraft.scope_level}
-                      onChange={(event) => setBindingDraft((value) => ({
+                      onValueChange={(nextValue) => setBindingDraft((value) => ({
                         ...value,
-                        scope_level: event.target.value as BindingDraft['scope_level'],
+                        scope_level: nextValue as BindingDraft['scope_level'],
                         taskKey: '',
                         requirementChoice: '',
                       }))}
                     >
                       <option value="PROJECT_DEFAULT">{messages.resources.projectDefault}</option>
                       <option value="TASK">{messages.resources.taskOverride}</option>
-                    </select>
+                    </Select>
                   </label>
                   {bindingDraft.scope_level === 'TASK' && (tasks.length > 0 ? (
                     <label>{messages.resources.taskSelectLabel}
-                      <select
+                      <Select
                         required
                         value={bindingDraft.taskKey}
-                        onChange={(event) => setBindingDraft((value) => ({ ...value, taskKey: event.target.value, requirementChoice: '' }))}
+                        onValueChange={(nextValue) => setBindingDraft((value) => ({ ...value, taskKey: nextValue, requirementChoice: '' }))}
                       >
                         <option value="">{messages.resources.pleaseSelect}</option>
                         {tasks.map((task) => (
                           <option key={taskScopeKey(task)} value={taskScopeKey(task)}>{taskOptionLabel(task)}</option>
                         ))}
-                      </select>
+                      </Select>
                     </label>
                   ) : (
                     <label>{messages.resources.taskScopeKeyLabel}
@@ -581,11 +582,11 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                   ))}
                   {requirementOptions.length > 0 && (
                     <label>{messages.resources.requirementKeyLabel}
-                      <select
+                      <Select
                         required
                         value={bindingDraft.requirementChoice}
-                        onChange={(event) => {
-                          const choice = event.target.value
+                        onValueChange={(nextValue) => {
+                          const choice = nextValue
                           const option = requirementOptions.find((item) => item.key === choice)
                           setBindingDraft((value) => {
                             // Requirement の kind と合わない Integration 選択は残さない。
@@ -608,7 +609,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                           </option>
                         ))}
                         <option value={CUSTOM_REQUIREMENT}>{messages.resources.requirementCustomOption}</option>
-                      </select>
+                      </Select>
                     </label>
                   )}
                   {useCustomRequirement && (
@@ -623,14 +624,14 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                     </label>
                   )}
                   <label>{messages.resources.integrationSelectLabel}
-                    <select
+                    <Select
                       required
                       value={bindingDraft.integration_id}
-                      onChange={(event) => {
-                        const integration = activeIntegrations.find((item) => item.integration_id === event.target.value)
+                      onValueChange={(nextValue) => {
+                        const integration = activeIntegrations.find((item) => item.integration_id === nextValue)
                         setBindingDraft((value) => ({
                           ...value,
-                          integration_id: event.target.value,
+                          integration_id: nextValue,
                           capabilityFallback: '',
                           scopeDraft: integration === undefined
                             ? []
@@ -642,7 +643,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                       {bindingIntegrationOptions.map((item) => (
                         <option key={item.integration_id} value={item.integration_id}>{item.name} · {item.provider}</option>
                       ))}
-                    </select>
+                    </Select>
                   </label>
                   {bindingIntegration !== undefined && selectedRequirement !== undefined && (
                     <p className="hint">
@@ -654,16 +655,16 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                   )}
                   {bindingIntegration !== undefined && useCustomRequirement && (
                     <label>{messages.resources.capabilitySelectLabel}
-                      <select
+                      <Select
                         required
                         value={bindingDraft.capabilityFallback}
-                        onChange={(event) => setBindingDraft((value) => ({ ...value, capabilityFallback: event.target.value }))}
+                        onValueChange={(nextValue) => setBindingDraft((value) => ({ ...value, capabilityFallback: nextValue }))}
                       >
                         <option value="">{messages.resources.pleaseSelect}</option>
                         {bindingIntegration.capabilities.map((capability) => (
                           <option key={capability} value={capability}>{capability}</option>
                         ))}
-                      </select>
+                      </Select>
                     </label>
                   )}
                   {bindingIntegration !== undefined && (
@@ -728,14 +729,14 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                   {writableIntegrations.length > 0 && (
                     <>
                       <label>{messages.resources.integrationSelectLabel}
-                        <select
+                        <Select
                           required
                           value={policyDraft.integration_id}
-                          onChange={(event) => {
-                            const integration = writableIntegrations.find((item) => item.integration_id === event.target.value)
+                          onValueChange={(nextValue) => {
+                            const integration = writableIntegrations.find((item) => item.integration_id === nextValue)
                             setPolicyDraft((value) => ({
                               ...value,
-                              integration_id: event.target.value,
+                              integration_id: nextValue,
                               // 事前許可は explicit 必須のため、wildcard を維持する既定を与えない。
                               scopeDraft: integration === undefined
                                 ? []
@@ -747,7 +748,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                           {writableIntegrations.map((item) => (
                             <option key={item.integration_id} value={item.integration_id}>{item.name}</option>
                           ))}
-                        </select>
+                        </Select>
                       </label>
                       <label>{messages.resources.operationLabel}
                         <input

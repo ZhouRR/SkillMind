@@ -130,7 +130,7 @@
 .workspaceQueue .pagination { display: flex; gap: 8px; margin-top: 16px; }
 .reportToolbar { display: flex; align-items: end; gap: 16px; margin-bottom: 20px; }
 .reportToolbar label { flex: 1 1 18rem; min-width: 0; max-width: 38rem; margin-bottom: 0; }
-.reportToolbar select { width: 100%; }
+.reportToolbar :is(select, .selectTrigger) { width: 100%; }
 .reportToolbar > button { flex-shrink: 0; white-space: nowrap; }
 .reportRunMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 24px; color: var(--text-muted); }
 .reportRunMeta > a { margin-left: auto; }

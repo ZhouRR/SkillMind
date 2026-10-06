@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from playwright.async_api import Browser, Error, Locator, Page, Route, async_playwright, expect
+from select_helpers import select_option
 
 ACTOR = "00000000-0000-4000-8000-000000000001"
 OTHER = "00000000-0000-4000-8000-000000000003"
@@ -463,7 +464,7 @@ async def create_form(page: Page, messages: dict) -> Locator:
     form = page.locator('[data-account-form="create"]')
     await form.get_by_label(messages["fields"]["email"], exact=True).fill("new-account@example.com")
     await form.get_by_label(messages["fields"]["name"], exact=True).fill("Created browser account")
-    await form.get_by_label(messages["fields"]["role"], exact=True).select_option("USER")
+    await select_option(form.get_by_role("combobox", name=messages["fields"]["role"], exact=True), "USER")
     await form.get_by_label(messages["initialPassword"], exact=True).fill(PASSWORD)
     await form.get_by_label(messages["confirmInitialPassword"], exact=True).fill(PASSWORD)
     return form
@@ -618,8 +619,8 @@ async def admin_directory(page: Page, api: AccountsApi, messages: dict) -> None:
     editor = await choose_target(page, messages)
     form = editor.locator('[data-account-form="edit"]')
     await form.get_by_label(messages["fields"]["name"], exact=True).fill("Revised display name")
-    await form.get_by_label(messages["fields"]["role"], exact=True).select_option("ADMIN")
-    await form.get_by_label(messages["fields"]["status"], exact=True).select_option("DISABLED")
+    await select_option(form.get_by_role("combobox", name=messages["fields"]["role"], exact=True), "ADMIN")
+    await select_option(form.get_by_role("combobox", name=messages["fields"]["status"], exact=True), "DISABLED")
     await form.get_by_label(messages["confirmChange"], exact=True).check()
     await double_submit(form)
     await expect(editor.get_by_text(messages["mutationSuccess"], exact=False)).to_be_visible()
@@ -806,7 +807,7 @@ async def admin_refusal(page: Page, api: AccountsApi, messages: dict, creation: 
     else:
         editor = await choose_target(page, messages)
         form = editor.locator('[data-account-form="edit"]')
-        await form.get_by_label(messages["fields"]["status"], exact=True).select_option("DISABLED")
+        await select_option(form.get_by_role("combobox", name=messages["fields"]["status"], exact=True), "DISABLED")
         await form.get_by_label(messages["confirmChange"], exact=True).check()
     await double_submit(form)
     await expect(page.get_by_role("alert")).to_contain_text(
@@ -855,7 +856,7 @@ async def app_initial_project(page: Page, api: AccountsApi, messages: dict, unkn
         await double_submit(form)
         await expect(page.get_by_role("alert")).to_contain_text(messages["failures"]["unknown"])
     gate.release.set()
-    await expect(page.locator(".sideNavProject select")).to_have_value(PROJECT)
+    await expect(page.locator(".sideNavProject .selectTrigger")).to_have_attribute("data-value", PROJECT)
     if unknown:
         await expect(page.get_by_role("alert")).to_contain_text(messages["failures"]["unknown"])
         await expect(
@@ -866,7 +867,7 @@ async def app_initial_project(page: Page, api: AccountsApi, messages: dict, unkn
         await expect(form.get_by_label(messages["currentPassword"], exact=True)).to_have_value(
             CURRENT_PASSWORD
         )
-    await page.locator(".sideNavProject select").select_option(NEXT_PROJECT)
+    await select_option(page.locator(".sideNavProject .selectTrigger"), NEXT_PROJECT)
     await expect(form.get_by_label(messages["currentPassword"], exact=True)).to_have_value("")
     await expect(page.get_by_role("alert")).to_have_count(0)
     assert urlsplit(page.url).fragment == "/accounts"
@@ -939,7 +940,7 @@ async def app_sign_in_other(page: Page, api: AccountsApi) -> None:
     await page.locator('input[name="password"]').fill(PASSWORD)
     await page.locator('button[type="submit"]').click()
     await expect(page.locator(".sidebarUser")).to_contain_text(api.users[OTHER]["display_name"])
-    await expect(page.locator(".sidebarLanguage select")).to_have_value("en")
+    await expect(page.locator(".sidebarLanguage .selectTrigger")).to_have_attribute("data-value", "en")
 
 
 async def app_late_session(
@@ -950,7 +951,7 @@ async def app_late_session(
     if suffix == "auth/logout":
         await page.locator(".sidebarLogout").click()
     elif method == "PUT" and suffix.endswith("ui-language"):
-        await page.locator(".sidebarLanguage select").select_option("ja")
+        await select_option(page.locator(".sidebarLanguage .selectTrigger"), "ja")
         messages = await catalog(page, "ja")
     await asyncio.wait_for(gate.received.wait(), 10)
     del api.gates[(method, suffix)]
@@ -960,8 +961,11 @@ async def app_late_session(
     await asyncio.wait_for(gate.returned.wait(), 10)
     await settle(page)
     await expect(page.locator(".sidebarUser")).to_contain_text(api.users[OTHER]["display_name"])
-    await expect(page.locator(".sidebarLanguage select")).to_have_value("en")
-    await expect(page.locator(".sideNavProject select option")).to_have_count(1)
+    await expect(page.locator(".sidebarLanguage .selectTrigger")).to_have_attribute("data-value", "en")
+    project = page.locator(".sideNavProject .selectTrigger")
+    # 空一覧の popup は開けないため、旧会話の選択を残さず無効になった表示を確認する。
+    await expect(project).to_be_disabled()
+    await expect(project).to_have_attribute("data-value", "")
     await expect(page.locator(".sidebarError")).to_have_count(0)
     await expect(page.locator('input[name="email"]')).to_have_count(0)
 
@@ -1090,7 +1094,7 @@ async def admin_self_revocation(
     )
     form = page.locator(f'[data-account-editor="{ACTOR}"] [data-account-form="edit"]')
     field = messages["fields"]["status" if disable else "role"]
-    await form.get_by_label(field, exact=True).select_option("DISABLED" if disable else "USER")
+    await select_option(form.get_by_role("combobox", name=field, exact=True), "DISABLED" if disable else "USER")
     await form.get_by_label(messages["confirmChange"], exact=True).check()
     await double_submit(form)
     await expect(page.locator('input[name="email"]')).to_be_visible()

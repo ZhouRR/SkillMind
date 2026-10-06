@@ -117,8 +117,8 @@
 /* sidebar 内の select(項目切替・言語切替)は同じ寸法で揃える。
    background は簡写だと base.css の chevron(background-image)まで消して
    「開けない入力欄」に見えるため、必ず background-color だけを差し替える。 */
-.sidebar select { min-height: 38px; padding: 7px 30px 7px 10px; background-color: var(--surface-input); font-size: 13px; }
-.sideNavProject .projectContext, .sideNavProject select { min-width: 0; max-width: 100%; }
+.sidebar :is(select, .selectTrigger) { min-height: 38px; padding: 7px 30px 7px 10px; background-color: var(--surface-input); font-size: 13px; }
+.sideNavProject .projectContext, .sideNavProject :is(select, .selectTrigger) { min-width: 0; max-width: 100%; }
 
 .sidebarFooter { display: grid; flex-shrink: 0; grid-template-columns: minmax(0, 1fr); gap: 10px; border-top: 1px solid var(--border); padding: 12px 18px 14px; }
 /* 外観と言語、本人と退出、接続状態と API 文書を一行ずつに組み、縦幅を導航へ譲る。 */
@@ -139,7 +139,7 @@
 /* 言語切替。外観切替の右に置き、残り幅を select が使う。
    label の既定 margin-bottom を打ち消し、間隔は親の gap 一本に任せる。 */
 .sidebarLanguage { display: flex; flex: 1; gap: 8px; align-items: center; min-width: 0; margin-bottom: 0; color: var(--text-muted); font-size: 12px; }
-.sidebarLanguage select { flex: 1; min-width: 0; }
+.sidebarLanguage :is(select, .selectTrigger) { flex: 1; min-width: 0; }
 .sidebarError { color: var(--danger); font-size: 12px; line-height: 1.4; }
 .sidebarLogout { flex-shrink: 0; border: 1px solid var(--border-strong); border-radius: var(--radius-tiny); padding: 5px 9px; color: var(--text-muted); background: transparent; font-size: 12px; white-space: nowrap; cursor: pointer; transition: color .15s ease, border-color .15s ease; }
 .sidebarLogout:hover:not(:disabled) { border-color: var(--accent-border); color: var(--accent); }
@@ -206,7 +206,7 @@
   .sidebarHeader:has(.sidebarMenuToggle[aria-expanded="false"]) + .navigationPanel { display: none; }
   .navigationPanel { flex: none; max-height: calc(100dvh - 64px); border-top: 1px solid var(--border); }
   .sideNav { flex: none; padding: 12px; }
-  .sideNav a, .sidebar select, .sideNavProject button, .sideNavSubItem, .sidebarLogout, .sidebarLink { min-height: 44px; }
+  .sideNav a, .sidebar :is(select, .selectTrigger), .sideNavProject button, .sideNavSubItem, .sidebarLogout, .sidebarLink { min-height: 44px; }
   .sidebarFooter .themeToggleCompact button { min-height: 36px; }
   .sideNavSubItem { white-space: normal; overflow-wrap: anywhere; }
   .sidebarFooter { padding: 16px 22px; }

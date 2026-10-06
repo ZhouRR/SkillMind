@@ -8,6 +8,7 @@ import { LanguageProvider } from '../../src/i18n'
 import { MESSAGES, UI_LANGUAGES } from '../../src/lib/i18n/messages'
 import { formatLocalTimestamp } from '../../src/lib/presentation'
 import { AccountsPage } from '../../src/pages/AccountsPage'
+import { combobox } from '../fixtures/select'
 
 /** 公開 field だけの架空 account。実 credential や外部接続は含まない。 */
 const account: UserAccountRecord = {
@@ -64,7 +65,8 @@ describe.each(UI_LANGUAGES)('real account components in %s', (language) => {
     const html = renderToStaticMarkup(<LanguageProvider language={language}>
       <UserCreatePanel session={session('ADMIN')} onSessionEnded={() => {}} onCreated={() => {}} onSelect={() => {}} />
     </LanguageProvider>)
-    expect(html).toContain(`<option value="" selected="">${messages.rolePlaceholder}</option>`)
+    expect(combobox(html)).toContain('data-value=""')
+    expect(combobox(html)).toContain(messages.rolePlaceholder)
     expect(html).toContain(`<label>${messages.fields.email}<input`)
     expect(html).toContain(`<label>${messages.initialPassword}<input`)
     // 確認欄は初期パスワードの確認であることを明示する(「新しいパスワード」と呼ばない)。

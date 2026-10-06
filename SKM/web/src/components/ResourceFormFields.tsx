@@ -1,3 +1,4 @@
+import { Select } from './Select'
 import type { ReactNode } from 'react'
 import type { SecretResolver } from '../api'
 import { useMessages } from '../i18n'
@@ -46,11 +47,11 @@ export function SecretResolverFields({
   return (
     <>
       <label>{messages.resources.resolverLabel}
-        <select disabled={editing} value={resolver} onChange={(event) => onResolver(event.target.value as SecretResolver)}>
+        <Select disabled={editing} value={resolver} onValueChange={(nextValue) => onResolver(nextValue as SecretResolver)}>
           <option value="ENVIRONMENT">{messages.resources.resolverEnvOption}</option>
           <option value="FILE">{messages.resources.resolverFileOption}</option>
           <option value="MANAGED">{messages.resources.resolverManagedOption}</option>
-        </select>
+        </Select>
       </label>
       {resolver === 'MANAGED' ? (
         <label>{messages.resources.credentialValueLabels[PROVIDER_FORMS[provider].credentialKind]}

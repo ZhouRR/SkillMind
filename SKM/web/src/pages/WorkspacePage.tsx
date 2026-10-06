@@ -1,3 +1,4 @@
+import { Select } from '../components/Select'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 
 import {
@@ -634,13 +635,13 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
           {launchTasks.length > 0 && (
             <>
               <label>{messages.workspace.taskLabel}
-                <select value={selectedTask ? selectedTaskId : ''} disabled={!tasksLoaded}
-                  onChange={(event) => { setSelectedTaskId(event.target.value); setInputText('{}'); setError(null) }}>
+                <Select value={selectedTask ? selectedTaskId : ''} disabled={!tasksLoaded}
+                  onValueChange={(nextValue) => { setSelectedTaskId(nextValue); setInputText('{}'); setError(null) }}>
                   {!selectedTask && <option value="" disabled>{messages.workspace.selectTaskFirst}</option>}
                   {launchTasks.map((task) => (
                     <option key={taskCatalogId(task)} value={taskCatalogId(task)}>{task.title} · {task.skill_name} v{task.version}</option>
                   ))}
-                </select>
+                </Select>
               </label>
               <TaskLaunchFields
                 inputText={inputText}

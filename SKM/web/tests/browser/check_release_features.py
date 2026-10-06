@@ -13,6 +13,7 @@ from check_document_upload import UploadBrowserAudit
 from check_projects import PROJECT, messages
 from playwright.async_api import Route, async_playwright, expect
 from schedule_management_fixture import ScheduleManagementApi
+from select_helpers import select_option
 
 
 class ReleaseApi(ScheduleManagementApi):
@@ -115,9 +116,9 @@ async def check(url: str, output: Path) -> None:
                         dialog.locator('[name="connect-access"]')
                     ).to_have_count(0)
                     for provider in ("postgres", "mcp"):
-                        await dialog.get_by_role(
+                        await select_option(dialog.get_by_role(
                             "combobox", name=resources["providerLabel"], exact=True
-                        ).select_option(provider)
+                        ), provider)
                         await expect(dialog.locator("textarea")).to_be_visible()
                     await page.screenshot(
                         path=str(output / f"resources-{language}-{theme}-{width}.png")

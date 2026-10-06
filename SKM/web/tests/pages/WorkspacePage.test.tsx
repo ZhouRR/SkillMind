@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { Select } from '../../src/components/Select'
 import type {
   ProjectModuleRecord,
   PublishedTaskRecord,
@@ -8,8 +9,10 @@ import type {
 } from '../../src/api'
 import { ModuleNavList } from '../../src/components/AppNavigation'
 import { SourceRequirementField, TaskReadinessPanel } from '../../src/components/TaskLaunchFields'
+import { MESSAGES } from '../../src/lib/i18n/messages'
 import { filterTasksByModule, type SourceRequirementChoice } from '../../src/lib/taskDraft'
 import { WorkspacePage } from '../../src/pages/WorkspacePage'
+import { combobox, lastSelectProps, selectOptions } from '../fixtures/select'
 
 const VERSION_ID = '00000000-0000-4000-8000-000000000061'
 
@@ -69,6 +72,9 @@ function task(overrides: Partial<PublishedTaskRecord> = {}): PublishedTaskRecord
     ...overrides,
   }
 }
+
+vi.mock('../../src/components/Select', { spy: true })
+beforeEach(() => { vi.mocked(Select).mockClear() })
 
 describe('WorkspacePage layout', () => {
   it('shows launch, pending work and reports without execution audit tabs', () => {
@@ -178,21 +184,30 @@ describe('SourceRequirementField', () => {
     const html = field(requirement(), 'integration:abc')
 
     expect(html).toContain('将使用：我的 Redmine · redmine')
-    expect(html).not.toContain('<select')
+    expect(html).not.toContain('role="combobox"')
   })
 
   it('does not label an empty selection as the single available source', () => {
     const html = field(requirement())
-    expect(html).toContain('<select')
-    expect(html).toContain('value="" selected=""')
+    expect(html).toContain('role="combobox"')
+    expect(combobox(html)).toContain('data-value=""')
+    expect(combobox(html)).toContain(MESSAGES.zh.workspace.selectConfiguredResource)
     expect(html).not.toContain('将使用：我的 Redmine · redmine')
+  })
+
+  it('forwards an explicit source token and keeps required selection semantics', () => {
+    const onChange = vi.fn()
+    renderToStaticMarkup(<SourceRequirementField requirement={requirement()} value="" onChange={onChange} />)
+    expect(lastSelectProps()).toMatchObject({ value: '', required: true })
+    lastSelectProps().onValueChange!('integration:abc')
+    expect(onChange).toHaveBeenCalledExactlyOnceWith('integration:abc')
   })
 
   it('guides to Resources when a required source has no candidate', () => {
     const html = field(requirement({ options: [] }))
 
     expect(html).toContain('尚未接入可用来源')
-    expect(html).not.toContain('<select')
+    expect(html).not.toContain('role="combobox"')
   })
 
   it('keeps a dropdown when several candidates exist', () => {
@@ -201,9 +216,12 @@ describe('SourceRequirementField', () => {
       { value: 'b', label: 'B · redmine' },
     ] }))
 
-    expect(html).toContain('<select')
-    expect(html).toContain('A · redmine')
-    expect(html).toContain('B · redmine')
+    expect(html).toContain('role="combobox"')
+    expect(selectOptions()).toEqual([
+      { value: '', label: MESSAGES.zh.workspace.selectConfiguredResource, disabled: false },
+      { value: 'a', label: 'A · redmine', disabled: false },
+      { value: 'b', label: 'B · redmine', disabled: false },
+    ])
   })
 })
 

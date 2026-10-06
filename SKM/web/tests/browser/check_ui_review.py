@@ -12,6 +12,7 @@ from check_projects import PROJECT, RUN, layout, messages
 from check_schedule_times import ScheduleApi, opened, previewed
 from check_visual_style import CONTRACTS, VisualApi
 from playwright.async_api import async_playwright, expect
+from select_helpers import select_option
 
 
 class ReviewApi(VisualApi):
@@ -85,16 +86,16 @@ async def check(url: str, output: Path):
             try:
                 await opened(page, entry)
                 await page.locator('[name="timezone"]').fill("Asia/Tokyo")
-                await page.locator('[name="recurrence"]').select_option("weekly")
+                await select_option(page.locator('[role="combobox"][data-field-name="recurrence"]'), "weekly")
                 await page.locator('[name="recurrence_time"]').fill("09:30")
-                await page.locator('[name="recurrence_weekday"]').select_option("2")
+                await select_option(page.locator('[role="combobox"][data-field-name="recurrence_weekday"]'), "2")
                 await previewed(page)
                 assert api.previews[-1]["body"]["definition"]["cron_expression"] == "30 9 * * 2"
                 assert api.previews[-1]["body"]["definition"]["timezone"] == "Asia/Tokyo"
-                await page.locator('[name="recurrence"]').select_option("custom")
+                await select_option(page.locator('[role="combobox"][data-field-name="recurrence"]'), "custom")
                 await expect(page.locator('[name="cron_expression"]')).to_have_value("30 9 * * 2")
                 await page.locator('[name="cron_expression"]').fill("*/15 9-17 * * 1-5")
-                await expect(page.locator('[name="recurrence"]')).to_have_value("custom")
+                await expect(page.locator('[role="combobox"][data-field-name="recurrence"]')).to_have_attribute("data-value", "custom")
                 assert not api.saves and not api.unexpected
                 print("PASS recurrence-presets", flush=True)
             finally:

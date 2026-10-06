@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 from playwright.async_api import Error, Page, Route, async_playwright, expect
+from select_helpers import select_option
 
 ROOT = Path(__file__).resolve().parents[2]
 PROJECT = "00000000-0000-4000-8000-000000000020"
@@ -254,7 +255,7 @@ async def open_form(page: Page, url: str) -> None:
     await page.goto(url)
     await page.locator(".runLauncher > button").click()
     await expect(page.get_by_role("dialog")).to_be_visible()
-    await page.locator('.documentSourceField select').first.select_option("ALL")
+    await select_option(page.locator('.documentSourceField .selectTrigger').first, "ALL")
     await page.locator(".jsonInput").fill('{"query":"original","positions":[2,1]}')
 
 
@@ -396,7 +397,7 @@ async def exercise(
             api.release.set()
             await page.locator(".runLauncher > button").click()
             await page.locator(".jsonInput").fill('{"query":"new context"}')
-            await page.locator('.documentSourceField select').first.select_option("ALL")
+            await select_option(page.locator('.documentSourceField .selectTrigger').first, "ALL")
             await expect(page.locator(".runFacts")).to_have_count(0)
             await start(page)
             await confirmed(page)

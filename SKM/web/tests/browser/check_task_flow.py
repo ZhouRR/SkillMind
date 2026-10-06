@@ -13,6 +13,7 @@ from check_accounts import OTHER, PASSWORD, ResponseGate, layout, privacy, proje
 from check_projects import ARCHIVED, NEXT_PROJECT, PROJECT, ProjectsApi, menu, messages, selected
 from check_run_submission import task_catalog
 from playwright.async_api import Browser, Page, Route, async_playwright, expect
+from select_helpers import select_option
 
 VERSION = "00000000-0000-4000-8000-000000000061"
 TASK = "00000000-0000-4000-8000-000000000070"
@@ -557,7 +558,7 @@ async def run_case(
             elif mode.startswith("project-"):
                 api.marker = "adopted-new-project"
                 await menu(page)
-                await page.locator(".sideNavProject select").select_option(NEXT_PROJECT)
+                await select_option(page.locator(".sideNavProject .selectTrigger"), NEXT_PROJECT)
                 await selected(page, NEXT_PROJECT)
                 await expect(page.locator("[data-task-flow-panel]")).to_have_count(0)
                 await open_preview(page)

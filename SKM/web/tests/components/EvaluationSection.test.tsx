@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiProblemError, loadEvaluationPage, loadEvaluationSubmission, submitEvaluation,
   type EvaluationPage, type EvaluationSubmissionInput, type RunDetailRecord } from '../../src/api'
+import { Select } from '../../src/components/Select'
 import { EvaluationSection, RunEvaluations } from '../../src/components/EvaluationSection'
 import { RunResultPanel, type RunDetailState } from '../../src/components/RunResultPanel'
 import { MESSAGES } from '../../src/lib/i18n/messages'
@@ -27,6 +28,7 @@ interface UiProps {
   children?: ReactNode; className?: string; type?: string; value?: string | number
   disabled?: boolean; readOnly?: boolean; role?: string; maxLength?: number
   onChange?: (event: { target: { value: string } }) => void
+  onValueChange?: (value: string) => void
   onSubmit?: (event: { preventDefault: () => void }) => void
   onClick?: () => void
 }
@@ -46,7 +48,7 @@ async function settle(overrides: Partial<SectionProps> = {}): Promise<UiElement>
   return render(overrides)
 }
 
-/** Function component を勝手に実行せず、返された JSX の host 配線だけを探索する。 */
+/** Function component を勝手に実行せず、返された JSX の公開 handler 配線だけを探索する。 */
 function elements(node: ReactNode, predicate: (item: UiElement) => boolean): UiElement[] {
   if (Array.isArray(node)) return node.flatMap((child) => elements(child, predicate))
   if (!isValidElement<UiProps>(node)) return []
@@ -73,12 +75,18 @@ function field(node: ReactNode, label: string): UiElement {
     (Array.isArray(item.props.children) ? item.props.children : [item.props.children])
       .filter((child) => !isValidElement(child)),
   ) === label)
-  return one(parent, (item) => ['input', 'textarea', 'select'].includes(String(item.type)))
+  return one(parent, (item) => item.type === Select || ['input', 'textarea'].includes(String(item.type)))
 }
 
-/** Form field の React handler に必要な最小の synthetic event を渡す。 */
+/** 共有 Select には value、native field には最小 event を渡して実 handler を検証する。 */
 function change(node: ReactNode, label: string, value: string): void {
-  const handler = field(node, label).props.onChange
+  const target = field(node, label)
+  if (target.type === Select) {
+    expect(target.props.onValueChange).toBeTypeOf('function')
+    target.props.onValueChange!(value)
+    return
+  }
+  const handler = target.props.onChange
   expect(handler).toBeTypeOf('function')
   handler!({ target: { value } })
 }

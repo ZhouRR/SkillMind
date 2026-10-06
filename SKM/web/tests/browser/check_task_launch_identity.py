@@ -11,6 +11,7 @@ from urllib.parse import urlencode, urlsplit
 
 from check_run_submission import ApiFixture, PROJECT, VERSION, task_catalog
 from playwright.async_api import async_playwright, expect
+from select_helpers import select_option, select_options
 
 REVIEW_VERSION = '00000000-0000-4000-8000-000000000062'
 MODULE = '00000000-0000-4000-8000-000000000070'
@@ -83,21 +84,22 @@ async def check(url, output):
                     await page.wait_for_function('Boolean(window.updateSubmissionTestContext)')
                     await page.evaluate('(language) => window.updateSubmissionTestContext({language})', language)
                     dialog = page.get_by_role('dialog')
-                    choice = dialog.locator('select').first
+                    choice = dialog.locator('.selectTrigger').first
                     await expect(dialog).to_be_visible()
-                    await expect(choice).to_have_value(TARGET)
+                    await expect(choice).to_have_attribute("data-value", TARGET)
                     # App の既定 module が task/link より遅れて届く状況を再現する。
                     await page.evaluate('(moduleId) => window.updateSubmissionTestContext({moduleId})', MODULE)
                     await expect(page.locator('.shellHeader, .pageHeader').first).to_contain_text('Review module')
-                    await expect(choice).to_have_value(TARGET)
-                    await expect(choice.locator('option:checked')).to_contain_text('Planning fixture')
+                    await expect(choice).to_have_attribute("data-value", TARGET)
+                    await expect(choice).to_contain_text('Planning fixture')
                     # 同じ task_key を手動で選び直しても精確 version が切り替わる。
-                    await choice.select_option(f'{REVIEW_VERSION}::execute')
+                    await select_option(choice, f'{REVIEW_VERSION}::execute')
                     await page.evaluate('window.updateSubmissionTestContext({moduleId: ""})')
-                    await expect(choice.locator('option')).to_have_count(2)
-                    await choice.select_option(TARGET)
+                    async with select_options(choice) as options:
+                        await expect(options).to_have_count(2)
+                    await select_option(choice, TARGET)
                     await page.evaluate('(moduleId) => window.updateSubmissionTestContext({moduleId})', MODULE)
-                    await expect(choice).to_have_value(TARGET)
+                    await expect(choice).to_have_attribute("data-value", TARGET)
                     await page.screenshot(path=str(output / f'launch-{language}-{theme}.png'))
                     await dialog.locator('button[type=submit]').click()
                     await asyncio.wait_for(api.received.wait(), timeout=5)
@@ -110,18 +112,18 @@ async def check(url, output):
                     await page.wait_for_function('Boolean(window.updateSubmissionTestContext)')
                     await page.evaluate('(language) => window.updateSubmissionTestContext({language})', language)
                     await expect(dialog).to_be_visible()
-                    await expect(choice).to_have_value('')
+                    await expect(choice).to_have_attribute("data-value", '')
                     await expect(dialog.get_by_role('alert')).to_be_visible()
                     await expect(dialog.locator('button[type=submit]')).to_be_disabled()
                     assert len(api.posts) == 1
-                    await choice.select_option(TARGET)
+                    await select_option(choice, TARGET)
                     await expect(dialog.locator('button[type=submit]')).to_be_enabled()
 
                     # 再認可時に精確版が一覧から消えても、同名 execute へ草稿を移さない。
                     api.catalog['tasks'] = api.catalog['tasks'][1:]
                     await page.evaluate('window.updateSubmissionTestContext({csrfToken: "d".repeat(32)})')
                     await expect(dialog.get_by_role('alert')).to_be_visible()
-                    await expect(choice).to_have_value('')
+                    await expect(choice).to_have_attribute("data-value", '')
                     await expect(dialog.locator('button[type=submit]')).to_be_disabled()
                     assert len(api.posts) == 1
                     assert not api.unexpected, api.unexpected

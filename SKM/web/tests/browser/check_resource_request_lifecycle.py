@@ -12,6 +12,7 @@ from check_projects import PROJECT, messages
 from check_resource_connections import ConnectionsApi
 from check_resource_editing import EditingApi
 from playwright.async_api import Route, async_playwright, expect
+from select_helpers import select_option
 
 
 class DelayedEditingApi(EditingApi):
@@ -150,7 +151,7 @@ async def check(url: str, output: Path) -> None:
                     await expect(page.locator('.resourceAdmin')).to_be_visible()
                     await page.get_by_role('button', name=labels['connectTitle'], exact=True).click()
                     dialog = page.get_by_role('dialog')
-                    await dialog.get_by_role('combobox', name=labels['providerLabel'], exact=True).select_option('postgres')
+                    await select_option(dialog.get_by_role('combobox', name=labels['providerLabel'], exact=True), 'postgres')
                     for key, value in (('nameLabel', 'Partial DB'), ('databaseHost', 'db.example.test'),
                                        ('databaseName', 'review'), ('databaseUser', 'reviewer')):
                         await dialog.get_by_label(labels[key], exact=True).fill(value)
@@ -160,7 +161,7 @@ async def check(url: str, output: Path) -> None:
                     await dialog.get_by_role('button', name=labels['connectSubmit'], exact=True).click()
                     await expect(dialog.get_by_role('alert')).to_contain_text('Fixture connection conflict')
                     await expect(password).to_have_value('')
-                    await expect(dialog.get_by_role('combobox', name=labels['credentialLabel'], exact=True)).to_have_value(api2.secrets[0]['secret_reference_id'])
+                    await expect(dialog.get_by_role('combobox', name=labels['credentialLabel'], exact=True)).to_have_attribute("data-value", api2.secrets[0]['secret_reference_id'])
                     assert api2.secret_posts == 1 and len(api2.connection_posts) == 1
                     api2.refuse_connection = False
                     await dialog.get_by_role('button', name=labels['connectSubmit'], exact=True).click()

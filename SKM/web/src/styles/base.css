@@ -238,7 +238,7 @@ label { display: grid; gap: 6px; margin-bottom: 12px; color: var(--text-muted); 
 .sourceField { display: grid; gap: 4px; margin-bottom: 12px; }
 .sourceFieldLabel { color: var(--text-muted); font-size: 12px; font-weight: 600; }
 .sourceFieldStatic { color: var(--text); font-size: 13px; }
-input, select, textarea {
+input, select, .selectTrigger, textarea {
   width: 100%;
   min-height: 42px;
   border: 1px solid var(--border-strong);
@@ -257,10 +257,10 @@ textarea {
   font-size: 14px;
   line-height: 1.7;
 }
-input:focus, select:focus, textarea:focus { border-color: var(--accent-strong); box-shadow: var(--ring); }
+input:focus, select:focus, .selectTrigger:focus, textarea:focus { border-color: var(--accent-strong); box-shadow: var(--ring); }
 /* background 簡写だと select の chevron(background-image)まで消えて「開けない入力欄」に見えるため、色だけ差し替える。 */
-input:disabled, select:disabled { color: var(--text-faint); cursor: not-allowed; background-color: var(--surface-raised); }
-input:hover:not(:disabled, :focus), select:hover:not(:disabled, :focus), textarea:hover:not(:disabled, :focus) { border-color: var(--border-hover); }
+input:disabled, select:disabled, .selectTrigger:disabled { color: var(--text-faint); cursor: not-allowed; background-color: var(--surface-raised); }
+input:hover:not(:disabled, :focus), select:hover:not(:disabled, :focus), .selectTrigger:hover:not(:disabled, :focus), textarea:hover:not(:disabled, :focus) { border-color: var(--border-hover); }
 /* 検証 error は利用者が触れた後だけ枠色で即時に示す(:user-invalid)。初期表示で全欄を赤くしない。 */
 input:user-invalid, select:user-invalid, textarea:user-invalid { border-color: var(--danger-border); }
 input:user-invalid:focus, select:user-invalid:focus, textarea:user-invalid:focus { box-shadow: 0 0 0 3px var(--danger-soft); }
@@ -274,91 +274,78 @@ select {
   background-repeat: no-repeat;
   background-position: right 10px center;
 }
-/* 単一選択だけを段階的に拡張する。未対応 browser と multiple/size listbox は native のまま。
-   JS で選択状態や keyboard を再実装せず、name/required/disabled と label の契約を保つ。 */
-@supports (appearance: base-select) and selector(select::picker(select)) {
-  select:not([multiple]):is(:not([size]), [size='1']),
-  select:not([multiple]):is(:not([size]), [size='1'])::picker(select) {
-    appearance: base-select;
-  }
-  select:not([multiple]):is(:not([size]), [size='1']) {
-    gap: 10px;
-    padding-inline-end: 12px;
-    background-image: none;
-    white-space: normal;
-    overflow-wrap: anywhere;
-    text-align: start;
-    cursor: pointer;
-  }
-  select::picker-icon {
-    content: '';
-    flex: 0 0 auto;
-    width: 8px;
-    height: 8px;
-    margin-inline-start: auto;
-    margin-block-start: -4px;
-    border-right: 1.5px solid currentColor;
-    border-bottom: 1.5px solid currentColor;
-    color: var(--text-muted);
-    rotate: 45deg;
-  }
-  select:open { border-color: var(--accent-strong); box-shadow: var(--ring); }
-  select:open::picker-icon { rotate: 225deg; margin-block-start: 4px; }
-  select:disabled { cursor: not-allowed; }
-  select:disabled::picker-icon { color: var(--text-faint); }
-  select:not([multiple]):is(:not([size]), [size='1'])::picker(select) {
-    /* Browser の top layer と標準 anchor/fallback を使い、modal/overflow 親に切られない。
-       長い名前は picker 内で折返し、短い viewport は picker 自身を scroll させる。 */
-    box-sizing: border-box;
-    min-inline-size: min(anchor-size(self-inline), calc(100dvw - 20px));
-    inline-size: max(anchor-size(self-inline), 12rem);
-    max-inline-size: stretch;
-    max-block-size: stretch;
-    margin-block: 6px;
-    padding: 6px;
-    border: 2px solid var(--picker-border);
-    border-radius: 12px;
-    background: var(--surface);
-    color: var(--text);
-    box-shadow: 3px 3px 0 var(--picker-shadow);
-    overflow: auto;
-    overscroll-behavior: contain;
-    scrollbar-gutter: stable;
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 1.5;
-  }
-  select:not([multiple]):is(:not([size]), [size='1']) option {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    min-inline-size: 0;
-    min-block-size: 44px;
-    padding: 9px 12px;
-    border: 0;
-    border-radius: var(--radius-tiny);
-    background: transparent;
-    color: var(--text);
-    font-weight: 400;
-    white-space: normal;
-    overflow-wrap: anywhere;
-    cursor: pointer;
-  }
-  select:not([multiple]):is(:not([size]), [size='1']) option:not(:disabled):hover { background: var(--surface-hover); }
-  select:not([multiple]):is(:not([size]), [size='1']) option:checked { background: var(--primary-bg); color: var(--primary-ink); font-weight: 650; }
-  select:not([multiple]):is(:not([size]), [size='1']) option:checked:not(:disabled):hover { background: var(--primary-hover); }
-  /* 現在値の塗りと移動中の focus 輪郭を分け、色だけで選択を示さない。 */
-  select:not([multiple]):is(:not([size]), [size='1']) option:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: -2px; }
-  select:not([multiple]):is(:not([size]), [size='1']) option::checkmark { order: 1; flex: 0 0 auto; margin-inline-start: auto; color: currentColor; }
-  select:not([multiple]):is(:not([size]), [size='1']) option:disabled { color: var(--text-faint); background: transparent; cursor: not-allowed; }
-  select:not([multiple]):is(:not([size]), [size='1']) optgroup { color: var(--text-muted); font-weight: 600; }
+/* 共通 DOM popup を使い、OS native picker の外観差を持ち込まない。 */
+.selectTrigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+  text-align: start;
+  cursor: pointer;
 }
+.selectTrigger:focus-visible { outline: none; }
+.selectTrigger[data-popup-open] { border-color: var(--accent-strong); box-shadow: var(--ring); }
+.selectTrigger[aria-invalid='true'] { border-color: var(--danger-border); }
+.selectTrigger[aria-invalid='true']:focus { box-shadow: 0 0 0 3px var(--danger-soft); }
+.selectValue { flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.selectIcon { display: inline-flex; flex-shrink: 0; margin-inline-start: auto; color: var(--text-muted); }
+.selectIcon svg, .selectItemIndicator svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.selectTrigger[data-popup-open] .selectIcon { transform: rotate(180deg); }
+.selectTrigger:disabled .selectIcon { color: var(--text-faint); }
+/* portal は通常 body、modal 内では modalBody の外側。同じ viewport 境界で反転・収縮する。 */
+.selectPositioner { z-index: 60; max-width: calc(100dvw - 20px); }
+.selectPopup {
+  width: max(var(--anchor-width), 12rem);
+  max-width: min(var(--available-width), calc(100dvw - 20px));
+  max-height: min(var(--available-height), 24rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 6px;
+  border: 2px solid var(--picker-border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 3px 3px 0 var(--picker-shadow);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
+  outline: none;
+}
+.selectPositioner[data-anchor-hidden] { visibility: hidden; }
+.selectItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--radius-tiny);
+  padding: 9px 12px;
+  color: var(--text);
+  background: transparent;
+  font-weight: 400;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+}
+.selectItemText { flex: 1; min-width: 0; }
+.selectItemIndicator { display: inline-flex; flex-shrink: 0; margin-inline-start: auto; }
+.selectItem[data-highlighted] { background: var(--surface-hover); outline: 2px solid var(--accent-strong); outline-offset: -2px; }
+.selectItem[data-selected] { background: var(--primary-bg); color: var(--primary-ink); font-weight: 650; }
+.selectItem[data-selected][data-highlighted] { background: var(--primary-hover); }
+.selectItem[data-disabled] { color: var(--text-faint); background: transparent; cursor: not-allowed; outline: none; }
+.selectGroup + .selectGroup { margin-top: 6px; border-top: 1px solid var(--border); padding-top: 6px; }
+.selectGroupLabel { padding: 6px 12px; color: var(--text-muted); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
 @media (forced-colors: active) {
-  select { border-color: ButtonText; }
-  select:not([multiple]):is(:not([size]), [size='1'])::picker(select) { border-color: ButtonText; box-shadow: none; }
-  select:not([multiple]):is(:not([size]), [size='1']) option:checked,
-  select:not([multiple]):is(:not([size]), [size='1']) option:checked:not(:disabled):hover { background: Highlight; color: HighlightText; }
-  select:not([multiple]):is(:not([size]), [size='1']) option:focus-visible { outline-color: Highlight; }
+  select, .selectTrigger, .selectPopup { border-color: ButtonText; }
+  .selectPopup { box-shadow: none; }
+  .selectItem[data-selected], .selectItem[data-selected][data-highlighted] { background: Highlight; color: HighlightText; forced-color-adjust: none; }
+  .selectItem[data-highlighted] { outline-color: Highlight; }
+  .selectItem[data-disabled] { color: GrayText; }
 }
 
 .formRow { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }

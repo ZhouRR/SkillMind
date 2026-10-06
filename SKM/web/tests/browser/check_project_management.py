@@ -21,6 +21,7 @@ from check_projects import (
     settle,
 )
 from playwright.async_api import Browser, Locator, Page, Route, async_playwright, expect
+from select_helpers import select_option
 
 CREATED = "00000000-0000-4000-8000-000000000090"
 DRAFT_NAME = "Browser reviewed project"
@@ -511,7 +512,7 @@ async def late_project(page: Page, api: ManagementApi, _: dict, returning: bool)
     await asyncio.wait_for(gate.received.wait(), 10)
     for identity in (NEXT_PROJECT, PROJECT) if returning else (NEXT_PROJECT,):
         await menu(page)
-        await page.locator(".sideNavProject select").select_option(identity)
+        await select_option(page.locator(".sideNavProject .selectTrigger"), identity)
         await selected(page, identity)
         await expect(page.locator("[data-project-form]")).to_be_visible()
     await expect(page.locator("[data-project-intent], [data-project-unknown]")).to_have_count(0)
@@ -637,7 +638,7 @@ async def initial_selection(page: Page, api: ManagementApi, _: dict, phase: str)
         await expect(page.locator("[data-project-unknown]")).to_be_visible()
     api.initial_gate.release.set()
     await selected(page, PROJECT)
-    await expect(page.locator(".sideNavProject select")).to_have_value(PROJECT)
+    await expect(page.locator(".sideNavProject .selectTrigger")).to_have_attribute("data-value", PROJECT)
     await settle(page)
     if phase == "unknown":
         await expect(page.locator("[data-project-unknown]")).to_be_visible()

@@ -23,6 +23,7 @@ from check_accounts import (
 )
 from check_run_submission import TASK, VERSION, task_catalog
 from playwright.async_api import Browser, Page, Route, async_playwright, expect
+from select_helpers import select_option, select_options
 
 ARCHIVED = "00000000-0000-4000-8000-000000000022"
 MISSING = "00000000-0000-4000-8000-000000000099"
@@ -263,7 +264,7 @@ async def menu(page: Page) -> None:
 
 async def selected(page: Page, project_id: str) -> None:
     """読み込み完了を実 selector の値から確認する。"""
-    await expect(page.locator(".sideNavProject select")).to_have_value(project_id)
+    await expect(page.locator(".sideNavProject .selectTrigger")).to_have_attribute("data-value", project_id)
 
 
 async def no_other_project(api: ProjectsApi, expected: str | None) -> None:
@@ -316,7 +317,7 @@ async def archived_workspace(page: Page, api: ProjectsApi, labels: dict) -> None
     assert any(call[1] == f"projects/{ARCHIVED}/runs/{RUN}/detail" for call in api.calls)
     await no_other_project(api, ARCHIVED)
     await menu(page)
-    await page.locator(".sideNavProject select").select_option(NEXT_PROJECT)
+    await select_option(page.locator(".sideNavProject .selectTrigger"), NEXT_PROJECT)
     await selected(page, NEXT_PROJECT)
     query = parse_qs(urlsplit(page.url).fragment.partition("?")[2])
     assert query == {"project": [NEXT_PROJECT]}, query
@@ -330,7 +331,7 @@ async def workspace_draft(page: Page, api: ProjectsApi, labels: dict) -> None:
     await page.locator(".runForm textarea.jsonInput").fill('{"draft":"old project only"}')
     await page.keyboard.press("Escape")
     await menu(page)
-    await page.locator(".sideNavProject select").select_option(NEXT_PROJECT)
+    await select_option(page.locator(".sideNavProject .selectTrigger"), NEXT_PROJECT)
     await selected(page, NEXT_PROJECT)
     assert parse_qs(urlsplit(page.url).fragment.partition("?")[2]) == {"project": [NEXT_PROJECT]}
     await expect(page.locator(".runForm")).to_be_hidden()
@@ -357,7 +358,7 @@ async def navigation(page: Page, api: ProjectsApi, labels: dict) -> None:
     toggle = page.locator(".sidebarMenuToggle")
     if await toggle.is_visible():
         await expect(toggle).to_have_attribute("aria-expanded", "false")
-        await expect(page.locator(".sideNavProject select")).not_to_be_visible()
+        await expect(page.locator(".sideNavProject .selectTrigger")).not_to_be_visible()
         await toggle.focus()
         await page.keyboard.press("Tab")
         assert not await page.evaluate(
@@ -366,7 +367,7 @@ async def navigation(page: Page, api: ProjectsApi, labels: dict) -> None:
         await toggle.focus()
         await page.keyboard.press("Enter")
         await expect(toggle).to_have_attribute("aria-expanded", "true")
-        await page.locator(".sideNavProject select").focus()
+        await page.locator(".sideNavProject .selectTrigger").focus()
         await page.keyboard.press("Escape")
         await expect(toggle).to_be_focused()
         await expect(toggle).to_have_attribute("aria-expanded", "false")
@@ -376,7 +377,7 @@ async def navigation(page: Page, api: ProjectsApi, labels: dict) -> None:
                 path=str(api.screenshot.with_name(api.screenshot.stem + "-expanded.png")),
                 full_page=True,
             )
-    await page.locator(".sideNavProject select").select_option(NEXT_PROJECT)
+    await select_option(page.locator(".sideNavProject .selectTrigger"), NEXT_PROJECT)
     await selected(page, NEXT_PROJECT)
     if await toggle.is_visible():
         await expect(toggle).to_have_attribute("aria-expanded", "false")
@@ -399,7 +400,7 @@ async def navigation(page: Page, api: ProjectsApi, labels: dict) -> None:
 async def resize_navigation(page: Page, api: ProjectsApi, _: dict) -> None:
     """狭幅・広幅間の回転でも隠れた control に焦点を残さず module 選択を辿る。"""
     await selected(page, PROJECT)
-    await page.locator(".sideNavProject select").focus()
+    await page.locator(".sideNavProject .selectTrigger").focus()
     await page.set_viewport_size({"width": 390, "height": 1000})
     toggle = page.locator(".sidebarMenuToggle")
     await expect(toggle).to_be_focused()
@@ -435,9 +436,9 @@ async def second_module_navigation(page: Page, api: ProjectsApi, labels: dict) -
         .get_by_role("button", name=labels["workspace"]["openNewRun"])
         .click()
     )
-    options = page.locator(".runForm select option")
-    await expect(options).to_have_count(1)
-    await expect(options).to_contain_text("Second module task")
+    async with select_options(page.locator(".runForm .selectTrigger").first) as options:
+        await expect(options).to_have_count(1)
+        await expect(options).to_contain_text("Second module task")
     assert "First module task" not in await page.locator(".runForm").inner_text()
     assert any(call[1] == f"projects/{PROJECT}/tasks" for call in api.calls)
     await page.keyboard.press("Escape")
@@ -508,8 +509,9 @@ async def explicit_list_failure(page: Page, api: ProjectsApi, labels: dict) -> N
     assert urlsplit(page.url).fragment == api.fragment
     await no_other_project(api, PROJECT)
     api.reject.clear()
-    await page.locator(".sideNavProject button").click()
-    await expect(page.locator(".sideNavProject select option")).to_have_count(2)
+    await page.locator(".sideNavProject button:not(.selectTrigger)").click()
+    async with select_options(page.locator(".sideNavProject .selectTrigger")) as options:
+        await expect(options).to_have_count(2)
     await expect(page.locator(".historyPage .emptyState")).to_be_visible()
     await selected(page, PROJECT)
     await expect(page.locator(".sideNavProject [role='alert']")).to_have_count(0)
