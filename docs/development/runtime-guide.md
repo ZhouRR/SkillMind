@@ -49,6 +49,14 @@ Excel→Markdown 的 `.xlsx` 路径使用 `excel-styles/v2`：同一文档保留
 
 迁移 `0059_native_resource_clients` 沿用 PostgreSQL 原账号和凭据，旧写连接转为 SELECT/INSERT/UPDATE/DELETE，旧只读连接保留 SELECT；不执行数据库 GRANT。Redmine 转为 HTTP，原 issue 范围和 PUT 权限保留，凭据正文不变。旧默认绑定停用，原 Run 快照不改写；部署前结束在途任务，新流程重新解析 Skill 并使用新绑定。HTTP 结果未知暂不提供通用自动核对协议，须保留原操作事实。
 
+## 画像の読取
+
+`mcp.download/v1` は、同 Run・同 binding の成功済み MCP query の Evidence と原応答の JSON Pointer から取得先を解決する。登録資格は同一 origin の GET だけへ送り、redirect・任意 URL・別接続の参照を許可しない。権限は I/O 前後で確認し、完全な byte/hash を Run file に保存する。MCP 接続の読取権で有効にし、既存 Run の凍結権限へ後付けしない。既存 HTTP 読取も登録済みの path/method 範囲で画像を取得できる。
+
+`workspace.image/v1` は、許可された Run の input/workspace/output path と原 hash を照合し、PNG/JPEG/WebP の実体を検証してから MCP image content を両 Engine へ渡す。上限は 8 MiB・2,500 万画素、単一 frame。封存 input・symlink 拒否・既存の出力予算を維持し、通常の ToolCall/Evidence は短い metadata/hash を保存する。ファイル path や Base64 text の返却だけを閲覧済みとしない。SDK builtin の `view_image` は引き続き禁止し、モデルは登録された画像 Tool を使用する。
+
+画像は必要時の観測であり、全タスクの開始条件ではない。スクリーンショットと現在の窓・撮影時点は Skill が照合し、クリックは確認済みの MCP セレクターを使う。履歴送信や短分段は汎用 MCP の元提案・批准・回読を通し、送信成功を業務 PASS と扱わない。ログの判定には許可された本文読取と今回の操作との対応が必要で、列挙/アップロードだけでは成立しない。
+
 ## 执行与恢复
 
 - 按[架构与术语](../overview/architecture.md)区分 Run、Segment 和 Attempt；生产入口为 [worker/settings](../../SKM/backend/src/skillmind/worker/settings.py)与 [executor](../../SKM/backend/src/skillmind/worker/executor.py)。同阶段技术恢复使用新 Attempt，不替换 Run，不改原快照、权限上限或 Result。

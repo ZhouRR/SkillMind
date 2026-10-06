@@ -522,6 +522,7 @@ def _resolve_source_tools(
         "tool.sequence/v1",
         "artifact.append/v1",
         "artifact.materialize/v1",
+        "workspace.image/v1",
         "workspace.edit/v1",
         "document.files/v1",
     ):

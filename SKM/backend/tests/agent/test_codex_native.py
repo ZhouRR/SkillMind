@@ -77,6 +77,7 @@ class SyntheticEndpoint(ThreadingHTTPServer):
         self.failure: dict[str, Any] | None = None
         self.failure_after_requests = 0
         self.tool_request_numbers = {1, 3}
+        self.tool_name = "issue_read_v1"
         self.stream_text = False
         self.whitespace_loop = False
         self.native_candidate: dict[str, Any] | None = None
@@ -143,12 +144,12 @@ def endpoint() -> Iterator[tuple[SyntheticEndpoint, list[dict[str, Any]]]]:
                 ],
             }
             if (len(requests) in server.tool_request_numbers
-                and "mcp__skillmind.issue_read_v1" in _wire_tool_names(body)):
+                and f"mcp__skillmind.{server.tool_name}" in _wire_tool_names(body)):
                 item = {
                     "id": f"fc_fixture_{len(requests)}",
                     "type": "function_call",
                     "call_id": f"call_fixture_{len(requests)}",
-                    "name": "issue_read_v1",
+                    "name": server.tool_name,
                     "namespace": "mcp__skillmind",
                     "arguments": json.dumps(
                         server.tool_arguments.get(
@@ -871,3 +872,60 @@ async def test_native_discovered_model_keeps_high_and_platform_tool_boundary(
     assert requests[0]["model"] == "gpt-6-sol"
     assert requests[0]["reasoning"]["effort"] == "high"
     assert not _wire_tool_names(requests[0]) - {"update_plan", "request_user_input"}
+
+
+async def test_native_image_tool_sends_pixels_to_the_model_wire_after_audit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    endpoint: tuple[ThreadingHTTPServer, list[dict[str, Any]]],
+) -> None:
+    """実 SDK/CLI の次の model 要求に画像 pixel が届き、単なる Base64 text でないと確認する。"""
+    import base64
+
+    from tests.agent.test_workspace_image import image_bytes, image_run
+
+    server, requests = endpoint
+    _local_client(monkeypatch, server)
+    server.tool_request_numbers = {1}
+    server.tool_name = "workspace_image_v1"
+    data = image_bytes()
+    registry, run = image_run(tmp_path)
+    (run.workspace.cwd / "image.png").write_bytes(data)
+    run = replace(
+        run,
+        model="gpt-5.6-terra",
+        result_schema={
+            "type": "object", "properties": {"ok": {"type": "boolean"}},
+            "required": ["ok"], "additionalProperties": False,
+        },
+    )
+    server.tool_arguments[1] = {
+        "path": "workspace/image.png", "expected_hash": "sha256:" + sha256_hex(data),
+    }
+    writer = MemoryAuditWriter()
+    engine = CodexAgentSdkEngine(
+        configuration=CodexRuntimeConfiguration("gpt-5.6-terra", "max", tmp_path / "codex"),
+        runtime_factory=lambda context: registry.build_gateway_runtime(
+            context, audit_writer=writer,
+        ),
+        transcript_backend=MemoryTranscriptBackend(),
+    )
+    async with asyncio.timeout(30):
+        events = [event async for event in engine.execute(run)]
+    assert events[-1].event_type is AgentEventType.RESULT_COMPLETED, [e.payload for e in events]
+    assert len(writer.completed) == 1 and len(requests) == 2
+
+    def image_urls(value):
+        """native wire の配列/入れ子を走査し、実 image block だけを抽出する。"""
+        if isinstance(value, dict):
+            if value.get("type") == "input_image":
+                yield value["image_url"]
+            for child in value.values():
+                yield from image_urls(child)
+        elif isinstance(value, list):
+            for child in value:
+                yield from image_urls(child)
+
+    urls = list(image_urls(requests[1]))
+    assert len(urls) == 1 and urls[0].startswith("data:image/png;base64,")
+    assert base64.b64decode(urls[0].split(",", 1)[1]) == data

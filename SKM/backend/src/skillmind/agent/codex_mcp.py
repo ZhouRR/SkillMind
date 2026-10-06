@@ -15,7 +15,7 @@ from uuid import uuid4
 import uvicorn
 from mcp.server.lowlevel import Server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-from mcp.types import CallToolResult, TextContent, Tool
+from mcp.types import CallToolResult, ImageContent, TextContent, Tool
 from starlette.responses import Response
 from starlette.types import Receive, Scope, Send
 
@@ -228,7 +228,11 @@ class CodexToolBridge:
                 )
             )
             return CallToolResult(
-                content=[TextContent.model_validate(block) for block in result["content"]],
+                content=[
+                    ImageContent.model_validate(block) if block.get("type") == "image"
+                    else TextContent.model_validate(block)
+                    for block in result["content"]
+                ],
                 isError=failed,
             )
 

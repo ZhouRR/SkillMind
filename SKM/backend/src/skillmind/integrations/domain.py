@@ -133,7 +133,9 @@ PROVIDER_DEFINITIONS: dict[str, ProviderDefinition] = {
     "mcp": ProviderDefinition(
         kind="other",
         provider="mcp",
-        capabilities=frozenset({"mcp.read/v1", "mcp.tools/v1", "mcp.query/v1", "mcp.call/v1"}),
+        capabilities=frozenset({
+            "mcp.read/v1", "mcp.tools/v1", "mcp.query/v1", "mcp.download/v1", "mcp.call/v1",
+        }),
         write_capabilities=frozenset({"mcp.call/v1"}),
         requires_secret=False,
         installed=True,  # tools は独立した配備 switch と凍結 profile の scope で制限する。
@@ -462,6 +464,8 @@ def normalize_integration_command(command: CreateIntegrationCommand) -> CreateIn
                     raise ValueError("MCP tool capabilities require a frozen catalog and scope")
                 for name in tools:
                     configured_tool(config, scope, name)
+                if "mcp.download/v1" in capabilities and "mcp.query/v1" not in capabilities:
+                    raise ValueError("MCP downloads require the query capability")
                 if "mcp.call/v1" in capabilities:
                     if command.secret_reference_id is None:
                         raise ValueError("MCP actions require a credential reference")

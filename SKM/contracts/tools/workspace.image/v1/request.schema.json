@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "expected_hash"
+  ],
+  "properties": {
+    "path": {
+      "type": "string",
+      "pattern": "^(input|workspace|output)/"
+    },
+    "expected_hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "purpose": {
+      "type": "string",
+      "maxLength": 2000
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/workspace.image/v1/request.schema.json",
+  "title": "workspace.image/v1 request"
+}

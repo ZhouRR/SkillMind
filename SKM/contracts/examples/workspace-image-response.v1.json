@@ -1,0 +1,15 @@
+{
+  "status": "success",
+  "provider": "workspace",
+  "image": {
+    "path": "workspace/resources/image.bin",
+    "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "size_bytes": 80,
+    "mime_type": "image/png",
+    "width": 2,
+    "height": 2
+  },
+  "evidence_refs": [
+    "ev_image"
+  ]
+}

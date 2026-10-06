@@ -182,6 +182,16 @@
       ]
     },
     {
+      "capability": "mcp.download/v1",
+      "description": "Fetch original bytes by source_evidence_ref and exact JSON pointer in a successful query from this same Run and MCP binding. GET uses the saved credential only at the same origin, without redirects or retries. Returns a workspace file; image viewing is separate and optional.",
+      "request_schema": "tools/mcp.download/v1/request.schema.json",
+      "response_schema": "tools/mcp.download/v1/response.schema.json",
+      "error_schema": "tools/mcp.download/v1/error.schema.json",
+      "providers": [
+        "mcp"
+      ]
+    },
+    {
       "capability": "mcp.query/v1",
       "description": "Call a tool explicitly authorized as read in mcp.tools/v1. Validate arguments against its frozen input_schema. Other tools require change.propose/v1 approval. Prefer response_mode=file and inspect data with workspace tools. May use a JSON request_file plus expected_hash instead of retranscribing arguments.",
       "request_schema": "tools/mcp.query/v1/request.schema.json",
@@ -263,6 +273,16 @@
       ]
     },
     {
+      "capability": "workspace.image/v1",
+      "description": "Read and verify a Run-local PNG/JPEG/WebP by path and expected_hash, then deliver actual MCP image content to the model. No network, SVG, animation or arbitrary file access. Metadata is audited before model delivery.",
+      "request_schema": "tools/workspace.image/v1/request.schema.json",
+      "response_schema": "tools/workspace.image/v1/response.schema.json",
+      "error_schema": "tools/workspace.image/v1/error.schema.json",
+      "providers": [
+        "workspace"
+      ]
+    },
+    {
       "capability": "workspace.read/v1",
       "description": "Read one UTF-8 file from the isolated Run workspace. For bounded reading use offset=0, max_chars=12000 and expected_hash; follow next_offset until null. Offsets count Unicode characters, not bytes.",
       "request_schema": "tools/workspace.read/v1/request.schema.json",
@@ -303,5 +323,5 @@
       ]
     }
   ],
-  "checksum": "sha256:98b5333e4266da5972afcad3b81ec1e6445684794470b4723918292f9d0c82f5"
+  "checksum": "sha256:49558a466657284d3db88a0863612b4d7be34e23c19a5d5461ef689e335a7885"
 }

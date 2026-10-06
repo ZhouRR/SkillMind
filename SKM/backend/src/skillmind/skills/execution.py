@@ -17,6 +17,7 @@ EXECUTION_VERSION = "skillmind.skill-execution/v1"
 PLATFORM_TOOLS = frozenset(
     {
         "workspace.read/v1",
+        "workspace.image/v1",
         "workspace.search/v1",
         "workspace.write/v1",
         "workspace.write/v2",

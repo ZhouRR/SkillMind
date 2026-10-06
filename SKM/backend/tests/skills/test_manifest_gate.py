@@ -177,11 +177,12 @@ def test_step_naming_unregistered_capability_degrades_without_blocking_publish()
     assert finding.path == "/capability_blueprint/guidance/recommended_steps/0"
 
 
-def test_step_capability_absent_from_requirements_is_reported() -> None:
+@pytest.mark.parametrize("capability", ["http.read/v1", "mcp.download/v1"])
+def test_step_capability_absent_from_requirements_is_reported(capability: str) -> None:
     """登録済みでも資源要求が開示しない能力は、Run で束縛されないため報告する。"""
 
     manifest = _manifest_with_steps(
-        [{"key": "read-issue", "text": "障害票を issue.read/v1 で取得する。"}],
+        [{"key": "read-resource", "text": f"許可済み資源を {capability} で取得する。"}],
         [],
     )
 
@@ -191,11 +192,12 @@ def test_step_capability_absent_from_requirements_is_reported() -> None:
     assert _step_codes(findings) == {"capability_blueprint:step_capability_not_disclosed"}
 
 
-def test_run_scoped_capability_in_step_needs_no_resource_requirement() -> None:
+@pytest.mark.parametrize("capability", ["workspace.search/v1", "workspace.image/v1"])
+def test_run_scoped_capability_in_step_needs_no_resource_requirement(capability: str) -> None:
     """Run 内の既束縛 workspace を使う手順は資源要求を必要としない。"""
 
     manifest = _manifest_with_steps(
-        [{"key": "find-file", "text": "workspace.search/v1 で対象ファイルを探す。"}],
+        [{"key": "read-file", "text": f"{capability} で対象ファイルを調べる。"}],
         [],
     )
 

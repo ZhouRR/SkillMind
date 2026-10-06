@@ -67,7 +67,7 @@ class ExecutionFeatures:
         """Interpreter、Run permission、実 Tool 準備で同じ上限を使う。"""
         if capability == "http.write/v1":
             return self.http_writes
-        if capability in {"mcp.tools/v1", "mcp.query/v1", "mcp.call/v1"}:
+        if capability in {"mcp.tools/v1", "mcp.query/v1", "mcp.download/v1", "mcp.call/v1"}:
             return self.mcp_tools
         if capability in {DATABASE_WRITE_CAPABILITY, "database.execute/v1"}:
             return self.database_writes

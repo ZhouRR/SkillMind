@@ -13,6 +13,10 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = ROOT / "contracts"
 
 EXAMPLE_CONTRACTS = {
+    "examples/workspace-image-request.v1.json": "tools/workspace.image/v1/request.schema.json",
+    "examples/workspace-image-response.v1.json": "tools/workspace.image/v1/response.schema.json",
+    "examples/mcp-download-request.v1.json": "tools/mcp.download/v1/request.schema.json",
+    "examples/mcp-download-response.v1.json": "tools/mcp.download/v1/response.schema.json",
     "examples/artifact-append-request.v1.json": "tools/artifact.append/v1/request.schema.json",
     "examples/artifact-append-response.v1.json": "tools/artifact.append/v1/response.schema.json",
     "examples/audit-export-request.v1.json": "tools/audit.export/v1/request.schema.json",

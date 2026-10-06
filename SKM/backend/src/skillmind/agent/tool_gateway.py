@@ -331,7 +331,26 @@ class ToolGateway:
             })}], "is_error": True}
         try:
             response = await self._invoke(binding, deepcopy(dict(arguments)))
-            return {"content": [{"type": "text", "text": _compact_json(response)}]}
+            content = [{"type": "text", "text": _compact_json(response)}]
+            if binding.registered.capability == "workspace.image/v1":
+                from skillmind.agent.workspace_image import image_block
+
+                try:
+                    content.append(await image_block(RunToolContext(
+                        run_id=self._context.run_id, run_attempt_id=self._context.run_attempt_id,
+                        project_id=self._context.project_id, user_id=self._context.user_id,
+                        tool=binding.registered, workspace=self._context.workspace,
+                        run=self._context,
+                    ), response))
+                except ToolProviderError as error:
+                    raise ToolGatewayError(error.code, error.message, retryable=False) from None
+                # metadata の小ささだけで通さず、実際に SDK へ渡す画像 byte も上限に含める。
+                size = len(_compact_json({"content": content}).encode())
+                if size > self._context.limits.max_output_bytes:
+                    raise ToolGatewayError(
+                        "too_large", "Image output exceeds the Run limit", retryable=False,
+                    )
+            return {"content": content}
         except ToolGatewayError as error:
             payload = {
                 "status": "error",

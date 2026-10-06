@@ -322,7 +322,7 @@ class RunService:
                                 else set()
                             ),
                             *(
-                                {"artifact.materialize/v1"}
+                                {"artifact.materialize/v1", "workspace.image/v1"}
                                 if "workspace.read/v1" in resolved.allowed_capabilities
                                 else set()
                             ),

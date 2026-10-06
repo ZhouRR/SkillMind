@@ -113,7 +113,7 @@ export function capabilitiesForAccess(
   mcpResources = true,
 ): string[] {
   if (provider === 'mcp') return mcpTools
-    ? [...(mcpResources ? ['mcp.read/v1'] : []), 'mcp.tools/v1', 'mcp.query/v1', ...(access === 'read_write' ? ['mcp.call/v1'] : [])]
+    ? [...(mcpResources ? ['mcp.read/v1'] : []), 'mcp.tools/v1', 'mcp.query/v1', 'mcp.download/v1', ...(access === 'read_write' ? ['mcp.call/v1'] : [])]
     : ['mcp.read/v1']
   const form = PROVIDER_FORMS[provider]
   if (access === 'read_write' && form.writeCapability !== null) {

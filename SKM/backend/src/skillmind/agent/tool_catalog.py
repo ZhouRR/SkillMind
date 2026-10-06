@@ -31,6 +31,7 @@ from skillmind.agent.tool_gateway import (
 )
 from skillmind.agent.tool_sequence import ToolSequenceProvider
 from skillmind.agent.workspace_edit import WorkspaceEditProvider
+from skillmind.agent.workspace_image import WorkspaceImageProvider
 from skillmind.agent.workspace_provider import (
     WorkspaceReadProvider,
     WorkspaceSearchProvider,
@@ -100,6 +101,7 @@ def _read_tool_definitions(
     mcp_provider: ToolProvider | None = None,
     mcp_tools_provider: ToolProvider | None = None,
     mcp_query_provider: ToolProvider | None = None,
+    mcp_download_provider: ToolProvider | None = None,
     repository_source: RepositorySnapshotSource | None = None,
 ) -> tuple[ToolDefinition, ...]:
     """注入済みの実 Provider だけを公開し、未設定の資源を合成 data で補わない。"""
@@ -122,6 +124,13 @@ def _read_tool_definitions(
             mcp_query_provider,
             "Call tools explicitly authorized as read in the frozen catalog. Other tools require "
             "change.propose approval; never call them here.",
+        ),
+        (
+            "mcp.download/v1", mcp_download_provider,
+            "Download original bytes from the same origin as this MCP connection, using a "
+            "source_evidence_ref from a successful mcp.query and an exact JSON pointer in its "
+            "response. No arbitrary URLs, redirects or cross-connection references. "
+            "Returns a Run-local path/hash; call workspace.image/v1 to actually view images.",
         ),
     ):
         if provider is not None:
@@ -333,6 +342,7 @@ def create_run_tool_registry(
     mcp_provider: ToolProvider | None = None,
     mcp_tools_provider: ToolProvider | None = None,
     mcp_query_provider: ToolProvider | None = None,
+    mcp_download_provider: ToolProvider | None = None,
     repository_source: RepositorySnapshotSource | None = None,
     subagent_provider: ToolProvider | None = None,
     deferred_features_enabled: bool = True,
@@ -354,6 +364,7 @@ def create_run_tool_registry(
                 mcp_provider=mcp_provider,
                 mcp_tools_provider=mcp_tools_provider,
                 mcp_query_provider=mcp_query_provider,
+                mcp_download_provider=mcp_download_provider,
                 repository_source=repository_source,
             ),
             document_read_tool_definition(contracts, document_source),
@@ -574,6 +585,18 @@ def _workspace_tool_definitions(contracts: ContractStore) -> tuple[ToolDefinitio
     """Run 内の読取と制限付き書込を精確な capability version ごとに登録する。"""
 
     return (
+        _tool_definition(
+            contracts, capability="workspace.image/v1",
+            description=(
+                "View a Run-local PNG, JPEG or WebP as actual model image content. Supply path "
+                "and the observed expected_hash. Metadata/path/Base64 text alone is not a viewed "
+                "image. Maximum 8 MiB and 25 million pixels; no SVG or animations. "
+                "Use registered download/read tools to obtain files first. Image interpretation "
+                "does not authorize coordinate clicks or guess selectors."
+            ),
+            providers={"workspace": WorkspaceImageProvider()}, unbound_provider="workspace",
+            minimum_execution_profile="GUIDED", sequence_safe=False,
+        ),
         _tool_definition(
             contracts,
             sequence_safe=True,

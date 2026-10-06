@@ -155,6 +155,8 @@ pathspec==1.1.1
     # via mypy
 pglast==8.4
     # via skillmind (pyproject.toml)
+pillow==12.3.0
+    # via skillmind (pyproject.toml)
 pluggy==1.6.0
     # via pytest
 protobuf==7.36.1

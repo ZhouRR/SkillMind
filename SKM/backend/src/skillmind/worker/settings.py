@@ -42,6 +42,7 @@ from skillmind.agent.engine import ClaudeAgentSdkEngine, RunMcpRuntime
 from skillmind.agent.evidence import PostgresToolAuditWriter
 from skillmind.agent.http_provider import HttpReadProvider
 from skillmind.agent.http_source import HttpResourceSource
+from skillmind.agent.mcp_download import McpDownloadProvider
 from skillmind.agent.mcp_lease import McpDesktopLeases
 from skillmind.agent.mcp_provider import McpReadProvider
 from skillmind.agent.mcp_source import StreamableHttpMcpSource
@@ -284,6 +285,10 @@ async def startup(ctx: dict[str, Any], *, maintenance_only: bool = False) -> Non
             source=StreamableHttpMcpToolsSource(),
             secret_resolver=DeploymentSecretResolver(cipher=secret_cipher),
             leases=McpDesktopLeases(ctx["database_session_factory"]),
+        ) if features.mcp_tools else None,
+        mcp_download_provider=McpDownloadProvider(
+            ctx["database_session_factory"], source=HttpResourceSource(),
+            secret_resolver=DeploymentSecretResolver(cipher=secret_cipher),
         ) if features.mcp_tools else None,
         database_provider=database_provider,
         native_database_provider=NativeDatabaseProvider(

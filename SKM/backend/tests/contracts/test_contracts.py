@@ -8,6 +8,7 @@ from typing import Any
 
 from jsonschema import FormatChecker
 from jsonschema.validators import validator_for
+
 from skillmind.api.main import create_app
 from skillmind.api.problems import PROBLEM_DETAILS_SCHEMA, problem_openapi_response
 
@@ -15,6 +16,10 @@ ROOT = Path(__file__).resolve().parents[3]
 CONTRACTS = ROOT / "contracts"
 
 EXAMPLES = {
+    "examples/workspace-image-request.v1.json": "tools/workspace.image/v1/request.schema.json",
+    "examples/workspace-image-response.v1.json": "tools/workspace.image/v1/response.schema.json",
+    "examples/mcp-download-request.v1.json": "tools/mcp.download/v1/request.schema.json",
+    "examples/mcp-download-response.v1.json": "tools/mcp.download/v1/response.schema.json",
     "examples/skill-execution.v1.json": "skill-execution/v1.schema.json",
     "examples/agent-task-brief.v2.json": "agent-task-brief/v2.schema.json",
     "examples/task-flow-preview-source.v1.json": "tasks/flow-preview/v1.schema.json",
@@ -87,7 +92,9 @@ EXAMPLES = {
     "examples/workspace-edit-response.v1.json": "tools/workspace.edit/v1/response.schema.json",
     "examples/database-query-request.v1.json": "tools/database.query/v1/request.schema.json",
     "examples/database-execute-request.v1.json": "tools/database.execute/v1/request.schema.json",
-    "examples/repository-workspace-request.v1.json": "tools/repository.workspace/v1/request.schema.json",
+    "examples/repository-workspace-request.v1.json": (
+        "tools/repository.workspace/v1/request.schema.json"
+    ),
     "examples/change-propose-file-request.v1.json": "tools/change.propose/v1/request.schema.json",
     "examples/mcp-query-file-request.v1.json": "tools/mcp.query/v1/request.schema.json",
     "examples/http-read-request.v1.json": "tools/http.read/v1/request.schema.json",
@@ -126,7 +133,9 @@ EXAMPLES = {
     "examples/database-read-response.v2.json": "tools/database.read/v2/response.schema.json",
     "examples/database-read-error.v2.json": "tools/database.read/v2/error.schema.json",
     "examples/database-describe-request.v1.json": "tools/database.describe/v1/request.schema.json",
-    "examples/database-describe-response.v1.json": "tools/database.describe/v1/response.schema.json",
+    "examples/database-describe-response.v1.json": (
+        "tools/database.describe/v1/response.schema.json"
+    ),
     "examples/database-describe-error.v1.json": "tools/database.describe/v1/error.schema.json",
     "examples/database-read-request.v1.json": "tools/database.read/v1/request.schema.json",
     "examples/database-read-response.v1.json": "tools/database.read/v1/response.schema.json",

@@ -398,8 +398,8 @@ describe('repository write configuration', () => {
 })
 
 it('keeps MCP resources optional and action permission explicit', () => {
-  expect(capabilitiesForAccess('mcp', 'read', true, false)).toEqual(['mcp.tools/v1', 'mcp.query/v1'])
-  expect(capabilitiesForAccess('mcp', 'read_write', true, false)).toEqual(['mcp.tools/v1', 'mcp.query/v1', 'mcp.call/v1'])
+  expect(capabilitiesForAccess('mcp', 'read', true, false)).toEqual(['mcp.tools/v1', 'mcp.query/v1', 'mcp.download/v1'])
+  expect(capabilitiesForAccess('mcp', 'read_write', true, false)).toEqual(['mcp.tools/v1', 'mcp.query/v1', 'mcp.download/v1', 'mcp.call/v1'])
   expect(capabilitiesForAccess('mcp', 'read_write', false, false)).toEqual(['mcp.read/v1'])
   expect(buildIntegrationScope('mcp', { issueIds: [], fieldKeys: [], paths: [], revisions: [], mcpTools: true, writeEnabled: false }))
     .toEqual({ resource_uris: [], tool_names: [] })

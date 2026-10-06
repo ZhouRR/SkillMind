@@ -1,0 +1,32 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "source_evidence_ref",
+    "pointer"
+  ],
+  "properties": {
+    "source_evidence_ref": {
+      "type": "string",
+      "pattern": "^ev_[a-zA-Z0-9_-]+$"
+    },
+    "pointer": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "purpose": {
+      "type": "string",
+      "maxLength": 2000
+    },
+    "hash_pointer": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "description": "If the original response publishes a SHA-256 for these bytes, select that field in the same response. The download must match it before publication."
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skillmind.local/tools/mcp.download/v1/request.schema.json",
+  "title": "mcp.download/v1 request"
+}
