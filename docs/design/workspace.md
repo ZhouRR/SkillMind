@@ -15,6 +15,8 @@
 - 候选路径较多时先显示数量，展开后可滚动查看完整列表；必要状态和缺失原因始终可见，不让路径清单挤压主要操作。
 - 三语统一使用消息目录。日间/夜间切换不重建表单；浏览器存储受限时仍可在当前页使用，默认主题遵从现有应用设置。
 
+単一選択の下拉は共有 `base.css` で統一する。`appearance: base-select` / `::picker(select)` 対応 browser では、境界・影・選択色と checkmark を持つ top-layer picker を使う。未対応 browser は従来の native picker を維持し、同じ外観を保証しない。複数選択と size listbox は対象外。選択値・label・required・disabled・form 送信は native select に任せ、長い選択肢は picker 内で折り返す。親 dialog は開いた picker の Escape を奪わない。
+
 PC 1440×900 为主，兼顾 1366×768、1920×1080、三语及双主题；390px 窄屏保留可操作性。实际颜色、字号和间距以共享样式为准，不在文档复制 CSS 数值。
 
 ## 导航与任务

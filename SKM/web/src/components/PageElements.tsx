@@ -4,6 +4,7 @@ import type { ProjectState } from '../appState'
 import type { ProjectRecord, RunEventRecord, RunStatus } from '../api'
 import { useMessages } from '../i18n'
 import { formatLocalTime } from '../lib/presentation'
+import { isOpenSelectPicker } from '../lib/selectPicker'
 
 /** 画面の目的と補助情報を統一した compact heading として表示する。 */
 export function PageHeader({ title, description, aside, reading = false }: {
@@ -148,6 +149,7 @@ export function ModalDialog({ open, title, meta, actions, wide = false, drawer =
     restoreFocusTo.current = window.document.activeElement as HTMLElement | null
     dialogRef.current?.focus()
     const handleKey = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented || (event.key === 'Escape' && isOpenSelectPicker(event.target))) return
       if (event.key === 'Escape') closeRef.current()
       if (event.key === 'Tab' && dialogRef.current) {
         const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
