@@ -17,6 +17,8 @@
 
 単一選択の下拉は共有 `Select` Component と Base UI の Select primitive で統一する。browser 固有の `appearance: base-select` に依存せず、境界・影・選択色と checkmark を持つ popup を全対応 browser で描画する。option/optgroup の値と無効状態を保ち、フォームの name/required と label、keyboard/typeahead/focus/dismissal は共有実装で扱う。長い選択肢は popup 内で折り返して scroll できる。親 dialog は popup が処理する Escape を奪わない。複数選択と size listbox は別の native control として扱う。
 
+文書の upload 先は自由入力できる `DocumentFolderInput` を使い、native datalist ではなく Base UI Autocomplete の候補を表示する。既存の階層パスと root を選べ、新規パスは候補にない状態でも保持する。Escape/候補の非同期更新は入力先を変更せず、upload 中などの無効化時は候補を閉じる。
+
 PC 1440×900 为主，兼顾 1366×768、1920×1080、三语及双主题；390px 窄屏保留可操作性。实际颜色、字号和间距以共享样式为准，不在文档复制 CSS 数值。
 
 ## 导航与任务
