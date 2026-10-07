@@ -12,6 +12,7 @@ from check_accounts import OTHER, PASSWORD, ResponseGate, self_revoke
 from check_document_management import DOCUMENT, SECOND, assert_document_writes, document, open_ancestor_folders, row_menu
 from check_projects import NEXT_PROJECT, PROJECT, ProjectsApi, messages, privacy, settle
 from playwright.async_api import Browser, Page, Route, async_playwright, expect
+from select_helpers import count_select_options, select_option
 
 PRIVATE = "Preview fixture internal detail must not be shown"
 SECOND_TEXT = "Second document is the current preview."
@@ -445,17 +446,17 @@ async def scenario(
                 frame = page.frame_locator("iframe.previewFrame")
                 selector = page.get_by_role("combobox", name=labels["previewPages"])
                 await expect(selector).to_be_visible()
-                total = await selector.locator("option").count()
+                total = await count_select_options(selector)
                 assert total > 10
                 await expect(page.get_by_role("button", name=catalog["runHistory"]["previous"], exact=True)).to_be_disabled()
                 assert await frame.locator("thead th").first.evaluate("el => el.getBoundingClientRect().width") >= 80
                 assert await frame.locator("table").first.evaluate("el => el.scrollWidth > el.clientWidth")
                 await page.get_by_role("button", name=catalog["runHistory"]["next"], exact=True).click()
-                await expect(selector).to_have_value("1")
+                await expect(selector).to_have_attribute("data-value", "1")
                 # 各頁に表頭を保持し、全行が重複も欠落もなく一度ずつ読める。
                 rows: list[str] = []
                 for index in range(total):
-                    await selector.select_option(str(index))
+                    await select_option(selector, str(index))
                     await expect(frame.locator("body")).to_be_visible()
                     await expect(frame.locator("body > pre")).to_have_count(0)
                     cells = await frame.locator("tbody tr td:first-child").all_text_contents()
@@ -469,24 +470,24 @@ async def scenario(
                 await page.get_by_role("button", name=labels["viewSource"], exact=True).click()
                 source_selector = page.get_by_role("combobox", name=labels["previewPages"])
                 source_parts = []
-                for source_index in range(await source_selector.locator("option").count()):
-                    await source_selector.select_option(str(source_index))
+                for source_index in range(await count_select_options(source_selector)):
+                    await select_option(source_selector, str(source_index))
                     source_parts.append(await page.locator(".previewText").text_content() or "")
                 assert "".join(source_parts) == WIDE_MARKDOWN
                 await page.get_by_role("dialog").get_by_role("button", name=labels["previewButton"], exact=True).click()
-                await expect(selector).to_have_value(str(total - 1))
+                await expect(selector).to_have_attribute("data-value", str(total - 1))
                 # toolbar が狭幅でも切れず、再オープン時は先頭頁へ戻る。
                 assert await page.locator(".markdownPreviewToolbar").evaluate("el => el.scrollWidth <= el.clientWidth + 1")
                 await page.keyboard.press("Escape")
                 await previews.first.click()
-                await expect(selector).to_have_value("0")
+                await expect(selector).to_have_attribute("data-value", "0")
             elif mode == "markdown-complex":
                 await expect(page.get_by_text(labels["markdownSourcePage"], exact=True)).to_be_visible()
                 await expect(page.locator("iframe.previewFrame")).to_have_count(0)
                 selector = page.get_by_role("combobox", name=labels["previewPages"])
                 parts = []
-                for index in range(await selector.locator("option").count()):
-                    await selector.select_option(str(index))
+                for index in range(await count_select_options(selector)):
+                    await select_option(selector, str(index))
                     await expect(page.locator(".previewText")).to_be_visible()
                     parts.append(await page.locator(".previewText").text_content() or "")
                 assert "".join(parts) == COMPLEX_MARKDOWN

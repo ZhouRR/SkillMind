@@ -19,6 +19,7 @@ from check_projects import (
     settle,
 )
 from playwright.async_api import Browser, Locator, Page, Route, async_playwright, expect
+from select_helpers import select_option
 
 DOCUMENT = "00000000-0000-4000-8000-000000000091"
 SECOND = "00000000-0000-4000-8000-000000000092"
@@ -230,7 +231,7 @@ async def scenario(
                 await asyncio.wait_for(api.gate.received.wait(), 5)
                 if mode == "switch":
                     await menu(page)
-                    await page.locator(".sideNavProject select").select_option(NEXT_PROJECT)
+                    await select_option(page.locator(".sideNavProject .selectTrigger"), NEXT_PROJECT)
                     await expect(page.locator(".documentItem")).to_have_count(2)
                     api.gate.release.set()
                     await asyncio.wait_for(api.gate.returned.wait(), 5)

@@ -1,3 +1,4 @@
+import { Select } from './Select'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
 import type { ProjectState } from '../appState'
@@ -5,6 +6,7 @@ import type { ProjectRecord, RunEventRecord, RunStatus } from '../api'
 import { useMessages } from '../i18n'
 import { formatLocalTime } from '../lib/presentation'
 import { isOpenSelectPicker } from '../lib/selectPicker'
+import { modalTabStops } from '../lib/focus'
 
 /** 画面の目的と補助情報を統一した compact heading として表示する。 */
 export function PageHeader({ title, description, aside, reading = false }: {
@@ -58,11 +60,11 @@ export function ProjectContextSelect({ projectState, projectId, currentProject, 
   return (
     <div className="projectContext">
       <label>{resolvedLabel}
-        <select
+        <Select
           disabled={projects.length === 0}
           title={selectedProject ? `${selectedProject.name}\n${projectId}` : undefined}
           value={projectId}
-          onChange={(event) => onSelect(event.target.value)}
+          onValueChange={(nextValue) => onSelect(nextValue)}
         >
           {needsPlaceholder && <option disabled value={projectId}>{placeholder}</option>}
           {projects.map((project) => (
@@ -71,7 +73,7 @@ export function ProjectContextSelect({ projectState, projectId, currentProject, 
               {project.status === 'ARCHIVED' && ` · ${messages.elements.archivedProject}`}
             </option>
           ))}
-        </select>
+        </Select>
       </label>
       {selectedProject && (projectState.status === 'idle' || projectState.status === 'loading') && (
         <p className="muted" role="status">{messages.elements.loadingProjects}</p>
@@ -151,10 +153,10 @@ export function ModalDialog({ open, title, meta, actions, wide = false, drawer =
     const handleKey = (event: KeyboardEvent): void => {
       if (event.defaultPrevented || (event.key === 'Escape' && isOpenSelectPicker(event.target))) return
       if (event.key === 'Escape') closeRef.current()
+      // portal 内の Tab は Base UI が trigger の前後へ戻す。popup item を modal の末尾と誤認しない。
+      if (event.key === 'Tab' && event.target instanceof Element && event.target.closest('[data-select-popup]')) return
       if (event.key === 'Tab' && dialogRef.current) {
-        const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
-          'button, a[href], input, select, textarea, summary, [tabindex="0"]',
-        )).filter((element) => !element.matches(':disabled') && element.getClientRects().length > 0)
+        const focusable = modalTabStops(dialogRef.current)
         const first = focusable[0]
         const last = focusable.at(-1)
         const active = window.document.activeElement

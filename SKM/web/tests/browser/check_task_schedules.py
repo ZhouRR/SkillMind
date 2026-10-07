@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 from check_projects import PROJECT, layout, messages
 from playwright.async_api import async_playwright, expect
 from schedule_management_fixture import ScheduleManagementApi, schedule
+from select_helpers import select_option
 
 
 def configure(api: ScheduleManagementApi) -> None:
@@ -71,10 +72,10 @@ async def check(url: str, output: Path) -> None:
                             ("ERROR", 1),
                             ("ARCHIVED", 1),
                         ]:
-                            await page.locator("[data-task-status]").select_option(state)
+                            await select_option(page.locator("[data-task-status]"), state)
                             await form.locator("button[type=submit]").click()
                             await expect(page.locator("[data-task-card]")).to_have_count(count)
-                        await page.locator("[data-task-status]").select_option("PAUSED")
+                        await select_option(page.locator("[data-task-status]"), "PAUSED")
                         await page.locator("[data-task-search]").fill("TASK-2")
                         await form.locator("button[type=submit]").click()
                         await expect(page.locator("[data-task-card]")).to_have_count(1)
@@ -88,12 +89,12 @@ async def check(url: str, output: Path) -> None:
                         await expect(page.locator("[data-task-card]")).to_have_count(0)
                         await expect(page.get_by_text(labels["tasks"]["noMatches"])).to_be_visible()
                         await page.locator("[data-task-search]").fill("")
-                        await page.locator("[data-task-status]").select_option("")
+                        await select_option(page.locator("[data-task-status]"), "")
                         await form.locator("button[type=submit]").click()
                         await expect(page.locator("[data-task-card]")).to_have_count(6)
                         await layout(page)
                         if width == 1440:
-                            tops = await form.locator('input,select,button').evaluate_all(
+                            tops = await form.locator('input:not([aria-hidden="true"]):visible, button:visible').evaluate_all(
                                 '(els)=>els.map(e=>e.getBoundingClientRect().top)'
                             )
                             assert max(tops) - min(tops) <= 2, tops

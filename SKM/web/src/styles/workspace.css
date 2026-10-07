@@ -626,10 +626,10 @@
 .previewText { margin: 0; color: var(--text-muted); font: 12px/1.65 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .markdownPreviewToolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
 .markdownPreviewPagination { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; flex: 1; }
-.markdownPreviewPagination select { flex: 1; min-width: 0; width: 12rem; max-width: 100%; }
+.markdownPreviewPagination :is(select, .selectTrigger) { flex: 1; min-width: 0; width: 12rem; max-width: 100%; }
 @media (max-width: 600px) {
   .markdownPreviewPagination { flex-basis: 100%; }
-  .markdownPreviewPagination select { width: 0; }
+  .markdownPreviewPagination :is(select, .selectTrigger) { width: 0; }
 }
 /* HTML 文書は書き手の想定(明色)で表示するため、frame 背景だけ白へ固定する。 */
 .modalViewport .modalDialog { width: 100%; height: 100%; min-height: 0; max-height: 100%; }
@@ -711,11 +711,11 @@
 .historyItem > .historyDelete { margin: 12px 8px 0 0; }
 .formRow.documentManagementToolbar, .formRow.historyManagementToolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .documentManagementToolbar { margin-bottom: 12px; }
-.documentManagementToolbar select { width: auto; }
+.documentManagementToolbar :is(select, .selectTrigger) { width: auto; }
 .documentManagementToolbar input { flex: 1 1 220px; min-width: 160px; }
 
 .documentSort { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-muted); white-space: nowrap; }
-.documentManagementToolbar .documentSort select { width: auto; min-width: 100px; }
+.documentManagementToolbar .documentSort :is(select, .selectTrigger) { width: auto; min-width: 100px; }
 .cronPresetFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .cronPresetFields > label { min-width: 0; }
 @media (max-width: 600px) { .cronPresetFields { grid-template-columns: 1fr; } }

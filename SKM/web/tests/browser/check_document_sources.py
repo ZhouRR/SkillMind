@@ -15,6 +15,7 @@ from playwright.async_api import Page, Route, async_playwright, expect
 from skillmind.documents.snapshot import DocumentSnapshot, parse_document_selection, parse_document_snapshot
 
 from check_run_submission import ApiFixture, PROJECT, ROOT, confirmed, task_catalog
+from select_helpers import select_option
 
 EXAMPLE = json.loads((ROOT.parent / "contracts/examples/run-detail-documents.v1.json").read_text())
 FROZEN = parse_document_snapshot(
@@ -117,17 +118,17 @@ async def select_scope(page: Page, mode: str) -> dict[str, str]:
     """フォルダーを一度選び、配下の全候補を同じ契約で送信する。"""
 
     field = page.locator('.documentSourceField')
-    await expect(field.locator('select').first).to_have_value('')
+    await expect(field.locator('.selectTrigger').first).to_have_attribute("data-value", '')
     if mode == 'NONE':
         return {}
-    await field.locator('select').first.select_option(mode)
+    await select_option(field.locator('.selectTrigger').first, mode)
     if mode == 'SINGLE':
         value = f'document:{FROZEN.documents[0].document_id}'
-        await field.locator('select').nth(1).select_option(value)
+        await select_option(field.locator('.selectTrigger').nth(1), value)
         return {'docs': value}
     if mode == 'SET':
         await expect(field.get_by_role('checkbox')).to_have_count(0)
-        await field.locator('select').nth(1).select_option('guides')
+        await select_option(field.locator('.selectTrigger').nth(1), 'guides')
         return {'docs': 'documents:' + ','.join(str(item.document_id) for item in FROZEN.documents)}
     return {'docs': 'project-documents:all'}
 
@@ -180,15 +181,15 @@ async def check_folder_boundaries(browser, url: str, origin: str) -> None:
             await page.locator('.runLauncher > button').click()
             await page.get_by_label('Objective').fill('Confirm folder boundaries')
             field = page.locator('.documentSourceField')
-            await field.locator('select').first.select_option('SET')
-            await field.locator('select').nth(1).select_option(path)
-            await expect(field.locator('select').first).to_have_value('SET')
-            await expect(field.locator('select').nth(1)).to_have_value(path)
-            await field.locator('select').first.select_option('SINGLE')
-            await expect(field.locator('select').nth(1)).to_have_value('document:')
-            await field.locator('select').first.select_option('SET')
-            await expect(field.locator('select').nth(1)).to_have_value('')
-            await field.locator('select').nth(1).select_option(path)
+            await select_option(field.locator('.selectTrigger').first, 'SET')
+            await select_option(field.locator('.selectTrigger').nth(1), path)
+            await expect(field.locator('.selectTrigger').first).to_have_attribute("data-value", 'SET')
+            await expect(field.locator('.selectTrigger').nth(1)).to_have_attribute("data-value", path)
+            await select_option(field.locator('.selectTrigger').first, 'SINGLE')
+            await expect(field.locator('.selectTrigger').nth(1)).to_have_attribute("data-value", 'document:')
+            await select_option(field.locator('.selectTrigger').first, 'SET')
+            await expect(field.locator('.selectTrigger').nth(1)).to_have_attribute("data-value", '')
+            await select_option(field.locator('.selectTrigger').nth(1), path)
             await page.locator('.runForm button[type="submit"]').click()
             await confirmed(page)
             assert len(fixture.posts) == 1

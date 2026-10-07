@@ -21,6 +21,7 @@ from check_projects import (
     settle,
 )
 from playwright.async_api import Browser, Locator, Page, Route, async_playwright, expect
+from select_helpers import select_option
 
 ACTIVE = "00000000-0000-4000-8000-000000000100"
 REMOVED = "00000000-0000-4000-8000-000000000101"
@@ -500,7 +501,7 @@ async def late_read(page: Page, api: MembersApi, _: dict, failure: bool) -> None
     del api.members[PROJECT][CANDIDATE]
     for project_id in (NEXT_PROJECT, PROJECT):
         await menu(page)
-        await page.locator(".sideNavProject select").select_option(project_id)
+        await select_option(page.locator(".sideNavProject .selectTrigger"), project_id)
         await selected(page, project_id)
         await panel(page)
     gate.release.set()
@@ -521,12 +522,12 @@ async def late_project(page: Page, api: MembersApi, _: dict, returning: bool) ->
     await double_confirm(page)
     await asyncio.wait_for(gate.received.wait(), 10)
     await menu(page)
-    await page.locator(".sideNavProject select").select_option(NEXT_PROJECT)
+    await select_option(page.locator(".sideNavProject .selectTrigger"), NEXT_PROJECT)
     await selected(page, NEXT_PROJECT)
     await panel(page)
     if returning:
         await menu(page)
-        await page.locator(".sideNavProject select").select_option(PROJECT)
+        await select_option(page.locator(".sideNavProject .selectTrigger"), PROJECT)
         await selected(page, PROJECT)
         await panel(page)
     await expect(page.locator(f'[data-member-id="{CANDIDATE}"]')).to_have_count(0)

@@ -1,12 +1,17 @@
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { Select } from '../../src/components/Select'
 import { ScheduleDialog, ScheduleEditDialog, ScheduleStatusActions } from '../../src/components/ScheduleDialog'
 import { SourceRequirementField } from '../../src/components/TaskLaunchFields'
 import { LanguageProvider } from '../../src/i18n'
 import { MESSAGES } from '../../src/lib/i18n/messages'
 import { documentTask } from '../fixtures/documentTask'
 import { scheduleFixture } from '../fixtures/schedule'
+import { combobox, lastSelectProps, selectOptions } from '../fixtures/select'
+
+vi.mock('../../src/components/Select', { spy: true })
+beforeEach(() => { vi.mocked(Select).mockClear() })
 
 describe.each(['zh', 'ja', 'en'] as const)('schedule confirmation in %s', (language) => {
   it('retains archive but omits resume when scheduled execution is disabled', () => {
@@ -52,9 +57,13 @@ describe.each(['zh', 'ja', 'en'] as const)('schedule confirmation in %s', (langu
       options: [{ value: 'integration:new', label: 'New candidate' }] }
     const html = renderToStaticMarkup(<LanguageProvider language={language}><SourceRequirementField
       requirement={requirement} value="integration:original" onChange={() => {}} /></LanguageProvider>)
-    expect(html).toContain('value="integration:original" disabled="" selected=""')
+    expect(combobox(html)).toContain('data-value="integration:original"')
+    expect(combobox(html)).toContain(MESSAGES[language].scheduleEditor.retainedSource('integration:original'))
+    expect(selectOptions()).toContainEqual({ value: 'integration:original', disabled: true,
+      label: MESSAGES[language].scheduleEditor.retainedSource('integration:original') })
     expect(html).toContain(MESSAGES[language].scheduleEditor.sourceUnavailable)
-    expect(html).toContain('value="integration:new"')
+    expect(selectOptions()).toContainEqual({ value: 'integration:new', label: 'New candidate', disabled: false })
+    expect(lastSelectProps().value).toBe('integration:original')
     expect(html).not.toContain(MESSAGES[language].workspace.willUseSource('New candidate'))
   })
 
@@ -62,7 +71,10 @@ describe.each(['zh', 'ja', 'en'] as const)('schedule confirmation in %s', (langu
     const html = renderToStaticMarkup(<LanguageProvider language={language}><SourceRequirementField
       requirement={{ key: 'issues', kind: 'issue', access: 'read', required: true, options: [] }}
       value="integration:original" onChange={() => {}} /></LanguageProvider>)
-    expect(html).toContain('value="integration:original" disabled="" selected=""')
+    expect(combobox(html)).toContain('data-value="integration:original"')
+    expect(combobox(html)).toContain(MESSAGES[language].scheduleEditor.retainedSource('integration:original'))
+    expect(selectOptions()).toContainEqual({ value: 'integration:original', disabled: true,
+      label: MESSAGES[language].scheduleEditor.retainedSource('integration:original') })
   })
 
   it('keeps state controls disabled for a readonly project', () => {

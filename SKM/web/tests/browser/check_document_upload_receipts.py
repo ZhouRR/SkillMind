@@ -21,6 +21,7 @@ from check_projects import (
     settle,
 )
 from playwright.async_api import Browser, Page, Route, async_playwright, expect
+from select_helpers import select_option
 
 KEY = "00000000-0000-4000-8000-000000000080"
 NEXT_KEY = "00000000-0000-4000-8000-000000000081"
@@ -358,7 +359,7 @@ async def manual_scenario(
             assert len(api.reads) == 1
             if mode == "manual-switch":
                 await menu(page)
-                await page.locator(".sideNavProject select").select_option(NEXT_PROJECT)
+                await select_option(page.locator(".sideNavProject .selectTrigger"), NEXT_PROJECT)
                 await expect(result).to_have_count(0)
                 project_id = NEXT_PROJECT
                 await expect(panel.locator(".documentItem")).to_have_count(2)
@@ -632,7 +633,7 @@ async def scenario(
                     )
                 elif mode == "post-switch":
                     await menu(page)
-                    await page.locator(".sideNavProject select").select_option(NEXT_PROJECT)
+                    await select_option(page.locator(".sideNavProject .selectTrigger"), NEXT_PROJECT)
                     await expect(state.locator(".documentUploadItems > li")).to_have_count(0)
                 else:
                     await page.evaluate("location.hash='/accounts'")
@@ -697,7 +698,7 @@ async def scenario(
                             )
                         else:
                             await menu(page)
-                            await page.locator(".sideNavProject select").select_option(NEXT_PROJECT)
+                            await select_option(page.locator(".sideNavProject .selectTrigger"), NEXT_PROJECT)
                             await expect(state.locator(".documentUploadItems > li")).to_have_count(
                                 0
                             )

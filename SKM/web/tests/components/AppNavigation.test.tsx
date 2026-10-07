@@ -9,6 +9,7 @@ import { ROUTE_ICONS } from '../../src/components/routeIcons'
 import { LanguageProvider } from '../../src/i18n'
 import { MESSAGES } from '../../src/lib/i18n/messages'
 import { DEMO_PROJECT, demoUser } from '../fixtures'
+import { comboboxes } from '../fixtures/select'
 
 const PROJECT = DEMO_PROJECT
 
@@ -142,7 +143,7 @@ describe('AppNavigation grouping', () => {
     expect(html.split('class="sidebarMenuToggle"').length - 1).toBe(1)
     expect(html.split('class="navigationPanel"').length - 1).toBe(1)
     expect(html.split('class="sidebarLogout"').length - 1).toBe(1)
-    expect(html.split('<select').length - 1).toBe(2)
+    expect(comboboxes(html)).toHaveLength(2)
     expect(html).not.toMatch(/class="navigationPanel"[^>]*hidden/)
   })
 
@@ -173,10 +174,10 @@ describe('AppNavigation grouping', () => {
     // 平台組と当前项目組(select label が見出しを兼ねる)が両方描画される。
     expect(html).toContain('平台')
     expect(html).toContain('当前项目')
-    expect(html).toContain(`<option value="${PROJECT.project_id}" selected="">${PROJECT.name}</option>`)
+    expect(comboboxes(html).find((trigger) => trigger.includes(`data-value="${PROJECT.project_id}"`))).toContain(PROJECT.name)
     expect(html).not.toContain(PROJECT.key)
     // select は Project 切替と言語切替の 2 つだけ。Project 切替入口は「当前项目」1 箇所に限る。
-    expect(html.split('<select').length - 1).toBe(2)
+    expect(comboboxes(html)).toHaveLength(2)
     expect(html.split('当前项目').length - 1).toBe(1)
     expect(html).toContain('界面语言')
     // 名前の不在を indexOf=-1 で見逃さず、実際の link が正しい分組にあることを守る。

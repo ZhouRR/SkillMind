@@ -1,12 +1,14 @@
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { Select } from '../../src/components/Select'
 import { SourceRequirementField } from '../../src/components/TaskLaunchFields'
 import { LanguageProvider } from '../../src/i18n'
 import { ALL_DOCUMENTS_SELECTION, PROJECT_DOCUMENT_LIBRARY_SELECTION } from '../../src/lib/documentSelection'
 import { MESSAGES } from '../../src/lib/i18n/messages'
 import { buildTaskDraft, defaultSourceProviders, sourceRequirements } from '../../src/lib/taskDraft'
 import { documentTask } from '../fixtures/documentTask'
+import { combobox, lastSelectProps, selectOptions } from '../fixtures/select'
 
 /** 入力と成果の要求を共存させる UI fixture。実 write の可用性や承認の証拠ではない。 */
 function task(required = true) {
@@ -18,6 +20,9 @@ function task(required = true) {
   })
   return value
 }
+
+vi.mock('../../src/components/Select', { spy: true })
+beforeEach(() => { vi.mocked(Select).mockClear() })
 
 describe('document library selection', () => {
   it('requires a separate explicit output choice and retains the original tokens', () => {
@@ -43,8 +48,11 @@ describe('document library selection', () => {
       <SourceRequirementField requirement={requirement} value="" onChange={() => {}} />
     </LanguageProvider>)
     expect(html).toContain(MESSAGES[language].workspace.documentSelection.library)
-    expect(html).toContain('value="" selected=""')
-    expect(html).toContain(`value="${PROJECT_DOCUMENT_LIBRARY_SELECTION}"`)
+    expect(combobox(html)).toContain('data-value=""')
+    expect(combobox(html)).toContain(MESSAGES[language].workspace.selectConfiguredResource)
+    expect(lastSelectProps()).toMatchObject({ value: '', required: true })
+    expect(selectOptions()).toContainEqual({ value: PROJECT_DOCUMENT_LIBRARY_SELECTION, disabled: false,
+      label: MESSAGES[language].workspace.documentSelection.library })
     expect(html).not.toContain('documentSourceField')
     expect(html).not.toContain(ALL_DOCUMENTS_SELECTION)
   })

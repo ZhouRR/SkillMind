@@ -1,3 +1,4 @@
+import { Select } from './Select'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import type { EvaluationRecord, EvaluationSubmissionReceipt, RunResultDetail } from '../api'
 import type { SessionEnded } from '../hooks/useResourceRequest'
@@ -127,12 +128,12 @@ export function EvaluationSection({ scope, result, csrfToken, writable, accessFa
         <fieldset disabled={locked}>
           <legend>{labels.draft}</legend>
           <div className="formRow">
-            <label>{messages.runResult.ratingLabel}<select value={draft.rating} onChange={(event) => setDraft({ ...draft, rating: Number(event.target.value) })}>
-              {[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-            <label>{messages.runResult.verdictLabel}<select value={draft.verdict}
-              onChange={(event) => setDraft({ ...draft, verdict: event.target.value as EvaluationDraft['verdict'] })}>
+            <label>{messages.runResult.ratingLabel}<Select value={draft.rating} onValueChange={(nextValue) => setDraft({ ...draft, rating: Number(nextValue) })}>
+              {[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value}</option>)}</Select></label>
+            <label>{messages.runResult.verdictLabel}<Select value={draft.verdict}
+              onValueChange={(nextValue) => setDraft({ ...draft, verdict: nextValue as EvaluationDraft['verdict'] })}>
               {(['accurate', 'partially_accurate', 'inaccurate', 'uncertain'] as const).map((value) => <option key={value} value={value}>{messages.enums.verdict[value]}</option>)}
-            </select></label>
+            </Select></label>
           </div>
           {/* UTF-16 入力欄は 2 符号単位まで許可し、公開上限は送信前に Unicode 符号位置で検証する。 */}
           <label>{messages.runResult.commentLabel}<textarea aria-label={messages.runResult.commentLabel} maxLength={8000} value={draft.comment}

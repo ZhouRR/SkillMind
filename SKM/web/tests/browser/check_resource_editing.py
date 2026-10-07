@@ -112,7 +112,7 @@ async def check(url: str, output: Path) -> None:
                     dialog = page.get_by_role("dialog")
                     await expect(dialog.get_by_label(labels["accessReadWrite"], exact=True)).to_be_checked()
                     await expect(dialog.get_by_label(labels["databasePort"], exact=True)).to_have_value("15432")
-                    await expect(dialog.get_by_role("combobox", name=labels["databaseTls"], exact=True)).to_have_value("require")
+                    await expect(dialog.get_by_role("combobox", name=labels["databaseTls"], exact=True)).to_have_attribute("data-value", "require")
                     password = dialog.get_by_label(labels["credentialValueLabels"]["password"], exact=True)
                     await expect(password).to_have_value("")
                     await expect(password).not_to_have_attribute("required", "")

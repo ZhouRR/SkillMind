@@ -12,6 +12,7 @@ from check_document_sources import DocumentApiFixture, select_scope
 from check_projects import messages
 from check_run_submission import confirmed
 from playwright.async_api import async_playwright, expect
+from select_helpers import select_option
 
 LIBRARY = "project-library:documents"
 
@@ -68,11 +69,11 @@ async def check(url: str) -> None:
                     await page.locator(".runLauncher > button").click()
                     await page.get_by_label("Objective").fill("Confirm separate input and output")
                     sources = await select_scope(page, "ALL")
-                    output = page.locator('label[title="outputs"] select')
-                    await expect(output).to_have_value("")
+                    output = page.locator('label[title="outputs"] .selectTrigger')
+                    await expect(output).to_have_attribute("data-value", "")
                     await page.locator('.runForm button[type="submit"]').click()
                     assert not fixture.posts
-                    await output.select_option(LIBRARY)
+                    await select_option(output, LIBRARY)
                     await expect(page.locator(".documentSourceField")).to_have_count(1)
                     labels = (await messages(page, language))["workspace"]["documentSelection"]
                     await expect(page.locator('[title="outputs"]')).to_contain_text(

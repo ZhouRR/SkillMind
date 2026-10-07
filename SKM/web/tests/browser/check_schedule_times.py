@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 from check_run_submission import OTHER_PROJECT, PROJECT, ROOT, ApiFixture, task_catalog
 from playwright.async_api import Error, Page, Route, async_playwright, expect
+from select_helpers import select_option, select_options
 
 CONFIRM = {
     "zh": "我已确认当前规则的以上计划时刻和 UTC offset。",
@@ -160,7 +161,7 @@ async def opened(page: Page, url: str, language: str = "en") -> None:
     )
     await page.locator(".taskCardActions button:not([data-flow-open])").first.click()
     await expect(page.locator("[data-schedule-form]")).to_be_visible()
-    await page.locator('[name="recurrence"]').select_option("custom")
+    await select_option(page.locator('[role="combobox"][data-field-name="recurrence"]'), "custom")
 
 
 async def previewed(page: Page) -> None:
@@ -230,7 +231,7 @@ async def exercise(
     elif case.startswith(("gap-", "fold-")):
         field = case.split("-")[1]
         if field == "run":
-            await page.locator('[name="kind"]').select_option("ONCE")
+            await select_option(page.locator('[role="combobox"][data-field-name="kind"]'), "ONCE")
         name = "run_at" if field == "run" else "end_at"
         await page.locator('[name="timezone"]').fill("Asia/Tokyo")
         value = "2027-03-14T02:30" if case.startswith("gap") else "2027-11-07T01:30"
@@ -244,11 +245,12 @@ async def exercise(
             assert not api.previews and not api.saves
         else:
             choices = page.locator("[data-schedule-offset]")
-            await expect(choices).to_have_value("")
-            await expect(choices.locator("option")).to_have_count(3)
-            await expect(choices).to_contain_text("UTC-04:00")
-            await expect(choices).to_contain_text("UTC-05:00")
-            await choices.select_option("2027-11-07T06:30:00.000Z")
+            await expect(choices).to_have_attribute("data-value", "")
+            async with select_options(choices) as options:
+                await expect(options).to_have_count(3)
+                await expect(options.filter(has_text="UTC-04:00")).to_have_count(1)
+                await expect(options.filter(has_text="UTC-05:00")).to_have_count(1)
+            await select_option(choices, "2027-11-07T06:30:00.000Z")
             await previewed(page)
             assert api.previews[0]["body"]["definition"][name] == "2027-11-07T06:30:00.000Z"
             await confirm.check()

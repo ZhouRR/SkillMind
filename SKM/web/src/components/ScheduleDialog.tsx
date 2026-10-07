@@ -1,3 +1,4 @@
+import { Select } from './Select'
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 
 import {
@@ -218,11 +219,11 @@ function ScheduleCreationForm({ open, projectId, csrfToken, task, onClose, onSav
           }} />
         <label>{messages.schedules.nameLabel}<input name="name" maxLength={200} type="text" value={name}
           placeholder={task.title} onChange={(event) => { nameRef.current = event.target.value; setName(event.target.value) }} /></label>
-        <label>{messages.schedules.kindLabel}<select name="kind" value={timing.kind}
-          onChange={(event) => changeTiming({ kind: event.target.value as ScheduleTimeDraft['kind'] })}>
+        <label>{messages.schedules.kindLabel}<Select name="kind" value={timing.kind}
+          onValueChange={(nextValue) => changeTiming({ kind: nextValue as ScheduleTimeDraft['kind'] })}>
           <option value="CRON">{messages.enums.scheduleKind.CRON}</option>
           <option value="ONCE">{messages.enums.scheduleKind.ONCE}</option>
-        </select></label>
+        </Select></label>
         <label>{messages.schedules.timezoneLabel}<input name="timezone" type="text" maxLength={64} value={timing.timezone}
           onChange={(event) => changeTiming({ timezone: event.target.value })} /></label>
         <p className="hint">{messages.schedules.ruleTimezoneHint}</p>
@@ -286,12 +287,12 @@ function ScheduleDateField({ name, label, value, choice, candidates, timezone, o
     {candidates.length === 1 && <p className="hint">{formatScheduleTimestamp(candidates[0]!.instant, timezone)}</p>}
     {original && <p className="hint" data-schedule-original-instant>{messages.scheduleEditor.originalInstant(original)}</p>}
     {candidates.length > 1 && <label>{messages.schedules.ambiguousLocalTime}
-      <select data-schedule-offset value={choice} onChange={(event) => onChoice(event.target.value)}>
+      <Select data-schedule-offset value={choice} onValueChange={(nextValue) => onChoice(nextValue)}>
         <option value="">{messages.schedules.chooseOffset}</option>
         {candidates.map((candidate) => <option key={candidate.instant} value={candidate.instant}>
           {formatScheduleTimestamp(candidate.instant, timezone)}
         </option>)}
-      </select>
+      </Select>
     </label>}
   </div>
 }

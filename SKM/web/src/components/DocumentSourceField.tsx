@@ -1,3 +1,4 @@
+import { Select } from './Select'
 import { useId, useState } from 'react'
 
 import { useMessages } from '../i18n'
@@ -34,14 +35,14 @@ export function DocumentSourceField({ requirement, value, onChange }: {
       <legend>{messages.workspace.resourceKind.document}{requirement.ordinal ? ` ${requirement.ordinal}` : ""}{requirement.required ? '' : messages.workspace.optionalSuffix}</legend>
       {requirement.guidance && <p className="hint">{requirement.guidance}</p>}
       <label>{labels.mode}
-        <select
+        <Select
           value={mode === 'NONE' ? '' : mode}
           required={requirement.required}
-          onChange={(event) => {
+          onValueChange={(nextValue) => {
             setChosenFolder(null)
-            onChange(event.target.value === 'SINGLE' ? 'document:'
-              : event.target.value === 'SET' ? 'documents:'
-                : event.target.value === 'ALL' ? ALL_DOCUMENTS_SELECTION : '')
+            onChange(nextValue === 'SINGLE' ? 'document:'
+              : nextValue === 'SET' ? 'documents:'
+                : nextValue === 'ALL' ? ALL_DOCUMENTS_SELECTION : '')
           }}
         >
           <option value="">{requirement.required ? labels.choose : messages.workspace.notUsed}</option>
@@ -49,24 +50,24 @@ export function DocumentSourceField({ requirement, value, onChange }: {
           <option value="SET" disabled={folders.length === 0}>{labels.set}</option>
           <option value="ALL" disabled={!hasAll}>{labels.all}</option>
           {selection.mode === 'INVALID' && <option value="INVALID" disabled>{labels.invalid}</option>}
-        </select>
+        </Select>
       </label>
       {mode === 'SINGLE' && (
         <label>{labels.single}
-          <select required value={selectedDocument?.value ?? value} onChange={(event) => onChange(event.target.value)}>
+          <Select required value={selectedDocument?.value ?? value} onValueChange={(nextValue) => onChange(nextValue)}>
             <option value="document:">{labels.choose}</option>
             {!selectedDocument && value !== 'document:' && <option value={value} disabled>{labels.invalid}</option>}
             {documents.map((option) => <option key={option.id} value={option.value}>{option.label}</option>)}
-          </select>
+          </Select>
         </label>
       )}
       {mode === 'SET' && <>
         <label>{labels.folder}
-          <select
+          <Select
             required
             value={selectedFolder?.path ?? (selection.valid ? '__saved__' : '')}
-            onChange={(event) => {
-              const folder = folders.find((item) => item.path === event.target.value)
+            onValueChange={(nextValue) => {
+              const folder = folders.find((item) => item.path === nextValue)
               setChosenFolder(folder ? { path: folder.path, value: folder.value } : null)
               onChange(folder?.value ?? 'documents:')
             }}
@@ -76,7 +77,7 @@ export function DocumentSourceField({ requirement, value, onChange }: {
             {folders.map((folder) => <option key={folder.path} value={folder.path} disabled={folder.ids.length > MAX_SELECTED_DOCUMENTS}>
               {folder.path === '/' ? labels.rootFolder : folder.path} · {labels.memberCount(folder.ids.length)}
             </option>)}
-          </select>
+          </Select>
         </label>
         <p className="hint">{labels.count(selection.ids.length)} · {labels.setHint}</p>
         {!selectedFolder && selection.ids.length > 0 && <ul className="documentChoices">

@@ -1,3 +1,4 @@
+import { Select } from './Select'
 import type { Dispatch, FormEvent, SetStateAction } from 'react'
 import type { IntegrationRecord, SecretReferenceRecord } from '../api'
 import { useMessages } from '../i18n'
@@ -28,17 +29,17 @@ export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets,
   return (
             <form className="resourceForm" onSubmit={(event) => void submitConnect(event)}>
               <label>{messages.resources.providerLabel}
-                <select
+                <Select
                   disabled={editingIntegration !== null}
                   value={connectDraft.provider}
-                  onChange={(event) => setConnectDraft(
-                    emptyConnectDraft(event.target.value as ResourceProvider),
+                  onValueChange={(nextValue) => setConnectDraft(
+                    emptyConnectDraft(nextValue as ResourceProvider),
                   )}
                 >
                   {RESOURCE_PROVIDERS.map((provider) => (
                     <option key={provider} value={provider}>{PROVIDER_LABELS[provider]}</option>
                   ))}
-                </select>
+                </Select>
               </label>
               <label>{messages.resources.nameLabel}
                 <input
@@ -58,12 +59,12 @@ export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets,
                     onChange={(event) => setConnectDraft((value) => ({ ...value, database: event.target.value }))} /></label>
                   <label>{messages.resources.databaseUser}<input required maxLength={253} value={connectDraft.username}
                     onChange={(event) => setConnectDraft((value) => ({ ...value, username: event.target.value }))} /></label>
-                  <label>{messages.resources.databaseTls}<select value={connectDraft.sslmode}
-                    onChange={(event) => setConnectDraft((value) => ({ ...value, sslmode: event.target.value }))}>
+                  <label>{messages.resources.databaseTls}<Select value={connectDraft.sslmode}
+                    onValueChange={(nextValue) => setConnectDraft((value) => ({ ...value, sslmode: nextValue }))}>
                     <option value="verify-full">{messages.resources.tlsVerifyFull}</option>
                     <option value="require">{messages.resources.tlsRequire}</option>
                     <option value="disable">{messages.resources.tlsDisable}</option>
-                  </select></label>
+                  </Select></label>
                 </>
               ) : connectDraft.provider === 'mcp' ? (
                 <label>{messages.resources.mcpServerUrl}<input type="url" required maxLength={2048}
@@ -73,10 +74,10 @@ export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets,
                 <>
                   <label>{messages.resources.baseUrlLabel}<input type="url" required value={connectDraft.baseUrl}
                     onChange={(event) => setConnectDraft((value) => ({ ...value, baseUrl: event.target.value }))} /></label>
-                  <label>{messages.resources.httpAuthentication}<select value={connectDraft.httpAuthMode}
-                    onChange={(event) => setConnectDraft((value) => ({ ...value, httpAuthMode: event.target.value as ConnectDraft['httpAuthMode'], credentialChoice: event.target.value === 'none' ? '' : value.credentialChoice }))}>
+                  <label>{messages.resources.httpAuthentication}<Select value={connectDraft.httpAuthMode}
+                    onValueChange={(nextValue) => setConnectDraft((value) => ({ ...value, httpAuthMode: nextValue as ConnectDraft['httpAuthMode'], credentialChoice: nextValue === 'none' ? '' : value.credentialChoice }))}>
                     <option value="none">{messages.resources.notUsed}</option><option value="bearer">Bearer</option><option value="header">API Key header</option>
-                  </select></label>
+                  </Select></label>
                   {connectDraft.httpAuthMode === 'header' && <label>{messages.resources.httpCredentialHeader}<input required value={connectDraft.httpAuthHeader}
                     placeholder="X-Redmine-API-Key" onChange={(event) => setConnectDraft((value) => ({ ...value, httpAuthHeader: event.target.value }))} /></label>}
                 </>
@@ -101,16 +102,16 @@ export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets,
                   {connectDraft.access === 'read_write' && (
                     <>
                       <label>{messages.resources.writeModeLabel}
-                        <select
+                        <Select
                           value={connectDraft.writeMode}
-                          onChange={(event) => setConnectDraft((value) => ({
+                          onValueChange={(nextValue) => setConnectDraft((value) => ({
                             ...value,
-                            writeMode: event.target.value as RepositoryWriteMode,
+                            writeMode: nextValue as RepositoryWriteMode,
                           }))}
                         >
                           <option value="direct">{messages.resources.writeModeDirect}</option>
                           <option value="branch">{messages.resources.writeModeBranch}</option>
-                        </select>
+                        </Select>
                       </label>
                       <p className="hint">{connectDraft.writeMode === 'direct'
                         ? messages.resources.writeModeDirectHint
@@ -130,17 +131,17 @@ export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets,
                 </>
               )}
               <label>{messages.resources.credentialLabel}
-                <select
+                <Select
                   required={connectForm.requiresSecret || (connectDraft.provider === 'http' && connectDraft.httpAuthMode !== 'none') || (connectDraft.provider === 'mcp' && connectDraft.mcpTools && connectDraft.access === 'read_write')}
                   value={connectDraft.credentialChoice}
-                  onChange={(event) => setConnectDraft((value) => ({ ...value, credentialChoice: event.target.value, secretValue: '', locator: '' }))}
+                  onValueChange={(nextValue) => setConnectDraft((value) => ({ ...value, credentialChoice: nextValue, secretValue: '', locator: '' }))}
                 >
                   {!connectForm.requiresSecret && <option value="" disabled={connectDraft.provider === 'mcp' && connectDraft.mcpTools && connectDraft.access === 'read_write'}>{messages.resources.notUsed}</option>}
                   <option value={NEW_CREDENTIAL}>{messages.resources.credentialNew}</option>
                   {connectSecrets.map((item) => (
                     <option key={item.secret_reference_id} value={item.secret_reference_id}>{item.name}</option>
                   ))}
-                </select>
+                </Select>
               </label>
               {selectedConnectSecret && (
                 <SecretResolverFields editing provider={connectDraft.provider}

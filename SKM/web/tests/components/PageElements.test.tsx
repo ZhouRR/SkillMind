@@ -1,10 +1,15 @@
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { Select } from '../../src/components/Select'
 import { ConfirmDialog, EmptyState, EventTimelineItem, LoadingSkeleton, ModalDialog, ProjectContextSelect } from '../../src/components/PageElements'
 import type { RunEventRecord } from '../../src/api'
 import { DEMO_PROJECT as PROJECT } from '../fixtures'
 import { MESSAGES } from '../../src/lib/i18n/messages'
+import { combobox, lastSelectProps, selectOptions } from '../fixtures/select'
+
+vi.mock('../../src/components/Select', { spy: true })
+beforeEach(() => { vi.mocked(Select).mockClear() })
 
 describe('ProjectContextSelect', () => {
   it.each(['idle', 'loading'] as const)('shows authorized archived detail while preserving the list %s status', (status) => {
@@ -17,9 +22,9 @@ describe('ProjectContextSelect', () => {
       />,
     )
     expect(html).toContain(`Quality Team · ${MESSAGES.zh.elements.archivedProject}`)
-    expect(html).toContain(`<option value="${PROJECT.project_id}" selected="">`)
+    expect(combobox(html)).toContain(`data-value="${PROJECT.project_id}"`)
     expect(html).toContain(`role="status">${MESSAGES.zh.elements.loadingProjects}</p>`)
-    expect(html).not.toContain('<select disabled')
+    expect(combobox(html)).not.toContain('disabled=')
     expect(html).not.toContain(MESSAGES.zh.elements.projectUnavailable)
   })
 
@@ -34,7 +39,7 @@ describe('ProjectContextSelect', () => {
     )
     expect(html).toContain(`Quality Team · ${MESSAGES.zh.elements.archivedProject}`)
     expect(html).toContain(`role="alert">${MESSAGES.zh.elements.projectListFailed}</p>`)
-    expect(html).not.toContain('<select disabled')
+    expect(combobox(html)).not.toContain('disabled=')
   })
 
   it('offers an explicit list retry only when the parent supplies a recovery action', () => {
@@ -49,7 +54,7 @@ describe('ProjectContextSelect', () => {
     )
     expect(html).toContain(`type="button">${MESSAGES.zh.runHistory.retry}</button>`)
     expect(html).toContain(`role="alert">${MESSAGES.zh.elements.projectListFailed}</p>`)
-    expect(html).toContain(`<option value="${PROJECT.project_id}" selected="">`)
+    expect(combobox(html)).toContain(`data-value="${PROJECT.project_id}"`)
   })
 
   it('does not offer another retry while the list request is already loading', () => {
@@ -63,7 +68,7 @@ describe('ProjectContextSelect', () => {
       />,
     )
     expect(html).toContain('role="status"')
-    expect(html).not.toContain('<button')
+    expect(html).not.toContain(`>${MESSAGES.zh.runHistory.retry}</button>`)
   })
 
   it('uses current detail once while retaining every other accessible candidate', () => {
@@ -76,9 +81,11 @@ describe('ProjectContextSelect', () => {
         onSelect={vi.fn()}
       />,
     )
-    expect(html.split('<option').length - 1).toBe(2)
+    expect(selectOptions()).toEqual([
+      { value: PROJECT.project_id, label: `Current authorized detail · ${MESSAGES.zh.elements.archivedProject}`, disabled: false },
+      { value: other.project_id, label: other.name, disabled: false },
+    ])
     expect(html).toContain(`Current authorized detail · ${MESSAGES.zh.elements.archivedProject}`)
-    expect(html).toContain('Other accessible project')
     expect(html).not.toContain('Quality Team')
     expect(html).not.toContain('role="status"')
     expect(html).not.toContain('role="alert"')
@@ -95,7 +102,7 @@ describe('ProjectContextSelect', () => {
     )
     expect(html).not.toContain('Quality Team')
     expect(html).toContain(MESSAGES.zh.elements.projectUnavailable)
-    expect(html).toContain('<select disabled')
+    expect(combobox(html)).toContain('disabled=""')
   })
 
   it('keeps an unavailable explicit target selected instead of implying the first accessible project', () => {
@@ -107,9 +114,13 @@ describe('ProjectContextSelect', () => {
         onSelect={vi.fn()}
       />,
     )
-    expect(html).toContain(`<option disabled="" value="${unavailableId}" selected="">${MESSAGES.zh.elements.projectUnavailable}</option>`)
-    expect(html).toContain(`<option value="${PROJECT.project_id}">`)
-    expect(html).not.toContain('<select disabled')
+    expect(combobox(html)).toContain(`data-value="${unavailableId}"`)
+    expect(combobox(html)).toContain(MESSAGES.zh.elements.projectUnavailable)
+    expect(selectOptions()).toEqual([
+      { value: unavailableId, label: MESSAGES.zh.elements.projectUnavailable, disabled: true },
+      { value: PROJECT.project_id, label: PROJECT.name, disabled: false },
+    ])
+    expect(combobox(html)).not.toContain('disabled=')
     expect(html).toContain('projectContextId')
   })
 
@@ -123,14 +134,15 @@ describe('ProjectContextSelect', () => {
     )
     expect(html).toContain(MESSAGES.zh.elements.projectUnavailable)
     expect(html).not.toContain(MESSAGES.zh.elements.noAccessibleProjects)
-    expect(html).toContain('<select disabled')
+    expect(combobox(html)).toContain('disabled=""')
   })
 
   it('retains the unresolved identity while showing a loading placeholder', () => {
     const html = renderToStaticMarkup(
       <ProjectContextSelect projectId={PROJECT.project_id} projectState={{ status: 'loading' }} onSelect={vi.fn()} />,
     )
-    expect(html).toContain(`<option disabled="" value="${PROJECT.project_id}" selected="">`)
+    expect(combobox(html)).toContain(`data-value="${PROJECT.project_id}"`)
+    expect(selectOptions()).toContainEqual({ value: PROJECT.project_id, label: MESSAGES.zh.elements.loadingProjects, disabled: true })
     expect(html).toContain(MESSAGES.zh.elements.loadingProjects)
     expect(html).not.toContain(MESSAGES.zh.elements.projectUnavailable)
   })
@@ -144,7 +156,7 @@ describe('ProjectContextSelect', () => {
       />,
     )
     expect(html).toContain(`Quality Team · ${MESSAGES.zh.elements.archivedProject}`)
-    expect(html).toContain(`<option value="${PROJECT.project_id}" selected="">`)
+    expect(combobox(html)).toContain(`data-value="${PROJECT.project_id}"`)
     expect(html).not.toContain(MESSAGES.zh.elements.projectUnavailable)
   })
 
@@ -157,12 +169,22 @@ describe('ProjectContextSelect', () => {
       />,
     )
 
-    expect(html).toContain(`<option value="${PROJECT.project_id}" selected="">${PROJECT.name}</option>`)
+    expect(combobox(html)).toContain(`data-value="${PROJECT.project_id}"`)
+    expect(combobox(html)).toContain(PROJECT.name)
     expect(html).not.toContain(PROJECT.key)
     // 名称で特定できる対象は UUID を常設行にせず、select の tooltip で照合できるようにする。
     expect(html).not.toContain('projectContextId')
     expect(html).toContain(`title="${PROJECT.name}\n${PROJECT.project_id}"`)
-    expect(html).not.toContain('<input')
+    expect(html).not.toMatch(/<input[^>]*type="(?:text|search)"/)
+  })
+
+  it('forwards the exact project value through the shared selection callback', () => {
+    const onSelect = vi.fn()
+    const other = { ...PROJECT, project_id: '00000000-0000-4000-8000-000000000011', name: 'Other project' }
+    renderToStaticMarkup(<ProjectContextSelect projectId={PROJECT.project_id}
+      projectState={{ status: 'ready', projects: [PROJECT, other] }} onSelect={onSelect} />)
+    lastSelectProps().onValueChange!(other.project_id)
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith(other.project_id)
   })
 
   it('shows a placeholder and keeps the control disabled while nothing is selectable', () => {

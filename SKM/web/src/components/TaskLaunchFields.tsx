@@ -1,3 +1,4 @@
+import { Select } from './Select'
 import type { PublishedTaskRecord, TaskReadinessRecord } from '../api'
 import { useMessages } from '../i18n'
 import { parseInputObject, sourceRequirements, usesDocumentSelection, type SourceRequirementChoice } from '../lib/taskDraft'
@@ -46,17 +47,17 @@ export function SourceRequirementField({ requirement, value, onChange }: {
   }
   return (
     <label title={requirement.key}>{label}{requirement.required ? '' : messages.workspace.optionalSuffix}
-      <select
+      <Select
         required={requirement.required}
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onValueChange={(nextValue) => onChange(nextValue)}
       >
         <option value="">{requirement.required ? messages.workspace.selectConfiguredResource : messages.workspace.notUsed}</option>
         {unavailable && <option value={value} disabled>{messages.scheduleEditor.retainedSource(value)}</option>}
         {requirement.options.map((option) => (
           <option key={option.value} value={option.value}>{optionLabel(option)}</option>
         ))}
-      </select>
+      </Select>
       {unavailable && <small>{messages.scheduleEditor.sourceUnavailable}</small>}
     </label>
   )

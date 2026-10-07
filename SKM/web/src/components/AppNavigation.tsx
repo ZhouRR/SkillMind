@@ -1,3 +1,4 @@
+import { Select } from './Select'
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
 import type { MetaState, ProjectState } from '../appState'
@@ -218,18 +219,18 @@ export function AppNavigation({ currentRoute, metaState, projectId, projectState
                 選択値の言語名が内容を示すため、見出しは読み上げ名としてだけ残す。 */}
             <label className="sidebarLanguage">
               <span className="visuallyHidden">{messages.language.label}</span>
-              <select
+              <Select
                 title={messages.language.label}
                 value={language}
-                onChange={(event) => {
-                  const next = asUiLanguage(event.target.value)
+                onValueChange={(nextValue) => {
+                  const next = asUiLanguage(nextValue)
                   if (next) onSelectLanguage(next)
                 }}
               >
                 {UI_LANGUAGES.map((candidate) => (
                   <option key={candidate} value={candidate}>{messages.language.names[candidate]}</option>
                 ))}
-              </select>
+              </Select>
             </label>
           </div>
           <div className="sidebarAccount">

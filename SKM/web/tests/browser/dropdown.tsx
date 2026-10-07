@@ -1,85 +1,95 @@
-import { useState, type ChangeEvent, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import { AppNavigation } from '../../src/components/AppNavigation'
-import { DEMO_PROJECT, demoUser } from '../fixtures'
 import { ModalDialog } from '../../src/components/PageElements'
+import { Select } from '../../src/components/Select'
 import { LanguageProvider, useMessages } from '../../src/i18n'
 import type { UiLanguage } from '../../src/lib/i18n/messages'
-import '../../src/styles/base.css'
-import '../../src/styles/shell.css'
-import '../../src/styles/presentation.css'
+import { HomePage } from '../../src/pages/HomePage'
+import { DEMO_PROJECT, demoUser } from '../fixtures'
+import '../../src/styles.css'
 
-/** 共有 catalog の長文を再利用し、三語の折返しを実データに依存せず確認する。 */
-function LongOptions() {
-  const messages = useMessages()
-  return <>
-    {Array.from({ length: 36 }, (_, index) => <option key={index} value={`long-${index}`}>
-      {`${String(index + 1).padStart(2, '0')} · ${messages.routes.documents.description} · ${messages.routes.schedules.description} · project_document_${'long_name_'.repeat(7)}${index}`}
-    </option>)}
-  </>
-}
-
-/** React controlled の native form/disabled/picker/modal を API なしで観測する隔離 fixture。 */
+/** 共有 Select の controlled/form/disabled/popup/modal 契約を API なしで観測する。 */
 function Fixture() {
   const messages = useMessages()
   const [value, setValue] = useState('alpha')
-  const [changes, setChanges] = useState(0)
+  const [changes, setChanges] = useState<string[]>([])
   const [required, setRequired] = useState('')
+  const [numeric, setNumeric] = useState(1)
   const [long, setLong] = useState('long-0')
   const [modalValue, setModalValue] = useState('alpha')
   const [modal, setModal] = useState(false)
   const [submitted, setSubmitted] = useState('')
-  const [sizeOne, setSizeOne] = useState('alpha')
   const [listbox, setListbox] = useState('alpha')
   const [multiple, setMultiple] = useState(['alpha'])
-  const onChange = (event: ChangeEvent<HTMLSelectElement>) => {
-    setValue(event.target.value)
-    setChanges((count) => count + 1)
+  const onChange = (nextValue: string) => {
+    setValue(nextValue)
+    setChanges((previous) => [...previous, nextValue])
   }
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setSubmitted(JSON.stringify(Object.fromEntries(new FormData(event.currentTarget))))
   }
   return <main style={{ maxWidth: 880, margin: '0 auto', padding: '20px 16px 170px' }}>
-    <h1>Native dropdown fixture</h1>
+    <h1>Shared dropdown fixture</h1>
     <p className="hint">{messages.routes.projects.description}</p>
-    <form id="native-form" className="panel" onSubmit={onSubmit} style={{ maxWidth: 460 }}>
+    <form id="dropdown-form" className="panel" onSubmit={onSubmit} onReset={() => {
+      // Controlled form は他の入力と同様、所有者が reset 後の state を復元する。
+      setValue('alpha')
+      setRequired('')
+      setNumeric(1)
+      setChanges([])
+      setSubmitted('')
+    }} style={{ maxWidth: 460 }}>
       <label htmlFor="basic-select">{messages.elements.projectLabel}</label>
-      <select id="basic-select" name="project" value={value} onChange={onChange}>
-        <option value="alpha">{messages.routes.projects.label}</option>
-        <option value="blocked" disabled>{messages.elements.projectUnavailable}</option>
+      <Select id="basic-select" name="project" value={value} onValueChange={onChange}>
+        <option value="alpha">Alpha · {messages.routes.projects.label}</option>
+        <option value="blocked" disabled>Beta unavailable · {messages.elements.projectUnavailable}</option>
         <optgroup label={messages.elements.archivedProject} disabled>
           <option value="archived-a">{messages.routes.history.label}</option>
           <option value="archived-b">{messages.routes.schedules.label}</option>
         </optgroup>
-        <option value="beta">{messages.routes.documents.label}</option>
-        <option value="gamma">{messages.routes.skills.label}</option>
-      </select>
+        <option value="beta">Beta · {messages.routes.documents.label}</option>
+        <option value="gamma">Gamma · {messages.routes.skills.label}</option>
+      </Select>
       <output id="selection" style={{ display: 'block', marginBlock: 8 }}>{value}</output>
-      <output id="change-count" style={{ display: 'block', marginBlock: 8 }}>{changes}</output>
+      <output id="change-count" style={{ display: 'block', marginBlock: 8 }}>{changes.length}</output>
+      <output id="change-log" hidden>{JSON.stringify(changes)}</output>
+      <button id="after-basic" type="button" className="secondaryButton">{messages.elements.close}</button>
       <label htmlFor="required-select">{messages.elements.selectProject}</label>
-      <select id="required-select" name="requiredProject" required value={required} onChange={(event) => setRequired(event.target.value)}>
+      <Select id="required-select" name="requiredProject" required value={required} onValueChange={setRequired}>
         <option value="" disabled>{messages.elements.selectProject}</option>
         <option value="required-alpha">{messages.routes.projects.label}</option>
         <option value="required-beta">{messages.routes.documents.label}</option>
-      </select>
+      </Select>
+      <label htmlFor="numeric-select">{messages.routes.schedules.label}</label>
+      <Select id="numeric-select" name="numericProject" value={numeric} onValueChange={(next) => setNumeric(Number(next))}>
+        <option value={1}>1 · {messages.routes.projects.label}</option>
+        <option value={2}>2 · {messages.routes.documents.label}</option>
+      </Select>
+      <output id="numeric-selection">{numeric}</output>
       <label htmlFor="disabled-select" style={{ marginTop: 12 }}>{messages.elements.noAccessibleProjects}</label>
-      <select id="disabled-select" name="disabledProject" disabled value="unavailable" onChange={() => setChanges((count) => count + 100)}>
+      <Select id="disabled-select" name="disabledProject" disabled value="unavailable" onValueChange={() => setChanges((previous) => [...previous, 'unexpected'])}>
         <option value="unavailable">{messages.elements.projectUnavailable}</option>
         <option value="unexpected">{messages.routes.projects.label}</option>
-      </select>
+      </Select>
       <button id="submit-form" type="submit" className="secondaryButton" style={{ marginTop: 12 }}>{messages.account.save}</button>
+      <button id="reset-form" type="reset" className="secondaryButton">Reset</button>
       <output id="submitted" style={{ display: 'block', overflowWrap: 'anywhere' }}>{submitted}</output>
+    </form>
+    <form id="uncontrolled-form" className="panel" style={{ maxWidth: 460, marginTop: 12 }}>
+      <label htmlFor="uncontrolled-select">{messages.elements.projectLabel}</label>
+      <Select id="uncontrolled-select" name="uncontrolledProject" defaultValue="beta">
+        <option value="alpha">Alpha · {messages.routes.projects.label}</option>
+        <option value="beta">Beta · {messages.routes.documents.label}</option>
+        <option value="gamma">Gamma · {messages.routes.skills.label}</option>
+      </Select>
+      <button id="reset-uncontrolled" type="reset" className="secondaryButton">Reset</button>
     </form>
     <button id="open-modal" type="button" className="secondaryButton" onClick={() => setModal(true)} style={{ marginTop: 16 }}>{messages.account.edit}</button>
     <button id="outside" type="button" className="secondaryButton" style={{ margin: 16 }}>{messages.elements.close}</button>
     <section className="panel" style={{ display: 'grid', gap: 12, maxWidth: 460, marginTop: 12 }}>
-      <label>size=1
-        <select id="size-one-select" size={1} value={sizeOne} onChange={(event) => setSizeOne(event.target.value)}>
-          <option value="alpha">{messages.routes.projects.label}</option><option value="beta">{messages.routes.documents.label}</option>
-        </select>
-      </label>
       <label>size=3
         <select id="listbox-select" size={3} value={listbox} onChange={(event) => setListbox(event.target.value)}>
           <option value="alpha">{messages.routes.projects.label}</option><option value="beta">{messages.routes.documents.label}</option><option value="gamma">{messages.routes.skills.label}</option>
@@ -93,33 +103,43 @@ function Fixture() {
     </section>
     <div id="clipped-container" style={{ position: 'fixed', bottom: 10, right: 10, width: 'min(320px, calc(100vw - 20px))', height: 126, overflow: 'hidden', padding: 8, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--surface)' }}>
       <label htmlFor="long-select">{messages.routes.documents.label}</label>
-      <select id="long-select" value={long} onChange={(event) => setLong(event.target.value)}><LongOptions /></select>
+      <Select id="long-select" value={long} onValueChange={setLong}>
+        {Array.from({ length: 36 }, (_, index) => <option key={index} value={`long-${index}`}>
+          {`${String(index + 1).padStart(2, '0')} · ${messages.routes.documents.description} · project_document_${'long_name_'.repeat(5)}${index}`}
+        </option>)}
+      </Select>
+      <output id="long-selection" hidden>{long}</output>
     </div>
     <ModalDialog open={modal} title={messages.account.edit} onClose={() => setModal(false)}>
+      <button id="modal-before" type="button" className="secondaryButton">{messages.routes.projects.label}</button>
       <label htmlFor="modal-select">{messages.elements.projectLabel}</label>
-      <select id="modal-select" value={modalValue} onChange={(event) => setModalValue(event.target.value)}>
+      <Select id="modal-select" value={modalValue} onValueChange={setModalValue}>
         <option value="alpha">{messages.routes.projects.label}</option>
         <option value="beta">{messages.routes.documents.label}</option>
         <option value="gamma">{messages.routes.skills.label}</option>
-      </select>
+      </Select>
+      <button id="modal-after" type="button" className="secondaryButton">{messages.routes.documents.label}</button>
       <output id="modal-selection">{modalValue}</output>
     </ModalDialog>
   </main>
 }
 
-/** 本物の緊凑導航を local state だけで動かし、pending badge の API 読取を明示的に止める。 */
+/** 実際の HomePage と導航を同じ Provider で描画し、言語変更の到達先を検証する。 */
 function NavigationFixture({ initialLanguage }: { initialLanguage: UiLanguage }) {
   const [language, setLanguage] = useState(initialLanguage)
   const [project, setProject] = useState(DEMO_PROJECT.project_id)
+  const [languageChanges, setLanguageChanges] = useState(0)
+  useEffect(() => { document.documentElement.lang = language }, [language])
+  const metaState = { status: 'ready' as const, meta: { name: 'skillmind', version: 'fixture', phase: 'test', task: 'dropdown', ingress: '/skillmind' } }
   return <LanguageProvider language={language}>
     <div className="appFrame">
       <AppNavigation
         currentRoute="home"
-        metaState={{ status: 'ready', meta: { name: 'skillmind', version: 'fixture', phase: 'test', task: 'dropdown', ingress: '/skillmind' } }}
+        metaState={metaState}
         projectId={project}
         pendingProjectId=""
         projectState={{ status: 'ready', projects: [DEMO_PROJECT, { ...DEMO_PROJECT, project_id: '00000000-0000-4000-8000-000000000011', name: 'Synthetic alternate project', key: 'alternate' }] }}
-        onSelectLanguage={setLanguage}
+        onSelectLanguage={(next) => { setLanguage(next); setLanguageChanges((count) => count + 1) }}
         onSelectProject={setProject}
         onSelectModule={() => undefined}
         activeModuleId=""
@@ -128,7 +148,13 @@ function NavigationFixture({ initialLanguage }: { initialLanguage: UiLanguage })
         onLogout={() => undefined}
         logoutError={null}
       />
-      <main className="shell"><h1>Navigation dropdown fixture</h1></main>
+      <main className="shell" data-page="home">
+        {/* 未選択の HomePage は実装自身が API を呼ばないため、通信を mock に差替える必要がない。 */}
+        <HomePage metaState={metaState} project={null} projectId="" />
+        <output id="navigation-language" hidden>{language}</output>
+        <output id="navigation-language-changes" hidden>{languageChanges}</output>
+        <output id="navigation-project" hidden>{project}</output>
+      </main>
     </div>
   </LanguageProvider>
 }

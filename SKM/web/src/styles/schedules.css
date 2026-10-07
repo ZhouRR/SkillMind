@@ -3,7 +3,7 @@
 .scheduleManagerList, .scheduleManagerDetail { min-width: 0; }
 .scheduleFilters { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
 .scheduleFilters label { flex: 1 1 150px; min-width: 0; }
-.scheduleFilters input, .scheduleFilters select { width: 100%; min-width: 0; }
+.scheduleFilters input, .scheduleFilters :is(select, .selectTrigger) { width: 100%; min-width: 0; }
 /* 全行を残し、Tab/矢印/タッチで巡れる有界一覧にする。狭幅でも詳細まで長く送らない。 */
 .scheduleRows { list-style: none; padding: 4px; display: grid; gap: 10px; max-height: min(60vh, 42rem); overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; }
 .scheduleRows li { min-width: 0; }

@@ -79,6 +79,15 @@ python3 tests/browser/check_projects.py \
 | 文書・directory | document_organization、document_management、document_preview、document_image_preview、document_upload、document_update、document_batches |
 | 接続・Skill・調度 | resource_editing、resource_request_lifecycle、mcp_tools、interpretation_requests、skill_library_delete、task_launch_identity、task_schedules、schedule_times |
 
+共有 dropdown の回帰は `dropdown.html` を使い、OS native picker への fallback を成功と扱わない。Chromium/Firefox/WebKit を用意した隔離環境で実行する：
+
+```bash
+python3 -m playwright install chromium firefox webkit
+python3 tests/browser/check_dropdown.py --url http://127.0.0.1:5189/skillmind/tests/browser/dropdown.html --browser all
+```
+
+全 engine・三語・双テーマ・desktop/狭幅/短い viewport の結果を `results.json` に保存する。popup の幾何・hit-test・Tab と portal は実 browser で確認し、jsdom の操作回帰を見た目の証明として扱わない。既存 browser runner は `select_helpers.py` 経由で共有 popup を実 click する。
+
 全 runner は [tests/browser](../../SKM/web/tests/browser/) にある。harness URL と `--output` 等の必須引数は各 runner を参照する。主に projects.html、提出系は run-submission.html を使う。
 外置依存は PYTHONPATH、browser は PLAYWRIGHT_BROWSERS_PATH を指定する。使用中 port を奪わず、終了時は自分の Vite だけを止める。mock は実 DB の競合/撤権、blob、外部 write や複数 Worker の証明ではない。
 

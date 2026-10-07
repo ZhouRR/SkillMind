@@ -14,6 +14,7 @@ from check_projects import PROJECT, RUN, TASK, SECOND_VERSION, layout, messages
 from check_run_submission import task_catalog
 from check_result_references import CONTRACTS
 from playwright.async_api import Route, async_playwright, expect
+from select_helpers import select_option, select_options
 
 SECOND_TASK = '00000000-0000-4000-8000-000000000032'
 
@@ -113,12 +114,13 @@ async def check(url: str, output: Path) -> None:
                     assert api.queries[-1]['status'] == ['SUCCEEDED', 'FAILED', 'CANCELLED']
                     assert api.queries[-1]['task_id'] == [TASK]
                     assert api.queries[-1]['limit'] == ['1']
-                    chooser = page.locator('.reportToolbar select')
-                    await expect(chooser.locator('option')).to_have_count(2)
-                    await chooser.select_option(SECOND_TASK)
+                    chooser = page.locator('.reportToolbar .selectTrigger')
+                    async with select_options(chooser) as options:
+                        await expect(options).to_have_count(2)
+                    await select_option(chooser, SECOND_TASK)
                     await expect(page.get_by_text(work['latestReportEmpty'], exact=True)).to_be_visible()
                     await expect(page.locator('iframe.outcomeReportFrame')).to_have_count(0)
-                    await chooser.select_option(TASK)
+                    await select_option(chooser, TASK)
                     await expect(page.locator('.resultSummary .readingMarkdown')).to_have_text(api.body['result']['summary'])
                     await expect(page.get_by_role('tab', name=work['tabConversation'], exact=True)).to_have_count(0)
                     await expect(page.get_by_role('tab', name=work['tabEvents'], exact=True)).to_have_count(0)

@@ -128,7 +128,7 @@ async def theme_controls(browser: Browser, url: str, output: Path) -> None:
         dialog = page.get_by_role("dialog", name=labels["resources"]["connectTitle"], exact=True)
         await expect(dialog).to_be_visible()
         await expect(page.locator(".modalDrawer:not([hidden])")).to_have_count(1)
-        field = dialog.locator('input:not([type="password"])').first
+        field = dialog.locator('input:not([type="password"]):not([aria-hidden="true"])').first
         await field.fill("https://fixture.example.com")
         # 別 tab からの変更は開いた drawer を閉じず、原草稿を保持する。
         other = await context.new_page()
@@ -222,7 +222,7 @@ async def sidebar_layout(page: Page) -> None:
     assert metrics["panelScroll"] == "auto" and metrics["navScroll"] == "visible", metrics
     assert metrics["footerGap"] >= -1, metrics
     # focus による親 scroll で、退出・言語・外観の全操作へ到達できる。
-    for selector in (".sidebarLogout", ".sidebarLanguage select", ".themeToggle button"):
+    for selector in (".sidebarLogout", ".sidebarLanguage .selectTrigger", ".themeToggle button"):
         control = page.locator(selector).first
         await control.focus()
         await expect(control).to_be_focused()

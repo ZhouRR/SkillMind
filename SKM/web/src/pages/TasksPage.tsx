@@ -1,3 +1,4 @@
+import { Select } from '../components/Select'
 import { RunDuration } from '../components/RunDuration'
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 
@@ -167,13 +168,13 @@ function TaskCenter({ projectId, csrfToken, moduleId, currentProject = null, pro
         <form className="taskFilters" data-task-filters onSubmit={search}>
           <label>{messages.scheduleManager.searchLabel}<input data-task-search value={q} maxLength={200}
             onChange={(event) => setQ(event.target.value)} /></label>
-          <label>{messages.scheduleManager.statusLabel}<select data-task-status value={status}
-            onChange={(event) => setStatus(event.target.value as TaskScheduleStatusFilter)}>
+          <label>{messages.scheduleManager.statusLabel}<Select data-task-status value={status}
+            onValueChange={(nextValue) => setStatus(nextValue as TaskScheduleStatusFilter)}>
             <option value="">{messages.scheduleManager.allStates}</option>
             <option value="UNCONFIGURED">{messages.tasks.noSchedule}</option>
             {(['ACTIVE', 'PAUSED', 'COMPLETED', 'ERROR', 'ARCHIVED'] as const).map((value) =>
               <option key={value} value={value}>{messages.enums.scheduleStatus[value]}</option>)}
-          </select></label>
+          </Select></label>
           <button className="primaryButton compactButton" type="submit" disabled={queryInvalid}>{messages.scheduleManager.search}</button>
           <button className="secondaryButton compactButton" type="button" data-task-refresh disabled={state.status === 'loading'}
             onClick={() => setRevision((current) => current + 1)}>{messages.scheduleManager.refresh}</button>

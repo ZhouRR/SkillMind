@@ -13,6 +13,7 @@ from check_accounts import ACTOR, CSRF
 from check_document_upload import UploadMockApi
 from check_projects import PROJECT, messages
 from playwright.async_api import Route, async_playwright, expect
+from select_helpers import select_option
 
 
 class ConnectionsApi(UploadMockApi):
@@ -100,9 +101,9 @@ async def check(url: str, output: Path) -> None:
                             "button", name=labels["connectTitle"], exact=True
                         ).click()
                         dialog = page.get_by_role("dialog")
-                        await dialog.get_by_role(
+                        await select_option(dialog.get_by_role(
                             "combobox", name=labels["providerLabel"], exact=True
-                        ).select_option(provider)
+                        ), provider)
                         await dialog.get_by_label(labels["nameLabel"], exact=True).fill(
                             f"{provider} reports"
                         )
@@ -126,7 +127,7 @@ async def check(url: str, output: Path) -> None:
                             await dialog.locator("textarea").fill("resource://reports/current")
                         else:
                             await dialog.get_by_label(labels["baseUrlLabel"], exact=True).fill("https://api.example.test")
-                            await dialog.get_by_role("combobox", name=labels["httpAuthentication"], exact=True).select_option("none")
+                            await select_option(dialog.get_by_role("combobox", name=labels["httpAuthentication"], exact=True), "none")
                             await dialog.locator("textarea").fill("/issues")
                         await page.screenshot(
                             path=str(output / f"{provider}-{language}-{theme}-{width}.png")

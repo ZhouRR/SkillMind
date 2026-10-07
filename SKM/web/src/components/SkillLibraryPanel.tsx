@@ -1,3 +1,4 @@
+import { Select } from './Select'
 import { useState } from 'react'
 import type { ProjectSkillVersionRecord, SkillVersionRecord } from '../api'
 import { useMessages } from '../i18n'
@@ -147,10 +148,10 @@ export function SkillLibraryPanel({
       {!projectId && <p className="hint">{messages.skills.libraryNoProjectHint}</p>}
       {versions.length > 0 && <div className="skillLibraryFilters">
         <label>{messages.skills.librarySearch}<input type="search" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
-        <label>{messages.skills.libraryStatus}<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+        <label>{messages.skills.libraryStatus}<Select value={statusFilter} onValueChange={(nextValue) => setStatusFilter(nextValue)}>
           <option value="all">{messages.skills.libraryAllStatuses}</option>
           {(['PUBLISHED', 'DRAFT', 'DEPRECATED'] as const).map((status) => <option key={status} value={status}>{messages.enums.skillVersionStatus[status]}</option>)}
-        </select></label>
+        </Select></label>
         <span className="hint" role="status">{messages.skills.libraryMatches(visibleVersions.length, versions.length)}</span>
         {(query || statusFilter !== 'all') && <button className="secondaryButton" type="button" onClick={clearFilters}>{messages.skills.libraryClearFilters}</button>}
       </div>}

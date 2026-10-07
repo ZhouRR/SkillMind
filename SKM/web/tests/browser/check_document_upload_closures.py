@@ -24,6 +24,7 @@ from check_document_upload_receipts import (
 )
 from check_projects import ARCHIVED, NEXT_PROJECT, PROJECT, menu, messages, privacy, settle
 from playwright.async_api import Browser, Page, Route, async_playwright, expect
+from select_helpers import select_option
 
 
 class ClosureApi(UploadReceiptsApi):
@@ -185,7 +186,7 @@ async def switch_owner(page: Page, api: ClosureApi, language: str, actor: bool) 
     """現在の App 選択または有効 session を実操作で置換する。"""
     if not actor:
         await menu(page)
-        await page.locator(".sideNavProject select").select_option(NEXT_PROJECT)
+        await select_option(page.locator(".sideNavProject .selectTrigger"), NEXT_PROJECT)
         await expect(page.locator(".documentUploadItems > li")).to_have_count(0)
         return
     await page.evaluate("location.hash='/accounts'")

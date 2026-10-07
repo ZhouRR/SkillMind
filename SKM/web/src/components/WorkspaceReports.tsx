@@ -1,3 +1,4 @@
+import { Select } from './Select'
 import { RunDuration } from './RunDuration'
 import { useCallback, useEffect, useState } from 'react'
 
@@ -49,10 +50,10 @@ export function WorkspaceReports({ projectId, tasks, actorId, csrfToken, onSessi
   return <div className="workspaceReports">
     <div className="reportToolbar">
       <label>{messages.workspace.taskLabel}
-        <select value={taskId} disabled={!tasks.length} onChange={(event) => setSelected(event.target.value)}>
+        <Select value={taskId} disabled={!tasks.length} onValueChange={(nextValue) => setSelected(nextValue)}>
           {!tasks.length && <option value="">{messages.workspace.noModuleTasks}</option>}
           {tasks.map((item) => <option key={item.task_id} value={item.task_id}>{item.title} · v{item.version}</option>)}
-        </select>
+        </Select>
       </label>
       <button className="secondaryButton" type="button" disabled={query.pending || !taskId}
         onClick={query.refresh}>{messages.runHistory.retry}</button>
