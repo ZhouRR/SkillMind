@@ -25,23 +25,30 @@ def contains_sensitive_content(text: str) -> bool:
     return bool(_CREDENTIAL_ASSIGNMENT.search(text) or _PRIVATE_KEY_MARKER.search(text))
 
 
-def find_sensitive_key(value: Any) -> str | None:
-    """入れ子構造から最初の credential らしい key 名を返し、なければ None を返す。"""
+def find_sensitive_key(value: Any, *, include_password: bool = True) -> str | None:
+    """資格の宣言を検査する。工具の応答では password 名による拒否を行わない。"""
 
     if isinstance(value, Mapping):
         for key, nested in value.items():
             normalized = str(key).lower()
             if (
-                normalized in SENSITIVE_KEY_NAMES
-                or any(fragment in normalized for fragment in _SENSITIVE_KEY_FRAGMENTS)
+                (
+                    normalized in SENSITIVE_KEY_NAMES
+                    and (include_password or normalized != "password")
+                )
+                or any(
+                    fragment in normalized
+                    for fragment in _SENSITIVE_KEY_FRAGMENTS
+                    if include_password or fragment != "password"
+                )
             ) and not _control_identifier(key, nested):
                 return str(key)
-            found = find_sensitive_key(nested)
+            found = find_sensitive_key(nested, include_password=include_password)
             if found is not None:
                 return found
     elif isinstance(value, list | tuple):
         for nested in value:
-            found = find_sensitive_key(nested)
+            found = find_sensitive_key(nested, include_password=include_password)
             if found is not None:
                 return found
     return None

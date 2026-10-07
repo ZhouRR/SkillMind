@@ -256,7 +256,11 @@ def document_read_tool_definition(
         sequence_safe=True,
         capability="document.read/v1",
         description=(
-            "Open a frozen project document by path. Prefer response_mode=file: copies the "
+            "Read a project document by path or document_id. When the Run grants project-wide "
+            "reading, list/read additional project files, including newly uploaded receipts, "
+            "without changing the selected task inputs. Selected inputs keep their frozen bytes. "
+            "Use expected_hash for an exact observed/uploaded version. Prefer response_mode=file: "
+            "copies the "
             "verified original bytes to this Run and returns a local path/hash without body. "
             "Read or search the file as needed. When available, use workspace.edit/v1 to copy, "
             "append, "
@@ -283,7 +287,8 @@ def document_convert_tool_definition(
             "artifact_refs and artifact size/hash instead of rewriting the Markdown. "
             "When workspace.read/v1 is allowed, use response_mode=file with publish_artifact=true: "
             "returns a readable file path, checksum and line count without the full body. "
-            "Read that file with workspace.read offset=0, max_chars=12000 and expected_hash; "
+            "Read that file with workspace.read offset=0 and expected_hash; the default page "
+            "is 64000 characters, adjustable up to 200000. "
             "follow next_offset until null to cover the full document. If the local copy is "
             "missing or changed, restore the same artifact_ref using artifact.materialize/v1. "
             "Inline is the legacy fallback when file reading is unavailable."
@@ -318,7 +323,9 @@ def document_list_tool_definition(
         sequence_safe=True,
         capability=DOCUMENT_LIST_CAPABILITY,
         description=(
-            "Page through frozen authorized documents by directory and storage LastModified; "
+            "Page through authorized project documents by directory and storage LastModified. "
+            "Runs with project-wide reading include unselected and newly uploaded files. "
+            "Check response.scope; historical Runs may cover only frozen inputs. "
             "follow every next_cursor and convert matches using each entry's observation Evidence"
         ),
         providers={DOCUMENT_PROVIDER: DocumentListProvider(source)},
@@ -414,7 +421,8 @@ def create_run_tool_registry(
                     "Download exact saved UTF-8 bytes from an Artifact of this Run to a readable "
                     "workspace file. Returns file metadata only, never the body. "
                     "Use workspace.read "
-                    "with offset=0, max_chars=12000 and expected_hash, following next_offset. "
+                    "with offset=0 and expected_hash, following next_offset. The default page "
+                    "is 64000 characters; max_chars can be adjusted up to 200000. "
                     "Restores missing or modified local copies without re-conversion "
                     "or publication."
                 ),
@@ -617,8 +625,10 @@ def _workspace_tool_definitions(contracts: ContractStore) -> tuple[ToolDefinitio
             sequence_safe=True,
             capability="workspace.read/v1",
             description=(
-                "Read one UTF-8 Run file. For large files use offset=0, max_chars=12000 "
-                "and expected_hash; follow next_offset until null. Offsets count Unicode "
+                "Read one UTF-8 Run file. Use offset=0 and expected_hash; the default page "
+                "is 64000 Unicode characters. Adjust max_chars up to 200000 for broad reading "
+                "when context allows, or request a smaller range for a focused lookup. "
+                "Follow next_offset until null for complete coverage. Offsets count Unicode "
                 "characters, not bytes. Line ranges are an alternative. Never infer full "
                 "coverage from a truncated response or search matches alone."
             ),

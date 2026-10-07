@@ -303,7 +303,7 @@ async def test_create_task_run_freezes_generic_snapshot(with_output: bool) -> No
         NAMESPACE_URL, f"skillmind:task:{resolved.skill_version_id}:{resolved.task_key}"
     )
     assert command.task_id == expected_task_id
-    assert command.task_snapshot_json["runtime_policy"] == "skillmind.runtime/v6"
+    assert command.task_snapshot_json["runtime_policy"] == "skillmind.runtime/v7"
     assert command.task_snapshot_json["task_key"] == "review-change"
     assert command.task_snapshot_json["capability"] == "repository.review"
     assert command.task_snapshot_json["skill_version_id"] == str(resolved.skill_version_id)
@@ -317,10 +317,15 @@ async def test_create_task_run_freezes_generic_snapshot(with_output: bool) -> No
     # 上限を増やさないので、付与そのものが費用や権限の拡大にはならない。
     assert command.permission_snapshot_json["allowed_capabilities"] == sorted([
         "interaction.request/v1", "repository.read/v1", "subagent.dispatch/v1",
-        *(["repository.workspace/v1", "workspace.write/v2", "workspace.edit/v1", "audit.export/v1", "tool.sequence/v1", "artifact.append/v1"]
+        "document.read/v1", "document.list/v1",
+        *(["repository.workspace/v1", "workspace.write/v2", "workspace.edit/v1",
+           "audit.export/v1", "tool.sequence/v1", "artifact.append/v1"]
           if with_output else []),
     ])
     assert command.permission_snapshot_json["denied_builtin_tools"] == list(M0_DENIED_BUILTIN_TOOLS)
+    assert command.permission_snapshot_json["project_document_read"] == {
+        "version": "v1", "project_id": str(project_id),
+    }
     assert command.permission_snapshot_json["actor_id"] == str(actor_id)
     assert command.permission_snapshot_json["actor_system_role"] == "ADMIN"
     assert command.permission_snapshot_json["project_membership"] == "ADMIN_BYPASS"

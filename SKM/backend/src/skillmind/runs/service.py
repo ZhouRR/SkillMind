@@ -289,9 +289,12 @@ class RunService:
                     "actor_system_role": authority.actor_system_role,
                     "project_membership": authority.project_membership,
                     "execution_profile": execution_profile,
+                    # 新規 Run の補助読取は Project 全体。選択入力の ID/hash は別途保持する。
+                    "project_document_read": {"version": "v1", "project_id": str(project_id)},
                     # 新規 Run だけに配備上限を固定する。旧 snapshot の権限を削って再利用しない。
                     "allowed_capabilities": sorted(
                         {
+                            "document.read/v1", "document.list/v1",
                             *(
                                 capability
                                 for capability in resolved.allowed_capabilities

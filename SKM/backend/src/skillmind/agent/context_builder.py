@@ -127,8 +127,7 @@ class ProductionRunContextBuilder:
             raise ValueError("Permission snapshot contains invalid capabilities")
         # 旧権限を削って別 Run として実行せず、物化・モデル起動の前に拒否する。
         if any(
-            not self._execution_features.capability_enabled(capability)
-            for capability in allowed
+            not self._execution_features.capability_enabled(capability) for capability in allowed
         ):
             raise ValueError("Run snapshot requires disabled execution features")
 
@@ -148,14 +147,18 @@ class ProductionRunContextBuilder:
                 claimed_run.selected_sources_json, project_id=claimed_run.project_id
             )
             deferred_ids = {
-                document.document_id for snapshot in snapshots
+                document.document_id
+                for snapshot in snapshots
                 if document_preparation_policy(
                     claimed_run.selected_sources_json[snapshot.requirement_key]
                 )
                 for document in snapshot.documents
             }
-            if any(document.document_id not in deferred_ids
-                   for snapshot in snapshots for document in snapshot.documents):
+            if any(
+                document.document_id not in deferred_ids
+                for snapshot in snapshots
+                for document in snapshot.documents
+            ):
                 raise ValueError("Document prerequisites require on-demand preparation")
         execution_profile = resolve_execution_profile(blueprint).profile.value
         snapshot_profile = permission.get("execution_profile")
@@ -203,8 +206,11 @@ class ProductionRunContextBuilder:
                 blueprint=blueprint,
                 repository_bindings=repository_bindings,
                 document_snapshots=document_snapshots,
-                skill_documents=(manifest.get("source_documents", ())
-                    if any(tool.capability in SKILL_FILE_CAPABILITIES for tool in tools) else ()),
+                skill_documents=(
+                    manifest.get("source_documents", ())
+                    if any(tool.capability in SKILL_FILE_CAPABILITIES for tool in tools)
+                    else ()
+                ),
             )
             workspace = prepared_input.workspace
             materialized = prepared_input.resources
@@ -219,17 +225,21 @@ class ProductionRunContextBuilder:
             selected_sources=claimed_run.selected_sources_json,
             tools=tools,
             limits=limits,
+            permission_snapshot=permission,
             model=self._model,
             segment_no=claimed_run.segment_no,
             segment_objective=_segment_objective(claimed_run.segment_objective_json),
             checkpoint=claimed_run.checkpoint_json,
-            effect_receipts=(await self._proposal_continuations.receipts(claimed_run)
-                if self._proposal_continuations is not None
-                and uses_modern_runtime(task) else ()),
-            database_observations=(await self._database_observations.project_facts(
-                claimed_run, tools, workspace
-            )
-                if self._database_observations is not None else ()),
+            effect_receipts=(
+                await self._proposal_continuations.receipts(claimed_run)
+                if self._proposal_continuations is not None and uses_modern_runtime(task)
+                else ()
+            ),
+            database_observations=(
+                await self._database_observations.project_facts(claimed_run, tools, workspace)
+                if self._database_observations is not None
+                else ()
+            ),
             # 物化器が実際に書いた落点だけを Brief へ載せる (計画 §19 W6)。未配線環境で存在
             # しない directory を案内すると、Agent は読めない path を試して行き詰まる。
             materialized=materialized,
@@ -265,7 +275,8 @@ class ProductionRunContextBuilder:
             input_json=dict(claimed_run.input_json),
             resolved_proposal=(
                 await self._proposal_continuations.load(claimed_run)
-                if self._proposal_continuations is not None else None
+                if self._proposal_continuations is not None
+                else None
             ),
         )
 
@@ -409,9 +420,16 @@ def _resolve_source_tools(
     if "repository.workspace/v1" in allowed:
         for original in tuple(tools):
             if original.capability == "repository.read/v1" and original.provider == "git":
-                tools.append(registry.resolve("repository.workspace/v1", provider="git",
-                    integration_id=original.integration_id, binding_id=original.binding_id,
-                    resource_key=original.resource_key, execution_profile=execution_profile))
+                tools.append(
+                    registry.resolve(
+                        "repository.workspace/v1",
+                        provider="git",
+                        integration_id=original.integration_id,
+                        binding_id=original.binding_id,
+                        resource_key=original.resource_key,
+                        execution_profile=execution_profile,
+                    )
+                )
     if uses_modern_runtime(claimed_run.task_snapshot_json):
         for original in tuple(tools):
             if original.capability != "database.read/v1":
@@ -478,7 +496,10 @@ def _resolve_source_tools(
             continue
         try:
             if tool_capability in DOCUMENT_CAPABILITIES:
-                if not any(tool.capability in DOCUMENT_CAPABILITIES for tool in tools):
+                if not any(tool.capability in DOCUMENT_CAPABILITIES for tool in tools) and (
+                    claimed_run.permission_snapshot_json.get("project_document_read")
+                    != {"version": "v1", "project_id": str(claimed_run.project_id)}
+                ):
                     raise LookupError("Document Tool requires a frozen document selection")
                 resolved = registry.resolve(
                     tool_capability,
@@ -528,6 +549,20 @@ def _resolve_source_tools(
     ):
         if auxiliary in allowed and auxiliary not in resolved_capabilities:
             tools.append(registry.resolve_unbound(auxiliary, execution_profile=execution_profile))
+    if claimed_run.permission_snapshot_json.get("project_document_read") == {
+        "version": "v1",
+        "project_id": str(claimed_run.project_id),
+    }:
+        for capability in ("document.read/v1", "document.list/v1"):
+            if capability in allowed and capability not in resolved_capabilities:
+                tools.append(
+                    registry.resolve(
+                        capability,
+                        provider=DOCUMENT_PROVIDER,
+                        integration_id=None,
+                        execution_profile=execution_profile,
+                    )
+                )
     return tools, repository_bindings
 
 

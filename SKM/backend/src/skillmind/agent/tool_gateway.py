@@ -790,7 +790,7 @@ def _reject_sensitive_response_keys(value: Any, *, capability: str | None = None
 
         sensitive = find_sensitive_tool_metadata(value)
     else:
-        sensitive = find_sensitive_key(value)
+        sensitive = find_sensitive_key(value, include_password=False)
     if sensitive is not None:
         raise ToolGatewayError(
             "unavailable", "Tool response contained a sensitive field", retryable=False

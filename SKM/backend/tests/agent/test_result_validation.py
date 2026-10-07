@@ -261,3 +261,15 @@ async def test_outcome_rejects_undeclared_structured_data_and_sensitive_fields()
             task_schema_ref=SCHEMA_CHECKSUM,
         )
     assert sensitive.value.code == "result_sensitive_field"
+
+
+async def test_result_keeps_password_named_state_without_new_rejection() -> None:
+    """応答で許可した状態情報を、最終結果の保存時に再び拒否しない。"""
+    task_schema = {"type": "object", "additionalProperties": True}
+    compiled = compile_outcome_schema(task_schema, task_schema_checksum=SCHEMA_CHECKSUM)
+    validated = await _validator(frozenset({"ev_generic_1"})).validate(
+        run_id=uuid4(), schema=compiled.schema, schema_ref=compiled.checksum,
+        structured_output=_outcome(structured_data={"controlState": {"isPassword": False}}),
+        result_kind="OUTCOME_ENVELOPE", task_schema=task_schema, task_schema_ref=SCHEMA_CHECKSUM,
+    )
+    assert validated.validation["task_schema_valid"] is True

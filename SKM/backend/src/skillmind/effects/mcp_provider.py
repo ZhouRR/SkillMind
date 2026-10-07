@@ -236,11 +236,17 @@ def _evidence(
 
 
 def _observation(
-    execution: ClaimedEffectExecution, content: dict[str, Any], phase: str, credential: str,
+    execution: ClaimedEffectExecution,
+    content: dict[str, Any],
+    phase: str,
+    credential: str,
 ) -> EffectEvidenceDraft:
     """未確認の取得事実を保存し、機密らしい応答は本文全体を除外する。"""
     serialized = canonical_json(content)
-    if (find_sensitive_key(content) is not None or contains_sensitive_content(serialized)
-        or credential in serialized):
+    if (
+        find_sensitive_key(content, include_password=False) is not None
+        or contains_sensitive_content(serialized)
+        or credential in serialized
+    ):
         content = {"omitted": True, "reason": "sensitive_content"}
     return _evidence(execution, {"verified": False, "response": content}, phase)

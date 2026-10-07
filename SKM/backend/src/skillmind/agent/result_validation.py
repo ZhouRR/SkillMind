@@ -297,7 +297,7 @@ class ResultValidator:
                 code="result_schema_invalid",
                 label="output",
             )
-            if find_sensitive_key(structured_output) is not None:
+            if find_sensitive_key(structured_output, include_password=False) is not None:
                 raise ResultValidationError(
                     "result_sensitive_field",
                     "Agent result contained a sensitive field",

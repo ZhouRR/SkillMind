@@ -1,4 +1,4 @@
-"""Run の凍結文書集合を有界 page で観測し、storage 更新日時で選別する。"""
+"""Project または旧 Run の凍結文書集合を有界 page で観測する。"""
 
 from __future__ import annotations
 
@@ -10,6 +10,10 @@ from typing import Any
 from skillmind.agent.document_inspection import document_observation_result
 from skillmind.agent.document_provider import resolve_frozen_documents
 from skillmind.agent.evidence import EvidenceDraft
+from skillmind.agent.project_document_access import (
+    has_project_document_read,
+    project_document_source,
+)
 from skillmind.agent.tool_gateway import ProviderToolResult, RunToolContext, ToolProviderError
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.documents.directory_query import parse_directory_query
@@ -25,7 +29,7 @@ from skillmind.storage import FileStorageError
 
 
 class DocumentListProvider:
-    """元の選択を越えず、候補単位の page と文書ごとの再利用可能な観測を返す。"""
+    """Run の読取範囲内で page と文書ごとの再利用可能な観測を返す。"""
 
     def __init__(self, source: ProjectDocumentSource) -> None:
         """単一 inspect と同じ source を使い、bucket の別権限経路を作らない。"""
@@ -37,7 +41,14 @@ class DocumentListProvider:
     ) -> ProviderToolResult:
         """path 条件を先に適用し、選択した page の実 metadata だけを取得する。"""
 
-        documents = _listing_documents(context)
+        project_read = has_project_document_read(context)
+        if project_read:
+            library = await project_document_source(self._source, context)
+            documents = tuple(await library.list_documents(project_id=context.project_id))
+            # 現在目録は本文を追加取得する権限であり、試験入力の集合を変更しない。
+            _listing_documents(context)
+        else:
+            documents = _listing_documents(context)
         try:
             query = parse_directory_query(arguments)
             limit = arguments.get("limit", 50)
@@ -79,7 +90,7 @@ class DocumentListProvider:
                         or observed.project_id != context.project_id
                         or not same_document_content(observed.document, document)
                         or observed.observation.size != document.size
-                        or _listing_documents(context) != documents
+                        or (not project_read and _listing_documents(context) != documents)
                     ):
                         raise DocumentSnapshotError("Frozen document metadata no longer matches")
                     result = document_observation_result(
@@ -109,12 +120,14 @@ class DocumentListProvider:
             raise ToolProviderError(
                 "unavailable", "Directory metadata observation is incomplete", retryable=False
             ) from error
-        if _listing_documents(context) != documents:
+        if project_read:
+            await project_document_source(self._source, context)
+        elif _listing_documents(context) != documents:
             raise ToolProviderError("scope_denied", "Frozen selection changed", retryable=False)
         response: dict[str, Any] = {
             "status": "success",
             "provider": "project",
-            "scope": "run_frozen_documents",
+            "scope": "project_documents" if project_read else "run_frozen_documents",
             "query": query.parameters,
             "query_checksum": checksum,
             "limit": limit,
@@ -127,9 +140,21 @@ class DocumentListProvider:
             else None,
             "entries": entries,
             "warnings": [
-                "Only documents frozen and authorized for this Run are covered; this is not "
-                "a live bucket listing. Follow next_cursor until null, including pages with "
-                "no matching entries. Failed pages do not establish coverage.",
+                *(
+                    [
+                        "Current project document library, excluding the recycle bin. Additional "
+                        "references do not change frozen task inputs. If the catalog changes "
+                        "between "
+                        "pages, start a new listing without cursor."
+                    ]
+                    if project_read
+                    else [
+                        "Only documents frozen and authorized for this Run are covered; this is "
+                        "not a live bucket listing. Follow next_cursor until null, including pages "
+                        "with "
+                        "no matching entries. Failed pages do not establish coverage."
+                    ]
+                ),
                 "Storage metadata only; document bytes and declared content hashes are not "
                 "verified. For conversion use evidence_refs[entry.evidence_index] as "
                 "observation_ref. Date filtering does not grant additional access.",
@@ -140,7 +165,7 @@ class DocumentListProvider:
             source_uri=f"document://projects/{context.project_id}/runs/{context.run_id}/listing",
             source_locator={"query_checksum": checksum, "scan_start": start, "scan_end": end},
             content_hash="sha256:" + sha256_hex(canonical_json(response)),
-            excerpt="Bounded metadata page of the original Run selection; no bytes verified.",
+            excerpt="Bounded project metadata page; no bytes verified.",
             metadata={"listing_version": "v1", "page": response},
         )
         return ProviderToolResult(response=response, evidence=(summary, *evidence))

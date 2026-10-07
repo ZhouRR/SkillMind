@@ -840,6 +840,22 @@ async def test_context_builder_resolves_project_document_source(tmp_path: Path) 
     assert context.tools[0].provider == "project-documents"
 
 
+async def test_new_run_project_library_read_is_wired_without_document_input(tmp_path: Path) -> None:
+    """入力文書 slot のない Run も、正しい凍結読取権と Brief で Project 参照を使える。"""
+    manifest = _generic_manifest(required=False)
+    manifest["tools"] = []
+    claimed = _generic_claimed(manifest=manifest, required=False, selected_sources={},
+                               allowed=("document.read/v1", "document.list/v1"))
+    claimed.permission_snapshot_json["project_document_read"] = {
+        "version": "v1", "project_id": str(claimed.project_id),
+    }
+    context = await _document_builder(tmp_path).build(claimed, sequence_start=1)
+    assert {tool.capability for tool in context.tools} == {"document.read/v1", "document.list/v1"}
+    assert "every current document in this Project" in context.prompt
+    assert "document_id" in context.prompt
+    assert "not a change to the frozen test/specification selection" in context.prompt
+
+
 @pytest.mark.parametrize("convert_only", [False, True])
 @pytest.mark.parametrize(
     "capability", ["document.convert/v1", "document.inspect/v1", "document.list/v1"]

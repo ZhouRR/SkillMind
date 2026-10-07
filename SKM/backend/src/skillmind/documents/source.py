@@ -9,7 +9,9 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from skillmind.auth.service import AuthenticatedActor
 from skillmind.core.hashing import canonical_json, sha256_hex
+from skillmind.db.models import User
 from skillmind.documents.content import (
     inspect_document_content,
     read_document_content,
@@ -23,6 +25,8 @@ from skillmind.documents.domain import (
 )
 from skillmind.documents.repository import DocumentRepository
 from skillmind.documents.snapshot import DocumentSnapshotError, FrozenDocument
+from skillmind.projects.domain import ProjectNotFoundError
+from skillmind.projects.repository import ProjectRepository
 from skillmind.storage import BlobReference, FileStorage, FileStorageError, sanitize_object_key
 from skillmind.storage.observation import BlobObservation
 
@@ -81,6 +85,30 @@ class ProjectDocumentSource(Protocol):
         ...
 
 
+@runtime_checkable
+class ProjectLibraryDocumentSource(Protocol):
+    """現在の Project 文書を列挙し、ID/path と現在の所属で解決する port。"""
+
+    async def authorize_reader(self, *, project_id: UUID, user_id: UUID) -> None:
+        """現在も有効な Project の読取権を確認する。"""
+        ...
+
+    async def list_documents(self, *, project_id: UUID) -> Sequence[FrozenDocument]:
+        """回収済みを除く現在目録の metadata だけを安定順で返す。"""
+        ...
+
+    async def find_document(
+        self,
+        *,
+        project_id: UUID,
+        document_id: UUID | None = None,
+        folder: str | None = None,
+        name: str | None = None,
+    ) -> FrozenDocument | None:
+        """同じ Project の現行文書だけを ID または正確な path で解決する。"""
+        ...
+
+
 class ProjectDocumentInventory(Protocol):
     """Run に凍結済みの文書だけを内容付きで取得する port。"""
 
@@ -128,6 +156,49 @@ class DatabaseProjectDocumentSource:
 
         self._session_factory = session_factory
         self._file_storage = file_storage
+
+    async def authorize_reader(self, *, project_id: UUID, user_id: UUID) -> None:
+        """モデルの指定値で資格を作らず、正本の現在ユーザーで共有 Project 認可を使う。"""
+        async with self._session_factory() as session:
+            user = await session.get(User, user_id, populate_existing=True)
+            if user is None or user.status != "ACTIVE":
+                raise DocumentNotFoundError("Document is not accessible")
+            actor = AuthenticatedActor(
+                user.id, user.organization_id, user.email, user.display_name, user.system_role
+            )
+            try:
+                await ProjectRepository(session).get_accessible(actor=actor, project_id=project_id)
+            except ProjectNotFoundError as error:
+                raise DocumentNotFoundError("Document is not accessible") from error
+
+    async def list_documents(self, *, project_id: UUID) -> Sequence[FrozenDocument]:
+        """現在目録を列挙し、正文は選択された page/read でのみ取得する。"""
+        async with self._session_factory() as session:
+            documents = await DocumentRepository(session).list_for_project(project_id)
+            return tuple(_frozen_metadata(document) for document in documents)
+
+    async def find_document(
+        self,
+        *,
+        project_id: UUID,
+        document_id: UUID | None = None,
+        folder: str | None = None,
+        name: str | None = None,
+    ) -> FrozenDocument | None:
+        """越権・回収済み・不存在を同じ不取得へ畳み、原 blob 読取を別経路へ複製しない。"""
+        async with self._session_factory() as session:
+            repository = DocumentRepository(session)
+            if document_id is not None:
+                try:
+                    return _frozen_metadata(
+                        await repository.get(project_id=project_id, document_id=document_id)
+                    )
+                except DocumentNotFoundError:
+                    return None
+            if folder is None or name is None:
+                return None
+            found = await repository.find_by_path(project_id=project_id, folder=folder, name=name)
+            return _frozen_metadata(found[0]) if found is not None else None
 
     async def fetch(self, *, project_id: UUID, document_id: UUID) -> ProjectDocumentContent | None:
         """Project と ID の一致を確認して blob を読み、同名の別文書へ切り替えない。"""

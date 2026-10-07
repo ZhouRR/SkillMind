@@ -12,6 +12,11 @@ from skillmind.agent.binary_text import (
     convert_excel_to_markdown,
 )
 from skillmind.agent.evidence import EvidenceDraft
+from skillmind.agent.project_document_access import (
+    document_selector,
+    has_project_document_read,
+    project_document_source,
+)
 from skillmind.agent.text_window import select_line_window
 from skillmind.agent.tool_gateway import (
     ProviderToolResult,
@@ -65,12 +70,13 @@ class DocumentProvider:
             context.run is None
             or "workspace.read/v1"
             not in context.run.permission_snapshot.get("allowed_capabilities", [])
-            or "line_start" in arguments or "line_end" in arguments
+            or "line_start" in arguments
+            or "line_end" in arguments
         ):
             raise ToolProviderError(
                 "invalid_request", "File delivery requires workspace reading", retryable=False
             )
-        content = await _load_frozen_content(self._source, context, arguments)
+        content = await _load_read_content(self._source, context, arguments)
         if arguments.get("response_mode") == "file":
             return await _document_file(context, content, arguments)
         try:
@@ -372,6 +378,50 @@ async def _load_frozen_content(
         )
     except DocumentSnapshotError as error:
         raise ToolProviderError("unavailable", str(error), retryable=False) from error
+    return content
+
+
+async def _load_read_content(
+    source: ProjectDocumentSource,
+    context: RunToolContext,
+    arguments: Mapping[str, Any],
+) -> ProjectDocumentContent:
+    """選択入力は元 byte を保持し、追加参照は現在 Project 内の原 ID/hash で読む。"""
+    path, document_id = document_selector(arguments)
+    folder, name = _split_document_path(path) if path is not None else (None, None)
+    project_read = has_project_document_read(context)
+    documents = resolve_frozen_documents(context)
+    document = next(
+        (
+            item
+            for item in documents
+            if (
+                item.document_id == document_id
+                if document_id is not None
+                else item.folder == folder and item.name == name
+            )
+        ),
+        None,
+    )
+    if project_read:
+        library = await project_document_source(source, context)
+        if document is None:
+            document = await library.find_document(
+                project_id=context.project_id, document_id=document_id, folder=folder, name=name
+            )
+    if document is None:
+        raise ToolProviderError("not_found", "Document was not found", retryable=False)
+    expected = arguments.get("expected_hash")
+    if expected is not None and expected != document.content_hash:
+        raise ToolProviderError("invalid_request", "Document hash does not match", retryable=False)
+    try:
+        content = await read_frozen_document(
+            source, project_id=context.project_id, document=document
+        )
+    except DocumentSnapshotError as error:
+        raise ToolProviderError("unavailable", str(error), retryable=False) from error
+    if project_read:
+        await project_document_source(source, context)
     return content
 
 

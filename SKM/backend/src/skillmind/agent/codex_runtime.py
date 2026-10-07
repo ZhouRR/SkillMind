@@ -154,6 +154,9 @@ class CodexRuntimeConfiguration:
                 'model_provider="openai"',
                 f"model={json.dumps(self.model)}",
                 f"model_reasoning_effort={json.dumps(self.effort)}",
+                # MCP の大きい頁を SDK の既定 10k token で途中切詰めしない。
+                # 本文量は既存 Gateway/Run と workspace.read の文字上限で管理する。
+                "tool_output_token_limit=1048576",
                 "mcp_servers={}",
             )
         )

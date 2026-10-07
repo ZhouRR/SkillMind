@@ -5,14 +5,14 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "path",
     "purpose"
   ],
   "properties": {
     "path": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 512
+      "maxLength": 512,
+      "description": "Project-relative file path. Selected task inputs retain frozen bytes; additional project documents are readable only under the frozen project-wide grant."
     },
     "line_start": {
       "type": "integer",
@@ -34,6 +34,16 @@
         "file"
       ],
       "default": "inline"
+    },
+    "document_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Exact document ID in this Project, including an ID from an upload receipt."
+    },
+    "expected_hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$",
+      "description": "Require the exact document bytes observed or confirmed in an upload receipt."
     }
   },
   "allOf": [
@@ -64,6 +74,18 @@
           ]
         }
       }
+    }
+  ],
+  "oneOf": [
+    {
+      "required": [
+        "path"
+      ]
+    },
+    {
+      "required": [
+        "document_id"
+      ]
     }
   ]
 }

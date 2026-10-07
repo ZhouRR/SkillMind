@@ -929,3 +929,61 @@ async def test_native_image_tool_sends_pixels_to_the_model_wire_after_audit(
     urls = list(image_urls(requests[1]))
     assert len(urls) == 1 and urls[0].startswith("data:image/png;base64,")
     assert base64.b64decode(urls[0].split(",", 1)[1]) == data
+
+
+@pytest.mark.parametrize("page_size", [64_000, 200_000])
+async def test_native_large_read_reaches_next_model_request_without_sdk_truncation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    endpoint: tuple[ThreadingHTTPServer, list[dict[str, Any]]],
+    page_size: int,
+) -> None:
+    """既定の大きい頁を実 SDK/CLI に通し、次の要求で中間を含む全 Unicode 文字を確認する。"""
+    from skillmind.agent.tool_catalog import _workspace_tool_definitions
+    from tests.agent.test_workspace_provider import _context as workspace_context
+
+    server, requests = endpoint
+    _local_client(monkeypatch, server)
+    server.tool_request_numbers = {1}
+    server.tool_name = "workspace_read_v1"
+    local = workspace_context(tmp_path, "workspace.read/v1")
+    original = "日本語😀" * (page_size // 4)
+    (local.workspace.cwd / "large.md").write_bytes(original.encode())
+    contracts = ContractStore(Path(__file__).resolve().parents[3] / "contracts")
+    registry = ToolRegistry(_workspace_tool_definitions(contracts))
+    tool = registry.resolve_unbound("workspace.read/v1", execution_profile="GUIDED")
+    base = context_with_brief(tmp_path)
+    run = replace(
+        base, run_id=local.run_id, model="gpt-5.6-terra", workspace=local.workspace,
+        tools=(tool,), permission_snapshot={"allowed_capabilities": ["workspace.read/v1"]},
+        result_schema={"type": "object", "properties": {"ok": {"type": "boolean"}},
+                       "required": ["ok"], "additionalProperties": False},
+        limits=replace(base.limits, max_output_bytes=1_048_576),
+    )
+    server.tool_arguments[1] = {"path": "workspace/large.md", "offset": 0,
+                               "expected_hash": "sha256:" + sha256_hex(original.encode()),
+                               "purpose": "Read complete Unicode page"}
+    if page_size != 64_000:
+        server.tool_arguments[1]["max_chars"] = page_size
+    writer = MemoryAuditWriter()
+    engine = CodexAgentSdkEngine(
+        configuration=CodexRuntimeConfiguration("gpt-5.6-terra", "max", tmp_path / "codex"),
+        runtime_factory=lambda context: registry.build_gateway_runtime(
+            context, audit_writer=writer,
+        ),
+        transcript_backend=MemoryTranscriptBackend(),
+    )
+    async with asyncio.timeout(30):
+        events = [event async for event in engine.execute(run)]
+    assert events[-1].event_type is AgentEventType.RESULT_COMPLETED, [e.payload for e in events]
+    assert len(writer.completed) == 1 and len(requests) == 2
+    output = next(item["output"] for item in requests[1]["input"]
+                  if item.get("type") == "function_call_output")
+    blocks = [{"type": "input_text", "text": output}] if isinstance(output, str) else output
+    payload = next(json.loads(block["text"]) for block in blocks
+                   if block.get("type") == "input_text" and block["text"].startswith("{"))
+    # CLI の wrapper 有無に依存せず、途中切詰めならこの完全一致が失敗する。
+    assert payload["content"] == original
+    assert payload["next_offset"] is None and payload["truncated"] is False
+    assert all(body["model"] == "gpt-5.6-terra" and body["reasoning"]["effort"] == "max"
+               for body in requests)

@@ -774,7 +774,8 @@
         "skillmind.runtime/v3",
         "skillmind.runtime/v4",
         "skillmind.runtime/v5",
-        "skillmind.runtime/v6"
+        "skillmind.runtime/v6",
+        "skillmind.runtime/v7"
       ]
     },
     "runtime_metadata": {
@@ -827,6 +828,24 @@
           }
         }
       }
+    },
+    "project_document_read": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "project_id"
+      ],
+      "properties": {
+        "version": {
+          "const": "v1"
+        },
+        "project_id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "description": "Frozen read grant for the current project document library. Does not change selected task inputs or write permissions."
     }
   },
   "$defs": {

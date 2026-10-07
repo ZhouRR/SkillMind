@@ -36,6 +36,9 @@ _MAX_SEARCH_FILES = 500
 _MAX_SEARCH_BYTES = 10_485_760
 _MAX_SEARCH_ENTRIES = 5_000
 _MAX_EXCERPT_CHARACTERS = 1_000
+# 頁の単位は Unicode 文字。大きい既定頁で往復を減らし、既存応答契約の上限内に保つ。
+DEFAULT_READ_CHARACTERS = 64_000
+MAX_READ_CHARACTERS = 200_000
 _ALLOWED_ROOT_NAMES = frozenset({"input", "workspace", "output"})
 # 書き込み面は Agent 自身の中間産物と成果物に限る。物化済み input/ は冻结证据であり書き込み対象
 # にしない (計画 §19 W2)。read/search とは別語彙で、逃さないよう root 集合を明示分離する。
@@ -125,9 +128,9 @@ def _character_page(
     context: RunToolContext, relative: str, content: _TextContent, arguments: Mapping[str, Any],
 ) -> ProviderToolResult:
     """長い一行も欠落なく読める Unicode offset と正確な次位置を返す。"""
-    offset, limit = arguments.get("offset", 0), arguments.get("max_chars", 12_000)
+    offset, limit = arguments.get("offset", 0), arguments.get("max_chars", DEFAULT_READ_CHARACTERS)
     if (type(offset) is not int or not 0 <= offset <= len(content.text)
-        or type(limit) is not int or not 1 <= limit <= 16_000
+        or type(limit) is not int or not 1 <= limit <= MAX_READ_CHARACTERS
         or "line_start" in arguments or "line_end" in arguments):
         raise ToolProviderError("invalid_request", "Invalid file page range", retryable=False)
     end = min(len(content.text), offset + limit)

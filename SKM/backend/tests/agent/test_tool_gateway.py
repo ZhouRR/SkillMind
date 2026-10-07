@@ -346,6 +346,38 @@ def test_evidence_rejects_credentials_and_invalid_hash() -> None:
         )
 
 
+@pytest.mark.parametrize("state", [False, True, None])
+async def test_password_named_response_state_is_returned_audited_and_replayed(tmp_path, state):
+    """password という項目名で応答を拒否せず、原状態を監査・再読込まで保持する。"""
+
+    class StateProvider(CsvIssueProvider):
+        """資格値を含まない UI 状態を通常応答と Evidence snapshot に載せる。"""
+
+        async def execute(self, context, arguments):
+            """通常 Provider の監査条件を満たしたまま原状態を返す。"""
+            result = await super().execute(context, arguments)
+            result.response["issue"]["extensions"] = {"controlState": {"isPassword": state}}
+            return replace(result, evidence=(replace(result.evidence[0],
+                metadata={"snapshot": {"controlState": {"isPassword": state}}}),))
+
+    provider = StateProvider()
+    registry = _registry(provider)
+    context = _context(tmp_path, registry)
+    writer = MemoryAuditWriter()
+    runtime = registry.build_gateway_runtime(context, audit_writer=writer)
+    arguments = {"issue_ref": "TICKET-1", "purpose": "Read current state"}
+    session_id = str(uuid4())
+    for _ in range(2):
+        await runtime.mcp.on_tool_authorized(context.tools[0].sdk_name, arguments,
+                                             "read-state", session_id)
+        result = await runtime.gateway.invoke_mcp(context.tools[0].sdk_name, arguments)
+        assert not result.get("is_error"), result
+        response = json.loads(result["content"][0]["text"])
+        assert response["issue"]["extensions"]["controlState"]["isPassword"] is state
+    assert provider.calls == 1
+    assert len(writer.completed) == 1
+
+
 def test_provider_error_keeps_stable_public_fields() -> None:
     """Provider error は公開 code、message、retryable だけを保持する。"""
 

@@ -101,7 +101,9 @@ def export_document(
     }
     text = canonical_json(document) + "\n"
     # 過去の保存規則が違っても、機密らしい本文を新たな公開 Artifact へ運ばない。
-    if find_sensitive_key(document) is not None or contains_sensitive_content(text):
+    if find_sensitive_key(
+        document, include_password=False
+    ) is not None or contains_sensitive_content(text):
         raise ValueError("Audit export contains restricted data")
     data = text.encode("utf-8")
     if len(data) > MAX_AUDIT_BYTES:

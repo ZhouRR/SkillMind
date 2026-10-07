@@ -779,5 +779,5 @@ def _copy_optional(value: Mapping[str, Any] | None) -> dict[str, Any] | None:
 def _reject_sensitive_keys(value: Any) -> None:
     """Evidence metadata へ credential らしい field が混入することを拒否する。"""
 
-    if find_sensitive_key(value) is not None:
+    if find_sensitive_key(value, include_password=False) is not None:
         raise ValueError("Evidence metadata contains a sensitive field")

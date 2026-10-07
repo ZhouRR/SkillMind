@@ -39,8 +39,9 @@
     "max_chars": {
       "type": "integer",
       "minimum": 1,
-      "maximum": 16000,
-      "default": 12000
+      "maximum": 200000,
+      "default": 64000,
+      "description": "Unicode characters per page. Defaults to 64000; increase up to 200000 for broad reading when context allows, or reduce for focused lookups."
     },
     "expected_hash": {
       "type": "string",

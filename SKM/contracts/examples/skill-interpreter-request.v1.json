@@ -113,7 +113,7 @@
   },
   "capability_catalog": {
     "catalog_version": "skillmind.tool-catalog/1",
-    "checksum": "sha256:1d246528cffe2273e764b85ed759962a8609fbff0b05e0aa1f3c61192ddc01a9",
+    "checksum": "sha256:b7dd720fdb9424791342dec304f9d9f5e9d7fb29a591db5b913fb303c8ad56e3",
     "capabilities": [
       {
         "capability": "artifact.materialize/v1",
@@ -298,7 +298,7 @@
       },
       {
         "capability": "workspace.read/v1",
-        "description": "Read one UTF-8 file from the isolated Run workspace. For bounded reading use offset=0, max_chars=12000 and expected_hash; follow next_offset until null. Offsets count Unicode characters, not bytes.",
+        "description": "Read one UTF-8 Run file. Character pages default to 64000; adjust max_chars up to 200000 for broad reading when context allows, or reduce for focused lookups. Use offset and expected_hash, and follow next_offset until null for complete coverage. Unicode offsets are not byte offsets.",
         "request_schema": "tools/workspace.read/v1/request.schema.json",
         "response_schema": "tools/workspace.read/v1/response.schema.json",
         "error_schema": "tools/workspace.read/v1/error.schema.json",

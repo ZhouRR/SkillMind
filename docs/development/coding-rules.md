@@ -12,7 +12,7 @@ route 只做认证/入出参，业务在 domain/service，查询/锁/持久化�
 | 处理 | 入口 / 限制 |
 | --- | --- |
 | JSON / SHA-256 | core/hashing.py：canonical_json / sha256_hex；源包索引按 skills/importer.py 的格式计算，不混用 JSON 与原字节摘要 |
-| 敏感字段 | core/redaction.py：find_sensitive_key；Evidence/Tool response 共用 |
+| 敏感字段 | core/redaction.py：find_sensitive_key；工具响应、Evidence 与最终结果不因 password 字段名拒绝，配置/凭据声明仍使用严格检测 |
 | Lease token | runs/domain.py：lease_token_hash |
 | RunEvent / Outbox | runs/repository_base.py 的 RunRepository：_snapshot_event、_event_outbox、_dispatch_outbox、_next_sequence |
 | 认证 Problem | api/auth_dependencies.py 共享 factory；Run 用 routes/runs.py 的 run_not_found_problem / authorized_run |

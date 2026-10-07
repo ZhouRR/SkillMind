@@ -133,12 +133,20 @@ async def test_export_fails_before_write_for_unavailable_or_unsafe_source(tmp_pa
     elif change == "wrong_ref":
         source.records["evidence"][0]["evidence_ref"] = "ev_foreign"
     elif change == "secret":
-        source.records["evidence"][0]["password"] = "fixture-private-value"
+        source.records["evidence"][0]["clientSecret"] = "fixture-private-value"
     else:
         source.records["evidence"][0]["raw"] = "x" * 1_048_576
     with pytest.raises(ToolProviderError):
         await AuditExportProvider(source).execute(context, arguments())
     assert list(context.workspace.output_dir.iterdir()) == []
+
+
+async def test_export_keeps_password_state_from_an_audited_response(tmp_path):
+    """工具で許可された状態 flag を監査 export で再び拒否しない。"""
+    context, source = context_at(tmp_path), MemorySource()
+    source.records["evidence"][0]["controlState"] = {"isPassword": False}
+    result = await AuditExportProvider(source).execute(context, arguments())
+    assert result.response["status"] == "success"
 
 
 @pytest.mark.parametrize("revoked_at", [1, 2, 3])

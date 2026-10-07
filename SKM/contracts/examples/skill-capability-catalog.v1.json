@@ -93,7 +93,7 @@
     },
     {
       "capability": "document.list/v1",
-      "description": "Page through the original Run frozen document selection by relative directory, extensions and exclusions. Observe actual storage LastModified with explicit calendar date, IANA timezone and inclusive cutoff. Follow every next_cursor including pages without matches; scope is frozen membership, not a live bucket listing. To convert a matching entry at its observed version, pass evidence_refs[entry.evidence_index] as document.convert/v1 observation_ref. No bytes are downloaded or verified.",
+      "description": "Page through authorized project documents by directory, extensions and storage LastModified. A project-wide Run grant includes unselected and newly uploaded files; historical Runs retain frozen input scope. Inspect response.scope and follow next_cursor. Metadata does not prove bytes were read.",
       "request_schema": "tools/document.list/v1/request.schema.json",
       "response_schema": "tools/document.list/v1/response.schema.json",
       "error_schema": "tools/document.list/v1/error.schema.json",
@@ -103,7 +103,7 @@
     },
     {
       "capability": "document.read/v1",
-      "description": "Read frozen project document bytes. Prefer response_mode=file with workspace.read available: returns a Worker-local path/hash/size, then read bounded ranges from the file. Inline remains compatible. Local changes do not update the library.",
+      "description": "Read a current project document by path or document_id under a frozen project-wide read grant; selected task inputs retain their original bytes. expected_hash selects exact uploaded/observed bytes. Prefer response_mode=file and workspace.read for bounded reading. Additional references do not change task inputs or write permissions.",
       "request_schema": "tools/document.read/v1/request.schema.json",
       "response_schema": "tools/document.read/v1/response.schema.json",
       "error_schema": "tools/document.read/v1/error.schema.json",
@@ -284,7 +284,7 @@
     },
     {
       "capability": "workspace.read/v1",
-      "description": "Read one UTF-8 file from the isolated Run workspace. For bounded reading use offset=0, max_chars=12000 and expected_hash; follow next_offset until null. Offsets count Unicode characters, not bytes.",
+      "description": "Read one UTF-8 Run file. Character pages default to 64000; adjust max_chars up to 200000 for broad reading when context allows, or reduce for focused lookups. Use offset and expected_hash, and follow next_offset until null for complete coverage. Unicode offsets are not byte offsets.",
       "request_schema": "tools/workspace.read/v1/request.schema.json",
       "response_schema": "tools/workspace.read/v1/response.schema.json",
       "error_schema": "tools/workspace.read/v1/error.schema.json",
@@ -323,5 +323,5 @@
       ]
     }
   ],
-  "checksum": "sha256:49558a466657284d3db88a0863612b4d7be34e23c19a5d5461ef689e335a7885"
+  "checksum": "sha256:fd14f1498ed056ca373d7afe90b1a5de62b9e69df9cd43cccdf5687818df1c6e"
 }

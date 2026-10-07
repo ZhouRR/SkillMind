@@ -29,13 +29,13 @@
 
 Excel→Markdown 的 `.xlsx` 路径使用 `excel-styles/v2`：同一文档保留原行列、静态整格/局部删除线和任意填充色，重复样式按实际连续范围合并，以 Markdown 颜色定义与范围表展示，复杂条件格式保留紧凑结构；不重复列举无删除线的普通富文本。色值保留原 RGB/theme/indexed/tint 表示；无法解色不假定白色。条件格式与表格样式只标记范围和未求值状态，不据此自动排除业务步骤。合并区域记录 anchor 与范围，不展开复制正文。旧 `.xls` 仍为值转换，并在保存的 Markdown 明示未检查样式。转换 profile 写入 Evidence，原文件/冻结版本、Artifact 原字节校验及既有限制不变。
 
-文档正文优先通过 `document.read/v1` 的 `response_mode=file` 交付为 Worker 内本 Run 的文件，响应只给路径、大小和哈希；Agent 再分段读取或检索。目录仍以平台 metadata 和 MinIO 内容为正本，本地是工作副本，不是实时同步盘。冻结选择的 ID/hash 不随目录变化扩张。
+文档正文优先通过 `document.read/v1` 的 `response_mode=file` 交付为 Worker 内本 Run 的文件，响应只给路径、大小和哈希；Agent 再分段读取或检索。新 Run 固定当前 Project 文档库的整体读权限，`document.list/read` 可取得未选择的参考资料及执行中新上传的文件；读取每次核对当前用户与项目权限。上传回执的文档 ID/hash 可直接用于 `document_id` / `expected_hash`。任务选择仍固定原 ID/hash，不因额外参考或同名更新变更；旧 Run 保留原范围。目录以平台 metadata 和 MinIO 内容为正本，本地是工作副本，不是实时同步盘。
 
-`workspace.edit/v1` 支持按原哈希复制、追加、唯一文本替换和发布已有输出文件，不要求模型复写全文。沿用 Artifact 的 UTF-8、大小及配额限制；发布输出后，`document.files/v1` 在已授权文档库内列举/观察目录、按原 Artifact 引用准备保存或改名、移动、建目录、删除空目录、回收及恢复提案，实际修改仍走共享 Effect。目录查询不授予额外正文读取权，画面与 Agent 使用同一份文档目录。旧 Run 的冻结工具和操作范围保持原样；新操作需新 Run 的对应权限。
+`workspace.edit/v1` 支持按原哈希复制、追加、唯一文本替换和发布已有输出文件，不要求模型复写全文。沿用 Artifact 的 UTF-8、大小及配额限制；发布输出后，`document.files/v1` 在已授权文档库内列举/观察目录、按原 Artifact 引用准备保存或改名、移动、建目录、删除空目录、回收及恢复提案，实际修改仍走共享 Effect。整体读权限不增加写权限，画面与 Agent 使用同一份文档目录。旧 Run 的冻结工具和操作范围保持原样；新操作需新 Run 的对应权限。
 
 覆盖保存采用原版本校验：先保存并核验新对象，发布事务再将旧文档移入回收站并切换正式目录。旧字节保留给冻结输入，成功回执证明原操作而非当前文件状态；并发改名、删除、替换和目录子集合变化均拒绝旧提案。确认冲突的更新会永久关闭原发布并释放逻辑路径占位，保留原对象、配额和审计；未知结果仍保持原占位，不借此重发。直接在 MinIO 改写内容会在原字节核验时被拒绝，但绕过平台的并行操作不享有平台事务隔离，不将其宣称为原子同步。
 
-文档转换优先使用 `response_mode=file` 与 `publish_artifact=true`：完整 Markdown 保存为本 Run Artifact 并复制到可读 workspace，响应仅含文件信息。`workspace.read/v1` 使用 `offset`、`max_chars` 和 `expected_hash` 分段读取，按 `next_offset` 继续；偏移量以 Unicode 字符计，文件变化则拒绝混读。本地副本缺失或变化时，`artifact.materialize/v1` 从同 Run 的已验证原字节恢复，不重新转换或发布。文档库保存仍引用 Artifact，权限、审批和回读不变；旧 inline 调用继续兼容。
+文档转换优先使用 `response_mode=file` 与 `publish_artifact=true`：完整 Markdown 保存为本 Run Artifact 并复制到可读 workspace，响应仅含文件信息。`workspace.read/v1` 使用 `offset`、`max_chars` 和 `expected_hash` 分段读取，默认 64,000、单次上限 200,000 个 Unicode 字符，按 `next_offset` 继续；宽范围读取按上下文余量调整，定位查询可使用小页。Codex 的工具输出截断额度同步覆盖大页，实际内容仍受 Gateway/Run 输出预算管理。文件变化则拒绝混读。本地副本缺失或变化时，`artifact.materialize/v1` 从同 Run 的已验证原字节恢复，不重新转换或发布。文档库保存仍引用 Artifact，权限、审批和回读不变；旧 inline 调用继续兼容。
 
 ## 资源文件与原生客户端
 

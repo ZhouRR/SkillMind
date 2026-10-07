@@ -446,8 +446,79 @@ async def test_character_pages_reconstruct_long_unicode_line_and_check_hash(tmp_
         })
 
 
+async def test_default_larger_pages_cover_specification_in_two_reads(tmp_path: Path) -> None:
+    """約十万文字の日本語本文を既定二頁で欠落なく読み、原 byte/hash を維持する。"""
+    context = _context(tmp_path, "workspace.read/v1")
+    original = "日本語😀" * 24_000 + "\r\nlast\n"
+    (context.workspace.cwd / "large.md").write_bytes(original.encode())
+    digest = "sha256:" + sha256_hex(original.encode())
+    first = await WorkspaceReadProvider().execute(context, {
+        "path": "workspace/large.md", "offset": 0, "expected_hash": digest,
+    })
+    second = await WorkspaceReadProvider().execute(context, {
+        "path": "workspace/large.md", "offset": first.response["next_offset"],
+        "expected_hash": digest,
+    })
+    for result in (first, second):
+        _validate_response("tools/workspace.read/v1/response.schema.json", dict(result.response))
+    assert len(first.response["content"]) == 64_000
+    assert first.response["truncated"] is True and first.response["next_offset"] == 64_000
+    assert second.response["next_offset"] is None and second.response["truncated"] is False
+    assert first.response["content"] + second.response["content"] == original
+    assert first.response["content_hash"] == second.response["content_hash"] == digest
+
+
+@pytest.mark.parametrize("page_size", [16_001, 64_000, 200_000])
+async def test_expanded_character_page_limit_keeps_exact_content(
+    tmp_path: Path, page_size: int,
+) -> None:
+    """旧上限より大きい要求も新契約に適合し、上限丁度の一行 JSON を省略しない。"""
+    context = _context(tmp_path, "workspace.read/v1")
+    original = '{"value":"' + "あ" * 210_000 + '"}'
+    (context.workspace.cwd / "large.json").write_bytes(original.encode())
+    arguments = {"path": "workspace/large.json", "offset": 0, "max_chars": page_size,
+                 "expected_hash": "sha256:" + sha256_hex(original.encode()), "purpose": "Read JSON"}
+    schema = ContractStore(CONTRACTS).load("tools/workspace.read/v1/request.schema.json")
+    Draft202012Validator(schema).validate(arguments)
+    result = await WorkspaceReadProvider().execute(context, arguments)
+    _validate_response("tools/workspace.read/v1/response.schema.json", dict(result.response))
+    assert result.response["content"] == original[:page_size]
+    assert result.response["next_offset"] == page_size
+
+
+async def test_large_read_still_respects_run_output_byte_budget(tmp_path: Path) -> None:
+    """文字頁を拡張しても、実 UTF-8 応答が Run の byte 上限を超えたら返さない。"""
+    import json
+
+    from skillmind.agent.tool_catalog import _workspace_tool_definitions
+    from skillmind.agent.tool_gateway import ToolRegistry
+    from tests.agent.test_tool_gateway import (
+        CsvIssueProvider,
+        MemoryAuditWriter,
+        _registry,
+    )
+    from tests.agent.test_tool_gateway import _context as run_context
+
+    local = _context(tmp_path, "workspace.read/v1")
+    (local.workspace.cwd / "large.md").write_bytes(("日" * 64_000).encode())
+    registry = ToolRegistry(_workspace_tool_definitions(ContractStore(CONTRACTS)))
+    tool = registry.resolve_unbound("workspace.read/v1", execution_profile="GUIDED")
+    base = run_context(tmp_path, _registry(CsvIssueProvider()))
+    run = replace(base, workspace=local.workspace, tools=(tool,),
+                  permission_snapshot={"allowed_capabilities": ["workspace.read/v1"]},
+                  limits=replace(base.limits, max_output_bytes=10_000))
+    writer = MemoryAuditWriter()
+    runtime = registry.build_gateway_runtime(run, audit_writer=writer)
+    arguments = {"path": "workspace/large.md", "offset": 0, "purpose": "Read text"}
+    await runtime.mcp.on_tool_authorized(tool.sdk_name, arguments, "large-page", str(uuid4()))
+    result = await runtime.gateway.invoke_mcp(tool.sdk_name, arguments)
+    assert result["is_error"] is True
+    assert json.loads(result["content"][0]["text"])["code"] == "too_large"
+    assert writer.completed == [] and writer.failed[0][1] == "too_large"
+
+
 @pytest.mark.parametrize("args", [
-    {"offset": -1}, {"offset": True}, {"offset": 100}, {"max_chars": 16001},
+    {"offset": -1}, {"offset": True}, {"offset": 100}, {"max_chars": 200001},
     {"offset": 0, "line_start": 1}, {"max_chars": 0},
 ])
 async def test_character_page_rejects_invalid_or_mixed_ranges(tmp_path: Path, args: dict) -> None:
