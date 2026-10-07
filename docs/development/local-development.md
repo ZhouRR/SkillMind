@@ -76,7 +76,7 @@ python3 tests/browser/check_projects.py \
 | Project・アカウント | projects、project_members、project_management、login、accounts、api_keys |
 | 提出・待機・履歴 | run_submission、interaction_responses、proposal_decisions、run_history、evaluation_submissions |
 | レポート・証拠 | report_reading、workspace_reports、result_references、artifacts |
-| 文書・directory | document_organization、document_management、document_preview、document_image_preview、document_upload、document_update、document_batches |
+| 文書・directory | document_organization、document_management、document_preview、document_image_preview、document_upload、document_update、document_batches、document_folder_input |
 | 接続・Skill・調度 | resource_editing、resource_request_lifecycle、mcp_tools、interpretation_requests、skill_library_delete、task_launch_identity、task_schedules、schedule_times |
 
 共有 dropdown の回帰は `dropdown.html` を使い、OS native picker への fallback を成功と扱わない。Chromium/Firefox/WebKit を用意した隔離環境で実行する：
@@ -87,6 +87,8 @@ python3 tests/browser/check_dropdown.py --url http://127.0.0.1:5189/skillmind/te
 ```
 
 全 engine・三語・双テーマ・desktop/狭幅/短い viewport の結果を `results.json` に保存する。popup の幾何・hit-test・Tab と portal は実 browser で確認し、jsdom の操作回帰を見た目の証明として扱わない。既存 browser runner は `select_helpers.py` 経由で共有 popup を実 click する。
+
+文書 upload 先の候補は `check_document_folder_input.py --url <projects.html の URL> --browser all` で検証する。三語・双テーマ・PC/狭幅で、繰り返し展開中の候補 DOM と連続 frame、root/既存パス/自由入力、Escape/Tab を確認する。DOM 単体 test は native datalist の描画や画面上のちらつきの証明ではない。
 
 全 runner は [tests/browser](../../SKM/web/tests/browser/) にある。harness URL と `--output` 等の必須引数は各 runner を参照する。主に projects.html、提出系は run-submission.html を使う。
 外置依存は PYTHONPATH、browser は PLAYWRIGHT_BROWSERS_PATH を指定する。使用中 port を奪わず、終了時は自分の Vite だけを止める。mock は実 DB の競合/撤権、blob、外部 write や複数 Worker の証明ではない。

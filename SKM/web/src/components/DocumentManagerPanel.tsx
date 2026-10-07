@@ -1,4 +1,5 @@
 import { Select } from './Select'
+import { DocumentFolderInput } from './DocumentFolderInput'
 import { HtmlPreview } from './HtmlPreview'
 import { SourcePreview } from './SourcePreview'
 import { ApiProblemError, purgeProjectDocument } from '../api'
@@ -319,11 +320,7 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
       {folderQuery.failure && <p role="alert" className="error">{messages.fileManagement.failure}</p>}
       {managementMessage && !edit && <p role="alert" className="error">{managementMessage}</p>}
       {!trashed && <div className="documentUpload documentToolbar">
-        <label className="documentTargetFolder">{messages.documentsPanel.targetFolder}
-          <input type="text" list="document-upload-folders" value={targetFolder} maxLength={200} disabled={blocked}
-            placeholder={messages.documentsPanel.rootFolder} onChange={(event) => setTargetFolder(event.target.value)} />
-          <datalist id="document-upload-folders">{[...folders].sort().map((folder) => <option key={folder} value={folder} />)}</datalist>
-        </label>
+        <DocumentFolderInput value={targetFolder} folders={folders} disabled={blocked} onValueChange={setTargetFolder} />
         <label className="primaryButton fileUploadButton">
           {messages.documentsPanel.chooseFiles}
           <input

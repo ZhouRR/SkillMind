@@ -459,7 +459,14 @@
 .pendingItemTitle small { color: var(--text-faint); font-size: 12px; }
 
 /* 文書の選択操作と upload 先を共通 toolbar の密度に揃える。 */
-.documentTargetFolder { display: grid; gap: 6px; min-width: 220px; flex: 1; }
+.documentTargetFolder { display: grid; gap: 6px; min-width: min(220px, 100%); max-width: 100%; flex: 1; }
+.documentTargetFolder > label { margin: 0; }
+.documentFolderInputGroup { position: relative; min-width: 0; }
+.documentFolderInputGroup > input { width: 100%; min-width: 0; padding-right: 44px; }
+.documentFolderTrigger { position: absolute; inset-block: 0; inset-inline-end: 0; width: 40px; display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: var(--text-muted); }
+.documentFolderTrigger .selectIcon { margin: 0; }
+.documentFolderTrigger[data-popup-open] .selectIcon { transform: rotate(180deg); }
+.documentFolderPopup { padding: 6px; }
 .documentToolbar { align-items: end; }
 .documentSelectionToolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-height: 34px; margin: 16px 0; font-size: 13px; }
 /* フォーム label の下余白を持ち込まず、選択数と操作ボタンの中央を揃える。 */
