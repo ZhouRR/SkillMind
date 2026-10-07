@@ -159,7 +159,9 @@ async def test_remote_failure_preserves_only_fixed_diagnostic_and_bounds_reads(n
     leases.confirm.assert_not_awaited()
 
 
-@pytest.mark.parametrize("response", [{"password": "hidden"}, {"text": "fixture-token"}])
+@pytest.mark.parametrize("response", [
+    {"secret": "hidden"}, {"password": "fixture-token"}, {"text": "fixture-token"},
+])
 async def test_sensitive_observation_is_omitted(response, no_delay):
     """秘密を含む成功 envelope も、失敗診断 Evidence へ保存しない。"""
     source = AsyncMock()

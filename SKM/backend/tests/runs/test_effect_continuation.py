@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -20,8 +22,10 @@ from skillmind.effects.continuation import (
     validated_effect_result,
 )
 from skillmind.effects.domain import EffectEvidenceDraft, EffectProviderResult
+from skillmind.effects.mcp_provider import McpCallProvider
 from skillmind.effects.proposal import CHANGE_PROPOSE_REQUEST_SCHEMA
 from skillmind.runs.interaction import INTERACTION_REQUEST_SCHEMA
+from tests.agent.test_mcp_tools import encoded, execution
 from tests.agent.test_task_brief import _brief_schema, _build
 from tests.runs.test_effect_unknown_outcomes import harness
 
@@ -83,7 +87,7 @@ async def test_finalized_original_readback_reaches_next_segment_prompt(capabilit
 async def test_invalid_provider_return_cannot_finalize_applied_or_dispatch(invalid):
     """公開できない回读は APPLIED にせず、元 claim を回収可能なまま保持する。"""
     h = harness()
-    content = ({"password": "synthetic"} if invalid == "sensitive"
+    content = ({"api_key": "synthetic"} if invalid == "sensitive"
                else {"body": "x" * MAX_EFFECT_RESULT_BYTES})
     evidence = EffectEvidenceDraft("database", "fixture://receipt", {}, content, None, {})
     with pytest.raises(ValueError):
@@ -204,7 +208,7 @@ def test_corrupt_or_unsafe_receipt_is_rejected_before_agent(invalid):
     if invalid == "hash":
         value["after"]["document"]["path"] = "tampered.md"
     elif invalid == "sensitive":
-        value["verification"]["password"] = "synthetic"
+        value["verification"]["api_key"] = "synthetic"
     elif invalid == "oversize":
         value["after"] = {"body": "文" * (MAX_EFFECT_RESULT_BYTES // 2)}
         value["after_content_hash"] = "sha256:" + sha256_hex(canonical_json(value["after"]))
@@ -214,3 +218,50 @@ def test_corrupt_or_unsafe_receipt_is_rejected_before_agent(invalid):
         value["extra"] = True
     with pytest.raises(ValueError):
         validated_effect_result(value)
+
+
+@pytest.mark.parametrize("attempt", [1, 2])
+async def test_mcp_control_state_receipt_finalizes_without_replaying_operation(attempt):
+    """実 Provider→finalize→Brief で制御属性を保持し、復旧時は原状態照会だけを送る。"""
+    h = harness(capability="mcp.call/v1")
+    del h.repository._next_effect_segment
+    h.proposal.checkpoint_json = {}
+    h.proposal.continuation_mode = "resume"
+    command = replace(execution(attempt=attempt), effect_execution_id=h.execution.id)
+    source, leases = AsyncMock(), AsyncMock()
+    response = {
+        "requestId": str(h.execution.id), "status": "COMPLETED", "operation": "click",
+        "controlState": {"isPassword": False, "isEnabled": True},
+    }
+    source.call.return_value = encoded(response)
+    result = await McpCallProvider(source=source, leases=leases, authorize=AsyncMock()).apply(
+        command, credential="fixture-token",
+    )
+    stored = await h.repository.finalize_effect_execution(
+        h.claimed, result=result, failure=None, duration_ms=1,
+    )
+    assert stored.status.value == "APPLIED" and stored.error is None
+    added = [row for call in h.session.add_all.call_args_list for row in call.args[0]]
+    segment = next(row for row in added if isinstance(row, RunSegment))
+    after = next(row for row in added if isinstance(row, Evidence)
+                 and row.evidence_ref == stored.after_ref)
+    confirmed = segment.checkpoint_json["effect_result"]
+    assert confirmed["after"] == after.metadata_json["snapshot"] == result.after.content
+    assert confirmed["after_content_hash"] == after.content_hash
+    assert confirmed["after"]["read_back"] == response
+    brief = _build(checkpoint=segment.checkpoint_json).brief
+    assert canonical_json(confirmed) in render_task_brief_prompt(
+        brief, input_json={}, output_schema={},
+    )
+    names = [call.args[2] for call in source.call.await_args_list]
+    assert names == (["execute_step", "get_step_status"] if attempt == 1
+                     else ["get_step_status"])
+
+
+@pytest.mark.parametrize("value", [False, True])
+def test_control_state_password_attribute_keeps_original_hash(value):
+    """属性の真偽に依存せず許可し、本文・hash・credential field の他規則は保つ。"""
+    original = receipt()
+    original["after"] = {"controlState": {"isPassword": value}}
+    original["after_content_hash"] = "sha256:" + sha256_hex(canonical_json(original["after"]))
+    assert validated_effect_result(original) == original

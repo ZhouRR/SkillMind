@@ -47,7 +47,11 @@ def validated_effect_result(value: Mapping[str, Any]) -> dict[str, Any]:
     if len(serialized.encode("utf-8")) > MAX_EFFECT_RESULT_BYTES:
         raise ValueError("Effect continuation result exceeds its byte limit")
     copied: dict[str, Any] = json.loads(serialized)
-    if not _VALIDATOR.is_valid(copied) or find_sensitive_key(copied) is not None:
+    # 回読は工具応答と同じ公開規則を使う。isPassword 等の制御属性で確定回执を拒否しない。
+    if (
+        not _VALIDATOR.is_valid(copied)
+        or find_sensitive_key(copied, include_password=False) is not None
+    ):
         raise ValueError("Effect continuation result is invalid")
     if copied["after_content_hash"] != "sha256:" + sha256_hex(canonical_json(copied["after"])):
         raise ValueError("Effect continuation result does not match its Evidence")
