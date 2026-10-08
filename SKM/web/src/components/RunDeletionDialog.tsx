@@ -41,19 +41,22 @@ export function RunDeletionDialog({ projectId, runId, run, csrfToken, action, on
     finally { window.clearTimeout(timer); if (current.current) { setBusy(false); writing.current = false } }
   }
   // 本文に「キャンセル」があるため見出しの「閉じる」は重ねず、取り消せない完全削除だけを danger 実心 button にする。
-  return <ModalDialog hideClose open title={restore ? m.restore : purge ? m.purge : m.trashAction} onClose={() => { if (!busy) onClose() }}>
+  return <ModalDialog compact hideClose open title={restore ? m.restore : purge ? m.purge : m.trashAction} onClose={() => { if (!busy) onClose() }}>
+    <div className="deleteConfirmationContent">
     <div className="runDeletionTarget"><strong>{run ? runHistoryTitle(run, messages.elements.unnamedRunTitle) : messages.elements.runFallbackTitle(runId.slice(0, 8))}</strong>
       {run && <time dateTime={run.started_at ?? run.created_at}>{formatLocalTimestamp(run.started_at ?? run.created_at)}</time>}
       <code>{runId}</code></div>
     {!preview && !error && <p role="status">{messages.uiAuditWorkspace.deletionLoading}</p>}
-    <p>{restore ? m.recycleHint : purge ? m.purgeConfirm : m.runConfirm}</p>
-    {preview && <><p>{m.outputs}: {preview.output_count} · {m.protected}: {preview.protected_output_count}</p>
+    <p className="confirmMessage">{restore ? m.restoreRun : purge ? m.purgeConfirm : `${m.runConfirm} ${m.recycleHint}`}</p>
+    {preview && <><p className="runDeletionCounts"><span>{m.outputs}: {preview.output_count}</span><span>{m.protected}: {preview.protected_output_count}</span></p>
       <details className="runDeletionOutputs" open={preview.outputs.length <= 5}><summary>{m.outputs} ({preview.output_count})</summary>
-        <ul tabIndex={preview.outputs.length > 5 ? 0 : undefined} aria-label={m.outputs}>{preview.outputs.map((d) => <li key={d.document_id}>{d.folder}/{d.name}{d.protected && ` (${m.protected})`}</li>)}</ul></details>
-      {!restore && <label className="runDeletionChoice"><input type="checkbox" checked={outputs} disabled={busy} onChange={(e) => setOutputs(e.target.checked)} />{purge ? m.purgeOutputs : m.includeOutputs}</label>}</>}
+        <ul tabIndex={0} aria-label={m.outputs}>{preview.outputs.map((d) => <li key={d.document_id}>{[d.folder, d.name].filter(Boolean).join('/')}{d.protected && ` (${m.protected})`}</li>)}</ul></details>
+      {!restore && <label className="runDeletionChoice"><input type="checkbox" checked={outputs} disabled={busy} onChange={(e) => setOutputs(e.target.checked)} /><span>{purge ? m.purgeOutputs : m.includeOutputs}</span></label>}</>}
     {cleanupPending && <p role="status">{m.cleanupPending}</p>}
     {error && <p role="alert" className="error">{sent ? `${m.unknown} ${m.runBlocked}` : m.failure}</p>}
-    <div className="formRow"><button className={purge ? 'destructiveButton' : 'primaryButton'} type="button" disabled={!preview || busy || sent} onClick={() => void submit()}>{restore ? m.restore : purge ? m.purge : m.trashAction}</button>
-      <button className="secondaryButton" type="button" disabled={busy} onClick={onClose}>{m.cancel}</button></div>
+    <div className="confirmActions">
+      <button className="secondaryButton" type="button" disabled={busy} onClick={onClose}>{m.cancel}</button>
+      <button className={purge ? 'destructiveButton' : 'primaryButton'} type="button" disabled={!preview || busy || sent} onClick={() => void submit()}>{restore ? m.restore : purge ? m.purge : m.trashAction}</button></div>
+    </div>
   </ModalDialog>
 }

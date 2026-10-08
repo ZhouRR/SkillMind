@@ -66,6 +66,8 @@ describe.each(UI_LANGUAGES)('real account components in %s', (language) => {
       <UserCreatePanel session={session('ADMIN')} onSessionEnded={() => {}} onCreated={() => {}} onSelect={() => {}} />
     </LanguageProvider>)
     expect(combobox(html)).toContain('data-value=""')
+    expect(combobox(html)).toContain('data-density="compact"')
+    expect(combobox(html)).toContain('selectTrigger shortControl')
     expect(combobox(html)).toContain(messages.rolePlaceholder)
     expect(html).toContain(`<label>${messages.fields.email}<input`)
     expect(html).toContain(`<label>${messages.initialPassword}<input`)

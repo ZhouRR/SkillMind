@@ -677,6 +677,7 @@ export const ZH: UiMessages = {
     failure: "操作未完成，请检查目标是否变化、是否被引用或存在同名项，再刷新列表。",
     unknown: "无法确认操作结果，请刷新列表核对后再进行下一步。",
     runConfirm: "将执行履历移入回收站，保留原始输入文档和操作审计记录。",
+    restoreRun: "恢复此执行履历，以及随此次履历一同移入回收站的公开成果。单独删除的文档不会一并恢复。",
     purgeOutputs: "一并完全删除本次执行的公开成果（共享文档保留）",
     includeOutputs: "一并移动本次执行的公开成果（其他履历或定时任务引用的文档保留）",
     runBlocked: "运行中或原操作尚未确认的履历无法删除。",
@@ -686,6 +687,8 @@ export const ZH: UiMessages = {
     purge: "完全删除",
     purgeConfirm: "此操作不可恢复。将删除执行详情、结果和关联审计，解除执行对 Skill 版本的引用，仅保留删除操作的最小审计。原始输入、共享文档及外部业务数据保留。",
     purgeDocuments: "完全删除所选文件，无法恢复。被执行或定时任务引用的文件不能删除。",
+    trashDocuments: "将所选文档移入回收站，之后可以恢复。此操作不释放存储空间。",
+    restoreDocuments: "将所选文档从回收站恢复到原目录。",
     cleanupPending: "履历已删除，但部分文件字节清理尚未确认，请联系管理员核对。",
   },
   documentsPanel: {

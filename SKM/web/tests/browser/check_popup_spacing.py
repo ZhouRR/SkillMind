@@ -122,11 +122,15 @@ async def check_menus(page: Page, output: Path, key: str) -> dict:
         await expect(menu).to_be_visible()
         measured = await geometry(menu)
         symmetric(measured)
-        assert measured['gutter'] == 'stable both-edges', measured
+        assert measured['gutter'] == ('auto' if length == 'short' else 'stable both-edges'), measured
         assert (measured['scrollHeight'] > measured['clientHeight'] + 1) == (length == 'long'), measured
         assert await menu.evaluate('''element => [...element.querySelectorAll('[role="menuitem"]')]
           .every(item => item.scrollWidth <= item.clientWidth + 1)''')
         bounds = await menu.bounding_box()
+        assert bounds
+        if length == 'short':
+            assert bounds['width'] < 272, bounds
+        result[f'{length}Width'] = bounds['width']
         assert bounds and page.viewport_size
         assert bounds['x'] >= 0 and bounds['y'] >= 0, bounds
         assert bounds['x'] + bounds['width'] <= page.viewport_size['width'] + 1, bounds

@@ -100,7 +100,7 @@ function SchemaField({ field, fieldKey, required, value, rawValue, onRawChange, 
   if (field.type === 'boolean') {
     return (
       <label>{label}{required ? ' *' : ''}
-        <Select required={required} value={typeof value === 'boolean' ? String(value) : ''} onValueChange={(nextValue) => onChange(nextValue === '' ? undefined : nextValue === 'true')}>
+        <Select className="shortControl shortControlNarrow" density="compact" required={required} value={typeof value === 'boolean' ? String(value) : ''} onValueChange={(nextValue) => onChange(nextValue === '' ? undefined : nextValue === 'true')}>
           {!required && <option value="">—</option>}
           <option value="true">true</option><option value="false">false</option>
         </Select>

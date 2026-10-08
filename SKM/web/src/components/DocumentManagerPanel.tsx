@@ -208,7 +208,10 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
     confirmPending.current = true
     setConfirming(true)
     const confirmed = await confirm({ title: restore ? messages.fileManagement.restore : messages.fileManagement.trashAction,
-      message: items.map((d) => d.name).join('、'), confirmLabel: restore ? messages.fileManagement.restore : messages.fileManagement.trashAction, destructive: !restore })
+      message: restore ? messages.fileManagement.restoreDocuments : messages.fileManagement.trashDocuments,
+      targets: items.map((d) => ({ id: d.document_id, label: [d.folder, d.name].filter(Boolean).join('/'), detail: d.document_id })),
+      targetsLabel: messages.documentsPanel.selectedCount(items.length),
+      confirmLabel: restore ? messages.fileManagement.restore : messages.fileManagement.trashAction, destructive: !restore })
     confirmPending.current = false
     if (!mounted.current) return
     setConfirming(false)
@@ -219,7 +222,9 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
   async function purge(items: ProjectDocumentRecord[]): Promise<void> {
     if (blocked || confirmPending.current || !items.length) return
     confirmPending.current = true; setConfirming(true)
-    const confirmed = await confirm({ title: messages.fileManagement.purge, message: messages.fileManagement.purgeDocuments + '\n' + items.map((d) => d.name).join('、'), confirmLabel: messages.fileManagement.purge, destructive: true })
+    const confirmed = await confirm({ title: messages.fileManagement.purge, message: messages.fileManagement.purgeDocuments,
+      targets: items.map((d) => ({ id: d.document_id, label: [d.folder, d.name].filter(Boolean).join('/'), detail: d.document_id })),
+      targetsLabel: messages.documentsPanel.selectedCount(items.length), confirmLabel: messages.fileManagement.purge, destructive: true })
     confirmPending.current = false
     if (!mounted.current) return
     setConfirming(false)
@@ -310,7 +315,7 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
         <button type="button" className="secondaryButton" disabled={browsingBlocked} aria-pressed={!trashed} onClick={() => { setTrashed(false); setSelectedIds(new Set()) }}>{messages.fileManagement.active}</button>
         <button type="button" className="secondaryButton" disabled={browsingBlocked} aria-pressed={trashed} onClick={() => { setTrashed(true); setSelectedIds(new Set()) }}>{messages.fileManagement.trash}</button>
         <input aria-label={messages.fileManagement.search} placeholder={messages.fileManagement.search} value={search} onChange={(e) => { setSearch(e.target.value); setSelectedIds(new Set()) }} />
-        <label className="documentSort">{messages.fileManagement.sort}<Select aria-label={messages.fileManagement.sort} value={sort} onValueChange={(nextValue) => setSort(nextValue)}><option value="name">{messages.fileManagement.byName}</option><option value="date">{messages.fileManagement.byDate}</option><option value="size">{messages.fileManagement.bySize}</option></Select></label>
+        <label className="documentSort shortField">{messages.fileManagement.sort}<Select className="shortControl shortControlNarrow" density="compact" aria-label={messages.fileManagement.sort} value={sort} onValueChange={(nextValue) => setSort(nextValue)}><option value="name">{messages.fileManagement.byName}</option><option value="date">{messages.fileManagement.byDate}</option><option value="size">{messages.fileManagement.bySize}</option></Select></label>
         {!trashed && <button className="secondaryButton" type="button" disabled={blocked} onClick={() => setEdit({ mode: 'CREATE_FOLDER', documents: [], folder: targetFolder ? targetFolder + '/' : '' })}>{messages.fileManagement.newFolder}</button>}
         <button type="button" className="secondaryButton" onClick={refresh} disabled={list.pending}>
           {messages.documentsPanel.refresh}

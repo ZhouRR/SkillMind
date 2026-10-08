@@ -7,6 +7,7 @@ import { useMessages } from '../i18n'
 import { formatLocalTime } from '../lib/presentation'
 import { isOpenSelectPicker } from '../lib/selectPicker'
 import { modalTabStops } from '../lib/focus'
+import '../styles/delete-confirmation.css'
 
 /** 画面の目的と補助情報を統一した compact heading として表示する。 */
 export function PageHeader({ title, description, aside, reading = false }: {
@@ -121,7 +122,7 @@ export function EmptyState({ text, action }: { text: string; action?: ReactNode 
  *  実際に破棄すべき草稿は呼び出し元が明示的に破棄する。
  *  開いている間は Escape と遮罩 click で閉じられ、背面の scroll を止め、
  *  閉じた後は開いた時の要素へ焦点を戻す(keyboard 利用者が現在地を失わないため)。 */
-export function ModalDialog({ open, title, meta, actions, wide = false, drawer = false, viewport = false, hideClose = false, onClose, children }: {
+export function ModalDialog({ open, title, meta, actions, wide = false, drawer = false, viewport = false, compact = false, hideClose = false, onClose, children }: {
   open: boolean
   title: string
   /** 見出し横の補助情報(寸法・種別など)。 */
@@ -133,6 +134,8 @@ export function ModalDialog({ open, title, meta, actions, wide = false, drawer =
   drawer?: boolean
   /** 文書 preview は四辺に同じ余白を残して viewport を使う。 */
   viewport?: boolean
+  /** 短い確認だけを適切な幅へ収め、長い form/preview の寸法を変えない。 */
+  compact?: boolean
   /** 本文側に「キャンセル」を持つ確認 dialog は見出しの「閉じる」を重ねない(Escape と遮罩 click は有効)。 */
   hideClose?: boolean
   onClose: () => void
@@ -185,7 +188,7 @@ export function ModalDialog({ open, title, meta, actions, wide = false, drawer =
   }, [open])
   return (
     <div
-      className={`modalOverlay${wide ? ' modalWide' : ''}${drawer ? ' modalDrawer' : ''}${viewport ? ' modalViewport' : ''}`}
+      className={`modalOverlay${wide ? ' modalWide' : ''}${drawer ? ' modalDrawer' : ''}${viewport ? ' modalViewport' : ''}${compact ? ' modalCompact' : ''}`}
       hidden={!open}
       onClick={(event) => { if (event.target === event.currentTarget) onClose() }}
     >
@@ -226,6 +229,9 @@ export interface ConfirmRequest {
   title: string
   /** 何が起きるか・取り消せるかを説明する本文。改行はそのまま表示する。 */
   message: string
+  /** 長い名称と原 ID を本文へ連結せず、照合可能な有界一覧に分ける。 */
+  targets?: { id: string; label: string; detail?: string }[]
+  targetsLabel?: string
   /** 実行 button の label(「削除」「廃止」など操作名を再掲する)。 */
   confirmLabel: string
   /** 取り消せない操作は true。実行 button を danger 色の実心にする。 */
@@ -277,22 +283,31 @@ export function ConfirmDialog({ request, onConfirm, onCancel }: {
   const messages = useMessages()
   return (
     <ModalDialog
+      compact={Boolean(request?.targets?.length)}
       hideClose
       open={request !== null}
       title={request?.title ?? ''}
       onClose={onCancel}
     >
-      <p className="confirmMessage">{request?.message ?? ''}</p>
-      <div className="confirmActions">
-        <button className="secondaryButton" type="button" onClick={onCancel}>{messages.elements.cancel}</button>
-        <button
-          autoFocus
-          className={request?.destructive ? 'destructiveButton' : 'primaryButton'}
-          type="button"
-          onClick={onConfirm}
-        >
-          {request?.confirmLabel ?? ''}
-        </button>
+      <div className={request?.targets?.length ? 'deleteConfirmationContent' : undefined}>
+        {request?.targets && request.targets.length > 0 && <div className="confirmTargets">
+          {request.targetsLabel && <p className="confirmTargetsLabel">{request.targetsLabel}</p>}
+          <ul className="confirmTargetList" tabIndex={0} aria-label={request.targetsLabel ?? request.title}>
+            {request.targets.map((target) => <li key={target.id}><strong>{target.label}</strong>{target.detail && <code>{target.detail}</code>}</li>)}
+          </ul>
+        </div>}
+        <p className="confirmMessage">{request?.message ?? ''}</p>
+        <div className="confirmActions">
+          <button className="secondaryButton" type="button" onClick={onCancel}>{messages.elements.cancel}</button>
+          <button
+            autoFocus
+            className={request?.destructive ? 'destructiveButton' : 'primaryButton'}
+            type="button"
+            onClick={onConfirm}
+          >
+            {request?.confirmLabel ?? ''}
+          </button>
+        </div>
       </div>
     </ModalDialog>
   )

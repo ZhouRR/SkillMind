@@ -81,6 +81,38 @@ describe('shared cross-browser Select', () => {
     expect(trigger.getAttribute('aria-expanded')).toBe('false')
   })
 
+  it('toggles compact overflow gutters on viewport and content changes without selecting a value', async () => {
+    const changes = vi.fn()
+    const render = (count: number) => <Select id="short-options" density="compact" value="0" onValueChange={changes}>
+      {Array.from({ length: count }, (_, index) => <option key={index} value={String(index)}>Option {index}</option>)}
+    </Select>
+    await act(async () => root.render(render(7)))
+    const trigger = container.querySelector<HTMLElement>('#short-options')!
+    await act(async () => trigger.focus())
+    await press(trigger, 'ArrowDown')
+    const popup = document.querySelector<HTMLElement>('.selectPopup')!
+    // 合成の scroll 寸法で lifecycle だけを検証し、実 browser の幾何とは区別する。
+    let contentHeight = 280
+    Object.defineProperties(popup, {
+      scrollHeight: { configurable: true, get: () => contentHeight },
+      clientHeight: { configurable: true, get: () => 160 },
+    })
+    await act(async () => window.dispatchEvent(new Event('resize')))
+    expect(popup.dataset.overflow).toBe('true')
+    contentHeight = 120
+    await act(async () => root.render(render(3)))
+    expect(popup.dataset.overflow).toBe('false')
+    contentHeight = 280
+    await act(async () => root.render(render(7)))
+    expect(popup.dataset.overflow).toBe('true')
+    expect(changes).not.toHaveBeenCalled()
+    await press(document.activeElement!, 'Escape')
+    contentHeight = 120
+    await act(async () => window.dispatchEvent(new Event('resize')))
+    expect(popup.dataset.overflow).toBe('true')
+    expect(document.activeElement).toBe(trigger)
+  })
+
   it('renders a real DOM popup, preserves required/name, changes exactly once, and resets', async () => {
     const changes = vi.fn()
     await act(async () => root.render(<Controlled changes={changes} />))

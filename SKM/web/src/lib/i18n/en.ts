@@ -657,6 +657,7 @@ export const EN: UiMessages = {
     failure: "Operation did not complete. Check changed paths, references or name conflicts and refresh.",
     unknown: "The result is unknown. Refresh and verify the list before continuing.",
     runConfirm: "Move this execution to the recycle bin. Original inputs and operation audit records are retained.",
+    restoreRun: "Restore this execution and the published outputs moved to the recycle bin with it. Documents deleted separately are not restored.",
     purgeOutputs: "Permanently delete this execution’s published outputs (keep shared documents)",
     includeOutputs: "Include published outputs (documents used by other executions or schedules are retained)",
     runBlocked: "Active executions or unresolved operations cannot be removed.",
@@ -666,6 +667,8 @@ export const EN: UiMessages = {
     purge: "Delete permanently",
     purgeConfirm: "This cannot be undone. Execution details, results, related audit records and Skill version references will be removed. Only a minimal deletion audit remains. Original inputs, shared documents and external business data are retained.",
     purgeDocuments: "Permanently delete the selected files. This cannot be undone. Files referenced by executions or schedules cannot be deleted.",
+    trashDocuments: "Move the selected documents to the recycle bin. They can be restored later. Storage space is not released.",
+    restoreDocuments: "Restore the selected documents from the recycle bin to their original folders.",
     cleanupPending: "History was deleted, but some file cleanup could not be confirmed. Ask an administrator to check.",
   },
   documentsPanel: {

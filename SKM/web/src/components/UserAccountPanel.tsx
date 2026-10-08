@@ -156,10 +156,10 @@ function AccountEditor({ userId, own, session, revision = 0, onSessionEnded, onC
           <p className="hint">{messages.draftMemoryOnly}</p>
           <fieldset disabled={!canWrite}>
             <label>{messages.fields.name}<input required maxLength={200} value={name} onChange={(event) => { setName(event.target.value); setConfirmChange(false) }} /></label>
-            <label>{messages.fields.role}<Select aria-label={messages.fields.role} value={role} onValueChange={(nextValue) => { setRole(nextValue === 'ADMIN' ? 'ADMIN' : 'USER'); setConfirmChange(false) }}>
+            <label>{messages.fields.role}<Select className="shortControl" density="compact" aria-label={messages.fields.role} value={role} onValueChange={(nextValue) => { setRole(nextValue === 'ADMIN' ? 'ADMIN' : 'USER'); setConfirmChange(false) }}>
               <option value="USER">{messages.roles.USER}</option><option value="ADMIN">{messages.roles.ADMIN}</option>
             </Select></label>
-            <label>{messages.fields.status}<Select aria-label={messages.fields.status} value={status} onValueChange={(nextValue) => { setStatus(nextValue === 'ACTIVE' ? 'ACTIVE' : 'DISABLED'); setConfirmChange(false) }}>
+            <label>{messages.fields.status}<Select className="shortControl" density="compact" aria-label={messages.fields.status} value={status} onValueChange={(nextValue) => { setStatus(nextValue === 'ACTIVE' ? 'ACTIVE' : 'DISABLED'); setConfirmChange(false) }}>
               <option value="ACTIVE">{messages.statuses.ACTIVE}</option><option value="DISABLED">{messages.statuses.DISABLED}</option>
             </Select></label>
             {(role !== base.system_role || status !== base.status) && <label className="accountCheckbox"><input type="checkbox" required checked={confirmChange} onChange={(event) => setConfirmChange(event.target.checked)} />{messages.confirmChange}</label>}

@@ -92,6 +92,8 @@ python3 tests/browser/check_dropdown.py --url http://127.0.0.1:5189/skillmind/te
 
 Popup の左右余白は `check_dropdown.py` と `check_document_folder_input.py` が実矩形で検証する。短い候補、長い候補の scroll 前後、選択有無の本文幅と checkmark 領域を確認する。関連する操作 menu・account 一覧・dialog は `check_popup_spacing.py --url http://127.0.0.1:5189/skillmind/tests/browser/popup-spacing.html --browser all` を使う。双テーマ・三語・PC/狭幅/短い viewport を対象に、各 browser の通常 scrollbar 設定で実行する。overlay scrollbar だけの結果は classic scrollbar の予約領域の証明にはならず、`results.json` の実測 gutter と実行環境を併記する。
 
+短い Select/数値 field は `check_short_controls.py --url http://127.0.0.1:5189/skillmind/tests/browser/short-controls.html --output <出力先> --browser all` で、三語・双テーマ・PC/狭幅/短画面と touch の trigger/popup 寸法・keyboard を確認する。削除確認は `check_delete_confirmations.py --url http://127.0.0.1:5189/skillmind/tests/browser/projects.html --output <出力先>` を使う。後者は長い文書/Run と複数成果を全面 mock し、原対象・後果・scroll と取消だけを確認する。実 API への write や実データ削除を許可する検証ではない。
+
 全 runner は [tests/browser](../../SKM/web/tests/browser/) にある。harness URL と `--output` 等の必須引数は各 runner を参照する。主に projects.html、提出系は run-submission.html を使う。
 外置依存は PYTHONPATH、browser は PLAYWRIGHT_BROWSERS_PATH を指定する。使用中 port を奪わず、終了時は自分の Vite だけを止める。mock は実 DB の競合/撤権、blob、外部 write や複数 Worker の証明ではない。
 

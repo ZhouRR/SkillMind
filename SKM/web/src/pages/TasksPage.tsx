@@ -186,7 +186,7 @@ function TaskCenter({ projectId, csrfToken, moduleId, currentProject = null, pro
         <form className="taskFilters" data-task-filters onSubmit={search}>
           <label>{messages.scheduleManager.searchLabel}<input data-task-search value={q} maxLength={200}
             onChange={(event) => setQ(event.target.value)} /></label>
-          <label>{messages.scheduleManager.statusLabel}<Select data-task-status value={status}
+          <label className="shortField">{messages.scheduleManager.statusLabel}<Select className="shortControl" density="compact" data-task-status value={status}
             onValueChange={(nextValue) => setStatus(nextValue as TaskScheduleStatusFilter)}>
             <option value="">{messages.scheduleManager.allStates}</option>
             <option value="UNCONFIGURED">{messages.tasks.noSchedule}</option>

@@ -337,6 +337,8 @@ describe('ConfirmDialog', () => {
 
     expect(html).toContain('primaryButton')
     expect(html).not.toContain('destructiveButton')
+    expect(html).not.toContain('modalCompact')
+    expect(html).not.toContain('deleteConfirmationContent')
   })
 
   it('offers a single cancel action instead of repeating a header close button', () => {

@@ -152,7 +152,7 @@ export function SkillLibraryPanel({
       {!projectId && <p className="hint">{messages.skills.libraryNoProjectHint}</p>}
       {versions.length > 0 && <div className="skillLibraryFilters">
         <label>{messages.skills.librarySearch}<input type="search" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
-        <label>{messages.skills.libraryStatus}<Select value={statusFilter} onValueChange={(nextValue) => setStatusFilter(nextValue)}>
+        <label className="shortField">{messages.skills.libraryStatus}<Select className="shortControl" density="compact" value={statusFilter} onValueChange={(nextValue) => setStatusFilter(nextValue)}>
           <option value="all">{messages.skills.libraryAllStatuses}</option>
           {(['PUBLISHED', 'DRAFT', 'DEPRECATED'] as const).map((status) => <option key={status} value={status}>{messages.enums.skillVersionStatus[status]}</option>)}
         </Select></label>

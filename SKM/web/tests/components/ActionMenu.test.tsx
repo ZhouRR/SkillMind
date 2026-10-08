@@ -32,13 +32,14 @@ function invoke(element: Element, handler: string, event: unknown = {}): void {
 /** focus と event listener の副作用だけを記録する最小 DOM fixture。 */
 class FakeNode {
   style: Record<string, string> = {}
+  dataset: Record<string, string> = {}
   scrollHeight = 130
   children: FakeNode[] = []
-  bounds = { top: 120, bottom: 156, right: 750 }
+  bounds = { top: 120, bottom: 156, right: 750, width: 272 }
   focus = vi.fn(() => { browserDocument.activeElement = this })
   contains(node: FakeNode): boolean { return node === this || this.children.includes(node) }
   querySelectorAll(): FakeNode[] { return this.children }
-  getBoundingClientRect() { return this.bounds }
+  getBoundingClientRect() { return { ...this.bounds, height: Math.min(this.scrollHeight + 4, Number.parseFloat(this.style.maxHeight ?? 'Infinity')) } }
 }
 let documentListeners: Map<string, EventListener>
 let windowListeners: Map<string, EventListener>
@@ -48,6 +49,8 @@ let button: FakeNode
 let menu: FakeNode
 let items: ActionMenuItem[]
 let called: ReturnType<typeof vi.fn<() => void>>
+let resizeCallback: () => void
+let disconnectObserver: ReturnType<typeof vi.fn<() => void>>
 
 /** Menu に ref を接続してから layout cleanup/setup を実行する。 */
 function render(props: Partial<Parameters<typeof ActionMenu>[0]> = {}, commit = true): ReactNode {
@@ -78,6 +81,12 @@ beforeEach(() => {
   browserWindow = { innerWidth: 800, innerHeight: 600,
     addEventListener: (key: string, handler: EventListener) => windowListeners.set(key, handler),
     removeEventListener: (key: string) => windowListeners.delete(key) }
+  disconnectObserver = vi.fn()
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: () => void) { resizeCallback = callback }
+    observe() {}
+    disconnect() { disconnectObserver() }
+  })
   vi.stubGlobal('Node', FakeNode)
   vi.stubGlobal('document', browserDocument)
   vi.stubGlobal('window', browserWindow)
@@ -168,12 +177,45 @@ describe('ActionMenu keyboard and dismissal ownership', () => {
     expect(documentListeners.size).toBe(0)
     expect(windowListeners.size).toBe(0)
   })
+  it('uses measured short action width without reserving empty scrollbar gutters', () => {
+    menu.bounds.width = 144
+    open()
+    expect(menu.style).toMatchObject({ width: 'max-content', maxWidth: '272px', left: '606px' })
+    expect(menu.dataset.overflow).toBe('false')
+    browserWindow.innerWidth = 130
+    windowListeners.get('resize')?.(new Event('resize'))
+    expect(menu.style).toMatchObject({ maxWidth: '114px', left: '8px' })
+  })
+  it('tracks measured menu size changes and disconnects its observer when dismissed', () => {
+    open()
+    menu.children[1]!.focus()
+    menu.bounds.width = 192
+    resizeCallback()
+    expect(menu.style.left).toBe('558px')
+    expect(browserDocument.activeElement).toBe(menu.children[1])
+    invoke(find(render(), (node) => node.props.role === 'menu'), 'onKeyDown', event('Escape'))
+    render()
+    expect(disconnectObserver).toHaveBeenCalledTimes(1)
+  })
+  it('repositions changed content without stealing focus from the active item', () => {
+    open()
+    menu.children[1]!.focus()
+    menu.scrollHeight = 900
+    render({ items: [...items, { id: 'extra', label: 'Another operation' }] })
+    expect(menu.dataset.overflow).toBe('true')
+    expect(browserDocument.activeElement).toBe(menu.children[1])
+    menu.scrollHeight = 130
+    render({ items: [...items] })
+    expect(menu.dataset.overflow).toBe('false')
+    expect(browserDocument.activeElement).toBe(menu.children[1])
+  })
   it('keeps a long menu inside a narrow short viewport', () => {
     browserWindow.innerWidth = 390
     browserWindow.innerHeight = 320
-    button.bounds = { top: 274, bottom: 310, right: 382 }
+    button.bounds = { top: 274, bottom: 310, right: 382, width: 34 }
     menu.scrollHeight = 700
     open()
-    expect(menu.style).toMatchObject({ width: '272px', maxHeight: '304px', left: '110px', top: '8px' })
+    expect(menu.dataset.overflow).toBe('true')
+    expect(menu.style).toMatchObject({ width: 'max-content', maxWidth: '272px', maxHeight: '304px', left: '110px', top: '8px' })
   })
 })
