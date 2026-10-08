@@ -1,7 +1,15 @@
+import { WORKSPACE_AUDIT_EN } from './workspaceAudit'
+import { RESOURCES_AUDIT_EN } from './resourcesAudit'
+import { ASSETS_AUDIT_EN } from './assetsAudit'
+import { SHARED_AUDIT_EN } from './sharedAudit'
 import type { UiMessages } from './messages'
 
 /** English。実装細部の語(PostgreSQL/SSE/CamelCase 内部名)を避け、利用者視点の平易な表現に統一する。 */
 export const EN: UiMessages = {
+  uiAuditWorkspace: WORKSPACE_AUDIT_EN,
+  resourcesAudit: RESOURCES_AUDIT_EN,
+  assetsAudit: ASSETS_AUDIT_EN,
+  sharedAudit: SHARED_AUDIT_EN,
   common: { moreActions: (name) => `More actions for ${name}` },
   theme: { label: 'Appearance', light: 'Light', dark: 'Dark' },
   routes: {

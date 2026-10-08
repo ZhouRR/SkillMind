@@ -14,7 +14,7 @@ export function HistoryPage({ projectId, csrfToken, readOnly = false }: { projec
   const messages = useMessages()
   const [state, setState] = useState<RunHistoryState>({ status: 'loading' })
   const [trashed, setTrashed] = useState(false)
-  const [deleting, setDeleting] = useState<{ id: string; action: 'TRASH' | 'RESTORE' | 'PURGE' } | null>(null)
+  const [deleting, setDeleting] = useState<{ item: RunHistoryItemRecord; action: 'TRASH' | 'RESTORE' | 'PURGE' } | null>(null)
   const [offset, setOffset] = useState(0)
   const [revision, setRevision] = useState(0)
   const controllerRef = useRef<AbortController | null>(null)
@@ -72,8 +72,8 @@ export function HistoryPage({ projectId, csrfToken, readOnly = false }: { projec
         <RunHistoryPanel
           state={state}
           trashed={trashed}
-          onDelete={readOnly ? undefined : (item) => setDeleting({ id: item.run_id, action: trashed ? 'RESTORE' : 'TRASH' })}
-          onPurge={readOnly ? undefined : (item) => setDeleting({ id: item.run_id, action: 'PURGE' })}
+          onDelete={readOnly ? undefined : (item) => setDeleting({ item, action: trashed ? 'RESTORE' : 'TRASH' })}
+          onPurge={readOnly ? undefined : (item) => setDeleting({ item, action: 'PURGE' })}
           selectedRunId={null}
           onOpen={openRun}
           onPrevious={() => setOffset((current) => Math.max(0, current - HISTORY_PAGE_SIZE))}
@@ -81,7 +81,7 @@ export function HistoryPage({ projectId, csrfToken, readOnly = false }: { projec
           onRefresh={() => setRevision((current) => current + 1)}
         />
       </section>
-      {deleting && <RunDeletionDialog key={`${projectId}:${deleting.id}:${deleting.action}:${csrfToken}:${trashed}`} projectId={projectId} runId={deleting.id} csrfToken={csrfToken} action={deleting.action}
+      {deleting && <RunDeletionDialog key={`${projectId}:${deleting.item.run_id}:${deleting.action}:${csrfToken}:${trashed}`} projectId={projectId} runId={deleting.item.run_id} run={deleting.item} csrfToken={csrfToken} action={deleting.action}
         onClose={() => { setDeleting(null); setRevision((r) => r + 1) }} onChanged={() => { setDeleting(null); setOffset(0); setRevision((r) => r + 1) }} />}
     </>
   )

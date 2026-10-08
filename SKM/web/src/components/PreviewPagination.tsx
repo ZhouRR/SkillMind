@@ -8,6 +8,7 @@ export function PreviewPagination({ index, count, select }: {
   const messages = useMessages()
   if (count <= 1) return null
   return <nav className="markdownPreviewPagination" aria-label={messages.documentsPanel.previewPages}>
+    <span className="previewPageStatus" role="status" aria-live="polite" aria-atomic="true">{messages.documentsPanel.previewPage(index + 1, count)}</span>
     <button type="button" className="secondaryButton compactButton" disabled={index === 0}
       onClick={() => select(index - 1)}>{messages.runHistory.previous}</button>
     <Select aria-label={messages.documentsPanel.previewPages} value={index}

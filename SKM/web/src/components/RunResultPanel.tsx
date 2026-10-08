@@ -22,6 +22,9 @@ import { RunExecutionMetrics } from './RunExecutionMetrics'
 import { RunInteractions } from './RunInteractions'
 import { OutcomeEnvelopeResult, SchemaResultValue } from './RunOutcome'
 import { RunSummaryReport } from './RunSummaryReport'
+import { ToolCallSummary } from './ToolCallSummary'
+import { ProposalDecisionOwner } from './ProposalDecisionOwner'
+import '../styles/execution-audit.css'
 
 /** Run detail 非同期読み込みの排他的 UI state。 */
 export type RunDetailState =
@@ -35,7 +38,7 @@ const ignoreSessionExpired: SessionEnded = () => {}
 
 /** 普通答復の owner は loading/error と表示 tab に依存させない。 */
 export function RunResultPanel({ state, csrfToken, actorId = '', projectId, runId, projectReadOnly = false, reportOnly = false,
-  onInteractionResponded, onInteractionFacts, onProposalDecided, onSessionExpired = ignoreSessionExpired }: {
+  onInteractionResponded, onInteractionFacts, onProposalDecided, onRetryDetail, onSessionExpired = ignoreSessionExpired }: {
   reportOnly?: boolean
   state: RunDetailState
   csrfToken: string
@@ -46,6 +49,7 @@ export function RunResultPanel({ state, csrfToken, actorId = '', projectId, runI
   onInteractionResponded?: (response: RespondedInteractionRecord) => void
   onInteractionFacts?: (detail: RunDetailRecord) => void
   onProposalDecided?: () => void
+  onRetryDetail?: () => void
   onSessionExpired?: SessionEnded
 }) {
   const detail = 'detail' in state ? state.detail : undefined
@@ -61,24 +65,28 @@ export function RunResultPanel({ state, csrfToken, actorId = '', projectId, runI
     <RunEvaluations key={JSON.stringify(['evaluations', actorId, csrfToken, scope.projectId.toLowerCase(), scope.runId.toLowerCase()])}
       open={evaluationOwner === owner} onClose={() => setEvaluationOwner(null)} onOpen={() => setEvaluationOwner(owner)}
       scope={scope} state={state} csrfToken={csrfToken} readOnly={projectReadOnly} onSessionExpired={onSessionExpired} />
+    <ProposalDecisionOwner key={`proposal:${owner}`}>
     <RunResultContent key={`content:${owner}`} reportOnly={reportOnly} state={state} csrfToken={csrfToken} onProposalDecided={onProposalDecided}
-      onEvaluate={() => setEvaluationOwner(owner)}
+      onEvaluate={() => setEvaluationOwner(owner)} onRetryDetail={onRetryDetail} projectReadOnly={projectReadOnly}
       artifactOwner={JSON.stringify([actorId, csrfToken, scope.projectId.toLowerCase(), scope.runId.toLowerCase()])}
       artifactScope={scope}
       onSessionExpired={onSessionExpired} />
+    </ProposalDecisionOwner>
   </>
 }
 
 /** 普通答復とは独立した Result、Proposal、Segment/ToolCall/Evidence 監査を表示する。 */
-function RunResultContent({ reportOnly, state, csrfToken, onProposalDecided, artifactOwner, artifactScope, onSessionExpired, onEvaluate }: {
+function RunResultContent({ reportOnly, state, csrfToken, onProposalDecided, artifactOwner, artifactScope, onSessionExpired, onEvaluate, onRetryDetail, projectReadOnly }: {
   reportOnly: boolean
   state: RunDetailState
   csrfToken: string
   onProposalDecided?: () => void
+  onRetryDetail?: () => void
   artifactOwner: string
   artifactScope: { actorId: string; projectId: string; runId: string }
   onSessionExpired: SessionEnded
   onEvaluate: () => void
+  projectReadOnly: boolean
 }) {
   const messages = useMessages()
   const [showTechnicalDetails, setShowTechnicalDetails] = useState(false)
@@ -88,9 +96,14 @@ function RunResultContent({ reportOnly, state, csrfToken, onProposalDecided, art
   if (state.status === 'idle') {
     return <EmptyState text={messages.runResult.idleEmpty} />
   }
-  if (state.status === 'loading') return <EmptyState text={messages.runResult.loadingEmpty} />
-  if (state.status === 'error') return <p className="error" role="alert">{state.message}</p>
-  const { detail } = state
+  const detail = 'detail' in state ? state.detail : undefined
+  if (!detail) return <div className="runDetailReadState">
+    {state.status === 'loading' && <p role="status">{messages.runResult.loadingEmpty}</p>}
+    {state.status === 'error' && <>
+      <p className="error" role="alert">{state.message}</p>
+      {onRetryDetail && <button className="secondaryButton" type="button" onClick={onRetryDetail}>{messages.uiAuditWorkspace.detailRetry}</button>}
+    </>}
+  </div>
   const result = detail.result
   // 「今あなたが動く必要があるもの」と「後から辿る記録」を分ける。前者は結果より上へ、
   // 後者は既定で畳む。同じ縦一列に全部広げると、待ち事項も結果も監査の中に埋もれる。
@@ -104,7 +117,13 @@ function RunResultContent({ reportOnly, state, csrfToken, onProposalDecided, art
   const retryAt = latestAttempt?.error?.retry_at
 
   return (
-    <div className="resultView">
+    <div className="resultView" aria-busy={state.status === 'loading'}>
+      {state.status === 'loading' && <p role="status">{messages.uiAuditWorkspace.detailUpdating}</p>}
+      {state.status === 'error' && <section className="runDetailReadState">
+        <p className="error" role="alert">{state.message}</p>
+        <p role="status">{messages.uiAuditWorkspace.detailStale}</p>
+        {onRetryDetail && <button className="secondaryButton" type="button" onClick={onRetryDetail}>{messages.uiAuditWorkspace.detailRetry}</button>}
+      </section>}
       {capacityError && <section className="resultSection" role={detail.status === 'FAILED' ? 'alert' : 'status'}>
         <strong>{messages.runResult.capacityTitle}</strong>
         <p>{detail.status === 'RETRY_PENDING' ? messages.runResult.capacityWaiting : messages.runResult.capacityFailed}</p>
@@ -126,6 +145,7 @@ function RunResultContent({ reportOnly, state, csrfToken, onProposalDecided, art
         </section>
       )}
       <PendingActionsSection
+        actorId={artifactScope.actorId} readOnly={projectReadOnly} available={state.status === 'ready'} onSessionExpired={onSessionExpired}
         csrfToken={csrfToken}
         detail={detail}
         onDecided={onProposalDecided}
@@ -149,14 +169,7 @@ function RunResultContent({ reportOnly, state, csrfToken, onProposalDecided, art
             <div><dt>{messages.runResult.structuredResult}</dt><dd>{result.result_kind === 'OUTCOME_ENVELOPE' ? messages.runResult.formatBadgeOutcome : (detail.output_schema_checksum ? messages.runResult.formatBadgeSchema : messages.runResult.formatBadgeLegacy)}</dd></div>
           </>}
         </dl>
-        <button
-          aria-pressed={showTechnicalDetails}
-          className="secondaryButton compactButton"
-          type="button"
-          onClick={() => setShowTechnicalDetails((current) => !current)}
-        >
-          {showTechnicalDetails ? messages.runResult.hideTechnicalDetails : messages.runResult.technicalDetails}
-        </button>
+
       </ModalDialog>
       <ModalDialog drawer wide open={drawer === 'checks'} title={messages.runResult.reading.checks} onClose={() => setDrawer(null)}>
         {result && <ResultValidationScope result={result} />}
@@ -178,6 +191,16 @@ function RunResultContent({ reportOnly, state, csrfToken, onProposalDecided, art
 
       <div className="resultReportGrid">
         <section className="resultSection resultReportBody" aria-label={messages.runResult.genericOutcome}>
+          <div className="reportTechnicalControl">
+        <button
+          aria-pressed={showTechnicalDetails}
+          className="secondaryButton compactButton"
+          type="button"
+          onClick={() => setShowTechnicalDetails((current) => !current)}
+        >
+          {showTechnicalDetails ? messages.runResult.hideTechnicalDetails : messages.runResult.technicalDetails}
+        </button>
+          </div>
           <ReportPresentation key={result.result_id} value={result.data}>
           {result.result_kind === 'OUTCOME_ENVELOPE'
             ? <OutcomeEnvelopeResult data={result.data} schema={detail.output_schema} showTechnicalDetails={showTechnicalDetails} onArtifact={(ref) => setArtifactPreview((previous) => ({ ref, nonce: (previous?.nonce ?? 0) + 1 }))} onEvidence={(refs) => { setEvidenceSelection(refs); setDrawer('evidence') }} />
@@ -202,7 +225,7 @@ function RunResultContent({ reportOnly, state, csrfToken, onProposalDecided, art
       {!reportOnly && <>
       <LazyAuditSection count={detail.tool_calls.length} title={messages.runResult.toolCalls}>
         {() => detail.tool_calls.length === 0 ? <p className="compactEmpty">{messages.runResult.noToolCalls}</p> : (
-          <ul className="toolSummaryList">{detail.tool_calls.map((tool) => <li key={tool.tool_call_id}><div><strong>{tool.capability}</strong><span>{tool.status}</span></div><p>{tool.provider} · {tool.duration_ms === null ? '—' : `${tool.duration_ms} ms`}</p><code>{JSON.stringify(tool.arguments_summary)}</code></li>)}</ul>
+          <ul className="toolSummaryList">{detail.tool_calls.map((tool) => <ToolCallSummary tool={tool} key={tool.tool_call_id} />)}</ul>
         )}
       </LazyAuditSection>
 
@@ -211,6 +234,7 @@ function RunResultContent({ reportOnly, state, csrfToken, onProposalDecided, art
       </LazyAuditSection>
 
       <ControlledEffectsSection
+        actorId={artifactScope.actorId} readOnly={projectReadOnly} available={state.status === 'ready'} onSessionExpired={onSessionExpired}
         csrfToken={csrfToken}
         detail={detail}
         onDecided={onProposalDecided}
@@ -219,7 +243,7 @@ function RunResultContent({ reportOnly, state, csrfToken, onProposalDecided, art
 
       {result !== null && (
         <LazyAuditSection title={messages.runResult.viewRawResult}>
-          {() => <pre className="rawResultBody">{JSON.stringify(result.data, null, 2)}</pre>}
+          {() => <pre className="rawResultBody" tabIndex={0} role="region" aria-label={messages.runResult.viewRawResult}>{JSON.stringify(result.data, null, 2)}</pre>}
         </LazyAuditSection>
       )}
 

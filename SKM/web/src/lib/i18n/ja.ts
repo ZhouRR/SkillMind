@@ -1,8 +1,16 @@
+import { WORKSPACE_AUDIT_JA } from './workspaceAudit'
+import { RESOURCES_AUDIT_JA } from './resourcesAudit'
+import { ASSETS_AUDIT_JA } from './assetsAudit'
+import { SHARED_AUDIT_JA } from './sharedAudit'
 import type { UiMessages } from './messages'
 
 /** 日本語。技術用語(実行/Evidence/SkillVersion 等)は利用者向けの平易な語へ統一し、
     契約の識別子(capability ID・ファイル名・API field)だけを英語のまま残す。 */
 export const JA: UiMessages = {
+  uiAuditWorkspace: WORKSPACE_AUDIT_JA,
+  resourcesAudit: RESOURCES_AUDIT_JA,
+  assetsAudit: ASSETS_AUDIT_JA,
+  sharedAudit: SHARED_AUDIT_JA,
   common: { moreActions: (name) => `${name}の操作` },
   theme: { label: '外観', light: 'ライト', dark: 'ダーク' },
   routes: {

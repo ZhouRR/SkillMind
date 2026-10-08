@@ -1,5 +1,5 @@
 import { Select } from './Select'
-import type { ChangeEvent } from 'react'
+import { useRef, useState, type ChangeEvent } from 'react'
 
 import { useMessages } from '../i18n'
 
@@ -21,17 +21,23 @@ export function SchemaTaskInput({
   onRawChange: (value: string) => void
 }) {
   const messages = useMessages()
+  const formDraft = useRef<Record<string, unknown>>(value ?? {})
+  if (value !== null) formDraft.current = value
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const formValue = value ?? formDraft.current
+  const editingInvalidRaw = value === null && Object.keys(drafts).length === 0
   const properties = isRecord(schema?.properties) ? schema.properties : null
   const required = new Set(
     Array.isArray(schema?.required)
       ? schema.required.filter((item): item is string => typeof item === 'string')
       : [],
   )
-  if (schema?.type !== 'object' || properties === null || value === null) {
+  if (schema?.type !== 'object' || properties === null) {
     return <RawJsonEditor value={rawValue} onChange={onRawChange} />
   }
   return (
     <div className="schemaInputForm">
+      <fieldset className="schemaInputFields" disabled={editingInvalidRaw}>
       {Object.entries(properties).map(([key, rawSchema]) => {
         const field = isRecord(rawSchema) ? rawSchema : {}
         return (
@@ -40,25 +46,40 @@ export function SchemaTaskInput({
             fieldKey={key}
             key={key}
             required={required.has(key)}
-            value={value[key]}
-            onChange={(next) => onChange({ ...value, [key]: next })}
+            value={formValue[key]}
+            rawValue={drafts[key]}
+            onRawChange={(raw) => {
+              const next = { ...drafts, [key]: raw }
+              setDrafts(next)
+              onRawChange(serializeFieldDrafts(formValue, next, required))
+            }}
+            onChange={(next) => {
+              const updated = { ...formValue, [key]: next }
+              // 複雑 field が未完成でも、同じ form の scalar 編集を次の render に残す。
+              formDraft.current = updated
+              if (Object.keys(drafts).length) onRawChange(serializeFieldDrafts(updated, drafts, required))
+              else onChange(updated)
+            }}
           />
         )
       })}
+      </fieldset>
       <details className="rawResult">
         <summary>{messages.taskInput.advancedJson}</summary>
-        <RawJsonEditor value={rawValue} onChange={onRawChange} />
+        <RawJsonEditor value={rawValue} onChange={(raw) => { setDrafts({}); onRawChange(raw) }} />
       </details>
     </div>
   )
 }
 
 /** 一つの scalar field を type/enum に応じた 共有 form control へ変換する。 */
-function SchemaField({ field, fieldKey, required, value, onChange }: {
+function SchemaField({ field, fieldKey, required, value, rawValue, onRawChange, onChange }: {
   field: FieldSchema
   fieldKey: string
   required: boolean
   value: unknown
+  rawValue?: string
+  onRawChange: (value: string) => void
   onChange: (value: unknown) => void
 }) {
   const messages = useMessages()
@@ -109,25 +130,44 @@ function SchemaField({ field, fieldKey, required, value, onChange }: {
       </label>
     )
   }
+  const raw = rawValue ?? (value === undefined ? '' : JSON.stringify(value, null, 2))
+  const invalid = raw.trim() === '' ? required : !validJson(raw)
   return (
     <label>{label}{required ? ' *' : ''}{messages.taskInput.jsonSuffix}
       <textarea
         rows={4}
         spellCheck={false}
-        value={value === undefined ? '' : JSON.stringify(value, null, 2)}
-        onChange={(event) => {
-          try { onChange(JSON.parse(event.target.value) as unknown) } catch { /* 完成した JSON まで保持する。 */ }
-        }}
+        required={required}
+        aria-invalid={invalid || undefined}
+        value={raw}
+        onChange={(event) => onRawChange(event.target.value)}
       />
+      {invalid && <small className="error" role="status">{messages.uiAuditWorkspace.invalidJson}</small>}
       {description && <small>{description}</small>}
     </label>
   )
 }
 
+/** 未完成の field JSON も原文のまま合成し、送信境界で不正入力を確実に止める。 */
+function serializeFieldDrafts(value: Record<string, unknown>, drafts: Record<string, string>, required: ReadonlySet<string>): string {
+  const keys = new Set([...Object.keys(value), ...Object.keys(drafts)])
+  const combined = `{\n${[...keys].filter((key) => key in drafts ? drafts[key]!.trim() !== '' : value[key] !== undefined)
+    .map((key) => `  ${JSON.stringify(key)}: ${drafts[key] ?? JSON.stringify(value[key])}`).join(',\n')}\n}`
+  // field 内へ兄弟 key に見える文字列を入力しても、単一 JSON 値として不正なら送信不可とする。
+  const invalid = Object.entries(drafts).some(([key, raw]) => raw.trim() === '' ? required.has(key) : !validJson(raw))
+  return invalid ? `${combined},` : combined
+}
+
+/** 途中の構文不正を例外ではなく編集状態として扱う。 */
+function validJson(raw: string): boolean {
+  try { JSON.parse(raw); return true } catch { return false }
+}
+
 /** Schema form が扱えない場合にも入力可能性を失わない raw JSON editor。 */
 function RawJsonEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const messages = useMessages()
-  return <label>{messages.taskInput.rawLabel}<textarea className="jsonInput" rows={6} spellCheck={false} value={value} onChange={(event) => onChange(event.target.value)} /></label>
+  const invalid = !validJson(value) || !isRecord(JSON.parse(value))
+  return <label>{messages.taskInput.rawLabel}<textarea className="jsonInput" aria-invalid={invalid || undefined} rows={6} spellCheck={false} value={value} onChange={(event) => onChange(event.target.value)} />{invalid && <small className="error" role="status">{messages.uiAuditWorkspace.invalidJson}</small>}</label>
 }
 
 /** Unknown JSON が object か判定する。 */

@@ -117,7 +117,9 @@
 /* sidebar 内の select(項目切替・言語切替)は同じ寸法で揃える。
    background は簡写だと base.css の chevron(background-image)まで消して
    「開けない入力欄」に見えるため、必ず background-color だけを差し替える。 */
-.sidebar :is(select, .selectTrigger) { min-height: 38px; padding: 7px 30px 7px 10px; background-color: var(--surface-input); font-size: 13px; }
+.sidebar :is(select, .selectTrigger) { min-height: 38px; background-color: var(--surface-input); font-size: 13px; }
+.sidebar select { padding: 7px 30px 7px 10px; }
+.sidebar .selectTrigger { padding: 7px 10px; }
 .sideNavProject .projectContext, .sideNavProject :is(select, .selectTrigger) { min-width: 0; max-width: 100%; }
 
 .sidebarFooter { display: grid; flex-shrink: 0; grid-template-columns: minmax(0, 1fr); gap: 10px; border-top: 1px solid var(--border); padding: 12px 18px 14px; }
@@ -174,7 +176,7 @@
 
 /* ---- Authentication gate:紹介と入力を分け、認証 form の意味を変えない ---- */
 .authShell { display: grid; min-height: 100vh; place-items: center; padding: 40px 24px; background: var(--bg); }
-.authLayout { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(340px, .9fr); width: min(100%, 1000px); border: 1px solid var(--border-strong); border-radius: 24px; background: var(--surface); box-shadow: 5px 5px 0 var(--border); overflow: hidden; }
+.authLayout { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(340px, .9fr); width: min(100%, 1000px); border: 1px solid var(--border-strong); border-radius: 24px; background: var(--surface); box-shadow: var(--shadow-picker); overflow: hidden; }
 .authStory { display: flex; flex-direction: column; justify-content: space-between; gap: 40px; padding: 46px; background: var(--surface-raised); border-right: 1px solid var(--border); }
 /* 標語は二行に均して「に。」のような一文字行を作らない。日本語は文節単位で折り返す。 */
 .authStory .authHeadline { margin: 30px 0 16px; max-width: 400px; color: var(--text-hi); font-weight: 700; font-size: clamp(26px, 3.2vw, 40px); line-height: 1.3; letter-spacing: -.045em; text-wrap: balance; word-break: auto-phrase; }

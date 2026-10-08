@@ -37,6 +37,7 @@ export {
   loadRun,
   loadRunDetail,
   loadPendingRuns,
+  loadPendingRunPage,
   loadRunHistory,
   PENDING_RUN_STATUSES,
   respondToInteraction,
