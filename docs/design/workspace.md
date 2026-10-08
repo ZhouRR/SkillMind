@@ -19,7 +19,9 @@
 
 文書の upload 先は自由入力できる `DocumentFolderInput` を使い、native datalist ではなく Base UI Autocomplete の候補を表示する。既存の階層パスと root を選べ、新規パスは候補にない状態でも保持する。Escape/候補の非同期更新は入力先を変更せず、upload 中などの無効化時は候補を閉じる。
 
-言語切替の短い三候補は明示的な compact density を使い、trigger と popup の余白を抑え、不要な scrollbar 領域は予約しない。checkmark の固定 slot、keyboard/focus と狭い viewport の scroll は維持し、touch の候補高は通常と同じにする。
+言語・状態・評価の点数・boolean・調度の短い候補は明示的な compact density を使い、不要な popup 余白と scrollbar 領域を抑える。短い form field の幅は個別に制限し、trigger の高さと他の入力との整列を保つ。任意 enum、資源・文書・path や長い説明には一律適用しない。checkmark の固定 slot、keyboard/focus と狭い viewport の scroll は維持し、touch の候補高は通常と同じにする。
+
+操作 menu は内容に応じた幅と viewport 上限を持ち、短い操作に空の scrollbar 領域を予約しない。scroll が必要な長い一覧だけ左右の gutter を揃え、長い label は折り返す。削除・回収の確認は専用の短い dialog を使い、対象名・path/ID と影響を省略しない。対象一覧だけを有界 scroll にし、狭幅では操作 button を折り返す。
 
 通常の Popup と有界の候補・操作一覧は classic scrollbar の予約領域を両側に揃え、項目の左右余白を対称に保つ。Select の checkmark は未選択行にも不可視の領域を確保し、選択切替で本文の幅を変えない。ページ内で伸びる一覧や短い dialog には空の scrollbar 領域を予約せず、dialog 本文は見出しの左端と揃える。
 

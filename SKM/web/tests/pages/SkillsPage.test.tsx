@@ -1,3 +1,4 @@
+import { combobox } from '../fixtures/select'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -582,6 +583,9 @@ describe('Skill library version groups', () => {
       projectId: '', busyVersionId: null, onPublish: vi.fn(), onDeprecate: vi.fn(), onDelete: vi.fn(), onEnable: vi.fn(), onDisable: vi.fn() }
     const html = renderToStaticMarkup(<SkillLibraryPanel {...props} />)
     expect(html.match(/class="skillVersionGroup"/g)).toHaveLength(1)
+    expect(combobox(html)).toContain('data-density="compact"')
+    expect(combobox(html)).toContain('selectTrigger shortControl')
+    expect(html).toContain('class="shortField"')
     expect(html).toContain('<details class="skillOtherVersions"><summary>')
     expect(html.indexOf('v1.0.0')).toBeLessThan(html.indexOf('skillOtherVersions'))
     expect(html).toContain('v0.9.0')

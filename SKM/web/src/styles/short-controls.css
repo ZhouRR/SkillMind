@@ -1,0 +1,24 @@
+/* 幅は短い既知の値だけに明示適用する。popup の density と入力欄の高さは独立に保つ。 */
+button.selectTrigger.shortControl { width: min(100%, 12rem); justify-self: start; }
+button.selectTrigger.shortControlNarrow { width: min(100%, 9rem); }
+input[type='number'].shortNumberControl { width: min(100%, 10rem); min-width: 0; justify-self: start; }
+
+/* 検索欄を広く残し、短い状態 filter が残り幅を均等に占有しないようにする。 */
+.skillLibraryFilters > label.shortField, .taskFilters > label.shortField {
+  flex: 0 1 12rem;
+  width: min(100%, 12rem);
+}
+.documentSort.shortField { min-width: 0; max-width: 100%; white-space: normal; }
+.documentManagementToolbar .documentSort button.selectTrigger.shortControl { width: min(100%, 9rem); min-width: 0; }
+
+/* 点数と曜日だけを狭くし、長い評価文・時刻の表示領域を圧縮しない。 */
+.formRow.evaluationRatingFields { grid-template-columns: minmax(0, 9rem) minmax(0, 1fr); }
+.cronPresetFields:has(> .shortField) { grid-template-columns: minmax(0, 1fr) minmax(0, 12rem); }
+
+@media (max-width: 600px) {
+  button.selectTrigger.shortControl, input[type='number'].shortNumberControl { width: 100%; }
+  .skillLibraryFilters > label.shortField, .taskFilters > label.shortField { flex: 1 1 100%; width: 100%; }
+  .documentSort.shortField { display: grid; flex: 1 1 100%; width: 100%; }
+  .documentManagementToolbar .documentSort button.selectTrigger.shortControl { width: 100%; }
+  .formRow.evaluationRatingFields, .cronPresetFields:has(> .shortField) { grid-template-columns: minmax(0, 1fr); }
+}

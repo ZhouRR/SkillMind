@@ -26,7 +26,7 @@ let result = evaluationResult()
 /** JSX の公開 handler だけを呼ぶ。DOM の妥当性検証や React の再調停は模倣しない。 */
 interface UiProps {
   children?: ReactNode; className?: string; type?: string; value?: string | number
-  disabled?: boolean; readOnly?: boolean; role?: string; maxLength?: number
+  disabled?: boolean; readOnly?: boolean; role?: string; maxLength?: number; density?: string
   onChange?: (event: { target: { value: string } }) => void
   onValueChange?: (value: string) => void
   onSubmit?: (event: { preventDefault: () => void }) => void
@@ -155,6 +155,14 @@ beforeEach(() => {
 afterEach(() => { unmountHooks(); vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals() })
 
 describe('evaluation component draft and original request', () => {
+  it('compacts the numeric rating while leaving translated verdicts full sized', () => {
+    const view = render({ open: true })
+    expect(field(view, resultLabels.ratingLabel).props).toMatchObject({ density: 'compact', className: 'shortControl shortControlNarrow' })
+    expect(field(view, resultLabels.verdictLabel).props.density).toBeUndefined()
+    expect(field(view, resultLabels.verdictLabel).props.className).toBeUndefined()
+    expect(elements(view, (item) => item.props.className === 'formRow evaluationRatingFields')).toHaveLength(1)
+  })
+
   it('keeps the unknown request visible outside a closed drawer and retains its draft on reopening', async () => {
     vi.mocked(submitEvaluation).mockRejectedValue(new TypeError('offline'))
     render({ open: true }); commitHooks(); await settle({ open: true })

@@ -22,22 +22,24 @@
   box-sizing: border-box;
   overflow: auto;
   overscroll-behavior: contain;
-  /* 短い viewport で scroll しても操作行を片側へ寄せない。 */
-  scrollbar-gutter: stable both-edges;
-  padding: 6px;
+  min-width: min(9rem, calc(100vw - 16px));
+  scrollbar-gutter: auto;
+  padding: 4px;
   border: 2px solid var(--picker-border);
   border-radius: 12px;
   background: var(--surface);
   color: var(--text);
   box-shadow: var(--shadow-picker);
 }
+/* 実際に scroll が必要な一覧だけ左右の余白を揃える。 */
+.actionMenuPanel[data-overflow="true"] { scrollbar-gutter: stable both-edges; }
 .actionMenuItem {
   display: flex;
   align-items: center;
   box-sizing: border-box;
   width: 100%;
-  min-height: 42px;
-  padding: 8px 10px;
+  min-height: 36px;
+  padding: 6px 10px;
   border: 0;
   border-radius: 4px;
   background: transparent;

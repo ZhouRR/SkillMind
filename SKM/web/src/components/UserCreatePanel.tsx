@@ -66,7 +66,7 @@ export function UserCreatePanel({ session, onSessionEnded, onCreated, onSelect }
         <label>{messages.fields.email}<input type="email" autoComplete="off" required maxLength={320}
           value={email} onChange={(event) => setEmail(event.target.value)} /></label>
         <label>{messages.fields.name}<input required maxLength={200} value={name} onChange={(event) => setName(event.target.value)} /></label>
-        <label>{messages.fields.role}<Select aria-label={messages.fields.role} required value={role} onValueChange={(nextValue) => setRole(nextValue === 'ADMIN' ? 'ADMIN' : nextValue === 'USER' ? 'USER' : '')}>
+        <label>{messages.fields.role}<Select className="shortControl" density="compact" aria-label={messages.fields.role} required value={role} onValueChange={(nextValue) => setRole(nextValue === 'ADMIN' ? 'ADMIN' : nextValue === 'USER' ? 'USER' : '')}>
           <option value="">{messages.rolePlaceholder}</option><option value="USER">{messages.roles.USER}</option><option value="ADMIN">{messages.roles.ADMIN}</option>
         </Select></label>
         <label>{messages.initialPassword}<input type="password" autoComplete="new-password" required minLength={PASSWORD_MIN_LENGTH} maxLength={1024}

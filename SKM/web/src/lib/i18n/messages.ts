@@ -623,6 +623,8 @@ export interface UiMessages {
     purge: string
     purgeConfirm: string
     purgeDocuments: string
+    trashDocuments: string
+    restoreDocuments: string
     cleanupPending: string
     rename: string
     move: string
@@ -648,6 +650,7 @@ export interface UiMessages {
     failure: string
     unknown: string
     runConfirm: string
+    restoreRun: string
     includeOutputs: string
     purgeOutputs: string
     runBlocked: string

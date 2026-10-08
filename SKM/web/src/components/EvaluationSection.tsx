@@ -127,8 +127,8 @@ export function EvaluationSection({ scope, result, csrfToken, writable, accessFa
       <form className="evaluationForm" onSubmit={submit}>
         <fieldset disabled={locked}>
           <legend>{labels.draft}</legend>
-          <div className="formRow">
-            <label>{messages.runResult.ratingLabel}<Select value={draft.rating} onValueChange={(nextValue) => setDraft({ ...draft, rating: Number(nextValue) })}>
+          <div className="formRow evaluationRatingFields">
+            <label>{messages.runResult.ratingLabel}<Select className="shortControl shortControlNarrow" density="compact" value={draft.rating} onValueChange={(nextValue) => setDraft({ ...draft, rating: Number(nextValue) })}>
               {[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value}</option>)}</Select></label>
             <label>{messages.runResult.verdictLabel}<Select value={draft.verdict}
               onValueChange={(nextValue) => setDraft({ ...draft, verdict: nextValue as EvaluationDraft['verdict'] })}>

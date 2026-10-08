@@ -351,6 +351,7 @@ select {
   scrollbar-gutter: auto;
   padding: 4px;
 }
+.selectPopup[data-density='compact'][data-overflow='true'] { scrollbar-gutter: stable both-edges; }
 .selectPopup[data-density='compact'] .selectItem { min-height: 36px; padding: 6px 10px; gap: 8px; }
 @media (pointer: coarse) {
   .selectPopup[data-density='compact'] .selectItem { min-height: 44px; }

@@ -10,7 +10,7 @@ export function ScheduleRecurrenceField({ value, onChange }: { value: string; on
   const preset = readCronPreset(value)
   const mode = advanced || !preset ? 'custom' : preset.mode
   return <div className="scheduleRecurrence">
-    <label>{labels.recurrenceLabel}<Select name="recurrence" value={mode} onValueChange={(nextValue) => {
+    <label>{labels.recurrenceLabel}<Select className="shortControl" density="compact" name="recurrence" value={mode} onValueChange={(nextValue) => {
       if (nextValue === 'custom') { setAdvanced(true); return }
       setAdvanced(false)
       onChange(writeCronPreset({ time: preset?.time ?? '09:00', weekday: preset?.weekday ?? '1', mode: nextValue === 'weekly' ? 'weekly' : 'daily' }))
@@ -23,7 +23,7 @@ export function ScheduleRecurrenceField({ value, onChange }: { value: string; on
         <label>{labels.timeLabel}<input type="time" name="recurrence_time" required value={preset.time} onChange={(event) => {
           if (/^\d{2}:\d{2}$/.test(event.target.value)) onChange(writeCronPreset({ ...preset, time: event.target.value }))
         }} /></label>
-        {mode === 'weekly' && <label>{labels.weekdayLabel}<Select name="recurrence_weekday" value={preset.weekday}
+        {mode === 'weekly' && <label className="shortField">{labels.weekdayLabel}<Select className="shortControl" density="compact" name="recurrence_weekday" value={preset.weekday}
           onValueChange={(nextValue) => onChange(writeCronPreset({ ...preset, weekday: nextValue }))}>
           {labels.weekdays.map((day, index) => <option key={day} value={String(index)}>{day}</option>)}
         </Select></label>}

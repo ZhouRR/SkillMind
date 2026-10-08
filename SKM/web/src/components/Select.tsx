@@ -1,5 +1,5 @@
 import { Select as SelectPrimitive } from '@base-ui/react/select'
-import { Children, Fragment, isValidElement, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { Children, Fragment, isValidElement, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { modalTabStops } from '../lib/focus'
 import type { ButtonHTMLAttributes, OptgroupHTMLAttributes, OptionHTMLAttributes, ReactNode } from 'react'
 
@@ -106,6 +106,7 @@ export function Select({ children, value, defaultValue, onValueChange, disabled,
   const [uncontrolledValue, setUncontrolledValue] = useState(initialValue.current)
   const selectedValue = value === undefined ? uncontrolledValue : String(value)
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null)
+  const [popup, setPopup] = useState<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const controlledRef = useRef(value !== undefined)
@@ -116,6 +117,22 @@ export function Select({ children, value, defaultValue, onValueChange, disabled,
   const [fieldsetDisabled, setFieldsetDisabled] = useState(false)
   const [open, setOpen] = useState(false)
   const effectiveDisabled = disabled || fieldsetDisabled
+
+  // 短い候補に空の gutter を残さず、短画面で scroll する時だけ左右を揃える。
+  useLayoutEffect(() => {
+    if (!popup || !open || density !== 'compact') return
+    function syncOverflow(): void {
+      if (!popup) return
+      popup.dataset.overflow = 'false'
+      popup.dataset.overflow = String(popup.scrollHeight > popup.clientHeight + 1)
+    }
+    syncOverflow()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(syncOverflow)
+    observer?.observe(popup)
+    for (const child of popup.children) observer?.observe(child)
+    window.addEventListener('resize', syncOverflow)
+    return () => { observer?.disconnect(); window.removeEventListener('resize', syncOverflow) }
+  }, [popup, open, density, entries])
 
   useEffect(() => {
     controlledRef.current = value !== undefined
@@ -216,7 +233,7 @@ export function Select({ children, value, defaultValue, onValueChange, disabled,
       <SelectPrimitive.Portal container={portalContainer ?? undefined}>
         <SelectPrimitive.Positioner className="selectPositioner" positionMethod="fixed"
           alignItemWithTrigger={false} sideOffset={6} collisionPadding={10} align="start">
-          <SelectPrimitive.Popup className="selectPopup" data-select-popup="" data-density={density} aria-labelledby={controlId}
+          <SelectPrimitive.Popup ref={setPopup} className="selectPopup" data-select-popup="" data-density={density} aria-labelledby={controlId}
             finalFocus={() => tabFocusTarget.current ?? true}
             onKeyDownCapture={(event) => {
               if (event.key !== 'Tab' || !portalContainer || !triggerRef.current) return

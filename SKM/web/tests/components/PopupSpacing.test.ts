@@ -26,7 +26,7 @@ function styleFor(className: string): CSSStyleDeclaration {
 }
 
 describe('popup spacing style contracts', () => {
-  it('keeps only the compact language popup narrow without reserving empty scrollbars', () => {
+  it('keeps explicitly compact short-option popups narrow without reserving empty scrollbars', () => {
     fixture.className = 'selectPopup'
     fixture.dataset.density = 'compact'
     fixture.innerHTML = '<div class="selectItem"><span class="selectItemText">English</span><span class="selectItemIndicator"></span></div>'
@@ -38,6 +38,9 @@ describe('popup spacing style contracts', () => {
     expect(getComputedStyle(item).padding).toBe('6px 10px')
     expect(getComputedStyle(item).gap).toBe('8px')
     expect(getComputedStyle(item.lastElementChild!).flexBasis).toBe('16px')
+    fixture.dataset.overflow = 'true'
+    expect(getComputedStyle(fixture).scrollbarGutter).toBe('stable both-edges')
+    fixture.removeAttribute('data-overflow')
     fixture.removeAttribute('data-density')
     expect(getComputedStyle(fixture).width).toBe('max(var(--anchor-width), 12rem)')
     expect(getComputedStyle(fixture).scrollbarGutter).toBe('stable both-edges')
@@ -51,7 +54,7 @@ describe('popup spacing style contracts', () => {
     expect(getComputedStyle(trigger).paddingRight).toBe('10px')
   })
 
-  it.each(['selectPopup', 'selectPopup documentFolderPopup', 'actionMenuPanel', 'accountEventList'])(
+  it.each(['selectPopup', 'selectPopup documentFolderPopup', 'accountEventList'])(
     'balances reserved scrollbar space on %s', (className) => {
       expect(styleFor(className).scrollbarGutter).toBe('stable both-edges')
     },
@@ -62,6 +65,15 @@ describe('popup spacing style contracts', () => {
       expect(style.paddingLeft).toBe(style.paddingRight)
     },
   )
+  it('reserves menu gutters only when the actual menu overflows', () => {
+    fixture.className = 'actionMenuPanel'
+    expect(getComputedStyle(fixture).scrollbarGutter).toBe('auto')
+    expect(getComputedStyle(fixture).padding).toBe('4px')
+    fixture.dataset.overflow = 'true'
+    expect(getComputedStyle(fixture).scrollbarGutter).toBe('stable both-edges')
+    fixture.innerHTML = '<button class="actionMenuItem">Remove</button>'
+    expect(getComputedStyle(fixture.firstElementChild!).minHeight).toBe('36px')
+  })
   it('uses equal logical spacing on the bounded account event list', () => {
     expect(styleFor('accountEventList').paddingInline).toBe('4px')
     expect(styleFor('accountEventList').paddingInlineEnd).toBe(styleFor('accountEventList').paddingInlineStart)

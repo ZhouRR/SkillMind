@@ -219,7 +219,7 @@ function ScheduleCreationForm({ open, projectId, csrfToken, task, onClose, onSav
           }} />
         <label>{messages.schedules.nameLabel}<input name="name" maxLength={200} type="text" value={name}
           placeholder={task.title} onChange={(event) => { nameRef.current = event.target.value; setName(event.target.value) }} /></label>
-        <label>{messages.schedules.kindLabel}<Select name="kind" value={timing.kind}
+        <label>{messages.schedules.kindLabel}<Select className="shortControl" density="compact" name="kind" value={timing.kind}
           onValueChange={(nextValue) => changeTiming({ kind: nextValue as ScheduleTimeDraft['kind'] })}>
           <option value="CRON">{messages.enums.scheduleKind.CRON}</option>
           <option value="ONCE">{messages.enums.scheduleKind.ONCE}</option>
@@ -240,7 +240,7 @@ function ScheduleCreationForm({ open, projectId, csrfToken, task, onClose, onSav
           value={timing.endAt} choice={timing.endAtChoice} candidates={endCandidates} timezone={inputTimezone}
           onChange={(value) => changeTiming({ endAt: value, endAtChoice: '' })}
           onChoice={(value) => changeTiming({ endAtChoice: value })} />
-        <label>{messages.schedules.maxRunsLabel}<input name="max_runs" type="number" min={1} max={100000} step={1}
+        <label>{messages.schedules.maxRunsLabel}<input className="shortNumberControl" name="max_runs" type="number" min={1} max={100000} step={1}
           value={timing.maxRuns} onChange={(event) => changeTiming({ maxRuns: event.target.value })} /></label>
         <div className="schedulePreviewActions"><button className="secondaryButton" data-schedule-preview type="button"
           disabled={!definition || (!!request && preview.pending)} onClick={handlePreview}>

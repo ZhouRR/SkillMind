@@ -58,7 +58,7 @@ export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets,
                 <>
                   <label>{messages.resources.databaseHost}<input required maxLength={253} value={connectDraft.host}
                     onChange={(event) => setConnectDraft((value) => ({ ...value, host: event.target.value }))} /></label>
-                  <label>{messages.resources.databasePort}<input required type="number" min={1} max={65535} value={connectDraft.port}
+                  <label>{messages.resources.databasePort}<input className="shortNumberControl" required type="number" min={1} max={65535} value={connectDraft.port}
                     onChange={(event) => setConnectDraft((value) => ({ ...value, port: event.target.value }))} /></label>
                   <label>{messages.resources.databaseName}<input required maxLength={253} value={connectDraft.database}
                     onChange={(event) => setConnectDraft((value) => ({ ...value, database: event.target.value }))} /></label>

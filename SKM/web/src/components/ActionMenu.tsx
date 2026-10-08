@@ -31,6 +31,7 @@ export function ActionMenu({ id, label, items, disabled = false, ownerKey = labe
   const mounted = useRef(false)
   const openRef = useRef(false)
   const initialFocus = useRef<'first' | 'last'>('first')
+  const reposition = useRef<(() => void) | null>(null)
   const current = useRef({ ownerKey, items, disabled })
   current.current = { ownerKey, items, disabled }
   const [openOwner, setOpenOwner] = useState<string | null>(null)
@@ -69,18 +70,24 @@ export function ActionMenu({ id, label, items, disabled = false, ownerKey = labe
       if (!menu || !button) return
       const margin = 8
       const gap = 4
-      const width = Math.min(272, Math.max(1, window.innerWidth - margin * 2))
+      const maxWidth = Math.min(272, Math.max(1, window.innerWidth - margin * 2))
       const maxHeight = Math.max(1, window.innerHeight - margin * 2)
-      menu.style.width = `${width}px`
+      menu.style.width = 'max-content'
+      menu.style.maxWidth = `${maxWidth}px`
       menu.style.maxHeight = `${maxHeight}px`
+      // 内容幅を使い、実際に縦 overflow する場合だけ左右の scrollbar 領域を揃える。
+      menu.dataset.overflow = 'false'
+      menu.dataset.overflow = String(menu.scrollHeight > maxHeight - 4)
+      const width = Math.min(menu.getBoundingClientRect().width, maxWidth)
       const bounds = button.getBoundingClientRect()
-      const height = Math.min(menu.scrollHeight + 2, maxHeight)
+      const height = Math.min(menu.getBoundingClientRect().height, maxHeight)
       const below = bounds.bottom + gap
       const preferredTop = below + height <= window.innerHeight - margin
         ? below : bounds.top - gap - height
       menu.style.left = `${Math.max(margin, Math.min(bounds.right - width, window.innerWidth - width - margin))}px`
       menu.style.top = `${Math.max(margin, Math.min(preferredTop, window.innerHeight - height - margin))}px`
     }
+    reposition.current = position
     position()
     const candidates = focusItems()
     ;(initialFocus.current === 'last' ? candidates.at(-1) : candidates[0])?.focus()
@@ -90,17 +97,26 @@ export function ActionMenu({ id, label, items, disabled = false, ownerKey = labe
       const target = event.target
       if (target instanceof Node && !menu?.contains(target) && !button?.contains(target)) close()
     }
+    // 翻訳・font・操作候補の更新でも内容幅の変化を viewport 内へ戻す。
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(position)
+    observer?.observe(menu)
+    observer?.observe(button)
     window.addEventListener('resize', position)
     window.addEventListener('scroll', position, true)
     document.addEventListener('pointerdown', outside, true)
     document.addEventListener('focusin', outside)
     return () => {
+      reposition.current = null
+      observer?.disconnect()
       window.removeEventListener('resize', position)
       window.removeEventListener('scroll', position, true)
       document.removeEventListener('pointerdown', outside, true)
       document.removeEventListener('focusin', outside)
     }
   }, [open, ownerKey])
+
+  // 外枠が上限に達したまま内容だけが増減しても gutter を更新し、現在の焦点は動かさない。
+  useLayoutEffect(() => { reposition.current?.() }, [items])
 
   function show(focus: 'first' | 'last' = 'first'): void {
     if (unavailable || !mounted.current) return

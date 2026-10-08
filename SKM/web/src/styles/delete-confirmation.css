@@ -1,0 +1,36 @@
+/* 確認専用の密度。通常 form、drawer と文書 preview の広さを維持する。 */
+.modalCompact .modalDialog { width: min(460px, 100%); min-width: 0; }
+.modalCompact .modalHeader { padding: 14px 18px; }
+.modalCompact .modalBody { min-height: 0; padding: 16px 18px 18px; }
+.deleteConfirmationContent { display: grid; min-width: 0; gap: 14px; overflow-wrap: anywhere; }
+.deleteConfirmationContent > p, .deleteConfirmationContent .confirmMessage { margin: 0; }
+.deleteConfirmationContent .confirmActions { gap: 8px; padding-top: 2px; }
+.deleteConfirmationContent .confirmActions > button { flex: 0 1 auto; width: auto; min-width: 0; max-width: 100%; min-height: 38px; padding: 8px 14px; white-space: normal; overflow-wrap: anywhere; }
+.confirmTargets { display: grid; min-width: 0; gap: 8px; }
+.confirmTargetsLabel { margin: 0; color: var(--text-muted); font-size: 12px; }
+.confirmTargetList { display: grid; gap: 10px; max-height: min(220px, 30dvh); margin: 0; padding: 10px 12px; list-style: none; overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-raised); scrollbar-gutter: auto; }
+.confirmTargetList li { display: grid; min-width: 0; gap: 4px; overflow-wrap: anywhere; }
+.confirmTargetList strong { font-size: 13px; line-height: 1.5; font-weight: 500; }
+.confirmTargetList code { color: var(--text-muted); font-size: 12px; }
+.confirmTargetList:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.deleteConfirmationContent .runDeletionTarget { gap: 4px; margin: 0; }
+.deleteConfirmationContent .runDeletionTarget strong { font-size: 14px; line-height: 1.5; }
+.deleteConfirmationContent .runDeletionTarget time, .deleteConfirmationContent .runDeletionTarget code { font-size: 12px; }
+.deleteConfirmationContent .runDeletionCounts { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--text-muted); font-size: 12px; }
+.deleteConfirmationContent .runDeletionOutputs { min-width: 0; margin: 0; }
+.deleteConfirmationContent .runDeletionOutputs summary { font-size: 13px; }
+.deleteConfirmationContent .runDeletionOutputs ul { max-height: min(180px, 25dvh); margin: 8px 0 0; padding: 0 8px 0 24px; overflow: auto; }
+.deleteConfirmationContent .runDeletionOutputs li + li { margin-top: 6px; }
+.deleteConfirmationContent .runDeletionChoice { min-width: 0; gap: 8px; padding: 0; font-size: 13px; line-height: 1.5; }
+.deleteConfirmationContent .runDeletionChoice span { min-width: 0; }
+.deleteConfirmationContent .runDeletionChoice input { flex-shrink: 0; }
+
+@media (max-width: 480px) {
+  .modalCompact .modalHeader { padding: 12px 16px; }
+  .modalCompact .modalBody { padding: 14px 16px 16px; }
+}
+
+/* Desktop の密度と touch の操作領域を分ける。危険操作でも小さい hit target にしない。 */
+@media (pointer: coarse) {
+  .deleteConfirmationContent .confirmActions > button { min-height: 44px; }
+}
