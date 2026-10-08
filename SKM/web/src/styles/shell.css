@@ -140,6 +140,8 @@
    label の既定 margin-bottom を打ち消し、間隔は親の gap 一本に任せる。 */
 .sidebarLanguage { display: flex; flex: 1; gap: 8px; align-items: center; min-width: 0; margin-bottom: 0; color: var(--text-muted); font-size: 12px; }
 .sidebarLanguage :is(select, .selectTrigger) { flex: 1; min-width: 0; }
+/* 自前 chevron は別要素なので native select 用の矢印余白を重ねない。 */
+.sidebarLanguage .selectTrigger[data-density='compact'] { padding: 5px 10px; gap: 8px; }
 .sidebarError { color: var(--danger); font-size: 12px; line-height: 1.4; }
 .sidebarLogout { flex-shrink: 0; border: 1px solid var(--border-strong); border-radius: var(--radius-tiny); padding: 5px 9px; color: var(--text-muted); background: transparent; font-size: 12px; white-space: nowrap; cursor: pointer; transition: color .15s ease, border-color .15s ease; }
 .sidebarLogout:hover:not(:disabled) { border-color: var(--accent-border); color: var(--accent); }

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import baseStyles from '../../src/styles/base.css?raw'
 import pageStyles from '../../src/styles/pages.css?raw'
 import accountStyles from '../../src/styles/accounts.css?raw'
+import shellStyles from '../../src/styles/shell.css?raw'
 import menuStyles from '../../src/styles/action-menu.css?raw'
 
 let stylesheet: HTMLStyleElement
@@ -11,7 +12,7 @@ let fixture: HTMLDivElement
 /** 実 CSS の cascade を確認する。pixel の対称性は browser runner で別途検証する。 */
 beforeEach(() => {
   stylesheet = document.createElement('style')
-  stylesheet.textContent = [baseStyles, pageStyles, accountStyles, menuStyles].join('\n')
+  stylesheet.textContent = [baseStyles, pageStyles, accountStyles, menuStyles, shellStyles].join('\n')
   document.head.append(stylesheet)
   fixture = document.createElement('div')
   document.body.append(fixture)
@@ -25,6 +26,31 @@ function styleFor(className: string): CSSStyleDeclaration {
 }
 
 describe('popup spacing style contracts', () => {
+  it('keeps only the compact language popup narrow without reserving empty scrollbars', () => {
+    fixture.className = 'selectPopup'
+    fixture.dataset.density = 'compact'
+    fixture.innerHTML = '<div class="selectItem"><span class="selectItemText">English</span><span class="selectItemIndicator"></span></div>'
+    expect(getComputedStyle(fixture).width).toBe('max(var(--anchor-width), 9rem)')
+    expect(getComputedStyle(fixture).scrollbarGutter).toBe('auto')
+    expect(getComputedStyle(fixture).padding).toBe('4px')
+    const item = fixture.firstElementChild!
+    expect(getComputedStyle(item).minHeight).toBe('36px')
+    expect(getComputedStyle(item).padding).toBe('6px 10px')
+    expect(getComputedStyle(item).gap).toBe('8px')
+    expect(getComputedStyle(item.lastElementChild!).flexBasis).toBe('16px')
+    fixture.removeAttribute('data-density')
+    expect(getComputedStyle(fixture).width).toBe('max(var(--anchor-width), 12rem)')
+    expect(getComputedStyle(fixture).scrollbarGutter).toBe('stable both-edges')
+    expect(getComputedStyle(item).minHeight).toBe('44px')
+  })
+  it('does not double-count the native arrow padding on the language trigger', () => {
+    fixture.className = 'sidebar'
+    fixture.innerHTML = '<label class="sidebarLanguage"><button class="selectTrigger" data-density="compact">English</button></label>'
+    const trigger = fixture.querySelector('button')!
+    expect(getComputedStyle(trigger).paddingLeft).toBe('10px')
+    expect(getComputedStyle(trigger).paddingRight).toBe('10px')
+  })
+
   it.each(['selectPopup', 'selectPopup documentFolderPopup', 'actionMenuPanel', 'accountEventList'])(
     'balances reserved scrollbar space on %s', (className) => {
       expect(styleFor(className).scrollbarGutter).toBe('stable both-edges')

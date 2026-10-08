@@ -220,6 +220,7 @@ export function AppNavigation({ currentRoute, metaState, projectId, projectState
             <label className="sidebarLanguage">
               <span className="visuallyHidden">{messages.language.label}</span>
               <Select
+                density="compact"
                 title={messages.language.label}
                 value={language}
                 onValueChange={(nextValue) => {

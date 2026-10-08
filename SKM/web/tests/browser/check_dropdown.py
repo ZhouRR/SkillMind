@@ -325,6 +325,15 @@ async def check_navigation(page: Page, url: str, output: Path, key: str, languag
     await expect(trigger).to_contain_text(LANGUAGE_LABELS[language])
     target = LANGUAGES[(LANGUAGES.index(language) + 1) % len(LANGUAGES)]
     popup = await open_picker(trigger, page)
+    await expect(popup).to_have_attribute('data-density', 'compact')
+    geometry = await check_popup_geometry(popup, indicators=True, scrollable=False)
+    assert geometry['reservedInlineSpace'] <= 1, geometry
+    bounds = await popup.bounding_box()
+    anchor = await trigger.bounding_box()
+    assert bounds and anchor
+    rem = await page.evaluate('parseFloat(getComputedStyle(document.documentElement).fontSize)')
+    assert abs(bounds['width'] - max(anchor['width'], 9 * rem)) <= 1, (bounds, anchor)
+    assert bounds['height'] <= 146, bounds
     await page.screenshot(path=str(output / f'{key}-home-language-open.png'))
     await popup.get_by_role('option', name=LANGUAGE_LABELS[target], exact=True).click()
     await closed_picker(trigger, page)
