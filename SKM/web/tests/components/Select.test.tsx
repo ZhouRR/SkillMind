@@ -76,6 +76,24 @@ describe('shared cross-browser Select', () => {
     expect(form.checkValidity()).toBe(false)
   })
 
+  it('keeps a checkmark slot on every option when selection changes', async () => {
+    const render = (value: string) => <Select aria-label="Project" value={value}>
+      <option value="alpha">Alpha</option><option value="beta">Beta</option>
+      <option value="disabled" disabled>Unavailable</option>
+    </Select>
+    await act(async () => root.render(render('alpha')))
+    const trigger = container.querySelector<HTMLElement>('[role="combobox"]')!
+    await press(trigger, 'ArrowDown')
+    const options = Array.from(document.querySelectorAll<HTMLElement>('[role="option"]'))
+    const indicators = options.map((option) => option.querySelector('.selectItemIndicator'))
+    expect(indicators.every(Boolean)).toBe(true)
+    expect(indicators.map((indicator) => indicator!.hasAttribute('data-selected'))).toEqual([true, false, false])
+    expect(indicators.every((indicator) => indicator!.getAttribute('aria-hidden') === 'true')).toBe(true)
+    await act(async () => root.render(render('beta')))
+    expect(options.map((option) => option.querySelector('.selectItemIndicator'))).toEqual(indicators)
+    expect(indicators.map((indicator) => indicator!.hasAttribute('data-selected'))).toEqual([false, true, false])
+  })
+
   it('leaves disabled fields out of form data and prevents opening', async () => {
     const changes = vi.fn()
     await act(async () => root.render(<form><label>Unavailable

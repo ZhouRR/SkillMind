@@ -9,7 +9,23 @@ from urllib.parse import urlsplit
 
 from check_document_organization import OrganizationApi
 from check_projects import PROJECT, messages
-from playwright.async_api import async_playwright, expect
+from popup_geometry import check_popup_geometry
+from playwright.async_api import Route, async_playwright, expect
+
+
+class FolderInputApi(OrganizationApi):
+    """既存の隔離 API に長い候補だけを加え、root と折返し・scroll を同時に検証する。"""
+
+    async def respond(self, route: Route) -> None:
+        """候補一覧だけを拡張し、文書や write の契約は共通 fixture に委ねる。"""
+        parts = urlsplit(route.request.url).path.removeprefix(self.prefix).split('/')
+        if len(parts) == 3 and parts[0] == 'projects' and parts[2] == 'document-folders':
+            assert route.request.method == 'GET'
+            await route.fulfill(json={'folders': ['specs', 'specs/nested/deep', 'empty/nested', *[
+                f'zz-long-{index:02d}-' + 'directory_name_' * 8 for index in range(36)
+            ]]})
+            return
+        await super().respond(route)
 
 
 async def check(url: str, output: Path, engine: str) -> None:
@@ -26,9 +42,9 @@ async def check(url: str, output: Path, engine: str) -> None:
             browser = await getattr(playwright, browser_name).launch()
             for language in ('ja', 'zh', 'en'):
                 for theme in ('light', 'dark'):
-                    for width in (1440, 390):
-                        api = OrganizationApi(url, language)
-                        context = await browser.new_context(viewport={'width': width, 'height': 900})
+                    for width, height in ((1440, 900), (390, 900), (390, 360)):
+                        api = FolderInputApi(url, language)
+                        context = await browser.new_context(viewport={'width': width, 'height': height})
                         await context.route('**/*', api.route)
                         await context.add_init_script(f"localStorage.setItem('skillmind.theme', '{theme}')")
                         page = await context.new_page()
@@ -47,6 +63,7 @@ async def check(url: str, output: Path, engine: str) -> None:
                             await expect(popup).to_be_visible()
                             await expect(popup.locator('[data-folder-path="specs/nested/deep"]')).to_be_visible()
                             await expect(popup.locator('[data-folder-path="empty/nested"]')).to_be_visible()
+                            await expect(popup.locator('[data-folder-path=""]')).to_have_count(1)
                             # 初回 positioning 後に候補が空になったり DOM が差し替わったりしない。
                             frames = await popup.evaluate('''async popup => {
                               const list = popup.querySelector('[role="listbox"]');
@@ -67,7 +84,12 @@ async def check(url: str, output: Path, engine: str) -> None:
                             assert all(row['same'] and row['text'] and row['visible'] and row['inside']
                                        and row['expanded'] == 'true' for row in frames), frames
                             if opening == 0:
-                                await page.screenshot(path=str(output / f'{browser_name}-{language}-{theme}-{width}.png'))
+                                long_geometry = await check_popup_geometry(popup, indicators=False, scrollable=True)
+                                last = popup.get_by_role('option').last
+                                await last.scroll_into_view_if_needed()
+                                assert await popup.evaluate('element => element.scrollTop > 0')
+                                scrolled_geometry = await check_popup_geometry(popup, indicators=False, scrollable=True)
+                                await page.screenshot(path=str(output / f'{browser_name}-{language}-{theme}-{width}x{height}.png'))
                             await field.press('Escape')
                             await expect(field).to_have_attribute('aria-expanded', 'false')
                             await expect(field).to_have_value('')
@@ -83,6 +105,15 @@ async def check(url: str, output: Path, engine: str) -> None:
                         await arrow.click()
                         await page.locator('[data-folder-path=""]').click()
                         await expect(field).to_have_value('')
+                        # 絞込み後の root と完全一致パスでは scrollbar が不要になっても余白を保つ。
+                        await field.fill('specs/nested/deep')
+                        popup = page.locator('.documentFolderPopup')
+                        await expect(popup).to_be_visible()
+                        await expect(popup.get_by_role('option')).to_have_count(2)
+                        await expect(popup.locator('[data-folder-path=""]')).to_have_count(1)
+                        await expect(popup.locator('[data-folder-path="specs/nested/deep"]')).to_have_count(1)
+                        short_geometry = await check_popup_geometry(popup, indicators=False, scrollable=False)
+                        await field.press('Escape')
                         await field.fill('specs')
                         await field.press('Tab')
                         await expect(field).to_have_attribute('aria-expanded', 'false')
@@ -90,7 +121,10 @@ async def check(url: str, output: Path, engine: str) -> None:
                         assert not api.operations and not errors, (api.operations, errors)
                         assert not api.unexpected and not api.failures, (api.unexpected, api.failures)
                         assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth')
-                        results.append({'browser': browser_name, 'language': language, 'theme': theme, 'width': width, 'passed': True})
+                        results.append({'browser': browser_name, 'language': language, 'theme': theme,
+                                        'width': width, 'height': height, 'passed': True,
+                                        'shortGeometry': short_geometry, 'longGeometry': long_geometry,
+                                        'scrolledGeometry': scrolled_geometry})
                         await context.close()
             await browser.close()
     (output / 'results.json').write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding='utf-8')

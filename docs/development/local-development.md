@@ -90,6 +90,8 @@ python3 tests/browser/check_dropdown.py --url http://127.0.0.1:5189/skillmind/te
 
 文書 upload 先の候補は `check_document_folder_input.py --url <projects.html の URL> --browser all` で検証する。三語・双テーマ・PC/狭幅で、繰り返し展開中の候補 DOM と連続 frame、root/既存パス/自由入力、Escape/Tab を確認する。DOM 単体 test は native datalist の描画や画面上のちらつきの証明ではない。
 
+Popup の左右余白は `check_dropdown.py` と `check_document_folder_input.py` が実矩形で検証する。短い候補、長い候補の scroll 前後、選択有無の本文幅と checkmark 領域を確認する。関連する操作 menu・account 一覧・dialog は `check_popup_spacing.py --url http://127.0.0.1:5189/skillmind/tests/browser/popup-spacing.html --browser all` を使う。双テーマ・三語・PC/狭幅/短い viewport を対象に、各 browser の通常 scrollbar 設定で実行する。overlay scrollbar だけの結果は classic scrollbar の予約領域の証明にはならず、`results.json` の実測 gutter と実行環境を併記する。
+
 全 runner は [tests/browser](../../SKM/web/tests/browser/) にある。harness URL と `--output` 等の必須引数は各 runner を参照する。主に projects.html、提出系は run-submission.html を使う。
 外置依存は PYTHONPATH、browser は PLAYWRIGHT_BROWSERS_PATH を指定する。使用中 port を奪わず、終了時は自分の Vite だけを止める。mock は実 DB の競合/撤権、blob、外部 write や複数 Worker の証明ではない。
 

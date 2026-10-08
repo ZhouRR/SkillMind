@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from popup_geometry import check_popup_geometry
 from playwright.async_api import BrowserType, Locator, Page, Route, async_playwright, expect
 
 
@@ -78,6 +79,16 @@ async def popup_style(popup: Locator) -> dict:
     }''')
 
 
+async def check_short_popup(page: Page) -> dict:
+    """二候補の非 scroll popup でも両側余白と選択有無の本文幅を揃える。"""
+    trigger = page.locator('#numeric-select')
+    popup = await open_picker(trigger, page)
+    geometry = await check_popup_geometry(popup, indicators=True, scrollable=False)
+    await page.keyboard.press('Escape')
+    await closed_picker(trigger, page)
+    return geometry
+
+
 async def check_form(page: Page) -> None:
     """required/name/numeric/disabled、controlled と uncontrolled reset を実 form で確認する。"""
     form = page.locator('#dropdown-form')
@@ -136,6 +147,7 @@ async def check_keyboard_pointer(page: Page, output: Path, key: str) -> dict:
     popup = await open_picker(trigger, page)
     await page.screenshot(path=str(output / f'{key}-open.png'))
     appearance = await popup_style(popup)
+    appearance['geometry'] = await check_popup_geometry(popup, indicators=True)
     assert appearance['backgroundColor'] not in {'transparent', 'rgba(0, 0, 0, 0)'}, appearance
     assert float(appearance['borderTopWidth'].removesuffix('px')) > 0, appearance
     assert float(appearance['borderRadius'].split()[0].removesuffix('px')) > 0, appearance
@@ -161,7 +173,10 @@ async def check_keyboard_pointer(page: Page, output: Path, key: str) -> dict:
     await expect(page.locator('#selection')).to_have_text('beta')
     await expect(page.locator('#change-count')).to_have_text('1')
     await expect(trigger).to_be_focused()
-    await open_picker(trigger, page, 'Enter')
+    popup = await open_picker(trigger, page, 'Enter')
+    changed_geometry = await check_popup_geometry(popup, indicators=True)
+    assert abs(changed_geometry['items'][0]['textWidth'] - appearance['geometry']['items'][0]['textWidth']) <= 1, changed_geometry
+    appearance['changedGeometry'] = changed_geometry
     await page.keyboard.press('ArrowUp')
     await page.keyboard.press('Escape')
     await closed_picker(trigger, page)
@@ -216,6 +231,7 @@ async def check_long_popup(page: Page, output: Path, key: str, width: int, heigh
     assert not await popup.evaluate('element => document.getElementById("clipped-container").contains(element)')
     appearance = await popup_style(popup)
     assert appearance['overflowY'] in {'auto', 'scroll'}, appearance
+    geometry = await check_popup_geometry(popup, indicators=True, scrollable=True)
     first = popup.get_by_role('option').first
     first_box = await first.bounding_box()
     assert first_box
@@ -231,6 +247,7 @@ async def check_long_popup(page: Page, output: Path, key: str, width: int, heigh
     assert last_box['y'] >= -1 and last_box['y'] + last_box['height'] <= height + 1, last_box
     assert last_box['x'] >= -1 and last_box['x'] + last_box['width'] <= width + 1, last_box
     assert await popup.evaluate('element => element.scrollTop > 0')
+    scrolled_geometry = await check_popup_geometry(popup, indicators=True, scrollable=True)
     # 下敷きや clipping に隠されていないことを hit test でも確認する。
     assert await last.evaluate('''element => {
       const rect = element.getBoundingClientRect();
@@ -239,7 +256,8 @@ async def check_long_popup(page: Page, output: Path, key: str, width: int, heigh
     await page.keyboard.press('Enter')
     await closed_picker(trigger, page)
     await expect(page.locator('#long-selection')).to_have_text('long-35')
-    return {'style': appearance, 'popupBounds': box, 'firstBounds': first_box, 'lastBounds': last_box}
+    return {'style': appearance, 'popupBounds': box, 'firstBounds': first_box, 'lastBounds': last_box,
+            'geometry': geometry, 'scrolledGeometry': scrolled_geometry}
 
 
 async def check_modal(page: Page, output: Path, key: str) -> None:
@@ -376,6 +394,7 @@ async def check(url: str, output: Path, browser_names: list[str], executable: st
                                 await page.goto(target)
                                 await expect(page.locator('html')).to_have_attribute('data-theme', theme)
                                 await expect(page.locator('#basic-select')).to_be_visible()
+                                result['shortPopup'] = await check_short_popup(page)
                                 result['popup'] = await check_keyboard_pointer(page, output, key)
                                 result['longPopup'] = await check_long_popup(page, output, key, width, height)
                                 await check_modal(page, output, key)

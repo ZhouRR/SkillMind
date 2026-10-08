@@ -21,7 +21,7 @@ dependencies = [
   "markitdown[xls,xlsx]==0.1.7",
   "mcp==1.30.0",
   "minio==7.2.20",
-  "openai-codex==0.160.0",
+  "openai-codex==0.161.0",
   "pglast==8.4",
   "pillow==12.3.0",
   "pydantic==2.13.4",

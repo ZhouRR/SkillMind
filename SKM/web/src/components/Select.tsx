@@ -85,7 +85,7 @@ function SelectEntries({ entries }: { entries: SelectEntry[] }) {
     <SelectPrimitive.Item key={entry.key} value={entry.value} label={entry.label}
       disabled={entry.disabled} data-value={entry.value} className="selectItem">
       <SelectPrimitive.ItemText className="selectItemText">{entry.label}</SelectPrimitive.ItemText>
-      <SelectPrimitive.ItemIndicator className="selectItemIndicator">
+      <SelectPrimitive.ItemIndicator keepMounted className="selectItemIndicator">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3 8 3.2 3.2L13 4.5" /></svg>
       </SelectPrimitive.ItemIndicator>
     </SelectPrimitive.Item>
