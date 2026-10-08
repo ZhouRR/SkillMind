@@ -154,8 +154,8 @@ function MembersContent({ projectId, currentProject, session, onSessionEnded }: 
     <div className="projectMembersContent" hidden={!authorized}>
       <div className="panelHeader"><h2>{messages.projectMembers.title}</h2></div>
       <div className="memberProjectIdentity"><strong>{currentProject?.name} · {currentProject?.key}</strong><details className="memberTechnical"><summary>{messages.elements.technicalDetails}</summary><code>{projectId}</code></details></div>
-      <p>{messages.projectMembers.description}</p>
-      <p className="memberBoundaryHint">{messages.projectMembers.adminBypass}</p>
+      <details className="detailDisclosure"><summary>{messages.sharedAudit.memberHelp}</summary><p>{messages.projectMembers.description}</p>
+        <p className="memberBoundaryHint">{messages.projectMembers.adminBypass}</p></details>
       {currentProject?.status === 'ARCHIVED' && <p className="memberBoundaryHint">{messages.projectMembers.archivedHint}</p>}
       <MemberResponseNotice failure={mutation.failure} />
       {success && <p role="status">{messages.projectMembers.saved}</p>}

@@ -77,6 +77,8 @@ function TaskCenter({ projectId, csrfToken, moduleId, currentProject = null, pro
   const scheduleLock = useRef(false)
   const setScheduleLocked = useCallback((busy: boolean) => { scheduleLock.current = busy; setScheduleBusy(busy) }, [])
   const controller = useRef<AbortController | null>(null)
+  const scheduleTrigger = useRef<HTMLButtonElement | null>(null)
+  const catalogHeading = useRef<HTMLHeadingElement | null>(null)
   const previewTrigger = useRef<HTMLButtonElement | null>(null)
   const previewHeading = useRef<HTMLHeadingElement | null>(null)
   const flow = useTaskFlowPreview({ projectId, actorId, sessionKey: csrfToken, onSessionEnded })
@@ -95,7 +97,9 @@ function TaskCenter({ projectId, csrfToken, moduleId, currentProject = null, pro
     void Promise.all([
       loadProjectTasks(projectId, active.signal),
       loadProjectSchedules(projectId, active.signal),
-      loadProjectModules(projectId, active.signal).catch(() => [] as ProjectModuleRecord[]),
+      loadProjectModules(projectId, active.signal).catch((caught: unknown) => {
+        throw new Error(`${messages.uiAuditWorkspace.modulesFailed}${caught instanceof Error ? ` ${caught.message}` : ''}`)
+      }),
     ])
       .then(([tasks, schedules, projectModules]) => {
         if (active.signal.aborted) return
@@ -119,11 +123,11 @@ function TaskCenter({ projectId, csrfToken, moduleId, currentProject = null, pro
     [modules, moduleId],
   )
   const allRows = useMemo(() => {
-    if (state.status !== 'ready') return []
+    if (state.status !== 'ready' || (moduleId && !activeModule)) return []
     return buildRows(filterTasksByModule(state.data.tasks, activeModule), state.data)
-  }, [state, activeModule])
+  }, [state, activeModule, moduleId])
   const rows = allRows.filter((row) => matchesTaskScheduleFilter(row.task, row.schedules, filter.q, filter.status))
-  const unavailable = state.status === 'ready' ? unavailableScheduledTasks(state.data.tasks, state.data.schedules)
+  const unavailable = state.status === 'ready' && !moduleId ? unavailableScheduledTasks(state.data.tasks, state.data.schedules)
     .filter((schedules) => matchesTaskScheduleFilter(null, schedules, filter.q, filter.status)) : []
   const queryInvalid = [...q.trim()].length > 200 || q.includes('\u0000')
 
@@ -133,7 +137,19 @@ function TaskCenter({ projectId, csrfToken, moduleId, currentProject = null, pro
     if (!queryInvalid) setFilter({ q, status })
   }
   /** 未決編集がある時は別の予定に対象を切り替えない。 */
-  function manageSchedule(id: string): void { if (!scheduleLock.current) setScheduleId(id) }
+  function manageSchedule(id: string, trigger: HTMLButtonElement): void {
+    if (scheduleLock.current) return
+    scheduleTrigger.current = trigger
+    setScheduleId(id)
+  }
+
+  /** 閉じた調度の起点を復元し、一覧更新で消えた場合は見出しへ戻す。 */
+  function closeSchedule(): void {
+    if (scheduleLock.current) return
+    setScheduleId(null)
+    if (scheduleTrigger.current?.isConnected) scheduleTrigger.current.focus()
+    else catalogHeading.current?.focus()
+  }
 
 
   useEffect(() => {
@@ -165,6 +181,8 @@ function TaskCenter({ projectId, csrfToken, moduleId, currentProject = null, pro
         aside={<span className="scopeBadge">{messages.tasks.countBadge(rows.length + unavailable.length)}</span>}
       />
       <section className="panel taskCatalog" aria-label={messages.routes.tasks.label}>
+        <h2 className="visuallyHidden" tabIndex={-1} ref={catalogHeading}>{messages.routes.tasks.label}</h2>
+        {projectReadOnly && <p className="hint">{messages.uiAuditWorkspace.readOnlyLaunch}</p>}
         <form className="taskFilters" data-task-filters onSubmit={search}>
           <label>{messages.scheduleManager.searchLabel}<input data-task-search value={q} maxLength={200}
             onChange={(event) => setQ(event.target.value)} /></label>
@@ -184,8 +202,8 @@ function TaskCenter({ projectId, csrfToken, moduleId, currentProject = null, pro
         {state.status === 'error' && <p className="error" role="alert">{state.message}</p>}
         {state.status === 'ready' && rows.length + unavailable.length === 0 && (
           <EmptyState
-            text={filter.q || filter.status ? messages.tasks.noMatches : messages.tasks.empty}
-            action={!(filter.q || filter.status) && <a className="secondaryButton compactButton" href={routeHref('skills')}>{messages.projects.goSkills}</a>}
+            text={moduleId && !activeModule ? messages.uiAuditWorkspace.moduleUnavailable : filter.q || filter.status ? messages.tasks.noMatches : messages.tasks.empty}
+            action={!(filter.q || filter.status) && !(moduleId && !activeModule) && <a className="secondaryButton compactButton" href={routeHref('skills')}>{messages.projects.goSkills}</a>}
           />
         )}
         {state.status === 'ready' && rows.length + unavailable.length > 0 && (
@@ -214,7 +232,7 @@ function TaskCenter({ projectId, csrfToken, moduleId, currentProject = null, pro
       </section>
       {scheduleId && <section data-task-schedule-panel>
         <div className="formRow"><button className="secondaryButton compactButton" type="button" data-task-schedule-close
-          disabled={scheduleBusy} onClick={() => { if (!scheduleLock.current) setScheduleId(null) }}>{messages.elements.close}</button></div>
+          disabled={scheduleBusy} onClick={closeSchedule}>{messages.elements.close}</button></div>
         <TaskScheduleDetails key={`${projectId}:${scheduleId}`} projectId={projectId} scheduleId={scheduleId}
           csrfToken={csrfToken} currentProject={currentProject} schedulingEnabled={schedulingEnabled}
           onSessionEnded={onSessionEnded} onBusyChange={setScheduleLocked} onChanged={() => setRevision((current) => current + 1)} />
@@ -272,7 +290,7 @@ function TaskCard({ row, projectId, projectReadOnly, schedulingEnabled, onSchedu
   projectReadOnly: boolean
   schedulingEnabled: boolean
   onSchedule: () => void
-  onManageSchedule: (id: string) => void
+  onManageSchedule: (id: string, trigger: HTMLButtonElement) => void
   scheduleBusy: boolean
   onPreview: (trigger: HTMLButtonElement) => void
   previewAllowed: boolean
@@ -329,7 +347,8 @@ function TaskCard({ row, projectId, projectReadOnly, schedulingEnabled, onSchedu
       <div className="taskCardActions">
         {/* 「立即执行」は工作空间へ渡す。実行中の観測・応答・承認はすべて向こうの責務で、
             ここに二つ目の実行 lifecycle を作らない。 */}
-        <a className="primaryButton compactButton" href={routeHref('workspace', projectId, { taskId: taskCatalogId(row.task) })}>
+        <a className="primaryButton compactButton" aria-disabled={projectReadOnly || undefined} tabIndex={projectReadOnly ? -1 : undefined}
+          href={projectReadOnly ? undefined : routeHref('workspace', projectId, { taskId: taskCatalogId(row.task) })}>
           {messages.tasks.runNow}
         </a>
         <button className="secondaryButton compactButton" type="button" data-flow-open={taskCatalogId(row.task)}
@@ -352,7 +371,7 @@ function TaskCard({ row, projectId, projectReadOnly, schedulingEnabled, onSchedu
 
 /** カードには各予定の状態と次回時刻を出し、詳細を開いて元版の操作を行う。 */
 function TaskSchedules({ schedules, onManage, disabled }: {
-  schedules: ScheduleRecord[]; onManage: (id: string) => void; disabled: boolean
+  schedules: ScheduleRecord[]; onManage: (id: string, trigger: HTMLButtonElement) => void; disabled: boolean
 }) {
   const messages = useMessages()
   if (!schedules.length) return null
@@ -361,7 +380,7 @@ function TaskSchedules({ schedules, onManage, disabled }: {
       <span className={`statusBadge scheduleStatus-${schedule.status.toLowerCase()}`}>{messages.enums.scheduleStatus[schedule.status]}</span>
       <strong>{schedule.name}</strong><span className="mono">{summarizeTiming(schedule)}</span>
       <button className="secondaryButton compactButton" type="button" data-task-schedule-manage={schedule.schedule_id}
-        disabled={disabled} onClick={() => onManage(schedule.schedule_id)}>{messages.tasks.manageSchedule}</button>
+        disabled={disabled} onClick={(event) => onManage(schedule.schedule_id, event.currentTarget)}>{messages.tasks.manageSchedule}</button>
     </li>)}
   </ul></details>
 }

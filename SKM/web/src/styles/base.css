@@ -13,17 +13,17 @@
 
 :root {
   /* 暖かな紙面と炭色の本文。色の意味は全画面で共有し、状態色は装飾に使わない。 */
-  --bg: #f7f5ef;
-  --bg-sidebar: #f0eee6;
-  --surface: #fffefa;
+  --bg: #fff4dd;
+  --bg-sidebar: #f7ecd5;
+  --surface: #fffdf7;
   --surface-raised: #f2f0e8;
   --surface-input: #ffffff;
   --surface-hover: #eae7dd;
   --border: #dedbd0;
   --border-strong: #b8b6a9;
   --border-hover: #858675;
-  --text: #363b31;
-  --text-hi: #242a22;
+  --text: #383027;
+  --text-hi: #26201a;
   --text-muted: #5c6357;
   --text-faint: #656b60;
 
@@ -31,11 +31,11 @@
   --accent: #765311;
   --accent-strong: #795b1b;
   --accent-deep: #58400e;
-  --accent-soft: #fcf3d5;
+  --accent-soft: #fff0b5;
   --accent-border: #cbb36e;
-  --primary-bg: #f3ce67;
-  --primary-hover: #eac052;
-  --primary-ink: #302a18;
+  --primary-bg: #ff7947;
+  --primary-hover: #ff8f64;
+  --primary-ink: #26201a;
 
   /* 進行中・成功・注意・失敗は文字ラベルと併用する。 */
   --live: #246d69;
@@ -56,12 +56,13 @@
   --overlay: rgba(36, 42, 34, .32);
   --drawer-overlay: rgba(30, 25, 17, .18);
 
-  --picker-border: #363b31;
-  --picker-shadow: #363b31;
+  --picker-border: #26201a;
+  --picker-shadow: #26201a;
+  --shadow-picker: 3px 3px 0 var(--picker-shadow);
   --shadow-panel: 0 2px 0 rgba(48, 44, 29, .045);
   --shadow-pop: 0 24px 72px rgba(48, 44, 29, .16), 0 3px 12px rgba(48, 44, 29, .08);
   --ring: 0 0 0 3px rgba(121, 91, 27, .18);
-  --radius: 16px;
+  --radius: 12px;
   --radius-small: 10px;
   --radius-tiny: 6px;
   --font-body: Inter, "PingFang SC", "Hiragino Sans GB", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", "Noto Sans JP", ui-sans-serif, system-ui, sans-serif;
@@ -238,7 +239,7 @@ label { display: grid; gap: 6px; margin-bottom: 12px; color: var(--text-muted); 
 .sourceField { display: grid; gap: 4px; margin-bottom: 12px; }
 .sourceFieldLabel { color: var(--text-muted); font-size: 12px; font-weight: 600; }
 .sourceFieldStatic { color: var(--text); font-size: 13px; }
-input, select, .selectTrigger, textarea {
+input:not([type="checkbox"]):not([type="radio"]), select, .selectTrigger, textarea {
   width: 100%;
   min-height: 42px;
   border: 1px solid var(--border-strong);
@@ -308,7 +309,7 @@ select {
   border-radius: 12px;
   background: var(--surface);
   color: var(--text);
-  box-shadow: 3px 3px 0 var(--picker-shadow);
+  box-shadow: var(--shadow-picker);
   font-size: 14px;
   font-weight: 400;
   line-height: 1.5;

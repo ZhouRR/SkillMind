@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
-import { changeRunDeletion, previewRunDeletion, type RunDeletionPreview } from '../api'
+import { changeRunDeletion, previewRunDeletion, type RunHistoryItemRecord, type RunDeletionPreview } from '../api'
 import { useMessages } from '../i18n'
+import { formatLocalTimestamp, runHistoryTitle } from '../lib/presentation'
 import { ModalDialog } from './PageElements'
 
 /** actor/Project/Run ごとに親が key を固定する確認 form。 */
-export function RunDeletionDialog({ projectId, runId, csrfToken, action, onClose, onChanged }: {
+export function RunDeletionDialog({ projectId, runId, run, csrfToken, action, onClose, onChanged }: {
   projectId: string; runId: string; csrfToken: string; action: 'TRASH' | 'RESTORE' | 'PURGE'
+  run?: RunHistoryItemRecord
   onClose: () => void; onChanged: () => void
 }) {
   const restore = action === 'RESTORE'
   const purge = action === 'PURGE'
-  const m = useMessages().fileManagement
+  const messages = useMessages()
+  const m = messages.fileManagement
   const [preview, setPreview] = useState<RunDeletionPreview | null>(null)
   const [outputs, setOutputs] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -39,10 +42,15 @@ export function RunDeletionDialog({ projectId, runId, csrfToken, action, onClose
   }
   // 本文に「キャンセル」があるため見出しの「閉じる」は重ねず、取り消せない完全削除だけを danger 実心 button にする。
   return <ModalDialog hideClose open title={restore ? m.restore : purge ? m.purge : m.trashAction} onClose={() => { if (!busy) onClose() }}>
+    <div className="runDeletionTarget"><strong>{run ? runHistoryTitle(run, messages.elements.unnamedRunTitle) : messages.elements.runFallbackTitle(runId.slice(0, 8))}</strong>
+      {run && <time dateTime={run.started_at ?? run.created_at}>{formatLocalTimestamp(run.started_at ?? run.created_at)}</time>}
+      <code>{runId}</code></div>
+    {!preview && !error && <p role="status">{messages.uiAuditWorkspace.deletionLoading}</p>}
     <p>{restore ? m.recycleHint : purge ? m.purgeConfirm : m.runConfirm}</p>
     {preview && <><p>{m.outputs}: {preview.output_count} · {m.protected}: {preview.protected_output_count}</p>
-      <ul>{preview.outputs.map((d) => <li key={d.document_id}>{d.folder}/{d.name}{d.protected && ` (${m.protected})`}</li>)}</ul>
-      {!restore && <label><input type="checkbox" checked={outputs} disabled={busy} onChange={(e) => setOutputs(e.target.checked)} />{purge ? m.purgeOutputs : m.includeOutputs}</label>}</>}
+      <details className="runDeletionOutputs" open={preview.outputs.length <= 5}><summary>{m.outputs} ({preview.output_count})</summary>
+        <ul tabIndex={preview.outputs.length > 5 ? 0 : undefined} aria-label={m.outputs}>{preview.outputs.map((d) => <li key={d.document_id}>{d.folder}/{d.name}{d.protected && ` (${m.protected})`}</li>)}</ul></details>
+      {!restore && <label className="runDeletionChoice"><input type="checkbox" checked={outputs} disabled={busy} onChange={(e) => setOutputs(e.target.checked)} />{purge ? m.purgeOutputs : m.includeOutputs}</label>}</>}
     {cleanupPending && <p role="status">{m.cleanupPending}</p>}
     {error && <p role="alert" className="error">{sent ? `${m.unknown} ${m.runBlocked}` : m.failure}</p>}
     <div className="formRow"><button className={purge ? 'destructiveButton' : 'primaryButton'} type="button" disabled={!preview || busy || sent} onClick={() => void submit()}>{restore ? m.restore : purge ? m.purge : m.trashAction}</button>

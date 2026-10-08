@@ -321,7 +321,7 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
       {managementMessage && !edit && <p role="alert" className="error">{managementMessage}</p>}
       {!trashed && <div className="documentUpload documentToolbar">
         <DocumentFolderInput value={targetFolder} folders={folders} disabled={blocked} onValueChange={setTargetFolder} />
-        <label className="primaryButton fileUploadButton">
+        <label className="primaryButton fileUploadButton" aria-disabled={blocked}>
           {messages.documentsPanel.chooseFiles}
           <input
             type="file"
@@ -335,7 +335,7 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
             }}
           />
         </label>
-        <label className="secondaryButton fileUploadButton">
+        <label className="secondaryButton fileUploadButton" aria-disabled={blocked}>
           {messages.documentsPanel.chooseFolder}
           <input
             type="file"
@@ -558,6 +558,7 @@ function FolderNode({ folder, projectId, busyId, onDelete, onPreview, selection,
           label={messages.common.moreActions(folder.name)} ownerKey={folder.path} items={actions} />
       </summary>
       <div className="docFolderBody">
+        <details className="documentFolderPath detailDisclosure"><summary>{messages.assetsAudit.fullPath}</summary><code>{folder.path}</code></details>
         {folder.folders.map((child) => (
           <FolderNode
             key={child.path}
@@ -636,6 +637,7 @@ function FileRow({ document, projectId, busyId, onDelete, onPreview, selection }
         <span title={document.mime}>
           {formatByteSize(document.size)}{typeLabel ? ` · ${typeLabel}` : ''}
           {' · '}{formatLocalTimestamp(document.created_at)}
+          <span className="documentPreviewAvailability">{kind !== null && !oversized ? messages.assetsAudit.previewAvailable : oversized ? messages.assetsAudit.downloadOversized : messages.assetsAudit.downloadUnsupported}</span>
         </span>
       </div>
       <div className="documentActions">

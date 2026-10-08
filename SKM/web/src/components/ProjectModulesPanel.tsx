@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 
 import { createProjectModule, deleteProjectModule, loadProjectModules, loadProjectTasks, updateProjectModule, type AuthSessionRecord, type ProjectModuleRecord } from '../api'
+import { ActionMenu } from './ActionMenu'
 import { EmptyState, LoadingSkeleton, useConfirmDialog } from './PageElements'
 import { useMessages } from '../i18n'
 import { apiErrorMessage } from '../lib/apiFeedback'
@@ -52,6 +53,8 @@ export function ProjectModulesPanel({ projectId, session }: {
   const isAdmin = session.user.system_role === 'ADMIN'
   const [modulesState, setModulesState] = useState<ModulesState>({ status: 'loading' })
   const [options, setOptions] = useState<SkillOption[]>([])
+  const [optionsState, setOptionsState] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [optionsError, setOptionsError] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const { confirm, confirmDialog } = useConfirmDialog()
   const [name, setName] = useState('')
@@ -76,7 +79,7 @@ export function ProjectModulesPanel({ projectId, session }: {
     loadController.current = controller
     setModulesState((current) => current.status === 'ready' ? current : { status: 'loading' })
     void loadProjectModules(projectId, controller.signal)
-      .then((modules) => setModulesState({ status: 'ready', modules }))
+      .then((modules) => { if (!controller.signal.aborted) setModulesState({ status: 'ready', modules }) })
       .catch((caught: unknown) => {
         if (!controller.signal.aborted) {
           setModulesState({
@@ -93,8 +96,12 @@ export function ProjectModulesPanel({ projectId, session }: {
     optionsController.current?.abort()
     const controller = new AbortController()
     optionsController.current = controller
+    setOptionsState('loading')
+    setOptionsError(null)
+    setOptions([])
     void loadProjectTasks(projectId, controller.signal)
       .then((catalog) => {
+        if (controller.signal.aborted) return
         const seen = new Map<string, SkillOption>()
         for (const task of catalog.tasks) {
           if (!seen.has(task.skill_version_id)) {
@@ -107,9 +114,12 @@ export function ProjectModulesPanel({ projectId, session }: {
           }
         }
         setOptions(sortSkillOptions([...seen.values()]))
+        setOptionsState('ready')
       })
-      .catch(() => {
-        if (!controller.signal.aborted) setOptions([])
+      .catch((caught: unknown) => {
+        if (controller.signal.aborted) return
+        setOptionsState('error')
+        setOptionsError(apiErrorMessage(caught, messages.sharedAudit.skillOptionsFailed, messages))
       })
     return () => controller.abort()
   }, [projectId, revision])
@@ -133,7 +143,7 @@ export function ProjectModulesPanel({ projectId, session }: {
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
-    mutateController.current?.abort()
+    if (mutateController.current || busy || optionsState !== 'ready') return
     const controller = new AbortController()
     mutateController.current = controller
     setBusy(true)
@@ -153,18 +163,19 @@ export function ProjectModulesPanel({ projectId, session }: {
         setError(apiErrorMessage(caught, messages.projects.modules.saveFailed, messages))
       }
     } finally {
-      if (!controller.signal.aborted) setBusy(false)
+      if (mutateController.current === controller) { mutateController.current = null; setBusy(false) }
     }
   }
 
   async function remove(module: ProjectModuleRecord): Promise<void> {
+    if (mutateController.current || busy) return
     if (!await confirm({
       title: messages.projects.modules.remove,
       message: messages.projects.modules.removeConfirm(module.name),
       confirmLabel: messages.projects.modules.remove,
       destructive: true,
     })) return
-    mutateController.current?.abort()
+    if (mutateController.current) return
     const controller = new AbortController()
     mutateController.current = controller
     setBusy(true)
@@ -179,7 +190,7 @@ export function ProjectModulesPanel({ projectId, session }: {
         setError(apiErrorMessage(caught, messages.projects.modules.removeFailed, messages))
       }
     } finally {
-      if (!controller.signal.aborted) setBusy(false)
+      if (mutateController.current === controller) { mutateController.current = null; setBusy(false) }
     }
   }
 
@@ -190,18 +201,18 @@ export function ProjectModulesPanel({ projectId, session }: {
       (skill) => [skill.skill_version_id, `${skill.skill_name} v${skill.version}`] as const,
     )),
   )
-  const staleSelected = staleBindingIds(selected, options)
+  const staleSelected = optionsState === 'ready' ? staleBindingIds(selected, options) : []
   return (
     <section className="panel modulesPanel" aria-label={messages.projects.modules.sectionAria}>
       <div className="panelHeader">
         <h2>{messages.projects.modules.title}</h2>
         {modulesState.status === 'ready' && <span className="eventCount">{modules.length}</span>}
       </div>
-      <p className="hint">{messages.projects.modules.hint}</p>
+      <details className="detailDisclosure"><summary>{messages.sharedAudit.moduleHelp}</summary><p className="hint">{messages.projects.modules.hint}</p></details>
       <div className="modulesLayout">
         <div className="moduleList">
           {modulesState.status === 'loading' && <LoadingSkeleton label={messages.projects.modules.loading} rows={2} />}
-          {modulesState.status === 'error' && <p className="error" role="alert">{modulesState.message}</p>}
+          {modulesState.status === 'error' && <div><p className="error" role="alert">{modulesState.message}</p><button type="button" className="secondaryButton" onClick={() => setRevision((current) => current + 1)}>{messages.account.refresh}</button></div>}
           {modulesState.status === 'ready' && modules.length === 0 && (
             <EmptyState text={messages.projects.modules.empty} />
           )}
@@ -219,7 +230,7 @@ export function ProjectModulesPanel({ projectId, session }: {
               {isAdmin && (
                 <div className="moduleItemActions">
                   <button className="secondaryButton compactButton" disabled={busy} type="button" onClick={() => startEdit(module)}>{messages.projects.modules.edit}</button>
-                  <button className="dangerButton" disabled={busy} type="button" onClick={() => void remove(module)}>{messages.projects.modules.remove}</button>
+                  <ActionMenu label={messages.common.moreActions(module.name)} disabled={busy} items={[{ id: 'remove', label: messages.projects.modules.remove, danger: true, onSelect: () => void remove(module) }]} />
                 </div>
               )}
             </article>
@@ -228,11 +239,13 @@ export function ProjectModulesPanel({ projectId, session }: {
         {isAdmin ? (
           <form className="moduleForm" onSubmit={(event) => void submit(event)}>
             <h3>{editingId === null ? messages.projects.modules.createTitle : messages.projects.modules.editTitle}</h3>
-            <label>{messages.projects.modules.nameLabel}<input maxLength={200} required value={name} onChange={(event) => setName(event.target.value)} /></label>
-            <label>{messages.projects.modules.descriptionLabel}<textarea className="compactTextarea" maxLength={2000} value={description} onChange={(event) => setDescription(event.target.value)} /></label>
-            <fieldset className="moduleSkillPicker">
+            <label>{messages.projects.modules.nameLabel}<input disabled={busy} maxLength={200} required value={name} onChange={(event) => setName(event.target.value)} /></label>
+            <label>{messages.projects.modules.descriptionLabel}<textarea disabled={busy} className="compactTextarea" maxLength={2000} value={description} onChange={(event) => setDescription(event.target.value)} /></label>
+            <fieldset className="moduleSkillPicker" disabled={busy || optionsState !== 'ready'} aria-busy={optionsState === 'loading'}>
               <legend>{messages.projects.modules.pickerLegend}</legend>
-              {options.length === 0 && (
+              {optionsState === 'loading' && <p role="status">{messages.projects.modules.loading}</p>}
+              {optionsState === 'error' && <p className="error" role="alert">{optionsError}</p>}
+              {optionsState === 'ready' && options.length === 0 && (
                 <p className="hint">{messages.projects.modules.noPublished}</p>
               )}
               {options.map((option) => (
@@ -261,9 +274,10 @@ export function ProjectModulesPanel({ projectId, session }: {
                 </label>
               ))}
             </fieldset>
+            {optionsState === 'error' && <button type="button" className="secondaryButton" onClick={() => setRevision((current) => current + 1)}>{messages.account.refresh}</button>}
             {error && <p className="error" role="alert">{error}</p>}
             <div className="moduleFormActions">
-              <button className="primaryButton" disabled={busy || selected.length === 0 || !name.trim()} type="submit">
+              <button className="primaryButton" disabled={busy || optionsState !== 'ready' || selected.length === 0 || !name.trim()} type="submit">
                 {busy ? messages.elements.processing : editingId === null ? messages.projects.modules.createTitle : messages.projects.modules.saveChanges}
               </button>
               {editingId !== null && (

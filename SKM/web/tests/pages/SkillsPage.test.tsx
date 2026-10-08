@@ -300,8 +300,8 @@ describe('InterpretationExecutionView display', () => {
     expect(html).toContain('00000000-0000-4000-8000-000000000050')
     expect(html).toContain('Only review a single file.')
     expect(html).toContain('有差异')
-    expect(html).toContain('tasks: +0 / -0 / ~1')
-    expect(html).toContain('confidence: 1 项变更')
+    expect(html).toContain('任务: +0 / -0 / ~1')
+    expect(html).toContain('置信度: 1 项变更')
   })
 
   it('marks a failed interpretation and does not offer a publishable draft path', () => {
@@ -326,7 +326,7 @@ describe('InterpretationExecutionView display', () => {
     }), language)
 
     expect(html).toContain(`<details class="rawResult"><summary>${label}</summary><ol>`)
-    expect(html).toContain('<li><pre>path=/report validator=required</pre></li><li><pre>path=/tasks validator=type</pre></li>')
+    expect(html).toMatch(/<li><pre[^>]*tabindex="0"[^>]*>path=\/report validator=required<\/pre><\/li><li><pre[^>]*>path=\/tasks validator=type<\/pre><\/li>/)
     expect(html.indexOf('schema_validation_failed')).toBeLessThan(html.indexOf(label))
   })
 
@@ -336,8 +336,8 @@ describe('InterpretationExecutionView display', () => {
       validation_attempts: ['<script>alert("fixture")</script> & text', '[link](javascript:alert(1))', 'third-attempt-hidden'],
     }))
 
-    expect(html).toContain('<pre>&lt;script&gt;alert(&quot;fixture&quot;)&lt;/script&gt; &amp; text</pre>')
-    expect(html).toContain('<pre>[link](javascript:alert(1))</pre>')
+    expect(html).toContain('>&lt;script&gt;alert(&quot;fixture&quot;)&lt;/script&gt; &amp; text</pre>')
+    expect(html).toContain('>[link](javascript:alert(1))</pre>')
     expect(html).not.toContain('<script>')
     expect(html).not.toContain('<a href="javascript:')
     expect(html).not.toContain('third-attempt-hidden')
@@ -395,7 +395,7 @@ describe('InterpretationExecutionView display', () => {
     } as unknown as InterpretationExecutionRecord)
 
     expect(html).toContain('外部变更意图')
-    expect(html).toContain('apply · risk medium')
+    expect(html).toContain('应用变更 · 中风险')
     expect(html).toContain('实际写入仍需注册对应外部系统并经用户批准')
   })
 
@@ -589,5 +589,44 @@ describe('Skill library version groups', () => {
     const failed = renderToStaticMarkup(<SkillLibraryPanel {...props} actionError={{ versionId: 'old-id', message: 'Still referenced' }} />)
     expect(failed).toContain('class="skillOtherVersions" open=""')
     expect(failed).toContain('Still referenced')
+  })
+})
+
+/** 読取が未確定の状態を「未有効化」という業務事実に変換しない。 */
+describe('Skills audit status and accessibility', () => {
+  it.each([{ status: 'idle' as const }, { status: 'loading' as const, projectId: 'project-a' }, { status: 'error' as const, message: 'Read failed', projectId: 'project-a' }, { status: 'ready' as const, enablements: [], projectId: 'project-old' }])('gates project actions while enablement is $status or belongs to another scope', (enablementState) => {
+    const html = renderToStaticMarkup(<SkillLibraryPanel libraryState={{ status: 'ready', versions: [version({ status: 'PUBLISHED' })] }}
+      enablementState={enablementState} projectId="project-a" busyVersionId={null} onRefresh={vi.fn()}
+      onPublish={vi.fn()} onDeprecate={vi.fn()} onDelete={vi.fn()} onEnable={vi.fn()} onDisable={vi.fn()} />)
+    expect(html).not.toContain('为项目启用')
+    expect(html).not.toContain('从项目停用')
+    expect(html).not.toContain('项目已启用 0')
+    expect(html).toContain(enablementState.status === 'loading' ? '正在加载项目启用关系' : '待确认')
+    if (enablementState.status === 'error') expect(html).toContain('Read failed')
+  })
+
+  it('links tabs to named panels and announces only compact streaming status', () => {
+    const page = renderToStaticMarkup(<SkillsPage projectId="" csrfToken="csrf" />)
+    expect(page).toContain('aria-controls=')
+    expect(page).toContain('aria-labelledby=')
+    expect(page).not.toContain('class="panel skillResult" aria-live')
+    const stream = renderToStaticMarkup(<InterpretStreamView prompt="Frozen prompt" output="Growing output" />)
+    expect(stream).toContain('class="interpretStreamHead" role="status"')
+    expect(stream).toContain('aria-live="off"')
+    expect(stream).toContain('tabindex="0" role="region"')
+    expect(stream).not.toContain('class="interpretStream" aria-live')
+  })
+
+  it('shows warnings and errors before technical details, with separate severity labels', () => {
+    const result = { normalized_package: { ...PREVIEW.normalized_package, diagnostics: [
+      { severity: 'error', code: 'invalid', message: 'Fix the source' },
+      { severity: 'warning', code: 'warning', message: 'Review the source' },
+    ] }, runtime_manifest_draft: { identity: { skill_key: 'review' }, compatibility: { confidence: 1, diagnostics: [] }, tools: [] }, capability_blueprint: null } as unknown as SkillParseResult
+    const html = renderToStaticMarkup(<SkillParseSummary result={result} />)
+    expect(html).toContain('1 项错误 · 1 项警告')
+    expect(html).toContain('class="diagnostic-error"')
+    expect(html).toContain('class="diagnostic-warning"')
+    expect(html.indexOf('Fix the source')).toBeLessThan(html.indexOf('class="technicalResultDetails"'))
+    expect(html.indexOf('Review the source')).toBeLessThan(html.indexOf('class="technicalResultDetails"'))
   })
 })

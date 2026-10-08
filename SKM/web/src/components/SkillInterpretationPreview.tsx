@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { InterpretationExecutionRecord, BlueprintNote, CapabilityBlueprintView, SourceTrace } from '../api'
 import type { AdjustState } from '../hooks/useSkillInterpretation'
 import { useMessages } from '../i18n'
+import { assetCodeLabel } from '../lib/i18n/assetsAudit'
 import type { UiMessages } from '../lib/i18n/messages'
 import { isNearBottom } from '../lib/scroll'
 import { SourceExecutionPreview } from './SourceExecutionPreview'
@@ -22,8 +23,8 @@ export function InterpretStreamView({ prompt, output, attempt = 1 }: {
     if (element && pinnedToBottom.current) element.scrollTop = element.scrollHeight
   }, [output])
   return (
-    <div className="interpretStream" aria-live="polite">
-      <div className="interpretStreamHead">
+    <div className="interpretStream">
+      <div className="interpretStreamHead" role="status">
         <span className="streamDot" aria-hidden="true" />
         <strong>{messages.skills.interpretRunning}</strong>
         <span className="interpretStreamHint">{messages.skills.interpretRunningHint}</span>
@@ -36,7 +37,7 @@ export function InterpretStreamView({ prompt, output, attempt = 1 }: {
       {prompt !== '' && (
         <details className="interpretPrompt">
           <summary>{messages.skills.promptSent}</summary>
-          <pre>{prompt}</pre>
+          <pre tabIndex={0} role="region" aria-label={messages.skills.promptSent}>{prompt}</pre>
         </details>
       )}
       <div className="interpretOutput">
@@ -44,7 +45,7 @@ export function InterpretStreamView({ prompt, output, attempt = 1 }: {
         {output === ''
           ? <p className="interpretOutputWaiting">{messages.skills.waitingModelOutput}</p>
           : (
-            <pre ref={outputRef} onScroll={(event) => { pinnedToBottom.current = isNearBottom(event.currentTarget) }}>
+            <pre tabIndex={0} role="region" aria-label={messages.skills.modelOutput} aria-live="off" ref={outputRef} onScroll={(event) => { pinnedToBottom.current = isNearBottom(event.currentTarget) }}>
               {output}<span className="streamCursor" />
             </pre>
           )}
@@ -60,7 +61,7 @@ type InterpretationDetailTab = 'report' | 'blueprint' | 'contracts' | 'diff'
  *
  *  詳細(報告・蓝图・契約・差分)は縦へ全部積むと発行判断に要る要約と操作が埋もれるため、
  *  tab で同時に一つだけ見せる。非活性 tab も hidden で mount したままにする(測試断言と状態保持)。 */
-export function InterpretationExecutionView({ execution, instruction, onInstructionChange, onAdjust, onRegenerate, onCreateDraft, adjustState, versionBusy }: {
+export function InterpretationExecutionView({ execution, instruction, onInstructionChange, onAdjust, onRegenerate, onCreateDraft, adjustState, versionBusy, disabled = false }: {
   execution: InterpretationExecutionRecord
   instruction: string
   onInstructionChange: (value: string) => void
@@ -69,8 +70,10 @@ export function InterpretationExecutionView({ execution, instruction, onInstruct
   onCreateDraft: () => void
   adjustState: AdjustState
   versionBusy: boolean
+  disabled?: boolean
 }) {
   const messages = useMessages()
+  const tabId = useId()
   const [detailTab, setDetailTab] = useState<InterpretationDetailTab>('report')
   const report = execution.report
   const failed = execution.status !== 'PREVIEW_READY'
@@ -85,20 +88,20 @@ export function InterpretationExecutionView({ execution, instruction, onInstruct
     <section className="interpretationPanel">
       <div className="subsectionHeader">
         <h3>{messages.skills.interpretationTitle}</h3>
-        <span className="scopeBadge">{execution.compatibility_level}</span>
+        <span className="scopeBadge">{assetCodeLabel(messages.assetsAudit.compatibility, execution.compatibility_level, messages.assetsAudit.unknown)}</span>
       </div>
-      <dl className="runFacts">
-        <div><dt>{messages.skills.interpretationIdLabel}</dt><dd className="mono">{execution.interpretation_id}</dd></div>
-        <div><dt>{messages.skills.interpretationStatusLabel}</dt><dd>{execution.status}{execution.reused ? messages.skills.reusedSuffix : ''}</dd></div>
+      <dl className="runFacts skillSummaryFacts">
+        <div><dt>{messages.skills.interpretationStatusLabel}</dt><dd>{assetCodeLabel(messages.assetsAudit.interpretation, execution.status, messages.assetsAudit.unknown)}{execution.reused ? messages.skills.reusedSuffix : ''}</dd></div>
         <div><dt>{messages.skills.interpretationModelLabel}</dt><dd className="mono">{execution.model ?? '—'}</dd></div>
         {!sourceExecution && <div><dt>{messages.skills.interpretationConfidenceLabel}</dt><dd>{execution.confidence.toFixed(2)}</dd></div>}
       </dl>
+      <details className="detailDisclosure"><summary>{messages.elements.technicalDetails}</summary><dl className="runFacts skillSummaryFacts"><div><dt>{messages.skills.interpretationIdLabel}</dt><dd className="mono">{execution.interpretation_id}</dd></div></dl></details>
       {failed && <p className="error" role="alert">{messages.skills.interpretationFailedLine(execution.error_code ?? 'unknown')}</p>}
       {validationAttempts && validationAttempts.length > 0 && (
         <details className="rawResult">
           <summary>{messages.skills.validationErrorDetails}</summary>
           <ol>
-            {validationAttempts.slice(0, 2).map((attempt, index) => <li key={index}><pre>{attempt}</pre></li>)}
+            {validationAttempts.slice(0, 2).map((attempt, index) => <li key={index}><pre tabIndex={0} role="region" aria-label={messages.skills.validationErrorDetails}>{attempt}</pre></li>)}
           </ol>
         </details>
       )}
@@ -108,16 +111,16 @@ export function InterpretationExecutionView({ execution, instruction, onInstruct
       {report && !sourceExecution && <p className="interpretationSummary">{report.summary}</p>}
       {sourceExecution && <SourceExecutionPreview preview={sourceExecution} />}
       {!sourceExecution && <div className="tabBar" role="tablist" aria-label={messages.skills.detailTabsAria}>
-        <SkillTabButton current={detailTab} tab="report" onSelect={setDetailTab}>{messages.skills.tabReport}</SkillTabButton>
-        <SkillTabButton current={detailTab} tab="blueprint" onSelect={setDetailTab}>{messages.skills.blueprintTitle}</SkillTabButton>
-        <SkillTabButton current={detailTab} tab="contracts" onSelect={setDetailTab}>{messages.skills.generatedContractsTitle}</SkillTabButton>
-        <SkillTabButton current={detailTab} tab="diff" onSelect={setDetailTab}>
+        <SkillTabButton idPrefix={tabId} current={detailTab} tab="report" onSelect={setDetailTab}>{messages.skills.tabReport}</SkillTabButton>
+        <SkillTabButton idPrefix={tabId} current={detailTab} tab="blueprint" onSelect={setDetailTab}>{messages.skills.blueprintTitle}</SkillTabButton>
+        <SkillTabButton idPrefix={tabId} current={detailTab} tab="contracts" onSelect={setDetailTab}>{messages.skills.generatedContractsTitle}</SkillTabButton>
+        <SkillTabButton idPrefix={tabId} current={detailTab} tab="diff" onSelect={setDetailTab}>
           {messages.skills.revisionDiffTitle}
           {/* 構造差分がある時だけ点を出し、他 tab からも「見るべき差分がある」ことを示す。 */}
           {execution.diff.has_changes === true && <i className="tabAlert" aria-hidden="true" />}
         </SkillTabButton>
       </div>}
-      <div className="tabPanel" role="tabpanel" hidden={!sourceExecution && detailTab !== 'report'}>
+      <div className="tabPanel" role={sourceExecution ? undefined : "tabpanel"} hidden={!sourceExecution && detailTab !== 'report'} id={`${tabId}-panel-report`} aria-labelledby={sourceExecution ? undefined : `${tabId}-tab-report`} tabIndex={0}>
         {report ? (
           <div className="interpretationDetailStack">
             {!sourceExecution && <ConfidenceGrid confidence={report.confidence} />}
@@ -134,8 +137,8 @@ export function InterpretationExecutionView({ execution, instruction, onInstruct
             {report.diagnostics.length > 0 && (
               <ul className="diagnostics">
                 {report.diagnostics.map((diagnostic, index) => (
-                  <li key={`${diagnostic.code}-${index}`}>
-                    <strong>{diagnostic.severity} · {diagnostic.code}</strong>
+                  <li className={`diagnostic-${diagnostic.severity}`} key={`${diagnostic.code}-${index}`}>
+                    <strong>{assetCodeLabel(messages.assetsAudit.severity, diagnostic.severity, messages.assetsAudit.unknown)} · {diagnostic.code}</strong>
                     <span>{diagnostic.message}{diagnostic.path ? ` (${diagnostic.path}${diagnostic.line ? `:${diagnostic.line}` : ''})` : ''}</span>
                   </li>
                 ))}
@@ -144,27 +147,27 @@ export function InterpretationExecutionView({ execution, instruction, onInstruct
           </div>
         ) : <p className="hint">{messages.skills.reportEmpty}</p>}
       </div>
-      <div className="tabPanel" role="tabpanel" hidden={!!sourceExecution || detailTab !== 'blueprint'}>
+      <div className="tabPanel" role="tabpanel" hidden={!!sourceExecution || detailTab !== 'blueprint'} id={`${tabId}-panel-blueprint`} aria-labelledby={`${tabId}-tab-blueprint`} tabIndex={0}>
         {hasBlueprint
           ? <CapabilityBlueprintPreview blueprint={blueprint} />
           : <p className="hint">{messages.skills.blueprintEmpty}</p>}
       </div>
-      <div className="tabPanel" role="tabpanel" hidden={!!sourceExecution || detailTab !== 'contracts'}>
+      <div className="tabPanel" role="tabpanel" hidden={!!sourceExecution || detailTab !== 'contracts'} id={`${tabId}-panel-contracts`} aria-labelledby={`${tabId}-tab-contracts`} tabIndex={0}>
         {hasContracts
           ? <GeneratedContractPreview manifest={manifest} />
           : <p className="hint">{messages.skills.contractsEmpty}</p>}
       </div>
-      <div className="tabPanel" role="tabpanel" hidden={!!sourceExecution || detailTab !== 'diff'}>
+      <div className="tabPanel" role="tabpanel" hidden={!!sourceExecution || detailTab !== 'diff'} id={`${tabId}-panel-diff`} aria-labelledby={`${tabId}-tab-diff`} tabIndex={0}>
         <RevisionDiffView diff={execution.diff} hasParent={execution.parent_interpretation_id !== null} />
       </div>
       {sourceExecution && execution.parent_interpretation_id && <details className="rawResult"><summary>{messages.skills.revisionDiffTitle}</summary><RevisionDiffView diff={execution.diff} hasParent /></details>}
-      <form className="adjustForm" onSubmit={(event) => { event.preventDefault(); onAdjust() }}>
-        <label>{messages.skills.adjustLabel}<textarea className="compactTextarea" value={instruction} onChange={(event) => onInstructionChange(event.target.value)} placeholder={messages.skills.adjustPlaceholder} spellCheck={false} /></label>
+      <form className="adjustForm" onSubmit={(event) => { event.preventDefault(); if (!disabled) onAdjust() }}>
+        <label>{messages.skills.adjustLabel}<textarea className="compactTextarea" disabled={disabled || adjustState.status === 'adjusting'} value={instruction} onChange={(event) => onInstructionChange(event.target.value)} placeholder={messages.skills.adjustPlaceholder} spellCheck={false} /></label>
         {adjustState.status === 'error' && <p className="error" role="alert">{adjustState.message}</p>}
         <div className="skillActions">
-          <button className="secondaryButton" type="submit" disabled={adjustState.status === 'adjusting' || !instruction.trim()}>{adjustState.status === 'adjusting' ? messages.skills.adjusting : messages.skills.adjustAndReinterpret}</button>
-          <button className="secondaryButton" type="button" disabled={versionBusy} onClick={onRegenerate}>{messages.skills.forceRegenerate}</button>
-          <button className="primaryButton" type="button" disabled={failed || versionBusy} onClick={onCreateDraft}>{versionBusy ? messages.skills.processing : messages.skills.createDraftFromThis}</button>
+          <button className="secondaryButton" type="submit" disabled={disabled || adjustState.status === 'adjusting' || !instruction.trim()}>{adjustState.status === 'adjusting' ? messages.skills.adjusting : messages.skills.adjustAndReinterpret}</button>
+          <button className="secondaryButton" type="button" disabled={disabled || versionBusy} onClick={onRegenerate}>{messages.skills.forceRegenerate}</button>
+          <button className="primaryButton" type="button" disabled={disabled || failed || versionBusy} onClick={onCreateDraft}>{versionBusy ? messages.skills.processing : messages.skills.createDraftFromThis}</button>
         </div>
       </form>
     </section>
@@ -207,7 +210,7 @@ function CapabilityBlueprintPreview({ blueprint }: { blueprint: CapabilityBluepr
             <ul className="noteList">
               {(task.deliverables ?? []).map((deliverable) => (
                 <li key={deliverable.key}>
-                  <strong>{messages.skills.deliverablePrefix(deliverable.kind)}</strong>
+                  <strong>{messages.skills.deliverablePrefix(assetCodeLabel(messages.taskFlow.deliverableKinds, deliverable.kind, messages.assetsAudit.unknown))}</strong>
                   <span>{deliverable.description}</span>
                 </li>
               ))}
@@ -221,9 +224,9 @@ function CapabilityBlueprintPreview({ blueprint }: { blueprint: CapabilityBluepr
           <ul className="noteList">
             {resources.map((resource) => (
               <li key={resource.key}>
-                <strong>{resource.key} · {resource.kind}</strong>
+                <strong>{resource.key} · {assetCodeLabel(messages.workspace.resourceKind, resource.kind, messages.assetsAudit.unknown)}</strong>
                 <span>
-                  {resource.required ? messages.skills.requiredLabel : messages.skills.optionalLabel} · {resource.access}
+                  {resource.required ? messages.skills.requiredLabel : messages.skills.optionalLabel} · {assetCodeLabel(messages.taskFlow.access, resource.access, messages.assetsAudit.unknown)}
                   {(resource.capabilities ?? []).length > 0
                     ? ` · ${(resource.capabilities ?? []).join(', ')}`
                     : ''}
@@ -244,7 +247,7 @@ function CapabilityBlueprintPreview({ blueprint }: { blueprint: CapabilityBluepr
           <ul className="noteList">
             {blueprint.interaction_points.map((point) => (
               <li key={point.key}>
-                <strong>{point.type}</strong>
+                <strong>{assetCodeLabel(messages.taskFlow.interactionTypes, point.type, messages.assetsAudit.unknown)}</strong>
                 <span>{point.condition}</span>
               </li>
             ))}
@@ -257,7 +260,7 @@ function CapabilityBlueprintPreview({ blueprint }: { blueprint: CapabilityBluepr
           <ul className="noteList">
             {blueprint.effect_intents.map((intent) => (
               <li key={intent.key}>
-                <strong>{intent.mode} · risk {intent.risk}</strong>
+                <strong>{assetCodeLabel(messages.taskFlow.modes, intent.mode, messages.assetsAudit.unknown)} · {assetCodeLabel(messages.taskFlow.risks, intent.risk, messages.assetsAudit.unknown)}</strong>
                 <span>
                   {intent.operation}
                   {intent.resource_key ? ` · ${intent.resource_key}` : ''}
@@ -335,12 +338,13 @@ function ContractFieldList({ contract, title }: { contract: unknown; title: stri
 
 /** 分項 confidence を小さな metric grid で表示する。 */
 function ConfidenceGrid({ confidence }: { confidence: Record<string, number> }) {
+  const messages = useMessages()
   const entries = Object.entries(confidence)
   if (entries.length === 0) return null
   return (
     <div className="resourceGrid">
       {entries.map(([area, value]) => (
-        <div className="metric" key={area}><span>{area}</span><strong>{value.toFixed(2)}</strong></div>
+        <div className="metric" key={area}><span>{assetCodeLabel(messages.assetsAudit.dimensions, area, messages.assetsAudit.unknown)} <code>{area}</code></span><strong>{value.toFixed(2)}</strong></div>
       ))}
     </div>
   )
@@ -384,7 +388,7 @@ function RevisionDiffView({ diff, hasParent }: { diff: Record<string, unknown>; 
       {hasParent && !changed && <p className="hint">{messages.skills.noStructuralDiff}</p>}
       {changed && <ul className="diffLines">{lines.map((line, index) => <li key={index}>{line}</li>)}</ul>}
       {hasParent && (
-        <details className="rawResult"><summary>{messages.skills.viewRawDiff}</summary><pre>{JSON.stringify(diff, null, 2)}</pre></details>
+        <details className="rawResult"><summary>{messages.skills.viewRawDiff}</summary><pre tabIndex={0} role="region" aria-label={messages.skills.viewRawDiff}>{JSON.stringify(diff, null, 2)}</pre></details>
       )}
     </div>
   )
@@ -399,22 +403,22 @@ function summarizeDiff(messages: UiMessages, diff: Record<string, unknown>): str
     const added = countArray(value.added)
     const removed = countArray(value.removed)
     const changed = countArray(value.changed)
-    if (added + removed + changed > 0) lines.push(`${dimension}: +${added} / -${removed} / ~${changed}`)
+    if (added + removed + changed > 0) lines.push(`${assetCodeLabel(messages.assetsAudit.dimensions, dimension, messages.assetsAudit.unknown)}: +${added} / -${removed} / ~${changed}`)
   }
   const level = diff.compatibility_level
-  if (isPlainRecord(level)) lines.push(`compatibility_level: ${String(level.from)} → ${String(level.to)}`)
+  if (isPlainRecord(level)) lines.push(`${messages.assetsAudit.dimensions.compatibility_level}: ${assetCodeLabel(messages.assetsAudit.compatibility, String(level.from), messages.assetsAudit.unknown)} → ${assetCodeLabel(messages.assetsAudit.compatibility, String(level.to), messages.assetsAudit.unknown)}`)
   for (const dimension of ['identity', 'permissions', 'ui', 'confidence', 'skill_execution']) {
     const value = diff[dimension]
     if (isPlainRecord(value) && isPlainRecord(value.changed)) {
       const count = Object.keys(value.changed).length
-      if (count > 0) lines.push(`${dimension}: ${messages.skills.changedCount(count)}`)
+      if (count > 0) lines.push(`${assetCodeLabel(messages.assetsAudit.dimensions, dimension, messages.assetsAudit.unknown)}: ${messages.skills.changedCount(count)}`)
     }
   }
   const diagnostics = diff.diagnostics
   if (isPlainRecord(diagnostics)) {
     const added = countArray(diagnostics.added)
     const removed = countArray(diagnostics.removed)
-    if (added + removed > 0) lines.push(`diagnostics: +${added} / -${removed}`)
+    if (added + removed > 0) lines.push(`${messages.assetsAudit.dimensions.diagnostics}: +${added} / -${removed}`)
   }
   return lines
 }

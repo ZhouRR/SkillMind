@@ -1,28 +1,30 @@
 import type { SkillDiagnostic, SkillParseResult, StoredSkillPreviewRecord } from '../api'
+import { assetCodeLabel } from '../lib/i18n/assetsAudit'
 import { useMessages } from '../i18n'
 import { formatByteSize } from '../lib/presentation'
 import type { UploadedSourceFile } from '../lib/skillUpload'
 import { DetailDrawer } from './PageElements'
 
 /** 上传済み目录の内容を「Skill 源文件」module 内で確認する読取専用 preview。 */
-export function UploadedSourceFiles({ files, onClear }: {
+export function UploadedSourceFiles({ files, onClear, disabled = false }: {
   files: UploadedSourceFile[]
   onClear: () => void
+  disabled?: boolean
 }) {
   const messages = useMessages()
   return (
     <div className="sourcePreview">
       <div className="sourcePreviewHeader">
         <span>{messages.skills.uploadedCount(files.length)}</span>
-        <button className="secondaryButton compactButton" type="button" onClick={onClear}>{messages.skills.clearUseManual}</button>
+        <button className="secondaryButton compactButton" type="button" disabled={disabled} onClick={onClear}>{messages.skills.clearUseManual}</button>
       </div>
       <ul className="sourcePreviewList">
         {files.map((file) => (
           <li key={file.path}>
             {file.kind === 'text' ? (
               <details className="sourcePreviewFile" open={file.path.endsWith('SKILL.md')}>
-                <summary><code>{file.path}</code><span>{formatByteSize(file.size)}</span></summary>
-                <pre>{file.content}</pre>
+                <summary><span className="sourceChevron" aria-hidden="true">›</span><code>{file.path}</code><span>{formatByteSize(file.size)}</span></summary>
+                <pre tabIndex={0} role="region" aria-label={file.path}>{file.content}</pre>
               </details>
             ) : (
               <div className="sourcePreviewOpaque">
@@ -47,11 +49,20 @@ export function SkillParseSummary({ result }: { result: SkillParseResult }) {
   const manifest = result.runtime_manifest_draft
   // Package 診断は manifest compatibility 側へ複製されるため、単純結合すると同一診断が二重表示される。
   const diagnostics = dedupeDiagnostics([...normalized.diagnostics, ...manifest.compatibility.diagnostics])
+  const important = diagnostics.filter((item) => item.severity === 'error' || item.severity === 'warning')
+  const info = diagnostics.filter((item) => item.severity !== 'error' && item.severity !== 'warning')
   return (
     <div className="skillSummary">
-      <dl className="runFacts">
+      <dl className="runFacts skillSummaryFacts">
         <div><dt>{messages.skills.parseNameLabel}</dt><dd>{normalized.metadata.name}</dd></div>
       </dl>
+      {important.length > 0 && <section className="skillImportantDiagnostics" aria-label={messages.skills.parseResult}>
+        <p className="diagnosticSummary">{messages.assetsAudit.diagnosticsSummary(important.filter((item) => item.severity === 'error').length, important.filter((item) => item.severity === 'warning').length)}</p>
+        <ul className="diagnostics">{important.map((item, index) => <li className={`diagnostic-${item.severity}`} key={`${item.code}-${index}`}>
+          <strong>{assetCodeLabel(messages.assetsAudit.severity, item.severity, messages.assetsAudit.unknown)}</strong><span>{item.message}</span>
+          <details className="detailDisclosure"><summary>{messages.elements.technicalDetails}</summary><code>{item.code}</code>{item.path && <p>{item.path}{item.line ? `:${item.line}` : ''}</p>}</details>
+        </li>)}</ul><p className="hint">{messages.assetsAudit.diagnosticsNext}</p>
+      </section>}
       <details className="technicalResultDetails">
         <summary>{messages.skills.technicalDetails}</summary>
         <dl className="runFacts">
@@ -61,7 +72,7 @@ export function SkillParseSummary({ result }: { result: SkillParseResult }) {
         <div><dt>{messages.skills.parseToolsLabel}</dt><dd>{manifest.tools.length === 0 ? messages.skills.toolsUnauthorized : manifest.tools.length}</dd></div>
         </dl>
         {normalized.declared_tools.length > 0 && <p className="hint">{messages.skills.declaredToolsLine(normalized.declared_tools.join(', '))}</p>}
-        {diagnostics.length > 0 && <ul className="diagnostics">{diagnostics.map((diagnostic, index) => <li key={`${diagnostic.code}-${index}`}><strong>{diagnostic.code}</strong><span>{diagnostic.message}</span></li>)}</ul>}
+        {info.length > 0 && <ul className="diagnostics">{info.map((diagnostic, index) => <li className={`diagnostic-${diagnostic.severity}`} key={`${diagnostic.code}-${index}`}><strong>{diagnostic.code}</strong><span>{diagnostic.message}</span></li>)}</ul>}
       </details>
       <div className="resourceGrid">
         <Metric label={messages.skills.metricFiles} value={normalized.source.files.length} />
@@ -78,7 +89,7 @@ export function SavedSkillIdentity({ stored }: { stored: StoredSkillPreviewRecor
   const messages = useMessages()
   return (
     <div className="savedSkill">
-      <div className="savedSkillStatus"><span>{messages.skills.savedInterpretationStatus}</span><strong>{stored.interpretation_status}</strong></div>
+      <div className="savedSkillStatus"><span>{messages.skills.savedInterpretationStatus}</span><strong>{assetCodeLabel(messages.assetsAudit.interpretation, stored.interpretation_status, messages.assetsAudit.unknown)}</strong></div>
       <DetailDrawer title={messages.elements.technicalDetails}>
         <dl className="runFacts">
           <div><dt>{messages.skills.savedSourceId}</dt><dd className="mono">{stored.skill_source_id}</dd></div>

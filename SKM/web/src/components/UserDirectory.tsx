@@ -20,6 +20,8 @@ export function UserDirectory({ session, revision, onSessionEnded, onChanged }: 
   const [selected, setSelected] = useState<string | null>(null)
   const selectionHeading = useRef<HTMLHeadingElement>(null)
   const directoryHeading = useRef<HTMLHeadingElement>(null)
+  const createSection = useRef<HTMLDetailsElement>(null)
+  const returnTarget = useRef<HTMLElement | null>(null)
   const limit = 25
   const loader = useCallback((signal: AbortSignal) => loadUsers(search.text, limit, search.offset, signal), [search])
   const query = useUserQuery(JSON.stringify([search.text, search.offset, revision]), loader, onSessionEnded)
@@ -32,19 +34,37 @@ export function UserDirectory({ session, revision, onSessionEnded, onChanged }: 
   }
   /** 選択した ID を新しい editor lifecycle にし、一覧の古い版を編集原版にしない。 */
   const select = (userId: string): void => {
+    returnTarget.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setSelected(userId)
     window.requestAnimationFrame(() => selectionHeading.current?.focus())
   }
   /** 閉じた editor の応答は破棄し、keyboard の位置を一覧へ戻す。 */
   const close = (): void => {
     setSelected(null)
-    directoryHeading.current?.focus()
+    if (returnTarget.current?.isConnected) returnTarget.current.focus()
+    else directoryHeading.current?.focus()
   }
   return <div className="accountDirectory" data-account-directory="">
+    {selected && <section data-account-editor={selected} aria-labelledby="selected-account-heading">
+      <div className="panelHeader"><h2 id="selected-account-heading" tabIndex={-1} ref={selectionHeading}>{messages.edit}</h2>
+        <button type="button" className="secondaryButton" onClick={close}>{messages.close}</button>
+      </div>
+      <UserAccountPanel userId={selected} own={false} session={session} revision={revision}
+        onSessionEnded={onSessionEnded} onChanged={onChanged} />
+    </section>}
+    <details className="detailDisclosure accountCreateDisclosure" ref={createSection}>
+      <summary>{messages.create}</summary>
+      <UserCreatePanel session={session} onSessionEnded={onSessionEnded} onCreated={onChanged} onSelect={select} />
+    </details>
     <section className="panel" aria-busy={query.pending}>
       {/* 開閉見出し(組織ユーザー)と同じ語を繰り返さず、区画内は一覧であることだけを示す。 */}
       <div className="panelHeader"><h2 ref={directoryHeading} tabIndex={-1}>{messages.userListTitle}</h2>
-        <button type="button" className="secondaryButton" disabled={query.pending} onClick={query.refresh}>{messages.refresh}</button>
+        <div className="inlineActions"><button type="button" className="primaryButton" onClick={() => {
+          if (!createSection.current) return
+          createSection.current.open = true
+          createSection.current.querySelector<HTMLInputElement>('input')?.focus()
+        }}>{messages.create}</button>
+        <button type="button" className="secondaryButton" disabled={query.pending} onClick={query.refresh}>{messages.refresh}</button></div>
       </div>
       <form className="accountSearch" data-account-form="search" onSubmit={submitSearch}>
         <label>{messages.search}<input type="search" maxLength={200} value={draft} placeholder={messages.searchPlaceholder}
@@ -59,13 +79,6 @@ export function UserDirectory({ session, revision, onSessionEnded, onChanged }: 
           pending={query.pending || !!query.failure} onChange={(offset) => setSearch((value) => ({ ...value, offset }))} />
       </>}
     </section>
-    <UserCreatePanel session={session} onSessionEnded={onSessionEnded} onCreated={onChanged} onSelect={select} />
-    {selected && <section data-account-editor={selected} aria-labelledby="selected-account-heading">
-      <div className="panelHeader"><h2 id="selected-account-heading" tabIndex={-1} ref={selectionHeading}>{messages.edit}</h2>
-        <button type="button" className="secondaryButton" onClick={close}>{messages.close}</button>
-      </div>
-      <UserAccountPanel userId={selected} own={false} session={session} revision={revision}
-        onSessionEnded={onSessionEnded} onChanged={onChanged} />
-    </section>}
+
   </div>
 }

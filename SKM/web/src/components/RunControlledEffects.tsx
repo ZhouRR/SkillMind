@@ -1,10 +1,12 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 
-import { decideChangeProposal, type ChangeProposalRecord, type RunDetailRecord } from '../api'
+import type { ChangeProposalRecord, RunDetailRecord } from '../api'
+import { useProposalDecision } from '../hooks/useProposalDecision'
+import type { SessionEnded } from '../hooks/useResourceRequest'
 import { useMessages } from '../i18n'
-import { createIdempotencyKey } from '../lib/idempotency'
 import { formatLocalTimestamp } from '../lib/presentation'
 import { displayText } from '../lib/resultPresentation'
+import '../styles/execution-audit.css'
 
 /** 期限内で未決の提案だけが「今 approve/reject できるもの」。 */
 export function isDecidable(proposal: ChangeProposalRecord): boolean {
@@ -33,11 +35,15 @@ function CollapsibleSection({ title, count, children }: {
  *
  *  Run が回答・承認待ちで停止している時、Workspace は自動でこの画面へ切り替える。
  *  利用者は「何をすれば続くのか」を探しに来るので、監査記録の下に置いてはいけない。 */
-export function PendingActionsSection({ detail, proposals, csrfToken, onDecided }: {
+export function PendingActionsSection({ detail, proposals, csrfToken, onDecided, actorId = '', readOnly = false, available = true, onSessionExpired }: {
   detail: RunDetailRecord
   proposals: ChangeProposalRecord[]
   csrfToken: string
   onDecided?: () => void
+  actorId?: string
+  readOnly?: boolean
+  available?: boolean
+  onSessionExpired?: SessionEnded
 }) {
   const messages = useMessages()
   if (proposals.length === 0) return null
@@ -50,9 +56,13 @@ export function PendingActionsSection({ detail, proposals, csrfToken, onDecided 
       <p className="hint">{messages.runResult.pendingHint}</p>
       {proposals.map((proposal) => (
         <ChangeProposalCard
+          actorId={actorId}
+          readOnly={readOnly}
+          available={available}
+          onSessionExpired={onSessionExpired}
           csrfToken={csrfToken}
           detail={detail}
-          key={`${proposal.proposal_id}:${proposal.version}:${proposal.checksum}`}
+          key={JSON.stringify([actorId, csrfToken, detail.project_id, detail.run_id, proposal.proposal_id])}
           onDecided={onDecided}
           proposal={proposal}
         />
@@ -64,11 +74,15 @@ export function PendingActionsSection({ detail, proposals, csrfToken, onDecided 
 /** 決着済みの Proposal と EffectExecution を observe→propose→apply の順に監査表示する。
  *
  *  未決の提案は上部の「対応が必要」へ移してあるため、ここは記録としてのみ畳んで置く。 */
-export function ControlledEffectsSection({ detail, proposals, csrfToken, onDecided }: {
+export function ControlledEffectsSection({ detail, proposals, csrfToken, onDecided, actorId = '', readOnly = false, available = true, onSessionExpired }: {
   detail: RunDetailRecord
   proposals: ChangeProposalRecord[]
   csrfToken: string
   onDecided?: () => void
+  actorId?: string
+  readOnly?: boolean
+  available?: boolean
+  onSessionExpired?: SessionEnded
 }) {
   const messages = useMessages()
   if (
@@ -82,9 +96,13 @@ export function ControlledEffectsSection({ detail, proposals, csrfToken, onDecid
       <div className="proposalList">
         {proposals.map((proposal) => (
           <ChangeProposalCard
+            actorId={actorId}
+            readOnly={readOnly}
+            available={available}
+            onSessionExpired={onSessionExpired}
             csrfToken={csrfToken}
             detail={detail}
-            key={`${proposal.proposal_id}:${proposal.version}:${proposal.checksum}`}
+            key={JSON.stringify([actorId, csrfToken, detail.project_id, detail.run_id, proposal.proposal_id])}
             onDecided={onDecided}
             proposal={proposal}
           />
@@ -119,55 +137,25 @@ export function ControlledEffectsSection({ detail, proposals, csrfToken, onDecid
   )
 }
 
-/** Exact version/checksum を表示したまま一度だけ approve/reject request を送る。 */
-function ChangeProposalCard({ detail, proposal, csrfToken, onDecided }: {
+/** Exact version/checksum と送信済み原要求を表示し、照合で write を再送しない。 */
+function ChangeProposalCard({ detail, proposal, csrfToken, onDecided, actorId = '', readOnly = false, available = true, onSessionExpired }: {
   detail: RunDetailRecord
   proposal: ChangeProposalRecord
   csrfToken: string
   onDecided?: () => void
+  actorId?: string
+  readOnly?: boolean
+  available?: boolean
+  onSessionExpired?: SessionEnded
 }) {
   const messages = useMessages()
+  const labels = messages.uiAuditWorkspace
   const [reason, setReason] = useState(messages.runResult.defaultApprovalReason)
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const controller = useRef<AbortController | null>(null)
-  useLayoutEffect(() => () => {
-    controller.current?.abort()
-    controller.current = null
-  }, [])
-
-  /** 表示中 Proposal の version/checksum と decision を idempotent に送る。 */
-  async function submitDecision(decision: 'APPROVED' | 'REJECTED'): Promise<void> {
-    // state の再描画前も同じ承認を二重送信しない。送信済み request は再送しない。
-    if (controller.current) return
-    const requestController = new AbortController()
-    controller.current = requestController
-    setSubmitting(true)
-    setError(null)
-    try {
-      await decideChangeProposal(
-        detail.project_id,
-        detail.run_id,
-        proposal,
-        decision,
-        reason.trim(),
-        createIdempotencyKey(),
-        csrfToken,
-        requestController.signal,
-      )
-      if (!requestController.signal.aborted && controller.current === requestController) onDecided?.()
-    } catch (caught: unknown) {
-      if (!requestController.signal.aborted && controller.current === requestController) {
-        setError(caught instanceof Error ? caught.message : 'Unknown Proposal API error')
-      }
-    } finally {
-      if (!requestController.signal.aborted && controller.current === requestController) {
-        controller.current = null
-        setSubmitting(false)
-      }
-    }
-  }
-
+  const submission = useProposalDecision({
+    scope: { actorId, projectId: detail.project_id, runId: detail.run_id, proposalId: proposal.proposal_id },
+    proposal, csrfToken, writable: !readOnly && available, onDecided, onSessionExpired,
+  })
+  const pending = submission.pending
 
   const canDecide = isDecidable(proposal)
   return (
@@ -178,17 +166,45 @@ function ChangeProposalCard({ detail, proposal, csrfToken, onDecided }: {
       </div>
       <h4>{proposal.summary}</h4>
       <dl className="proposalFacts">
-        <div><dt>{messages.runResult.targetLabel}</dt><dd>{displayText(proposal.target.display, displayText(proposal.target.locator, '—'))}</dd></div>
+        <div className="proposalTarget"><dt>{messages.runResult.targetLabel}</dt><dd>{displayText(proposal.target.display, displayText(proposal.target.locator, '—'))}</dd></div>
         <div><dt>{messages.runResult.capabilityLabel}</dt><dd>{proposal.capability_version}</dd></div>
         <div><dt>{messages.runResult.versionLabel}</dt><dd>{proposal.version}</dd></div>
         <div><dt>{messages.runResult.expiresLabel}</dt><dd>{formatLocalTimestamp(proposal.expires_at)}</dd></div>
       </dl>
       <ProposalChanges changes={proposal.changes} precondition={proposal.precondition} />
       <p className="hint">{messages.runResult.evidenceLine(proposal.evidence_refs, proposal.checksum)}</p>
-      {canDecide && (
+      {readOnly && canDecide && <p className="hint">{labels.proposalReadOnly}</p>}
+      {submission.storageUnavailable && <p className="error" role="alert">{labels.proposalStorageUnavailable}</p>}
+      {pending && <section className="proposalOriginal" aria-label={labels.proposalOriginal}>
+        <h4>{labels.proposalOriginal}</h4>
+        <dl className="proposalRequestFacts">
+          <div><dt>{labels.proposalRequestKey}</dt><dd><code>{pending.request.key}</code></dd></div>
+          <div><dt>{labels.proposalDecision}</dt><dd>{messages.enums.proposalStatus[pending.request.decision]}</dd></div>
+          <div><dt>{messages.runResult.versionLabel}</dt><dd>{pending.request.version} · <code>{pending.request.checksum}</code></dd></div>
+          <div><dt>{messages.runResult.approvalReason}</dt><dd>{pending.request.reason}</dd></div>
+        </dl>
+        <p role="status">{submission.checking ? labels.proposalChecking
+          : pending.phase === 'sending' ? labels.proposalSending
+          : pending.phase === 'confirmed' ? labels.proposalConfirmed
+          : pending.phase === 'observed' ? labels.proposalObserved
+          : pending.phase === 'conflict' ? labels.proposalConflict
+          : pending.phase === 'rejected' ? labels.proposalRejected
+          : labels.proposalUnknown}</p>
+        {pending.phase === 'unknown' && <p className="hint">{submission.checked ? labels.proposalPending : labels.proposalUnknownHint}</p>}
+        {pending.approval && <p>{messages.enums.proposalStatus[pending.approval.decision]} · {formatLocalTimestamp(pending.approval.created_at)} · <code>{pending.approval.approval_id}</code></p>}
+        {pending.error && <p className="error" role="alert">{pending.error}</p>}
+        {submission.readFailed && <p className="error" role="alert">{labels.proposalReadFailed}</p>}
+        {pending.phase !== 'sending' && pending.phase !== 'confirmed' && <button type="button" className="secondaryButton"
+          disabled={submission.checking || submission.accessDenied} onClick={() => void submission.check()}>{labels.proposalCheck}</button>}
+        {pending.editable && pending.phase === 'rejected' && <button className="secondaryButton" type="button"
+          disabled={readOnly || !available || submission.checking || submission.accessDenied}
+          onClick={submission.editRejected}>{labels.proposalEditRejected}</button>}
+      </section>}
+      {canDecide && !pending && (
         <div className="proposalDecision">
           <label>{messages.runResult.approvalReason}
             <textarea
+              disabled={submission.locked}
               maxLength={1000}
               required
               value={reason}
@@ -198,14 +214,14 @@ function ChangeProposalCard({ detail, proposal, csrfToken, onDecided }: {
           <div className="formRow">
             <button
               className="primaryButton"
-              disabled={submitting || !reason.trim()}
-              onClick={() => void submitDecision('APPROVED')}
+              disabled={submission.locked || !reason.trim()}
+              onClick={() => void submission.start('APPROVED', reason)}
               type="button"
             >{messages.runResult.approveAndApply}</button>
             <button
               className="dangerButton"
-              disabled={submitting || !reason.trim()}
-              onClick={() => void submitDecision('REJECTED')}
+              disabled={submission.locked || !reason.trim()}
+              onClick={() => void submission.start('REJECTED', reason)}
               type="button"
             >{messages.runResult.rejectAndContinue}</button>
           </div>
@@ -214,7 +230,6 @@ function ChangeProposalCard({ detail, proposal, csrfToken, onDecided }: {
       {proposal.status === 'PENDING_APPROVAL' && !canDecide && (
         <p className="error">{messages.runResult.proposalExpired}</p>
       )}
-      {error && <p className="error" role="alert">{error}</p>}
     </article>
   )
 }
@@ -231,7 +246,7 @@ function ProposalChanges({
   const files = fileChanges(changes)
   if (files.length === 0) {
     // issue field 更新のように値が小さい提案は、従来どおり構造をそのまま見せる方が速い。
-    return <pre>{JSON.stringify({ changes, precondition }, null, 2)}</pre>
+    return <pre tabIndex={0} role="region" aria-label={messages.uiAuditWorkspace.proposalChanges}>{JSON.stringify({ changes, precondition }, null, 2)}</pre>
   }
   const baseRevision = typeof precondition.revision === 'string' ? precondition.revision : '—'
   return (
@@ -249,7 +264,7 @@ function ProposalChanges({
             )}
           </summary>
           {file.action === 'SET'
-            ? <pre className="proposalFileBody">{file.content}</pre>
+            ? <pre className="proposalFileBody" tabIndex={0} role="region" aria-label={file.path}>{file.content}</pre>
             : <p className="hint">{messages.runResult.changeRemoved}</p>}
         </details>
       ))}

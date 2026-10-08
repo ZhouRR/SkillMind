@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
 
 import {
   ApiProblemError,
@@ -21,6 +21,7 @@ import {
 import { EmptyState, PageHeader, useConfirmDialog } from '../components/PageElements'
 import { useMessages } from '../i18n'
 import { useSkillInterpretation } from '../hooks/useSkillInterpretation'
+import { assetCodeLabel } from '../lib/i18n/assetsAudit'
 import { apiErrorMessage } from '../lib/apiFeedback'
 import { readUploadedSourcePreview, type UploadedSourceFile } from '../lib/skillUpload'
 import { SkillLibraryPanel, SkillVersionDetail, type SkillLibraryState, type ProjectEnablementState } from '../components/SkillLibraryPanel'
@@ -32,7 +33,7 @@ import { SkillTabButton } from '../components/SkillTabButton'
 type SkillParseState =
   | { status: 'idle' }
   | { status: 'parsing' }
-  | { status: 'ready'; result: SkillParseResult }
+  | { status: 'ready'; result: SkillParseResult; files: SkillSourceFile[]; revision: number }
   | { status: 'error'; message: string }
 
 /** SkillSource/Interpretation 永続化の非同期状態。 */
@@ -58,6 +59,12 @@ export function SkillsPage({ projectId, csrfToken }: {
   csrfToken: string
 }) {
   const messages = useMessages()
+  const tabId = useId()
+  const sourceRevision = useRef(0)
+  const interpretationRevision = useRef(0)
+  const [sourceChanged, setSourceChanged] = useState(false)
+  const currentProject = useRef(projectId)
+  currentProject.current = projectId
   const [skillMarkdown, setSkillMarkdown] = useState('')
   const [referenceMarkdown, setReferenceMarkdown] = useState('')
   const [uploadedSource, setUploadedSource] = useState<UploadedSourceFile[] | null>(null)
@@ -80,7 +87,7 @@ export function SkillsPage({ projectId, csrfToken }: {
   const { interpretState, adjustState, instruction, setInstruction, pendingRequestId,
     resetInterpretation, confirmPendingInterpretation, dismissInterpretation, handleInterpret,
     handleAdjust, acknowledgeDraft } = useSkillInterpretation(csrfToken,
-      () => { versionController.current?.abort(); setVersionState({ status: 'idle' }) }, () => setPageTab('workbench'))
+      () => { interpretationRevision.current = sourceRevision.current; versionController.current?.abort(); setVersionState({ status: 'idle' }) }, () => setPageTab('workbench'))
 
   // DOM が切り替わった commit で旧要求を閉じ、passive cleanup 前の成功も破棄する。
   useLayoutEffect(() => () => {
@@ -124,6 +131,7 @@ export function SkillsPage({ projectId, csrfToken }: {
 
   /** 選択 Project の active/disabled enablement を監査表示用に再取得する。 */
   async function refreshEnablements(): Promise<void> {
+    if (currentProject.current !== projectId) return
     enablementController.current?.abort()
     if (!projectId) {
       setEnablementState({ status: 'idle' })
@@ -131,14 +139,14 @@ export function SkillsPage({ projectId, csrfToken }: {
     }
     const controller = new AbortController()
     enablementController.current = controller
-    setEnablementState({ status: 'loading' })
+    setEnablementState({ status: 'loading', projectId })
     try {
       const enablements = await listProjectSkillVersions(projectId, true, controller.signal)
-      if (!controller.signal.aborted) setEnablementState({ status: 'ready', enablements })
+      if (!controller.signal.aborted && currentProject.current === projectId) setEnablementState({ status: 'ready', enablements, projectId })
     } catch (error: unknown) {
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted && currentProject.current === projectId) {
         setEnablementState({
-          status: 'error',
+          status: 'error', projectId,
           message: apiErrorMessage(error, messages.skills.loadEnablementsFailed, messages),
         })
       }
@@ -160,9 +168,22 @@ export function SkillsPage({ projectId, csrfToken }: {
     setVersionState({ status: 'idle' })
   }
 
+  /** 入力の世代を進め、旧解析と保存済み表示を現在の入力へ流用しない。 */
+  function changeSource(): void {
+    sourceRevision.current += 1
+    parseController.current?.abort()
+    setSourceChanged((changed) => changed || parseState.status !== 'idle' || saveState.status !== 'idle' || interpretState.status !== 'idle' || versionState.status !== 'idle')
+    setParseState({ status: 'idle' })
+    setSaveState({ status: 'idle' })
+    resetDownstream()
+  }
+
   /** Model を呼ばない parser preview を実行し、以前の保存結果を無効化する。 */
   async function handleParse(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
+    if (saveController.current || uploadController.current || !skillMarkdown.trim()) return
+    const files = currentFiles()
+    const revision = sourceRevision.current
     parseController.current?.abort()
     const controller = new AbortController()
     parseController.current = controller
@@ -170,38 +191,43 @@ export function SkillsPage({ projectId, csrfToken }: {
     setSaveState({ status: 'idle' })
     resetDownstream()
     try {
-      const result = await parseSkillSource(currentFiles(), csrfToken, controller.signal)
-      if (parseController.current !== controller || controller.signal.aborted) return
-      setParseState({ status: 'ready', result })
+      const result = await parseSkillSource(files, csrfToken, controller.signal)
+      if (parseController.current !== controller || controller.signal.aborted || sourceRevision.current !== revision) return
+      setParseState({ status: 'ready', result, files, revision })
+      setSourceChanged(false)
     } catch (error: unknown) {
       if (!controller.signal.aborted) {
-        setParseState({ status: 'error', message: apiErrorMessage(error, 'Unknown parser error', messages) })
+        setParseState({ status: 'error', message: apiErrorMessage(error, messages.assetsAudit.parserFailed, messages) })
       }
     }
   }
 
   /** Preview と同じ source を不可変な SkillSource/Interpretation として保存する。 */
   async function handleSave(): Promise<void> {
-    saveController.current?.abort()
+    if (saveController.current || uploadController.current || parseState.status !== 'ready' || parseState.revision !== sourceRevision.current) return
+    const files = parseState.files
     const controller = new AbortController()
     saveController.current = controller
     setSaveState({ status: 'saving' })
     resetDownstream()
     try {
-      const stored = await saveSkillImport(currentFiles(), csrfToken, controller.signal)
+      const stored = await saveSkillImport(files, csrfToken, controller.signal)
       if (saveController.current !== controller || controller.signal.aborted) return
       setSaveState({ status: 'ready', stored })
     } catch (error: unknown) {
       if (!controller.signal.aborted) {
-        setSaveState({ status: 'error', message: apiErrorMessage(error, 'Unknown persistence error', messages) })
+        setSaveState({ status: 'error', message: apiErrorMessage(error, messages.assetsAudit.saveFailed, messages) })
       }
+    } finally {
+      if (saveController.current === controller) saveController.current = null
     }
   }
 
   /** 選択した目录（binary asset 可）を multipart upload し、保存済み source として扱う。 */
   async function handleUpload(files: File[]): Promise<void> {
-    if (files.length === 0) return
-    uploadController.current?.abort()
+    if (files.length === 0 || uploadController.current || saveController.current) return
+    sourceRevision.current += 1
+    parseController.current?.abort()
     const controller = new AbortController()
     uploadController.current = controller
     setParseState({ status: 'idle' })
@@ -213,18 +239,23 @@ export function SkillsPage({ projectId, csrfToken }: {
         readUploadedSourcePreview(files),
         uploadSkillFiles(files, csrfToken, controller.signal),
       ])
-      if (controller.signal.aborted) return
+      if (controller.signal.aborted || uploadController.current !== controller) return
+      setSourceChanged(false)
       setUploadedSource(preview)
       setSaveState({ status: 'ready', stored })
     } catch (error: unknown) {
       if (!controller.signal.aborted) {
-        setSaveState({ status: 'error', message: apiErrorMessage(error, 'Unknown upload error', messages) })
+        setSaveState({ status: 'error', message: apiErrorMessage(error, messages.assetsAudit.uploadFailed, messages) })
       }
+    } finally {
+      if (uploadController.current === controller) uploadController.current = null
     }
   }
 
   /** 指定 Interpretation を gate report 付き frozen DRAFT へ変換する。 */
   async function handleCreateDraft(interpretationId: string): Promise<void> {
+    if (sourceChanged || (interpretationId !== (saveState.status === 'ready' ? saveState.stored.interpretation_id : null)
+      && !(interpretState.status === 'ready' && interpretationCurrent && interpretationId === interpretState.execution.interpretation_id))) return
     versionController.current?.abort()
     const controller = new AbortController()
     versionController.current = controller
@@ -242,7 +273,7 @@ export function SkillsPage({ projectId, csrfToken }: {
       await refreshLibrary()
     } catch (error: unknown) {
       if (!controller.signal.aborted) {
-        setVersionState({ status: 'error', message: apiErrorMessage(error, 'Unknown draft API error', messages) })
+        setVersionState({ status: 'error', message: apiErrorMessage(error, messages.assetsAudit.draftFailed, messages) })
       }
     }
   }
@@ -285,7 +316,7 @@ export function SkillsPage({ projectId, csrfToken }: {
       await refreshLibrary()
     } catch (error: unknown) {
       if (!controller.signal.aborted) {
-        const message = apiErrorMessage(error, 'Unknown publish API error', messages)
+        const message = apiErrorMessage(error, messages.assetsAudit.publishFailed, messages)
         if (fromLibrary) setLibraryActionError({ versionId: version.skill_version_id, message })
         else setVersionState({ status: 'error', message })
       }
@@ -361,7 +392,7 @@ export function SkillsPage({ projectId, csrfToken }: {
 
   /** Organization の PUBLISHED 精確版を現在 Project へ明示有効化する。 */
   async function handleEnable(version: SkillVersionRecord): Promise<void> {
-    if (!projectId || version.status !== 'PUBLISHED') return
+    if (!projectId || version.status !== 'PUBLISHED' || enablementState.status !== 'ready' || enablementState.projectId !== projectId || libraryBusyVersionId !== null) return
     libraryMutationController.current?.abort()
     const controller = new AbortController()
     libraryMutationController.current = controller
@@ -374,11 +405,11 @@ export function SkillsPage({ projectId, csrfToken }: {
         csrfToken,
         controller.signal,
       )
-      await refreshEnablements()
+      if (!controller.signal.aborted && currentProject.current === projectId) await refreshEnablements()
     } catch (error: unknown) {
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted && currentProject.current === projectId) {
         setEnablementState({
-          status: 'error',
+          status: 'error', projectId,
           message: apiErrorMessage(error, messages.skills.enableFailed, messages),
         })
       }
@@ -389,7 +420,7 @@ export function SkillsPage({ projectId, csrfToken }: {
 
   /** 現在 Project の有効化を監査行を残したまま停用する。 */
   async function handleDisable(version: SkillVersionRecord): Promise<void> {
-    if (!projectId) return
+    if (!projectId || enablementState.status !== 'ready' || enablementState.projectId !== projectId || libraryBusyVersionId !== null) return
     libraryMutationController.current?.abort()
     const controller = new AbortController()
     libraryMutationController.current = controller
@@ -402,11 +433,11 @@ export function SkillsPage({ projectId, csrfToken }: {
         csrfToken,
         controller.signal,
       )
-      await refreshEnablements()
+      if (!controller.signal.aborted && currentProject.current === projectId) await refreshEnablements()
     } catch (error: unknown) {
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted && currentProject.current === projectId) {
         setEnablementState({
-          status: 'error',
+          status: 'error', projectId,
           message: apiErrorMessage(error, messages.skills.disableFailed, messages),
         })
       }
@@ -415,6 +446,11 @@ export function SkillsPage({ projectId, csrfToken }: {
     }
   }
 
+  const interpretationCurrent = !sourceChanged && (sourceRevision.current === 0
+    || (saveState.status === 'ready' && interpretState.status === 'ready'
+      && saveState.stored.skill_source_id === interpretState.execution.skill_source_id))
+  const sourceLocked = saveState.status === 'saving'
+  const stage = versionState.status !== 'idle' ? 'publish' : saveState.status === 'ready' ? 'interpret' : parseState.status === 'ready' ? 'save' : 'parse'
   const importFailure = [parseState, saveState, interpretState, adjustState, versionState]
     .find((state) => state.status === 'error')
   const importPending = parseState.status === 'parsing' ? messages.skills.parsing
@@ -432,11 +468,11 @@ export function SkillsPage({ projectId, csrfToken }: {
       />
       {/* 非活性側も mount を保ち、頁签切替で入力草稿や進行中の要求を破棄しない。 */}
       <div className="tabBar" role="tablist" aria-label={messages.skills.pageTabsAria}>
-        <SkillTabButton current={pageTab} tab="library" onSelect={setPageTab}>
+        <SkillTabButton idPrefix={tabId} current={pageTab} tab="library" onSelect={setPageTab}>
           {messages.skills.libraryTitle}
           {libraryState.status === 'ready' && <span className="eventCount">{new Set(libraryState.versions.map((version) => version.skill_key)).size}</span>}
         </SkillTabButton>
-        <SkillTabButton current={pageTab} tab="workbench" onSelect={setPageTab}>
+        <SkillTabButton idPrefix={tabId} current={pageTab} tab="workbench" onSelect={setPageTab}>
           {messages.skills.tabWorkbench}
         </SkillTabButton>
       </div>
@@ -444,17 +480,18 @@ export function SkillsPage({ projectId, csrfToken }: {
         {importPending && <p role="status">{importPending}</p>}
         {importFailure?.status === 'error' && <p className="error" role="alert">{importFailure.message}</p>}
       </>}
-      <div className="tabPanel" role="tabpanel" hidden={pageTab !== 'workbench'}>
+      <div className="tabPanel" role="tabpanel" hidden={pageTab !== 'workbench'} id={`${tabId}-panel-workbench`} aria-labelledby={`${tabId}-tab-workbench`} tabIndex={0}>
       <section className="skillWorkspace" aria-label={messages.skills.workspaceAria}>
         <form className="panel skillForm" onSubmit={(event) => void handleParse(event)}>
           <div className="panelHeader"><h2>{messages.skills.sourceTitle}</h2></div>
           <div className="skillUpload">
             <span>{messages.skills.orUploadDir}</span>
-            <label className="primaryButton fileUploadButton">
+            <label className="primaryButton fileUploadButton" aria-disabled={sourceLocked}>
               {messages.skills.chooseSkillDir}
               <input
                 type="file"
                 multiple
+                disabled={sourceLocked}
                 aria-label={messages.skills.uploadDirAria}
                 ref={(element) => { element?.setAttribute('webkitdirectory', '') }}
                 onChange={(event) => {
@@ -469,22 +506,26 @@ export function SkillsPage({ projectId, csrfToken }: {
           {uploadedSource === null ? (
             <details className="detailDisclosure skillTextSource">
               <summary>{messages.skills.manualSource}</summary>
-              <label>SKILL.md<textarea placeholder={messages.skills.skillMdPlaceholder} value={skillMarkdown} onChange={(event) => setSkillMarkdown(event.target.value)} spellCheck={false} /></label>
+              <label>SKILL.md<textarea placeholder={messages.skills.skillMdPlaceholder} value={skillMarkdown} disabled={sourceLocked} onChange={(event) => { changeSource(); setSkillMarkdown(event.target.value) }} spellCheck={false} /></label>
               <details className="detailDisclosure">
                 <summary>{messages.skills.referencesLabel}</summary>
-                <label>{messages.skills.referencesLabel}<textarea placeholder={messages.skills.referencesPlaceholder} value={referenceMarkdown} onChange={(event) => setReferenceMarkdown(event.target.value)} spellCheck={false} /></label>
+                <label>{messages.skills.referencesLabel}<textarea placeholder={messages.skills.referencesPlaceholder} value={referenceMarkdown} disabled={sourceLocked} onChange={(event) => { changeSource(); setReferenceMarkdown(event.target.value) }} spellCheck={false} /></label>
               </details>
-              <button className="primaryButton" disabled={parseState.status === 'parsing' || !skillMarkdown.trim()} type="submit">{parseState.status === 'parsing' ? messages.skills.parsing : messages.skills.parseSkill}</button>
+              <button className="primaryButton" disabled={sourceLocked || parseState.status === 'parsing' || !skillMarkdown.trim()} type="submit">{parseState.status === 'parsing' ? messages.skills.parsing : messages.skills.parseSkill}</button>
             </details>
           ) : (
-            <UploadedSourceFiles files={uploadedSource} onClear={() => setUploadedSource(null)} />
+            <UploadedSourceFiles files={uploadedSource} disabled={sourceLocked} onClear={() => { if (sourceLocked) return; changeSource(); setUploadedSource(null) }} />
           )}
         </form>
 
-        <section className="panel skillResult" aria-live="polite">
+        <section className="panel skillResult">
+          <ol className="skillStages" aria-label={messages.assetsAudit.stagesLabel}>
+            {(Object.keys(messages.assetsAudit.stages) as Array<keyof typeof messages.assetsAudit.stages>).map((item) => <li key={item} aria-current={stage === item ? 'step' : undefined}>{messages.assetsAudit.stages[item]}</li>)}
+          </ol>
+          <p className="skillWorkStatus" role="status" aria-live="polite">{importPending ?? (sourceChanged ? messages.assetsAudit.sourceChanged : '')}</p>
           <div className="panelHeader">
             <h2>{messages.skills.parseResult}</h2>
-            {parseState.status === 'ready' && <span className="scopeBadge">{parseState.result.runtime_manifest_draft.compatibility.level}</span>}
+            {parseState.status === 'ready' && <span className="scopeBadge">{assetCodeLabel(messages.assetsAudit.compatibility, parseState.result.runtime_manifest_draft.compatibility.level, messages.assetsAudit.unknown)}</span>}
           </div>
           {parseState.status === 'idle' && saveState.status === 'idle' && interpretState.status === 'idle' && <EmptyState text={messages.skills.parseEmptyIdle} />}
           {parseState.status === 'parsing' && <EmptyState text={messages.skills.parseRunning} />}
@@ -492,7 +533,7 @@ export function SkillsPage({ projectId, csrfToken }: {
           {parseState.status === 'ready' && (
             <>
               <SkillParseSummary result={parseState.result} />
-              <button className="secondaryButton saveSkillButton" disabled={saveState.status === 'saving'} type="button" onClick={() => void handleSave()}>{saveState.status === 'saving' ? messages.skills.saving : messages.skills.saveResult}</button>
+              <button className="secondaryButton saveSkillButton" disabled={sourceChanged || saveState.status === 'saving'} type="button" onClick={() => void handleSave()}>{saveState.status === 'saving' ? messages.skills.saving : messages.skills.saveResult}</button>
             </>
           )}
           {/* 目录 upload は parseState を経由しないため、保存結果は parse 分岐の外で常に描画する(upload 成功が無反応に見える不具合の修正)。 */}
@@ -507,6 +548,8 @@ export function SkillsPage({ projectId, csrfToken }: {
               </div>
             </>
           )}
+          {interpretState.status !== 'idle' && (interpretationRevision.current !== sourceRevision.current
+            || (interpretState.status === 'ready' && !interpretationCurrent)) && <p className="notice">{messages.assetsAudit.previousInterpretation}</p>}
           {interpretState.status === 'unknown' && (
             <div role="status" className="notice">
               <p>{interpretState.message}</p>
@@ -520,9 +563,10 @@ export function SkillsPage({ projectId, csrfToken }: {
             <InterpretStreamView prompt={interpretState.prompt} output={interpretState.output} attempt={interpretState.attempt} />
           )}
           {interpretState.status === 'error' && <p className="error" role="alert">{interpretState.message}</p>}
-          {interpretState.status === 'ready' && (
+          {interpretState.status === 'ready' && <>
             <InterpretationExecutionView
               execution={interpretState.execution}
+              disabled={!interpretationCurrent}
               instruction={instruction}
               onInstructionChange={setInstruction}
               onAdjust={() => void handleAdjust(interpretState.execution.interpretation_id)}
@@ -531,17 +575,17 @@ export function SkillsPage({ projectId, csrfToken }: {
               adjustState={adjustState}
               versionBusy={versionState.status === 'loading'}
             />
-          )}
+          </>}
           {versionState.status === 'error' && <p className="error" role="alert">{versionState.message}</p>}
           {versionState.status === 'ready' && <SkillVersionDetail version={versionState.version} onPublish={() => void handlePublish(versionState.version)} />}
         </section>
       </section>
       </div>
-      <div className="tabPanel" role="tabpanel" hidden={pageTab !== 'library'}>
+      <div className="tabPanel" role="tabpanel" hidden={pageTab !== 'library'} id={`${tabId}-panel-library`} aria-labelledby={`${tabId}-tab-library`} tabIndex={0}>
         <SkillLibraryPanel
           libraryState={libraryState}
           actionError={libraryActionError}
-          onRefresh={() => { setLibraryActionError(null); void refreshLibrary() }}
+          onRefresh={() => { setLibraryActionError(null); void refreshLibrary(); void refreshEnablements() }}
           enablementState={enablementState}
           projectId={projectId}
           busyVersionId={libraryBusyVersionId}

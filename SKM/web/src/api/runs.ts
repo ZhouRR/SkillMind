@@ -457,6 +457,11 @@ export async function loadPendingRuns(
   return page.items
 }
 
+/** 対応待ち一覧のページ情報を保持し、先頭件数を全件数として表示しない。 */
+export async function loadPendingRunPage(projectId: string, limit: number, signal?: AbortSignal): Promise<RunHistoryPageRecord> {
+  return loadRunHistory(projectId, limit, 0, signal, PENDING_RUN_STATUSES)
+}
+
 /** Unknown JSON から取消 response の公開 field と enum を検証する。 */
 function parseCancelRunRecord(value: unknown): CancelRunRecord {
   if (
