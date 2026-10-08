@@ -94,7 +94,9 @@ async def check(url: str, output: Path) -> None:
                 audit = UploadBrowserAudit(page, api)
                 try:
                     await page.goto(f'{url}#/resources?project={PROJECT}')
-                    labels = (await messages(page, language))['resources']
+                    catalog = await messages(page, language)
+                    labels = catalog['resources']
+                    audit_labels = catalog['resourcesAudit']
                     panel = page.get_by_role('region', name=labels['integrationListTitle'])
                     await expect(panel.get_by_text('Review DB', exact=True)).to_be_visible()
                     await expect(page.locator('.loadingSkeleton')).to_have_count(0)
@@ -110,7 +112,7 @@ async def check(url: str, output: Path) -> None:
                         form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));''')
                     await asyncio.wait_for(api.write_gate.received.wait(), 5)
                     assert api.attempts == 1
-                    await expect(dialog.get_by_role('button', name=labels['save'], exact=True)).to_be_disabled()
+                    await expect(dialog.get_by_role('button', name=audit_labels['saving'], exact=True)).to_be_disabled()
                     api.write_gate.release.set()
                     await expect(dialog).to_have_count(0)
                     assert len(api.updates) == 1
@@ -120,9 +122,16 @@ async def check(url: str, output: Path) -> None:
                     api.drop_write = True
                     await dialog.get_by_label(labels['databaseHost'], exact=True).fill('unknown.example.test')
                     await dialog.get_by_role('button', name=labels['save'], exact=True).click()
-                    await expect(dialog.get_by_role('alert')).to_contain_text('API returned a non-JSON response')
+                    await expect(dialog.get_by_role('alert').filter(has_text='API returned a non-JSON response')).to_be_visible()
+                    await expect(dialog.get_by_text(audit_labels['unknownTitle'], exact=True)).to_be_visible()
                     await expect(dialog.get_by_label(labels['databaseHost'], exact=True)).to_have_value('unknown.example.test')
                     assert api.attempts == 2 and len(api.updates) == 1
+                    # 不明な原 write は再送せず、一覧再読取と人の確認を経て最新内容から開き直す。
+                    await dialog.locator('.resourceFormActionsSticky').get_by_role('button', name=audit_labels['close'], exact=True).click()
+                    feedback = page.locator('.resourceAdmin > .resourceRequestFeedback')
+                    await feedback.get_by_role('button', name=audit_labels['refresh'], exact=True).click()
+                    await feedback.get_by_role('button', name=audit_labels['reviewComplete'], exact=True).click()
+                    await panel.get_by_role('button', name=labels['edit'], exact=True).click()
                     api.drop_write = False
                     api.write_gate = ResponseGate()
                     await dialog.get_by_label(labels['databaseHost'], exact=True).fill('late.example.test')

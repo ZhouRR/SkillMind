@@ -1,3 +1,4 @@
+import { useMessages } from '../i18n'
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 /** 表示用の iframe identity。内容は key やログへ載せない。 */
@@ -7,6 +8,7 @@ let nextPreviewId = 0
 export function StaticPreviewFrame({ source, title, className = 'previewFrame' }: {
   source: string; title: string; className?: string
 }) {
+  const messages = useMessages()
   const owner = useMemo(() => ({ id: ++nextPreviewId }), [source])
   const [loaded, setLoaded] = useState<typeof owner | null>(null)
   const active = useRef<typeof owner | null>(null)
@@ -16,7 +18,8 @@ export function StaticPreviewFrame({ source, title, className = 'previewFrame' }
   }, [owner])
   const ready = loaded === owner
   return <div className="previewFrameSurface" aria-busy={!ready}>
-    <iframe key={owner.id} className={className} sandbox="" referrerPolicy="no-referrer" srcDoc={source}
+    <p className="hint previewFrameNavigation">{messages.assetsAudit.frameNavigation}</p>
+    <iframe tabIndex={0} key={owner.id} className={className} sandbox="" referrerPolicy="no-referrer" srcDoc={source}
       title={title} style={{ visibility: ready ? 'visible' : 'hidden' }}
       onLoad={() => { if (active.current === owner) setLoaded(owner) }} />
   </div>

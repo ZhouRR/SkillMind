@@ -3,6 +3,7 @@ import { act, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { DocumentOrganizeDialog } from '../../src/components/DocumentOrganizeDialog'
 import { DocumentFolderInput } from '../../src/components/DocumentFolderInput'
 import { LanguageProvider } from '../../src/i18n'
 
@@ -196,4 +197,20 @@ describe('upload folder autocomplete', () => {
     expect(changes).not.toHaveBeenCalled()
   })
 
+})
+
+/** 整理も upload と同じ自由入力候補を使い、root と新規パスを区別する。 */
+describe('organize folder autocomplete', () => {
+  it('uses the shared labeled autocomplete with native required validation for folder creation', async () => {
+    const save = vi.fn()
+    await act(async () => root.render(<LanguageProvider language="en"><DocumentOrganizeDialog edit={{ mode: 'CREATE_FOLDER', folder: '', documents: [] }} folders={['specs/api']} busy={false} onClose={vi.fn()} onSave={save} /></LanguageProvider>))
+    const input = document.querySelector<HTMLInputElement>('[role="dialog"] input[role="combobox"]')!
+    expect(input).not.toBeNull()
+    expect(input.required).toBe(true)
+    expect(document.querySelector('datalist')).toBeNull()
+    expect(input.labels?.[0]?.textContent).toBeTruthy()
+    await type(input, 'new/free-form-path')
+    await act(async () => document.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!.click())
+    expect(save).toHaveBeenCalledExactlyOnceWith('new/free-form-path', '')
+  })
 })

@@ -1,0 +1,35 @@
+/* 管理一覧・長い scope と drawer を既存の面と罫線で整える。 */
+.resourceAdmin .resourceInfo { min-width: 0; }
+.resourceAdmin .resourceInfo strong { overflow: visible; white-space: normal; text-overflow: clip; overflow-wrap: anywhere; }
+.resourceAdmin .resourceInfo small, .resourceRequestFeedback strong { overflow-wrap: anywhere; }
+.resourceFormFields { display: grid; gap: 16px; margin: 0; padding: 0; min-width: 0; border: 0; }
+.resourceFormFields > label { display: grid; gap: 8px; min-width: 0; }
+.resourceSectionTitle { margin: 8px 0 0; padding-top: 16px; border-top: 1px solid var(--border); font-size: 15px; }
+.resourceSectionTitle:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.resourceForm .scopePicker, .resourceForm .scopePickerGroup { min-width: 0; }
+.resourceForm .scopePickerGroup { margin: 0; padding: 10px 0; border: 0; }
+.resourceForm .scopePickerGroup legend { padding: 0; }
+.resourceForm .scopePickerGroup > label:not(.scopeOption) { display: block; margin: 8px 0; }
+.resourceForm .scopeOption { align-items: flex-start; min-width: 0; }
+.resourceForm .scopeOption input { flex: 0 0 auto; }
+.resourceForm .scopeOption > span { min-width: 0; overflow-wrap: anywhere; }
+.resourceTechnicalKey { display: block; margin-bottom: 8px; color: var(--text-muted); overflow-wrap: anywhere; }
+.resourceFormActions { display: flex; gap: 10px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+.resourceFormActions > button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.resourceFormActionsSticky { position: sticky; bottom: -1px; z-index: 1; padding-block: 14px; background: var(--surface); border-top: 1px solid var(--border); }
+.resourceRequestFeedback { min-width: 0; display: grid; gap: 10px; padding-block: 12px; border-top: 1px solid var(--border); }
+.resourceRequestFeedback p { margin: 0; overflow-wrap: anywhere; }
+.resourceRequestFeedback > button { justify-self: start; }
+.resourceTaskCatalogState { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.resourceTaskCatalogState p { width: 100%; margin: 0; }
+.resourceToolCatalog { min-width: 0; }
+.resourceToolCatalog summary { padding-block: 8px; cursor: pointer; }
+.resourceToolCatalogList { max-height: 18rem; overflow: auto; scrollbar-gutter: stable both-edges; padding-inline: 8px; }
+.resourceToolCatalogList:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.resourceLoadError { display: grid; gap: 8px; }
+.resourceLoadError > button { justify-self: start; }
+@media (max-width: 480px) {
+  .resourceAdmin .resourceItem { align-items: stretch; }
+  .resourceAdmin .resourceItem .panelHeaderActions { justify-content: flex-start; flex-wrap: wrap; }
+  .resourceFormActionsSticky > button { flex: 1 1 10rem; }
+}

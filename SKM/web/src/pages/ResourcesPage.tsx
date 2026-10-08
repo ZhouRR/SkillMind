@@ -1,7 +1,7 @@
 import { Select } from '../components/Select'
 import { discoverMcpTools } from '../api/integrations'
 import { supportsMcpCatalog } from '../lib/resourceConfig'
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react'
 
 import {
   createEffectPreauthorization,
@@ -25,7 +25,7 @@ import { useMessages } from '../i18n'
 import { useResourceAdministration } from '../hooks/useResourceAdministration'
 import { prepareResourceConnection, resourceWriteEnabled } from '../lib/resourceConnection'
 import { ResourceConnectionForm } from '../components/ResourceConnectionForm'
-import { ResourceList, ResourceTabButton, SecretResolverFields, ScopeSubsetPicker } from '../components/ResourceFormFields'
+import { ResourceList, ResourceRequestFeedback, ResourceTabButton, SecretResolverFields, ScopeSubsetPicker } from '../components/ResourceFormFields'
 import {
   PROVIDER_FORMS,
   RESOURCE_PROVIDERS,
@@ -77,8 +77,8 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
 }) {
   const messages = useMessages()
   const features = { deferredFeaturesEnabled, databaseWritesEnabled, gitWritesEnabled, mcpToolsEnabled }
-  const { secrets, integrations, bindings, policies, tasks, loading, busy, error, setError,
-    perform, recordSecret } = useResourceAdministration(projectId, deferredFeaturesEnabled)
+  const { secrets, integrations, bindings, policies, tasks, taskStatus, retryTasks, loaded, loading, loadError, busy, error, setError,
+    perform, recordSecret, refresh, unconfirmed, canAcknowledge, acknowledge, stopWaiting } = useResourceAdministration(projectId, deferredFeaturesEnabled, csrfToken)
   const [connectDraft, setConnectDraft] = useState<ConnectDraft>(() => emptyConnectDraft('http'))
   const [secretDraft, setSecretDraft] = useState<SecretDraft>(EMPTY_SECRET)
   const [bindingDraft, setBindingDraft] = useState<BindingDraft>(EMPTY_BINDING)
@@ -89,12 +89,17 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
   const [editingSecret, setEditingSecret] = useState<SecretReferenceRecord | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<IntegrationRecord | SecretReferenceRecord | null>(null)
   const savedMcpUrl = useRef('')
+  const tabId = useId()
+  const [manualBinding, setManualBinding] = useState(false)
+  const locked = busy !== null || unconfirmed !== null
+  const unavailable = locked || !loaded || loading || loadError !== null
+  const bindingCatalogAvailable = taskStatus === 'ready' || manualBinding
 
   useEffect(() => {
     setOpenDialog(null); setDeleteTarget(null); setEditingIntegration(null); setEditingSecret(null)
     setConnectDraft(emptyConnectDraft('http')); setSecretDraft(EMPTY_SECRET)
-    setBindingDraft(EMPTY_BINDING); setPolicyDraft(EMPTY_POLICY)
-  }, [projectId])
+    setBindingDraft(EMPTY_BINDING); setPolicyDraft(EMPTY_POLICY); setManualBinding(false)
+  }, [projectId, csrfToken])
 
   // 配備状態の再取得で後置機能が閉じた場合、非表示 tab に取り残さない。
   useEffect(() => {
@@ -119,7 +124,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
 
   /** 新規作成弹窗を開く。前回操作の error を持ち越さない(草稿は保持する)。 */
   function showDialog(dialog: ResourceDialog): void {
-    if (busy !== null) return
+    if (unavailable) return
     setError(null)
     setEditingIntegration(null); setEditingSecret(null)
     setConnectDraft(emptyConnectDraft(connectDraft.provider)); setSecretDraft(EMPTY_SECRET)
@@ -135,7 +140,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
       setEditingIntegration(detail.integration)
       setConnectDraft(connectDraftFromIntegration(detail.integration, detail.config))
       setOpenDialog('connect')
-    }, 'read')
+    }, 'read', item.name)
   }
 
   /** 保存済み接続だけを発見し、対象変更・閉鎖後の遅延結果は破棄する。 */
@@ -151,13 +156,13 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
       if (!supportsMcpCatalog(result.catalog)) setError(messages.resources.mcpUnsupported)
       setConnectDraft((current) => current.provider === 'mcp' && current.serverUrl.trim() === savedMcpUrl.current
         ? { ...current, mcpCatalog: result.catalog, mcpTools: supportsMcpCatalog(result.catalog) } : current)
-    }, 'read')
+    }, 'read', item.name)
   }
 
   /** 原値を取得せず、認証情報の metadata と任意の差し替え入力を開く。 */
   function editSecret(item: SecretReferenceRecord): void {
     const provider = asResourceProvider(item.provider)
-    if (provider === null) return
+    if (unavailable || provider === null) return
     setEditingSecret(item)
     setSecretDraft({ ...EMPTY_SECRET, name: item.name, provider, resolver: item.resolver, key_version: item.key_version })
     setError(null); setOpenDialog('secret')
@@ -169,7 +174,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
     if (item === null) return
     const done = await perform('delete', (signal) => 'integration_id' in item
       ? deleteIntegration(projectId, item.integration_id, item.revision, csrfToken, signal)
-      : deleteSecretReference(projectId, item.secret_reference_id, item.updated_at, csrfToken, signal))
+      : deleteSecretReference(projectId, item.secret_reference_id, item.updated_at, csrfToken, signal), 'write', item.name)
     if (done) setDeleteTarget(null)
   }
 
@@ -219,7 +224,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
       if (editingIntegration === null) await createIntegration(projectId, input, csrfToken, signal)
       else await updateIntegration(projectId, editingIntegration.integration_id,
         { ...input, expected_revision: editingIntegration.revision }, csrfToken, signal)
-    })
+    }, 'write', draft.name)
     if (succeeded) {
       setEditingIntegration(null)
       setConnectDraft(emptyConnectDraft(draft.provider))
@@ -249,7 +254,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
       }),
       csrfToken,
       signal,
-    ))
+    ), 'write', secretDraft.name)
     if (succeeded) {
       setSecretDraft(EMPTY_SECRET)
       setEditingSecret(null)
@@ -265,8 +270,8 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
       ? (selectedBindingTask === undefined ? [] : requirementOptionsForTask(selectedBindingTask))
       : collectRequirementOptions(tasks)
   ), [tasks, bindingDraft.scope_level, selectedBindingTask])
-  const useCustomRequirement = requirementOptions.length === 0
-    || bindingDraft.requirementChoice === CUSTOM_REQUIREMENT
+  const useCustomRequirement = bindingCatalogAvailable && (requirementOptions.length === 0
+    || bindingDraft.requirementChoice === CUSTOM_REQUIREMENT)
   const selectedRequirement = useCustomRequirement
     ? undefined
     : requirementOptions.find((option) => option.key === bindingDraft.requirementChoice)
@@ -294,6 +299,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
   /** Project default/Task override の binding を Integration scope の部分集合として保存する。 */
   async function submitBinding(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
+    if (!bindingCatalogAvailable) return
     if (bindingIntegration === undefined) {
       setError(messages.resources.selectValidIntegration)
       return
@@ -322,7 +328,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
       integration_id: bindingIntegration.integration_id,
       capability_version: bindingCapability,
       requested_scope: requestedScope,
-    }, csrfToken, signal))
+    }, csrfToken, signal), 'write', requirementKey)
     if (succeeded) {
       setBindingDraft(EMPTY_BINDING)
       setOpenDialog(null)
@@ -359,12 +365,28 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
       expires_at: policyDraft.expires_at
         ? new Date(policyDraft.expires_at).toISOString()
         : null,
-    }, csrfToken, signal))
+    }, csrfToken, signal), 'write', policyIntegration.name)
     if (succeeded) {
       setPolicyDraft(EMPTY_POLICY)
       setOpenDialog(null)
     }
   }
+
+  /** 閉じる時は待機だけを終え、結果不明の表示は一覧側へ引き継ぐ。 */
+  function closeDialog(): void {
+    stopWaiting(); setOpenDialog(null); setDeleteTarget(null)
+  }
+
+  /** 再読取後の明示確認で送信を終え、古い revision と秘密値の直接再送を防ぐ。 */
+  function finishReview(): void {
+    if (!acknowledge()) return
+    setConnectDraft(emptyConnectDraft(connectDraft.provider)); setSecretDraft(EMPTY_SECRET)
+    setBindingDraft(EMPTY_BINDING); setPolicyDraft(EMPTY_POLICY)
+    setEditingIntegration(null); setEditingSecret(null); setOpenDialog(null); setDeleteTarget(null)
+  }
+  const feedback = <ResourceRequestFeedback busy={busy} unconfirmed={unconfirmed} loading={loading}
+    loadError={loadError} canAcknowledge={canAcknowledge} stopWaiting={stopWaiting}
+    refresh={refresh} acknowledge={finishReview} />
 
   const connectWriteEnabled = resourceWriteEnabled(connectDraft.provider, features)
     && (connectDraft.provider !== 'mcp' || connectDraft.mcpTools)
@@ -384,20 +406,26 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
         <div className="resourceAdmin">
           {/* 弹窗が開いている間の error は弹窗内に出す。ここは一覧上の操作(停用など)の失敗用。 */}
           {error && openDialog === null && deleteTarget === null && <p className="error resourceAdminError" role="alert">{error}</p>}
-          {loading && <LoadingSkeleton label={messages.resources.loadingConfig} rows={2} />}
+          {openDialog === null && deleteTarget === null && feedback}
+          {loading && !loaded && <LoadingSkeleton label={messages.resources.loadingConfig} rows={2} />}
+          {loading && loaded && <p role="status">{messages.resourcesAudit.refreshing}</p>}
+          {loadError && <div className="resourceLoadError" role="alert">
+            <p>{messages.resources.loadFailed} {loadError}</p>
+            <button className="secondaryButton" onClick={refresh} disabled={loading} type="button">{messages.resourcesAudit.refresh}</button>
+          </div>}
           {/* 通常操作は認証情報と権限の一覧・追加だけで完結する。 */}
-          <section className="resourceTabPanel" aria-label={messages.resources.integrationListTitle}>
+          <section className="resourceTabPanel" aria-busy={loading} aria-label={messages.resources.integrationListTitle}>
             <section className="panel">
               <div className="panelHeader">
                 <h2>{messages.resources.integrationListTitle}</h2>
                 <div className="panelHeaderActions">
-                  <span className="eventCount">{integrations.length}</span>
-                  <button className="secondaryButton" type="button" onClick={() => showDialog('connect')}>
+                  <span className="eventCount">{loaded ? integrations.length : '—'}</span>
+                  <button className="secondaryButton" disabled={unavailable} type="button" onClick={() => showDialog('connect')}>
                     {messages.resources.connectTitle}
                   </button>
                 </div>
               </div>
-              <ResourceList busy={busy !== null} emptyText={messages.resources.connectGuide} items={integrations.map((item) => {
+              <ResourceList loaded={loaded} busy={unavailable} emptyText={messages.resources.connectGuide} items={integrations.map((item) => {
                 const provider = asResourceProvider(item.provider)
                 const accessText = accessForCapabilities(item.capabilities) === 'read_write'
                   ? messages.resources.accessBadgeReadWrite
@@ -410,7 +438,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                   updatedAt: item.updated_at,
                   onEdit: () => void editIntegration(item),
                   onDelete: () => { setError(null); setDeleteTarget(item) },
-                  onDisable: item.status === 'ACTIVE' ? () => void perform(`integration-${item.integration_id}`, (signal) => disableIntegration(projectId, item.integration_id, item.revision, csrfToken, signal)) : undefined,
+                  onDisable: item.status === 'ACTIVE' ? () => void perform(`integration-${item.integration_id}`, (signal) => disableIntegration(projectId, item.integration_id, item.revision, csrfToken, signal), 'write', item.name) : undefined,
                 }
               })} />
             </section>
@@ -418,12 +446,13 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
 
           {/* 取り消せない削除の最終確認。対象名と影響を示し、実行 button は danger 実心で「キャンセル」と区別する。 */}
           <ModalDialog hideClose open={deleteTarget !== null} title={messages.resources.deleteConfirm}
-            onClose={() => { if (busy === null) setDeleteTarget(null) }}>
+            onClose={closeDialog}>
             <p className="confirmMessage"><strong>{deleteTarget?.name}</strong>{'\n'}{messages.resources.deleteConfirmHint}</p>
             {error && deleteTarget !== null && <p className="error" role="alert">{error}</p>}
+            {feedback}
             <div className="confirmActions">
-              <button className="secondaryButton" disabled={busy !== null} onClick={() => setDeleteTarget(null)} type="button">{messages.resources.cancel}</button>
-              <button className="destructiveButton" disabled={busy !== null} onClick={() => void removeResource()} type="button">{messages.resources.delete}</button>
+              <button className="secondaryButton" onClick={closeDialog} type="button">{locked ? messages.resourcesAudit.close : messages.resources.cancel}</button>
+              <button className="destructiveButton" disabled={unavailable} onClick={() => void removeResource()} type="button">{busy === 'delete' ? messages.resourcesAudit.working : messages.resources.delete}</button>
             </div>
           </ModalDialog>
           <ModalDialog
@@ -431,11 +460,12 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
             drawer
             title={editingIntegration === null ? messages.resources.connectTitle : messages.resources.editTitle(editingIntegration.name)}
             wide
-            onClose={() => { if (busy === null) setOpenDialog(null) }}
+            onClose={closeDialog}
           >
             <ResourceConnectionForm connectDraft={connectDraft} setConnectDraft={setConnectDraft}
               secrets={secrets} editingIntegration={editingIntegration} connectWriteEnabled={connectWriteEnabled}
               mcpToolsEnabled={mcpToolsEnabled} busy={busy} error={openDialog === 'connect' ? error : null}
+              locked={locked} feedback={feedback} onClose={closeDialog}
               submitConnect={submitConnect} discoverTools={discoverTools} />
           </ModalDialog>
 
@@ -443,23 +473,23 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
             <summary>{messages.resources.advancedTitle}</summary>
             <p className="hint">{messages.resources.advancedHint}</p>
             <div className="tabBar" role="tablist" aria-label={messages.resources.tabsAria}>
-              <ResourceTabButton current={resourceTab} tab="secret" onSelect={setResourceTab}>{messages.resources.tabSecret}</ResourceTabButton>
-              <ResourceTabButton current={resourceTab} tab="binding" onSelect={setResourceTab}>{messages.resources.tabBinding}</ResourceTabButton>
-              {deferredFeaturesEnabled && <ResourceTabButton current={resourceTab} tab="policy" onSelect={setResourceTab}>{messages.resources.tabPolicy}</ResourceTabButton>}
+              <ResourceTabButton id={`${tabId}-tab-secret`} panelId={`${tabId}-panel-secret`} current={resourceTab} tab="secret" onSelect={setResourceTab}>{messages.resources.tabSecret}</ResourceTabButton>
+              <ResourceTabButton id={`${tabId}-tab-binding`} panelId={`${tabId}-panel-binding`} current={resourceTab} tab="binding" onSelect={setResourceTab}>{messages.resources.tabBinding}</ResourceTabButton>
+              {deferredFeaturesEnabled && <ResourceTabButton id={`${tabId}-tab-policy`} panelId={`${tabId}-panel-policy`} current={resourceTab} tab="policy" onSelect={setResourceTab}>{messages.resources.tabPolicy}</ResourceTabButton>}
             </div>
-            <section className="resourceTabPanel tabPanel" role="tabpanel" hidden={resourceTab !== 'secret'}>
+            <section className="resourceTabPanel tabPanel" role="tabpanel" id={`${tabId}-panel-secret`} aria-labelledby={`${tabId}-tab-secret`} tabIndex={0} aria-busy={loading} hidden={resourceTab !== 'secret'}>
               <section className="panel">
                 <div className="panelHeader">
                   <h2>{messages.resources.secretTitle}</h2>
                   <div className="panelHeaderActions">
-                    <span className="eventCount">{secrets.length}</span>
-                    <button className="secondaryButton" type="button" onClick={() => showDialog('secret')}>
+                    <span className="eventCount">{loaded ? secrets.length : '—'}</span>
+                    <button className="secondaryButton" disabled={unavailable} type="button" onClick={() => showDialog('secret')}>
                       {messages.resources.registerLocator}
                     </button>
                   </div>
                 </div>
                 <p className="hint">{messages.resources.secretAdvancedHint}</p>
-                <ResourceList busy={busy !== null} items={secrets.map((item) => {
+                <ResourceList loaded={loaded} busy={unavailable} items={secrets.map((item) => {
                   // 契約値(mcp / MANAGED)をそのまま並べず、製品名・読み取り方式・鍵バージョンの見出しで示す。
                   const provider = asResourceProvider(item.provider)
                   const resolver = item.resolver === 'ENVIRONMENT' ? messages.resources.resolverEnvOption
@@ -473,7 +503,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                   updatedAt: item.updated_at,
                   onEdit: () => editSecret(item),
                   onDelete: () => { setError(null); setDeleteTarget(item) },
-                  onDisable: item.status === 'ACTIVE' ? () => void perform(`secret-${item.secret_reference_id}`, (signal) => disableSecretReference(projectId, item.secret_reference_id, csrfToken, signal)) : undefined,
+                  onDisable: item.status === 'ACTIVE' ? () => void perform(`secret-${item.secret_reference_id}`, (signal) => disableSecretReference(projectId, item.secret_reference_id, csrfToken, signal), 'write', item.name) : undefined,
                 }})} />
               </section>
             </section>
@@ -482,18 +512,20 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
               open={openDialog === 'secret'}
               drawer
               title={editingSecret === null ? messages.resources.registerLocator : messages.resources.editTitle(editingSecret.name)}
-              onClose={() => { if (busy === null) setOpenDialog(null) }}
+              onClose={closeDialog}
             >
-              <form className="resourceForm" onSubmit={(event) => void submitSecret(event)}>
+              <form className="resourceForm" aria-busy={busy !== null} onSubmit={(event) => void submitSecret(event)}>
+                <fieldset className="resourceFormFields" disabled={locked}>
                   <label>{messages.resources.nameLabel}<input required value={secretDraft.name} onChange={(event) => setSecretDraft((value) => ({ ...value, name: event.target.value }))} /></label>
                   <label>{messages.resources.providerLabel}
-                    <Select disabled={editingSecret !== null} value={secretDraft.provider} onValueChange={(nextValue) => setSecretDraft((value) => ({ ...value, provider: nextValue as ResourceProvider, secret_value: '', locator: '' }))}>
+                    <Select disabled={locked || editingSecret !== null} value={secretDraft.provider} onValueChange={(nextValue) => setSecretDraft((value) => ({ ...value, provider: nextValue as ResourceProvider, secret_value: '', locator: '' }))}>
                       {RESOURCE_PROVIDERS.map((provider) => (
                         <option key={provider} value={provider}>{PROVIDER_LABELS[provider]}</option>
                       ))}
                     </Select>
                   </label>
                   <SecretResolverFields
+                    disabled={locked}
                     editing={editingSecret !== null}
                     provider={secretDraft.provider}
                     resolver={secretDraft.resolver}
@@ -507,24 +539,29 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                   />
                   <label>{messages.resources.keyVersionLabel}<input value={secretDraft.key_version} onChange={(event) => setSecretDraft((value) => ({ ...value, key_version: event.target.value }))} /></label>
                   <p className="hint resourceWarning">{secretDraft.resolver === 'MANAGED' ? messages.resources.secretValueHint : messages.resources.secretHint}</p>
-                  {error && openDialog === 'secret' && <p className="error" role="alert">{error}</p>}
-                  <button className="primaryButton" disabled={busy !== null} type="submit">{editingSecret === null ? messages.resources.registerLocator : messages.resources.save}</button>
+                </fieldset>
+                {error && openDialog === 'secret' && <p className="error" role="alert">{error}</p>}
+                {feedback}
+                <div className="resourceFormActions resourceFormActionsSticky">
+                  <button className="secondaryButton" onClick={closeDialog} type="button">{messages.resourcesAudit.close}</button>
+                  <button className="primaryButton" disabled={locked} type="submit">{busy === 'secret' ? messages.resourcesAudit.saving : editingSecret === null ? messages.resources.registerLocator : messages.resources.save}</button>
+                </div>
               </form>
             </ModalDialog>
 
-            <section className="resourceTabPanel tabPanel" role="tabpanel" hidden={resourceTab !== 'binding'}>
+            <section className="resourceTabPanel tabPanel" role="tabpanel" id={`${tabId}-panel-binding`} aria-labelledby={`${tabId}-tab-binding`} tabIndex={0} aria-busy={loading} hidden={resourceTab !== 'binding'}>
               <section className="panel">
                 <div className="panelHeader">
                   <h2>{messages.resources.bindingTitle}</h2>
                   <div className="panelHeaderActions">
-                    <span className="eventCount">{bindings.length}</span>
-                    <button className="secondaryButton" type="button" onClick={() => showDialog('binding')}>
+                    <span className="eventCount">{loaded ? bindings.length : '—'}</span>
+                    <button className="secondaryButton" disabled={unavailable} type="button" onClick={() => showDialog('binding')}>
                       {messages.resources.newBinding}
                     </button>
                   </div>
                 </div>
                 <p className="hint">{messages.resources.bindingHint}</p>
-                <ResourceList busy={busy !== null} items={bindings.map((item) => ({
+                <ResourceList loaded={loaded} busy={unavailable} items={bindings.map((item) => ({
                   id: item.binding_id,
                   title: `${item.requirement_key} · ${bindingLevelText(item.scope_level)}`,
                   detail: `${item.provider} ${item.capability_version} · ${summarizeScope(item.scope, { wildcardLabel: messages.resources.scopeUnrestrictedLabel, keyLabels: messages.resources.scopeKeyLabels })}`,
@@ -539,12 +576,14 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
               drawer
               title={messages.resources.bindingTitle}
               wide
-              onClose={() => { if (busy === null) setOpenDialog(null) }}
+              onClose={closeDialog}
             >
-              <form className="resourceForm" onSubmit={(event) => void submitBinding(event)}>
+              <form className="resourceForm" aria-busy={busy !== null} onSubmit={(event) => void submitBinding(event)}>
+                <fieldset className="resourceFormFields" disabled={locked}>
                   <p className="hint">{messages.resources.bindingHint}</p>
                   <label>{messages.resources.levelLabel}
                     <Select
+                      disabled={locked}
                       value={bindingDraft.scope_level}
                       onValueChange={(nextValue) => setBindingDraft((value) => ({
                         ...value,
@@ -557,9 +596,16 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                       <option value="TASK">{messages.resources.taskOverride}</option>
                     </Select>
                   </label>
-                  {bindingDraft.scope_level === 'TASK' && (tasks.length > 0 ? (
+                  {taskStatus !== 'ready' && <div className="resourceTaskCatalogState">
+                    <p role={taskStatus === 'error' ? 'alert' : 'status'}>{taskStatus === 'error' ? messages.resourcesAudit.taskLoadFailed : messages.resourcesAudit.taskLoading}</p>
+                    {taskStatus === 'error' && <button className="secondaryButton" onClick={retryTasks} type="button">{messages.resourcesAudit.refresh}</button>}
+                    {!manualBinding && <button className="secondaryButton" onClick={() => setManualBinding(true)} type="button">{messages.resourcesAudit.manualTaskEntry}</button>}
+                  </div>}
+                  {taskStatus === 'ready' && tasks.length === 0 && <p className="hint">{messages.resourcesAudit.noTasks}</p>}
+                  {bindingCatalogAvailable && bindingDraft.scope_level === 'TASK' && (tasks.length > 0 ? (
                     <label>{messages.resources.taskSelectLabel}
                       <Select
+                        disabled={locked}
                         required
                         value={bindingDraft.taskKey}
                         onValueChange={(nextValue) => setBindingDraft((value) => ({ ...value, taskKey: nextValue, requirementChoice: '' }))}
@@ -580,9 +626,11 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                       />
                     </label>
                   ))}
-                  {requirementOptions.length > 0 && (
+                  {((manualBinding && taskStatus !== 'ready') || (taskStatus === 'ready' && tasks.length === 0)) && <p className="hint">{messages.resourcesAudit.manualTaskHint}</p>}
+                  {bindingCatalogAvailable && requirementOptions.length > 0 && (
                     <label>{messages.resources.requirementKeyLabel}
                       <Select
+                        disabled={locked}
                         required
                         value={bindingDraft.requirementChoice}
                         onValueChange={(nextValue) => {
@@ -625,6 +673,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                   )}
                   <label>{messages.resources.integrationSelectLabel}
                     <Select
+                      disabled={locked}
                       required
                       value={bindingDraft.integration_id}
                       onValueChange={(nextValue) => {
@@ -656,6 +705,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                   {bindingIntegration !== undefined && useCustomRequirement && (
                     <label>{messages.resources.capabilitySelectLabel}
                       <Select
+                        disabled={locked}
                         required
                         value={bindingDraft.capabilityFallback}
                         onValueChange={(nextValue) => setBindingDraft((value) => ({ ...value, capabilityFallback: nextValue }))}
@@ -675,26 +725,27 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                       onChange={(next) => setBindingDraft((value) => ({ ...value, scopeDraft: next }))}
                     />
                   )}
-                  {error && openDialog === 'binding' && <p className="error" role="alert">{error}</p>}
-                  <button
-                    className="primaryButton"
-                    disabled={busy !== null || bindingCapabilityMissing}
-                    type="submit"
-                  >
-                    {messages.resources.saveBinding}
+                </fieldset>
+                {error && openDialog === 'binding' && <p className="error" role="alert">{error}</p>}
+                {feedback}
+                <div className="resourceFormActions resourceFormActionsSticky">
+                  <button className="secondaryButton" onClick={closeDialog} type="button">{messages.resourcesAudit.close}</button>
+                  <button className="primaryButton" disabled={locked || bindingCapabilityMissing || !bindingCatalogAvailable} type="submit">
+                    {busy === 'binding' ? messages.resourcesAudit.saving : messages.resources.saveBinding}
                   </button>
+                </div>
               </form>
             </ModalDialog>
 
-            <section className="resourceTabPanel tabPanel" role="tabpanel" hidden={!deferredFeaturesEnabled || resourceTab !== 'policy'}>
+            <section className="resourceTabPanel tabPanel" role="tabpanel" id={`${tabId}-panel-policy`} aria-labelledby={`${tabId}-tab-policy`} tabIndex={0} aria-busy={loading} hidden={!deferredFeaturesEnabled || resourceTab !== 'policy'}>
               <section className="panel">
                 <div className="panelHeader">
                   <h2>{messages.resources.policyTitle}</h2>
                   <div className="panelHeaderActions">
-                    <span className="eventCount">{policies.length}</span>
+                    <span className="eventCount">{loaded ? policies.length : '—'}</span>
                     <button
                       className="secondaryButton"
-                      disabled={writableIntegrations.length === 0}
+                      disabled={unavailable || writableIntegrations.length === 0}
                       type="button"
                       onClick={() => showDialog('policy')}
                     >
@@ -703,16 +754,16 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                   </div>
                 </div>
                 <p className="hint resourceWarning">{messages.resources.policyHint}</p>
-                {writableIntegrations.length === 0 && (
+                {loaded && writableIntegrations.length === 0 && (
                   <p className="hint">{messages.resources.noWritableIntegration}</p>
                 )}
-                <ResourceList busy={busy !== null} items={policies.map((item) => ({
+                <ResourceList loaded={loaded} busy={unavailable} items={policies.map((item) => ({
                   id: item.preauthorization_id,
                   title: `${item.capability_version} · ${item.operation}`,
                   detail: `LOW · v${item.policy_version} · ${summarizeScope(item.scope, { wildcardLabel: messages.resources.scopeUnrestrictedLabel, keyLabels: messages.resources.scopeKeyLabels })}`,
                   status: item.status,
                   updatedAt: item.updated_at,
-                  onDisable: item.status === 'ACTIVE' ? () => void perform(`policy-${item.preauthorization_id}`, (signal) => disableEffectPreauthorization(projectId, item.preauthorization_id, item.policy_version, csrfToken, signal)) : undefined,
+                  onDisable: item.status === 'ACTIVE' ? () => void perform(`policy-${item.preauthorization_id}`, (signal) => disableEffectPreauthorization(projectId, item.preauthorization_id, item.policy_version, csrfToken, signal), 'write', item.operation) : undefined,
                 }))} />
               </section>
             </section>
@@ -722,14 +773,16 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
               drawer
               title={messages.resources.policyTitle}
               wide
-              onClose={() => { if (busy === null) setOpenDialog(null) }}
+              onClose={closeDialog}
             >
-              <form className="resourceForm" onSubmit={(event) => void submitPolicy(event)}>
+              <form className="resourceForm" aria-busy={busy !== null} onSubmit={(event) => void submitPolicy(event)}>
+                <fieldset className="resourceFormFields" disabled={locked}>
                   <p className="hint resourceWarning">{messages.resources.policyHint}</p>
                   {writableIntegrations.length > 0 && (
                     <>
                       <label>{messages.resources.integrationSelectLabel}
                         <Select
+                          disabled={locked}
                           required
                           value={policyDraft.integration_id}
                           onValueChange={(nextValue) => {
@@ -774,10 +827,15 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                           onChange={(event) => setPolicyDraft((value) => ({ ...value, expires_at: event.target.value }))}
                         />
                       </label>
-                      {error && openDialog === 'policy' && <p className="error" role="alert">{error}</p>}
-                      <button className="primaryButton" disabled={busy !== null} type="submit">{messages.resources.createPolicy}</button>
                     </>
                   )}
+                </fieldset>
+                {error && openDialog === 'policy' && <p className="error" role="alert">{error}</p>}
+                {feedback}
+                <div className="resourceFormActions resourceFormActionsSticky">
+                  <button className="secondaryButton" onClick={closeDialog} type="button">{messages.resourcesAudit.close}</button>
+                  <button className="primaryButton" disabled={locked || !policyIntegration} type="submit">{busy === 'policy' ? messages.resourcesAudit.saving : messages.resources.createPolicy}</button>
+                </div>
               </form>
             </ModalDialog>
           </details>

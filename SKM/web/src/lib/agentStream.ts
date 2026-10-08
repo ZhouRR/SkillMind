@@ -4,6 +4,7 @@ import { hasAppendOnlyPrefix } from './runEventBuffer'
 /** Agent conversation に表示する user task の安全な要約。任意 task に依存しない汎用形状。 */
 export interface AgentPromptSummary {
   taskTitle: string
+  requestUnavailable?: boolean
   capability: string | null
   input: Record<string, unknown>
   sources: Record<string, string>

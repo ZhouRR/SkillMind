@@ -108,6 +108,11 @@ export function documentPreviewHtml(source: string, layout: 'document' | 'report
     enqueue(element, safe)
   }
   const root = output.firstElementChild!
+  // 原文に明示された言語だけを採用する。未知の文書を UI 言語と同一視しない。
+  const rootAttributes = source.match(/^\s*(?:<!doctype\s+html\b[^>]*>\s*)?<html\b([^>]*)>/i)?.[1] ?? ''
+  const declaredLanguage = rootAttributes.match(/(?:^|\s)lang\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i)
+  const language = declaredLanguage?.[1] ?? declaredLanguage?.[2] ?? declaredLanguage?.[3] ?? ''
+  root.setAttribute('lang', /^[a-z]{2,8}(?:-[a-z0-9]{1,8})*$/i.test(language) ? language : 'und')
   const head = root.querySelector('head')!
   const policy = inert.createElement('meta')
   policy.setAttribute('http-equiv', 'Content-Security-Policy')
@@ -123,7 +128,7 @@ export function documentPreviewHtml(source: string, layout: 'document' | 'report
 
 /** Markdown と原文 fallback の静的 CSS。文書 preview は親の配色 token で上書きする。 */
 function envelope(body: string): string {
-  return '<!doctype html><html><head><meta charset="utf-8">'
+  return '<!doctype html><html lang="und"><head><meta charset="utf-8">'
     + `<meta http-equiv="Content-Security-Policy" content="${PREVIEW_POLICY}">`
     + '<meta name="referrer" content="no-referrer">'
     + '<style>:root{color-scheme:light;color:CanvasText;background:Canvas;--border:color-mix(in srgb,CanvasText 25%,Canvas);--raised:color-mix(in srgb,CanvasText 6%,Canvas)}'

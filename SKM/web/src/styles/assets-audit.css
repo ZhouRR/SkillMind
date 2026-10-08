@@ -1,0 +1,64 @@
+/* 資産画面の長文・操作状態を揃える。色は共有 token の意味を維持する。 */
+.skillStages { display: flex; flex-wrap: wrap; gap: 8px 20px; list-style: decimal inside; margin: 0 0 16px; padding: 0; color: var(--text-muted); font-size: 13px; }
+.skillStages li { min-width: 0; overflow-wrap: anywhere; }
+.skillStages [aria-current='step'] { color: var(--accent-strong); font-weight: 700; }
+.skillWorkStatus:empty { display: none; }
+.skillSummaryFacts { grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); }
+:is(.skillSummary, .interpretationPanel) .runFacts dd { white-space: normal; overflow-wrap: anywhere; overflow: visible; text-overflow: clip; }
+:is(.sourcePreviewHeader, .sourcePreviewFile summary, .sourcePreviewOpaque, .skillUpload, .savedSkillStatus, .interpretStreamHead, .skillVersionDetail .subsectionHeader) { flex-wrap: wrap; gap: 8px; min-width: 0; }
+:is(.sourcePreviewFile summary code, .sourcePreviewOpaque code, .skillLibraryIdentity, .skillLibraryIdentity strong, .skillLibraryDescription, .skillLibraryIdentity code, .noteList, .sourceTraceList, .skillResult) { min-width: 0; overflow-wrap: anywhere; }
+.sourcePreviewFile summary code { flex: 1 1 160px; }
+.sourceChevron { display: inline-block; font-size: 20px; line-height: 1; transform-origin: center; transition: transform .15s; }
+.sourcePreviewFile[open] > summary .sourceChevron { transform: rotate(90deg); }
+:is(.skillLibraryDescription, .skillUpload, .sourcePreviewHeader, .sourcePreviewOpaque, .savedSkillStatus, .interpretStreamHint, .interpretationSummary, .noteList, .sourceTraceList) { font-size: 14px; line-height: 1.7; }
+.skillImportantDiagnostics { margin-block: 16px; }
+.diagnosticSummary { font-weight: 600; }
+.diagnostics .diagnostic-error { background: var(--danger-soft); border-color: var(--danger-border); color: var(--danger); }
+.diagnostics .diagnostic-warning { background: var(--warn-soft); border-color: var(--warn-border); color: var(--warn); }
+.diagnostics .diagnostic-info { background: var(--surface-raised); border-color: var(--border); color: var(--text); }
+:is(.skillResult pre, .sourcePreview pre, .previewText, .readingMarkdown pre, .imagePreviewViewport):focus-visible { outline: 2px solid var(--accent-strong); outline-offset: -2px; }
+.fileUploadButton[aria-disabled='true'], .fileUploadButton:has(input:disabled) { opacity: .5; cursor: not-allowed; box-shadow: none; }
+.primaryButton.fileUploadButton[aria-disabled='true']:hover { background: var(--primary-bg); }
+.secondaryButton.fileUploadButton[aria-disabled='true']:hover { background: var(--surface-input); border-color: var(--border); }
+.documentManagementToolbar { padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.documentUpload.documentToolbar { align-items: end; padding-block: 12px; }
+.documentUpload .documentOverwriteOption { flex-basis: 100%; }
+.documentPreviewAvailability { display: block; margin-top: 2px; color: var(--text-muted); }
+.docFolder summary strong { white-space: normal; overflow-wrap: anywhere; overflow: visible; text-overflow: clip; }
+.docFolderCount { flex-shrink: 0; }
+.documentFolderPath { min-width: 0; padding-inline: var(--tree-row-pad); }
+.documentFolderPath > summary { display: list-item; padding: 4px 0; font-size: 12px; }
+.documentFolderPath > summary::before { display: none; }
+.documentFolderPath code { display: block; overflow-wrap: anywhere; }
+.documentUploadStatus progress { display: block; width: 100%; height: 8px; accent-color: var(--accent-strong); margin-block: 8px 12px; }
+.documentUploadItems :is(strong, p) { overflow-wrap: anywhere; }
+.documentUploadCompletedItems { max-height: 260px; overflow: auto; scrollbar-gutter: stable both-edges; }
+.completedDocumentUploads { margin-block: 12px; }
+.markdownPreviewPage { min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; }
+.previewPageStatus { flex-basis: 100%; color: var(--text-muted); font-size: 13px; }
+.previewFrameNavigation { margin: 0; padding: 6px 0; flex-shrink: 0; }
+.imagePreviewToolbar { align-self: stretch; }
+.imagePreviewViewport { width: 100%; min-width: 0; min-height: 0; overflow: auto; }
+.imagePreviewViewport .previewImage { margin-inline: auto; }
+.imagePreviewOriginal .previewImage { max-width: none; max-height: none; margin: 0; }
+@media (max-width: 600px) {
+  .skillStages { gap: 8px 12px; }
+  .sourcePreviewHeader > button, .skillUpload > .fileUploadButton { max-width: 100%; white-space: normal; }
+  .documentUpload.documentToolbar { display: flex; flex-wrap: wrap; gap: 10px; }
+  .documentUpload .documentTargetFolder { flex-basis: 100%; }
+  .documentUpload .fileUploadButton { flex: 1 1 160px; text-align: center; white-space: normal; }
+  .docFolder .docFolder .docFolder .docFolderBody { padding-left: 0; }
+  .docFolder summary { flex-wrap: wrap; }
+  .docFolder summary strong { flex-basis: calc(100% - 90px); }
+  .docFolderCount { margin-left: var(--tree-marker); }
+  .markdownPreviewPagination { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); width: 100%; }
+  .markdownPreviewPagination .previewPageStatus { grid-column: 1 / -1; grid-row: 1; }
+  .markdownPreviewPagination .selectTrigger { width: 100%; grid-column: 1 / -1; grid-row: 2; }
+  .markdownPreviewPagination > button { min-width: 0; white-space: normal; grid-row: 3; }
+}
+/* 埋込枠の説明は本文の上、長い形式説明は省略せず独立行に置く。 */
+.previewFrameSurface { flex-direction: column; }
+.documentInfo .documentPreviewAvailability { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.documentFolderPath > summary::before { display: inline-block; content: '▸'; margin-right: 6px; }
+.documentFolderPath[open] > summary::before { content: '▾'; }
+.imagePreviewViewport { max-height: 65vh; }

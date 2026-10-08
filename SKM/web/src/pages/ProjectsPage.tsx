@@ -57,7 +57,7 @@ function ProjectsContent(props: ProjectsPageProps & { projectContextId: string }
     </div>
     <ProjectManagementPanel {...props} tab={pageTab} onSessionEnded={onSessionEnded} onEditTab={() => setPageTab('projects')} />
     <div className="tabPanel" id="project-panel-modules" aria-labelledby="project-tab-modules" role="tabpanel" hidden={pageTab !== 'modules'}>
-      {props.projectId ? <ProjectModulesPanel projectId={props.projectId} session={props.session} /> : <EmptyState text={messages.projects.modulesNeedProject} />}
+      {props.projectId ? <ProjectModulesPanel key={props.projectId} projectId={props.projectId} session={props.session} /> : <EmptyState text={messages.projects.modulesNeedProject} />}
     </div>
     {props.session.user.system_role === 'ADMIN' && <div className="tabPanel" id="project-panel-members" aria-labelledby="project-tab-members" role="tabpanel" hidden={pageTab !== 'members'}>
       {membersOpened && <ProjectMembersPanel projectContextId={props.projectContextId} currentProject={props.currentProject} session={props.session} onSessionEnded={onSessionEnded} />}

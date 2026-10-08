@@ -1,3 +1,4 @@
+import { assetCodeLabel } from '../lib/i18n/assetsAudit'
 import { Select } from './Select'
 import { useState } from 'react'
 import type { ProjectSkillVersionRecord, SkillVersionRecord } from '../api'
@@ -14,9 +15,9 @@ export type SkillLibraryState =
 /** 選択 Project の精確版有効化一覧の非同期状態。 */
 export type ProjectEnablementState =
   | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'ready'; enablements: ProjectSkillVersionRecord[] }
-  | { status: 'error'; message: string }
+  | { status: 'loading'; projectId?: string }
+  | { status: 'ready'; enablements: ProjectSkillVersionRecord[]; projectId?: string }
+  | { status: 'error'; message: string; projectId?: string }
 
 /** Organization version 一覧と選択 Project の明示有効化関係を同じ精確版単位で表示する。 */
 export function SkillLibraryPanel({
@@ -48,7 +49,9 @@ export function SkillLibraryPanel({
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const versions = libraryState.versions ?? []
-  const enablements = enablementState.status === 'ready' ? enablementState.enablements : []
+  const enablementsKnown = enablementState.status === 'ready' && (!enablementState.projectId || enablementState.projectId === projectId)
+  const enablements = enablementState.status === 'ready' && enablementsKnown ? enablementState.enablements : []
+  const enablementLabel = enablementState.status === 'loading' ? messages.skills.loadingEnablements : messages.assetsAudit.enablementUnknown
   const activeIds = new Set(enablements
     .filter(({ disabled_at }) => disabled_at === null)
     .map(({ skill_version }) => skill_version.skill_version_id))
@@ -89,21 +92,22 @@ export function SkillLibraryPanel({
         <div className="skillLibraryIdentity">
           <strong>{version.name} <span className="mono">v{version.version}</span></strong>
           {version.description && (!primary || primary.description !== version.description) && <p className="skillLibraryDescription">{version.description}</p>}
-          <details className="detailDisclosure"><summary>{messages.elements.technicalDetails}</summary><code>{version.skill_key}</code></details>
+          <DetailDrawer title={messages.elements.technicalDetails}><code>{version.skill_key}</code></DetailDrawer>
           {actionError?.versionId === version.skill_version_id && <p className="error" role="alert">{actionError.message}</p>}
         </div>
         <div className="skillLibraryStatus">
           <span className="statusBadge">{messages.enums.skillVersionStatus[version.status] ?? version.status}</span>
+          {projectId && !enablementsKnown && <span className="scopeBadge">{enablementLabel}</span>}
           {projectId && active && <span className="scopeBadge">{messages.skills.enabledBadge}</span>}
           {projectId && disabled && <span className="scopeBadge">{messages.skills.disabledBadge}</span>}
         </div>
         <div className="skillActions">
           {projectId && active && (
-            <button className="secondaryButton" type="button" disabled={unavailable} onClick={() => onDisable(version)}>
+            <button className="secondaryButton" type="button" disabled={unavailable || !enablementsKnown} onClick={() => onDisable(version)}>
               {busy ? messages.elements.processing : messages.skills.disableFromProject}
             </button>
           )}
-          {projectId && !active && !disabled && version.status === 'PUBLISHED' && (
+          {projectId && enablementsKnown && !active && !disabled && version.status === 'PUBLISHED' && (
             <button className="primaryButton" type="button" disabled={unavailable} onClick={() => onEnable(version)}>
               {busy ? messages.elements.processing : messages.skills.enableForProject}
             </button>
@@ -142,7 +146,7 @@ export function SkillLibraryPanel({
           <p className="hint">{messages.skills.libraryHint}</p>
         </div>
         {projectId
-          ? <span className="scopeBadge">{messages.skills.enabledCount(activeIds.size)}</span>
+          ? <span className="scopeBadge">{enablementsKnown ? messages.skills.enabledCount(activeIds.size) : enablementLabel}</span>
           : <span className="scopeBadge">{messages.skills.noProjectBadge}</span>}
       </div>
       {!projectId && <p className="hint">{messages.skills.libraryNoProjectHint}</p>}
@@ -155,9 +159,9 @@ export function SkillLibraryPanel({
         <span className="hint" role="status">{messages.skills.libraryMatches(visibleVersions.length, versions.length)}</span>
         {(query || statusFilter !== 'all') && <button className="secondaryButton" type="button" onClick={clearFilters}>{messages.skills.libraryClearFilters}</button>}
       </div>}
-      {enablementState.status === 'error' && <p className="error" role="alert">{enablementState.message}</p>}
+      {enablementState.status === 'error' && <div><p className="error" role="alert">{enablementState.message}</p>{onRefresh && <button className="secondaryButton" type="button" onClick={onRefresh}>{messages.runHistory.retry}</button>}</div>}
       {/* 読み込み中は「空(点線枠)」ではなく骨格行を出す。空態と loading の意味を取り違えさせない。 */}
-      {((libraryState.status === 'loading' && versions.length === 0) || enablementState.status === 'loading') && (
+      {libraryState.status === 'loading' && versions.length === 0 && (
         <LoadingSkeleton
           label={libraryState.status === 'loading' ? messages.skills.loadingLibrary : messages.skills.loadingEnablements}
           rows={3}
@@ -200,8 +204,8 @@ export function SkillVersionDetail({ version, onPublish, disabled = false }: {
       <DetailDrawer title={messages.elements.technicalDetails}>
         <dl className="runFacts"><div><dt>{messages.skills.versionIdLabel}</dt><dd className="mono">{version.skill_version_id}</dd></div><div><dt>{messages.skills.manifestChecksumLabel}</dt><dd className="mono">{version.manifest_checksum}</dd></div></dl>
       </DetailDrawer>
-      <ul className="diagnostics">{version.gate_findings.map((finding, index) => <li key={`${finding.code}-${index}`}><strong>{finding.severity} · {finding.code}</strong><span>{finding.message}</span></li>)}</ul>
-      <details className="rawResult"><summary>{messages.skills.viewInterpretationDiff}</summary><pre>{JSON.stringify(version.interpretation_diff, null, 2)}</pre></details>
+      <ul className="diagnostics">{version.gate_findings.map((finding, index) => <li className={`diagnostic-${finding.severity}`} key={`${finding.code}-${index}`}><strong>{assetCodeLabel(messages.assetsAudit.severity, finding.severity, messages.assetsAudit.unknown)} · {finding.code}</strong><span>{finding.message}</span></li>)}</ul>
+      <details className="rawResult"><summary>{messages.skills.viewInterpretationDiff}</summary><pre tabIndex={0} role="region" aria-label={messages.skills.viewInterpretationDiff}>{JSON.stringify(version.interpretation_diff, null, 2)}</pre></details>
       <button className="primaryButton" disabled={disabled || !version.gate_passed || version.status !== 'DRAFT'} type="button" onClick={onPublish}>{version.status === 'PUBLISHED' ? messages.skills.published : messages.skills.publishVersion}</button>
       {!version.gate_passed && <p className="hint">{messages.skills.hardGateHint}</p>}
     </section>

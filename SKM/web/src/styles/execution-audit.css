@@ -1,0 +1,30 @@
+/* 承認前に読む値は省略せず、長い locator と日時を常に表示する。 */
+.proposalCard .proposalFacts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.proposalCard .proposalFacts > div { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 3px; }
+.proposalCard .proposalFacts .proposalTarget { grid-column: 1 / -1; }
+.proposalCard .proposalFacts dd { min-width: 0; overflow: visible; overflow-wrap: anywhere; text-align: left; text-overflow: clip; white-space: normal; }
+.proposalOriginal { display: grid; min-width: 0; gap: 10px; padding: 12px; border: 1px solid var(--warn-border); border-radius: var(--radius-small); }
+.proposalRequestFacts { display: grid; gap: 8px; margin: 0; }
+.proposalRequestFacts > div { min-width: 0; }
+.proposalRequestFacts dt { color: var(--text-faint); font-size: 12px; }
+.proposalRequestFacts dd { margin: 3px 0 0; overflow-wrap: anywhere; }
+.proposalOriginal button { justify-self: start; }
+.proposalCard pre:focus-visible, .rawResultBody:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+/* 状態の色は既知成功に限定し、未知値は中立のままにする。 */
+.toolSummaryList .toolStatus { flex-shrink: 0; color: var(--text-muted); }
+.toolSummaryList .toolStatus-succeeded { color: var(--ok); }
+.toolSummaryList .toolStatus-failed { color: var(--danger); }
+.toolSummaryList .toolStatus-running, .toolSummaryList .toolStatus-pending { color: var(--accent); }
+.toolSummaryList > li > div { flex-wrap: wrap; }
+.toolSummaryList > li strong, .toolSummaryList > li > p { overflow-wrap: anywhere; }
+.toolArguments { min-width: 0; margin-top: 8px; }
+.toolArguments > summary { cursor: pointer; color: var(--text-muted); font-size: 12px; }
+.toolArguments .rawResultBody { margin-top: 8px; }
+.reportTechnicalControl { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+.reportFallback, .runDetailReadState { display: grid; gap: 10px; min-width: 0; }
+.reportFallback p, .runDetailReadState p { margin: 0; }
+.reportFallback button, .runDetailReadState button { justify-self: start; }
+@media (max-width: 600px) {
+  .proposalCard .proposalFacts { grid-template-columns: minmax(0, 1fr); }
+  .reportTechnicalControl { justify-content: flex-start; }
+}

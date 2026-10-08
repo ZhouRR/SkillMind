@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { useMessages } from '../i18n'
-import { reportPreviewHtml } from '../lib/documentPreview'
+import { HtmlPreview } from './HtmlPreview'
 import { splitOverflow } from '../lib/resultOverflow'
 import { displayText, isHtmlReport } from '../lib/resultPresentation'
 import { MarkdownText } from './MarkdownText'
@@ -97,8 +97,7 @@ function DeliverableContent({ item }: { item: Record<string, unknown> }) {
     {(content || description.length > 240) && <details className="deliverableContent" open={html || undefined}>
       <summary>{messages.deliverableContent}</summary>
       {description.length > 240 && <MarkdownText text={description} />}
-      {content && (html ? <iframe className="outcomeReportFrame" title={displayText(item.title, messages.untitledLabel)}
-        sandbox="" referrerPolicy="no-referrer" srcDoc={reportPreviewHtml(content)} />
+      {content && (html ? <HtmlPreview className="outcomeReportFrame" title={displayText(item.title, messages.untitledLabel)} source={content} />
         : item.kind === 'structured_data' ? <pre>{content}</pre> : <MarkdownText text={content} />)}
     </details>}
   </>

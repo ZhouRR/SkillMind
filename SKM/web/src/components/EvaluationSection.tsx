@@ -158,7 +158,7 @@ export function EvaluationSection({ scope, result, csrfToken, writable, accessFa
               revisions: [...current.revisions, { id: nextRow.current++, pointer: '', value: '', reason: '' }] })}>{messages.runResult.addRevision}</button>
           {draftError && <p className="error" role="alert">
             {draftError.row !== undefined && `${labels.revisionNumber(draftError.row + 1)}: `}{labels.draftErrors[draftError.key]}</p>}
-          <button className="secondaryButton" type="submit">{messages.runResult.addEvaluation}</button>
+          <button className="primaryButton" type="submit">{messages.runResult.addEvaluation}</button>
         </fieldset>
       </form>
       {!pending && <details className="detailDisclosure evaluationRecovery"><summary>{labels.lookupTitle}</summary><form className="evaluationLookup" onSubmit={(event) => { event.preventDefault(); setLookupError(!submission.lookup(lookupKey.trim())) }}>

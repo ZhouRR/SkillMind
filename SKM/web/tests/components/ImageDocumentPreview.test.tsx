@@ -14,7 +14,7 @@ vi.mock('../../src/i18n', () => ({ useMessages: () => MESSAGES.zh }))
 interface PreviewProps {
   children?: ReactNode; className?: string; role?: string; label?: string
   src?: string; alt?: string; referrerPolicy?: string; style?: CSSProperties
-  'aria-busy'?: boolean; onLoad?: () => void; onError?: () => void
+  'aria-busy'?: boolean; onClick?: () => void; 'aria-pressed'?: boolean; onLoad?: () => void; onError?: () => void
 }
 type Element = ReactElement<PreviewProps>
 const labels = MESSAGES.zh.documentsPanel
@@ -250,5 +250,20 @@ describe('ImageDocumentPreview resource ownership', () => {
     expectLoading(mount())
     unmountHooks()
     expect(revokeUrl).toHaveBeenCalledExactlyOnceWith('blob:image-1')
+  })
+})
+
+/** 拡大は表示だけを変え、検証済み Blob と decode owner を再発行しない。 */
+describe('image preview size controls', () => {
+  it('toggles original dimensions without recreating the Blob URL', () => {
+    image(mount()).props.onLoad!()
+    const before = render()
+    const toggle = elements(before, (item) => item.type === 'button')[0]!
+    expect(toggle.props['aria-pressed']).toBe(false)
+    toggle.props.onClick!()
+    const original = render()
+    expect(elements(original, (item) => item.props.className === 'imagePreviewViewport imagePreviewOriginal')).toHaveLength(1)
+    expect(elements(original, (item) => item.type === 'button')[0]!.props['aria-pressed']).toBe(true)
+    expect(createUrl).toHaveBeenCalledTimes(1)
   })
 })
