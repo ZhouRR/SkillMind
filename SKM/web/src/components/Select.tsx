@@ -12,6 +12,8 @@ export interface SelectProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement
   required?: boolean
   readOnly?: boolean
   autoComplete?: string
+  /** 短い設定候補だけを小さく表示し、通常の長い一覧には適用しない。 */
+  density?: 'default' | 'compact'
 }
 
 /** Native option の表示・送信値・無効状態を popup へ渡す中間表現。 */
@@ -95,7 +97,7 @@ function SelectEntries({ entries }: { entries: SelectEntry[] }) {
 /** Browser 固有 picker を使わない共有 select。焦点・typeahead・dismissal は Base UI に委ねる。
  *  hidden input で required/name/form を維持し、native label は実 button に関連付く。 */
 export function Select({ children, value, defaultValue, onValueChange, disabled, required, readOnly,
-  name, form, autoComplete, id, className, ...triggerProps }: SelectProps) {
+  name, form, autoComplete, id, className, density = 'default', ...triggerProps }: SelectProps) {
   const generatedId = useId()
   const controlId = id ?? `select-${generatedId}`
   const entries = useMemo(() => parseOptions(children), [children])
@@ -198,7 +200,7 @@ export function Select({ children, value, defaultValue, onValueChange, disabled,
         if (details.reason === 'escape-key') details.event.stopPropagation()
       }}>
       <SelectPrimitive.Trigger {...triggerProps} ref={setTrigger} id={controlId}
-        className={`selectTrigger${className ? ` ${className}` : ''}`} data-value={selectedValue} data-field-name={name}
+        className={`selectTrigger${className ? ` ${className}` : ''}`} data-value={selectedValue} data-field-name={name} data-density={density}
         onKeyDownCapture={(event) => {
           // Base UI の閉じた trigger の typeahead は native event を通知に含めない。
           keyboardInteraction.current = true
@@ -214,7 +216,7 @@ export function Select({ children, value, defaultValue, onValueChange, disabled,
       <SelectPrimitive.Portal container={portalContainer ?? undefined}>
         <SelectPrimitive.Positioner className="selectPositioner" positionMethod="fixed"
           alignItemWithTrigger={false} sideOffset={6} collisionPadding={10} align="start">
-          <SelectPrimitive.Popup className="selectPopup" data-select-popup="" aria-labelledby={controlId}
+          <SelectPrimitive.Popup className="selectPopup" data-select-popup="" data-density={density} aria-labelledby={controlId}
             finalFocus={() => tabFocusTarget.current ?? true}
             onKeyDownCapture={(event) => {
               if (event.key !== 'Tab' || !portalContainer || !triggerRef.current) return

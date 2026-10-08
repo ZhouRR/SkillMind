@@ -51,6 +51,36 @@ function Controlled({ changes }: { changes: (value: string) => void }) {
 }
 
 describe('shared cross-browser Select', () => {
+  it('applies compact density to the language trigger and its portal without changing default selects', async () => {
+    const changes = vi.fn()
+    await act(async () => root.render(<>
+      <Select id="language" density="compact" defaultValue="ja" onValueChange={changes}>
+        <option value="ja">日本語</option><option value="zh">中文</option><option value="en">English</option>
+      </Select>
+      <Select id="project"><option value="project">Project</option></Select>
+    </>))
+    const trigger = container.querySelector<HTMLElement>('#language')!
+    expect(trigger.dataset.density).toBe('compact')
+    expect(trigger.hasAttribute('density')).toBe(false)
+    expect(container.querySelector<HTMLElement>('#project')!.dataset.density).toBe('default')
+    await act(async () => trigger.focus())
+    await press(trigger, 'ArrowDown')
+    const popup = document.querySelector<HTMLElement>('.selectPopup')!
+    expect(popup.dataset.density).toBe('compact')
+    expect(popup.querySelectorAll('[role="option"]')).toHaveLength(3)
+    expect(popup.querySelectorAll('.selectItemIndicator')).toHaveLength(3)
+    await press(trigger, 'Escape')
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(trigger)
+    expect(changes).not.toHaveBeenCalled()
+    await press(trigger, 'ArrowDown')
+    const english = document.querySelector<HTMLElement>('[data-value="en"][role="option"]')!
+    await act(async () => english.click())
+    expect(changes).toHaveBeenCalledExactlyOnceWith('en')
+    expect(trigger.getAttribute('data-value')).toBe('en')
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+  })
+
   it('renders a real DOM popup, preserves required/name, changes exactly once, and resets', async () => {
     const changes = vi.fn()
     await act(async () => root.render(<Controlled changes={changes} />))

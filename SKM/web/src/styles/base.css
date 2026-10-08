@@ -343,6 +343,17 @@ select {
 .selectItem[data-disabled] { color: var(--text-faint); background: transparent; cursor: not-allowed; outline: none; }
 .selectGroup + .selectGroup { margin-top: 6px; border-top: 1px solid var(--border); padding-top: 6px; }
 .selectGroupLabel { padding: 6px 12px; color: var(--text-muted); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+/* 言語など短い設定候補は本文の読みやすさを保ち、空の scrollbar を両側に予約しない。
+   長い業務一覧の幅・scrollbar と checkmark の固定 slot は既定のまま維持する。 */
+.selectPopup[data-density='compact'] {
+  width: max(var(--anchor-width), 9rem);
+  scrollbar-gutter: auto;
+  padding: 4px;
+}
+.selectPopup[data-density='compact'] .selectItem { min-height: 36px; padding: 6px 10px; gap: 8px; }
+@media (pointer: coarse) {
+  .selectPopup[data-density='compact'] .selectItem { min-height: 44px; }
+}
 @media (forced-colors: active) {
   select, .selectTrigger, .selectPopup { border-color: ButtonText; }
   .selectPopup { box-shadow: none; }
