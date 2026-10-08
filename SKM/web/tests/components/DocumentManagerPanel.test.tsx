@@ -156,7 +156,9 @@ describe('DocumentTree display', () => {
       document({ document_id: 'doc-zip', name: 'assets.zip', size: 100, mime: 'application/zip' }),
     ])
     // md には预览、zip には出ない(1 件だけ)。
-    expect(html.split('预览').length - 1).toBe(1)
+    expect(html.split('aria-label="预览:').length - 1).toBe(1)
+    expect(html).toContain('可预览')
+    expect(html).toContain('仅下载 · 暂不支持此格式预览')
     expect(html).toContain('aria-label="下载: assets.zip"')
     expect(html).toContain('/documents/doc-zip/content')
     expect(html).toContain('download="assets.zip"')
@@ -165,7 +167,8 @@ describe('DocumentTree display', () => {
       document({ document_id: 'doc-big', name: 'big.md', size: 20_000_001 }),
     ])
     // 上限を超えた本文は preview 取得せず、原 download URL と誘導を残す。
-    expect(oversized).not.toContain('预览')
+    expect(oversized).not.toContain('aria-label="预览:')
+    expect(oversized).toContain('仅下载 · 超过 20 MB 预览上限')
     expect(oversized).toContain('aria-label="下载: big.md"')
     expect(oversized).toContain('download="big.md"')
     expect(oversized).toContain('/documents/doc-big/content')

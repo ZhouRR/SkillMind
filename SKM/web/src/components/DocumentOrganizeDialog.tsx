@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { ProjectDocumentRecord } from '../api'
 import { useMessages } from '../i18n'
+import { DocumentFolderInput } from './DocumentFolderInput'
 import { ModalDialog } from './PageElements'
 
 export interface DocumentEdit {
@@ -23,8 +24,7 @@ export function DocumentOrganizeDialog({ edit, folders, busy, error, onClose, on
   return <ModalDialog hideClose open title={title} onClose={() => { if (!busy) onClose() }}>
     <form className="formStack" onSubmit={(event) => { event.preventDefault(); if (!busy) onSave(folder, name) }}>
       {error && <p role="alert" className="error">{error}</p>}
-      <label>{m.folder}<input value={folder} maxLength={200} disabled={busy} list="organize-folders" required={edit.mode !== 'MOVE'} onChange={(e) => setFolder(e.target.value)} /></label>
-      <datalist id="organize-folders">{folders.map((path) => <option key={path} value={path} />)}</datalist>
+      <DocumentFolderInput label={m.folder} value={folder} folders={folders} disabled={busy} required={edit.mode !== 'MOVE'} onValueChange={setFolder} />
       {edit.mode === 'MOVE' && edit.documents.length === 1 && <label>{m.name}<input value={name} maxLength={200} required disabled={busy} onChange={(e) => setName(e.target.value)} /></label>}
       <div className="formRow"><button className="primaryButton" disabled={busy} type="submit">{m.save}</button><button className="secondaryButton" disabled={busy} type="button" onClick={onClose}>{m.cancel}</button></div>
     </form>

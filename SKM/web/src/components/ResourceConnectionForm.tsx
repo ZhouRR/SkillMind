@@ -1,5 +1,5 @@
 import { Select } from './Select'
-import type { Dispatch, FormEvent, SetStateAction } from 'react'
+import type { Dispatch, FormEvent, SetStateAction, ReactNode } from 'react'
 import type { IntegrationRecord, SecretReferenceRecord } from '../api'
 import { useMessages } from '../i18n'
 import { PROVIDER_FORMS, RESOURCE_PROVIDERS,
@@ -10,7 +10,10 @@ import { SecretResolverFields } from './ResourceFormFields'
 
 /** Provider 別の接続入力を同じ草稿として表示する。通信と中間成功は親 controller が所有する。 */
 export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets, editingIntegration,
-  connectWriteEnabled, mcpToolsEnabled, busy, error, submitConnect, discoverTools }: {
+  connectWriteEnabled, mcpToolsEnabled, busy, error, submitConnect, discoverTools, locked, feedback, onClose }: {
+  locked: boolean
+  feedback: ReactNode
+  onClose: () => void
   connectDraft: ConnectDraft
   setConnectDraft: Dispatch<SetStateAction<ConnectDraft>>
   secrets: SecretReferenceRecord[]
@@ -27,10 +30,12 @@ export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets,
   const connectSecrets = secrets.filter((item) => item.status === 'ACTIVE' && item.provider === connectDraft.provider)
   const selectedConnectSecret = secrets.find((item) => item.secret_reference_id === connectDraft.credentialChoice)
   return (
-            <form className="resourceForm" onSubmit={(event) => void submitConnect(event)}>
+            <form className="resourceForm" aria-busy={busy !== null} onSubmit={(event) => void submitConnect(event)}>
+              <fieldset className="resourceFormFields" disabled={locked}>
+              <h3 className="resourceSectionTitle">{messages.resourcesAudit.connectionSection}</h3>
               <label>{messages.resources.providerLabel}
                 <Select
-                  disabled={editingIntegration !== null}
+                  disabled={locked || editingIntegration !== null}
                   value={connectDraft.provider}
                   onValueChange={(nextValue) => setConnectDraft(
                     emptyConnectDraft(nextValue as ResourceProvider),
@@ -59,7 +64,7 @@ export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets,
                     onChange={(event) => setConnectDraft((value) => ({ ...value, database: event.target.value }))} /></label>
                   <label>{messages.resources.databaseUser}<input required maxLength={253} value={connectDraft.username}
                     onChange={(event) => setConnectDraft((value) => ({ ...value, username: event.target.value }))} /></label>
-                  <label>{messages.resources.databaseTls}<Select value={connectDraft.sslmode}
+                  <label>{messages.resources.databaseTls}<Select disabled={locked} value={connectDraft.sslmode}
                     onValueChange={(nextValue) => setConnectDraft((value) => ({ ...value, sslmode: nextValue }))}>
                     <option value="verify-full">{messages.resources.tlsVerifyFull}</option>
                     <option value="require">{messages.resources.tlsRequire}</option>
@@ -74,12 +79,7 @@ export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets,
                 <>
                   <label>{messages.resources.baseUrlLabel}<input type="url" required value={connectDraft.baseUrl}
                     onChange={(event) => setConnectDraft((value) => ({ ...value, baseUrl: event.target.value }))} /></label>
-                  <label>{messages.resources.httpAuthentication}<Select value={connectDraft.httpAuthMode}
-                    onValueChange={(nextValue) => setConnectDraft((value) => ({ ...value, httpAuthMode: nextValue as ConnectDraft['httpAuthMode'], credentialChoice: nextValue === 'none' ? '' : value.credentialChoice }))}>
-                    <option value="none">{messages.resources.notUsed}</option><option value="bearer">Bearer</option><option value="header">API Key header</option>
-                  </Select></label>
-                  {connectDraft.httpAuthMode === 'header' && <label>{messages.resources.httpCredentialHeader}<input required value={connectDraft.httpAuthHeader}
-                    placeholder="X-Redmine-API-Key" onChange={(event) => setConnectDraft((value) => ({ ...value, httpAuthHeader: event.target.value }))} /></label>}
+
                 </>
               ) : (
                 <>
@@ -103,6 +103,7 @@ export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets,
                     <>
                       <label>{messages.resources.writeModeLabel}
                         <Select
+                  disabled={locked}
                           value={connectDraft.writeMode}
                           onValueChange={(nextValue) => setConnectDraft((value) => ({
                             ...value,
@@ -130,8 +131,18 @@ export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets,
                   )}
                 </>
               )}
+              <h3 className="resourceSectionTitle">{messages.resourcesAudit.authenticationSection}</h3>
+              {connectDraft.provider === 'http' && <>
+                  <label>{messages.resources.httpAuthentication}<Select disabled={locked} value={connectDraft.httpAuthMode}
+                    onValueChange={(nextValue) => setConnectDraft((value) => ({ ...value, httpAuthMode: nextValue as ConnectDraft['httpAuthMode'], credentialChoice: nextValue === 'none' ? '' : value.credentialChoice }))}>
+                    <option value="none">{messages.resources.notUsed}</option><option value="bearer">Bearer</option><option value="header">API Key header</option>
+                  </Select></label>
+                  {connectDraft.httpAuthMode === 'header' && <label>{messages.resources.httpCredentialHeader}<input required value={connectDraft.httpAuthHeader}
+                    placeholder="X-Redmine-API-Key" onChange={(event) => setConnectDraft((value) => ({ ...value, httpAuthHeader: event.target.value }))} /></label>}
+              </>}
               <label>{messages.resources.credentialLabel}
                 <Select
+                  disabled={locked}
                   required={connectForm.requiresSecret || (connectDraft.provider === 'http' && connectDraft.httpAuthMode !== 'none') || (connectDraft.provider === 'mcp' && connectDraft.mcpTools && connectDraft.access === 'read_write')}
                   value={connectDraft.credentialChoice}
                   onValueChange={(nextValue) => setConnectDraft((value) => ({ ...value, credentialChoice: nextValue, secretValue: '', locator: '' }))}
@@ -144,7 +155,7 @@ export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets,
                 </Select>
               </label>
               {selectedConnectSecret && (
-                <SecretResolverFields editing provider={connectDraft.provider}
+                <SecretResolverFields disabled={locked} editing provider={connectDraft.provider}
                   resolver={selectedConnectSecret.resolver} locator={connectDraft.locator}
                   secretValue={connectDraft.secretValue}
                   envExample={connectForm.environmentLocatorExample} fileExample={connectForm.fileLocatorExample}
@@ -155,7 +166,7 @@ export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets,
               )}
               {connectDraft.credentialChoice === NEW_CREDENTIAL && (
                 <>
-                  <SecretResolverFields
+                  <SecretResolverFields disabled={locked}
                     provider={connectDraft.provider}
                     resolver={connectDraft.resolver}
                     locator={connectDraft.locator}
@@ -169,6 +180,7 @@ export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets,
                   <p className="hint resourceWarning">{connectDraft.resolver === 'MANAGED' ? messages.resources.secretValueHint : messages.resources.secretHint}</p>
                 </>
               )}
+              <h3 className="resourceSectionTitle">{messages.resourcesAudit.scopeSection}</h3>
               {connectWriteEnabled && connectForm.writeCapability !== null && (
                 <fieldset className="scopePicker">
                   <legend>{messages.resources.accessLabel}</legend>
@@ -215,6 +227,9 @@ export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets,
                       onChange={(event) => setConnectDraft((value) => ({ ...value, mcpTools: event.target.checked }))} />
                       <span>{messages.resources.mcpEnableTools}</span></label>
                     <p className="hint">{messages.resources.mcpToolsHint}</p>
+                    <details className="resourceToolCatalog">
+                      <summary>{messages.resourcesAudit.mcpToolCount(mcpToolNames(connectDraft.mcpCatalog).length)}</summary>
+                      <div className="resourceToolCatalogList" tabIndex={0} role="region" aria-label={messages.resourcesAudit.mcpToolCount(mcpToolNames(connectDraft.mcpCatalog).length)}>
                     {mcpToolNames(connectDraft.mcpCatalog).map((name) => {
                       const mode = connectDraft.mcpTools ? mcpPermissionsForAccess(connectDraft.mcpCatalog, connectDraft.access)[name] : undefined
                       return <div key={name} className="resourceToolPermission">
@@ -222,6 +237,8 @@ export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets,
                         <span>{mode === 'read' ? messages.resources.mcpToolRead : mode === 'call' ? messages.resources.mcpToolCall : messages.resources.mcpToolDenied}</span>
                       </div>
                     })}
+                      </div>
+                    </details>
                   </>}
                 </div>}
                 <label>{messages.resources.mcpResourceUris}<textarea className="mono compactTextarea"
@@ -261,10 +278,15 @@ export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets,
                   </label>
                 </>
               )}
+              </fieldset>
               {error && <p className="error" role="alert">{error}</p>}
-              <button className="primaryButton" disabled={busy !== null} type="submit">
-                {editingIntegration === null ? messages.resources.connectSubmit : messages.resources.save}
-              </button>
+              {feedback}
+              <div className="resourceFormActions resourceFormActionsSticky">
+                <button className="secondaryButton" onClick={onClose} type="button">{messages.resourcesAudit.close}</button>
+                <button className="primaryButton" disabled={locked} type="submit">
+                  {busy === 'connect' ? messages.resourcesAudit.saving : editingIntegration === null ? messages.resources.connectSubmit : messages.resources.save}
+                </button>
+              </div>
             </form>
   )
 }

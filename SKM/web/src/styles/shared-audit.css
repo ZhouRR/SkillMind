@@ -1,0 +1,41 @@
+/* 共有 control の幾何と階層。表示確認が必要な pixel 値と、宣言の回帰を混同しない。 */
+input[type="checkbox"], input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  flex: 0 0 18px;
+  margin: 3px 0;
+  accent-color: var(--accent-strong);
+}
+label:has(> input[type="checkbox"]), label:has(> input[type="radio"]) {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 32px;
+  line-height: 1.7;
+  font-size: 13px;
+}
+.buttonRow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.buttonRow > button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.muted { color: var(--text-muted); font-size: 13px; line-height: 1.65; }
+.apiKeyStatus { align-self: start; width: fit-content; border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px; font-size: 13px; font-weight: 600; }
+.apiKeyActive { color: var(--ok); background: var(--ok-soft); border-color: var(--ok-border); }
+.apiKeyRevoked { color: var(--text-muted); background: var(--surface-raised); }
+.accountForm { width: 100%; max-width: 44rem; }
+.accountCreateDisclosure { margin: 0; }
+.accountCreateDisclosure > .accountCreate { margin-top: 16px; }
+.accountDirectory > [data-account-editor] { border-block-end: 1px solid var(--border); padding-block-end: 24px; }
+.projectList .projectSelect :is(strong, span, small) { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.moduleItem, .moduleItemBody, .moduleSkillPicker { min-width: 0; }
+.moduleItemBody :is(strong, p), .moduleSkillChips code, .moduleSkillOption span { overflow-wrap: anywhere; }
+.moduleFormActions, .moduleItemActions { display: flex; flex-wrap: wrap; gap: 10px; }
+.moduleFormActions button { white-space: normal; }
+.moduleSkillPicker { border-color: var(--border); }
+.modulesPanel > .detailDisclosure { margin-block: 0 16px; }
+@media (max-width: 600px) {
+  .moduleItem { grid-template-columns: minmax(0, 1fr); }
+  .moduleItemActions { justify-content: flex-start; }
+  .buttonRow > button { flex: 1 1 140px; }
+}

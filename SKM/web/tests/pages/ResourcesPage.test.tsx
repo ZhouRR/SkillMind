@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { ResourcesPage } from '../../src/pages/ResourcesPage'
 import { DEMO_PROJECT as PROJECT } from '../fixtures'
 
-/** 既定言語(zh)の管理画面を静的描画する。effect は走らないため一覧は空のまま。 */
+/** 既定言語(zh)の管理画面を静的描画する。effect は走らないため一覧の読取状態は未確認のまま。 */
 function page(projectId: string = PROJECT.project_id): string {
   return renderToStaticMarkup(
     <ResourcesPage csrfToken={'s'.repeat(32)} projectId={projectId} />,
@@ -77,15 +77,17 @@ describe('ResourcesPage guided layout', () => {
     // 非活性 tab の中身も hidden で DOM に残すため、binding/policy の内容は描画される。
     expect(html).toContain('任务连接设置')
     expect(html).toContain('低风险写入预授权')
-    // write 可能な Integration が無い間は、事前許可 form ではなく導線の説明を出す。
-    expect(html).toContain('没有允许提议修改的 Redmine 集成')
+    // 読取前に「書込可能な接続が無い」とは判断しない。
+    expect(html).not.toContain('没有允许提议修改的 Redmine 集成')
   })
 
-  it('shows the empty-state guide for the connected system list', () => {
+  it('shows initial loading without claiming that the connection list is empty', () => {
     const html = page()
 
     expect(html).toContain('连接与权限')
-    expect(html).toContain('尚未添加配置')
+    expect(html).toContain('正在读取资源配置…')
+    expect(html).not.toContain('尚未添加配置')
+    expect(html).toContain('aria-busy="true"')
   })
 
   it('keeps each section as a list and hosts the creation forms in always-mounted modals', () => {

@@ -94,6 +94,7 @@ async def check(url, output):
                     await expect(
                         dialog.get_by_label(labels["mcpEnableTools"], exact=True)
                     ).to_be_checked()
+                    await dialog.locator('.resourceToolCatalog > summary').click()
                     for name in TOOLS:
                         await expect(dialog.get_by_text(name, exact=True)).to_be_visible()
                         await expect(dialog.get_by_role("combobox", name=name, exact=True)).to_have_count(0)

@@ -1,5 +1,5 @@
 import { RunDuration } from '../components/RunDuration'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { MetaState } from '../appState'
 import { loadRunHistory, type ProjectRecord, type RunHistoryItemRecord } from '../api'
@@ -15,7 +15,7 @@ const RECENT_RUNS_LIMIT = 6
 /** 概览の「最近执行」読み込み state。 */
 type RecentRunsState =
   | { status: 'idle' | 'loading' }
-  | { status: 'ready'; items: RunHistoryItemRecord[] }
+  | { status: 'ready'; items: RunHistoryItemRecord[]; error?: string }
   | { status: 'error'; message: string }
 
 /** 現在 Project の「今どうなっているか」を一枚で示す概览画面。
@@ -30,7 +30,14 @@ export function HomePage({ metaState, project, projectId }: {
   projectId: string
 }) {
   const messages = useMessages()
+  const loadedProject = useRef(projectId)
+  const [revision, setRevision] = useState(0)
   const [runsState, setRunsState] = useState<RecentRunsState>({ status: 'idle' })
+
+  useEffect(() => {
+    const timer = window.setInterval(() => { if (document.visibilityState !== 'hidden') setRevision((value) => value + 1) }, 30000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   useEffect(() => {
     if (!projectId) {
@@ -38,19 +45,19 @@ export function HomePage({ metaState, project, projectId }: {
       return
     }
     const controller = new AbortController()
-    setRunsState({ status: 'loading' })
+    const sameProject = loadedProject.current === projectId
+    loadedProject.current = projectId
+    setRunsState((previous) => sameProject && previous.status === 'ready' ? previous : { status: 'loading' })
     void loadRunHistory(projectId, RECENT_RUNS_LIMIT, 0, controller.signal)
-      .then((page) => setRunsState({ status: 'ready', items: page.items }))
+      .then((page) => { if (!controller.signal.aborted) setRunsState({ status: 'ready', items: page.items }) })
       .catch((error: unknown) => {
         if (!controller.signal.aborted) {
-          setRunsState({
-            status: 'error',
-            message: error instanceof Error ? error.message : messages.home.loadRunsFailed,
-          })
+          const message = error instanceof Error ? error.message : messages.home.loadRunsFailed
+          setRunsState((previous) => previous.status === 'ready' ? { ...previous, error: message } : { status: 'error', message })
         }
       })
     return () => controller.abort()
-  }, [projectId])
+  }, [projectId, revision])
 
   return (
     <div className="homePage">
@@ -73,17 +80,19 @@ export function HomePage({ metaState, project, projectId }: {
       {/* 対応待ちは DOM/視線の順とも先頭に残し、空状態は小さく保つ。 */}
       <div className="homeActivity">
         <aside className="homeAttention">
-          <PendingActionsPanel projectId={projectId} />
+          <PendingActionsPanel projectId={projectId} revision={revision} />
           {metaState.status === 'error' && <ServiceStatCard state={metaState} />}
         </aside>
         <section className="panel homeRuns" aria-label={messages.home.recentRuns}>
           <div className="panelHeader">
             <h2>{messages.home.recentRuns}</h2>
             <div className="homeActions">
+              {projectId && <button className="secondaryButton compactButton" type="button" onClick={() => setRevision((value) => value + 1)}>{messages.runHistory.retry}</button>}
               <a href={routeHref('history', projectId || undefined)}>{messages.routes.history.label}</a>
             </div>
           </div>
-          <RecentRuns projectId={projectId} state={runsState} />
+          {runsState.status === 'ready' && runsState.error && <p className="error" role="alert">{runsState.error}</p>}
+          <RecentRuns projectId={projectId} state={loadedProject.current === projectId ? runsState : { status: 'loading' }} />
         </section>
       </div>
     </div>

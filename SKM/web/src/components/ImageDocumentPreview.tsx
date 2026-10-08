@@ -7,7 +7,10 @@ interface ImageResource { blob: Blob; url: string; status: 'loading' | 'ready' |
 
 /** Blob 切替・閉鎖時に URL を破棄し、旧 img の遅延 event は次の画像へ反映しない。 */
 export function ImageDocumentPreview({ blob, title }: { blob: Blob; title: string }) {
-  const labels = useMessages().documentsPanel
+  const messages = useMessages()
+  const labels = messages.documentsPanel
+  const [originalBlob, setOriginalBlob] = useState<Blob | null>(null)
+  const originalSize = originalBlob === blob
   const [resource, setResource] = useState<ImageResource | null>(null)
   const owner = useRef<ImageResource | null>(null)
   const currentBlob = useRef(blob)
@@ -30,9 +33,12 @@ export function ImageDocumentPreview({ blob, title }: { blob: Blob; title: strin
   return <div className="imagePreview" aria-busy={!visible || visible.status === 'loading'}>
     {(!visible || visible.status === 'loading') && <LoadingSkeleton label={labels.loadingPreview} rows={3} />}
     {visible?.status === 'error' && <p className="error" role="alert">{labels.failures.loadFailed}</p>}
+    {visible?.status === 'ready' && <div className="imagePreviewToolbar"><button type="button" className="secondaryButton compactButton" aria-pressed={originalSize} onClick={() => setOriginalBlob(originalSize ? null : blob)}>{originalSize ? messages.assetsAudit.imageFit : messages.assetsAudit.imageOriginal}</button></div>}
+    <div className={originalSize ? 'imagePreviewViewport imagePreviewOriginal' : 'imagePreviewViewport'} tabIndex={0} role="region" aria-label={title}>
     {visible && visible.status !== 'error' && <img key={visible.url} className="previewImage"
       src={visible.url} alt={title} referrerPolicy="no-referrer"
       style={{ visibility: visible.status === 'ready' ? 'visible' : 'hidden' }}
       onLoad={() => finish('ready')} onError={() => finish('error')} />}
+    </div>
   </div>
 }

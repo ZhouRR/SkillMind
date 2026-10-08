@@ -1,0 +1,27 @@
+/* 実行画面は本文の可読性を保ち、長い原入力も省略せずに読めるようにする。 */
+.schemaInputForm { grid-template-columns: minmax(0, 1fr); }
+.schemaInputFields { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 16px; grid-column: 1 / -1; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); }
+.schemaInputForm small.error { color: var(--danger); }
+.schemaInputForm textarea[aria-invalid="true"] { border-color: var(--danger-border); }
+.schemaInputFields > label { min-width: 0; }
+.schemaInputFields > label:has(textarea) { grid-column: 1 / -1; }
+.homeRunTitle strong { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.homeRunTitle, .pendingItemTitle { min-width: 0; }
+.pendingPanel .panelHeader, .homeRuns .panelHeader { flex-wrap: wrap; gap: 12px; }
+/* 会話の keyboard scroll は外側の一領域へ統合し、本文内の二重 scroll を避ける。 */
+.conversation .message pre { max-height: none; overflow: visible; }
+.conversation .message dl { grid-template-columns: minmax(0, 1fr); }
+.conversation .message dl > div, .conversation .message dt, .conversation .message dd { min-width: 0; overflow-wrap: anywhere; }
+.conversation .message dl > div { flex-wrap: wrap; }
+.conversation .message dd { margin: 0; }
+.conversation:focus-visible, .runDeletionOutputs ul:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.runDeletionTarget { display: grid; gap: 6px; margin-block: 12px 18px; overflow-wrap: anywhere; }
+.runDeletionTarget time, .runDeletionTarget code { color: var(--text-muted); font-size: 13px; }
+.runDeletionOutputs { margin-block: 12px; }
+.runDeletionOutputs ul { max-height: 240px; overflow-y: auto; padding-inline: 24px 8px; overflow-wrap: anywhere; }
+.runDeletionChoice { display: flex; align-items: flex-start; gap: 10px; padding-block: 8px; }
+.runDeletionChoice input { margin-top: 3px; }
+.taskCardActions a[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+@media (max-width: 600px) {
+  .conversation .message dl > div { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+}

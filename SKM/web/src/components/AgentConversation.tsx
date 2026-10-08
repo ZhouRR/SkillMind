@@ -35,6 +35,9 @@ export function AgentConversation({ prompt, events, runStatus }: {
     <div
       className="conversation"
       aria-live="polite"
+      role="region"
+      tabIndex={0}
+      aria-label={messages.workspace.tabConversation}
       ref={scrollRef}
       onScroll={(event) => { pinnedToBottom.current = isNearBottom(event.currentTarget) }}
     >
@@ -45,6 +48,7 @@ export function AgentConversation({ prompt, events, runStatus }: {
           {prompt.capability && <> (<code>{prompt.capability}</code>)</>}
           {messages.conversation.taskSentenceSuffix}
         </p>
+        {prompt.requestUnavailable && <p className="hint" role="status">{messages.uiAuditWorkspace.requestUnavailable}</p>}
         {inputEntries.length > 0 && (
           <dl>
             {inputEntries.map(([key, value]) => (

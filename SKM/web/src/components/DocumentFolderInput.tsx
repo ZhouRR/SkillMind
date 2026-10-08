@@ -6,13 +6,15 @@ import { useMessages } from '../i18n'
 /** 既存フォルダーの候補と自由入力を同じ文字列契約で扱う。空文字は root。 */
 interface DocumentFolderInputProps {
   value: string
+  label?: string
+  required?: boolean
   folders: Iterable<string>
   disabled: boolean
   onValueChange: (value: string) => void
 }
 
 /** OS の datalist popup に依存せず、新規パスを保持する upload 先入力。 */
-export function DocumentFolderInput({ value, folders, disabled, onValueChange }: DocumentFolderInputProps) {
+export function DocumentFolderInput({ value, folders, disabled, onValueChange, label, required = false }: DocumentFolderInputProps) {
   const messages = useMessages()
   const id = useId()
   const [open, setOpen] = useState(false)
@@ -31,7 +33,7 @@ export function DocumentFolderInput({ value, folders, disabled, onValueChange }:
   const items = useMemo(() => JSON.parse(signature) as string[], [signature])
 
   return <div className="documentTargetFolder">
-    <label id={`${id}-label`} htmlFor={id}>{messages.documentsPanel.targetFolder}</label>
+    <label id={`${id}-label`} htmlFor={id}>{label ?? messages.documentsPanel.targetFolder}</label>
     <Autocomplete.Root items={items} value={value} disabled={disabled} open={open && !disabled} openOnInputClick
       onOpenChange={(next, details) => {
         if (next && disabled) { details.cancel(); return }
@@ -44,8 +46,8 @@ export function DocumentFolderInput({ value, folders, disabled, onValueChange }:
       }}
       filter={(path, query) => path === '' || path.toLocaleLowerCase().includes(query.toLocaleLowerCase())}>
       <Autocomplete.InputGroup className="documentFolderInputGroup">
-        <Autocomplete.Input id={id} maxLength={200} placeholder={messages.documentsPanel.rootFolder} autoComplete="off" />
-        <Autocomplete.Trigger className="documentFolderTrigger" aria-label={messages.documentsPanel.targetFolder}>
+        <Autocomplete.Input required={required} id={id} maxLength={200} placeholder={messages.documentsPanel.rootFolder} autoComplete="off" />
+        <Autocomplete.Trigger className="documentFolderTrigger" aria-label={label ?? messages.documentsPanel.targetFolder}>
           <Autocomplete.Icon className="selectIcon"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg></Autocomplete.Icon>
         </Autocomplete.Trigger>
       </Autocomplete.InputGroup>

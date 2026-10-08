@@ -1,5 +1,5 @@
 import { Select } from '../components/Select'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 
 import {
   cancelRun,
@@ -16,7 +16,8 @@ import {
   type RespondedInteractionRecord,
   type RunStatus,
 } from '../api'
-import { EmptyState, EventTimelineItem, ModalDialog, PageHeader, StatusBadge } from '../components/PageElements'
+import { EmptyState, LoadingSkeleton, EventTimelineItem, ModalDialog, PageHeader, StatusBadge } from '../components/PageElements'
+import { TabButton } from '../components/TabButton'
 import { AgentConversation } from '../components/AgentConversation'
 import { RunResultPanel, type RunDetailState } from '../components/RunResultPanel'
 import { WorkspaceQueue } from '../components/WorkspaceQueue'
@@ -26,7 +27,7 @@ import { useRunSubmission } from '../hooks/useRunSubmission'
 import type { SessionEnded } from '../hooks/useResourceRequest'
 import { useMessages } from '../i18n'
 import type { UiMessages } from '../lib/i18n/messages'
-import { type AgentPromptSummary } from '../lib/agentStream'
+import { normalizeSelectedSources, type AgentPromptSummary } from '../lib/agentStream'
 import { routeHref } from '../lib/routing'
 import { appendOrderedEvents, createAuditEventProjector, createEventBatcher } from '../lib/runEventBuffer'
 import { formatLocalTimestamp } from '../lib/presentation'
@@ -83,6 +84,14 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
   projectReadOnly = false, detailView = false,
   onSessionExpired = ignoreSessionExpired }: WorkspacePageProps) {
   const messages = useMessages()
+  const observationId = useId()
+  const manualObservation = useRef(false)
+  const [catalogRevision, setCatalogRevision] = useState(0)
+  const [detailRevision, setDetailRevision] = useState(0)
+  const [initialReadRevision, setInitialReadRevision] = useState(0)
+  const [initialRunLoading, setInitialRunLoading] = useState(false)
+  const [modulesLoaded, setModulesLoaded] = useState(false)
+  const [modulesError, setModulesError] = useState<string | null>(null)
   const [tasks, setTasks] = useState<PublishedTaskRecord[]>([])
   const [tasksLoaded, setTasksLoaded] = useState(false)
   const [modules, setModules] = useState<ProjectModuleRecord[]>([])
@@ -140,8 +149,8 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
     [modules, moduleId],
   )
   // sidebar で選択された業務模块に task 一覧を絞る。module を持たない Project(null)は catalog 全件。
-  const visibleTasks = useMemo(() => moduleId && !activeModule ? [] : filterTasksByModule(tasks, activeModule),
-    [tasks, activeModule, moduleId])
+  const visibleTasks = useMemo(() => !tasksLoaded || (moduleId && (!modulesLoaded || modulesError || !activeModule)) ? [] : filterTasksByModule(tasks, activeModule),
+    [tasks, activeModule, moduleId, tasksLoaded, modulesLoaded, modulesError])
   // 開いている草稿の精確 Task は module の遅延到着で差し替えない。表示 option と送信元を一致させる。
   const launchTasks = runDialogOpen && selectedTask && !visibleTasks.includes(selectedTask)
     ? [selectedTask, ...visibleTasks] : visibleTasks
@@ -195,11 +204,13 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
         }
       })
     return () => controller.abort()
-  }, [projectId, sessionIdentity])
+  }, [projectId, sessionIdentity, catalogRevision])
 
-  // Project の module 構成を取得し、任務を業務単位で見せる。失敗は task 実行を妨げない。
+  // Module の読取失敗を未設定と同一視せず、元の業務範囲を維持する。
   useEffect(() => {
     modulesController.current?.abort()
+    setModulesLoaded(false)
+    setModulesError(null)
     if (!projectId) {
       setModules([])
       return
@@ -207,12 +218,12 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
     const controller = new AbortController()
     modulesController.current = controller
     void loadProjectModules(projectId, controller.signal)
-      .then((loaded) => { if (!controller.signal.aborted && ownsSession()) setModules(loaded) })
-      .catch(() => {
-        if (!controller.signal.aborted && ownsSession()) setModules([])
+      .then((loaded) => { if (!controller.signal.aborted && ownsSession()) { setModules(loaded); setModulesLoaded(true) } })
+      .catch((caught: unknown) => {
+        if (!controller.signal.aborted && ownsSession()) setModulesError(caught instanceof Error ? caught.message : messages.uiAuditWorkspace.modulesFailed)
       })
     return () => controller.abort()
-  }, [projectId, sessionIdentity])
+  }, [projectId, sessionIdentity, catalogRevision])
 
   // 閉じた草稿だけ module の既定を選ぶ。明示リンクの解決待ちや編集中の対象は上書きしない。
   useEffect(() => {
@@ -299,6 +310,8 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
     if (!initialRunId || !projectId || appliedInitialRunId.current === initialRunId) return
     const controller = new AbortController()
     initialRunController.current = controller
+    setInitialRunLoading(true)
+    setError(null)
     void loadRun(initialRunId, controller.signal)
       .then((loaded) => {
         if (controller.signal.aborted || !ownsSession() || currentRunIdentity.current !== runIdentity) return
@@ -307,12 +320,14 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
         appliedInitialRunId.current = initialRunId
         setEvents([])
         setDetailState({ status: 'idle' })
+        manualObservation.current = false
         setObservationTab('conversation')
         setPromptSummary({
           taskTitle: messages.elements.runFallbackTitle(shortRunId(loaded.run_id)),
           capability: null,
           input: {},
           sources: {},
+          requestUnavailable: true,
         })
         setRun(loaded)
         setUiState(TERMINAL_STATUSES.has(loaded.status) ? 'idle' : 'streaming')
@@ -322,9 +337,9 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
           if (interactionFailure(caught, false).key === 'sessionExpired') onSessionExpired()
           setError(messages.home.loadRunsFailed)
         }
-      })
+      }).finally(() => { if (!controller.signal.aborted && ownsSession()) setInitialRunLoading(false) })
     return () => controller.abort()
-  }, [initialRunId, messages.elements.runFallbackTitle, messages.home.loadRunsFailed, projectId, sessionIdentity])
+  }, [initialRunId, initialReadRevision, messages.elements.runFallbackTitle, messages.home.loadRunsFailed, projectId, sessionIdentity])
 
   useEffect(() => {
     if (!run) return
@@ -358,12 +373,12 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
         }
       })
     return () => controller.abort()
-  }, [run?.project_id, run?.run_id, run?.row_version, selectionRevision, sessionIdentity])
+  }, [run?.project_id, run?.run_id, run?.row_version, selectionRevision, detailRevision, sessionIdentity])
 
   // 終態または user interaction 待機では詳細へ寄せ、実行中は会話タブの streaming を維持する。
   useEffect(() => {
     if (
-      detailState.status === 'ready'
+      !manualObservation.current && detailState.status === 'ready'
       && (TERMINAL_STATUSES.has(detailState.detail.status)
         || detailState.detail.status === 'WAITING_FOR_INPUT'
         || detailState.detail.status === 'WAITING_FOR_APPROVAL')
@@ -373,6 +388,7 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
   /** 新しい意図を固定する。未確認要求の再送はここを通らず、元の本文を使う。 */
   function handleCreate(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault()
+    if (projectReadOnly) { setError(messages.uiAuditWorkspace.readOnlyLaunch); return }
     if (submission.pending !== null && (!acknowledgePrevious || submission.pending.phase === 'sending')) return
     if (!selectedTask) {
       setError(messages.workspace.selectTaskFirst)
@@ -400,6 +416,7 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
     const payload = submissionPayload(request)
     setEvents([])
     setDetailState({ status: 'idle' })
+    manualObservation.current = false
     setObservationTab('conversation')
     setPromptSummary({
       taskTitle: request.taskTitle,
@@ -415,6 +432,7 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
 
   /** 入力弹窗を開く。前回の失敗 error を持ち越さない。 */
   function openRunDialog(): void {
+    if (projectReadOnly && !submission.pending) return
     setError(null)
     if (uiState === 'error') setUiState('idle')
     setRunDialogOpen(true)
@@ -423,6 +441,7 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
   /** SSE とは別に PostgreSQL 正本の現在 Run 状態を再取得する。 */
   async function handleRefresh(): Promise<void> {
     if (!run || !ownsSession()) return
+    setDetailRevision((value) => value + 1)
     refreshController.current?.abort()
     const controller = new AbortController()
     refreshController.current = controller
@@ -498,8 +517,14 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
         ? promptSummary.taskTitle : tasks.find((task) => sameInteractionIdentity(task.task_id, run.task_id))?.title)
       || messages.elements.runFallbackTitle(shortRunId(run.run_id))
     : null
-  const conversationPrompt = promptSummary && runTaskTitle && promptSummary.taskTitle !== runTaskTitle
-    ? { ...promptSummary, taskTitle: runTaskTitle } : promptSummary
+  const frozenDetail = run && detailSessionIdentity.current === sessionIdentity ? retainedRunDetail(detailState, run) : undefined
+  const conversationPrompt = frozenDetail && runTaskTitle ? {
+    taskTitle: runTaskTitle, capability: promptSummary?.capability ?? null,
+    input: frozenDetail.input, sources: normalizeSelectedSources(frozenDetail.selected_sources),
+  } : promptSummary && runTaskTitle ? { ...promptSummary, taskTitle: runTaskTitle } : promptSummary
+
+  /** 利用者が明示選択した頁を遅延 detail 更新で奪わない。 */
+  function selectObservation(tab: ObservationTab): void { manualObservation.current = true; setObservationTab(tab) }
 
   return (
     <>
@@ -516,13 +541,16 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
           <section className="panel runLauncher">
             {!run && <div className="panelHeader"><h2>{messages.workspace.newRun}</h2></div>}
             {tasksError && <p className="error" role="alert">{tasksError}</p>}
+            {modulesError && <p className="error" role="alert">{messages.uiAuditWorkspace.modulesFailed}: {modulesError}</p>}
+            {(tasksError || modulesError) && <button className="secondaryButton compactButton" type="button" onClick={() => setCatalogRevision((value) => value + 1)}>{messages.runHistory.retry}</button>}
+            {!tasksError && !modulesError && (!tasksLoaded || (moduleId && !modulesLoaded)) && <LoadingSkeleton label={messages.tasks.loading} rows={2} />}
             {/* 空態は文言だけで終わらせず、解決先(技能库)への入口を同じ行に置く。 */}
-            {!tasksError && tasks.length === 0 && (
+            {!tasksError && !modulesError && tasksLoaded && tasks.length === 0 && (
               <p className="hint">{messages.workspace.noPublishedTasks} <a href={routeHref('skills')}>{messages.projects.goSkills}</a></p>
             )}
             {/* 「全部」入口を廃したので、模块に紐づかない task はここからは見えない。
                 空態では原因(未公開/未束縛)と解決先(模块設定)を必ず添える。 */}
-            {!tasksError && tasks.length > 0 && visibleTasks.length === 0 && (
+            {!tasksError && !modulesError && tasksLoaded && modulesLoaded && tasks.length > 0 && visibleTasks.length === 0 && (
               <p className="hint">
                 {messages.workspace.noModuleTasks}{' '}
                 <a href={routeHref('projects')}>{messages.workspace.goModuleSettings}</a>
@@ -533,12 +561,13 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
             )}
             <button
               className={run ? 'secondaryButton' : 'primaryButton'}
-              disabled={visibleTasks.length === 0 && submission.pending === null}
+              disabled={submission.pending === null && (projectReadOnly || visibleTasks.length === 0)}
               type="button"
               onClick={openRunDialog}
             >
               {submission.pending ? messages.workspace.submission.open : messages.workspace.openNewRun}
             </button>
+            {projectReadOnly && <p className="hint">{messages.uiAuditWorkspace.readOnlyLaunch}</p>}
             {submission.pending && <p className="hint" role="status">{messages.workspace.submission.phase[submission.pending.phase]}</p>}
           </section>
 
@@ -561,10 +590,13 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
           <section className="panel runPanel" aria-live="polite">
             <div className="panelHeader"><h2>{runTaskTitle ?? messages.workspace.runStatus}</h2>{run && <StatusBadge status={run.status} />}</div>
             {run && <time className="runTimestamp" dateTime={run.created_at}>{formatLocalTimestamp(run.created_at)}</time>}
-            {!run && (
+            {!run && initialRunId && (initialRunLoading
+              ? <LoadingSkeleton label={messages.runHistory.loading} rows={2} />
+              : <button className="secondaryButton" type="button" onClick={() => setInitialReadRevision((value) => value + 1)}>{messages.runHistory.retry}</button>)}
+            {!run && !initialRunId && (
               <EmptyState
                 text={submission.pending ? messages.workspace.submission.phase[submission.pending.phase] : messages.workspace.emptyBeforeRun}
-                action={visibleTasks.length > 0 && (
+                action={!projectReadOnly && visibleTasks.length > 0 && (
                   <button className="secondaryButton compactButton" type="button" onClick={openRunDialog}>
                     {messages.workspace.openNewRun}
                   </button>
@@ -578,22 +610,23 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
           {/* 会話・結果・監査は同時に一つだけ観測する。runPanel を残し、以下をタブへ束ねて縦の積み上げを解消する。 */}
           <section className="panel observationPanel">
             {detailView && <div className="tabBar" role="tablist" aria-label={messages.workspace.observationAria}>
-              <ObservationTabButton current={observationTab} tab="conversation" onSelect={setObservationTab}>{messages.workspace.tabConversation}</ObservationTabButton>
-              <ObservationTabButton current={observationTab} tab="result" onSelect={setObservationTab}>
+              <TabButton selected={observationTab === 'conversation'} id={`${observationId}-conversation-tab`} panelId={`${observationId}-conversation-panel`} onSelect={() => selectObservation('conversation')}>{messages.workspace.tabConversation}</TabButton>
+              <TabButton selected={observationTab === 'result'} id={`${observationId}-result-tab`} panelId={`${observationId}-result-panel`} onSelect={() => selectObservation('result')}>
                 {messages.workspace.tabResult}
                 {/* 回答・承認待ちの間は結果 tab に点を出し、他 tab からも待ち事項の所在を示す。状態名は tab 隣の StatusBadge が読み上げる。 */}
                 {run !== null && (run.status === 'WAITING_FOR_INPUT' || run.status === 'WAITING_FOR_APPROVAL')
                   && <i className="tabAlert" aria-hidden="true" />}
-              </ObservationTabButton>
-              <ObservationTabButton current={observationTab} tab="events" onSelect={setObservationTab}>
+              </TabButton>
+              <TabButton selected={observationTab === 'events'} id={`${observationId}-events-tab`} panelId={`${observationId}-events-panel`} onSelect={() => selectObservation('events')}>
                 {messages.workspace.tabEvents}<span className="eventCount">{messages.workspace.loadedEvents(auditEvents.length)}</span>
-              </ObservationTabButton>
+              </TabButton>
             </div>}
-            <div className="tabPanel" role={detailView ? "tabpanel" : undefined}>
-              {detailView && observationTab === 'conversation'
-                && <AgentConversation prompt={conversationPrompt} events={events} runStatus={run?.status ?? null} />}
-              <div className="workspaceResultMount" hidden={detailView && observationTab !== 'result'}>
+            <div className="tabPanel">
+              {detailView && <div role="tabpanel" id={`${observationId}-conversation-panel`} aria-labelledby={`${observationId}-conversation-tab`} hidden={observationTab !== 'conversation'}>
+                <AgentConversation prompt={conversationPrompt} events={events} runStatus={run?.status ?? null} /></div>}
+              <div className="workspaceResultMount" role={detailView ? 'tabpanel' : undefined} id={`${observationId}-result-panel`} aria-labelledby={detailView ? `${observationId}-result-tab` : undefined} hidden={detailView && observationTab !== 'result'}>
                 <RunResultPanel
+                  onRetryDetail={() => setDetailRevision((value) => value + 1)}
                   reportOnly={!detailView}
                   actorId={actorId}
                   csrfToken={csrfToken}
@@ -607,11 +640,11 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
                   state={selectingInitialRun || detailSessionIdentity.current !== sessionIdentity ? { status: 'loading' } : detailState}
                 />
               </div>
-              {detailView && observationTab === 'events' && (
+              {detailView && <div role="tabpanel" id={`${observationId}-events-panel`} aria-labelledby={`${observationId}-events-tab`} hidden={observationTab !== 'events'}>{(
                 auditEvents.length === 0
                   ? <EmptyState text={messages.workspace.sseEmpty} />
                   : <ol className="timeline" tabIndex={0} aria-label={messages.workspace.tabEvents}>{auditEvents.map((item) => <EventTimelineItem key={item.sequence} event={item} />)}</ol>
-              )}
+              )}</div>}
             </div>
           </section>
           </>}
@@ -630,8 +663,11 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
             />
           )}
           {tasksError && <p className="error" role="alert">{tasksError}</p>}
+            {modulesError && <p className="error" role="alert">{messages.uiAuditWorkspace.modulesFailed}: {modulesError}</p>}
+            {(tasksError || modulesError) && <button className="secondaryButton compactButton" type="button" onClick={() => setCatalogRevision((value) => value + 1)}>{messages.runHistory.retry}</button>}
+            {!tasksError && !modulesError && (!tasksLoaded || (moduleId && !modulesLoaded)) && <LoadingSkeleton label={messages.tasks.loading} rows={2} />}
           {tasksLoaded && selectedTaskId && !selectedTask && <p className="error" role="alert">{messages.workspace.selectedTaskUnavailable}</p>}
-          {launchTasks.length === 0 && <p className="hint">{messages.workspace.noModuleTasks}</p>}
+          {tasksLoaded && (!moduleId || modulesLoaded) && !tasksError && !modulesError && launchTasks.length === 0 && <p className="hint">{messages.workspace.noModuleTasks}</p>}
           {launchTasks.length > 0 && (
             <>
               <label>{messages.workspace.taskLabel}
@@ -657,7 +693,7 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
               </label>
               <button
                 className="primaryButton"
-                disabled={!selectedTask || (submission.pending !== null && (submission.pending.phase === 'sending' || !acknowledgePrevious))}
+                disabled={projectReadOnly || !selectedTask || (submission.pending !== null && (submission.pending.phase === 'sending' || !acknowledgePrevious))}
                 type="submit"
               >
                 {submission.pending?.phase === 'sending'
@@ -678,26 +714,6 @@ function retainedRunDetail(state: RunDetailState, run: RunRecord): RunDetailReco
   const detail = 'detail' in state ? state.detail : undefined
   return detail && sameInteractionIdentity(detail.project_id, run.project_id)
     && sameInteractionIdentity(detail.run_id, run.run_id) ? detail : undefined
-}
-
-/** 単一の観測タブ button。選択状態を aria-selected で表し、tablist 内で切り替える。 */
-function ObservationTabButton({ current, tab, onSelect, children }: {
-  current: ObservationTab
-  tab: ObservationTab
-  onSelect: (tab: ObservationTab) => void
-  children: ReactNode
-}) {
-  return (
-    <button
-      aria-selected={current === tab}
-      className="tab"
-      onClick={() => onSelect(tab)}
-      role="tab"
-      type="button"
-    >
-      {children}
-    </button>
-  )
 }
 
 /** SSE UI state と terminal status から利用者向け表示を返す。 */

@@ -24,19 +24,19 @@
   overscroll-behavior: contain;
   /* 短い viewport で scroll しても操作行を片側へ寄せない。 */
   scrollbar-gutter: stable both-edges;
-  padding: 5px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-small);
+  padding: 6px;
+  border: 2px solid var(--picker-border);
+  border-radius: 12px;
   background: var(--surface);
   color: var(--text);
-  box-shadow: var(--shadow-pop);
+  box-shadow: var(--shadow-picker);
 }
 .actionMenuItem {
   display: flex;
   align-items: center;
   box-sizing: border-box;
   width: 100%;
-  min-height: 36px;
+  min-height: 42px;
   padding: 8px 10px;
   border: 0;
   border-radius: 4px;

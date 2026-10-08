@@ -1,9 +1,11 @@
 import type { ReactElement } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { MESSAGES } from '../../src/lib/i18n/messages'
 import { StaticPreviewFrame } from '../../src/components/StaticPreviewFrame'
 import { commitHooks, hookPhases, unmountHooks } from '../fixtures/hookHarness'
 
 vi.mock('react', async () => (await import('../fixtures/hookHarness')).hookReact)
+vi.mock('../../src/i18n', () => ({ useMessages: () => MESSAGES.zh }))
 
 /** iframe の native load を合成し、表示 owner と sandbox 属性だけを検証する。 */
 interface FrameProps { srcDoc: string; sandbox: string; referrerPolicy: string;
@@ -11,10 +13,10 @@ interface FrameProps { srcDoc: string; sandbox: string; referrerPolicy: string;
 function render(source: string) {
   hookPhases.cursor = 0
   const result = StaticPreviewFrame({ source, title: 'Preview' }) as ReactElement<{
-    'aria-busy': boolean; children: ReactElement<FrameProps>
+    'aria-busy': boolean; children: ReactElement<FrameProps>[]
   }>
   commitHooks()
-  return { busy: result.props['aria-busy'], frame: result.props.children }
+  return { busy: result.props['aria-busy'], frame: result.props.children.find((child) => child.type === 'iframe')! }
 }
 afterEach(unmountHooks)
 

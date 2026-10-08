@@ -44,17 +44,17 @@ export function ApiKeyPanel({ session, onSessionEnded }: { session: AuthSessionR
       <code>Authorization: Bearer &lt;API_KEY&gt;</code>
       <button className="secondaryButton" onClick={() => setCreated(null)}>{text.saved}</button>
     </div>}
-    {mutation.failure && <p role="alert">{unknown ? text.unknown : messages.account.failures[mutation.failure.key]}</p>}
+    {mutation.failure && <p className="error" role="alert">{unknown ? text.unknown : messages.account.failures[mutation.failure.key]}</p>}
     <div className="buttonRow">
       <button className="secondaryButton" disabled={query.pending || mutation.busy} onClick={query.refresh}>{messages.account.refresh}</button>
       {unknown && <button className="secondaryButton" disabled={!canReview} onClick={() => { mutation.acknowledge(); setReviewRevision(null) }}>{text.reviewed}</button>}
     </div>
-    {query.failure && <p role="alert">{messages.account.failures[query.failure.key]}</p>}
+    {query.failure && <p className="error" role="alert">{messages.account.failures[query.failure.key]}</p>}
     {query.pending && <p aria-live="polite">{messages.account.busy}</p>}
-    {query.data?.length === 0 && <p className="muted">{text.empty}</p>}
+    {!query.pending && !query.failure && query.data?.length === 0 && <p className="muted">{text.empty}</p>}
     <div className="apiKeyList">{query.data?.map((key) => <article className="apiKeyRow" key={key.id}>
       <div className="apiKeyInfo"><strong>{key.name}</strong><code>{key.key_prefix}…</code>
-        <span>{key.revoked_at ? text.revoked : text.active}</span>
+        <span className={`apiKeyStatus ${key.revoked_at ? 'apiKeyRevoked' : 'apiKeyActive'}`}>{key.revoked_at ? text.revoked : text.active}</span>
         <span className="muted">{text.created}: {formatLocalTimestamp(key.created_at)}</span>
         <span className="muted">{text.lastUsed}: {key.last_used_at ? formatLocalTimestamp(key.last_used_at) : text.never}</span>
       </div>

@@ -1,9 +1,17 @@
+import { WORKSPACE_AUDIT_ZH } from './workspaceAudit'
+import { RESOURCES_AUDIT_ZH } from './resourcesAudit'
+import { ASSETS_AUDIT_ZH } from './assetsAudit'
+import { SHARED_AUDIT_ZH } from './sharedAudit'
 import type { UiMessages } from './messages'
 
 /** 中文既定文案。技術用語(Run/Evidence/SkillVersion 等)は利用者向けの平易な語へ統一し、
     契約の識別子(capability ID・ファイル名・API field)だけを英語のまま残す。
     句読点は中文 UI の慣例に合わせ、文中は全角記号で統一する。 */
 export const ZH: UiMessages = {
+  uiAuditWorkspace: WORKSPACE_AUDIT_ZH,
+  resourcesAudit: RESOURCES_AUDIT_ZH,
+  assetsAudit: ASSETS_AUDIT_ZH,
+  sharedAudit: SHARED_AUDIT_ZH,
   common: { moreActions: (name) => `${name}的更多操作` },
   theme: { label: '外观', light: '日间', dark: '夜间' },
   routes: {

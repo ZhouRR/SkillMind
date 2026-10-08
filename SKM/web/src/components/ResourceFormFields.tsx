@@ -1,5 +1,6 @@
+import { handleTabKeyDown } from './TabButton'
 import { Select } from './Select'
-import type { ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import type { SecretResolver } from '../api'
 import { useMessages } from '../i18n'
 import { formatLocalTimestamp } from '../lib/presentation'
@@ -8,7 +9,9 @@ import type { ResourceTab } from '../lib/resourceDrafts'
 import { ActionMenu } from './ActionMenu'
 
 /** 資源設定タブの button。選択状態を aria-selected で表し、tablist 内で切り替える。 */
-export function ResourceTabButton({ current, tab, onSelect, children }: {
+export function ResourceTabButton({ current, tab, onSelect, children, id, panelId }: {
+  id: string
+  panelId: string
   current: ResourceTab
   tab: ResourceTab
   onSelect: (tab: ResourceTab) => void
@@ -16,9 +19,13 @@ export function ResourceTabButton({ current, tab, onSelect, children }: {
 }) {
   return (
     <button
+      id={id}
+      aria-controls={panelId}
       aria-selected={current === tab}
+      tabIndex={current === tab ? 0 : -1}
       className="tab"
       onClick={() => onSelect(tab)}
+      onKeyDown={handleTabKeyDown}
       role="tab"
       type="button"
     >
@@ -30,9 +37,10 @@ export function ResourceTabButton({ current, tab, onSelect, children }: {
 /** resolver 選択と、MANAGED の明文入力 / ENVIRONMENT・FILE の locator 入力を切り替える共通 field。
  *  接続 form と凭据 form の両方で使い、MANAGED 分岐の重複を一箇所へ集約する(hint は各 form 側が持つ)。 */
 export function SecretResolverFields({
-  provider, resolver, locator, secretValue, envExample, fileExample, onResolver, onLocator, onSecretValue, editing = false,
+  provider, resolver, locator, secretValue, envExample, fileExample, onResolver, onLocator, onSecretValue, editing = false, disabled = false,
 }: {
   editing?: boolean
+  disabled?: boolean
   provider: ResourceProvider
   resolver: SecretResolver
   locator: string
@@ -47,7 +55,7 @@ export function SecretResolverFields({
   return (
     <>
       <label>{messages.resources.resolverLabel}
-        <Select disabled={editing} value={resolver} onValueChange={(nextValue) => onResolver(nextValue as SecretResolver)}>
+        <Select disabled={editing || disabled} value={resolver} onValueChange={(nextValue) => onResolver(nextValue as SecretResolver)}>
           <option value="ENVIRONMENT">{messages.resources.resolverEnvOption}</option>
           <option value="FILE">{messages.resources.resolverFileOption}</option>
           <option value="MANAGED">{messages.resources.resolverManagedOption}</option>
@@ -80,7 +88,7 @@ export function SecretResolverFields({
 }
 
 /** 管理資源の編集・無効化・参照保護付き削除を表示する。 */
-export function ResourceList({ items, emptyText, busy }: { busy: boolean; emptyText?: string; items: Array<{
+export function ResourceList({ items, emptyText, busy, loaded = true }: { loaded?: boolean; busy: boolean; emptyText?: string; items: Array<{
   id: string
   title: string
   detail: string
@@ -91,6 +99,7 @@ export function ResourceList({ items, emptyText, busy }: { busy: boolean; emptyT
   onDelete?: () => void
 }> }) {
   const messages = useMessages()
+  if (!loaded) return null
   if (items.length === 0) return <p className="compactEmpty">{emptyText ?? messages.resources.notConfigured}</p>
   return (
     <ul className="resourceList">
@@ -128,6 +137,7 @@ export function ScopeSubsetPicker({ allowWildcard, entries, legend, onChange }: 
   onChange: (next: ScopeDraftEntry[]) => void
 }) {
   const messages = useMessages()
+  const id = useId()
   const update = (index: number, patch: Partial<ScopeDraftEntry>): void => {
     onChange(entries.map((entry, at) => (at === index ? { ...entry, ...patch } : entry)))
   }
@@ -135,8 +145,9 @@ export function ScopeSubsetPicker({ allowWildcard, entries, legend, onChange }: 
     <fieldset className="scopePicker">
       <legend>{legend}</legend>
       {entries.map((entry, index) => (
-        <div className="scopePickerGroup" key={entry.key}>
-          <p className="resourceGroupLabel">{entry.key}</p>
+        <fieldset className="scopePickerGroup" key={entry.key}>
+          <legend className="resourceGroupLabel">{messages.resources.scopeKeyLabels[entry.key] ?? entry.key}</legend>
+          {messages.resources.scopeKeyLabels[entry.key] && <small className="mono resourceTechnicalKey">{entry.key}</small>}
           {entry.wildcardSource ? (
             <>
               {allowWildcard && (
@@ -146,17 +157,20 @@ export function ScopeSubsetPicker({ allowWildcard, entries, legend, onChange }: 
                     type="checkbox"
                     onChange={(event) => update(index, { keepAll: event.target.checked })}
                   />
-                  <span>{messages.resources.scopeKeepAllOption}</span>
+                  <span>{messages.resourcesAudit.scopeKeepAllLabel(messages.resources.scopeKeyLabels[entry.key] ?? entry.key)}</span>
                 </label>
               )}
               {(!allowWildcard || !entry.keepAll) && (
                 <>
+                  <label htmlFor={`${id}-${index}`}>{messages.resourcesAudit.scopeNarrowLabel(messages.resources.scopeKeyLabels[entry.key] ?? entry.key)}</label>
                   <input
+                    id={`${id}-${index}`}
+                    aria-describedby={`${id}-${index}-hint`}
                     className="mono"
                     value={entry.raw}
                     onChange={(event) => update(index, { raw: event.target.value })}
                   />
-                  <p className="hint">{messages.resources.scopeNarrowHint}</p>
+                  <p className="hint" id={`${id}-${index}-hint`}>{messages.resources.scopeNarrowHint}</p>
                 </>
               )}
             </>
@@ -179,8 +193,44 @@ export function ScopeSubsetPicker({ allowWildcard, entries, legend, onChange }: 
               ))}
             </>
           )}
-        </div>
+        </fieldset>
       ))}
     </fieldset>
   )
+}
+
+/** 各 drawer と一覧が同じ待機終了・手動照合を表示する。書込の取消・再送は行わない。 */
+export function ResourceRequestFeedback({ busy, unconfirmed, loading, loadError, canAcknowledge,
+  stopWaiting, refresh, acknowledge }: {
+  busy: string | null
+  unconfirmed: { label: string } | null
+  loading: boolean
+  loadError: string | null
+  canAcknowledge: boolean
+  stopWaiting: () => void
+  refresh: () => void
+  acknowledge: () => void
+}) {
+  const messages = useMessages()
+  if (busy) return <div className="resourceRequestFeedback">
+    <p role="status">{messages.resourcesAudit.working}</p>
+    <p className="hint">{messages.resourcesAudit.waitHint}</p>
+    <button className="secondaryButton" onClick={stopWaiting} type="button">{messages.resourcesAudit.stopWaiting}</button>
+  </div>
+  if (!unconfirmed) return null
+  return <section className="resourceRequestFeedback" aria-label={messages.resourcesAudit.unknownTitle}>
+    <p className="resourceWarning" role="alert">{messages.resourcesAudit.unknownTitle}</p>
+    <strong>{unconfirmed.label}</strong>
+    <p>{messages.resourcesAudit.unknownHint}</p>
+    {loadError && <p className="error" role="alert">{loadError}</p>}
+    <p className="hint">{messages.resourcesAudit.reviewHint}</p>
+    <div className="resourceFormActions">
+      <button className="secondaryButton" disabled={loading} onClick={refresh} type="button">
+        {loading ? messages.resources.loadingConfig : messages.resourcesAudit.refresh}
+      </button>
+      <button className="secondaryButton" disabled={!canAcknowledge} onClick={acknowledge} type="button">
+        {messages.resourcesAudit.reviewComplete}
+      </button>
+    </div>
+  </section>
 }

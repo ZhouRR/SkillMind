@@ -1,7 +1,7 @@
 import { Select } from './Select'
 import type { PublishedTaskRecord, TaskReadinessRecord } from '../api'
 import { useMessages } from '../i18n'
-import { parseInputObject, sourceRequirements, usesDocumentSelection, type SourceRequirementChoice } from '../lib/taskDraft'
+import { parseInputObject, taskCatalogId, sourceRequirements, usesDocumentSelection, type SourceRequirementChoice } from '../lib/taskDraft'
 import { ALL_DOCUMENTS_SELECTION, PROJECT_DOCUMENT_LIBRARY_SELECTION } from '../lib/documentSelection'
 import { DocumentSourceField } from './DocumentSourceField'
 import { SchemaTaskInput } from './SchemaTaskInput'
@@ -157,6 +157,7 @@ export function TaskLaunchFields({ task, inputText, sourceProviders, onInputText
         {/* ブランチ名の注意はリポジトリ要求がある時だけ添え、無関係な task に常駐させない。 */}
         {requirements.some((requirement) => requirement.kind === 'repository') && <> {messages.workspace.freezeRepositoryHint}</>}</p>}
       <SchemaTaskInput
+        key={taskCatalogId(task)}
         schema={task.input_schema}
         value={parseInputObject(inputText)}
         rawValue={inputText}

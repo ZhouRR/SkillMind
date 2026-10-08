@@ -7,3 +7,10 @@
 @import './styles/workspace-responsive.css';
 @import './styles/reading.css';
 @import './styles/presentation.css';
+
+@import './styles/shared-audit.css';
+
+@import './styles/assets-audit.css';
+@import './styles/resources-audit.css';
+@import './styles/workspace-audit.css';
+@import './styles/execution-audit.css';

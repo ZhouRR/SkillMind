@@ -1,3 +1,7 @@
+import type { WorkspaceAuditMessages } from './workspaceAudit'
+import type { ResourcesAuditMessages } from './resourcesAudit'
+import type { AssetsAuditMessages } from './assetsAudit'
+import type { SharedAuditMessages } from './sharedAudit'
 import type { AppRoute } from '../routing'
 
 import { EN } from './en'
@@ -15,6 +19,10 @@ export type UiLanguage = (typeof UI_LANGUAGES)[number]
     key を追加する場合は三言語すべてへ同時に追加する。Record<UiLanguage, UiMessages>
     の型検査が欠落を compile error として検出する。 */
 export interface UiMessages {
+  uiAuditWorkspace: WorkspaceAuditMessages
+  resourcesAudit: ResourcesAuditMessages
+  assetsAudit: AssetsAuditMessages
+  sharedAudit: SharedAuditMessages
   theme: { label: string; light: string; dark: string }
   /** 一覧で共有する対象別の操作入口。 */
   common: { moreActions: (name: string) => string }
