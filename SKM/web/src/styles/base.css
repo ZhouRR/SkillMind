@@ -67,13 +67,16 @@
   --radius-tiny: 6px;
   --font-body: Inter, "PingFang SC", "Hiragino Sans GB", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", "Noto Sans JP", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  /* 説明と長文の行間を共有し、画面・dialog ごとの過大な上書きを避ける。 */
+  --line-height-body: 1.6;
+  --line-height-reading: 1.65;
 
   color-scheme: light;
   color: var(--text);
   background: var(--bg);
   font-family: var(--font-body);
   font-size: 14px;
-  line-height: 1.6;
+  line-height: var(--line-height-body);
   font-synthesis: weight;
   font-variant-numeric: tabular-nums;
   text-rendering: optimizeLegibility;
@@ -338,9 +341,11 @@ select {
 .selectItemIndicator { display: inline-flex; flex: 0 0 16px; margin-inline-start: auto; }
 /* 選択切替で checkmark 分の本文幅を変えず、選択状態だけを表示する。 */
 .selectItemIndicator:not([data-selected]) { visibility: hidden; }
-.selectItem[data-highlighted] { background: var(--surface-hover); outline: 2px solid var(--accent-strong); outline-offset: -2px; }
-.selectItem[data-selected] { background: var(--primary-bg); color: var(--primary-ink); font-weight: 650; }
-.selectItem[data-selected][data-highlighted] { background: var(--primary-hover); }
+/* Pointer の面は実際の hover に追従し、keyboard の候補だけ highlight に従う。 */
+.selectItem:hover, :where(.selectPopup[data-navigation='keyboard']) .selectItem[data-highlighted] { background: var(--surface-hover); }
+.selectItem[data-selected] { background: var(--accent-soft); color: var(--accent-deep); font-weight: 600; }
+/* Pointer の hover は面だけ、keyboard の焦点は選択中にも見える枠で区別する。 */
+.selectPopup[data-navigation='keyboard'] .selectItem[data-highlighted]:not([data-disabled]) { outline: 2px solid var(--accent-strong); outline-offset: -2px; }
 .selectItem[data-disabled] { color: var(--text-faint); background: transparent; cursor: not-allowed; outline: none; }
 .selectGroup + .selectGroup { margin-top: 6px; border-top: 1px solid var(--border); padding-top: 6px; }
 .selectGroupLabel { padding: 6px 12px; color: var(--text-muted); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
@@ -370,7 +375,7 @@ select {
 .schemaInputForm { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0 16px; align-items: start; }
 .schemaInputForm > label:has(textarea), .schemaInputForm > .rawResult { grid-column: 1 / -1; }
 .schemaInputForm small { color: var(--text-faint); font-size: 12px; font-weight: 400; line-height: 1.5; }
-.hint { margin: 2px 0 12px; color: var(--text-faint); font-size: 13px; line-height: 1.55; }
+.hint { margin: 2px 0 12px; color: var(--text-faint); font-size: 13px; line-height: var(--line-height-body); }
 /* label 内の補足は label の太字を継がず、他の補足文と同じ通常字重にする。 */
 label .hint, label small { font-weight: 400; }
 .compactTextarea { min-height: 90px; font-family: inherit; }
@@ -430,7 +435,7 @@ a.primaryButton, a.secondaryButton { display: inline-flex; justify-content: cent
 }
 
 /* ---- 確認 dialog:破壊的操作の直前に理由と影響を読ませる ---- */
-.confirmMessage { margin: 0 0 20px; color: var(--text); font-size: 13px; line-height: 1.7; white-space: pre-line; overflow-wrap: anywhere; }
+.confirmMessage { margin: 0 0 20px; color: var(--text); font-size: 13px; line-height: var(--line-height-body); white-space: pre-line; overflow-wrap: anywhere; }
 .confirmActions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
 .confirmActions .primaryButton { width: auto; padding: 8px 20px; }
 .confirmActions .destructiveButton { padding: 8px 20px; }

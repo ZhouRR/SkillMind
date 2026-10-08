@@ -13,7 +13,6 @@ from skillmind.documents.library import (
     parse_document_library_source,
 )
 from skillmind.documents.snapshot import (
-    DOCUMENT_CAPABILITIES,
     DOCUMENT_PROVIDER,
     DocumentSnapshot,
     is_document_source,
@@ -23,6 +22,36 @@ from skillmind.documents.snapshot import (
 )
 from skillmind.runs.creation_replay import stored_creation_intent
 from skillmind.schedules.repository_occurrences import occurrence_snapshot
+
+# Blueprint の resourceKind のうち Integration を表す種類。Tool 名・version は参照判定に使わない。
+_INTEGRATION_RESOURCE_KINDS = frozenset({"issue", "repository", "file", "knowledge", "other"})
+
+
+def _require_integration_source(source: Mapping[str, object], selection: str | None) -> None:
+    """凍結した種類と原選択/default の接続 identity で、Project 文書以外の資源と確認する。"""
+
+    kind, provider = source.get("resource_kind"), source.get("provider")
+    candidate, identity = source.get("candidate_key"), source.get("integration_id")
+    if (
+        not isinstance(kind, str) or kind not in _INTEGRATION_RESOURCE_KINDS
+        or not isinstance(provider, str) or not provider
+        or not isinstance(candidate, str) or not candidate.startswith("integration:")
+        or not isinstance(identity, str)
+    ):
+        raise ValueError("Stored Integration resource type cannot be verified")
+    integration_id = UUID(identity)
+    if integration_id.int == 0 or UUID(candidate.removeprefix("integration:")) != integration_id:
+        raise ValueError("Stored Integration resource identity cannot be verified")
+    if selection is not None:
+        if not selection.startswith("integration:") or UUID(
+            selection.removeprefix("integration:")
+        ) != integration_id:
+            raise ValueError("Integration resource does not match the original choice")
+    else:
+        # 省略された選択は保存済み default binding で証明し、現在の接続設定から補わない。
+        binding_id = source.get("source_binding_id")
+        if not isinstance(binding_id, str) or UUID(binding_id).int == 0:
+            raise ValueError("Original Integration default binding cannot be verified")
 
 
 def choice_document_ids(sources: object) -> frozenset[UUID]:
@@ -70,43 +99,13 @@ def run_document_ids(run: Run) -> frozenset[UUID]:
             actual_library_keys.add(key)
             continue
         if not is_document_source(source) and not is_document_source(source.get("candidate_key")):
-            capability = source.get("capability")
-            if (
-                not isinstance(capability, str)
-                or (
-                    not capability.startswith(("issue.", "repository."))
-                    and capability not in {
-                        "database.read/v1",
-                        "database.query/v1",
-                        "database.execute/v1",
-                        "http.read/v1",
-                        "http.write/v1",
-                        "mcp.read/v1",
-                        "mcp.tools/v1",
-                        "mcp.query/v1",
-                        "mcp.call/v1",
-                    }
-                )
-                or not isinstance(source.get("provider"), str)
-                or not source["provider"]
-            ):
-                raise ValueError("Stored non-document source is not verifiable")
-            # 新しい直接アクセス契約も文書ではない。未知 version や provider の偽装は除外する。
-            if (
-                capability in {"database.query/v1", "database.execute/v1"}
-                and source["provider"] != "postgres"
-            ) or (
-                capability in {"http.read/v1", "http.write/v1"}
-                and source["provider"] != "http"
-            ):
-                raise ValueError("Stored native source provider is not verifiable")
+            _require_integration_source(source, original.sources.get(key))
             continue
         actual_keys.add(key)
         value = source.get("document_snapshot")
         if (
             source.get("provider") != DOCUMENT_PROVIDER
-            or source.get("capability") not in DOCUMENT_CAPABILITIES
-            or source.get("resource_kind", "document") != "document"
+            or source.get("resource_kind") != "document"
             or not isinstance(value, Mapping)
             or key not in document_keys
         ):

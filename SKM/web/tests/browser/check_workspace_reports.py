@@ -115,6 +115,7 @@ async def check(url: str, output: Path) -> None:
                     assert api.queries[-1]['task_id'] == [TASK]
                     assert api.queries[-1]['limit'] == ['1']
                     chooser = page.locator('.reportToolbar .selectTrigger')
+                    refresh = page.locator('.reportToolbar').get_by_role('button', name=labels['runHistory']['retry'], exact=True)
                     async with select_options(chooser) as options:
                         await expect(options).to_have_count(2)
                     await select_option(chooser, SECOND_TASK)
@@ -127,19 +128,19 @@ async def check(url: str, output: Path) -> None:
                     await expect(page.locator('.runFacts')).to_have_count(0)
                     # Workspace は要約のみ。最新の失敗と scope 拒否をここで確認し、全文は詳細へ進む。
                     api.failed = True
-                    await page.locator('.reportToolbar button').click()
+                    await refresh.click()
                     await expect(page.locator('.reportRunMeta .statusBadge')).to_have_text(labels['enums']['runStatus']['FAILED'])
                     await expect(page.locator('.reportSummary')).to_have_count(0)
                     api.failed = False
-                    await page.locator('.reportToolbar button').click()
+                    await refresh.click()
                     await expect(page.locator('.reportSummary .readingMarkdown')).to_have_text(api.body['result']['summary'])
                     api.wrong_scope = True
-                    await page.locator('.reportToolbar button').click()
+                    await refresh.click()
                     await expect(page.locator('.workspaceReports [role="alert"]')).to_be_visible()
                     await expect(page.locator('.workspaceReports .deliverableContent, .workspaceReports .runArtifacts')).to_have_count(0)
                     assert api.queries[-1]['task_id'] == [TASK]
                     api.wrong_scope = False
-                    await page.locator('.reportToolbar button').click()
+                    await refresh.click()
                     await expect(page.locator('.workspaceReports [role="alert"]')).to_have_count(0)
                     await page.get_by_role('link', name=work['executionDetail'], exact=True).click()
                     assert '#/history?' in page.url and f'run={RUN}' in page.url

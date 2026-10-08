@@ -41,7 +41,7 @@ async def check_fields(page: Page, narrow: bool) -> list[dict]:
             assert field['width'] <= field['limit'] * field['rem'] + 1, field
     if not narrow:
         for scope in ['.skillLibraryFilters', '.taskFilters']:
-            search = await page.locator(f'{scope} input').bounding_box()
+            search = await page.locator(scope).get_by_role('textbox').bounding_box()
             status = await page.locator(f'{scope} .shortControl').bounding_box()
             assert search and status and search['width'] > status['width'], (search, status)
         score, verdict = await page.locator('#score').bounding_box(), await page.locator('#verdict').bounding_box()
@@ -59,7 +59,7 @@ async def check_popups(page: Page, touch: bool) -> list[dict]:
         await trigger.scroll_into_view_if_needed()
         await trigger.focus()
         await page.keyboard.press('ArrowDown')
-        popup = page.locator('.selectPopup')
+        popup = page.locator('.selectPopup:visible')
         await expect(popup).to_be_visible()
         await expect(popup).to_have_attribute('data-density', 'compact')
         await page.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
@@ -90,13 +90,16 @@ async def check_popups(page: Page, touch: bool) -> list[dict]:
     trigger = page.locator('#task-status')
     await trigger.focus()
     await page.keyboard.press('ArrowDown')
+    # 開く時の初期 focus が完了する前に次の key を送り、End の焦点を上書きさせない。
+    await expect(page.locator('.selectPopup:visible [data-highlighted]')).to_be_focused()
     await page.keyboard.press('End')
+    await expect(page.locator('.selectPopup:visible [data-value="ARCHIVED"]')).to_be_focused()
     await page.keyboard.press('Enter')
     await expect(trigger).to_have_attribute('data-value', 'ARCHIVED')
     await expect(trigger).to_be_focused()
     await page.keyboard.press('ArrowDown')
     await page.keyboard.press('Tab')
-    await expect(page.locator('.selectPopup')).to_have_count(0)
+    await expect(page.locator('.selectPopup:visible')).to_have_count(0)
     await expect(trigger).not_to_be_focused()
     return result
 
@@ -129,7 +132,8 @@ async def check(url: str, output: Path, browsers: list[str], executable: str | N
                             async def only_fixture(route: Route) -> None:
                                 """同じ origin の静的資源だけを許し、API と外部通信を拒否する。"""
                                 destination = urlsplit(route.request.url)
-                                if (destination.scheme, destination.netloc) != (origin.scheme, origin.netloc) or '/api/' in destination.path:
+                                api_prefix = origin.path.split('/tests/browser/', 1)[0] + '/api/'
+                                if (destination.scheme, destination.netloc) != (origin.scheme, origin.netloc) or destination.path.startswith(api_prefix):
                                     blocked.append(route.request.url)
                                     await route.abort()
                                 else:

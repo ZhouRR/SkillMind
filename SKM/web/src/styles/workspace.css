@@ -617,7 +617,7 @@
 .docFolder summary > input[type='checkbox'] { flex: 0 0 16px; width: 16px; height: 16px; min-height: 0; margin: 0; padding: 0; accent-color: var(--accent-strong); }
 .docFolderCount { margin-left: auto; color: var(--text-faint); font: 600 12px var(--font-mono); }
 /* 入れ子の folder は枠を重ねず行として並べ、右余白を持たないことで行末の操作列を最上位 folder と揃える。 */
-.docFolderBody { display: grid; gap: 2px; border-top: 1px solid var(--border); padding: 6px 0 6px var(--tree-indent); }
+.docFolderBody { display: grid; gap: 2px; padding: 6px 0 6px var(--tree-indent); }
 .docFolderBody .docFolder { border: 0; border-radius: 0; background: transparent; }
 .docFolderBody .documentList { gap: 2px; }
 .docFolderBody .documentItem { padding: 8px var(--tree-row-pad) 8px calc(var(--tree-row-pad) + var(--tree-marker)); }

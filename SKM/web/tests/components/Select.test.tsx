@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, useState } from 'react'
+import { act, useLayoutEffect, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -51,6 +51,42 @@ function Controlled({ changes }: { changes: (value: string) => void }) {
 }
 
 describe('shared cross-browser Select', () => {
+  it('closes a repeated selection without notifying a value change', async () => {
+    const changes = vi.fn()
+    await act(async () => root.render(<Select id="same-value" defaultValue="alpha" onValueChange={changes}>
+      <option value="alpha">Alpha</option><option value="beta">Beta</option>
+    </Select>))
+    const trigger = container.querySelector<HTMLElement>('#same-value')!
+    await act(async () => trigger.focus())
+    await press(trigger, 'ArrowDown')
+    await act(async () => document.querySelector<HTMLElement>('[role="option"][data-value="alpha"]')!.click())
+    expect(trigger.dataset.value).toBe('alpha')
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    expect(changes).not.toHaveBeenCalled()
+  })
+
+  it('separates keyboard focus from pointer hover without changing the selected value', async () => {
+    const changes = vi.fn()
+    await act(async () => root.render(<Select id="navigation" defaultValue="alpha" onValueChange={changes}>
+      <option value="alpha">Alpha</option><option value="beta">Beta</option>
+    </Select>))
+    const trigger = container.querySelector<HTMLElement>('#navigation')!
+    await act(async () => trigger.focus())
+    await press(trigger, 'ArrowDown')
+    const popup = document.querySelector<HTMLElement>('.selectPopup')!
+    expect(popup.dataset.navigation).toBe('keyboard')
+    await act(async () => popup.dispatchEvent(new Event('pointermove', { bubbles: true })))
+    expect(popup.dataset.navigation).toBe('pointer')
+    await press(document.activeElement!, 'ArrowDown')
+    expect(popup.dataset.navigation).toBe('keyboard')
+    await act(async () => popup.dispatchEvent(new Event('pointermove', { bubbles: true })))
+    expect(popup.dataset.navigation).toBe('pointer')
+    expect(trigger.dataset.value).toBe('alpha')
+    expect(changes).not.toHaveBeenCalled()
+    await press(document.activeElement!, 'Escape')
+    expect(document.activeElement).toBe(trigger)
+  })
+
   it('applies compact density to the language trigger and its portal without changing default selects', async () => {
     const changes = vi.fn()
     await act(async () => root.render(<>
@@ -330,6 +366,41 @@ describe('shared cross-browser Select', () => {
     expect(trigger.disabled).toBe(false)
   })
 
+
+  it.each([false, true])('closes a page popup and moves Tab to the adjacent field (shift=%s)', async (shiftKey) => {
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue({ length: 1 } as DOMRectList)
+    await act(async () => root.render(<div><button>Before</button>
+      <Select defaultValue="alpha"><option value="alpha">Alpha</option><option value="beta">Beta</option></Select>
+      <button>After</button></div>))
+    const trigger = container.querySelector<HTMLButtonElement>('[role="combobox"]')!
+    await act(async () => trigger.focus())
+    await press(trigger, 'ArrowDown')
+    await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey, bubbles: true, cancelable: true })))
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement?.textContent).toBe(shiftKey ? 'Before' : 'After')
+    expect(trigger.dataset.value).toBe('alpha')
+  })
+
+  it('preserves owner focus when selection hides the trigger', async () => {
+    /** Project 切替で mobile 披露を閉じる実際の所有者動作を再現する。 */
+    function NavigationFixture() {
+      const [hidden, setHidden] = useState(false)
+      useLayoutEffect(() => { if (hidden) document.getElementById('menu-toggle')!.focus() }, [hidden])
+      return <><button id="menu-toggle">Menu</button><div hidden={hidden}>
+        <Select defaultValue="alpha" onValueChange={() => {
+          setHidden(true)
+        }}><option value="alpha">Alpha</option><option value="beta">Beta</option></Select>
+      </div></>
+    }
+    await act(async () => root.render(<NavigationFixture />))
+    const trigger = container.querySelector<HTMLButtonElement>('[role="combobox"]')!
+    await act(async () => trigger.focus())
+    await press(trigger, 'ArrowDown')
+    await press(document.activeElement!, 'End')
+    await press(document.activeElement!, 'Enter')
+    expect(trigger.closest('[hidden]')).not.toBeNull()
+    expect(document.activeElement?.id).toBe('menu-toggle')
+  })
 
   it.each([false, true])('returns modal popup Tab to the adjacent field (shift=%s)', async (shiftKey) => {
     vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue({ length: 1 } as DOMRectList)

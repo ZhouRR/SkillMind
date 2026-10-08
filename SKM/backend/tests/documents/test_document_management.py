@@ -9,8 +9,14 @@ import pytest
 from sqlalchemy import select
 
 from skillmind.db import models as m
-from skillmind.documents.domain import DocumentConflictError, DocumentNotFoundError
+from skillmind.documents.domain import (
+    DocumentConflictError,
+    DocumentInUseError,
+    DocumentNotFoundError,
+    DocumentReferencesUnavailableError,
+)
 from skillmind.documents.management import DocumentManagementRepository, path_conflicts
+from skillmind.documents.reference_repository import DocumentReferenceRepository
 from skillmind.documents.repository import DocumentRepository
 from tests.documents.management_sql import SqlDatabase
 
@@ -142,6 +148,65 @@ async def test_bulk_restore_conflict_does_not_restore_first_document(db):
                 select(m.ProjectDocument).where(m.ProjectDocument.id.in_([first.id, second.id]))
             )
         )
+
+
+async def test_trash_preserves_original_document_despite_opaque_retained_history(db):
+    """旧履歴を解析できなくても回収・復元は可能。原バイトと完全削除の参照制約は保つ。"""
+    original = add_document(db)
+    # 古い形式の未検証履歴を意図的に保持し、回収のために書換えたり無視したりしない。
+    retained = db.seed("runs", project_id=original.project_id, status="SUCCEEDED")
+    await apply(db, "TRASH", [change(original, original.folder, original.name)])
+    with db.transaction() as port:
+        repository = DocumentRepository(port)
+        assert not await repository.list_for_project(original.project_id)
+        saved, reference = await repository.get_for_download(
+            project_id=original.project_id, document_id=original.id,
+        )
+        assert (saved.document_id, saved.checksum, saved.size, reference.key) == (
+            original.id, original.checksum, original.size, original.storage_key,
+        )
+        assert (await port.get(m.Run, retained["id"])).selected_sources_json == retained[
+            "selected_sources_json"
+        ]
+        with pytest.raises(DocumentReferencesUnavailableError):
+            await DocumentReferenceRepository(port).require_unreferenced(
+                project_id=original.project_id, document_id=original.id,
+            )
+    await apply(db, "RESTORE", [change(original, original.folder, original.name)])
+    with db.transaction() as port:
+        assert (await DocumentRepository(port).get(
+            project_id=original.project_id, document_id=original.id,
+        )).checksum == original.checksum
+
+
+@pytest.mark.parametrize("run_status,effect_status,allowed", [
+    ("SUCCEEDED", "APPLIED", True),
+    ("RUNNING", "APPLIED", False),
+    ("SUCCEEDED", "VERIFICATION_FAILED", False),
+])
+async def test_generated_output_trash_keeps_original_operation_guard(
+    db, run_status, effect_status, allowed,
+):
+    """終端成果だけを回収でき、稼働中や原操作の検証待ちは履歴参照と独立に保護する。"""
+    run = db.seed("runs", project_id=db.rows["projects"]["id"], status=run_status)
+    db.seed("agent_sessions", run_id=run["id"], status="IDLE")
+    db.seed("run_attempts", run_id=run["id"], status="SUCCEEDED")
+    effect = db.seed("effect_executions", run_id=run["id"], status=effect_status)
+    upload = db.seed(
+        "document_effect_uploads", run_id=run["id"], effect_id=effect["id"],
+        project_id=db.rows["projects"]["id"], state="PUBLISHED", protocol_version=2,
+    )
+    document = add_document(db, id=upload["document_id"], effect_upload_id=upload["id"])
+    if allowed:
+        await apply(db, "TRASH", [change(document, document.folder, document.name)])
+    else:
+        with pytest.raises(DocumentInUseError):
+            await apply(db, "TRASH", [change(document, document.folder, document.name)])
+    with db.transaction() as port:
+        saved = await port.get(m.ProjectDocument, document.id)
+        assert (saved.deleted_at is not None) is allowed
+        assert saved.effect_upload_id == upload["id"]
+        assert saved.storage_key == document.storage_key
 
 
 async def test_pending_upload_prevents_folder_relocation_or_file_ancestor(db):

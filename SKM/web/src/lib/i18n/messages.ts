@@ -660,7 +660,6 @@ export interface UiMessages {
   }
   documentsPanel: {
     updateFile: string
-    replaceSameName: string
     targetFolder: string
     rootFolder: string
     uploadHere: string

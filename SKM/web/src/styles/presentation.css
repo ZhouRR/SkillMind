@@ -2,13 +2,13 @@
 .shell { max-width: 1640px; width: 100%; margin-inline: auto; }
 .shell .pageHeader { margin-bottom: 26px; }
 .shell .pageHeader h1 { font-size: 30px; font-weight: 700; }
-.shell .pageDescription { max-width: 860px; line-height: 1.8; }
+.shell .pageDescription { max-width: 860px; line-height: var(--line-height-body); }
 .shell > .tabBar { padding: 0 0 10px; margin: 0 0 22px; gap: 8px; }
 .shell .panel { min-width: 0; }
 .shell .panelHeader { gap: 16px; }
 .shell .panelHeader h2 { font-size: 16px; font-weight: 700; }
 .shell:not([data-page='home']):not([data-page='workspace']) .emptyState { min-height: 150px; }
-.shell .hint { line-height: 1.8; }
+.shell .hint { line-height: var(--line-height-body); }
 .themeToggle { display: inline-flex; gap: 4px; padding: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-input); }
 .themeToggle button { display: inline-flex; justify-content: center; align-items: center; gap: 7px; min-height: 34px; padding: 6px 12px; border: 1px solid transparent; border-radius: 8px; color: var(--text-muted); background: transparent; font-size: 12px; cursor: pointer; }
 .themeToggle button[aria-pressed='true'] { color: var(--accent); border-color: var(--accent-border); background: var(--accent-soft); }
@@ -54,8 +54,6 @@
 .documentToolbar { align-items: end; }
 .documentToolbar .documentTargetFolder { margin: 0; }
 .documentToolbar .fileUploadButton { width: auto; margin: 0; }
-.documentToolbar .documentOverwriteOption { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; }
-.documentOverwriteOption input[type="checkbox"] { flex: none; width: auto; margin: 0; }
 .documentToolbar .documentRefresh { margin: 0 0 0 auto; }
 [data-page='documents'] .documentHelp { margin-top: 24px; }
 [data-page='documents'] .documentUploadStatus, [data-page='documents'] .documentUploadClosure { margin-bottom: 20px; }

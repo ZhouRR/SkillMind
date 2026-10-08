@@ -14,10 +14,13 @@
 - 短说明用折叠，资源、证据和评价用抽屉，确认用小弹窗，不嵌套弹窗。保留键盘、焦点、Escape、长文本和滚动行为。
 - 候选路径较多时先显示数量，展开后可滚动查看完整列表；必要状态和缺失原因始终可见，不让路径清单挤压主要操作。
 - 三语统一使用消息目录。日间/夜间切换不重建表单；浏览器存储受限时仍可在当前页使用，默认主题遵从现有应用设置。
+- 说明文字与 Markdown 总结复用共享行距，保留字号与长文本换行；确认弹窗和抽屉不额外放大行距。
 
 単一選択の下拉は共有 `Select` Component と Base UI の Select primitive で統一する。browser 固有の `appearance: base-select` に依存せず、境界・影・選択色と checkmark を持つ popup を全対応 browser で描画する。option/optgroup の値と無効状態を保ち、フォームの name/required と label、keyboard/typeahead/focus/dismissal は共有実装で扱う。長い選択肢は popup 内で折り返して scroll できる。親 dialog は popup が処理する Escape を奪わない。複数選択と size listbox は別の native control として扱う。
 
 文書の upload 先は自由入力できる `DocumentFolderInput` を使い、native datalist ではなく Base UI Autocomplete の候補を表示する。既存の階層パスと root を選べ、新規パスは候補にない状態でも保持する。Escape/候補の非同期更新は入力先を変更せず、upload 中などの無効化時は候補を閉じる。
+
+候補の hover は中立色の面、選択は淡い強調色と checkmark、keyboard の焦点は枠で区別する。keyboard から pointer へ戻った時に焦点枠を残さず、hover だけで選択値を変えない。
 
 言語・状態・評価の点数・boolean・調度の短い候補は明示的な compact density を使い、不要な popup 余白と scrollbar 領域を抑える。短い form field の幅は個別に制限し、trigger の高さと他の入力との整列を保つ。任意 enum、資源・文書・path や長い説明には一律適用しない。checkmark の固定 slot、keyboard/focus と狭い viewport の scroll は維持し、touch の候補高は通常と同じにする。
 

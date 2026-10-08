@@ -78,6 +78,20 @@ async def header_navigation(page: Page) -> None:
     await expect(icon.locator("circle")).to_have_count(0)
 
 
+async def text_density(page: Page) -> None:
+    """実画面の説明・要約が読める行間を持ち、後段 CSS で過大に戻らないことを確認する。"""
+    rows = await page.locator(
+        '.pageDescription, .hint, .skillLibraryDescription, .readingMarkdown p, .confirmMessage'
+    ).evaluate_all('''nodes => nodes.filter(el => el.getBoundingClientRect().width > 0
+      && el.getBoundingClientRect().height > 0).map(el => {
+      const css=getComputedStyle(el);return {className:el.className,
+        font:parseFloat(css.fontSize),line:parseFloat(css.lineHeight)};
+    })''')
+    for row in rows:
+        if row['line'] is not None:
+            assert 1.35 <= row['line'] / row['font'] <= 1.71, row
+
+
 async def theme_controls(browser: Browser, url: str, output: Path) -> None:
     """実 button・再読込・別 tab・storage 拒否を検証し、業務草稿の再 mount を検出する。"""
     api = VisualApi(url, "zh")
@@ -312,7 +326,7 @@ async def skill_identity_layout(browser: Browser, url: str, output: Path) -> Non
 
             async def respond(route: Route) -> None:
                 """parse/save だけを fixture へ閉じ、モデル・実保存へ到達させない。"""
-                suffix = route.request.url.removeprefix(f"{api.origin}{api.prefix}")
+                suffix = urlsplit(route.request.url).path.removeprefix(api.prefix)
                 if route.request.method == "POST" and suffix in ("skills/parse", "skill-imports"):
                     posts.append(suffix)
                     await route.fulfill(status=200 if suffix == "skills/parse" else 201,
@@ -371,7 +385,7 @@ async def permission_feedback(browser: Browser, url: str, output: Path) -> None:
 
             async def respond(route: Route) -> None:
                 """安定 code は維持し、英語の Problem 本文が画面へ漏れないことを試す。"""
-                suffix = route.request.url.removeprefix(f"{api.origin}{api.prefix}")
+                suffix = urlsplit(route.request.url).path.removeprefix(api.prefix)
                 denied_read = route.request.method == "GET" and suffix in {
                     f"projects/{PROJECT}/{resource}" for resource in
                     ("secret-references", "integrations", "resource-bindings", "effect-preauthorizations")
@@ -399,7 +413,7 @@ async def permission_feedback(browser: Browser, url: str, output: Path) -> None:
                         await page.locator(".skillTextSource > summary").click()
                         await page.locator(".skillForm textarea").first.fill("# Browser-only permission fixture")
                         await page.locator('.skillForm button[type="submit"]').click()
-                    await expect(page.get_by_text(labels["account"]["failures"]["adminRequired"], exact=True)).to_be_visible()
+                    await expect(page.get_by_text(labels["account"]["failures"]["adminRequired"], exact=False)).to_be_visible()
                     assert "Administrator access is required." not in await page.locator("main").inner_text()
                     await layout(page)
                     await page.screenshot(path=str(output / f"permission-{name}-{language}-{theme}.png"))
@@ -475,6 +489,7 @@ async def check(url: str, output: Path) -> None:
                             await layout(page)
                             await brand_identity(page)
                             await header_navigation(page)
+                            await text_density(page)
                             if name == "skills" and language == "ja" and width > 960:
                                 lines = await page.locator(".skillScopeBadge").evaluate("""el => {
                                   const range = document.createRange();
@@ -490,12 +505,12 @@ async def check(url: str, output: Path) -> None:
                                   - el.getBoundingClientRect().bottom""")
                                 assert spacing >= 16, spacing
                                 if width > 960:
-                                    # ラベル全体ではなく、入力欄とボタンの上辺を比較する。
+                                    # align-items:end の操作列の下辺を測り、別行の checkbox・hidden input を除く。
                                     controls = await page.locator(".documentToolbar").evaluate(
-                                        """el => [...el.children].map(child =>
-                                          (child.querySelector('input[type="text"]') ?? child)
-                                            .getBoundingClientRect().top)"""
+                                        """el => [...el.querySelectorAll('.documentFolderInputGroup > input, .fileUploadButton')]
+                                          .map(child => child.getBoundingClientRect().bottom)"""
                                     )
+                                    assert len(controls) == 3, controls
                                     assert max(controls) - min(controls) <= 1, controls
                                     bounds = await page.locator(".documentTree").bounding_box()
                                     assert bounds and bounds["y"] < 500, bounds

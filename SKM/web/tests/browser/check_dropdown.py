@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import traceback
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -77,6 +78,43 @@ async def popup_style(popup: Locator) -> dict:
       return Object.fromEntries(['backgroundColor', 'borderRadius', 'borderTopWidth',
         'boxShadow', 'overflowY', 'maxHeight', 'zIndex'].map(key => [key, style[key]]));
     }''')
+
+
+async def check_hover_styles(page: Page, output: Path, key: str) -> dict:
+    """幅の広い候補でも pointer に焦点枠が残らず、keyboard と選択の表示を保つ。"""
+    trigger = page.locator('#basic-select')
+    popup = await open_picker(trigger, page)
+    selected = popup.get_by_role('option', selected=True)
+    await expect(selected).to_be_focused()
+    original = await selected.evaluate('el => getComputedStyle(el).backgroundColor')
+    await popup.locator('[data-value="beta"]').hover()
+    target = popup.locator('[data-value="beta"]')
+    await expect(popup).to_have_attribute('data-navigation', 'pointer')
+    assert await target.evaluate('''el => {
+      const style = getComputedStyle(el);
+      return style.outlineStyle === 'none' || parseFloat(style.outlineWidth) === 0;
+    }''')
+    assert await target.evaluate('el => getComputedStyle(el).backgroundColor') != original
+    await page.keyboard.press('End')
+    await expect(popup.locator('[data-value="gamma"]')).to_have_attribute('data-highlighted', '')
+    await expect(popup).to_have_attribute('data-navigation', 'keyboard')
+    assert await popup.locator('[data-highlighted]').evaluate(
+        'el => parseFloat(getComputedStyle(el).outlineWidth)') > 0
+    await popup.locator('[data-value="gamma"]').hover()
+    await popup.locator('[data-value="beta"]').hover()
+    await expect(popup).to_have_attribute('data-navigation', 'pointer')
+    assert await target.evaluate('''el => {
+      const style = getComputedStyle(el);
+      return style.outlineStyle === 'none' || parseFloat(style.outlineWidth) === 0;
+    }''')
+    assert await target.evaluate('el => getComputedStyle(el).backgroundColor') != original
+    assert await selected.evaluate('el => getComputedStyle(el).backgroundColor') == original
+    await expect(trigger).to_have_attribute('data-value', 'alpha')
+    await expect(page.locator('#change-count')).to_have_text('0')
+    await popup.screenshot(path=str(output / f'{key}-hover.png'))
+    await page.keyboard.press('Escape')
+    await closed_picker(trigger, page)
+    return {'pointerOutlineVisible': False, 'keyboardOutlineVisible': True, 'selectionPreserved': True}
 
 
 async def check_short_popup(page: Page) -> dict:
@@ -199,7 +237,11 @@ async def check_keyboard_pointer(page: Page, output: Path, key: str) -> dict:
     await closed_picker(trigger, page)
     await expect(page.locator('#after-basic')).to_be_focused()
     await open_picker(trigger, page)
-    await page.locator('h1').click()
+    # 短い画面では見出しが popup に覆われるため、予約余白の確かな外側をクリックする。
+    bounds = await page.locator('.selectPopup:visible').bounding_box()
+    assert bounds and not (bounds['x'] <= 1 <= bounds['x'] + bounds['width']
+                          and bounds['y'] <= 1 <= bounds['y'] + bounds['height']), bounds
+    await page.mouse.click(1, 1)
     await closed_picker(trigger, page)
     await expect(page.locator('#selection')).to_have_text('gamma')
     # theme の変更は同じ trigger と controlled value を維持する。
@@ -390,7 +432,9 @@ async def check(url: str, output: Path, browser_names: list[str], executable: st
                             async def only_fixture(route: Route) -> None:
                                 """外部資源と全 API を禁止し、同一 origin の静的 fixture 資源だけを許可する。"""
                                 destination = urlsplit(route.request.url)
-                                if (destination.scheme, destination.netloc) != (origin.scheme, origin.netloc) or '/api/' in destination.path:
+                                api_prefix = origin.path.split('/tests/browser/', 1)[0] + '/api/'
+                                # src/api/ は静的な client module。実 HTTP API と混同して遮断しない。
+                                if (destination.scheme, destination.netloc) != (origin.scheme, origin.netloc) or destination.path.startswith(api_prefix):
                                     blocked.append(route.request.url)
                                     await route.abort()
                                 else:
@@ -404,6 +448,7 @@ async def check(url: str, output: Path, browser_names: list[str], executable: st
                                 await expect(page.locator('html')).to_have_attribute('data-theme', theme)
                                 await expect(page.locator('#basic-select')).to_be_visible()
                                 result['shortPopup'] = await check_short_popup(page)
+                                result['hover'] = await check_hover_styles(page, output, key)
                                 result['popup'] = await check_keyboard_pointer(page, output, key)
                                 result['longPopup'] = await check_long_popup(page, output, key, width, height)
                                 await check_modal(page, output, key)
@@ -415,7 +460,7 @@ async def check(url: str, output: Path, browser_names: list[str], executable: st
                                 result['passed'] = True
                             except Exception as error:
                                 # Browser 回帰の結果境界で失敗を記録し、他言語・viewport の採取を続ける。
-                                result.update(passed=False, error=str(error), pageErrors=errors, blockedRequests=blocked)
+                                result.update(passed=False, error=str(error), traceback=traceback.format_exc(), pageErrors=errors, blockedRequests=blocked)
                                 failures.append(key)
                                 await page.screenshot(path=str(output / f'{key}-failure.png'))
                             finally:

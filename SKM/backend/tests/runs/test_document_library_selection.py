@@ -279,7 +279,8 @@ def test_library_can_coexist_with_existing_non_document_read_sources(capability,
         "outputs": FrozenDocumentLibraryBinding(
             row.project_id, row.id, uuid4(), "outputs", target()
         ).to_json(),
-        "records": {"capability": capability, "provider": provider, "candidate_key": token},
+        "records": {"capability": capability, "provider": provider, "candidate_key": token,
+                    "resource_kind": "other", "integration_id": token.removeprefix("integration:")},
     }
     assert run_document_ids(row) == frozenset()
     row.selected_sources_json["records"]["document_snapshot"] = {}

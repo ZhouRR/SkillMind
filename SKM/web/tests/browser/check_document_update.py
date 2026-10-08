@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import hashlib
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -64,7 +65,7 @@ async def check(url: str, output: Path) -> None:
                         await (await chooser.value).set_files({"name": "local-copy.md", "mimeType": "text/markdown", "buffer": b"updated"})
                         await expect(page.get_by_label(labels["uploadFilesAria"], exact=True)).to_be_enabled()
                         assert len(api.updates) == 1 and api.updates[0]["name"] == "overview.md"
-                        await page.get_by_role("checkbox", name=labels["replaceSameName"], exact=True).check()
+                        await expect(page.locator('.documentOverwriteOption')).to_have_count(0)
                         await page.get_by_role("combobox", name=labels["targetFolder"], exact=True).fill("specs")
                         await page.get_by_label(labels["uploadFilesAria"], exact=True).set_input_files([
                             {"name": "overview.md", "mimeType": "text/markdown", "buffer": b"new first"},
@@ -72,6 +73,16 @@ async def check(url: str, output: Path) -> None:
                         ])
                         await expect(page.get_by_label(labels["uploadFilesAria"], exact=True)).to_be_enabled()
                         assert len(api.updates) == 3 and len({item["key"] for item in api.updates}) == 3
+                        # フォルダー upload も既定で同じ相対 path を更新し、個別の設定切替を要求しない。
+                        await page.get_by_role("combobox", name=labels["targetFolder"], exact=True).fill("")
+                        with TemporaryDirectory(prefix="skm-document-update-") as directory:
+                            source = Path(directory) / "specs"
+                            source.mkdir()
+                            (source / "overview.md").write_bytes(b"directory first")
+                            (source / "second.md").write_bytes(b"directory second")
+                            await page.get_by_label(labels["uploadFolderAria"], exact=True).set_input_files(str(source))
+                            await expect(page.get_by_label(labels["uploadFolderAria"], exact=True)).to_be_enabled()
+                        assert len(api.updates) == 5 and len({item["key"] for item in api.updates}) == 5
                         assert len(api.rows[PROJECT]) == 2 and not api.delete_calls
                         assert await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
                         audit.verify()

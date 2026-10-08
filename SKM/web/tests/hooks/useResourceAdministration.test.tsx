@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiProblemError, type SecretReferenceRecord } from '../../src/api'
 import { useResourceAdministration } from '../../src/hooks/useResourceAdministration'
 import { RESOURCE_REQUEST_TIMEOUT_MS } from '../../src/hooks/useResourceRequest'
+import { LanguageProvider } from '../../src/i18n'
+import { MESSAGES } from '../../src/lib/i18n/messages'
 
 const api = vi.hoisted(() => ({
   loadSecretReferences: vi.fn(), loadIntegrations: vi.fn(), loadResourceBindings: vi.fn(),
@@ -43,6 +45,16 @@ afterEach(async () => {
 })
 
 describe('resource administration catalog facts', () => {
+  it('retranslates retained read failures without another resource request', async () => {
+    api.loadIntegrations.mockRejectedValueOnce(new ApiProblemError('Synthetic administrator denial', 403, 'administrator_required'))
+    await act(async () => root.render(<LanguageProvider language="en"><Harness /></LanguageProvider>))
+    expect(state.loadError).toBe(MESSAGES.en.account.failures.adminRequired)
+    await act(async () => root.render(<LanguageProvider language="ja"><Harness /></LanguageProvider>))
+    expect(state.loadError).toBe(MESSAGES.ja.account.failures.adminRequired)
+    expect(api.loadIntegrations).toHaveBeenCalledTimes(1)
+    expect(api.loadSecretReferences).toHaveBeenCalledTimes(1)
+  })
+
   it('does not turn initial pending or failed reads into a confirmed empty catalog, and retries read-only', async () => {
     const read = deferred<never[]>()
     api.loadIntegrations.mockReturnValueOnce(read.promise)

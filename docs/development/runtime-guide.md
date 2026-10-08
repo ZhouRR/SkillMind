@@ -23,8 +23,8 @@
 - 冻结精确版本、资源选择、文档 ID/hash 与绑定。新增文件、同名重传或配置变化不改变原 Run；缺失或损坏不能用当前文件补齐。物化与复用沿 [workspace_materializer](../../SKM/backend/src/skillmind/agent/workspace_materializer.py)和 [input_snapshot](../../SKM/backend/src/skillmind/runs/input_snapshot.py)，校验原回执及完整输入树；`input/` 只读，写入限 `workspace/`、`output/`。
 - 选择文档、读取正文、转换与保存成果是独立能力。按需准备仅冻结清单，后续工具核验原内容；文档观察不等于取得正文，MCP 服务的只读标注不等于授权。能力与 Provider 是否可用，以 [Worker 装配](../../SKM/backend/src/skillmind/worker/settings.py)及冻结 binding 为准。
 - 上传按原 actor/Project、幂等键和内容确认；数据库提交与对象 PUT 不原子。沿 [DocumentService](../../SKM/backend/src/skillmind/documents/service.py)保留预约、发布/关闭回执及原存储归属；关闭发布不证明 PUT 停止，未知不自动重传、删对象或退配额。
-- 改名/移动只改变展示路径，保留 ID、原字节、存储引用和原上传回执；清理时校验不变身份，不能要求当前路径仍等于上传路径。回收站仍占用存储；完全删除先检查回收状态、生成执行已结束、无未决操作及其他引用。[引用查询](../../SKM/backend/src/skillmind/documents/reference_repository.py)覆盖 Run、Schedule、occurrence，未知历史拒绝删除。
-- 画面的“更新文件”和上传时“更新同名文件”固定元 ID、路径与 checksum，在预约和发布时检查并发变化；新版本使用新 ID，旧版移入回收站并保留原字节、冻结引用和上传回执。知识库更新无需先删除历史引用，但旧版完全删除仍需引用检查；保留的旧版继续计入配额。
+- 改名/移动只改变展示路径，保留 ID、原字节、存储引用和原上传回执；清理时校验不变身份，不能要求当前路径仍等于上传路径。回收站仍占用存储；完全删除先检查回收状态、生成执行已结束、无未决操作及其他引用。[引用查询](../../SKM/backend/src/skillmind/documents/reference_repository.py)覆盖 Run、Schedule、occurrence，按原文档选择和冻结资源类型、连接身份提取引用，不验证非文档工具的名称或版本，也不查询当前连接配置。资源类型或身份缺失、文档快照无法验证时仍拒绝删除，不从旧工具名称推测类型。
+- 画面上传文件或目录时默认更新同目录同名文件，无需单独选择开关；“更新文件”菜单也沿用同一路径。更新固定元 ID、路径与 checksum，在预约和发布时检查并发变化；新版本使用新 ID，旧版移入回收站并保留原字节、冻结引用和上传回执。知识库更新无需先删除历史引用，但旧版完全删除仍需引用检查；保留的旧版继续计入配额。
 - 删除须在同一事务保存原对象清理要求，再在确认提交后尝试删 blob。204、目录消失或一次读不到对象都不证明全部版本、在途 PUT 和配额已结清；持久清理重试与结算仍待补齐。执行履历 purge 沿 [history_purge](../../SKM/backend/src/skillmind/runs/history_purge.py)，保留共享成果与最小删除审计，不删除外部业务数据或重做操作。
 
 Excel→Markdown 的 `.xlsx` 路径使用 `excel-styles/v2`：同一文档保留原行列、静态整格/局部删除线和任意填充色，重复样式按实际连续范围合并，以 Markdown 颜色定义与范围表展示，复杂条件格式保留紧凑结构；不重复列举无删除线的普通富文本。色值保留原 RGB/theme/indexed/tint 表示；无法解色不假定白色。条件格式与表格样式只标记范围和未求值状态，不据此自动排除业务步骤。合并区域记录 anchor 与范围，不展开复制正文。旧 `.xls` 仍为值转换，并在保存的 Markdown 明示未检查样式。转换 profile 写入 Evidence，原文件/冻结版本、Artifact 原字节校验及既有限制不变。
@@ -36,6 +36,8 @@ Excel→Markdown 的 `.xlsx` 路径使用 `excel-styles/v2`：同一文档保留
 覆盖保存采用原版本校验：先保存并核验新对象，发布事务再将旧文档移入回收站并切换正式目录。旧字节保留给冻结输入，成功回执证明原操作而非当前文件状态；并发改名、删除、替换和目录子集合变化均拒绝旧提案。确认冲突的更新会永久关闭原发布并释放逻辑路径占位，保留原对象、配额和审计；未知结果仍保持原占位，不借此重发。直接在 MinIO 改写内容会在原字节核验时被拒绝，但绕过平台的并行操作不享有平台事务隔离，不将其宣称为原子同步。
 
 文档转换优先使用 `response_mode=file` 与 `publish_artifact=true`：完整 Markdown 保存为本 Run Artifact 并复制到可读 workspace，响应仅含文件信息。`workspace.read/v1` 使用 `offset`、`max_chars` 和 `expected_hash` 分段读取，默认 64,000、单次上限 200,000 个 Unicode 字符，按 `next_offset` 继续；宽范围读取按上下文余量调整，定位查询可使用小页。Codex 的工具输出截断额度同步覆盖大页，实际内容仍受 Gateway/Run 输出预算管理。文件变化则拒绝混读。本地副本缺失或变化时，`artifact.materialize/v1` 从同 Run 的已验证原字节恢复，不重新转换或发布。文档库保存仍引用 Artifact，权限、审批和回读不变；旧 inline 调用继续兼容。
+
+文档移入回收站保留原 ID、对象字节、效果回执和冻结引用，原输入仍按 ID/hash 读取；历史引用或旧记录的解析失败不阻止可恢复的回收。完全删除仍检查历史、调度和回执引用。生成元仍在运行或有未核对操作时，成果回收继续拒绝；复原仍核对同名路径和待处理上传，不覆盖新文档。
 
 ## 资源文件与原生客户端
 

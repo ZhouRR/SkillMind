@@ -39,7 +39,10 @@ export function useResourceAdministration(projectId: string, deferredFeaturesEna
   const [revision, setRevision] = useState(0)
   const [taskRevision, setTaskRevision] = useState(0)
   const [loading, setLoading] = useState(Boolean(projectId))
-  const [loadError, setLoadError] = useState<string | null>(null)
+  // 原失敗を保持し、初回言語取得・言語切替でも読取を再送せず現在の catalog で表示する。
+  const [loadFailure, setLoadFailure] = useState<{ kind: 'timeout' } | { kind: 'request'; error: unknown } | null>(null)
+  const loadError = loadFailure?.kind === 'timeout' ? messages.resourcesAudit.readTimeout
+    : loadFailure ? apiErrorMessage(loadFailure.error, messages.resources.loadFailed, messages) : null
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [, setUnconfirmed] = useState(unconfirmedByProject.get(projectId) ?? null)
@@ -56,7 +59,7 @@ export function useResourceAdministration(projectId: string, deferredFeaturesEna
   useLayoutEffect(() => {
     mounted.current = true
     catalogReady.current = false; reviewedRef.current = false
-    setBusy(null); setError(null); setLoadError(null); setReviewed(false)
+    setBusy(null); setError(null); setLoadFailure(null); setReviewed(false)
     setUnconfirmed(unconfirmedByProject.get(projectId) ?? null)
     return () => {
       mounted.current = false
@@ -69,7 +72,7 @@ export function useResourceAdministration(projectId: string, deferredFeaturesEna
     if (!projectId) { setLoading(false); return }
     const controller = new AbortController()
     loadRequest.current = controller
-    setLoading(true); setLoadError(null); setReviewed(false)
+    setLoading(true); setLoadFailure(null); setReviewed(false)
     catalogReady.current = false; reviewedRef.current = false
     const operationAtStart = unconfirmedByProject.get(projectId)
     let settled = false
@@ -78,7 +81,7 @@ export function useResourceAdministration(projectId: string, deferredFeaturesEna
       && currentSession === session && loadRequest.current === controller && !controller.signal.aborted
     const expire = (): void => {
       if (!current()) return
-      settled = true; controller.abort(); setLoading(false); setLoadError(messages.resourcesAudit.readTimeout)
+      settled = true; controller.abort(); setLoading(false); setLoadFailure({ kind: 'timeout' })
     }
     const timer = window.setTimeout(expire, RESOURCE_REQUEST_TIMEOUT_MS)
     void Promise.all([
@@ -94,7 +97,7 @@ export function useResourceAdministration(projectId: string, deferredFeaturesEna
       reviewedRef.current = unconfirmedByProject.get(projectId) === operationAtStart
       setReviewed(reviewedRef.current)
     }).catch((caught: unknown) => {
-      if (current()) setLoadError(apiErrorMessage(caught, messages.resources.loadFailed, messages))
+      if (current()) setLoadFailure({ kind: 'request', error: caught })
     }).finally(() => {
       if (current()) { setLoading(false); settled = true }
       window.clearTimeout(timer)

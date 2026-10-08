@@ -10,7 +10,7 @@
 .sourcePreviewFile summary code { flex: 1 1 160px; }
 .sourceChevron { display: inline-block; font-size: 20px; line-height: 1; transform-origin: center; transition: transform .15s; }
 .sourcePreviewFile[open] > summary .sourceChevron { transform: rotate(90deg); }
-:is(.skillLibraryDescription, .skillUpload, .sourcePreviewHeader, .sourcePreviewOpaque, .savedSkillStatus, .interpretStreamHint, .interpretationSummary, .noteList, .sourceTraceList) { font-size: 14px; line-height: 1.7; }
+:is(.skillLibraryDescription, .skillUpload, .sourcePreviewHeader, .sourcePreviewOpaque, .savedSkillStatus, .interpretStreamHint, .interpretationSummary, .noteList, .sourceTraceList) { font-size: 14px; line-height: var(--line-height-body); }
 .skillImportantDiagnostics { margin-block: 16px; }
 .diagnosticSummary { font-weight: 600; }
 .diagnostics .diagnostic-error { background: var(--danger-soft); border-color: var(--danger-border); color: var(--danger); }
@@ -22,7 +22,6 @@
 .secondaryButton.fileUploadButton[aria-disabled='true']:hover { background: var(--surface-input); border-color: var(--border); }
 .documentManagementToolbar { padding-bottom: 12px; border-bottom: 1px solid var(--border); }
 .documentUpload.documentToolbar { align-items: end; padding-block: 12px; }
-.documentUpload .documentOverwriteOption { flex-basis: 100%; }
 .documentPreviewAvailability { display: block; margin-top: 2px; color: var(--text-muted); }
 .docFolder summary strong { white-space: normal; overflow-wrap: anywhere; overflow: visible; text-overflow: clip; }
 .docFolderCount { flex-shrink: 0; }
@@ -48,9 +47,7 @@
   .documentUpload .documentTargetFolder { flex-basis: 100%; }
   .documentUpload .fileUploadButton { flex: 1 1 160px; text-align: center; white-space: normal; }
   .docFolder .docFolder .docFolder .docFolderBody { padding-left: 0; }
-  .docFolder summary { flex-wrap: wrap; }
-  .docFolder summary strong { flex-basis: calc(100% - 90px); }
-  .docFolderCount { margin-left: var(--tree-marker); }
+  /* 名前だけを折り返し、checkbox・件数・操作は狭幅でも同じ行に残す。 */
   .markdownPreviewPagination { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); width: 100%; }
   .markdownPreviewPagination .previewPageStatus { grid-column: 1 / -1; grid-row: 1; }
   .markdownPreviewPagination .selectTrigger { width: 100%; grid-column: 1 / -1; grid-row: 2; }

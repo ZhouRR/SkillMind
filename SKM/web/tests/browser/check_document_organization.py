@@ -65,6 +65,22 @@ class OrganizationApi(ProjectsApi):
             await super().respond(route)
 
 
+async def selection_alignment(page) -> None:
+    """未選択・選択後とも、全選択の文字と件数、checkbox の実描画を縦中央へ揃える。"""
+    measured = await page.locator('.documentSelectionToolbar').evaluate('''el => {
+      const label = el.querySelector('label'), status = el.querySelector('[role="status"]');
+      const checkbox = label.querySelector('input').getBoundingClientRect();
+      const bounds = label.getBoundingClientRect();
+      const text = [...label.childNodes].find(n => n.nodeType === Node.TEXT_NODE && n.textContent.trim());
+      const labelRange = document.createRange(), statusRange = document.createRange();
+      labelRange.selectNodeContents(text); statusRange.selectNodeContents(status);
+      const a = labelRange.getBoundingClientRect(), b = statusRange.getBoundingClientRect();
+      return {textOffset: Math.abs(a.top + a.height / 2 - b.top - b.height / 2),
+        checkboxOffset: Math.abs(checkbox.top + checkbox.height / 2 - bounds.top - bounds.height / 2)};
+    }''')
+    assert measured['textOffset'] <= 1 and measured['checkboxOffset'] <= 1, measured
+
+
 async def directory_layout(page) -> None:
     """汎用 input 幅が目录名を押し出さず、checkbox と操作入口が行内に収まる。"""
     rows = await page.locator('.docFolder > summary').evaluate_all('''nodes => nodes.map(row => {
@@ -80,6 +96,13 @@ async def directory_layout(page) -> None:
         assert row['width'] == row['height'] == 16 and row['nameWidth'] > 0, row
         assert row['nameRight'] <= row['actionLeft'] + 1, row
         assert row['actionRight'] <= row['right'] + 1, row
+    label = page.locator('.documentSortLabel')
+    measured = await label.evaluate('''el => ({height:el.getBoundingClientRect().height,
+      line:parseFloat(getComputedStyle(el).lineHeight), wrapping:getComputedStyle(el).whiteSpace})''')
+    assert measured['wrapping'] == 'nowrap' and measured['height'] <= measured['line'] + 1, measured
+    assert all(float(width.removesuffix('px')) == 0 for width in
+        await page.locator('.docFolderBody').evaluate_all('nodes => nodes.map(el => getComputedStyle(el).borderTopWidth)'))
+    await selection_alignment(page)
 
 
 async def check(url: str, output: Path) -> None:
@@ -315,6 +338,7 @@ async def folder_selection(browser, url: str, output: Path, language: str, theme
         await specs.check()
         await expect(folder).to_have_attribute('open', '')
         await expect(page.locator('.documentItem input:checked')).to_have_count(3)
+        await selection_alignment(page)
         nested_summary = page.locator('.docFolder > summary').filter(has=page.locator('strong[title="specs/nested"]'))
         await nested_summary.locator('strong').click()
         first = page.locator('.documentItem').filter(has=page.get_by_role('button', name=f"{d['previewButton']}: overview.md", exact=True))
@@ -332,6 +356,15 @@ async def folder_selection(browser, url: str, output: Path, language: str, theme
         search = page.get_by_role('textbox', name=m['search'], exact=True)
         await search.fill('overview')
         await expect(page.locator('.documentItem')).to_have_count(1)
+        # 非空目录の回収入口は検索結果だけを確認へ渡し、取消しで文書を変更しない。
+        menu = await row_menu(page, page.locator('.docFolder > summary').filter(has=page.locator('strong[title="specs"]')))
+        await menu.get_by_role('menuitem', name=m['trashAction'], exact=True).click()
+        dialog = page.get_by_role('dialog')
+        await expect(dialog).to_contain_text('overview.md')
+        await expect(dialog).not_to_contain_text('second.md')
+        await expect(dialog).not_to_contain_text('archive.zip')
+        await dialog.get_by_role('button', name=catalog['elements']['cancel'], exact=True).click()
+        assert len(api.rows[PROJECT]) == 3
         await specs.check()
         await expect(page.locator('.documentItem input:checked')).to_have_count(1)
         await expect(specs).to_have_js_property('indeterminate', False)

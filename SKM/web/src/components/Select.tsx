@@ -111,11 +111,12 @@ export function Select({ children, value, defaultValue, onValueChange, disabled,
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const controlledRef = useRef(value !== undefined)
   const keyboardInteraction = useRef(false)
-  const tabFocusTarget = useRef<HTMLElement | null>(null)
+  const tabFocusTarget = useRef<HTMLElement | false | null>(null)
   const resetValueRef = useRef(initialValue.current)
   const [invalid, setInvalid] = useState(false)
   const [fieldsetDisabled, setFieldsetDisabled] = useState(false)
   const [open, setOpen] = useState(false)
+  const [navigation, setNavigation] = useState<'pointer' | 'keyboard'>('pointer')
   const effectiveDisabled = disabled || fieldsetDisabled
 
   // 短い候補に空の gutter を残さず、短画面で scroll する時だけ左右を揃える。
@@ -205,6 +206,8 @@ export function Select({ children, value, defaultValue, onValueChange, disabled,
           return
         }
         const normalizedValue = nextValue
+        // 同じ値の再選択では閉鎖を primitive に任せ、変更通知や再読込を重複させない。
+        if (normalizedValue === selectedValue) return
         setUncontrolledValue(normalizedValue)
         setInvalid(false)
         onValueChange?.(normalizedValue)
@@ -221,8 +224,13 @@ export function Select({ children, value, defaultValue, onValueChange, disabled,
         onKeyDownCapture={(event) => {
           // Base UI の閉じた trigger の typeahead は native event を通知に含めない。
           keyboardInteraction.current = true
+          setNavigation('keyboard')
           queueMicrotask(() => { keyboardInteraction.current = false })
           triggerProps.onKeyDownCapture?.(event)
+        }}
+        onPointerDownCapture={(event) => {
+          setNavigation('pointer')
+          triggerProps.onPointerDownCapture?.(event)
         }}
         aria-invalid={triggerProps['aria-invalid'] ?? (invalid && !selectedValue ? true : undefined)}>
         <SelectPrimitive.Value className="selectValue" />
@@ -233,15 +241,27 @@ export function Select({ children, value, defaultValue, onValueChange, disabled,
       <SelectPrimitive.Portal container={portalContainer ?? undefined}>
         <SelectPrimitive.Positioner className="selectPositioner" positionMethod="fixed"
           alignItemWithTrigger={false} sideOffset={6} collisionPadding={10} align="start">
-          <SelectPrimitive.Popup ref={setPopup} className="selectPopup" data-select-popup="" data-density={density} aria-labelledby={controlId}
-            finalFocus={() => tabFocusTarget.current ?? true}
+          <SelectPrimitive.Popup ref={setPopup} className="selectPopup" data-select-popup="" data-density={density} data-navigation={navigation} aria-labelledby={controlId}
+            finalFocus={() => {
+              if (tabFocusTarget.current !== null) return tabFocusTarget.current
+              // 親の導航・dialog が閉じた場合、所有者が移した焦点を隠れた trigger に戻さない。
+              if (!triggerRef.current || triggerRef.current.closest('[hidden]')) return false
+              return true
+            }}
+            onPointerMoveCapture={() => setNavigation('pointer')}
+            onPointerDownCapture={() => setNavigation('pointer')}
             onKeyDownCapture={(event) => {
-              if (event.key !== 'Tab' || !portalContainer || !triggerRef.current) return
-              // 外側 modal の Tab 順を保ち、portal 末尾から dialog 外へ漏れるのを防ぐ。
-              const controls = modalTabStops(portalContainer)
+              setNavigation('keyboard')
+              if (event.key !== 'Tab' || !triggerRef.current) return
+              // Portal の配置ではなく元 trigger の Tab 順を使い、modal の中だけ循環する。
+              const controls = modalTabStops(portalContainer ?? document.body)
               const index = controls.indexOf(triggerRef.current)
               if (index < 0 || controls.length === 0) return
-              tabFocusTarget.current = controls[(index + (event.shiftKey ? -1 : 1) + controls.length) % controls.length] ?? null
+              const next = index + (event.shiftKey ? -1 : 1)
+              const target = portalContainer ? (next + controls.length) % controls.length : next
+              tabFocusTarget.current = controls[target] ?? false
+              // 画面端では browser の Tab 移動を保ち、trigger に再度焦点を戻さない。
+              if (!tabFocusTarget.current) { setOpen(false); return }
               event.preventDefault()
               event.stopPropagation()
               setOpen(false)

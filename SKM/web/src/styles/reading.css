@@ -5,7 +5,7 @@
 .homeHeroBody { min-width: 0; }
 .homeEyebrow { color: var(--accent); font-size: 12px; font-weight: 650; letter-spacing: .06em; }
 .homeHero h2 { margin: 8px 0; color: var(--text-hi); font-size: clamp(26px, 2.4vw, 34px); font-weight: 750; line-height: 1.3; overflow-wrap: anywhere; }
-.homeHero p { max-width: 640px; margin: 0; color: var(--text-muted); font-size: 15px; line-height: 1.8; }
+.homeHero p { max-width: 640px; margin: 0; color: var(--text-muted); font-size: 15px; line-height: var(--line-height-reading); }
 .homeProjectKey { display: flex; align-items: center; gap: 8px; margin-top: 14px; color: var(--accent); font-size: 12px; }
 .homeProjectKey svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.5; }
 .homeProjectKey code { overflow-wrap: anywhere; }
@@ -190,15 +190,15 @@
 .artifactMarkdownPreview .readingMarkdown { max-width: 1280px; margin: 0 auto; }
 
 /* Markdown の表・長い code は自身でスクロールし、周囲の本文幅を広げない。 */
-.readingMarkdown { min-width: 0; color: var(--text); font: 400 15px/1.85 var(--font-body); overflow-wrap: anywhere; }
+.readingMarkdown { min-width: 0; color: var(--text); font: 400 15px/var(--line-height-reading) var(--font-body); overflow-wrap: anywhere; }
 .readingMarkdown > :first-child { margin-top: 0; }
 .readingMarkdown > :last-child { margin-bottom: 0; }
-.readingMarkdown p, .resultReportBody .readingMarkdown p { margin: 0 0 12px; color: inherit; font: inherit; }
+.readingMarkdown p, .resultReportBody .readingMarkdown p { margin: 0 0 10px; color: inherit; font: inherit; }
 .readingMarkdown :is(h4, h5, h6), .resultReportBody .readingMarkdown :is(h4, h5, h6) { display: block; margin: 20px 0 10px; color: var(--text-hi); font-size: 1.06em; font-weight: 650; line-height: 1.6; }
 .readingMarkdown > :is(h4, h5, h6):first-child { margin-top: 0; }
 .readingMarkdown strong, .resultReportBody .readingMarkdown strong { color: inherit; font-size: inherit; font-weight: 650; }
-.readingMarkdown :is(ul, ol) { margin: 8px 0 14px; padding-left: 1.6em; }
-.readingMarkdown li { margin: 4px 0; padding-left: 3px; }
+.readingMarkdown :is(ul, ol) { margin: 6px 0 12px; padding-left: 1.6em; }
+.readingMarkdown li { margin: 2px 0; padding-left: 3px; }
 .readingMarkdown li > p { margin-bottom: 4px; }
 .readingMarkdown code { border-radius: 4px; padding: 2px 5px; background: var(--surface-raised); color: var(--text-hi); font: .88em/1.7 var(--font-mono); }
 .readingMarkdown pre, .resultReportBody .readingMarkdown pre { max-width: 100%; max-height: 32rem; overflow: auto; border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; background: var(--surface-raised); color: var(--text); font: 13px/1.7 var(--font-mono); white-space: pre; }

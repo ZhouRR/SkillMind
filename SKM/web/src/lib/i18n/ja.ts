@@ -672,7 +672,6 @@ export const JA: UiMessages = {
   },
   documentsPanel: {
     updateFile: 'ファイルを更新',
-    replaceSameName: '同名ファイルを更新（旧版は保持）',
     targetFolder: 'アップロード先フォルダー',
     rootFolder: 'ルート（空欄）',
     uploadHere: 'このフォルダーへアップロード',
@@ -745,7 +744,7 @@ export const JA: UiMessages = {
       uploadClosed: 'Server は元アップロードの公開継続を拒否しました。停止受付記録を照合し、再送やデータ削除済みという推定をしないでください。',
       uploadPending: '元 upload は未確認です。後続 file を停止し、元 key で読取専用の照合を行ってください。',
       uploadKeyConflict: '元 upload key に対応する内容が一致しません。原要求を上書きせず、未知のまま照合してください。',
-      uploadConflict: '同名ファイルがあるか、選択した版が変更されています。一覧を更新し、更新機能で再度選択してください。',
+      uploadConflict: '保存先に競合があるか、ファイルが変更されています。一覧を更新し、もう一度アップロードしてください。',
       uploadNotFound: '今回は元 upload が見つかりませんでした。在途 POST が後から受理される可能性があるため、未知と書込制限を保持します。',
       uploadUnavailable: '原 upload 記録を検証できません。後で手動照合してください。元の結果は未知のままです。',
       uploadInvalidKey: '完全な元 upload UUID を入力してください。代替 key は自動生成しません。',

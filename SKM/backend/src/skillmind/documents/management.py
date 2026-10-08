@@ -90,7 +90,6 @@ class DocumentManagementRepository:
             for p in parents(path)
         }
         if action in {"TRASH", "RESTORE"}:
-            from skillmind.documents.reference_repository import DocumentReferenceRepository
             from skillmind.runs.history_deletion import require_restore_path
 
             for change in changes:
@@ -105,9 +104,8 @@ class DocumentManagementRepository:
                 ):
                     raise DocumentConflictError("Document path changed")
                 if action == "TRASH" and document.deleted_at is None:
-                    await DocumentReferenceRepository(self.session).require_unreferenced(
-                        project_id=project_id, document_id=document.id
-                    )
+                    # ゴミ箱への移動は ID/blob を残すため、凍結入力の原バイトを引き続き読める。
+                    # 履歴参照の制約は完全削除に適用し、稼働中・結果未確定の生成元は保護する。
                     await require_output_finished(self.session, document)
                     document.deleted_at = datetime.now(UTC)
                     document.deleted_by = actor_id

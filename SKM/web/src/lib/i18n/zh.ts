@@ -693,7 +693,6 @@ export const ZH: UiMessages = {
   },
   documentsPanel: {
     updateFile: '更新文件',
-    replaceSameName: '更新同名文件（保留旧版）',
     targetFolder: '上传目标目录',
     rootFolder: '根目录（留空）',
     uploadHere: '上传到此目录',
@@ -766,7 +765,7 @@ export const ZH: UiMessages = {
       uploadClosed: '服务端拒绝此原上传继续发布；请核对原关闭回执，不要重传或据此推断字节已清理。',
       uploadPending: '原上传仍待确认。已暂停后续文件，请用原键只读查询，不重发上传。',
       uploadKeyConflict: '原上传键对应的内容不一致，不能覆盖原请求；保持未知并核对原记录。',
-      uploadConflict: '同名文件已存在，或所选版本已变化。请刷新列表，再通过更新功能重新选择。',
+      uploadConflict: '保存路径存在冲突，或文件已被修改。请刷新列表后重新上传。',
       uploadNotFound: '本次尚未查到原上传；在途 POST 仍可能稍后受理，因此保留未知，不开放新写入。',
       uploadUnavailable: '原上传记录暂时无法核验，请稍后人工查询；原结果仍保持未知。',
       uploadInvalidKey: '请输入完整有效的原上传 UUID；不会自动生成替代键。',

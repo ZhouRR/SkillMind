@@ -6,7 +6,7 @@ import asyncio
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -76,6 +76,18 @@ def referenced_run(
         },
     )
     return stored_creation(command)
+
+
+def integration_source(
+    integration_id: UUID, *, provider: str = "mcp", capability: str = "mcp.download/v1",
+    kind: str = "other", default: bool = False,
+) -> dict[str, object]:
+    """参照判定に必要な現行の凍結種類・接続 ID・選択根拠を持つ source を作る。"""
+    return {
+        "provider": provider, "capability": capability, "resource_kind": kind,
+        "candidate_key": f"integration:{integration_id}", "integration_id": str(integration_id),
+        "source_binding_id": str(uuid4()) if default else None,
+    }
 
 
 async def test_unreferenced_delete_commits_then_deletes_only_original_blob() -> None:
@@ -175,15 +187,17 @@ async def test_valid_run_without_selected_optional_documents_does_not_pin_assets
     "provider,capability", [
         ("mcp", "mcp.read/v1"), ("mcp", "mcp.tools/v1"),
         ("mcp", "mcp.query/v1"), ("mcp", "mcp.call/v1"),
+        ("mcp", "mcp.download/v1"), ("mcp", "mcp.future_operation/v99"),
         ("postgres", "database.query/v1"), ("postgres", "database.execute/v1"),
         ("http", "http.read/v1"), ("http", "http.write/v1"),
+        ("http", "http.future_request/v99"), ("new-provider", "custom.operation/v42"),
     ]
 )
 @pytest.mark.parametrize("referenced", [False, True])
 async def test_non_document_resources_preserve_exact_document_references(
     provider: str, capability: str, referenced: bool
 ) -> None:
-    """現行の外部 source 契約を認識し、無関係な文書だけ削除を許可する。"""
+    """Tool の追加や version 変更で文書参照を失わず、無関係な文書だけ削除を許可する。"""
 
     db = DeletionDatabase()
     token = f"document:{db.document.id}"
@@ -197,7 +211,7 @@ async def test_non_document_resources_preserve_exact_document_references(
         creation_command(intent),
         selected_sources_json={
             "docs": document_source,
-            "runner": {"provider": provider, "capability": capability},
+            "runner": integration_source(integration_id, provider=provider, capability=capability),
         },
     )
     db.runs.append(stored_creation(command))
@@ -211,8 +225,8 @@ async def test_non_document_resources_preserve_exact_document_references(
         db.storage.delete.assert_awaited_once()
 
 
-async def test_unknown_mcp_source_contract_still_blocks_document_deletion() -> None:
-    """未知の version を同じ MCP 接頭辞だけで無参照に分類しない。"""
+async def test_missing_resource_type_and_identity_still_blocks_document_deletion() -> None:
+    """Tool の名前だけでは文書以外の資源と推定しない。"""
 
     db = DeletionDatabase()
     intent = replace(creation_intent(), project_id=db.project.id)
@@ -230,8 +244,8 @@ async def test_unknown_mcp_source_contract_still_blocks_document_deletion() -> N
     ("http", "database.query/v1"), ("postgres", "http.read/v1"),
     ("postgres", "database.query/v2"), ("http", "http.read/v99"),
 ])
-async def test_unverifiable_native_source_still_protects_documents(provider, capability):
-    """非文書に見える名前だけで、未知契約や provider 不整合の保護を外さない。"""
+async def test_tool_metadata_alone_cannot_establish_a_non_document_source(provider, capability):
+    """種類と接続 identity がない履歴は、Provider/Tool 名から補完しない。"""
     db = DeletionDatabase()
     intent = replace(creation_intent(), project_id=db.project.id)
     db.runs.append(stored_creation(replace(
@@ -241,6 +255,72 @@ async def test_unverifiable_native_source_still_protects_documents(provider, cap
     with pytest.raises(DocumentReferencesUnavailableError):
         await db.remove_document()
     db.storage.delete.assert_not_called()
+
+
+@pytest.mark.parametrize("kind", ["issue", "repository", "file", "knowledge", "other"])
+@pytest.mark.parametrize("default", [False, True])
+async def test_integration_resource_identity_is_checked_without_live_provider(kind, default):
+    """種類・原選択/default だけで判定し、現在の接続や Tool catalog は照会しない。"""
+    db = DeletionDatabase()
+    identity = uuid4()
+    sources = {} if default else {"resource": f"integration:{identity}"}
+    intent = replace(creation_intent(sources=sources), project_id=db.project.id)
+    db.runs.append(stored_creation(replace(
+        creation_command(intent), selected_sources_json={
+            "resource": integration_source(identity, kind=kind, default=default),
+        },
+    )))
+    await db.remove_document()
+    db.storage.delete.assert_awaited_once()
+
+
+@pytest.mark.parametrize("broken", [
+    "kind_missing", "kind_unknown", "kind_invalid", "kind_document", "provider_missing",
+    "candidate_missing", "candidate_invalid", "candidate_other", "identity_missing",
+    "identity_invalid", "identity_other", "identity_nil", "snapshot", "library",
+    "default_missing", "default_invalid", "default_nil",
+])
+async def test_ambiguous_resource_identity_cannot_hide_a_document_reference(broken):
+    """文書の偽装、原選択との不一致、default の欠損は削除成功として扱わない。"""
+    db = DeletionDatabase()
+    identity = uuid4()
+    default = broken.startswith("default_")
+    sources = {} if default else {"resource": f"integration:{identity}"}
+    source = integration_source(identity, default=default)
+    field, _, change = broken.partition("_")
+    field = {"kind": "resource_kind", "candidate": "candidate_key",
+             "identity": "integration_id", "default": "source_binding_id"}.get(field, field)
+    if change == "missing":
+        source.pop(field)
+    elif change == "other":
+        source[field] = f"integration:{uuid4()}" if field == "candidate_key" else str(uuid4())
+    elif change == "nil":
+        source[field] = str(UUID(int=0))
+    elif change == "document":
+        source[field] = "document"
+    elif change == "unknown":
+        source[field] = "unknown-kind"
+    elif change == "invalid":
+        source[field] = 42
+    elif broken == "snapshot":
+        source["document_snapshot"] = {}
+    elif broken == "library":
+        source["provider"] = "project-library"
+    intent = replace(creation_intent(sources=sources), project_id=db.project.id)
+    db.runs.append(stored_creation(replace(
+        creation_command(intent), selected_sources_json={"resource": source},
+    )))
+    with pytest.raises(DocumentReferencesUnavailableError):
+        await db.remove_document()
+    db.storage.delete.assert_not_called()
+
+
+def test_document_reference_members_do_not_depend_on_the_tool_name():
+    """文書の Tool 名変更で原文書の参照保護を失わない。"""
+    db = DeletionDatabase()
+    row = referenced_run(db)
+    row.selected_sources_json["docs"]["capability"] = "document.future_read/v42"
+    assert run_document_ids(row) == frozenset({db.document.id})
 
 
 @pytest.mark.parametrize(

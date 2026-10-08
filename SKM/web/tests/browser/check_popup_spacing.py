@@ -191,7 +191,8 @@ async def check(url: str, output: Path, browser_names: list[str], executable: st
                             async def only_fixture(route: Route) -> None:
                                 """同一 origin の静的資源だけを許可し、API と外部通信は拒否する。"""
                                 destination = urlsplit(route.request.url)
-                                if (destination.scheme, destination.netloc) != (origin.scheme, origin.netloc) or '/api/' in destination.path:
+                                api_prefix = origin.path.split('/tests/browser/', 1)[0] + '/api/'
+                                if (destination.scheme, destination.netloc) != (origin.scheme, origin.netloc) or destination.path.startswith(api_prefix):
                                     blocked.append(route.request.url)
                                     await route.abort()
                                 else:

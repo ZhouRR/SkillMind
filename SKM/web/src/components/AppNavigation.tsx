@@ -68,6 +68,7 @@ export function AppNavigation({ currentRoute, metaState, projectId, projectState
   const menuToggle = useRef<HTMLButtonElement>(null)
   const menuPanel = useRef<HTMLDivElement>(null)
   const restoreNavFocus = useRef(false)
+  const restoreMenuFocus = useRef(false)
   const lastFocused = useRef<Element | null>(null)
   sessionEnded.current = onSessionEnded
 
@@ -81,9 +82,16 @@ export function AppNavigation({ currentRoute, metaState, projectId, projectState
   /** 披露を閉じた後も、隠れた control へ keyboard focus を残さない。 */
   function closeMenu(): void {
     if (!compact) return
+    restoreMenuFocus.current = true
     setMenuOpen(false)
-    menuToggle.current?.focus()
   }
+
+  useLayoutEffect(() => {
+    // Select の選択処理と hidden の反映が終わってから、閉じた披露の焦点を返す。
+    if (!compact || menuOpen || !restoreMenuFocus.current) return
+    restoreMenuFocus.current = false
+    menuToggle.current?.focus()
+  }, [compact, menuOpen])
 
   useLayoutEffect(() => {
     const query = window.matchMedia(COMPACT_NAV_QUERY)
@@ -131,8 +139,7 @@ export function AppNavigation({ currentRoute, metaState, projectId, projectState
     function handleEscape(event: KeyboardEvent): void {
       if (event.key !== 'Escape' || event.defaultPrevented || isOpenSelectPicker(event.target)) return
       event.preventDefault()
-      setMenuOpen(false)
-      menuToggle.current?.focus()
+      closeMenu()
     }
     window.addEventListener('keydown', handleEscape)
     return () => window.removeEventListener('keydown', handleEscape)

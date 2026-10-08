@@ -8,7 +8,8 @@ input[type='number'].shortNumberControl { width: min(100%, 10rem); min-width: 0;
   flex: 0 1 12rem;
   width: min(100%, 12rem);
 }
-.documentSort.shortField { min-width: 0; max-width: 100%; white-space: normal; }
+.documentSort.shortField { flex: 0 0 auto; min-width: 0; max-width: 100%; white-space: nowrap; }
+.documentSortLabel { flex-shrink: 0; white-space: nowrap; }
 .documentManagementToolbar .documentSort button.selectTrigger.shortControl { width: min(100%, 9rem); min-width: 0; }
 
 /* 点数と曜日だけを狭くし、長い評価文・時刻の表示領域を圧縮しない。 */

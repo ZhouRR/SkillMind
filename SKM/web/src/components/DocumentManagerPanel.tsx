@@ -112,7 +112,6 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
   const confirmPending = useRef(false)
   const [confirming, setConfirming] = useState(false)
   const [targetFolder, setTargetFolder] = useState('')
-  const [replaceSameName, setReplaceSameName] = useState(false)
   const replacementInput = useRef<HTMLInputElement | null>(null)
   const replacementTarget = useRef<ProjectDocumentRecord | null>(null)
   const [trashed, setTrashed] = useState(false)
@@ -302,6 +301,8 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
       return next
     }),
     folderDelete: trashed ? undefined : (path) => { void performManagement({ action: 'DELETE_FOLDER', source: path }) },
+    // 確認には現在の検索範囲の原 ID だけを渡し、非表示の文書へ選択を拡大しない。
+    folderRecycle: (path) => { void recycle(visible.filter((d) => d.folder === path || d.folder.startsWith(`${path}/`)), trashed) },
     purge: trashed ? (document) => { void purge([document]) } : undefined,
     trashed }
   return (
@@ -315,7 +316,7 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
         <button type="button" className="secondaryButton" disabled={browsingBlocked} aria-pressed={!trashed} onClick={() => { setTrashed(false); setSelectedIds(new Set()) }}>{messages.fileManagement.active}</button>
         <button type="button" className="secondaryButton" disabled={browsingBlocked} aria-pressed={trashed} onClick={() => { setTrashed(true); setSelectedIds(new Set()) }}>{messages.fileManagement.trash}</button>
         <input aria-label={messages.fileManagement.search} placeholder={messages.fileManagement.search} value={search} onChange={(e) => { setSearch(e.target.value); setSelectedIds(new Set()) }} />
-        <label className="documentSort shortField">{messages.fileManagement.sort}<Select className="shortControl shortControlNarrow" density="compact" aria-label={messages.fileManagement.sort} value={sort} onValueChange={(nextValue) => setSort(nextValue)}><option value="name">{messages.fileManagement.byName}</option><option value="date">{messages.fileManagement.byDate}</option><option value="size">{messages.fileManagement.bySize}</option></Select></label>
+        <label className="documentSort shortField"><span className="documentSortLabel">{messages.fileManagement.sort}</span><Select className="shortControl shortControlNarrow" density="compact" aria-label={messages.fileManagement.sort} value={sort} onValueChange={(nextValue) => setSort(nextValue)}><option value="name">{messages.fileManagement.byName}</option><option value="date">{messages.fileManagement.byDate}</option><option value="size">{messages.fileManagement.bySize}</option></Select></label>
         {!trashed && <button className="secondaryButton" type="button" disabled={blocked} onClick={() => setEdit({ mode: 'CREATE_FOLDER', documents: [], folder: targetFolder ? targetFolder + '/' : '' })}>{messages.fileManagement.newFolder}</button>}
         <button type="button" className="secondaryButton" onClick={refresh} disabled={list.pending}>
           {messages.documentsPanel.refresh}
@@ -336,7 +337,7 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
             onChange={(event) => {
               const selected = event.currentTarget.files ? Array.from(event.currentTarget.files) : []
               event.currentTarget.value = ''
-              upload.start(selected, targetFolder, replaceSameName ? documents : [])
+              upload.start(selected, targetFolder, documents)
             }}
           />
         </label>
@@ -351,12 +352,10 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
             onChange={(event) => {
               const selected = event.currentTarget.files ? Array.from(event.currentTarget.files) : []
               event.currentTarget.value = ''
-              upload.start(selected, targetFolder, replaceSameName ? documents : [])
+              upload.start(selected, targetFolder, documents)
             }}
           />
         </label>
-        <label className="documentOverwriteOption"><input type="checkbox" checked={replaceSameName} disabled={blocked}
-          onChange={(event) => setReplaceSameName(event.target.checked)} />{messages.documentsPanel.replaceSameName}</label>
         <input ref={replacementInput} type="file" hidden disabled={blocked} aria-label={messages.documentsPanel.updateFile}
           onChange={(event) => {
             const file = event.currentTarget.files?.[0]
@@ -476,6 +475,7 @@ interface DocumentTreeSelection {
   replace?: (document: ProjectDocumentRecord) => void
   folderEdit?: (path: string) => void
   folderDelete?: (path: string) => void
+  folderRecycle?: (path: string) => void
   folderSelect?: (path: string, checked: boolean) => void
   purge?: (document: ProjectDocumentRecord) => void
   trashed?: boolean
@@ -542,6 +542,10 @@ function FolderNode({ folder, projectId, busyId, onDelete, onPreview, selection,
     disabled: selection.disabled, onSelect: () => selection.onFolder(folder.path) })
   if (selection?.folderEdit) actions.push({ id: 'organize', label: `${messages.fileManagement.rename} / ${messages.fileManagement.move}`,
     disabled: selection.disabled, onSelect: () => selection.folderEdit?.(folder.path) })
+  if (total > 0 && selection?.folderRecycle) actions.push({ id: 'recycle',
+    label: selection.trashed ? messages.fileManagement.restore : messages.fileManagement.trashAction,
+    disabled: selection.disabled, danger: !selection.trashed, separatorBefore: true,
+    onSelect: () => selection.folderRecycle?.(folder.path) })
   if (total === 0 && selection?.folderDelete) actions.push({ id: 'delete', label: messages.fileManagement.emptyFolder,
     disabled: selection.disabled, danger: true, separatorBefore: true, onSelect: () => selection.folderDelete?.(folder.path) })
   return (
