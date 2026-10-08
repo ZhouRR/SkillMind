@@ -22,6 +22,8 @@
   box-sizing: border-box;
   overflow: auto;
   overscroll-behavior: contain;
+  /* 短い viewport で scroll しても操作行を片側へ寄せない。 */
+  scrollbar-gutter: stable both-edges;
   padding: 5px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-small);

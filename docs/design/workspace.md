@@ -19,6 +19,8 @@
 
 文書の upload 先は自由入力できる `DocumentFolderInput` を使い、native datalist ではなく Base UI Autocomplete の候補を表示する。既存の階層パスと root を選べ、新規パスは候補にない状態でも保持する。Escape/候補の非同期更新は入力先を変更せず、upload 中などの無効化時は候補を閉じる。
 
+Popup と有界の候補・操作一覧は classic scrollbar の予約領域を両側に揃え、項目の左右余白を対称に保つ。Select の checkmark は未選択行にも不可視の領域を確保し、選択切替で本文の幅を変えない。ページ内で伸びる一覧や短い dialog には空の scrollbar 領域を予約せず、dialog 本文は見出しの左端と揃える。
+
 PC 1440×900 为主，兼顾 1366×768、1920×1080、三语及双主题；390px 窄屏保留可操作性。实际颜色、字号和间距以共享样式为准，不在文档复制 CSS 数值。
 
 ## 导航与任务

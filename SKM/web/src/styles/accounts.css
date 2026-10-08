@@ -30,9 +30,9 @@
 .accountPager .inlineActions { display: flex; flex-wrap: wrap; gap: 8px; }
 .accountUserList, .accountEventList { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 /* 一頁の全件を残しつつ、作成・編集入口が長い履歴の下へ埋もれることを防ぐ。 */
-.accountUserList, .accountEventList { overflow: auto; scrollbar-gutter: stable; padding-inline-end: 4px; }
 .accountUserList { max-height: none; }
-.accountEventList { max-height: min(45vh, 320px); }
+/* ページ内で伸びる user 一覧に空の scrollbar を予約しない。有界の履歴だけ両側を揃える。 */
+.accountEventList { max-height: min(45vh, 320px); overflow: auto; scrollbar-gutter: stable both-edges; padding-inline: 4px; }
 .accountUserList:focus-visible, .accountEventList:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .accountUserCard, .accountEventList > li { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-small); padding: 12px; overflow-wrap: anywhere; }
 .accountUserCard { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }

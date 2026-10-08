@@ -33,6 +33,8 @@ export default defineConfig(({ mode }) => {
     // DOM を必要としない API contract test は軽量な Node 環境で実行する。
     test: {
       environment: 'node',
+      // CSS 契約 test だけに実 CSS 文字列を渡す。通常の style import は従来どおり stub。
+      css: { include: [/\.css\?raw$/] },
       include: ['tests/**/*.test.{ts,tsx}'],
     },
   }

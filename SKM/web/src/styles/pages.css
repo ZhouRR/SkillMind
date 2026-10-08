@@ -466,7 +466,6 @@
 .documentFolderTrigger { position: absolute; inset-block: 0; inset-inline-end: 0; width: 40px; display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: var(--text-muted); }
 .documentFolderTrigger .selectIcon { margin: 0; }
 .documentFolderTrigger[data-popup-open] .selectIcon { transform: rotate(180deg); }
-.documentFolderPopup { padding: 6px; }
 .documentToolbar { align-items: end; }
 .documentSelectionToolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-height: 34px; margin: 16px 0; font-size: 13px; }
 /* フォーム label の下余白を持ち込まず、選択数と操作ボタンの中央を揃える。 */
