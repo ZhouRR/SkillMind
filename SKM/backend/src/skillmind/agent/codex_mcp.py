@@ -20,6 +20,7 @@ from starlette.responses import Response
 from starlette.types import Receive, Scope, Send
 
 from skillmind.agent.domain import AgentEventType, RunContext
+from skillmind.agent.effect_receipt_delivery import deliver_receipt
 from skillmind.agent.tool_gateway import RunToolRuntime
 from skillmind.agent.tool_policy import ToolExecutionPolicy
 from skillmind.effects.inline import inline_success
@@ -160,6 +161,10 @@ class CodexToolBridge:
                     if inline is not None:
                         inline_proposal_id = str(inline.proposal_id)
                         if inline.receipt is not None:
+                            response = inline_success(inline.receipt)
+                            response["effect_result"] = await deliver_receipt(
+                                self.context, inline.receipt,
+                            )
                             # 事実は DB に確定済み。Engine が順序を採番して通常 event を配送する。
                             await self.events.put((AgentEventType.EFFECT_APPLIED, {
                                 "proposal_id": inline_proposal_id,
@@ -173,7 +178,7 @@ class CodexToolBridge:
                                     TextContent(
                                         type="text",
                                         text=json.dumps(
-                                            inline_success(inline.receipt), ensure_ascii=False
+                                            response, ensure_ascii=False
                                         ),
                                     )
                                 ]

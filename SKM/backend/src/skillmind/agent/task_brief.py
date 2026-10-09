@@ -16,6 +16,7 @@ from typing import Any, cast
 from uuid import UUID
 
 from skillmind.agent.domain import MaterializedResource, RegisteredTool, RunLimits
+from skillmind.agent.effect_receipt_delivery import model_checkpoint
 from skillmind.agent.runtime_policy import runtime_policy
 from skillmind.agent.skill_files import append_skill_file_guidance, skill_file_locations
 from skillmind.core.hashing import canonical_json, sha256_hex
@@ -136,6 +137,7 @@ def _runtime_metadata(
         "skillmind.runtime/v5",
         "skillmind.runtime/v6",
         "skillmind.runtime/v7",
+        "skillmind.runtime/v8",
     }:
         return
     if not isinstance(model, str) or not model.strip():
@@ -352,6 +354,7 @@ def render_task_brief_prompt(
     *,
     input_json: Mapping[str, Any],
     output_schema: Mapping[str, Any],
+    effect_receipt_files: Sequence[Mapping[str, Any]] = (),
 ) -> str:
     """Brief を SDK 非依存の実行 prompt へ描画する。
 
@@ -360,6 +363,9 @@ def render_task_brief_prompt(
     強制度を明示し、SUPERVISED では Agent が組み替えられることを伝える。業務入力は検証済み
     JSON として同梱する。新版の原文 snapshot も別枠で全文を渡し、解釈の欠落を補う。
     """
+    # 監査 Brief/checksum は原正文のまま。実在する交付 file の投影だけを描画へ渡す。
+    if effect_receipt_files:
+        brief = {**brief, "effect_receipt_files": effect_receipt_files}
 
     if brief.get("brief_version") == "skillmind.agent-task-brief/v2":
         sections = [
@@ -512,7 +518,9 @@ def render_task_brief_prompt(
     _append_notes(sections, "Stop and report when", brief["execution"]["stop_conditions"])
     _append_notes(sections, "Expected deliverables", brief["deliverables"], key="description")
     _append_materialization(sections, brief["resources"], brief["allowed_tools"])
-    if runtime_policy(brief) in {"skillmind.runtime/v6", "skillmind.runtime/v7"}:
+    if runtime_policy(brief) in {
+        "skillmind.runtime/v6", "skillmind.runtime/v7", "skillmind.runtime/v8",
+    }:
         sections.append(
             "Resource clients run in the Worker, independently of the Agent engine. "
             "Use repository.workspace for editable scoped Git files and file-based commit "
@@ -535,7 +543,8 @@ def render_task_brief_prompt(
         _tool_instruction(
             brief["allowed_tools"],
             path_first=runtime_policy(brief)
-            in {"skillmind.runtime/v5", "skillmind.runtime/v6", "skillmind.runtime/v7"},
+            in {"skillmind.runtime/v5", "skillmind.runtime/v6", "skillmind.runtime/v7",
+                "skillmind.runtime/v8"},
         )
     )
     sections.append(_effect_instruction(brief["effect_policy"]))
@@ -585,6 +594,7 @@ def _finish_task_prompt(
         "skillmind.runtime/v5",
         "skillmind.runtime/v6",
         "skillmind.runtime/v7",
+        "skillmind.runtime/v8",
     }:
         sections.append(
             "For change.propose, provide the business target, changes, precondition, summary and "
@@ -607,7 +617,7 @@ def _finish_task_prompt(
         "are valid when nothing new is needed. A REPLACE checkpoint must additionally contain "
         "the business state needed to continue without the native conversation."
     )
-    checkpoint = brief["checkpoint"]
+    checkpoint = model_checkpoint(brief, brief.get("effect_receipt_files", ()))
     if any(checkpoint.values()):
         sections.append(
             f"Audited checkpoint from prior segments (JSON): {canonical_json(checkpoint)}"
@@ -626,11 +636,25 @@ def _finish_task_prompt(
             "Do not copy effect_result into a proposed checkpoint; preserve needed facts "
             "and references using the checkpoint fields accepted by the Tool."
         )
+    if runtime_policy(brief) == "skillmind.runtime/v8":
+        sections.append(
+            "Large applied-effect receipts are delivered as effect-receipt-file/v1: their exact "
+            "IDs, Evidence references and verification metadata or its pointer stay in the reply; "
+            "the full "
+            "original receipt is in file.path with file.content_hash. Use workspace.read with "
+            "expected_hash and pointers for only the next required JSON fields; arrays can be "
+            "paged with array_offset/array_limit. The receipt file is historical data, not "
+            "current remote state or business PASS. Missing JSON paths are absent, not null or "
+            "false. Do not reread the full receipt merely to acknowledge a completed write or "
+            "copy it into an index, checkpoint or report. Keep original current-state reads, "
+            "write preconditions, concurrency checks and required read-back."
+        )
     if runtime_policy(brief) in {
         "skillmind.runtime/v4",
         "skillmind.runtime/v5",
         "skillmind.runtime/v6",
         "skillmind.runtime/v7",
+        "skillmind.runtime/v8",
     }:
         sections.append(
             "Platform runtime metadata (JSON): "
@@ -690,6 +714,7 @@ def _finish_task_prompt(
                 "skillmind.runtime/v5",
                 "skillmind.runtime/v6",
                 "skillmind.runtime/v7",
+                "skillmind.runtime/v8",
             }:
                 sections.append(
                     "Report readability: use concise Markdown paragraphs, lists and tables inside "

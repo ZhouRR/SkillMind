@@ -914,7 +914,8 @@
         "skillmind.runtime/v4",
         "skillmind.runtime/v5",
         "skillmind.runtime/v6",
-        "skillmind.runtime/v7"
+        "skillmind.runtime/v7",
+        "skillmind.runtime/v8"
       ]
     },
     "runtime_metadata": {

@@ -631,6 +631,12 @@ def _workspace_tool_definitions(contracts: ContractStore) -> tuple[ToolDefinitio
                 "Follow next_offset until null for complete coverage. Offsets count Unicode "
                 "characters, not bytes. Line ranges are an alternative. Never infer full "
                 "coverage from a truncated response or search matches alone."
+                " For JSON files, supply pointers (RFC 6901) with expected_hash to read only "
+                "required values. Missing paths return exists=false; null and false are present "
+                "values. Selected arrays use array_offset/array_limit (default 20, maximum 200) "
+                "and each selection's next_offset. Do not mix JSON pointers with text paging. "
+                "Maximum JSON source 16 MiB and selected values 64 KiB; narrow pointers or pages "
+                "when too large. Receipt file hashes identify the complete original bytes."
             ),
             providers={"workspace": WorkspaceReadProvider()},
             unbound_provider="workspace",

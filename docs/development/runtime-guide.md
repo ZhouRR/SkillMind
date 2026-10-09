@@ -43,6 +43,8 @@ Excel→Markdown 的 `.xlsx` 路径使用 `excel-styles/v2`：同一文档保留
 
 网络访问由 Worker 内的共享客户端执行，与 Codex/Claude 等引擎无关；平台仍核验绑定、权限和操作回执，不把凭据交给模型或开放任意 Shell。请求文件使用 `request_file` + `expected_hash`，完整响应保存到 `workspace/resources/`；Agent 按路径读取所需部分。`change.propose` 可直接提交已准备的 JSON 文件，批准绑定其实际内容，文件发生变化则拒绝。
 
+超过 8 KiB 的已确认 Effect 回执优先交付为本 Run 的文件引用，短回执直接返回。数据库与审计 Brief 保留完整原值，模型获得原操作状态、Evidence、验证信息及文件 hash；即时返回、续行和恢复使用相同投影，同一回执不重复出现在最新结果和累计列表中。本地副本缺失时从已保存的原回执重建；缺少读权限/工具或文件保存失败时交付完整原值，不改变已完成的业务结果，也不重放外部操作。文件引用仅证明那次操作，不证明当前外部状态或业务 PASS。
+
 - Git：`repository.workspace/v1` 将授权 UTF-8 文件放到可编辑目录；`prepare_commit` 按本地文件哈希准备提案，不要求模型重新输出正文。提交仍检查分支、路径、原 revision 和回读；本地编辑不会自动推送。
 - MCP：使用发现并冻结的原生参数 Schema；读调用支持文件输入/输出，修改调用仍经原 Effect、批准和原操作 ID。文件方式不改变工具权限或桌面占用规则。
 - PostgreSQL：新连接使用 `database.query/v1` 和 `database.execute/v1`，表／列权限由原数据库账号决定，不再维护平台表／列 DSL。支持单条 SELECT 与批准的 INSERT/UPDATE/DELETE、JOIN/CTE 和 `$1` 参数；不开放 DDL、事务控制或多语句。JSON 日期／时间字符串按 PostgreSQL 确认的参数类型在同一事务内转换，保留数据库时区语义，普通文本不自动转为日期。写入、必要回读与既有 `skillmind_effects.execution_receipts` 在同一事务提交；未知结果只核对原回执，不重发 SQL。
@@ -54,6 +56,8 @@ Excel→Markdown 的 `.xlsx` 路径使用 `excel-styles/v2`：同一文档保留
 ## 画像の読取
 
 `mcp.download/v1` は、同 Run・同 binding の成功済み MCP query の Evidence と原応答の JSON Pointer から取得先を解決する。登録資格は同一 origin の GET だけへ送り、redirect・任意 URL・別接続の参照を許可しない。権限は I/O 前後で確認し、完全な byte/hash を Run file に保存する。MCP 接続の読取権で有効にし、既存 Run の凍結権限へ後付けしない。既存 HTTP 読取も登録済みの path/method 範囲で画像を取得できる。
+
+`workspace.read/v1` 的 JSON 模式使用 `pointers` 与 `expected_hash`，按 RFC 6901 取得指定字段；缺失字段通过 `exists: false` 明示，区别于存在的 null/false。选中数组默认每页 20 项、最大 200 项，用各项的 `next_offset` 继续；JSON 来源最多 16 MiB，选择结果最多 64 KiB，超限须缩小字段或页，不截断值冒充完整结果。返回 hash 始终对应完整源文件，路径、封存输入、权限和符号链接检查与普通读取相同。
 
 `workspace.image/v1` は、許可された Run の input/workspace/output path と原 hash を照合し、PNG/JPEG/WebP の実体を検証してから MCP image content を両 Engine へ渡す。上限は 8 MiB・2,500 万画素、単一 frame。封存 input・symlink 拒否・既存の出力予算を維持し、通常の ToolCall/Evidence は短い metadata/hash を保存する。ファイル path や Base64 text の返却だけを閲覧済みとしない。SDK builtin の `view_image` は引き続き禁止し、モデルは登録された画像 Tool を使用する。
 

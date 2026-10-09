@@ -26,9 +26,11 @@ from skillmind.agent.tool_gateway import (
     RunToolContext,
     ToolProviderError,
 )
+from skillmind.agent.workspace_json import MAX_JSON_BYTES, select_json
 from skillmind.artifacts.domain import MAX_ARTIFACT_BYTES, ArtifactDraft
-from skillmind.core.hashing import sha256_hex
+from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.core.markdown_excerpt import MAX_CONTEXT_CHARACTERS, markdown_table_preview
+from skillmind.core.timing import safe_observation
 
 _MAX_FILE_BYTES = MAX_ARTIFACT_BYTES
 _MAX_READ_BYTES = 104_857_600
@@ -64,7 +66,7 @@ class WorkspaceReadProvider:
             context,
             relative,
             path,
-            max_bytes=_MAX_READ_BYTES
+            max_bytes=MAX_JSON_BYTES if "pointers" in arguments else _MAX_READ_BYTES
             if relative.startswith(
                 ("workspace/documents/", "workspace/resources/", "workspace/repositories/")
             )
@@ -77,6 +79,29 @@ class WorkspaceReadProvider:
                 "invalid_request",
                 "Workspace file changed; restore the original Artifact or verify its new version",
                 retryable=False,
+            )
+        if "pointers" in arguments:
+            selected = await asyncio.to_thread(select_json, content.text, arguments)
+            safe_observation(
+                "run.performance.json_selection", run_id=context.run_id,
+                run_attempt_id=context.run_attempt_id, tool_call_id=context.tool_call_id,
+                source_bytes=len(data), output_bytes=len(canonical_json(selected).encode("utf-8")),
+            )
+            return ProviderToolResult(
+                response={
+                    "status": "success", "provider": "workspace", "path": relative,
+                    "content_hash": content.checksum, **selected,
+                },
+                evidence=(EvidenceDraft(
+                    evidence_type="workspace-file", source_uri=_workspace_uri(context, relative),
+                    source_locator={
+                        "path": relative, "pointers": arguments["pointers"],
+                        "array_offset": arguments.get("array_offset", 0),
+                        "array_limit": arguments.get("array_limit", 20),
+                    },
+                    content_hash=content.checksum,
+                    metadata={"scope": "run-workspace", "read_only": True, "format": "json"},
+                ),),
             )
         if "offset" in arguments or "max_chars" in arguments:
             return _character_page(context, relative, content, arguments)

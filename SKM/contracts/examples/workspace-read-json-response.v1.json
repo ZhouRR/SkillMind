@@ -1,0 +1,31 @@
+{
+  "status": "success",
+  "provider": "workspace",
+  "path": "workspace/resources/fixture/response.json",
+  "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "format": "json",
+  "selections": [
+    {
+      "pointer": "/result/status",
+      "exists": true,
+      "value": "COMPLETED"
+    },
+    {
+      "pointer": "/result/items",
+      "exists": true,
+      "value": [
+        {
+          "id": "item-1"
+        }
+      ],
+      "offset": 0,
+      "next_offset": null,
+      "total_items": 1
+    }
+  ],
+  "evidence_refs": [
+    "ev_fixture"
+  ],
+  "warnings": [],
+  "truncated": false
+}

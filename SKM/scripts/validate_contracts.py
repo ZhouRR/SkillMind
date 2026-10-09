@@ -246,6 +246,8 @@ EXAMPLE_CONTRACTS = {
     "examples/task-schedule-page.v1.json": "task-schedule/v1.schema.json",
     "examples/task-schedule-status-request.v1.json": "task-schedule/v1.schema.json",
     "examples/workspace-read-request.v1.json": "tools/workspace.read/v1/request.schema.json",
+    "examples/workspace-read-json-request.v1.json": "tools/workspace.read/v1/request.schema.json",
+    "examples/workspace-read-json-response.v1.json": "tools/workspace.read/v1/response.schema.json",
     "examples/workspace-read-response.v1.json": "tools/workspace.read/v1/response.schema.json",
     "examples/workspace-search-request.v1.json": "tools/workspace.search/v1/request.schema.json",
     "examples/workspace-search-response.v1.json": "tools/workspace.search/v1/response.schema.json",

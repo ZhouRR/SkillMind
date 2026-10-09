@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from contextlib import aclosing
 from typing import Any
 from uuid import UUID
 
 from jsonschema import Draft202012Validator, FormatChecker
+from sqlalchemy.exc import SQLAlchemyError
 
 from skillmind.agent.database_provider import DatabaseReadProvider
 from skillmind.agent.domain import (
@@ -15,6 +17,7 @@ from skillmind.agent.domain import (
     RunContext,
     RunLimits,
 )
+from skillmind.agent.effect_receipt_delivery import checkpoint_receipts, materialize_receipt_files
 from skillmind.agent.repository_source import (
     RepositoryBindingRef,
 )
@@ -245,6 +248,26 @@ class ProductionRunContextBuilder:
             materialized=materialized,
             skill_files=skill_files,
         )
+        receipt_files = await materialize_receipt_files(
+            workspace, checkpoint_receipts(brief.brief["checkpoint"]),
+            permission.get("allowed_capabilities", ())
+            if any(tool.capability == "workspace.read/v1" for tool in tools) else (),
+        )
+        if (self._proposal_continuations is not None
+            and any(tool.capability == "workspace.read/v1" for tool in tools)):
+            try:
+                async with aclosing(
+                    self._proposal_continuations.materialization_receipts(claimed_run),
+                ) as originals:
+                    async for original in originals:
+                        # 即時回执は checkpoint にない場合もある。原 DB 記録から副本だけを戻し、
+                        # 再試行時の凍結 Brief/checksum やモデルの既知 facts を変更しない。
+                        await materialize_receipt_files(
+                            workspace, (original,), permission.get("allowed_capabilities", ()),
+                        )
+            except SQLAlchemyError:
+                # 任意の副本復元だけで既存の実行経路を止めない。原 DB/操作の成否は変えない。
+                pass
         return RunContext(
             run_id=claimed_run.run_id,
             run_attempt_id=claimed_run.run_attempt_id,
@@ -254,6 +277,7 @@ class ProductionRunContextBuilder:
                 brief.brief,
                 input_json=claimed_run.input_json,
                 output_schema=output_schema,
+                effect_receipt_files=receipt_files,
             ),
             task_snapshot=dict(task),
             skill_snapshots=(manifest,),
@@ -272,6 +296,7 @@ class ProductionRunContextBuilder:
             },
             task_brief=brief.brief,
             task_brief_checksum=brief.checksum,
+            effect_receipt_files=receipt_files,
             input_json=dict(claimed_run.input_json),
             resolved_proposal=(
                 await self._proposal_continuations.load(claimed_run)

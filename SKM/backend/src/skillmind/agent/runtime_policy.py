@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-RUNTIME_POLICY = "skillmind.runtime/v7"
+RUNTIME_POLICY = "skillmind.runtime/v8"
 SUPPORTED_RUNTIME_POLICIES = frozenset(
     {
         "skillmind.runtime/v2",
@@ -13,6 +13,7 @@ SUPPORTED_RUNTIME_POLICIES = frozenset(
         "skillmind.runtime/v4",
         "skillmind.runtime/v5",
         "skillmind.runtime/v6",
+        "skillmind.runtime/v7",
         RUNTIME_POLICY,
     }
 )

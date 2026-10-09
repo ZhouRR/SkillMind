@@ -805,6 +805,60 @@ async def test_native_inline_effect_returns_receipt_without_interrupting_turn(
     assert len(calls)==1 and len(requests)==2
 
 
+async def test_native_large_receipt_file_and_json_pointer_read_stay_in_one_turn(
+    tmp_path, monkeypatch, endpoint,
+):
+    """固定 SDK へ小さい原回执参照を返し、次呼出しは原 JSON の必要な値だけを読む。"""
+    from skillmind.agent.effect_receipt_delivery import deliver_receipt
+    from skillmind.agent.tool_catalog import _workspace_tool_definitions
+    from skillmind.effects.inline import InlineEffectResult
+    from tests.agent.test_effect_receipt_delivery import large_receipt, run_context
+
+    server, requests = endpoint
+    _local_client(monkeypatch, server)
+    contracts = ContractStore(Path(__file__).resolve().parents[3] / "contracts")
+    registry = ToolRegistry((
+        _change_propose_tool_definition(contracts), *_workspace_tool_definitions(contracts),
+    ))
+    base = run_context(tmp_path)
+    proposal = registry.resolve_unbound("change.propose/v1", execution_profile="GUIDED")
+    context = replace(base, model="gpt-5.6-terra", tools=(proposal, *base.tools),
+        permission_snapshot={"allowed_capabilities": ["change.propose/v1", "workspace.read/v1"]})
+    original = large_receipt()
+    file = (await deliver_receipt(context, original))["file"]
+    server.tool_request_numbers = {2}
+    server.tool_name = "workspace_read_v1"
+    server.tool_arguments[2] = {
+        "path": file["path"], "expected_hash": file["content_hash"],
+        "pointers": ["/after/rows/0/status"], "purpose": "Read the original operation state",
+    }
+    effects = []
+    writer = MemoryAuditWriter()
+
+    async def complete(arguments, call_id, session_id):
+        """接線だけを検証する。原 apply/commit は共有 executor の回帰で別に確認する。"""
+        effects.append(call_id)
+        return InlineEffectResult(uuid4(), original)
+
+    def runtime(run):
+        """二つの工具を同じ audit と合成 Effect ポートへ接続する。"""
+        value = registry.build_gateway_runtime(run, audit_writer=writer)
+        return replace(value, mcp=replace(value.mcp, on_inline_effect=complete))
+
+    engine = CodexAgentSdkEngine(
+        configuration=CodexRuntimeConfiguration("gpt-5.6-terra", "max", tmp_path / "codex"),
+        runtime_factory=runtime, transcript_backend=MemoryTranscriptBackend(),
+    )
+    async with asyncio.timeout(40):
+        events = [event async for event in engine.execute(context)]
+    assert events[-1].event_type is AgentEventType.RESULT_COMPLETED, [e.payload for e in events]
+    assert len(effects) == 1 and len(writer.completed) == 1 and len(requests) == 3
+    assert not any(e.event_type is AgentEventType.CHANGE_PROPOSED for e in events)
+    wire = canonical_json([body.get("input", []) for body in requests])
+    assert "effect-receipt-file/v1" in wire and "selections" in wire and "ERROR" in wire
+    assert "x" * 100 not in wire
+
+
 async def test_native_same_capability_routes_two_resources_in_one_turn(
     tmp_path, monkeypatch, endpoint
 ):

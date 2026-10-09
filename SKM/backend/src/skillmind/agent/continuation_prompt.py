@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any
 
 from skillmind.agent.domain import RunContext
+from skillmind.agent.effect_receipt_delivery import model_checkpoint
 from skillmind.agent.task_brief import render_task_brief_prompt
 from skillmind.agent.tool_routing import resource_identity
 from skillmind.core.hashing import canonical_json, sha256_hex
@@ -55,7 +56,7 @@ def continuation_prompt(
             }
         )
     )
-    checkpoint = brief["checkpoint"]
+    checkpoint = model_checkpoint(brief, context.effect_receipt_files)
     hashes = {
         key: [_hash(item) for item in value] if isinstance(value, list) else _hash(value)
         for key, value in checkpoint.items()

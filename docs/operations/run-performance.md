@@ -18,6 +18,8 @@ INFO JSON 日志使用 `run.performance.` 前缀。实现入口为[计时器](..
 | `result_validation` / `result_schema` / `result_references` | 结果完整校验 / Schema / 引用核对 |
 | `terminal_save` | 终态持久化 |
 | `final_output` | 最终数据 `output_bytes`，无 duration_ms |
+| `receipt_delivery` | 原回执 `source_bytes` 与模型投影 `output_bytes`；`receipt_delivery` 区分 FILE/INLINE |
+| `json_selection` | 完整 JSON 文件 `source_bytes` 与字段/数组页的 `output_bytes` |
 
 耗时单位为 `duration_ms`；`sample_count` 是累计 await 区间数，不是模型请求数。区间存在包含和并行关系，不能相加为总耗时；`engine_wait` 也不是纯推理时间。当前日志不能完整拆分排队、工具内部和页面首屏时间。
 

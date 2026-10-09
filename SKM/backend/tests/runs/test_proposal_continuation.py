@@ -116,6 +116,36 @@ async def test_receipt_index_deduplicates_exact_effect_and_rejects_unknown():
         await reader.receipts(claimed)
 
 
+@pytest.mark.parametrize("damaged", [False, True])
+async def test_materialization_uses_only_original_applied_receipts_and_verified_hash(damaged):
+    """副本の復元 query は同 Run/Project/原 Tool と APPLIED に限定し、hash 改変を拒否する。"""
+    session, segment, proposal, effect = _rows()
+    original = segment.checkpoint_json["effect_result"]
+    effect.verification_json = original["verification"]
+    after = SimpleNamespace(evidence_ref=effect.after_ref,
+        content_hash="sha256:" + "0" * 64 if damaged else original["after_content_hash"],
+        metadata_json={"snapshot": original["after"]})
+
+    async def rows():
+        """DB の cursor だけを置換し、実際の query と原値の検証を実行する。"""
+        yield effect, proposal, after
+
+    session.stream.return_value = rows()
+    session.__aenter__.return_value = session
+    reader = ProposalContinuationReader(Mock(return_value=session))
+    claimed = SimpleNamespace(run_id=proposal.run_id, project_id=uuid4())
+    if damaged:
+        with pytest.raises(ValueError, match="Evidence"):
+            [value async for value in reader.materialization_receipts(claimed)]
+    else:
+        assert [value async for value in reader.materialization_receipts(claimed)] == [original]
+    statement = session.stream.await_args.args[0]
+    compiled = statement.compile()
+    assert list(compiled.params.values()).count(claimed.run_id) == 3
+    assert claimed.project_id in compiled.params.values() and "APPLIED" in compiled.params.values()
+    assert "tool_call_id" in str(compiled)
+
+
 @pytest.mark.asyncio
 async def test_legacy_receipt_index_does_not_change_frozen_runtime():
     """旧 Run には新しい回読索引も追加の DB 読取も導入しない。"""

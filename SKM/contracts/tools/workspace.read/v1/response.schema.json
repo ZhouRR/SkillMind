@@ -8,10 +8,7 @@
     "status",
     "provider",
     "path",
-    "content",
     "content_hash",
-    "line_start",
-    "line_end",
     "evidence_refs",
     "warnings",
     "truncated"
@@ -75,6 +72,106 @@
     "total_chars": {
       "type": "integer",
       "minimum": 0
+    },
+    "format": {
+      "const": "json"
+    },
+    "selections": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pointer",
+          "exists"
+        ],
+        "properties": {
+          "pointer": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "exists": {
+            "type": "boolean"
+          },
+          "value": {},
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "next_offset": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "total_items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "exists": {
+                  "const": true
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "value"
+              ]
+            },
+            "else": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "value"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "offset"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "next_offset"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "total_items"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "dependentRequired": {
+          "offset": [
+            "offset",
+            "next_offset",
+            "total_items"
+          ],
+          "next_offset": [
+            "offset",
+            "next_offset",
+            "total_items"
+          ],
+          "total_items": [
+            "offset",
+            "next_offset",
+            "total_items"
+          ]
+        }
+      }
     }
   },
   "dependentRequired": {
@@ -93,5 +190,68 @@
       "next_offset",
       "total_chars"
     ]
-  }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "content",
+        "line_start",
+        "line_end"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "selections"
+            ]
+          },
+          {
+            "required": [
+              "format"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "required": [
+        "format",
+        "selections"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "content"
+            ]
+          },
+          {
+            "required": [
+              "line_start"
+            ]
+          },
+          {
+            "required": [
+              "line_end"
+            ]
+          },
+          {
+            "required": [
+              "offset"
+            ]
+          },
+          {
+            "required": [
+              "next_offset"
+            ]
+          },
+          {
+            "required": [
+              "total_chars"
+            ]
+          }
+        ]
+      }
+    }
+  ]
 }

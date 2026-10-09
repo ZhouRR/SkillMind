@@ -47,6 +47,31 @@
       "type": "string",
       "pattern": "^sha256:[a-f0-9]{64}$",
       "description": "Reject changed file bytes; use the hash from conversion or materialization."
+    },
+    "pointers": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "maxLength": 2048,
+        "pattern": "^(?:/(?:[^~/]|~[01])*)*$"
+      },
+      "description": "Read exact RFC 6901 paths from JSON; absent differs from null/false. Requires expected_hash. Do not mix text paging."
+    },
+    "array_offset": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Starting item for each selected JSON array."
+    },
+    "array_limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 200,
+      "default": 20,
+      "description": "Items per selected JSON array. Continue with that selection next_offset."
     }
   },
   "allOf": [
@@ -80,6 +105,63 @@
             }
           ]
         }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "pointers"
+        ]
+      },
+      "then": {
+        "required": [
+          "expected_hash"
+        ],
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "offset"
+              ]
+            },
+            {
+              "required": [
+                "max_chars"
+              ]
+            },
+            {
+              "required": [
+                "line_start"
+              ]
+            },
+            {
+              "required": [
+                "line_end"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "anyOf": [
+          {
+            "required": [
+              "array_offset"
+            ]
+          },
+          {
+            "required": [
+              "array_limit"
+            ]
+          }
+        ]
+      },
+      "then": {
+        "required": [
+          "pointers"
+        ]
       }
     }
   ]

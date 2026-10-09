@@ -1,0 +1,10 @@
+{
+  "path": "workspace/resources/fixture/response.json",
+  "expected_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "pointers": [
+    "/result/status",
+    "/result/items"
+  ],
+  "array_limit": 20,
+  "purpose": "Read the next required fields"
+}

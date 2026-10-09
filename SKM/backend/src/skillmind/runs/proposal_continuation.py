@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -19,6 +19,7 @@ from skillmind.db.models import (
     ChangeApproval,
     ChangeProposal,
     EffectExecution,
+    Evidence,
     RunAttempt,
     RunSegment,
     UserInteraction,
@@ -161,6 +162,34 @@ class ProposalContinuationReader:
                     receipt = validated_effect_result(value)
                     receipts[receipt["effect_execution_id"]] = receipt
             return list(receipts.values())
+
+    async def materialization_receipts(
+        self, claimed: ClaimedRun,
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """即時交付済みの原回执も物化用に読む。凍結 Brief や新しい観測は追加しない。"""
+        async with self._session_factory() as session:
+            rows = await session.stream(select(EffectExecution, ChangeProposal, Evidence)
+                .join(ChangeProposal, ChangeProposal.id == EffectExecution.proposal_id)
+                .join(Evidence, Evidence.evidence_ref == EffectExecution.after_ref)
+                .where(
+                    EffectExecution.run_id == claimed.run_id,
+                    EffectExecution.status == "APPLIED",
+                    ChangeProposal.run_id == claimed.run_id,
+                    ChangeProposal.project_id == claimed.project_id,
+                    Evidence.run_id == claimed.run_id,
+                    Evidence.tool_call_id == EffectExecution.tool_call_id,
+                ).execution_options(yield_per=20))
+            async for effect, proposal, after in rows:
+                value = {
+                    "effect_execution_id": str(effect.id), "proposal_ref": proposal.proposal_ref,
+                    "capability_version": proposal.capability_version, "status": "APPLIED",
+                    "after_ref": after.evidence_ref, "after_content_hash": after.content_hash,
+                    "after": after.metadata_json["snapshot"],
+                    "verification": dict(effect.verification_json),
+                }
+                if effect.before_ref is not None:
+                    value["before_ref"] = effect.before_ref
+                yield validated_effect_result(value)
 
 
 async def _resolved_outcome(
