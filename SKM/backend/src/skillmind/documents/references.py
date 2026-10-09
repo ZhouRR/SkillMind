@@ -8,8 +8,8 @@ from uuid import UUID
 from skillmind.db.models import Run, TaskSchedule, TaskScheduleOccurrence
 from skillmind.documents.domain import DocumentReferencesUnavailableError
 from skillmind.documents.library import (
+    DOCUMENT_LIBRARY_PROVIDER,
     DOCUMENT_LIBRARY_SELECTION,
-    is_document_library_source,
     parse_document_library_source,
 )
 from skillmind.documents.snapshot import (
@@ -90,7 +90,12 @@ def run_document_ids(run: Run) -> frozenset[UUID]:
     for key, source in run.selected_sources_json.items():
         if not isinstance(key, str) or not key or not isinstance(source, Mapping):
             raise ValueError("Stored Run source is not verifiable")
-        if is_document_library_source(source):
+        # 参照の分類は原選択・種類・文書 identity だけで行い、Tool 名を分類根拠にしない。
+        if (
+            key in library_keys
+            or source.get("provider") == DOCUMENT_LIBRARY_PROVIDER
+            or source.get("candidate_key") == DOCUMENT_LIBRARY_SELECTION
+        ):
             parse_document_library_source(
                 source, project_id=run.project_id, run_id=run.id, requirement_key=key
             )
@@ -98,7 +103,13 @@ def run_document_ids(run: Run) -> frozenset[UUID]:
                 raise ValueError("Document library does not match the original choice")
             actual_library_keys.add(key)
             continue
-        if not is_document_source(source) and not is_document_source(source.get("candidate_key")):
+        if not (
+            key in document_keys
+            or source.get("resource_kind") == "document"
+            or source.get("provider") == DOCUMENT_PROVIDER
+            or "document_snapshot" in source
+            or is_document_source(source.get("candidate_key"))
+        ):
             _require_integration_source(source, original.sources.get(key))
             continue
         actual_keys.add(key)

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
+from urllib.parse import quote
 from uuid import uuid4
 
 import httpx
@@ -102,11 +103,16 @@ def harness(tmp_path, resource):
 
 
 @pytest.mark.parametrize("file_response", [False, True])
+@pytest.mark.parametrize("encoded_name", [False, True])
 async def test_download_preserves_original_bytes_and_both_mcp_response_modes(
-    harness, file_response
+    harness, file_response, encoded_name
 ):
-    """inline/file の両観測から参照を復元し、同 origin へ GET を一度だけ送る。"""
+    """inline/file と UTF-8 符号化参照を照合し、同 origin へ一度だけ GET する。"""
     h = harness
+    download_path = "/api/images/" + quote("画面.png" if encoded_name else "fixture.png")
+    h.original["result"]["screenshot"]["downloadPath"] = download_path
+    h.evidence.content_hash = "sha256:" + sha256_hex(canonical_json(h.original))
+    h.tool.result_json = {**h.original, "evidence_refs": ["ev_original"]}
     if file_response:
         path = f"workspace/resources/{h.tool.id}/response.json"
         local = h.context.workspace.root / path
@@ -119,7 +125,8 @@ async def test_download_preserves_original_bytes_and_both_mcp_response_modes(
         }
     result = await h.provider.execute(h.context, h.arguments)
     assert len(h.calls) == 1
-    assert str(h.calls[0].url) == "https://mcp.example.test/api/images/fixture.png"
+    assert str(h.calls[0].url) == "https://mcp.example.test" + download_path
+    assert h.calls[0].url.raw_path == download_path.encode("ascii")
     file = result.response["file"]
     assert (h.context.workspace.root / file["path"]).read_bytes() == h.data
     assert file["content_hash"] == "sha256:" + sha256_hex(h.data)
@@ -174,16 +181,49 @@ async def test_revocation_after_download_keeps_bytes_out_of_the_workspace(harnes
         "//other.example.test/image.png",
         "/api/../secret",
         "/api/%2e%2e/secret",
+        "/api/%252e%252e/secret",
+        "/api/%2Fother/image.png",
+        "/api/%5cother/image.png",
+        "/api/%FF/image.png",
+        "/api/%GG/image.png",
+        "/api/%00image.png",
+        "/api/%3Fimage.png",
         "/api/image?key=x",
         "/api/image#fragment",
         "https://user:fixture@mcp.example.test/image",
         "http://mcp.example.test/image",
+        "https://mcp.example.test/api/\nimage.png",
+        "https://mcp.example.test/api/%2Fimage.png",
     ],
 )
-def test_download_references_do_not_change_authority_or_decode_paths(value):
-    """scheme/authority/資格/query/fragment/dot segment を原文のまま拒否する。"""
+def test_download_references_do_not_change_authority_or_path_structure(value):
+    """UTF-8 復元でも別 origin、encoded 区切り・二重符号化・dot segment を拒否する。"""
     with pytest.raises(ValueError):
         observed_path({"path": value}, "/path", "https://mcp.example.test/mcp")
+
+
+@pytest.mark.parametrize("absolute", [False, True])
+def test_encoded_download_path_preserves_filename_and_same_origin(absolute):
+    """同 origin の相対/絶対参照から日文名を一度だけ復元する。"""
+    path = "/artifacts/fixture/" + quote("画面.png")
+    reference = "https://mcp.example.test" + path if absolute else path
+    assert observed_path(
+        {"path": reference}, "/path", "https://mcp.example.test/mcp"
+    ) == "/artifacts/fixture/画面.png"
+
+
+@pytest.mark.parametrize("path", ["/api/%2e%2e/image.png", "/api/%252fimage.png"])
+async def test_encoded_unsafe_reference_is_rejected_before_credential_dispatch(harness, path):
+    """正しい原観測に危険な参照があっても資格を送信せず、file を公開しない。"""
+    h = harness
+    h.original["result"]["screenshot"]["downloadPath"] = path
+    h.evidence.content_hash = "sha256:" + sha256_hex(canonical_json(h.original))
+    h.tool.result_json = {**h.original, "evidence_refs": ["ev_original"]}
+    with pytest.raises(ToolProviderError) as error:
+        await h.provider.execute(h.context, h.arguments)
+    assert error.value.code == "invalid_request"
+    assert not h.calls
+    assert not (h.context.workspace.cwd / "resources").exists()
 
 
 def test_download_does_not_grant_workspace_reading(harness):

@@ -188,6 +188,7 @@ async def test_valid_run_without_selected_optional_documents_does_not_pin_assets
         ("mcp", "mcp.read/v1"), ("mcp", "mcp.tools/v1"),
         ("mcp", "mcp.query/v1"), ("mcp", "mcp.call/v1"),
         ("mcp", "mcp.download/v1"), ("mcp", "mcp.future_operation/v99"),
+        ("mcp", "document.read/v1"), ("mcp", "document.write/v1"),
         ("postgres", "database.query/v1"), ("postgres", "database.execute/v1"),
         ("http", "http.read/v1"), ("http", "http.write/v1"),
         ("http", "http.future_request/v99"), ("new-provider", "custom.operation/v42"),

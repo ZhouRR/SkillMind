@@ -17,6 +17,7 @@ from skillmind.agent.contract_store import ContractStore
 from skillmind.agent.tool_catalog import _change_propose_tool_definition
 from skillmind.agent.tool_gateway import ToolRegistry
 from skillmind.core.hashing import sha256_hex
+from skillmind.effects.inline import InlineEffectResult
 from skillmind.effects.postgres_native import SQL_OBSERVATION_MESSAGE, SqlObservationValidationError
 from skillmind.runs.domain import LeaseValidationError, RunCancellationRequestedError
 from skillmind.worker.proposal_preflight import ProposalPreflight
@@ -24,6 +25,7 @@ from skillmind.worker.tool_authority import ToolExecutionAuthority
 from tests.agent.test_tool_gateway import CsvIssueProvider, MemoryAuditWriter, _context, _registry
 from tests.agent.test_tool_policy import _database_proposal
 from tests.effects.test_native_resource_effects import sql_execution
+from tests.runs.test_effect_continuation import receipt
 from tests.worker.test_agent_run_executor import _claimed
 
 
@@ -150,6 +152,86 @@ async def test_file_proposal_validates_original_bytes_and_tool_identity(setup):
     error = await validator.validate(tool.sdk_name, request, "changed-call", "session")
     assert error["code"] == "invalid_request"
     assert service.validate_native_sql_proposal.await_count == 1
+
+
+@pytest.mark.parametrize("sdk", ["codex", "codex-inline", "claude"])
+async def test_sdk_file_proposal_reaches_preflight_before_effect_validation(setup, sdk):
+    """両 SDK が file envelope を受理し、展開済み提案を検査して原承認経路へ渡す。"""
+    registry, tool, context, authority, arguments, service, validator = setup
+    path = context.workspace.cwd / "proposal.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    raw = json.dumps(arguments).encode()
+    path.write_bytes(raw)
+    request = {
+        "request_file": "workspace/proposal.json",
+        "expected_hash": "sha256:" + sha256_hex(raw),
+    }
+    writer = MemoryAuditWriter()
+    runtime = registry.build_gateway_runtime(context, audit_writer=writer)
+    inline = AsyncMock(return_value=InlineEffectResult(uuid4(), receipt()))
+    runtime = replace(runtime, mcp=replace(
+        runtime.mcp, on_deferred_validation=validator.validate,
+        on_inline_effect=inline if sdk == "codex-inline" else None,
+    ))
+    session = str(uuid4())
+    if sdk.startswith("codex"):
+        deferred = AsyncMock()
+        bridge = CodexToolBridge(context, runtime, on_deferred=deferred)
+        bridge.session_id = session
+        result = await bridge.invoke(tool.sdk_name, request, "file-call")
+        assert not result.isError
+        deferred.assert_awaited_once_with(tool.sdk_name, request, "file-call", session)
+        if sdk == "codex-inline":
+            assert bridge.accepting and not bridge.parked.is_set()
+            assert json.loads(result.content[0].text)["delivery"] == "INLINE"
+            inline.assert_awaited_once_with(request, "file-call", session)
+        else:
+            assert not bridge.accepting and bridge.parked.is_set()
+            assert bridge.deferred[1]["change_proposal_request"] == request
+    else:
+        options = build_claude_agent_options(
+            context, mcp_server=runtime.mcp.server,
+            configuration=ClaudeRuntimeConfiguration(environment={}),
+            deferred_tool_names=runtime.mcp.deferred_tool_names,
+            on_deferred_validation=runtime.mcp.on_deferred_validation,
+            on_tool_denied=runtime.mcp.on_tool_denied,
+        )
+        hook = options.hooks["PreToolUse"][0].hooks[0]
+        result = await hook({
+            "hook_event_name": "PreToolUse", "session_id": session,
+            "tool_name": tool.sdk_name, "tool_input": request, "tool_use_id": "file-call",
+        }, "file-call", {"signal": None})
+        assert result["hookSpecificOutput"]["permissionDecision"] == "defer"
+    assert not writer.denied
+    service.validate_native_sql_proposal.assert_awaited_once_with(
+        authority.claimed, arguments, tool_use_id="file-call",
+    )
+
+
+@pytest.mark.parametrize("damage", ["capability", "missing", "schema", "boundary", "revision"])
+async def test_expanded_file_is_not_allowed_to_bypass_inline_policy(setup, damage):
+    """hash が正しくても不正な内側の能力・形状・境界・行 revision は保存前に拒否する。"""
+    _, tool, context, _, arguments, service, validator = setup
+    if damage == "capability":
+        arguments["capability_version"] = "change.propose/v1"
+    elif damage == "missing":
+        del arguments["capability_version"]
+    elif damage == "schema":
+        arguments["changes"] = []
+    elif damage == "boundary":
+        arguments["target"]["project_id"] = str(uuid4())
+    else:
+        arguments, *_ = _database_proposal()
+        arguments["precondition"]["revision"] = "ABSENT"
+    path = context.workspace.cwd / "proposal.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    raw = json.dumps(arguments).encode()
+    path.write_bytes(raw)
+    error = await validator.validate(tool.sdk_name, {
+        "request_file": "workspace/proposal.json", "expected_hash": "sha256:" + sha256_hex(raw),
+    }, "invalid-call", "session")
+    assert error["code"] == "invalid_request" and error["retryable"] is False
+    service.validate_native_sql_proposal.assert_not_awaited()
 
 
 @pytest.mark.parametrize("failure", [ValueError, SQLAlchemyError])

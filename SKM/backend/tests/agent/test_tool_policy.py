@@ -269,6 +269,26 @@ def test_non_effect_capability_is_correctable_before_deferred_proposal(capabilit
     assert policy.authorize(tool.sdk_name, arguments) is tool
 
 
+def test_proposal_file_envelope_does_not_read_unexpanded_effect_fields() -> None:
+    """file envelope の認可で内側の能力を読まず、展開後の既存検査へ引き渡す。"""
+    _, _, tool, policy = _database_proposal()
+    arguments = {"request_file": "workspace/proposal.json", "expected_hash": "sha256:" + "a" * 64}
+    original = deepcopy(arguments)
+    assert policy.authorize(tool.sdk_name, arguments) is tool
+    assert arguments == original
+
+
+@pytest.mark.parametrize("extra", [{"capability_version": "database.write/v1"}, {"changes": []}])
+def test_proposal_file_envelope_cannot_mix_inline_fields(extra) -> None:
+    """file と inline の混用を延期前の Schema 検査で引き続き拒否する。"""
+    _, _, tool, policy = _database_proposal()
+    with pytest.raises(ToolPolicyViolation, match="registered schema"):
+        policy.authorize(tool.sdk_name, {
+            "request_file": "workspace/proposal.json", "expected_hash": "sha256:" + "a" * 64,
+            **extra,
+        })
+
+
 @pytest.mark.parametrize("operation", ["INSERT", "UPDATE"])
 def test_inconsistent_database_revision_is_correctable_before_deferral(operation: str) -> None:
     """不在表記や行摘要の誤りを model に返し、原行から一致する候補だけを延期する。"""

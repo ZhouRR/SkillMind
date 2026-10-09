@@ -104,6 +104,10 @@ class ToolExecutionPolicy:
         )
         if errors:
             raise ToolPolicyViolation("Tool input does not match registered schema")
+        if tool.capability == CHANGE_PROPOSE_CAPABILITY and "request_file" in tool_input:
+            # envelope はここまで検査し、file の hash 照合・展開後に同じ認可を再実行する。
+            # 内側の capability_version を未展開の envelope から読まない。
+            return tool
         # Effect 側も Agent の Provider を読むため、起動時の循環 import を避ける。
         from skillmind.effects.catalog import resolve_effect_capability
         from skillmind.effects.database_write import (

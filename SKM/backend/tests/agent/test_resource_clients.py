@@ -228,13 +228,18 @@ async def test_request_files_are_hashed_scoped_and_validated_before_mcp_call(tmp
 
 async def test_proposal_file_resolves_exact_bytes_without_model_transcription(tmp_path):
     """差替え・symlink・root 逃逸で承認対象を変更できない。"""
+    from tests.agent.test_tool_policy import _database_proposal
+
     context = file_context(tmp_path)
-    raw = b'{"resource_key":"api","changes":[{"value":"original"}]}'
+    proposal, _, tool, _ = _database_proposal()
+    proposal["changes"][0]["value"]["values"]["message"] = "original"
+    raw = json.dumps(proposal).encode()
     path = context.workspace.cwd / "proposal.json"
     path.write_bytes(raw)
     run = SimpleNamespace(
         workspace=context.workspace,
-        permission_snapshot={"allowed_capabilities": ["workspace.read/v1"]},
+        tools=(tool,),
+        permission_snapshot={"allowed_capabilities": [tool.capability, "workspace.read/v1"]},
     )
     args = {
         "request_file": "workspace/proposal.json",
@@ -242,7 +247,8 @@ async def test_proposal_file_resolves_exact_bytes_without_model_transcription(tm
         "evidence_refs": ["ev_one"],
     }
     expanded = await expand_proposal_file(run, args)
-    assert expanded["changes"][0]["value"] == "original" and expanded["evidence_refs"] == ["ev_one"]
+    assert expanded["changes"][0]["value"]["values"]["message"] == "original"
+    assert expanded["evidence_refs"] == ["ev_one"]
     path.write_bytes(b"{}")
     with pytest.raises(ValueError):
         await expand_proposal_file(run, args)

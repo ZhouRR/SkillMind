@@ -9,7 +9,9 @@ from typing import Any
 
 from skillmind.agent.domain import RunContext
 from skillmind.agent.materialization_storage import MaterializationError, read_file
+from skillmind.agent.tool_policy import ToolExecutionPolicy, ToolPolicyViolation
 from skillmind.core.hashing import sha256_hex
+from skillmind.effects.proposal import CHANGE_PROPOSE_SDK_NAME
 
 
 async def expand_proposal_file(context: RunContext, arguments: Mapping[str, Any]) -> dict[str, Any]:
@@ -34,4 +36,13 @@ async def expand_proposal_file(context: RunContext, arguments: Mapping[str, Any]
         raise ValueError("Proposal file could not be read") from None
     if "evidence_refs" in arguments:
         result["evidence_refs"] = arguments["evidence_refs"]
+    # SDK の envelope 検査だけで承認へ進めない。preflight・即時実行・延期保存が
+    # それぞれ読み直した原 byte に、凍結 Tool と同じ Schema/境界検査を適用する。
+    try:
+        ToolExecutionPolicy(
+            context.tools,
+            allowed_capabilities=frozenset(context.permission_snapshot["allowed_capabilities"]),
+        ).authorize(CHANGE_PROPOSE_SDK_NAME, result)
+    except ToolPolicyViolation as error:
+        raise ValueError(str(error)) from None
     return result

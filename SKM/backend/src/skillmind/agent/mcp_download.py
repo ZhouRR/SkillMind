@@ -7,7 +7,7 @@ import json
 import re
 from collections.abc import Mapping
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -48,7 +48,7 @@ def _point(value: Any, pointer: str) -> Any:
 def observed_path(value: Any, pointer: str, endpoint: str) -> str:
     """元応答の正確な JSON Pointer を使い、任意 URL と別サーバーの資格転送を拒否する。"""
     value = _point(value, pointer)
-    if not isinstance(value, str):
+    if not isinstance(value, str) or any(ord(c) < 32 or ord(c) == 127 for c in value):
         raise ValueError("Download reference is not a string")
     parsed, base = urlsplit(value), urlsplit(endpoint)
     if parsed.scheme or parsed.netloc:
@@ -72,7 +72,11 @@ def observed_path(value: Any, pointer: str, endpoint: str) -> str:
         ):
             raise ValueError("Download reference changes origin")
         value = parsed.path
-    return validate_path(value)
+    # 原参照の UTF-8 filename を一度だけ復元し、HTTP client の共通処理で再符号化する。
+    # 区切りの符号化は path の構造を変えるため拒否し、残る % は二重 decode を防ぐ。
+    if re.search(r"%(?:2f|5c)", value, re.IGNORECASE):
+        raise ValueError("Download reference contains an encoded path separator")
+    return validate_path(unquote(value, errors="strict"))
 
 
 class McpDownloadProvider:
