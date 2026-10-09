@@ -8,12 +8,13 @@
     "schemaVersion",
     "executionId",
     "operations",
+    "reasons",
     "notRun",
     "gaps"
   ],
   "properties": {
     "schemaVersion": {
-      "const": "1.0"
+      "const": "2.0"
     },
     "executionId": {
       "type": "string",
@@ -93,6 +94,34 @@
         "$ref": "#/$defs/stepNote"
       },
       "description": "原 ID・記録・画像・対応の不足。対象を特定し、成功や NOT_RUN で埋めない。"
+    },
+    "reasons": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidenceRefs": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      },
+      "description": "共通の不足/未実行理由と確認済み根拠を一度だけ保持する。各 reasonRef の存在と根拠の所有は構造検証とは別に照合する。"
     }
   },
   "$defs": {
@@ -152,7 +181,7 @@
       "required": [
         "testCaseId",
         "stepId",
-        "reason"
+        "reasonRef"
       ],
       "properties": {
         "testCaseId": {
@@ -163,9 +192,24 @@
           "type": "string",
           "minLength": 1
         },
-        "reason": {
+        "reasonRef": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+          "description": "本索引の reasons の既存 key。未定義 key は使用しない。"
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1,
+          "description": "このステップだけに必要な差分。共通理由や根拠を繰り返さない。"
+        },
+        "evidenceRefs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "当該ステップだけの確認済み根拠。reasons にある共通参照を複写しない。"
         }
       }
     }
