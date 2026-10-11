@@ -5,17 +5,19 @@ description: 実行前に固定した RV 済み Markdown と Runner の原操作
 
 # Result Judge / Triage
 
-## 入力と環境
+## 目的と入力
 
-必要な入力は `executionId`、`testRunId`、または本実行の Runner 原記録への参照。直前の実行から取得できる情報は再入力させず、接続済みの PostgreSQL と実行記録を照合して対象を確定する。`testRunId` が複数実行を指す場合は全部を独立に扱うか指定範囲を確認し、最新・成功の実行を暗黙に選ばない。
+登録済みの実行根拠と Runner 原記録・証跡を照合し、ケース別 Verdict と原因分類を保存する。
 
-判定入力は **登録済みの原 Markdown と実行根拠＋本実行の Runner 原記録/証跡** とする。業務知識は条件の解釈に使う参考入力であり、原実測を代替しない。モデル生成の `実行結果.json`、`操作記録.json`、独立計画、`sourcePlan` を要求しない。入力用に原記録を別の実測 JSON へ書き直させない。PostgreSQL、原記録を読める許可済み Runner/MCP、必要時の MinIO、JSON Schema 検証を使用する。Runner 読取は実行時の接続に正確に対応する資源を使い、Runner への書込・起動・UI 操作はしない。既知 Issue の読取は利用できる場合に使う。他の Skill は参照・呼び出しせず、本タスクは判定・分類と成果保存までを扱う。
+対象実行は `executionId`、`testRunId`、または本実行の Runner 原記録への参照から特定し、実行コンテキストと接続済み PostgreSQL の登録記録で照合する。`testRunId` が複数実行を指す場合は全部を独立に扱うか指定範囲を確認し、最新・成功の実行を暗黙に選ばない。
+
+判定入力は **登録済みの原 Markdown と実行根拠＋本実行の Runner 原記録/証跡** とする。業務知識は条件の解釈に使う参考入力であり、原実測を代替しない。モデル生成の `実行結果.json`、`操作記録.json`、独立計画、`sourcePlan` を要求しない。入力用に原記録を別の実測 JSON へ書き直させない。PostgreSQL、原記録を読める許可済み Runner/MCP、必要時の MinIO、JSON Schema 検証を使用する。Runner 読取は実行時の接続に正確に対応する資源を使い、Runner への書込・起動・UI 操作はしない。既知 Issue の読取は利用できる場合に使う。他の Skill は参照・呼び出しせず、判定・分類と成果保存までを扱う。
 
 実行根拠は [execution-basis.schema.json](schemas/execution-basis.schema.json)、既存 `test_execution.result_ref` の参照索引は [runner-records.schema.json](schemas/runner-records.schema.json) に従う。索引は原記録の所在/対応だけを示し、Runner 原文の形式を規定しない。判定出力は [verdict.schema.json](schemas/verdict.schema.json)（`schemaVersion: 3.0`）。過去の記録を新形式へ勝手に変換・上書きせず、現在の判定に必要な原資料の不足として扱う。
 
 ## 業務知識の参照
 
-任意の独立した文書読取リソース「業務知識」（key: `business_knowledge`、kind: `document`、access: `read`、required: `false`）を使う。プロジェクト文書庫の `JAF業務知識/` 等、INDEX と配下の Markdown を含むディレクトリを選択する。対象仕様の「文書範囲」や成果物保存先とは別の選択範囲とし、同じ接続でも統合しない。入力フォームに知識庫のパス・ID・本文を追加しない。
+任意の独立した文書読取リソース「業務知識」（key: `business_knowledge`、kind: `document`、access: `read`、required: `false`）を使う。プロジェクト文書庫の `JAF業務知識/` 等、INDEX と配下の Markdown を含むディレクトリを選択する。対象仕様の「文書範囲」や成果物保存先とは別の選択範囲とし、同じ接続でも統合しない。
 
 - **取得**：結び付いた範囲の `INDEX.md` を最初に読み、アプリ名・機能名・画面 ID を手掛かりに必要な共通規則、業務、画面、注意事項だけを読む。`document.list/v1`・`document.read/v1`、または既に物化された入力の `workspace.search/v1`・`workspace.read/v1` を使い、実際の文書参照・ファイル索引からパスを取得する。INDEX の本文に個別リンクがなくても、その案内する配下を許可済み範囲内で検索する。列挙の続きがある場合は必要な範囲で取得する。未選択ディレクトリへ広げず、開発環境のローカルパスや知識の由来を探索しない。
 - **位置付け**：業務ルールは知識庫を正本とし、対象仕様は試験範囲・入力・操作・期待結果を定める。知識庫の例を新規ケースとして追加せず、対象アプリ・条件に合う規則だけを使う。知識庫は実測、接続設定、実際の権限や追加操作の許可を代替しない。参考文書を試験対象・変換対象・成果物として登録しない。
