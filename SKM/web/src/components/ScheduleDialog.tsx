@@ -102,8 +102,6 @@ function ScheduleCreationForm({ open, projectId, csrfToken, task, onClose, onSav
   const inputRef = useRef(inputText)
   const [sources, setSources] = useState(() => original ? { ...original.sources } : defaultSourceProviders(task))
   const sourcesRef = useRef(sources)
-  const [autoApprove, setAutoApprove] = useState(original?.auto_approve ?? true)
-  const autoApproveRef = useRef(autoApprove)
   const runCandidates = useMemo(() => localScheduleInstants(timing.runAt, inputTimezone), [timing.runAt, inputTimezone])
   const endCandidates = useMemo(() => localScheduleInstants(timing.endAt, inputTimezone), [timing.endAt, inputTimezone])
   const definition = useMemo(() => {
@@ -193,11 +191,9 @@ function ScheduleCreationForm({ open, projectId, csrfToken, task, onClose, onSav
     const payload = {
       name: schedule ? nameRef.current : nameRef.current.trim() || draft.taskTitle, definition: original.definition,
       skill_version_id: draft.skillVersionId, task_key: draft.taskKey, input: draft.input, sources: draft.sources,
-      auto_approve: autoApproveRef.current,
     }
     const accepted = schedule ? revision.submit({ kind: 'edit', input: {
       name: payload.name, definition: payload.definition, input: payload.input, sources: payload.sources,
-      auto_approve: payload.auto_approve,
     } }, onSaved) : mutation.submit((signal) => {
       if (!isCurrent()) throw new DOMException('Obsolete schedule', 'AbortError')
       return createSchedule(projectId, payload, csrfToken, signal)
@@ -221,12 +217,6 @@ function ScheduleCreationForm({ open, projectId, csrfToken, task, onClose, onSav
           onSourceChange={(key, value) => {
             sourcesRef.current = { ...sourcesRef.current, [key]: value }; setSources(sourcesRef.current)
           }} />
-        <label className="scopeOption">
-          <input type="checkbox" name="auto_approve" checked={autoApprove}
-            onChange={(event) => { autoApproveRef.current = event.target.checked; setAutoApprove(event.target.checked) }} />
-          <span>{messages.workspace.autoApprove}</span>
-        </label>
-        <p className="hint">{messages.workspace.autoApproveRunHint}</p>
         <label>{messages.schedules.nameLabel}<input name="name" maxLength={200} type="text" value={name}
           placeholder={task.title} onChange={(event) => { nameRef.current = event.target.value; setName(event.target.value) }} /></label>
         <label>{messages.schedules.kindLabel}<Select className="shortControl" density="compact" name="kind" value={timing.kind}

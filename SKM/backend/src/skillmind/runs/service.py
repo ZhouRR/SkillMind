@@ -527,7 +527,9 @@ class RunService:
                 authority = await authorization.authorize(
                     session, intent=intent, idempotency_key=idempotency_key
                 )
-                if (auto_approve or auto_approve_git or auto_approve_mcp) and not authority.auto_approval_allowed:
+                if (
+                    auto_approve or auto_approve_git or auto_approve_mcp
+                ) and not authority.auto_approval_allowed:
                     raise TaskSourceSelectionError(
                         "Automatic approval requires verified original consent"
                     )

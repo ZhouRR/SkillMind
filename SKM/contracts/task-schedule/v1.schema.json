@@ -62,8 +62,7 @@
         "created_by",
         "row_version",
         "created_at",
-        "updated_at",
-        "auto_approve"
+        "updated_at"
       ],
       "properties": {
         "schedule_id": {
@@ -178,9 +177,6 @@
         "updated_at": {
           "type": "string",
           "format": "date-time"
-        },
-        "auto_approve": {
-          "type": "boolean"
         }
       }
     },

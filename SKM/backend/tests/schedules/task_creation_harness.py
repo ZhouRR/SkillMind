@@ -20,10 +20,16 @@ from tests.schedules.fakes import TOKEN, occurrence_row, schedule_row
 class ScheduledTaskCreationHarness(CreationAuthorizationHarness):
     """持久認領も fake callback で通さず、本物の lock/fence/結算に保存行を渡す。"""
 
-    def __init__(self, *, replay: bool = False) -> None:
+    def __init__(self, *, replay: bool = False, auto_approve: bool = False) -> None:
         """Run の原要求と Schedule の不変 occurrence を同一 identity で準備する。"""
 
         super().__init__("first-replay" if replay else "new")
+        self.intent = replace(
+            self.intent,
+            auto_approve=auto_approve,
+            auto_approve_git=auto_approve,
+            auto_approve_mcp=auto_approve,
+        )
         self.schedule = schedule_row()
         self.schedule.project_id = self.project.id
         self.schedule.created_by = self.user.id
@@ -31,7 +37,7 @@ class ScheduledTaskCreationHarness(CreationAuthorizationHarness):
         self.schedule.task_key = self.intent.task_key
         self.schedule.input_json = self.intent.input_json
         self.schedule.sources_json = self.intent.sources
-        self.occurrence = occurrence_row(self.schedule)
+        self.occurrence = occurrence_row(self.schedule, auto_approve=auto_approve)
         self.schedule.row_version = 2
         self.key = self.occurrence.idempotency_key
         self.winner = stored_creation(
@@ -133,4 +139,7 @@ class ScheduledTaskCreationHarness(CreationAuthorizationHarness):
             trace_id=None,
             actor_id=self.user.id,
             authorization=ScheduleRunCreationParticipant(self.claim),
+            auto_approve=self.claim.auto_approve,
+            auto_approve_git=self.claim.auto_approve,
+            auto_approve_mcp=self.claim.auto_approve,
         )

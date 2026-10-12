@@ -680,3 +680,39 @@ async def test_authorized_participant_can_create_with_original_reserved_schedule
         "session_exit",
     ]
     assert harness.committed == ["run", "binding", "sources", "occurrence"]
+
+
+@pytest.mark.parametrize("lookup_only", [False, True])
+async def test_internal_participant_cannot_grant_unverified_automatic_approval(
+    monkeypatch: pytest.MonkeyPatch, lookup_only: bool
+) -> None:
+    """原同意を検証しない内部入口は、Worker が自動承認を要求しても作成・照会しない。"""
+
+    harness = _Harness(monkeypatch)
+    harness.intent = replace(
+        harness.intent, auto_approve=True, auto_approve_git=True, auto_approve_mcp=True
+    )
+    request = {
+        "project_id": harness.intent.project_id,
+        "input_json": harness.intent.input_json,
+        "sources": harness.intent.sources,
+        "actor_id": harness.intent.actor_id,
+        "idempotency_key": harness.key,
+        "authorization": harness.participant,
+        "auto_approve": True,
+        "auto_approve_git": True,
+        "auto_approve_mcp": True,
+    }
+    with pytest.raises(TaskSourceSelectionError, match="verified original consent"):
+        if lookup_only:
+            await harness.service.find_task_run_replay(
+                skill_version_id=harness.intent.skill_version_id,
+                task_key=harness.intent.task_key,
+                **request,
+            )
+        else:
+            await harness.service.create_task_run(
+                resolved=harness.resolved, trace_id=None, **request
+            )
+    assert harness.events == ["session_enter", "begin", "authorize", "rollback", "session_exit"]
+    assert not harness.committed and not harness.staged

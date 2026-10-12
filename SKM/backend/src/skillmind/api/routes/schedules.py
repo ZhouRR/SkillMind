@@ -91,7 +91,6 @@ class CreateScheduleRequest(BaseModel):
     task_key: str = Field(min_length=1, max_length=200)
     input: dict[str, Any] = Field(default_factory=dict)
     sources: dict[str, str] = Field(default_factory=dict, max_length=50)
-    auto_approve: bool = Field(default=False, strict=True)
 
 
 class UpdateScheduleRequest(BaseModel):
@@ -108,7 +107,6 @@ class UpdateScheduleRequest(BaseModel):
     input: dict[str, Any] = Field(default_factory=dict)
     sources: dict[str, str] = Field(default_factory=dict, max_length=50)
     expected_row_version: int = Field(ge=1, strict=True)
-    auto_approve: bool = Field(default=False, strict=True)
 
 
 class ScheduleStatusRequest(BaseModel):
@@ -153,7 +151,6 @@ class ScheduleResponse(BaseModel):
     task_key: str = Field(min_length=1)
     input: dict[str, Any]
     sources: dict[str, str]
-    auto_approve: bool = Field(strict=True)
     next_run_at: AwareDatetime | None
     last_run_at: AwareDatetime | None
     last_run_id: UUID | None
@@ -349,7 +346,6 @@ async def create_schedule(
             task_key=body.task_key,
             input_json=body.input,
             sources=body.sources,
-            auto_approve=body.auto_approve,
         )
     except UnauthorizedSessionError as error:
         raise authentication_required_problem() from error
@@ -425,7 +421,6 @@ async def update_schedule(
             input_json=body.input,
             sources=body.sources,
             expected_row_version=body.expected_row_version,
-            auto_approve=body.auto_approve,
         )
     except UnauthorizedSessionError as error:
         raise authentication_required_problem() from error
@@ -611,7 +606,6 @@ def _schedule_response(record: ScheduleRecord) -> ScheduleResponse:
         task_key=record.task_key,
         input=record.input_json,
         sources=record.sources,
-        auto_approve=record.auto_approve,
         next_run_at=record.next_run_at,
         last_run_at=record.last_run_at,
         last_run_id=record.last_run_id,

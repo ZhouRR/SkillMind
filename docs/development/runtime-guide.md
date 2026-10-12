@@ -73,6 +73,7 @@ Excel→Markdown 的 `.xlsx` 路径使用 `excel-styles/v2`：同一文档保留
 - 取消先持久保存意图；[RunRepository](../../SKM/backend/src/skillmind/runs/repository.py)在原 Run/Segment/Attempt 锁内核验 lease、取消和终态。旧 Worker 失去 lease 后不得补写成功或失败；Tool 登记、调用与保存沿 [evidence](../../SKM/backend/src/skillmind/agent/evidence.py)复核原执行权，未决调用不重新发放执行许可，成功重放只返回可核实的原回执。
 - 接受取消、业务终态、SDK 清理返回和远端停止分别核对；保留协作取消与清理，本地退出不能证明远端停止或作为退额依据。
 - 模型/会话恢复沿原记录与 [session_store](../../SKM/backend/src/skillmind/agent/session_store.py)，缺失依据时停止；不补造 transcript、自动改模型或从头重跑。定期执行同样保留原 occurrence 与创建身份，入口见 [schedules/service](../../SKM/backend/src/skillmind/schedules/service.py)。
+- 定期実行は既定で自動承認する。一般・Git・MCP の同意を発火時の原要求へ固定し、作成者の現在の Project/資源権限を検証して通常の Run/Effect 経路へ渡す。再照会は元 occurrence の設定を使い、在途 Run の同意を後から変更しない。
 
 ## 外部效果
 

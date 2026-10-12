@@ -173,7 +173,6 @@ class ScheduleService:
         task_key: str,
         input_json: dict[str, Any],
         sources: dict[str, str],
-        auto_approve: bool = False,
     ) -> ScheduleRecord:
         """定義・task・資源選択をすべて検証してから schedule を作成する。"""
 
@@ -205,7 +204,6 @@ class ScheduleService:
                     sources=sources,
                     created_by=users.actor.id,
                     next_run_at=first,
-                    auto_approve=auto_approve,
                 )
             )
         return result
@@ -221,7 +219,6 @@ class ScheduleService:
         input_json: dict[str, Any],
         sources: dict[str, str],
         expected_row_version: int,
-        auto_approve: bool = False,
     ) -> ScheduleRecord:
         """定義と凍結入力を差し替える。終態 schedule は編集させない。"""
 
@@ -265,7 +262,6 @@ class ScheduleService:
                     sources=sources,
                     next_run_at=first,
                     expected_row_version=expected_row_version,
-                    auto_approve=auto_approve,
                 )
             )
         return result

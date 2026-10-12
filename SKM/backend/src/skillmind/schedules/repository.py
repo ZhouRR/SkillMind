@@ -50,7 +50,6 @@ class ScheduleRepository(ScheduleOccurrenceRepository):
             task_key=command.task_key,
             input_json=deepcopy(command.input_json),
             sources_json=dict(command.sources),
-            auto_approve=command.auto_approve,
             next_run_at=utc_time(command.next_run_at, minute=True),
             last_run_at=None,
             last_run_id=None,
@@ -149,7 +148,6 @@ class ScheduleRepository(ScheduleOccurrenceRepository):
         row.max_runs = command.definition.max_runs
         row.input_json = deepcopy(command.input_json)
         row.sources_json = dict(command.sources)
-        row.auto_approve = command.auto_approve
         # PAUSED/ERROR を編集しただけで次回発火があるように見せない。
         row.next_run_at = (
             utc_time(command.next_run_at, minute=True) if row.status == "ACTIVE" else None
@@ -272,5 +270,4 @@ def _to_record(row: TaskSchedule) -> ScheduleRecord:
         updated_at=row.updated_at,
         configuration_version=row.configuration_version,
         occurrence_protocol=row.occurrence_protocol,
-        auto_approve=row.auto_approve,
     )

@@ -19,8 +19,7 @@ export function captureScheduleIntent<T extends ScheduleMutation>(input: T, oper
   const required = operation === 'create'
     ? ['name', 'definition', 'skill_version_id', 'task_key']
     : ['name', 'definition', 'expected_row_version']
-  requireShape(frozen, required, ['input', 'sources', 'auto_approve'])
-  if (frozen.auto_approve !== undefined && typeof frozen.auto_approve !== 'boolean') invalid()
+  requireShape(frozen, required, ['input', 'sources'])
   if (!boundedString(frozen.name, 200) || !pythonStrip(frozen.name)) invalid()
   validateDefinition(frozen.definition)
   if (operation === 'create') {
@@ -54,7 +53,6 @@ export function matchesScheduleIntent(record: ScheduleRecord, intent: ScheduleMu
     && sameInstant(record.run_at, definition.run_at ?? null, definition.kind === 'ONCE')
     && sameInstant(record.end_at, definition.end_at ?? null)
     && record.max_runs === (definition.max_runs ?? null)
-    && record.auto_approve === (intent.auto_approve ?? false)
     && sameJson(record.input, intent.input ?? {}) && sameJson(record.sources, intent.sources ?? {})
 }
 

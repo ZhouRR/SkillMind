@@ -217,9 +217,10 @@ class ScheduleOccurrenceRepository:
                 actor_id=row.created_by,
                 input_json=row.input_json,
                 sources=row.sources_json,
-                auto_approve=row.auto_approve,
-                auto_approve_git=row.auto_approve,
-                auto_approve_mcp=row.auto_approve,
+                # 定期実行は既定で自動承認し、その同意も原要求/hash に固定する。
+                auto_approve=True,
+                auto_approve_git=True,
+                auto_approve_mcp=True,
             ),
             exhausted=plan.exhausted,
             missed=plan.missed,

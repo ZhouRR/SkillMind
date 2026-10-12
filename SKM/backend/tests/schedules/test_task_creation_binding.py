@@ -9,7 +9,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from skillmind.db.models import Run
-from skillmind.schedules.domain import ScheduleClaimLostError, ScheduleOutcome
+from skillmind.effects.run_approval import run_auto_approval_actor
+from skillmind.runs.creation_request import CREATION_REQUEST_FIELD
+from skillmind.schedules.creation import ScheduleRunCreationParticipant
+from skillmind.schedules.domain import (
+    ScheduleClaimLostError,
+    ScheduleOccurrenceConflictError,
+    ScheduleOutcome,
+)
 from skillmind.schedules.service import ScheduleService
 from skillmind.skills.domain import PublishedTaskNotFoundError
 from tests.runs.creation_authorization_harness import row_values
@@ -116,3 +123,49 @@ async def test_schedule_trigger_classifies_only_determined_unavailable_task(fail
             with pytest.raises(errors[failure]):
                 await service._create_scheduled_run(db.claim)
     assert db.occurrence.status == "PENDING" and db.schedule.run_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replay", [False, True])
+async def test_scheduled_run_preserves_automatic_approval_in_original_request(replay: bool) -> None:
+    """内部認領で原同意を検証し、Run 作成と再照会が同じ承認設定を使う。"""
+    db = ScheduledTaskCreationHarness(replay=replay, auto_approve=True)
+    result = await db.call()
+    rows = [row for row in db.committed if isinstance(row, Run) and row.id == result.run_id]
+    assert len(rows) == 1
+    run = rows[0]
+    original = run.task_snapshot_json[CREATION_REQUEST_FIELD]
+    assert original["auto_approve"] is True
+    assert original["auto_approve_git"] is True
+    assert original["auto_approve_mcp"] is True
+    for capability, provider in [
+        ("http.write/v1", "http"),
+        ("database.execute/v1", "postgres"),
+        ("repository.write/v1", "git"),
+        ("mcp.call/v1", "mcp"),
+    ]:
+        assert run_auto_approval_actor(run, capability, provider=provider) == db.user.id
+    assert db.schedule.run_count == 1
+    assert db.occurrence.status == "SETTLED" and db.occurrence.run_id == result.run_id
+
+
+@pytest.mark.asyncio
+async def test_schedule_claim_cannot_add_approval_to_another_original_request() -> None:
+    """Worker の bool 改変だけで保存済み原 occurrence の同意を拡張しない。"""
+    db = ScheduledTaskCreationHarness()
+    with pytest.raises(ScheduleOccurrenceConflictError):
+        await db.service.create_task_run(
+            project_id=db.project.id,
+            resolved=db.resolved,
+            input_json=db.intent.input_json,
+            sources=db.intent.sources,
+            idempotency_key=db.key,
+            trace_id=None,
+            actor_id=db.user.id,
+            authorization=ScheduleRunCreationParticipant(db.claim),
+            auto_approve=True,
+            auto_approve_git=True,
+            auto_approve_mcp=True,
+        )
+    assert not any(isinstance(row, Run) for row in db.committed)
+    assert db.occurrence.run_id is None

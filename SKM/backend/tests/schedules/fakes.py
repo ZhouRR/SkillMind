@@ -41,7 +41,6 @@ def schedule_row() -> TaskSchedule:
         skill_version_id=uuid4(),
         task_key="analyze",
         input_json={"value": 1},
-        auto_approve=False,
         sources_json={},
         next_run_at=NOW,
         last_run_at=None,
@@ -59,7 +58,7 @@ def schedule_row() -> TaskSchedule:
     )
 
 
-def occurrence_row(schedule: TaskSchedule) -> TaskScheduleOccurrence:
+def occurrence_row(schedule: TaskSchedule, *, auto_approve: bool = False) -> TaskScheduleOccurrence:
     """原 snapshot codec を用い、別の test 専用保存形式を作らない。"""
 
     snapshot = ScheduleOccurrenceSnapshot(
@@ -76,6 +75,9 @@ def occurrence_row(schedule: TaskSchedule) -> TaskScheduleOccurrence:
             schedule.created_by,
             schedule.input_json,
             schedule.sources_json,
+            auto_approve=auto_approve,
+            auto_approve_git=auto_approve,
+            auto_approve_mcp=auto_approve,
         ),
         exhausted=False,
         missed=0,

@@ -60,6 +60,11 @@ async def test_claim_persists_original_snapshot_before_advancing_candidate() -> 
     record = _to_record(db.schedule)
     claim = await db.repo.claim_due(record, now=NOW, worker_id="worker", token=TOKEN)
     assert claim is not None
+    assert claim.auto_approve is True
+    request = db.occurrences[0].snapshot_json["request"]
+    assert request["auto_approve"] is True
+    assert request["auto_approve_git"] is True
+    assert request["auto_approve_mcp"] is True
     assert db.schedule.next_run_at == NOW + timedelta(minutes=1)
     assert db.schedule.run_count == 0
     assert db.schedule.row_version == 2
@@ -136,10 +141,14 @@ async def test_legacy_tick_preserves_unverifiable_counts_and_last_run() -> None:
 
 
 @pytest.mark.asyncio
-async def test_recovery_keeps_original_intent_and_fences_previous_generation() -> None:
+@pytest.mark.parametrize("auto_approve", [False, True])
+async def test_recovery_keeps_original_intent_and_fences_previous_generation(
+    auto_approve: bool,
+) -> None:
     """新しい定義・pause に影響されず、元の一件を再認領する。"""
 
     db = ScheduleDatabase(claimed=True)
+    db.occurrences[0] = occurrence_row(db.schedule, auto_approve=auto_approve)
     original = db.claim
     payload = deepcopy(db.occurrences[0].snapshot_json)
     db.schedule.input_json = {"replacement": True}
@@ -151,6 +160,7 @@ async def test_recovery_keeps_original_intent_and_fences_previous_generation() -
     assert len(recovered) == 1
     assert recovered[0].occurrence_id == original.occurrence_id
     assert recovered[0].input_json == original.input_json
+    assert recovered[0].auto_approve is auto_approve
     assert recovered[0].lease_generation == 2
     assert db.occurrences[0].snapshot_json == payload
     assert db.schedule.run_count == 0

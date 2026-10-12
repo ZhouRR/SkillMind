@@ -1624,7 +1624,6 @@ async def test_schedule_claim_due_preserves_one_pending_occurrence_for_original_
             skill_version_id=version.id,
             task_key="analyze",
             input_json={},
-            auto_approve=False,
             sources_json={},
             next_run_at=occurrence,
             run_count=0,

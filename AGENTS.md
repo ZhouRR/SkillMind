@@ -15,7 +15,7 @@
 - PostgreSQL は正本、Redis は Queue・短期 Lock・通知。Run snapshot/権限上限/Result は不変。人工修正は Evaluation、人工答復/批准は新 Segment、同 Segment 復旧は新 Attempt。原 Run の自動同意による短操作は、直接交付の所有権を保存した場合のみ同 Attempt に原回执を返せる。
 - Skill は Organization 資産 + Project 明示有効化。新規 Skill は入力/資源の最小宣言と凍結原文で実行する。旧 Blueprint は原値を保持し、Manifest から逆算せず、業務専用 Schema/seed/renderer を共通規則へ戻さない。
 - guidance・script・model 提案は権限ではない。未知の業務能力と登録済み versioned Tool を区別し、実行 Script は公開 checksum に一致させる。SDK builtin は DENIED_BUILTIN_TOOLS で fail closed、cwd は隔離ではない。凍結 input/ は読取専用、write は workspace/・output/ のみ。
-- 外部 write は observe → propose → apply。[受控写入](docs/development/runtime-guide.md#外部效果)の承認、Provider、scope、競合・idempotency・必要な検証を省略しない。HTTP は登録根へ一回送信し原 response を検証根拠とするため、前後 GET を強制しない。repository.write/v1 は Project 事前許可不可・force 禁止。Git/MCP はそれぞれ原 Run 開始時の明示同意による自動承認を許可する。
+- 外部 write は observe → propose → apply。[受控写入](docs/development/runtime-guide.md#外部效果)の承認、Provider、scope、競合・idempotency・必要な検証を省略しない。HTTP は登録根へ一回送信し原 response を検証根拠とするため、前後 GET を強制しない。repository.write/v1 は Project 事前許可不可・force 禁止。Git/MCP はそれぞれ原 Run 開始時の同意による自動承認を許可する。定期実行は既定の自動同意を元 occurrence に固定し、現在の作成者・資源権限を再検証する。
 - 生成 UI・並行子 Agent・Shell/network の拡張は[後置範囲](docs/development/runtime-guide.md#后置能力)を確認し、影響する権限・隔離・予算を実装と回帰で検証する。局部実装を全面許可にしない。生成 bundle は CSP sandbox allow-scripts、iframe に allow-same-origin を付けない。子能力は resolve_subagent_capabilities と Run 共通予算を通す。
 
 ## 言語とコード

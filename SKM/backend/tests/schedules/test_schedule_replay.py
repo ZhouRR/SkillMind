@@ -29,10 +29,13 @@ def _claimed() -> ClaimedSchedule:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("authorized", [True, False])
-async def test_replay_checks_current_owner_before_ignoring_self_overlap(authorized: bool) -> None:
+@pytest.mark.parametrize("auto_approve", [False, True])
+async def test_replay_checks_current_owner_before_ignoring_self_overlap(
+    authorized: bool, auto_approve: bool
+) -> None:
     """作成済みの自分の Run は重複扱いせず、失効 actor はその前で止める。"""
 
-    claimed = _claimed()
+    claimed = replace(_claimed(), auto_approve=auto_approve)
     actor = AuthenticatedActor(
         user_id=claimed.created_by,
         organization_id=uuid4(),
@@ -78,6 +81,10 @@ async def test_replay_checks_current_owner_before_ignoring_self_overlap(authoriz
         authorization = runs.find_task_run_replay.call_args.kwargs["authorization"]
         assert isinstance(authorization, ScheduleRunCreationParticipant)
         assert authorization._claim is claimed
+        request = runs.find_task_run_replay.call_args.kwargs
+        assert request["auto_approve"] is auto_approve
+        assert request["auto_approve_git"] is auto_approve
+        assert request["auto_approve_mcp"] is auto_approve
     else:
         assert result.outcome is ScheduleOutcome.FAILED_PRECONDITION
         assert result.run_id is None
@@ -160,10 +167,13 @@ async def test_ambiguous_original_schedule_request_is_a_precondition_failure() -
 
 
 @pytest.mark.asyncio
-async def test_schedule_lookup_and_create_share_the_original_internal_authorization() -> None:
+@pytest.mark.parametrize("auto_approve", [False, True])
+async def test_schedule_lookup_and_create_share_the_original_internal_authorization(
+    auto_approve: bool,
+) -> None:
     """照会 miss 後も同じ認領を通用作成へ渡し、人間の会話や caller role を補造しない。"""
 
-    claimed = _claimed()
+    claimed = replace(_claimed(), auto_approve=auto_approve)
     actor = AuthenticatedActor(
         user_id=claimed.created_by,
         organization_id=uuid4(),
@@ -207,6 +217,10 @@ async def test_schedule_lookup_and_create_share_the_original_internal_authorizat
     authorization = runs.find_task_run_replay.call_args.kwargs["authorization"]
     assert isinstance(authorization, ScheduleRunCreationParticipant)
     assert authorization._claim is claimed
+    original = runs.find_task_run_replay.call_args.kwargs
+    assert original["auto_approve"] is auto_approve
+    assert original["auto_approve_git"] is auto_approve
+    assert original["auto_approve_mcp"] is auto_approve
     runs.create_task_run.assert_awaited_once_with(
         project_id=claimed.project_id,
         resolved=resolved,
@@ -218,5 +232,8 @@ async def test_schedule_lookup_and_create_share_the_original_internal_authorizat
         trace_id=None,
         actor_id=claimed.created_by,
         authorization=authorization,
+        auto_approve=claimed.auto_approve,
+        auto_approve_git=claimed.auto_approve,
+        auto_approve_mcp=claimed.auto_approve,
     )
     session_factory.assert_not_called()
