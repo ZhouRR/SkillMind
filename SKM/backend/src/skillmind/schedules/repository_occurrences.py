@@ -217,6 +217,9 @@ class ScheduleOccurrenceRepository:
                 actor_id=row.created_by,
                 input_json=row.input_json,
                 sources=row.sources_json,
+                auto_approve=row.auto_approve,
+                auto_approve_git=row.auto_approve,
+                auto_approve_mcp=row.auto_approve,
             ),
             exhausted=plan.exhausted,
             missed=plan.missed,
@@ -569,6 +572,7 @@ def _claimed(row: TaskScheduleOccurrence, *, token: str) -> ClaimedSchedule:
         lease_token=token,
         lease_generation=row.lease_generation,
         lease_expires_at=row.lease_expires_at,
+        auto_approve=snapshot.intent.auto_approve,
     )
 
 
@@ -595,6 +599,9 @@ def _match_claim(
             actor_id=claim.created_by,
             input_json=claim.input_json,
             sources=claim.sources,
+            auto_approve=claim.auto_approve,
+            auto_approve_git=claim.auto_approve,
+            auto_approve_mcp=claim.auto_approve,
         ).to_json(),
         "definition": definition_json(claim.definition),
         "exhausted": claim.exhausted,

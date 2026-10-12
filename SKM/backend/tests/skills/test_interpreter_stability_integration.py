@@ -12,12 +12,12 @@ from skillmind.skills.runtime_profile import InterpreterRuntimeProfile
 
 
 @pytest.mark.asyncio
-async def test_model_identity_binds_profile_and_freezes_operation_catalog() -> None:
-    """実 adapter に渡す identity と prompt の操作集合が同じ凍結値である。"""
+async def test_model_identity_binds_profile_and_projects_only_resources() -> None:
+    """実 profile を固定し、候補の入力には資源種別だけを渡す。"""
 
     import json
 
-    from skillmind.effects.operation_policy import WRITE_OPERATIONS
+    from skillmind.core.hashing import canonical_json, sha256_hex
     from skillmind.skills.direct_candidate import candidate_schema
     from skillmind.skills.model_interpreter import ModelCompletion, ModelSkillInterpreter
     from tests.skills.test_skill_service import CONTRACTS, SYSTEM_SKILL
@@ -48,7 +48,12 @@ async def test_model_identity_binds_profile_and_freezes_operation_catalog() -> N
     await interpreter.interpret(request, model="test-model", parameters={})
     assert len(calls) == 1
     sent = json.loads(calls[0]["user_message"])
-    assert sent["write_operations"] == json.loads(json.dumps(WRITE_OPERATIONS))
+    assert "write_operations" not in sent and "capabilities" not in sent
+    assert sent["resources"]
+    assert all(set(resource) == {"kind", "provider"} for resource in sent["resources"])
+    assert interpreter.runtime_profile["write_operations_checksum"] == (
+        "sha256:" + sha256_hex(canonical_json({}))
+    )
     assert calls[0]["parameters"] == {}
 
 
@@ -56,7 +61,10 @@ async def test_model_identity_binds_profile_and_freezes_operation_catalog() -> N
 async def test_invalid_parameters_and_model_drift_never_start_completion(tmp_path: Any) -> None:
     """誤った設定は原呼出し許可や SDK 起動より前に拒否する。"""
 
-    from skillmind.skills.interpreter_execution import InterpreterErrorCode, InterpreterExecutionError
+    from skillmind.skills.interpreter_execution import (
+        InterpreterErrorCode,
+        InterpreterExecutionError,
+    )
     from skillmind.skills.model_interpreter import ModelSkillInterpreter
 
     class NoCompletion:

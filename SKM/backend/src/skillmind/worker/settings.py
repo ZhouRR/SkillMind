@@ -379,6 +379,7 @@ async def startup(ctx: dict[str, Any], *, maintenance_only: bool = False) -> Non
         ctx["effect_executor"] = ApprovedEffectExecutor(
             effect_service=ctx["effect_service"],
             provider_registry=create_effect_provider_registry(
+                workspace_root=settings.run_workspace_root,
                 features=features,
                 effect_service=ctx["effect_service"],
                 secret_resolver=DeploymentSecretResolver(cipher=secret_cipher),

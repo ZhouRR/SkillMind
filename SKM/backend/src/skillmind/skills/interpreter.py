@@ -489,6 +489,7 @@ def build_interpreter_request(
             "detected_adapter": package.detected_adapter,
             "normalized_package": package.to_dict(),
             "source_documents": build_source_documents(source_files),
+            **({"entry_path": package.entry_path} if package.entry_path is not None else {}),
         },
         "static_analysis": analysis.to_dict(),
         "capability_catalog": catalog.to_dict(),
@@ -695,6 +696,7 @@ class InterpreterFixtureRunner:
             source_file_index=source["normalized_package"]["source"]["files"],
             source_snapshot=[{"path": d["path"], "content": d["content"]}
                              for d in source["source_documents"]],
+            entry_path=source.get("entry_path"),
             interpretation_id=UUID(manifest["identity"]["interpretation_id"]),
             interpreter_version=manifest["identity"]["interpreter_version"],
         )

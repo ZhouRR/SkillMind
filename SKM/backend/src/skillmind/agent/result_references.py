@@ -23,6 +23,7 @@ from skillmind.db.models import (
 )
 from skillmind.effects.catalog import EFFECT_CAPABILITIES
 from skillmind.effects.domain import EffectLeaseValidationError
+from skillmind.effects.http_write import HTTP_WRITE
 from skillmind.effects.outcomes import effect_requires_reconciliation
 from skillmind.effects.repository_write import LEGACY_GIT_WRITE_PROVIDER_VERSION
 from skillmind.effects.run_approval import has_actor_approval
@@ -74,7 +75,7 @@ def collect_result_references(value: Mapping[str, Any], *, outcome: bool) -> Res
 
 
 class EffectSummaryLookup(Protocol):
-    """保存された Proposal/Approval/Effect/read-back を一貫した読取で確認する port。"""
+    """保存された Proposal/Approval/Effect と原検証回执を一貫した読取で確認する port。"""
 
     async def invalid_refs(
         self, run_id: UUID, claims: tuple[EffectSummaryClaim, ...],
@@ -233,9 +234,20 @@ def _matches_claim(
         return False
     expected_paths = _unique_paths(expected.get("paths"))
     observed_paths = _unique_paths(observed.get("matched_paths"))
+    method = "HTTP_RESPONSE" if proposal.capability_version == HTTP_WRITE else "READ_BACK"
+    if method == "HTTP_RESPONSE":
+        # HTTP は原 response を確認根拠とする。GET 回読を要求せず、実 code と原観測の
+        # 一致を検査する。202 の受理を業務完了や Matrix 送達へ読み替えない。
+        status = observed.get("http_status")
+        snapshot = after.metadata_json["snapshot"]
+        if (execution.provider != "http" or type(status) is not int or not 200 <= status < 300
+            or not isinstance(observed.get("file"), dict)
+            or any(snapshot.get(key) != observed.get(key)
+                   for key in ("http_status", "headers", "file"))):
+            return False
     tool_result = tool.result_json
     return (
-        expected.get("method") == observed.get("method") == "READ_BACK"
+        expected.get("method") == observed.get("method") == method
         and expected_paths is not None and expected_paths == observed_paths
         and isinstance(tool_result, dict) and tool.error_json is None
         and tool_result.get("status") == "success"
@@ -261,7 +273,7 @@ def _saved_evidence_matches(evidence: Evidence) -> bool:
 
 
 def _unique_paths(value: Any) -> frozenset[str] | None:
-    """空/重複/非文字列の read-back 対象を有効な完全一致へ丸めない。"""
+    """空/重複/非文字列の検証対象を有効な完全一致へ丸めない。"""
 
     if not isinstance(value, list) or not value or not all(
         isinstance(path, str) and path.startswith("/") for path in value

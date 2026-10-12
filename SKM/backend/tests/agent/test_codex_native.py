@@ -37,7 +37,7 @@ from skillmind.runs.proposal_continuation import ResolvedProposal
 from skillmind.skills.candidate import CANDIDATE_SCHEMA_ID, candidate_schema
 from skillmind.skills.direct_candidate import CANDIDATE_SCHEMA_ID as DIRECT_SCHEMA_ID
 from skillmind.skills.direct_candidate import candidate_schema as direct_schema
-from tests.agent.test_codex_schema import assert_strict_schema
+from tests.agent.test_codex_schema import assert_native_schema_types, assert_strict_schema
 from tests.agent.test_continuation_prompt import compiled, context_with_brief
 from tests.agent.test_session_store import MemoryTranscriptBackend
 from tests.agent.test_tool_gateway import CsvIssueProvider, MemoryAuditWriter, _context, _registry
@@ -109,6 +109,7 @@ def endpoint() -> Iterator[tuple[SyntheticEndpoint, list[dict[str, Any]]]]:
             requests.append(body)
             schema = body["text"]["format"]["schema"]
             if schema.get("$id") in {CANDIDATE_SCHEMA_ID, DIRECT_SCHEMA_ID}:
+                assert_native_schema_types(schema)
                 Draft202012Validator.check_schema(schema)
                 Draft202012Validator(schema).validate(server.native_candidate)
             else:

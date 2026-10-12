@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "description": "http.write/v1 is an approved effect through change.propose/v1. operation=POST/PUT/PATCH/DELETE must match request.method; target.locator must equal request.path, a relative API path, never a full URL. Exactly one SET /request value={request:{method,path,query?,headers?,body?},read_back:{method:GET,path,query?,headers?},checks:[{pointer,equals}]}. First observe the same read_back GET and copy response.file.content_hash into precondition.revision, with its evidence_refs. The GET is repeated before and after the mutation; it must succeed before writing, so do not use absent or an expected 404 as a precondition. checks point into the parsed GET JSON body (for example /item/status), not the tool response envelope, HTTP status, headers or file metadata. verification is READ_BACK with paths=[/request] and may be omitted. Use only configured paths/methods and non-secret allowed headers; credentials are platform supplied. No automatic mutation retry; 202 is not completion and unknown outcomes are never resent.",
+  "description": "Approved HTTP request through change.propose/v1. operation=POST/PUT/PATCH/DELETE matches request.method; target.locator equals request.path or request.url. One SET /request value={request:{method,path,base_url?,query?,headers?,body?}}; alternatively supply url instead of path/base_url. Relative path is appended to the registered root, including its base path. With multiple roots choose a registered base_url or a full URL under one root. Credentials are platform supplied. precondition and evidence_refs may be omitted; no pre-GET, read_back or JSON checks are required. verification uses HTTP_RESPONSE and may be omitted. The request is sent once; 2xx confirms an HTTP response, 202 means accepted. Inspect the response file and interpret business results yourself. A timeout or unknown result is never automatically resent.",
   "properties": {
     "request": {
       "type": "object",
@@ -33,72 +33,54 @@
             "type": "string"
           }
         },
-        "body": {}
-      },
-      "required": [
-        "method",
-        "path"
-      ]
-    },
-    "read_back": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "method": {
-          "const": "GET"
-        },
-        "path": {
+        "body": {},
+        "base_url": {
           "type": "string",
-          "minLength": 1,
           "maxLength": 2048
         },
-        "query": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "headers": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
+        "url": {
+          "type": "string",
+          "maxLength": 2048
         }
       },
       "required": [
-        "path"
-      ]
-    },
-    "checks": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 50,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "pointer": {
-            "type": "string",
-            "pattern": "^(?:/(?:[^~/]|~[01])*)*$"
-          },
-          "equals": {}
+        "method"
+      ],
+      "oneOf": [
+        {
+          "required": [
+            "path"
+          ],
+          "not": {
+            "required": [
+              "url"
+            ]
+          }
         },
-        "required": [
-          "pointer",
-          "equals"
-        ]
-      }
-    },
-    "expected_revision": {
-      "type": "string",
-      "pattern": "^sha256:[a-f0-9]{64}$"
+        {
+          "required": [
+            "url"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "path"
+                ]
+              },
+              {
+                "required": [
+                  "base_url"
+                ]
+              }
+            ]
+          }
+        }
+      ]
     }
   },
   "required": [
-    "request",
-    "read_back",
-    "checks",
-    "expected_revision"
+    "request"
   ],
   "$id": "https://schemas.skillmind.local/tools/http.write/v1/request.schema.json",
   "title": "http.write/v1 request"

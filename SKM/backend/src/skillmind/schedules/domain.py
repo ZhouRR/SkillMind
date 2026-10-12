@@ -172,6 +172,7 @@ class CreateScheduleCommand:
     sources: dict[str, str]
     created_by: UUID
     next_run_at: datetime
+    auto_approve: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,6 +187,7 @@ class UpdateScheduleCommand:
     sources: dict[str, str]
     next_run_at: datetime
     expected_row_version: int
+    auto_approve: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,6 +222,7 @@ class ScheduleRecord:
     # 旧投影から新 writer の認領資格を補造しない。
     configuration_version: int = 1
     occurrence_protocol: int = 0
+    auto_approve: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,6 +260,7 @@ class ClaimedSchedule:
     lease_token: str = field(repr=False)
     lease_generation: int
     lease_expires_at: datetime
+    auto_approve: bool = False
 
 
 @dataclass(frozen=True, slots=True)

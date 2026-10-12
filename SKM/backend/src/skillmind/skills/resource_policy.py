@@ -50,8 +50,6 @@ def resource_operations(
                     "statements", ()
                 ):
                     continue
-                if capability == "http.write/v1" and operation not in scope.get("methods", ()):
-                    continue
                 result.append({
                     "resource_key": key, "capability_version": capability, "operation": operation,
                 })

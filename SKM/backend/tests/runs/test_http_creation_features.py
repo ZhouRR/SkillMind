@@ -49,7 +49,7 @@ async def test_http_run_creation_preserves_shared_policy_and_write_binding(enabl
     db.integration.kind = "other"
     db.integration.provider = "http"
     db.integration.capabilities_json = list(capabilities)
-    db.integration.scope_json = {}
+    db.integration.scope_json = {"base_urls": ["https://api.example.test"]}
     db.sources = {"api": f"integration:{db.integration.id}"}
     if not enabled:
         with pytest.raises(TaskSourceSelectionError, match="disabled execution features"):
@@ -61,6 +61,7 @@ async def test_http_run_creation_preserves_shared_policy_and_write_binding(enabl
         run = next(row for row in db.committed if isinstance(row, Run))
         assert set(run.permission_snapshot_json["allowed_capabilities"]) == {
             "http.read/v1", "http.write/v1", "change.propose/v1", "interaction.request/v1",
+            "document.list/v1", "document.read/v1",
         }
         source = run.selected_sources_json["api"]
         assert source["capability"] == "http.read/v1"

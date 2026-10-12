@@ -508,8 +508,6 @@ class RunService:
                 raise UnauthorizedSessionError("Authentication is required")
         elif not isinstance(authorization, RunCreationParticipant):
             raise TypeError("Run creation requires user access or an internal claim participant")
-        if (auto_approve or auto_approve_git) and not isinstance(authorization, UserAccess):
-            raise TaskSourceSelectionError("Automatic approval requires an interactive Run start")
         make_intent = partial(
             _task_run_intent,
             project_id=project_id,
@@ -529,6 +527,10 @@ class RunService:
                 authority = await authorization.authorize(
                     session, intent=intent, idempotency_key=idempotency_key
                 )
+                if (auto_approve or auto_approve_git or auto_approve_mcp) and not authority.auto_approval_allowed:
+                    raise TaskSourceSelectionError(
+                        "Automatic approval requires verified original consent"
+                    )
                 try:
                     yield session, intent, authority
                 except PublishedTaskNotFoundError:

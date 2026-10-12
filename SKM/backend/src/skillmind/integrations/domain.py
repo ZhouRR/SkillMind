@@ -448,7 +448,7 @@ def normalize_integration_command(command: CreateIntegrationCommand) -> CreateIn
         if config["auth_mode"] != "none" and command.secret_reference_id is None:
             raise IntegrationValidationError("HTTP authentication requires a credential")
         if "http.write/v1" in capabilities and "http.read/v1" not in capabilities:
-            raise IntegrationValidationError("HTTP write requires read-back access")
+            raise IntegrationValidationError("HTTP write requires the read capability")
     scope = normalize_provider_scope(
         command.provider,
         command.scope,
@@ -505,7 +505,7 @@ def normalize_provider_scope(
     if provider == "http":
         from skillmind.integrations.http_resource import normalize_scope
         try:
-            return normalize_scope(scope, write_enabled=write_enabled)
+            return normalize_scope(scope)
         except ValueError as error:
             raise IntegrationValidationError(str(error)) from None
     if provider == "mcp" and "tool_names" in scope:

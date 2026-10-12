@@ -73,9 +73,7 @@
         "operation",
         "target",
         "changes",
-        "precondition",
-        "summary",
-        "evidence_refs"
+        "summary"
       ],
       "properties": {
         "effect_intent_key": {
@@ -146,9 +144,6 @@
         "precondition": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "revision"
-          ],
           "properties": {
             "revision": {
               "type": "string",
@@ -164,7 +159,7 @@
         },
         "evidence_refs": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 0,
           "maxItems": 200,
           "uniqueItems": true,
           "items": {
@@ -205,7 +200,10 @@
           ],
           "properties": {
             "method": {
-              "const": "READ_BACK"
+              "enum": [
+                "READ_BACK",
+                "HTTP_RESPONSE"
+              ]
             },
             "paths": {
               "type": "array",
@@ -239,7 +237,55 @@
         "checkpoint": {
           "$ref": "#/$defs/checkpoint"
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "capability_version": {
+                "const": "http.write/v1"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "precondition": {
+                "maxProperties": 0
+              },
+              "verification": {
+                "properties": {
+                  "method": {
+                    "const": "HTTP_RESPONSE"
+                  }
+                }
+              }
+            }
+          },
+          "else": {
+            "required": [
+              "precondition",
+              "evidence_refs"
+            ],
+            "properties": {
+              "precondition": {
+                "required": [
+                  "revision"
+                ]
+              },
+              "evidence_refs": {
+                "minItems": 1
+              },
+              "verification": {
+                "properties": {
+                  "method": {
+                    "const": "READ_BACK"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     {
       "type": "object",
@@ -255,7 +301,7 @@
         },
         "evidence_refs": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 0,
           "maxItems": 200,
           "uniqueItems": true,
           "items": {

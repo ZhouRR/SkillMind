@@ -530,8 +530,9 @@ def render_task_brief_prompt(
             "PostgreSQL uses database.query and approved database.execute with native SQL and $1 "
             "parameters; "
             "the configured account enforces table/column permissions. HTTP APIs use relative "
-            "paths and "
-            "runtime-injected credentials. Inspect response files by path. "
+            "paths under registered base_urls or a full URL within those roots, with "
+            "runtime-injected credentials. HTTP writes need no pre-GET/read-back; inspect the "
+            "HTTP status and response file, and evaluate business results yourself. "
             "A prepared proposal JSON file may be submitted with change.propose request_file, "
             "expected_hash "
             "and evidence_refs. File edits alone do not publish remote changes. "
@@ -596,8 +597,10 @@ def _finish_task_prompt(
         "skillmind.runtime/v8",
     }:
         sections.append(
-            "For change.propose, provide the business target, changes, precondition, summary and "
-            "evidence. Idempotency, minimum risk, READ_BACK paths, expiry, rollback and an empty "
+            "For change.propose, provide the business target, changes, summary and required "
+            "preconditions/evidence. HTTP writes need neither a prior GET nor its revision or "
+            "evidence. Idempotency, minimum risk, verification paths, expiry, rollback and an "
+            "empty "
             "RESUME checkpoint may be derived by the platform. Preserve explicit business "
             "checkpoint facts when needed. A direct INLINE response contains the committed "
             "original "

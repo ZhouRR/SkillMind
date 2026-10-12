@@ -11,7 +11,11 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from skillmind.agent.codex_diagnostics import codex_failure_detail
-from skillmind.agent.codex_schema import CodexOutputError, CodexOutputSchema
+from skillmind.agent.codex_schema import (
+    CodexOutputError,
+    CodexOutputSchema,
+    NativeCodexOutputSchema,
+)
 from skillmind.skills.interpreter import (
     build_legacy_interpreter_generation_schema as build_interpreter_generation_schema,
 )
@@ -37,6 +41,40 @@ def assert_strict_schema(schema: dict[str, Any], depth: int = 0) -> None:
             assert_strict_schema(child, depth + 1)
     if schema["type"] == "array":
         assert_strict_schema(schema["items"], depth + 1)
+
+
+def assert_native_schema_types(schema: dict[str, Any], path: str = "") -> None:
+    """原生候補も API の明示型・全必須 field・閉じた object 条件へ通す。"""
+
+    if "$ref" not in schema and "anyOf" not in schema:
+        assert "type" in schema, f"Native schema has no type at {path or '/'}"
+    if schema.get("type") == "object":
+        assert schema.get("additionalProperties") is False
+        assert set(schema.get("required", [])) == set(schema.get("properties", {}))
+    for key in ("properties", "$defs"):
+        for name, child in schema.get(key, {}).items():
+            assert_native_schema_types(child, f"{path}/{key}/{name}")
+    if "items" in schema:
+        assert_native_schema_types(schema["items"], f"{path}/items")
+    for index, child in enumerate(schema.get("anyOf", [])):
+        assert_native_schema_types(child, f"{path}/anyOf/{index}")
+
+
+@pytest.mark.parametrize("direct", [False, True])
+def test_native_candidate_schema_has_explicit_types_without_encoding(direct: bool) -> None:
+    """Draft 合法性だけでなく、実 SDK にそのまま送る候補の型条件を検査する。"""
+
+    from skillmind.skills.candidate import candidate_schema as legacy_schema
+    from skillmind.skills.direct_candidate import candidate_schema as direct_schema
+
+    contracts = Path(__file__).resolve().parents[3] / "contracts"
+    original = direct_schema(contracts) if direct else legacy_schema(contracts)
+    before = deepcopy(original)
+    output = NativeCodexOutputSchema(original)
+
+    assert_native_schema_types(output.schema)
+    assert output.schema == before and original == before
+    Draft202012Validator.check_schema(output.schema)
 
 
 def _closed(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:

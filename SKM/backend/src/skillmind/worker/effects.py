@@ -16,6 +16,7 @@ from skillmind.effects.domain import (
     EffectFailure,
     EffectLeaseValidationError,
 )
+from skillmind.effects.http_provider import HttpResponseError
 from skillmind.effects.mcp_diagnostics import McpEffectFailure
 from skillmind.effects.postgres_native import SqlPreconditionNotMetError
 from skillmind.effects.provider import EffectProviderRegistry
@@ -223,7 +224,8 @@ class ApprovedEffectExecutor:
                 code=error.code,
                 retryable=error.retryable,
                 diagnostic=error.diagnostic if isinstance(error, McpEffectFailure) else None,
-                observations=error.observations if isinstance(error, McpEffectFailure) else (),
+                observations=error.observations
+                if isinstance(error, McpEffectFailure | HttpResponseError) else (),
             )
         except (SecretResolutionError, LookupError, ValueError):
             failure = EffectFailure(

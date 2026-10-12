@@ -92,7 +92,9 @@ class HttpReadProvider:
                     evidence_type="resource",
                     source_uri=f"http-resource://{context.tool.integration_id}/{context.tool_call_id}",
                     source_locator={
-                        "path": request["path"],
+                        "url": request.get("url"),
+                        "path": request.get("path"),
+                        "base_url": request.get("base_url"),
                         "method": request.get("method", "GET"),
                     },
                     content_hash=file["content_hash"],

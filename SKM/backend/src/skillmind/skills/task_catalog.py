@@ -95,14 +95,18 @@ def project_published_tasks(
 ) -> list[PublishedTaskDescriptor]:
     """Manifest の tasks を汎用 descriptor へ投影する。業務固有定数には依存しない。
 
-    Manifest は publish gate を通過済みで契約に整合するが、破損行でも例外を投げず
-    投影可能な範囲だけを返すよう防御的に読み取る。
+    発行時に有効だった保存版でも、現在の契約で解決できない場合は新規 task へ公開しない。
+    未対応/破損版を除外し、別版の発見を妨げず、原 Manifest は変更しない。
     """
 
     compatibility_level = _string_at(manifest, ("compatibility", "level"))
     default_view = _string_at(manifest, ("ui", "default_view"))
     tools = _tool_requirements(manifest)
-    blueprint = resolve_skill_definition(manifest)
+    try:
+        blueprint = resolve_skill_definition(manifest)
+    except ValueError:
+        # 宣言の拒否だけを発見境界で処理する。直接の Run 解決は従来どおり拒否する。
+        return []
     if blueprint is None:
         # publish gate が蓝图を必須にしているため、ここへ来る manifest は必ず持っている。
         # 万一欠けた行を discovery へ出すと、目標も規則も無い task が実行できてしまう。

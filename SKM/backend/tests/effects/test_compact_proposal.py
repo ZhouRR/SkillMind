@@ -175,3 +175,29 @@ def test_inline_success_preserves_confirmed_business_failure(status):
     assert result["effect_result"] == before
     assert result["effect_result"]["after"]["read_back"]["status"] == status
     assert result["effect_result"]["verification"]["business_verdict"] == "NOT_EVALUATED"
+
+
+def test_http_proposal_needs_no_get_evidence_or_fake_revision():
+    """Webhook の一回送信に GET 観測を要求せず、他 Provider の規則は維持する。"""
+    from skillmind.effects.http_write import validate_http_proposal
+    value = {
+        "resource_key": "api", "capability_version": "http.write/v1", "operation": "POST",
+        "target": {"locator": "/webhook", "display": "send message"},
+        "changes": [{"path": "/request", "action": "SET", "value": {
+            "request": {"method": "POST", "path": "/webhook", "body": {"message": "hello"}},
+        }}], "summary": "Send one message",
+    }
+    Draft202012Validator(CHANGE_PROPOSE_REQUEST_SCHEMA).validate(value)
+    draft = parse_change_proposal_request(value, request_identity="http-fixture-call")
+    assert draft.evidence_refs == () and draft.precondition == {}
+    assert draft.verification == {"method": "HTTP_RESPONSE", "paths": ["/request"]}
+    payload = validate_http_proposal(draft, {"base_urls": ["https://api.example.test"]},
+                                     {"auth_mode": "none"})
+    assert payload == value["changes"][0]["value"]
+    for bad in (
+        {"precondition": {"revision": "fake"}},
+        {"verification": {"method": "READ_BACK", "paths": ["/request"]}},
+        {"capability_version": "database.execute/v1"},
+    ):
+        with pytest.raises(ValueError):
+            parse_change_proposal_request({**value, **bad}, request_identity="http-fixture-call")

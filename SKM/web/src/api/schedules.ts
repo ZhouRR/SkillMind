@@ -41,6 +41,7 @@ export interface ScheduleRecord {
   task_key: string
   input: Record<string, unknown>
   sources: Record<string, string>
+  auto_approve: boolean
   next_run_at: string | null
   last_run_at: string | null
   last_run_id: string | null
@@ -62,6 +63,7 @@ export interface CreateScheduleInput {
   task_key: string
   input?: Record<string, unknown>
   sources?: Record<string, string>
+  auto_approve?: boolean
 }
 
 /** 既存 schedule の定義と凍結入力を差し替える入力。束縛 task は変更できない。 */
@@ -71,6 +73,7 @@ export interface UpdateScheduleInput {
   input?: Record<string, unknown>
   sources?: Record<string, string>
   expected_row_version: number
+  auto_approve?: boolean
 }
 
 /** 検索は server に渡し、部分ページを全件の代わりにしない。 */
@@ -349,6 +352,7 @@ const SCHEDULE_FIELDS = [
   'schedule_id', 'project_id', 'name', 'kind', 'status', 'timezone', 'cron_expression', 'run_at', 'end_at', 'max_runs',
   'skill_version_id', 'task_key', 'input', 'sources', 'next_run_at', 'last_run_at', 'last_run_id', 'last_outcome',
   'last_error', 'run_count', 'missed_count', 'created_by', 'row_version', 'created_at', 'updated_at',
+  'auto_approve',
 ]
 
 /** JSON の有限整数だけを受け、bool/小数/unsafe number を件数や CAS に使わない。 */
@@ -359,6 +363,7 @@ function isInteger(value: unknown, minimum: number): value is number {
 /** schedule record の契約を実行時に検証する。 */
 function isScheduleRecord(value: unknown): value is ScheduleRecord {
   if (!isRecord(value) || !exactFields(value, SCHEDULE_FIELDS)) return false
+  if (typeof value.auto_approve !== 'boolean') return false
   if (!['schedule_id', 'project_id', 'skill_version_id', 'created_by'].every((key) => isUuid(value[key]))) return false
   if (!['name', 'timezone', 'task_key'].every((key) => typeof value[key] === 'string' && value[key].length > 0)) return false
   if (typeof value.kind !== 'string' || !SCHEDULE_KINDS.has(value.kind)) return false

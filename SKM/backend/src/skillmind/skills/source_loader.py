@@ -114,17 +114,11 @@ class SkillSourceLoader:
         # 明示 entry はアップロード root 相対。Browser 側の除去後にもう一段剥がさない。
         frozen_files = freeze_upload_files(files, normalize_root=entry_path is None)
         loaded, preview = self._prepare(frozen_files, entry_path=entry_path)
-        selected_entry = entry_path
-        if (
-            selected_entry is None and loaded.package.detected_adapter == "directory-skill/v1"
-            and loaded.package.primary_instruction != "SKILL.md"
-        ):
-            selected_entry = loaded.package.primary_instruction
         selected = {file.path for file in loaded.package.files}
         return PreparedSkillImport(
             preview=preview, source_files=loaded.source_files,
             upload_files=tuple(file for file in frozen_files if file.path in selected),
-            entry_path=selected_entry,
+            entry_path=loaded.package.entry_path,
         )
 
     def _prepare(

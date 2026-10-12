@@ -137,10 +137,10 @@ export function accessForCapabilities(capabilities: readonly string[]): Resource
 /** 構造化入力から server の scope allowlist 形へ組み立てる。形は Provider ごとに固定。 */
 export function buildIntegrationScope(
   provider: ResourceProvider,
-  input: { issueIds: string[]; fieldKeys: string[]; paths: string[]; revisions: string[]; tables?: string[]; resourceUris?: string[]; mcpTools?: boolean; mcpPermissions?: Record<string, string>; writeEnabled?: boolean; writeColumns?: string[]; operations?: string[]; httpMethods?: string[] },
+  input: { issueIds: string[]; fieldKeys: string[]; paths: string[]; revisions: string[]; tables?: string[]; resourceUris?: string[]; mcpTools?: boolean; mcpPermissions?: Record<string, string>; writeEnabled?: boolean; writeColumns?: string[]; operations?: string[]; httpBaseUrls?: string[] },
 ): Record<string, string[]> {
   if (provider === 'postgres') return { statements: input.writeEnabled ? ['SELECT', ...(input.operations ?? [])] : ['SELECT'] }
-  if (provider === 'http') return { paths: input.paths, methods: ['GET', 'HEAD', ...(input.writeEnabled ? input.httpMethods ?? [] : [])] }
+  if (provider === 'http') return { base_urls: [...new Set((input.httpBaseUrls ?? []).map((url) => url.trim()).filter(Boolean))] }
   if (provider === 'mcp') return { resource_uris: input.resourceUris ?? [], ...(input.mcpTools
     ? { tool_names: Object.entries(input.mcpPermissions ?? {}).filter(([, mode]) => mode === 'read' || (mode === 'call' && input.writeEnabled)).map(([name]) => name).sort() } : {}) }
   if (provider === 'redmine') {
@@ -186,7 +186,7 @@ export function buildIntegrationConfig(
     write?: RepositoryWriteInput
   },
 ): Record<string, unknown> {
-  if (provider === 'http') return { base_url: input.baseUrl.trim(), auth_mode: input.httpAuthMode ?? 'bearer', ...(input.httpAuthMode === 'header' ? { credential_header: input.httpAuthHeader?.trim() ?? '' } : {}) }
+  if (provider === 'http') return { auth_mode: input.httpAuthMode ?? 'bearer', ...(input.httpAuthMode === 'header' ? { credential_header: input.httpAuthHeader?.trim() ?? '' } : {}) }
   if (provider === 'postgres') return { access_mode: 'native_sql', host: input.host?.trim() ?? '', port: Number(input.port ?? '5432'),
     database: input.database?.trim() ?? '', username: input.username?.trim() ?? '', sslmode: input.sslmode ?? 'verify-full' }
   if (provider === 'mcp') return { server_url: input.serverUrl?.trim() ?? '', transport: 'streamable_http',
@@ -253,7 +253,7 @@ export function findWriteConfigIssue(
 export const REPOSITORY_WRITE_BRANCH_PREFIX = 'skillmind/'
 
 /** Server が確実に拒否する scope を送信前に検出する。null は「送ってよい」。 */
-export type ScopeIssue = 'issue_ids_required' | 'field_keys_required' | 'paths_required' | 'tables_required' | 'write_columns_required' | 'database_operations_required' | 'mcp_tools_required'
+export type ScopeIssue = 'issue_ids_required' | 'field_keys_required' | 'paths_required' | 'tables_required' | 'write_columns_required' | 'database_operations_required' | 'mcp_tools_required' | 'http_base_urls_required'
 
 /** Backend normalize_provider_scope の必須条件 mirror。write は明示 field 列を要求する。 */
 export function findScopeIssue(
@@ -262,7 +262,7 @@ export function findScopeIssue(
   writeEnabled: boolean,
 ): ScopeIssue | null {
   if (provider === 'postgres') return writeEnabled && (scope.statements?.length ?? 0) < 2 ? 'database_operations_required' : null
-  if (provider === 'http') return !scope.paths?.length ? 'paths_required' : null
+  if (provider === 'http') return !scope.base_urls?.length ? 'http_base_urls_required' : null
   if (provider === 'mcp') return scope.tool_names !== undefined && scope.tool_names.length === 0 ? 'mcp_tools_required' : null
   if (provider === 'redmine') {
     if ((scope.issue_ids ?? []).length === 0) return 'issue_ids_required'

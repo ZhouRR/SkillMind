@@ -35,9 +35,7 @@ CHANGE_PROPOSE_REQUEST_SCHEMA: dict[str, Any] = {
         "operation",
         "target",
         "changes",
-        "precondition",
         "summary",
-        "evidence_refs",
     ],
     "properties": {
         "effect_intent_key": {"$ref": "#/$defs/key"},
@@ -66,7 +64,9 @@ CHANGE_PROPOSE_REQUEST_SCHEMA: dict[str, Any] = {
                 "additionalProperties": False,
                 "required": ["path", "action", "value"],
                 "properties": {
-                    "path": {"type": "string", "pattern": r"^/[^\x00-\x1f\x7f]+$", "maxLength": 512},
+                    "path": {
+                        "type": "string", "pattern": r"^/[^\x00-\x1f\x7f]+$", "maxLength": 512,
+                    },
                     "action": {"enum": ["SET", "REMOVE", "APPEND"]},
                     "value": {},
                 },
@@ -75,13 +75,12 @@ CHANGE_PROPOSE_REQUEST_SCHEMA: dict[str, Any] = {
         "precondition": {
             "type": "object",
             "additionalProperties": False,
-            "required": ["revision"],
             "properties": {"revision": {"type": "string", "minLength": 1, "maxLength": 256}},
         },
         "summary": {"type": "string", "minLength": 1, "maxLength": 4000},
         "evidence_refs": {
             "type": "array",
-            "minItems": 1,
+            "minItems": 0,
             "maxItems": 200,
             "uniqueItems": True,
             "items": {"type": "string", "pattern": "^ev_[a-zA-Z0-9_-]+$"},
@@ -99,7 +98,7 @@ CHANGE_PROPOSE_REQUEST_SCHEMA: dict[str, Any] = {
             "additionalProperties": False,
             "required": ["method", "paths"],
             "properties": {
-                "method": {"const": "READ_BACK"},
+                "method": {"enum": ["READ_BACK", "HTTP_RESPONSE"]},
                 "paths": {
                     "type": "array",
                     "minItems": 1,
@@ -118,6 +117,23 @@ CHANGE_PROPOSE_REQUEST_SCHEMA: dict[str, Any] = {
         "continuation_mode": {"enum": ["RESUME", "FORK", "REPLACE"]},
         "checkpoint": {"$ref": "#/$defs/checkpoint"},
     },
+    "allOf": [{
+        "if": {"properties": {"capability_version": {"const": "http.write/v1"}}},
+        "then": {
+            "properties": {
+                "precondition": {"maxProperties": 0},
+                "verification": {"properties": {"method": {"const": "HTTP_RESPONSE"}}},
+            },
+        },
+        "else": {
+            "required": ["precondition", "evidence_refs"],
+            "properties": {
+                "precondition": {"required": ["revision"]},
+                "evidence_refs": {"minItems": 1},
+                "verification": {"properties": {"method": {"const": "READ_BACK"}}},
+            },
+        },
+    }],
     "$defs": {
         "key": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]*$", "maxLength": 128},
         "checkpoint": {
@@ -170,7 +186,17 @@ CHANGE_PROPOSE_REQUEST_SCHEMA["type"] = "object"
 CHANGE_PROPOSE_REQUEST_SCHEMA["oneOf"] = [
     {key: value for key, value in CHANGE_PROPOSE_INLINE_SCHEMA.items()
      if key not in {"$schema", "$id", "title", "$defs"}},
-    {'type': 'object', 'additionalProperties': False, 'properties': {'request_file': {'type': 'string', 'pattern': '^(workspace|output)/'}, 'expected_hash': {'type': 'string', 'pattern': '^sha256:[a-f0-9]{64}$'}, 'evidence_refs': {'type': 'array', 'minItems': 1, 'maxItems': 200, 'uniqueItems': True, 'items': {'type': 'string', 'pattern': '^ev_[a-zA-Z0-9_-]+$'}}}, 'required': ['request_file', 'expected_hash']},
+    {'type': 'object',
+     'additionalProperties': False,
+     'properties': {'request_file': {'type': 'string', 'pattern': '^(workspace|output)/'},
+                    'expected_hash': {'type': 'string', 'pattern': '^sha256:[a-f0-9]{64}$'},
+                    'evidence_refs': {'type': 'array',
+                                      'minItems': 0,
+                                      'maxItems': 200,
+                                      'uniqueItems': True,
+                                      'items': {'type': 'string',
+                                                'pattern': '^ev_[a-zA-Z0-9_-]+$'}}},
+     'required': ['request_file', 'expected_hash']},
 ]
 
 
@@ -183,6 +209,10 @@ def parse_change_proposal_request(
     payload = deepcopy(original)
     if not Draft202012Validator(CHANGE_PROPOSE_INLINE_SCHEMA).is_valid(original):
         raise ChangeProposalValidationError("ChangeProposal request did not match its contract")
+    is_http = payload.get("capability_version") == "http.write/v1"
+    if is_http:
+        payload.setdefault("precondition", {})
+        payload.setdefault("evidence_refs", [])
     # モデルは業務目的と正確な値/根拠を指定し、既知の管理項目は platform が生成する。
     # request identity は SDK/Worker 由来。同じ内容の別操作を hash だけで重複除去しない。
     paths = [
@@ -200,7 +230,9 @@ def parse_change_proposal_request(
         "rollback",
         {"description": "No automatic compensation; preserve the original operation receipt."},
     )
-    payload.setdefault("verification", {"method": "READ_BACK", "paths": paths})
+    payload.setdefault("verification", {
+        "method": "HTTP_RESPONSE" if is_http else "READ_BACK", "paths": paths,
+    })
     payload.setdefault("expires_in_seconds", 3600)
     payload.setdefault("continuation_mode", "RESUME")
     payload.setdefault(

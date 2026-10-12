@@ -1957,7 +1957,8 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 code=failure.code, retryable=failure.retryable, previous=execution.error_json,
                 diagnostic=failure.diagnostic,
             )
-            if proposal.capability_version == "mcp.call/v1" and failure.observations:
+            if (proposal.capability_version in {"mcp.call/v1", "http.write/v1"}
+                and failure.observations):
                 refs = list(execution.error_json.get("observation_refs", []))
                 for observation in failure.observations[:2]:
                     ref = f"ev_{uuid4().hex}"
@@ -1967,6 +1968,9 @@ class EffectOperationsMixin(_RunRepositoryBase):
                     ))
                     refs.append(ref)
                 execution.error_json["observation_refs"] = refs[-16:]
+                if proposal.capability_version == "http.write/v1":
+                    execution.error_json["response"] = dict(failure.observations[0].content)
+                    evidence_refs = tuple(refs)
             proposal.status = (
                 ChangeProposalStatus.STALE.value
                 if failure.status is EffectExecutionStatus.STALE
@@ -1978,6 +1982,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 code=execution.error_json["code"],
                 retryable=failure.retryable,
                 diagnostic=execution.error_json.get("diagnostic"),
+                response=execution.error_json.get("response"),
             )
         execution.executed_at = now
         execution.lease_token_hash = None
@@ -3027,6 +3032,8 @@ class EffectOperationsMixin(_RunRepositoryBase):
                     else ""
                 )
             )
+            if "response" in effect_error:
+                facts.append("Original HTTP response: " + canonical_json(effect_error["response"]))
         if rejection_reason is not None:
             if outcome != "REJECTED":
                 raise ValueError("Only a rejection can carry rejection feedback")
@@ -3408,13 +3415,14 @@ class EffectOperationsMixin(_RunRepositoryBase):
 
 def _effect_tool_error(
     *, code: str, retryable: bool, diagnostic: dict[str, Any] | None = None,
+    response: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Tool contract に適合し、外部 response 本文を含まない effect error を返す。"""
 
     return {
         "status": "error",
         "code": "invalid_request"
-        if code in {"mcp_request_not_sent", "sql_precondition_not_met"}
+        if code in {"mcp_request_not_sent", "sql_precondition_not_met", "http_response_error"}
         else code,
         "message": (
             "Original external write result requires reconciliation"
@@ -3423,6 +3431,7 @@ def _effect_tool_error(
             if code == "sql_precondition_not_met"
             else "Controlled effect could not be completed"
         )
-        + diagnostic_message(diagnostic),
+        + diagnostic_message(diagnostic)
+        + (" Original HTTP response: " + canonical_json(response) if response is not None else ""),
         "retryable": retryable,
     }

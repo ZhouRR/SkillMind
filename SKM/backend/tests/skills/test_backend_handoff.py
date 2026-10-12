@@ -17,7 +17,7 @@ from skillmind.agent.task_brief import build_agent_task_brief, render_task_brief
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.core.settings import Settings
 from skillmind.skills.direct_candidate import candidate_schema
-from skillmind.skills.domain import InlineSkillFile
+from skillmind.skills.domain import StoredSkillSource, UploadSkillFile
 from skillmind.skills.interpreter import load_capability_catalog
 from skillmind.skills.interpreter_execution import compute_execution_key
 from skillmind.skills.model_interpreter import ModelCompletion, ModelSkillInterpreter
@@ -33,8 +33,11 @@ SYSTEM_SKILL = ROOT / "skills/skillmind-skill-interpreter"
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("engine", ["codex", "claude"])
-async def test_empty_input_import_handoff_and_source_task_remain_usable(engine: str) -> None:
-    """同期した別 instance の identity が一致し、モデル無しの保守側も原 task を読める。"""
+@pytest.mark.parametrize("entry_path", [None, "SKILL.md", "skills/review/SKILL.md"])
+async def test_empty_input_import_handoff_and_source_task_remain_usable(
+    engine: str, entry_path: str | None,
+) -> None:
+    """選択入口と共有 file を API/Worker 間で固定し、保守側も公開済み task を読める。"""
 
     settings = Settings(_env_file=None, contracts_dir=CONTRACTS)
     sessions = MagicMock(side_effect=AssertionError("This regression does not access a database"))
@@ -67,19 +70,35 @@ async def test_empty_input_import_handoff_and_source_task_remain_usable(engine: 
 
     api, api_adapter, api_catalog = instance()
     worker, worker_adapter, worker_catalog = instance()
-    files = (InlineSkillFile(
-        path="SKILL.md",
-        content="---\nname: handoff-review\ndescription: Explain the supplied instructions.\n---\n"
-        "# Handoff review\nNo caller input or external resources are required.\n",
-    ),)
-    preview = api.preview_inline(files)
-    source = SimpleNamespace(
-        storage_uri="database://fixture", source_files=files,
-        source_hash=preview.normalized_package["source"]["content_hash"],
+    path = entry_path or "SKILL.md"
+    schema_path = "../../schemas/input.schema.json" if path.startswith("skills/") else (
+        "schemas/input.schema.json"
+    )
+    files = (
+        UploadSkillFile(
+            path=path,
+            data=("---\nname: handoff-review\ndescription: Explain the supplied instructions.\n"
+                  "---\n# Handoff review\nNo caller input or external resources are required.\n"
+                  f"[Input schema]({schema_path})\n").encode(),
+            content_type="text/markdown",
+        ),
+        UploadSkillFile("schemas/input.schema.json", b'{"type":"object"}', "application/json"),
+    )
+    prepared = api._source_loader.prepare_upload(files, entry_path=entry_path)
+    command = prepared.save_command(organization_id=uuid4(), imported_by=uuid4())
+    source = StoredSkillSource(
+        skill_source_id=uuid4(), organization_id=command.organization_id,
+        name=command.name, source_type=command.source_type, source_hash=command.source_hash,
+        source_files=command.source_files, source_file_index=command.source_file_index,
+        entry_path=command.entry_path,
     )
     payloads, requests = [], []
-    for service, adapter, catalog in ((api, api_adapter, api_catalog), (worker, worker_adapter, worker_catalog)):
-        package, analysis, request = await service._prepare_request(source, catalog, adapter.system_identity)
+    for service, adapter, catalog in (
+        (api, api_adapter, api_catalog), (worker, worker_adapter, worker_catalog),
+    ):
+        package, analysis, request = await service._prepare_request(
+            source, catalog, adapter.system_identity,
+        )
         assert request is not None
         requests.append(request)
         payloads.append(_interpretation_request_input(
@@ -89,6 +108,7 @@ async def test_empty_input_import_handoff_and_source_task_remain_usable(engine: 
             runtime_profile=service._runtime_profile_snapshot(),
         ))
     assert canonical_json(payloads[0]) == canonical_json(payloads[1])
+    assert requests[0]["source"].get("entry_path") == entry_path
     assert compute_execution_key(requests[0], model="test-model", parameters={}) == (
         compute_execution_key(requests[1], model="test-model", parameters={})
     )
@@ -111,7 +131,7 @@ async def test_empty_input_import_handoff_and_source_task_remain_usable(engine: 
         settings, session_factory=sessions, file_storage=None, document_library_target=None,
     )
     assert maintenance._interpreter is None
-    maintenance.preview_inline(files)
+    maintenance.preview_inline(source.source_files)
     maintenance._validate_task_input(resolved.input_schema, {})
     brief = build_agent_task_brief(
         run_id=uuid4(), project_id=uuid4(), manifest=manifest, selected_sources={}, tools=[],
@@ -123,6 +143,8 @@ async def test_empty_input_import_handoff_and_source_task_remain_usable(engine: 
         limits=RunLimits(max_turns=10, wall_timeout_seconds=60, max_output_bytes=100000),
     )
     assert brief.brief["source_documents"] == requests[0]["source"]["source_documents"]
-    assert render_task_brief_prompt(brief.brief, input_json={}, output_schema=resolved.output_schema)
+    assert render_task_brief_prompt(
+        brief.brief, input_json={}, output_schema=resolved.output_schema,
+    )
     assert manifest == original and len(calls) == 1
     sessions.assert_not_called()

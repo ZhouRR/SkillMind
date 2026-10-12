@@ -478,8 +478,10 @@ export const EN: UiMessages = {
   resources: {
     httpAuthentication: 'Authentication',
     httpCredentialHeader: 'API key header name',
-    httpPaths: 'Allowed API paths',
-    httpMethods: 'Allowed HTTP mutation methods',
+    httpBaseUrls: 'API base URLs',
+    httpAddAddress: 'Add',
+    httpRemoveAddress: 'Remove',
+    httpBaseUrlsRequired: 'Add an API base URL.',
     nativeSqlHint: 'Execute SQL directly. Table and column access follows the configured database account permissions.',
 
     resourceInUse: 'This resource is used by execution history or another configuration. Disable it, or remove the references before deleting it.',
@@ -620,7 +622,7 @@ export const EN: UiMessages = {
     scopeKeepAllOption: 'Keep unrestricted',
     scopeNarrowHint: 'Comma or newline separated; empty allows nothing.',
     scopeUnrestrictedLabel: 'unrestricted',
-    scopeKeyLabels: { statements: 'SQL operations', methods: 'HTTP methods', tables: 'Tables', write_columns: 'Writable columns', operations: 'Write operations', tool_names: 'Tools', resource_uris: 'Resource URIs', issue_ids: 'Issues', field_keys: 'Editable fields', paths: 'Paths', revisions: 'Revisions' },
+    scopeKeyLabels: { base_urls: 'API URLs', statements: 'SQL operations', methods: 'HTTP methods', tables: 'Tables', write_columns: 'Writable columns', operations: 'Write operations', tool_names: 'Tools', resource_uris: 'Resource URIs', issue_ids: 'Issues', field_keys: 'Editable fields', paths: 'Paths', revisions: 'Revisions' },
     pleaseSelect: 'Select…',
     selectValidIntegration: 'Select a valid integration.',
     saveBinding: 'Save binding',
@@ -1050,7 +1052,7 @@ export const EN: UiMessages = {
       incompleteDraft: 'Enter a valid JSON object and complete all document selections. Optional scopes can be set to not used.',
     },
     creating: 'Creating…',
-    autoApprove: 'Automatically approve database writes, document saves, Git commits and MCP operations',
+    autoApprove: 'Automatically approve database writes, document saves, Git commits, MCP and HTTP operations',
     startRun: 'Start run',
     submission: {
       title: 'Confirm the previous submission',

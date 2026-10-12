@@ -118,7 +118,7 @@ def test_profile_scope_requires_readback_and_only_registered_mcp_run_consent():
     assert ExecutionFeatures(mcp_tools=True).effect_enabled("mcp.call/v1", "call", provider="mcp")
 
 
-def test_mcp_wiring_has_read_tools_and_supervised_effect_without_direct_action():
+def test_mcp_wiring_has_read_tools_and_supervised_effect_without_direct_action(tmp_path):
     """新能力は本番 registry へ装配され、外部 action は Agent gateway に登録しない。"""
     from pathlib import Path
     from uuid import uuid4
@@ -149,6 +149,7 @@ def test_mcp_wiring_has_read_tools_and_supervised_effect_without_direct_action()
     with pytest.raises(LookupError):
         registry.resolve("mcp.call/v1", provider="mcp", integration_id=uuid4(), binding_id=uuid4())
     effects = create_effect_provider_registry(
+        workspace_root=tmp_path,
         features=ExecutionFeatures(mcp_tools=True),
         effect_service=Mock(),
         secret_resolver=Mock(),

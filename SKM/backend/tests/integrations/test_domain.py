@@ -32,8 +32,8 @@ def _http_command() -> CreateIntegrationCommand:
         kind="other",
         provider="http",
         capabilities=("http.write/v1", "http.read/v1"),
-        scope={"paths": ["/issues/42.json"], "methods": ["PUT", "GET"]},
-        config={"base_url": "https://redmine.example.test/", "auth_mode": "header", "credential_header": "X-Redmine-API-Key"},
+        scope={"base_urls": ["https://redmine.example.test/"]},
+        config={"auth_mode": "header", "credential_header": "X-Redmine-API-Key"},
         secret_reference_id=uuid4(),
         created_by=uuid4(),
     )
@@ -45,11 +45,8 @@ def test_http_write_integration_normalizes_exact_scope_and_url() -> None:
     normalized = normalize_integration_command(_http_command())
 
     assert normalized.capabilities == ("http.read/v1", "http.write/v1")
-    assert normalized.scope == {
-        "paths": ["/issues/42.json"],
-        "methods": ["GET", "PUT"],
-    }
-    assert normalized.config == {"base_url": "https://redmine.example.test", "auth_mode": "header", "credential_header": "X-Redmine-API-Key"}
+    assert normalized.scope == {"base_urls": ["https://redmine.example.test"]}
+    assert normalized.config == {"auth_mode": "header", "credential_header": "X-Redmine-API-Key"}
 
 
 @pytest.mark.parametrize(
@@ -327,11 +324,11 @@ def test_http_scope_accepts_explicit_root_and_deduplicates() -> None:
     normalized = normalize_integration_command(
         replace(
             _http_command(),
-            scope={"paths": ["/", "/"], "methods": ["GET", "PUT"]},
+            scope={"base_urls": ["https://redmine.example.test/", "https://redmine.example.test"]},
         )
     )
 
-    assert normalized.scope == {"paths": ["/"], "methods": ["GET", "PUT"]}
+    assert normalized.scope == {"base_urls": ["https://redmine.example.test"]}
 
 
 def test_repository_scope_rejects_reserved_wildcard_token() -> None:

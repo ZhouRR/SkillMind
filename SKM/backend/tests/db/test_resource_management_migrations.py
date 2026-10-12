@@ -51,3 +51,13 @@ def test_deletion_audit_does_not_keep_run_or_skill_foreign_keys():
         downgrade = migration_sql(name, "downgrade")
         assert downgrade.index("LOCK TABLE") < downgrade.index("IF EXISTS")
         assert "RAISE EXCEPTION" in downgrade
+
+
+def test_http_root_migration_converts_connections_without_rewriting_run_snapshots():
+    """旧 form の根を一度だけ変換し、資格と凍結 Run は SQL 更新対象にしない。"""
+    sql = migration_sql("0062_http_resource_roots.py")
+    assert "json_build_object('base_urls'" in sql
+    assert "config_json::jsonb - 'base_url'" in sql
+    assert "scope_level <> 'RUN'" in sql
+    assert "revision = revision + 1" in sql
+    assert "UPDATE runs" not in sql and "UPDATE secret_references" not in sql

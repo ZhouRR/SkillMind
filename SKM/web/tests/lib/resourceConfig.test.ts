@@ -42,10 +42,10 @@ describe('PostgreSQL and MCP connection configuration', () => {
 
   it('configures generic HTTP authentication and method/path scope without a secret body', () => {
     expect(buildIntegrationConfig('http', { ...emptyConnectDraft('http'), baseUrl: ' https://api.example.test ',
-      httpAuthMode: 'header', httpAuthHeader: 'X-Redmine-API-Key' })).toEqual({ base_url: 'https://api.example.test', auth_mode: 'header', credential_header: 'X-Redmine-API-Key' })
+      httpAuthMode: 'header', httpAuthHeader: 'X-Redmine-API-Key' })).toEqual({ auth_mode: 'header', credential_header: 'X-Redmine-API-Key' })
     expect(capabilitiesForAccess('http', 'read_write')).toEqual(['http.read/v1', 'http.write/v1'])
     expect(buildIntegrationScope('http', { issueIds: [], fieldKeys: [], paths: ['/issues'], revisions: [],
-      writeEnabled: true, httpMethods: ['PUT'] })).toEqual({ paths: ['/issues'], methods: ['GET', 'HEAD', 'PUT'] })
+      writeEnabled: true, httpBaseUrls: ['https://api.example.test'] })).toEqual({ base_urls: ['https://api.example.test'] })
   })
 
   it('builds MCP Streamable HTTP metadata and requires explicit resource URIs', () => {

@@ -477,8 +477,10 @@ export const JA: UiMessages = {
   resources: {
     httpAuthentication: '認証方式',
     httpCredentialHeader: 'API Key のヘッダー名',
-    httpPaths: 'アクセスを許可する API パス',
-    httpMethods: '変更を許可する HTTP メソッド',
+    httpBaseUrls: '接続先の根 URL',
+    httpAddAddress: '追加',
+    httpRemoveAddress: '削除',
+    httpBaseUrlsRequired: '接続先の根 URL を追加してください。',
     nativeSqlHint: 'SQL を直接実行します。テーブル・列のアクセス権限は接続先のデータベースアカウントに従います。',
 
     resourceInUse: '実行履歴や他の設定で使用されています。無効化するか、参照を外してから削除してください。',
@@ -619,7 +621,7 @@ export const JA: UiMessages = {
     scopeKeepAllOption: '無制限のまま',
     scopeNarrowHint: 'カンマまたは改行区切り。空にするとどの値も許可されません。',
     scopeUnrestrictedLabel: '無制限',
-    scopeKeyLabels: { statements: 'SQL 操作', methods: 'HTTP メソッド', tables: 'テーブル', write_columns: '書込み列', operations: '書込み操作', tool_names: 'ツール', resource_uris: 'リソース URI', issue_ids: 'チケット', field_keys: '変更項目', paths: 'パス', revisions: 'リビジョン' },
+    scopeKeyLabels: { base_urls: '接続先 URL', statements: 'SQL 操作', methods: 'HTTP メソッド', tables: 'テーブル', write_columns: '書込み列', operations: '書込み操作', tool_names: 'ツール', resource_uris: 'リソース URI', issue_ids: 'チケット', field_keys: '変更項目', paths: 'パス', revisions: 'リビジョン' },
     pleaseSelect: '選択してください',
     selectValidIntegration: '有効な連携を選択してください。',
     saveBinding: 'バインドを保存',
@@ -1050,7 +1052,7 @@ export const JA: UiMessages = {
       incompleteDraft: '有効な JSON object を入力し、文書範囲を確認してください。任意の範囲は「使用しない」を選択できます。',
     },
     creating: '作成中…',
-    autoApprove: '自動承認（データベース・文書保存・Git 提出・MCP 操作）',
+    autoApprove: '自動承認（データベース・文書保存・Git 提出・MCP・HTTP 操作）',
     startRun: '実行を開始',
     submission: {
       title: '前回の送信を確認',

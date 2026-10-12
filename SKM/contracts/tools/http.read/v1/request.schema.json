@@ -32,10 +32,46 @@
         "purpose": {
           "type": "string",
           "maxLength": 2000
+        },
+        "base_url": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "url": {
+          "type": "string",
+          "maxLength": 2048
         }
       },
-      "required": [
-        "path"
+      "oneOf": [
+        {
+          "required": [
+            "path"
+          ],
+          "not": {
+            "required": [
+              "url"
+            ]
+          }
+        },
+        {
+          "required": [
+            "url"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "path"
+                ]
+              },
+              {
+                "required": [
+                  "base_url"
+                ]
+              }
+            ]
+          }
+        }
       ]
     },
     {

@@ -40,6 +40,7 @@ from skillmind.skills.domain import (
 from skillmind.skills.manifest_gate import ManifestValidator
 from skillmind.skills.repository import SkillRepository
 from skillmind.skills.service import _schema_failure_detail
+from tests.skills.test_source_execution import compile_case
 
 ORGANIZATION_ID = UUID("00000000-0000-4000-8000-0000000000a1")
 
@@ -532,6 +533,47 @@ async def test_list_published_task_descriptors_projects_joined_rows() -> None:
     assert tasks[0].task_key == "review-change"
     assert tasks[0].title == "Repository Review"
     assert tasks[0].default_view == "repository-review-report"
+
+
+def catalog_session_with_unsupported_versions(
+    include_supported: bool,
+) -> tuple[MagicMock, list[tuple[SimpleNamespace, SimpleNamespace, SimpleNamespace]], UUID]:
+    """HTTP と Repository の回帰が共有する、旧版と任意の新版を含む読取専用 join。"""
+
+    _, supported = compile_case()
+    old = deepcopy(supported)
+    old["skill_execution"]["execution_version"] = "skillmind.skill-execution/v1"
+    skill = SimpleNamespace(id=uuid4(), key="review", name="Review")
+    active_version = SimpleNamespace(id=uuid4(), version="2.0.0", published_at=None)
+    old_version = SimpleNamespace(id=uuid4(), version="1.0.0", published_at=None)
+    rows = [(skill, old_version, SimpleNamespace(manifest_json=old))]
+    if include_supported:
+        rows.append((skill, active_version, SimpleNamespace(manifest_json=supported)))
+    session = MagicMock(spec=AsyncSession)
+    session.__aenter__.return_value = session
+    result = MagicMock()
+    result.all.return_value = rows
+    session.execute = AsyncMock(return_value=result)
+    return session, rows, active_version.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("include_supported", [False, True])
+async def test_catalog_excludes_unsupported_versions_and_keeps_supported_rows(
+    include_supported: bool,
+) -> None:
+    """同じ Project の旧版を除外し、新版の発見と原 Manifest の不変性を保つ。"""
+
+    session, rows, active_version_id = catalog_session_with_unsupported_versions(include_supported)
+    original = deepcopy([row[2].manifest_json for row in rows])
+
+    tasks = await SkillRepository(session).list_published_task_descriptors(project_id=uuid4())
+
+    assert [task.skill_version_id for task in tasks] == (
+        [active_version_id] if include_supported else []
+    )
+    assert [row[2].manifest_json for row in rows] == original
+    session.add.assert_not_called()
 
 
 def _binding_session(status: str) -> MagicMock:

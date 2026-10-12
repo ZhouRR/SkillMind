@@ -51,13 +51,13 @@ Excel→Markdown 的 `.xlsx` 路径使用 `excel-styles/v2`：同一文档保留
 - MCP：使用发现并冻结的原生参数 Schema；读调用支持文件输入/输出，修改调用仍经原 Effect、批准和原操作 ID。文件方式不改变工具权限或桌面占用规则。
 - PostgreSQL：新连接使用 `database.query/v1` 和 `database.execute/v1`，表／列权限由原数据库账号决定，不再维护平台表／列 DSL。支持单条 SELECT 与批准的 INSERT/UPDATE/DELETE、JOIN/CTE 和 `$1` 参数；不开放 DDL、事务控制或多语句。JSON 日期／时间字符串按 PostgreSQL 确认的参数类型在同一事务内转换，保留数据库时区语义，普通文本不自动转为日期。写入、必要回读与既有 `skillmind_effects.execution_receipts` 在同一事务提交；未知结果只核对原回执，不重发 SQL。
 - SQL 写入前，先对同一资源执行与 `read_back` 相同的 SELECT、参数和行数上限，将完整响应文件的 hash 和 Evidence 引用作为提案前提；INSERT 也要先读取目标行不存在的结果，不能引用 Schema、UUID 或时间查询的 hash。提案保存前在当前 Agent 会话中返回可修正诊断。实际执行时若确认首次 DML 尚未发送且事务已退出，前提变化允许重新读取后提交新提案；历史尝试、回执冲突及结果未知仍按原操作核对，不自动重放。
-- HTTP API：替代 Redmine 专用入口，设置基础地址、路径范围、方法和 Bearer/API Key header；认证值仍保存在 Secret。读取支持 GET/HEAD，修改支持批准后的 POST/PUT/PATCH/DELETE，并指定 GET 回读与结果条件。禁止改目标域和自动跟随重定向；超时、202 或未确认回读不算完成，也不自动重发。
+- HTTP API：资源只登记根地址列表和认证方式，认证值仍保存在 Secret；接口路径、方法与业务参数由 Skill/Agent 提供。相对路径追加到所选根地址，完整 URL 也须属于已登记的 origin 和根路径。读取支持 GET/HEAD，批准后可发送 POST/PUT/PATCH/DELETE；不要求事前 GET、远端 revision 或 GET 回读。原响应的状态码、允许公开的响应头及完整字节文件交给 Agent，2xx 表示请求获得成功响应，202 表示受理，业务是否完成由 Agent 判断。非 2xx 保留实际响应供处理；禁止自动跟随重定向，超时或结果未知不自动重发。
 
-迁移 `0059_native_resource_clients` 沿用 PostgreSQL 原账号和凭据，旧写连接转为 SELECT/INSERT/UPDATE/DELETE，旧只读连接保留 SELECT；不执行数据库 GRANT。Redmine 转为 HTTP，原 issue 范围和 PUT 权限保留，凭据正文不变。旧默认绑定停用，原 Run 快照不改写；部署前结束在途任务，新流程重新解析 Skill 并使用新绑定。HTTP 结果未知暂不提供通用自动核对协议，须保留原操作事实。
+迁移 `0059_native_resource_clients` 沿用 PostgreSQL 原账号和凭据，旧写连接转为 SELECT/INSERT/UPDATE/DELETE，旧只读连接保留 SELECT；不执行数据库 GRANT。Redmine 转为 HTTP，原 issue 范围和 PUT 权限保留，凭据正文不变。旧默认绑定停用，原 Run 快照不改写；部署前结束在途任务，新流程重新解析 Skill 并使用新绑定。HTTP 的 `0062_http_resource_roots` 将现有基础地址移入根地址列表并取消路径/方法配置，停用旧格式的默认绑定；新 Run 选择当前连接，旧 Run 不改写。HTTP 结果未知暂不提供通用自动核对协议，须保留原操作事实。
 
 ## 画像の読取
 
-`mcp.download/v1` は、同 Run・同 binding の成功済み MCP query の Evidence と原応答の JSON Pointer から取得先を解決する。登録資格は同一 origin の GET だけへ送り、redirect・任意 URL・別接続の参照を許可しない。権限は I/O 前後で確認し、完全な byte/hash を Run file に保存する。MCP 接続の読取権で有効にし、既存 Run の凍結権限へ後付けしない。既存 HTTP 読取も登録済みの path/method 範囲で画像を取得できる。
+`mcp.download/v1` は、同 Run・同 binding の成功済み MCP query の Evidence と原応答の JSON Pointer から取得先を解決する。登録資格は同一 origin の GET だけへ送り、redirect・任意 URL・別接続の参照を許可しない。権限は I/O 前後で確認し、完全な byte/hash を Run file に保存する。MCP 接続の読取権で有効にし、既存 Run の凍結権限へ後付けしない。既存 HTTP 読取も登録済みの根 URL 配下で画像を取得できる。
 
 `workspace.read/v1` 的 JSON 模式使用 `pointers` 与 `expected_hash`，按 RFC 6901 取得指定字段；缺失字段通过 `exists: false` 明示，区别于存在的 null/false。选中数组默认每页 20 项、最大 200 项，用各项的 `next_offset` 继续；JSON 来源最多 16 MiB，选择结果最多 64 KiB，超限须缩小字段或页，不截断值冒充完整结果。返回 hash 始终对应完整源文件，路径、封存输入、权限和符号链接检查与普通读取相同。
 
@@ -80,7 +80,7 @@ Excel→Markdown 的 `.xlsx` 路径使用 `excel-styles/v2`：同一文档保留
 
 - 外部写入沿 observe → propose → approve → apply；Agent 提案不等于远端执行。批准绑定精确 Proposal version/checksum、Provider、操作与 scope；[EffectService](../../SKM/backend/src/skillmind/effects/service.py)与独立 Worker 核对当前资格、冻结 binding、lease、取消和期限，不在业务锁内等待远端 I/O。
 - 自动批准只能来自原 Run 启动时明确记录的同意，或适用能力的既有预授权规则；Git/MCP 的额外同意不从旧 Run 补推。`repository.write/v1` 禁止 Project 预授权与 force，Git 仍核对精确 ref 和原提交，不把启动同意当作任意仓库写权限。
-- 实际能力由 [ExecutionFeatures](../../SKM/backend/src/skillmind/effects/release.py)与 [Provider registry](../../SKM/backend/src/skillmind/effects/wiring.py)共同限定：PostgreSQL DML、文档保存与目录管理、Git commit、MCP 调用保留独立开关；HTTP API 按连接的路径、方法与读写权限开放。旧队列也须检查当前开关，历史读取与获授权的原结果核对保持独立。
+- 实际能力由 [ExecutionFeatures](../../SKM/backend/src/skillmind/effects/release.py)与 [Provider registry](../../SKM/backend/src/skillmind/effects/wiring.py)共同限定：PostgreSQL DML、文档保存与目录管理、Git commit、MCP 调用保留独立开关；HTTP API 按连接的根地址列表与读写权限开放。旧队列也须检查当前开关，历史读取与获授权的原结果核对保持独立。
 - 写入前观察、并发冲突检查、原操作幂等和 read-back 均须保留。原回执证明原操作；当前同名、同值或当前画面不能代替原回执。数据库、对象存储、仓库、MCP 与平台数据库之间没有统一原子事务。
 - MCP 提案创建时自动关联同 Run、同连接、同绑定 checksum 和目录哈希的成功工具目录证据，并纳入提案 checksum 与批准；保存后的提案只核对原引用，不补换证据。复用目录证据不替代当前授权、动态画面观察或操作回执。
 - 写入结果未知时停止主处理，保留原 Effect 与已发生事实；失败状态不证明未写入，不据此重做写入或补偿删除。原结果只读核对走 [reconciliation_service](../../SKM/backend/src/skillmind/effects/reconciliation_service.py)。取消、lease 到期或核对未检出都不证明未执行；MCP 的回读重试不能重发修改操作，入口见 [mcp_provider](../../SKM/backend/src/skillmind/effects/mcp_provider.py)。

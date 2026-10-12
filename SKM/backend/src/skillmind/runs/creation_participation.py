@@ -17,6 +17,8 @@ class RunCreationAuthority:
 
     actor_system_role: str
     project_membership: str
+    # 内部発火は保存済み原要求の明示同意を検証した場合だけ自動承認を継承する。
+    auto_approval_allowed: bool = False
 
 
 @runtime_checkable

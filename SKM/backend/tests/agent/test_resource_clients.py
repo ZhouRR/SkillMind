@@ -57,8 +57,8 @@ def test_http_paths_cannot_change_authority_or_escape_prefix(path):
     """正規化前に別宛先・encoded traversal を拒否する。"""
     with pytest.raises(ValueError):
         validate_request(
-            {"base_url": "https://api.example.test/base"},
-            {"paths": ["/"], "methods": ["GET"]},
+            {},
+            {"base_urls": ["https://api.example.test/base"]},
             {"path": path},
             write=False,
         )
@@ -79,12 +79,11 @@ async def test_http_native_body_and_api_key_reach_only_registered_origin():
     source = HttpResourceSource(httpx.MockTransport(respond))
     config = normalize_config(
         {
-            "base_url": "https://api.example.test/base",
             "auth_mode": "header",
             "credential_header": "X-Redmine-API-Key",
         }
     )
-    scope = normalize_scope({"paths": ["/issues"], "methods": ["POST"]}, write_enabled=True)
+    scope = normalize_scope({"base_urls": ["https://api.example.test/base"]})
     result = await source.request(
         config,
         scope,
@@ -107,8 +106,8 @@ async def test_http_no_automatic_retry_or_credential_echo():
         calls.append(request)
         raise httpx.ReadTimeout("private transport detail")
 
-    config = {"base_url": "https://api.example.test", "auth_mode": "bearer"}
-    scope = {"paths": ["/"], "methods": ["GET"]}
+    config = {"auth_mode": "bearer"}
+    scope = {"base_urls": ["https://api.example.test/base"]}
     with pytest.raises(HttpResourceError, match="transport_unconfirmed"):
         await HttpResourceSource(httpx.MockTransport(fail)).request(
             config, scope, {"path": "/items"}, "fixture-value"
@@ -123,9 +122,9 @@ async def test_http_no_automatic_retry_or_credential_echo():
 async def test_http_response_stays_in_run_file_and_revocation_prevents_publication(tmp_path):
     """完全な正文の file と小さい metadata を分離する。"""
     context = file_context(tmp_path)
-    config = {"base_url": "https://api.example.test", "auth_mode": "none"}
+    config = {"auth_mode": "none"}
     bound = SimpleNamespace(
-        integration=SimpleNamespace(config=config), scope={"paths": ["/"], "methods": ["GET"]}
+        integration=SimpleNamespace(config=config), scope={"base_urls": ["https://api.example.test/base"]}
     )
     body = b'{"message":"' + b"x" * 1_100_000 + b'"}'
     provider = HttpReadProvider(
@@ -402,3 +401,74 @@ async def test_native_query_evidence_preserves_exact_request_and_binding(tmp_pat
     assert evidence.content_hash == response.response["file"]["content_hash"]
     assert evidence.content_hash == "sha256:" + sha256_hex(canonical_json(result))
     assert provider._bound.await_count == 2
+
+
+@pytest.mark.parametrize(
+    "arguments,expected",
+    [
+        ({"url": "https://api.example.test/api/messages/"}, "https://api.example.test/api/messages/"),
+        ({"path": "/messages"}, "https://api.example.test/api/messages"),
+        ({"url": "https://api.example.test/api/messages"}, "https://api.example.test/api/messages"),
+        (
+            {"url": "https://API.EXAMPLE.TEST:443/api/messages"},
+            "https://api.example.test/api/messages",
+        ),
+    ],
+)
+def test_http_root_keeps_api_prefix_for_relative_and_absolute_requests(arguments, expected):
+    """根 path と同じ origin を保持し、Skill はサーバ住所を重複定義しなくてよい。"""
+    result = validate_request(
+        {}, {"base_urls": ["https://api.example.test/api"]}, arguments, write=False
+    )
+    assert result["url"] == expected
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://api.example.test/apievil/messages",
+        "https://api.example.test/messages",
+        "https://other.example.test/api/messages",
+        "http://api.example.test/api/messages",
+        "https://api.example.test:8443/api/messages",
+        "https://user@api.example.test/api/messages",
+        "https://api.example.test/api/../messages",
+        "https://api.example.test/api/%2e%2e/messages",
+    ],
+)
+def test_http_absolute_url_cannot_escape_registered_origin_or_root(url):
+    """文字列前綴ではなく origin と path segment 境界で範囲を確認する。"""
+    with pytest.raises(ValueError):
+        validate_request(
+            {}, {"base_urls": ["https://api.example.test/api"]}, {"url": url}, write=False
+        )
+
+
+def test_http_multiple_roots_require_an_explicit_choice_and_never_guess():
+    """複数根では指定した登録先だけを使い、曖昧な相対 path を勝手に送らない。"""
+    scope = {"base_urls": ["https://first.example.test/api", "https://second.example.test/api"]}
+    with pytest.raises(ValueError, match="multiple roots"):
+        validate_request({}, scope, {"path": "/messages"}, write=False)
+    result = validate_request(
+        {}, scope, {"base_url": scope["base_urls"][1], "path": "/messages"}, write=False
+    )
+    assert result["url"] == "https://second.example.test/api/messages"
+    with pytest.raises(ValueError):
+        validate_request(
+            {}, scope, {"path": "/messages", "base_url": "https://other.example.test"}, write=False
+        )
+
+
+@pytest.mark.parametrize(
+    "base",
+    [
+        "file:///etc",
+        "https://user:secret@example.test",
+        "https://example.test?key=x",
+        "https://example.test/a/../b",
+    ],
+)
+def test_http_root_list_rejects_credentials_and_unsafe_urls(base):
+    """接続登録段階でも呼出しと同じ URL 境界を適用する。"""
+    with pytest.raises(ValueError):
+        normalize_scope({"base_urls": [base]})

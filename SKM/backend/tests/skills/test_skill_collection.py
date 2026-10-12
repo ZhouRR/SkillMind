@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
+import json
+from copy import deepcopy
 from pathlib import Path
 from uuid import UUID
 
 import pytest
 
+from skillmind.skills.capability_blueprint import CapabilityBlueprintError
+from skillmind.skills.direct_candidate import candidate_schema
 from skillmind.skills.domain import InlineSkillFile, StoredSkillSource, UploadSkillFile
 from skillmind.skills.importer import SkillImportError, SkillPackageParser
+from skillmind.skills.interpreter import (
+    InterpreterFixtureRunner,
+    SkillStaticAnalyzer,
+    build_interpreter_request,
+    load_capability_catalog,
+    load_interpreter_system_skill,
+)
 from skillmind.skills.source_loader import SkillSourceLoader
 from skillmind.skills.source_storage import SkillSourceStorage
 from skillmind.storage import InMemoryFileStorage
@@ -42,6 +53,7 @@ def test_selected_entry_keeps_original_paths_and_only_its_dependencies(collectio
     package = SkillPackageParser().parse_directory(collection, entry_path="skills/alpha/SKILL.md")
     assert package.name == "alpha"
     assert package.primary_instruction == "skills/alpha/SKILL.md"
+    assert package.entry_path == "skills/alpha/SKILL.md"
     assert {file.path for file in package.files} == {
         "skills/alpha/SKILL.md",
         "skills/alpha/scripts/check.py",
@@ -157,6 +169,34 @@ async def test_selected_source_reloads_with_identical_shared_bytes(collection: P
         file.content for file in loaded.source_files if file.path.endswith("SKILL.md")
     ).startswith("---\r\n")
 
+    # Blob から再構築した原 byte と選択入口を、実 compiler/公開門禁まで通す。
+    identity = load_interpreter_system_skill(
+        CONTRACTS.parent / "skills/skillmind-skill-interpreter",
+        generation_schema=candidate_schema(CONTRACTS),
+    )
+    request = build_interpreter_request(
+        package=loaded.package, source_files=loaded.source_files,
+        analysis=SkillStaticAnalyzer().analyze(loaded.package, loaded.source_files),
+        catalog=load_capability_catalog(CONTRACTS / "examples/skill-capability-catalog.v1.json"),
+        system_skill=identity,
+    )
+    assert request["source"]["entry_path"] == command.entry_path
+    candidate = json.loads((CONTRACTS / "examples/skill-candidate.v3.json").read_text())
+    runner = InterpreterFixtureRunner(CONTRACTS)
+    compiled = runner.run(request, candidate, bind_identity=True, require_direct_candidate=True)
+    assert compiled["runtime_manifest_draft"]["source_documents"] == (
+        request["source"]["source_documents"]
+    )
+    for invalid_entry in (None, "skills/beta/SKILL.md", "schemas/result.schema.json"):
+        broken = deepcopy(request)
+        if invalid_entry is None:
+            del broken["source"]["entry_path"]
+        else:
+            broken["source"]["entry_path"] = invalid_entry
+        with pytest.raises(CapabilityBlueprintError) as failed:
+            runner.run(broken, candidate, bind_identity=True, require_direct_candidate=True)
+        assert failed.value.code == "candidate_publish_invalid"
+
 
 async def test_legacy_generic_source_does_not_acquire_a_new_entry(collection: Path) -> None:
     """旧 snapshot の再読取では、現在の検出規則で入口と指示を切り替えない。"""
@@ -172,6 +212,7 @@ async def test_legacy_generic_source_does_not_acquire_a_new_entry(collection: Pa
         UUID(int=4), UUID(int=1), legacy.name, legacy.source_type, legacy.content_hash, files
     )
     loaded = await loader.load_stored(source)
+    assert loaded.package.entry_path is None
     assert loaded.package.to_dict() == legacy.to_dict()
     selected = SkillPackageParser().parse_directory(safe_root, entry_path="references/SKILL.md")
     assert selected.content_hash != legacy.content_hash
@@ -203,6 +244,6 @@ async def test_single_nested_upload_persists_its_detected_entry(collection: Path
         source_file_index=command.source_file_index,
         entry_path=command.entry_path,
     )
-    assert (
-        await loader.load_stored(source)
-    ).package.to_dict() == prepared.preview.normalized_package
+    loaded = await loader.load_stored(source)
+    assert loaded.package.entry_path == command.entry_path
+    assert loaded.package.to_dict() == prepared.preview.normalized_package

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
+
+import pytest
 
 from skillmind.agent.outcome import compile_outcome_schema
 from skillmind.skills import (
@@ -269,6 +272,35 @@ def test_malformed_and_empty_tasks_are_skipped() -> None:
     assert _project(_manifest(tasks="not-a-list")) == []
     manifest = _manifest(tasks=["not-a-dict", {"key": "no-capability"}, {"capability": "no.key"}])
     assert _project(manifest) == []
+
+
+@pytest.mark.parametrize("declaration", [
+    {"execution_version": "skillmind.skill-execution/v1"},
+    {"execution_version": "skillmind.skill-execution/v99"},
+    {}, None, "invalid",
+])
+def test_unsupported_execution_is_omitted_without_becoming_runnable(
+    declaration: object,
+) -> None:
+    """未対応/破損 version は一覧を壊さず、直接指定しても実行許可へ変換しない。"""
+
+    manifest = _manifest(skill_execution=declaration)
+    del manifest["capability_blueprint"]
+    original = deepcopy(manifest)
+
+    assert _project(manifest) == []
+    with pytest.raises(ValueError):
+        _resolve(manifest, "review-change")
+    assert manifest == original
+
+
+def test_conflicting_execution_does_not_fall_back_to_blueprint() -> None:
+    """二重宣言を発見対象から除き、旧 Blueprint への fallback で権限を補わない。"""
+
+    manifest = _manifest(skill_execution={"execution_version": "skillmind.skill-execution/v2"})
+    assert _project(manifest) == []
+    with pytest.raises(ValueError):
+        _resolve(manifest, "review-change")
 
 
 def test_legacy_reference_task_is_not_projected_or_resolved() -> None:

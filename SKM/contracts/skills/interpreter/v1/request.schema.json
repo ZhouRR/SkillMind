@@ -39,6 +39,12 @@
         },
         "source_documents": {
           "$ref": "#/$defs/sourceDocuments"
+        },
+        "entry_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "description": "Selected Skill entry relative to the uploaded source root, frozen by the platform and included in the source hash."
         }
       }
     },

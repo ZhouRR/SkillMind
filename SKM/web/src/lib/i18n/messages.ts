@@ -456,8 +456,10 @@ export interface UiMessages {
   resources: {
     httpAuthentication: string
     httpCredentialHeader: string
-    httpPaths: string
-    httpMethods: string
+    httpBaseUrls: string
+    httpAddAddress: string
+    httpRemoveAddress: string
+    httpBaseUrlsRequired: string
     nativeSqlHint: string
 
     resourceInUse: string

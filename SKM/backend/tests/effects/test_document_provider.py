@@ -305,6 +305,7 @@ async def test_approved_executor_uses_library_registry_without_integration_secre
     database,
     monkeypatch,
     lost_response,
+    tmp_path,
 ):
     """本番 executor→registry→service→SQL/S3 を通し、finalize port への結果分類を検証する。"""
     provider, execution, _, server = runtime(database, monkeypatch)
@@ -312,6 +313,7 @@ async def test_approved_executor_uses_library_registry_without_integration_secre
     effects = MemoryEffectService(execution)
     resolver = MagicMock()
     registry = create_effect_provider_registry(
+        workspace_root=tmp_path,
         features=ExecutionFeatures(document_writes=True),
         effect_service=effects,
         secret_resolver=resolver,
@@ -342,9 +344,10 @@ async def test_approved_executor_uses_library_registry_without_integration_secre
 
 
 @pytest.mark.parametrize("enabled", [False, True])
-def test_factory_requires_explicit_document_ports_and_never_resolves_fake_secret(enabled):
+def test_factory_requires_explicit_document_ports_and_never_resolves_fake_secret(enabled, tmp_path):
     """内部開放だけでは Provider を不完全装配せず、既存 switch も文書 write を開かない。"""
     arguments = dict(
+        workspace_root=tmp_path,
         features=ExecutionFeatures(document_writes=enabled),
         effect_service=MagicMock(),
         secret_resolver=MagicMock(),

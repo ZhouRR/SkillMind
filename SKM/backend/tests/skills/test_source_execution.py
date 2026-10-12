@@ -12,7 +12,7 @@ from jsonschema import Draft202012Validator, FormatChecker, ValidationError
 
 from skillmind.agent.domain import RunLimits
 from skillmind.agent.task_brief import build_agent_task_brief, render_task_brief_prompt
-from skillmind.api.routes.task_flow import TaskFlowPreviewResponse
+from skillmind.api.routes.task_flow import TaskFlowPreviewResponse, _assessment, _preview_response
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.effects.domain import ChangeProposalValidationError
 from skillmind.effects.operation_policy import operation_authorization_key
@@ -22,6 +22,11 @@ from skillmind.runs.repository_effects import EffectOperationsMixin
 from skillmind.skills.direct_candidate import candidate_schema
 from skillmind.skills.execution import resolve_skill_definition, validate_execution
 from skillmind.skills.interpreter import InterpreterFixtureRunner, load_interpreter_system_skill
+from skillmind.skills.resource_binding import (
+    ProjectResourceCandidate,
+    evaluate_blueprint_readiness,
+)
+from skillmind.skills.service import TaskFlowPreviewResult
 from skillmind.skills.task_catalog import project_published_tasks
 from skillmind.skills.task_flow_preview import TaskFlowPreviewSource, project_task_flow_preview
 from tests.effects.test_document_write import request as proposal_request
@@ -128,6 +133,38 @@ def test_direct_candidate_publish_catalog_brief_preview_roundtrip() -> None:
     body = {**preview.to_json(), "readiness": {"scope": "SKILL_BLUEPRINT", "assessment": None}}
     validated = TaskFlowPreviewResponse.model_validate_json(json.dumps(body))
     assert validated.status == "SOURCE_EXECUTION" and validated.plan is None
+
+    # 接続情報がある preview も原宣言を照合し、資源から得た access/capability を受け付ける。
+    for candidates in ((), (ProjectResourceCandidate(
+        key="library", kind="document", provider="project-library", label="Outputs",
+        capabilities=("document.write/v1",),
+    ),)):
+        assessment = evaluate_blueprint_readiness(
+            manifest["skill_execution"], candidates=candidates,
+            registered_capabilities=frozenset({"document.write/v1"}),
+            registered_write_capabilities=frozenset({"document.write/v1"}),
+        )
+        assessed = {
+            **body,
+            "readiness": {"scope": "SKILL_BLUEPRINT", "assessment": _assessment(assessment)},
+        }
+        response = _preview_response(
+            TaskFlowPreviewResult(preview, assessment), project_id=project_id,
+            skill_version_id=version_id, task_key="execute",
+        )
+        assert response.readiness.assessment is not None
+        requirement = response.readiness.assessment.requirements[0]
+        assert requirement.access == "write"
+        assert requirement.capabilities == (["document.write/v1"] if candidates else [])
+
+        for field, value in (
+            ("key", "wrong-resource"), ("kind", "other"), ("required", False),
+            ("selection_guidance", "changed guidance"),
+        ):
+            changed = deepcopy(assessed)
+            changed["readiness"]["assessment"]["requirements"][0][field] = value
+            with pytest.raises(ValueError):
+                TaskFlowPreviewResponse.model_validate_json(json.dumps(changed))
     assert validated.source_execution is not None
     assert ExecutionFeatures(document_writes=True).blueprint_enabled(manifest["skill_execution"])
     assert ExecutionFeatures().blueprint_enabled(manifest["skill_execution"])

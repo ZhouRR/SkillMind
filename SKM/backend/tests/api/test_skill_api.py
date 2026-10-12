@@ -4,16 +4,20 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
 
 from skillmind.runs.domain import CreatedRun, RunStatus, derive_task_id
 from skillmind.skills import InlineSkillFile, UploadSkillFile
 from skillmind.skills.domain import SkillInterpretationStatus
+from skillmind.skills.service import SkillService
 from tests.api.fakes import FakeArqPool, FakeRunService, FakeSkillService
+from tests.skills.test_skill_repository import catalog_session_with_unsupported_versions
+from tests.skills.test_skill_service import CONTRACTS
 
 
 def test_parse_skill_returns_assisted_draft_without_authorizing_tools(
@@ -524,6 +528,26 @@ def test_list_project_tasks_projects_published_task_catalog(client: TestClient) 
     # 資源要求は蓝图が唯一の宣言元。公開 response では readiness/blueprint 経由で見る。
     assert "data_source_requirements" not in task
     assert task["tool_requirements"][0]["capability"] == "repository.read/v1"
+
+@pytest.mark.parametrize("include_supported", [False, True])
+def test_task_catalog_http_survives_unsupported_saved_execution_versions(
+    client: TestClient, include_supported: bool,
+) -> None:
+    """実 Service/Repository で旧版を除外し、空一覧/新版一覧を HTTP 200 で返す。"""
+
+    session, _, active_version_id = catalog_session_with_unsupported_versions(include_supported)
+    client.app.state.skill_service = SkillService(MagicMock(return_value=session), CONTRACTS)
+    client.app.state.run_service = FakeRunService()
+
+    response = client.get(f"/api/v1/projects/{uuid4()}/tasks")
+
+    assert response.status_code == 200
+    assert [task["skill_version_id"] for task in response.json()["tasks"]] == (
+        [str(active_version_id)] if include_supported else []
+    )
+    session.add.assert_not_called()
+
+
 def test_published_task_exposes_the_deterministic_run_join_key(client: TestClient) -> None:
     """task descriptor が Run 側と同じ task_id を返すことを確認する。
 

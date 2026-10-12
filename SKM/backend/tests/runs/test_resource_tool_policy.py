@@ -133,14 +133,13 @@ async def test_run_freezes_full_connection_scope_and_default_tools(writable: boo
     )
 
 
-def test_operations_follow_resource_methods_and_keep_scope_ownership() -> None:
-    """HTTP の許可方法を越えず、別資源の operation を流用できない。"""
+def test_http_operations_follow_access_level_and_keep_resource_ownership() -> None:
+    """HTTP の方法を個別設定させず、別資源の operation を流用できない。"""
     sources = {"api": {"provider": "http", "capabilities": ["http.read/v1", "http.write/v1"],
-                       "scope": {"methods": ["GET", "POST"]}}}
+                       "scope": {"base_urls": ["https://api.example.test"]}}}
     original = deepcopy(sources)
     ops = resource_operations(sources, allowed_capabilities={"http.read/v1", "http.write/v1"})
-    assert ops == [{"resource_key": "api", "capability_version": "http.write/v1",
-                    "operation": "POST"}]
+    assert {op["operation"] for op in ops} == {"POST", "PUT", "PATCH", "DELETE"}
     assert sources == original
     _, manifest = compile_case()
     arguments = {
@@ -150,8 +149,8 @@ def test_operations_follow_resource_methods_and_keep_scope_ownership() -> None:
     }
     assert EffectOperationsMixin._validate_effect_intent(
         manifest["skill_execution"], **arguments,
-    ) == ops[0]
-    for mutation in ({"resource_key": "other"}, {"operation": "DELETE"},
+    )["operation"] == "POST"
+    for mutation in ({"resource_key": "other"}, {"operation": "TRACE"},
                      {"resource_operations": []}, {"risk_level": "LOW"}):
         with pytest.raises(ChangeProposalValidationError):
             EffectOperationsMixin._validate_effect_intent(

@@ -76,11 +76,27 @@ export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets,
                   placeholder="https://mcp.example.com/mcp" value={connectDraft.serverUrl}
                   onChange={(event) => setConnectDraft((value) => ({ ...value, serverUrl: event.target.value, mcpCatalog: null, mcpTools: false }))} /></label>
               ) : connectDraft.provider === 'http' ? (
-                <>
-                  <label>{messages.resources.baseUrlLabel}<input type="url" required value={connectDraft.baseUrl}
-                    onChange={(event) => setConnectDraft((value) => ({ ...value, baseUrl: event.target.value }))} /></label>
-
-                </>
+                <fieldset className="scopePicker">
+                  <legend>{messages.resources.httpBaseUrls}</legend>
+                  {connectDraft.httpBaseUrls.map((url, index) => (
+                    <div className="httpAddressRow" key={index}>
+                      <input type="url" required maxLength={2048} value={url}
+                        aria-label={`${messages.resources.baseUrlLabel} ${index + 1}`}
+                        placeholder="https://example.com/api"
+                        onChange={(event) => setConnectDraft((value) => ({ ...value,
+                          httpBaseUrls: value.httpBaseUrls.map((entry, i) => i === index ? event.target.value : entry),
+                        }))} />
+                      <button type="button" className="secondaryButton" disabled={connectDraft.httpBaseUrls.length === 1}
+                        onClick={() => setConnectDraft((value) => ({ ...value,
+                          httpBaseUrls: value.httpBaseUrls.filter((_, i) => i !== index),
+                        }))}>{messages.resources.httpRemoveAddress}</button>
+                    </div>
+                  ))}
+                  <button type="button" className="secondaryButton" disabled={connectDraft.httpBaseUrls.length >= 100}
+                    onClick={() => setConnectDraft((value) => ({ ...value, httpBaseUrls: [...value.httpBaseUrls, ''] }))}>
+                    {messages.resources.httpAddAddress}
+                  </button>
+                </fieldset>
               ) : (
                 <>
                   <label>{messages.resources.repositoryUriLabel}
@@ -180,7 +196,7 @@ export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets,
                   <p className="hint resourceWarning">{connectDraft.resolver === 'MANAGED' ? messages.resources.secretValueHint : messages.resources.secretHint}</p>
                 </>
               )}
-              <h3 className="resourceSectionTitle">{messages.resourcesAudit.scopeSection}</h3>
+              {connectDraft.provider !== 'http' && <h3 className="resourceSectionTitle">{messages.resourcesAudit.scopeSection}</h3>}
               {connectWriteEnabled && connectForm.writeCapability !== null && (
                 <fieldset className="scopePicker">
                   <legend>{messages.resources.accessLabel}</legend>
@@ -246,19 +262,7 @@ export function ResourceConnectionForm({ connectDraft, setConnectDraft, secrets,
                   onChange={(event) => setConnectDraft((value) => ({ ...value, resourceUris: event.target.value }))} />
                   <span className="hint">{messages.resources.mcpReadHint}</span></label>
                 </>
-              ) : connectDraft.provider === 'http' ? (
-                <>
-                  <label>{messages.resources.httpPaths}<textarea required className="mono compactTextarea" value={connectDraft.paths}
-                    onChange={(event) => setConnectDraft((value) => ({ ...value, paths: event.target.value }))} /></label>
-                  {connectWriteEnabled && connectDraft.access === 'read_write' && <fieldset className="scopePicker"><legend>{messages.resources.httpMethods}</legend>
-                    {['POST', 'PUT', 'PATCH', 'DELETE'].map((method) => <label className="scopeOption" key={method}>
-                      <input type="checkbox" checked={connectDraft.httpMethods.includes(method)}
-                        onChange={(event) => setConnectDraft((value) => ({ ...value, httpMethods: event.target.checked ? [...value.httpMethods, method] : value.httpMethods.filter((v) => v !== method) }))} />
-                      <span>{method}</span>
-                    </label>)}
-                  </fieldset>}
-                </>
-              ) : (
+              ) : connectDraft.provider === 'http' ? null : (
                 <>
                   <label>{messages.resources.pathsLabel}
                     <textarea

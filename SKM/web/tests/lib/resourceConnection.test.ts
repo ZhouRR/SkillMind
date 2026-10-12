@@ -73,3 +73,23 @@ describe('resource connection preparation', () => {
     expect(resourceWriteEnabled('redmine', git)).toBe(false)
   })
 })
+
+it('edits HTTP roots without path/method rules and preserves its credential reference', () => {
+  const item: IntegrationRecord = { integration_id: 'fixture-http', project_id: 'fixture-project',
+    name: 'Webhook service', kind: 'other', provider: 'http', status: 'ACTIVE', revision: 2,
+    capabilities: ['http.read/v1', 'http.write/v1'],
+    scope: { base_urls: ['https://first.example.test/api', 'https://second.example.test/api'] },
+    config_keys: ['auth_mode'], secret_reference_id: 'fixture-credential', created_by: 'fixture-admin',
+    created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z', disabled_at: null }
+  const config = { auth_mode: 'bearer' }
+  const draft = connectDraftFromIntegration(item, config)
+  const result = prepareResourceConnection(draft, true)
+  expect(result.valid).toBe(true)
+  if (!result.valid) throw new Error('Expected HTTP connection payload')
+  expect(result.input.scope).toEqual(item.scope)
+  expect(result.input.config).toEqual(config)
+  expect(result.input.capabilities).toEqual(item.capabilities)
+  expect(draft.credentialChoice).toBe('fixture-credential')
+  expect(prepareResourceConnection({ ...draft, httpBaseUrls: ['  '] }, true))
+    .toEqual({ valid: false, scopeIssue: 'http_base_urls_required' })
+})

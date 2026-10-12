@@ -25,6 +25,10 @@ def effect_failure_record(
 
     if not resolve_effect_capability(capability).supports_supervision(provider) or attempt_no == 0:
         return {"code": code, "retryable": retryable}
+    if (capability == "http.write/v1" and provider == "http" and attempt_no == 1
+        and previous is None and code == "http_response_error"):
+        # 非 2xx の原 response は受信済み。不明や未送信と推測せず Agent に評価させる。
+        return {"code": code, "retryable": False}
     if (
         capability == "database.execute/v1"
         and provider == "postgres"

@@ -11,7 +11,7 @@ from skillmind.effects.release import configured_execution_features
 from skillmind.effects.wiring import create_effect_provider_registry
 
 
-def test_git_only_registry_requires_explicit_run_consent_for_automatic_approval():
+def test_git_only_registry_requires_explicit_run_consent_for_automatic_approval(tmp_path):
     """Git switch は DB/SVN/Redmine/子実行を開かない。"""
     features = configured_execution_features(Settings(_env_file=None, git_writes_enabled=True))
     assert features.write_capabilities == frozenset({"repository.write/v1", "http.write/v1"})
@@ -24,6 +24,7 @@ def test_git_only_registry_requires_explicit_run_consent_for_automatic_approval(
     assert not definition.supports_run_approval("svn")
     assert definition.supports_supervision("git") and not definition.supports_supervision("svn")
     registry = create_effect_provider_registry(
+        workspace_root=tmp_path,
         features=features,
         effect_service=AsyncMock(),
         secret_resolver=Mock(),

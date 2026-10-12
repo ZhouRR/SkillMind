@@ -53,6 +53,7 @@ class ScheduleRunCreationParticipant:
         return RunCreationAuthority(
             actor_system_role=user.system_role,
             project_membership="ADMIN_BYPASS" if user.system_role == "ADMIN" else "ACTIVE",
+            auto_approval_allowed=intent.auto_approve,
         )
 
     async def before_create(self, session: AsyncSession) -> None:

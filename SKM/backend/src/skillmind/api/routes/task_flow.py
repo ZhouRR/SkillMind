@@ -472,10 +472,10 @@ class TaskFlowPreviewResponse(_FlowModel):
             if self.readiness.assessment is not None:
                 resources = declaration["resource_requirements"]
                 requirements = self.readiness.assessment.requirements
+                # 最小宣言の同一性だけを比較する。access/capability は現在の資源評価に属する。
                 if len(resources) != len(requirements) or any(
-                    (r["key"], r["kind"], r["required"], r["access"], r["capabilities"],
-                     r.get("selection_guidance")) !=
-                    (q.key, q.kind, q.required, q.access, q.capabilities, q.selection_guidance)
+                    (r["key"], r["kind"], r["required"], r.get("selection_guidance")) !=
+                    (q.key, q.kind, q.required, q.selection_guidance)
                     for r, q in zip(resources, requirements, strict=True)
                 ):
                     raise ValueError("Source execution readiness differs from declaration")

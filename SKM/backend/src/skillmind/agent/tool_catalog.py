@@ -207,11 +207,11 @@ def _read_tool_definitions(
         definitions.append(_tool_definition(
             contracts, sequence_safe=True, capability="http.read/v1",
             description=(
-                'Request GET/HEAD from the bound HTTP API using a relative path. Tool success '
+                'Request GET/HEAD under the bound HTTP base_urls. Use path and optional base_url '
+                'or a full url under a registered root. Tool success '
                 'does not imply HTTP success: inspect http_status. Complete '
                 'response bytes are saved as a Run file; read them with workspace tools. '
-                'Mutations require http.write/v1 approval. Never supply credentials or a full '
-                'URL.'
+                'Mutations require http.write/v1 approval. Credentials are platform supplied.'
             ),
             providers={"http": http_provider}))
     if redmine_issue_provider is not None:
@@ -560,7 +560,8 @@ def _change_propose_tool_definition(contracts: ContractStore) -> ToolDefinition:
         capability=CHANGE_PROPOSE_CAPABILITY,
         description=(
             "Submit one controlled external operation. Supply resource_key, capability_version, "
-            "operation, target, changes, precondition, summary and evidence_refs. Platform-derived "
+            "operation, target, changes, summary and required preconditions/evidence. HTTP writes "
+            "need no precondition or prior GET evidence. Platform-derived "
             "idempotency_key, risk_level, verification, rollback, expiry and RESUME checkpoint may "
             "be omitted; include actual new business checkpoint facts when required. With explicit "
             "Run-start approval and direct-delivery support, the original committed receipt is "

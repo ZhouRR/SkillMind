@@ -265,3 +265,36 @@ def test_control_state_password_attribute_keeps_original_hash(value):
     original["after"] = {"controlState": {"isPassword": value}}
     original["after_content_hash"] = "sha256:" + sha256_hex(canonical_json(original["after"]))
     assert validated_effect_result(original) == original
+
+
+async def test_http_error_response_reaches_continuation_without_unknown_or_replay():
+    """非 2xx の原 file 参照を保存し、Agent が正文を確認して処理できる。"""
+    from skillmind.effects.domain import EffectExecutionStatus, EffectFailure
+    h = harness(capability="http.write/v1")
+    del h.repository._next_effect_segment
+    h.execution.provider = "http"
+    h.proposal.continuation_mode = "RESUME"
+    h.proposal.checkpoint_json = {"summary": "Send message", "evidence_refs": []}
+    response = {"http_status": 400, "headers": {}, "file": {
+        "path": "workspace/resources/effects/fixture/response.bin",
+        "content_hash": "sha256:" + "a" * 64, "size_bytes": 32,
+    }}
+    observation = EffectEvidenceDraft("resource", "http-resource://fixture", {}, response, None, {})
+    await h.repository.finalize_effect_execution(
+        replace(h.claimed, provider="http"), result=None,
+        failure=EffectFailure(status=EffectExecutionStatus.FAILED,
+                              code="http_response_error", retryable=False,
+                              observations=(observation,)), duration_ms=1,
+    )
+    assert h.execution.error_json["code"] == "http_response_error"
+    assert h.execution.error_json["response"] == response
+    assert len(h.execution.error_json["observation_refs"]) == 1
+    assert h.tool.error_json["code"] == "invalid_request"
+    assert canonical_json(response) in h.tool.error_json["message"]
+    added = [row for call in h.session.add_all.call_args_list for row in call.args[0]]
+    next_segment = next(row for row in added if isinstance(row, RunSegment))
+    facts = next_segment.checkpoint_json["confirmed_facts"]
+    assert any(canonical_json(response) in fact for fact in facts)
+    assert (next_segment.checkpoint_json["evidence_refs"]
+            == h.execution.error_json["observation_refs"])
+    assert "effect_result" not in next_segment.checkpoint_json

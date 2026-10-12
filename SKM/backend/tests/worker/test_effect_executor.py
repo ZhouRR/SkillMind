@@ -394,3 +394,19 @@ async def test_mcp_diagnostic_and_unverified_observations_reach_finalization():
     assert service.finalized[1].diagnostic == error.diagnostic
     assert len(service.finalized[1].diagnostic["local_diagnostic_id"]) == 32
     assert service.finalized[1].observations == (observation,)
+
+
+async def test_http_error_response_observation_reaches_finalization():
+    """例外分類の境界でも原 response を捨てず、body を通常例外へ反射しない。"""
+    from skillmind.effects.domain import EffectEvidenceDraft
+    from skillmind.effects.http_provider import HttpResponseError
+    observation = EffectEvidenceDraft(
+        "resource", "http-resource://fixture", {}, {"http_status": 400, "file": {}}, None, {},
+    )
+    service = MemoryEffectService(_claimed())
+    await _executor(service, RaisingProvider(HttpResponseError(observation))).execute(
+        service.claimed.effect_execution_id,
+    )
+    assert service.finalized[1].code == "http_response_error"
+    assert service.finalized[1].retryable is False
+    assert service.finalized[1].observations == (observation,)

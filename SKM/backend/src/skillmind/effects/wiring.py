@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import partial
+from pathlib import Path
 
 from skillmind.agent.http_source import HttpResourceSource
 from skillmind.agent.mcp_lease import McpDesktopLeases
@@ -11,6 +12,7 @@ from skillmind.agent.repository_client import (
     GitWritableRepositoryClient,
     SvnWritableRepositoryClient,
 )
+from skillmind.agent.workspace import WorkspaceManager
 from skillmind.documents.library import DOCUMENT_LIBRARY_PROVIDER, DOCUMENT_WRITE_CAPABILITY
 from skillmind.effects.catalog import resolve_effect_capability
 from skillmind.effects.document_provider import DocumentWriteProvider
@@ -43,6 +45,7 @@ def create_effect_provider_registry(
     secret_resolver: DeploymentSecretResolver,
     git_client: GitWritableRepositoryClient,
     svn_client: SvnWritableRepositoryClient,
+    workspace_root: Path,
     document_service: DocumentEffectService | None = None,
     document_source: S3ObjectWriteSource | None = None,
     mcp_leases: McpDesktopLeases | None = None,
@@ -57,6 +60,7 @@ def create_effect_provider_registry(
                 "http",
                 HttpWriteProvider(
                     source=HttpResourceSource(),
+                    workspace_manager=WorkspaceManager(workspace_root),
                     authorize=partial(
                         effect_service.authorize_effect_step,
                         provider_version=HTTP_VERSION,

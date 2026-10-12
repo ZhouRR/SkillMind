@@ -117,6 +117,7 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
     if (issue === 'field_keys_required') return messages.resources.fieldKeysRequired
     if (issue === 'write_columns_required') return messages.resources.databaseWriteColumnsRequired
     if (issue === 'database_operations_required') return messages.resources.databaseOperationsRequired
+    if (issue === 'http_base_urls_required') return messages.resources.httpBaseUrlsRequired
     if (issue === 'mcp_tools_required') return messages.resources.mcpToolsRequired
     if (issue === 'tables_required') return messages.resources.tablesRequired
     return messages.resources.pathsRequired

@@ -45,7 +45,7 @@ export interface ConnectDraft {
   name: string
   httpAuthMode: 'none' | 'bearer' | 'header'
   httpAuthHeader: string
-  httpMethods: string[]
+  httpBaseUrls: string[]
   baseUrl: string
   repositoryUri: string
   defaultRevision: string
@@ -118,7 +118,7 @@ export function emptyConnectDraft(provider: ResourceProvider): ConnectDraft {
   return {
     provider,
     name: '',
-    baseUrl: '', httpAuthMode: 'bearer', httpAuthHeader: 'X-API-Key', httpMethods: ['POST', 'PUT', 'PATCH', 'DELETE'],
+    baseUrl: '', httpAuthMode: 'bearer', httpAuthHeader: 'X-API-Key', httpBaseUrls: [''],
     repositoryUri: '',
     defaultRevision: 'HEAD',
     host: '', port: '5432', database: '', username: '', sslmode: 'verify-full',
@@ -134,7 +134,7 @@ export function emptyConnectDraft(provider: ResourceProvider): ConnectDraft {
     issueIds: '',
     fieldKeys: [],
     customFieldKeys: '',
-    paths: provider === 'http' ? '/' : '',
+    paths: '',
     revisions: 'HEAD',
     writeMode: 'direct',
     writeBranchPrefix: '',
@@ -200,7 +200,7 @@ export function connectDraftFromIntegration(
     access: accessForCapabilities(item.capabilities),
     httpAuthMode: text('auth_mode') === 'none' ? 'none' : text('auth_mode') === 'header' ? 'header' : 'bearer',
     httpAuthHeader: text('credential_header', 'X-API-Key'),
-    httpMethods: values('methods').filter((m) => !['GET', 'HEAD'].includes(m)),
+    httpBaseUrls: values('base_urls'),
     baseUrl: text('base_url'), repositoryUri: text('repository_uri'),
     defaultRevision: text('default_revision', draft.defaultRevision),
     host: text('host'), port: text('port', draft.port), database: text('database'),

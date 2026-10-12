@@ -33,3 +33,19 @@
   .resourceAdmin .resourceItem .panelHeaderActions { justify-content: flex-start; flex-wrap: wrap; }
   .resourceFormActionsSticky > button { flex: 1 1 10rem; }
 }
+
+/* HTTP の根 URL は列挙するだけにし、狭い画面でも削除操作を見失わない。 */
+.httpAddressRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.httpAddressRow input {
+  flex: 1;
+  min-width: 0;
+}
+
+.httpAddressRow button {
+  flex: none;
+}

@@ -710,3 +710,159 @@ async def test_result_accepts_only_original_git_run_start_approval(consent):
     lookup, _, _ = _lookup((*graph.joined(), run))
     invalid = await lookup.invalid_refs(graph.proposal.run_id, (graph.claim(),))
     assert invalid == (frozenset() if consent == "git" else {graph.proposal.proposal_ref})
+
+
+async def _http_graph(tmp_path, *, status: int = 200) -> tuple[EffectGraph, list[object]]:
+    """実 HTTP client→Provider→Evidence writer の保存形式を隔離 transport で作る。"""
+    import httpx
+
+    from skillmind.agent.http_source import HttpResourceSource
+    from skillmind.agent.workspace import WorkspaceManager
+    from skillmind.effects.http_provider import HttpWriteProvider
+    from skillmind.effects.http_write import HTTP_VERSION, HTTP_WRITE
+
+    graph = _graph()
+    graph.proposal.capability_version = HTTP_WRITE
+    graph.proposal.risk_level = "HIGH"
+    graph.proposal.verification_json = {"method": "HTTP_RESPONSE", "paths": ["/request"]}
+    graph.execution.provider = "http"
+    graph.execution.provider_version = HTTP_VERSION
+    graph.tool.capability_version = HTTP_WRITE
+    graph.tool.provider = "http"
+    sent = []
+
+    def respond(request):
+        """外部接続をせず、n8n と同じ受理応答を一回だけ返す。"""
+        sent.append(request)
+        return (httpx.Response(status, content=b"") if status == 204
+                else httpx.Response(status, json={"message": "Workflow was started"}))
+
+    claimed = replace(
+        _claimed(graph), operation="POST", provider="http", capability_version=HTTP_WRITE,
+        target={"locator": "/messages", "display": "Send fixture notification"},
+        changes=({"path": "/request", "action": "SET", "value": {
+            "request": {"method": "POST", "path": "/messages", "body": {"message": "sample"}},
+        }},), precondition={}, integration_config={"auth_mode": "none"},
+        integration_scope={"base_urls": ["https://api.example.test"]},
+    )
+    provider = HttpWriteProvider(
+        source=HttpResourceSource(httpx.MockTransport(respond)), authorize=AsyncMock(),
+        workspace_manager=WorkspaceManager(tmp_path),
+    )
+    result = await provider.apply(claimed, credential=None)
+    graph.execution.verification_json = dict(result.verification)
+    assert graph.tool.result_json is not None
+    graph.tool.result_json.update(provider="http", verification=dict(result.verification))
+    assert graph.execution.executed_at is not None
+    assert graph.execution.before_ref is not None and graph.execution.after_ref is not None
+    before = EffectOperationsMixin._effect_evidence_row(
+        run_id=graph.proposal.run_id, tool_call_id=graph.tool.id,
+        evidence_ref=graph.execution.before_ref, draft=result.before,
+        now=graph.execution.executed_at,
+    )
+    after = EffectOperationsMixin._effect_evidence_row(
+        run_id=graph.proposal.run_id, tool_call_id=graph.tool.id,
+        evidence_ref=graph.execution.after_ref, draft=result.after,
+        now=graph.execution.executed_at,
+    )
+    return replace(graph, before=before, after=after), sent
+
+
+@pytest.mark.parametrize("status", [200, 201, 202, 204])
+@pytest.mark.parametrize("approval_source", ["USER", "RUN_START"])
+async def test_http_response_passes_full_result_validation_without_get(
+    tmp_path, status, approval_source,
+):
+    """受理の原回执を Outcome 最終検証まで通し、実ケースの effect_summary_invalid を防ぐ。"""
+    from skillmind.agent.result_validation import ResultValidator
+    from tests.agent.test_result_references import ProposalLookup, validate_outcome
+    from tests.agent.test_result_validation import MemoryEvidenceLookup, _outcome
+    from tests.runs.creation_fakes import creation_command, creation_intent, stored_creation
+
+    graph, sent = await _http_graph(tmp_path, status=status)
+    run = None
+    if approval_source == "RUN_START":
+        graph.approval.source = "RUN_START"
+        intent = replace(creation_intent(), project_id=graph.project_id,
+                         actor_id=graph.approval.actor_id, auto_approve=True)
+        run = stored_creation(creation_command(intent))
+        run.id = graph.proposal.run_id
+    lookup, _, session = _lookup((*graph.joined(), run))
+    claim = graph.claim()
+    value = _outcome(
+        summary="Webhook accepted; message delivery is not verified.",
+        deliverables=[], evidence_refs=[], change_proposal_refs=[],
+        limitations=["Delivery is not confirmed."],
+        effects=[{"proposal_ref": claim.proposal_ref, "status": claim.status,
+                  "summary": "HTTP request accepted", "before_ref": claim.before_ref,
+                  "after_ref": claim.after_ref}],
+    )
+    validated = await validate_outcome(
+        ResultValidator(MemoryEvidenceLookup(frozenset({claim.before_ref, claim.after_ref})),
+                        ProposalLookup(graph.proposal.run_id), effect_lookup=lookup),
+        graph.proposal.run_id, value,
+    )
+    assert validated.data["status"] == "COMPLETED"
+    assert validated.data["limitations"] == value["limitations"]
+    assert validated.change_proposal_refs == {graph.proposal.proposal_ref}
+    assert graph.execution.verification_json["business_verdict"] == "NOT_EVALUATED"
+    assert len(sent) == 1 and sent[0].method == "POST"
+    file = graph.execution.verification_json["file"]
+    raw = (tmp_path / str(graph.proposal.run_id) / file["path"]).read_bytes()
+    assert file["content_hash"] == "sha256:" + sha256_hex(raw)
+    session.execute.assert_awaited_once()
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.parametrize("mutation", [
+    "wrong_method", "wrong_expected_method", "bad_status", "boolean_status",
+    "missing_file", "changed_file", "changed_headers", "wrong_paths", "wrong_approval",
+    "unknown_result", "another_run", "broken_response_hash", "wrong_tool_response",
+])
+async def test_http_summary_still_requires_original_response_and_audit_links(tmp_path, mutation):
+    """HTTP 方式の修正で批准・2xx・範囲・原 response の整合検査を緩めない。"""
+    from copy import deepcopy
+
+    graph, sent = await _http_graph(tmp_path)
+    verification = deepcopy(graph.execution.verification_json)
+    if mutation == "wrong_method":
+        verification["method"] = "READ_BACK"
+    elif mutation == "wrong_expected_method":
+        graph.proposal.verification_json["method"] = "READ_BACK"
+    elif mutation == "bad_status":
+        verification["http_status"] = 500
+    elif mutation == "boolean_status":
+        verification["http_status"] = True
+    elif mutation == "missing_file":
+        verification.pop("file")
+    elif mutation == "changed_file":
+        verification["file"]["content_hash"] = "sha256:" + "0" * 64
+    elif mutation == "changed_headers":
+        verification["headers"] = {"content-type": "text/plain"}
+    elif mutation == "wrong_paths":
+        verification["matched_paths"] = ["/other"]
+    elif mutation == "wrong_approval":
+        graph.approval.proposal_checksum = "sha256:" + "0" * 64
+    elif mutation == "unknown_result":
+        graph.execution.error_json = {"code": "effect_result_unknown"}
+    elif mutation == "another_run":
+        graph.after.run_id = uuid4()
+    elif mutation == "broken_response_hash":
+        graph.after.content_hash = "sha256:" + "0" * 64
+    graph.execution.verification_json = verification
+    assert graph.tool.result_json is not None
+    graph.tool.result_json["verification"] = deepcopy(verification)
+    if mutation == "wrong_tool_response":
+        graph.tool.result_json["verification"]["http_status"] = 201
+    assert await _invalid(graph) == {graph.proposal.proposal_ref}
+    assert len(sent) == 1
+
+
+async def test_http_response_method_is_not_accepted_for_other_resources():
+    """READ_BACK が必要な資源へ HTTP の応答方式を流用させない。"""
+    graph = _graph()
+    graph.proposal.verification_json["method"] = "HTTP_RESPONSE"
+    graph.execution.verification_json["method"] = "HTTP_RESPONSE"
+    assert graph.tool.result_json is not None
+    graph.tool.result_json["verification"] = dict(graph.execution.verification_json)
+    assert await _invalid(graph) == {graph.proposal.proposal_ref}

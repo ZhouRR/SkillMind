@@ -41,6 +41,7 @@ def schedule_row() -> TaskSchedule:
         skill_version_id=uuid4(),
         task_key="analyze",
         input_json={"value": 1},
+        auto_approve=False,
         sources_json={},
         next_run_at=NOW,
         last_run_at=None,

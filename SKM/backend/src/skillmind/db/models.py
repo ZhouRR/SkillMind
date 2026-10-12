@@ -22,6 +22,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -2321,6 +2322,8 @@ class TaskSchedule(IdentityMixin, TimestampMixin, Base):
     task_key: Mapped[str] = mapped_column(String(200), nullable=False)
     input_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     sources_json: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False)
+    # 保存時の明示同意だけを発火へ継承し、旧 schedule の権限を黙って広げない。
+    auto_approve: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
     next_run_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

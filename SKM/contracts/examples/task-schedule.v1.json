@@ -11,8 +11,12 @@
   "max_runs": 10,
   "skill_version_id": "00000000-0000-4000-8000-000000000061",
   "task_key": "review",
-  "input": { "objective": "Review the selected documents" },
-  "sources": { "documents": "project-documents:all" },
+  "input": {
+    "objective": "Review the selected documents"
+  },
+  "sources": {
+    "documents": "project-documents:all"
+  },
   "next_run_at": "2027-01-02T18:00:00Z",
   "last_run_at": "2027-01-01T18:00:00Z",
   "last_run_id": "00000000-0000-4000-8000-000000000071",
@@ -23,5 +27,6 @@
   "created_by": "00000000-0000-4000-8000-000000000030",
   "row_version": 4,
   "created_at": "2026-12-30T00:00:00Z",
-  "updated_at": "2027-01-01T18:00:01Z"
+  "updated_at": "2027-01-01T18:00:01Z",
+  "auto_approve": false
 }

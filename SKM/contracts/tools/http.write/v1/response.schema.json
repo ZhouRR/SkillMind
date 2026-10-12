@@ -36,11 +36,14 @@
       "additionalProperties": true,
       "required": [
         "method",
-        "matched_paths"
+        "matched_paths",
+        "http_status",
+        "headers",
+        "file"
       ],
       "properties": {
         "method": {
-          "const": "READ_BACK"
+          "const": "HTTP_RESPONSE"
         },
         "matched_paths": {
           "type": "array",
@@ -48,6 +51,40 @@
           "uniqueItems": true,
           "items": {
             "type": "string"
+          }
+        },
+        "http_status": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "file": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "content_hash"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "pattern": "^workspace/"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "content_hash": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            }
           }
         }
       }

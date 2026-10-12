@@ -498,8 +498,10 @@ export const ZH: UiMessages = {
   resources: {
     httpAuthentication: '认证方式',
     httpCredentialHeader: 'API Key 请求头名称',
-    httpPaths: '允许访问的 API 路径',
-    httpMethods: '允许修改的 HTTP 方法',
+    httpBaseUrls: '接口根地址',
+    httpAddAddress: '追加',
+    httpRemoveAddress: '删除',
+    httpBaseUrlsRequired: '请添加接口根地址。',
     nativeSqlHint: '直接执行 SQL，表和列的访问权限由连接使用的数据库账号决定。',
 
     resourceInUse: '执行历史或其他配置仍在使用此项。可以将其停用，或解除引用后再删除。',
@@ -640,7 +642,7 @@ export const ZH: UiMessages = {
     scopeKeepAllOption: '保持不限',
     scopeNarrowHint: '逗号或换行分隔；留空表示不允许任何值。',
     scopeUnrestrictedLabel: '不限',
-    scopeKeyLabels: { statements: 'SQL 操作', methods: 'HTTP 方法', tables: '数据表', write_columns: '可写列', operations: '写入操作', tool_names: '工具', resource_uris: '资源 URI', issue_ids: '工单', field_keys: '可改字段', paths: '路径', revisions: '修订' },
+    scopeKeyLabels: { base_urls: '接口地址', statements: 'SQL 操作', methods: 'HTTP 方法', tables: '数据表', write_columns: '可写列', operations: '写入操作', tool_names: '工具', resource_uris: '资源 URI', issue_ids: '工单', field_keys: '可改字段', paths: '路径', revisions: '修订' },
     pleaseSelect: '请选择',
     selectValidIntegration: '请选择有效的集成。',
     saveBinding: '保存绑定',
@@ -1073,7 +1075,7 @@ export const ZH: UiMessages = {
       incompleteDraft: '请填写有效的 JSON 对象，并完成所有文档范围选择；可选范围可明确选择不使用。',
     },
     creating: '正在创建…',
-    autoApprove: '自动批准（数据库写入、文档保存、Git 提交、MCP 操作）',
+    autoApprove: '自动批准（数据库写入、文档保存、Git 提交、MCP／HTTP 操作）',
     startRun: '开始执行',
     submission: {
       title: '确认上一次提交',

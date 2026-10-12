@@ -6,7 +6,10 @@
   "additionalProperties": false,
   "properties": {
     "candidate_version": {
-      "const": "skillmind.skill-candidate/v3"
+      "type": "string",
+      "enum": [
+        "skillmind.skill-candidate/v3"
+      ]
     },
     "title": {
       "type": [

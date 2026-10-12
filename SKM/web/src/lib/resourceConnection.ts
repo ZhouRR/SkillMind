@@ -40,7 +40,7 @@ export function prepareResourceConnection(draft: ConnectDraft, writeEnabled: boo
       ? [...new Set([...draft.fieldKeys, ...parseListInput(draft.customFieldKeys)])] : [SCOPE_WILDCARD],
     paths: parseListInput(draft.paths), revisions: parseListInput(draft.revisions),
     tables: parseListInput(draft.tables), writeEnabled: access === 'read_write',
-    writeColumns: parseListInput(draft.writeColumns), operations: draft.databaseOperations, httpMethods: draft.httpMethods,
+    writeColumns: parseListInput(draft.writeColumns), operations: draft.databaseOperations, httpBaseUrls: draft.httpBaseUrls,
     resourceUris: parseListInput(draft.resourceUris), mcpTools: draft.mcpTools, mcpPermissions,
   })
   const scopeIssue = findScopeIssue(draft.provider, scope, access === 'read_write')

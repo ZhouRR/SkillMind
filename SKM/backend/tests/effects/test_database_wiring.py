@@ -16,10 +16,11 @@ from tests.effects.database_fixtures import database_execution
 
 @pytest.mark.parametrize("deferred", [False, True])
 @pytest.mark.parametrize("database", [False, True])
-def test_production_registry_matches_readiness_and_provider_versions(deferred, database):
+def test_production_registry_matches_readiness_and_provider_versions(deferred, database, tmp_path):
     """readiness の宣言集合と実実装/version を四つの配備組合せで照合する。"""
     features = ExecutionFeatures(deferred, database)
     registry = create_effect_provider_registry(
+        workspace_root=tmp_path,
         features=features,
         effect_service=MagicMock(),
         secret_resolver=MagicMock(),
@@ -39,13 +40,14 @@ def test_production_registry_matches_readiness_and_provider_versions(deferred, d
             registry.resolve(capability_version="database.execute/v1", provider="postgres")
 
 
-async def test_database_factory_binds_original_service_and_resolver():
+async def test_database_factory_binds_original_service_and_resolver(tmp_path):
     """原生 SQL client の段階認可も共有 service/version/resolver を通す。"""
     from skillmind.effects.postgres_native import SQL_VERSION
     from tests.effects.test_native_resource_effects import sql_execution
     service, resolver = MagicMock(), MagicMock()
     service.authorize_effect_step = AsyncMock()
-    registry = create_effect_provider_registry(features=ExecutionFeatures(database_writes=True),
+    registry = create_effect_provider_registry(
+        features=ExecutionFeatures(database_writes=True), workspace_root=tmp_path,
         effect_service=service, secret_resolver=resolver, git_client=MagicMock(), svn_client=MagicMock())
     provider = registry.resolve(capability_version="database.execute/v1", provider="postgres").implementation
     execution = sql_execution()

@@ -20,78 +20,113 @@ from tests.agent.test_mcp_tools import execution
 
 
 def http_execution():
-    """既存 Effect fixture を一つの明示 API 更新へ置き換える。"""
+    """事前 GET を持たない承認済み HTTP request を固定する。"""
     return replace(
         execution(),
         provider="http",
         capability_version="http.write/v1",
-        operation="PUT",
-        target={"locator": "/items/1", "display": "item"},
-        integration_config={"base_url": "https://api.example.test", "auth_mode": "none"},
-        integration_scope={"paths": ["/items"], "methods": ["GET", "PUT"]},
+        operation="POST",
+        target={"locator": "/messages", "display": "send message"},
+        integration_config={"auth_mode": "none"},
+        integration_scope={"base_urls": ["https://api.example.test"]},
         changes=(
             {
                 "path": "/request",
                 "action": "SET",
                 "value": {
-                    "request": {"method": "PUT", "path": "/items/1", "body": {"done": True}},
-                    "read_back": {"path": "/items/1"},
-                    "checks": [{"pointer": "/done", "equals": True}],
+                    "request": {
+                        "method": "POST",
+                        "path": "/messages",
+                        "body": {"message": "hello"},
+                    },
                 },
             },
         ),
-        precondition={"revision": "sha256:" + sha256_hex(b'{"done":false}')},
+        precondition={},
+        verification={"method": "HTTP_RESPONSE", "paths": ["/request"]},
     )
 
 
-async def test_http_write_uses_observed_etag_and_readback_without_replaying():
-    """transport 成功だけでなく指定した JSON 条件を実 GET で確認する。"""
-    source = SimpleNamespace(
-        request=AsyncMock(
-            side_effect=[
-                HttpResponse(200, {"etag": '"v1"'}, b'{"done":false}'),
-                HttpResponse(204, {}, b""),
-                HttpResponse(200, {}, b'{"done":true}'),
-            ]
-        )
+def http_provider(tmp_path, source, authorize=None):
+    """実 file 保存を含む Provider を隔離 workspace で作る。"""
+    from skillmind.agent.workspace import WorkspaceManager
+
+    return HttpWriteProvider(
+        source=source,
+        authorize=authorize or AsyncMock(),
+        workspace_manager=WorkspaceManager(tmp_path),
     )
+
+
+@pytest.mark.parametrize("status", [200, 201, 202, 204])
+async def test_http_write_returns_exact_response_without_get_or_replay(tmp_path, status):
+    """受理を含む 2xx は原応答を保存し、空 body でも架空 GET を加えない。"""
+    body = b"" if status == 204 else b'{"accepted":true}'
+    source = SimpleNamespace(request=AsyncMock(return_value=HttpResponse(status, {}, body)))
     authorize = AsyncMock()
-    provider = HttpWriteProvider(source=source, authorize=authorize)
-    result = await provider.apply(http_execution(), credential=None)
-    assert result.verification["http_status"] == 204
-    assert source.request.await_args_list[1].args[2]["headers"]["If-Match"] == '"v1"'
-    assert source.request.await_count == 3 and authorize.await_count == 7
+    provider = http_provider(tmp_path, source, authorize)
+    original = http_execution()
+    result = await provider.apply(original, credential=None)
+    assert result.verification["method"] == "HTTP_RESPONSE"
+    assert result.verification["http_status"] == status
+    assert result.verification["business_verdict"] == "NOT_EVALUATED"
+    assert (
+        tmp_path / str(original.run_id) / result.after.content["file"]["path"]
+    ).read_bytes() == body
+    assert source.request.await_count == 1 and authorize.await_count == 3
+    assert source.request.await_args.kwargs["write"] is True
     with pytest.raises(EffectProviderTransportError):
-        await provider.apply(replace(http_execution(), attempt_no=2), credential=None)
-    assert source.request.await_count == 3
-
-
-@pytest.mark.parametrize(
-    "after_send", [HttpResourceError("transport_unconfirmed"), HttpResponse(202, {}, b"{}")]
-)
-async def test_http_timeout_and_async_acceptance_never_repeat_mutation(after_send):
-    """送信済みかもしれない要求を反復せず、202 を完成と表示しない。"""
-    source = SimpleNamespace(
-        request=AsyncMock(side_effect=[HttpResponse(200, {}, b'{"done":false}'), after_send])
-    )
-    with pytest.raises(EffectProviderTransportError):
-        await HttpWriteProvider(source=source, authorize=AsyncMock()).apply(
-            http_execution(), credential=None
-        )
-    assert source.request.await_count == 2
-
-
-async def test_http_changed_precondition_prevents_mutation():
-    """古い read hash のまま上書きしない。"""
-    source = SimpleNamespace(
-        request=AsyncMock(return_value=HttpResponse(200, {}, b'{"done":true}'))
-    )
-    with pytest.raises(EffectProviderStaleError):
-        await HttpWriteProvider(source=source, authorize=AsyncMock()).apply(
-            http_execution(), credential=None
-        )
+        await provider.apply(replace(original, attempt_no=2), credential=None)
     assert source.request.await_count == 1
 
+
+async def test_http_timeout_never_repeats_mutation(tmp_path):
+    """送信済みかもしれない要求を GET や mutation で探らない。"""
+    source = SimpleNamespace(
+        request=AsyncMock(side_effect=HttpResourceError("transport_unconfirmed"))
+    )
+    with pytest.raises(EffectProviderTransportError, match="http_result_unconfirmed"):
+        await http_provider(tmp_path, source).apply(http_execution(), credential=None)
+    assert source.request.await_count == 1
+
+
+@pytest.mark.parametrize("status", [302, 400, 429, 500])
+async def test_http_error_keeps_response_and_is_not_an_unknown_result(tmp_path, status):
+    """非 2xx でも正文を Agent に残し、失敗を未送信や不明へ変換しない。"""
+    from skillmind.effects.http_provider import HttpResponseError
+    from skillmind.effects.outcomes import effect_failure_record
+
+    body = b'{"error":"request rejected"}'
+    source = SimpleNamespace(request=AsyncMock(return_value=HttpResponse(status, {}, body)))
+    original = http_execution()
+    with pytest.raises(HttpResponseError) as caught:
+        await http_provider(tmp_path, source).apply(original, credential=None)
+    observation = caught.value.observations[0]
+    assert observation.content["http_status"] == status
+    assert (
+        tmp_path / str(original.run_id) / observation.content["file"]["path"]
+    ).read_bytes() == body
+    record = effect_failure_record(
+        capability=original.capability_version,
+        provider="http",
+        attempt_no=1,
+        code=caught.value.code,
+        retryable=False,
+        previous=None,
+    )
+    assert record == {"code": "http_response_error", "retryable": False}
+    assert source.request.await_count == 1
+
+
+async def test_http_revocation_prevents_response_file_publication(tmp_path):
+    """送信後の撤権でも再送せず、正文 file は公開しない。"""
+    source = SimpleNamespace(request=AsyncMock(return_value=HttpResponse(200, {}, b"private")))
+    authorize = AsyncMock(side_effect=[None, None, PermissionError("revoked")])
+    original = http_execution()
+    with pytest.raises(PermissionError):
+        await http_provider(tmp_path, source, authorize).apply(original, credential=None)
+    assert not list((tmp_path / str(original.run_id)).rglob("response.bin"))
+    assert source.request.await_count == 1
 
 class Connection:
     """transaction exit と原 receipt の SQL を記録する有界替身。"""

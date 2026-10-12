@@ -175,6 +175,8 @@ class NormalizedSkillPackage:
     declared_tools: tuple[str, ...]
     extensions: Mapping[str, Any] = field(default_factory=dict)
     diagnostics: tuple[ImportDiagnostic, ...] = ()
+    # 選択入口は source hash の一部。指示の primary path から逆算しない。
+    entry_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Canonical persistence と checksum 検証に利用できる JSON object を返す。"""
@@ -347,11 +349,12 @@ class SkillPackageParser:
                     "skill_selection_required", "Choose a Skill entry from the uploaded directory",
                 )
             if entries:
-                source = _select_skill_source(source, entries[0])
+                entry_path = entries[0]
+                source = _select_skill_source(source, entry_path)
         _validate_markdown_references(source)
         for adapter in self._adapters:
             if adapter.supports(source):
-                return adapter.normalize(source)
+                return replace(adapter.normalize(source), entry_path=entry_path)
         raise SkillImportError(
             "unsupported_skill_source",
             "Directory does not contain a supported Skill or Markdown entry point",
