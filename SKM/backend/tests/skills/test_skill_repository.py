@@ -7,6 +7,7 @@ transaction 内の再検証は実 UserRepository を使う service/API 回帰で
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,6 +16,8 @@ from uuid import UUID, uuid4
 
 import pytest
 from jsonschema import Draft202012Validator
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from skillmind.db.models import ProjectSkillVersion, SkillInterpretation, SkillSource
 from skillmind.skills.capability_blueprint import CapabilityBlueprintError
 from skillmind.skills.domain import (
@@ -37,7 +40,6 @@ from skillmind.skills.domain import (
 from skillmind.skills.manifest_gate import ManifestValidator
 from skillmind.skills.repository import SkillRepository
 from skillmind.skills.service import _schema_failure_detail
-from sqlalchemy.ext.asyncio import AsyncSession
 
 ORGANIZATION_ID = UUID("00000000-0000-4000-8000-0000000000a1")
 
@@ -65,7 +67,8 @@ def _command() -> SaveSkillPreviewCommand:
 
 
 @pytest.mark.asyncio
-async def test_save_preview_creates_source_and_interpretation() -> None:
+@pytest.mark.parametrize("entry_path", [None, "SKILL.md"])
+async def test_save_preview_creates_source_and_interpretation(entry_path: str | None) -> None:
     """初回保存が source snapshot と interpretation を同じ session に追加する。"""
 
     session = MagicMock(spec=AsyncSession)
@@ -75,7 +78,7 @@ async def test_save_preview_creates_source_and_interpretation() -> None:
     missing_interpretation = MagicMock()
     missing_interpretation.one_or_none.return_value = None
     session.scalars = AsyncMock(side_effect=[missing_source, missing_interpretation])
-    command = _command()
+    command = replace(_command(), entry_path=entry_path)
 
     stored = await SkillRepository(session).save_preview(
         command, authorize=lambda: datetime(2026, 9, 10, tzinfo=UTC)
@@ -87,6 +90,7 @@ async def test_save_preview_creates_source_and_interpretation() -> None:
     assert added[0].source_snapshot_json == [{"path": "SKILL.md", "content": "# Ticket Reviewer\n"}]
     # Organization は認証境界で確定した command 値をそのまま不変 source へ刻む。
     assert added[0].organization_id == ORGANIZATION_ID
+    assert added[0].entry_path == entry_path
     assert added[1].model is None
     assert stored.skill_source_id == added[0].id
     assert stored.interpretation_id == added[1].id

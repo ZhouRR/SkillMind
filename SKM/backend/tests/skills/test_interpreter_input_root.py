@@ -13,10 +13,10 @@ CONTRACTS = Path(__file__).resolve().parents[3] / "contracts"
 
 
 def candidate() -> dict[str, Any]:
-    """外部データを含まない、入力を要求しない native v2 候補を作る。"""
+    """外部データを含まない、入力を要求しない native v3 候補を作る。"""
 
     return {
-        "candidate_version": "skillmind.skill-candidate/v2",
+        "candidate_version": "skillmind.skill-candidate/v3",
         "title": None,
         "description": None,
         "input_contract": {
@@ -26,7 +26,6 @@ def candidate() -> dict[str, Any]:
         },
         "input_source_ref": "s0",
         "resource_requirements": [],
-        "platform_tools": [],
         "diagnostics": [],
     }
 
@@ -45,7 +44,7 @@ def validator() -> Draft202012Validator:
     """本番と同じ Schema file を読み、テスト専用 Schema を使わない。"""
 
     schema = json.loads(
-        (CONTRACTS / "skills/interpreter/v2/candidate.schema.json").read_text(encoding="utf-8")
+        (CONTRACTS / "skills/interpreter/v3/candidate.schema.json").read_text(encoding="utf-8")
     )
     Draft202012Validator.check_schema(schema)
     return Draft202012Validator(schema)

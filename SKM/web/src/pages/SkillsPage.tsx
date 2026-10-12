@@ -23,7 +23,7 @@ import { useMessages } from '../i18n'
 import { useSkillInterpretation } from '../hooks/useSkillInterpretation'
 import { assetCodeLabel } from '../lib/i18n/assetsAudit'
 import { apiErrorMessage } from '../lib/apiFeedback'
-import { readUploadedSourcePreview, type UploadedSourceFile } from '../lib/skillUpload'
+import { readUploadedSourcePreview, uploadedSkillEntries, type UploadedSourceFile } from '../lib/skillUpload'
 import { SkillLibraryPanel, SkillVersionDetail, type SkillLibraryState, type ProjectEnablementState } from '../components/SkillLibraryPanel'
 import { SavedSkillIdentity, SkillParseSummary, UploadedSourceFiles } from '../components/SkillSourcePreview'
 import { InterpretationExecutionView, InterpretStreamView } from '../components/SkillInterpretationPreview'
@@ -68,6 +68,9 @@ export function SkillsPage({ projectId, csrfToken }: {
   const [skillMarkdown, setSkillMarkdown] = useState('')
   const [referenceMarkdown, setReferenceMarkdown] = useState('')
   const [uploadedSource, setUploadedSource] = useState<UploadedSourceFile[] | null>(null)
+  const [uploadBundle, setUploadBundle] = useState<{
+    files: File[]; entries: string[]; selected: string
+  } | null>(null)
   const [parseState, setParseState] = useState<SkillParseState>({ status: 'idle' })
   const [saveState, setSaveState] = useState<SkillSaveState>({ status: 'idle' })
   const [versionState, setVersionState] = useState<SkillVersionState>({ status: 'idle' })
@@ -223,8 +226,8 @@ export function SkillsPage({ projectId, csrfToken }: {
     }
   }
 
-  /** 選択した目录（binary asset 可）を multipart upload し、保存済み source として扱う。 */
-  async function handleUpload(files: File[]): Promise<void> {
+  /** 複数 entry は先に選択欄へ出し、選択した source だけを保存・解析する。 */
+  async function handleUpload(files: File[], entryPath?: string): Promise<void> {
     if (files.length === 0 || uploadController.current || saveController.current) return
     sourceRevision.current += 1
     parseController.current?.abort()
@@ -234,14 +237,29 @@ export function SkillsPage({ projectId, csrfToken }: {
     setSaveState({ status: 'saving' })
     resetDownstream()
     try {
-      // Preview は手元 File から読み、保存成功と同時に「実際に保存された源文件」として左欄へ出す。
+      const entries = uploadedSkillEntries(files)
+      if (entryPath === undefined && entries.length > 1) {
+        const preview = await readUploadedSourcePreview(files)
+        if (controller.signal.aborted || uploadController.current !== controller) return
+        setUploadedSource(preview)
+        setUploadBundle({ files, entries, selected: '' })
+        setSaveState({ status: 'idle' })
+        setSourceChanged(false)
+        return
+      }
+      const selected = entryPath ?? entries[0]
+      setUploadBundle(entries.length > 1 ? { files, entries, selected: selected ?? '' } : null)
+      // Root の単一 Skill は既存 API 呼出しを維持する。複数 source の境界は server が検証する。
       const [preview, stored] = await Promise.all([
         readUploadedSourcePreview(files),
-        uploadSkillFiles(files, csrfToken, controller.signal),
+        selected && (selected !== 'SKILL.md' || entries.length > 1)
+          ? uploadSkillFiles(files, csrfToken, controller.signal, selected)
+          : uploadSkillFiles(files, csrfToken, controller.signal),
       ])
       if (controller.signal.aborted || uploadController.current !== controller) return
       setSourceChanged(false)
-      setUploadedSource(preview)
+      const included = new Set(stored.preview.normalized_package.source.files.map((file) => file.path))
+      setUploadedSource(included.size > 0 ? preview.filter((file) => included.has(file.path)) : preview)
       setSaveState({ status: 'ready', stored })
     } catch (error: unknown) {
       if (!controller.signal.aborted) {
@@ -503,6 +521,18 @@ export function SkillsPage({ projectId, csrfToken }: {
             </label>
           </div>
           <p className="hint">{messages.skills.uploadHint}</p>
+          {uploadBundle !== null && <label>
+            {messages.skills.selectUploadedSkill}
+            <select value={uploadBundle.selected} disabled={sourceLocked} onChange={(event) => {
+              const selected = event.currentTarget.value
+              if (!selected) return
+              changeSource()
+              void handleUpload(uploadBundle.files, selected)
+            }}>
+              <option value="" disabled>{messages.skills.selectUploadedSkillPlaceholder}</option>
+              {uploadBundle.entries.map((path) => <option value={path} key={path}>{path.replace(/\/SKILL\.md$/, '')}</option>)}
+            </select>
+          </label>}
           {uploadedSource === null ? (
             <details className="detailDisclosure skillTextSource">
               <summary>{messages.skills.manualSource}</summary>
@@ -514,7 +544,7 @@ export function SkillsPage({ projectId, csrfToken }: {
               <button className="primaryButton" disabled={sourceLocked || parseState.status === 'parsing' || !skillMarkdown.trim()} type="submit">{parseState.status === 'parsing' ? messages.skills.parsing : messages.skills.parseSkill}</button>
             </details>
           ) : (
-            <UploadedSourceFiles files={uploadedSource} disabled={sourceLocked} onClear={() => { if (sourceLocked) return; changeSource(); setUploadedSource(null) }} />
+            <UploadedSourceFiles files={uploadedSource} disabled={sourceLocked} onClear={() => { if (sourceLocked) return; changeSource(); setUploadedSource(null); setUploadBundle(null) }} />
           )}
         </form>
 

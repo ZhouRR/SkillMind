@@ -340,9 +340,9 @@
   },
   "interpreter": {
     "skill_key": "skillmind-skill-interpreter",
-    "version": "6.0.0",
-    "source_hash": "sha256:957578708dafe60cc0e9b120355ce88652ee596339f88991aa6225e4eece07db",
-    "prompt_checksum": "sha256:957578708dafe60cc0e9b120355ce88652ee596339f88991aa6225e4eece07db"
+    "version": "7.0.0",
+    "source_hash": "sha256:dcbbb7e5eb889fd2df92b606c230dd8a34dbcace57fa277074cb05322270c305",
+    "prompt_checksum": "sha256:dcbbb7e5eb889fd2df92b606c230dd8a34dbcace57fa277074cb05322270c305"
   },
   "target_contracts": {
     "runtime_manifest": "skillmind/v1alpha1",

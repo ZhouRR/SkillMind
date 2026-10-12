@@ -6,6 +6,7 @@ from copy import deepcopy
 
 import pytest
 from jsonschema import Draft202012Validator
+
 from skillmind.skills.candidate_revision import repair_components, validate_repair_scope
 from skillmind.skills.capability_blueprint import CapabilityBlueprintError
 from skillmind.skills.direct_candidate import candidate_schema, compile_candidate
@@ -16,19 +17,12 @@ from tests.skills.test_source_execution import direct_case
 
 @pytest.mark.parametrize("capabilities", [None, []])
 def test_resource_capabilities_cannot_request_an_uncompilable_shape(capabilities) -> None:
-    """必須の能力を null で生成できる Schema と後段拒否の矛盾を除く。"""
+    """接続選択の契約へ model の能力許可を戻さない。"""
     _, candidate = direct_case(writes=True)
     candidate["resource_requirements"][0]["capabilities"] = capabilities
     errors = list(Draft202012Validator(candidate_schema(CONTRACTS)).iter_errors(candidate))
-    assert any(
-        list(error.absolute_path)
-        == [
-            "resource_requirements",
-            0,
-            "capabilities",
-        ]
-        for error in errors
-    )
+    assert errors
+    assert errors[0].validator == "additionalProperties"
 
 
 @pytest.mark.parametrize(

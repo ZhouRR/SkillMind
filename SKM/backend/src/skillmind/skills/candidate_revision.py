@@ -1,4 +1,4 @@
-"""原宣言の調整基準と、明示 scope／候補修復の非対象 field 保護を提供する。"""
+"""原宣言の調整基準と、明示 scope と候補修復の非対象 field 保護を提供する。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ _LAUNCH_FIELDS = frozenset({
 })
 _CANDIDATE_FIELDS = frozenset({
     "candidate_version", "title", "description", "input_contract", "input_source_ref",
-    "resource_requirements", "platform_tools", "diagnostics",
+    "resource_requirements", "diagnostics",
 })
 
 
@@ -40,7 +40,7 @@ def snapshot_launch_contract(manifest: Mapping[str, Any]) -> dict[str, Any] | No
     tasks = manifest.get("tasks")
     if (
         not isinstance(definition, Mapping)
-        or definition.get("execution_version") != "skillmind.skill-execution/v1"
+        or definition.get("execution_version") != "skillmind.skill-execution/v2"
         or not isinstance(definition.get("tasks"), list) or len(definition["tasks"]) != 1
         or not isinstance(tasks, list) or len(tasks) != 1
         or not isinstance(tasks[0], Mapping)
@@ -131,7 +131,7 @@ def validate_adjustment_scope(
 
 
 def repair_components(path: str, code: str) -> frozenset[str] | None:
-    """一意に位置付けられる v2 のエラーだけを、修復可能な候補 component へ写像する。"""
+    """一意に位置付けられる v3 のエラーだけを、修復可能な候補 component へ写像する。"""
 
     if code == "candidate_publish_invalid" or not path.startswith("/"):
         # Publish preflight は複数箇所を含み得る。一箇所だけの修復と偽らない。
@@ -142,7 +142,7 @@ def repair_components(path: str, code: str) -> frozenset[str] | None:
     if path.startswith("/skill_execution/resource_requirements"):
         return frozenset({"resource_requirements"})
     if code.startswith("contract_"):
-        # v2 は入力契約のみをモデルに宣言させる。
+        # v3 は入力契約のみをモデルに宣言させる。
         return frozenset({"input_contract"})
     return None
 

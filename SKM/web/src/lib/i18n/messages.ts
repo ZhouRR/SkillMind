@@ -1292,6 +1292,8 @@ export interface UiMessages {
     parseSkill: string
     orUploadDir: string
     chooseSkillDir: string
+    selectUploadedSkill: string
+    selectUploadedSkillPlaceholder: string
     uploadDirAria: string
     uploadHint: string
     parseResult: string

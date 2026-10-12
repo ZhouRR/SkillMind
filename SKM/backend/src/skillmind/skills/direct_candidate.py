@@ -11,7 +11,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from skillmind.skills.capability_blueprint import CapabilityBlueprintError
-from skillmind.skills.execution import EXECUTION_VERSION, PLATFORM_TOOLS, validate_execution
+from skillmind.skills.execution import EXECUTION_VERSION, validate_execution
 from skillmind.skills.importer import _skill_key
 from skillmind.skills.source_projection import (
     SourceLocations,
@@ -21,15 +21,15 @@ from skillmind.skills.source_projection import (
     omit_optional_nulls as _omit_optional_nulls,
 )
 
-CANDIDATE_VERSION = "skillmind.skill-candidate/v2"
-CANDIDATE_SCHEMA_ID = "https://schemas.skillmind.local/skills/interpreter/v2/candidate.schema.json"
+CANDIDATE_VERSION = "skillmind.skill-candidate/v3"
+CANDIDATE_SCHEMA_ID = "https://schemas.skillmind.local/skills/interpreter/v3/candidate.schema.json"
 
 
 def candidate_schema(contracts_dir: Path) -> dict[str, Any]:
     """新規解釈で使う小さい native Schema をロードする。"""
 
     schema: dict[str, Any] = json.loads(
-        (contracts_dir / "skills/interpreter/v2/candidate.schema.json").read_text(encoding="utf-8")
+        (contracts_dir / "skills/interpreter/v3/candidate.schema.json").read_text(encoding="utf-8")
     )
     Draft202012Validator.check_schema(schema)
     return schema
@@ -80,25 +80,6 @@ def compile_candidate(
         "source_traces": traces,
     }
     validate_execution(definition, root)
-    platform_tools = value["platform_tools"]
-    if len(set(platform_tools)) != len(platform_tools) or not set(platform_tools) <= PLATFORM_TOOLS:
-        raise CapabilityBlueprintError(
-            "skill_execution_invalid",
-            "/platform_tools",
-            "Choose only supported task-local platform Tools.",
-        )
-    # 外部 Tools は宣言済み resource から導出し、binding と二重宣言させない。
-    from skillmind.effects.catalog import EFFECT_CAPABILITIES
-
-    tools = set(platform_tools) | {"interaction.request/v1", "workspace.read/v1"}
-    required_tools = set(tools)
-    for resource in resources:
-        if resource["required"]:
-            required_tools.update(resource["capabilities"])
-        tools.update(cap for cap in resource["capabilities"] if cap not in EFFECT_CAPABILITIES)
-        if resource["operations"]:
-            tools.add("change.propose/v1")
-            required_tools.add("change.propose/v1")
     diagnostics = [
         {
             "severity": d["severity"],
@@ -136,7 +117,8 @@ def compile_candidate(
                 ],
             }
         ],
-        "tools": [{"capability": t, "required": t in required_tools} for t in sorted(tools)],
+        # 原文は Tool の許可リストを持たない。Run が実資源と配備から解決する。
+        "tools": [],
     }
     return {
         "response_version": "skillmind.skill-interpreter.response/v1",

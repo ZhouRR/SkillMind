@@ -1,5 +1,5 @@
 {
-  "execution_version": "skillmind.skill-execution/v1",
+  "execution_version": "skillmind.skill-execution/v2",
   "tasks": [
     {
       "key": "execute",
@@ -16,19 +16,10 @@
       "key": "review_outputs",
       "kind": "document",
       "required": true,
-      "access": "write",
-      "capabilities": [
-        "document.write/v1"
-      ],
       "accepted_providers": [
         "project-library"
       ],
-      "operations": [
-        {
-          "capability_version": "document.write/v1",
-          "operation": "CREATE"
-        }
-      ]
+      "selection": "resource"
     }
   ],
   "source_traces": [

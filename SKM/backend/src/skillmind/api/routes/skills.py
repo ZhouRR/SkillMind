@@ -9,7 +9,7 @@ from time import monotonic
 from typing import Annotated, Any, Literal, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Request, Response, status
+from fastapi import APIRouter, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from redis.asyncio import Redis
@@ -472,6 +472,7 @@ async def save_skill_import(
 async def upload_skill_import(
     request: Request,
     actor: AdminWriteActor,
+    entry_path: Annotated[str | None, Query(min_length=1, max_length=1024)] = None,
 ) -> StoredSkillPreviewResponse:
     """ADMIN が multipart で Skill (binary asset 可) を Organization へ保存する。"""
 
@@ -482,6 +483,7 @@ async def upload_skill_import(
         stored = await service.save_upload(
             access=access,
             files=upload_files,
+            **({"entry_path": entry_path} if entry_path is not None else {}),
         )
     except UnauthorizedSessionError as error:
         raise authentication_required_problem() from error

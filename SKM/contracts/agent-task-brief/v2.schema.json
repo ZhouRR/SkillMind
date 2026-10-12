@@ -347,6 +347,10 @@
                 }
               }
             ]
+          },
+          "scope": {
+            "type": "object",
+            "description": "Frozen resource paths, methods or statement permissions. No credentials; actual access is rechecked by the Provider."
           }
         },
         "allOf": [

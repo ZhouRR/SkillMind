@@ -38,7 +38,7 @@ async def test_empty_input_import_handoff_and_source_task_remain_usable(engine: 
 
     settings = Settings(_env_file=None, contracts_dir=CONTRACTS)
     sessions = MagicMock(side_effect=AssertionError("This regression does not access a database"))
-    candidate = json.loads((CONTRACTS / "examples/skill-candidate.v2.json").read_text())
+    candidate = json.loads((CONTRACTS / "examples/skill-candidate.v3.json").read_text())
     calls: list[dict[str, Any]] = []
 
     class Completion:

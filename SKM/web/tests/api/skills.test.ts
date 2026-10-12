@@ -319,6 +319,21 @@ describe('Skill interpretation API contract', () => {
     expect(entries.map((file) => file.name)).toEqual(['SKILL.md', 'references/rules.md'])
   })
 
+  it('sends a selected collection entry and preserves shared-root relative paths', async () => {
+    const fetchMock = jsonFetch(STORED, 201)
+    vi.stubGlobal('fetch', fetchMock)
+    const skill = new File(['# Skill\r\n'], 'SKILL.md', { type: 'text/markdown' })
+    const schema = new File(['{}'], 'result.schema.json', { type: 'application/json' })
+    Object.defineProperty(skill, 'webkitRelativePath', { value: 'fixture/skills/fixture/SKILL.md' })
+    Object.defineProperty(schema, 'webkitRelativePath', { value: 'fixture/schemas/result.schema.json' })
+    await uploadSkillFiles([skill, schema], CSRF, undefined, 'skills/fixture/SKILL.md')
+    const call = fetchMock.mock.calls[0]!
+    expect(call[0]).toBe(`${API_BASE}/skill-imports/upload?entry_path=skills%2Ffixture%2FSKILL.md`)
+    const entries = (call[1]?.body as FormData).getAll('files') as File[]
+    expect(entries.map((file) => file.name)).toEqual(['skills/fixture/SKILL.md', 'schemas/result.schema.json'])
+    expect(await entries[0]!.text()).toBe('# Skill\r\n')
+  })
+
   it('queues an append-only adjustment job with the instruction and CSRF', async () => {
     const fetchMock = jsonFetch(
       { ...REQUEST_RESPONSE, execution_key: `sha256:${'b'.repeat(64)}` },

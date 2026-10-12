@@ -7,7 +7,7 @@ import json
 import os
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 from urllib.parse import unquote, urlsplit
@@ -17,6 +17,7 @@ import yaml
 from jsonschema import Draft202012Validator, FormatChecker
 from yaml.events import AliasEvent
 
+from skillmind.skills.source_identity import skill_source_hash
 from skillmind.skills.task_contract import compile_task_contract
 
 _FRONT_MATTER_BOUNDARY = "---"
@@ -211,6 +212,7 @@ class _ScannedSource:
     files: tuple[SkillFile, ...]
     text_files: Mapping[str, str]
     content_hash: str
+    entry_path: str = "SKILL.md"
 
 
 class SkillAdapter(Protocol):
@@ -235,15 +237,15 @@ class DirectorySkillAdapter:
     adapter_id = "directory-skill/v1"
 
     def supports(self, source: _ScannedSource) -> bool:
-        """Root 直下の SKILL.md だけを directory Skill の entry point とする。"""
+        """選択された SKILL.md だけを entry point とし、隣接 Skill を指示へ混ぜない。"""
 
-        return "SKILL.md" in source.text_files
+        return source.entry_path in source.text_files
 
     def normalize(self, source: _ScannedSource) -> NormalizedSkillPackage:
         """Known metadata を正規化し、未知 field と Tool 声明を隔離する。"""
 
-        raw = source.text_files["SKILL.md"]
-        metadata, body = _parse_front_matter(raw, path="SKILL.md")
+        raw = source.text_files[source.entry_path]
+        metadata, body = _parse_front_matter(raw, path=source.entry_path)
         name = _metadata_string(metadata, "name") or _first_heading(body) or source.root.name
         description = _metadata_string(metadata, "description") or _first_paragraph(body)
         argument_hint = _metadata_string(metadata, "argument-hint", "argument_hint")
@@ -260,13 +262,13 @@ class DirectorySkillAdapter:
                     severity="warning",
                     code="declared_tools_not_authorized",
                     message="Source Tool declarations were recorded but did not grant permissions",
-                    path="SKILL.md",
+                    path=source.entry_path,
                 )
             )
         return _normalized_package(
             source,
             adapter_id=self.adapter_id,
-            primary="SKILL.md",
+            primary=source.entry_path,
             name=name,
             description=description,
             argument_hint=argument_hint,
@@ -330,10 +332,22 @@ class SkillPackageParser:
         self._limits = limits or SkillImportLimits()
         self._adapters = tuple(adapters or (DirectorySkillAdapter(), GenericDocumentAdapter()))
 
-    def parse_directory(self, root: Path) -> NormalizedSkillPackage:
+    def parse_directory(
+        self, root: Path, *, entry_path: str | None = None, discover_entries: bool = True,
+    ) -> NormalizedSkillPackage:
         """Directory を一度だけ scan し、最初に match した Adapter で正規化する。"""
 
         source = _scan_directory(root, self._limits)
+        if entry_path is not None:
+            source = _select_skill_source(source, entry_path)
+        elif discover_entries and "SKILL.md" not in source.text_files:
+            entries = _skill_entry_paths(source)
+            if len(entries) > 1:
+                raise SkillImportError(
+                    "skill_selection_required", "Choose a Skill entry from the uploaded directory",
+                )
+            if entries:
+                source = _select_skill_source(source, entries[0])
         _validate_markdown_references(source)
         for adapter in self._adapters:
             if adapter.supports(source):
@@ -539,14 +553,120 @@ def _scan_directory(root: Path, limits: SkillImportLimits) -> _ScannedSource:
                 raise SkillImportError(
                     "invalid_text_encoding", "Text Skill files must use UTF-8", path=relative
                 ) from error
-    index = [file.to_dict() for file in files]
-    canonical = json.dumps(index, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return _ScannedSource(
         root=root,
         files=tuple(files),
         text_files=text_files,
-        content_hash=f"sha256:{hashlib.sha256(canonical).hexdigest()}",
+        content_hash=_source_content_hash(files),
     )
+
+
+def _source_content_hash(files: Sequence[SkillFile], *, entry_path: str | None = None) -> str:
+    """既存形式の file index hash を全体 scan と選択 source で共有する。"""
+
+    return skill_source_hash([file.to_dict() for file in files], entry_path=entry_path)
+
+
+def _skill_entry_paths(source: _ScannedSource) -> list[str]:
+    """最外の SKILL.md を候補にし、その配下の resource entry は別候補にしない。"""
+
+    entries = sorted(path for path in source.text_files if PurePosixPath(path).name == "SKILL.md")
+    return [path for path in entries if not any(
+        other != path and (str(PurePosixPath(other).parent) == "."
+                          or path.startswith(str(PurePosixPath(other).parent) + "/"))
+        for other in entries
+    )]
+
+
+def _local_reference(owner: str, target: str) -> str | None:
+    """取得はせず、アップロード root 内の相対参照だけを既存規則で解決する。"""
+
+    target = target.strip()
+    if not target:
+        return None
+    target = target.split(maxsplit=1)[0].strip("<>")
+    parsed = urlsplit(target)
+    if parsed.scheme or target.startswith("#"):
+        return None
+    decoded = unquote(parsed.path)
+    if decoded.startswith("/") or "\\" in decoded:
+        raise SkillImportError(
+            "reference_escape", "Markdown reference escapes the Skill source root", path=owner,
+        )
+    return _normalize_relative_path(PurePosixPath(owner).parent / decoded, owner=owner)
+
+
+def _file_references(path: str, text: str) -> set[str]:
+    """Markdown と JSON の参照依存を辿り、共有 Schema のローカル依存も含める。"""
+
+    targets: list[str] = []
+    if path.lower().endswith(".md"):
+        targets = [match.group(1) for match in _MARKDOWN_LINK.finditer(text)]
+    elif path.lower().endswith(".json"):
+        try:
+            value = json.loads(text)
+        except (json.JSONDecodeError, RecursionError):
+            # 通常の JSON 素材の不正を import gate へ昇格させず、元内容はそのまま保存する。
+            return set()
+        if not path.lower().endswith(".schema.json") and not (
+            isinstance(value, dict) and isinstance(value.get("$schema"), str)
+        ):
+            # 通常の payload の $ref をファイル依存と誤認し、追加資料を要求しない。
+            return set()
+        pending = [value]
+        while pending:
+            node = pending.pop()
+            if isinstance(node, dict):
+                if isinstance(node.get("$ref"), str):
+                    targets.append(node["$ref"])
+                pending.extend(node.values())
+            elif isinstance(node, list):
+                pending.extend(node)
+    return {
+        resolved for target in targets
+        if (resolved := _local_reference(path, target)) is not None
+    }
+
+
+def _select_skill_source(source: _ScannedSource, entry_path: str) -> _ScannedSource:
+    """原 byte/path を変えず、選択 Skill と root 内の参照依存だけを凍結対象にする。"""
+
+    if entry_path not in source.text_files or PurePosixPath(entry_path).name != "SKILL.md":
+        raise SkillImportError(
+            "skill_entry_not_found", "The selected Skill entry is not in the upload",
+        )
+    parent = PurePosixPath(entry_path).parent
+    prefix = "" if str(parent) == "." else str(parent) + "/"
+    others = [path for path in source.text_files if PurePosixPath(path).name == "SKILL.md"
+              and path != entry_path and str(PurePosixPath(path).parent) != "."
+              and not entry_path.startswith(str(PurePosixPath(path).parent) + "/")]
+    excluded = [str(PurePosixPath(path).parent) + "/" for path in others]
+    selected = {file.path for file in source.files if file.path.startswith(prefix)
+                and not any(file.path.startswith(other) for other in excluded)}
+    selected.add(entry_path)
+    known = {file.path for file in source.files}
+    pending = list(selected)
+    while pending:
+        path = pending.pop()
+        for reference in _file_references(path, source.text_files.get(path, "")):
+            if reference not in known:
+                raise SkillImportError(
+                    "missing_reference", "Markdown reference does not exist in the Skill source",
+                    path=path,
+                )
+            if reference not in selected:
+                selected.add(reference)
+                pending.append(reference)
+    files = tuple(file for file in source.files if file.path in selected)
+    result = replace(source, files=files,
+                     content_hash=_source_content_hash(files, entry_path=entry_path),
+                     text_files={path: text for path, text in source.text_files.items()
+                                 if path in selected}, entry_path=entry_path)
+    if _skill_entry_paths(result) != [entry_path]:
+        raise SkillImportError(
+            "skill_selection_ambiguous", "The selected source references another Skill entry",
+        )
+    return result
 
 
 def _validate_markdown_references(source: _ScannedSource) -> None:
@@ -558,20 +678,7 @@ def _validate_markdown_references(source: _ScannedSource) -> None:
         if not path.lower().endswith(".md"):
             continue
         references: set[str] = set()
-        for match in _MARKDOWN_LINK.finditer(text):
-            target = match.group(1).strip().split(maxsplit=1)[0].strip("<>")
-            parsed = urlsplit(target)
-            if parsed.scheme or target.startswith("#"):
-                continue
-            if parsed.path.startswith("/"):
-                raise SkillImportError(
-                    "reference_escape",
-                    "Markdown reference escapes the Skill source root",
-                    path=path,
-                )
-            decoded = unquote(parsed.path)
-            relative = PurePosixPath(path).parent / PurePosixPath(decoded)
-            normalized = _normalize_relative_path(relative, owner=path)
+        for normalized in _file_references(path, text):
             if normalized not in known_paths:
                 raise SkillImportError(
                     "missing_reference",
@@ -697,7 +804,7 @@ def _normalized_package(
         instruction_text=body,
         sections=_sections(body),
         files=source.files,
-        resources=_resources(source.files),
+        resources=_resources(source.files, primary=primary),
         declared_tools=declared_tools,
         extensions=_json_copy(dict(extensions)),
         diagnostics=diagnostics,
@@ -721,14 +828,17 @@ def _sections(body: str) -> tuple[InstructionSection, ...]:
     return tuple(sections)
 
 
-def _resources(files: tuple[SkillFile, ...]) -> SkillResources:
-    """Conventional top-level directory だけを resource class へ映射する。"""
+def _resources(files: tuple[SkillFile, ...], *, primary: str = "SKILL.md") -> SkillResources:
+    """選択 Skill 内の慣用 directory を分類し、実 source path は改変しない。"""
 
     scripts: list[str] = []
     references: list[str] = []
     assets: list[str] = []
     for file in files:
-        top = PurePosixPath(file.path).parts[0].lower()
+        path = PurePosixPath(file.path)
+        parent = PurePosixPath(primary).parent
+        relative = path.relative_to(parent) if path.is_relative_to(parent) else path
+        top = relative.parts[0].lower()
         if top == "scripts":
             scripts.append(file.path)
         elif top == "references":

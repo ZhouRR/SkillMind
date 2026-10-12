@@ -120,7 +120,6 @@ from skillmind.runs.domain import (
 )
 from skillmind.runs.repository_base import _RunRepositoryBase
 from skillmind.skills.execution import (
-    declared_operations,
     is_source_execution,
     resolve_skill_definition,
 )
@@ -1587,13 +1586,16 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 resource_key=binding.requirement_key, operation=proposal.operation,
                 capability_version=proposal.capability_version,
                 risk_level=proposal.risk_level,
+                resource_operations=run.permission_snapshot_json.get("resource_operations", []),
             )
             resources = [
                 item for item in blueprint.get("resource_requirements", [])
                 if isinstance(item, dict) and item.get("key") == binding.requirement_key
             ]
-            if (
-                len(resources) != 1 or resources[0].get("access") != "write"
+            if len(resources) != 1:
+                raise ValueError("Frozen resource does not declare the effect capability")
+            if not is_source_execution(blueprint) and (
+                resources[0].get("access") != "write"
                 or proposal.capability_version not in resources[0].get("capabilities", [])
             ):
                 raise ValueError("Frozen resource does not declare the effect capability")
@@ -2794,6 +2796,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
             blueprint, effect_intent_key=draft.effect_intent_key, resource_key=draft.resource_key,
             operation=draft.operation, risk_level=draft.risk_level.value,
             capability_version=draft.capability_version,
+            resource_operations=run.permission_snapshot_json.get("resource_operations", []),
         )
         binding = (
             await self._session.scalars(
@@ -2832,11 +2835,12 @@ class EffectOperationsMixin(_RunRepositoryBase):
     def _validate_effect_intent(
         blueprint: dict[str, Any], *, effect_intent_key: str, resource_key: str,
         operation: str, risk_level: str, capability_version: str | None = None,
+        resource_operations: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         """初回提案と段階認可で同じ apply 意図/対象/操作/リスク境界を使う。"""
 
         if is_source_execution(blueprint):
-            matches = [op for op in declared_operations(blueprint)
+            matches = [op for op in resource_operations or []
                        if op["resource_key"] == resource_key
                        and op["capability_version"] == capability_version
                        and op["operation"] == operation]

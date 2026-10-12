@@ -65,6 +65,26 @@ def test_registered_tool_with_valid_input_is_allowed() -> None:
     assert policy.allowed_sdk_names == ("mcp__skillmind__issue_read_v1",)
 
 
+@pytest.mark.parametrize("capability,field", [("http.read/v1", "query"),
+                                            ("mcp.query/v1", "arguments")])
+def test_native_business_fields_do_not_replace_resource_authority(capability, field) -> None:
+    """API の同名業務 field は許し、platform 接続 selector の変更は拒否する。"""
+    sdk_name = capability_to_sdk_name(capability)
+    schema = {
+        "type": "object", "additionalProperties": False,
+        "properties": {field: {"type": "object"}}, "required": [field],
+    }
+    tool = RegisteredTool(
+        capability=capability, sdk_name=sdk_name, provider="fixture",
+        integration_id=uuid4(), input_schema=schema,
+    )
+    policy = ToolExecutionPolicy((tool,))
+    arguments = {field: {"project_id": "business-project", "provider": "business-kind"}}
+    assert policy.authorize(sdk_name, arguments) == tool
+    with pytest.raises(ToolPolicyViolation, match="integration_id"):
+        policy.authorize(sdk_name, {**arguments, "integration_id": str(uuid4())})
+
+
 def test_unregistered_tool_is_denied() -> None:
     """allowed_tools に似た名前でも Run 未登録なら実行前に拒否する。"""
 

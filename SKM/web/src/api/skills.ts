@@ -246,6 +246,7 @@ export async function uploadSkillFiles(
   files: readonly File[],
   csrfToken: string,
   signal?: AbortSignal,
+  entryPath?: string,
 ): Promise<StoredSkillPreviewRecord> {
   const form = new FormData()
   const paths = normalizedSkillUploadPaths(files)
@@ -254,7 +255,7 @@ export async function uploadSkillFiles(
     form.append('files', file, paths[index])
   }
   return parseStoredSkillPreview(await requestApiJson(
-    `${API_BASE}/skill-imports/upload`,
+    `${API_BASE}/skill-imports/upload${entryPath ? `?entry_path=${encodeURIComponent(entryPath)}` : ''}`,
     {
       // Content-Type は設定しない。browser が multipart boundary 付きで付与する。
       method: 'POST',

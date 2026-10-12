@@ -486,9 +486,18 @@
       "description": "Blueprint を補作しない版付き宣言。",
       "properties": {
         "execution_version": {
-          "const": "skillmind.skill-execution/v1",
+          "const": "skillmind.skill-execution/v2",
           "title": "Execution Version",
           "type": "string"
+        },
+        "tasks": {
+          "items": {
+            "$ref": "#/$defs/FlowExecutionTaskResponse"
+          },
+          "maxItems": 1,
+          "minItems": 1,
+          "title": "Tasks",
+          "type": "array"
         },
         "resource_requirements": {
           "items": {
@@ -503,15 +512,6 @@
             "$ref": "#/$defs/FlowExecutionTraceResponse"
           },
           "title": "Source Traces",
-          "type": "array"
-        },
-        "tasks": {
-          "items": {
-            "$ref": "#/$defs/FlowExecutionTaskResponse"
-          },
-          "maxItems": 1,
-          "minItems": 1,
-          "title": "Tasks",
           "type": "array"
         }
       },
@@ -559,35 +559,8 @@
     },
     "FlowExecutionResourceResponse": {
       "additionalProperties": false,
-      "description": "読書宣言に実操作を添える。",
+      "description": "入力選択と接続選択だけを返し、model の操作許可は含めない。",
       "properties": {
-        "accepted_providers": {
-          "items": {
-            "maxLength": 128,
-            "pattern": "^[a-z][a-z0-9_.-]*$",
-            "type": "string"
-          },
-          "maxItems": 20,
-          "title": "Accepted Providers",
-          "type": "array"
-        },
-        "access": {
-          "enum": [
-            "read",
-            "write"
-          ],
-          "title": "Access",
-          "type": "string"
-        },
-        "capabilities": {
-          "items": {
-            "pattern": "^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$",
-            "type": "string"
-          },
-          "maxItems": 20,
-          "title": "Capabilities",
-          "type": "array"
-        },
         "key": {
           "maxLength": 128,
           "pattern": "^[a-z][a-z0-9_.-]*$",
@@ -606,16 +579,27 @@
           "title": "Kind",
           "type": "string"
         },
-        "operations": {
-          "items": {
-            "$ref": "#/$defs/FlowOperationResponse"
-          },
-          "title": "Operations",
-          "type": "array"
-        },
         "required": {
           "title": "Required",
           "type": "boolean"
+        },
+        "selection": {
+          "enum": [
+            "documents",
+            "resource"
+          ],
+          "title": "Selection",
+          "type": "string"
+        },
+        "accepted_providers": {
+          "items": {
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Accepted Providers",
+          "type": "array"
         },
         "selection_guidance": {
           "maxLength": 1000,
@@ -628,8 +612,7 @@
         "key",
         "kind",
         "required",
-        "access",
-        "operations"
+        "selection"
       ],
       "title": "FlowExecutionResourceResponse",
       "type": "object"
@@ -638,22 +621,28 @@
       "additionalProperties": false,
       "description": "一つの原文実行タスク。",
       "properties": {
+        "key": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Key",
+          "type": "string"
+        },
         "capability": {
           "maxLength": 128,
           "pattern": "^[a-z][a-z0-9_.-]*$",
           "title": "Capability",
           "type": "string"
         },
+        "title": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
         "description": {
           "maxLength": 2000,
           "minLength": 1,
           "title": "Description",
-          "type": "string"
-        },
-        "key": {
-          "maxLength": 128,
-          "pattern": "^[a-z][a-z0-9_.-]*$",
-          "title": "Key",
           "type": "string"
         },
         "resource_keys": {
@@ -664,12 +653,6 @@
           },
           "title": "Resource Keys",
           "type": "array"
-        },
-        "title": {
-          "maxLength": 200,
-          "minLength": 1,
-          "title": "Title",
-          "type": "string"
         }
       },
       "required": [
@@ -686,6 +669,14 @@
       "additionalProperties": false,
       "description": "最小宣言の原文位置。",
       "properties": {
+        "target": {
+          "title": "Target",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
         "line": {
           "anyOf": [
             {
@@ -697,14 +688,6 @@
             }
           ],
           "title": "Line"
-        },
-        "path": {
-          "title": "Path",
-          "type": "string"
-        },
-        "target": {
-          "title": "Target",
-          "type": "string"
         }
       },
       "required": [
@@ -879,29 +862,6 @@
         "text"
       ],
       "title": "FlowNoteResponse",
-      "type": "object"
-    },
-    "FlowOperationResponse": {
-      "additionalProperties": false,
-      "description": "資源に必要な実操作。承認済みの効果ではない。",
-      "properties": {
-        "capability_version": {
-          "pattern": "^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$",
-          "title": "Capability Version",
-          "type": "string"
-        },
-        "operation": {
-          "maxLength": 128,
-          "minLength": 1,
-          "title": "Operation",
-          "type": "string"
-        }
-      },
-      "required": [
-        "capability_version",
-        "operation"
-      ],
-      "title": "FlowOperationResponse",
       "type": "object"
     },
     "FlowPlanResponse": {

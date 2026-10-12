@@ -92,6 +92,15 @@ class ToolExecutionPolicy:
         if tool.capability in {"database.read/v1", "database.read/v2"}:
             # filters は業務列と値。原入力の Schema と Provider の binding/scope 検証は残す。
             boundary_input = {key: value for key, value in tool_input.items() if key != "filters"}
+        elif tool.capability in {"http.read/v1", "mcp.query/v1"}:
+            # 原生 API の業務 field を platform 接続 selector と混同しない。
+            # 実際の接続/資格/宛先は Provider が凍結資源から解決する。
+            business_fields = {"query", "headers"} if tool.capability == "http.read/v1" else {
+                "arguments",
+            }
+            boundary_input = {
+                key: value for key, value in tool_input.items() if key not in business_fields
+            }
         boundary_fields = _find_boundary_fields(boundary_input)
         if boundary_fields:
             fields = ", ".join(sorted(boundary_fields))

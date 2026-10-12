@@ -108,7 +108,7 @@ class ModelSkillInterpreter:
         self._response_schema = deepcopy(dict(response_schema))
         self._accept_prompt_json = accept_prompt_json
         # 実 prompt と同じ操作集合を保持し、呼出し時の global 差替えを identity に隠さない。
-        self._write_operations = deepcopy(WRITE_OPERATIONS)
+        self._write_operations = {} if self.uses_direct_candidates else deepcopy(WRITE_OPERATIONS)
         self._runtime_profile = (
             runtime_profile.snapshot(
                 write_operations=self._write_operations,
@@ -174,7 +174,16 @@ class ModelSkillInterpreter:
             raise InterpreterExecutionError(InterpreterErrorCode.IDENTITY_MISMATCH)
         projected = model_request(request) if self.uses_native_candidates else dict(request)
         if self.uses_direct_candidates:
-            projected["write_operations"] = deepcopy(self._write_operations)
+            from skillmind.integrations.domain import PROVIDER_DEFINITIONS
+
+            providers = {provider for capability in projected.pop("capabilities")
+                         for provider in capability["providers"]}
+            projected["resources"] = [
+                {"kind": definition.kind, "provider": provider}
+                for provider, definition in sorted(PROVIDER_DEFINITIONS.items())
+                if provider in providers and definition.installed
+            ] + [{"kind": "document", "provider": provider}
+                 for provider in ("project-documents", "project-library") if provider in providers]
         if previous_candidate is not None:
             # 前候補は未信頼のデータ。共有 instance に保存せず、今回の原 request だけへ渡す。
             projected["previous_candidate"] = dict(previous_candidate)

@@ -30,7 +30,6 @@ from skillmind.effects.continuation import validated_effect_result
 from skillmind.effects.operation_policy import operation_risk
 from skillmind.runs.input_snapshot import InputFileSeal
 from skillmind.skills.execution import (
-    declared_operations,
     is_source_execution,
     resolve_skill_definition,
 )
@@ -218,7 +217,7 @@ def build_agent_task_brief(
             "effect_policy": {
                 "operations": [
                     {**op, "minimum_risk": operation_risk(op["capability_version"])}
-                    for op in declared_operations(blueprint)
+                    for op in (permission_snapshot or {}).get("resource_operations", [])
                 ]
             },
             "checkpoint": _checkpoint(
@@ -1028,8 +1027,17 @@ def _resources(
         key = _string(requirement.get("key"))
         if not key:
             continue
-        hints = _string_list(requirement.get("capabilities"))
         source = selected_sources.get(key)
+        if is_source_execution(blueprint):
+            from skillmind.skills.resource_policy import resource_capabilities
+            hints = list(resource_capabilities(source)) if isinstance(source, Mapping) else []
+            access = _string(source.get("access")) if isinstance(source, Mapping) else (
+                "write" if requirement.get("kind") == "document"
+                and requirement.get("selection") == "resource" else "read"
+            )
+        else:
+            hints = _string_list(requirement.get("capabilities"))
+            access = _string(requirement.get("access"))
         binding = None
         if (
             isinstance(source, Mapping)
@@ -1045,10 +1053,13 @@ def _resources(
             "key": key,
             "kind": _string(requirement.get("kind")),
             "required": requirement.get("required") is True,
-            "access": _string(requirement.get("access")),
+            "access": access,
             "capabilities": hints,
             "binding": binding,
         }
+        if is_source_execution(blueprint) and isinstance(source, Mapping) and binding is not None:
+            # 正規化済みの資源範囲だけを渡す。接続 config/Secret はモデルへ公開しない。
+            resource["scope"] = dict(source.get("scope", {}))
         if is_document_library_source(source):
             if (
                 project_id is None

@@ -450,12 +450,28 @@ async def test_source_execution_context_resolves_library_without_blueprint(tmp_p
     claimed.selected_sources_json["review_outputs"] = FrozenDocumentLibraryBinding(
         claimed.project_id, claimed.run_id, uuid4(), "review_outputs", library
     ).to_json()
+    from skillmind.skills.resource_policy import default_capabilities, resource_operations
+    grants = set(default_capabilities()) | {"document.write/v1"}
+    claimed.permission_snapshot_json["allowed_capabilities"] = sorted(
+        (grants - {"document.write/v1"}) | {"change.propose/v1", "document.files/v1"}
+    )
+    claimed.permission_snapshot_json["resource_operations"] = resource_operations(
+        claimed.selected_sources_json, allowed_capabilities=grants,
+    )
+    claimed.permission_snapshot_json["project_document_read"] = {
+        "version": "v1", "project_id": str(claimed.project_id),
+    }
     context = await builder(tmp_path, library).build(claimed, sequence_start=1)
     assert context.task_brief["brief_version"] == "skillmind.agent-task-brief/v2"
     resource = context.task_brief["resources"][0]
     assert resource["document_library"] == library.reference(claimed.project_id)
     assert "document.write/v1" not in {tool.capability for tool in context.tools}
     assert "change.propose/v1" in {tool.capability for tool in context.tools}
+    assert {
+        "workspace.read/v1", "workspace.write/v2", "workspace.edit/v1", "workspace.image/v1",
+        "document.convert/v1", "json.schema.validate/v1",
+    } <= {tool.capability for tool in context.tools}
+    assert resource["scope"] == library.scope(claimed.project_id)
     assert context.task_brief["source_documents"] == manifest["source_documents"]
 
 

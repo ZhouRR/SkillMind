@@ -69,7 +69,7 @@ _VALIDATION_PATH_FIELDS = frozenset({
     "candidate_version", "source_ref",
     "response_version", "source_hash", "interpreter", "skill_key", "version", "prompt_checksum",
     "normalized_package", "runtime_manifest_draft", "report", "capability_blueprint", "identity",
-    "skill_execution", "operations", "capability_version", "platform_tools", "input_source_ref",
+    "skill_execution", "operations", "capability_version", "selection", "input_source_ref",
     "compatibility", "tasks", "capabilities", "tools", "resource_requirements", "guidance",
     "required_rules", "recommended_steps", "quality_criteria", "prohibited_actions", "assumptions",
     "questions", "diagnostics", "source_traces", "effect_intents", "interaction_points",
@@ -92,7 +92,7 @@ _VALIDATION_ARRAY_FIELDS = frozenset({
     "quality_criteria", "prohibited_actions", "assumptions", "questions", "diagnostics",
     "source_traces", "effect_intents", "interaction_points", "fields", "enum", "resource_keys",
     "document_prerequisites", "providers", "workflows", "steps", "contract_source_trace",
-    "operations", "platform_tools",
+    "operations",
 })
 _CONTRACT_VALIDATION_CODES = frozenset({
     "source_trace_target_invalid", "skill_execution_invalid",
@@ -155,6 +155,7 @@ class SkillRepository:
                 storage_uri=command.storage_uri or f"database://skill-sources/{source_id}",
                 content_hash=command.source_hash,
                 source_version=None,
+                entry_path=command.entry_path,
                 imported_by=command.imported_by,
                 source_snapshot_json=[
                     {"path": file.path, "content": file.content} for file in command.source_files
@@ -226,6 +227,7 @@ class SkillRepository:
                 for item in (getattr(source, "source_file_index_json", None) or [])
                 if isinstance(item, dict)
             ),
+            entry_path=getattr(source, "entry_path", None),
         )
 
     async def find_model_interpretation(
@@ -969,6 +971,7 @@ class SkillRepository:
             source_snapshot=design.source_snapshot,
             interpretation_id=design.interpretation_id,
             interpreter_version=design.interpreter_version,
+            entry_path=design.entry_path,
         )
 
     async def _version_design_source(
@@ -1250,6 +1253,7 @@ def _design_source(
         source_hash=source.content_hash,
         source_file_index=deepcopy(source.source_file_index_json),
         source_snapshot=deepcopy(source.source_snapshot_json),
+        entry_path=getattr(source, "entry_path", None),
         interpretation_id=interpretation.id,
         interpreter_version=interpretation.interpreter_version,
     )

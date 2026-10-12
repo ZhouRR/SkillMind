@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from skillmind.skills.interpreter import InterpreterSystemSkillIdentity
 
 # 候補投影・編訳の意味を変える場合は更新する。保存済み候補や Run は再計算しない。
-INTERPRETER_PIPELINE_VERSION = "skillmind.interpreter-pipeline/v2.1"
+INTERPRETER_PIPELINE_VERSION = "skillmind.interpreter-pipeline/v3.0"
 
 
 @dataclass(frozen=True, slots=True)

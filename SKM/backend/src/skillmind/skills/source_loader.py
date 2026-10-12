@@ -47,6 +47,7 @@ class PreparedSkillImport:
     preview: SkillPreview
     source_files: tuple[InlineSkillFile, ...]
     upload_files: tuple[UploadSkillFile, ...] = ()
+    entry_path: str | None = None
 
     def save_command(self, *, organization_id: UUID, imported_by: UUID) -> SaveSkillPreviewCommand:
         """同じ解析産物から保存 command を構築し、保存用の再解析を不要にする。"""
@@ -80,6 +81,7 @@ class PreparedSkillImport:
             checksum=_string(extensions, "normalized_package_hash"),
             preview=self.preview,
             source_file_index=_package_file_index_from_source(source),
+            entry_path=self.entry_path,
         )
 
 
@@ -101,27 +103,42 @@ class SkillSourceLoader:
         """呼出側 alias から切離し、inline snapshot の元 path/text を保持する。"""
 
         frozen_files = deepcopy(tuple(files))
-        _loaded, preview = self._prepare(frozen_files)
+        _loaded, preview = self._prepare(frozen_files, discover_entries=False)
         return PreparedSkillImport(preview=preview, source_files=frozen_files)
 
-    def prepare_upload(self, files: Sequence[UploadSkillFile]) -> PreparedSkillImport:
+    def prepare_upload(
+        self, files: Sequence[UploadSkillFile], *, entry_path: str | None = None,
+    ) -> PreparedSkillImport:
         """一度だけ root/bytes を固定し、同じ package を preview と保存の両方に渡す。"""
 
-        frozen_files = freeze_upload_files(files)
-        loaded, preview = self._prepare(frozen_files)
+        # 明示 entry はアップロード root 相対。Browser 側の除去後にもう一段剥がさない。
+        frozen_files = freeze_upload_files(files, normalize_root=entry_path is None)
+        loaded, preview = self._prepare(frozen_files, entry_path=entry_path)
+        selected_entry = entry_path
+        if (
+            selected_entry is None and loaded.package.detected_adapter == "directory-skill/v1"
+            and loaded.package.primary_instruction != "SKILL.md"
+        ):
+            selected_entry = loaded.package.primary_instruction
+        selected = {file.path for file in loaded.package.files}
         return PreparedSkillImport(
-            preview=preview, source_files=loaded.source_files, upload_files=frozen_files,
+            preview=preview, source_files=loaded.source_files,
+            upload_files=tuple(file for file in frozen_files if file.path in selected),
+            entry_path=selected_entry,
         )
 
     def _prepare(
         self, files: Sequence[InlineSkillFile | UploadSkillFile],
+        *, entry_path: str | None = None, discover_entries: bool = True,
     ) -> tuple[LoadedSkillSource, SkillPreview]:
         """Inline/upload/保存 preview の展開・parser・manifest 手順を共有する。"""
 
         with TemporaryDirectory(prefix="skillmind-skill-") as temporary:
             root = Path(temporary).resolve()
             write_skill_source_files(files, root)
-            loaded = self._load_directory(root)
+            loaded = self._load_directory(
+                root, entry_path=entry_path, discover_entries=discover_entries,
+            )
         return loaded, SkillPreview(
             normalized_package=loaded.package.to_dict(),
             runtime_manifest_draft=self._manifest_builder.build(loaded.package),
@@ -133,17 +150,23 @@ class SkillSourceLoader:
         with TemporaryDirectory(prefix="skillmind-interpret-") as temporary:
             root = Path(temporary).resolve()
             await self._storage.materialize(source, root)
-            loaded = self._load_directory(root)
+            loaded = self._load_directory(
+                root, entry_path=source.entry_path, discover_entries=False,
+            )
         if loaded.package.content_hash != source.source_hash:
             raise SkillSourceIntegrityError(
                 "Stored SkillSource content hash drifted from its snapshot"
             )
         return loaded
 
-    def _load_directory(self, root: Path) -> LoadedSkillSource:
+    def _load_directory(
+        self, root: Path, *, entry_path: str | None = None, discover_entries: bool = True,
+    ) -> LoadedSkillSource:
         """Parser の text/binary 判定を唯一の正本として元 bytes を読み込む。"""
 
-        package = self._parser.parse_directory(root)
+        package = self._parser.parse_directory(
+            root, entry_path=entry_path, discover_entries=discover_entries,
+        )
         return LoadedSkillSource(
             package=package, source_files=load_inline_text_files(root, package),
         )

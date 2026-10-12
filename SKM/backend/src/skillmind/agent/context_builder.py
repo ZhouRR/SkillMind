@@ -59,7 +59,7 @@ from skillmind.skills.document_prerequisites import (
     DOCUMENT_READINESS_CAPABILITY,
     document_prerequisites,
 )
-from skillmind.skills.execution import resolve_skill_definition
+from skillmind.skills.execution import is_source_execution, resolve_skill_definition
 from skillmind.skills.frozen_manifest import verified_run_manifest
 from skillmind.skills.resource_binding import required_resource_keys
 
@@ -369,6 +369,33 @@ def _resolve_source_tools(
     bound_tool_sources: dict[str, list[RegisteredTool]] = {}
     repository_bindings: dict[str, RepositoryBindingRef] = {}
     blueprint = resolve_skill_definition(manifest)
+    if blueprint is not None and is_source_execution(blueprint):
+        from skillmind.skills.resource_policy import resource_capabilities, resource_operations
+
+        operations = claimed_run.permission_snapshot_json.get("resource_operations")
+        if not isinstance(operations, list):
+            raise ValueError("Frozen resource operations are missing")
+        grants = set(allowed) | {op["capability_version"] for op in operations}
+        if resource_operations(
+            claimed_run.selected_sources_json, allowed_capabilities=grants,
+        ) != operations:
+            raise ValueError("Frozen resource operations do not match selected resources")
+        # 元の Skill は変更せず、既存 resolver に実資源の能力を渡す。
+        bound_requirements = []
+        for requirement in blueprint["resource_requirements"]:
+            source = claimed_run.selected_sources_json.get(requirement["key"])
+            bound_requirements.append({
+                **requirement,
+                "capabilities": list(resource_capabilities(source))
+                if isinstance(source, Mapping) else [],
+                "access": source.get("access", "read")
+                if isinstance(source, Mapping) else "read",
+            })
+        blueprint = {**blueprint, "resource_requirements": bound_requirements}
+        manifest = {**manifest, "tools": [
+            {"capability": capability, "required": False}
+            for capability in sorted(set(allowed) - EFFECT_CAPABILITIES.keys())
+        ]}
     requirements = (
         _sequence(blueprint.get("resource_requirements")) if isinstance(blueprint, Mapping) else []
     )

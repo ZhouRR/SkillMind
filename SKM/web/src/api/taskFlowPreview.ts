@@ -55,9 +55,12 @@ export interface TaskFlowPreviewRecord {
 /** 原文実行の準備宣言。業務計画や生成された結果契約を含めない。 */
 export interface SourceExecutionPreview {
   declaration: {
-    execution_version: 'skillmind.skill-execution/v1'
+    execution_version: 'skillmind.skill-execution/v2'
     tasks: [{ key: string; capability: string; title: string; description: string; resource_keys: string[] }]
-    resource_requirements: Array<TaskFlowResource & { operations: Array<{ capability_version: string; operation: string }> }>
+    resource_requirements: Array<{
+      key: string; kind: TaskFlowResource['kind']; required: boolean
+      selection: 'documents' | 'resource'; accepted_providers?: string[]; selection_guidance?: string
+    }>
     source_traces: Array<{ target: string; path: string; line: number | null }>
   }
   input_contract: Record<string, unknown>
@@ -67,7 +70,7 @@ export interface SourceExecutionPreview {
 export function parseSourceExecution(value: unknown): SourceExecutionPreview {
   if (!fields(value, ['declaration', 'input_contract', 'source_documents'])
     || !fields(value.declaration, ['execution_version', 'tasks', 'resource_requirements', 'source_traces'])
-    || value.declaration.execution_version !== 'skillmind.skill-execution/v1'
+    || value.declaration.execution_version !== 'skillmind.skill-execution/v2'
     || !contract(value.input_contract)
     || !Array.isArray(value.source_documents) || value.source_documents.length === 0
     || !value.source_documents.every((doc) => fields(doc, ['path', 'content', 'sha256'])
@@ -77,12 +80,11 @@ export function parseSourceExecution(value: unknown): SourceExecutionPreview {
       && key(task.key) && key(task.capability) && text(task.title, 200) && text(task.description, 2000) && keys(task.resource_keys))
     || !Array.isArray(value.declaration.resource_requirements) || value.declaration.resource_requirements.length > 50
     || !value.declaration.resource_requirements.every((item) => {
-      if (!isRecord(item)) return false
-      const { operations, ...base } = item
-      return resource(base) && Array.isArray(base.capabilities) && base.capabilities.length > 0
-        && Array.isArray(operations) && operations.every((op) => fields(op, ['capability_version', 'operation'])
-          && typeof op.capability_version === 'string' && base.capabilities?.includes(op.capability_version)
-          && text(op.operation, 128))
+      return fields(item, ['key', 'kind', 'required', 'selection'], ['accepted_providers', 'selection_guidance'])
+        && key(item.key) && member(item.kind, ['issue', 'repository', 'document', 'file', 'knowledge', 'other'])
+        && typeof item.required === 'boolean' && member(item.selection, ['documents', 'resource'])
+        && (item.selection !== 'documents' || item.kind === 'document')
+        && optional(item, 'accepted_providers', keys) && optional(item, 'selection_guidance', (entry) => text(entry, 1000))
     })
     || !Array.isArray(value.declaration.source_traces) || !value.declaration.source_traces.every((trace) => fields(trace, ['target', 'path', 'line'])
       && typeof trace.target === 'string' && trace.target.startsWith('/') && text(trace.path, 1024)
@@ -266,9 +268,10 @@ function readinessMatches(value: TaskFlowPreviewRecord): boolean {
   return current.requirements.length === resources.length && current.requirements.every((requirement) => {
     const declared = resources.find((item) => item.key === requirement.key)
     return declared !== undefined && requirement.kind === declared.kind && requirement.required === (declared.required || Boolean(value.plan?.shared.effect_intents?.some((effect) => effect.mode === 'apply' && effect.resource_key === declared.key)))
-      && requirement.access === declared.access && requirement.capabilities.length === (declared.capabilities ?? []).length
+      && (value.source_execution !== undefined || ('access' in declared
+        && requirement.access === declared.access && requirement.capabilities.length === (declared.capabilities ?? []).length
+        && requirement.capabilities.every((capability) => (declared.capabilities ?? []).includes(capability))))
       && requirement.selection_guidance === (declared.selection_guidance ?? null)
-      && requirement.capabilities.every((capability) => (declared.capabilities ?? []).includes(capability))
       && new Set(requirement.capabilities).size === requirement.capabilities.length
   })
 }

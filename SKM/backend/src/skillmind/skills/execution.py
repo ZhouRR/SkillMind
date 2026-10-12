@@ -1,4 +1,4 @@
-"""原文実行の最小宣言と旧 Blueprint を、意味を補作せず共有 consumer へ渡す。"""
+"""原文実行の資源選択と platform 所有の Tool 方針を分離する。"""
 
 from __future__ import annotations
 
@@ -10,10 +10,7 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
-from skillmind.documents.library_contract import has_invalid_document_library_capabilities
-from skillmind.effects.operation_policy import WRITE_OPERATIONS
-
-EXECUTION_VERSION = "skillmind.skill-execution/v1"
+EXECUTION_VERSION = "skillmind.skill-execution/v2"
 PLATFORM_TOOLS = frozenset(
     {
         "workspace.read/v1",
@@ -32,6 +29,12 @@ PLATFORM_TOOLS = frozenset(
         "interaction.request/v1",
     }
 )
+
+
+# Tool は model に選別させない。外部操作と子 Agent は資源/配備の別権限で解決する。
+DEFAULT_TOOLS = PLATFORM_TOOLS - {
+    "workspace.write/v1", "document.files/v1", "subagent.dispatch/v1",
+}
 
 
 def is_source_execution(definition: Mapping[str, Any]) -> bool:
@@ -55,7 +58,7 @@ def resolve_skill_definition(manifest: Mapping[str, Any]) -> dict[str, Any] | No
 
 
 def declared_operations(definition: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """新方式は資源別の許可候補を、旧方式は原 apply 宣言を読み取る。"""
+    """Blueprint の apply 宣言だけを読む。原文実行の操作許可は Run 資源に属する。"""
 
     if not is_source_execution(definition):
         return [
@@ -63,19 +66,15 @@ def declared_operations(definition: Mapping[str, Any]) -> list[dict[str, Any]]:
             for item in definition.get("effect_intents", [])
             if isinstance(item, Mapping) and item.get("mode") == "apply"
         ]
-    return [
-        {"resource_key": resource["key"], **operation}
-        for resource in definition.get("resource_requirements", [])
-        for operation in resource.get("operations", [])
-    ]
+    return []
 
 
 def validate_execution(definition: Mapping[str, Any], contracts_dir: Path) -> None:
-    """最小宣言の参照、操作と読書分離を検査し、業務手順を再解釈しない。"""
+    """資源選択の形を検査し、Tool や操作許可を model に生成させない。"""
 
     from skillmind.skills.capability_blueprint import CapabilityBlueprintError
 
-    schema = json.loads((contracts_dir / "skill-execution/v1.schema.json").read_text())
+    schema = json.loads((contracts_dir / "skill-execution/v2.schema.json").read_text())
     error = next(Draft202012Validator(schema).iter_errors(definition), None)
     if error is not None:
         path = "/skill_execution/" + "/".join(str(part) for part in error.absolute_path)
@@ -91,51 +90,9 @@ def validate_execution(definition: Mapping[str, Any], contracts_dir: Path) -> No
             "/skill_execution",
             "Resource keys must be unique and match the task.",
         )
-    catalog = json.loads((contracts_dir / "examples/skill-capability-catalog.v1.json").read_text())
-    available = {c["capability"] for c in catalog["capabilities"]} - PLATFORM_TOOLS - {
-        "change.propose/v1", "document.readiness/v1",
-    }
     for i, resource in enumerate(resources):
-        path = f"/skill_execution/resource_requirements/{i}"
-        caps = resource.get("capabilities", [])
-        if not caps or len(set(caps)) != len(caps) or not set(caps) <= available:
+        if resource["selection"] == "documents" and resource["kind"] != "document":
             raise CapabilityBlueprintError(
-                "skill_execution_invalid",
-                path,
-                "Resource capabilities must be registered and unique.",
-            )
-        providers = {provider for entry in catalog["capabilities"]
-                     if entry["capability"] in caps for provider in entry["providers"]}
-        accepted = resource.get("accepted_providers", [])
-        if len(set(accepted)) != len(accepted) or not set(accepted) <= providers:
-            raise CapabilityBlueprintError(
-                "skill_execution_invalid", path,
-                "Provider hints must match the registered resource capabilities.",
-            )
-        if has_invalid_document_library_capabilities(resource):
-            raise CapabilityBlueprintError(
-                "document_library_capabilities_invalid",
-                path,
-                "Artifact library destinations allow document.write/v1 only.",
-            )
-        operations = resource["operations"]
-        pairs = {(x["capability_version"], x["operation"]) for x in operations}
-        if len(pairs) != len(operations) or any(
-            cap not in caps or op not in WRITE_OPERATIONS.get(cap, ()) for cap, op in pairs
-        ):
-            raise CapabilityBlueprintError(
-                "skill_execution_invalid",
-                path,
-                "Use registered operations on the declared resource.",
-            )
-        writes = set(caps) & WRITE_OPERATIONS.keys()
-        if (
-            writes != {cap for cap, _ in pairs}
-            or (writes and (resource["access"] != "write" or resource["required"] is not True))
-            or (not writes and resource["access"] != "read")
-        ):
-            raise CapabilityBlueprintError(
-                "skill_execution_invalid",
-                path,
-                "Writes need an explicit operation and required write resource.",
+                "skill_execution_invalid", f"/skill_execution/resource_requirements/{i}",
+                "Document selection requires a document resource.",
             )

@@ -707,7 +707,7 @@ async def test_native_skill_candidate_uses_unencoded_schema_and_original_model(
     schema = direct_schema(contracts) if direct else candidate_schema(contracts)
     server.native_candidate = json.loads(
         (contracts / (
-            "examples/skill-candidate.v2.json" if direct else "examples/skill-candidate.v1.json"
+            "examples/skill-candidate.v3.json" if direct else "examples/skill-candidate.v1.json"
         )).read_text()
     )
     configuration = CodexRuntimeConfiguration("gpt-6-astra", "medium", tmp_path / "codex")

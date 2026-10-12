@@ -83,13 +83,16 @@ class SkillSourceStorage:
             target.write_bytes(data)
 
 
-def freeze_upload_files(files: Sequence[UploadSkillFile]) -> tuple[UploadSkillFile, ...]:
+def freeze_upload_files(
+    files: Sequence[UploadSkillFile], *, normalize_root: bool = True,
+) -> tuple[UploadSkillFile, ...]:
     """最初の await より前に bytes を複写し、browser directory の共通 root だけを除去する。"""
 
-    return _normalize_upload_skill_root(tuple(
+    frozen = tuple(
         UploadSkillFile(path=file.path, data=bytes(file.data), content_type=file.content_type)
         for file in files
-    ))
+    )
+    return _normalize_upload_skill_root(frozen) if normalize_root else frozen
 
 
 def write_skill_source_files(

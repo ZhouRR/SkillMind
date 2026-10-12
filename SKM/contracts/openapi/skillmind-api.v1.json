@@ -2769,7 +2769,7 @@
         "description": "Blueprint を補作しない版付き宣言。",
         "properties": {
           "execution_version": {
-            "const": "skillmind.skill-execution/v1",
+            "const": "skillmind.skill-execution/v2",
             "title": "Execution Version",
             "type": "string"
           },
@@ -2842,7 +2842,7 @@
       },
       "FlowExecutionResourceResponse": {
         "additionalProperties": false,
-        "description": "読書宣言に実操作を添える。",
+        "description": "入力選択と接続選択だけを返し、model の操作許可は含めない。",
         "properties": {
           "accepted_providers": {
             "items": {
@@ -2852,23 +2852,6 @@
             },
             "maxItems": 20,
             "title": "Accepted Providers",
-            "type": "array"
-          },
-          "access": {
-            "enum": [
-              "read",
-              "write"
-            ],
-            "title": "Access",
-            "type": "string"
-          },
-          "capabilities": {
-            "items": {
-              "pattern": "^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$",
-              "type": "string"
-            },
-            "maxItems": 20,
-            "title": "Capabilities",
             "type": "array"
           },
           "key": {
@@ -2889,16 +2872,17 @@
             "title": "Kind",
             "type": "string"
           },
-          "operations": {
-            "items": {
-              "$ref": "#/components/schemas/FlowOperationResponse"
-            },
-            "title": "Operations",
-            "type": "array"
-          },
           "required": {
             "title": "Required",
             "type": "boolean"
+          },
+          "selection": {
+            "enum": [
+              "documents",
+              "resource"
+            ],
+            "title": "Selection",
+            "type": "string"
           },
           "selection_guidance": {
             "maxLength": 1000,
@@ -2911,8 +2895,7 @@
           "key",
           "kind",
           "required",
-          "access",
-          "operations"
+          "selection"
         ],
         "title": "FlowExecutionResourceResponse",
         "type": "object"
@@ -3162,29 +3145,6 @@
           "text"
         ],
         "title": "FlowNoteResponse",
-        "type": "object"
-      },
-      "FlowOperationResponse": {
-        "additionalProperties": false,
-        "description": "資源に必要な実操作。承認済みの効果ではない。",
-        "properties": {
-          "capability_version": {
-            "pattern": "^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$",
-            "title": "Capability Version",
-            "type": "string"
-          },
-          "operation": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Operation",
-            "type": "string"
-          }
-        },
-        "required": [
-          "capability_version",
-          "operation"
-        ],
-        "title": "FlowOperationResponse",
         "type": "object"
       },
       "FlowPlanResponse": {
@@ -38044,6 +38004,24 @@
         "description": "ADMIN が multipart で Skill (binary asset 可) を Organization へ保存する。",
         "operationId": "upload_skill_import_api_v1_skill_imports_upload_post",
         "parameters": [
+          {
+            "in": "query",
+            "name": "entry_path",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 1024,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Entry Path"
+            }
+          },
           {
             "in": "header",
             "name": "X-CSRF-Token",

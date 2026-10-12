@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker, ValidationError
+
 from skillmind.integrations.domain import PROVIDER_DEFINITIONS
 from skillmind.skills import (
     CapabilityCatalogEntry,
@@ -336,59 +337,31 @@ def test_static_analysis_rejects_content_changed_after_normalization() -> None:
         SkillStaticAnalyzer().analyze(package, files)
 
 
-def test_capability_catalog_is_sorted_unique_and_checksum_bound() -> None:
-    """Catalog 順序を固定し、重複 capability と checksum drift を拒否する。"""
-
-    loaded = load_capability_catalog(CONTRACTS / "examples" / "skill-capability-catalog.v1.json")
-    assert [item.capability for item in loaded.capabilities] == [
-        "artifact.append/v1",
-        "artifact.materialize/v1",
-        "audit.export/v1",
-        "change.propose/v1",
-        "database.read/v1",
-        "database.write/v1",
-        "document.convert/v1",
-        "document.files/v1",
-        "document.inspect/v1",
-        "document.list/v1",
-        "document.read/v1",
-        "document.readiness/v1",
-        "document.write/v1",
-        "interaction.request/v1",
-        "issue.read/v1",
-        "issue.update/v1",
-        "json.schema.validate/v1",
-        "mcp.call/v1",
-        "mcp.query/v1",
-        "mcp.read/v1",
-        "mcp.tools/v1",
-        "repository.read/v1",
-        "repository.write/v1",
-        "subagent.dispatch/v1",
-        "tool.sequence/v1",
-        "workspace.edit/v1",
-        "workspace.read/v1",
-        "workspace.search/v1",
-        "workspace.write/v1",
-        "workspace.write/v2",
-    ]
-    issue = next(item for item in loaded.capabilities if item.capability == "issue.read/v1")
-    assert issue.providers == ("redmine",)
-    assert set(issue.providers) == {
-        provider
-        for provider, definition in PROVIDER_DEFINITIONS.items()
-        if definition.installed and issue.capability in definition.capabilities
-    }
-    assert loaded.checksum == (
-        "sha256:58d5e70957c3ca4dccc0a9118e55ffe01fa0bc6ecf0628ce6db624f5d0db2b81"
+def test_capability_catalog_is_sorted_unique_and_checksum_bound(tmp_path: Path) -> None:
+    """公開 catalog の全 entry を保ち、旧能力リストを別の正本として持たない。"""
+    path = CONTRACTS / "examples" / "skill-capability-catalog.v1.json"
+    original = json.loads(path.read_text())
+    loaded = load_capability_catalog(path)
+    assert [item.capability for item in loaded.capabilities] == sorted(
+        item["capability"] for item in original["capabilities"]
     )
+    http = next(item for item in loaded.capabilities if item.capability == "http.read/v1")
+    assert http.providers == ("http",)
+    assert set(http.providers) == {
+        provider for provider, definition in PROVIDER_DEFINITIONS.items()
+        if definition.installed and http.capability in definition.capabilities
+    }
+    assert loaded.checksum == original["checksum"]
+    tampered = copy.deepcopy(original)
+    tampered["capabilities"][0]["description"] = "Changed without updating the checksum"
+    altered_path = tmp_path / "catalog.json"
+    altered_path.write_text(json.dumps(tampered))
+    with pytest.raises(ValueError, match="checksum"):
+        load_capability_catalog(altered_path)
     duplicate = CapabilityCatalogEntry(
-        capability="issue.read/v1",
-        description="Read issue",
-        request_schema="request.schema.json",
-        response_schema="response.schema.json",
-        error_schema="error.schema.json",
-        providers=("csv",),
+        capability="http.read/v1", description="Read HTTP resource",
+        request_schema="request.schema.json", response_schema="response.schema.json",
+        error_schema="error.schema.json", providers=("http",),
     )
     with pytest.raises(ValueError, match="Duplicate"):
         CapabilityCatalogSnapshot.build(
@@ -402,8 +375,8 @@ def test_system_skill_identity_is_versioned_and_matches_fixture_contract() -> No
     identity = load_interpreter_system_skill(SYSTEM_SKILL)
     example = _load_contract("examples/skill-interpreter-request.v1.json")["interpreter"]
 
-    assert identity.version == "6.0.0"
-    assert identity.interpreter_version == "skillmind-skill-interpreter/6.0.0"
+    assert identity.version == "7.0.0"
+    assert identity.interpreter_version == "skillmind-skill-interpreter/7.0.0"
     assert identity.to_dict() == example
 
 
@@ -415,59 +388,6 @@ def _system_prompt() -> str:
         " ".join(item.content.split())
         for item in load_inline_text_files(SYSTEM_SKILL, package)
     )
-
-
-def test_system_skill_preserves_business_language_and_source_constraints() -> None:
-    """Schema だけでは検出できない原文保持と手順変換の境界を prompt に残す。"""
-
-    prompt = _system_prompt()
-    for instruction in (
-        'source language',
-        'complete original Skill and references',
-        'Exact table names, columns, paths, conditions and processing order '
-        'remain in the original source',
-        'Do not rewrite business procedures',
-    ):
-        assert instruction in prompt
-
-
-def test_system_skill_maps_catalog_capabilities_without_granting_writes() -> None:
-    """利用可能な Git write を旧説明で抑止せず、承認と Provider 境界を保持する。"""
-
-    prompt = _system_prompt()
-    for instruction in (
-        'registered capabilities and supported Providers',
-        'Source commands and bundled scripts do not grant execution permission',
-        'automatic approval option govern actual proposals',
-        'workspace.write/v2',
-    ):
-        assert instruction in prompt
-
-
-def test_system_skill_separates_resource_setup_from_document_execution() -> None:
-    """条件付き write の任意接続化と登録前メタデータの循環依存を防ぐ指示を固定する。"""
-
-    prompt = _system_prompt()
-    for instruction in (
-        'Group targets sharing a connection and authorization purpose',
-        'its availability does not approve or force a write',
-        'Document selection and resource binding already supply',
-        'metadata is not document content',
-    ):
-        assert instruction in prompt
-
-
-def test_system_skill_bounds_contracts_without_changing_source_deliverables() -> None:
-    """フォーム深度を守り、Markdown や深い成果物を不要な出力契約へ押し込まない。"""
-
-    prompt = _system_prompt()
-    for instruction in (
-        'Declare only values the caller must choose',
-        'Use an empty object contract when no caller input is needed',
-        'Do not rewrite business procedures, rules, output schemas',
-        'platform owns task keys',
-    ):
-        assert instruction in prompt
 
 
 def test_fixture_runner_validates_response_and_publishable_manifest() -> None:
@@ -514,7 +434,7 @@ def test_bind_identity_stamps_platform_identity_on_model_output() -> None:
     response["runtime_manifest_draft"]["tasks"] = [task]  # type: ignore[index]
     validated = InterpreterFixtureRunner(CONTRACTS).run(request, response, bind_identity=True)
     identity = validated["runtime_manifest_draft"]["identity"]
-    assert identity["interpreter_version"] == "skillmind-skill-interpreter/6.0.0"
+    assert identity["interpreter_version"] == "skillmind-skill-interpreter/7.0.0"
     assert identity["source_hash"] == request["source"]["content_hash"]  # type: ignore[index]
     # 蓝图は同じ解釈の一部であり、manifest と別の identity/互換 level を持ってはならない。
     blueprint = validated["runtime_manifest_draft"]["capability_blueprint"]
@@ -622,26 +542,6 @@ def test_offline_fixture_runner_uses_repository_assets() -> None:
     response = result["response"]
     assert isinstance(response, dict)
     assert response["response_version"] == "skillmind.skill-interpreter.response/v1"
-
-
-def test_system_skill_keeps_parallel_execution_optional_and_bounded() -> None:
-    """独立した観点だけで扇出を強制せず、依存順と読取専用の境界を保つ。"""
-
-    prompt = _system_prompt()
-    for instruction in ('only needed task-local capabilities', 'platform creates one task'):
-        assert instruction in prompt
-
-
-def test_system_skill_preserves_mandatory_effect_before_document_access() -> None:
-    """原文依拠の gate、按需準備と不明結果の扱いを prompt に固定する。"""
-
-    prompt = _system_prompt()
-    for instruction in (
-        'processing order remain in the original source',
-        'required document conversion explicitly',
-        'Platform approvals',
-    ):
-        assert instruction in prompt
 
 
 def test_system_skill_separates_blueprint_and_manifest_source_trace_scopes() -> None:

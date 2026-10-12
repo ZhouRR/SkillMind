@@ -17,6 +17,7 @@ from skillmind.skills.design_validation import (
     SkillDesignSource,
     validate_skill_design,
 )
+from skillmind.skills.source_identity import skill_source_hash
 from skillmind.skills.task_contract import compile_task_contract
 from skillmind.skills.task_flow_preview import (
     TaskFlowPreviewInvalidError,
@@ -87,6 +88,7 @@ def test_design_requires_no_project_or_version_identity_and_preserves_original_v
         "source_snapshot",
         "interpretation_id",
         "interpreter_version",
+        "entry_path",
     }
     assert canonical_json(result.manifest) == before
     assert result.blueprint == source.manifest["capability_blueprint"]
@@ -97,6 +99,21 @@ def test_design_requires_no_project_or_version_identity_and_preserves_original_v
     assert canonical_json(source.manifest) == before
     source.source_snapshot[0]["content"] = "changed original"
     assert result.source_traces[0]["line"] == 1
+
+
+def test_selected_entry_is_bound_to_source_identity_without_changing_legacy_hashes() -> None:
+    """選択 source の入口は公開門禁でも照合し、別入口/旧 array hash で代用できない。"""
+    original = _source()
+    assert validate_skill_design(source=original, contracts_dir=CONTRACTS)
+    entry_path = "説明/SKILL.md"
+    selected_hash = skill_source_hash(original.source_file_index, entry_path=entry_path)
+    selected = replace(original, entry_path=entry_path, source_hash=selected_hash)
+    selected.manifest["identity"]["source_hash"] = selected_hash
+    selected.manifest["capability_blueprint"]["identity"]["source_hash"] = selected_hash
+    selected = _rehashed(selected)
+    assert validate_skill_design(source=selected, contracts_dir=CONTRACTS)
+    with pytest.raises(SkillDesignInvalidError):
+        validate_skill_design(source=replace(selected, entry_path=None), contracts_dir=CONTRACTS)
 
 
 @pytest.mark.parametrize("declared", [False, True])

@@ -23,11 +23,13 @@ export function SourceExecutionPreview({ preview }: { preview: Preview }) {
     </section>
     {preview.declaration.resource_requirements.length > 0 && <section className="taskFlowSection"><h4>{labels.sourceResources}</h4>
       <ul className="taskFlowItems">{preview.declaration.resource_requirements.map((resource) => <li key={resource.key}>
-        <strong>{messages.workspace.resourceKind[resource.kind]} · {labels.access[resource.access]}</strong>
+        <strong>{resource.kind === 'document'
+          ? messages.runHistory.documentSources[resource.selection === 'documents' ? 'documents' : 'library']
+          : messages.workspace.resourceKind[resource.kind]}</strong>
         <p>{resource.selection_guidance || resource.key}</p>
         <small>{resource.required ? messages.workspace.requiredLabel : messages.workspace.optionalLabel}
           {resource.accepted_providers?.length ? ` · ${resource.accepted_providers.join(' / ')}` : ''}
-          {resource.operations.length ? ` · ${resource.operations.map((op) => op.operation).join(' / ')}` : ''}</small>
+        </small>
       </li>)}</ul>
     </section>}
     <section className="taskFlowSection"><h4>{labels.sourceText}</h4>

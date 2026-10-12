@@ -173,15 +173,21 @@ def _bind_requirement(
     """一つの要求に照合する候補を選び、不足時は理由を添える。"""
 
     kind = _string(requirement.get("kind"))
+    selection = requirement.get("selection")
     hints = tuple(_string_list(requirement.get("capabilities")))
     accepted = tuple(_string_list(requirement.get("accepted_providers")))
     required = requirement.get("required") is True
     matched = tuple(
         _rank_candidates(
-            [item for item in candidates if _matches(item, kind=kind, hints=hints)],
+            [item for item in candidates if _matches(item, kind=kind, hints=hints)
+             and (selection != "documents" or item.provider == "project-documents")
+             and (selection != "resource" or kind != "document"
+                  or item.provider == "project-library")],
             accepted_providers=accepted,
         )
     )
+    if selection is not None:
+        hints = tuple(sorted({cap for item in matched for cap in item.capabilities}))
     # 「登録済み かつ (Provider 索引を渡されたなら) 実装配線済み」の能力だけを実行可能能力とみなす。
     serviceable = tuple(
         hint
@@ -222,7 +228,11 @@ def _bind_requirement(
         key=cast(str, requirement["key"]),
         kind=kind,
         required=required,
-        access=_string(requirement.get("access")),
+        access=("read" if selection == "documents" else "write")
+        if kind == "document" and selection is not None
+        else ("write" if selection is not None and any(
+            is_write_capability(cap) for cap in hints
+        ) else _string(requirement.get("access")) or "read"),
         status=status,
         reason=reason,
         candidates=exposed,
@@ -299,7 +309,11 @@ def _readiness_level(
         return TaskReadinessLevel.GUIDANCE_ONLY
     if any(item.status is RequirementStatus.UNAVAILABLE for item in required):
         return TaskReadinessLevel.CONFIGURATION_REQUIRED
-    if _has_executable_apply(blueprint, registered_write_capabilities):
+    if any(
+        item.status is RequirementStatus.AVAILABLE
+        and any(cap in registered_write_capabilities for cap in item.capabilities)
+        for item in bindings
+    ) or _has_executable_apply(blueprint, registered_write_capabilities):
         return TaskReadinessLevel.ACTIONABLE
     # apply 意図があっても write Provider が無ければ ACTIONABLE にしない。docs/04 §3.3 のとおり
     # 提案の生成までは実行でき、実際の書き込みだけが不可能な状態が正しい表現になる。

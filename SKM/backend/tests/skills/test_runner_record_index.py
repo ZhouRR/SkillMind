@@ -11,13 +11,18 @@ import pytest
 from jsonschema import Draft202012Validator, FormatChecker
 
 from skillmind.core.hashing import canonical_json
+from skillmind.skills.importer import SkillPackageParser
 
-SKILLS = Path(__file__).resolve().parents[4] / "real-flow-test/skills"
+SOURCES = Path(__file__).resolve().parents[4] / "real-flow-test"
 
 
 def schema(skill):
     """実際に取り込む自己完結 Schema を読む。平台へ業務形式を登録しない。"""
-    return json.loads((SKILLS / skill / "schemas/runner-records.schema.json").read_text())
+    package = SkillPackageParser().parse_directory(
+        SOURCES.resolve(), entry_path=f"skills/{skill}/SKILL.md",
+    )
+    assert "schemas/runner-records.schema.json" in {file.path for file in package.files}
+    return json.loads((SOURCES / "schemas/runner-records.schema.json").read_text())
 
 
 def index():
@@ -69,3 +74,19 @@ def test_no_gaps_or_missing_steps_need_no_fabricated_reason():
     value = index()
     value.update(reasons={}, notRun=[], gaps=[])
     Draft202012Validator(schema("execution-plan-generator")).validate(value)
+
+
+@pytest.mark.parametrize("request_id", ["fixture-job-7", "fixture/jobs/7", "17"])
+def test_native_operation_identifiers_are_not_forced_to_uuid(request_id: str) -> None:
+    """異なるサービスの原 ID を保持し、FlaUI の UUID 形式を業務索引へ強制しない。"""
+    value = index()
+    value.update(
+        reasons={}, notRun=[], gaps=[],
+        operations=[{
+            "testCaseId": "CASE-0001", "stepId": "S1", "role": "BUSINESS",
+            "connectionRef": "fixture-runner", "requestId": request_id,
+            "confirmation": "CONFIRMED", "records": [{"locator": "fixture-record"}],
+        }],
+    )
+    for skill in ["execution-plan-generator", "result-judge-triage"]:
+        Draft202012Validator(schema(skill), format_checker=FormatChecker()).validate(value)

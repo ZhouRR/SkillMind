@@ -1,5 +1,5 @@
 {
-  "candidate_version": "skillmind.skill-candidate/v2",
+  "candidate_version": "skillmind.skill-candidate/v3",
   "title": null,
   "description": null,
   "input_contract": {
@@ -17,8 +17,5 @@
   },
   "input_source_ref": "s0",
   "resource_requirements": [],
-  "platform_tools": [
-    "workspace.write/v2"
-  ],
   "diagnostics": []
 }

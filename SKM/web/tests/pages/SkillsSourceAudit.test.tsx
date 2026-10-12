@@ -58,6 +58,31 @@ async function type(value: string) {
 async function parse() { await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))) }
 
 describe('Skill source snapshot ownership', () => {
+  it('lists collection entries before any import or model call, then binds the selected source', async () => {
+    await render()
+    const alpha = new File(['# Alpha'], 'SKILL.md')
+    const beta = new File(['# Beta'], 'SKILL.md')
+    Object.defineProperty(alpha, 'webkitRelativePath', { value: 'fixture/skills/alpha/SKILL.md' })
+    Object.defineProperty(beta, 'webkitRelativePath', { value: 'fixture/skills/beta/SKILL.md' })
+    await act(async () => {
+      const input = container.querySelector<HTMLInputElement>('input[type="file"]')!
+      Object.defineProperty(input, 'files', { configurable: true, value: [alpha, beta] })
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(api.uploadSkillFiles).not.toHaveBeenCalled()
+    expect(api.interpretSkillSource).not.toHaveBeenCalled()
+    const picker = container.querySelector<HTMLSelectElement>('select')!
+    expect([...picker.options].map((option) => option.value)).toEqual(['', 'skills/alpha/SKILL.md', 'skills/beta/SKILL.md'])
+    await act(async () => {
+      picker.value = 'skills/beta/SKILL.md'
+      picker.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(api.uploadSkillFiles).toHaveBeenCalledWith([alpha, beta], 'csrf', expect.any(AbortSignal), 'skills/beta/SKILL.md')
+    expect(api.interpretSkillSource).not.toHaveBeenCalled()
+    await click('Interpret with model')
+    expect(api.interpretSkillSource).toHaveBeenCalledWith(stored.skill_source_id, expect.any(String), 'csrf', expect.any(AbortSignal), false)
+  })
+
   it('saves exactly the parsed snapshot, locks submission fields, then invalidates every old source result after editing', async () => {
     await render(); await type('# Original'); await parse()
     expect(container.textContent).toContain('Parsed original')

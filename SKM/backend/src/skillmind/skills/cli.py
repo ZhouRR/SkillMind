@@ -16,10 +16,12 @@ from skillmind.skills.importer import (
 )
 
 
-def parse_skill(source: Path, contracts_dir: Path) -> dict[str, Any]:
+def parse_skill(
+    source: Path, contracts_dir: Path, *, entry_path: str | None = None,
+) -> dict[str, Any]:
     """Directory Skill を normalized package と Assisted manifest draft へ変換する。"""
 
-    package = SkillPackageParser().parse_directory(source.resolve())
+    package = SkillPackageParser().parse_directory(source.resolve(), entry_path=entry_path)
     schema_path = contracts_dir.resolve() / "runtime-manifest" / "v1alpha1.schema.json"
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
     if not isinstance(schema, dict):
@@ -35,6 +37,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         description="Parse a directory Skill without invoking a model or executing scripts."
     )
     parser.add_argument("source", type=Path, help="Skill source directory")
+    parser.add_argument("--entry", help="Selected SKILL.md path relative to the source directory")
     parser.add_argument(
         "--contracts-dir",
         type=Path,
@@ -43,7 +46,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     arguments = parser.parse_args(argv)
     try:
-        result = parse_skill(arguments.source, arguments.contracts_dir)
+        result = parse_skill(arguments.source, arguments.contracts_dir, entry_path=arguments.entry)
     except SkillImportError as error:
         print(
             json.dumps(

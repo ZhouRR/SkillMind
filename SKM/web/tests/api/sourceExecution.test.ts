@@ -25,7 +25,7 @@ describe('source execution previews', () => {
       language, children: createElement(SourceExecutionPreview, { preview }),
     }))
     for (const resource of preview.declaration.resource_requirements) {
-      expect(html).toContain(`${MESSAGES[language].workspace.resourceKind[resource.kind]} · `)
+      expect(html).toContain(resource.kind === 'document' ? MESSAGES[language].runHistory.documentSources.library : MESSAGES[language].workspace.resourceKind[resource.kind])
     }
     expect(html).not.toContain('<strong> · ')
   })

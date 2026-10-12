@@ -23,7 +23,7 @@ def manifest() -> dict[str, Any]:
 
     return {
         "skill_execution": {
-            "execution_version": "skillmind.skill-execution/v1",
+            "execution_version": "skillmind.skill-execution/v2",
             "tasks": [{"key": "execute", "title": "分析", "description": "入力の分析"}],
             "resource_requirements": [{"key": "reference", "required": False}],
             "source_traces": [{"target": "/resource_requirements/0", "path": "SKILL.md", "line": 1}],
@@ -141,12 +141,12 @@ def test_repair_preserves_components_outside_the_validation_error() -> None:
     """入力の修復で資源や Tool を変更・削除させず、省略と null も区別する。"""
 
     before = {"input_contract": {"type": "string"}, "title": None,
-              "resource_requirements": [], "platform_tools": []}
+              "resource_requirements": [], "diagnostics": []}
     after = deepcopy(before)
     after["input_contract"] = {"type": "object"}
     allowed = repair_components("/input_contract/type", "candidate_input_root_invalid")
     validate_repair_scope(before, after, allowed)
-    after["platform_tools"] = ["workspace.write/v2"]
+    after["diagnostics"] = [{"severity": "warning"}]
     with pytest.raises(CandidateRevisionError):
         validate_repair_scope(before, after, allowed)
     after = deepcopy(before)
@@ -158,7 +158,7 @@ def test_repair_preserves_components_outside_the_validation_error() -> None:
 @pytest.mark.parametrize(("path", "code", "expected"), [
     ("/skill_execution/resource_requirements/0", "skill_execution_invalid", {"resource_requirements"}),
     ("/fields/0/type", "contract_type_invalid", {"input_contract"}),
-    ("/platform_tools", "skill_execution_invalid", {"platform_tools"}),
+    ("/diagnostics", "skill_execution_invalid", {"diagnostics"}),
     ("/tasks/0", "candidate_publish_invalid", None),
     ("/source_ref", "candidate_source_invalid", None),
 ])

@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker, ValidationError
+
 from skillmind.agent.domain import RunLimits
 from skillmind.agent.task_brief import build_agent_task_brief, render_task_brief_prompt
 from skillmind.api.routes.task_flow import TaskFlowPreviewResponse
@@ -35,19 +36,17 @@ def direct_case(*, writes: bool = False) -> tuple[dict[str, Any], dict[str, Any]
         SYSTEM_SKILL,
         generation_schema=candidate_schema(CONTRACTS),
     ).to_dict()
-    candidate = json.loads((CONTRACTS / "examples/skill-candidate.v2.json").read_text())
+    candidate = json.loads((CONTRACTS / "examples/skill-candidate.v3.json").read_text())
     if writes:
         candidate["resource_requirements"] = [
             {
                 "key": "review_outputs",
                 "kind": "document",
                 "required": True,
-                "access": "write",
-                "capabilities": ["document.write/v1"],
+                "selection": "resource",
                 "accepted_providers": ["project-library"],
                 "selection_guidance": None,
                 "source_ref": "s0:1",
-                "operations": [{"capability_version": "document.write/v1", "operation": "CREATE"}],
             }
         ]
     return request, candidate
@@ -131,7 +130,7 @@ def test_direct_candidate_publish_catalog_brief_preview_roundtrip() -> None:
     assert validated.status == "SOURCE_EXECUTION" and validated.plan is None
     assert validated.source_execution is not None
     assert ExecutionFeatures(document_writes=True).blueprint_enabled(manifest["skill_execution"])
-    assert not ExecutionFeatures().blueprint_enabled(manifest["skill_execution"])
+    assert ExecutionFeatures().blueprint_enabled(manifest["skill_execution"])
 
 
 def test_source_operations_propose_without_intent_and_preserve_idempotency() -> None:
@@ -150,6 +149,8 @@ def test_source_operations_propose_without_intent_and_preserve_idempotency() -> 
         capability_version=draft.capability_version,
         operation=draft.operation,
         risk_level="MEDIUM",
+        resource_operations=[{"resource_key": "review_outputs",
+                              "capability_version": "document.write/v1", "operation": "CREATE"}],
     )
     validate = EffectOperationsMixin._validate_effect_intent
     assert validate(manifest["skill_execution"], **arguments)["operation"] == "CREATE"
@@ -178,7 +179,9 @@ def test_invalid_execution_is_not_silently_downgraded(mutation: str) -> None:
     elif mutation == "two_tasks":
         definition["tasks"].append(deepcopy(definition["tasks"][0]))
     else:
-        definition["resource_requirements"][0]["operations"][0]["operation"] = "DELETE"
+        definition["resource_requirements"][0]["operations"] = [
+            {"capability_version": "document.write/v1", "operation": "DELETE"}
+        ]
     with pytest.raises((ValueError, ValidationError)):
         resolved = resolve_skill_definition(manifest)
         assert resolved is not None
@@ -193,19 +196,17 @@ def test_optional_read_resource_does_not_become_required_tool() -> None:
             "key": "references",
             "kind": "repository",
             "required": False,
-            "access": "read",
-            "capabilities": ["repository.read/v1"],
+            "selection": "resource",
             "accepted_providers": ["git"],
             "selection_guidance": None,
             "source_ref": "s0:1",
-            "operations": [],
         }
     ]
     response = InterpreterFixtureRunner(CONTRACTS).run(
         request, candidate, bind_identity=True, require_direct_candidate=True
     )
     tools = response["runtime_manifest_draft"]["tools"]
-    assert next(t for t in tools if t["capability"] == "repository.read/v1")["required"] is False
+    assert tools == []
 
 
 @pytest.mark.parametrize("mutation", [None, "operation", "scope", "permission", "approval"])
@@ -219,11 +220,16 @@ async def test_source_execution_keeps_effect_step_authorization(mutation: str | 
     snapshot = task["skill_snapshots"][0]
     legacy = snapshot["manifest"].pop("capability_blueprint")
     resource = legacy["resource_requirements"][0]
-    resource["operations"] = [
-        {"capability_version": h.proposal.capability_version, "operation": h.proposal.operation}
-    ]
+    resource.pop("access")
+    resource.pop("capabilities")
+    resource["selection"] = "resource"
+    h.run.permission_snapshot_json["resource_operations"] = [{
+        "resource_key": resource["key"],
+        "capability_version": h.proposal.capability_version,
+        "operation": h.proposal.operation,
+    }]
     snapshot["manifest"]["skill_execution"] = {
-        "execution_version": "skillmind.skill-execution/v1",
+        "execution_version": "skillmind.skill-execution/v2",
         "resource_requirements": [resource],
         "tasks": [],
         "source_traces": [],
@@ -232,9 +238,9 @@ async def test_source_execution_keeps_effect_step_authorization(mutation: str | 
         resource["key"], h.proposal.capability_version, h.proposal.operation
     )
     if mutation == "operation":
-        resource["operations"][0]["operation"] = "UPDATE"
+        h.run.permission_snapshot_json["resource_operations"][0]["operation"] = "UPDATE"
     elif mutation == "scope":
-        resource["access"] = "read"
+        h.run.permission_snapshot_json["resource_operations"] = []
     elif mutation == "permission":
         h.integration.revision += 1
     elif mutation == "approval":

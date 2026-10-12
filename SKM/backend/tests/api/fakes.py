@@ -1258,6 +1258,7 @@ class FakeSkillService:
         *,
         access: UserAccess,
         files: tuple[UploadSkillFile, ...],
+        entry_path: str | None = None,
     ) -> StoredSkillPreview:
         """受信 upload を記録し、storage 未配線 scenario では domain error を返す。"""
 
@@ -1265,6 +1266,7 @@ class FakeSkillService:
         if self.storage_unavailable:
             raise SkillStorageUnavailableError("Object storage is not configured for uploads")
         self.received_uploads = files
+        self.received_entry_path = entry_path
         return StoredSkillPreview(
             skill_source_id=self.stored.skill_source_id,
             interpretation_id=self.stored.interpretation_id,

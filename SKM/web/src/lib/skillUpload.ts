@@ -11,7 +11,14 @@ export function normalizedSkillUploadPaths(
     || segments.some((parts) => parts.length < 2 || parts[0] !== commonRoot)
   ) return paths
   const stripped = segments.map((parts) => parts.slice(1).join('/'))
-  return stripped.includes('SKILL.md') ? stripped : paths
+  return stripped.some((path) => path === 'SKILL.md' || path.endsWith('/SKILL.md')) ? stripped : paths
+}
+
+/** フォルダー内の entry を列挙するだけで、本文を解析・改変したり model を呼んだりしない。 */
+export function uploadedSkillEntries(files: readonly Pick<File, 'name' | 'webkitRelativePath'>[]): string[] {
+  return normalizedSkillUploadPaths(files)
+    .filter((path) => path === 'SKILL.md' || path.endsWith('/SKILL.md'))
+    .sort((left, right) => left.localeCompare(right))
 }
 
 /** 上传目录の読取専用 preview entry。text は内容を持ち、binary/過大は種別だけ示す。 */

@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
+
 from skillmind.runs.domain import CreatedRun, RunStatus, derive_task_id
 from skillmind.skills import InlineSkillFile, UploadSkillFile
 from skillmind.skills.domain import SkillInterpretationStatus
@@ -120,6 +121,24 @@ def test_upload_skill_import_returns_503_when_storage_unavailable(client: TestCl
     assert response.status_code == 503
     assert response.headers["content-type"].startswith("application/problem+json")
     assert response.json()["code"] == "skill_storage_unavailable"
+
+
+def test_upload_skill_import_forwards_explicit_entry_without_rewriting_files(
+    client: TestClient,
+) -> None:
+    """コレクションの選択と元ファイルは共有 service へ渡し、route で依存を推測しない。"""
+    fake = FakeSkillService()
+    client.app.state.skill_service = fake
+    response = client.post(
+        "/api/v1/skill-imports/upload",
+        params={"entry_path": "skills/fixture/SKILL.md"},
+        files=[("files", ("skills/fixture/SKILL.md", b"# Fixture\r\n", "text/markdown")),
+               ("files", ("schemas/result.schema.json", b"{}", "application/json"))],
+    )
+    assert response.status_code == 201
+    assert fake.received_entry_path == "skills/fixture/SKILL.md"
+    assert fake.received_uploads[0].data == b"# Fixture\r\n"
+    assert fake.received_uploads[1].path == "schemas/result.schema.json"
 
 
 def test_get_skill_interpretation_returns_saved_preview(client: TestClient) -> None:

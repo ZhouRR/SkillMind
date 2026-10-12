@@ -72,6 +72,7 @@ class SaveSkillPreviewCommand:
     storage_uri: str | None = None
     # 元の bytes を object storage から再構築するため、全 file の index (binary を含む) を保持する。
     source_file_index: tuple[dict[str, Any], ...] = ()
+    entry_path: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +87,7 @@ class StoredSkillSource:
     source_files: tuple[InlineSkillFile, ...]
     storage_uri: str = ""
     source_file_index: tuple[dict[str, Any], ...] = ()
+    entry_path: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

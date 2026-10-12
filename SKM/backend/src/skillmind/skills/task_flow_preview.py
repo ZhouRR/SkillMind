@@ -59,6 +59,7 @@ class TaskFlowPreviewSource:
     source_snapshot: Any = field(repr=False)
     interpretation_id: UUID
     interpreter_version: str
+    entry_path: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +136,7 @@ def _project(
             source_snapshot=source.source_snapshot,
             interpretation_id=source.interpretation_id,
             interpreter_version=source.interpreter_version,
+            entry_path=source.entry_path,
         ),
         contracts_dir=contracts_dir,
         allow_missing_blueprint=True,

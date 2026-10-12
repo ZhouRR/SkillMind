@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 from jsonschema import Draft202012Validator, ValidationError
+
 from skillmind.skills.interpreter import (
     build_legacy_interpreter_generation_schema as build_interpreter_generation_schema,
 )
@@ -86,6 +87,28 @@ class _FakeClient:
             raise self._error
         assert self._completion is not None
         return self._completion
+
+
+async def test_direct_interpreter_transmits_resources_without_tool_permission_catalog() -> None:
+    """凍結原文を保ち、model に接続選択だけを問い、Tool 許可を生成させない。"""
+    from skillmind.skills.direct_candidate import candidate_schema
+    from tests.skills.test_source_execution import direct_case
+
+    request, candidate = direct_case()
+    client = _FakeClient(completion=ModelCompletion(candidate, None, False))
+    interpreter = ModelSkillInterpreter(
+        completion_client=client, system_skill_root=SYSTEM_SKILL,
+        response_schema=candidate_schema(CONTRACTS),
+    )
+    request["interpreter"] = interpreter.system_identity.to_dict()
+    result = await interpreter.interpret(request, model="fixture-model", parameters={})
+    assert result == candidate
+    (message,) = client.user_messages
+    projected = json.loads(message)
+    assert "capabilities" not in projected and "write_operations" not in projected
+    assert {"kind": "other", "provider": "postgres"} in projected["resources"]
+    assert {"kind": "document", "provider": "project-library"} in projected["resources"]
+    assert projected["sources"][0]["numbered_text"]
 
 
 def _response_schema() -> dict[str, Any]:

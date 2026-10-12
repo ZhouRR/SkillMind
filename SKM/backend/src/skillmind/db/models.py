@@ -424,6 +424,8 @@ class SkillSource(IdentityMixin, Base):
     storage_uri: Mapped[str] = mapped_column(String(512), nullable=False)
     content_hash: Mapped[str] = mapped_column(String(71), nullable=False)
     source_version: Mapped[str | None] = mapped_column(String(128))
+    # 選択入口も source の一部。NULL の旧 snapshot は旧入口規則を維持する。
+    entry_path: Mapped[str | None] = mapped_column(String(1024))
     imported_by: Mapped[UUID] = mapped_column(nullable=False, index=True)
     source_snapshot_json: Mapped[list[dict[str, str]]] = mapped_column(JSON, nullable=False)
     # text snapshot だけでは binary asset を再現できないため、全 file の index を別保持する。

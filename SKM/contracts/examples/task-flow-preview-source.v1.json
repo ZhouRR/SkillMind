@@ -12,12 +12,12 @@
   },
   "status": "SOURCE_EXECUTION",
   "blueprint_checksum": null,
-  "preview_checksum": "sha256:843401b57c2305a9fdbbfa1efeb977c7d7cfea28613d14f8f81f2f7843297003",
+  "preview_checksum": "sha256:3e75637e997548ee377d72e16b936040e1016e3ed15aa3c9f834cb863cca1326",
   "plan": null,
   "source_traces": [],
   "source_execution": {
     "declaration": {
-      "execution_version": "skillmind.skill-execution/v1",
+      "execution_version": "skillmind.skill-execution/v2",
       "tasks": [
         {
           "key": "execute",
@@ -34,19 +34,10 @@
           "key": "review_outputs",
           "kind": "document",
           "required": true,
-          "access": "write",
-          "capabilities": [
-            "document.write/v1"
-          ],
           "accepted_providers": [
             "project-library"
           ],
-          "operations": [
-            {
-              "capability_version": "document.write/v1",
-              "operation": "CREATE"
-            }
-          ]
+          "selection": "resource"
         }
       ],
       "source_traces": [

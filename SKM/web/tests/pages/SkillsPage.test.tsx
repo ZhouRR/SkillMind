@@ -151,7 +151,7 @@ describe('SkillsPage entry affordances', () => {
     const html = renderToStaticMarkup(<SkillsPage csrfToken={'c'.repeat(32)} projectId="00000000-0000-4000-8000-000000000020" />)
 
     expect(html).toContain('解析技能')
-    expect(html).toContain('选择技能目录')
+    expect(html).toContain('选择文件夹')
     expect(html).toContain('aria-label="上传技能目录"')
     expect(html).toContain('skillUpload')
   })

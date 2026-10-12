@@ -236,6 +236,11 @@ def _allowed_capabilities(manifest: Mapping[str, Any]) -> tuple[str, ...]:
     (apply は承認済み EffectExecution Worker だけが Provider を起動する)。
     """
 
+    definition = resolve_skill_definition(manifest)
+    from skillmind.skills.execution import is_source_execution
+    if definition is not None and is_source_execution(definition):
+        from skillmind.skills.resource_policy import default_capabilities
+        return tuple(sorted(default_capabilities()))
     capabilities: set[str] = set()
     for item in _sequence(manifest.get("tools")):
         if isinstance(item, Mapping):

@@ -377,17 +377,15 @@ class FlowReadinessResponse(_FlowModel):
     assessment: FlowAssessmentResponse | None
 
 
-class FlowOperationResponse(_FlowModel):
-    """資源に必要な実操作。承認済みの効果ではない。"""
+class FlowExecutionResourceResponse(_FlowModel):
+    """入力選択と接続選択だけを返し、model の操作許可は含めない。"""
 
-    capability_version: Capability
-    operation: Annotated[str, Field(min_length=1, max_length=128)]
-
-
-class FlowExecutionResourceResponse(FlowResourceResponse):
-    """読書宣言に実操作を添える。"""
-
-    operations: list[FlowOperationResponse]
+    key: Key
+    kind: ResourceKind
+    required: Annotated[bool, Field(strict=True)]
+    selection: Literal["documents", "resource"]
+    accepted_providers: Annotated[list[Key], Field(max_length=20)] | None = None
+    selection_guidance: Text | None = None
 
 
 class FlowExecutionTaskResponse(_FlowModel):
@@ -411,7 +409,7 @@ class FlowExecutionTraceResponse(_FlowModel):
 class FlowExecutionDeclarationResponse(_FlowModel):
     """Blueprint を補作しない版付き宣言。"""
 
-    execution_version: Literal["skillmind.skill-execution/v1"]
+    execution_version: Literal["skillmind.skill-execution/v2"]
     tasks: Annotated[list[FlowExecutionTaskResponse], Field(min_length=1, max_length=1)]
     resource_requirements: Annotated[list[FlowExecutionResourceResponse], Field(max_length=50)]
     source_traces: list[FlowExecutionTraceResponse]

@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.skillmind.local/skill-execution/v1.schema.json",
-  "title": "Skill source execution v1",
+  "$id": "https://schemas.skillmind.local/skill-execution/v2.schema.json",
+  "title": "Skill resource execution v2",
   "type": "object",
   "additionalProperties": false,
   "properties": {
     "execution_version": {
-      "const": "skillmind.skill-execution/v1"
+      "const": "skillmind.skill-execution/v2"
     },
     "tasks": {
       "type": "array",
@@ -58,8 +58,7 @@
           "key",
           "kind",
           "required",
-          "access",
-          "operations"
+          "selection"
         ],
         "properties": {
           "key": {
@@ -71,20 +70,6 @@
           "required": {
             "type": "boolean"
           },
-          "access": {
-            "enum": [
-              "read",
-              "write"
-            ],
-            "type": "string"
-          },
-          "capabilities": {
-            "type": "array",
-            "maxItems": 20,
-            "items": {
-              "$ref": "#/$defs/versionedCapability"
-            }
-          },
           "accepted_providers": {
             "type": "array",
             "maxItems": 20,
@@ -95,27 +80,13 @@
           "selection_guidance": {
             "$ref": "#/$defs/text"
           },
-          "operations": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "capability_version": {
-                  "$ref": "#/$defs/versionedCapability"
-                },
-                "operation": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128
-                }
-              },
-              "required": [
-                "capability_version",
-                "operation"
-              ]
-            },
-            "maxItems": 20
+          "selection": {
+            "type": "string",
+            "enum": [
+              "documents",
+              "resource"
+            ],
+            "description": "documents freezes selected task input; resource selects a connection or project document library. This is not an access permission."
           }
         }
       },
@@ -163,10 +134,6 @@
       "type": "string",
       "pattern": "^[a-z][a-z0-9_.-]*$",
       "maxLength": 128
-    },
-    "versionedCapability": {
-      "type": "string",
-      "pattern": "^[a-z][a-z0-9_.-]*/v[1-9][0-9]*$"
     },
     "resourceKind": {
       "enum": [

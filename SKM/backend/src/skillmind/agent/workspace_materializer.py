@@ -1045,7 +1045,8 @@ def _validated_document_snapshots(
         for item in requirements
         if isinstance(item, Mapping)
         and item.get("kind") == "document"
-        and item.get("access", "read") == "read"
+        and (item.get("selection") == "documents"
+             or item.get("access") == "read")
         and isinstance(item.get("key"), str)
     }
     keys = {item.requirement_key for item in snapshots}

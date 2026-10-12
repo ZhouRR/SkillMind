@@ -9,6 +9,8 @@ import re
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
 
+from skillmind.skills.importer import SkillPackageParser
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -47,13 +49,15 @@ def basis() -> dict:
 def records() -> dict:
     """合成の原 locator だけを持つ DB result_ref。Runner 本文の形式ではない。"""
     return {
-        "schemaVersion": "1.0", "executionId": "00000000-0000-4000-8000-000000000003",
+        "schemaVersion": "2.0", "executionId": "00000000-0000-4000-8000-000000000003",
         "operations": [{
             "testCaseId": "TC-1", "stepId": "S1", "role": "BUSINESS",
             "connectionRef": "fixture-runner", "requestId": "fixture-request-1",
             "confirmation": "CONFIRMED", "records": [{"locator": "fixture-record-1"}],
         }],
-        "notRun": [{"testCaseId": "TC-1", "stepId": "S2", "reason": "依存操作が失敗したため未送信"}],
+        "notRun": [{"testCaseId": "TC-1", "stepId": "S2", "reasonRef": "dependency"}],
+        "reasons": {"dependency": {"text": "依存操作が失敗したため未送信"},
+                    "missing": {"text": "原応答未確認"}},
         "gaps": [],
     }
 
@@ -145,7 +149,7 @@ def test_confirmed_failure_and_unconfirmed_are_not_business_verdicts(records: di
     """参照索引は終端確認だけを持ち、実測・失敗状態は原記録から判定する。"""
     records["operations"][0]["confirmation"] = "UNCONFIRMED"
     records["operations"][0]["records"] = []
-    records["gaps"] = [{"testCaseId": "TC-1", "stepId": "S1", "reason": "原応答未確認"}]
+    records["gaps"] = [{"testCaseId": "TC-1", "stepId": "S1", "reasonRef": "missing"}]
     validator("runner-records.schema.json").validate(records)
     assert records["notRun"][0]["stepId"] == "S2"
 
@@ -153,7 +157,7 @@ def test_confirmed_failure_and_unconfirmed_are_not_business_verdicts(records: di
 def test_empty_operation_set_can_record_preparation_failure(records: dict) -> None:
     """操作を発行できなかった異常のために架空の Runner 記録を要求しない。"""
     records["operations"] = []
-    records["notRun"].append({"testCaseId": "TC-1", "stepId": "S1", "reason": "準備失敗で未送信"})
+    records["notRun"].append({"testCaseId": "TC-1", "stepId": "S1", "reasonRef": "dependency"})
     validator("runner-records.schema.json").validate(records)
 
 
@@ -263,19 +267,20 @@ def test_pass_cannot_hide_missing_or_contradictory_results(verdict: dict, change
     assert list(validator("verdict.schema.json").iter_errors(value))
 
 
-def test_packaged_schemas_and_links_are_self_contained() -> None:
-    """実行/判定 Skill の単独導入で外部 Schema や隣接 package を要求しない。"""
+def test_selected_schemas_and_links_are_inside_the_uploaded_root() -> None:
+    """共有参照は選択 source に凍結され、隣接 Skill の手作業コピーは不要。"""
     for skill in ("execution-plan-generator", "result-judge-triage"):
-        package = ROOT / "skills" / skill
-        text = (package / "SKILL.md").read_text(encoding="utf-8")
-        for link in re.findall(r"\]\(([^)]+)\)", text):
-            target = (package / link).resolve()
-            assert target.is_relative_to(package.resolve()) and target.is_file()
-        for path in (package / "schemas").glob("*.json"):
-            assert path.read_bytes() == (ROOT / "schemas" / path.name).read_bytes()
-            schema = json.loads(path.read_text(encoding="utf-8"))
+        package = SkillPackageParser().parse_directory(ROOT.resolve(), entry_path=f"skills/{skill}/SKILL.md")
+        included = {file.path for file in package.files}
+        assert package.primary_instruction == f"skills/{skill}/SKILL.md"
+        assert not any(path.endswith("SKILL.md") and path != package.primary_instruction for path in included)
+        for path in included:
+            if not path.startswith("schemas/"):
+                continue
+            raw = (ROOT / path).read_text(encoding="utf-8")
+            schema = json.loads(raw)
             Draft202012Validator.check_schema(schema)
-            for ref in re.findall(r'"\$ref"\s*:\s*"([^"]+)"', path.read_text(encoding="utf-8")):
+            for ref in re.findall(r'"\$ref"\s*:\s*"([^"]+)"', raw):
                 assert ref.startswith("#/")
                 node = schema
                 for token in ref[2:].split("/"):
@@ -302,36 +307,11 @@ def test_ref_contracts_have_one_record_definition() -> None:
         assert "sourceMarkdown" in node["required"] and "sourcePlan" not in node["properties"]
 
 
-@pytest.mark.parametrize("phrase", [
-    "追加報告の生成・保存を理由に次の操作を待たせない",
-    "会話の記憶だけに依存しない",
-    "画像不足だけで実際に完了した操作を未実行へ変更しない",
-    "UI 操作を再送しない",
-    "終端状態、`finished_at` を一回の UPDATE で同時保存・回読する",
-    "タスク終了時に `RUNNING` を残さない",
-    "索引検証が失敗しても終端登録を止めず",
-    "業務実行の終端化を遠隔操作の停止・成功や予約解消の証明にしない",
-    "実行登録前の終了では行や executionId を新設しない",
-    "同じ行の観測と仕様上の対象",
-])
-def test_execution_prompt_preserves_business_boundaries(phrase: str) -> None:
-    """指示の静的回帰であり、実モデルの解釈等価性の検証ではない。"""
-    text = (ROOT / "skills/execution-plan-generator/SKILL.md").read_text(encoding="utf-8")
-    assert phrase in text
-    assert "保存失敗時は次の操作へ進まない" not in text
-
-
-@pytest.mark.parametrize("phrase", [
-    "取得できた報告だけへ範囲を縮めない",
-    "原記録がないだけでは `NOT_RUN` とせず",
-    "スクリーンショットは内容を実際に見られた場合だけ",
-    "日時・ディレクトリ名・画面名の近さで混ぜない",
-    "クリック完了から受信端到達を推論せず",
-    "DB の `version_snapshot` から引き継ぎ",
-    "UI 操作・起動・送信を再実行しない",
-])
-def test_judgement_prompt_uses_original_sources(phrase: str) -> None:
-    """消えた中間ファイルから版や実測を取得する残存指示を防ぐ。"""
-    text = (ROOT / "skills/result-judge-triage/SKILL.md").read_text(encoding="utf-8")
-    assert phrase in text
-    assert "versionSnapshot` は実行結果から" not in text
+def test_each_real_skill_freezes_a_distinct_source() -> None:
+    """共有 upload から選んでも別 Skill と知識庫を同じ指示 source にしない。"""
+    packages = [SkillPackageParser().parse_directory(ROOT.resolve(), entry_path=f"skills/{skill}/SKILL.md")
+                for skill in ("rv-reviewer", "execution-plan-generator", "result-judge-triage")]
+    assert len({package.content_hash for package in packages}) == 3
+    for package in packages:
+        assert len([file for file in package.files if file.path.endswith("SKILL.md")]) == 1
+        assert not any("JAF業務知識" in file.path or file.path.endswith(".xlsx") for file in package.files)

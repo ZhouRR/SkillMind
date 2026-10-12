@@ -13,7 +13,9 @@
 ## Skill 与冻结原文
 
 - Skill 是 Organization 资产，发布后由 Project 显式启用精确版本。沿 [SkillService](../../SKM/backend/src/skillmind/skills/service.py)处理导入、发布、启停与引用检查，不覆盖已发布内容或绕开现存引用删除版本。
+- フォルダーに複数の `SKILL.md` がある場合は画面で解析対象を選ぶ。アップロード root 内の共有 Schema/参照を辿り、選択 Skill と依存ファイルだけを原 path・byte・hash で保存する。参照は root 外へ広げず、他 Skill・知識庫を暗黙に解析しない。共有ファイルの後日の変更は既存 source に反映せず、新規取込で固定する。API は `/skill-imports/upload` の任意 `entry_path`、CLI は `--entry` で同じ選択を指定できる。
 - 新导入只提取输入、资源及操作的最小声明，并形成一个执行任务；完整冻结原文进入 Brief，业务顺序与条件由 Agent 按原文执行。入口为 [direct_candidate](../../SKM/backend/src/skillmind/skills/direct_candidate.py)、[execution](../../SKM/backend/src/skillmind/skills/execution.py)及 [task_brief](../../SKM/backend/src/skillmind/agent/task_brief.py)。旧 Blueprint 保留原值，不从 Manifest 逆算，不在续行时升级历史策略。
+- 新規原文 task は `skill-candidate/v3` の入力・資源選択だけを解析し、`skill-execution/v2` で固定する。`documents` は試験入力の凍結、`resource` は接続/文書庫の選択であり、読書権限ではない。通用 file・画像・変換・Schema Tool は platform が常備し、外部 Tool と操作は選択資源の全 scope/capability と配備上限から Run に固定する。Task の追加 Tool 許可リストや操作宣言は生成しない。既定 binding は接続の選択に使い、資源本体の範囲を Task 側で再縮小しない。接続 config/Secret は Worker に保持し、Agent には原 scope と実際の Tool/操作を渡す。新版は再解析・新規 Run で使用し、旧候補/実行の変換を追加しない。
 - 来源、脚本和模型建议不是权限。Tool 由 [catalog](../../SKM/backend/src/skillmind/agent/tool_catalog.py)统一装配契约和 Provider，经 [ContextBuilder](../../SKM/backend/src/skillmind/agent/context_builder.py)及 [ToolExecutionPolicy](../../SKM/backend/src/skillmind/agent/tool_policy.py)核验冻结绑定、当前开关和调用权限；不按相近名字放行未知能力。SDK builtin 保持拒绝，Shell/网络/文件不能绕过 Gateway，改变 cwd 不构成隔离。执行脚本须核对发布 checksum，业务专用 Schema、seed 和 renderer 不进入通用层。
 - 异步解释保留原请求、来源 hash、模型配置和调用事实；超时、取消或响应未知不能靠换 ID 重新生成。修改解释流程先核对 [request_service](../../SKM/backend/src/skillmind/skills/request_service.py)与消费者，模型质量另用固定输入和独立预期验收。
 - Codex 模型信息通过固定 CLI 获取：内置目录缺少所选模型或思考强度时，用专用登录和代理配置执行官方模型发现；保留返回的模型能力，仅覆盖平台工具限制。未找到或读取失败时明确报错，不猜参数、不换模型或降低思考强度；登录本身不依赖模型目录就绪。

@@ -1,48 +1,41 @@
 ---
 name: skillmind-skill-interpreter
-description: Identify caller inputs and resource requirements for executing a frozen Skill directly.
-version: 6.0.0
+description: Identify caller inputs and resources for executing a frozen Skill directly.
+version: 7.0.0
 ---
 # Skillmind Skill Interpreter
 
-Read the numbered frozen sources. Return one `skillmind.skill-candidate/v2` matching the supplied
-schema; do not execute the Skill. The platform creates one task and supplies the complete original
-Skill and references to the execution Agent. Do not rewrite business procedures, rules, output
-schemas, success criteria, approval points or recovery instructions into a second execution plan.
+Read the numbered frozen sources and return one `skillmind.skill-candidate/v3` matching the supplied
+schema. Do not execute the Skill or rewrite its procedures, rules, outputs or recovery into a plan.
+The execution Agent receives the complete frozen source and dependencies.
 
 ## Inputs
 
-Use a concise task title and description in the source language, or null to retain source metadata.
-Declare only values the caller must choose. Document selection and resource binding already supply
-paths, document IDs, library IDs, bucket and connection metadata; do not ask for these again.
-Keep exact caller field names, types, enums and defaults where the input contract supports them.
-Use an empty object contract when no caller input is needed. Internal IDs and generated values
-are runtime context, not inputs. Reference the source section with `input_source_ref`.
+Use a concise title and description in the source language, or null to retain source metadata.
+Declare only values the caller must choose. Document selection and resource binding supply paths,
+document IDs, library IDs, bucket and connection metadata. Internal/generated IDs and runtime
+settings are not caller inputs. Keep exact field names, types, enums and defaults where supported;
+use an empty object contract when no caller input is needed. Reference `input_source_ref`.
 
 ## Resources
 
-Select registered capabilities and supported Providers from the supplied catalog. Group targets
-sharing a connection and authorization purpose into one resource; multiple tables do not imply
-multiple connections. Keep document inputs and artifact destinations separate. Selection guidance
-should only help choose the correct resource. Exact table names, columns, paths, conditions and
-processing order remain in the original source, which the Agent receives in full.
+Identify connections the caller needs to select from the supplied resource kinds and Providers.
+Group tables or endpoints sharing a connection into one resource. Keep distinct connection purposes
+separate. Use `selection: documents` only for documents that define the task's input scope;
+use `selection: resource` for a connection or project document library. This does not grant or
+restrict read/write permission. Project document reference reading is already supplied; an optional
+knowledge library in that project does not need another required connection.
 
-For external writes, declare the resource capability and each required operation from
-`write_operations`. The resource must be required and write-access, even for conditional writes;
-its availability does not approve or force a write. Read-only resources have no operations.
-Platform approvals and the Run's automatic approval option govern actual proposals at runtime.
-Source commands and bundled scripts do not grant execution permission.
-
-`platform_tools` contains only needed task-local capabilities: workspace read/search/write,
-JSON Schema validation, interaction or subagent dispatch. External Tools and `change.propose/v1`
-are derived from resource declarations. Use `workspace.write/v2` for published output files.
-Select required document conversion explicitly; metadata is not document content.
+Declare a resource required only when the task cannot proceed without it. Optional uses remain
+optional. Provider hints and selection guidance help choose the correct resource. Do not generate
+capabilities, tool lists, operations or approval policies. The platform supplies registered local
+Tools, conversion and Schema validation, and derives external operations from selected resources.
+Actual permissions and the Run's automatic approval settings govern access and effects.
 
 ## Gaps and repair
 
-Report an error only for a real unsupported requirement or missing essential caller decision.
-A connection not yet bound is resolved by platform readiness, not an invented source defect.
-Do not invent a resource, permission or unsupported workaround. Optional requirements remain
-optional unless an external write needs its target bound. Never copy credentials into the candidate.
-On validation feedback, correct the identified declaration errors and return the complete candidate.
+Report an error only for a genuine missing essential input or unsupported resource type.
+An unbound connection is resolved at task launch, not an invented Skill defect. Do not turn an
+optional tool or evidence limitation into a universal start condition. Never copy credentials.
+On validation feedback, repair the identified declaration and return the complete candidate.
 See [field rules](references/output-contract.md) for source references and field ownership.

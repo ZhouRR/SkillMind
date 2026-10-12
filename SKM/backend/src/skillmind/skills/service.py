@@ -208,11 +208,12 @@ class SkillService:
         *,
         access: UserAccess,
         files: Sequence[UploadSkillFile],
+        entry_path: str | None = None,
     ) -> StoredSkillPreview:
         """原 bytes の準備と外部 PUT を DB transaction から分離して upload を保存する。"""
 
         access = deepcopy(access)
-        prepared = self._source_loader.prepare_upload(files)
+        prepared = self._source_loader.prepare_upload(files, entry_path=entry_path)
         async with self._admin_transaction(access) as (repository, locked, authorize):
             organization_id = locked.actor.organization_id
             command = prepared.save_command(
@@ -1628,7 +1629,7 @@ def _schema_failure_detail(error: Exception) -> str:
         "source_trace_target_invalid", "document_library_capabilities_invalid",
     ):
         prefix = (
-            "" if error.path.startswith(("/skill_execution", "/platform_tools"))
+            "" if error.path.startswith("/skill_execution")
             else "/capability_blueprint"
         )
         return f"{prefix}{error.path}: {error.code}"

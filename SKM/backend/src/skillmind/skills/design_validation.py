@@ -25,6 +25,7 @@ from skillmind.skills.source_documents import (
     validate_source_documents,
     validate_source_location,
 )
+from skillmind.skills.source_identity import skill_source_hash
 
 _HASH = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _KEY = re.compile(r"[a-z][a-z0-9_.-]{0,127}\Z")
@@ -70,6 +71,7 @@ class SkillDesignSource:
     source_snapshot: Any = field(repr=False)
     interpretation_id: UUID
     interpreter_version: str
+    entry_path: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -299,10 +301,12 @@ def _source_files(source: SkillDesignSource) -> dict[str, tuple[dict[str, Any], 
         _require(total <= limits.max_total_bytes)
         files[path] = item, None
     _require(list(files) == sorted(files))
-    # importer.py の永続化済み形式は ensure_ascii=True。共通 canonical_json に置換すると
-    # 日本語/中国語 path の過去 hash が変わるため、この歴史形式だけを明示して保持する。
-    index_json = json.dumps(index, sort_keys=True, separators=(",", ":"), allow_nan=False)
-    _require(f"sha256:{sha256_hex(index_json)}" == source.source_hash)
+    if source.entry_path is not None:
+        _require(
+            _source_path(source.entry_path) in files and source.entry_path.endswith("SKILL.md")
+        )
+    # 選択入口の同一性も照合する。旧 source の array hash は共有 helper が維持する。
+    _require(skill_source_hash(index, entry_path=source.entry_path) == source.source_hash)
     snapshot = deepcopy(source.source_snapshot)
     _require(isinstance(snapshot, list) and len(snapshot) <= limits.max_files)
     seen: set[str] = set()

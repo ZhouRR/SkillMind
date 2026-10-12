@@ -231,8 +231,25 @@ class RunService:
                     document_repository=DocumentRepository(session),
                     document_library_target=self._document_library_target,
                 )
+                if is_source_execution(blueprint):
+                    from skillmind.skills.resource_policy import resource_capabilities
+
+                    if any(
+                        isinstance(source, dict)
+                        and source.get("provider") != "project-library"
+                        and not any(
+                            not is_write_capability(cap)
+                            and self._execution_features.provider_enabled(cap, source["provider"])
+                            for cap in resource_capabilities(source)
+                        )
+                        for source in selected_sources.values()
+                    ):
+                        raise TaskSourceSelectionError(
+                            "The selected resource has no enabled access"
+                        )
                 if any(
                     isinstance(item, ResolvedRunBinding)
+                    and not is_source_execution(blueprint)
                     and not self._execution_features.provider_enabled(
                         item.capability_version, item.integration.provider
                     )
@@ -258,6 +275,32 @@ class RunService:
                     await _complete_creation(authorization, session, replay)
                     return replay
                 raise
+            resource_operations_snapshot: list[dict[str, str]] = []
+            resource_tools: set[str] | None = None
+            if is_source_execution(blueprint):
+                from skillmind.skills.resource_policy import (
+                    resource_capabilities,
+                    resource_operations,
+                )
+
+                granted = set(resolved.allowed_capabilities)
+                for source in selected_sources.values():
+                    granted.update(resource_capabilities(source))
+                granted = {
+                    cap for cap in granted if self._execution_features.capability_enabled(cap)
+                }
+                resource_operations_snapshot = resource_operations(
+                    selected_sources, allowed_capabilities=granted,
+                )
+                from skillmind.effects.catalog import EFFECT_CAPABILITIES
+
+                resource_tools = {cap for cap in granted if cap not in EFFECT_CAPABILITIES}
+                if resource_operations_snapshot:
+                    resource_tools.add(CHANGE_PROPOSE_CAPABILITY)
+                if any(op["capability_version"] == DOCUMENT_WRITE_CAPABILITY
+                       for op in resource_operations_snapshot):
+                    resource_tools.add("document.files/v1")
+                has_apply_intent = bool(resource_operations_snapshot)
             command = CreateRunCommand(
                 project_id=project_id,
                 task_id=task_id,
@@ -292,7 +335,9 @@ class RunService:
                     # 新規 Run の補助読取は Project 全体。選択入力の ID/hash は別途保持する。
                     "project_document_read": {"version": "v1", "project_id": str(project_id)},
                     # 新規 Run だけに配備上限を固定する。旧 snapshot の権限を削って再利用しない。
-                    "allowed_capabilities": sorted(
+                    "resource_operations": resource_operations_snapshot,
+                    "allowed_capabilities": sorted(resource_tools)
+                    if resource_tools is not None else sorted(
                         {
                             "document.read/v1", "document.list/v1",
                             *(
@@ -1154,7 +1199,12 @@ async def _resolve_selected_sources(
         declared = tuple(
             item for item in blueprint_requirement.get("capabilities", []) if isinstance(item, str)
         )
+        resource_mode = is_source_execution(blueprint)
         access = str(blueprint_requirement.get("access") or "read")
+        if resource_mode and blueprint_requirement.get("kind") == "document":
+            access = "read" if blueprint_requirement["selection"] == "documents" else "write"
+        if resource_mode and blueprint_requirement.get("kind") == "document":
+            declared = (DOCUMENT_WRITE_CAPABILITY,) if access == "write" else DOCUMENT_CAPABILITIES
         if blueprint_requirement.get("kind") == "document":
             if access == "write":
                 if (
@@ -1214,19 +1264,27 @@ async def _resolve_selected_sources(
             raise TaskSourceSelectionError(
                 f"Integration kind does not satisfy resource requirement: {key}"
             )
+        if resource_mode:
+            declared = integration.capabilities
+            reads = sorted(cap for cap in declared if not is_write_capability(cap)
+                           and (cap != "mcp.read/v1" or integration.scope.get("resource_uris")))
+            observe_capability = "mcp.tools/v1" if "mcp.tools/v1" in reads else (
+                reads[0] if reads else None
+            )
+            access = "write" if any(is_write_capability(cap) for cap in declared) else "read"
         binding_capability = _select_binding_capability(
-            integration.capabilities,
-            hints=declared,
-            access=access,
+            integration.capabilities, hints=declared, access=access,
             observe_capability=observe_capability,
         )
         if observe_capability is not None and observe_capability not in integration.capabilities:
             raise TaskSourceSelectionError(f"Integration lacks the observe capability for {key}")
-        scope = dict(configured.scope) if configured is not None else dict(integration.scope)
+        scope = dict(integration.scope) if resource_mode else (
+            dict(configured.scope) if configured is not None else dict(integration.scope)
+        )
         if configured is not None and (
             configured.integration_id != integration.integration_id
             or configured.revision != str(integration.revision)
-            or configured.capability_version != binding_capability
+            or (not resource_mode and configured.capability_version != binding_capability)
         ):
             raise TaskSourceSelectionError(f"Configured ResourceBinding is stale for {key}")
         bindings.append(
@@ -1249,6 +1307,7 @@ async def _resolve_selected_sources(
             "resource_kind": kind,
             "access": access,
             "source_binding_id": (str(configured.binding_id) if configured is not None else None),
+            **({"capabilities": list(integration.capabilities)} if resource_mode else {}),
         }
     if provided:
         raise TaskSourceSelectionError(f"Unknown data source keys: {sorted(provided)}")
