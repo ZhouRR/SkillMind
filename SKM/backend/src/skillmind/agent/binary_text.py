@@ -40,7 +40,7 @@ _MAX_ENTRY_BYTES = 16_777_216
 MAX_EXCEL_INPUT_BYTES = 8_388_608
 MAX_MARKDOWN_BYTES = 1_048_576
 MARKITDOWN_VERSION = "0.1.7"
-EXCEL_STYLE_PROFILE = "excel-styles/v2"
+EXCEL_STYLE_PROFILE = "excel-styles/v3"
 EXCEL_VALUE_PROFILE = "excel-values/v1"
 _CONVERSION_TIMEOUT_SECONDS = 30
 
@@ -167,9 +167,7 @@ def render_excel_markdown(suffix: str, data: bytes) -> str:
         ]
         markdown = "\n\n".join(sections).strip()
         markdown += (
-            "\n\n> Excel format coverage: excel-values/v1. Legacy XLS cell values only; "
-            "strikethrough, fills and conditional formatting were NOT inspected. "
-            "Do not infer absence of formatting or exclude rows from colors alone."
+            "\n\n> Legacy XLS: values only; cell formatting NOT inspected."
         )
     if len(markdown.encode("utf-8")) > MAX_MARKDOWN_BYTES:
         raise BinaryTextError("Converted Markdown exceeds the output limit")

@@ -18,6 +18,7 @@ from html import escape
 from io import BytesIO
 from typing import Any
 from xml.etree import ElementTree
+from zipfile import ZipFile
 
 from openpyxl import load_workbook
 from openpyxl.cell.rich_text import CellRichText, TextBlock
@@ -27,9 +28,10 @@ from openpyxl.utils.cell import get_column_letter
 from openpyxl.workbook.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
+from skillmind.agent.binary_text import _read_part, _read_sheet_targets
 from skillmind.core.hashing import canonical_json
 
-STYLE_PROFILE = "excel-styles/v2"
+STYLE_PROFILE = "excel-styles/v3"
 VALUE_PROFILE = "excel-values/v1"
 _THEME_KEYS = (
     "lt1",
@@ -225,23 +227,43 @@ def _compact_ranges(cells: Iterable[tuple[int, int]]) -> list[str]:
     ]
 
 
-def _style_facts(sheet: Worksheet, colors: _Colors) -> dict[str, Any]:
-    """疎な実セルを走査し、空白の色凡例や広い row/column 設定も展開せず残す。"""
+def _style_facts(
+    sheet: Worksheet, colors: _Colors, height: int, width: int,
+) -> dict[str, Any]:
+    """本文範囲の有効な静的書式と、範囲外の明示セル/色凡例を縮約する。
+
+    行列書式は未割当セルの既定値。割当済みセルの無色/通常 font も上書きとして扱い、
+    罫線だけのセルへ行の灰色を合成しない。広い行列設定を Excel 全域へ展開しない。
+    """
     groups: dict[str, list[tuple[int, int]]] = defaultdict(list)
     rich_strikes: list[dict[str, Any]] = []
     styles: dict[int, dict[str, Any]] = {}
+    row_styles = {key: item.style_id for key, item in sheet.row_dimensions.items()
+                  if item.has_style}
+    column_styles = {
+        column: item.style_id
+        for item in sheet.column_dimensions.values() if item.has_style
+        for column in range(max(1, item.min), min(width, item.max) + 1)
+    }
+
+    def detail_for(style_id: int) -> dict[str, Any]:
+        """同じ workbook の同じ immutable style は一度だけ解色する。"""
+        if style_id not in styles:
+            style = sheet.parent._cell_styles[style_id]
+            font = sheet.parent._fonts[style.fontId]
+            detail: dict[str, Any] = {"fill": colors.fill(sheet.parent._fills[style.fillId])}
+            if font.strike is not None:
+                detail["base_font_strike"] = font.strike
+            styles[style_id] = detail
+        return styles[style_id]
+
     for (row, column), cell in sorted(sheet._cells.items()):
-        # merge の非 anchor は合成セルであり、原セルの書式とは主張しない。
+        # 結合領域の fill/font は anchor が定義する。本文や座標の複写は不要。
         if cell.__class__.__name__ == "MergedCell":
             continue
-        # 同じ workbook の同じ immutable style は一度だけ解色する。
-        detail = styles.get(cell.style_id)
-        if detail is None:
-            detail = {"fill": colors.fill(cell.fill)}
-            if cell.font.strike is not None:
-                detail["base_font_strike"] = cell.font.strike
-            styles[cell.style_id] = detail
-        if detail["fill"] != {"type": "none"} or cell.font.strike is not None:
+        detail = detail_for(cell.style_id)
+        if (detail["fill"] != {"type": "none"} or cell.font.strike is not None
+                or row in row_styles or column in column_styles):
             groups[canonical_json(detail)].append((row, column))
         if isinstance(cell.value, CellRichText):
             spans = []
@@ -253,8 +275,19 @@ def _style_facts(sheet: Worksheet, colors: _Colors) -> dict[str, Any]:
             # 削除線なしの rich text を列挙しない。base=true の明示解除だけは空範囲を残す。
             if spans or cell.font.strike:
                 rich_strikes.append({"cell": cell.coordinate, "strike_spans": spans})
+    # 本文内の未割当セルだけに既定値を適用する。割当済みの無色セルは除外済み。
+    normal = detail_for(0)
+    styled_normal = normal["fill"] != {"type": "none"} or "base_font_strike" in normal
+    for row in range(1, height + 1):
+        columns = range(1, width + 1) if row in row_styles or styled_normal else column_styles
+        for column in columns:
+            if (row, column) not in sheet._cells:
+                detail = detail_for(row_styles.get(row, column_styles.get(column, 0)))
+                if detail["fill"] != {"type": "none"} or "base_font_strike" in detail:
+                    groups[canonical_json(detail)].append((row, column))
     facts: dict[str, Any] = {
         "profile": STYLE_PROFILE,
+        "static_style_note": "Unlisted cells have no static fill/strike.",
         "cell_styles": [
             {"ranges": _compact_ranges(coords), **json.loads(detail)}
             for detail, coords in sorted(groups.items())
@@ -263,32 +296,12 @@ def _style_facts(sheet: Worksheet, colors: _Colors) -> dict[str, Any]:
     if rich_strikes:
         facts["rich_text"] = rich_strikes
         facts["rich_text_offsets"] = (
-            "Zero-based Unicode code points, end exclusive; overrides base_font_strike."
+            "Strike spans: zero-based Unicode [start,end); override cell strike."
         )
-    defaults = []
-    for kind, dimensions in (("row", sheet.row_dimensions), ("column", sheet.column_dimensions)):
-        for key, dimension in sorted(dimensions.items(), key=lambda entry: str(entry[0])):
-            if dimension.has_style:
-                defaults.append(
-                    {
-                        "axis": kind,
-                        "key": str(key),
-                        **(
-                            {"min": dimension.min, "max": dimension.max} if kind == "column" else {}
-                        ),
-                        "fill": colors.fill(dimension.fill),
-                        "strike": dimension.font.strike,
-                    }
-                )
-    if defaults:
-        facts["dimension_defaults"] = defaults
-        facts["dimension_note"] = "Row/column defaults are not expanded; explicit cell styles win."
     merges = sorted(str(item) for item in sheet.merged_cells.ranges)
     if merges:
         facts["merged_ranges"] = merges
-        facts["merge_note"] = (
-            "Value and static style refer to the anchor; covered cells are not copied."
-        )
+        facts["merge_note"] = "Merged ranges use the top-left anchor's fill/strike."
     conditional = []
     for region in sheet.conditional_formatting:
         rules = []
@@ -373,10 +386,12 @@ def _facts_table(headers: Sequence[str], rows: Iterable[Sequence[str]]) -> str:
 
 def _style_markdown(facts: Mapping[str, Any]) -> str:
     """書式事実を範囲表へ投影する。共通色は一回、巨大な range 配列は短い行へ分ける。"""
-    lines = ["### Excel style facts", "", f"Profile: {STYLE_PROFILE}"]
+    lines = ["### Excel style facts", ""]
     if "style_status" in facts:
         lines.append(str(facts["style_status"]))
     styles = facts.get("cell_styles", [])
+    if styles and "static_style_note" in facts:
+        lines.append(str(facts["static_style_note"]))
     fills: dict[str, str] = {}
     for entry in styles:
         key = canonical_json(entry["fill"])
@@ -398,21 +413,13 @@ def _style_markdown(facts: Mapping[str, Any]) -> str:
     if rows:
         lines.extend(["", _facts_table(["Cells", "Fill", "Base strike"], rows)])
     else:
-        lines.append("No explicit cell fill/strike entries." if "style_status" not in facts
-                     else "Cell formatting was not inspected.")
+        lines.append("No static fill/strike." if "style_status" not in facts
+                     else "Cell styles were not read.")
     if "rich_text" in facts:
         lines.extend(["", str(facts["rich_text_offsets"]), _facts_table(
             ["Rich text cell", "Strike spans"],
             ((item["cell"], ", ".join(f"[{a},{b})" for a, b in item["strike_spans"]) or "none")
              for item in facts["rich_text"]),
-        )])
-    if "dimension_defaults" in facts:
-        lines.extend(["", str(facts["dimension_note"]), _facts_table(
-            ["Axis", "Key / bounds", "Fill", "Strike"],
-            ((item["axis"],
-              item["key"] + (f" ({item['min']}:{item['max']})" if "min" in item else ""),
-              _fill_text(item["fill"]), json.dumps(item["strike"]))
-             for item in facts["dimension_defaults"]),
         )])
     if "merged_ranges" in facts:
         lines.extend(["", str(facts["merge_note"])])
@@ -429,6 +436,28 @@ def _style_markdown(facts: Mapping[str, Any]) -> str:
     if "sheet_state" in facts:
         lines.append("Sheet state: " + str(facts["sheet_state"]))
     return "\n".join(lines)
+
+
+def _extended_conditional_ranges(data: bytes) -> dict[str, list[str]]:
+    """reader が破棄する拡張条件書式の影響を、元 XML のシート/範囲に限定する。"""
+    result: dict[str, list[str]] = {}
+    with ZipFile(BytesIO(data)) as archive:
+        for name, part in _read_sheet_targets(archive):
+            root = _read_part(archive, part)
+            if root is None:
+                continue
+            ranges = set()
+            for node in root.iter():
+                if (node.tag.endswith("}conditionalFormatting")
+                        and not node.tag.startswith(
+                            "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+                        )):
+                    references = [child.text for child in node.iter()
+                                  if child.tag.endswith("}sqref") and child.text]
+                    ranges.update(references or ["sheet (range unavailable)"])
+            if ranges:
+                result[name] = sorted(ranges)
+    return result
 
 
 def _sheet_table(
@@ -474,23 +503,42 @@ def render_styled_sheets(
     未読注記を添える。内容を失敗扱いにしたり、書式無しと偽装したりしない。
     """
     book: Workbook | None = None
-    limitations = [
-        "Conditional formatting and table styles are not evaluated; static fill is not "
-        'the final displayed color. The converter infers no exclusions; interpret style facts '
-        'using the source legend and business rules.'
-    ]
+    limitations: list[str] = []
+    extended_ranges: dict[str, list[str]] = {}
     try:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             book = load_workbook(BytesIO(data), data_only=True, keep_links=False, rich_text=True)
-        if caught:
+        messages = {str(item.message) for item in caught}
+        conditional_warning = (
+            "Conditional Formatting extension is not supported and will be removed"
+        )
+        if conditional_warning in messages:
+            extended_ranges = _extended_conditional_ranges(data)
+            if not extended_ranges:
+                limitations.append(
+                    "CONDITIONAL_FORMATTING_RANGES_UNAVAILABLE: affected ranges unknown."
+                )
+        # 固定 reader の既知の非セル機能警告は、fill/strike 全体の未確認へ拡大しない。
+        non_style_warnings = {
+            "Data Validation extension is not supported and will be removed",
+            "Sparkline Group extension is not supported and will be removed",
+            "Slicer List extension is not supported and will be removed",
+            "Timeline Ref extension is not supported and will be removed",
+            "Protected Range extension is not supported and will be removed",
+            "Ignored Error extension is not supported and will be removed",
+            "Web Extension extension is not supported and will be removed",
+        }
+        if messages - non_style_warnings - {conditional_warning}:
             limitations.append(
-                "Workbook reader reported unsupported features; visual fidelity is incomplete."
+                "UNCLASSIFIED_READER_WARNING: unsupported workbook features; impact unknown."
             )
     except (ValueError, TypeError, KeyError, IndexError, OSError, ElementTree.ParseError):
+        if book is not None:
+            book.close()
+            book = None
         limitations.append(
-            "STYLE_EXTRACTION_UNAVAILABLE: only cell values were read; do not infer "
-            "absence of strikethrough or background formatting."
+            "STYLE_EXTRACTION_UNAVAILABLE: fill/strike unread; absence is unknown."
         )
     try:
         colors = _Colors(book) if book is not None else None
@@ -502,16 +550,24 @@ def render_styled_sheets(
             ]
             body = _sheet_table(rows, sheet, html_to_markdown)
             facts: dict[str, Any] = (
-                _style_facts(sheet, colors)
+                _style_facts(sheet, colors, len(rows), max(map(len, rows), default=0))
                 if sheet is not None and colors is not None
                 else {"profile": STYLE_PROFILE, "style_status": "NOT_INSPECTED"}
             )
+            if name in extended_ranges:
+                facts.setdefault("conditional_formats", []).extend(
+                    {"range": region, "evaluation": "NOT_EVALUATED",
+                     "source": "unsupported_extension"}
+                    for region in extended_ranges[name]
+                )
             sections.append(
                 f"## {markdown_literal(name)}\n{body}\n\n"
                 + _style_markdown(facts)
             )
-        coverage = "> Excel format coverage: " + STYLE_PROFILE + ". " + " ".join(limitations)
-        return coverage + "\n\n" + "\n\n".join(sections).strip()
+        # 通常は技術説明を付けず、実際に読めなかった情報だけを本文と区別して示す。
+        notes = "\n".join("> " + item for item in limitations)
+        body = "\n\n".join(sections).strip()
+        return notes + "\n\n" + body if notes else body
     finally:
         if book is not None:
             book.close()

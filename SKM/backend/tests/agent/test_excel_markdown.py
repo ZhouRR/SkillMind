@@ -14,6 +14,7 @@ from openpyxl.cell.text import InlineFont
 from openpyxl.formatting.rule import CellIsRule, ColorScaleRule
 from openpyxl.styles import Color, Font, GradientFill, PatternFill
 from openpyxl.styles.fills import Stop
+from openpyxl.worksheet.table import Table, TableStyleInfo
 
 from skillmind.agent.binary_text import convert_excel_to_markdown, render_excel_markdown
 from skillmind.agent.excel_markdown import _CellTokens, _Colors, _compact_ranges, markdown_literal
@@ -57,6 +58,9 @@ def test_any_solid_fill_preserves_raw_and_resolved_color(rgb: str) -> None:
     assert "```json" not in markdown
     assert "old action" in markdown and "new action" in markdown
     assert "~~old action~~" not in markdown
+    assert markdown.startswith("## Cases\n")
+    assert "Excel format coverage" not in markdown and "Profile:" not in markdown
+    assert "excel-styles/" not in markdown
 
 
 def test_whole_cell_strike_and_literal_tildes_are_distinct() -> None:
@@ -195,17 +199,136 @@ def test_conditional_fill_and_strike_are_explicitly_unevaluated() -> None:
     assert "#FFFF00" in markdown
 
 
-def test_merged_anchors_and_dimension_defaults_are_not_expanded() -> None:
-    """結合範囲と default style は記録するが、複写や全行走査を行わない。"""
+def test_merged_style_uses_anchor_without_expanding_unused_dimensions() -> None:
+    """結合全域の書式を anchor に対応付け、広い既定値で本文範囲を増やさない。"""
     book = _book()
     sheet = book["Cases"]
     sheet.merge_cells("B2:C2")
     sheet["B2"].fill = PatternFill("solid", fgColor="FFFF0000")
     sheet.row_dimensions[4].fill = PatternFill("solid", fgColor="FF00FF00")
+    sheet.column_dimensions.group("D", "XFD")
     sheet.column_dimensions["D"].font = Font(strike=True)
     markdown = _convert(book)
     assert "Merged: B2:C2" in markdown and "| B2 | F1 | unspecified |" in markdown
-    assert "| row | 4 |" in markdown and "| column | D" in markdown
+    assert "top-left anchor" in markdown
+    assert "#00FF00" not in markdown and "XFD" not in markdown
+    assert len(markdown) < 1800
+
+
+def test_effective_dimensions_respect_allocated_no_fill_and_font_overrides() -> None:
+    """既存無色セルは灰色にせず、本文内の未割当セルだけ行→列の順で解決する。"""
+    book = _book()
+    sheet = book["Cases"]
+    sheet.row_dimensions[2].fill = PatternFill("solid", fgColor="FFD9D9D9")
+    sheet.row_dimensions[2].font = Font(strike=True)
+    sheet.column_dimensions.group("B", "C")
+    sheet.column_dimensions["B"].fill = PatternFill("solid", fgColor="FFFF0000")
+    # 未割当の B2 は行、B4 は列の書式を使う。C2 は明示的な無色/削除線解除。
+    del sheet["B2"]
+    sheet["C2"].font = Font(strike=False)
+    sheet["A4"] = "last"
+    markdown = _convert(book)
+    assert "| B1:C1, A2, B3:C3 | F1 | unspecified |" in markdown
+    assert "| C2 | F1 | false |" in markdown
+    assert "| B2 | F2 | true |" in markdown
+    assert "| B4:C4 | F3 | unspecified |" in markdown
+    assert "| F1 | none |" in markdown
+    assert "| F2 | " + markdown_literal("solid: rgb=FFD9D9D9; #D9D9D9; RESOLVED") + " |" in markdown
+    assert "| F3 | " + markdown_literal("solid: rgb=FFFF0000; #FF0000; RESOLVED") + " |" in markdown
+    assert "#D9D9D9" in markdown and "#FF0000" in markdown
+    assert "~~old result~~" not in markdown
+    assert "dimension_defaults" not in markdown
+
+
+def test_row_gray_does_not_replace_allocated_normal_or_border_only_cells() -> None:
+    """行の色と矛盾する実セルの無色を明示し、全行廃止という推測を避ける。"""
+    from openpyxl.styles import Border, Side
+
+    book = _book()
+    sheet = book["Cases"]
+    sheet.row_dimensions[2].fill = PatternFill("solid", fgColor="FFA5A5A5")
+    sheet["B2"].border = Border(bottom=Side(style="thin"))
+    markdown = _convert(book)
+    assert "| A2:C2 | F1 | unspecified |" in markdown
+    assert "| F1 | none |" in markdown
+    assert "#A5A5A5" not in markdown
+    assert "not the final displayed color" not in markdown
+    assert "NOT_EVALUATED" not in markdown
+
+
+def _with_extension(book: Workbook, extension: str) -> bytes:
+    """合成シートに reader が警告する拡張だけを加え、他の ZIP bytes は維持する。"""
+    target = BytesIO()
+    with ZipFile(BytesIO(_bytes(book))) as source, ZipFile(target, "w", ZIP_DEFLATED) as archive:
+        for item in source.infolist():
+            raw = source.read(item.filename)
+            if item.filename == "xl/worksheets/sheet1.xml":
+                raw = raw.replace(b"</worksheet>", extension.encode() + b"</worksheet>")
+            archive.writestr(item.filename, raw)
+    return target.getvalue()
+
+
+def test_data_validation_warning_does_not_invalidate_static_formatting() -> None:
+    """入力規則の未対応を、無関係な静的色/削除線の欠落へ拡大しない。"""
+    book = _book()
+    book["Cases"]["B2"].fill = PatternFill("solid", fgColor="FFA5A5A5")
+    raw = _with_extension(book, '<extLst><ext '
+                          'uri="{CCE6A557-97BC-4B89-ADB6-D9C93CAAB3DF}"/></extLst>')
+    markdown = render_excel_markdown(".xlsx", raw)
+    assert "#A5A5A5" in markdown and "old action" in markdown
+    assert "READER_WARNING" not in markdown
+    assert "visual fidelity is incomplete" not in markdown
+    assert "NOT_EVALUATED" not in markdown
+
+
+def test_unsupported_conditional_formatting_is_scoped_to_original_sheet_and_range() -> None:
+    """reader が捨てる x14 条件書式も元範囲を残し、他シートへ警告しない。"""
+    book = _book()
+    book.create_sheet("Unaffected").append(["plain"])
+    raw = _with_extension(book, '<extLst><ext '
+        'uri="{78C0D931-6437-407D-A8EE-F0AAD7539E65}" '
+        'xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" '
+        'xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main">'
+        '<x14:conditionalFormattings><x14:conditionalFormatting>'
+        '<xm:sqref>B2:B3</xm:sqref></x14:conditionalFormatting>'
+        '</x14:conditionalFormattings></ext></extLst>')
+    markdown = render_excel_markdown(".xlsx", raw)
+    affected, unaffected = markdown.split("## Unaffected", 1)
+    assert '| B2:B3 |' in affected and markdown_literal("unsupported_extension") in affected
+    assert "NOT_EVALUATED" in affected and "NOT_EVALUATED" not in unaffected
+    assert "UNCLASSIFIED_READER_WARNING" not in markdown
+
+
+def test_table_style_warning_stays_with_its_sheet_and_table_range() -> None:
+    """通常の静的書式とテーブルの未評価部分を混同しない。"""
+    book = _book()
+    table = Table(displayName="CasesTable", ref="A1:C3")
+    table.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
+    book["Cases"].add_table(table)
+    book.create_sheet("Unaffected").append(["plain"])
+    affected, unaffected = _convert(book).split("## Unaffected", 1)
+    assert "table_styles (NOT_EVALUATED)" in affected and "| A1:C3 |" in affected
+    assert "NOT_EVALUATED" not in unaffected
+
+
+def test_unknown_reader_warning_is_not_hidden_or_reflected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """未分類警告は固定文で残し、reader の任意正文を成果物へ反射しない。"""
+    import warnings
+
+    from skillmind.agent import excel_markdown
+
+    original = excel_markdown.load_workbook
+
+    def warned(*args: Any, **kwargs: Any) -> Workbook:
+        """合成警告のある reader を再現する。"""
+        warnings.warn("unrecognized-feature-private-marker", UserWarning, stacklevel=2)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(excel_markdown, "load_workbook", warned)
+    markdown = _convert(_book())
+    assert "UNCLASSIFIED_READER_WARNING" in markdown
+    assert "unrecognized-feature-private-marker" not in markdown
+    assert "old action" in markdown
 
 
 def test_original_special_values_are_not_html_or_markdown_instructions() -> None:
@@ -256,6 +379,7 @@ def test_style_reader_failure_is_visible_in_saved_markdown(monkeypatch: pytest.M
     assert "old action" in markdown
     assert "NOT_INSPECTED" in markdown
     assert "STYLE_EXTRACTION_UNAVAILABLE" in markdown
+    assert markdown.startswith("> STYLE_EXTRACTION_UNAVAILABLE:")
 
 
 def test_shared_string_rich_text_is_not_limited_to_inline_strings() -> None:
@@ -295,7 +419,7 @@ async def test_style_conversion_uses_real_bounded_subprocess() -> None:
     data = _bytes(book)
     before = copy(data)
     result = await convert_excel_to_markdown("sample.xlsx", data)
-    assert data == before and result.profile == "excel-styles/v2"
+    assert data == before and result.profile == "excel-styles/v3"
     assert "~~old action~~" in result.markdown and "#FF0000" in result.markdown
 
 
@@ -317,7 +441,8 @@ async def test_published_artifact_contains_styles_and_keeps_source_identity() ->
     artifact = result.evidence[-1].artifact
     assert artifact is not None and artifact.content.decode("utf-8") == result.response["markdown"]
     assert result.response["document"]["checksum"] == content.checksum
-    assert result.evidence[0].metadata["conversion_profile"] == "excel-styles/v2"
+    assert result.evidence[0].metadata["conversion_profile"] == "excel-styles/v3"
+    assert "excel-styles/" not in result.response["markdown"]
     assert result.response["markdown_checksum"] == artifact.checksum
     assert "#FF0000" in artifact.content.decode("utf-8")
 
@@ -330,6 +455,7 @@ async def test_legacy_xls_values_remain_available_without_claiming_style_support
     result = await convert_excel_to_markdown("legacy.xls", raw)
     assert result.profile == "excel-values/v1"
     assert "NOT inspected" in result.markdown and "正常終了" in result.markdown
+    assert "Excel format coverage" not in result.markdown
 
 
 def test_repeated_cell_style_is_resolved_once(monkeypatch: pytest.MonkeyPatch) -> None:
