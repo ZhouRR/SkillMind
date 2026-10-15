@@ -16,9 +16,11 @@ from skillmind.agent.document_files import DocumentFilesProvider
 from skillmind.agent.tool_gateway import ToolProviderError
 from skillmind.artifacts.repository import ArtifactRepository
 from skillmind.documents.library import (
+    DOCUMENT_WRITE_CAPABILITY,
     DocumentLibraryBindingRepository,
     FrozenDocumentLibraryBinding,
 )
+from skillmind.skills.resource_policy import resource_operations
 from tests.agent.test_document_provider import CONTRACTS, _context
 from tests.documents.test_document_library_binding import target
 from tests.documents.test_document_management import add_document, apply, change
@@ -36,7 +38,12 @@ def provider_context(db, monkeypatch):
     run = replace(
         context.run,
         resolved_sources={"outputs": binding.to_json()},
-        permission_snapshot={"allowed_capabilities": ["document.write/v1", "document.files/v1"]},
+        permission_snapshot={
+            "allowed_capabilities": ["document.files/v1"],
+            "resource_operations": resource_operations(
+                {"outputs": binding.to_json()}, allowed_capabilities={DOCUMENT_WRITE_CAPABILITY},
+            ),
+        },
     )
     context = replace(context, run=run)
     authorized = AsyncMock(
@@ -115,7 +122,9 @@ async def test_revocation_and_wrong_run_cannot_list_current_files(db, monkeypatc
 
 
 async def test_prepare_save_references_exact_run_artifact_without_body(db, monkeypatch):
+    """実資源の操作権だけで保存を準備し、apply capability を Tool へ戻さない。"""
     provider, context, _ = provider_context(db, monkeypatch)
+    assert DOCUMENT_WRITE_CAPABILITY not in context.run.permission_snapshot["allowed_capabilities"]
     _, _, values = object_fixture()
     artifact = values["artifact"]
     lookup = AsyncMock(return_value=artifact)
@@ -142,6 +151,56 @@ async def test_prepare_save_references_exact_run_artifact_without_body(db, monke
         run_id=context.run_id,
         artifact_ref=artifact.metadata.artifact_ref,
     )
+
+
+@pytest.mark.parametrize(
+    "grant",
+    [
+        None,
+        {"resource_key": "other", "capability_version": DOCUMENT_WRITE_CAPABILITY,
+         "operation": "CREATE"},
+        {"resource_key": "outputs", "capability_version": "http.write/v1",
+         "operation": "CREATE"},
+        {"resource_key": "outputs", "capability_version": DOCUMENT_WRITE_CAPABILITY,
+         "operation": "UPDATE"},
+        {"resource_key": "outputs", "capability_version": DOCUMENT_WRITE_CAPABILITY,
+         "operation": "UNKNOWN"},
+    ],
+)
+async def test_prepare_requires_the_same_library_and_frozen_operation(db, monkeypatch, grant):
+    """他資源・別操作・旧 Tool 許可だけでは、metadata や Artifact を取得しない。"""
+    provider, context, authorized = provider_context(db, monkeypatch)
+    context = replace(context, run=replace(context.run, permission_snapshot={
+        "allowed_capabilities": ["document.files/v1", DOCUMENT_WRITE_CAPABILITY],
+        "resource_operations": [grant] if grant is not None else [],
+    }))
+    lookup = AsyncMock()
+    monkeypatch.setattr(ArtifactRepository, "get_content", lookup)
+    with pytest.raises(ToolProviderError, match="operation is not authorized") as denied:
+        await provider.execute(context, {
+            "library_key": "outputs", "purpose": "Save", "action": "prepare",
+            "operation": "CREATE", "path": "new/result.md", "artifact_ref": "art_fixture",
+            "mime_type": "text/markdown",
+        })
+    assert denied.value.code == "scope_denied"
+    authorized.assert_not_awaited()
+    lookup.assert_not_awaited()
+
+
+async def test_metadata_requires_tool_permission_and_a_selected_library_operation(db, monkeypatch):
+    """書込 Tool の名前だけで文書庫を列挙せず、凍結された資源権限も要求する。"""
+    provider, context, authorized = provider_context(db, monkeypatch)
+    for permission in (
+        {"allowed_capabilities": ["document.files/v1"], "resource_operations": []},
+        {**context.run.permission_snapshot, "allowed_capabilities": []},
+    ):
+        denied_context = replace(context, run=replace(context.run, permission_snapshot=permission))
+        with pytest.raises(ToolProviderError) as denied:
+            await provider.execute(denied_context, {
+                "library_key": "outputs", "purpose": "List", "action": "list",
+            })
+        assert denied.value.code == "scope_denied"
+    authorized.assert_not_awaited()
 
 
 async def test_revocation_during_metadata_read_prevents_publication(db, monkeypatch):

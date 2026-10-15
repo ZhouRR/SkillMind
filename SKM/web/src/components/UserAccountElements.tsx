@@ -54,8 +54,11 @@ export function UserSummaryList({ users, disabled, onSelect }: {
   if (users.length === 0) return <p>{messages.emptyUsers}</p>
   return <ul className="accountUserList" tabIndex={0} aria-label={messages.manageUsers}>
     {users.map((account) => <li className="accountUserCard" key={account.user_id}>
-      <div><strong>{account.display_name}</strong><p>{account.email}</p>
-        <p>{messages.roles[account.system_role]} · <span className={`statusBadge status-${account.status.toLowerCase()}`}>{messages.statuses[account.status]}</span></p>
+      <div className="accountUserInfo"><strong>{account.display_name}</strong><p>{account.email}</p>
+        <div className="accountUserMeta">
+          <span>{messages.roles[account.system_role]}</span>
+          <span className={`statusBadge status-${account.status.toLowerCase()}`}>{messages.statuses[account.status]}</span>
+        </div>
       </div>
       <button type="button" className="secondaryButton" disabled={disabled}
         aria-label={`${messages.edit}: ${account.email}`} onClick={() => onSelect(account.user_id)}>{messages.edit}</button>

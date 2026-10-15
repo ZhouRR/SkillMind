@@ -108,7 +108,10 @@ export function ResourceList({ items, emptyText, busy, loaded = true }: { loaded
           <div className="resourceInfo">
             <strong>{item.title}</strong>
             <span className="resourceValue">{item.detail}</span>
-            <small><span className={`statusBadge status-${item.status.toLowerCase()}`}>{messages.enums.resourceStatus[item.status] ?? item.status}</span> · {formatLocalTimestamp(item.updatedAt)}</small>
+            <div className="resourceItemMeta">
+              <span className={`statusBadge status-${item.status.toLowerCase()}`}>{messages.enums.resourceStatus[item.status] ?? item.status}</span>
+              <span className="resourceTimestamp">{formatLocalTimestamp(item.updatedAt)}</span>
+            </div>
           </div>
           <div className="panelHeaderActions">
             {item.onEdit && <button disabled={busy} className="secondaryButton compactButton" onClick={item.onEdit} type="button">{messages.resources.edit}</button>}

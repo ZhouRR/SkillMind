@@ -377,7 +377,7 @@ function TaskSchedules({ schedules, onManage, disabled }: {
   if (!schedules.length) return null
   return <details className="taskSchedules"><summary>{messages.tasks.manageSchedule} ({schedules.length})</summary><ul className="taskScheduleList">
     {schedules.map((schedule) => <li key={schedule.schedule_id}>
-      <span className={`statusBadge scheduleStatus-${schedule.status.toLowerCase()}`}>{messages.enums.scheduleStatus[schedule.status]}</span>
+      <span className={`statusBadge status-${schedule.status.toLowerCase()} scheduleStatus-${schedule.status.toLowerCase()}`}>{messages.enums.scheduleStatus[schedule.status]}</span>
       <strong>{schedule.name}</strong><span className="mono">{summarizeTiming(schedule)}</span>
       <button className="secondaryButton compactButton" type="button" data-task-schedule-manage={schedule.schedule_id}
         disabled={disabled} onClick={(event) => onManage(schedule.schedule_id, event.currentTarget)}>{messages.tasks.manageSchedule}</button>

@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import copy
 from io import BytesIO
 from typing import Any
+from xml.etree import ElementTree
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
@@ -144,10 +145,51 @@ def test_custom_indexed_palette_and_reserved_system_colors() -> None:
     sheet["A2"].fill = PatternFill("solid", fgColor=Color(indexed=1))
     sheet["B2"].fill = PatternFill("solid", fgColor=Color(indexed=64))
     sheet["C2"].fill = PatternFill("solid", fgColor=Color(auto=True))
+    sheet["B3"].fill = PatternFill("solid", fgColor=Color(indexed=44))
+    sheet["C3"].fill = PatternFill("solid", fgColor=Color(indexed=65))
     markdown = _convert(book)
     assert markdown_literal("indexed=1; #ABCDEF; RESOLVED") in markdown
     assert "indexed=64; UNRESOLVED" in markdown
+    assert "indexed=65; UNRESOLVED" in markdown
+    assert "indexed=44; UNRESOLVED" in markdown
+    assert "#99CCFF" not in markdown
     assert "auto=True; UNRESOLVED" in markdown
+
+
+@pytest.mark.parametrize("palette", ["absent", "empty", "mru_only"])
+def test_missing_indexed_palette_uses_standard_colors_without_resolving_system_color(
+    palette: str,
+) -> None:
+    """mruColors は索引表ではない。未定義の索引色は標準表、system 背景は未解決とする。"""
+    book = _book()
+    sheet = book["Cases"]
+    sheet["B2"].fill = PatternFill("solid", fgColor=Color(indexed=9))
+    sheet["B3"].fill = PatternFill("solid", fgColor=Color(indexed=44))
+    sheet["C2"].fill = PatternFill("solid", fgColor=Color(indexed=65))
+    target = BytesIO()
+    ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    with ZipFile(BytesIO(_bytes(book))) as source, ZipFile(target, "w", ZIP_DEFLATED) as archive:
+        for item in source.infolist():
+            raw = source.read(item.filename)
+            if item.filename == "xl/styles.xml":
+                root = ElementTree.fromstring(raw)
+                colors = root.find(ns + "colors")
+                assert colors is not None
+                if palette == "absent":
+                    root.remove(colors)
+                else:
+                    colors.clear()
+                    if palette == "mru_only":
+                        mru = ElementTree.SubElement(colors, ns + "mruColors")
+                        ElementTree.SubElement(mru, ns + "color", rgb="FFFF0000")
+                raw = ElementTree.tostring(root)
+            archive.writestr(item.filename, raw)
+    markdown = render_excel_markdown(".xlsx", target.getvalue())
+    assert markdown_literal("indexed=9; #FFFFFF; RESOLVED") in markdown
+    assert markdown_literal("indexed=44; #99CCFF; RESOLVED") in markdown
+    assert "indexed=65; UNRESOLVED" in markdown
+    assert markdown.count("UNRESOLVED") == 1
+    assert "old action" in markdown and "new action" in markdown
 
 
 def test_missing_theme_keeps_unresolved_number() -> None:

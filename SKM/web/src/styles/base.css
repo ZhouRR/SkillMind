@@ -165,24 +165,33 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
 .scopeBadge, .statusBadge {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  gap: 5px;
+  width: fit-content;
+  max-width: fit-content;
+  justify-self: start;
+  flex-shrink: 0;
   border: 1px solid var(--border-strong);
   border-radius: 999px;
-  padding: 4px 10px;
+  padding: 2px 8px;
+  min-height: 20px;
   color: var(--text-muted);
   background: var(--surface-raised);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
+  line-height: 1.35;
   white-space: nowrap;
+  vertical-align: middle;
+  letter-spacing: .01em;
 }
 /* Run 状態 badge は文字と同色の状態点を先頭に置き、色覚に頼らず現在地を掴めるようにする。 */
-.statusBadge::before { content: ""; flex-shrink: 0; width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
-.status-succeeded, .status-active, .status-enabled, .status-completed { border-color: var(--ok-border); color: var(--ok); background: var(--ok-soft); }
-.status-failed, .status-error, .status-blocked { border-color: var(--danger-border); color: var(--danger); background: var(--danger-soft); }
+.statusBadge::before { content: ""; flex-shrink: 0; width: 5px; height: 5px; border-radius: 999px; background: currentColor; }
+.status-succeeded, .status-active, .status-enabled, .status-completed, .status-published, .scheduleStatus-active, .scheduleStatus-completed { border-color: var(--ok-border); color: var(--ok); background: var(--ok-soft); }
+.status-failed, .status-error, .status-blocked, .scheduleStatus-error { border-color: var(--danger-border); color: var(--danger); background: var(--danger-soft); }
 /* 取消・無効・除外・アーカイブは中立の終態。danger 色を使うと「壊れた」と誤読されるため無彩色で示す。 */
-.status-cancelled, .status-disabled, .status-archived, .status-removed { border-color: var(--border-strong); color: var(--text-muted); background: var(--surface-raised); }
+.status-cancelled, .status-disabled, .status-archived, .status-removed, .status-deprecated, .scheduleStatus-archived { border-color: var(--border-strong); color: var(--text-muted); background: var(--surface-raised); }
 .status-running, .status-preparing { border-color: var(--live-border); color: var(--live); background: var(--live-soft); }
-.status-waiting_permission, .status-waiting_for_input, .status-waiting_for_approval, .status-retry_pending, .status-paused, .status-frozen, .status-waiting { border-color: var(--warn-border); color: var(--warn); background: var(--warn-soft); }
+.status-waiting_permission, .status-waiting_for_input, .status-waiting_for_approval, .status-retry_pending, .status-paused, .status-frozen, .status-waiting, .status-draft, .scheduleStatus-paused { border-color: var(--warn-border); color: var(--warn); background: var(--warn-soft); }
 .status-running::before, .status-preparing::before { animation: statusPulse 1.4s ease-in-out infinite; }
 @keyframes statusPulse { 50% { opacity: .3; } }
 

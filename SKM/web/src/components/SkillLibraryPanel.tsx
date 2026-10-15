@@ -96,7 +96,7 @@ export function SkillLibraryPanel({
           {actionError?.versionId === version.skill_version_id && <p className="error" role="alert">{actionError.message}</p>}
         </div>
         <div className="skillLibraryStatus">
-          <span className="statusBadge">{messages.enums.skillVersionStatus[version.status] ?? version.status}</span>
+          <span className={`statusBadge status-${version.status.toLowerCase()}`}>{messages.enums.skillVersionStatus[version.status] ?? version.status}</span>
           {projectId && !enablementsKnown && <span className="scopeBadge">{enablementLabel}</span>}
           {projectId && active && <span className="scopeBadge">{messages.skills.enabledBadge}</span>}
           {projectId && disabled && <span className="scopeBadge">{messages.skills.disabledBadge}</span>}

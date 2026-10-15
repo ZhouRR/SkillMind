@@ -144,7 +144,7 @@ export function ProjectRows({ projects, projectId, locked, admin, onSelect, onAc
   const messages = useMessages()
   return <div className="projectList">{projects.map((project) => <article className={`projectItem${project.project_id.toLowerCase() === projectId.toLowerCase() ? ' projectItemSelected' : ''}`} data-project-row={project.project_id} key={project.project_id}>
     <button className="projectSelect" type="button" data-project-action="select" onClick={() => onSelect(project.project_id)}>
-      <strong>{project.name}</strong><span>{project.key}</span><small>{project.description || messages.projects.noDescription}</small>
+      <strong>{project.name}</strong><span className="projectKey">{project.key}</span><small>{project.description || messages.projects.noDescription}</small>
       <span className={`statusBadge status-${project.status.toLowerCase()}`}>{messages.projectManagement.states[project.status]}</span>
     </button>
     {admin && <div className="projectItemActions"><button className="secondaryButton compactButton" type="button" data-project-action="edit" disabled={locked} onClick={() => onAction('edit', project)}>{messages.projects.edit}</button>

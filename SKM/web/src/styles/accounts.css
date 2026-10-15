@@ -14,9 +14,9 @@
 .accountSearch { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin-bottom: 16px; }
 .accountSearch label { flex: 1 1 200px; min-width: 0; margin: 0; }
 .accountFacts { display: grid; gap: 10px; margin: 14px 0; font-size: 13px; line-height: 1.6; }
-.accountFacts > div { display: grid; grid-template-columns: minmax(80px, .65fr) minmax(0, 1fr); gap: 12px; }
+.accountFacts > div { display: grid; grid-template-columns: minmax(80px, .65fr) minmax(0, 1fr); gap: 12px; align-items: center; }
 .accountFacts dt { color: var(--text-muted); }
-.accountFacts dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.accountFacts dd { min-width: 0; margin: 0; overflow-wrap: anywhere; display: flex; align-items: center; }
 .accountVersion { color: var(--text-muted); font-size: 13px; }
 .accountComparison, .accountCreateReview { margin: 18px 0; border: 1px solid var(--warn); border-radius: var(--radius-small); padding: 14px; overflow-wrap: anywhere; }
 .accountNotice { margin: 12px 0; border-inline-start: 3px solid var(--warn); padding: 8px 12px; background: var(--warn-soft); overflow-wrap: anywhere; }
@@ -37,7 +37,9 @@
 .accountUserCard, .accountEventList > li { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-small); padding: 12px; overflow-wrap: anywhere; }
 .accountUserCard { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
 .accountUserCard > div { flex: 1 1 170px; min-width: 0; }
-.accountUserCard p { margin: 5px 0; font-size: 13px; }
+.accountUserCard p { margin: 3px 0; font-size: 13px; }
+.accountUserMeta { display: flex; align-items: center; gap: 8px; margin-top: 5px; font-size: 12px; color: var(--text-muted); }
+.accountUserMeta .statusBadge { flex-shrink: 0; }
 .accountUserCard small { display: block; color: var(--text-muted); }
 .accountEventList summary { cursor: pointer; line-height: 1.7; }
 .accountEventList summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }

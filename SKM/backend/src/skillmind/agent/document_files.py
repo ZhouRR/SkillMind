@@ -15,6 +15,7 @@ from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.db.models import ProjectDocument
 from skillmind.documents.file_state import FOLDER_OPERATIONS, file_description, observe_file_state
 from skillmind.documents.library import (
+    DOCUMENT_WRITE_CAPABILITY,
     DocumentLibraryBindingRepository,
     DocumentLibraryTarget,
     parse_document_library_source,
@@ -22,6 +23,7 @@ from skillmind.documents.library import (
 from skillmind.documents.management import DocumentManagementRepository
 from skillmind.documents.paths import validate_document_path
 from skillmind.effects.document_write import document_proposal_payload
+from skillmind.effects.operation_policy import WRITE_OPERATIONS
 from skillmind.storage import UploadRejectedError
 
 CAPABILITY = "document.files/v1"
@@ -56,10 +58,25 @@ class DocumentFilesProvider:
             or run.project_id != context.project_id
             or run.run_attempt_id != context.run_attempt_id
             or run.user_id != context.user_id
-            or "document.write/v1" not in run.permission_snapshot.get("allowed_capabilities", [])
+            or CAPABILITY not in run.permission_snapshot.get("allowed_capabilities", [])
         ):
             raise ToolProviderError(
                 "scope_denied", "Document library is not authorized", retryable=False
+            )
+        # 外部 write は Tool 一覧ではなく、同じ資源に凍結された操作権から確認する。
+        grants = run.permission_snapshot.get("resource_operations")
+        operations = {
+            item.get("operation") for item in grants
+            if isinstance(item, Mapping)
+            and item.get("resource_key") == key
+            and item.get("capability_version") == DOCUMENT_WRITE_CAPABILITY
+            and item.get("operation") in WRITE_OPERATIONS[DOCUMENT_WRITE_CAPABILITY]
+        } if isinstance(grants, list) else set()
+        if not operations or (
+            arguments.get("action") == "prepare" and arguments.get("operation") not in operations
+        ):
+            raise ToolProviderError(
+                "scope_denied", "Document library operation is not authorized", retryable=False
             )
         try:
             binding = parse_document_library_source(

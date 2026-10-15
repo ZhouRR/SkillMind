@@ -22,7 +22,7 @@ from zipfile import ZipFile
 
 from openpyxl import load_workbook
 from openpyxl.cell.rich_text import CellRichText, TextBlock
-from openpyxl.styles.colors import Color
+from openpyxl.styles.colors import COLOR_INDEX, Color
 from openpyxl.styles.fills import Fill, GradientFill
 from openpyxl.utils.cell import get_column_letter
 from openpyxl.workbook.workbook import Workbook
@@ -98,7 +98,9 @@ class _Colors:
 
     def __init__(self, book: Workbook) -> None:
         """system color は lastClr の観測値のみを使い、OS 色を推測しない。"""
-        self.palette = tuple(book._colors)
+        # mruColors だけの colors 要素は reader の palette を空にする。定義がなければ標準色。
+        # 部分的な独自 palette の範囲外や system 色を、標準色で補完しない。
+        self.palette = tuple(book._colors or COLOR_INDEX)
         self.theme: dict[int, str] = {}
         if book.loaded_theme:
             try:

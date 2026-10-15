@@ -1,7 +1,7 @@
 /* 管理一覧・長い scope と drawer を既存の面と罫線で整える。 */
 .resourceAdmin .resourceInfo { min-width: 0; }
 .resourceAdmin .resourceInfo strong { overflow: visible; white-space: normal; text-overflow: clip; overflow-wrap: anywhere; }
-.resourceAdmin .resourceInfo small, .resourceRequestFeedback strong { overflow-wrap: anywhere; }
+.resourceAdmin .resourceInfo small, .resourceAdmin .resourceItemMeta, .resourceRequestFeedback strong { overflow-wrap: anywhere; }
 .resourceFormFields { display: grid; gap: 16px; margin: 0; padding: 0; min-width: 0; border: 0; }
 .resourceFormFields > label { display: grid; gap: 8px; min-width: 0; }
 .resourceSectionTitle { margin: 8px 0 0; padding-top: 16px; border-top: 1px solid var(--border); font-size: 15px; }

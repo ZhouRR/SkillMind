@@ -67,10 +67,11 @@
 .projectItem { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; border: 1px solid var(--border); border-radius: var(--radius-small); padding: 8px; background: var(--surface-input); transition: border-color .15s ease, background .15s ease; }
 .projectItem:hover { border-color: var(--border-strong); }
 .projectItemSelected { border-color: var(--accent-border); background: var(--accent-soft); }
-.projectSelect { display: grid; gap: 3px; min-width: 0; border: 0; padding: 4px; color: var(--text); background: transparent; text-align: left; cursor: pointer; }
-.projectSelect strong, .projectSelect span, .projectSelect small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.projectSelect span { color: var(--accent); font: 12px var(--font-mono); }
+.projectSelect { display: grid; gap: 4px; min-width: 0; border: 0; padding: 4px; color: var(--text); background: transparent; text-align: left; cursor: pointer; }
+.projectSelect strong, .projectSelect .projectKey, .projectSelect small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.projectSelect .projectKey { color: var(--accent); font: 12px var(--font-mono); }
 .projectSelect small { color: var(--text-faint); font-size: 12px; }
+.projectSelect .statusBadge { justify-self: start; align-self: flex-start; margin-top: 6px; }
 .projectItemActions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
 /* 作成時は全幅、編集時は取消が左・保存が右の整列にする。 */
 .projectFormActions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: flex-end; margin-top: 14px; }
@@ -360,6 +361,9 @@
 /* 範囲要約は利用者語の見出しを含むため本文 font で表示し、狭幅でも省略せず折り返して読ませる。 */
 .resourceValue { color: var(--text-muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .resourceInfo small { color: var(--text-faint); font-size: 12px; }
+.resourceItemMeta { display: flex; align-items: center; gap: 8px; margin-top: 4px; color: var(--text-faint); font-size: 12px; line-height: 1.4; }
+.resourceItemMeta .statusBadge { flex-shrink: 0; }
+.resourceTimestamp { color: var(--text-faint); font-size: 12px; }
 /* 権限档位・scope 部分集合の radio/checkbox 群。moduleSkillPicker と同じ見た目規則を踏襲する。 */
 .scopePicker { display: grid; gap: 7px; margin: 0; border: 1px solid var(--border); border-radius: var(--radius-small); padding: 11px 12px; }
 .scopePicker legend { padding: 0 4px; color: var(--text-muted); font-size: 12px; font-weight: 600; }
@@ -408,7 +412,7 @@
 .taskCardFacts div { display: grid; gap: 2px; min-width: 0; }
 .taskCardFacts dt { color: var(--text-faint); font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
 .taskCardFacts dd { margin: 0; color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
-.taskCardLastRun { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.taskCardLastRun { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 0 16px; font-size: 12px; }
 .taskScheduleList {
   display: grid;
   gap: 8px;

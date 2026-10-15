@@ -29,7 +29,7 @@
 - 画面上传文件或目录时默认更新同目录同名文件，无需单独选择开关；“更新文件”菜单也沿用同一路径。更新固定元 ID、路径与 checksum，在预约和发布时检查并发变化；新版本使用新 ID，旧版移入回收站并保留原字节、冻结引用和上传回执。知识库更新无需先删除历史引用，但旧版完全删除仍需引用检查；保留的旧版继续计入配额。
 - 删除须在同一事务保存原对象清理要求，再在确认提交后尝试删 blob。204、目录消失或一次读不到对象都不证明全部版本、在途 PUT 和配额已结清；持久清理重试与结算仍待补齐。执行履历 purge 沿 [history_purge](../../SKM/backend/src/skillmind/runs/history_purge.py)，保留共享成果与最小删除审计，不删除外部业务数据或重做操作。
 
-Excel→Markdown の `.xlsx` は `excel-styles/v3` で原行列、静的な塗りと全体/部分削除線を保持する。割当済みセルの無色・削除線解除を含む書式を優先し、本文内の未割当セルだけに行→列→標準の既定値を適用する。同書式は連続範囲に縮約し、結合領域は左上セルの書式を参照して本文を複写しない。RGB/theme/indexed/tint の原値と解色結果を残し、未解決色を白とみなさない。条件書式・表スタイルの未評価は実在するシート/範囲だけに示す。入力規則など静的書式と無関係な既知 reader 警告は除き、未分類警告や書式読取失敗は明示する。除外判断は業務規則に委ね、旧 `.xls` は値のみ/書式未検査を明示する。profile は Evidence に記録し、Markdown 本文には重複記載しない。Markdown の注記は書式の読み方と実際の未取得情報だけを短く示し、原版/Artifact の原 byte 検証と既存制限は維持する。
+Excel→Markdown の `.xlsx` は `excel-styles/v3` で原行列、静的な塗りと全体/部分削除線を保持する。割当済みセルの無色・削除線解除を含む書式を優先し、本文内の未割当セルだけに行→列→標準の既定値を適用する。同書式は連続範囲に縮約し、結合領域は左上セルの書式を参照して本文を複写しない。RGB/theme/indexed/tint の原値と解色結果を残す。索引調色板が未定義・空の場合だけ標準色を使い、独自調色板の範囲外や system 色を白・標準色で補完しない。条件書式・表スタイルの未評価は実在するシート/範囲だけに示す。入力規則など静的書式と無関係な既知 reader 警告は除き、未分類警告や書式読取失敗は明示する。除外判断は業務規則に委ね、旧 `.xls` は値のみ/書式未検査を明示する。profile は Evidence に記録し、Markdown 本文には重複記載しない。Markdown の注記は書式の読み方と実際の未取得情報だけを短く示し、原版/Artifact の原 byte 検証と既存制限は維持する。
 
 文档正文优先通过 `document.read/v1` 的 `response_mode=file` 交付为 Worker 内本 Run 的文件，响应只给路径、大小和哈希；Agent 再分段读取或检索。新 Run 固定当前 Project 文档库的整体读权限，`document.list/read` 可取得未选择的参考资料及执行中新上传的文件；读取每次核对当前用户与项目权限。上传回执的文档 ID/hash 可直接用于 `document_id` / `expected_hash`。任务选择仍固定原 ID/hash，不因额外参考或同名更新变更；旧 Run 保留原范围。目录以平台 metadata 和 MinIO 内容为正本，本地是工作副本，不是实时同步盘。
 
@@ -77,7 +77,7 @@ Excel→Markdown の `.xlsx` は `excel-styles/v3` で原行列、静的な塗�
 
 ## 外部效果
 
-受控写入的模型说明来自各 Effect request Schema 的 `description`，由同一提案工具统一交付。维护时同步准确的 `target`、`changes`、前提版本来源和回读格式；不能只描述用途，也不能把格式说明当作新增权限。文档与 Git 优先复用已提供的提案准备工具，直接提案使用同一契约；无需在业务 Skill 重复平台字段格式。
+受控写入的模型说明来自各 Effect request Schema 的 `description`，由同一提案工具统一交付。维护时同步准确的 `target`、`changes`、前提版本来源和回读格式；不能只描述用途，也不能把格式说明当作新增权限。文档与 Git 优先复用已提供的提案准备工具，直接提案使用同一契约；无需在业务 Skill 重复平台字段格式。 文書ファイルの提案準備も、直接 write Tool の有無ではなく同じ文書庫・操作の凍結権限と現在の binding を照合する。
 
 - 外部写入沿 observe → propose → approve → apply；Agent 提案不等于远端执行。批准绑定精确 Proposal version/checksum、Provider、操作与 scope；[EffectService](../../SKM/backend/src/skillmind/effects/service.py)与独立 Worker 核对当前资格、冻结 binding、lease、取消和期限，不在业务锁内等待远端 I/O。
 - 自动批准只能来自原 Run 启动时明确记录的同意，或适用能力的既有预授权规则；Git/MCP 的额外同意不从旧 Run 补推。`repository.write/v1` 禁止 Project 预授权与 force，Git 仍核对精确 ref 和原提交，不把启动同意当作任意仓库写权限。
