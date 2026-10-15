@@ -122,6 +122,8 @@ async def test_sequence_rejects_non_sequence_and_deferred_tools(tmp_path, safe, 
     context, runtime, _, provider = sequence_runtime(tmp_path, safe=safe, deferred=deferred)
     result = await invoke(context, runtime, [step()])
     assert result["status"] == "error" and provider.calls == 0
+    assert result["code"] == "scope_denied"
+    assert "does not support sequence execution" in result["message"]
 
 
 @pytest.mark.parametrize(
@@ -138,6 +140,18 @@ async def test_all_steps_validated_before_first_child(tmp_path, bad):
     context, runtime, _, provider = sequence_runtime(tmp_path)
     result = await invoke(context, runtime, [step(), bad])
     assert result["status"] == "error" and provider.calls == 0
+
+
+async def test_sequence_preserves_child_input_diagnostic_before_any_execution(tmp_path):
+    """子の不足引数を sequence 不可と誤報せず、位置と元の原因を返す。"""
+    context, runtime, writer, provider = sequence_runtime(tmp_path)
+    bad = {"capability": "issue.read/v1", "arguments": {"issue_ref": "synthetic-private"}}
+    result = await invoke(context, runtime, [step(), bad])
+    assert result["code"] == "invalid_request" and result["retryable"] is False
+    assert "/steps/1" in result["message"] and "purpose" in result["message"]
+    assert "No steps were executed" in result["message"]
+    assert "synthetic-private" not in result["message"]
+    assert provider.calls == 0 and not writer.completed and len(writer.failed) == 1
 
 
 async def test_explicit_condition_stops_even_when_tool_completed(tmp_path):

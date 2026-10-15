@@ -9,6 +9,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from skillmind.agent.domain import RegisteredTool
+from skillmind.agent.tool_diagnostics import schema_error_summary
 from skillmind.agent.tool_routing import ToolRouteError, ToolRouting, provider_arguments
 from skillmind.effects.proposal import CHANGE_PROPOSE_CAPABILITY
 
@@ -22,7 +23,12 @@ _BOUNDARY_ARGUMENTS = frozenset(
 
 
 class ToolPolicyViolation(PermissionError):
-    """Tool 呼び出しが Run snapshot の hard boundary に違反したことを表す。"""
+    """Provider 実行前の引数不正と権限境界の拒否を区別する。"""
+
+    def __init__(self, message: str, *, code: str = "scope_denied") -> None:
+        """既存の公開 error code と、値を含まない診断を保持する。"""
+        self.code = code
+        super().__init__(message)
 
 
 def capability_to_sdk_name(capability: str) -> str:
@@ -81,10 +87,15 @@ class ToolExecutionPolicy:
     def authorize(self, tool_name: str, tool_input: Mapping[str, Any]) -> RegisteredTool:
         """Tool 名、parameter Schema、境界変更用 field を実行直前に検証する。"""
 
+        if not isinstance(tool_input, Mapping):
+            raise ToolPolicyViolation(
+                "Tool arguments must be a JSON object. The provider was not called.",
+                code="invalid_request",
+            )
         try:
             tool = self._routing.resolve(tool_name, tool_input)
         except ToolRouteError as error:
-            raise ToolPolicyViolation(str(error)) from None
+            raise ToolPolicyViolation(str(error), code=error.code) from None
         boundary_input = (
             _proposal_control_arguments(tool_input)
             if tool.capability == CHANGE_PROPOSE_CAPABILITY else tool_input
@@ -112,7 +123,11 @@ class ToolExecutionPolicy:
             key=lambda error: tuple(str(part) for part in error.absolute_path),
         )
         if errors:
-            raise ToolPolicyViolation("Tool input does not match registered schema")
+            raise ToolPolicyViolation(
+                "Tool input does not match registered schema: " + schema_error_summary(errors)
+                + ". Correct the arguments and submit a new request; the provider was not called.",
+                code="invalid_request",
+            )
         if tool.capability == CHANGE_PROPOSE_CAPABILITY and "request_file" in tool_input:
             # envelope はここまで検査し、file の hash 照合・展開後に同じ認可を再実行する。
             # 内側の capability_version を未展開の envelope から読まない。
@@ -134,7 +149,8 @@ class ToolExecutionPolicy:
                 raise ToolPolicyViolation(
                     "capability_version must name the registered write effect for the resource "
                     "(for example database.write/v1 or document.write/v1), "
-                    "not the change.propose/v1 control tool or a read capability"
+                    "not the change.propose/v1 control tool or a read capability",
+                    code="invalid_request",
                 ) from error
         if (
             tool.capability == CHANGE_PROPOSE_CAPABILITY
@@ -152,7 +168,7 @@ class ToolExecutionPolicy:
                     expected=row["expected"], precondition=tool_input["precondition"],
                 )
             except ValueError as error:
-                raise ToolPolicyViolation(str(error)) from error
+                raise ToolPolicyViolation(str(error), code="invalid_request") from error
         return tool
 
 

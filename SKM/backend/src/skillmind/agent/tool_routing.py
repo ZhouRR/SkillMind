@@ -16,6 +16,11 @@ _RESOURCE_KEY = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
 class ToolRouteError(ValueError):
     """接続情報を公開しない、修正可能な資源選択の誤り。"""
 
+    def __init__(self, message: str, *, code: str = "invalid_request") -> None:
+        """未登録の能力と、登録済み資源の選択ミスを区別する。"""
+        self.code = code
+        super().__init__(message)
+
 
 def provider_arguments(tool: RegisteredTool, arguments: Mapping[str, Any]) -> dict[str, Any]:
     """外側の selector だけを取り除き、MCP や DB の業務引数を変更しない。"""
@@ -74,7 +79,10 @@ class ToolRouting:
         """一つなら省略可、複数なら原 slot key を必須にする。接続 ID は受け取らない。"""
         group = self._groups.get(name)
         if not group:
-            raise ToolRouteError(f"Tool is not registered for this run: {name}")
+            raise ToolRouteError(
+                "Tool is not registered for this Run. Use the Run's registered tool catalog.",
+                code="scope_denied",
+            )
         if group[0].resource_key is None:
             if group[0].integration_id is not None and "resource_key" in arguments:
                 raise ToolRouteError("This tool has no named resource selector")

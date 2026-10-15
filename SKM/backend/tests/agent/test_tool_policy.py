@@ -106,6 +106,34 @@ def test_schema_violation_is_denied() -> None:
         )
 
 
+@pytest.mark.parametrize("capability,arguments", [
+    ("document.list/v1", {"directory": "reference", "recursive": False, "limit": 100}),
+    ("document.files/v1", {"action": "list", "library_key": "documents",
+                           "path": "reference", "limit": 200}),
+])
+def test_document_list_limits_are_invalid_requests_with_actionable_diagnostics(
+    capability, arguments,
+):
+    """実際の両文書契約で上限・必須引数を示し、権限拒否や接続障害と混同しない。"""
+    root = Path(__file__).resolve().parents[3] / "contracts"
+    tool = RegisteredTool(
+        capability=capability, sdk_name=capability_to_sdk_name(capability),
+        provider="fixture", integration_id=uuid4(),
+        input_schema=json.loads((root / f"tools/{capability}/request.schema.json").read_text()),
+    )
+    policy = ToolExecutionPolicy((tool,))
+    with pytest.raises(ToolPolicyViolation) as caught:
+        policy.authorize(tool.sdk_name, arguments)
+    error = caught.value
+    assert error.code == "invalid_request"
+    assert "/limit: must be <= 50" in str(error)
+    assert "missing required fields: purpose" in str(error)
+    assert "provider was not called" in str(error) and len(str(error)) <= 500
+    corrected = {**arguments, "limit": 50, "purpose": "List reference documents"}
+    assert policy.authorize(tool.sdk_name, corrected) is tool
+    assert arguments["limit"] > 50
+
+
 def test_nested_boundary_argument_is_denied_before_schema_validation() -> None:
     """入れ子 field でも Integration を model 入力から変更できないことを保証する。"""
 

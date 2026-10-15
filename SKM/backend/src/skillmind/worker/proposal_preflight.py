@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy.exc import SQLAlchemyError
 
 from skillmind.agent.domain import RunContext
-from skillmind.agent.proposal_files import expand_proposal_file
+from skillmind.agent.proposal_files import ProposalFileError, expand_proposal_file
 from skillmind.effects.postgres_native import SQL_OBSERVATION_MESSAGE, SqlObservationValidationError
 from skillmind.runs.service import RunService
 from skillmind.worker.tool_authority import ToolExecutionAuthority
@@ -49,6 +49,11 @@ class ProposalPreflight:
                 "code": "invalid_request",
                 "message": SQL_OBSERVATION_MESSAGE,
                 "retryable": False,
+            }
+        except ProposalFileError as file_error:
+            error = {
+                "status": "error", "code": file_error.code,
+                "message": str(file_error), "retryable": False,
             }
         except ValueError:
             error = {

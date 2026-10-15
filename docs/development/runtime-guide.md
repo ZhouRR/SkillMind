@@ -24,12 +24,13 @@
 
 - 冻结精确版本、资源选择、文档 ID/hash 与绑定。新增文件、同名重传或配置变化不改变原 Run；缺失或损坏不能用当前文件补齐。物化与复用沿 [workspace_materializer](../../SKM/backend/src/skillmind/agent/workspace_materializer.py)和 [input_snapshot](../../SKM/backend/src/skillmind/runs/input_snapshot.py)，校验原回执及完整输入树；`input/` 只读，写入限 `workspace/`、`output/`。
 - 选择文档、读取正文、转换与保存成果是独立能力。按需准备仅冻结清单，后续工具核验原内容；文档观察不等于取得正文，MCP 服务的只读标注不等于授权。能力与 Provider 是否可用，以 [Worker 装配](../../SKM/backend/src/skillmind/worker/settings.py)及冻结 binding 为准。
+- 工具参数不合法返回 `invalid_request`，指出契约中的字段位置、类型或数量限制，说明 Provider 尚未执行；权限拒绝保留 `scope_denied`。SDK 与工具序列保留同一诊断，拒绝审计记录分类和原因，不复制输入值。`retryable: false` 不阻止修正参数后的新请求。Provider 返回值不合契约或无法分类的执行失败使用 `unavailable`，不据此断言连接故障；真实读取失败仍可阻断任务，结果未知的外部操作不得自动重放。
 - 上传按原 actor/Project、幂等键和内容确认；数据库提交与对象 PUT 不原子。沿 [DocumentService](../../SKM/backend/src/skillmind/documents/service.py)保留预约、发布/关闭回执及原存储归属；关闭发布不证明 PUT 停止，未知不自动重传、删对象或退配额。
 - 改名/移动只改变展示路径，保留 ID、原字节、存储引用和原上传回执；清理时校验不变身份，不能要求当前路径仍等于上传路径。回收站仍占用存储；完全删除先检查回收状态、生成执行已结束、无未决操作及其他引用。[引用查询](../../SKM/backend/src/skillmind/documents/reference_repository.py)覆盖 Run、Schedule、occurrence，按原文档选择和冻结资源类型、连接身份提取引用，不验证非文档工具的名称或版本，也不查询当前连接配置。资源类型或身份缺失、文档快照无法验证时仍拒绝删除，不从旧工具名称推测类型。
 - 画面上传文件或目录时默认更新同目录同名文件，无需单独选择开关；“更新文件”菜单也沿用同一路径。更新固定元 ID、路径与 checksum，在预约和发布时检查并发变化；新版本使用新 ID，旧版移入回收站并保留原字节、冻结引用和上传回执。知识库更新无需先删除历史引用，但旧版完全删除仍需引用检查；保留的旧版继续计入配额。
 - 删除须在同一事务保存原对象清理要求，再在确认提交后尝试删 blob。204、目录消失或一次读不到对象都不证明全部版本、在途 PUT 和配额已结清；持久清理重试与结算仍待补齐。执行履历 purge 沿 [history_purge](../../SKM/backend/src/skillmind/runs/history_purge.py)，保留共享成果与最小删除审计，不删除外部业务数据或重做操作。
 
-Excel→Markdown の `.xlsx` は `excel-styles/v3` で原行列、静的な塗りと全体/部分削除線を保持する。割当済みセルの無色・削除線解除を含む書式を優先し、本文内の未割当セルだけに行→列→標準の既定値を適用する。同書式は連続範囲に縮約し、結合領域は左上セルの書式を参照して本文を複写しない。RGB/theme/indexed/tint の原値と解色結果を残す。索引調色板が未定義・空の場合だけ標準色を使い、独自調色板の範囲外や system 色を白・標準色で補完しない。条件書式・表スタイルの未評価は実在するシート/範囲だけに示す。入力規則など静的書式と無関係な既知 reader 警告は除き、未分類警告や書式読取失敗は明示する。除外判断は業務規則に委ね、旧 `.xls` は値のみ/書式未検査を明示する。profile は Evidence に記録し、Markdown 本文には重複記載しない。Markdown の注記は書式の読み方と実際の未取得情報だけを短く示し、原版/Artifact の原 byte 検証と既存制限は維持する。
+Excel→Markdown の `.xlsx` は `excel-styles/v3` で原行列、静的な塗りと全体/部分削除線を保持する。割当済みセルの無色・削除線解除を含む書式を優先し、本文内の未割当セルだけに行→列→標準の既定値を適用する。同書式は連続範囲に縮約し、結合領域は左上セルの書式を参照して本文を複写しない。RGB/theme/indexed/tint の原値と解色結果を残す。索引調色板が未定義・空の場合だけ標準色を使う。無補正の索引 64/65 は `SYSTEM_FOREGROUND` / `SYSTEM_BACKGROUND` として役割を示し、RGB は推測しない。独自調色板の範囲外・不明な色・補正済み system 色は `UNRESOLVED` を保持する。条件書式・表スタイルの未評価は実在するシート/範囲だけに示す。入力規則など静的書式と無関係な既知 reader 警告は除き、未分類警告や書式読取失敗は明示する。除外判断は業務規則に委ね、旧 `.xls` は値のみ/書式未検査を明示する。profile は Evidence に記録し、Markdown 本文には重複記載しない。Markdown の注記は書式の読み方と実際の未取得情報だけを短く示し、原版/Artifact の原 byte 検証と既存制限は維持する。
 
 文档正文优先通过 `document.read/v1` 的 `response_mode=file` 交付为 Worker 内本 Run 的文件，响应只给路径、大小和哈希；Agent 再分段读取或检索。新 Run 固定当前 Project 文档库的整体读权限，`document.list/read` 可取得未选择的参考资料及执行中新上传的文件；读取每次核对当前用户与项目权限。上传回执的文档 ID/hash 可直接用于 `document_id` / `expected_hash`。任务选择仍固定原 ID/hash，不因额外参考或同名更新变更；旧 Run 保留原范围。目录以平台 metadata 和 MinIO 内容为正本，本地是工作副本，不是实时同步盘。
 

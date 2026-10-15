@@ -22,7 +22,7 @@ from starlette.types import Receive, Scope, Send
 from skillmind.agent.domain import AgentEventType, RunContext
 from skillmind.agent.effect_receipt_delivery import deliver_receipt
 from skillmind.agent.tool_gateway import RunToolRuntime
-from skillmind.agent.tool_policy import ToolExecutionPolicy
+from skillmind.agent.tool_policy import ToolExecutionPolicy, ToolPolicyViolation
 from skillmind.effects.inline import inline_success
 
 BridgeEvent = tuple[AgentEventType, dict[str, Any]]
@@ -97,7 +97,7 @@ class CodexToolBridge:
         arguments = deepcopy(dict(arguments))
         async with self._lock:
             if not self.accepting or self.session_id is None:
-                return _tool_error("Tool execution is stopped")
+                return _tool_error("Tool execution is stopped", code="unavailable")
             if self._calls >= self.context.limits.max_turns:
                 self.accepting = False
                 self.stop_reason = "run_limit_exceeded"
@@ -109,15 +109,16 @@ class CodexToolBridge:
                     self.runtime.mcp.on_tool_attempt()
                 self._policy.authorize(name, arguments)
             except PermissionError as error:
+                code = error.code if isinstance(error, ToolPolicyViolation) else "scope_denied"
                 if self.runtime.mcp.on_tool_denied is not None:
                     await self.runtime.mcp.on_tool_denied(
                         name,
                         arguments,
                         call_id,
                         self.session_id,
-                        "Tool policy denied",
+                        f"{code}: {error}",
                     )
-                return _tool_error(str(error))
+                return _tool_error(str(error), code=code)
             await self.events.put(
                 (
                     AgentEventType.TOOL_REQUESTED,
@@ -156,7 +157,8 @@ class CodexToolBridge:
                         )
                     except ValueError:
                         return _tool_error(
-                            "Controlled operation does not match its frozen contract or scope."
+                            "Controlled operation does not match its frozen contract or scope.",
+                            code="invalid_request",
                         )
                     if inline is not None:
                         inline_proposal_id = str(inline.proposal_id)
@@ -242,10 +244,13 @@ class CodexToolBridge:
             )
 
 
-def _tool_error(message: str) -> CallToolResult:
-    """固定の境界診断だけを model へ返す。"""
+def _tool_error(message: str, *, code: str = "scope_denied") -> CallToolResult:
+    """既存の error envelope で分類と修正可能な診断を model へ返す。"""
 
-    return CallToolResult(content=[TextContent(type="text", text=message)], isError=True)
+    payload = {"status": "error", "code": code, "message": message, "retryable": False}
+    return CallToolResult(content=[TextContent(
+        type="text", text=json.dumps(payload, ensure_ascii=False),
+    )], isError=True)
 
 
 class _OwnedServer(uvicorn.Server):

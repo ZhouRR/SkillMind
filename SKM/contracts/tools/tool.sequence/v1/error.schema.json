@@ -18,6 +18,7 @@
       "enum": [
         "invalid_request",
         "not_found",
+        "scope_denied",
         "too_large",
         "unavailable"
       ]

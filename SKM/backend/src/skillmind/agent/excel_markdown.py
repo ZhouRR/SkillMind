@@ -97,7 +97,7 @@ class _Colors:
     """workbook 固有の theme/palette と原色表現を保持する。"""
 
     def __init__(self, book: Workbook) -> None:
-        """system color は lastClr の観測値のみを使い、OS 色を推測しない。"""
+        """theme の lastClr と索引表を読み、system 色の RGB は推測しない。"""
         # mruColors だけの colors 要素は reader の palette を空にする。定義がなければ標準色。
         # 部分的な独自 palette の範囲外や system 色を、標準色で補完しない。
         self.palette = tuple(book._colors or COLOR_INDEX)
@@ -138,6 +138,10 @@ class _Colors:
             value = self.theme.get(int(color.theme))
         elif color.type == "indexed":
             index = int(color.indexed)
+            # 無補正の予約色は役割を特定できる。RGB は作らず、意味が不明な色と区別する。
+            if index in (64, 65) and not color.tint:
+                result["resolution"] = "SYSTEM_FOREGROUND" if index == 64 else "SYSTEM_BACKGROUND"
+                return result
             if 0 <= index < min(64, len(self.palette)):
                 value = str(self.palette[index])
         if value is None or re.fullmatch(r"(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})", value) is None:

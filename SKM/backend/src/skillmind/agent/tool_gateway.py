@@ -26,8 +26,12 @@ from skillmind.agent.evidence import (
     new_evidence_ref,
     validate_artifact_publication,
 )
-from skillmind.agent.tool_diagnostics import safe_tool_diagnostic
-from skillmind.agent.tool_policy import ToolExecutionPolicy, capability_to_sdk_name
+from skillmind.agent.tool_diagnostics import safe_tool_diagnostic, schema_error_summary
+from skillmind.agent.tool_policy import (
+    ToolExecutionPolicy,
+    ToolPolicyViolation,
+    capability_to_sdk_name,
+)
 from skillmind.agent.tool_routing import (
     ToolRouteError,
     ToolRouting,
@@ -262,10 +266,13 @@ class ToolGateway:
 
     def validate_sequence_step(self, name: str, arguments: Mapping[str, Any]) -> None:
         """子能力を同じ frozen policy へ通し、制御/再帰/外部 write を拒否する。"""
+        self._coordinator.validate_request(name, arguments)
         binding = self._resolve_binding(name, arguments)
         if not binding.definition.sequence_safe or binding.definition.defer_execution:
-            raise PermissionError("Tool does not support sequence execution")
-        self._coordinator.validate_request(name, arguments)
+            raise ToolPolicyViolation(
+                "Tool does not support sequence execution. Call it separately through its "
+                "registered interface; sequence execution does not grant additional permission."
+            )
 
     async def invoke_sequence_step(
         self, parent: RunToolContext, step: Mapping[str, Any], *, position: int,
@@ -292,18 +299,23 @@ class ToolGateway:
                 str(parent.agent_session_id),
             )
             return await self._invoke(self._resolve_binding(name, args), args)
-        except PermissionError:
+        except PermissionError as error:
+            code = error.code if isinstance(error, ToolPolicyViolation) else "scope_denied"
+            message = str(error) if isinstance(error, ToolPolicyViolation) else (
+                "Sequence authority or tool budget is unavailable; "
+                "remaining steps were not executed"
+            )
             await self._coordinator.register_denied(
                 name,
                 args,
                 f"sequence:{parent.tool_call_id}:{position}",
                 str(parent.agent_session_id),
-                "Sequence authority or tool budget is unavailable",
+                f"{code}: {message}",
             )
             return {
                 "status": "error",
-                "code": "scope_denied",
-                "message": "Sequence authority or tool budget is unavailable",
+                "code": code,
+                "message": message,
                 "retryable": False,
             }
         except ToolGatewayError as error:
@@ -326,7 +338,7 @@ class ToolGateway:
             binding = self._resolve_binding(tool_name, arguments)
         except ToolRouteError as error:
             return {"content": [{"type": "text", "text": _compact_json({
-                "status": "error", "code": "invalid_request",
+                "status": "error", "code": error.code,
                 "message": str(error), "retryable": False,
             })}], "is_error": True}
         try:
@@ -365,7 +377,9 @@ class ToolGateway:
                 payload = {
                     "status": "error",
                     "code": "unavailable",
-                    "message": "Tool execution failed",
+                    "message": "Tool error did not match its registered contract. "
+                    "Ask the platform administrator to check the tool configuration; "
+                    "do not repeat an external operation whose result is unconfirmed.",
                     "retryable": False,
                 }
             return {
@@ -511,7 +525,9 @@ class ToolGateway:
                 duration_ms=_duration_ms(started),
             )
             raise ToolGatewayError(
-                "unavailable", "Tool execution failed", retryable=False
+                "unavailable", "Tool execution failed; no validated result is available. "
+                "The cause could not be classified. Do not assume a connection outage or repeat "
+                "an external operation without checking its original status.", retryable=False
             ) from error
         try:
             return await self._audit_writer.complete(
@@ -766,7 +782,10 @@ def _validate_response(schema: Mapping[str, Any], response: Mapping[str, Any]) -
     )
     if errors:
         raise ToolGatewayError(
-            "unavailable", "Tool response did not match its contract", retryable=False
+            "unavailable", "Tool response did not match its contract: "
+            + schema_error_summary(errors) + ". This is a provider response error. "
+            "Ask the platform administrator to check it; do not repeat an unconfirmed operation.",
+            retryable=False,
         )
 
 

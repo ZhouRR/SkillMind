@@ -15,6 +15,7 @@ from skillmind.agent.materialization_storage import (
     read_file,
     write_workspace_file,
 )
+from skillmind.agent.tool_diagnostics import schema_error_summary
 from skillmind.agent.tool_gateway import (
     ProviderToolResult,
     RunToolContext,
@@ -108,12 +109,20 @@ class ResourceFileProvider:
         mode = request.pop("response_mode", "inline")
         if mode == "file":
             require_file_access(context)
-        if mode not in {"file", "inline"} or not Draft202012Validator(self._schema).is_valid(
-            request
-        ):
+        if mode not in ("file", "inline"):
             raise ToolProviderError(
-                "invalid_request",
-                "Resource request does not match its native tool contract",
+                "invalid_request", "/response_mode must be inline or file; "
+                "the resource was not called.", retryable=False,
+            )
+        errors = sorted(
+            Draft202012Validator(self._schema).iter_errors(request),
+            key=lambda error: tuple(str(part) for part in error.absolute_path),
+        )
+        if errors:
+            raise ToolProviderError(
+                "invalid_request", "Resource request does not match its native tool contract: "
+                + schema_error_summary(errors)
+                + ". Correct the request file; the resource was not called.",
                 retryable=False,
             )
         result = await self._inner.execute(context, request)

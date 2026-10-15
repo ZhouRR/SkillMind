@@ -315,8 +315,38 @@ async def test_invalid_provider_response_fails_before_evidence_commit(tmp_path: 
 
     assert result["is_error"] is True
     assert payload["code"] == "unavailable"
+    assert "missing required fields: issue" in payload["message"]
+    assert "provider response error" in payload["message"]
+    assert payload["retryable"] is False and provider.calls == 1
     assert writer.completed == []
     assert writer.failed[0][1] == "unavailable"
+
+
+async def test_unclassified_provider_failure_is_safe_and_does_not_claim_an_outage(tmp_path):
+    """分類不能な失敗は環境故障と断定せず、内部例外や原値を返さない。"""
+
+    class BrokenProvider(CsvIssueProvider):
+        """秘密に見立てた本文を持つ、分類不能な例外を注入する。"""
+
+        async def execute(self, context, arguments):
+            """Provider 到達回数を記録し、内部情報を含む例外を投げる。"""
+            self.calls += 1
+            raise RuntimeError("internal-source=synthetic-private")
+
+    provider = BrokenProvider()
+    registry = _registry(provider)
+    context = _context(tmp_path, registry)
+    writer = MemoryAuditWriter()
+    runtime = registry.build_gateway_runtime(context, audit_writer=writer)
+    args = {"issue_ref": "fixture", "purpose": "Read"}
+    await runtime.mcp.on_tool_authorized(context.tools[0].sdk_name, args, "call", str(uuid4()))
+    result = await runtime.gateway.invoke_mcp(context.tools[0].sdk_name, args)
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["code"] == "unavailable" and payload["retryable"] is False
+    assert "cause could not be classified" in payload["message"]
+    assert "Do not assume a connection outage" in payload["message"]
+    assert "synthetic-private" not in payload["message"]
+    assert provider.calls == 1 and len(writer.failed) == 1 and not writer.completed
 
 
 def test_evidence_rejects_credentials_and_invalid_hash() -> None:

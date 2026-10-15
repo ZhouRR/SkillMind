@@ -223,6 +223,17 @@ async def test_request_files_are_hashed_scoped_and_validated_before_mcp_call(tmp
     with pytest.raises(ToolProviderError):
         await request_from_file(context, args)
     assert inner.execute.await_count == 1
+    invalid = b'{"name":"inspect","arguments":"synthetic-private"}'
+    path.write_bytes(invalid)
+    with pytest.raises(ToolProviderError) as caught:
+        await wrapped.execute(context, {
+            **args, "expected_hash": "sha256:" + sha256_hex(invalid),
+        })
+    assert caught.value.code == "invalid_request" and caught.value.retryable is False
+    assert "/arguments: expected object" in caught.value.message
+    assert "resource was not called" in caught.value.message
+    assert "synthetic-private" not in caught.value.message
+    assert inner.execute.await_count == 1
 
 
 async def test_proposal_file_resolves_exact_bytes_without_model_transcription(tmp_path):

@@ -149,18 +149,18 @@ def test_custom_indexed_palette_and_reserved_system_colors() -> None:
     sheet["C3"].fill = PatternFill("solid", fgColor=Color(indexed=65))
     markdown = _convert(book)
     assert markdown_literal("indexed=1; #ABCDEF; RESOLVED") in markdown
-    assert "indexed=64; UNRESOLVED" in markdown
-    assert "indexed=65; UNRESOLVED" in markdown
+    assert markdown_literal("indexed=64; SYSTEM_FOREGROUND") in markdown
+    assert markdown_literal("indexed=65; SYSTEM_BACKGROUND") in markdown
     assert "indexed=44; UNRESOLVED" in markdown
     assert "#99CCFF" not in markdown
     assert "auto=True; UNRESOLVED" in markdown
 
 
 @pytest.mark.parametrize("palette", ["absent", "empty", "mru_only"])
-def test_missing_indexed_palette_uses_standard_colors_without_resolving_system_color(
+def test_missing_indexed_palette_uses_standard_colors_and_symbolic_system_background(
     palette: str,
 ) -> None:
-    """mruColors は索引表ではない。未定義の索引色は標準表、system 背景は未解決とする。"""
+    """未定義の索引色は標準表を使い、system 背景は RGB を推測せず役割を示す。"""
     book = _book()
     sheet = book["Cases"]
     sheet["B2"].fill = PatternFill("solid", fgColor=Color(indexed=9))
@@ -187,9 +187,23 @@ def test_missing_indexed_palette_uses_standard_colors_without_resolving_system_c
     markdown = render_excel_markdown(".xlsx", target.getvalue())
     assert markdown_literal("indexed=9; #FFFFFF; RESOLVED") in markdown
     assert markdown_literal("indexed=44; #99CCFF; RESOLVED") in markdown
-    assert "indexed=65; UNRESOLVED" in markdown
-    assert markdown.count("UNRESOLVED") == 1
+    assert markdown_literal("indexed=65; SYSTEM_BACKGROUND") in markdown
+    assert "UNRESOLVED" not in markdown
     assert "old action" in markdown and "new action" in markdown
+
+
+@pytest.mark.parametrize("index,role", [(64, "SYSTEM_FOREGROUND"), (65, "SYSTEM_BACKGROUND")])
+def test_system_color_role_does_not_invent_display_rgb(index: int, role: str) -> None:
+    """予約色は OS の白/黒へ固定せず、元索引と前景/背景の意味だけを保持する。"""
+    value = _Colors(_book()).describe(Color(indexed=index))
+    assert value == {"type": "indexed", "value": index, "tint": 0.0, "resolution": role}
+
+
+@pytest.mark.parametrize("index,tint", [(64, 0.5), (65, -0.5)])
+def test_tinted_system_color_keeps_unknown_display_color(index: int, tint: float) -> None:
+    """補正済み system 色を通常の既定背景と扱わず、原補正値と未解決状態を残す。"""
+    value = _Colors(_book()).describe(Color(indexed=index, tint=tint))
+    assert value == {"type": "indexed", "value": index, "tint": tint, "resolution": "UNRESOLVED"}
 
 
 def test_missing_theme_keeps_unresolved_number() -> None:

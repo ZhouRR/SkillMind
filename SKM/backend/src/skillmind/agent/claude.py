@@ -25,7 +25,11 @@ from skillmind.agent.claude_build import (
     bundled_claude_build,
 )
 from skillmind.agent.domain import RunContext
-from skillmind.agent.tool_policy import DENIED_BUILTIN_TOOLS, ToolExecutionPolicy
+from skillmind.agent.tool_policy import (
+    DENIED_BUILTIN_TOOLS,
+    ToolExecutionPolicy,
+    ToolPolicyViolation,
+)
 
 STRUCTURED_OUTPUT_TOOL_NAME = "StructuredOutput"
 
@@ -194,6 +198,8 @@ def build_claude_agent_options(
                 cast(dict[str, Any], input_data.get("tool_input", {})),
             )
         except (PermissionError, ValueError) as error:
+            code = error.code if isinstance(error, ToolPolicyViolation) else "scope_denied"
+            reason = f"{code}: {error}"
             tool_use_id = input_data.get("tool_use_id") or _tool_use_id
             session_id = input_data.get("session_id")
             if (
@@ -208,13 +214,13 @@ def build_claude_agent_options(
                         cast(dict[str, Any], input_data.get("tool_input", {})),
                         tool_use_id,
                         session_id,
-                        str(error),
+                        reason,
                     )
             return {
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
                     "permissionDecision": "deny",
-                    "permissionDecisionReason": str(error),
+                    "permissionDecisionReason": reason,
                 }
             }
         tool_name = str(input_data.get("tool_name", ""))

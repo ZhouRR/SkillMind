@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -150,6 +150,32 @@ async def test_pre_tool_hook_denies_unregistered_tool(tmp_path: Path) -> None:
     result = await hook(input_data, "tool-1", {"signal": None})  # type: ignore[arg-type]
 
     assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+async def test_pre_tool_hook_preserves_input_diagnostic_and_audit_reason(tmp_path: Path) -> None:
+    """Claude にも不足引数と分類を返し、監査に同じ脱敏済み理由を渡す。"""
+    authorized, denied = AsyncMock(), AsyncMock()
+    context = _run_context(tmp_path)
+    options = build_claude_agent_options(
+        context, mcp_server={"type": "sdk", "name": "skillmind", "instance": object()},
+        configuration=ClaudeRuntimeConfiguration(environment={}),
+        on_tool_authorized=authorized, on_tool_denied=denied,
+    )
+    assert options.hooks is not None
+    hook = options.hooks["PreToolUse"][0].hooks[0]
+    event = {
+        "hook_event_name": "PreToolUse", "session_id": str(uuid4()),
+        "tool_use_id": "invalid-call", "tool_name": context.tools[0].sdk_name,
+        "tool_input": {"issue_ref": "synthetic-private"},
+    }
+    result = await hook(event, "invalid-call", {"signal": None})  # type: ignore[arg-type]
+    output = result["hookSpecificOutput"]
+    assert output["permissionDecision"] == "deny"
+    reason = output["permissionDecisionReason"]
+    assert reason.startswith("invalid_request:") and "purpose" in reason
+    assert "provider was not called" in reason and "synthetic-private" not in reason
+    assert denied.await_args.args[-1] == reason
+    authorized.assert_not_awaited()
 
 
 @pytest.mark.asyncio

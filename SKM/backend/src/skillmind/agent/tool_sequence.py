@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from skillmind.agent.evidence import EvidenceDraft
 from skillmind.agent.tool_gateway import ProviderToolResult, RunToolContext, ToolProviderError
-from skillmind.agent.tool_policy import capability_to_sdk_name
+from skillmind.agent.tool_policy import ToolPolicyViolation, capability_to_sdk_name
 from skillmind.core.hashing import canonical_json, sha256_hex
 
 if TYPE_CHECKING:
@@ -83,17 +83,22 @@ class ToolSequenceProvider:
         if not isinstance(steps, list) or not 1 <= len(steps) <= MAX_SEQUENCE_STEPS:
             raise ToolProviderError("invalid_request", "Invalid sequence size", retryable=False)
         # どの step も前段の未知値に依存させず、全登録/権限/Schema を副作用前に検査する。
-        try:
-            for step in steps:
+        for position, step in enumerate(steps):
+            try:
                 gateway.validate_sequence_step(
                     capability_to_sdk_name(step["capability"]), step["arguments"]
                 )
-        except (KeyError, TypeError, ValueError, LookupError, PermissionError):
-            raise ToolProviderError(
-                "invalid_request",
-                "Sequence contains an unavailable or non-sequence tool",
-                retryable=False,
-            ) from None
+            except ToolPolicyViolation as error:
+                raise ToolProviderError(
+                    error.code, f"Sequence /steps/{position}: {error} No steps were executed.",
+                    retryable=False,
+                ) from None
+            except (KeyError, TypeError, ValueError, LookupError, PermissionError):
+                raise ToolProviderError(
+                    "invalid_request", f"Sequence /steps/{position} is invalid; "
+                    "check its capability and arguments. No steps were executed.",
+                    retryable=False,
+                ) from None
         completed: list[dict[str, Any]] = []
         outcome, reason = "COMPLETED", None
         for position, step in enumerate(steps):

@@ -218,6 +218,55 @@ async def test_invalid_effect_input_returns_tool_error_then_corrected_proposal_p
     assert bridge.deferred[0] is AgentEventType.CHANGE_PROPOSED
     assert bridge.deferred[1]["change_proposal_request"] == arguments
     deferred.assert_awaited_once_with(tool.sdk_name, arguments, "corrected-call", bridge.session_id)
+
+
+async def test_input_error_is_audited_and_corrected_call_can_continue(tmp_path: Path) -> None:
+    """引数エラーは実行前に分類・監査し、新要求だけが同じ境界内で実行される。"""
+    provider = CsvIssueProvider()
+    registry = _registry(provider)
+    context = _context(tmp_path, registry)
+    writer = MemoryAuditWriter()
+    bridge = CodexToolBridge(
+        context, registry.build_gateway_runtime(context, audit_writer=writer),
+        on_deferred=AsyncMock(),
+    )
+    bridge.session_id = str(uuid4())
+    rejected = await bridge.invoke(
+        context.tools[0].sdk_name, {"issue_ref": "synthetic-private"}, "invalid-call",
+    )
+    payload = json.loads(rejected.content[0].text)
+    assert rejected.isError and payload["code"] == "invalid_request"
+    assert payload["retryable"] is False and "purpose" in payload["message"]
+    assert "synthetic-private" not in payload["message"]
+    assert provider.calls == 0 and not writer.completed
+    assert writer.denied[0][1] == "invalid_request: " + payload["message"]
+    assert bridge.accepting and not bridge.parked.is_set()
+    corrected = await bridge.invoke(
+        context.tools[0].sdk_name,
+        {"issue_ref": "synthetic-private", "purpose": "Read fixture"}, "corrected-call",
+    )
+    assert not corrected.isError and provider.calls == 1 and len(writer.completed) == 1
+
+
+async def test_boundary_denial_remains_scope_denied(tmp_path: Path) -> None:
+    """境界のすり替えは引数修正の案内で許可せず、Provider に到達させない。"""
+    provider = CsvIssueProvider()
+    registry = _registry(provider)
+    context = _context(tmp_path, registry)
+    writer = MemoryAuditWriter()
+    bridge = CodexToolBridge(
+        context, registry.build_gateway_runtime(context, audit_writer=writer),
+        on_deferred=AsyncMock(),
+    )
+    bridge.session_id = str(uuid4())
+    result = await bridge.invoke(context.tools[0].sdk_name, {
+        "issue_ref": "fixture", "purpose": "Read", "project_id": "synthetic-private",
+    }, "denied-call")
+    payload = json.loads(result.content[0].text)
+    assert payload["code"] == "scope_denied" and payload["retryable"] is False
+    assert "run boundary: project_id" in payload["message"]
+    assert "synthetic-private" not in payload["message"]
+    assert writer.denied[0][1].startswith("scope_denied:") and provider.calls == 0
     assert not writer.completed
 
 

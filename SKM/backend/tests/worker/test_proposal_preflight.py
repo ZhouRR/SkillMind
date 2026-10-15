@@ -230,7 +230,31 @@ async def test_expanded_file_is_not_allowed_to_bypass_inline_policy(setup, damag
     error = await validator.validate(tool.sdk_name, {
         "request_file": "workspace/proposal.json", "expected_hash": "sha256:" + sha256_hex(raw),
     }, "invalid-call", "session")
-    assert error["code"] == "invalid_request" and error["retryable"] is False
+    assert error["code"] == ("scope_denied" if damage == "boundary" else "invalid_request")
+    assert error["retryable"] is False
+    assert {
+        "capability": "capability_version must name", "missing": "registered schema",
+        "schema": "registered schema", "boundary": "run boundary",
+        "revision": "absent (lowercase)",
+    }[damage] in error["message"]
+    service.validate_native_sql_proposal.assert_not_awaited()
+
+
+@pytest.mark.parametrize("raw,expected", [
+    (b'not-json synthetic-private', "valid UTF-8 JSON"),
+    (b'"synthetic-private"', "one inline JSON request object"),
+])
+async def test_proposal_file_parse_error_preserves_safe_diagnostic(setup, raw, expected):
+    """ファイル本文を反射せず、JSON 構文と提案形状の失敗を区別して返す。"""
+    _, tool, context, _, _, service, validator = setup
+    path = context.workspace.cwd / "proposal.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(raw)
+    error = await validator.validate(tool.sdk_name, {
+        "request_file": "workspace/proposal.json", "expected_hash": "sha256:" + sha256_hex(raw),
+    }, "invalid-call", "session")
+    assert error["code"] == "invalid_request" and expected in error["message"]
+    assert "synthetic-private" not in error["message"]
     service.validate_native_sql_proposal.assert_not_awaited()
 
 
