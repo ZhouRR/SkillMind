@@ -61,8 +61,10 @@ export function HistoryPage({ projectId, csrfToken, readOnly = false }: { projec
           {/* 頁見出しを繰り返さず、今見ているのが現在の一覧かゴミ箱かを示す。 */}
           <h2>{trashed ? messages.fileManagement.trash : messages.historyPage.listTitle}</h2>
           <div className="formRow historyManagementToolbar">
-            <button className="secondaryButton compactButton" type="button" aria-pressed={!trashed} onClick={() => setTrashed(false)}>{messages.fileManagement.active}</button>
-            <button className="secondaryButton compactButton" type="button" aria-pressed={trashed} onClick={() => setTrashed(true)}>{messages.fileManagement.trash}</button>
+            <div className="segmentedControl" role="group" aria-label={messages.historyPage.listTitle}>
+              <button className="segmentedOption" type="button" aria-pressed={!trashed} onClick={() => setTrashed(false)}>{messages.fileManagement.active}</button>
+              <button className="segmentedOption" type="button" aria-pressed={trashed} onClick={() => setTrashed(true)}>{messages.fileManagement.trash}</button>
+            </div>
             <button className="secondaryButton compactButton" type="button" onClick={() => setRevision((current) => current + 1)}>
               {messages.runHistory.retry}
             </button>

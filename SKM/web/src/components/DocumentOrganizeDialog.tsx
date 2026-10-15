@@ -26,7 +26,7 @@ export function DocumentOrganizeDialog({ edit, folders, busy, error, onClose, on
       {error && <p role="alert" className="error">{error}</p>}
       <DocumentFolderInput label={m.folder} value={folder} folders={folders} disabled={busy} required={edit.mode !== 'MOVE'} onValueChange={setFolder} />
       {edit.mode === 'MOVE' && edit.documents.length === 1 && <label>{m.name}<input value={name} maxLength={200} required disabled={busy} onChange={(e) => setName(e.target.value)} /></label>}
-      <div className="formRow"><button className="primaryButton" disabled={busy} type="submit">{m.save}</button><button className="secondaryButton" disabled={busy} type="button" onClick={onClose}>{m.cancel}</button></div>
+      <div className="modalFormActions"><button className="secondaryButton" disabled={busy} type="button" onClick={onClose}>{m.cancel}</button><button className="primaryButton" disabled={busy} type="submit">{m.save}</button></div>
     </form>
   </ModalDialog>
 }

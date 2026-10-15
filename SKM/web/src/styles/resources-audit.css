@@ -14,9 +14,21 @@
 .resourceForm .scopeOption input { flex: 0 0 auto; }
 .resourceForm .scopeOption > span { min-width: 0; overflow-wrap: anywhere; }
 .resourceTechnicalKey { display: block; margin-bottom: 8px; color: var(--text-muted); overflow-wrap: anywhere; }
-.resourceFormActions { display: flex; gap: 10px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
-.resourceFormActions > button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
-.resourceFormActionsSticky { position: sticky; bottom: -1px; z-index: 1; padding-block: 14px; background: var(--surface); border-top: 1px solid var(--border); }
+.resourceFormActions { display: flex; gap: 12px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+.resourceFormActions > button { width: auto; min-width: 96px; white-space: normal; overflow-wrap: anywhere; }
+.resourceFormActions .primaryButton { order: 2; }
+.resourceFormActions .secondaryButton { order: 1; }
+.resourceFormActionsSticky {
+  position: sticky;
+  bottom: -24px;
+  z-index: 2;
+  margin-inline: -24px;
+  margin-bottom: -24px;
+  padding: 16px 24px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, .06);
+}
 .resourceRequestFeedback { min-width: 0; display: grid; gap: 10px; padding-block: 12px; border-top: 1px solid var(--border); }
 .resourceRequestFeedback p { margin: 0; overflow-wrap: anywhere; }
 .resourceRequestFeedback > button { justify-self: start; }

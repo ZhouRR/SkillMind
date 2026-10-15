@@ -81,6 +81,9 @@
 .modalDrawer .modalDialog { width: min(560px, 100%); height: 100dvh; max-height: 100dvh; border-radius: 16px 0 0 16px; }
 .modalDrawer.modalWide .modalDialog { width: min(720px, 100%); }
 .modalDrawer .modalBody { min-height: 0; padding: 24px; }
+/* 少量情報用 Compact 抽屉: 全画面を占有せず、適度な高さの浮動カードとして表示する */
+.modalDrawer.modalCompact { align-items: center; justify-content: flex-end; padding: 24px; }
+.modalDrawer.modalCompact .modalDialog { width: min(480px, 100%); height: auto; max-height: 85vh; border-radius: 16px; box-shadow: var(--shadow-pop); }
 .modalDrawer .resultCollapseBody { padding: 0; }
 .modalDrawer .resultValidationScope { border: 0; padding: 0; }
 .resultReportBody .subsectionHeader { margin-bottom: 8px; }

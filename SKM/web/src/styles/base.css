@@ -33,8 +33,8 @@
   --accent-deep: #58400e;
   --accent-soft: #fff0b5;
   --accent-border: #cbb36e;
-  --primary-bg: #ff7947;
-  --primary-hover: #ff8f64;
+  --primary-bg: #dfa837;
+  --primary-hover: #cd9626;
   --primary-ink: #26201a;
 
   /* 進行中・成功・注意・失敗は文字ラベルと併用する。 */
@@ -177,12 +177,12 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
 }
 /* Run 状態 badge は文字と同色の状態点を先頭に置き、色覚に頼らず現在地を掴めるようにする。 */
 .statusBadge::before { content: ""; flex-shrink: 0; width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
-.status-succeeded { border-color: var(--ok-border); color: var(--ok); background: var(--ok-soft); }
-.status-failed { border-color: var(--danger-border); color: var(--danger); background: var(--danger-soft); }
-/* 取消は失敗ではなく中立の終態。danger 色を使うと「壊れた」と誤読されるため無彩色で示す。 */
-.status-cancelled { border-color: var(--border-strong); color: var(--text-muted); background: var(--surface-raised); }
+.status-succeeded, .status-active, .status-enabled, .status-completed { border-color: var(--ok-border); color: var(--ok); background: var(--ok-soft); }
+.status-failed, .status-error, .status-blocked { border-color: var(--danger-border); color: var(--danger); background: var(--danger-soft); }
+/* 取消・無効・除外・アーカイブは中立の終態。danger 色を使うと「壊れた」と誤読されるため無彩色で示す。 */
+.status-cancelled, .status-disabled, .status-archived, .status-removed { border-color: var(--border-strong); color: var(--text-muted); background: var(--surface-raised); }
 .status-running, .status-preparing { border-color: var(--live-border); color: var(--live); background: var(--live-soft); }
-.status-waiting_permission, .status-waiting_for_input, .status-waiting_for_approval, .status-retry_pending { border-color: var(--warn-border); color: var(--warn); background: var(--warn-soft); }
+.status-waiting_permission, .status-waiting_for_input, .status-waiting_for_approval, .status-retry_pending, .status-paused, .status-frozen, .status-waiting { border-color: var(--warn-border); color: var(--warn); background: var(--warn-soft); }
 .status-running::before, .status-preparing::before { animation: statusPulse 1.4s ease-in-out infinite; }
 @keyframes statusPulse { 50% { opacity: .3; } }
 
@@ -400,6 +400,44 @@ label .hint, label small { font-weight: 400; }
 .secondaryButton:disabled { cursor: not-allowed; opacity: .55; }
 /* 表示切替(例:現在の一覧 / ゴミ箱)の選択中を色と面で示し、どちらを見ているかを迷わせない。 */
 .secondaryButton[aria-pressed='true'] { border-color: var(--accent-border); color: var(--accent-deep); background: var(--accent-soft); }
+/* ---- Segmented Control: 排他的選択を一体型 pill で示す ---- */
+.segmentedControl {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  gap: 2px;
+}
+.segmentedOption {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: calc(var(--radius-small) - 2px);
+  padding: 5px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s ease, color .15s ease, box-shadow .15s ease;
+}
+.segmentedOption:hover:not(:disabled) {
+  color: var(--text-hi);
+}
+.segmentedOption[aria-pressed='true'] {
+  color: var(--accent-deep);
+  background: var(--surface);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+}
+.segmentedOption:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
 a.primaryButton, a.secondaryButton { display: inline-flex; justify-content: center; align-items: center; text-decoration: none; }
 .compactButton { min-height: 34px; padding: 5px 12px; font-size: 13px; }
 /* 破壊確認だけを赤い実心 button にし、通常の主操作と混同させない。 */
@@ -439,6 +477,8 @@ a.primaryButton, a.secondaryButton { display: inline-flex; justify-content: cent
 .confirmActions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
 .confirmActions .primaryButton { width: auto; padding: 8px 20px; }
 .confirmActions .destructiveButton { padding: 8px 20px; }
+.modalFormActions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; align-items: center; margin-top: 20px; }
+.modalFormActions .primaryButton, .modalFormActions .secondaryButton { width: auto; min-width: 90px; }
 
 /* ---- Modal:新規作成/長い form を一覧・観測画面から切り離す共通弹窗 ----
    常時 mount + hidden 切替(頁面測試の renderToStaticMarkup に中身を残すため、条件描画にしない)。 */
@@ -479,6 +519,40 @@ a.primaryButton, a.secondaryButton { display: inline-flex; justify-content: cent
 .modalHeaderActions { display: flex; flex-shrink: 0; gap: 8px; margin-left: auto; }
 /* 短い dialog に空の scrollbar 分を予約せず、見出しと本文の左端を揃える。 */
 .modalBody { overflow-y: auto; padding: 20px 22px 24px; scrollbar-gutter: auto; }
+.modalFooter {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+  padding: 16px 22px;
+  background: var(--surface);
+  border-radius: 0 0 18px 18px;
+}
+.modalDrawer .modalFooter {
+  border-radius: 0;
+}
+
+/* 一覧行の技術情報は行高を広げない控えめな折り畳みとする */
+.projectRowDetails, .memberTechnical, .historyTechnical {
+  border: 0;
+  padding: 2px 0 0;
+  margin-top: 4px;
+}
+.projectRowDetails > summary, .memberTechnical > summary, .historyTechnical > summary {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-faint);
+  cursor: pointer;
+  user-select: none;
+}
+.projectRowDetails > summary:hover, .memberTechnical > summary:hover, .historyTechnical > summary:hover {
+  color: var(--accent);
+}
+.projectRowDetails[open] > summary, .memberTechnical[open] > summary, .historyTechnical[open] > summary {
+  margin-bottom: 4px;
+}
 
 /* panelHeader 右側に件数 badge と操作 button を並べる汎用容器。 */
 .panelHeaderActions { display: flex; flex-shrink: 0; align-items: center; gap: 10px; }

@@ -7,7 +7,7 @@
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  width: 248px;
+  width: 264px;
   height: 100vh;
   border-right: 1px solid var(--border);
   background: var(--bg-sidebar);
@@ -28,7 +28,7 @@
 /* 長い識別子で列を広げず、footer と一緒に親 panel だけをスクロールする。
    PC 主対象の 1366×768 で導航と footer が一画面に収まる密度を保つ(不足時だけ親が縦スクロール)。 */
 .sideNav { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; flex: 1 0 auto; align-content: start; padding: 18px 14px 12px; }
-.sideNav a > span:not(.navBadge) { min-width: 0; overflow-wrap: anywhere; }
+.sideNav a > span:not(.navBadge) { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 導航は「平台 / 当前项目」の二分組。当前项目分組の見出しは Project 切替 select の label が兼ねる。 */
 .navGroupLabel {
   margin: 2px 0 6px;
@@ -90,6 +90,17 @@
   background: var(--accent);
 }
 .sideNav a[aria-current="page"] svg { color: var(--accent); }
+/* 子メニュー（業務モジュール）が現在選択されている場合、親リンクは面を塗らず控えめに示す */
+.sideNavEntry:has(.sideNavSubItem[aria-current="true"]) > a[aria-current="page"] {
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-hi);
+  font-weight: 600;
+}
+.sideNavEntry:has(.sideNavSubItem[aria-current="true"]) > a[aria-current="page"]::before {
+  background: var(--border-strong);
+  width: 2px;
+}
 .sideNav svg { flex-shrink: 0; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 
 /* route link と子菜单の組を grid/flex の直接子として透過させ、既存 layout を変えない。 */
@@ -112,7 +123,12 @@
   transition: background .15s ease, color .15s ease;
 }
 .sideNavSubItem:hover { color: var(--text-hi); background: var(--surface-hover); }
-.sideNavSubItem[aria-current="true"] { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.sideNavSubItem[aria-current="true"] {
+  color: var(--accent-deep);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-border);
+  font-weight: 600;
+}
 
 /* sidebar 内の select(項目切替・言語切替)は同じ寸法で揃える。
    background は簡写だと base.css の chevron(background-image)まで消して
@@ -121,6 +137,7 @@
 .sidebar select { padding: 7px 30px 7px 10px; }
 .sidebar .selectTrigger { padding: 7px 10px; }
 .sideNavProject .projectContext, .sideNavProject :is(select, .selectTrigger) { min-width: 0; max-width: 100%; }
+.sideNavProject .selectValue { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .sidebarFooter { display: grid; flex-shrink: 0; grid-template-columns: minmax(0, 1fr); gap: 10px; border-top: 1px solid var(--border); padding: 12px 18px 14px; }
 /* 外観と言語、本人と退出、接続状態と API 文書を一行ずつに組み、縦幅を導航へ譲る。 */

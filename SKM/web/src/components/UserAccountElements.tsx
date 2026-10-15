@@ -38,7 +38,7 @@ export function UserAccountFacts({ account, compact = false }: { account: UserAc
     <div><dt>{messages.fields.name}</dt><dd>{account.display_name}</dd></div>
     <div><dt>{messages.fields.email}</dt><dd>{account.email}</dd></div>
     <div><dt>{messages.fields.role}</dt><dd>{messages.roles[account.system_role]}</dd></div>
-    <div><dt>{messages.fields.status}</dt><dd>{messages.statuses[account.status]}</dd></div>
+    <div><dt>{messages.fields.status}</dt><dd><span className={`statusBadge status-${account.status.toLowerCase()}`}>{messages.statuses[account.status]}</span></dd></div>
   </dl>{compact ? <details className="detailDisclosure accountTechnical"><summary>{catalog.elements.technicalDetails}</summary>
     {technical}<p className="accountVersion">{messages.versionUsed(account.row_version)}</p>
   </details> : technical}</>
@@ -55,7 +55,7 @@ export function UserSummaryList({ users, disabled, onSelect }: {
   return <ul className="accountUserList" tabIndex={0} aria-label={messages.manageUsers}>
     {users.map((account) => <li className="accountUserCard" key={account.user_id}>
       <div><strong>{account.display_name}</strong><p>{account.email}</p>
-        <p>{messages.roles[account.system_role]} · {messages.statuses[account.status]}</p>
+        <p>{messages.roles[account.system_role]} · <span className={`statusBadge status-${account.status.toLowerCase()}`}>{messages.statuses[account.status]}</span></p>
       </div>
       <button type="button" className="secondaryButton" disabled={disabled}
         aria-label={`${messages.edit}: ${account.email}`} onClick={() => onSelect(account.user_id)}>{messages.edit}</button>

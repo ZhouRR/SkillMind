@@ -122,7 +122,7 @@ export function EmptyState({ text, action }: { text: string; action?: ReactNode 
  *  実際に破棄すべき草稿は呼び出し元が明示的に破棄する。
  *  開いている間は Escape と遮罩 click で閉じられ、背面の scroll を止め、
  *  閉じた後は開いた時の要素へ焦点を戻す(keyboard 利用者が現在地を失わないため)。 */
-export function ModalDialog({ open, title, meta, actions, wide = false, drawer = false, viewport = false, compact = false, hideClose = false, onClose, children }: {
+export function ModalDialog({ open, title, meta, actions, wide = false, drawer = false, viewport = false, compact = false, hideClose = false, footer, onClose, children }: {
   open: boolean
   title: string
   /** 見出し横の補助情報(寸法・種別など)。 */
@@ -138,6 +138,8 @@ export function ModalDialog({ open, title, meta, actions, wide = false, drawer =
   compact?: boolean
   /** 本文側に「キャンセル」を持つ確認 dialog は見出しの「閉じる」を重ねない(Escape と遮罩 click は有効)。 */
   hideClose?: boolean
+  /** 弹窗・抽屉の末尾に固定配置するフッター操作領域。 */
+  footer?: ReactNode
   onClose: () => void
   children: ReactNode
 }) {
@@ -209,6 +211,7 @@ export function ModalDialog({ open, title, meta, actions, wide = false, drawer =
           </div>}
         </div>
         <div className="modalBody">{children}</div>
+        {footer && <div className="modalFooter">{footer}</div>}
       </div>
     </div>
   )
@@ -219,7 +222,7 @@ export function DetailDrawer({ title, children }: { title: string; children: Rea
   const [open, setOpen] = useState(false)
   return <>
     <button className="secondaryButton compactButton detailDrawerTrigger" type="button" onClick={() => setOpen(true)}>{title}</button>
-    <ModalDialog drawer open={open} title={title} onClose={() => setOpen(false)}>{children}</ModalDialog>
+    <ModalDialog compact drawer open={open} title={title} onClose={() => setOpen(false)}>{children}</ModalDialog>
   </>
 }
 

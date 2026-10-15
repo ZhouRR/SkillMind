@@ -313,8 +313,10 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
         {documentsState.status === 'ready' && <span className="eventCount">{documents.length}</span>}
       </div>
       <div className="formRow documentManagementToolbar">
-        <button type="button" className="secondaryButton" disabled={browsingBlocked} aria-pressed={!trashed} onClick={() => { setTrashed(false); setSelectedIds(new Set()) }}>{messages.fileManagement.active}</button>
-        <button type="button" className="secondaryButton" disabled={browsingBlocked} aria-pressed={trashed} onClick={() => { setTrashed(true); setSelectedIds(new Set()) }}>{messages.fileManagement.trash}</button>
+        <div className="segmentedControl" role="group" aria-label={messages.documentsPanel.listTitle}>
+          <button type="button" className="segmentedOption" disabled={browsingBlocked} aria-pressed={!trashed} onClick={() => { setTrashed(false); setSelectedIds(new Set()) }}>{messages.fileManagement.active}</button>
+          <button type="button" className="segmentedOption" disabled={browsingBlocked} aria-pressed={trashed} onClick={() => { setTrashed(true); setSelectedIds(new Set()) }}>{messages.fileManagement.trash}</button>
+        </div>
         <input aria-label={messages.fileManagement.search} placeholder={messages.fileManagement.search} value={search} onChange={(e) => { setSearch(e.target.value); setSelectedIds(new Set()) }} />
         <label className="documentSort shortField"><span className="documentSortLabel">{messages.fileManagement.sort}</span><Select className="shortControl shortControlNarrow" density="compact" aria-label={messages.fileManagement.sort} value={sort} onValueChange={(nextValue) => setSort(nextValue)}><option value="name">{messages.fileManagement.byName}</option><option value="date">{messages.fileManagement.byDate}</option><option value="size">{messages.fileManagement.bySize}</option></Select></label>
         {!trashed && <button className="secondaryButton" type="button" disabled={blocked} onClick={() => setEdit({ mode: 'CREATE_FOLDER', documents: [], folder: targetFolder ? targetFolder + '/' : '' })}>{messages.fileManagement.newFolder}</button>}
