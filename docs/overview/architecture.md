@@ -1,41 +1,42 @@
-# 架构与核心术语
+# システム構成と用語
 
-Backend 是模块化单体：API、业务 Worker 与维护 Worker 共享 Python package，分别运行。业务层依赖 AgentEngine 抽象，SDK 适配器负责 Codex/Claude 的具体通信。
+Backend はモジュラーモノリスであり、API・業務 Worker・保守 Worker が同一 Python package を共有して個別プロセスで動作する。業務層は `AgentEngine` 抽象に依存し、SDK アダプタが Codex/Claude との通信を担う。
 
-## 执行链路
+## 実行経路
 
 ```text
-Web / API 调用方 → Traefik → FastAPI → 领域服务 → PostgreSQL
-                                          ↓ Outbox
-                                Redis 队列与通知
-                                  ↓         ↓
-                             业务 Worker  维护 Worker
-                                  ↓
-                           AgentEngine → 模型
-                                  ↓
-                         Tool Gateway / Provider
-                                  ↓
-                        受绑定和授权限制的外部资源
+Web / API 呼出元 → Traefik → FastAPI → ドメインサービス → PostgreSQL
+                                           ↓ Outbox
+                                 Redis キューと通知
+                                   ↓          ↓
+                              業務 Worker  保守 Worker
+                                   ↓
+                            AgentEngine → モデル
+                                   ↓
+                          Tool Gateway / Provider
+                                   ↓
+                         束縛・認可された外部資源
 ```
 
-- Skill：原文导入 → 最小执行声明 → 审查发布 → 项目启用 → 任务目录。历史 Blueprint 保持原版本兼容。
-- Run：冻结版本、输入与授权上限 → 入队 → 准备只读输入 → 执行 → 等待答复/批准或提交结果。
-- 外部变更：观测 → 提案 → 人工或适用的自动批准 → Effect → 回读并保存回执。
+- **Skill**：原文取込 → 最小実行宣言 → 審査・公開 → Project 有効化 → タスク登録（旧 Blueprint は原版互換を維持）。
+- **Run**：バージョン・入力・権限上限を凍結 → キュー投入 → 読取専用入力の物化 → 実行 → 回答/承認待ち、または結果提出。
+- **外部変更**：観測（observe） → 提案（propose） → 人工または適用可能な自動承認 → 実行（apply） → 回読と回執保存。
 
-数据库是业务与审计正本，Redis 提供队列、短期锁、通知和登录防护；文档 blob 与 Run workspace 独立存储，不能当作同一事务。恢复参见[一致恢复点](../operations/backup-recovery.md#一致恢复点包含什么)。
+PostgreSQL が業務と監査の正本であり、Redis はキュー・短期ロック・通知・ログイン防護を担う。文書 blob と Run workspace は別ストレージであり同一トランザクションではない。復元は[一致復元点](../operations/backup-recovery.md#一致復元点の内容)を参照する。
 
-## 读代码时的核心术语
+## 主要用語
 
-| 名称 | 含义 |
+| 名称 | 意味 |
 | --- | --- |
-| Organization / Project | 组织资产与项目访问范围 |
-| SkillVersion / Task | 不可变发布版本及该版本提供的任务入口 |
-| Integration / ResourceBinding | 外部连接及运行获准使用的资源范围，凭据不交给模型 |
-| Run / Segment / Attempt | 一次业务请求、一次分析或续行阶段、同阶段的技术尝试 |
-| Brief / Snapshot | 冻结执行指令与输入事实，不能用当前配置回填旧值 |
-| Interaction / Proposal | 普通问题与具体外部变更提案，采用不同回答协议 |
-| Effect / Receipt | 实际变更及原操作回执；回执不证明远端当前状态 |
-| Evidence / Artifact | 可追溯的观测证据与已保存文件 |
-| Result / Evaluation | 不可变执行结果与追加式人工评价/修订 |
+| Organization / Project | 組織資産とプロジェクトのアクセス境界 |
+| SkillVersion / Task | 不変の公開バージョンと、そのバージョンが提供するタスク入口 |
+| Integration / ResourceBinding | 外部接続と実行時に許可された資源範囲（資格情報はモデルに渡さない） |
+| Run / Segment / Attempt | 1 回の業務要求、分析/継続フェーズ、同一フェーズ内の技術的試行 |
+| Brief / Snapshot | 凍結された実行指示と入力事実（現在設定で過去値を埋め戻さない） |
+| Interaction / Proposal | 通常の質問と外部変更提案（回答プロトコルが異なる） |
+| Effect / Receipt | 実際の外部変更と原操作の回執（回執は外部の現在状態を保証しない） |
+| Evidence / Artifact | 追跡可能な観測証拠と保存済み成果物ファイル |
+| Result / Evaluation | 不変の実行結果と追記式の人工評価・修正 |
 
-代码定位统一见[变更指南](../development/change-guide.md)，详细接口见 [Contracts](../../SKM/README.md#contracts)。修改时核对[运行边界](../development/runtime-guide.md)，部署拓扑与路径配置见[部署指南](../operations/deployment.md)，此处不另列模块规格。
+コード配置は[変更ガイド](../development/change-guide.md)、詳細スキーマは [Contracts](../../SKM/README.md#contracts)、実行制約は[実行境界](../development/runtime-guide.md)、配備構成は[配備手順](../operations/deployment.md)を参照する。
+

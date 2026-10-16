@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="ja">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <title>Skillmind · 使用与维护指南</title>
+  <title>Skillmind · 利用・保守ガイド</title>
   <script>
     // 文書と章を自前で復元するため、旧 layout の座標で browser に上書きさせない。
     if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
@@ -13,7 +13,7 @@
     :root { --ink:#182b40; --muted:#56697e; --line:#dce5ed; --blue:#175b99; --paper:#fff; --wash:#f3f6f9; }
     * { box-sizing:border-box; }
     html { scroll-padding-top:var(--docs-scroll-offset,32px); }
-    body { margin:0; color:var(--ink); background:var(--paper); font:16px/1.8 system-ui,-apple-system,"Segoe UI","Noto Sans CJK SC","Microsoft YaHei",sans-serif; }
+    body { margin:0; color:var(--ink); background:var(--paper); font:16px/1.8 system-ui,-apple-system,"Segoe UI","Hiragino Sans","Noto Sans CJK JP","Yu Gothic UI",sans-serif; }
     a { color:var(--blue); text-decoration:underline; text-underline-offset:3px; overflow-wrap:anywhere; }
     a:hover { color:#0c3861; }
     :focus-visible { outline:3px solid #1f6aa7; outline-offset:3px; }
@@ -83,30 +83,30 @@
   </style>
 </head>
 <body>
-  <a class="skip" href="#main">跳到正文</a>
-  <aside class="sidebar" id="sidebar" aria-label="文档导航">
+  <a class="skip" href="#main">本文へ移動</a>
+  <aside class="sidebar" id="sidebar" aria-label="文書ナビゲーション">
     <a class="brand" href="#docs/README.md::">Skillmind</a>
-    <p class="subtitle">使用、开发与运维 · 文档中心</p>
-    <label class="search-label" for="search">搜索文档</label>
-    <input id="search" type="search" placeholder="名称、概念、接口或关键词" autocomplete="off">
+    <p class="subtitle">利用・開発・運用 · 文書センター</p>
+    <label class="search-label" for="search">文書を検索</label>
+    <input id="search" type="search" placeholder="名称・概念・API・キーワード" autocomplete="off">
     <div id="search-status" role="status" aria-live="polite"></div>
-    <nav id="navigation" aria-label="文档列表"></nav>
+    <nav id="navigation" aria-label="文書一覧"></nav>
   </aside>
   <div class="layout">
     <header class="topbar">
-      <span class="eyebrow" id="category">SKILLMIND / 文档</span>
+      <span class="eyebrow" id="category">SKILLMIND / 文書</span>
       <div class="actions">
-        <a id="source-link" href="README.md">Markdown 源文件</a>
-        <button id="print-button" type="button">打印本页</button>
-        <button id="menu-button" type="button" aria-controls="sidebar" aria-expanded="false">目录</button>
+        <a id="source-link" href="README.md">Markdown 原文</a>
+        <button id="print-button" type="button">ページ印刷</button>
+        <button id="menu-button" type="button" aria-controls="sidebar" aria-expanded="false">目次</button>
       </div>
     </header>
     <div class="content-layout">
-      <article id="main" tabindex="-1" aria-label="文档正文"></article>
-      <aside class="toc" aria-label="本页目录"><strong>本页内容</strong><div id="toc-links"></div></aside>
+      <article id="main" tabindex="-1" aria-label="文書本文"></article>
+      <aside class="toc" aria-label="ページ目次"><strong>このページの内容</strong><div id="toc-links"></div></aside>
     </div>
   </div>
-  <noscript>此离线浏览版需要 JavaScript 切换文档。可直接打开 <a href="README.md">Markdown 文档索引</a>。</noscript>
+  <noscript>このオフライン閲覧版は文書の切替に JavaScript を使用します。<a href="README.md">Markdown 文書索引</a>を直接開くこともできます。</noscript>
   <script type="application/json" id="docs-data">__DOCS_PAYLOAD__</script>
   <script>
     'use strict';
@@ -167,7 +167,7 @@
             : title.includes(query) ? 1 : id.includes(query) ? 2 : 3;
           return rank < 3 || sections.length ? [{page, sections, rank}] : [];
         }).sort((left, right) => left.rank - right.rank);
-        document.getElementById('search-status').textContent = found.length + ' 篇匹配文档';
+        document.getElementById('search-status').textContent = found.length + ' 件の一致文書';
         for (const {page, sections} of found) {
           const row = document.createElement('div');
           row.className = 'search-hit';
@@ -183,7 +183,7 @@
           }
           if (sections.length > 3) {
             const more = document.createElement('small');
-            more.textContent = '本页另有 ' + (sections.length - 3) + ' 个匹配章节，可用浏览器查找继续定位。';
+            more.textContent = 'このページには他に ' + (sections.length - 3) + ' 件の一致章があります。ブラウザのページ内検索も利用できます。';
             row.append(more);
           }
           navigation.append(row);
@@ -214,7 +214,7 @@
         region.tabIndex = overflow ? 0 : -1;
         if (overflow) {
           region.setAttribute('role', 'region');
-          region.setAttribute('aria-label', '表格 ' + (index + 1) + '，可横向滚动');
+          region.setAttribute('aria-label', '表 ' + (index + 1) + '（横スクロール可）');
           region.setAttribute('aria-describedby', hint.id);
         } else {
           region.removeAttribute('role');
@@ -251,11 +251,11 @@
       if (!page) {
         main.replaceChildren();
         const title = document.createElement('h1');
-        title.textContent = '文档不存在';
-        main.append(title, linkFor(pages.get('docs/README.md'), '返回文档导航'));
-        document.getElementById('category').textContent = 'SKILLMIND / 未找到';
+        title.textContent = '文書が見つかりません';
+        main.append(title, linkFor(pages.get('docs/README.md'), '文書ガイドへ戻る'));
+        document.getElementById('category').textContent = 'SKILLMIND / 未検出';
         document.getElementById('source-link').hidden = true;
-        document.title = '文档不存在 · Skillmind';
+        document.title = '文書が見つかりません · Skillmind';
         document.body.classList.remove('menu-open');
         menuButton.setAttribute('aria-expanded', 'false');
         renderNavigation();
@@ -272,9 +272,9 @@
       const inlineToc = document.createElement('details');
       inlineToc.className = 'inline-toc';
       const inlineSummary = document.createElement('summary');
-      inlineSummary.textContent = '本页内容';
+      inlineSummary.textContent = 'このページの内容';
       const inlineLinks = document.createElement('nav');
-      inlineLinks.setAttribute('aria-label', '本页章节');
+      inlineLinks.setAttribute('aria-label', 'ページ内の章');
       inlineToc.append(inlineSummary, inlineLinks);
       for (const heading of page.toc) {
         const link = linkFor(page, heading.title, heading.anchor);
@@ -288,12 +288,12 @@
         hint.className = 'scroll-hint';
         hint.id = 'docs-table-hint-' + index;
         hint.hidden = true;
-        hint.textContent = '表格可横向滚动；聚焦表格后可用方向键查看。';
+        hint.textContent = '表は横スクロールできます（フォーカス後に矢印キーでも移動可）。';
         region.before(hint);
       }
       const footer = document.createElement('footer');
       footer.className = 'page-footer';
-      footer.textContent = page.id + ' · 从 Markdown 生成；修改源文件后重新构建。';
+      footer.textContent = page.id + ' · Markdown から生成（原文変更後は再ビルドしてください）。';
       main.append(footer);
       document.body.classList.remove('menu-open');
       menuButton.setAttribute('aria-expanded', 'false');

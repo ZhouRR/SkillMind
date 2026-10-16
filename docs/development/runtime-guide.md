@@ -1,134 +1,90 @@
-# 运行与数据维护指南
+# 実行・データ保守ガイド
 
-本页保留维护现有链路时必须守住的边界；详细字段、状态和实现以代码与 [contracts](../../SKM/contracts/) 为准，能力进度见 [Roadmap](../planning/roadmap.md)。
+本ページは既存経路を保守する上で守るべき境界を定義する。詳細な項目・状態・実装はコードと [contracts](../../SKM/contracts/) を正とし、能力の進捗は [Roadmap](../planning/roadmap.md) を参照。
 
-## 身份与授权
+## 認証と認可
 
-- 入口复用 [actor dependency](../../SKM/backend/src/skillmind/api/auth_dependencies.py)：Cookie 写请求同时检查 Origin/CSRF；显式 API Key header 验证原 Key，重复、混用或无效时拒绝，不回退 Cookie。越权与不存在统一为 404，归档项目只开放获授权读取。
-- API Key 当前授予创建者所在组织的 ADMIN 资源权限，没有逐 Key scope；创建者须保持有效 ADMIN。不能借 Key 绕过项目状态、冻结权限、部署开关或批准。
-- 入口认证与业务提交分属不同事务。涉及持久写入时复用 [UserAccess](../../SKM/backend/src/skillmind/users/access.py)，在业务锁等待后及最终提交检查原资格、当前成员与项目状态；后台执行按持久发起人、批准与原 claim 复核，不能伪造浏览器会话。
-- Run 冻结的是权限上限，后来的授权不能补进旧 Run；当前撤权仍须生效。凭据停用、业务取消、本地连接关闭分别处理，不据此宣称远端进程已停止。
-- Secret 只经 [resolver](../../SKM/backend/src/skillmind/integrations/secrets.py)交给受控 Provider，不进入 Brief、日志、Evidence 或业务工作区。ENVIRONMENT/FILE 保存引用，MANAGED 使用与项目及引用绑定的[加密实现](../../SKM/backend/src/skillmind/core/secret_crypto.py)；缺 key、篡改或解析失败必须拒绝。轮换与恢复按[运行手册](../operations/runbook.md)和[一致恢复点](../operations/backup-recovery.md#一致恢复点包含什么)执行，数据库与原 keyring 缺一不可。
+- 入口は [actor dependency](../../SKM/backend/src/skillmind/api/auth_dependencies.py) を共用する。Cookie による変更要求は Origin/CSRF も検証し、明示 API Key header は原 Key を検証して重複・混用・無効時は即拒否する（Cookie へ fallback しない）。越権と不存在は同じ 404 を返し、アーカイブ済み Project は認可された読取のみを許可する。
+- API Key は作成者が属する Organization の ADMIN 資源権限を付与し（Key 単位の scope なし）、作成者が有効な ADMIN であり続ける必要がある。Key によって Project 状態・凍結権限・配備スイッチ・承認を迂回することはできない。
+- 認証と業務コミットは別トランザクションとする。永続書込は [UserAccess](../../SKM/backend/src/skillmind/users/access.py) を通し、ロック待機後およびコミット前に現在の資格・メンバー・Project 状態を再検証する。バックグラウンド実行は永続化された起票者・承認・原 claim を再検証し、ブラウザセッションを偽装しない。
+- Run は権限上限を凍結し、後続の権限追加を旧 Run へ遡及させない一方、権限剥奪は即座に効力を持つ。資格停止・業務取消・ローカル接続切断は個別に扱い、リモートプロセスの終了を決めつけない。
+- Secret は [resolver](../../SKM/backend/src/skillmind/integrations/secrets.py) 経由でのみ制御下 Provider に渡し、Brief・ログ・Evidence・ワークスペースへ入れない。`ENVIRONMENT`/`FILE` は参照を保存し、`MANAGED` は Project と参照に束縛した[暗号化実装](../../SKM/backend/src/skillmind/core/secret_crypto.py)を使う（鍵欠落・改ざん・解決失敗はすべて拒否）。ローテーションと復元は [Runbook](../operations/runbook.md) と[一致復元点](../operations/backup-recovery.md#一致復元点の内容)に従う。
 
-## Skill 与冻结原文
+## Skill と凍結原文
 
-- Skill 是 Organization 资产，发布后由 Project 显式启用精确版本。沿 [SkillService](../../SKM/backend/src/skillmind/skills/service.py)处理导入、发布、启停与引用检查，不覆盖已发布内容或绕开现存引用删除版本。
-- フォルダーに複数の `SKILL.md` がある場合は画面で解析対象を選ぶ。アップロード root 内の共有 Schema/参照を辿り、選択 Skill と依存ファイルだけを原 path・byte・hash で保存する。参照は root 外へ広げず、他 Skill・知識庫を暗黙に解析しない。共有ファイルの後日の変更は既存 source に反映せず、新規取込で固定する。API は `/skill-imports/upload` の任意 `entry_path`、CLI は `--entry` で同じ選択を指定できる。
-- 新导入只提取输入、资源及操作的最小声明，并形成一个执行任务；完整冻结原文进入 Brief，业务顺序与条件由 Agent 按原文执行。入口为 [direct_candidate](../../SKM/backend/src/skillmind/skills/direct_candidate.py)、[execution](../../SKM/backend/src/skillmind/skills/execution.py)及 [task_brief](../../SKM/backend/src/skillmind/agent/task_brief.py)。旧 Blueprint 保留原值，不从 Manifest 逆算，不在续行时升级历史策略。
-- 新規原文 task は `skill-candidate/v3` の入力・資源選択だけを解析し、`skill-execution/v2` で固定する。`documents` は試験入力の凍結、`resource` は接続/文書庫の選択であり、読書権限ではない。通用 file・画像・変換・Schema Tool は platform が常備し、外部 Tool と操作は選択資源の全 scope/capability と配備上限から Run に固定する。Task の追加 Tool 許可リストや操作宣言は生成しない。既定 binding は接続の選択に使い、資源本体の範囲を Task 側で再縮小しない。接続 config/Secret は Worker に保持し、Agent には原 scope と実際の Tool/操作を渡す。新版は再解析・新規 Run で使用し、旧候補/実行の変換を追加しない。
-- 来源、脚本和模型建议不是权限。Tool 由 [catalog](../../SKM/backend/src/skillmind/agent/tool_catalog.py)统一装配契约和 Provider，经 [ContextBuilder](../../SKM/backend/src/skillmind/agent/context_builder.py)及 [ToolExecutionPolicy](../../SKM/backend/src/skillmind/agent/tool_policy.py)核验冻结绑定、当前开关和调用权限；不按相近名字放行未知能力。SDK builtin 保持拒绝，Shell/网络/文件不能绕过 Gateway，改变 cwd 不构成隔离。执行脚本须核对发布 checksum，业务专用 Schema、seed 和 renderer 不进入通用层。
-- 异步解释保留原请求、来源 hash、模型配置和调用事实；超时、取消或响应未知不能靠换 ID 重新生成。修改解释流程先核对 [request_service](../../SKM/backend/src/skillmind/skills/request_service.py)与消费者，模型质量另用固定输入和独立预期验收。
-- Codex 模型信息通过固定 CLI 获取：内置目录缺少所选模型或思考强度时，用专用登录和代理配置执行官方模型发现；保留返回的模型能力，仅覆盖平台工具限制。未找到或读取失败时明确报错，不猜参数、不换模型或降低思考强度；登录本身不依赖模型目录就绪。
+- Skill は Organization 資産であり、公開後に Project が特定版を明示有効化する。[SkillService](../../SKM/backend/src/skillmind/skills/service.py) に従い取込・公開・有効化・参照検査を行い、公開済み内容の上書きや既存参照がある版の削除を行わない。
+- 取込ディレクトリに複数の `SKILL.md` がある場合は画面（または API `/skill-imports/upload` の `entry_path`、CLI `--entry`）で解析対象を選択する。アップロードルート内の共有 Schema・参照のみを辿り、選択された Skill と依存ファイルを元パス・バイト列・ハッシュのまま保存する（ルート外参照や他 Skill の暗黙解析は行わない）。
+- 新規取込は `skill-candidate/v3` の入力と資源選択のみを解析し、`skill-execution/v2` の単一実行タスクとして固定する。凍結原文一式を Brief に渡して Agent が実行する（入口は [direct_candidate](../../SKM/backend/src/skillmind/skills/direct_candidate.py)、[execution](../../SKM/backend/src/skillmind/skills/execution.py)、[task_brief](../../SKM/backend/src/skillmind/agent/task_brief.py)）。`documents` はテスト入力を凍結し、`resource` は接続/文書ライブラリを選択する（それ自体は読み書き権限ではない）。汎用ファイル・画像・変換・Schema ツールは常備され、外部ツールと操作は選択資源の全 scope/capability と配備上限で Run に固定する（Task 層でのツール allowlist や資源範囲の再縮小は行わない）。旧 Blueprint は原値を保持し、逆算や自動昇格を行わない。
+- 出所・スクリプト・モデル提案は権限ではない。ツールは [catalog](../../SKM/backend/src/skillmind/agent/tool_catalog.py) で契約と Provider を配線し、[ContextBuilder](../../SKM/backend/src/skillmind/agent/context_builder.py) と [ToolExecutionPolicy](../../SKM/backend/src/skillmind/agent/tool_policy.py) で凍結束縛・スイッチ・権限を検証する。SDK builtin は拒否し、Shell/ネットワーク/ファイルは Gateway を迂回せず、実行スクリプトは公開 checksum を照合する。
+- 非同期解釈は元要求・ソース hash・モデル設定・呼出事実を保持し（タイムアウトや結果不明時に ID を変えて再実行しない）、変更時は [request_service](../../SKM/backend/src/skillmind/skills/request_service.py) を確認する。Codex モデル情報は固定 CLI で検出し、選択モデルや思考強度が未取得の場合は専用ログインとプロキシで公式検出を実行し、失敗時は推測や自動縮退を行わず明示エラーとする。
 
-## 输入与文档
+## 入力と文書
 
-- 冻结精确版本、资源选择、文档 ID/hash 与绑定。新增文件、同名重传或配置变化不改变原 Run；缺失或损坏不能用当前文件补齐。物化与复用沿 [workspace_materializer](../../SKM/backend/src/skillmind/agent/workspace_materializer.py)和 [input_snapshot](../../SKM/backend/src/skillmind/runs/input_snapshot.py)，校验原回执及完整输入树；`input/` 只读，写入限 `workspace/`、`output/`。
-- 选择文档、读取正文、转换与保存成果是独立能力。按需准备仅冻结清单，后续工具核验原内容；文档观察不等于取得正文，MCP 服务的只读标注不等于授权。能力与 Provider 是否可用，以 [Worker 装配](../../SKM/backend/src/skillmind/worker/settings.py)及冻结 binding 为准。
-- 工具参数不合法返回 `invalid_request`，指出契约中的字段位置、类型或数量限制，说明 Provider 尚未执行；权限拒绝保留 `scope_denied`。SDK 与工具序列保留同一诊断，拒绝审计记录分类和原因，不复制输入值。`retryable: false` 不阻止修正参数后的新请求。Provider 返回值不合契约或无法分类的执行失败使用 `unavailable`，不据此断言连接故障；真实读取失败仍可阻断任务，结果未知的外部操作不得自动重放。
-- 上传按原 actor/Project、幂等键和内容确认；数据库提交与对象 PUT 不原子。沿 [DocumentService](../../SKM/backend/src/skillmind/documents/service.py)保留预约、发布/关闭回执及原存储归属；关闭发布不证明 PUT 停止，未知不自动重传、删对象或退配额。
-- 改名/移动只改变展示路径，保留 ID、原字节、存储引用和原上传回执；清理时校验不变身份，不能要求当前路径仍等于上传路径。回收站仍占用存储；完全删除先检查回收状态、生成执行已结束、无未决操作及其他引用。[引用查询](../../SKM/backend/src/skillmind/documents/reference_repository.py)覆盖 Run、Schedule、occurrence，按原文档选择和冻结资源类型、连接身份提取引用，不验证非文档工具的名称或版本，也不查询当前连接配置。资源类型或身份缺失、文档快照无法验证时仍拒绝删除，不从旧工具名称推测类型。
-- 画面上传文件或目录时默认更新同目录同名文件，无需单独选择开关；“更新文件”菜单也沿用同一路径。更新固定元 ID、路径与 checksum，在预约和发布时检查并发变化；新版本使用新 ID，旧版移入回收站并保留原字节、冻结引用和上传回执。知识库更新无需先删除历史引用，但旧版完全删除仍需引用检查；保留的旧版继续计入配额。
-- 删除须在同一事务保存原对象清理要求，再在确认提交后尝试删 blob。204、目录消失或一次读不到对象都不证明全部版本、在途 PUT 和配额已结清；持久清理重试与结算仍待补齐。执行履历 purge 沿 [history_purge](../../SKM/backend/src/skillmind/runs/history_purge.py)，保留共享成果与最小删除审计，不删除外部业务数据或重做操作。
+- **スナップショットとワークスペース**：Run は特定版・資源選択・文書 ID/hash・束縛を凍結する。実体化と再利用は [workspace_materializer](../../SKM/backend/src/skillmind/agent/workspace_materializer.py) と [input_snapshot](../../SKM/backend/src/skillmind/runs/input_snapshot.py) で原回執と入力ツリーを検証し、`input/` は読取専用、書込は `workspace/`・`output/` に限定する。能力の可用性は [Worker 配線](../../SKM/backend/src/skillmind/worker/settings.py) と凍結束縛に従う。
+- **ツールエラー分類**：引数不正は `invalid_request`（項目と制約・未実行である旨を示し、修正後の再送を許可）、越権は `scope_denied`、戻り値違反や未分類失敗は `unavailable` を返し、結果不明の外部操作は自動再送しない。
+- **アップロード・同名更新・削除**：アップロードは [DocumentService](../../SKM/backend/src/skillmind/documents/service.py) で原 actor/Project・冪等キー・内容回執を束縛する。画面でのファイル/フォルダ投入は同ディレクトリ同名ファイルを既定で上書き更新し（「ファイルを更新」メニューと同経路）、新版に新 ID を採番して旧版をごみ箱へ移し、原バイト・凍結参照・回執を保持する（クォータ対象も継続）。改名・移動は表示パスのみを変更し文書 ID を維持する。完全削除はごみ箱移動後に生成実行の終了と未決参照がないことを確認して行う（[参照クエリ](../../SKM/backend/src/skillmind/documents/reference_repository.py) は Run・Schedule・occurrence を網羅）。削除は同一トランザクションでオブジェクト清掃を登録した後に非同期で blob を消し、実行履歴の清掃は [history_purge](../../SKM/backend/src/skillmind/runs/history_purge.py) に従い共有成果物と最小削除監査を保持する。
+- **Excel 変換（`excel-styles/v3`）**：`.xlsx` 変換は元の行列・静的塗潰し色・全体/部分取消線を保持する。割当済みセル書式（無色・取消線解除を含む）を優先し、未割当セルは行→列→既定の順でフォールバックする。同一書式は連続範囲に統合し、結合セルは左上書式を参照して本文を重複出力しない。RGB/theme/indexed/tint の原値と解決結果を保持し（index 64/65 は `SYSTEM_FOREGROUND`/`SYSTEM_BACKGROUND`、範囲外や未知色は `UNRESOLVED`）、実在する表/範囲にのみ未評価の条件付き書式や表スタイルを注記し、旧 `.xls` は値のみ・スタイル未検査と明記する。スタイル profile は Evidence に記録し、Markdown 本文には重複出力しない。
+- **文書読み書きと分割変換**：`document.read/v1` は `response_mode=file` で本 Run ローカルファイルへの交付を優先する。新規 Run は現在 Project の文書ライブラリ全体の読取権限を持ち（都度現在ユーザーと Project 権限を再確認）、アップロード回執 ID/hash による直接読取に対応する。`document.convert_to_markdown/v1` も `response_mode=file` と `publish_artifact=true` を優先し、`workspace.read/v1` は `offset`・`max_chars`（既定 64,000、上限 200,000）・`expected_hash` による分割読取に対応し、ローカル欠落時は `artifact.materialize/v1` で検証済み原バイトから復元する。
+- **ワークスペース編集とディレクトリ提案**：`workspace.edit/v1` は原ハッシュに基づくコピー・追記・一意文字列置換・出力公開に対応し、`document.files/v1` は認可文書ライブラリ内のディレクトリ列挙と保存・改名・移動・空ディレクトリ作成/削除・ごみ箱移動/復元提案を準備する（実書込は共有 Effect と元版競合検証を通す）。
 
-Excel→Markdown の `.xlsx` は `excel-styles/v3` で原行列、静的な塗りと全体/部分削除線を保持する。割当済みセルの無色・削除線解除を含む書式を優先し、本文内の未割当セルだけに行→列→標準の既定値を適用する。同書式は連続範囲に縮約し、結合領域は左上セルの書式を参照して本文を複写しない。RGB/theme/indexed/tint の原値と解色結果を残す。索引調色板が未定義・空の場合だけ標準色を使う。無補正の索引 64/65 は `SYSTEM_FOREGROUND` / `SYSTEM_BACKGROUND` として役割を示し、RGB は推測しない。独自調色板の範囲外・不明な色・補正済み system 色は `UNRESOLVED` を保持する。条件書式・表スタイルの未評価は実在するシート/範囲だけに示す。入力規則など静的書式と無関係な既知 reader 警告は除き、未分類警告や書式読取失敗は明示する。除外判断は業務規則に委ね、旧 `.xls` は値のみ/書式未検査を明示する。profile は Evidence に記録し、Markdown 本文には重複記載しない。Markdown の注記は書式の読み方と実際の未取得情報だけを短く示し、原版/Artifact の原 byte 検証と既存制限は維持する。
+## 資源ファイルと原生クライアント
 
-文档正文优先通过 `document.read/v1` 的 `response_mode=file` 交付为 Worker 内本 Run 的文件，响应只给路径、大小和哈希；Agent 再分段读取或检索。新 Run 固定当前 Project 文档库的整体读权限，`document.list/read` 可取得未选择的参考资料及执行中新上传的文件；读取每次核对当前用户与项目权限。上传回执的文档 ID/hash 可直接用于 `document_id` / `expected_hash`。任务选择仍固定原 ID/hash，不因额外参考或同名更新变更；旧 Run 保留原范围。目录以平台 metadata 和 MinIO 内容为正本，本地是工作副本，不是实时同步盘。
+ネットワークアクセスは Worker 内の共有クライアントが実行し、束縛・権限・回執を検証して資格情報をモデルに露出しない。要求は `request_file` + `expected_hash` に対応し、応答は `workspace/resources/` に保存する。`change.propose` は JSON ファイル提出とその内容ハッシュ束縛に対応する。8 KiB を超える確認済み Effect 回執はファイル参照として交付し（短い回執や保存失敗時は原値を返却）、同一回執は継続・復旧でも同一投影を保つ。
 
-`workspace.edit/v1` 支持按原哈希复制、追加、唯一文本替换和发布已有输出文件，不要求模型复写全文。沿用 Artifact 的 UTF-8、大小及配额限制；发布输出后，`document.files/v1` 在已授权文档库内列举/观察目录、按原 Artifact 引用准备保存或改名、移动、建目录、删除空目录、回收及恢复提案，实际修改仍走共享 Effect。整体读权限不增加写权限，画面与 Agent 使用同一份文档目录。旧 Run 的冻结工具和操作范围保持原样；新操作需新 Run 的对应权限。
+- **Git**：`repository.workspace/v1` で認可 UTF-8 ファイルを編集可能ディレクトリに配置し、`prepare_commit` でローカルファイルハッシュから提案を準備し、コミット時も branch・パス・原 revision・read-back を検証する。
+- **MCP**：検出・凍結された原生パラメータ Schema を使い、読取はファイル入出力に対応し、書込は Effect・承認・原操作 ID を通す。
+- **PostgreSQL**：`database.query/v1` と `database.execute/v1` を使い、テーブル/列権限は DB アカウントに委ねる。単一 SELECT と承認後の INSERT/UPDATE/DELETE・JOIN/CTE・`$1` パラメータに対応する（DDL・トランザクション制御・複文は禁止）。書込前に同一資源へ `read_back` と同一の SELECT（INSERT 対象行の不在確認を含む）を実行し、応答ファイルハッシュと Evidence を提案前提とし、書込・read-back・`skillmind_effects.execution_receipts` を同一トランザクションでコミットする。
+- **HTTP API**：接続にはルート URL 一覧と認証 Secret のみを登録し、パス・メソッド・引数は登録された origin とルート配下で Skill/Agent が指定する。GET/HEAD 読取と承認後の POST/PUT/PATCH/DELETE に対応し、事前 GET や read-back は強制しない。原ステータスコード・許可ヘッダ・完全バイト列ファイルをそのまま Agent に渡す（自動リダイレクト禁止、タイムアウトや結果不明時の自動再送禁止）。
+- **設定移行**：`0059_native_resource_clients` で旧書込接続を SELECT/INSERT/UPDATE/DELETE へ、Redmine を HTTP へ変換し、`0062_http_resource_roots` で基底 URL をルート一覧へ統合して旧既定束縛を無効化する（旧 Run スナップショットは書き換えない）。
 
-覆盖保存采用原版本校验：先保存并核验新对象，发布事务再将旧文档移入回收站并切换正式目录。旧字节保留给冻结输入，成功回执证明原操作而非当前文件状态；并发改名、删除、替换和目录子集合变化均拒绝旧提案。确认冲突的更新会永久关闭原发布并释放逻辑路径占位，保留原对象、配额和审计；未知结果仍保持原占位，不借此重发。直接在 MinIO 改写内容会在原字节核验时被拒绝，但绕过平台的并行操作不享有平台事务隔离，不将其宣称为原子同步。
+## 画像と精密読取
 
-文档转换优先使用 `response_mode=file` 与 `publish_artifact=true`：完整 Markdown 保存为本 Run Artifact 并复制到可读 workspace，响应仅含文件信息。`workspace.read/v1` 使用 `offset`、`max_chars` 和 `expected_hash` 分段读取，默认 64,000、单次上限 200,000 个 Unicode 字符，按 `next_offset` 继续；宽范围读取按上下文余量调整，定位查询可使用小页。Codex 的工具输出截断额度同步覆盖大页，实际内容仍受 Gateway/Run 输出预算管理。文件变化则拒绝混读。本地副本缺失或变化时，`artifact.materialize/v1` 从同 Run 的已验证原字节恢复，不重新转换或发布。文档库保存仍引用 Artifact，权限、审批和回读不变；旧 inline 调用继续兼容。
+- `mcp.download/v1` は同一 Run・同一束縛の成功した MCP 読取 Evidence と原応答 JSON Pointer からダウンロード URL を解決し、同一 origin へのみ資格情報付き GET を送り（リダイレクト・別接続参照は禁止）、権限検証後に完全バイト列とハッシュを保存する。
+- `workspace.read/v1` の JSON モードは `pointers`（RFC 6901）と `expected_hash` で項目を精密読取する（欠落は `exists: false`、配列は既定 20 件/ページ・上限 200 件、元ファイル上限 16 MiB・結果上限 64 KiB、超過時は切り詰めず拒否）。
+- `workspace.image/v1` は Run 内パス・原ハッシュ・PNG/JPEG/WebP 実体（上限 8 MiB・2,500 万画素・単一フレーム）を検証してエンジンへ画像を渡し、SDK builtin `view_image` は禁止する。スクリーンショットとウィンドウ状態は Skill が照合し、クリックは確認済み MCP セレクタを使用する。
 
-文档移入回收站保留原 ID、对象字节、效果回执和冻结引用，原输入仍按 ID/hash 读取；历史引用或旧记录的解析失败不阻止可恢复的回收。完全删除仍检查历史、调度和回执引用。生成元仍在运行或有未核对操作时，成果回收继续拒绝；复原仍核对同名路径和待处理上传，不覆盖新文档。
+## 実行と復旧
 
-## 资源文件与原生客户端
+- [システム構成と用語](../overview/architecture.md)に従い Run・Segment・Attempt を区別する（入口は [worker/settings](../../SKM/backend/src/skillmind/worker/settings.py) と [executor](../../SKM/backend/src/skillmind/worker/executor.py)）。同一段階の復旧は新 Attempt を作成し、原スナップショット・権限上限・Result は変更しない。
+- 送信前に主体・冪等キー・入力・資源選択・承認同意を凍結し、[creation_request](../../SKM/backend/src/skillmind/runs/creation_request.py)・[creation_replay](../../SKM/backend/src/skillmind/runs/creation_replay.py)・Web [runSubmission](../../SKM/web/src/lib/runSubmission.ts) を共用する。通信断やタイムアウト時はまず原回執を確認し、再送は原キーと原内容を維持して遅延応答を隔離する。
+- 取消はまず意図を永続化し、[RunRepository](../../SKM/backend/src/skillmind/runs/repository.py) がロック内で lease・取消・終端状態を検証し、ツール呼出は [evidence](../../SKM/backend/src/skillmind/agent/evidence.py) で実行権を再確認する。モデルセッション復旧は [session_store](../../SKM/backend/src/skillmind/agent/session_store.py) の原記録を読み、根拠欠落時は停止する。
+- 定期実行（[schedules/service](../../SKM/backend/src/skillmind/schedules/service.py)）は既定で自動承認を有効にし、汎用・Git・MCP の同意を発火時の原 occurrence 要求に固定した上で、実行時に作成者の現在の Project・資源権限を再検証する。
 
-网络访问由 Worker 内的共享客户端执行，与 Codex/Claude 等引擎无关；平台仍核验绑定、权限和操作回执，不把凭据交给模型或开放任意 Shell。请求文件使用 `request_file` + `expected_hash`，完整响应保存到 `workspace/resources/`；Agent 按路径读取所需部分。`change.propose` 可直接提交已准备的 JSON 文件，批准绑定其实际内容，文件发生变化则拒绝。
+## 外部効果
 
-超过 8 KiB 的已确认 Effect 回执优先交付为本 Run 的文件引用，短回执直接返回。数据库与审计 Brief 保留完整原值，模型获得原操作状态、Evidence、验证信息及文件 hash；即时返回、续行和恢复使用相同投影，同一回执不重复出现在最新结果和累计列表中。本地副本缺失时从已保存的原回执重建；缺少读权限/工具或文件保存失败时交付完整原值，不改变已完成的业务结果，也不重放外部操作。文件引用仅证明那次操作，不证明当前外部状态或业务 PASS。
+- 外部書込は observe → propose → approve → apply に従う。モデル向け説明は各 Effect request Schema の `description` から供給し、文書と Git は提案準備ツールを優先利用する。
+- 承認は特定 Proposal の version/checksum・Provider・操作・scope に束縛し、[EffectService](../../SKM/backend/src/skillmind/effects/service.py) が業務ロック外でリモート I/O を実行する。自動承認は原 Run 開始時に記録された同意または既存の事前認可に限定する（`repository.write/v1` は Project 事前認可と force を禁止）。
+- 実効能力は [ExecutionFeatures](../../SKM/backend/src/skillmind/effects/release.py) と [Provider registry](../../SKM/backend/src/skillmind/effects/wiring.py) のスイッチ双方で制限する。MCP 提案は同一 Run/接続/束縛のツールカタログ証拠を自動関連付けして checksum に含める。
+- 書込結果が不明な場合は主フローを停止して原 Effect を保持し、[reconciliation_service](../../SKM/backend/src/skillmind/effects/reconciliation_service.py) で読取照合を行う。MCP の read-back 再試行（[mcp_provider](../../SKM/backend/src/skillmind/effects/mcp_provider.py)）は変更操作を決して再送しない。
 
-- Git：`repository.workspace/v1` 将授权 UTF-8 文件放到可编辑目录；`prepare_commit` 按本地文件哈希准备提案，不要求模型重新输出正文。提交仍检查分支、路径、原 revision 和回读；本地编辑不会自动推送。
-- MCP：使用发现并冻结的原生参数 Schema；读调用支持文件输入/输出，修改调用仍经原 Effect、批准和原操作 ID。文件方式不改变工具权限或桌面占用规则。
-- PostgreSQL：新连接使用 `database.query/v1` 和 `database.execute/v1`，表／列权限由原数据库账号决定，不再维护平台表／列 DSL。支持单条 SELECT 与批准的 INSERT/UPDATE/DELETE、JOIN/CTE 和 `$1` 参数；不开放 DDL、事务控制或多语句。JSON 日期／时间字符串按 PostgreSQL 确认的参数类型在同一事务内转换，保留数据库时区语义，普通文本不自动转为日期。写入、必要回读与既有 `skillmind_effects.execution_receipts` 在同一事务提交；未知结果只核对原回执，不重发 SQL。
-- SQL 写入前，先对同一资源执行与 `read_back` 相同的 SELECT、参数和行数上限，将完整响应文件的 hash 和 Evidence 引用作为提案前提；INSERT 也要先读取目标行不存在的结果，不能引用 Schema、UUID 或时间查询的 hash。提案保存前在当前 Agent 会话中返回可修正诊断。实际执行时若确认首次 DML 尚未发送且事务已退出，前提变化允许重新读取后提交新提案；历史尝试、回执冲突及结果未知仍按原操作核对，不自动重放。
-- HTTP API：资源只登记根地址列表和认证方式，认证值仍保存在 Secret；接口路径、方法与业务参数由 Skill/Agent 提供。相对路径追加到所选根地址，完整 URL 也须属于已登记的 origin 和根路径。读取支持 GET/HEAD，批准后可发送 POST/PUT/PATCH/DELETE；不要求事前 GET、远端 revision 或 GET 回读。原响应的状态码、允许公开的响应头及完整字节文件交给 Agent，2xx 表示请求获得成功响应，202 表示受理，业务是否完成由 Agent 判断。非 2xx 保留实际响应供处理；禁止自动跟随重定向，超时或结果未知不自动重发。
+## 結果と評価
 
-迁移 `0059_native_resource_clients` 沿用 PostgreSQL 原账号和凭据，旧写连接转为 SELECT/INSERT/UPDATE/DELETE，旧只读连接保留 SELECT；不执行数据库 GRANT。Redmine 转为 HTTP，原 issue 范围和 PUT 权限保留，凭据正文不变。旧默认绑定停用，原 Run 快照不改写；部署前结束在途任务，新流程重新解析 Skill 并使用新绑定。HTTP 的 `0062_http_resource_roots` 将现有基础地址移入根地址列表并取消路径/方法配置，停用旧格式的默认绑定；新 Run 选择当前连接，旧 Run 不改写。HTTP 结果未知暂不提供通用自动核对协议，须保留原操作事实。
+- 技術的終端状態・結果の完全性・業務 PASS/FAIL は分けて表現する。[ResultValidator](../../SKM/backend/src/skillmind/agent/result_validation.py) が凍結 Schema・参照帰属・添付バイト・保存済み Effect 事実を検証する。
+- Result/Evidence/Artifact は不変とし、人手修正は [Evaluation](../../SKM/backend/src/skillmind/evaluations/service.py) を追記して原結果を上書きしない。
+- `audit.export/v1`（[audit_export](../../SKM/backend/src/skillmind/agent/audit_export.py)）は保存済み事実のみを出力し、`artifact.append/v1` は原バイト検証後に短文を追記して新 Artifact 参照を公開する（元の監査参照は不変）。表示規則は [UI ガイド](../design/workspace.md#レポートとプレビュー)を参照。
 
-## 画像の読取
+## 後置能力
 
-`mcp.download/v1` は、同 Run・同 binding の成功済み MCP query の Evidence と原応答の JSON Pointer から取得先を解決する。登録資格は同一 origin の GET だけへ送り、redirect・任意 URL・別接続の参照を許可しない。権限は I/O 前後で確認し、完全な byte/hash を Run file に保存する。MCP 接続の読取権で有効にし、既存 Run の凍結権限へ後付けしない。既存 HTTP 読取も登録済みの根 URL 配下で画像を取得できる。
+未接続または要否判断待ちの能力は日常タスクの前提としない。
 
-`workspace.read/v1` 的 JSON 模式使用 `pointers` 与 `expected_hash`，按 RFC 6901 取得指定字段；缺失字段通过 `exists: false` 明示，区别于存在的 null/false。选中数组默认每页 20 项、最大 200 项，用各项的 `next_offset` 继续；JSON 来源最多 16 MiB，选择结果最多 64 KiB，超限须缩小字段或页，不截断值冒充完整结果。返回 hash 始终对应完整源文件，路径、封存输入、权限和符号链接检查与普通读取相同。
-
-`workspace.image/v1` は、許可された Run の input/workspace/output path と原 hash を照合し、PNG/JPEG/WebP の実体を検証してから MCP image content を両 Engine へ渡す。上限は 8 MiB・2,500 万画素、単一 frame。封存 input・symlink 拒否・既存の出力予算を維持し、通常の ToolCall/Evidence は短い metadata/hash を保存する。ファイル path や Base64 text の返却だけを閲覧済みとしない。SDK builtin の `view_image` は引き続き禁止し、モデルは登録された画像 Tool を使用する。
-
-画像は必要時の観測であり、全タスクの開始条件ではない。スクリーンショットと現在の窓・撮影時点は Skill が照合し、クリックは確認済みの MCP セレクターを使う。履歴送信や短分段は汎用 MCP の元提案・批准・回読を通し、送信成功を業務 PASS と扱わない。ログの判定には許可された本文読取と今回の操作との対応が必要で、列挙/アップロードだけでは成立しない。
-
-## 执行与恢复
-
-- 按[架构与术语](../overview/architecture.md)区分 Run、Segment 和 Attempt；生产入口为 [worker/settings](../../SKM/backend/src/skillmind/worker/settings.py)与 [executor](../../SKM/backend/src/skillmind/worker/executor.py)。同阶段技术恢复使用新 Attempt，不替换 Run，不改原快照、权限上限或 Result。
-- 提交前冻结原身份、幂等键、输入、资源选择与批准同意；同键只确认同一内容。复用 [creation_request](../../SKM/backend/src/skillmind/runs/creation_request.py)、[creation_replay](../../SKM/backend/src/skillmind/runs/creation_replay.py)与 Web [runSubmission](../../SKM/web/src/lib/runSubmission.ts)，重放不读取当前资源重建快照。
-- 断网、超时、abort、提交异常或损坏的成功响应均可能已经落库。保留原请求，先查询原回执；404 仅表示本次未见。协议允许显式重发时仍用原键、原内容和相同业务身份，不自动换键；新会话可按接口规则查询原事实，不能接管旧在途写入。晚到响应必须隔离于新 actor/Project/Run。
-- 取消先持久保存意图；[RunRepository](../../SKM/backend/src/skillmind/runs/repository.py)在原 Run/Segment/Attempt 锁内核验 lease、取消和终态。旧 Worker 失去 lease 后不得补写成功或失败；Tool 登记、调用与保存沿 [evidence](../../SKM/backend/src/skillmind/agent/evidence.py)复核原执行权，未决调用不重新发放执行许可，成功重放只返回可核实的原回执。
-- 接受取消、业务终态、SDK 清理返回和远端停止分别核对；保留协作取消与清理，本地退出不能证明远端停止或作为退额依据。
-- 模型/会话恢复沿原记录与 [session_store](../../SKM/backend/src/skillmind/agent/session_store.py)，缺失依据时停止；不补造 transcript、自动改模型或从头重跑。定期执行同样保留原 occurrence 与创建身份，入口见 [schedules/service](../../SKM/backend/src/skillmind/schedules/service.py)。
-- 定期実行は既定で自動承認する。一般・Git・MCP の同意を発火時の原要求へ固定し、作成者の現在の Project/資源権限を検証して通常の Run/Effect 経路へ渡す。再照会は元 occurrence の設定を使い、在途 Run の同意を後から変更しない。
-
-## 外部效果
-
-受控写入的模型说明来自各 Effect request Schema 的 `description`，由同一提案工具统一交付。维护时同步准确的 `target`、`changes`、前提版本来源和回读格式；不能只描述用途，也不能把格式说明当作新增权限。文档与 Git 优先复用已提供的提案准备工具，直接提案使用同一契约；无需在业务 Skill 重复平台字段格式。 文書ファイルの提案準備も、直接 write Tool の有無ではなく同じ文書庫・操作の凍結権限と現在の binding を照合する。
-
-- 外部写入沿 observe → propose → approve → apply；Agent 提案不等于远端执行。批准绑定精确 Proposal version/checksum、Provider、操作与 scope；[EffectService](../../SKM/backend/src/skillmind/effects/service.py)与独立 Worker 核对当前资格、冻结 binding、lease、取消和期限，不在业务锁内等待远端 I/O。
-- 自动批准只能来自原 Run 启动时明确记录的同意，或适用能力的既有预授权规则；Git/MCP 的额外同意不从旧 Run 补推。`repository.write/v1` 禁止 Project 预授权与 force，Git 仍核对精确 ref 和原提交，不把启动同意当作任意仓库写权限。
-- 实际能力由 [ExecutionFeatures](../../SKM/backend/src/skillmind/effects/release.py)与 [Provider registry](../../SKM/backend/src/skillmind/effects/wiring.py)共同限定：PostgreSQL DML、文档保存与目录管理、Git commit、MCP 调用保留独立开关；HTTP API 按连接的根地址列表与读写权限开放。旧队列也须检查当前开关，历史读取与获授权的原结果核对保持独立。
-- 写入前观察、并发冲突检查、原操作幂等和 read-back 均须保留。原回执证明原操作；当前同名、同值或当前画面不能代替原回执。数据库、对象存储、仓库、MCP 与平台数据库之间没有统一原子事务。
-- MCP 提案创建时自动关联同 Run、同连接、同绑定 checksum 和目录哈希的成功工具目录证据，并纳入提案 checksum 与批准；保存后的提案只核对原引用，不补换证据。复用目录证据不替代当前授权、动态画面观察或操作回执。
-- 写入结果未知时停止主处理，保留原 Effect 与已发生事实；失败状态不证明未写入，不据此重做写入或补偿删除。原结果只读核对走 [reconciliation_service](../../SKM/backend/src/skillmind/effects/reconciliation_service.py)。取消、lease 到期或核对未检出都不证明未执行；MCP 的回读重试不能重发修改操作，入口见 [mcp_provider](../../SKM/backend/src/skillmind/effects/mcp_provider.py)。
-
-## 结果与评价
-
-- 技术终态、结果完整程度与业务 PASS/FAIL 分开表达。结果通过 [ResultValidator](../../SKM/backend/src/skillmind/agent/result_validation.py)校验冻结 Schema、引用归属、附件字节及保存的 Effect 事实；模型自称成功不构成 APPLIED，结构有效不证明业务正确。
-- Result/Evidence/Artifact 保留原值。人工修正追加 [Evaluation](../../SKM/backend/src/skillmind/evaluations/service.py)，不覆盖结果或自动采用建议；重复提交和未知响应沿原评价身份确认。
-- 附件只能发布经工具审计确认的原字节，下载核验归属和 hash。`audit.export/v1` 导出已存事实，不重新执行操作，不把通用审计 JSON 当作 Skill 规定的业务成果；入口见 [audit_export](../../SKM/backend/src/skillmind/agent/audit_export.py)。
-- `artifact.append/v1` 按当前 Run 的 Artifact 引用读取并核验原字节，只追加模型提供的短文本，覆盖同一本地 output 路径并发布新引用；保存文档使用新引用，原审计引用不改写。不要求模型转抄全文，也不增加外部写入权限。
-- 报告与预览按 [UI 指南](../design/workspace.md#报告与预览)展示；模板不替代 Skill 规定的业务成果，展示故障不重跑模型或改变业务状态。
-
-## 后置能力
-
-按生产接线和实际证据判断能力，不因存在数据表、开关或测试就扩大默认承诺。仅在真实需求涉及下列能力时核对，不把它们作为日常任务的新前置条件。
-
-| 范围 | 当前维护边界 |
+| 範囲 | 現在の保守境界 |
 | --- | --- |
-| Run 统一预算 | [primary_budget](../../SKM/backend/src/skillmind/worker/primary_budget.py)尚未接入生产 coordinator；Codex 启动前拒绝美元限额，局部 turns/output/timeout 不等于完整计费上限。接入时须主子共享、收费前预留、可信计量，未知费用不退额。 |
-| 子 Agent | [Provider](../../SKM/backend/src/skillmind/agent/subagent_provider.py)仅局部实现，共享消费、停止与审计恢复未闭合；权限经 [resolve_subagent_capabilities](../../SKM/backend/src/skillmind/agent/subagent.py)收窄，禁止写入、交互和递归 dispatch。 |
-| 生成 UI | [Manifest](../../SKM/contracts/runtime-manifest/v1alpha1.schema.json)仍不允许 frontend_module，builder/Host 未接。未来开放须验证隔离：bundle 使用 CSP sandbox allow-scripts，iframe 禁止 allow-same-origin；静态报告不算生成应用。 |
-| 外部写操作序列 | [局部实验](../../SKM/backend/tests/worker/test_receipt_sequence_experiment.py)仍未接入生产。已接入的同 job SDK 复用和本地/只读短序列见下节；它们不等于取消逐次 Effect/Segment，也不执行批量外部写入。 |
-| 其他扩展 | Task Flow 只读预览；完整编排、SVN 写入交付、PR 自动创建及更广的 Shell/network 能力按实际需求明确权限、恢复与验收范围。 |
+| Run 共通予算 | [primary_budget](../../SKM/backend/src/skillmind/worker/primary_budget.py) は本番 coordinator 未接続。Codex 起動前にドル上限を拒否し、将来接続時は親子共有・課金前確保・費用不明時の返還なしを守る |
+| 子 Agent | [Provider](../../SKM/backend/src/skillmind/agent/subagent_provider.py) は部分実装。権限は [resolve_subagent_capabilities](../../SKM/backend/src/skillmind/agent/subagent.py) で絞り込み、書込・対話・再帰 dispatch を禁止 |
+| 生成 UI | [Manifest](../../SKM/contracts/runtime-manifest/v1alpha1.schema.json) は `frontend_module` を引き続き禁止。将来開放時は CSP `sandbox allow-scripts` と iframe の `allow-same-origin` 禁止を検証する |
+| 外部書込シーケンス | [局所実験](../../SKM/backend/tests/worker/test_receipt_sequence_experiment.py) は本番未接続。同一 job の SDK 再利用と読取専用短列では一括外部書込を行わない |
+| その他拡張 | Task Flow は読取専用プレビュー。完全オーケストレーション・SVN 書込・PR 自動作成・広範な Shell/network は実需要に応じて評価 |
 
-## 有限工具序列与暖续行
+## 限定ツール列とウォーム継続
 
-本地/只读短序列由 `agent/tool_sequence.py` 经原 `ToolGateway` 执行。注册项必须显式 `sequence_safe`，子工具仍须在原 Run 冻结集合中；改变注册不扩大历史权限。取消传播、未决不重放，外部写入与控制工具不能进入此序列。
+- `agent/tool_sequence.py` は元の `ToolGateway` を通じて `sequence_safe` と明示されたローカル/読取専用サブツール 1〜5 個（原 Run の凍結集合内）を順次実行し、取消伝播に対応し外部書込と制御ツールを禁止する。
+- `agent/warm_codex.py` は同一 Worker job の原 Run 内でのみ Codex プロセスを再利用し（Run 間で権限やセッションを共有しない）、原 Run ロック内で隣接 Segment・原 Effect・自動承認を検証して新 Attempt を作成する。
 
-Codex 的 `agent/warm_codex.py` 只在同一 Worker job 的原 Run 内复用 transport，绝不复用 Tool 权限或跨用户会话。`claim_for_execution(expected_previous=...)` 在原 Run 锁内校验相邻 Segment、原 Effect 和自动批准，仍经普通 claim 创建新 Attempt。回收及跨 Worker 处理保留原 Outbox。可选的直接回执见下节，它与暖续行分别验收；多写操作序列仍未交付。
+## 自動承認操作の直接回執
 
-## 自动批准操作的直接回执
+`SKILLMIND_INLINE_EFFECTS_ENABLED` は既定で無効（migration `0056_inline_effect_owner` に依存し、Codex かつ Attempt 残り時間が十分な自動承認操作にのみ適用。Claude や他条件は従来の延期経路を通る）。`change.propose/v1` は原 SDK 呼出 ID から冪等キーを生成して既定管理項目を補完し、有効時は原 Attempt を `RUNNING` のまま `ApprovedEffectExecutor` で claim・コミットして原回執を当該ツール結果として直接返す。失敗・取消・応答不明時は即座に当該 turn を停止して従来の Effect 待機/照合フローへ戻し、重複する書込操作を決して新規作成しない。
 
-`SKILLMIND_INLINE_EFFECTS_ENABLED` 默认关闭；数据库迁移 `0056_inline_effect_owner` 随正常部署执行后，可在隔离验证通过的 Codex Worker 上启用。未启用、无原 Run 自动批准同意、不支持分阶段授权或要求非 RESUME 的操作保留原延期路径，不新增用户确认。Claude 继续使用原延期方式。
+## 同一タスクの同種複数資源
 
-`change.propose/v1` 保留业务目标、修改、前提、说明与依据；管理字段可省略。平台按原 SDK 调用身份生成幂等键（不按内容去重），补充风险下限、回读路径和默认恢复字段；显式业务条件不覆盖。提案、批准、Effect 与原 ToolCall 仍逐项保存。
+Run は Skill の資源スロットに従い同種の複数接続を束縛できる。`database.*`・`mcp.*`・`repository.read`・`issue.read`・`tool.sequence` のサブ呼出および `change.propose` は最上位の `resource_key` で凍結済みスロットを選択する（複数束縛時は必須、単一束縛時は省略可。URL/ID の直接指定やテーブル名からの推測は不可）。SDK は能力ごとに 1 つのツール定義のみを公開して選択可能な key を列挙し、内部では `(capability, resource_key)` ごとに独立して認可・ルーティング・監査を行い、最上位 selector を除いた業務引数を Provider に渡す。
 
-启用时，当前原 Attempt 保持 RUNNING，通过共享 `ApprovedEffectExecutor` 认领并核验自动批准操作，只有原回执提交后才作为当前工具结果返回。不跳过权限、lease、读回或业务检查，也不承诺外部操作恰好一次。数据层用原 Attempt 反向引用和提案中的内部交付身份防止重复认领。
-
-失败、取消、未知响应或 Worker 中断时保留原 ID：停止原 native turn 后迁回原 Effect 等待/核对流程；恢复不能创建一个新写操作。原 Agent lease 失效时，新的外部阶段不可沿旧权继续；回执已确认不等于业务 PASS。两次相同参数但不同 SDK 调用仍是两次独立意图。
-
-直接回执只在原 Attempt 剩余时间足够容纳既有 Effect 监督上限与交付余量时尝试；不足时在创建操作前走原延期路径，不延长或重置期限，也不因开启优化把长任务强行塞进一个 Attempt。
-
-## 同一任务的同类多资源
-
-Run 可按 Skill 的不同资源槽位绑定多个同类连接。`database.*`、`mcp.*`、`repository.read` 和 `issue.read` 的顶层 `resource_key` 选择已经冻结的槽位；同一能力有多个绑定时必须明确选择，只有一个时可省略。平台不接受通过 selector 提供 URL、Integration ID 或凭据，也不按表名、远端工具名或路径猜连接。
-
-SDK 每个能力仍只公开一个工具定义，并列出当前可选 key；内部执行与审计按 `(capability, resource_key)` 保留原 binding、当前授权和原调用身份。Provider 只收到去除顶层 selector 后的业务参数，嵌套的同名业务字段保留。`tool.sequence` 的每一步在 `arguments.resource_key` 中选择资源；全部静态选择先验证，子调用继续独立审计、计量及检查撤权。写入仍通过原 `change.propose.resource_key` 与 Effect，不把读取、目录发现或其他连接的证据当作目标写权限。
-
-新增能力无需复制 Provider；接入原工具注册与资源声明即可复用路由。扩充项目连接或更新配置不补进已冻结 Run。上线后以新建 Run 验证至少两个数据库、两个 MCP 服务或两个仓库的准确选择、相同表名/工具名/path 的隔离、原回执重放及缺失 selector 的明确错误；测试替身不能代替真实多连接验收。

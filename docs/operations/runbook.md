@@ -1,14 +1,12 @@
-# Skillmind 运维与故障排查
+# Skillmind 運用・障害対応
 
-从症状定位服务和原请求，再决定处理方式。启动见[Quickstart](quickstart.md)、升级见[发布](deployment.md)、数据恢复见[恢复](backup-recovery.md)，运行边界见[运行与资源指南](../development/runtime-guide.md)。
+症状から対象サービスと原要求を特定して対処を決める。起動は [Quickstart](quickstart.md)、更新は[配備](deployment.md)、データ復元は[復元](backup-recovery.md)、実行境界は[実行・データ保守ガイド](../development/runtime-guide.md)を参照。
 
-## 运用原则
+## 運用原則
 
-优先查看原响应、Run/Attempt/Effect ID 和脱敏日志。PostgreSQL 是正本；不改状态、删审计、清队列或换键消除错误。只分享 UTC、版本、对象 ID、公开错误码和影响范围，不上传 `.env`、凭据或业务正文。
+原応答・Run/Attempt/Effect ID・マスク済みログを優先確認する。PostgreSQL が正本であり、エラー解消のために状態書換・監査削除・キュー消去・キー変更を行わない。共有するのは UTC・版・オブジェクト ID・公開エラーコード・影響範囲のみとし、`.env`・資格情報・業務本文は出さない。調査コマンドは `ENV_FILE`/project を確認した配備ディレクトリで実行する。
 
-命令在已确认 ENV_FILE/project 的部署目录执行。已授权操作按其范围继续；排障本身不授权真实模型、停机、恢复或外部写入。
-
-## 服务与队列
+## サービスとキュー
 
 ```bash
 make status
@@ -16,85 +14,81 @@ make runtime-check
 docker compose --env-file "${ENV_FILE:-.env}" logs --no-log-prefix --tail=200 api worker maintenance
 ```
 
-| 症状 | 核对 |
+| 症状 | 確認事項 |
 | --- | --- |
-| API 不健康或版本不一致 | 部署阶段、migration head、DB/Redis 和 runtime-check；按[发布](deployment.md#linux-核验与部署)定位原错误 |
-| 新任务不执行、批准后不续行 | dispatch 开关、`worker` 与 `maintenance` 健康状态、原 Outbox/job；两队列都要运行，不重建 Run 催执行 |
-| 执行慢、页面更新慢 | 按[耗时观测](run-performance.md)区分准备、模型/工具等待、收尾与展示 |
-| 模型认证或网络失败 | Worker 设备登录状态、出口代理和认证/模型服务连通性；配置 fingerprint 不验证登录 |
+| API 不健全または版不一致 | 配備段階・migration head・DB/Redis・`runtime-check`。[配備](deployment.md#linux-検証と配備)に従い元エラーを特定 |
+| 新規タスク未実行・承認後に継続しない | dispatch スイッチ・`worker` と `maintenance` の健全性・原 Outbox/job。両キューの稼働が必要であり、Run の再作成で実行を促さない |
+| 実行や画面更新が遅い | [性能観測](run-performance.md)に従い準備・モデル/ツール待機・収束・表示を切り分ける |
+| モデル認証や通信の失敗 | Worker のデバイスログイン状態・プロキシ・認証/モデルサービスへの疎通 |
 
-## 认证故障的只读分诊
+## 認証障害の読取トリアージ
 
-记录 path（无参数）、status/code/request_id，只核 header 存在性、cookie 属性和 Origin，不记录值。
+path（クエリなし）・status/code/request_id を記録し、ヘッダ有無・cookie 属性・Origin のみを確認する（機密値は記録しない）。
 
-| 响应 | 处理 |
+| 応答 | 対処 |
 | --- | --- |
-| 401 invalid_credentials / authentication_required | 核环境、会话期限和权限；bootstrap 只用于首个 ADMIN，不能重置账户 |
-| 403 csrf_rejected | 核 Origin scheme/host/port、CSRF header 与当前会话；保全未确认请求，不直接重发 |
-| 403 administrator_required / 404 | 区分系统 ADMIN 与 ProjectMember；404 也可能隐藏越权 |
-| 409 project_archived / 版本冲突 | 读取原对象最新状态，保留原请求；归档不会取消在途 Run/Effect |
-| 422 | 按公开契约修正输入，不分享包含密码的原值 |
+| 401 `invalid_credentials` / `authentication_required` | 環境・セッション期限・権限を確認。`bootstrap-admin` は最初の ADMIN 作成専用でありアカウント初期化には使えない |
+| 403 `csrf_rejected` | Origin・CSRF header・現セッションを確認。未確認要求を保全し、そのまま再送しない |
+| 403 `administrator_required` / 404 | システム ADMIN と ProjectMember を区別する（404 は越権の秘匿でも返る） |
+| 409 `project_archived` / 版競合 | 対象オブジェクトの最新状態を読み、原要求を保全する（アーカイブは処理中 Run/Effect を取消さない） |
+| 422 | 公開契約に従い入力を修正し、パスワードを含む原値は共有しない |
 
-会话读取可能更新 idle，login-context 会建立 challenge 并消耗配额，不能反复请求作为健康探针。修改密码被拒绝不代表当前会话失效。
+`login-context` は challenge を発行しクォータを消費するため、ヘルスチェック用途で反復呼出しない。
 
-## 登录防护的排查与恢复
+## ログイン防護の調査と復旧
 
-429 按 `Retry-After` 停止快速重试，核共享出口和可信代理。503 `login_protection_unavailable` 核 Redis 权限、容量、TTL 与超时；PING 不能证明登录所需命令可用。不 FLUSHDB、删配额或轮换来源绕过限制。
+429 は `Retry-After` に従い再試行を止め、共有出口 IP や信頼プロキシを確認する。503 `login_protection_unavailable` は Redis の権限・容量・TTL・タイムアウトを確認し、制限回避のための `FLUSHDB`・クォータ削除・送信元ローテーションは行わない。
 
-## 文档保存与删除的只读分诊
+## 文書保存と削除の読取トリアージ
 
-保留 Project/document ID、原 upload key 和响应。改名、移动和恢复保持同一文档 ID；原上传回执保留上传时路径，排障按 ID 与内容身份核对，不能仅凭名称差异判断回执损坏。超限或 MIME 拒绝应修正文件/配置；存储异常先核 namespace、连接和权限。
+Project/document ID・原 upload key・応答を保全する。改名・移動・復元は同一文書 ID を維持するため、ID と内容ハッシュで照合する。
 
-知识库等已被历史执行引用的文件，使用行菜单的“更新文件”；批量上传时勾选“更新同名文件”，无需先删旧文件。新任务选择新版，历史执行保留旧版。更新冲突先刷新列表，再重新选择目标，不能沿用已变化的元版本。
+過去実行から参照されている知識ベース等のファイルは行メニュー「ファイルを更新」を使うか、ファイル/フォルダの一括投入で同ディレクトリ同名ファイルを上書き更新できる（旧ファイルの事前削除は不要）。新規タスクは新版を選択し、過去実行は旧版を維持する。更新競合時は一覧を再読込してから再操作する。
 
-| 症状 | 处理 |
+| 症状 | 対処 |
 | --- | --- |
-| 上传未知、PENDING 或原 key 查无 | 继续按原 key 核回执，不换键重传或释放占用；查无不证明旧请求未提交 |
-| 已 PUBLISHED 但列表无文件 | 按原 document ID 核后续移动/删除，不同名补建 |
-| 删除 409 | 查 Run、调度及历史引用；引用无法确认时保留，不拆外键或删审计 |
-| 删除 503 或响应中断 | 先读原文档当前状态，再核原上传记录与存储；元数据可能已提交删除，不因错误响应换 ID 重做 |
-| 下载缺失/hash 不符、切存储后不可读 | 按原 ID/key/hash 和恢复点核对，不改 hash、复用 namespace 或覆盖同名文件 |
-| 删除后对象/配额仍在 | 元数据删除不证明存储清理和配额结算完成；无通用孤立对象清理 CLI，不递归删前缀 |
+| アップロード結果不明・`PENDING`・原 key 不在 | 原 key のまま回執を確認し、キーを変えて再送しない |
+| `PUBLISHED` だが一覧にない | 原 document ID で後続の移動/削除を確認し、同名で新規作成しない |
+| 削除 409 | Run・スケジュール・履歴参照を確認し、参照解消を確認できない間は保持する |
+| 削除 503 または応答中断 | まず原文書の現在状態を読み、原アップロード記録とストレージを照合する（ID を変えてやり直さない） |
+| ダウンロード欠落/hash 不一致・ストレージ切替後の読取不可 | 原 ID/key/hash と復元点で照合し、hash 書換や namespace 流用を行わない |
+| 削除後もオブジェクトやクォータが残る | メタデータ削除はストレージ清掃やクォータ精算の完了を意味しない。ストレージ接頭辞を手動再帰削除しない |
 
-回收箱可恢复，完全删除不可恢复；两者仍受原始输入、共享引用和未知操作保护。项目删除还受执行删除审计、调度、成员审计及文档等引用保护；执行列表为空时仍可能返回执行审计占用，应保持归档。
+ごみ箱からは復元可能だが、完全削除は復元できない（原入力・共有参照・結果不明操作の保護対象）。Project の実行一覧が空でも削除監査等の参照が残る場合はアーカイブを維持する。
 
-## 准备故障的只读分诊
+## 準備障害の読取トリアージ
 
-`RUNNING` 且无 Session 时先查 Context 准备、输入回执和 Brief。`preparation_timeout` 核准备超时配置与资源耗时；`context_build_failed` 核冻结来源和绑定。保留原输入世代及 workspace，不删目录、补 READY 或用今日 HEAD/同名文件替代冻结输入。
+`RUNNING` で Session がない場合は Context 準備・入力回執・Brief を確認する。`preparation_timeout` は準備タイムアウト設定と資源応答時間を、`context_build_failed` は凍結ソースと束縛を確認する。引継ぎが繰り返される場合は lease・Attempt 時系列・エラーを確認する（lease 期限切れや取消受理は旧リモートプロセスの終了を意味しない）。
 
-反复接管时核 lease、Attempt 时间线和错误；租约到期不证明旧调用已停止。已接受取消也不证明 SDK/远端进程已退出。恢复能力须按实际 engine/model、输入和会话材料验证。
+## WAITING 状態
 
-## WAITING 状态
+`WAITING_FOR_INPUT/APPROVAL` は非終端状態であり、原 Interaction/Proposal と期限を確認して回答・承認する。要求タイムアウト・410・通信断時はまず原状態を読み、自動承認範囲は原 Run 開始時の同意に従う。
 
-`WAITING_FOR_INPUT/APPROVAL` 是非终态。查看原 Interaction/Proposal 和期限后答复或批准；已批准 Effect 可独立执行，不重复批准。请求返回超时、410 或断线时先读原状态；自动批准范围以原 Run 启动同意为准，开关或 Project 权限不能补造同意。
+## 結果と評価の読取トリアージ
 
-## 结果与评价的只读分诊
+結果の `PARTIAL`/`BLOCKED`・証拠・プラットフォーム書込回執を併せて確認する（モデル自身の保存完了申告は read-back の代替にならない）。評価は原 Result（pointer は `detail.result.data` 相対）に対して行い、送信原キーを保持して結果不明時は重複 POST しない。
 
-Run 成功不等于业务全部完成；同时查看结果的 PARTIAL/BLOCKED、证据与平台写入回执。模型称已保存不替代 read-back。评价针对原 Result，pointer 相对 `detail.result.data`；保留提交原键，未知不重复 POST，也不覆盖原结果。
+## Schedule と Recovery の監視
 
-## Schedule 与 Recovery 的监视
+`SCHEDULING_ENABLED`・dispatch・保守 Worker・ルールタイムゾーン・原 occurrence を確認する。`next_run_at` が進んで Run がない場合は「処理中照合」を確認し、カウンタ消去やスケジュール再作成で補填実行しない。
 
-核 `SCHEDULING_ENABLED`、dispatch、维护 Worker、规则时区和原 occurrence。暂停/修改不撤回已认领触发，last_* 摘要和业务结果须分别读取。`next_run_at` 前进而没有 Run 时查“在途核对”，不清计数或重建调度补跑；租约到期与查询为空都不是可重发证明。
+## Incident と recovery
 
-## Incident 与 recovery
-
-沿原 Proposal/Effect、请求键、批准与远端回执核事实。执行详情提供只读核对时，CONFIRMED 只证明原操作被观察到，不保证 Run 已续行；NOT_OBSERVED/CONFLICT 不授权重推。明确未应用仍需复查授权/范围/期限/revision；未知或部分成功保持原记录，不换键、强推或以重启 Worker 促恢复。
-
-外部 Git commit、数据库事务、文档保存和 MCP 调用均可能先于本地收尾完成。数据库恢复也不能撤销它们；没有通用补账或“只补 PR” CLI。修正保留原结果和适用 Evaluation/incident 记录。
+原 Proposal/Effect・要求キー・承認・リモート回執に沿って事実を照合する。読取照合の `CONFIRMED` は原操作が観測されたことのみを示し、`NOT_OBSERVED`/`CONFLICT` は自動再送を認可しない。結果不明や部分成功は原記録を保持し、キー変更・強制 push・Worker 再起動による復旧促進を行わない。外部 Git・DB・文書・MCP の変更はローカル収束より先に完了し得るため、DB 復元では外部変更を取り消せない。
 
 ## MANAGED Secret の KEK 運用
 
-`SKILLMIND_MANAGED_SECRET_KEK` 使用 `version:base64key` 的逗号分隔 keyring，每个 key 为 32 字节，首项用于新加密，旧项用于解密。轮换先保全所需旧 key，让全部持钥进程加载“新 active + 旧 key”，再执行：
+`SKILLMIND_MANAGED_SECRET_KEK` は `version:base64key` のカンマ区切り keyring（各 32 バイト、先頭が新規暗号化用、以降は復号用）を使う。ローテーション時は旧鍵を保全し、鍵を扱う全プロセスに「新 active + 旧鍵」を読み込ませてから以下を実行する。
 
 ```bash
 docker compose --env-file "${ENV_FILE:-.env}" exec api python -m skillmind.ops.rotate_secrets
 ```
 
-命令会重封装数据库密文；检查退出状态及 rotated/skipped，skipped 不验证解密。cipher 在进程启动时加载，只改 CLI 环境不会更新服务。不同 key 使用不同版本名，旧备份所需 key 独立保留；DB 备份无法补回丢失 KEK。
+DB 内の暗号文が再ラップされる（終了コードと `rotated`/`skipped` を確認）。旧バックアップに必要な鍵は独立して保管する（DB バックアップから紛失した KEK は復元できない）。
 
 ## 通常 smoke
 
-仅在获准测试环境执行；会调用模型、创建 Run/Evaluation 并测试取消。指定已有 Project 和已发布任务，不能把新 Project 当作旧队列的隔离措施：
+承認された検証環境でのみ実行する（モデル呼出・Run/Evaluation 作成・取消検証を行う）。
 
 ```bash
 docker compose --env-file "${ENV_FILE:-.env}" exec \
@@ -102,4 +96,5 @@ docker compose --env-file "${ENV_FILE:-.env}" exec \
   api python -m skillmind.ops.smoke
 ```
 
-密码通过 TTY。可用 `SKILLMIND_SMOKE_SKILL_VERSION_ID`、`TASK_KEY`、`TASK_INPUT_JSON`、`TASK_SOURCES_JSON`（后三者也加 `SKILLMIND_SMOKE_` 前缀）指定任务。通过只覆盖脚本所验链路，不代表全部 Provider、质量或灾难恢复通过。Worker 停机/接管试验另在允许中断的隔离环境执行。
+パスワードは TTY から入力する。`SKILLMIND_SMOKE_SKILL_VERSION_ID`・`TASK_KEY`・`TASK_INPUT_JSON`・`TASK_SOURCES_JSON` で対象タスクを指定できる。
+

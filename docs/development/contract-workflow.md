@@ -1,52 +1,53 @@
-# 公开契约变更与联调
+# 公開契約の変更と結合
 
-本页适用于公开协议或持久格式变更；内部重构、样式和文案不因此新增 Schema、版本或 migration。维护边界见[运行指南](runtime-guide.md)，状态见[计划](../planning/roadmap.md)，命令环境见[本地开发](local-development.md)。
+本ページは公開プロトコルおよび永続フォーマットの変更に適用する。内部リファクタリング・スタイル・文言のみの変更では Schema、版、migration を追加しない。保守境界は[実行境界](runtime-guide.md)、状態は[計画](../planning/roadmap.md)、コマンド環境は[ローカル開発](local-development.md)を参照。
 
-## 先看整条交付链
+## 交付経路の全体像
 
 ```text
-领域规则/授权/兼容 → Schema/example → Backend
-  → Web/Worker → 契约与流程回归 → 版本匹配及发布
+領域規則/認可/互換 → Schema/example → Backend
+  → Web/Worker → 契約・フロー回帰 → 版整合と配備
 ```
 
-只改受影响层。新增 required、删字段、收窄 enum、改变空值或 HTTP 拒绝语义，即使 URL/v1 文件名不变也可能破坏兼容。
+影響する層のみを更新する。`required` 追加・項目削除・enum 縮小・null 許容や HTTP 拒否意味の変更は、URL や `v1` ファイル名が同じでも互換性を壊し得る。
 
-## 三种数据不要混成一份
+## 3 種類のデータを混同しない
 
-| 层 | 边界 |
+| 層 | 境界 |
 | --- | --- |
-| 持久快照 | 保存当时事实、格式版与 checksum，不为新页面重写旧 Run |
-| 公开响应 | 授权后白名单投影，不直接暴露内部 JSON 或修改原值来脱敏 |
-| 页面状态 | validator 后生成视图，不补造历史资源、身份或缺失字段 |
+| 永続スナップショット | 当時の事実・フォーマット版・checksum を保持し、新画面のために旧 Run を書き換えない |
+| 公開応答 | 認可後の allowlist 投影とし、内部 JSON の直接露出や元値の書き換えによるマスクを行わない |
+| 画面状態 | validator 通過後にビューを生成し、履歴資源・主体・欠落項目を捏造しない |
 
-## 开工时列出消费者和同步先后
+## 消費者と同期順序の特定
 
-按[同步表](coding-rules.md#同步点)识别实际消费者，包括 Worker/CLI/Schedule 等旁路；只同步受影响项。除了 JSON 字段，还需核对 route 的 status、media type、header、缓存和 Problem。[OpenAPI](../../SKM/contracts/openapi/skillmind-api.v1.json)由 app 生成，不能手补。
-Schema 不验证授权/并发，OpenAPI 一致性不证明声明覆盖真实响应；例如登录 429 还须检查 Retry-After 和页面处理。
+[同期点](coding-rules.md#同期点)に従い Worker・CLI・Schedule 等の経路を含む実際の消費者を特定し、影響項目のみを同期する。JSON 項目だけでなく route の status、media type、header、キャッシュ、Problem も照合する。[OpenAPI](../../SKM/contracts/openapi/skillmind-api.v1.json) は app から生成し、手編集しない。
+Schema は認可や並行制御を検証せず、OpenAPI 整合は宣言が実応答を網羅することまでは保証しない（例：ログイン 429 では `Retry-After` と画面処理も確認する）。
 
-## 遇到未接齐的交付链
+## 未接続の交付経路と検査
 
-从实际 route、装配和消费者定位缺口。DTO、example 或单模块测试存在，都不等于用户流程已接通；一致性或合跑失败须修复原断点，不能关闭校验来消除错误。
+実際の route・配線・消費者から欠落箇所を特定する。DTO・example・単体テストの存在はユーザー動線の開通を意味しない。整合検査や一括テストの失敗は原因箇所を修復し、検証を無効化してエラーを隠さない。
 
-读检查不启动 lifespan、不连 DB、不回写。Backend 依赖就绪后，在 `SKM/` 执行 `python3 scripts/validate_contracts.py`；在 `SKM/backend/` 执行：
+読取検査は lifespan を起動せず、DB 接続や書き戻しも行わない。Backend 依存の準備後、`SKM/` で `python3 scripts/validate_contracts.py` を、`SKM/backend/` で以下を実行する。
 
 ```bash
 python3 -m pytest -p no:cacheprovider -o addopts= -q \
   tests/contracts/test_contracts.py::test_exported_openapi_is_current
 ```
 
-公开 API 变更时在 `SKM/` 运行 `python3 scripts/export_openapi.py`，并同步消费者和测试；只读审查和文档整理不重导出。
+公開 API を変更した場合は `SKM/` で `python3 scripts/export_openapi.py` を実行し、消費者とテストを同期する（読取専用レビューや文書整理では再出力しない）。
 
-## 历史数据兼容不等于前后端版本兼容
+## 履歴互換と版互換
 
-- 新 API 读旧 Run：返回明确历史状态，不从当前资源补快照。
-- 新 Web 读旧 API：只接受规定的兼容形状，必需字段不默认空数组。
-- 旧 Web 读新 API：核对额外字段/enum；同批发布仍有旧浏览器、Worker 和在途请求。
-- API/Worker 回退：确认 schema、队列和非终态可读，不删审计或降低校验。
+- 新 API で旧 Run を読む：明確な履歴状態を返し、現在の資源からスナップショットを補完しない。
+- 新 Web で旧 API を読む：規定された互換形状のみを受け入れ、必須項目を空配列へ既定化しない。
+- 旧 Web で新 API を読む：追加項目や enum を確認する。一括配備でも旧ブラウザ・Worker・処理中リクエストが残る。
+- API/Worker のロールバック：schema・キュー・非終端状態の読取互換を確認し、監査削除や検証緩和を行わない。
 
-可选展示损坏可按既有规则降级；身份、授权和必需协议错误不能降级为成功。
+任意の表示データの破損は既存規則で縮退表示できるが、主体・認可・必須プロトコルエラーを成功へ縮退させてはならない。
 
-## 怎样记录验证结论
+## 検証結果の記録
 
-按本次范围报告文档、契约、Backend/Web、真实事务与部署/模型结果，明确 mock、失败、skip 和未执行。
-真实 DB/外部 write 只用获准的隔离目标。持续能力缺口更新计划，临时诊断留在交付结果，不追加历史文档或借用旧通过次数。
+変更範囲に応じて文書・契約・Backend/Web・実トランザクション・配備/モデルの結果を報告し、mock・失敗・skip・未実行を明記する。
+実 DB や外部 write は承認された隔離対象のみで行う。継続的な能力不足は計画へ反映し、一時的な診断は交付報告に留めて履歴文書の追加や過去の通過件数の流用を行わない。
+

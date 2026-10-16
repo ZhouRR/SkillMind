@@ -1,30 +1,30 @@
-# 代码变更指南
+# コード変更ガイド
 
-先读 [AGENTS](../../AGENTS.md)与[当前状态](../planning/roadmap.md#当前执行状态)，明确用户场景、具体问题和完成标准，再查下表。规则边界集中在[运行维护指南](runtime-guide.md)，详细形状以源码与 Contracts 为准。
+作業前に [AGENTS](../../AGENTS.md) と[現在の状態](../planning/roadmap.md#現在の実行状態)を読み、利用シナリオ・課題・完了基準を明確にしてから下表で対象コードを特定する。維持すべき境界は[実行・データ保守ガイド](runtime-guide.md)、詳細な型はソースと Contracts を参照する。
 
-## 按问题定位代码
+## 課題別のコード入口
 
-Backend 路径相对 `SKM/backend/src/skillmind/`。
+Backend パスは `SKM/backend/src/skillmind/` 基準。
 
-| 场景 | 主要入口 | 核对重点 |
+| シナリオ | 主な入口 | 確認重点 |
 | --- | --- | --- |
-| 登录、账户、项目权限 | auth/、projects/、api/auth_dependencies.py | 原身份、撤权、CSRF/API Key、资源隔离 |
-| Skill 导入与发布 | skills/service.py、skills/source_loader.py、skills/source_storage.py；agent/interpreter* | 预览/保存/重建共用源包解析与字节存储；授权和事务留在 Service，原文 hash 与发布校验不变 |
-| 任务、调度、输入 | runs/、schedules/、agent/context_builder.py | 精确任务、原请求幂等、冻结选择与物化 |
-| 执行、等待、恢复 | agent/、worker/、runs/ | Segment/Attempt、lease、事件、取消、未知结果 |
-| 数据库、Git、MCP 写入 | effects/、agent/*_provider.py、agent/*_source.py | 绑定、批准、冲突、原操作回执与回读 |
-| 文档、目录、回收站 | documents/、storage/、runs/ | 原始输入、共享引用、恢复与完全删除 |
-| 结果与评价 | agent/result_validation.py、evaluations/ | 原结果不变、引用、追加评价 |
-| 页面与交互 | web/src/pages、components、hooks、api、lib | 页面组合、请求生命周期、纯数据转换分开；[UI 指南](../design/workspace.md)、原请求及响应验证 |
-| 配置、迁移与恢复 | core/settings.py、backend/migrations、compose.yml | [部署](../operations/deployment.md)与[恢复](../operations/backup-recovery.md) |
+| ログイン・アカウント・Project 権限 | auth/、projects/、api/auth_dependencies.py | 元の主体、権限剥奪、CSRF/API Key、資源隔離 |
+| Skill 取込と公開 | skills/service.py、skills/source_loader.py、skills/source_storage.py、agent/interpreter* | プレビュー/保存/再構築でパッケージ解析と byte 保存を共有。認可とトランザクションは Service に置き、原文 hash と公開検証を維持 |
+| タスク・スケジュール・入力 | runs/、schedules/、agent/context_builder.py | 正確なタスク、元要求のべき等性、凍結選択と物化 |
+| 実行・待機・復旧 | agent/、worker/、runs/ | Segment/Attempt、lease、イベント、取消、結果不明時の扱い |
+| DB・Git・MCP 書込 | effects/、agent/*_provider.py、agent/*_source.py | 束縛、承認、競合、原操作の回執と回読 |
+| 文書・フォルダ・ごみ箱 | documents/、storage/、runs/ | 原入力、共有参照、復元と完全削除 |
+| 結果と評価 | agent/result_validation.py、evaluations/ | 元結果の不変性、参照検証、追記評価 |
+| 画面と対話 | web/src/pages、components、hooks、api、lib | 画面構成・要求ライフサイクル・純粋変換の分離、[UI ガイド](../design/workspace.md)、要求と応答の検証 |
+| 設定・移行・復元 | core/settings.py、backend/migrations、compose.yml | [配備](../operations/deployment.md)と[復元](../operations/backup-recovery.md) |
 
-## 保持改动与问题相称
+## 変更規模の抑制
 
-局部样式、文案或错误诊断直接使用现有组件和服务，不额外设计流程。涉及权限、持久化或公开协议时，再核对冻结点、消费者、失败/恢复与版本兼容，按[契约流程](contract-workflow.md)同步。
+局所的なスタイル・文言・エラー診断は既存コンポーネントとサービスをそのまま使い、新たなフローを作らない。権限・永続化・公開プロトコルに関わる場合は凍結点、消費者、失敗/復旧、版互換を確認し、[契約変更手順](contract-workflow.md)に従って同期する。
 
-不因指南提到后置能力而顺带补齐框架；不把性能优化变成跳过业务写入、审批、回读或结果校验。运行效果不足时先读[耗时观测](../operations/run-performance.md)，用实际证据选择下一处优化。
+性能改善のために業務書込・承認・回読・結果検証を省略しない。実行速度の課題はまず[性能観測](../operations/run-performance.md)で計測根拠を確認する。
 
-## 验证与交付
+## 検証と交付
 
-按[同步点](coding-rules.md#同步点)和[变更验证表](local-development.md#変更に応じた検証)选择回归。区分局部通过、真实事务/浏览器/模型验证与部署状态；明确失败、skip 和未执行项。
-长期规则更新对应指南，功能状态更新 Roadmap，临时排查结果不增加正式文档。文档生成见[维护方式](documentation.md)。
+[同期点](coding-rules.md#同期点)と[変更に応じた検証](local-development.md#変更に応じた検証)から回帰テストを選ぶ。単体通過・実 DB/ブラウザ/モデル検証・配備済み状態を区別し、失敗・skip・未実施を明記する。恒久規則は該当ガイド、機能状態は Roadmap を更新し、文書生成は[文書維持](documentation.md)に従う。
+

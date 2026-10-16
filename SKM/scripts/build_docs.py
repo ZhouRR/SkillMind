@@ -24,13 +24,13 @@ DOCS = ROOT / "docs"
 OUTPUT = DOCS / "index.html"
 TEMPLATE = Path(__file__).with_name("docs-viewer.html")
 GROUPS = {
-    "overview": "开始阅读",
-    "planning": "当前进度",
-    "design": "界面规范",
-    "development": "开发指南",
-    "operations": "部署与运维",
-    "code": "工程入口",
-    "other": "其他资料",
+    "overview": "はじめに",
+    "planning": "現在の進捗",
+    "design": "UI 規約",
+    "development": "開発ガイド",
+    "operations": "配備と運用",
+    "code": "コード入口",
+    "other": "その他",
 }
 FIRST_PAGES = [
     "docs/README.md",

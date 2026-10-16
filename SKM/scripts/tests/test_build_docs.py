@@ -385,14 +385,14 @@ class DocumentationBuildTests(unittest.TestCase):
         ):
             with self.subTest(target=target):
                 self.assertIn(target, source)
-        self.assertEqual(build_docs.GROUPS["design"], "界面规范")
+        self.assertEqual(build_docs.GROUPS["design"], "UI 規約")
 
     def test_roadmap_keeps_current_status_and_verification_navigation(self) -> None:
         """現状・検証境界・改善方針へ案内し、旧作業 ID の維持を要求しない。"""
 
         document = self.parse("docs/planning/roadmap.md")
         self.assertTrue(
-            {"当前执行状态", "已实现的主要能力", "当前仍需核实的事项", "后续推进方式", "交付判断"}
+            {"現在の実行状態", "実装済みの主要能力", "継続確認事項", "今後の進め方", "交付判断"}
             <= document.anchors
         )
         self.assertNotIn("delivery-history", document.source)
@@ -412,7 +412,7 @@ class DocumentationBuildTests(unittest.TestCase):
                     continue
                 with self.subTest(document=path.name, section=section["title"]):
                     self.assertNotRegex(section["title"], r"^\d+(?:\.\d+)*\.?\s+")
-        self.assertIn("当前执行状态", self.parse("docs/planning/roadmap.md").anchors)
+        self.assertIn("現在の実行状態", self.parse("docs/planning/roadmap.md").anchors)
 
     def test_adjacent_responsibilities_link_to_their_single_sources(self) -> None:
         """開発と運用の正本を辿れ、操作コマンドを障害案内へ複製しない。"""

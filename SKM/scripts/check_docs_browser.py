@@ -186,8 +186,8 @@ async def check_navigation(page: Page, book: Path, pages: list[dict]) -> None:
     await expect(page.locator("#main h1")).to_have_text("Skillmind 文書ガイド")
 
     await page.goto(page_url(book, "docs/missing.md"))
-    await expect(page.locator("#main h1")).to_have_text("文档不存在")
-    await page.get_by_role("link", name="返回文档导航", exact=True).click()
+    await expect(page.locator("#main h1")).to_have_text("文書が見つかりません")
+    await page.get_by_role("link", name="文書ガイドへ戻る", exact=True).click()
     await expect(page.locator("#main h1")).to_have_text("Skillmind 文書ガイド")
 
     await page.goto(page_url(book, "SKM/README.md", "backend"))
@@ -207,7 +207,7 @@ async def check_navigation(page: Page, book: Path, pages: list[dict]) -> None:
     await page.reload()
     await check_heading(page)
     await check_layout(page, "desktop to mobile native reload")
-    menu = page.get_by_role("button", name="目录", exact=True)
+    menu = page.get_by_role("button", name="目次", exact=True)
     await menu.focus()
     await page.keyboard.press("Enter")
     await expect(search).to_be_focused()
@@ -217,7 +217,7 @@ async def check_navigation(page: Page, book: Path, pages: list[dict]) -> None:
 
     await page.set_viewport_size({"width": 1440, "height": 1000})
     await page.evaluate("window.print = () => { window.docsPrinted = true; }")
-    await page.get_by_role("button", name="打印本页", exact=True).click()
+    await page.get_by_role("button", name="ページ印刷", exact=True).click()
     assert await page.evaluate("window.docsPrinted === true")
     await page.emulate_media(media="print")
     await expect(page.locator(".sidebar")).to_be_hidden()
