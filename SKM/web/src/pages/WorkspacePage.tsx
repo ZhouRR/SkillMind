@@ -22,6 +22,7 @@ import { AgentConversation } from '../components/AgentConversation'
 import { RunResultPanel, type RunDetailState } from '../components/RunResultPanel'
 import { WorkspaceQueue } from '../components/WorkspaceQueue'
 import { RunSubmissionPanel } from '../components/RunSubmissionPanel'
+import { RunDuration } from '../components/RunDuration'
 import { TaskLaunchFields } from '../components/TaskLaunchFields'
 import { useRunSubmission } from '../hooks/useRunSubmission'
 import type { SessionEnded } from '../hooks/useResourceRequest'
@@ -604,11 +605,18 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
               />
             )}
             {/* Row version は楽観 lock の実装細部のため表示しない。状態は enum catalog の利用者語で示す。 */}
-            {run && <>{detailView && <dl className="runFacts"><div><dt>{messages.workspace.runIdLabel}</dt><dd className="mono" title={run.run_id}>{shortRunId(run.run_id)}</dd></div>{!TERMINAL_STATUSES.has(run.status) && <div><dt>{messages.workspace.connLabel}</dt><dd>{connectionLabel(messages, uiState, run.status)}</dd></div>}</dl>}{!TERMINAL_STATUSES.has(run.status) && <div className="formRow"><button className="secondaryButton" type="button" onClick={() => void handleRefresh()}>{messages.workspace.refreshDb}</button><button className="secondaryButton" disabled={uiState === 'cancelling'} type="button" onClick={() => void handleCancel()}>{uiState === 'cancelling' ? messages.workspace.cancelling : messages.workspace.cancelRun}</button></div>}</>}
+            {run && <>{detailView && <dl className="runFacts"><div><dt>{messages.workspace.runIdLabel}</dt><dd className="mono" title={run.run_id}>{shortRunId(run.run_id)}</dd></div></dl>}{!TERMINAL_STATUSES.has(run.status) && <div className="formRow runLiveActions"><button className="secondaryButton compactButton" type="button" onClick={() => void handleRefresh()}>{messages.workspace.refreshDb}</button><button className="secondaryButton compactButton" disabled={uiState === 'cancelling'} type="button" onClick={() => void handleCancel()}>{uiState === 'cancelling' ? messages.workspace.cancelling : messages.workspace.cancelRun}</button></div>}</>}
           </section>
 
           {/* 会話・結果・監査は同時に一つだけ観測する。runPanel を残し、以下をタブへ束ねて縦の積み上げを解消する。 */}
           <section className="panel observationPanel">
+            {run && !TERMINAL_STATUSES.has(run.status) && <section className="runLiveProgress" aria-label={messages.workspace.liveProgress}>
+              <div className="runLiveHeading"><strong>{messages.workspace.liveProgress}</strong><RunDuration run={frozenDetail ?? run} /></div>
+              <p className="hint" role="status">{connectionLabel(messages, uiState, run.status)}</p>
+              {auditEvents.length > 0 && <ol className="timeline runLiveTimeline" aria-label={messages.workspace.tabEvents}>
+                {auditEvents.slice(-3).map((item) => <EventTimelineItem key={item.sequence} event={item} />)}
+              </ol>}
+            </section>}
             {detailView && <div className="tabBar" role="tablist" aria-label={messages.workspace.observationAria}>
               <TabButton selected={observationTab === 'conversation'} id={`${observationId}-conversation-tab`} panelId={`${observationId}-conversation-panel`} onSelect={() => selectObservation('conversation')}>{messages.workspace.tabConversation}</TabButton>
               <TabButton selected={observationTab === 'result'} id={`${observationId}-result-tab`} panelId={`${observationId}-result-panel`} onSelect={() => selectObservation('result')}>
@@ -622,6 +630,9 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
               </TabButton>
             </div>}
             <div className="tabPanel">
+              {!detailView && run && !TERMINAL_STATUSES.has(run.status)
+                && run.status !== 'WAITING_FOR_INPUT' && run.status !== 'WAITING_FOR_APPROVAL'
+                && <AgentConversation prompt={conversationPrompt} events={events} runStatus={run.status} />}
               {detailView && <div role="tabpanel" id={`${observationId}-conversation-panel`} aria-labelledby={`${observationId}-conversation-tab`} hidden={observationTab !== 'conversation'}>
                 <AgentConversation prompt={conversationPrompt} events={events} runStatus={run?.status ?? null} /></div>}
               <div className="workspaceResultMount" role={detailView ? 'tabpanel' : undefined} id={`${observationId}-result-panel`} aria-labelledby={detailView ? `${observationId}-result-tab` : undefined} hidden={detailView && observationTab !== 'result'}>
@@ -652,8 +663,20 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
         </div>
       </section>
       {/* 新規実行の入力(任務・就緒度・来源・入力)は幅の広い弹窗で行い、rail の圧縮表示をやめる。 */}
-      <ModalDialog open={runDialogOpen} title={messages.workspace.newRun} wide onClose={() => setRunDialogOpen(false)}>
-        <form className="runForm" onSubmit={handleCreate}>
+      <ModalDialog open={runDialogOpen} title={messages.workspace.newRun} wide onClose={() => setRunDialogOpen(false)}
+        footer={<div className="launchFooter">
+          <label className="submissionAcknowledgement">
+            <input type="checkbox" checked={autoApprove} onChange={(event) => setAutoApprove(event.target.checked)} />
+            <span>{messages.workspace.autoApprove}</span>
+          </label>
+          <div className="launchFooterActions">
+            <button className="primaryButton" data-run-submit form={`${observationId}-launch`} type="submit"
+              disabled={launchTasks.length === 0 || projectReadOnly || !selectedTask || (submission.pending !== null && (submission.pending.phase === 'sending' || !acknowledgePrevious))}>
+              {submission.pending?.phase === 'sending' ? messages.workspace.creating : submission.pending ? messages.workspace.submission.startNew : messages.workspace.startRun}
+            </button>
+          </div>
+        </div>}>
+        <form id={`${observationId}-launch`} className="runForm" onSubmit={handleCreate}>
           {submission.pending && (
             <RunSubmissionPanel
               pending={submission.pending}
@@ -686,20 +709,6 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
                 sourceProviders={sourceProviders}
                 task={selectedTask}
               />
-              <label className="submissionAcknowledgement">
-                <input type="checkbox" checked={autoApprove}
-                  onChange={(event) => setAutoApprove(event.target.checked)} />
-                <span>{messages.workspace.autoApprove}</span>
-              </label>
-              <button
-                className="primaryButton"
-                disabled={projectReadOnly || !selectedTask || (submission.pending !== null && (submission.pending.phase === 'sending' || !acknowledgePrevious))}
-                type="submit"
-              >
-                {submission.pending?.phase === 'sending'
-                  ? messages.workspace.creating
-                  : submission.pending ? messages.workspace.submission.startNew : messages.workspace.startRun}
-              </button>
             </>
           )}
           {error && <p className="error" role="alert">{error}</p>}

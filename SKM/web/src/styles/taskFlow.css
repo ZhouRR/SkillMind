@@ -23,3 +23,10 @@
   .taskFlowIdentity > div { grid-template-columns: minmax(0, 1fr); gap: .1rem; }
   .taskFlowPanel .formRow { flex-wrap: wrap; }
 }
+
+/* 原文の順序と契約を保ち、長い資源説明だけを整列する。 */
+.taskFlowItems { list-style: none; padding-left: 0; }
+.taskFlowItems li { padding: 12px 0; border-bottom: 1px solid var(--border); }
+.taskFlowItems li:last-child { border-bottom: 0; }
+.taskFlowItems strong { color: var(--text-hi); }
+.taskFlowItems p { margin-block: 6px; color: var(--text-muted); }

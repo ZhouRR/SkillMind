@@ -7,7 +7,7 @@
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  width: 264px;
+  width: 248px;
   height: 100vh;
   border-right: 1px solid var(--border);
   background: var(--bg-sidebar);
@@ -27,7 +27,7 @@
 
 /* 長い識別子で列を広げず、footer と一緒に親 panel だけをスクロールする。
    PC 主対象の 1366×768 で導航と footer が一画面に収まる密度を保つ(不足時だけ親が縦スクロール)。 */
-.sideNav { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; flex: 1 0 auto; align-content: start; padding: 18px 14px 12px; }
+.sideNav { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; flex: 1 0 auto; align-content: start; padding: 12px 12px 8px; }
 .sideNav a > span:not(.navBadge) { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 導航は「平台 / 当前项目」の二分組。当前项目分組の見出しは Project 切替 select の label が兼ねる。 */
 .navGroupLabel {
@@ -40,7 +40,7 @@
   text-transform: uppercase;
 }
 /* ProjectContextSelect（名称で選択、UUID は監査用の補助行）の唯一の利用箇所は sidebar のため、様式もここへ集約する。 */
-.sideNavProject { margin: 12px 0 8px; border-top: 1px solid var(--border); padding: 12px 8px 0; }
+.sideNavProject { margin: 8px 0 6px; border-top: 1px solid var(--border); padding: 8px 8px 0; }
 .sideNavProject .projectContext label {
   gap: 6px;
   margin-bottom: 4px;
@@ -269,3 +269,12 @@
 }
 
 .sideNavEntry > a > span:not(.navBadge) { text-wrap: balance; }
+
+/* 短い PC では階層を保ったまま縦密度を上げ、footer を一画面へ収める。 */
+@media (min-width: 961px) and (max-height: 800px) {
+  .sideNav a { min-height: 34px; padding-block: 5px; }
+  .sideNavSubItem { padding-block: 3px; }
+  .sidebarFooter { gap: 7px; padding: 10px 16px; }
+}
+.authIntro { background: var(--surface); }
+.authBrand .brandMark { filter: saturate(.65); }

@@ -37,4 +37,12 @@ describe('report presentation identity', () => {
     expect(isHtmlReport('# report\n\n<script>alert(1)</script>')).toBe(false)
     expect(isHtmlReport('plain report')).toBe(false)
   })
+  it('names HTTP phases from recorded provider facts and shortens file paths without claiming success', () => {
+    const roles = { request: 'HTTP request', response: 'HTTP response' }
+    const http = { ...evidence, evidence_type: 'resource', source_uri: 'http-resource://synthetic/operation', source_locator: { phase: 'request' } }
+    expect(evidenceTitle(http, [], roles)).toBe(roles.request)
+    expect(evidenceTitle({ ...http, source_locator: { phase: 'response' } }, [], roles)).toBe(roles.response)
+    expect(evidenceTitle({ ...http, source_uri: 'other://synthetic' }, [], roles)).toBe(evidence.evidence_ref)
+    expect(evidenceTitle({ ...evidence, source_locator: { path: 'workspace/resources/effects/synthetic/response.bin' } })).toBe('response.bin')
+  })
 })

@@ -11,7 +11,7 @@ export function PreviewPagination({ index, count, select }: {
     <span className="previewPageStatus" role="status" aria-live="polite" aria-atomic="true">{messages.documentsPanel.previewPage(index + 1, count)}</span>
     <button type="button" className="secondaryButton compactButton" disabled={index === 0}
       onClick={() => select(index - 1)}>{messages.runHistory.previous}</button>
-    <Select aria-label={messages.documentsPanel.previewPages} value={index}
+    <Select className="previewPageSelect" aria-label={messages.documentsPanel.previewPages} value={index}
       onValueChange={(nextValue) => select(Number(nextValue))}>
       {Array.from({ length: count }, (_, ordinal) => <option key={ordinal} value={ordinal}>
         {messages.documentsPanel.previewPage(ordinal + 1, count)}

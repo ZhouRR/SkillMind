@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { RespondedInteractionRecord, RunDetailRecord, UserInteractionDetail } from '../api'
 import type { SessionEnded } from '../hooks/useResourceRequest'
@@ -30,6 +30,14 @@ export function RunInteractions({ scope, state, csrfToken, pendingOnly = false, 
   const valid = detail && sameInteractionIdentity(detail.project_id, scope.projectId)
     && sameInteractionIdentity(detail.run_id, scope.runId) ? detail : null
   const [saved, setSaved] = useState({ source: valid, items: valid?.interactions ?? [] })
+  const openIds = useRef(new Set(valid?.interactions.filter((item) => item.status === 'OPEN').map((item) => item.interaction_id) ?? []))
+  const [expanded, setExpanded] = useState(openIds.current.size > 0)
+  useEffect(() => {
+    const nextOpen = new Set(saved.items.filter((item) => item.status === 'OPEN').map((item) => item.interaction_id))
+    // 新しい質問だけを展開する。答復直後の receipt と焦点を畳まず、手動の開閉も再読取で戻さない。
+    if ([...nextOpen].some((id) => !openIds.current.has(id))) setExpanded(true)
+    openIds.current = nextOpen
+  }, [saved.items])
   // 同じ component 内で前 props を照合し、次の commit 前に安定した同一 key の一覧へ更新する。
   if (valid && saved.source !== valid) setSaved({ source: valid, items: mergeInteractions(saved.items, valid.interactions) })
   if (!saved.items.length) return null
@@ -37,8 +45,11 @@ export function RunInteractions({ scope, state, csrfToken, pendingOnly = false, 
   const hasOpen = state.status === 'ready'
     && (valid?.status === 'WAITING_FOR_INPUT' || valid?.status === 'WAITING_FOR_APPROVAL')
     && valid.interactions.some((item) => item.status === 'OPEN')
-  return <section className="runInteractions resultSection" hidden={pendingOnly && !saved.items.some((item) => item.status === 'OPEN')}>
-    <h3>{hasOpen ? messages.runResult.pendingTitle : messages.interactionResponse.recordsTitle}</h3>
+  // 終了済みの質問は畳み、待機中の操作・未知答復の所有者は同じ subtree に保つ。
+  return <details className="runInteractions resultSection" open={expanded} onToggle={(event) => {
+    if (event.target === event.currentTarget) setExpanded(event.currentTarget.open)
+  }} hidden={pendingOnly && !saved.items.some((item) => item.status === 'OPEN')}>
+    <summary>{hasOpen ? messages.runResult.pendingTitle : messages.interactionResponse.recordsTitle}<span className="eventCount">{saved.items.length}</span></summary>
     {hasOpen && <p className="hint">{messages.runResult.pendingHint}</p>}
     {/* 表示だけを切り替え、未知答復の確認に必要なカード所有者は捨てない。 */}
     {saved.items.map((interaction) => <div key={interaction.interaction_id.toLowerCase()} hidden={pendingOnly && interaction.status !== 'OPEN'}><InteractionCard
@@ -47,5 +58,5 @@ export function RunInteractions({ scope, state, csrfToken, pendingOnly = false, 
       accessFailure={state.status === 'error' ? state.accessFailure : undefined}
       available={Boolean(valid?.interactions.some((item) => sameInteractionIdentity(item.interaction_id, interaction.interaction_id)))}
       writable={state.status === 'ready' && valid?.status === 'WAITING_FOR_INPUT'} /></div>)}
-  </section>
+  </details>
 }

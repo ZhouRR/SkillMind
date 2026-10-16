@@ -1,10 +1,11 @@
 /* 実行画面は本文の可読性を保ち、長い原入力も省略せずに読めるようにする。 */
 .schemaInputForm { grid-template-columns: minmax(0, 1fr); }
-.schemaInputFields { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 16px; grid-column: 1 / -1; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); }
+.schemaInputFields { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 16px; grid-column: 1 / -1; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
 .schemaInputForm small.error { color: var(--danger); }
 .schemaInputForm textarea[aria-invalid="true"] { border-color: var(--danger-border); }
 .schemaInputFields > label { min-width: 0; }
 .schemaInputFields > label:has(textarea) { grid-column: 1 / -1; }
+.schemaInputFields .schemaTextInput { min-height: 96px; max-height: 320px; field-sizing: content; resize: vertical; line-height: 1.6; }
 .homeRunTitle strong { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
 .homeRunTitle, .pendingItemTitle { min-width: 0; }
 .pendingPanel .panelHeader, .homeRuns .panelHeader { flex-wrap: wrap; gap: 12px; }
@@ -14,6 +15,9 @@
 .conversation .message dl > div, .conversation .message dt, .conversation .message dd { min-width: 0; overflow-wrap: anywhere; }
 .conversation .message dl > div { flex-wrap: wrap; }
 .conversation .message dd { margin: 0; }
+/* 入力本文は右端へ寄せず、長文と原改行を全幅で読めるようにする。 */
+.conversation .message .promptInputs > div { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.conversation .message .promptInputs dd { overflow: visible; text-overflow: clip; white-space: pre-wrap; text-align: left; }
 .conversation:focus-visible, .runDeletionOutputs ul:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .runDeletionTarget { display: grid; gap: 6px; margin-block: 12px 18px; overflow-wrap: anywhere; }
 .runDeletionTarget time, .runDeletionTarget code { color: var(--text-muted); font-size: 13px; }

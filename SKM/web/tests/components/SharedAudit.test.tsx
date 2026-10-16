@@ -2,13 +2,14 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { loadProjectModules, loadProjectTasks, loadUsers, type TaskCatalogRecord } from '../../src/api'
+import { loadProjectModules, loadProjectTasks, loadUsers, updateProjectModule, type TaskCatalogRecord } from '../../src/api'
 import { UserDirectory } from '../../src/components/UserDirectory'
 import { ProjectModulesPanel } from '../../src/components/ProjectModulesPanel'
 import { LanguageProvider } from '../../src/i18n'
 import { MESSAGES } from '../../src/lib/i18n/messages'
 import { DEMO_PROJECT, demoSession } from '../fixtures'
 import { deferred } from '../fixtures/hookHarness'
+import { documentTask } from '../fixtures/documentTask'
 import base from '../../src/styles/base.css?raw'
 import shell from '../../src/styles/shell.css?raw'
 import pages from '../../src/styles/pages.css?raw'
@@ -16,7 +17,7 @@ import shared from '../../src/styles/shared-audit.css?raw'
 import project from '../../src/styles/project-management.css?raw'
 import members from '../../src/styles/project-members.css?raw'
 
-vi.mock('../../src/api', async (original) => ({ ...await original<typeof import('../../src/api')>(), loadProjectModules: vi.fn(), loadProjectTasks: vi.fn(), loadUsers: vi.fn() }))
+vi.mock('../../src/api', async (original) => ({ ...await original<typeof import('../../src/api')>(), loadProjectModules: vi.fn(), loadProjectTasks: vi.fn(), loadUsers: vi.fn(), updateProjectModule: vi.fn() }))
 let container: HTMLDivElement
 let root: Root
 let style: HTMLStyleElement
@@ -34,8 +35,25 @@ afterEach(async () => { await act(async () => root.unmount()); container.remove(
 /** Project の候補読取を意図的に保留し、真の空と区別する。 */
 async function renderModules() {
   await act(async () => root.render(<LanguageProvider language="zh"><ProjectModulesPanel projectId={DEMO_PROJECT.project_id} session={demoSession('ADMIN')} /></LanguageProvider>))
+  await act(async () => container.querySelector<HTMLButtonElement>('.modulesPanel > .panelHeader button')!.click())
 }
 describe('shared audit protections', () => {
+  it('keeps an existing older version selected when editing grouped skill versions', async () => {
+    const current = { ...documentTask(false), skill_name: 'Synthetic skill', version: '1.1.0' }
+    const old = { ...current, skill_version_id: '00000000-0000-4000-8000-000000000077', version: '1.0.0' }
+    const module = { module_id: '00000000-0000-4000-8000-000000000088', project_id: DEMO_PROJECT.project_id,
+      name: 'Synthetic module', description: '', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+      skills: [{ ...old, sort_order: 0 }] }
+    vi.mocked(loadProjectModules).mockResolvedValue([module])
+    vi.mocked(loadProjectTasks).mockResolvedValue({ tasks: [old, current] })
+    vi.mocked(updateProjectModule).mockResolvedValue(module)
+    await renderModules()
+    await act(async () => container.querySelector<HTMLButtonElement>('.moduleItemActions > button')!.click())
+    expect(container.querySelector<HTMLDetailsElement>('.moduleSkillGroup details')!.open).toBe(true)
+    expect([...container.querySelectorAll<HTMLInputElement>('.moduleSkillOption input')].map((input) => input.checked)).toEqual([false, true])
+    await act(async () => container.querySelector('form.moduleForm')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
+    expect(vi.mocked(updateProjectModule).mock.calls[0]?.[2].skill_version_ids).toEqual([old.skill_version_id])
+  })
   it('places user creation before the long list and keeps its draft mounted when collapsed', async () => {
     vi.mocked(loadUsers).mockResolvedValue({ items: [], limit: 25, offset: 0, total: 0 })
     await act(async () => root.render(<LanguageProvider language="zh"><UserDirectory session={demoSession('ADMIN')} revision={0} onSessionEnded={() => {}} onChanged={() => {}} /></LanguageProvider>))

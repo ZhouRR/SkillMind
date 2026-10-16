@@ -604,6 +604,11 @@ async def basic(page: Page, api: InteractionApi, labels: dict) -> None:
     }
     await expect(page.locator('[data-interaction-phase="confirmed"] h4')).to_be_focused()
     await expect(page.locator("[data-interaction-receipt]")).to_contain_text(NEXT_SEGMENT)
+    await page.reload()
+    await expect(page.locator(".runInteractions")).to_be_visible()
+    await expect(page.locator(".runInteractions")).not_to_have_attribute("open", "")
+    await page.locator(".runInteractions > summary").click()
+    await expect(card(page)).to_contain_text(ANSWER)
 
 
 async def unknown_confirmation(page: Page, api: InteractionApi, _: dict) -> None:
@@ -1123,7 +1128,7 @@ async def workspace_read_failure(page: Page, api: InteractionApi, labels: dict) 
     assert len(api.reads) > before
     expected = "unknown" if status == "500" else "rejected"
     await phase(page, expected)
-    await expect(page.locator(".runInteractions > h3")).to_have_text(
+    await expect(page.locator(".runInteractions > summary")).to_contain_text(
         labels["interactionResponse"]["recordsTitle"]
     )
     await expect(page.locator(".runInteractions")).not_to_contain_text(

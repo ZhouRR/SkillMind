@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import argparse
 from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -39,9 +40,9 @@ class KeyApi(AccountsApi):
         return await route.fulfill(json=record)
 
 
-async def main() -> None:
+async def check(url: str, output: Path) -> None:
     """作成、秘密の消去、失効、未知結果の手動確認を実 React で検証する。"""
-    url = 'http://127.0.0.1:5177/skillmind/tests/browser/accounts.html'
+    output.mkdir(parents=True, exist_ok=True)
     async with async_playwright() as pw:
         browser = await pw.chromium.launch()
         for language in ['ja', 'zh', 'en']:
@@ -54,7 +55,7 @@ async def main() -> None:
                 page.on('pageerror',lambda error: errors.append(str(error)))
                 await page.goto(f'{url}?app=1#/accounts')
                 panel = page.locator('.apiKeyPanel')
-                await panel.locator('..').locator('summary').click()
+                await page.get_by_role('tab', name=await panel.get_attribute('aria-label'), exact=True).click()
                 form=panel.locator('form')
                 await form.locator('input').fill('Example app')
                 await form.locator('button').click()
@@ -81,11 +82,18 @@ async def main() -> None:
                 assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
                 assert not errors and not api.failures and not api.unexpected, (errors,api.failures,api.unexpected)
                 if language=='ja' and width==1440:
-                    await page.screenshot(path='/tmp/skm-api-keys-20260914/api-key-ui.png',full_page=True)
+                    await page.screenshot(path=str(output / 'api-key-ui.png'),full_page=True)
                 await context.close()
         await browser.close()
     print('API key UI: 6 locale/width combinations passed; create/revoke/unknown and memory-only secret')
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--url', required=True)
+    parser.add_argument('--output', type=Path, required=True)
+    args = parser.parse_args()
+    address = urlsplit(args.url)
+    if address.scheme != 'http' or address.hostname not in {'127.0.0.1', 'localhost'} or not address.path.endswith('/tests/browser/accounts.html'):
+        parser.error('Only the loopback accounts.html mock harness is allowed')
+    asyncio.run(check(args.url, args.output))

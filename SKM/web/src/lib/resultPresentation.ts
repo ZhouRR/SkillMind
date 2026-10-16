@@ -16,12 +16,19 @@ function sourceDocumentName(evidence: EvidenceDetail, snapshots: readonly RunDoc
 }
 
 /** 業務名が無い証拠も正確な table/path を使い、最後だけ原 Evidence ID へ戻る。 */
-export function evidenceTitle(evidence: EvidenceDetail, snapshots: readonly RunDocumentSnapshotRecord[] = []): string {
+export function evidenceTitle(evidence: EvidenceDetail, snapshots: readonly RunDocumentSnapshotRecord[] = [],
+  roles?: { request: string; response: string }): string {
   const name = sourceDocumentName(evidence, snapshots)
   if (name) return name
+  // HTTP Provider の明示 phase だけを名称化し、path から送信成否を推測しない。
+  if (roles && evidence.source_uri.startsWith('http-resource://')) {
+    const phase = evidence.source_locator.phase
+    if (phase === 'request') return roles.request
+    if (phase === 'response' || typeof evidence.metadata.http_status === 'number') return roles.response
+  }
   for (const key of ['name', 'table', 'path']) {
     const value = evidence.source_locator[key]
-    if (typeof value === 'string' && value.trim()) return value
+    if (typeof value === 'string' && value.trim()) return key === 'path' ? value.split(/[\\/]/).filter(Boolean).at(-1) || value : value
   }
   return evidence.evidence_ref
 }

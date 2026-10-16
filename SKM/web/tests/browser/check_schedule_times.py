@@ -169,7 +169,7 @@ async def previewed(page: Page) -> None:
 
     await page.locator("[data-schedule-preview]").click()
     await expect(page.locator("[data-schedule-confirm]")).to_be_visible()
-    await expect(page.locator('[data-schedule-form] button[type="submit"]')).to_be_disabled()
+    await expect(page.locator('[data-schedule-submit]')).to_be_disabled()
 
 
 async def submit_event(page: Page, count: int = 1) -> None:
@@ -197,7 +197,7 @@ async def exercise(
 
     await opened(page, url, language)
     form = page.locator("[data-schedule-form]")
-    save = form.locator('button[type="submit"]')
+    save = page.locator('[data-schedule-submit]')
     confirm = page.locator("[data-schedule-confirm]")
     if case == "language":
         await expect(page.locator("[data-schedule-input-timezone]")).to_contain_text("UTC")

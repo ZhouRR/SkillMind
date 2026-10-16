@@ -94,7 +94,10 @@
 
 /* ---- 项目管理:模块配置 ---- */
 .modulesPanel { display: grid; gap: 4px; }
-.modulesLayout { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(300px, .8fr); gap: 18px; margin-top: 4px; }
+.modulesPanel > .panelHeader { flex-wrap: wrap; gap: 10px; }
+.modulesPanel > .panelHeader h2 { flex: 0 1 auto; }
+.modulesPanel > .panelHeader > button { width: auto; margin-left: auto; }
+.modulesLayout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; margin-top: 4px; }
 .moduleList { display: grid; gap: 10px; align-content: start; }
 .moduleItem {
   display: grid;
@@ -120,13 +123,21 @@
   font-size: 12px;
 }
 .moduleItemActions { display: flex; flex-direction: column; flex-shrink: 0; gap: 6px; }
-.moduleForm { display: grid; gap: 2px; align-content: start; border-left: 1px solid var(--border); padding-left: 18px; }
+.moduleForm { display: grid; gap: 2px; align-content: start; min-width: 0; }
 .moduleForm h3 { margin: 0 0 10px; color: var(--text-hi); font-size: 13.5px; }
 .moduleSkillPicker { display: grid; gap: 7px; margin: 0 0 14px; border: 1px solid var(--border); border-radius: var(--radius-small); padding: 11px 12px; }
 .moduleSkillPicker legend { padding: 0 4px; color: var(--text-muted); font-size: 12px; font-weight: 600; }
 .moduleSkillOption { display: flex; gap: 8px; align-items: center; margin: 0; color: var(--text); font-size: 13px; font-weight: 500; }
 .moduleSkillOption input { width: auto; min-height: 0; box-shadow: none; accent-color: var(--accent-strong); }
 .moduleSkillOption span { line-height: 1.4; }
+.moduleSkillGroup { min-width: 0; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.moduleSkillGroup:last-child { border-bottom: 0; }
+.moduleSkillGroup > details { margin: 8px 0 0 26px; }
+.moduleSkillGroup summary { display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text-muted); font-size: 12px; }
+.moduleSkillGroup summary::before { content: '▸'; }
+.moduleSkillGroup details[open] > summary::before { content: '▾'; }
+.moduleSkillGroup details > div { display: grid; gap: 10px; margin-top: 12px; }
+.moduleSkillOption span { min-width: 0; overflow-wrap: anywhere; }
 /* 束縛は残るが候補から外れた版。外さないと保存できないため警告色で理由を添える。 */
 .moduleSkillOptionStale span { display: grid; gap: 2px; color: var(--warn); }
 .moduleSkillOptionStale small { color: var(--warn); font-size: 12px; }
@@ -535,4 +546,61 @@
 @media (max-width: 600px) {
   .skillVersionGroup .skillLibraryList > li { grid-template-columns: minmax(0, 1fr); }
   .skillLibraryFilters label:not(:first-child) { flex: 1 1 220px; }
+}
+
+/* 一覧の主情報を先に揃え、管理操作は同じ右端に残す。 */
+.projectListLayout > .panel { width: 100%; }
+.projectSelect { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; }
+.projectSelect strong { font-size: 15px; }
+.projectSelect .projectKey { grid-column: 1; color: var(--text-muted); }
+.projectSelect small { grid-column: 1; font-size: 13px; }
+.projectSelect .statusBadge { grid-column: 2; grid-row: 1 / 4; align-self: center; margin: 0; }
+.projectSidePanel .projectFormActions { position: sticky; bottom: -24px; margin-inline: -24px; padding: 12px 24px; border-top: 1px solid var(--border); background: var(--surface); }
+.moduleItem { padding: 12px; background: transparent; }
+.moduleItemBody strong { font-size: 15px; }
+.moduleItemBody p { font-size: 13px; }
+.moduleSkillChips code { border-color: var(--border); color: var(--text-muted); background: var(--surface-raised); }
+.moduleItemActions { flex-direction: row; align-self: start; }
+.skillLibraryFilters { margin-bottom: 12px; }
+.skillLibraryIdentity strong { font-size: 15px; }
+.skillLibraryIdentity strong .mono { color: var(--text-muted); font-size: 12px; font-weight: 400; }
+.skillLibraryIdentity .detailDrawerTrigger { justify-self: start; min-height: 28px; border-color: transparent; padding: 2px 0; color: var(--text-muted); }
+.skillVersionGroup .skillLibraryList > li { align-items: start; padding: 16px; }
+.skillVersionGroup .skillLibraryList .skillActions { grid-column: auto; }
+.skillLibraryStatus { justify-content: flex-end; max-width: 200px; }
+.skillDescription > summary { display: flex; gap: 8px; cursor: pointer; list-style: none; }
+.skillDescription > summary::after { content: '▸'; color: var(--text-faint); flex: 0 0 auto; }
+.skillDescription > summary::-webkit-details-marker { display: none; }
+.skillDescription:not([open]) .skillLibraryDescription { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.skillDescription[open] > summary::after { content: '▾'; }
+.taskCard { padding: 20px; gap: 14px; }
+.taskCardActions > * { flex: 0 1 auto; padding-inline: 12px; }
+.taskCardActions .primaryButton { margin-inline-end: auto; }
+.taskCardFacts { padding-top: 12px; }
+.taskCardLastRun { margin-block: 4px 8px; }
+.resourceList { gap: 0; }
+.resourceItem { gap: 12px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 14px 0; background: transparent; }
+.resourceItem:last-child { border-bottom: 0; }
+.resourceInfo { flex: 1; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; }
+.resourceInfo strong { font-size: 15px; white-space: normal; }
+.resourceValue { grid-column: 1 / -1; font-size: 13px; }
+.resourceItemMeta { grid-column: 2; grid-row: 1; flex-wrap: wrap; justify-content: flex-end; margin: 0; }
+.resourceProvider { display: grid; place-items: center; align-self: start; flex: 0 0 34px; width: 34px; height: 34px; border-radius: var(--radius-tiny); color: var(--text-muted); background: var(--surface-raised); }
+.resourceProvider svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.apiKeyPanel { padding-block: 0; gap: 12px; }
+.apiKeyList { gap: 0; }
+.apiKeyInfo { display: grid; grid-template-columns: minmax(140px, 1fr) auto; gap: 4px 16px; flex: 1; }
+.apiKeyInfo strong { font-size: 14px; }
+.apiKeyInfo code { grid-column: 1; color: var(--text-muted); font-size: 12px; }
+.apiKeyInfo .apiKeyStatus { grid-column: 2; grid-row: 1 / 3; align-self: center; }
+.apiKeyInfo .muted { font-size: 12px; }
+@media (max-width: 700px) {
+  .resourceInfo, .apiKeyInfo { grid-template-columns: minmax(0, 1fr); }
+  .resourceItemMeta, .apiKeyInfo .apiKeyStatus { grid-column: 1; grid-row: auto; justify-content: flex-start; }
+  .resourceItem { flex-wrap: wrap; align-items: flex-start; }
+  .resourceItem .resourceInfo { flex-basis: calc(100% - 50px); }
+  .resourceItem > .resourceActions { margin-inline-start: auto; }
+  .skillVersionGroup .skillLibraryList > li { grid-template-columns: minmax(0, 1fr) auto; }
+  .skillLibraryStatus { grid-row: 2; grid-column: 1 / -1; justify-content: flex-start; max-width: none; }
+  .taskCardActions > * { flex: 1 1 120px; }
 }

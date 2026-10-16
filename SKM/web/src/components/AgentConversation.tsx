@@ -50,7 +50,7 @@ export function AgentConversation({ prompt, events, runStatus }: {
         </p>
         {prompt.requestUnavailable && <p className="hint" role="status">{messages.uiAuditWorkspace.requestUnavailable}</p>}
         {inputEntries.length > 0 && (
-          <dl>
+          <dl className="promptInputs">
             {inputEntries.map(([key, value]) => (
               <div key={key}><dt>{key}</dt><dd>{formatInputValue(value)}</dd></div>
             ))}
@@ -96,7 +96,7 @@ export function AgentConversation({ prompt, events, runStatus }: {
   )
 }
 
-/** 任意 task input の一値を、本文を膨らませない短い表示 text へ変換する。 */
+/** 凍結 input を省略せず表示し、文字列内の改行も保持する。 */
 function formatInputValue(value: unknown): string {
   if (typeof value === 'string') return value || '""'
   if (typeof value === 'number' || typeof value === 'boolean' || value === null) return String(value)

@@ -52,7 +52,9 @@ describe.each(UI_LANGUAGES)('real account components in %s', (language) => {
       <AccountsPage session={session('ADMIN')} onSessionEnded={() => {}} onAccountChanged={() => {}} />
     </LanguageProvider>)
     expect(html).toContain('data-account-directory')
-    expect(html).toContain('class="detailDisclosure accountDirectorySection"')
+    expect(html).toContain('class="accountDirectorySection"')
+    expect(html).toContain('role="tablist"')
+    expect(html).toContain('role="tabpanel"')
     expect(html).toContain('data-account-form="search"')
     expect(html).toContain('data-account-form="create"')
     expect(html).toContain(messages.manageUsers)

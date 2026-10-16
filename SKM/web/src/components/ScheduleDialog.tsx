@@ -1,5 +1,5 @@
 import { Select } from './Select'
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 
 import {
   ApiProblemError, createSchedule, previewSchedule,
@@ -89,6 +89,7 @@ function ScheduleCreationForm({ open, projectId, csrfToken, task, onClose, onSav
   & { isCurrent: () => boolean }) {
   const messages = useMessages()
   const [inputTimezone] = useState(browserScheduleTimezone)
+  const formId = useId()
   const [original] = useState(() => schedule ? structuredClone(schedule) : null)
   const [initialTiming] = useState<ScheduleTimeDraft>(() => original ? scheduleTimeDraft(original, inputTimezone) : ({
     kind: 'CRON', timezone: inputTimezone, cronExpression: '0 3 * * *',
@@ -206,17 +207,19 @@ function ScheduleCreationForm({ open, projectId, csrfToken, task, onClose, onSav
     }
   }
 
-  return <ModalDialog open={open} title={original ? messages.scheduleEditor.title : messages.schedules.create} wide onClose={onClose}>
-    <form className="runForm" data-schedule-form data-schedule-editor={original?.schedule_id} onSubmit={handleSubmit}>
+  return <ModalDialog open={open} title={original ? messages.scheduleEditor.title : messages.schedules.create} wide onClose={onClose}
+    footer={<>
+      <button className="primaryButton" data-schedule-submit form={formId} type="submit" disabled={locked || !taskDraft || !currentPreview || confirmed !== request}>
+        {mutation.busy || revision.phase === 'sending' ? messages.schedules.saving : messages.schedules.save}
+      </button>
+    </>}>
+    <form id={formId} className="runForm" data-schedule-form data-schedule-editor={original?.schedule_id} onSubmit={handleSubmit}>
       <p className="hint">{messages.schedules.frozenTask(task.title)}</p>
       {original && <p className="hint">{messages.scheduleEditor.identity(original.schedule_id, revision.base!.row_version)}</p>}
       {(unavailable || editingTerminal) && <p role="alert">{messages.scheduleEditor.unavailable}</p>}
       <fieldset disabled={locked} className="scheduleConfiguration">
-        <TaskLaunchFields task={task} inputText={inputText} sourceProviders={sources}
-          onInputTextChange={(value) => { inputRef.current = value; setInputText(value) }}
-          onSourceChange={(key, value) => {
-            sourcesRef.current = { ...sourcesRef.current, [key]: value }; setSources(sourcesRef.current)
-          }} />
+        <section className="scheduleTiming" aria-label={messages.schedules.timingTitle}>
+        <h3>{messages.schedules.timingTitle}</h3>
         <label>{messages.schedules.nameLabel}<input name="name" maxLength={200} type="text" value={name}
           placeholder={task.title} onChange={(event) => { nameRef.current = event.target.value; setName(event.target.value) }} /></label>
         <label>{messages.schedules.kindLabel}<Select className="shortControl" density="compact" name="kind" value={timing.kind}
@@ -258,6 +261,15 @@ function ScheduleCreationForm({ open, projectId, csrfToken, task, onClose, onSav
             }} /><span>{messages.schedules.previewConfirm}</span></label>
         </div>}
         <p className="hint">{messages.schedules.overlapHint}</p>
+        </section>
+        <section className="scheduleResources" aria-label={messages.schedules.resourcesTitle}>
+          <h3>{messages.schedules.resourcesTitle}</h3>
+          <TaskLaunchFields task={task} inputText={inputText} sourceProviders={sources}
+            onInputTextChange={(value) => { inputRef.current = value; setInputText(value) }}
+            onSourceChange={(key, value) => {
+              sourcesRef.current = { ...sourcesRef.current, [key]: value }; setSources(sourcesRef.current)
+            }} />
+        </section>
       </fieldset>
       {request && preview.failure && <p className="error" role="alert">{messages.schedules[preview.failure.key]}</p>}
       {formError && <p className="error" role="alert">{formError}</p>}
@@ -265,10 +277,6 @@ function ScheduleCreationForm({ open, projectId, csrfToken, task, onClose, onSav
         if (open && revision.adopt()) invalidatePreview()
       }} /> : mutation.failure && <p className="error" role="alert" data-schedule-save-failure>{messages.schedules[mutation.failure.key]}</p>}
       <p className="hint">{original ? messages.scheduleEditor.closingHint : messages.schedules.closingHint}</p>
-      <button className="primaryButton" type="submit"
-        disabled={locked || !taskDraft || !currentPreview || confirmed !== request}>
-        {mutation.busy || revision.phase === 'sending' ? messages.schedules.saving : messages.schedules.save}
-      </button>
     </form>
   </ModalDialog>
 }

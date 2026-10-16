@@ -72,6 +72,13 @@ export function RunArtifacts({ projectId, runId, result, onSessionExpired, evide
     start(match, 'preview')
   }, [requestedPreview, index.pending, index.failure, index.data, request])
 
+  // 空索引を大きな成果物区画にしない。読取失敗や未解決参照は通常区画で必ず残す。
+  if (!index.pending && !index.failure && records.length === 0 && refs.length === 0 && !unavailable && request === null) {
+    return result === null ? null : <section className="runArtifactsEmpty" aria-label={labels.title}>
+      <p className="compactEmpty">{labels.empty}</p>
+      <button className="secondaryButton compactButton" type="button" onClick={index.refresh}>{labels.refresh}</button>
+    </section>
+  }
   return <section ref={section} className="resultSection runArtifacts" aria-label={labels.title}>
     <h3>{labels.title}</h3>
     {unavailable && <p role="status" className="hint">{labels.previewUnavailable}</p>}

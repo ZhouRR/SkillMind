@@ -33,12 +33,8 @@ describe('Schema task raw drafts', () => {
     expect(document.activeElement).toBe(object)
     expect(container.querySelector('[data-valid]')!.textContent).toBe('false')
     expect(object!.getAttribute('aria-invalid')).toBe('true')
-    await act(async () => {
-      const title = container.querySelector<HTMLInputElement>('input')!
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(title, 'edited during invalid JSON')
-      title.dispatchEvent(new Event('input', { bubbles: true }))
-    })
-    expect(container.querySelector<HTMLInputElement>('input')!.value).toBe('edited during invalid JSON')
+    await type(container.querySelector<HTMLTextAreaElement>('.schemaTextInput')!, 'edited during invalid JSON')
+    expect(container.querySelector<HTMLTextAreaElement>('.schemaTextInput')!.value).toBe('edited during invalid JSON')
     await type(array!, '[1,')
     await type(object!, '{ "new": 2 }')
     expect(object!.value).toBe('{ "new": 2 }')
@@ -46,7 +42,7 @@ describe('Schema task raw drafts', () => {
     expect(container.querySelector('[data-valid]')!.textContent).toBe('false')
     await type(array!, '[1, 2]')
     expect(container.querySelector('[data-valid]')!.textContent).toBe('true')
-    expect(container.querySelector<HTMLInputElement>('input')!.value).toBe('edited during invalid JSON')
+    expect(container.querySelector<HTMLTextAreaElement>('.schemaTextInput')!.value).toBe('edited during invalid JSON')
   })
   it('blocks a malformed field that would otherwise inject a valid sibling into the combined object', async () => {
     await act(async () => root.render(<Editor />))
@@ -54,7 +50,7 @@ describe('Schema task raw drafts', () => {
     await type(object, '{}, \"other\": 123')
     expect(object.getAttribute('aria-invalid')).toBe('true')
     expect(container.querySelector('[data-valid]')!.textContent).toBe('false')
-    expect(container.querySelector<HTMLInputElement>('input')!.value).toBe('keep')
+    expect(container.querySelector<HTMLTextAreaElement>('.schemaTextInput')!.value).toBe('keep')
     await type(object, '{}')
     expect(container.querySelector('[data-valid]')!.textContent).toBe('true')
     expect(container.querySelector('.jsonInput')!.textContent).not.toContain('other')
@@ -80,6 +76,15 @@ describe('Schema task raw drafts', () => {
       expect(details.open).toBe(true)
       expect(raw.value).toBe(text)
     }
-    expect(container.querySelector<HTMLInputElement>('input')!.value).toBe('changed')
+    expect(container.querySelector<HTMLTextAreaElement>('.schemaTextInput')!.value).toBe('changed')
+  })
+  it('retains long multiline text and focus without changing the JSON value', async () => {
+    await act(async () => root.render(<Editor />))
+    const text = container.querySelector<HTMLTextAreaElement>('.schemaTextInput')!
+    text.focus()
+    const value = 'First line\n' + 'Unbounded message '.repeat(30) + '\nLast line'
+    await type(text, value)
+    expect(document.activeElement).toBe(text)
+    expect(parseInputObject(container.querySelector<HTMLTextAreaElement>('.jsonInput')!.value)?.title).toBe(value)
   })
 })

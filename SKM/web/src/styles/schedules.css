@@ -25,3 +25,11 @@
 .scheduleNotice button { margin-inline-start: 10px; }
 @media (max-width: 1100px) { .scheduleManagerLayout { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 480px) { .scheduleFacts dl { grid-template-columns: minmax(0, 1fr); } .scheduleNotice button { margin: 10px 0 0; } }
+
+/* 予定を先に設定し、その後で固定する入力と資源を確認する。 */
+.scheduleTiming, .scheduleResources { min-width: 0; }
+.scheduleTiming { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
+.scheduleTiming > :not(label) { grid-column: 1 / -1; }
+.scheduleTiming h3, .scheduleResources h3 { margin: 4px 0 16px; font-size: 16px; color: var(--text-hi); }
+.scheduleResources { border-top: 1px solid var(--border); padding-top: 16px; }
+@media (max-width: 600px) { .scheduleTiming { grid-template-columns: minmax(0, 1fr); } }

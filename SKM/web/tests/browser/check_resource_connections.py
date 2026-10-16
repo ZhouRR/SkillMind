@@ -126,9 +126,8 @@ async def check(url: str, output: Path) -> None:
                             )
                             await dialog.locator("textarea").fill("resource://reports/current")
                         else:
-                            await dialog.get_by_label(labels["baseUrlLabel"], exact=True).fill("https://api.example.test")
+                            await dialog.get_by_label(f'{labels["baseUrlLabel"]} 1', exact=True).fill("https://api.example.test")
                             await select_option(dialog.get_by_role("combobox", name=labels["httpAuthentication"], exact=True), "none")
-                            await dialog.locator("textarea").fill("/issues")
                         await page.screenshot(
                             path=str(output / f"{provider}-{language}-{theme}-{width}.png")
                         )
@@ -152,8 +151,8 @@ async def check(url: str, output: Path) -> None:
                     }
                     assert postgres["scope"] == {"statements": ["SELECT"]}
                     assert postgres["capabilities"] == ["database.query/v1"]
-                    assert http["config"] == {"base_url": "https://api.example.test", "auth_mode": "none"}
-                    assert http["scope"] == {"paths": ["/issues"], "methods": ["GET", "HEAD"]}
+                    assert http["config"] == {"auth_mode": "none"}
+                    assert http["scope"] == {"base_urls": ["https://api.example.test"]}
                     assert http["secret_reference_id"] is None
                     assert postgres["secret_reference_id"] == api.secrets[0]["secret_reference_id"]
                     assert mcp["config"] == {

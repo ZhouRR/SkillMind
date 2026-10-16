@@ -365,6 +365,7 @@ export interface UiMessages {
       nameLabel: string
       descriptionLabel: string
       pickerLegend: string
+      otherVersions: (count: number) => string
       noPublished: string
       /** 廃止・無効化で候補から外れたのに束縛が残っている version の注記。 */
       staleBinding: string
@@ -674,6 +675,9 @@ export interface UiMessages {
     batchDeleted: (deleted: number, total: number) => string
     batchStopped: string
     viewSource: string
+    compactTables: string
+    restoreTableSpacing: string
+    compactTablesHint: string
     previewPages: string
     previewPage: (page: number, total: number) => string
     uploadHelp: string
@@ -830,6 +834,7 @@ export interface UiMessages {
   }
   runResult: {
     evidencePhases: Record<string, string>
+    evidenceRoles: { request: string; response: string }
     deliverableContent: string
     executionDiagnostics: string
     viewLocator: string
@@ -1103,6 +1108,7 @@ export interface UiMessages {
     /** Run 事実行の識別ラベルと画面 aria(旧 hard code 英語の資源化)。 */
     runIdLabel: string
     connLabel: string
+    liveProgress: string
     taskExecutionAria: string
     refreshDb: string
     cancelling: string
@@ -1196,6 +1202,9 @@ export interface UiMessages {
   }
   /** 時刻起動 (ScheduleDialog)。用語は一般利用者路線に合わせ、cron/schedule を表に出さない。 */
   schedules: {
+    /** 調度 form の時間設定と入力・資源を分ける見出し。 */
+    timingTitle: string
+    resourcesTitle: string
     title: string
     create: string
     empty: string

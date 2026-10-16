@@ -46,3 +46,14 @@
 .memberTechnical { order: 1; }
 .memberCandidateGroups { min-width: 0; }
 .memberCandidateGroups > details { margin-top: 12px; }
+
+/* Project 説明より参加関係を先に読める密度にする。 */
+.projectMembersContent { gap: 14px; }
+.projectMembersPanel .panelHeader { margin-bottom: 0; padding-bottom: 10px; }
+.memberProjectIdentity { gap: 2px; }
+.projectMembersContent > .detailDisclosure { margin-block: 0; padding-block: 8px; }
+.memberCard { padding-block: 10px; }
+.memberCard > div { grid-template-columns: minmax(0, 1fr) auto; gap: 2px 16px; }
+.memberCard > div > p { grid-column: 1; }
+.memberCard .memberFacts, .memberTechnical { grid-column: 1 / -1; }
+@media (max-width: 700px) { .memberCard > div { grid-template-columns: minmax(0, 1fr); } }

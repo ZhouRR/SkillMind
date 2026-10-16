@@ -114,7 +114,7 @@ async def check(url: str, output: Path) -> None:
                         await page.locator("[data-schedule-preview]").click()
                         await expect(page.locator("[data-schedule-confirm]")).to_be_visible()
                         await page.locator("[data-schedule-confirm]").check()
-                        await page.locator("[data-schedule-editor] button[type=submit]").click()
+                        await page.locator("[data-schedule-submit]").click()
                         await expect(page.locator("[data-schedule-editor]")).to_be_hidden()
                         await expect(
                             page.locator("[data-task-schedule-details] h3").first
@@ -135,7 +135,7 @@ async def check(url: str, output: Path) -> None:
                         await page.locator("[data-schedule-preview]").click()
                         await expect(page.locator("[data-schedule-confirm]")).to_be_visible()
                         await page.locator("[data-schedule-confirm]").check()
-                        await page.locator("[data-schedule-form] button[type=submit]").click()
+                        await page.locator("[data-schedule-submit]").click()
                         await expect(page.locator("[data-schedule-form]")).to_have_count(0)
                         await expect(page.locator("[data-task-card]")).to_have_count(6)
                         assert len(api.writes) == 3
@@ -153,7 +153,7 @@ async def check(url: str, output: Path) -> None:
                             await expect(page.locator("[data-schedule-confirm]")).to_be_visible()
                             await page.locator("[data-schedule-confirm]").check()
                             api.actions = ["drop"]
-                            await page.locator("[data-schedule-editor] button[type=submit]").click()
+                            await page.locator("[data-schedule-submit]").click()
                             await expect(
                                 page.locator("[data-schedule-review=unknown]")
                             ).to_be_visible()

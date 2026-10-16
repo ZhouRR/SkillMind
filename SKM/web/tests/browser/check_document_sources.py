@@ -190,7 +190,7 @@ async def check_folder_boundaries(browser, url: str, origin: str) -> None:
             await select_option(field.locator('.selectTrigger').first, 'SET')
             await expect(field.locator('.selectTrigger').nth(1)).to_have_attribute("data-value", '')
             await select_option(field.locator('.selectTrigger').nth(1), path)
-            await page.locator('.runForm button[type="submit"]').click()
+            await page.locator('[data-run-submit]').click()
             await confirmed(page)
             assert len(fixture.posts) == 1
             body = json.loads(fixture.posts[0]['body'])
@@ -218,7 +218,7 @@ async def exercise(page: Page, api: DocumentApiFixture, url: str, screen: str, m
         await expect(page.locator('.schedulePreview li')).to_have_count(1)
         assert len(api.preview_posts) == 1 and not api.schedule_posts and not api.posts
     elif mode != 'NONE':
-        await page.locator('.runForm button[type="submit"]').click()
+        await page.locator('[data-run-submit]').click()
         assert not api.posts
     sources = await select_scope(page, mode)
     if screen == 'tasks':
@@ -227,7 +227,7 @@ async def exercise(page: Page, api: DocumentApiFixture, url: str, screen: str, m
     assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth')
     if output is not None and mode == 'SET':
         await page.screenshot(path=str(output / f'{screen}-{language}-selection.png'))
-    await page.locator('.runForm button[type="submit"]').click()
+    await page.locator('[data-run-submit]').click()
     if screen == 'tasks':
         await expect(page.get_by_role('dialog')).to_have_count(0)
         assert len(api.schedule_posts) == 1 and not api.posts

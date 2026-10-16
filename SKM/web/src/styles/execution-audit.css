@@ -20,11 +20,9 @@
 .toolArguments { min-width: 0; margin-top: 8px; }
 .toolArguments > summary { cursor: pointer; color: var(--text-muted); font-size: 12px; }
 .toolArguments .rawResultBody { margin-top: 8px; }
-.reportTechnicalControl { display: flex; justify-content: flex-end; margin-bottom: 12px; }
 .reportFallback, .runDetailReadState { display: grid; gap: 10px; min-width: 0; }
 .reportFallback p, .runDetailReadState p { margin: 0; }
 .reportFallback button, .runDetailReadState button { justify-self: start; }
 @media (max-width: 600px) {
   .proposalCard .proposalFacts { grid-template-columns: minmax(0, 1fr); }
-  .reportTechnicalControl { justify-content: flex-start; }
 }

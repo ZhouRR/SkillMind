@@ -71,7 +71,7 @@ async def check(url: str) -> None:
                     sources = await select_scope(page, "ALL")
                     output = page.locator('label[title="outputs"] .selectTrigger')
                     await expect(output).to_have_attribute("data-value", "")
-                    await page.locator('.runForm button[type="submit"]').click()
+                    await page.locator('[data-run-submit]').click()
                     assert not fixture.posts
                     await select_option(output, LIBRARY)
                     await expect(page.locator(".documentSourceField")).to_have_count(1)
@@ -80,7 +80,7 @@ async def check(url: str) -> None:
                         labels["library"]
                     )
                     assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-                    await page.locator('.runForm button[type="submit"]').click()
+                    await page.locator('[data-run-submit]').click()
                     await confirmed(page)
                     assert len(fixture.posts) == 1
                     body = json.loads(fixture.posts[0]["body"])

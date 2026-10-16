@@ -142,10 +142,11 @@ export function EvidenceCard({ evidence, snapshots, expanded = false }: { eviden
   const [opened, setOpened] = useState(expanded)
   const [source, setSource] = useState(false)
   const preview = evidencePreviewSource(evidence)
+  const title = evidenceTitle(evidence, snapshots, messages.runResult.evidenceRoles)
   return (
     <details className="evidenceCard" open={opened} onToggle={(event) => setOpened(event.currentTarget.open)}>
-      <summary><span><strong>{evidenceTitle(evidence, snapshots)}</strong><small>{messages.runResult.evidenceTypes[evidence.evidence_type] ?? evidence.evidence_type} · {formatLocalTimestamp(evidence.created_at)}{typeof evidence.source_locator.phase === 'string' && messages.runResult.evidencePhases[evidence.source_locator.phase] ? ` · ${messages.runResult.evidencePhases[evidence.source_locator.phase]}` : ''}</small></span><span>{evidence.excerpt ? messages.runResult.viewExcerpt : messages.runResult.viewLocator}</span></summary>
-      {opened && <details className="evidenceMetadata" open={!evidence.excerpt || undefined}><summary>{messages.runResult.technicalDetails}</summary>
+      <summary><span><strong>{title === evidence.evidence_ref ? messages.runResult.evidenceTypes[evidence.evidence_type] ?? messages.runResult.evidenceTitle : title}</strong><small>{messages.runResult.evidenceTypes[evidence.evidence_type] ?? evidence.evidence_type} · {formatLocalTimestamp(evidence.created_at)}{typeof evidence.source_locator.phase === 'string' && messages.runResult.evidencePhases[evidence.source_locator.phase] ? ` · ${messages.runResult.evidencePhases[evidence.source_locator.phase]}` : ''}</small></span><span>{evidence.excerpt ? messages.runResult.viewExcerpt : messages.runResult.viewLocator}</span></summary>
+      {opened && <details className="evidenceMetadata"><summary>{messages.runResult.technicalDetails}</summary>
       <code>{evidence.evidence_ref}</code><dl><div><dt>{messages.runResult.evidenceSourceLabel}</dt><dd>{evidence.source_uri}</dd></div><div><dt>{messages.runResult.evidenceLocatorLabel}</dt><dd>{JSON.stringify(evidence.source_locator)}</dd></div><div><dt>{messages.runResult.evidenceHashLabel}</dt><dd>{evidence.content_hash}</dd></div></dl></details>}
       {opened && (evidence.excerpt === null ? <p className="compactEmpty">{messages.runResult.noExcerpt}</p> : <>
         <div className="excerptToolbar" role="group" aria-label={messages.runResult.excerptDisplay}>

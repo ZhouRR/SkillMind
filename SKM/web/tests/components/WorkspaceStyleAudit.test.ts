@@ -8,7 +8,7 @@ describe('Workspace reading style contracts', () => {
   })
   it('lets schema fields fill the outer grid without a narrow-screen fixed minimum', () => {
     expect(css).toContain('.schemaInputForm { grid-template-columns: minmax(0, 1fr); }')
-    expect(css).toContain('repeat(auto-fit, minmax(min(100%, 240px), 1fr))')
+    expect(css).toContain('repeat(auto-fit, minmax(min(100%, 300px), 1fr))')
     expect(css).toContain('.schemaInputFields > label:has(textarea) { grid-column: 1 / -1; }')
   })
   it('uses one keyboard-scroll conversation region and wraps unbroken input metadata', () => {

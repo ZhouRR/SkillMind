@@ -132,7 +132,7 @@ describe('execution audit DOM contracts', () => {
     expect(container.querySelector('.resultReportBody')).toBe(report); expect(container.textContent).toContain(labels.detailStale)
     expect(container.textContent).toContain('Original')
     const toggle = button(MESSAGES.zh.runResult.technicalDetails)
-    expect(toggle.closest('.resultReportBody')).toBe(report); expect(toggle.closest('[role="dialog"]')).toBeNull()
+    expect(toggle.closest('.resultActions')).not.toBeNull(); expect(toggle.closest('[role="dialog"]')).toBeNull()
     await act(async () => toggle.click()); expect(button(MESSAGES.zh.runResult.hideTechnicalDetails).getAttribute('aria-pressed')).toBe('true')
   })
 

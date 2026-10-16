@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 
 import { createProjectModule, deleteProjectModule, loadProjectModules, loadProjectTasks, updateProjectModule, type AuthSessionRecord, type ProjectModuleRecord } from '../api'
 import { ActionMenu } from './ActionMenu'
-import { EmptyState, LoadingSkeleton, useConfirmDialog } from './PageElements'
+import { EmptyState, LoadingSkeleton, ModalDialog, useConfirmDialog } from './PageElements'
 import { useMessages } from '../i18n'
 import { apiErrorMessage } from '../lib/apiFeedback'
 
@@ -56,6 +56,8 @@ export function ProjectModulesPanel({ projectId, session }: {
   const [optionsState, setOptionsState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [optionsError, setOptionsError] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [formOpen, setFormOpen] = useState(false)
+  const formId = useId()
   const { confirm, confirmDialog } = useConfirmDialog()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -126,6 +128,7 @@ export function ProjectModulesPanel({ projectId, session }: {
 
   /** Form を作成 mode(空)へ戻す。 */
   function resetForm(): void {
+    setFormOpen(false)
     setEditingId(null)
     setName('')
     setDescription('')
@@ -134,6 +137,7 @@ export function ProjectModulesPanel({ projectId, session }: {
 
   /** 既存 module を form へ読み込み、編集 mode に切り替える。 */
   function startEdit(module: ProjectModuleRecord): void {
+    setFormOpen(true)
     setEditingId(module.module_id)
     setName(module.name)
     setDescription(module.description)
@@ -202,13 +206,18 @@ export function ProjectModulesPanel({ projectId, session }: {
     )),
   )
   const staleSelected = optionsState === 'ready' ? staleBindingIds(selected, options) : []
+  const groups = new Map<string, SkillOption[]>()
+  for (const option of options) groups.set(option.skill_name, [...(groups.get(option.skill_name) ?? []), option])
   return (
     <section className="panel modulesPanel" aria-label={messages.projects.modules.sectionAria}>
       <div className="panelHeader">
         <h2>{messages.projects.modules.title}</h2>
         {modulesState.status === 'ready' && <span className="eventCount">{modules.length}</span>}
+        {isAdmin && <button className="primaryButton compactButton" type="button" disabled={busy}
+          onClick={() => { resetForm(); setError(null); setFormOpen(true) }}>{messages.projects.modules.createTitle}</button>}
       </div>
       <details className="detailDisclosure"><summary>{messages.sharedAudit.moduleHelp}</summary><p className="hint">{messages.projects.modules.hint}</p></details>
+      {error && !formOpen && <p className="error" role="alert">{error}</p>}
       <div className="modulesLayout">
         <div className="moduleList">
           {modulesState.status === 'loading' && <LoadingSkeleton label={messages.projects.modules.loading} rows={2} />}
@@ -237,8 +246,14 @@ export function ProjectModulesPanel({ projectId, session }: {
           ))}
         </div>
         {isAdmin ? (
-          <form className="moduleForm" onSubmit={(event) => void submit(event)}>
-            <h3>{editingId === null ? messages.projects.modules.createTitle : messages.projects.modules.editTitle}</h3>
+          <ModalDialog drawer open={formOpen} title={editingId === null ? messages.projects.modules.createTitle : messages.projects.modules.editTitle}
+            onClose={() => { if (!busy) setFormOpen(false) }} footer={<div className="moduleFormActions">
+              <button className="primaryButton" form={formId} disabled={busy || optionsState !== 'ready' || selected.length === 0 || !name.trim()} type="submit">
+                {busy ? messages.elements.processing : editingId === null ? messages.projects.modules.createTitle : messages.projects.modules.saveChanges}
+              </button>
+              <button className="secondaryButton" disabled={busy} type="button" onClick={() => setFormOpen(false)}>{messages.elements.cancel}</button>
+            </div>}>
+          <form id={formId} className="moduleForm" onSubmit={(event) => void submit(event)}>
             <label>{messages.projects.modules.nameLabel}<input disabled={busy} maxLength={200} required value={name} onChange={(event) => setName(event.target.value)} /></label>
             <label>{messages.projects.modules.descriptionLabel}<textarea disabled={busy} className="compactTextarea" maxLength={2000} value={description} onChange={(event) => setDescription(event.target.value)} /></label>
             <fieldset className="moduleSkillPicker" disabled={busy || optionsState !== 'ready'} aria-busy={optionsState === 'loading'}>
@@ -248,18 +263,9 @@ export function ProjectModulesPanel({ projectId, session }: {
               {optionsState === 'ready' && options.length === 0 && (
                 <p className="hint">{messages.projects.modules.noPublished}</p>
               )}
-              {options.map((option) => (
-                <label className="moduleSkillOption" key={option.skill_version_id}>
-                  <input
-                    checked={selected.includes(option.skill_version_id)}
-                    type="checkbox"
-                    onChange={(event) => setSelected((current) => event.target.checked
-                      ? [...current, option.skill_version_id]
-                      : current.filter((id) => id !== option.skill_version_id))}
-                  />
-                  <span>{option.label}</span>
-                </label>
-              ))}
+              {[...groups].map(([skillName, versions]) => <ModuleSkillGroup key={`${editingId ?? 'create'}:${skillName}`}
+                name={skillName} versions={versions} selected={selected} onToggle={(id, checked) => setSelected((current) => checked
+                  ? [...current, id] : current.filter((item) => item !== id))} />)}
               {staleSelected.map((versionId) => (
                 <label className="moduleSkillOption moduleSkillOptionStale" key={versionId}>
                   <input
@@ -276,15 +282,8 @@ export function ProjectModulesPanel({ projectId, session }: {
             </fieldset>
             {optionsState === 'error' && <button type="button" className="secondaryButton" onClick={() => setRevision((current) => current + 1)}>{messages.account.refresh}</button>}
             {error && <p className="error" role="alert">{error}</p>}
-            <div className="moduleFormActions">
-              <button className="primaryButton" disabled={busy || optionsState !== 'ready' || selected.length === 0 || !name.trim()} type="submit">
-                {busy ? messages.elements.processing : editingId === null ? messages.projects.modules.createTitle : messages.projects.modules.saveChanges}
-              </button>
-              {editingId !== null && (
-                <button className="secondaryButton" disabled={busy} type="button" onClick={resetForm}>{messages.projects.modules.cancelEdit}</button>
-              )}
-            </div>
           </form>
+          </ModalDialog>
         ) : (
           <div className="moduleForm">
             <h3>{messages.projects.modules.configTitle}</h3>
@@ -295,4 +294,25 @@ export function ProjectModulesPanel({ projectId, session }: {
       {confirmDialog}
     </section>
   )
+}
+
+/** 最新版を先に示し、既存の旧版選択は展開したまま精確な version ID で編集する。 */
+function ModuleSkillGroup({ name, versions, selected, onToggle }: {
+  name: string; versions: SkillOption[]; selected: string[]; onToggle: (id: string, checked: boolean) => void
+}) {
+  const messages = useMessages()
+  const older = versions.slice(1)
+  const selectedOlder = older.filter((item) => selected.includes(item.skill_version_id)).length
+  const [open, setOpen] = useState(() => older.some((option) => selected.includes(option.skill_version_id)))
+  const option = (item: SkillOption) => <label className="moduleSkillOption" key={item.skill_version_id}>
+    <input checked={selected.includes(item.skill_version_id)} type="checkbox" onChange={(event) => onToggle(item.skill_version_id, event.target.checked)} />
+    <span>{item.label}</span>
+  </label>
+  return <div className="moduleSkillGroup">
+    {versions[0] && option(versions[0])}
+    {older.length > 0 && <details open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary>{messages.projects.modules.otherVersions(older.length)}{selectedOlder > 0 && <span className="eventCount">{selectedOlder}</span>}</summary>
+      <div aria-label={name}>{older.map(option)}</div>
+    </details>}
+  </div>
 }

@@ -30,12 +30,13 @@
 
 /* 一覧では名前・状態・次の操作を強調し、card の中に card を重ねない。 */
 [data-page='projects'] .projectManagementLayout { grid-template-columns: minmax(0, 1.45fr) minmax(300px, .85fr); gap: 24px; }
+[data-page='projects'] .projectListLayout { grid-template-columns: minmax(0, 1fr); }
 [data-page='projects'] .projectList { gap: 0; }
-[data-page='projects'] .projectItem { padding: 16px 12px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; }
+[data-page='projects'] .projectItem { padding: 12px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; }
 [data-page='projects'] .projectItemSelected { border-radius: 10px; background: var(--accent-soft); }
 [data-page='projects'] .projectSelect { gap: 6px; }
 [data-page='projects'] .projectSelect strong { font-size: 15px; }
-[data-page='projects'] .projectSidePanel { background: var(--surface-raised); }
+[data-page='projects'] aside.projectSidePanel { background: var(--surface-raised); }
 [data-page='skills'] .skillWorkspace { grid-template-columns: minmax(300px, .8fr) minmax(0, 1.5fr); gap: 24px; }
 [data-page='skills'] .skillForm { background: var(--surface-raised); }
 [data-page='skills'] .skillForm { display: flex; flex-direction: column; gap: 16px; }
@@ -50,7 +51,7 @@
 .detailDisclosure.resourceAdvanced > summary { color: var(--text-hi); font-size: 15px; font-weight: 700; }
 .detailDisclosure.resourceAdvanced[open] > summary { margin-bottom: 14px; }
 .resourceAdvanced .resourceTabPanel > .panel { border: 0; border-radius: 0; padding: 0; background: transparent; box-shadow: none; }
-[data-page='resources'] .resourceItem { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 20px 4px; background: transparent; }
+[data-page='resources'] .resourceItem { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 14px 0; background: transparent; }
 [data-page='resources'] .resourceInfo { gap: 8px; }
 [data-page='resources'] .resourceInfo strong { font-size: 15px; }
 [data-page='documents'] .documentUpload { padding: 0; margin-bottom: 16px; border: 0; }
@@ -71,7 +72,7 @@
 [data-page='documents'] .docFolderBody .documentItem { border: 0; border-radius: 0; background: transparent; }
 [data-page='history'] .historyList { gap: 0; }
 [data-page='history'] .historyItem { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; }
-[data-page='history'] .historyItem > button:not(.historyDelete) { padding: 18px 8px; }
+[data-page='history'] .historyItem > button:not(.historyDelete) { padding: 14px 8px; }
 [data-page='history'] .historyItem:hover { background: var(--surface-raised); }
 [data-page='history'] .historyPrimary strong { font-size: 15px; white-space: normal; }
 [data-page='history'] .historyMeta { margin-top: 10px; }
@@ -80,23 +81,16 @@
 [data-page='history'] .historyItem > .historyDelete { margin: 14px 8px 0 0; }
 /* 一件だけでも全幅へ引き伸ばさず、card 幅を読みやすい範囲に保つ(auto-fill は空の列を残す)。 */
 [data-page='tasks'] .taskCards { grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 24px; }
-[data-page='tasks'] .taskCard { padding: 24px; }
+[data-page='tasks'] .taskCard { padding: 20px; }
 [data-page='schedules'] .scheduleManagerLayout { grid-template-columns: minmax(300px, .75fr) minmax(0, 1.35fr); gap: 24px; }
 [data-page='schedules'] .scheduleManagerDetail { background: var(--surface); }
 [data-page='schedules'] .scheduleSelect { padding: 16px; }
 [data-page='schedules'] .scheduleFacts h3 { margin-top: 24px; }
-.accountUserCard { background: var(--surface-raised); }
+.accountUserCard { background: transparent; }
 .accountEditor > .panel, .accountDirectory > .panel { padding: 24px; }
 /* 本文幅は他画面と同じ shell 幅に揃え、見出しと区画の右端をずらさない。 */
 .accountsLayout { grid-template-columns: minmax(0, 1fr); }
-.accountDirectorySection > summary { color: var(--text-hi); font-size: 16px; }
-/* 管理区画(API キー・組織ユーザー)も本人区画と同じ card に入れ、見出しで開閉する。
-   中の区画は枠を重ねず(card の中に card を置かない)、区切り線だけで分ける。 */
-.detailDisclosure.accountDirectorySection { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 24px; background: var(--surface); box-shadow: var(--shadow-panel); }
-.detailDisclosure.accountDirectorySection > summary { font-size: 15px; font-weight: 700; }
-.detailDisclosure.accountDirectorySection[open] > summary { margin-bottom: 18px; border-bottom: 1px solid var(--border); padding-bottom: 14px; }
-.accountDirectorySection .accountDirectory > .panel { border: 0; border-radius: 0; padding: 0; background: transparent; box-shadow: none; }
-.accountDirectorySection .accountDirectory > .panel + .panel { border-top: 1px solid var(--border); padding-top: 18px; }
+/* 管理 tab の一覧は本人区画と同じ独立 panel に揃える。 */
 .accountDirectorySection .apiKeyPanel > .hint:first-child, .accountDirectorySection .apiKeyPanel > p:first-child { margin-top: 0; }
 /* panelHeader を持たない区画見出し(例:ユーザー作成)も他の区画見出しと同じ寸法にする。 */
 .accountsLayout .panel > h2 { margin: 0 0 6px; color: var(--text-hi); font-size: 15px; font-weight: 700; }

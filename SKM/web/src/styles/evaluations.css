@@ -18,3 +18,11 @@
   .evaluationSection .evaluationRevision > div { grid-template-columns: minmax(0, 1fr); }
   .evaluationSection .evaluationItem > div { flex-wrap: wrap; }
 }
+
+/* 通常評価と項目修正の技術入力を分け、原値や未解決 error は隠さない。 */
+.evaluationAdvanced { border-top: 1px solid var(--border); padding-block: 10px; }
+.evaluationAdvanced > summary { cursor: pointer; color: var(--text-muted); font-weight: 600; }
+.evaluationAdvanced[open] > summary { margin-bottom: 12px; }
+.evaluationAdvanced .secondaryButton { width: auto; }
+.evaluationForm > fieldset > .primaryButton { width: auto; min-width: 140px; }
+.evaluationForm { border: 0; background: transparent; padding: 0; }

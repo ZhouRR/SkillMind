@@ -9,7 +9,10 @@ import { SkillsPage } from '../../src/pages/SkillsPage'
 import { InterpretStreamView, InterpretationExecutionView } from '../../src/components/SkillInterpretationPreview'
 import { SkillLibraryPanel, SkillVersionDetail } from '../../src/components/SkillLibraryPanel'
 import { SkillParseSummary, UploadedSourceFiles } from '../../src/components/SkillSourcePreview'
+import { ActionMenu } from '../../src/components/ActionMenu'
 import { readUploadedSourcePreview } from '../../src/lib/skillUpload'
+
+vi.mock('../../src/components/ActionMenu', { spy: true })
 
 const PREVIEW = {
   normalized_package: {
@@ -535,7 +538,11 @@ describe('SkillLibraryPanel project enablement', () => {
     )
 
     expect(html).toContain('项目已启用')
-    expect(html).toContain('从项目停用')
+    expect(html).toContain('aria-haspopup="menu"')
+    expect(html).not.toContain('>从项目停用</button>')
+    expect(vi.mocked(ActionMenu).mock.calls.at(-1)?.[0].items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'disable', label: '从项目停用', disabled: false, onSelect: expect.any(Function) }),
+    ]))
     expect(html).not.toContain('为项目启用')
   })
 })

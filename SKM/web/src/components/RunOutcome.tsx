@@ -113,6 +113,7 @@ function OutcomeCollection({ title, empty, children, singleHeading = false }: {
 }) {
   const items = Array.isArray(children) ? (children as ReactNode[]) : [children]
   const { visible, hidden } = splitOverflow(items)
+  if (items.length === 0) return <p className="outcomeEmpty compactEmpty">{empty}</p>
   return (
     <section className="outcomeGroup" aria-label={title}>
       {/* 畳んだ後も総数が読めるよう、見出しに件数を残す。 */}

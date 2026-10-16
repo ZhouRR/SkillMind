@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 
 import type { AuthSessionRecord, UserAccountRecord } from '../api'
 import { ApiKeyPanel } from '../components/ApiKeyPanel'
 import { PageHeader } from '../components/PageElements'
 import { UserAccountPanel } from '../components/UserAccountPanel'
 import { UserDirectory } from '../components/UserDirectory'
+import { TabButton } from '../components/TabButton'
 import type { SessionEnded } from '../hooks/useUserRequest'
 import { useMessages } from '../i18n'
 
@@ -26,6 +27,9 @@ function AccountsContent({ session, onSessionEnded, onAccountChanged }: {
 }) {
   const messages = useMessages()
   const [revision, setRevision] = useState(0)
+  const [tab, setTab] = useState<'own' | 'keys' | 'users'>('own')
+  const tabId = useId()
+  const admin = session.user.system_role === 'ADMIN'
   /** 一覧・本人資料の再読取は通知し、編集中の原版や草稿は自動採用しない。 */
   const changed = (account: UserAccountRecord): void => {
     setRevision((value) => value + 1)
@@ -33,19 +37,25 @@ function AccountsContent({ session, onSessionEnded, onAccountChanged }: {
   }
   return <>
     <PageHeader title={messages.routes.accounts.label} />
+    <div className="tabBar" role="tablist" aria-label={messages.routes.accounts.label}>
+      {(['own', ...(admin ? ['keys', 'users'] as const : [])] as const).map((item) =>
+        <TabButton key={item} id={`${tabId}-${item}`} panelId={`${tabId}-${item}-panel`}
+          selected={tab === item} onSelect={() => setTab(item)}>
+          {item === 'own' ? messages.account.myAccount : item === 'keys' ? messages.apiKeys.title : messages.account.manageUsers}
+        </TabButton>)}
+    </div>
     <div className="accountsLayout">
-      <div data-account-own="">
+      {/* 非表示 panel も保持し、tab 往復で草稿・未知要求・編集対象を破棄しない。 */}
+      <div data-account-own="" role="tabpanel" id={`${tabId}-own-panel`} aria-labelledby={`${tabId}-own`} hidden={tab !== 'own'}>
         <UserAccountPanel userId={session.user.user_id} own session={session} revision={revision}
           onSessionEnded={onSessionEnded} onChanged={changed} />
       </div>
-      {session.user.system_role === 'ADMIN' && <details className="detailDisclosure accountDirectorySection">
-        <summary>{messages.apiKeys.title}</summary>
+      {admin && <section className="panel accountDirectorySection" role="tabpanel" id={`${tabId}-keys-panel`} aria-labelledby={`${tabId}-keys`} hidden={tab !== 'keys'}>
         <ApiKeyPanel session={session} onSessionEnded={onSessionEnded} />
-      </details>}
-      {session.user.system_role === 'ADMIN' && <details className="detailDisclosure accountDirectorySection">
-        <summary>{messages.account.manageUsers}</summary>
+      </section>}
+      {admin && <section className="accountDirectorySection" role="tabpanel" id={`${tabId}-users-panel`} aria-labelledby={`${tabId}-users`} hidden={tab !== 'users'}>
         <UserDirectory session={session} revision={revision} onSessionEnded={onSessionEnded} onChanged={changed} />
-      </details>}
+      </section>}
     </div>
   </>
 }

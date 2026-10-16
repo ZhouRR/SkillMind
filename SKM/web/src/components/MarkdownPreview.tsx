@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMessages } from '../i18n'
 import { documentMarkdownPageHtml } from '../lib/documentPreview'
 import { readingMarkdownPage } from '../lib/markdown'
+import { compactPreviewTables } from '../lib/compactPreviewTables'
 import { useMermaidPreviews } from '../hooks/useMermaidPreviews'
 import { useMarkdownPreview } from '../hooks/useMarkdownPreview'
 import { usePreviewTheme } from '../hooks/usePreviewTheme'
@@ -17,6 +18,7 @@ export function MarkdownPreview({ source, title = '', mode = 'document' }: {
   const messages = useMessages()
   const labels = messages.documentsPanel
   const [sourceSelection, setSourceSelection] = useState<string | null>(null)
+  const [compactTables, setCompactTables] = useState(true)
   const showSource = sourceSelection === source
   const preview = useMarkdownPreview(source, !showSource, mode)
   const [selection, setSelection] = useState({ source, index: 0 })
@@ -30,6 +32,8 @@ export function MarkdownPreview({ source, title = '', mode = 'document' }: {
   const select = (index: number): void => { setSelection({ source, index }); preview.select(index) }
   const theme = usePreviewTheme()
   const page = preview.page
+  const compactTokens = useMemo(() => page && mode === 'document' ? compactPreviewTables(page.tokens) : page?.tokens, [page, mode])
+  const canCompact = Boolean(page && compactTokens?.some((token, index) => token !== page.tokens[index]))
   const readingRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const region = readingRef.current
@@ -39,7 +43,7 @@ export function MarkdownPreview({ source, title = '', mode = 'document' }: {
   const diagramLabels = useMemo(() => ({ loading: labels.mermaidLoading, failed: labels.mermaidFailed, title: labels.mermaidTitle }), [labels])
   const html = useMemo(() => showSource || !page || page.sourceOnly ? ''
     : mode === 'reading' ? readingMarkdownPage(page.tokens, page.source, { previews: diagrams, labels: diagramLabels })
-      : documentMarkdownPageHtml(page.tokens, page.source, { previews: diagrams, labels: diagramLabels }), [page, showSource, mode, diagrams, diagramLabels])
+      : documentMarkdownPageHtml(compactTables && compactTokens ? compactTokens : page.tokens, page.source, { previews: diagrams, labels: diagramLabels }), [page, showSource, mode, diagrams, diagramLabels, compactTables, compactTokens])
   const themedHtml = useMemo(() => html.replace('</head>', `<style>${previewThemeCss(theme)}</style></head>`), [html, theme])
   return <>
     {(mode === 'document' || preview.count > 1) && <div className="markdownPreviewToolbar">
@@ -47,8 +51,11 @@ export function MarkdownPreview({ source, title = '', mode = 'document' }: {
         onClick={() => setSourceSelection(showSource ? null : source)}>
         {showSource ? labels.previewButton : labels.viewSource}
       </button>}
+      {!showSource && canCompact && <button type="button" className="secondaryButton compactButton" aria-pressed={compactTables}
+        onClick={() => setCompactTables((current) => !current)}>{compactTables ? labels.restoreTableSpacing : labels.compactTables}</button>}
       {!showSource && <PreviewPagination index={preview.index} count={preview.count} select={select} />}
     </div>}
+    {!showSource && canCompact && compactTables && <p className="hint compactTableHint" role="status">{labels.compactTablesHint}</p>}
     <div className="markdownPreviewPage" ref={readingRef}>
     {showSource ? <SourcePreview source={source} />
       : preview.status === 'loading' ? <p role="status">{labels.loadingPreview}</p>

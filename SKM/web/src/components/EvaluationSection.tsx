@@ -138,6 +138,8 @@ export function EvaluationSection({ scope, result, csrfToken, writable, accessFa
           {/* UTF-16 入力欄は 2 符号単位まで許可し、公開上限は送信前に Unicode 符号位置で検証する。 */}
           <label>{messages.runResult.commentLabel}<textarea aria-label={messages.runResult.commentLabel} maxLength={8000} value={draft.comment}
             onChange={(event) => setDraft({ ...draft, comment: event.target.value })} /></label>
+          <details className="evaluationAdvanced" onInvalidCapture={(event) => { event.currentTarget.open = true }}>
+          <summary>{messages.runResult.addRevision}</summary>
           <p className="hint">{labels.revisionHint}</p>
           {draft.revisions.map((row, index) => {
             const original = evaluationOriginal(result.data, row.pointer)
@@ -156,6 +158,7 @@ export function EvaluationSection({ scope, result, csrfToken, writable, accessFa
           <button className="secondaryButton" type="button" disabled={draft.revisions.length >= 100}
             onClick={() => setDraft((current) => current.revisions.length >= 100 ? current : { ...current,
               revisions: [...current.revisions, { id: nextRow.current++, pointer: '', value: '', reason: '' }] })}>{messages.runResult.addRevision}</button>
+          </details>
           {draftError && <p className="error" role="alert">
             {draftError.row !== undefined && `${labels.revisionNumber(draftError.row + 1)}: `}{labels.draftErrors[draftError.key]}</p>}
           <button className="primaryButton" type="submit">{messages.runResult.addEvaluation}</button>

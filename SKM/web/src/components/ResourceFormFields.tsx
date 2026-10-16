@@ -91,6 +91,8 @@ export function SecretResolverFields({
 export function ResourceList({ items, emptyText, busy, loaded = true }: { loaded?: boolean; busy: boolean; emptyText?: string; items: Array<{
   id: string
   title: string
+  provider?: string
+  providerLabel?: string
   detail: string
   status: string
   updatedAt: string
@@ -105,6 +107,9 @@ export function ResourceList({ items, emptyText, busy, loaded = true }: { loaded
     <ul className="resourceList">
       {items.map((item) => (
         <li className="resourceItem" key={item.id}>
+          {item.provider && <span className="resourceProvider" title={item.providerLabel} aria-label={item.providerLabel}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d={RESOURCE_ICON_PATHS[item.provider] ?? RESOURCE_ICON_PATHS.mcp} /></svg>
+          </span>}
           <div className="resourceInfo">
             <strong>{item.title}</strong>
             <span className="resourceValue">{item.detail}</span>
@@ -126,6 +131,14 @@ export function ResourceList({ items, emptyText, busy, loaded = true }: { loaded
       ))}
     </ul>
   )
+}
+
+/** 接続種別だけを線形 icon で補助し、権限や稼働状態を装飾から推測しない。 */
+const RESOURCE_ICON_PATHS: Record<string, string> = {
+  postgres: 'M4 6c0-4 16-4 16 0s-16 4-16 0v12c0 4 16 4 16 0V6M4 12c0 4 16 4 16 0',
+  git: 'M6 3v12a5 5 0 0 0 5 5h4M6 7h7a5 5 0 0 1 5 5v4M3 3h6M15 16h6M15 20h6',
+  http: 'M3 12h18M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM12 3c-5 5-5 13 0 18 5-5 5-13 0-18Z',
+  mcp: 'M8 3v5M16 3v5M5 8h14v4a7 7 0 0 1-14 0V8ZM12 19v3',
 }
 
 /** Integration scope の部分集合を選ばせる。

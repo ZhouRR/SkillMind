@@ -52,3 +52,22 @@
   .accountsLayout .panel { padding: 14px; }
   .accountFacts > div { grid-template-columns: minmax(80px, .65fr) minmax(0, 1fr); gap: 8px; }
 }
+
+/* tab は表示だけを切替え、草稿・要求の owner を保持する。 */
+.accountsLayout > [hidden] { display: none; }
+.accountsLayout .inlineActions { margin-top: 0; align-items: center; }
+.accountsLayout .inlineActions > .primaryButton { width: auto; }
+.accountCreateDisclosure:not([open]) { display: none; }
+.accountUserList { gap: 0; }
+.accountUserCard { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 12px 0; }
+.accountUserCard:last-child { border-bottom: 0; }
+.accountUserCard .accountUserInfo { display: grid; grid-template-columns: minmax(150px, 1fr) auto; gap: 2px 20px; }
+.accountUserInfo > p { grid-column: 1; }
+.accountUserInfo > .accountUserMeta { grid-column: 2; grid-row: 1 / 3; margin: 0; align-self: center; }
+.accountDanger { margin-top: 12px; padding-top: 8px; }
+.accountFacts { max-width: 700px; gap: 8px; }
+.accountEditor { gap: 16px; }
+@media (max-width: 700px) {
+  .accountUserCard .accountUserInfo { grid-template-columns: minmax(0, 1fr); }
+  .accountUserInfo > .accountUserMeta { grid-column: 1; grid-row: auto; }
+}

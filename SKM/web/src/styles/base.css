@@ -13,8 +13,8 @@
 
 :root {
   /* 暖かな紙面と炭色の本文。色の意味は全画面で共有し、状態色は装飾に使わない。 */
-  --bg: #fff4dd;
-  --bg-sidebar: #f7ecd5;
+  --bg: #f8f5ec;
+  --bg-sidebar: #f0ede4;
   --surface: #fffdf7;
   --surface-raised: #f2f0e8;
   --surface-input: #ffffff;
@@ -25,7 +25,7 @@
   --text: #383027;
   --text-hi: #26201a;
   --text-muted: #5c6357;
-  --text-faint: #656b60;
+  --text-faint: #606458;
 
   /* Amber は主操作と現在地。link/focus は同系統の濃色で読みやすくする。 */
   --accent: #765311;
@@ -59,7 +59,7 @@
   --picker-border: #26201a;
   --picker-shadow: #26201a;
   --shadow-picker: 3px 3px 0 var(--picker-shadow);
-  --shadow-panel: 0 2px 0 rgba(48, 44, 29, .045);
+  --shadow-panel: none;
   --shadow-pop: 0 24px 72px rgba(48, 44, 29, .16), 0 3px 12px rgba(48, 44, 29, .08);
   --ring: 0 0 0 3px rgba(121, 91, 27, .18);
   --radius: 12px;
@@ -96,8 +96,8 @@
   --border-hover: #a79b87;
   --text: #e4dfd3;
   --text-hi: #f5f1e4;
-  --text-muted: #c2b8a6;
-  --text-faint: #b3a995;
+  --text-muted: #cec6b8;
+  --text-faint: #bdb4a4;
   --accent: #e8c879;
   --accent-strong: #f2d995;
   --accent-deep: #fae4a9;
@@ -123,7 +123,7 @@
   --destructive-ink: #ffffff;
   --picker-border: #a79b87;
   --picker-shadow: #0d0c09;
-  --shadow-panel: 0 2px 0 rgba(0, 0, 0, .18);
+  --shadow-panel: none;
   --shadow-pop: 0 24px 72px rgba(0, 0, 0, .4);
   --ring: 0 0 0 3px rgba(232, 200, 121, .2);
   --overlay: rgba(0, 0, 0, .55);
@@ -200,7 +200,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 22px;
+  padding: 20px;
   background: var(--surface);
   box-shadow: var(--shadow-panel);
 }
@@ -220,8 +220,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
   place-items: center;
   align-content: center;
   gap: 10px;
-  min-height: 180px;
-  border: 1px dashed var(--border-strong);
+  min-height: 132px;
+  border: 0;
   border-radius: var(--radius-small);
   color: var(--text-faint);
   background: var(--surface-raised);
@@ -246,7 +246,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
 @keyframes skeletonShimmer { from { background-position: 130% 0; } to { background-position: -30% 0; } }
 
 /* ---- Form ---- */
-label { display: grid; gap: 6px; margin-bottom: 12px; color: var(--text-muted); font-size: 12px; font-weight: 600; }
+label { display: grid; gap: 6px; margin-bottom: 12px; color: var(--text-muted); font-size: 13px; font-weight: 600; }
 /* 来源が自動確定した資源要求。label と同じ縦位置に「使用: 名称」や設定導線を静的に見せる。 */
 .sourceField { display: grid; gap: 4px; margin-bottom: 12px; }
 .sourceFieldLabel { color: var(--text-muted); font-size: 12px; font-weight: 600; }
@@ -384,7 +384,7 @@ select {
 .schemaInputForm { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0 16px; align-items: start; }
 .schemaInputForm > label:has(textarea), .schemaInputForm > .rawResult { grid-column: 1 / -1; }
 .schemaInputForm small { color: var(--text-faint); font-size: 12px; font-weight: 400; line-height: 1.5; }
-.hint { margin: 2px 0 12px; color: var(--text-faint); font-size: 13px; line-height: var(--line-height-body); }
+.hint { margin: 2px 0 12px; color: var(--text-faint); font-size: 14px; line-height: var(--line-height-body); }
 /* label 内の補足は label の太字を継がず、他の補足文と同じ通常字重にする。 */
 label .hint, label small { font-weight: 400; }
 .compactTextarea { min-height: 90px; font-family: inherit; }
@@ -395,13 +395,13 @@ label .hint, label small { font-weight: 400; }
   border: 1px solid transparent;
   border-radius: var(--radius-small);
   padding: 9px 16px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   transition: background .15s ease, border-color .15s ease, color .15s ease, transform .1s ease;
 }
 .primaryButton:active:not(:disabled), .secondaryButton:active:not(:disabled), .destructiveButton:active:not(:disabled) { transform: translateY(1px); }
-.primaryButton { width: 100%; color: var(--primary-ink); border-color: var(--accent-border); background: var(--primary-bg); box-shadow: 0 2px 0 var(--accent-border); }
+.primaryButton { width: 100%; color: var(--primary-ink); border-color: var(--accent-border); background: var(--primary-bg); box-shadow: none; }
 .primaryButton:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--accent-strong); }
 .primaryButton:disabled { cursor: not-allowed; opacity: .55; box-shadow: none; }
 .secondaryButton { border-color: var(--border-strong); color: var(--text); background: var(--surface); }
@@ -527,7 +527,7 @@ a.primaryButton, a.secondaryButton { display: inline-flex; justify-content: cent
 .modalMeta { flex-shrink: 0; color: var(--text-faint); font-size: 12px; white-space: nowrap; }
 .modalHeaderActions { display: flex; flex-shrink: 0; gap: 8px; margin-left: auto; }
 /* 短い dialog に空の scrollbar 分を予約せず、見出しと本文の左端を揃える。 */
-.modalBody { overflow-y: auto; padding: 20px 22px 24px; scrollbar-gutter: auto; }
+.modalBody { min-height: 0; overscroll-behavior: contain; overflow-y: auto; padding: 20px 22px 24px; scrollbar-gutter: auto; }
 .modalFooter {
   display: flex;
   flex-shrink: 0;
@@ -609,3 +609,18 @@ a.primaryButton, a.secondaryButton { display: inline-flex; justify-content: cent
 :root:lang(zh) { --font-body: Inter, "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif; }
 :root:lang(en) { --font-body: Inter, system-ui, sans-serif; }
 .fileUploadButton { justify-content: center; }
+
+/* 固定操作は原 form の submit に結び付け、長文の下へ埋もれさせない。 */
+.modalFooter { flex-wrap: wrap; padding-block: 12px; }
+.modalFooter > .primaryButton { width: auto; min-width: 112px; }
+.launchFooter { display: grid; gap: 10px; width: 100%; min-width: 0; }
+.launchFooter .submissionAcknowledgement { margin: 0; font-size: 13px; }
+.launchFooterActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.launchFooterActions .primaryButton { width: auto; min-width: 128px; }
+.panelHeaderActions { flex-wrap: wrap; }
+.panelHeaderActions > .primaryButton { width: auto; }
+.visuallyHidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+@media (max-width: 600px) {
+  .modalFooter { padding: 12px 16px; }
+  .launchFooterActions > button { flex: 1 1 120px; }
+}

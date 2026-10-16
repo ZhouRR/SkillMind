@@ -424,12 +424,96 @@ async def permission_feedback(browser: Browser, url: str, output: Path) -> None:
                 await context.close()
 
 
-async def check(url: str, output: Path) -> None:
+async def page_dialogs(browser: Browser, url: str, output: Path) -> None:
+    """関連 drawer/form を実操作し、短い画面の固定送信・草稿・focus を確認する。"""
+    for language in ("zh", "ja", "en"):
+        for width in (1440, 390):
+            for theme in ("dark", "light"):
+                api = VisualApi(url, language)
+                context = await browser.new_context(viewport={"width": width, "height": 768 if width == 1440 else 844}, locale=language)
+                await context.route("**/*", api.route)
+                await context.add_init_script(f"localStorage.setItem('skillmind.theme', '{theme}')")
+                page = await context.new_page()
+                errors: list[str] = []
+                page.on("pageerror", lambda error, errors=errors: errors.append(str(error)))
+
+                async def snapshot(name: str, submit: str | None = None) -> None:
+                    """dialog の可視域と元 form の関連を確認し、実保存を行わない。"""
+                    dialog = page.get_by_role("dialog")
+                    await expect(dialog).to_be_visible()
+                    await expect(page.locator(".modalOverlay:not([hidden])")).to_have_count(1)
+                    await layout(page)
+                    box = await dialog.bounding_box()
+                    assert box and box["x"] >= 0 and box["y"] >= 0, box
+                    assert box["y"] + box["height"] <= page.viewport_size["height"] + 1, box
+                    if submit:
+                        button = page.locator(submit)
+                        await expect(button).to_be_visible()
+                        assert await button.evaluate("el => Boolean(el.form) && el.closest('.modalFooter') !== null")
+                        button_box = await button.bounding_box()
+                        assert button_box and button_box["y"] + button_box["height"] <= page.viewport_size["height"], button_box
+                    await page.screenshot(path=str(output / f"dialog-{name}-{language}-{width}-{theme}.png"))
+                    await page.keyboard.press("Escape")
+                    await expect(dialog).not_to_be_visible()
+
+                try:
+                    await page.goto(f"{url}#/projects?project={PROJECT}")
+                    labels = await messages(page, language)
+                    create = page.locator("[data-project-create]")
+                    await create.click()
+                    project_name = page.locator('[data-project-form] input[name="name"]')
+                    await project_name.fill("Retained project draft")
+                    await snapshot("project")
+                    await expect(create).to_be_focused()
+                    await create.click()
+                    await expect(project_name).to_have_value("Retained project draft")
+                    await page.keyboard.press("Escape")
+                    await page.goto(f"{url}#/resources?project={PROJECT}")
+                    await page.get_by_role("button", name=labels["resources"]["connectTitle"], exact=True).click()
+                    await snapshot("resource-connection")
+                    await page.locator(".resourceAdvanced > summary").click()
+                    for tab_name, button_name, tag in (
+                        ("tabSecret", "registerLocator", "credential"),
+                        ("tabBinding", "newBinding", "binding"),
+                    ):
+                        await page.get_by_role("tab", name=labels["resources"][tab_name], exact=True).click()
+                        await page.get_by_role("button", name=labels["resources"][button_name], exact=True).click()
+                        await snapshot(tag)
+                    await page.goto(f"{url}#/tasks?project={PROJECT}")
+                    await page.get_by_role("button", name=labels["tasks"]["addSchedule"], exact=True).click()
+                    await snapshot("schedule", "[data-schedule-submit]")
+                    await page.goto(f"{url}#/workspace?project={PROJECT}")
+                    launch = page.locator(".runLauncher > button")
+                    await launch.click()
+                    draft = page.locator(".runForm .jsonInput")
+                    await draft.fill('{"review":"retained"}')
+                    await snapshot("launch", "[data-run-submit]")
+                    await expect(launch).to_be_focused()
+                    await launch.click()
+                    await expect(draft).to_have_value('{"review":"retained"}')
+                    await page.keyboard.press("Escape")
+                    await page.goto(f"{url}#/history?project={PROJECT}&run={RUN}")
+                    await expect(page.locator(".resultSummary")).to_be_visible()
+                    for index in range(await page.get_by_role("tab").count()):
+                        await page.get_by_role("tab").nth(index).click()
+                        await settle(page)
+                        await layout(page)
+                        await page.screenshot(path=str(output / f"observation-tab-{index}-{language}-{width}-{theme}.png"))
+                    assert not api.unexpected and not api.failures and not api.mutations() and not errors, (api.unexpected, api.failures, errors)
+                    print(f"PASS dialogs-{language}-{width}-{theme}", flush=True)
+                finally:
+                    await context.close()
+
+
+async def check(url: str, output: Path, dialogs_only: bool = False) -> None:
     """全ルートで横溢れ・描画例外・配色・非意図的な API 書込を検出する。"""
     output.mkdir(parents=True, exist_ok=True)
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch()
         try:
+            await page_dialogs(browser, url, output)
+            if dialogs_only:
+                return
             await theme_controls(browser, url, output)
             await empty_project_layout(browser, url, output)
             await skill_identity_layout(browser, url, output)
@@ -581,8 +665,10 @@ async def check(url: str, output: Path) -> None:
                                 path=str(output / f"{name}-{language}-{width}-{theme}.png"),
                             )
                             print(f"PASS {name}-{language}-{width}-{theme}", flush=True)
-                            if width == 1440 and name in {"skills", "projects", "resources"}:
+                            if width == 1440 and name in {"skills", "projects", "resources", "accounts"}:
                                 # 読取 tab だけを実操作する。権限変更・公開・接続は実行しない。
+                                if name == "resources":
+                                    await page.locator(".resourceAdvanced > summary").click()
                                 tabs = page.get_by_role("tab")
                                 for index in range(await tabs.count()):
                                     await tabs.nth(index).click()
@@ -608,6 +694,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", required=True)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--dialogs-only", action="store_true")
     args = parser.parse_args()
     address = urlsplit(args.url)
     if (
@@ -618,7 +705,7 @@ def main() -> None:
         or address.fragment
     ):
         parser.error("Only an owned loopback projects.html mock harness is allowed")
-    asyncio.run(check(args.url, args.output))
+    asyncio.run(check(args.url, args.output, args.dialogs_only))
 
 
 if __name__ == "__main__":

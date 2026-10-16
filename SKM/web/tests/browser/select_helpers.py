@@ -12,6 +12,10 @@ from playwright.async_api import Locator, expect
 @asynccontextmanager
 async def select_options(control: Locator) -> AsyncIterator[Locator]:
     """対象 trigger の popup だけを開き、検査後は Escape で元の画面へ戻す。"""
+    # popup の aria-owns が label の名前計算に影響しても、選択した原 trigger を追跡する。
+    control_id = await control.get_attribute("id")
+    if control_id:
+        control = control.page.locator(f"[id={json.dumps(control_id)}]")
     if await control.evaluate("element => element.tagName === 'SELECT'"):
         yield control.locator("option")
         return

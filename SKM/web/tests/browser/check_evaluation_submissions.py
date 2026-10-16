@@ -509,6 +509,7 @@ async def scenario(
                     await expect_draft_locked(section)
                 assert not api.posts
             elif mode == "unicode":
+                await section.locator(".evaluationAdvanced > summary").click()
                 comment = section.get_by_label(catalog["runResult"]["commentLabel"], exact=True)
                 await comment.fill("😀" * 4000)
                 await expect(comment).to_have_value("😀" * 4000)
@@ -545,6 +546,7 @@ async def scenario(
                 assert api.posts[0]["revisions"][0]["reason"] == "😀" * 1000
                 assert api.posts[0]["revisions"][0]["pointer"] == pointer
             elif mode in ("revisions", "invalid-json", "duplicate-pointer"):
+                await section.locator(".evaluationAdvanced > summary").click()
                 for pointer, value, reason in [
                     ("/nullable", "null", "Keep original null"),
                     ("/a~1b/~0value", '{"a":2}', "Escaped original"),
@@ -793,14 +795,21 @@ async def scenario(
                     await expect_draft_locked(section)
                     assert len(api.posts) == 1
         if mode in ("success", "revisions"):
+            await page.keyboard.press("Escape")
+            await page.locator(".resultCollapse > summary").filter(
+                has_text=catalog["runResult"]["viewRawResult"]
+            ).click()
             raw = page.locator(".rawResultBody")
             await expect(raw).to_have_count(1)
             assert json.loads(await raw.text_content()) == DATA
             before = api.detail_reads
             await page.reload()
-            await open_evaluation(page, catalog)
+            await page.locator(".resultCollapse > summary").filter(
+                has_text=catalog["runResult"]["viewRawResult"]
+            ).click()
             assert api.detail_reads > before
             assert json.loads(await page.locator(".rawResultBody").text_content()) == DATA
+            await open_evaluation(page, catalog)
             await expect(section.locator(".evaluationItem")).to_have_count(1)
             assert len(api.posts) == 1
         await settle(page)

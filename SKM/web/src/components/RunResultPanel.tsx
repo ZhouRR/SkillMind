@@ -152,13 +152,17 @@ function RunResultContent({ reportOnly, state, csrfToken, onProposalDecided, art
         proposals={decidableProposals}
       />
       {result && <RunSummaryReport detail={detail} showValidation={!reportOnly} />}
-      <div className="resultActions" aria-label={messages.workspace.tabResult}>
+      {(result || !reportOnly) && <div className="resultActions" aria-label={messages.workspace.tabResult}>
         {!reportOnly && <RunDuration run={detail} />}
         {result && <button className="secondaryButton compactButton" type="button" onClick={onEvaluate}>{messages.runResult.manualEvaluation}</button>}
         {!reportOnly && <><button className="secondaryButton compactButton" type="button" onClick={() => { setEvidenceSelection(null); setDrawer('evidence') }}>{messages.runResult.evidenceTitle}<span className="eventCount">{detail.evidence.length}</span></button>
         {result && <button className="secondaryButton compactButton" type="button" onClick={() => setDrawer('checks')}>{messages.runResult.reading.checks}</button>}
         <button className="secondaryButton compactButton" type="button" onClick={() => setDrawer('details')}>{messages.runResult.reading.details}</button></>}
-      </div>
+        {result && <button aria-pressed={showTechnicalDetails} className="secondaryButton compactButton" type="button"
+          onClick={() => setShowTechnicalDetails((current) => !current)}>
+          {showTechnicalDetails ? messages.runResult.hideTechnicalDetails : messages.runResult.technicalDetails}
+        </button>}
+      </div>}
       {/* 補助 drawer: 証拠・人手評価は wide、実行情報は compact、検証の範囲は標準幅で表示する。 */}
       <ModalDialog compact drawer open={drawer === 'details'} title={messages.runResult.reading.details} onClose={() => setDrawer(null)}>
         <dl className="runDetailFacts">
@@ -185,22 +189,13 @@ function RunResultContent({ reportOnly, state, csrfToken, onProposalDecided, art
           })}</div>}
       </ModalDialog>
       {result === null ? (
-        <EmptyState text={messages.runResult.noValidatedResult(messages.enums.runStatus[detail.status] ?? detail.status)} />
+        ['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(detail.status)
+          ? <EmptyState text={messages.runResult.noValidatedResult(messages.enums.runStatus[detail.status] ?? detail.status)} /> : null
       ) : <>
       {!reportOnly && <ResultValidationScope result={result} compact />}
 
       <div className="resultReportGrid">
         <section className="resultSection resultReportBody" aria-label={messages.runResult.genericOutcome}>
-          <div className="reportTechnicalControl">
-        <button
-          aria-pressed={showTechnicalDetails}
-          className="secondaryButton compactButton"
-          type="button"
-          onClick={() => setShowTechnicalDetails((current) => !current)}
-        >
-          {showTechnicalDetails ? messages.runResult.hideTechnicalDetails : messages.runResult.technicalDetails}
-        </button>
-          </div>
           <ReportPresentation key={result.result_id} value={result.data}>
           {result.result_kind === 'OUTCOME_ENVELOPE'
             ? <OutcomeEnvelopeResult data={result.data} schema={detail.output_schema} showTechnicalDetails={showTechnicalDetails} onArtifact={(ref) => setArtifactPreview((previous) => ({ ref, nonce: (previous?.nonce ?? 0) + 1 }))} onEvidence={(refs) => { setEvidenceSelection(refs); setDrawer('evidence') }} />

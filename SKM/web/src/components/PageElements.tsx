@@ -330,7 +330,7 @@ export function LoadingSkeleton({ rows = 3, label }: { rows?: number; label?: st
 export function EventTimelineItem({ event }: { event: RunEventRecord }) {
   const messages = useMessages()
   return (
-    <li>
+    <li className={/^(TOOL_|EFFECT_|PROPOSAL_|ENGINE_FAILED|RUN_COMPLETED|RUN_FAILED)/.test(event.event_type) ? 'eventMilestone' : undefined}>
       <details className="eventDetails">
         <summary>
           <span className="sequence">#{event.sequence}</span>

@@ -123,9 +123,14 @@ function SchemaField({ field, fieldKey, required, value, rawValue, onRawChange, 
     )
   }
   if (field.type === 'string') {
+    // 長さを制約しない自由文は改行を保持する。format/pattern 付きの短い識別値は一行で扱う。
+    const multiline = !field.format && !field.pattern
+      && !(typeof field.maxLength === 'number' && field.maxLength <= 160)
     return (
       <label>{label}{required ? ' *' : ''}
-        <input required={required} type="text" value={typeof value === 'string' ? value : ''} onChange={(event) => onChange(event.target.value)} />
+        {multiline
+          ? <textarea className="schemaTextInput" rows={2} required={required} value={typeof value === 'string' ? value : ''} onChange={(event) => onChange(event.target.value)} />
+          : <input required={required} type="text" value={typeof value === 'string' ? value : ''} onChange={(event) => onChange(event.target.value)} />}
         {description && <small>{description}</small>}
       </label>
     )

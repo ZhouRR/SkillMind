@@ -139,7 +139,7 @@ async def check(url: str, output: Path) -> None:
                         await expect(page.locator(".homeRunItem")).to_have_count(5)
                         await expect(page.locator(".pendingItem")).to_have_count(2)
                         await expect(page.locator(".pendingItem").first).to_have_attribute(
-                            "href", f"#/workspace?project={PROJECT}&run={RUN}"
+                            "href", f"#/history?project={PROJECT}&run={RUN}"
                         )
                     else:
                         await expect(
@@ -157,15 +157,19 @@ async def check(url: str, output: Path) -> None:
                                 await technical.locator(":scope > summary").click()
                         if name == "detail":
                             await page.goto(f"{url}#/history?project={PROJECT}&run={RUN}")
-                            await expect(page.locator(".outcomeCard pre")).to_have_text(REPORT)
+                            content = page.locator(".deliverableContent").first
+                            await expect(content).not_to_have_attribute("open", "")
+                            await content.locator(":scope > summary").click()
+                            report_text = content.locator(".readingMarkdown")
+                            await expect(report_text).to_have_text(REPORT, use_inner_text=True)
                             await expect(page.locator(".validationBrief")).to_be_visible()
                             await expect(page.locator(".resultValidationScope")).not_to_be_visible()
                             if width >= 1366:
                                 body = await page.locator(".resultReportBody").bounding_box()
-                                report = await page.locator(".outcomeCard pre").bounding_box()
+                                report = await report_text.bounding_box()
                                 assert body and body["width"] >= 850
                                 assert report and report["y"] < 650
-                                assert await page.locator(".outcomeCard pre").evaluate(
+                                assert await report_text.evaluate(
                                     "el => getComputedStyle(el).fontSize === '15px'"
                                 )
                         await settle(page)
@@ -184,8 +188,8 @@ async def check(url: str, output: Path) -> None:
                             await page.get_by_role(
                                 "button", name=labels["runResult"]["viewExcerpt"], exact=True
                             ).click()
-                            await expect(page.locator(".evidenceCard[open] pre")).to_have_text(
-                                api.body["evidence"][0]["excerpt"]
+                            await expect(page.locator(".evidenceCard[open] .readingMarkdown")).to_have_text(
+                                api.body["evidence"][0]["excerpt"], use_inner_text=True
                             )
                             await page.keyboard.press("Escape")
                             await page.evaluate("window.scrollTo(0, 0)")

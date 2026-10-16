@@ -42,6 +42,16 @@ beforeEach(() => {
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals() })
 describe('Workspace audit page state', () => {
+  it('shows live progress and the original request directly in the running workspace', async () => {
+    const run = { ...interactionRun(), project_id: DEMO_PROJECT.project_id, status: 'RUNNING' as const }
+    vi.mocked(api.loadRun).mockResolvedValue(run)
+    vi.mocked(api.loadRunDetail).mockResolvedValue({ ...interactionDetail(), ...run,
+      interactions: [], input: { message: 'Original first line\nOriginal second line' }, task_title: 'Synthetic task' })
+    await act(async () => root.render(<WorkspacePage {...props} initialRunId={run.run_id} />))
+    expect(container.querySelector('.runLiveProgress')?.textContent).toContain(MESSAGES.zh.workspace.liveProgress)
+    expect(container.querySelector('.conversation .promptInputs')?.textContent).toContain('Original first line\nOriginal second line')
+    expect(container.querySelector('.runLiveActions .compactButton')).not.toBeNull()
+  })
   it('shows catalog loading without a false empty state, and module failure without widening scope', async () => {
     const wait = deferred<Awaited<ReturnType<typeof api.loadProjectTasks>>>()
     vi.mocked(api.loadProjectTasks).mockReturnValueOnce(wait.promise)
@@ -68,7 +78,7 @@ describe('Workspace audit page state', () => {
   it('disables new launches in archived projects including a direct launch link', async () => {
     await act(async () => root.render(<WorkspacePage {...props} projectReadOnly initialTaskId={taskCatalogId(task())} />))
     expect(container.textContent).toContain(MESSAGES.zh.uiAuditWorkspace.readOnlyLaunch)
-    const submit = container.querySelector<HTMLButtonElement>('.runForm button[type="submit"]')!
+    const submit = container.querySelector<HTMLButtonElement>('[data-run-submit]')!
     expect(submit.disabled).toBe(true)
     await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
     expect(submissionStart).not.toHaveBeenCalled()

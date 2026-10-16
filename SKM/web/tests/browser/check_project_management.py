@@ -212,6 +212,8 @@ async def action(page: Page, project_id: str, operation: str) -> None:
 async def form(page: Page, *, creating: bool = False) -> Locator:
     """非敏感草稿を入力し、送信時の原値と別の比較材料にする。"""
     result = page.locator("[data-project-form]")
+    if not await result.is_visible():
+        await page.locator("[data-project-create]").click()
     await expect(result).to_be_visible()
     if creating:
         await result.locator('input[name="key"]').fill("browser-created")
@@ -252,6 +254,7 @@ async def success(page: Page) -> None:
 async def basic_flow(page: Page, api: ManagementApi, _: dict) -> None:
     """作成・編集・アーカイブ・復元・削除を原版で辿り、同tick確認を毎回一通にする。"""
     # HTML pattern は modern browser の v flag でも有効で、誤入力を拒否する。
+    await page.locator("[data-project-create]").click()
     key = page.locator('[data-project-form] input[name="key"]')
     for value, valid in (
         ("UPPERCASE", False), ("bad_key", False), ("-prefix", False), ("fixture-01", True)
@@ -260,7 +263,8 @@ async def basic_flow(page: Page, api: ManagementApi, _: dict) -> None:
         assert await key.evaluate("input => input.checkValidity()") is valid
     await freeze(page, operation="create")
     await page.locator("[data-project-cancel]").click()
-    await expect(page.locator(".projectSidePanel > h2")).to_be_focused()
+    await page.keyboard.press("Escape")
+    await expect(page.locator(".projectListLayout .panelHeader h2")).to_be_focused()
     assert not api.project_mutations()
     await freeze(page, operation="create")
     if api.screenshot:
@@ -271,7 +275,7 @@ async def basic_flow(page: Page, api: ManagementApi, _: dict) -> None:
     await confirm(page)
     await success(page)
     await expect(page.locator(f'[data-project-row="{CREATED}"]')).to_be_visible()
-    await expect(page.locator(".projectSidePanel > h2")).to_be_focused()
+    await expect(page.locator(".projectListLayout .panelHeader h2")).to_be_focused()
     assert api.details[CREATED]["row_version"] == 1
     for operation, expected in (
         ("edit", 1),
@@ -295,7 +299,7 @@ async def basic_flow(page: Page, api: ManagementApi, _: dict) -> None:
             page.locator(
                 ".archivedProjects .panelHeader h2"
                 if operation == "restore"
-                else ".projectSidePanel > h2"
+                else ".projectListLayout .panelHeader h2"
             )
         ).to_be_focused()
         call = api.project_mutations()[-1]
@@ -432,7 +436,7 @@ async def unknown(page: Page, api: ManagementApi, _: dict, operation: str) -> No
         page.locator(
             ".archivedProjects .panelHeader h2"
             if operation in {"restore", "delete"}
-            else ".projectSidePanel > h2"
+            else ".projectListLayout .panelHeader h2"
         )
     ).to_be_focused()
     assert len(api.project_mutations()) == 1
@@ -514,7 +518,7 @@ async def late_project(page: Page, api: ManagementApi, _: dict, returning: bool)
         await menu(page)
         await select_option(page.locator(".sideNavProject .selectTrigger"), identity)
         await selected(page, identity)
-        await expect(page.locator("[data-project-form]")).to_be_visible()
+        await expect(page.locator("[data-project-form]")).to_be_attached()
     await expect(page.locator("[data-project-intent], [data-project-unknown]")).to_have_count(0)
     gate.release.set()
     await asyncio.wait_for(gate.returned.wait(), 10)

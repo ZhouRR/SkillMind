@@ -379,6 +379,8 @@ async def password_form(page: Page, messages: dict) -> Locator:
     """実 label から password を入力し、送信回数と消去を後続 case で検証する。"""
 
     form = page.locator('[data-account-form="password"]')
+    if not await page.locator("[data-account-own]").is_visible():
+        await page.get_by_role("tab", name=messages["myAccount"], exact=True).click()
     disclosure = page.locator('[data-account-action="password"]')
     await expect(disclosure).to_be_attached()
     if await disclosure.get_attribute("open") is None:
@@ -448,13 +450,15 @@ async def choose_target(page: Page, messages: dict) -> Locator:
     """一覧行の実操作から精確 ID の editor を開き、一覧 object の流用を避ける。"""
 
     directory = page.locator("[data-account-directory]")
+    if not await directory.is_visible():
+        await page.get_by_role("tab", name=messages["manageUsers"], exact=True).click()
     await directory.get_by_role(
         "button",
         name=f"{messages['edit']}: person00@example.com",
         exact=True,
     ).click()
     editor = page.locator(f'[data-account-editor="{TARGET}"]')
-    await expect(editor.locator('[data-account-form="edit"] input')).to_be_enabled()
+    await expect(editor.get_by_label(messages["fields"]["name"], exact=True)).to_be_enabled()
     return editor
 
 
@@ -462,6 +466,10 @@ async def create_form(page: Page, messages: dict) -> Locator:
     """初期 password と明示的役割を入力し、Project membership を要求しない。"""
 
     form = page.locator('[data-account-form="create"]')
+    if not await form.is_visible():
+        await page.locator("[data-account-directory] > .panel > .panelHeader").get_by_role(
+            "button", name=messages["create"], exact=True
+        ).click()
     await form.get_by_label(messages["fields"]["email"], exact=True).fill("new-account@example.com")
     await form.get_by_label(messages["fields"]["name"], exact=True).fill("Created browser account")
     await select_option(form.get_by_role("combobox", name=messages["fields"]["role"], exact=True), "USER")
@@ -511,15 +519,11 @@ async def exercise_case(
         ).to_be_visible()
         if app and output is not None:
             await expect(page.locator('[data-account-form="password"] input').first).to_be_enabled()
-            await expect(page.locator(".accountEvents > details")).to_be_attached()
+            await expect(page.locator(".accountEvents .accountEventList")).to_be_attached()
             await settle(page)
             await page.screenshot(path=str(output / f"{name}-entry.png"), full_page=True)
         if role == "ADMIN":
-            disclosure = page.locator(".accountDirectorySection").filter(
-                has=page.locator("[data-account-directory]")
-            )
-            if await disclosure.get_attribute("open") is None:
-                await disclosure.locator(":scope > summary").click()
+            await page.get_by_role("tab", name=messages["manageUsers"], exact=True).click()
         await action(page, api, messages)
         await settle(page)
         await privacy(page)
@@ -569,7 +573,6 @@ async def own_refusal(page: Page, api: AccountsApi, messages: dict) -> None:
     await expect(alert).to_be_focused()
     await expect(page.locator('[data-testid="session-ended-count"]')).to_have_text("0")
     events = page.locator(".accountEvents")
-    await events.locator(":scope > details > summary").click()
     # 日付のない時刻だけでは、別日の安全操作を人が区別できない。
     await expect(events.locator("time").first).to_contain_text("2026")
     await keyboard_scroll(page, events.locator(".accountEventList"))
@@ -599,7 +602,10 @@ async def admin_directory(page: Page, api: AccountsApi, messages: dict) -> None:
     """検索/一覧 page/作成/精確編集/役割状態変更を一つの実 UI 導線で辿る。"""
 
     directory = page.locator("[data-account-directory]")
-    await keyboard_scroll(page, directory.locator(".accountUserList"))
+    await expect(directory.locator(".accountUserList")).to_be_visible()
+    await directory.locator(".accountUserList").focus()
+    await expect(directory.locator(".accountUserList")).to_be_focused()
+    await page.keyboard.press("PageDown")
     await directory.get_by_role("button", name=messages["next"], exact=True).click()
     await expect(directory.get_by_text("person29@example.com", exact=True)).to_be_visible()
     assert any(call[1] == "users" and call[2]["offset"] == ["25"] for call in api.calls)
@@ -646,20 +652,21 @@ async def version_conflict(page: Page, api: AccountsApi, messages: dict) -> None
     directory = page.locator(".accountDirectorySection").filter(
         has=page.locator("[data-account-directory]")
     )
-    await directory.locator(":scope > summary").click()
+    await page.get_by_role("tab", name=messages["myAccount"], exact=True).click()
     await expect(form).not_to_be_visible()
-    await directory.locator(":scope > summary").click()
+    await page.get_by_role("tab", name=messages["manageUsers"], exact=True).click()
     await expect(form.get_by_label(messages["fields"]["name"], exact=True)).to_have_value(
         "Unsaved original draft"
     )
     await double_submit(form)
     await asyncio.wait_for(api.received.wait(), 10)
-    await directory.locator(":scope > summary").click()
+    await page.get_by_role("tab", name=messages["myAccount"], exact=True).click()
     api.release.set()
-    await expect(editor.get_by_role("alert")).to_contain_text(
+    await expect(editor.get_by_role("alert", include_hidden=True)).to_contain_text(
         messages["failures"]["versionConflict"]
     )
-    await expect(directory).to_have_attribute("open", "")
+    await page.get_by_role("tab", name=messages["manageUsers"], exact=True).click()
+    await expect(directory).to_be_visible()
     await expect(editor.get_by_role("alert")).to_be_visible()
     await expect(editor.locator(".accountVersion")).to_contain_text("7")
     await expect(form.get_by_label(messages["fields"]["name"], exact=True)).to_have_value(
@@ -983,6 +990,7 @@ async def app_self_name_preserves_unknown(page: Page, api: AccountsApi, messages
     await expect(page.locator("[data-account-own]").get_by_role("alert")).to_contain_text(
         messages["failures"]["unknown"]
     )
+    await page.get_by_role("tab", name=messages["manageUsers"], exact=True).click()
     await (
         page.locator("[data-account-directory]")
         .get_by_role(
@@ -998,6 +1006,7 @@ async def app_self_name_preserves_unknown(page: Page, api: AccountsApi, messages
     api.drop = False
     await form.get_by_role("button", name=messages["save"], exact=True).click()
     await expect(page.locator(".sidebarUser")).to_contain_text("New visible self name")
+    await page.get_by_role("tab", name=messages["myAccount"], exact=True).click()
     own = page.locator("[data-account-own]")
     await expect(own.get_by_role("alert")).to_contain_text(messages["failures"]["unknown"])
     await expect(own.locator(".accountVersion")).to_contain_text("7")

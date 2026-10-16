@@ -262,7 +262,7 @@ async def open_form(page: Page, url: str) -> None:
 async def start(page: Page) -> None:
     """native form の検証を通して明示的に一回送信する。"""
 
-    await page.locator('.runForm button[type="submit"]').click()
+    await page.locator('[data-run-submit]').click()
 
 
 async def pending(page: Page, phase: str = "unknown") -> None:
@@ -360,7 +360,7 @@ async def exercise(
     await start(page)
     await asyncio.wait_for(api.received.wait(), timeout=10)
     if case in {"double-click", "timeout", "actor-switch", "project-switch"}:
-        await expect(page.locator('.runForm button[type="submit"]')).to_be_disabled()
+        await expect(page.locator('[data-run-submit]')).to_be_disabled()
         await page.locator(".runForm").evaluate(
             """form => {
                 form.dispatchEvent(new Event('submit', {bubbles:true,cancelable:true}));
@@ -414,7 +414,7 @@ async def exercise(
         if case == "reject"
         else "unknown",
     )
-    await expect(page.locator('.runForm button[type="submit"]')).to_be_disabled()
+    await expect(page.locator('[data-run-submit]')).to_be_disabled()
     if case == "reload":
         await page.reload()
         await expect(page.locator(".runLauncher > button")).to_be_enabled()

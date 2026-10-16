@@ -59,3 +59,24 @@
 .documentFolderPath > summary::before { display: inline-block; content: '▸'; margin-right: 6px; }
 .documentFolderPath[open] > summary::before { content: '▾'; }
 .imagePreviewViewport { max-height: 65vh; }
+
+/* Preview の状態通知は読み上げへ残し、同じ頁数を二度並べない。 */
+.previewPageStatus { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.markdownPreviewPagination { flex: 0 1 auto; margin-inline-start: auto; }
+.markdownPreviewPagination .previewPageSelect { flex: 0 1 180px; width: 180px; }
+.previewFrameNavigation { font-size: 12px; line-height: 1.5; padding-block: 4px; }
+.documentManagementToolbar { padding-bottom: 8px; }
+.documentUpload.documentToolbar { margin-bottom: 8px; padding-block: 8px; }
+.documentUpload.documentToolbar label { margin-bottom: 0; }
+.skillStages { gap: 8px 12px; counter-reset: skill-step; list-style: none; }
+.skillStages li { display: flex; gap: 7px; align-items: center; counter-increment: skill-step; }
+.skillStages li::before { content: counter(skill-step); display: grid; place-items: center; width: 24px; height: 24px; flex: 0 0 24px; border-radius: 50%; border: 1px solid var(--border); font-size: 12px; }
+.skillStages [aria-current='step']::before { border-color: var(--accent-border); background: var(--accent-soft); }
+@media (max-width: 600px) {
+  .markdownPreviewPagination { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; margin: 0; }
+  .markdownPreviewPagination .previewPageStatus { position: absolute; }
+  .markdownPreviewPagination .previewPageSelect { grid-column: 2; grid-row: 1; width: 100%; }
+  .markdownPreviewPagination > button { grid-row: 1; }
+  .markdownPreviewPagination > button:first-of-type { grid-column: 1; }
+  .markdownPreviewPagination > button:last-of-type { grid-column: 3; }
+}

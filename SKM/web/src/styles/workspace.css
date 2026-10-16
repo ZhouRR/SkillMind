@@ -74,14 +74,17 @@
   grid-template-columns: 44px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
-  padding: 14px 0;
+  padding: 10px 0;
   cursor: pointer;
   list-style: none;
 }
 .eventDetails summary::-webkit-details-marker { display: none; }
 .eventDetails summary:hover .eventSummary strong { color: var(--accent); }
-.eventSummary strong { display: block; color: var(--text); font-size: 12px; font-weight: 600; transition: color .15s ease; }
-.eventSummary time { display: block; margin-top: 3px; color: var(--text-faint); font-size: 12px; }
+.eventSummary { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; }
+.eventSummary strong { color: var(--text); font-size: 13px; font-weight: 600; transition: color .15s ease; }
+.eventSummary time { color: var(--text-faint); font-size: 12px; font-variant-numeric: tabular-nums; }
+.timeline .eventMilestone::before { background: var(--accent); }
+.eventMilestone .eventSummary strong { color: var(--text-hi); }
 .detailHint { color: var(--text-faint); font-size: 12px; }
 .eventDetails[open] .detailHint { color: var(--accent); }
 .eventDetailBody { display: grid; gap: 12px; padding: 0 0 14px 54px; }
@@ -142,6 +145,21 @@
 
 /* ---- Result と Evidence ---- */
 .resultView { display: grid; gap: 14px; }
+.runArtifactsEmpty { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid var(--border); padding-top: 10px; }
+.runArtifactsEmpty p { margin: 0; }
+.outcomeEnvelope .outcomeEmpty { margin: 0; font-size: 12px; }
+/* 最新 event と実経過時間だけを示し、架空の進捗率は作らない。 */
+.runLiveProgress { padding: 16px 24px; border-bottom: 1px solid var(--border); background: var(--accent-soft); }
+.runLiveHeading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; align-items: baseline; }
+.runLiveHeading strong { color: var(--text-hi); font-size: 14px; }
+.runLiveHeading .runDuration { color: var(--text-muted); font-size: 12px; }
+.runLiveProgress > .hint { margin: 6px 0 10px; }
+.runLiveProgress .runLiveTimeline { max-height: none; overflow: visible; }
+.runLiveProgress .eventDetails summary { padding-block: 8px; }
+.workspaceReading .runPanel > .formRow.runLiveActions { display: flex; flex-wrap: wrap; flex: 0 1 auto; width: auto; gap: 8px; margin: 0 0 0 auto; }
+.runLiveActions > button { width: auto; }
+.workspaceResultMount:empty, .resultView:empty { display: none; }
+.compactTableHint { flex-shrink: 0; }
 .technicalToggleRow { display: flex; justify-content: flex-end; }
 .technicalToggleRow .secondaryButton { color: var(--text-faint); }
 /* 結果には Skill 次第で任意長の識別子・URI・JSON が載る。grid/flex item の既定 min-width:auto は
@@ -724,3 +742,18 @@
 .imagePreview { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: center; gap: 12px; }
 .imagePreview > .loadingSkeleton { align-self: stretch; }
 .previewImage { display: block; max-width: 100%; max-height: 100%; object-fit: contain; flex-shrink: 0; }
+
+/* 履歴・文書は行の境界だけを残し、本文の幅を二重枠で消費しない。 */
+.historyPage .historyList { gap: 0; }
+.historyPage .historyItem { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; }
+.historyPage .historyItem:last-child { border-bottom: 0; }
+.historyPage .historyPrimary strong { font-size: 15px; }
+.historyPage .historySummary { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: 14px; }
+.historyPage .historyMeta { font-size: 12px; }
+.historyPage .historyRowDetails { padding-block: 6px; }
+.documentPanel > .panelHeader { margin-bottom: 12px; padding-bottom: 10px; }
+.documentItem { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 10px 4px; background: transparent; }
+.documentName { font-size: 14px; }
+.docFolder { border-color: var(--border); }
+.documentSourceField { background: transparent; }
+.runLauncher { box-shadow: none; }

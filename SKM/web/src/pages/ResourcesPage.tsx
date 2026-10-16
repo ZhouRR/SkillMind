@@ -434,6 +434,8 @@ export function ResourcesPage({ projectId, csrfToken, deferredFeaturesEnabled = 
                 return {
                   id: item.integration_id,
                   title: item.name,
+                  provider: item.provider,
+                  providerLabel: provider === null ? item.provider : PROVIDER_LABELS[provider],
                   detail: `${provider === null ? item.provider : PROVIDER_LABELS[provider]} · ${accessText} · ${summarizeScope(item.scope, { wildcardLabel: messages.resources.scopeUnrestrictedLabel, keyLabels: messages.resources.scopeKeyLabels })}`,
                   status: item.status,
                   updatedAt: item.updated_at,

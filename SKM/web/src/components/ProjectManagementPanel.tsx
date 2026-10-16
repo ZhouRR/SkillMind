@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, type FormEvent } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
 
 import { loadProjects, type AuthSessionRecord, type ProjectRecord } from '../api'
 import type { ProjectState } from '../appState'
@@ -8,7 +8,7 @@ import { useMessages } from '../i18n'
 import { PROJECT_REQUEST_POLICY } from '../lib/projectFeedback'
 import { validProjectDraft, type ProjectDraft, type ProjectIntent } from '../lib/projectManagement'
 import { routeHref } from '../lib/routing'
-import { EmptyState, LoadingSkeleton } from './PageElements'
+import { EmptyState, LoadingSkeleton, ModalDialog } from './PageElements'
 import { ProjectDraftFacts, ProjectEditTarget, ProjectFacts, ProjectIntentConfirmation, ProjectResponseNotice } from './ProjectManagementElements'
 import { ProjectManagementReview } from './ProjectManagementReview'
 import { ActionMenu } from './ActionMenu'
@@ -49,13 +49,14 @@ function AdminProjectManagement(props: ProjectManagementProps) {
   const messages = useMessages()
   const listLoader = useCallback((signal: AbortSignal) => loadProjects(true, signal), [])
   const list = useResourceQuery('project-management-list', listLoader, props.onSessionEnded, PROJECT_REQUEST_POLICY)
-  const formHeading = useRef<HTMLHeadingElement>(null)
+  const listHeading = useRef<HTMLHeadingElement>(null)
+  const [formOpen, setFormOpen] = useState(false)
   const archivedHeading = useRef<HTMLHeadingElement>(null)
   const visibleTab = useRef(props.tab)
   visibleTab.current = props.tab
   /** 消える確認 button に focus を残さず、現在見えている管理区画へ戻す。 */
   function focusLanding(): void {
-    if (visibleTab.current === 'projects') formHeading.current?.focus()
+    if (visibleTab.current === 'projects') listHeading.current?.focus()
     if (visibleTab.current === 'archived') archivedHeading.current?.focus()
   }
   useLayoutEffect(() => {
@@ -69,6 +70,7 @@ function AdminProjectManagement(props: ProjectManagementProps) {
       else if (action === 'archive') props.onProjectArchived(project)
       else props.onProjectChanged(project)
       if (action === 'create') props.setProjectId(project.project_id)
+      setFormOpen(false)
       focusLanding()
     } })
   const ready = !list.pending && !list.failure && list.data !== null
@@ -77,15 +79,12 @@ function AdminProjectManagement(props: ProjectManagementProps) {
   const projects = ready ? list.data ?? [] : fallback
   const active = projects.filter((project) => project.status === 'ACTIVE')
   const archived = ready ? projects.filter((project) => project.status === 'ARCHIVED') : []
-  useEffect(() => {
-    if (manager.editor.original && !manager.intent) formHeading.current?.focus()
-  }, [manager.editor.original, manager.intent])
 
   /** 他の原要求がある間は対象を差し替えず、編集選択時だけ form tab を開く。 */
   function action(actionName: Exclude<ProjectIntent['action'], 'create'>, project: ProjectRecord): void {
     if (!ready) return
     if (actionName === 'edit') {
-      if (manager.edit(project)) { props.onEditTab(); formHeading.current?.focus() }
+      if (manager.edit(project)) { props.onEditTab(); setFormOpen(true) }
     } else manager.choose(actionName, project)
   }
   /** Form submit 自体は write でなく、原 payload の明示確認を準備する。 */
@@ -108,21 +107,29 @@ function AdminProjectManagement(props: ProjectManagementProps) {
         : <ProjectManagementReview key={manager.phase} intent={manager.intent} unknown={manager.phase === 'unknown'} onSessionEnded={props.onSessionEnded}
           onAdopt={manager.adopt} onAcknowledge={() => { manager.acknowledge(); list.refresh(); focusLanding() }} onCancel={() => { manager.cancel(); focusLanding() }} />}
     </>}
-    <section className="projectManagementLayout tabPanel" id="project-panel-projects" aria-labelledby="project-tab-projects" role="tabpanel" hidden={props.tab !== 'projects'}>
+    <section className="projectManagementLayout projectListLayout tabPanel" id="project-panel-projects" aria-labelledby="project-tab-projects" role="tabpanel" hidden={props.tab !== 'projects'}>
       <section className="panel" aria-busy={list.pending}>
-        <div className="panelHeader"><h2>{messages.projects.accessible}</h2><button className="secondaryButton" type="button" data-project-list-refresh="active" disabled={list.pending} onClick={list.refresh}>{messages.account.refresh}</button></div>
+        <div className="panelHeader"><h2 ref={listHeading} tabIndex={-1}>{messages.projects.accessible}</h2>
+          <div className="panelHeaderActions">
+            <button className="secondaryButton" type="button" data-project-list-refresh="active" disabled={list.pending} onClick={list.refresh}>{messages.account.refresh}</button>
+            <button className="primaryButton" type="button" data-project-create disabled={manager.locked} onClick={() => setFormOpen(true)}>{manager.editor.original ? messages.projects.editTitle : messages.projects.createTitle}</button>
+          </div>
+        </div>
         {list.pending && <LoadingSkeleton label={messages.projects.loadingList} rows={2} />}
         <ProjectResponseNotice failure={list.failure} />
         {ready && !active.length && <EmptyState text={messages.projects.emptyActive} />}
         <ProjectRows projects={active} projectId={props.projectId} locked={!ready || manager.locked} admin onSelect={props.setProjectId} onAction={action} />
       </section>
-      <aside className="panel projectSidePanel">
-        <h2 ref={formHeading} tabIndex={-1}>{manager.editor.original ? messages.projects.editTitle : messages.projects.createTitle}</h2>
+      {/* 確認区画と重ねず、閉鎖・tab 往復でも元の草稿は manager が保持する。 */}
+      <ModalDialog drawer open={formOpen && props.tab === 'projects' && !manager.intent}
+        title={manager.editor.original ? messages.projects.editTitle : messages.projects.createTitle} onClose={() => setFormOpen(false)}>
+      <div className="projectSidePanel">
         {manager.editor.original && <ProjectEditTarget project={manager.editor.original} />}
         {/* 作成・編集 form の直下に画面移動の link を並べない。移動は sidebar が担う。 */}
         <ProjectMetadataForm draft={manager.editor.draft} editing={!!manager.editor.original} locked={manager.locked}
-          onChange={manager.change} onSubmit={submit} onReset={() => { manager.edit(null); focusLanding() }} />
-      </aside>
+          onChange={manager.change} onSubmit={submit} onReset={() => { manager.edit(null); setFormOpen(false); focusLanding() }} />
+      </div>
+      </ModalDialog>
     </section>
     <section className="panel archivedProjects tabPanel" id="project-panel-archived" aria-labelledby="project-tab-archived" role="tabpanel" hidden={props.tab !== 'archived'} aria-busy={list.pending}>
       <div className="panelHeader"><h2 ref={archivedHeading} tabIndex={-1}>{messages.projects.archivedTitle}</h2><button className="secondaryButton" type="button" data-project-list-refresh="archived" disabled={list.pending} onClick={list.refresh}>{messages.account.refresh}</button></div>

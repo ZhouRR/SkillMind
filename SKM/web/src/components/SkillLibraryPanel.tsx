@@ -91,7 +91,9 @@ export function SkillLibraryPanel({
             「名称 + 版 + SKILL.md 原文の説明」で足り、skill_key は追跡用に残す。 */}
         <div className="skillLibraryIdentity">
           <strong>{version.name} <span className="mono">v{version.version}</span></strong>
-          {version.description && (!primary || primary.description !== version.description) && <p className="skillLibraryDescription">{version.description}</p>}
+          {version.description && (!primary || primary.description !== version.description) && <details className="skillDescription">
+            <summary><span className="skillLibraryDescription">{version.description}</span></summary>
+          </details>}
           <DetailDrawer title={messages.elements.technicalDetails}><code>{version.skill_key}</code></DetailDrawer>
           {actionError?.versionId === version.skill_version_id && <p className="error" role="alert">{actionError.message}</p>}
         </div>
@@ -102,11 +104,6 @@ export function SkillLibraryPanel({
           {projectId && disabled && <span className="scopeBadge">{messages.skills.disabledBadge}</span>}
         </div>
         <div className="skillActions">
-          {projectId && active && (
-            <button className="secondaryButton" type="button" disabled={unavailable || !enablementsKnown} onClick={() => onDisable(version)}>
-              {busy ? messages.elements.processing : messages.skills.disableFromProject}
-            </button>
-          )}
           {projectId && enablementsKnown && !active && !disabled && version.status === 'PUBLISHED' && (
             <button className="primaryButton" type="button" disabled={unavailable} onClick={() => onEnable(version)}>
               {busy ? messages.elements.processing : messages.skills.enableForProject}
@@ -118,6 +115,8 @@ export function SkillLibraryPanel({
           {/* 廃止しただけでは行が残り続けるため、監査参照のない版に限り片付け経路を出す。
               参照が残る版は backend が 409 で拒否し、その理由を一覧の error 欄へ出す。 */}
           <ActionMenu label={messages.common.moreActions(`${version.name} v${version.version}`)} disabled={unavailable} items={[
+            ...(projectId && active ? [{ id: 'disable', label: busy ? messages.elements.processing : messages.skills.disableFromProject,
+              disabled: !enablementsKnown, onSelect: () => onDisable(version) }] : []),
             ...(version.status === 'PUBLISHED'
               ? [{ id: 'deprecate', label: messages.skills.deprecateVersion, onSelect: () => onDeprecate(version) }]
               : [{ id: 'delete', label: messages.skills.deleteVersion, onSelect: () => onDelete(version), danger: true }]),
