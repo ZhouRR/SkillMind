@@ -23,6 +23,7 @@ import { RunResultPanel, type RunDetailState } from '../components/RunResultPane
 import { WorkspaceQueue } from '../components/WorkspaceQueue'
 import { RunSubmissionPanel } from '../components/RunSubmissionPanel'
 import { RunDuration } from '../components/RunDuration'
+import { ExecutionDetailHeader } from '../components/ExecutionDetailHeader'
 import { TaskLaunchFields } from '../components/TaskLaunchFields'
 import { useRunSubmission } from '../hooks/useRunSubmission'
 import type { SessionEnded } from '../hooks/useResourceRequest'
@@ -523,21 +524,25 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
     taskTitle: runTaskTitle, capability: promptSummary?.capability ?? null,
     input: frozenDetail.input, sources: normalizeSelectedSources(frozenDetail.selected_sources),
   } : promptSummary && runTaskTitle ? { ...promptSummary, taskTitle: runTaskTitle } : promptSummary
+  const latestAuditEvent = auditEvents.at(-1)
 
   /** 利用者が明示選択した頁を遅延 detail 更新で奪わない。 */
   function selectObservation(tab: ObservationTab): void { manualObservation.current = true; setObservationTab(tab) }
 
   return (
     <>
-      <PageHeader reading={Boolean(run || detailView)}
-        title={detailView ? messages.workspace.executionDetail : activeModule ? messages.workspace.titleWithModule(activeModule.name) : messages.routes.workspace.label}
-        description={detailView || run ? undefined : activeModule?.description || undefined}
+      {detailView ? <ExecutionDetailHeader projectId={projectId} run={run} detail={frozenDetail} title={runTaskTitle}
+        loading={initialRunLoading || selectingInitialRun} cancelling={uiState === 'cancelling'}
+        onRetry={() => setInitialReadRevision((value) => value + 1)} onRefresh={() => void handleRefresh()} onCancel={() => void handleCancel()} />
+      : <PageHeader reading={Boolean(run)}
+        title={activeModule ? messages.workspace.titleWithModule(activeModule.name) : messages.routes.workspace.label}
+        description={run ? undefined : activeModule?.description || undefined}
         /* Module 名は見出しに含まれるため重ねない。範囲表示は Project 全体を扱う時だけ残す。 */
-        aside={!detailView && activeModule ? undefined : <span className="scopeBadge">{messages.workspace.projectWideScope}</span>}
-      />
-      <section className={`workspace${run || detailView ? ' workspaceReading' : ''}`} aria-label={messages.workspace.taskExecutionAria}>
-        {/* 左 rail は「実行の入口」と履歴へのショートカット、右 main は現在 Run の観測に責務を分離する。
-            履歴の検索・ページングは独立画面へ移し、ここでは実行観測を縦に圧迫しない。 */}
+        aside={activeModule ? undefined : <span className="scopeBadge">{messages.workspace.projectWideScope}</span>}
+      />}
+      <section className={`workspace${run || detailView ? ' workspaceReading' : ''}${detailView ? ' executionDetailPage' : run ? ' workspaceActiveRun' : ''}`} aria-label={messages.workspace.taskExecutionAria}>
+        {/* 起動・画面移動は一つの toolbar、現在 Run の識別・操作は本文上部にまとめる。
+            display: contents による grid 自動配置で button と Run 見出しを競合させない。 */}
         {!detailView && <div className="workspaceRail">
           <section className="panel runLauncher">
             {!run && <div className="panelHeader"><h2>{messages.workspace.newRun}</h2></div>}
@@ -571,7 +576,15 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
             {projectReadOnly && <p className="hint">{messages.uiAuditWorkspace.readOnlyLaunch}</p>}
             {submission.pending && <p className="hint" role="status">{messages.workspace.submission.phase[submission.pending.phase]}</p>}
           </section>
-
+          {run && <nav className="workspaceRunNavigation" aria-label={messages.workspace.observationAria}>
+            <a className="secondaryButton compactButton" href={routeHref('history', projectId, { runId: run.run_id })}>
+              {messages.workspace.executionDetail}
+            </a>
+            <button className="secondaryButton compactButton" type="button" onClick={() => {
+              setRun(null); setEvents([]); setDetailState({ status: 'idle' }); appliedInitialRunId.current = null
+              window.location.hash = routeHref('workspace', projectId)
+            }}>{messages.workspace.queueTitle}</button>
+          </nav>}
         </div>}
 
         <div className="workspaceMain">
@@ -579,16 +592,7 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
             projectId={projectId} tasks={visibleTasks} actorId={actorId} csrfToken={csrfToken}
             projectReadOnly={projectReadOnly} onSessionExpired={onSessionExpired} />}
           {(run || detailView) && <>
-          <div className="formRow">
-            <a className="secondaryButton compactButton" href={routeHref('history', projectId, detailView ? undefined : { runId: run?.run_id })}>
-              {detailView ? messages.routes.history.label : messages.workspace.executionDetail}
-            </a>
-            {!detailView && <button className="secondaryButton compactButton" type="button" onClick={() => {
-              setRun(null); setEvents([]); setDetailState({ status: 'idle' }); appliedInitialRunId.current = null
-              window.location.hash = routeHref('workspace', projectId)
-            }}>{messages.workspace.queueTitle}</button>}
-          </div>
-          <section className="panel runPanel" aria-live="polite">
+          {!detailView && <section className="panel runPanel" aria-live="polite">
             <div className="panelHeader"><h2>{runTaskTitle ?? messages.workspace.runStatus}</h2>{run && <StatusBadge status={run.status} />}</div>
             {run && <time className="runTimestamp" dateTime={run.created_at}>{formatLocalTimestamp(run.created_at)}</time>}
             {!run && initialRunId && (initialRunLoading
@@ -605,18 +609,11 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
               />
             )}
             {/* Row version は楽観 lock の実装細部のため表示しない。状態は enum catalog の利用者語で示す。 */}
-            {run && <>{detailView && <dl className="runFacts"><div><dt>{messages.workspace.runIdLabel}</dt><dd className="mono" title={run.run_id}>{shortRunId(run.run_id)}</dd></div></dl>}{!TERMINAL_STATUSES.has(run.status) && <div className="formRow runLiveActions"><button className="secondaryButton compactButton" type="button" onClick={() => void handleRefresh()}>{messages.workspace.refreshDb}</button><button className="secondaryButton compactButton" disabled={uiState === 'cancelling'} type="button" onClick={() => void handleCancel()}>{uiState === 'cancelling' ? messages.workspace.cancelling : messages.workspace.cancelRun}</button></div>}</>}
-          </section>
+            {run && !TERMINAL_STATUSES.has(run.status) && <div className="formRow runLiveActions"><button className="secondaryButton compactButton" type="button" onClick={() => void handleRefresh()}>{messages.workspace.refreshDb}</button><button className="secondaryButton compactButton" disabled={uiState === 'cancelling'} type="button" onClick={() => void handleCancel()}>{uiState === 'cancelling' ? messages.workspace.cancelling : messages.workspace.cancelRun}</button></div>}
+          </section>}
 
-          {/* 会話・結果・監査は同時に一つだけ観測する。runPanel を残し、以下をタブへ束ねて縦の積み上げを解消する。 */}
+          {/* 実行の識別を上部に残し、会話・結果・監査は一度に一つの本文として読む。 */}
           <section className="panel observationPanel">
-            {run && !TERMINAL_STATUSES.has(run.status) && <section className="runLiveProgress" aria-label={messages.workspace.liveProgress}>
-              <div className="runLiveHeading"><strong>{messages.workspace.liveProgress}</strong><RunDuration run={frozenDetail ?? run} /></div>
-              <p className="hint" role="status">{connectionLabel(messages, uiState, run.status)}</p>
-              {auditEvents.length > 0 && <ol className="timeline runLiveTimeline" aria-label={messages.workspace.tabEvents}>
-                {auditEvents.slice(-3).map((item) => <EventTimelineItem key={item.sequence} event={item} />)}
-              </ol>}
-            </section>}
             {detailView && <div className="tabBar" role="tablist" aria-label={messages.workspace.observationAria}>
               <TabButton selected={observationTab === 'conversation'} id={`${observationId}-conversation-tab`} panelId={`${observationId}-conversation-panel`} onSelect={() => selectObservation('conversation')}>{messages.workspace.tabConversation}</TabButton>
               <TabButton selected={observationTab === 'result'} id={`${observationId}-result-tab`} panelId={`${observationId}-result-panel`} onSelect={() => selectObservation('result')}>
@@ -626,9 +623,19 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
                   && <i className="tabAlert" aria-hidden="true" />}
               </TabButton>
               <TabButton selected={observationTab === 'events'} id={`${observationId}-events-tab`} panelId={`${observationId}-events-panel`} onSelect={() => selectObservation('events')}>
-                {messages.workspace.tabEvents}<span className="eventCount">{messages.workspace.loadedEvents(auditEvents.length)}</span>
+                {messages.workspace.tabEvents}<span className="eventCount" aria-label={messages.workspace.loadedEvents(auditEvents.length)}>{auditEvents.length}</span>
               </TabButton>
             </div>}
+            {run && !TERMINAL_STATUSES.has(run.status) && <details className="runLiveProgress" aria-label={messages.workspace.liveProgress}>
+              <summary><span className="runLiveIndicator" aria-hidden="true" /><strong>{messages.workspace.liveProgress}</strong>
+                <span className="runLiveLatest">{latestAuditEvent ? messages.enums.runEvent[latestAuditEvent.event_type] ?? latestAuditEvent.event_type : messages.enums.runStatus[run.status]}</span>
+                <span className="runLiveConnection">{connectionLabel(messages, uiState, run.status)}</span>
+                {!detailView && <RunDuration run={frozenDetail ?? run} />}
+              </summary>
+              {auditEvents.length > 0 && <ol className="timeline runLiveTimeline" aria-label={messages.workspace.tabEvents}>
+                {auditEvents.slice(-3).map((item) => <EventTimelineItem key={item.sequence} event={item} />)}
+              </ol>}
+            </details>}
             <div className="tabPanel">
               {!detailView && run && !TERMINAL_STATUSES.has(run.status)
                 && run.status !== 'WAITING_FOR_INPUT' && run.status !== 'WAITING_FOR_APPROVAL'

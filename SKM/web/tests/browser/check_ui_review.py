@@ -67,9 +67,9 @@ async def check(url: str, output: Path):
                         await expect(page.locator(".skillLibraryIdentity:visible")).to_have_count(1)
                         await expect(page.locator(".skillLibraryIdentity:visible")).to_contain_text("v0.1.3")
                         await page.goto(f"{url}#/history?project={PROJECT}&run={RUN}")
-                        await expect(page.locator(".runPanel h2")).to_have_text("Original archived review")
+                        await expect(page.locator(".executionHeader h1")).to_have_text("Original archived review")
                         await layout(page)
-                        delta = await page.evaluate("""() => Math.abs(document.querySelector('.pageHeader').getBoundingClientRect().right - document.querySelector('.workspaceReading').getBoundingClientRect().right)""")
+                        delta = await page.evaluate("""() => Math.abs(document.querySelector('.executionHeader').getBoundingClientRect().right - document.querySelector('.workspaceReading').getBoundingClientRect().right)""")
                         assert delta < 2, delta
                         await page.screenshot(path=str(output / f"detail-{width}-{theme}.png"), full_page=True)
                         assert not errors and not api.unexpected and not api.failures

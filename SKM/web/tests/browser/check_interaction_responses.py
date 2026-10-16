@@ -669,7 +669,7 @@ async def refresh_preserves(page: Page, api: InteractionApi, _: dict) -> None:
     await phase(page, "unknown")
     await page.locator(".tabBar button").nth(1).click()
     await phase(page, "unknown")
-    await page.locator(".runPanel button").first.click()
+    await page.locator(".executionControls button").first.click()
     await expect(card(page)).to_have_count(1)
     await phase(page, "unknown")
     for gate in api.sse_gates:
@@ -843,7 +843,7 @@ async def sending_refresh(page: Page, api: InteractionApi, _: dict) -> None:
     await submit(page)
     await asyncio.wait_for(gate.received.wait(), 5)
     await phase(page, "sending")
-    await page.locator(".runPanel button").first.click()
+    await page.locator(".executionControls button").first.click()
     await expect(card(page)).to_have_count(1)
     await phase(page, "sending")
     await page.locator(".tabBar button").nth(0).click()
@@ -892,13 +892,13 @@ async def interaction_aba(page: Page, api: InteractionApi, _: dict) -> None:
     await asyncio.wait_for(gate.received.wait(), 5)
     api.details[RUN]["interactions"] = [interaction(OTHER_INTERACTION)]
     api.details[RUN]["row_version"] += 1
-    await page.locator(".runPanel button").first.click()
+    await page.locator(".executionControls button").first.click()
     await expect(card(page, OTHER_INTERACTION)).to_be_visible()
     await phase(page, "unknown")
     await expect(card(page).locator("[data-interaction-confirm-original]")).to_be_disabled()
     api.details[RUN]["interactions"] = [old_question]
     api.details[RUN]["row_version"] += 1
-    await page.locator(".runPanel button").first.click()
+    await page.locator(".executionControls button").first.click()
     await expect(card(page).locator("[data-interaction-confirm-original]")).to_be_enabled()
     api.write_gate = None
     gate.release.set()
@@ -960,12 +960,12 @@ async def stale_receipt(page: Page, api: InteractionApi, labels: dict) -> None:
     api.details[RUN].update(status="SUCCEEDED", row_version=12)
     for current in list(api.sse_gates):
         current.release.set()
-    await expect(page.locator(".runPanel")).to_contain_text(
+    await expect(page.locator(".executionHeader")).to_contain_text(
         labels["enums"]["runStatus"]["SUCCEEDED"]
     )
     gate.release.set()
     await phase(page, "confirmed")
-    await expect(page.locator(".runPanel")).to_contain_text(
+    await expect(page.locator(".executionHeader")).to_contain_text(
         labels["enums"]["runStatus"]["SUCCEEDED"]
     )
     assert len(api.posts) == 1
@@ -1037,7 +1037,7 @@ async def original_version(page: Page, api: InteractionApi, _: dict) -> None:
     await phase(page, "unknown")
     api.details[RUN]["interactions"][0]["version"] = 8
     api.details[RUN]["row_version"] = 8
-    await page.locator(".runPanel button").first.click()
+    await page.locator(".executionControls button").first.click()
     await expect(card(page).locator(".segmentHeading")).to_contain_text("v8")
     await phase(page, "unknown")
     await confirm_original(page)
@@ -1220,7 +1220,7 @@ async def legacy_pending_confirmation(page: Page, api: InteractionApi, labels: d
     original = deepcopy(api.posts[0])
     legacy_duplicate_options(api)
     api.details[RUN]["row_version"] = 9
-    await page.locator(".runPanel button").first.click()
+    await page.locator(".executionControls button").first.click()
     await expect_legacy_options(page, labels)
     await phase(page, "unknown")
     assert len(api.posts) == 1

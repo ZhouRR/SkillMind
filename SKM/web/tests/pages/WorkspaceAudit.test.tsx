@@ -42,6 +42,18 @@ beforeEach(() => {
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals() })
 describe('Workspace audit page state', () => {
+  it('uses the frozen task title as the detail heading and keeps execution metadata together', async () => {
+    const run = { ...interactionRun(), project_id: DEMO_PROJECT.project_id, status: 'SUCCEEDED' as const }
+    vi.mocked(api.loadRun).mockResolvedValue(run)
+    vi.mocked(api.loadRunDetail).mockResolvedValue({ ...interactionDetail(), ...run, task_title: 'Frozen review task' })
+    await act(async () => root.render(<WorkspacePage {...props} detailView initialRunId={run.run_id} />))
+    expect(container.querySelector('h1')?.textContent).toBe('Frozen review task')
+    expect(container.querySelectorAll('h1')).toHaveLength(1)
+    expect(container.querySelector('.executionMetadata dd')?.getAttribute('title')).toBe(run.run_id)
+    expect(container.querySelector('.executionBreadcrumb a')?.getAttribute('href')).toContain('/history?project=')
+    expect(container.querySelector('.executionControls')).toBeNull()
+    expect(container.querySelector('.runPanel')).toBeNull()
+  })
   it('shows live progress and the original request directly in the running workspace', async () => {
     const run = { ...interactionRun(), project_id: DEMO_PROJECT.project_id, status: 'RUNNING' as const }
     vi.mocked(api.loadRun).mockResolvedValue(run)

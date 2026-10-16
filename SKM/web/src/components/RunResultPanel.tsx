@@ -156,9 +156,9 @@ function RunResultContent({ reportOnly, state, csrfToken, onProposalDecided, art
         {!reportOnly && <RunDuration run={detail} />}
         {result && <button className="secondaryButton compactButton" type="button" onClick={onEvaluate}>{messages.runResult.manualEvaluation}</button>}
         {!reportOnly && <><button className="secondaryButton compactButton" type="button" onClick={() => { setEvidenceSelection(null); setDrawer('evidence') }}>{messages.runResult.evidenceTitle}<span className="eventCount">{detail.evidence.length}</span></button>
-        {result && <button className="secondaryButton compactButton" type="button" onClick={() => setDrawer('checks')}>{messages.runResult.reading.checks}</button>}
-        <button className="secondaryButton compactButton" type="button" onClick={() => setDrawer('details')}>{messages.runResult.reading.details}</button></>}
-        {result && <button aria-pressed={showTechnicalDetails} className="secondaryButton compactButton" type="button"
+        {result && <button className="secondaryButton compactButton resultAuxiliaryAction" type="button" onClick={() => setDrawer('checks')}>{messages.runResult.reading.checks}</button>}
+        <button className="secondaryButton compactButton resultAuxiliaryAction" type="button" onClick={() => setDrawer('details')}>{messages.runResult.reading.details}</button></>}
+        {result && <button aria-pressed={showTechnicalDetails} className="secondaryButton compactButton resultAuxiliaryAction" type="button"
           onClick={() => setShowTechnicalDetails((current) => !current)}>
           {showTechnicalDetails ? messages.runResult.hideTechnicalDetails : messages.runResult.technicalDetails}
         </button>}

@@ -68,7 +68,7 @@ python3 tests/browser/check_projects.py \
 | --- | --- |
 | 全体の見た目・部品 | visual_style、ui_review、reading、dropdown（dropdown.html）、short_controls（short-controls.html）、popup_spacing（popup-spacing.html）、action_menu、delete_confirmations |
 | Project・アカウント | projects、project_members、project_management、login、accounts、api_keys |
-| 提出・待機・履歴 | run_submission、run_titles、task_flow、execution_presentation、event_stream_batching、interaction_responses、proposal_decisions、run_history、history_actions、reconciliation、evaluation_submissions |
+| 提出・待機・履歴 | run_submission、run_titles、task_flow、execution_presentation、workspace_execution、event_stream_batching、interaction_responses、proposal_decisions、run_history、history_actions、reconciliation、evaluation_submissions |
 | レポート・証拠 | report_reading、workspace_reports、result_references、artifacts |
 | 文書・directory | document_library、document_sources、document_organization、document_management、document_preview、document_image_preview、document_upload、document_upload_receipts、document_upload_closures、document_update、document_batches、document_folder_input |
 | 接続・Skill・調度 | resource_connections、resource_navigation、resource_editing、resource_request_lifecycle、database_writes、mcp_tools、release_features、interpretation_requests、skill_request_lifecycle、skill_library_delete、task_launch_identity、task_schedules、schedule_times |

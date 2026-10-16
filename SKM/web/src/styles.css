@@ -16,3 +16,5 @@
 @import './styles/execution-audit.css';
 
 @import './styles/short-controls.css';
+/* 実行画面の構成は共通の読書 layout より後で確定し、同じ詳細度の余白指定を覆されない。 */
+@import './styles/execution-detail.css';

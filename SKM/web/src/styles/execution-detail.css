@@ -1,0 +1,95 @@
+/* 実行詳細は「識別 → 観測タブ → 本文」の三層にし、報告の内外へ枠を重ねない。 */
+.executionDetailPage { max-width: 1180px; margin-inline: auto; min-width: 0; }
+.executionHeader { max-width: 1180px; margin: 0 auto 24px; padding-bottom: 24px; border-bottom: 1px solid var(--border); }
+.executionBreadcrumb { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 18px; color: var(--text-faint); font-size: 12px; }
+.executionBreadcrumb a { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); text-decoration: none; }
+.executionBreadcrumb a:hover { color: var(--accent); }
+.executionTitleRow { display: flex; justify-content: space-between; align-items: start; flex-wrap: wrap; gap: 16px; }
+.executionIdentity { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; min-width: 0; flex: 1 1 320px; }
+.executionIdentity h1 { margin: 0; color: var(--text-hi); font-size: 28px; font-weight: 700; line-height: 1.4; letter-spacing: -.02em; overflow-wrap: anywhere; }
+.executionControls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.executionControls > button { width: auto; }
+.executionMetadata { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 22px; margin-top: 12px; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.executionMetadata .runFacts { display: block; margin: 0; }
+.executionMetadata .runFacts > div { display: flex; align-items: baseline; gap: 6px; margin: 0; border: 0; padding: 0; background: none; }
+.executionMetadata .runFacts :is(dt, dd) { margin: 0; color: var(--text-faint); font-size: 12px; font-weight: 400; letter-spacing: 0; text-transform: none; }
+.executionMetadata code { font: 12px var(--font-mono); }
+.workspaceReading.executionDetailPage { display: block; max-width: 1180px; margin-inline: auto; }
+.workspace:is(.executionDetailPage, .workspaceActiveRun) .observationPanel { display: grid; gap: 16px; min-height: 0; border: 0; padding: 0; background: none; box-shadow: none; }
+/* タブ・進捗・本文の間隔を親の gap で保証し、境界線同士と margin の相殺を避ける。 */
+.executionDetailPage .observationPanel > .tabBar { gap: 8px; margin: 0; padding: 0; border-bottom: 1px solid var(--border); }
+.executionDetailPage .observationPanel > .tabBar .tab { background: transparent; border-radius: 0; padding: 12px 16px; }
+.executionDetailPage .tabBar .eventCount { min-width: 24px; font-size: 11px; }
+.workspace:is(.executionDetailPage, .workspaceActiveRun) .observationPanel > .tabPanel { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius); padding: 24px 28px; background: var(--surface); }
+
+/* Workspace から起動した直後も一列で読み、画面移動と現在 Run の操作を別の行へ揃える。 */
+.workspaceReading.workspaceActiveRun { display: block; }
+.workspaceActiveRun .workspaceRail { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin: 0 0 20px; border-bottom: 1px solid var(--border); padding-bottom: 20px; }
+.workspaceActiveRun .runLauncher { flex: 0 1 auto; }
+.workspaceRunNavigation { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
+.workspaceRunNavigation > :is(a, button) { width: auto; }
+.workspaceActiveRun .workspaceMain { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+.workspaceActiveRun .runPanel { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-area: auto; gap: 6px 20px; margin: 0; padding: 0; }
+.workspaceActiveRun .runPanel .panelHeader { min-width: 0; flex-wrap: wrap; justify-content: flex-start; gap: 8px 12px; }
+.workspaceActiveRun .runPanel h2 { overflow-wrap: anywhere; font-size: 20px; }
+.workspaceActiveRun .runPanel .runTimestamp { grid-column: 1; }
+.workspaceActiveRun .runPanel > .formRow.runLiveActions { grid-column: 2; grid-row: 1 / 3; align-self: center; margin: 0; }
+
+/* 最新の観測だけを一行で示し、直近三件と payload は明示展開した時に読む。 */
+.workspace .runLiveProgress { margin: 0; border: 1px solid var(--border); border-radius: var(--radius-small); padding: 0; background: var(--surface-input); }
+.workspace .runLiveProgress > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 12px 16px; color: var(--text-muted); cursor: pointer; list-style: none; font-size: 12px; }
+.workspace .runLiveProgress > summary::-webkit-details-marker { display: none; }
+.workspace .runLiveProgress > summary::after { content: '⌄'; color: var(--text-faint); }
+.workspace .runLiveProgress[open] > summary::after { content: '⌃'; }
+.runLiveIndicator { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--live); }
+.runLiveProgress summary strong { color: var(--text); font-size: 12px; font-weight: 600; }
+.runLiveLatest { flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; }
+.runLiveConnection { color: var(--text-faint); }
+.workspace .runLiveProgress > .timeline { padding: 0 16px 12px; border-top: 1px solid var(--border); }
+
+/* 要約と業務本文は一つの読書面へ置き、補助操作を本文見出しより強調しない。 */
+.executionDetailPage .resultView .reportSummary { border: 0; border-left: 3px solid var(--accent-border); border-radius: 0 8px 8px 0; padding: 16px 20px; background: var(--surface-raised); }
+.executionDetailPage .resultView .reportSummary h3 { margin: 0 0 10px; color: var(--text-muted); font-size: 12px; font-weight: 600; }
+.executionDetailPage .reportSummary > div > .readingMarkdown { color: var(--text-hi); font-size: 16px; line-height: 1.75; }
+.executionDetailPage .resultView .reportSummary dl { gap: 10px 28px; margin-top: 14px; padding-top: 12px; }
+.executionDetailPage .resultActions { align-items: center; gap: 8px; }
+.executionDetailPage .resultActions > .runDuration { display: none; }
+.executionDetailPage .resultAuxiliaryAction { border-color: transparent; background: transparent; color: var(--text-muted); box-shadow: none; }
+.executionDetailPage .resultAuxiliaryAction:hover, .executionDetailPage .resultAuxiliaryAction[aria-pressed='true'] { color: var(--accent); background: var(--accent-soft); }
+.executionDetailPage .validationBrief { border-bottom: 0; padding-bottom: 0; line-height: 1.6; }
+.executionDetailPage .resultReportBody .outcomeEnvelope { gap: 20px; }
+.executionDetailPage .resultReportBody .outcomeStatus { border: 0; padding: 0; background: none; font-size: 12px; }
+.executionDetailPage .resultReportBody .outcomeGroup > h4 { margin: 0; padding-bottom: 8px; font-size: 13px; }
+.executionDetailPage .conversation { gap: 16px; }
+.executionDetailPage .message { border: 0; border-left: 2px solid var(--border-strong); border-radius: 0 8px 8px 0; padding: 18px 20px; background: var(--surface-raised); }
+.executionDetailPage .messageAgent { border-left-color: var(--live-border); background: transparent; }
+.executionDetailPage .messageMeta strong { font-size: 13px; }
+.executionDetailPage .message dl.promptSources { gap: 8px 20px; }
+.executionDetailPage .message .promptSources > div { border-top: 0; padding-top: 0; }
+.executionDetailPage .timeline > li { padding-bottom: 0; }
+
+@media (max-width: 700px) {
+  .executionHeader { margin-bottom: 16px; padding-bottom: 18px; }
+  .executionBreadcrumb { margin-bottom: 12px; }
+  .executionIdentity { flex-basis: 100%; gap: 8px 12px; }
+  .executionIdentity h1 { font-size: 23px; }
+  .executionMetadata { gap: 6px 16px; }
+  .executionDetailPage .observationPanel > .tabBar { gap: 0; }
+  .executionDetailPage .observationPanel > .tabBar .tab { padding: 12px 10px; font-size: 13px; }
+  .workspace:is(.executionDetailPage, .workspaceActiveRun) .observationPanel > .tabPanel { padding: 18px 16px; }
+  .workspaceActiveRun .workspaceRail { gap: 12px; margin-bottom: 16px; padding-bottom: 16px; }
+  .workspaceRunNavigation { flex-basis: 100%; margin-left: 0; }
+  .workspaceActiveRun .runPanel { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .workspaceActiveRun .runPanel > .formRow.runLiveActions { grid-area: auto; justify-content: flex-start; margin-top: 4px; }
+  .executionDetailPage .resultView .reportSummary { padding: 14px 16px; }
+  .executionDetailPage .message { padding: 14px 16px; }
+  .executionDetailPage .resultActions { gap: 6px; }
+  /* 狭幅でも開閉記号だけを次の行へ落とさず、接続・経過時間を二行目へ揃える。 */
+  .workspace .runLiveProgress > summary { display: grid; grid-template-columns: 6px auto minmax(0, 1fr) auto; padding: 10px 12px; gap: 6px 8px; }
+  .runLiveIndicator { grid-column: 1; grid-row: 1; }
+  .runLiveProgress summary strong { grid-column: 2; grid-row: 1; }
+  .runLiveLatest { grid-column: 3; grid-row: 1; }
+  .runLiveConnection { grid-column: 2; grid-row: 2; }
+  .runLiveProgress summary .runDuration { grid-column: 3; grid-row: 2; justify-self: end; }
+  .workspace .runLiveProgress > summary::after { grid-column: 4; grid-row: 1 / 3; }
+}
