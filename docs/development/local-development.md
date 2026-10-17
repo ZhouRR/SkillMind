@@ -70,10 +70,11 @@ python3 tests/browser/check_projects.py \
 | Project・アカウント | projects、project_members、project_management、login、accounts、api_keys |
 | 提出・待機・履歴 | run_submission、run_titles、task_flow、execution_presentation、workspace_execution、event_stream_batching、interaction_responses、proposal_decisions、run_history、history_actions、reconciliation、evaluation_submissions |
 | レポート・証拠 | report_reading、workspace_reports、result_references、artifacts |
-| 文書・directory | document_library、document_sources、document_organization、document_management、document_preview、document_image_preview、document_upload、document_upload_receipts、document_upload_closures、document_update、document_batches、document_folder_input |
+| 文書・directory | document_library、document_sources、document_organization、document_preview、document_image_preview、document_upload、document_upload_receipts、document_upload_closures、document_update、document_batches、document_folder_input |
 | 接続・Skill・調度 | resource_connections、resource_navigation、resource_editing、resource_request_lifecycle、database_writes、mcp_tools、release_features、interpretation_requests、skill_request_lifecycle、skill_library_delete、task_launch_identity、task_schedules、schedule_times |
 
 全 runner は [tests/browser](../../SKM/web/tests/browser/) にあり、主に `projects.html`（提出系は `run-submission.html`）と `--output` を使う。
+共通の架空 API は `account_fixture.py` / `document_fixture.py`、描画待機・翻訳取得・機密入力の非公開検査は `browser_helpers.py` を使い、検証ケースの module から再 export しない。
 
 - **Dropdown / Autocomplete / 寸法**：`check_dropdown.py`（`dropdown.html`）、`check_document_folder_input.py`、`check_popup_spacing.py`（`popup-spacing.html`）、`check_short_controls.py`（`short-controls.html`）は `--browser all`（Chromium/Firefox/WebKit）で三語・双テーマ・PC/狭幅/短画面を検証し、`results.json` に実測矩形を保存する。OS native picker/datalist への fallback や jsdom 単体結果を見た目の証明と扱わない。
 - **削除確認**：`check_delete_confirmations.py` は長い文書/Run と複数成果を全面 mock し、原対象・後果・scroll・取消だけを確認する。

@@ -1,0 +1,26 @@
+{
+  "summary": "レビューを完了し、確認事項を記録しました。",
+  "status": "COMPLETED",
+  "deliverables": [
+    {
+      "key": "report",
+      "kind": "report",
+      "title": "レビュー報告",
+      "artifact": "A2a5350e71c96"
+    }
+  ],
+  "findings": [
+    {
+      "key": "finding",
+      "title": "確認事項",
+      "detail": "前提条件が不足する。",
+      "sources": [
+        "E2b0be39df1c8"
+      ]
+    }
+  ],
+  "open_questions": [],
+  "limitations": [],
+  "confidence": 0.9,
+  "needs_review": true
+}

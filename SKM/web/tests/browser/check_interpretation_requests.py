@@ -9,8 +9,9 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from check_accounts import CSRF
-from check_projects import PROJECT, ProjectsApi, messages, settle
+from account_fixture import CSRF, PROJECT
+from browser_helpers import messages, settle
+from check_projects import ProjectsApi
 from playwright.async_api import Route, async_playwright, expect
 
 SOURCE = "00000000-0000-4000-8000-000000000040"

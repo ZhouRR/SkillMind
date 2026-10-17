@@ -43,6 +43,7 @@ from skillmind.agent.domain import (
     ResumeContext,
     RunContext,
 )
+from skillmind.agent.model_result import model_result_schema
 from skillmind.agent.session_store import SessionTranscriptBackend, TranscriptKey
 from skillmind.agent.tool_gateway import RunToolRuntime
 from skillmind.agent.warm_codex import current_warm_session, warm_codex_scope
@@ -238,7 +239,7 @@ class CodexAgentSdkEngine:
             session_ref: AgentSessionRef | None = None
             stop_task: asyncio.Task[None] | None = None
             try:
-                output = CodexOutputSchema(context.result_schema)
+                output = CodexOutputSchema(model_result_schema(context))
                 if needs_start:
                     with observe_phase("run.performance.sdk_start", run_id=context.run_id,
                                        run_attempt_id=context.run_attempt_id):
@@ -253,7 +254,7 @@ class CodexAgentSdkEngine:
                         "returns paused, stop. The next user turn supplies its outcome. "
                         "Return the final result using the requested JSON Schema. "
                         "Original business schema: "
-                        + json.dumps(dict(context.result_schema), ensure_ascii=False)
+                        + json.dumps(dict(model_result_schema(context)), ensure_ascii=False)
                         + output.instructions
                     ),
                 }

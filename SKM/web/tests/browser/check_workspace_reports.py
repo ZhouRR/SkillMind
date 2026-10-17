@@ -9,10 +9,12 @@ from copy import deepcopy
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+from account_fixture import PROJECT
+from browser_helpers import messages
 from check_artifacts import ARTIFACT, HEADERS, ArtifactApi, metadata
-from check_projects import PROJECT, RUN, TASK, SECOND_VERSION, layout, messages
-from check_run_submission import task_catalog
+from check_projects import RUN, SECOND_VERSION, TASK, layout
 from check_result_references import CONTRACTS
+from check_run_submission import task_catalog
 from playwright.async_api import Route, async_playwright, expect
 from select_helpers import select_option, select_options
 

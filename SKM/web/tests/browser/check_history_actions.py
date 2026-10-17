@@ -7,8 +7,9 @@ import json
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from check_accounts import CSRF
-from check_projects import PROJECT, RUN, layout, messages
+from account_fixture import CSRF, PROJECT
+from browser_helpers import messages
+from check_projects import RUN, layout
 from check_workspace_reports import CONTRACTS, WorkspaceApi
 from playwright.async_api import Route, async_playwright, expect
 

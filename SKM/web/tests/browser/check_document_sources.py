@@ -10,12 +10,14 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID, uuid4
 
+from check_run_submission import PROJECT, ROOT, ApiFixture, confirmed, task_catalog
 from playwright.async_api import Page, Route, async_playwright, expect
-
-from skillmind.documents.snapshot import DocumentSnapshot, parse_document_selection, parse_document_snapshot
-
-from check_run_submission import ApiFixture, PROJECT, ROOT, confirmed, task_catalog
 from select_helpers import select_option
+from skillmind.documents.snapshot import (
+    DocumentSnapshot,
+    parse_document_selection,
+    parse_document_snapshot,
+)
 
 EXAMPLE = json.loads((ROOT.parent / "contracts/examples/run-detail-documents.v1.json").read_text())
 FROZEN = parse_document_snapshot(

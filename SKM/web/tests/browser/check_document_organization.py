@@ -6,9 +6,10 @@ import asyncio
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from check_accounts import CSRF
-from check_document_management import SECOND, DocumentsApi, document, row_menu
-from check_projects import ARCHIVED, NEXT_PROJECT, PROJECT, ProjectsApi, messages
+from account_fixture import CSRF, NEXT_PROJECT, PROJECT
+from browser_helpers import messages
+from check_projects import ARCHIVED, ProjectsApi
+from document_fixture import SECOND, DocumentsApi, document, row_menu
 from playwright.async_api import Route, async_playwright, expect
 
 

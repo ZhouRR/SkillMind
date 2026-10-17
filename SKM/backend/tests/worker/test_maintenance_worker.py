@@ -23,17 +23,11 @@ async def test_maintenance_startup_has_no_model_or_effect_executor(monkeypatch):
     monkeypatch.setattr(worker, "create_database_engine", MagicMock())
     monkeypatch.setattr(worker, "create_session_factory", MagicMock())
     monkeypatch.setattr(worker, "create_file_storage", lambda _: InMemoryFileStorage())
-    for name in (
-        "load_secret_cipher",
-        "build_skill_interpreter",
-        "CodexAgentSdkEngine",
-        "ClaudeAgentSdkEngine",
-        "create_document_write_source",
-        "WorkspaceMaterializer",
-    ):
-        monkeypatch.setattr(worker, name, MagicMock(side_effect=AssertionError(name)))
+    assemble = MagicMock(side_effect=AssertionError("Execution runtime must not start"))
+    monkeypatch.setattr(worker, "configure_execution_runtime", assemble)
     ctx = {}
     await worker.maintenance_startup(ctx)
+    assemble.assert_not_called()
     assert ctx["maintenance_only"] is True
     assert all(
         key in ctx

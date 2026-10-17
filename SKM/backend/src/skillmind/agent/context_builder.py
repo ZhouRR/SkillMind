@@ -120,6 +120,10 @@ class ProductionRunContextBuilder:
         _required_string(task, "output_schema")
         input_schema = _snapshot_schema(task, key="input_schema_json")
         output_schema = _snapshot_schema(task, key="output_schema_json")
+        model_output_schema = (
+            _snapshot_schema(task, key="model_output_schema_json")
+            if "model_output_schema_json" in task else None
+        )
         _validate_json(input_schema, claimed_run.input_json, label="Run input")
         permission = claimed_run.permission_snapshot_json
         _validate_actor(permission, claimed_run.actor_id)
@@ -277,6 +281,7 @@ class ProductionRunContextBuilder:
                 brief.brief,
                 input_json=claimed_run.input_json,
                 output_schema=output_schema,
+                model_output_schema=model_output_schema,
                 effect_receipt_files=receipt_files,
             ),
             task_snapshot=dict(task),

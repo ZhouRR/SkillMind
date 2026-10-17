@@ -8,18 +8,18 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from check_accounts import CSRF, OTHER, PASSWORD, ResponseGate, project, self_revoke
-from check_projects import (
-    ARCHIVED,
+from account_fixture import (
+    CSRF,
     NEXT_PROJECT,
+    OTHER,
+    PASSWORD,
     PROJECT,
-    ProjectsApi,
-    menu,
-    messages,
-    privacy,
-    selected,
-    settle,
+    ResponseGate,
+    project,
 )
+from browser_helpers import menu, messages, privacy, settle
+from check_accounts import self_revoke
+from check_projects import ARCHIVED, ProjectsApi, selected
 from playwright.async_api import Browser, Locator, Page, Route, async_playwright, expect
 from select_helpers import select_option
 

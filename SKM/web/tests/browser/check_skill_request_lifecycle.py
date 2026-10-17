@@ -8,9 +8,9 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from check_accounts import CSRF, ResponseGate
+from account_fixture import CSRF, PROJECT, ResponseGate
+from browser_helpers import messages
 from check_interpretation_requests import ADJUSTMENT, RECEIPT, RESULT, InterpretationApi
-from check_projects import PROJECT, messages
 from check_skill_library_delete import VERSION
 from playwright.async_api import Route, async_playwright, expect
 

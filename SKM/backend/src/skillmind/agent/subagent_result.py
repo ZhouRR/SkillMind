@@ -95,7 +95,8 @@ class SubagentTranscript:
         if not self._saw_success:
             raise SubagentProtocolError("Sub-agent success terminal is missing")
         validated = await validator.validate_context(
-            self._context, structured_output=self._structured_output
+            self._context, structured_output=self._structured_output,
+            session_id=self.sdk_session_id,
         )
         # validated.summary は Run 一覧用の短い preview。親が読む branch 本文まで
         # 280 文字へ切らず、検証済み payload に対して Tool 契約の上限だけを適用する。

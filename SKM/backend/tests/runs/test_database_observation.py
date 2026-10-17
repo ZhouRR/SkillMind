@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from skillmind.db.models import Evidence, ToolCall
 from skillmind.effects.database_write import database_row_revision
 from skillmind.effects.domain import ChangeProposalValidationError
+from skillmind.effects.proposal_evidence import validate_database_observation
 from skillmind.runs.repository import RunRepository
 
 
@@ -109,7 +110,9 @@ def observation():
 
 async def verify(h):
     """公開済み観測を照合する本番 repository method を呼ぶ。"""
-    await h.repository._validate_database_observation(h.draft, binding=h.binding, payload=h.payload)
+    await validate_database_observation(
+        h.repository._session, h.draft, binding=h.binding, payload=h.payload,
+    )
 
 
 async def test_exact_absence_and_full_original_row_are_accepted(observation):

@@ -8,9 +8,18 @@ import json
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from check_accounts import OTHER, PASSWORD, ResponseGate, self_revoke
-from check_document_management import DOCUMENT, SECOND, assert_document_writes, document, open_ancestor_folders, row_menu
-from check_projects import NEXT_PROJECT, PROJECT, ProjectsApi, messages, privacy, settle
+from account_fixture import NEXT_PROJECT, OTHER, PASSWORD, PROJECT, ResponseGate
+from browser_helpers import messages, privacy, settle
+from check_accounts import self_revoke
+from check_projects import ProjectsApi
+from document_fixture import (
+    DOCUMENT,
+    SECOND,
+    assert_document_writes,
+    document,
+    open_ancestor_folders,
+    row_menu,
+)
 from playwright.async_api import Browser, Page, Route, async_playwright, expect
 from select_helpers import count_select_options, select_option
 

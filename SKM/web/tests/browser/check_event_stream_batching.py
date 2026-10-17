@@ -6,9 +6,8 @@ import argparse
 import asyncio
 from urllib.parse import urlsplit
 
+from check_run_submission import PROJECT, TASK, ApiFixture
 from playwright.async_api import Route, async_playwright, expect
-
-from check_run_submission import ApiFixture, PROJECT, TASK
 
 RUN_A = "00000000-0000-4000-8000-000000000081"
 RUN_B = "00000000-0000-4000-8000-000000000082"

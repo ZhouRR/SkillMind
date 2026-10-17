@@ -7,8 +7,10 @@ import asyncio
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from account_fixture import PROJECT
+from browser_helpers import messages, settle
 from check_artifacts import ARTIFACT
-from check_projects import PROJECT, layout, messages, settle
+from check_projects import layout
 from check_workspace_reports import WorkspaceApi
 from playwright.async_api import async_playwright, expect
 

@@ -6,9 +6,9 @@ import asyncio
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from check_accounts import NEXT_PROJECT, ResponseGate
+from account_fixture import NEXT_PROJECT, PROJECT, ResponseGate
+from browser_helpers import messages
 from check_document_upload import UploadBrowserAudit
-from check_projects import PROJECT, messages
 from check_resource_connections import ConnectionsApi
 from check_resource_editing import EditingApi
 from playwright.async_api import Route, async_playwright, expect

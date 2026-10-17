@@ -7,7 +7,8 @@ import asyncio
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from check_projects import PROJECT, RUN
+from account_fixture import PROJECT
+from check_projects import RUN
 from check_result_references import ResultApi
 from playwright.async_api import Browser, Route, async_playwright, expect
 

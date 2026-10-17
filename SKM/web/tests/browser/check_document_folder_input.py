@@ -7,10 +7,11 @@ import json
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from account_fixture import PROJECT
+from browser_helpers import messages
 from check_document_organization import OrganizationApi
-from check_projects import PROJECT, messages
-from popup_geometry import check_popup_geometry
 from playwright.async_api import Route, async_playwright, expect
+from popup_geometry import check_popup_geometry
 
 
 class FolderInputApi(OrganizationApi):

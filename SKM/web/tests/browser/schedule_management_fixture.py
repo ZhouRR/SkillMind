@@ -6,13 +6,7 @@ import asyncio
 from copy import deepcopy
 from urllib.parse import parse_qs, urlsplit
 
-from check_accounts import (
-    ACTOR,
-    CSRF,
-    PROJECT,
-    ResponseGate,
-    session,
-)
+from account_fixture import ACTOR, CSRF, PROJECT, ResponseGate, session
 from check_projects import ProjectsApi
 from check_run_submission import VERSION, task_catalog
 from check_schedule_times import occurrences

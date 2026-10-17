@@ -13,6 +13,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from skillmind.agent.domain import RunContext
+from skillmind.agent.model_result import (
+    ResultAssemblyError,
+    ResultAssemblyLookup,
+    assemble_model_result,
+    model_result_schema,
+)
 from skillmind.agent.outcome import OUTCOME_ENVELOPE_SCHEMA
 from skillmind.agent.result_references import EffectSummaryLookup, collect_result_references
 from skillmind.artifacts.domain import ArtifactIntegrityError
@@ -202,6 +208,7 @@ class ResultValidator:
         *,
         effect_lookup: EffectSummaryLookup | None = None,
         artifact_lookup: ArtifactLookup | None = None,
+        assembly_lookup: ResultAssemblyLookup | None = None,
     ) -> None:
         """参照/効果の読取 port と通用 interpreter を保持し、未装配は成功へ降格しない。"""
 
@@ -209,14 +216,38 @@ class ResultValidator:
         self._proposal_lookup = proposal_lookup
         self._effect_lookup = effect_lookup
         self._artifact_lookup = artifact_lookup
+        self._assembly_lookup = assembly_lookup
         self._generic = GenericResultInterpreter()
 
     @timed_async("run.performance.result_validation")
     async def validate_context(
-        self, context: RunContext, *, structured_output: Any
+        self, context: RunContext, *, structured_output: Any, session_id: UUID | None = None,
     ) -> ValidatedResult:
         """凍結 context の出力契約を主/子で同じ規則により解決して検証する。"""
 
+        if "model_output_schema_json" in context.task_snapshot:
+            structured_output = deepcopy(structured_output)
+            self._validate_schema(
+                schema=model_result_schema(context), value=structured_output,
+                code="result_schema_invalid", label="model output",
+            )
+            if self._assembly_lookup is None:
+                raise ResultValidationError(
+                    "result_assembly_unavailable", "Saved result audit records are unavailable",
+                )
+            snapshot = await self._assembly_lookup.load(context, session_id)
+            try:
+                structured_output = assemble_model_result(structured_output, snapshot)
+            except ResultAssemblyError as error:
+                raise ResultValidationError(error.code, str(error)) from None
+            # 業務 Schema に明示された source_ref 等も既存の単一収集規則で帰属を検査する。
+            # 参照の合計はモデルに再記入させず、実際の宣言位置から決定的に作る。
+            references = collect_result_references(structured_output, outcome=True)
+            structured_output.update(
+                evidence_refs=sorted(references.evidence),
+                artifact_refs=sorted(references.artifacts),
+                change_proposal_refs=sorted(references.proposals),
+            )
         schema_ref = context.task_snapshot.get("output_schema_checksum")
         if not isinstance(schema_ref, str):
             schema_ref = context.task_snapshot.get("output_schema")

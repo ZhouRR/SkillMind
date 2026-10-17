@@ -9,7 +9,9 @@ from copy import deepcopy
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from check_projects import PROJECT, RUN, ProjectsApi, messages, privacy, settle
+from account_fixture import PROJECT
+from browser_helpers import messages, privacy, settle
+from check_projects import RUN, ProjectsApi
 from playwright.async_api import Browser, Page, Route, async_playwright, expect
 
 CONTRACTS = Path(__file__).resolve().parents[3] / "contracts"

@@ -11,9 +11,17 @@ from copy import deepcopy
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from check_accounts import ACTOR, CSRF, OTHER, ResponseGate
+from account_fixture import ACTOR, CSRF, OTHER, ResponseGate
 from check_run_submission import OTHER_PROJECT, PROJECT, TASK, task_catalog
-from playwright.async_api import Browser, Error, Locator, Page, Route, async_playwright, expect
+from playwright.async_api import (
+    Browser,
+    Error,
+    Locator,
+    Page,
+    Route,
+    async_playwright,
+    expect,
+)
 
 RUN = "00000000-0000-4000-8000-000000000010"
 OTHER_RUN = "00000000-0000-4000-8000-000000000011"

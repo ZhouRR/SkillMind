@@ -7,8 +7,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
-from check_accounts import ACTOR, CSRF, session
-from check_projects import PROJECT, messages
+from account_fixture import ACTOR, CSRF, PROJECT, session
+from browser_helpers import messages
 from check_resource_connections import ConnectionsApi
 from playwright.async_api import Route, async_playwright, expect
 

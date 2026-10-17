@@ -1,90 +1,28 @@
 import { Select } from './Select'
 import { DocumentFolderInput } from './DocumentFolderInput'
-import { HtmlPreview } from './HtmlPreview'
-import { SourcePreview } from './SourcePreview'
 import { ApiProblemError, purgeProjectDocument } from '../api'
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 
 import {
   loadProjectDocuments,
   loadDocumentFolders,
   manageDocuments,
-  loadProjectDocumentText,
-  loadProjectDocumentImage,
-  projectDocumentContentHref,
   type ProjectDocumentRecord,
 } from '../api'
 import { DocumentOrganizeDialog, type DocumentEdit } from './DocumentOrganizeDialog'
-import { ActionMenu, type ActionMenuItem } from './ActionMenu'
 import { useMessages } from '../i18n'
 import { useDocumentDeletion } from '../hooks/useDocumentDeletion'
 import { useDocumentUpload } from '../hooks/useDocumentUpload'
 import { useDocumentUploadClosure } from '../hooks/useDocumentUploadClosure'
 import { useResourceQuery, type SessionEnded } from '../hooks/useResourceRequest'
 import { DOCUMENT_REQUEST_POLICY, documentFailure, type DocumentFailure } from '../lib/documentFeedback'
-import { DOCUMENT_PREVIEW_MAX_BYTES as PREVIEW_MAX_BYTES } from '../lib/documentPreview'
-import { MarkdownDocumentPreview } from './MarkdownDocumentPreview'
-import { documentTypeLabel, formatByteSize, formatLocalTimestamp } from '../lib/presentation'
-import { ImageDocumentPreview } from './ImageDocumentPreview'
-import { formatJsonPreview } from '../lib/jsonPreview'
-import { EmptyState, LoadingSkeleton, ModalDialog, useConfirmDialog } from './PageElements'
+import { DOCUMENT_PREVIEW_MAX_BYTES as PREVIEW_MAX_BYTES, type DocumentPreviewKind } from '../lib/documentPreview'
+import { buildDocumentTree } from '../lib/documentTree'
+import { DocumentTree, type DocumentTreeSelection } from './DocumentTree'
+import { DocumentPreviewLoader, type DocumentPreviewRequest } from './DocumentPreviewDialog'
+import { EmptyState, LoadingSkeleton, useConfirmDialog } from './PageElements'
 import { DocumentUploadStatus, DocumentUploadRecovery } from './DocumentUploadStatus'
 import { DocumentUploadClosure, DocumentUploadClosureRecovery } from './DocumentUploadClosure'
-
-/** 画面内 preview の描画種別。拡張子登録で excel 等の viewer を後付けする拡張点。 */
-export type DocumentPreviewKind = 'text' | 'html' | 'markdown' | 'image'
-
-/** 拡張子 → preview 種別の登録表。未登録拡張子は preview 対象外(download のみ)。 */
-const DOCUMENT_PREVIEWERS: Record<string, DocumentPreviewKind> = {
-  png: 'image',
-  jpg: 'image',
-  jpeg: 'image',
-  gif: 'image',
-  txt: 'text',
-  json: 'text',
-  jsonl: 'text',
-  csv: 'text',
-  tsv: 'text',
-  log: 'text',
-  yaml: 'text',
-  yml: 'text',
-  xml: 'text',
-  md: 'markdown',
-  markdown: 'markdown',
-  html: 'html',
-  htm: 'html',
-}
-
-/** 画面内 preview を許可する最大 byte 数。超過は download へ誘導する。 */
-export { PREVIEW_MAX_BYTES }
-
-/** 文書名から preview 種別を引く。対象外は null。 */
-export function documentPreviewKind(name: string): DocumentPreviewKind | null {
-  const extension = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
-  return DOCUMENT_PREVIEWERS[extension] ?? null
-}
-
-/** 文書 preview dialog の非同期状態。 */
-export type DocumentPreviewState =
-  | { status: 'loading'; document: ProjectDocumentRecord }
-  | { status: 'ready'; document: ProjectDocumentRecord; kind: Exclude<DocumentPreviewKind, 'image'>; content: string }
-  | { status: 'ready'; document: ProjectDocumentRecord; kind: 'image'; content: Blob }
-  | { status: 'error'; document: ProjectDocumentRecord; message: string }
-
-/** 同じ ID の再読取も別 request として所有し、閉じる瞬間に旧応答を無効化する。 */
-interface PreviewRequest {
-  id: number
-  document: ProjectDocumentRecord
-  kind: DocumentPreviewKind
-}
-
-/** folder path を実際の階層として表示するための文書 tree node。root は name/path とも空文字。 */
-export interface DocumentTreeNode {
-  name: string
-  path: string
-  folders: DocumentTreeNode[]
-  files: ProjectDocumentRecord[]
-}
 
 /** 原 actor/会話/Project ごとに未知意図と非同期処理の owner を分離する。 */
 interface DocumentManagerProps {
@@ -103,10 +41,10 @@ export function DocumentManagerPanel(props: DocumentManagerProps) {
 /** 現在の文書目录と原削除意図を分けて所有する。 */
 function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessionEnded }: DocumentManagerProps) {
   const messages = useMessages()
-  const [preview, setPreview] = useState<PreviewRequest | null>(null)
+  const [preview, setPreview] = useState<DocumentPreviewRequest | null>(null)
   const [revision, setRevision] = useState(0)
   const { confirm, confirmDialog } = useConfirmDialog()
-  const previewRequest = useRef<PreviewRequest | null>(null)
+  const previewRequest = useRef<DocumentPreviewRequest | null>(null)
   const previewSequence = useRef(0)
   const mounted = useRef(false)
   const confirmPending = useRef(false)
@@ -434,307 +372,4 @@ function DocumentManagerBody({ projectId, csrfToken, actorId, readOnly, onSessio
       {confirmDialog}
     </section>
   )
-}
-
-/** 読取の期限・取消・遅延応答を通常 query と共有し、現在 request の拒否だけを伝える。 */
-function DocumentPreviewLoader({ request, projectId, isCurrent, observeFailure, onClose }: {
-  request: PreviewRequest
-  projectId: string
-  isCurrent: () => boolean
-  observeFailure: (error: unknown) => void
-  onClose: () => void
-}) {
-  const messages = useMessages()
-  const current = useRef(isCurrent)
-  current.current = isCurrent
-  const loader = useCallback(async (signal: AbortSignal) => {
-    signal.throwIfAborted()
-    if (!current.current()) throw new DOMException('Preview request is no longer current', 'AbortError')
-    const content = request.kind === 'image'
-      ? { kind: request.kind, content: await loadProjectDocumentImage(projectId, request.document.document_id, signal) }
-      : { kind: request.kind, content: await loadProjectDocumentText(projectId, request.document.document_id, signal) }
-    signal.throwIfAborted()
-    if (!current.current()) throw new DOMException('Preview request is no longer current', 'AbortError')
-    return content
-  }, [projectId, request])
-  // observeFailure が書込門禁と会話失効を一度に通知するため、query から二重通知しない。
-  const query = useResourceQuery(String(request.id), loader, () => undefined, DOCUMENT_REQUEST_POLICY, true,
-    (error) => { if (current.current()) observeFailure(error) })
-  const preview: DocumentPreviewState = query.failure
-    ? { status: 'error', document: request.document, message: messages.documentsPanel.failures[query.failure.key] }
-    : query.pending || query.data === null ? { status: 'loading', document: request.document }
-      : { status: 'ready', document: request.document, ...query.data }
-  return <DocumentPreviewDialog preview={preview} projectId={projectId} onClose={onClose} />
-}
-
-/** 文書 tree の選択と upload 先を親 owner へ返す操作。 */
-interface DocumentTreeSelection {
-  selectedIds: ReadonlySet<string>
-  disabled: boolean
-  toggle: (id: string, checked: boolean) => void
-  onFolder: (path: string) => void
-  edit?: (document: ProjectDocumentRecord) => void
-  replace?: (document: ProjectDocumentRecord) => void
-  folderEdit?: (path: string) => void
-  folderDelete?: (path: string) => void
-  folderRecycle?: (path: string) => void
-  folderSelect?: (path: string, checked: boolean) => void
-  purge?: (document: ProjectDocumentRecord) => void
-  trashed?: boolean
-}
-
-/** 文書一覧を folder path の実階層で表示する presentational tree。folder 先行・file 後続で安定表示する。 */
-export function DocumentTree({ root, projectId, busyId, onDelete, onPreview, selection, expandFolders = false }: {
-  root: DocumentTreeNode
-  expandFolders?: boolean
-  projectId: string
-  busyId: string | null
-  selection?: DocumentTreeSelection
-  onDelete: (document: ProjectDocumentRecord) => void
-  onPreview: (document: ProjectDocumentRecord, kind: DocumentPreviewKind) => void
-}) {
-  return (
-    <div className="documentTree">
-      {root.folders.map((folder) => (
-        <FolderNode
-          key={folder.path}
-          folder={folder}
-          expandFolders={expandFolders}
-          projectId={projectId}
-          busyId={busyId}
-          selection={selection}
-          onDelete={onDelete}
-          onPreview={onPreview}
-        />
-      ))}
-      {root.files.length > 0 && (
-        <ul className="documentList">
-          {root.files.map((document) => (
-            <FileRow
-              key={document.document_id}
-              document={document}
-              projectId={projectId}
-              busyId={busyId}
-              selection={selection}
-              onDelete={onDelete}
-              onPreview={onPreview}
-            />
-          ))}
-        </ul>
-      )}
-    </div>
-  )
-}
-
-/** 一つの folder を開閉可能な節として描画し、子 folder → file の順で内容を並べる。 */
-function FolderNode({ folder, projectId, busyId, onDelete, onPreview, selection, expandFolders }: {
-  folder: DocumentTreeNode
-  expandFolders: boolean
-  projectId: string
-  busyId: string | null
-  selection?: DocumentTreeSelection
-  onDelete: (document: ProjectDocumentRecord) => void
-  onPreview: (document: ProjectDocumentRecord, kind: DocumentPreviewKind) => void
-}) {
-  const messages = useMessages()
-  const total = countDocuments(folder)
-  const selected = selection ? countSelectedDocuments(folder, selection.selectedIds) : 0
-  const actions: ActionMenuItem[] = []
-  if (selection && !selection.trashed) actions.push({ id: 'upload', label: messages.documentsPanel.uploadHere,
-    disabled: selection.disabled, onSelect: () => selection.onFolder(folder.path) })
-  if (selection?.folderEdit) actions.push({ id: 'organize', label: `${messages.fileManagement.rename} / ${messages.fileManagement.move}`,
-    disabled: selection.disabled, onSelect: () => selection.folderEdit?.(folder.path) })
-  if (total > 0 && selection?.folderRecycle) actions.push({ id: 'recycle',
-    label: selection.trashed ? messages.fileManagement.restore : messages.fileManagement.trashAction,
-    disabled: selection.disabled, danger: !selection.trashed, separatorBefore: true,
-    onSelect: () => selection.folderRecycle?.(folder.path) })
-  if (total === 0 && selection?.folderDelete) actions.push({ id: 'delete', label: messages.fileManagement.emptyFolder,
-    disabled: selection.disabled, danger: true, separatorBefore: true, onSelect: () => selection.folderDelete?.(folder.path) })
-  return (
-    <details className="docFolder" open={expandFolders}>
-      <summary>
-        {selection?.folderSelect && <input type="checkbox" checked={total > 0 && selected === total}
-          disabled={selection.disabled || total === 0}
-          aria-label={`${messages.fileManagement.selectFolder}: ${folder.name}`}
-          ref={(element) => { if (element) element.indeterminate = selected > 0 && selected < total }}
-          onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}
-          onChange={(event) => selection.folderSelect?.(folder.path, event.target.checked)} />}
-        <svg className="docFolderIcon" viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M1.8 4.2a1 1 0 0 1 1-1h3.4l1.6 1.8h5.4a1 1 0 0 1 1 1v6.2a1 1 0 0 1-1 1H2.8a1 1 0 0 1-1-1Z" />
-        </svg>
-        <strong title={folder.path}>{folder.name}</strong>
-        {/* 数字だけだと何の数か分からないため、配下の文書数として単位を付ける。 */}
-        <span className="docFolderCount">{messages.workspace.documentSelection.memberCount(total)}</span>
-        <ActionMenu id={`document-folder-actions-${projectId}-${encodeURIComponent(folder.path)}`}
-          label={messages.common.moreActions(folder.name)} ownerKey={folder.path} items={actions} />
-      </summary>
-      <div className="docFolderBody">
-        <details className="documentFolderPath detailDisclosure"><summary>{messages.assetsAudit.fullPath}</summary><code>{folder.path}</code></details>
-        {folder.folders.map((child) => (
-          <FolderNode
-            key={child.path}
-            folder={child}
-            expandFolders={expandFolders}
-            projectId={projectId}
-            busyId={busyId}
-            selection={selection}
-            onDelete={onDelete}
-            onPreview={onPreview}
-          />
-        ))}
-        {folder.files.length > 0 && (
-          <ul className="documentList">
-            {folder.files.map((document) => (
-              <FileRow
-                key={document.document_id}
-                document={document}
-                projectId={projectId}
-                busyId={busyId}
-                selection={selection}
-                onDelete={onDelete}
-                onPreview={onPreview}
-              />
-            ))}
-          </ul>
-        )}
-      </div>
-    </details>
-  )
-}
-
-/** 検索で絞った tree 内だけを数え、非表示の文書を一括操作へ混入させない。 */
-function countSelectedDocuments(folder: DocumentTreeNode, selectedIds: ReadonlySet<string>): number {
-  return folder.files.filter((document) => selectedIds.has(document.document_id)).length
-    + folder.folders.reduce((sum, child) => sum + countSelectedDocuments(child, selectedIds), 0)
-}
-
-/** 一つの文書 row。preview は登録拡張子かつ上限内のときだけ有効化する。 */
-function FileRow({ document, projectId, busyId, onDelete, onPreview, selection }: {
-  document: ProjectDocumentRecord
-  projectId: string
-  busyId: string | null
-  selection?: DocumentTreeSelection
-  onDelete: (document: ProjectDocumentRecord) => void
-  onPreview: (document: ProjectDocumentRecord, kind: DocumentPreviewKind) => void
-}) {
-  const messages = useMessages()
-  const kind = documentPreviewKind(document.name)
-  const oversized = document.size > PREVIEW_MAX_BYTES
-  const downloadHref = projectDocumentContentHref(projectId, document.document_id)
-  const typeLabel = documentTypeLabel(document.name)
-  const actions: ActionMenuItem[] = [{ id: 'download', label: messages.documentsPanel.download, href: downloadHref, download: document.name }]
-  if (selection?.replace) actions.push({ id: 'update', label: messages.documentsPanel.updateFile,
-    disabled: selection.disabled, onSelect: () => selection.replace?.(document) })
-  if (selection?.edit) actions.push({ id: 'organize', label: `${messages.fileManagement.rename} / ${messages.fileManagement.move}`,
-    disabled: selection.disabled, onSelect: () => selection.edit?.(document) })
-  actions.push({ id: 'recycle', label: busyId === document.document_id ? messages.documentsPanel.deleting
-    : selection?.trashed ? messages.fileManagement.restore : messages.fileManagement.trashAction,
-    disabled: busyId !== null || selection?.disabled, danger: !selection?.trashed, separatorBefore: true,
-    onSelect: () => onDelete(document) })
-  if (selection?.purge) actions.push({ id: 'purge', label: messages.fileManagement.purge,
-    disabled: selection.disabled, danger: true, onSelect: () => selection.purge?.(document) })
-  return (
-    <li className="documentItem">
-      {selection && <input type="checkbox" checked={selection.selectedIds.has(document.document_id)} disabled={selection.disabled}
-        aria-label={messages.documentsPanel.selectFile(document.name)}
-        onChange={(event) => selection.toggle(document.document_id, event.target.checked)} />}
-      <div className="documentInfo">
-        {kind !== null && !oversized ? <button className="documentName" type="button" title={document.name}
-          aria-label={`${messages.documentsPanel.previewButton}: ${document.name}`}
-          onClick={() => onPreview(document, kind)}>{document.name}</button>
-          : <a className="documentName" href={downloadHref} download={document.name}
-            aria-label={`${messages.documentsPanel.download}: ${document.name}`}
-            title={oversized ? messages.documentsPanel.oversizedTitle : document.name}>{document.name}</a>}
-        <span title={document.mime}>
-          {formatByteSize(document.size)}{typeLabel ? ` · ${typeLabel}` : ''}
-          {' · '}{formatLocalTimestamp(document.created_at)}
-          <span className="documentPreviewAvailability">{kind !== null && !oversized ? messages.assetsAudit.previewAvailable : oversized ? messages.assetsAudit.downloadOversized : messages.assetsAudit.downloadUnsupported}</span>
-        </span>
-      </div>
-      <div className="documentActions">
-        <ActionMenu id={`document-actions-${projectId}-${document.document_id}`}
-          label={messages.common.moreActions(document.name)} ownerKey={document.document_id} items={actions} />
-      </div>
-    </li>
-  )
-}
-
-/** 文書 preview を広い共通 modal に描画する。埋め込み CSS/静的 SVG は CSP 付き sandbox に保持する。
- *
- *  親が preview 有無で条件描画するため、ここでの open は常に true。
- *  遮罩・Escape・背面 scroll 停止・焦点復帰は ModalDialog 側の共通実装に委ねる。 */
-export function DocumentPreviewDialog({ preview, projectId, onClose }: {
-  preview: DocumentPreviewState
-  projectId: string
-  onClose: () => void
-}) {
-  const messages = useMessages()
-  const { document } = preview
-  const text = useMemo(() => preview.status === 'ready' && preview.kind !== 'image'
-    ? formatJsonPreview(preview.content, document.name) : '', [preview, document.name])
-  return (
-    <ModalDialog
-      open
-      viewport
-      title={document.name}
-      meta={`${formatByteSize(document.size)} · ${document.mime}`}
-      actions={(
-        <a
-          className="secondaryButton compactButton"
-          download={document.name}
-          href={projectDocumentContentHref(projectId, document.document_id)}
-        >
-          {messages.documentsPanel.download}
-        </a>
-      )}
-      onClose={onClose}
-    >
-      {preview.status === 'loading' && <LoadingSkeleton label={messages.documentsPanel.loadingPreview} rows={3} />}
-      {preview.status === 'error' && <p className="error" role="alert">{preview.message}</p>}
-      {preview.status === 'ready' && preview.kind === 'image' && (
-        <ImageDocumentPreview blob={preview.content} title={document.name} />
-      )}
-      {preview.status === 'ready' && preview.kind === 'markdown' && (
-        <MarkdownDocumentPreview source={preview.content} title={document.name} />
-      )}
-      {preview.status === 'ready' && preview.kind === 'text' && (
-        <SourcePreview source={text} />
-      )}
-      {preview.status === 'ready' && preview.kind === 'html' && (
-        <HtmlPreview source={preview.content} title={document.name} />
-      )}
-    </ModalDialog>
-  )
-}
-
-/** 文書一覧から folder path の実階層 tree を構築する。folder・file とも名称昇順で安定させる。 */
-export function buildDocumentTree(documents: ProjectDocumentRecord[], emptyFolders: string[] = [], sort = 'name'): DocumentTreeNode {
-  const root: DocumentTreeNode = { name: '', path: '', folders: [], files: [] }
-  const nodes = new Map<string, DocumentTreeNode>([['', root]])
-  const ensureFolder = (path: string): DocumentTreeNode => {
-    const existing = nodes.get(path)
-    if (existing) return existing
-    const segments = path.split('/')
-    const parent = ensureFolder(segments.slice(0, -1).join('/'))
-    const node: DocumentTreeNode = { name: segments.at(-1) ?? '', path, folders: [], files: [] }
-    parent.folders.push(node)
-    nodes.set(path, node)
-    return node
-  }
-  for (const path of emptyFolders) ensureFolder(path)
-  for (const document of documents) {
-    ensureFolder(document.folder).files.push(document)
-  }
-  const sortNode = (node: DocumentTreeNode): void => {
-    node.folders.sort((left, right) => left.name.localeCompare(right.name))
-    node.files.sort((left, right) => (sort === 'size' ? right.size - left.size : sort === 'date' ? Date.parse(right.created_at) - Date.parse(left.created_at) : 0) || left.name.localeCompare(right.name))
-    node.folders.forEach(sortNode)
-  }
-  sortNode(root)
-  return root
-}
-
-/** Folder 配下(子孫含む)の文書件数を数える。 */
-export function countDocuments(node: DocumentTreeNode): number {
-  return node.files.length + node.folders.reduce((sum, child) => sum + countDocuments(child), 0)
 }

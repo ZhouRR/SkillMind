@@ -30,6 +30,7 @@ from skillmind.runs.domain import LeaseValidationError
 from skillmind.runs.repository_inputs import PostgresInputSnapshotStore
 from skillmind.storage import InMemoryFileStorage
 from skillmind.storage.factory import create_document_upload_limits, create_file_storage
+from skillmind.worker import runtime_wiring as wiring
 from skillmind.worker import settings as worker
 from skillmind.worker.executor import AgentRunExecutor
 from skillmind.worker.tool_authority import bind_tool_authority, require_tool_authority
@@ -82,10 +83,10 @@ async def test_startup_injects_required_receipt_and_preparation_limits(
     monkeypatch.setattr(worker, "create_session_factory", lambda _: sessions)
     storage = create_file_storage(settings) if library_configured else InMemoryFileStorage()
     monkeypatch.setattr(worker, "create_file_storage", lambda _: storage)
-    writer_factory = MagicMock(wraps=worker.create_document_write_source)
-    monkeypatch.setattr(worker, "create_document_write_source", writer_factory)
+    writer_factory = MagicMock(wraps=wiring.create_document_write_source)
+    monkeypatch.setattr(wiring, "create_document_write_source", writer_factory)
     monkeypatch.setattr(
-        worker,
+        wiring,
         "build_skill_interpreter",
         MagicMock(
             return_value=(
@@ -103,14 +104,14 @@ async def test_startup_injects_required_receipt_and_preparation_limits(
     engine_class = CodexAgentSdkEngine if agent_sdk == "codex" else ClaudeAgentSdkEngine
     engine = MagicMock(wraps=engine_class)
     audit_writer = MagicMock(wraps=PostgresToolAuditWriter)
-    registry = MagicMock(wraps=worker.create_run_tool_registry)
-    monkeypatch.setattr(worker, "create_run_tool_registry", registry)
-    monkeypatch.setattr(worker, "WorkspaceMaterializer", materializer)
-    monkeypatch.setattr(worker, "AgentRunExecutor", executor)
-    monkeypatch.setattr(worker, "ResultValidator", validator)
-    monkeypatch.setattr(worker, "SubagentDispatchProvider", subagent)
-    monkeypatch.setattr(worker, engine_class.__name__, engine)
-    monkeypatch.setattr(worker, "PostgresToolAuditWriter", audit_writer)
+    registry = MagicMock(wraps=wiring.create_run_tool_registry)
+    monkeypatch.setattr(wiring, "create_run_tool_registry", registry)
+    monkeypatch.setattr(wiring, "WorkspaceMaterializer", materializer)
+    monkeypatch.setattr(wiring, "AgentRunExecutor", executor)
+    monkeypatch.setattr(wiring, "ResultValidator", validator)
+    monkeypatch.setattr(wiring, "SubagentDispatchProvider", subagent)
+    monkeypatch.setattr(wiring, engine_class.__name__, engine)
+    monkeypatch.setattr(wiring, "PostgresToolAuditWriter", audit_writer)
     context = {"redis": MagicMock()}
 
     await worker.startup(context)

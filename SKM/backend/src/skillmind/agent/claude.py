@@ -25,6 +25,7 @@ from skillmind.agent.claude_build import (
     bundled_claude_build,
 )
 from skillmind.agent.domain import RunContext
+from skillmind.agent.model_result import model_result_schema
 from skillmind.agent.tool_policy import (
     DENIED_BUILTIN_TOOLS,
     ToolExecutionPolicy,
@@ -160,7 +161,7 @@ def build_claude_agent_options(
         allowed_capabilities=frozenset(raw_capabilities),
     )
 
-    output_schema = deepcopy(dict(context.result_schema))
+    output_schema = deepcopy(dict(model_result_schema(context)))
     Draft202012Validator.check_schema(output_schema)
     # 結果 Schema の参照は同梱内容だけで解決し、hook から外部 Schema を取得しない。
     output_validator = Draft202012Validator(

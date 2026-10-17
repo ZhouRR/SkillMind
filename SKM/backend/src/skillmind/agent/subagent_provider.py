@@ -19,6 +19,7 @@ from uuid import UUID
 
 from skillmind.agent.domain import AgentEvent, RunContext
 from skillmind.agent.evidence import EvidenceDraft
+from skillmind.agent.model_result import MODEL_RESULT_INSTRUCTIONS
 from skillmind.agent.result_validation import ResultValidator
 from skillmind.agent.subagent import (
     MAX_SUBAGENT_BRANCHES,
@@ -299,7 +300,10 @@ def _derive_child_context(
     allowed = frozenset(capabilities)
     return replace(
         parent,
-        prompt=_branch_prompt(branch),
+        prompt=_branch_prompt(branch) + (
+            "\n\n" + MODEL_RESULT_INSTRUCTIONS
+            if "model_output_schema_json" in parent.task_snapshot else ""
+        ),
         permission_snapshot={
             **parent.permission_snapshot,
             "allowed_capabilities": sorted(allowed),

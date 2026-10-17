@@ -8,8 +8,9 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from check_accounts import CSRF, OTHER, PASSWORD, ResponseGate, self_revoke
-from check_document_management import PRIVATE
+from account_fixture import CSRF, NEXT_PROJECT, OTHER, PASSWORD, PROJECT, ResponseGate
+from browser_helpers import menu, messages, privacy, settle
+from check_accounts import self_revoke
 from check_document_upload import UploadBrowserAudit
 from check_document_upload_receipts import (
     KEY,
@@ -22,7 +23,8 @@ from check_document_upload_receipts import (
     recover_key,
     summary,
 )
-from check_projects import ARCHIVED, NEXT_PROJECT, PROJECT, menu, messages, privacy, settle
+from check_projects import ARCHIVED
+from document_fixture import PRIVATE
 from playwright.async_api import Browser, Page, Route, async_playwright, expect
 from select_helpers import select_option
 

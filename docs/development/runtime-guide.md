@@ -60,6 +60,7 @@
 ## 結果と評価
 
 - 技術的終端状態・結果の完全性・業務 PASS/FAIL は分けて表現する。[ResultValidator](../../SKM/backend/src/skillmind/agent/result_validation.py) が凍結 Schema・参照帰属・添付バイト・保存済み Effect 事実を検証する。
+- 新規 Run は[モデル結果契約](../../SKM/contracts/outcomes/model/v1.schema.json)を task snapshot に固定する。モデルは業務内容とツールの `result_references` にある短参照だけを返し、[組立処理](../../SKM/backend/src/skillmind/agent/model_result.py)が原 Evidence/Artifact ID、提案一覧、保存済み操作状態と回執から従来の OutcomeEnvelope を構成する。発見事項の根拠はモデルが選択し、全証拠を一括で根拠にしない。短参照は原 ID から安定生成し、欠落・衝突・別種を拒否する。主実行と続行で同じ参照を使い、子は自身の Session の観測だけを解決する。組立後も全提案の未完了、帰属、原回執と Artifact 実体の検証を省略せず、保存形式・業務ファイル・外部操作は変更しない。
 - Result/Evidence/Artifact は不変とし、人手修正は [Evaluation](../../SKM/backend/src/skillmind/evaluations/service.py) を追記して原結果を上書きしない。
 - `audit.export/v1`（[audit_export](../../SKM/backend/src/skillmind/agent/audit_export.py)）は保存済み事実のみを出力し、`artifact.append/v1` は原バイト検証後に短文を追記して新 Artifact 参照を公開する（元の監査参照は不変）。表示規則は [UI ガイド](../design/workspace.md#レポートとプレビュー)を参照。
 

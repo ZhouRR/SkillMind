@@ -10,9 +10,10 @@ from tempfile import TemporaryDirectory
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from check_document_management import row_menu
+from account_fixture import PROJECT
+from browser_helpers import messages
 from check_document_upload import UploadBrowserAudit, UploadMockApi, upload_request
-from check_projects import PROJECT, messages
+from document_fixture import row_menu
 from playwright.async_api import async_playwright, expect
 
 

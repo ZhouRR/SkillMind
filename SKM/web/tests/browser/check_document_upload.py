@@ -11,9 +11,9 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from check_accounts import CSRF
-from check_document_management import DocumentsApi, document
-from check_projects import PROJECT, messages, privacy, settle
+from account_fixture import CSRF, PROJECT
+from browser_helpers import messages, privacy, settle
+from document_fixture import DocumentsApi, document
 from playwright.async_api import (
     Browser,
     ConsoleMessage,

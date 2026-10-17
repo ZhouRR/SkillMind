@@ -8,17 +8,17 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from check_accounts import OTHER, PASSWORD, ResponseGate, self_revoke
-from check_document_management import PRIVATE, assert_document_writes, delete_first, document, row_menu
+from account_fixture import NEXT_PROJECT, OTHER, PASSWORD, PROJECT, ResponseGate
+from browser_helpers import menu, messages, privacy, settle
+from check_accounts import self_revoke
 from check_document_upload import UploadBrowserAudit, UploadMockApi, upload_request
-from check_projects import (
-    ARCHIVED,
-    NEXT_PROJECT,
-    PROJECT,
-    menu,
-    messages,
-    privacy,
-    settle,
+from check_projects import ARCHIVED
+from document_fixture import (
+    PRIVATE,
+    assert_document_writes,
+    confirm_first_document_action,
+    document,
+    row_menu,
 )
 from playwright.async_api import Browser, Page, Route, async_playwright, expect
 from select_helpers import select_option
@@ -537,7 +537,7 @@ async def scenario(
                     await expect(panel.locator('input[type="file"]').first).to_be_enabled()
             assert not api.uploads
         elif mode == "delete-first":
-            await delete_first(page, labels)
+            await confirm_first_document_action(page, labels)
             await expect(panel.get_by_text(labels["unknownTitle"], exact=True)).to_be_visible()
             await inject_selection(page, "must-not-send.md")
             await expect(state.locator(".documentUploadItems > li")).to_have_count(0)

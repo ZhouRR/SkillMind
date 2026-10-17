@@ -10,10 +10,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from check_document_management import DOCUMENT, document, open_ancestor_folders
-from check_projects import PROJECT, RUN, SECOND_VERSION, layout, messages
+from account_fixture import PROJECT
+from browser_helpers import messages
+from check_projects import RUN, SECOND_VERSION, layout
 from check_run_submission import task_catalog
 from check_visual_style import VisualApi
+from document_fixture import DOCUMENT, document, open_ancestor_folders
 from playwright.async_api import Route, async_playwright, expect
 
 MESSAGE = 'Synthetic UI review message. ' * 14 + '\nSecond line remains visible.'

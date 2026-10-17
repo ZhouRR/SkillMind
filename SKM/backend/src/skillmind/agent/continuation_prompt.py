@@ -8,6 +8,7 @@ from typing import Any
 
 from skillmind.agent.domain import RunContext
 from skillmind.agent.effect_receipt_delivery import model_checkpoint
+from skillmind.agent.model_result import project_result_references
 from skillmind.agent.task_brief import render_task_brief_prompt
 from skillmind.agent.tool_routing import resource_identity
 from skillmind.core.hashing import canonical_json, sha256_hex
@@ -34,6 +35,7 @@ def continuation_prompt(
         static,
         input_json=context.input_json,
         output_schema=context.result_schema,
+        model_output_schema=context.task_snapshot.get("model_output_schema_json"),
     )
     static_checksum = sha256_hex(
         canonical_json(
@@ -57,6 +59,8 @@ def continuation_prompt(
         )
     )
     checkpoint = model_checkpoint(brief, context.effect_receipt_files)
+    if "model_output_schema_json" in context.task_snapshot:
+        checkpoint = project_result_references(checkpoint)
     hashes = {
         key: [_hash(item) for item in value] if isinstance(value, list) else _hash(value)
         for key, value in checkpoint.items()

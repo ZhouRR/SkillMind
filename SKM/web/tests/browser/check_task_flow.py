@@ -9,8 +9,17 @@ from copy import deepcopy
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from check_accounts import OTHER, PASSWORD, ResponseGate, layout, privacy, project, settle
-from check_projects import ARCHIVED, NEXT_PROJECT, PROJECT, ProjectsApi, menu, messages, selected
+from account_fixture import (
+    NEXT_PROJECT,
+    OTHER,
+    PASSWORD,
+    PROJECT,
+    ResponseGate,
+    project,
+)
+from browser_helpers import menu, messages, privacy, settle
+from check_accounts import layout
+from check_projects import ARCHIVED, ProjectsApi, selected
 from check_run_submission import task_catalog
 from playwright.async_api import Browser, Page, Route, async_playwright, expect
 from select_helpers import select_option

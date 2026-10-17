@@ -6,6 +6,7 @@ from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
+
 from skillmind.core.settings import Settings
 from skillmind.effects.release import configured_execution_features
 from skillmind.storage import InMemoryFileStorage
@@ -66,7 +67,7 @@ def test_unknown_or_different_library_refuses_writer_before_network(monkeypatch,
 def test_production_feature_conversion_keeps_three_write_limits_independent(
     monkeypatch, deferred, database, document
 ):
-    """明示環境変数から CREATE だけを配備し、他 switch は権限の代用にしない。"""
+    """文書の作成・更新・回収を同じ上限で制御し、他 switch は権限の代用にしない。"""
     monkeypatch.setenv("SKILLMIND_DOCUMENT_WRITES_ENABLED", str(document).lower())
     features = configured_execution_features(
         settings(
@@ -77,7 +78,9 @@ def test_production_feature_conversion_keeps_three_write_limits_independent(
     assert features.deferred is deferred and features.database_writes is database
     assert features.document_writes is document
     assert features.effect_enabled("document.write/v1", "CREATE") is document
-    assert not features.effect_enabled("document.write/v1", "UPDATE")
+    assert features.effect_enabled("document.write/v1", "UPDATE") is document
+    assert features.effect_enabled("document.write/v1", "TRASH") is document
+    assert features.effect_enabled("document.write/v1", "RESTORE") is document
     assert not features.effect_enabled("document.write/v1", "DELETE")
     assert features.effect_enabled("database.write/v1", "INSERT") is database
     assert features.capability_enabled("subagent.dispatch/v1") is deferred

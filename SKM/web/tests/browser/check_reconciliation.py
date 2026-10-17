@@ -8,7 +8,9 @@ import json
 from copy import deepcopy
 from urllib.parse import urlsplit
 
-from check_projects import PROJECT, RUN, ResponseGate, privacy, settle
+from account_fixture import PROJECT, ResponseGate
+from browser_helpers import privacy, settle
+from check_projects import RUN
 from check_result_references import ResultApi
 from playwright.async_api import async_playwright, expect
 

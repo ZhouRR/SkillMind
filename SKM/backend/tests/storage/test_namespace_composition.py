@@ -22,6 +22,7 @@ from skillmind.skills.service_wiring import build_skill_service
 from skillmind.storage import FileStorage
 from skillmind.storage.factory import create_file_storage
 from skillmind.storage.namespace import make_s3_namespace
+from skillmind.worker import runtime_wiring as wiring
 from skillmind.worker import settings as worker
 
 _NAMESPACE = UUID("11111111-2222-4333-8444-555555555555")
@@ -92,6 +93,7 @@ async def test_api_and_worker_inject_same_factory_namespace_into_real_consumers(
         monkeypatch.setattr(module, "create_database_engine", lambda _: engine)
         monkeypatch.setattr(module, "create_session_factory", lambda _: sessions)
         monkeypatch.setattr(module, "create_file_storage", storage_factory)
+    for module in (main, wiring):
         monkeypatch.setattr(
             module, "build_skill_interpreter",
             Mock(return_value=(None, None, None, "synthetic-model")),
@@ -102,8 +104,8 @@ async def test_api_and_worker_inject_same_factory_namespace_into_real_consumers(
     worker_skill = Mock(wraps=build_skill_service)
     monkeypatch.setattr(main, "DocumentService", api_document)
     monkeypatch.setattr(main, "build_skill_service", api_skill)
-    monkeypatch.setattr(worker, "DatabaseProjectDocumentSource", worker_document)
-    monkeypatch.setattr(worker, "build_skill_service", worker_skill)
+    monkeypatch.setattr(wiring, "DatabaseProjectDocumentSource", worker_document)
+    monkeypatch.setattr(wiring, "build_skill_service", worker_skill)
     app = FastAPI()
     context: dict[str, Any] = {"redis": redis}
     async with main.lifespan(app):

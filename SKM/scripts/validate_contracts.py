@@ -179,6 +179,7 @@ EXAMPLE_CONTRACTS = {
         "tools/subagent.dispatch/v1/response.schema.json"
     ),
     "examples/outcome-envelope.v1.json": "outcomes/envelope/v1.schema.json",
+    "examples/model-outcome.v1.json": "outcomes/model/v1.schema.json",
     "examples/project.v1.json": "projects/v1/project.schema.json",
     "examples/project-list.v1.json": "projects/v1/list.schema.json",
     "examples/project-member.v1.json": "projects/v1/member.schema.json",

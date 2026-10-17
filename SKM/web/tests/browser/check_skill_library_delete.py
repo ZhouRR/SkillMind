@@ -9,8 +9,9 @@ from copy import deepcopy
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from check_accounts import CSRF
-from check_projects import PROJECT, ProjectsApi, layout, messages
+from account_fixture import CSRF, PROJECT
+from browser_helpers import messages
+from check_projects import ProjectsApi, layout
 from playwright.async_api import Route, async_playwright, expect
 from select_helpers import select_option
 

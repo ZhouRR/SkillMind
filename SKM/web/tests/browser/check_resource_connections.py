@@ -9,9 +9,9 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from check_accounts import ACTOR, CSRF
+from account_fixture import ACTOR, CSRF, PROJECT
+from browser_helpers import messages
 from check_document_upload import UploadMockApi
-from check_projects import PROJECT, messages
 from playwright.async_api import Route, async_playwright, expect
 from select_helpers import select_option
 

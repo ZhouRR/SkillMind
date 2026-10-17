@@ -11,9 +11,16 @@ import zlib
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from check_document_management import DOCUMENT, SECOND, assert_document_writes, document, open_ancestor_folders
+from account_fixture import NEXT_PROJECT, PROJECT
+from browser_helpers import messages, privacy, settle
 from check_document_preview import PRIVATE, PreviewApi
-from check_projects import NEXT_PROJECT, PROJECT, messages, privacy, settle
+from document_fixture import (
+    DOCUMENT,
+    SECOND,
+    assert_document_writes,
+    document,
+    open_ancestor_folders,
+)
 from playwright.async_api import Browser, Page, Route, async_playwright, expect
 
 

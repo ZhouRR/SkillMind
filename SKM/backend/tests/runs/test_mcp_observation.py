@@ -13,7 +13,9 @@ import pytest
 from skillmind.db.models import ChangeProposal, Evidence, ResourceBinding
 from skillmind.effects.domain import ChangeProposalValidationError
 from skillmind.effects.proposal import parse_change_proposal_request
+from skillmind.effects.proposal_evidence import validate_mcp_observation
 from skillmind.integrations.mcp_tools import digest
+from skillmind.runs import repository_effects
 from tests.agent.test_mcp_tools import TOOLS, catalog, config
 from tests.runs.test_database_observation import observation as observation
 
@@ -46,7 +48,8 @@ def mcp_observation(observation):
 
 async def verify(h, *, lookup=True):
     """候補作成と保存済み提案の同じ照合処理を呼ぶ。"""
-    return await h.repository._validate_mcp_observation(
+    return await validate_mcp_observation(
+        h.repository._session,
         h.draft, binding=h.binding, payload=h.payload, allow_lookup=lookup,
     )
 
@@ -146,9 +149,9 @@ async def test_draft_links_evidence_only_after_current_authorization_and_contrac
     elif failure == "revision":
         h.draft = replace(h.draft, precondition={"revision": "sha256:" + "0" * 64})
     monkeypatch.setattr(h.repository, "_validate_effect_binding", authorize)
-    monkeypatch.setattr(h.repository, "_validate_effect_artifact", AsyncMock())
-    observation = AsyncMock(wraps=h.repository._validate_mcp_observation)
-    monkeypatch.setattr(h.repository, "_validate_mcp_observation", observation)
+    monkeypatch.setattr(repository_effects, "validate_effect_artifact", AsyncMock())
+    observation = AsyncMock(wraps=validate_mcp_observation)
+    monkeypatch.setattr(repository_effects, "validate_mcp_observation", observation)
     blueprint = {"effect_intents": [{
         "key": h.draft.effect_intent_key, "mode": "apply", "resource_key": "runner",
         "operation": "call", "risk": h.draft.risk_level.value,
@@ -156,7 +159,9 @@ async def test_draft_links_evidence_only_after_current_authorization_and_contrac
     claimed = SimpleNamespace(skill_snapshots_json=({"manifest": {
         "capability_blueprint": blueprint,
     }},))
-    run = SimpleNamespace(id=h.binding.run_id, project_id=uuid4())
+    run = SimpleNamespace(
+        id=h.binding.run_id, project_id=uuid4(), permission_snapshot_json={},
+    )
     if failure:
         with pytest.raises(ChangeProposalValidationError):
             await h.repository._validate_proposal_draft(claimed, run=run, draft=h.draft)

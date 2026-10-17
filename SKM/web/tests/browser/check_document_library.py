@@ -8,8 +8,8 @@ import json
 from itertools import product
 from urllib.parse import urlsplit
 
+from browser_helpers import messages
 from check_document_sources import DocumentApiFixture, select_scope
-from check_projects import messages
 from check_run_submission import confirmed
 from playwright.async_api import async_playwright, expect
 from select_helpers import select_option

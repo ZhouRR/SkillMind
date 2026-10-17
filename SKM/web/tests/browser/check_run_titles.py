@@ -7,8 +7,9 @@ import json
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from account_fixture import PROJECT
 from check_artifacts import ArtifactApi
-from check_projects import PROJECT, RUN, layout
+from check_projects import RUN, layout
 from check_result_references import CONTRACTS
 from playwright.async_api import Route, async_playwright, expect
 

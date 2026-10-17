@@ -8,7 +8,9 @@ from copy import deepcopy
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from check_projects import PROJECT, layout, messages
+from account_fixture import PROJECT
+from browser_helpers import messages
+from check_projects import layout
 from playwright.async_api import async_playwright, expect
 from schedule_management_fixture import ScheduleManagementApi, schedule
 from select_helpers import select_option

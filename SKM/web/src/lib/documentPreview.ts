@@ -3,6 +3,36 @@ import { mermaidCodeHtml, type MermaidPreviews, type MermaidPreviewLabels } from
 
 export { DOCUMENT_PREVIEW_MAX_BYTES } from './previewLimits'
 
+/** 画面内 preview の描画種別。拡張子登録で excel 等の viewer を後付けする拡張点。 */
+export type DocumentPreviewKind = 'text' | 'html' | 'markdown' | 'image'
+
+/** 拡張子 → preview 種別の登録表。未登録拡張子は preview 対象外(download のみ)。 */
+const DOCUMENT_PREVIEWERS: Record<string, DocumentPreviewKind> = {
+  png: 'image',
+  jpg: 'image',
+  jpeg: 'image',
+  gif: 'image',
+  txt: 'text',
+  json: 'text',
+  jsonl: 'text',
+  csv: 'text',
+  tsv: 'text',
+  log: 'text',
+  yaml: 'text',
+  yml: 'text',
+  xml: 'text',
+  md: 'markdown',
+  markdown: 'markdown',
+  html: 'html',
+  htm: 'html',
+}
+
+/** 文書名から preview 種別を引く。対象外は null。 */
+export function documentPreviewKind(name: string): DocumentPreviewKind | null {
+  const extension = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
+  return DOCUMENT_PREVIEWERS[extension] ?? null
+}
+
 const HTML_NAMESPACE = 'http://www.w3.org/1999/xhtml'
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg'
 const PREVIEW_POLICY = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"

@@ -8,6 +8,7 @@ from typing import Any
 
 from skillmind.agent.domain import RunContext, RunWorkspace
 from skillmind.agent.materialization_storage import MaterializationError, write_workspace_file
+from skillmind.agent.model_result import project_result_references
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.core.timing import safe_observation
 from skillmind.effects.continuation import validated_effect_result
@@ -105,11 +106,16 @@ def project_receipt(
 async def deliver_receipt(context: RunContext, receipt: Mapping[str, Any]) -> dict[str, Any]:
     """即時回执も保存済み原値から交付し、外部 Provider や再実行を呼ばない。"""
     if not any(tool.capability == "workspace.read/v1" for tool in context.tools):
-        return validated_effect_result(receipt)
+        original = validated_effect_result(receipt)
+        return project_result_references(original) if (
+            "model_output_schema_json" in context.task_snapshot
+        ) else original
     files = await materialize_receipt_files(
         context.workspace, (receipt,), context.permission_snapshot.get("allowed_capabilities", ()),
     )
     projected = project_receipt(receipt, files)
+    if "model_output_schema_json" in context.task_snapshot:
+        projected = project_result_references(projected)
     safe_observation(
         "run.performance.receipt_delivery", run_id=context.run_id,
         run_attempt_id=context.run_attempt_id, effect_execution_id=receipt["effect_execution_id"],

@@ -88,7 +88,7 @@ class ExecutionFeatures:
     def effect_enabled(
         self, capability: str, operation: str, *, provider: str | None = None
     ) -> bool:
-        """DB は INSERT/UPDATE、文書庫は CREATE に限り、他 switch からの迂回を拒否する。"""
+        """DB は INSERT/UPDATE、文書庫は管理操作に限り、他 switch からの迂回を拒否する。"""
         return (
             capability in self.write_capabilities
             and (capability != DATABASE_WRITE_CAPABILITY or operation in {"INSERT", "UPDATE"})

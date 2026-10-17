@@ -8,9 +8,9 @@ from itertools import product
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from check_accounts import session
+from account_fixture import PROJECT, session
+from browser_helpers import messages
 from check_document_upload import UploadBrowserAudit
-from check_projects import PROJECT, messages
 from playwright.async_api import Route, async_playwright, expect
 from schedule_management_fixture import ScheduleManagementApi
 from select_helpers import select_option

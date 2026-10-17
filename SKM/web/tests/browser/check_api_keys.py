@@ -1,13 +1,13 @@
 """三言語の実 Key UI を mock HTTP で検証し、秘密保存や自動再発行を防ぐ。"""
 from __future__ import annotations
 
-import asyncio
 import argparse
+import asyncio
 from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from check_accounts import ACTOR, CSRF, NOW, AccountsApi
+from account_fixture import ACTOR, CSRF, NOW, AccountsApi
 from playwright.async_api import Route, async_playwright, expect
 
 

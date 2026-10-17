@@ -12,7 +12,9 @@ from copy import deepcopy
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from check_projects import PROJECT, RUN, layout, messages, settle
+from account_fixture import PROJECT
+from browser_helpers import messages, settle
+from check_projects import RUN, layout
 from check_result_references import CONTRACTS
 from check_visual_style import VisualApi
 from playwright.async_api import Route, async_playwright, expect

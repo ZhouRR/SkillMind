@@ -9,7 +9,7 @@ from itertools import product
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
 
-from check_run_submission import ApiFixture, PROJECT, VERSION, task_catalog
+from check_run_submission import PROJECT, VERSION, ApiFixture, task_catalog
 from playwright.async_api import async_playwright, expect
 from select_helpers import select_option, select_options
 

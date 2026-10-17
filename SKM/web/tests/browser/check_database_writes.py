@@ -8,8 +8,8 @@ from itertools import product
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from check_accounts import session
-from check_projects import PROJECT, messages
+from account_fixture import PROJECT, session
+from browser_helpers import messages
 from check_resource_connections import ConnectionsApi
 from playwright.async_api import Route, async_playwright, expect
 from select_helpers import select_option

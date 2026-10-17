@@ -9,18 +9,17 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from check_accounts import (
+from account_fixture import (
     NEXT_PROJECT,
     OTHER,
     PASSWORD,
     PROJECT,
     AccountsApi,
     ResponseGate,
-    privacy,
     project,
-    self_revoke,
-    settle,
 )
+from browser_helpers import menu, messages, privacy, settle
+from check_accounts import self_revoke
 from check_run_submission import TASK, VERSION, task_catalog
 from playwright.async_api import Browser, Page, Route, async_playwright, expect
 from select_helpers import select_option, select_options
@@ -247,19 +246,8 @@ class ProjectsApi(AccountsApi):
         }
 
 
-async def messages(page: Page, language: str) -> dict:
-    """実翻訳 catalog を読むので文案を test 側で二重管理しない。"""
-    return await page.evaluate(
-        "async language => (await import('../../src/lib/i18n/messages.ts')).MESSAGES[language]",
-        language,
-    )
 
 
-async def menu(page: Page) -> None:
-    """狭幅では実開閉 button を通し、非表示要素の force 操作をしない。"""
-    toggle = page.locator(".sidebarMenuToggle")
-    if await toggle.is_visible() and await toggle.get_attribute("aria-expanded") == "false":
-        await toggle.click()
 
 
 async def selected(page: Page, project_id: str) -> None:

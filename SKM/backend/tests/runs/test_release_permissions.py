@@ -6,6 +6,7 @@ from copy import deepcopy
 from dataclasses import replace
 
 import pytest
+
 from skillmind.db.models import Run
 from skillmind.runs.domain import TaskSourceSelectionError
 from skillmind.runs.service import RunService
@@ -14,7 +15,7 @@ from tests.runs.creation_authorization_harness import CreationAuthorizationHarne
 
 @pytest.mark.asyncio
 async def test_readonly_creation_does_not_grant_subagent_or_proposal():
-    """主読取とユーザー質問は保持し、後置能力を新規 permission snapshot に含めない。"""
+    """Project 文書を含む主読取と質問は保持し、後置能力を新規 snapshot に含めない。"""
     db = CreationAuthorizationHarness()
     db.service = RunService(db.session_factory, deferred_features_enabled=False)
     created = await db.call()
@@ -23,6 +24,8 @@ async def test_readonly_creation_does_not_grant_subagent_or_proposal():
     assert set(run.permission_snapshot_json["allowed_capabilities"]) == {
         "repository.read/v1",
         "interaction.request/v1",
+        "document.list/v1",
+        "document.read/v1",
     }
 
 
@@ -74,4 +77,5 @@ async def test_scheduled_creation_has_an_independent_deployment_limit(enabled):
         assert db.occurrence.status == 'SETTLED'
         assert set(run.permission_snapshot_json['allowed_capabilities']) == {
             'repository.read/v1', 'interaction.request/v1',
+            'document.list/v1', 'document.read/v1',
         }

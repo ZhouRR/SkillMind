@@ -7,9 +7,11 @@ import json
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+from account_fixture import PROJECT
+from browser_helpers import messages
 from check_document_organization import OrganizationApi
 from check_history_actions import HistoryApi
-from check_projects import PROJECT, RUN, messages
+from check_projects import RUN
 from check_workspace_reports import CONTRACTS
 from playwright.async_api import Page, Route, async_playwright, expect
 

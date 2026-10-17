@@ -7,9 +7,16 @@ import asyncio
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from check_document_management import DOCUMENT, SECOND, document, open_ancestor_folders, row_menu
+from account_fixture import NEXT_PROJECT, PROJECT
+from browser_helpers import messages, settle
 from check_document_upload import UploadMockApi, upload_request
-from check_projects import NEXT_PROJECT, PROJECT, messages, settle
+from document_fixture import (
+    DOCUMENT,
+    SECOND,
+    document,
+    open_ancestor_folders,
+    row_menu,
+)
 from playwright.async_api import Browser, Page, Route, async_playwright, expect
 
 THIRD = "00000000-0000-4000-8000-000000000093"

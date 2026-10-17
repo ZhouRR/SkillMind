@@ -11,6 +11,8 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import pytest
 
+from skillmind.agent.model_result import compile_model_result_schema
+from skillmind.agent.outcome import compile_outcome_schema
 from skillmind.documents.domain import StoredDocument
 from skillmind.documents.repository import DocumentRepository
 from skillmind.documents.snapshot import ALL_DOCUMENTS_SELECTION, DOCUMENT_READ_CAPABILITY
@@ -62,6 +64,7 @@ def _resolved(
     `capability_blueprint.resource_requirements` へ直接載せる。
     """
 
+    outcome = compile_outcome_schema(None, task_schema_checksum=None)
     return ResolvedTaskRun(
         skill_id=uuid4(),
         skill_version_id=uuid4(),
@@ -84,9 +87,9 @@ def _resolved(
             },
         },
         input_schema={"type": "object", "additionalProperties": False},
-        output_schema={"type": "object", "additionalProperties": False},
+        output_schema=outcome.schema,
         input_schema_checksum="sha256:" + ("b" * 64),
-        output_schema_checksum="sha256:" + ("c" * 64),
+        output_schema_checksum=outcome.checksum,
         task_output_schema=None,
         task_output_schema_checksum=None,
     )
@@ -311,6 +314,9 @@ async def test_create_task_run_freezes_generic_snapshot(with_output: bool) -> No
     assert command.task_snapshot_json["input_schema_json"] == resolved.input_schema
     assert command.task_snapshot_json["output_schema_checksum"] == resolved.output_schema_checksum
     assert command.task_snapshot_json["result_kind"] == "OUTCOME_ENVELOPE"
+    assert command.task_snapshot_json["model_output_schema_json"] == compile_model_result_schema(
+        resolved.output_schema,
+    )
     assert command.task_snapshot_json["task_output_schema_json"] is None
     assert command.task_snapshot_json["skill_snapshots"] == [resolved.skill_snapshot]
     # 扇出は実行時判断のため無条件に付く (計画 §23 D2)。子は Run 予算を分け合うだけで

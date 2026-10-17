@@ -173,6 +173,7 @@ EXAMPLES = {
         "tools/subagent.dispatch/v1/response.schema.json"
     ),
     "examples/outcome-envelope.v1.json": "outcomes/envelope/v1.schema.json",
+    "examples/model-outcome.v1.json": "outcomes/model/v1.schema.json",
     "examples/project.v1.json": "projects/v1/project.schema.json",
     "examples/project-list.v1.json": "projects/v1/list.schema.json",
     "examples/project-member.v1.json": "projects/v1/member.schema.json",
@@ -288,6 +289,17 @@ def test_runtime_outcome_schema_matches_public_contract() -> None:
     from skillmind.agent.outcome import OUTCOME_ENVELOPE_SCHEMA
 
     assert load(CONTRACTS / "outcomes" / "envelope" / "v1.schema.json") == (OUTCOME_ENVELOPE_SCHEMA)
+
+
+def test_model_result_schema_matches_public_contract() -> None:
+    """SDK のモデル契約と保存包絡を別に保守し、共通の投影からの差分を拒否する。"""
+    from skillmind.agent.model_result import compile_model_result_schema
+    from skillmind.agent.outcome import compile_outcome_schema
+
+    stored = compile_outcome_schema(None, task_schema_checksum=None)
+    assert load(CONTRACTS / "outcomes/model/v1.schema.json") == compile_model_result_schema(
+        stored.schema,
+    )
 
 
 def test_runtime_interaction_schema_matches_public_contract() -> None:

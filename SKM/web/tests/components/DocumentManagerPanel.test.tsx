@@ -2,13 +2,10 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ProjectDocumentRecord } from '../../src/api'
-import {
-  DocumentPreviewDialog,
-  DocumentTree,
-  buildDocumentTree,
-  countDocuments,
-  documentPreviewKind,
-} from '../../src/components/DocumentManagerPanel'
+import { DocumentPreviewDialog } from '../../src/components/DocumentPreviewDialog'
+import { DocumentTree } from '../../src/components/DocumentTree'
+import { buildDocumentTree, countDocuments } from '../../src/lib/documentTree'
+import { documentPreviewKind } from '../../src/lib/documentPreview'
 
 const PROJECT_ID = '00000000-0000-4000-8000-000000000020'
 

@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from skillmind.agent.domain import AgentEvent
+from skillmind.agent.model_result import compile_model_result_schema
 from skillmind.agent.runtime_policy import RUNTIME_POLICY
 from skillmind.agent.subagent import SUBAGENT_DISPATCH_CAPABILITY
 from skillmind.agent.task_brief import resolve_execution_profile
@@ -320,6 +321,7 @@ class RunService:
                     "output_schema_checksum": resolved.output_schema_checksum,
                     "input_schema_json": input_schema_json,
                     "output_schema_json": output_schema_json,
+                    "model_output_schema_json": compile_model_result_schema(output_schema_json),
                     "result_kind": "OUTCOME_ENVELOPE",
                     "task_output_schema": resolved.task_output_schema_checksum,
                     "task_output_schema_checksum": resolved.task_output_schema_checksum,

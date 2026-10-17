@@ -9,6 +9,7 @@ import pytest
 from skillmind.agent.postgres_native import query_identity
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.effects.postgres_native import SqlObservationValidationError
+from skillmind.effects.proposal_evidence import validate_database_observation
 from tests.runs.test_database_observation import observation as observation
 
 
@@ -36,7 +37,9 @@ def native_observation(observation):
 
 async def verify(h):
     """保存と承認の共通 validator を呼ぶ。"""
-    await h.repository._validate_database_observation(h.draft, binding=h.binding, payload=h.payload)
+    await validate_database_observation(
+        h.repository._session, h.draft, binding=h.binding, payload=h.payload
+    )
 
 
 async def test_exact_empty_query_with_default_options_is_valid(native_observation):

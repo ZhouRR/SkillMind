@@ -9,10 +9,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from check_accounts import CSRF
+from account_fixture import CSRF, PROJECT
+from browser_helpers import messages
 from check_event_stream_batching import FAKE_SOURCE
 from check_execution_presentation import PresentationApi
-from check_projects import PROJECT, layout, messages
+from check_projects import layout
 from playwright.async_api import Page, Route, async_playwright, expect
 
 PROMPT = '表示確認用の合成仕様書について、手順と期待値を確認してください。'

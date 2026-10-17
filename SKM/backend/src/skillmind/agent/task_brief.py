@@ -353,6 +353,7 @@ def render_task_brief_prompt(
     *,
     input_json: Mapping[str, Any],
     output_schema: Mapping[str, Any],
+    model_output_schema: Mapping[str, Any] | None = None,
     effect_receipt_files: Sequence[Mapping[str, Any]] = (),
 ) -> str:
     """Brief を SDK 非依存の実行 prompt へ描画する。
@@ -387,7 +388,9 @@ def render_task_brief_prompt(
         ]
         append_skill_file_guidance(sections, brief)
         _append_materialization(sections, brief["resources"], brief["allowed_tools"])
-        return _finish_task_prompt(sections, brief, input_json, output_schema)
+        return _finish_task_prompt(
+            sections, brief, input_json, output_schema, model_output_schema,
+        )
     sections = [
         f"Objective: {brief['objective']['segment_objective']}",
         _PROFILE_INSTRUCTIONS[ExecutionProfile(brief["execution"]["profile"])],
@@ -550,7 +553,7 @@ def render_task_brief_prompt(
     sections.append(_effect_instruction(brief["effect_policy"]))
     sections.append(_interaction_instruction(brief["interaction_policy"]))
     append_skill_file_guidance(sections, brief)
-    return _finish_task_prompt(sections, brief, input_json, output_schema)
+    return _finish_task_prompt(sections, brief, input_json, output_schema, model_output_schema)
 
 
 def _finish_task_prompt(
@@ -558,6 +561,7 @@ def _finish_task_prompt(
     brief: Mapping[str, Any],
     input_json: Mapping[str, Any],
     output_schema: Mapping[str, Any],
+    model_output_schema: Mapping[str, Any] | None = None,
 ) -> str:
     """新旧方式で同じ checkpoint、回执と platform 完了報告の契約を適用する。"""
 
@@ -620,6 +624,10 @@ def _finish_task_prompt(
         "the business state needed to continue without the native conversation."
     )
     checkpoint = model_checkpoint(brief, brief.get("effect_receipt_files", ()))
+    if model_output_schema is not None:
+        from skillmind.agent.model_result import project_result_references
+
+        checkpoint = project_result_references(checkpoint)
     if any(checkpoint.values()):
         sections.append(
             f"Audited checkpoint from prior segments (JSON): {canonical_json(checkpoint)}"
@@ -725,13 +733,20 @@ def _finish_task_prompt(
                     "out of narrative summaries and deliverable descriptions unless they are "
                     "needed to understand a business finding. Preserve required exact identifiers "
                     "and references in their existing structured fields and required deliverables; "
-                    "never omit Skill-required business data. Use artifact_ref for an actual "
-                    "published artifact, never a path or a guessed association. Do not create "
+                    "never omit Skill-required business data. "
+                    + ("Use artifact for an actual " if model_output_schema is not None
+                       else "Use artifact_ref for an actual ")
+                    + "published artifact, never a path or a guessed association. Do not create "
                     "an extra report deliverable just to repeat technical completion metadata."
                 )
         else:
             _append_legacy_report_instruction(sections)
-    # 新旧で同じ厳密結果契約を適用する。
+    if model_output_schema is not None:
+        from skillmind.agent.model_result import MODEL_RESULT_INSTRUCTIONS
+
+        sections.append(MODEL_RESULT_INSTRUCTIONS)
+        output_schema = model_output_schema
+    # モデル契約と保存契約は分離しても、それぞれの検証を省略しない。
     sections.append(
         "Return ONLY one JSON object matching the exact schema below. "
         "Do not use Markdown, code fences, commentary, or text outside the JSON object. "

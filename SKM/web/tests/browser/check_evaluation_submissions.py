@@ -11,9 +11,11 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
-from check_accounts import CSRF, OTHER, PASSWORD, ResponseGate, self_revoke
+from account_fixture import CSRF, NEXT_PROJECT, OTHER, PASSWORD, PROJECT, ResponseGate
+from browser_helpers import messages, privacy, settle
+from check_accounts import self_revoke
 from check_artifacts import NEXT_RUN, ArtifactApi
-from check_projects import NEXT_PROJECT, PROJECT, RUN, messages, privacy, settle
+from check_projects import RUN
 from playwright.async_api import Browser, Page, Route, async_playwright, expect
 
 RESULT = "00000000-0000-4000-8000-000000000080"

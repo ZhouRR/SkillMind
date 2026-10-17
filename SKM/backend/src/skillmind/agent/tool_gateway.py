@@ -26,6 +26,7 @@ from skillmind.agent.evidence import (
     new_evidence_ref,
     validate_artifact_publication,
 )
+from skillmind.agent.model_result import project_result_references
 from skillmind.agent.tool_diagnostics import safe_tool_diagnostic, schema_error_summary
 from skillmind.agent.tool_policy import (
     ToolExecutionPolicy,
@@ -343,7 +344,16 @@ class ToolGateway:
             })}], "is_error": True}
         try:
             response = await self._invoke(binding, deepcopy(dict(arguments)))
-            content = [{"type": "text", "text": _compact_json(response)}]
+            delivered = project_result_references(response) if (
+                "model_output_schema_json" in self._context.task_snapshot
+            ) else response
+            text = _compact_json(delivered)
+            if len(text.encode("utf-8")) > self._context.limits.max_output_bytes:
+                raise ToolGatewayError(
+                    "too_large", "Tool output including reference labels exceeds the Run limit",
+                    retryable=False,
+                )
+            content = [{"type": "text", "text": text}]
             if binding.registered.capability == "workspace.image/v1":
                 from skillmind.agent.workspace_image import image_block
 
