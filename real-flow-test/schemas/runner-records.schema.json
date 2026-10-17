@@ -191,7 +191,8 @@
         },
         "stepId": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "対象ステップ ID。ケース全体が同一理由で未実行（notRun）または不足（gaps）の場合は \"*\" でケース全体を表せる。"
         },
         "reasonRef": {
           "type": "string",

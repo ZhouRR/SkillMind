@@ -1,14 +1,15 @@
 ---
 name: execution-plan-generator
-description: RV を通過した保存済み Markdown と利用可能な業務知識で用例を理解し、独立計画ファイルを生成せず最小の実行根拠（execution_basis）を固定して MCP で自動テストを実行し、原回執と画面観測から参照索引（result_ref）を保存・要約する（互換のため旧識別子 execution-plan-generator を維持）。
+description: RV を通過した保存済み Markdown と利用可能な業務知識で用例を理解し、独立計画ファイルを生成せずケース単位の最小実行根拠（execution_basis）を固定して MCP で自動テストを実行し、原回執と画面観測から参照索引（result_ref）を保存・要約する（互換のため旧識別子 execution-plan-generator を維持）。
 ---
 
-# テスト実行（識別子: execution-plan-generator）
+# テスト実行・原記録索引保存（旧称互換: execution-plan-generator）
 
 ## 目的と入力
 
 RV 済み Markdown に従って MCP で被測環境を操作し、原回執と画面観測から実行結果を要約する。最終的な業務 PASS/FAIL 判定や他 Skill の呼び出しは行わない（互換性のため Skill 識別子は `execution-plan-generator` を維持するが、独立した計画ファイルや `plan_id` は作成しない）。
 
+- **一貫完遂と途中終了の禁止（最重要）**：前処理・環境確認・仕様書の一部読取が終わっただけの段階で `PARTIAL` サマリを返してタスクを終了することを厳禁する。RV 未完了/不合格・テスト管理 DB 未移行/利用不能・必須予約/環境の致命的不整合などの停止条件に該当しない限り、**必ず同一 Run 内で「仕様全文の読取 → `executionBasis` の作成・検証 → `test_execution` の `RUNNING` 登録 → MCP による環境準備・画面操作 → `result_ref` と終端状態の UPDATE」まで連続して完遂する**。返却の `PARTIAL` は、`test_execution` 登録と実行可能なケースの操作・終端 UPDATE を完了した上で一部ケース/ステップが未実行・結果不明として残った場合にのみ使用する。
 - **対象と ID 照合**：選択された RV 済み Markdown または実行コンテキストの文書参照からパス・ID・本文を取得する。文書庫の文書 ID とテスト管理 DB の `document_id` は同一とは限らない。文書参照の `objectKey` は各文書メタデータの `path`（または `folder` と `name` を `/` で結んだ文書庫内相対パス）をそのまま使い、`test_automation.test_artifact.object_key`・文書庫・bucket・`MARKDOWN` 種別と照合して `test_run_id`・`document_id` から `test_run`・`test_document` の RV 状態と `specVersion` を引き継ぐ。物理ストレージキーと作業用ローカルパスは取得・保存時にのみ使い、DB 照合や成果物参照には使わない。
 - **入力境界**：仕様本文の入力はこの Markdown のみとする。プロジェクト全体の文書読取が許可されている場合は参考資料や同一実行中のアップロード文書を取得できるが、別文書を試験対象へ追加したり凍結根拠を差し替えたりしない。元 Excel の取得・読取・再変換・版照合は行わず、ファイル・保存先・Version ID・ETag・シート名・セル座標の未提供を理由に停止しない。
 - **資源と権限境界**：接続済みの MinIO・PostgreSQL・Schema 検証ツールと被測環境の Runner/MCP を使う。アプリ識別子・環境版・対象ビルド版は公開設定・読取結果・監査済み回答から取得し、仕様書への接続設定追記や秘密情報の入力を求めず、ツール一覧やアプリ名から推測しない。公開ツールの説明・入出力 Schema に従い、外部書込は観測・提案・承認・適用・回読の手順を守る。DB・Schema の項目名は業務保存契約であり、外部 API に同じ名前を要求せず確認した実データを対応付ける。画像や履歴送信機能の不足を一律の開始禁止条件にせず、後続の最終判定も実行完了の条件にしない。
@@ -27,7 +28,7 @@ RV 済み Markdown に従って MCP で被測環境を操作し、原回執と�
 
 ## 前処理と RV 範囲の引継ぎ
 
-1. **RV 状態と適用範囲の確認**：選択 Markdown の保存記録で RV が `COMPLETED` ＋ `PASS` であることを確認して保存済み `MARKDOWN` を取得する。末尾の `RV 確認済みの適用範囲`（`testRunId`・`documentId`・`specVersion`）と登録・原文対応を一度確認し、有効範囲・除外・部分改訂の解釈を引き継ぐ（再解釈や再質問で範囲を変えず、付記のない文書は知識庫の表記・改訂規則を適用し、不整合は影響操作の前に返す）。RV の除外箇所・書式付記・凡例・表頭・改訂履歴は業務ステップや `NOT_RUN` に数えず、原文の清書で行番号やハッシュを作り直さない。有効対象 0 件なら対象なしとして返し、実行登録・アプリ操作・架空の完了件数を作らない。
+1. **RV 状態と適用範囲の確認（大判 Markdown の一括読取）**：選択 Markdown の保存記録で RV が `COMPLETED` ＋ `PASS` であることを確認して保存済み `MARKDOWN` を物化・取得する。**物化した仕様書 Markdown は数十行ずつの細切れ読取を禁止する**。`workspace.read/v1` の公開上限（例：`offset: 0, max_chars: 200000` と次ページ `offset: 200000, max_chars: 200000`、または大きな行範囲）を使って 2〜3 回で全文と末尾の `## RV 確認済みの適用範囲`（`testRunId`・`documentId`・`specVersion`）を欠落なく確認し、有効範囲・除外・部分改訂の解釈を引き継ぐ（再解釈や再質問で範囲を変えず、付記のない文書は知識庫の表記・改訂規則を適用し、不整合は影響操作の前に返す）。RV の除外箇所・書式付記・凡例・表頭・改訂履歴は業務ステップや `NOT_RUN` に数えず、原文の清書で行番号やハッシュを作り直さない。有効対象 0 件なら対象なしとして返し、実行登録・アプリ操作・架空の完了件数を作らない。
 2. **テスト管理表の確認**：`test_execution` の実構造で `execution_basis`（JSONB）・NULL 許容 `plan_id`・[runner-records.schema.json](../../schemas/runner-records.schema.json) の参照索引を保存する `result_ref` の型と制約を確認する。未移行なら必要な移行を明示して停止し、架空/空/旧計画 ID で回避しない。
 3. **MCP 能力の把握**：許可された MCP のツール一覧・Schema から環境取得・アプリ準備・画面観測・操作・原操作照会/取消・画像/原履歴/ログの取得と保存能力を把握し、契約が変わらない間は再利用する。能力不足は関連ステップに具体的な理由を残して独立部分を続け、手動代行や追加質問で全体を待機させない。
 4. **予約（Lease）の取得**：公開された予約機能があれば同一実行の予約を取得し、確認した参照を `environmentLease` に保存する（取得失敗や実際の占有競合は後続操作を止めて報告。Windows デスクトップの専用利用は手配済み前提とし再確認しない。サービス内予約と外部操作の排他は区別し、外部排他の未検証だけで停止しない）。
@@ -35,13 +36,13 @@ RV 済み Markdown に従って MCP で被測環境を操作し、原回執と�
 
 ## 実行前の根拠固定と実行登録
 
-1. **全ケース・ステップの特定**：引き継いだ適用範囲と原文から、有効な全ケース・業務ステップ・前提条件・データ・後処理・元の期待条件を確認する。ケース・ステップ ID がなければ文書内の順序から安定した ID を付ける。対象範囲を後から実行済み操作だけに狭めず、期待条件が特定できなければ不足を確認し創作しない。
-2. **`executionBasis` の作成**：[execution-basis.schema.json](../../schemas/execution-basis.schema.json) に従う最小の `executionBasis` を作成する（全文・手順配列・MCP 引数の写しを別ファイルにしない）。
+1. **全有効ケースの特定**：引き継いだ適用範囲と原文から、有効な全テストケース・業務ステップ・前提条件・データ・後処理・元の期待条件を確認する。ケース ID がなければ文書内の順序から安定した ID を付ける。対象範囲を後から実行済み操作だけに狭めず、期待条件が特定できなければ不足を確認し創作しない。
+2. **`executionBasis` の作成（ケース単位の行範囲固定）**：[execution-basis.schema.json](../../schemas/execution-basis.schema.json) に従う最小の `executionBasis` を作成する（全文・手順配列・MCP 引数の写しを別ファイルにせず、数千ステップを個別に JSON 展開しない）。
    - `sourceMarkdown`：取得元の文書参照と、RV 付記を含む取得ファイル全体の原バイト列の SHA-256（改行・空白を正規化しない）。
    - `specVersion`：RV 登録の元 Excel のハッシュ。
-   - `cases[].steps[]`：`stepId`・原文の操作位置 `sourceLines`・期待条件位置 `expectedLines`（取得した UTF-8 Markdown の先頭を 1 とする包含行範囲）・先行ステップ `dependsOn` のみを記録し、範囲の実在・全対象網羅・ID 一意性・依存先の存在と非循環を実行前に検証する。
+   - `cases[]`：有効な各テストケースを 1 件ずつ記録する。各要素にはステップサフィックス（`_01` 等）を除いたケース単位の `testCaseId` と、当該ケースの有効な操作・期待条件が含まれる UTF-8 Markdown の 1 始まり包含行範囲 `sourceLines`（`{"start", "end"}`）のみを記録する（期待条件が別行範囲に分かれる場合のみ `expectedLines`、他ケースへの先行依存がある場合のみ `dependsOn` を指定し、同一範囲・独立ケースでは省略する）。範囲の実在・全有効ケース網羅・ID 一意性・依存先の存在と非循環を実行前に検証する。ケース数が多い場合は `workspace.search/v1` や `database.query/v1` の集計、`workspace.write/v2`・`workspace.edit/v1` を使って `workspace/execution-basis.json` を一括生成し、`json.schema.validate/v1` で検証する。
    - `environment`：確認済みの `appId`・`connectionRef`・`environmentLease`・`maxParallelism: 1`・`caseTimeoutSeconds` を保持する（環境・タスク指定を優先し、未指定時はケース 1800 秒・単発操作 15 秒を既定として工具上限内に収める。ケース時間は最初のアプリ準備から測り、承認・中断待ちを含め継続時にリセットしない）。
-3. **`versionSnapshot` と実行登録**：`versionSnapshot` に凍結 Skill の版識別子 `skillVersion`（表示名や推測版番号で代用しない、`skillChecksum` 併記可）・`environmentVersion`・`sutBuild`・`runnerVersions`・`modelVersion` を保持する。新規テストごとに `executionId`（UUID）を発行し、`executionBasis` の Schema・format・原文対応を検証した上で、`test_execution` に `execution_id`・RV の `test_run_id`/`document_id`・`execution_basis`・`version_snapshot`・`plan_id: NULL`・`status: RUNNING`・`started_at` を一度に登録・回読する。実行前に永続化できなければ操作を開始せず、登録後は根拠・期待条件・固定版を変更しない（固定後に判明した Runner 版は操作回執から取得し、`version_snapshot` は書き換えない。同じ識別体系の環境・対象ビルド・Runner 版が固定値と異なる場合は停止する）。
+3. **`versionSnapshot` と実行登録**：`versionSnapshot` に凍結 Skill の版識別子 `skillVersion`（Brief の `identity.skill_version_id` をそのまま使用し、表示名や推測版番号で代用しない）・`environmentVersion`・`sutBuild`・`runnerVersions`・`modelVersion` を保持する。新規テストごとに `executionId`（UUID）を発行し、`executionBasis` の Schema・format・原文対応を検証した上で、`test_execution` に `execution_id`・RV の `test_run_id`/`document_id`・`execution_basis`・`version_snapshot`・`plan_id: NULL`・`status: RUNNING`・`started_at` を一度に登録・回読する。実行前に永続化できなければ操作を開始せず、登録後は根拠・期待条件・固定版を変更しない（固定後に判明した Runner 版は操作回執から取得し、`version_snapshot` は書き換えない。同じ識別体系の環境・対象ビルド・Runner 版が固定値と異なる場合は停止する）。
 
 ## 画面確認・MCP 実行・環境準備
 
@@ -65,16 +66,15 @@ RV 済み Markdown に従って MCP で被測環境を操作し、原回執と�
 1. **大きい回執と原履歴・ログの保存**：実行結果は実際の MCP 回執と画面観測のみに基づく。大きい確定回執がファイルとハッシュで交付された場合は原ハッシュを照合し、構造化読取能力（JSON Pointer・配列頁送り）で必要項目のみを漏れなく読む（全文読取や文章化はしない）。
    - 終了時に原履歴保存が有効・許可されている場合は、公開能力で本実行の終了済み原操作のみを保存し（上限超過時のみ集合を分割し送信前に ID と集合を固定）、原回執で文書識別子・hash・保存状態を確認できた参照だけを索引へ加える（部分保存は未適用分のみ処理し、応答不明は原保存要求を照会する。Runner 内の取得先と文書庫の保存済み参照を区別する）。
    - 仕様にログ読取・保存ステップがある場合は、履歴保存とは別の原要求で同実行の副本を保存・回読し、本文が必要な場合のみ保存回執の文書参照と hash で原文を取得・照合する。
-2. **参照索引（`result_ref`）と状態区分の基準**：収尾時に [runner-records.schema.json](../../schemas/runner-records.schema.json)（`schemaVersion: 2.0`）の参照索引を作成し、登録済み `execution_basis` の全ケース・ステップを母集団として ID・対応・重複・`reasonRef` 定義を検証する（構造修正は初回含め最大 3 回とし、UI 操作の再実行には流用しない）。
+2. **参照索引（`result_ref`）と状態区分の基準**：収尾時に [runner-records.schema.json](../../schemas/runner-records.schema.json)（`schemaVersion: 2.0`）の参照索引を作成し、登録済み `execution_basis.cases` の全ケースを母集団として ID・対応・重複・`reasonRef` 定義を検証する（構造修正は初回含め最大 3 回とし、UI 操作の再実行には流用しない）。
 
 | 対象 | 区分と記録規則 |
 | --- | --- |
 | `operations[].confirmation` | 原回執で原操作の終端結果（既知の失敗終端を含む）を確認できれば `CONFIRMED`、送信または結果が不明なら `UNCONFIRMED`（画像や原履歴の保存不足だけで `UNCONFIRMED` へ変更しない。一つの接続/要求を複数ステップへ付け替えず、`PREPARATION` / `OBSERVATION` だけのステップを業務完了に数えない） |
-| `notRun` / `gaps` / `reasons` | 未送信と確認できた業務ステップのみを `notRun` に 1 件ずつ列挙し、原 ID 不明・観測不足・画像/履歴/ログ保存不足は `gaps` に残す（未取得ファイルから未実行・成功・失敗を推測しない）。共通理由と確認済み根拠は `reasons` の `text` / `evidenceRefs` に一度だけ定義し、各項目は `testCaseId`・`stepId`・`reasonRef` と個別差分 `detail` / `evidenceRefs` のみで参照する（記録参照未取得時は `records: []` とし架空のファイル・hash・`archive` を補わない） |
+| `notRun` / `gaps` / `reasons` | 未送信と確認できた業務対象のみを `notRun` に記録し、原 ID 不明・観測不足・画像/履歴/ログ保存不足は `gaps` に残す（未取得ファイルから未実行・成功・失敗を推測しない）。ケース全体が同一理由で未実行または不足の場合は当該 `testCaseId` に対し `stepId: "*"` で 1 件に集約し、ケース内の一部ステップのみ未実行・不足の場合は個別 `stepId` を列挙する。共通理由と確認済み根拠は `reasons` の `text` / `evidenceRefs` に一度だけ定義し、各項目は `testCaseId`・`stepId`・`reasonRef` と個別差分 `detail` / `evidenceRefs` のみで参照する（記録参照未取得時は `records: []` とし架空のファイル・hash・`archive` を補わない） |
 | `test_execution.status` | 全必須ステップの操作確定完了は `COMPLETED`（実行状態でありテスト PASS ではない）、操作異常・前提未成立・保存/検証失敗は `ERROR`、実行期限超過は `TIMEOUT`、取消・中断・終了指示は `ABORTED`。タスク終了時に `RUNNING` を残さず、存在しない `BLOCKED` も書かない（回答・承認後に継続する一時待機は終了と区別） |
 
 3. **終端 UPDATE と継続・異常時の引き渡し**：本 `execution_id` の未終了行に対し、検証済み `result_ref`・終端 `status`・`finished_at` を 1 回の UPDATE で同時保存・回読する（索引検証が失敗しても終端登録は止めず、既存 `result_ref` を保持して終端 `status`・`finished_at`・実在する `error` 列へ終了理由・未保存事項・既知の原要求 ID を保存・回読する。応答不明時は同じ行を回読して未適用分のみを扱い、既存の終端値を上書きしない。実行登録前の終了では行や `executionId` を新設しない）。
    - 同一実行の継続ではテスト管理 DB・原操作状態・永続化された要求/回執を照合し、同じ `executionId`・根拠・期限で未完了部分（保存のみの失敗なら索引/終了登録のみ）を再開し、UI 操作を再送しない。取消・終了指示を受けた場合は新たな UI 操作をせず終端登録のみを行う。
    - テスト管理 DB 利用不能・撤権・Worker 強制終了等で更新不能な場合は、取得済みの `executionId`・原操作・必要な終端状態・未保存事項を既存の継続/監査情報へ残し、管理側による収尾が必要と明示する（未確認操作の予約を勝手に解除しない）。
-4. **返却サマリ**：画面で読める 1 回の簡潔な実行サマリを返す。実行 ID・対象範囲・全体の実行状態、各業務ステップの操作概要と確認結果、完了・失敗・`notRun`・結果不明の件数、停止理由と未確認の期待条件、画像/ログの閲覧範囲と原記録の保存状態をまとめる（独立部分まで実行・収尾し不足が残る返却は `PARTIAL` とし、未読内容を検証済みと称さず、期待条件の業務 PASS/FAIL 判定は後続工程に委ねる）。
-
+4. **返却サマリ**：画面で読める 1 回の簡潔な実行サマリを返す。実行 ID・対象範囲・全体の実行状態、実施した操作の概要と確認結果、完了・失敗・`notRun`・結果不明の件数、停止理由と未確認の期待条件、画像/ログの閲覧範囲と原記録の保存状態をまとめる（`test_execution` の登録・可能な範囲の MCP 操作・終端 UPDATE まで完了した上で未実行/不明が残る返却は `PARTIAL` とし、未読内容を検証済みと称さず、期待条件の業務 PASS/FAIL 判定は後続工程に委ねる）。

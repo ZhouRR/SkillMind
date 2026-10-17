@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Markdown 直接実行の根拠",
-  "description": "実行登録の execution_basis に保存する。独立した計画成果物や状態管理は作らない。ID・行範囲・全件対応・依存関係は原文と別途照合する。",
+  "description": "実行登録の execution_basis に保存するケース単位の最小根拠。独立した計画成果物やステップ別の重複定義は作らない。ケース ID・行範囲・全件対応は原文と別途照合する。",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -49,97 +49,36 @@
     "cases": {
       "type": "array",
       "minItems": 1,
+      "description": "有効な各テストケースを 1 件ずつ記録する（ステップごとの展開は行わず、ケース単位の行範囲で固定する）。",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": [
           "testCaseId",
-          "steps"
+          "sourceLines"
         ],
         "properties": {
           "testCaseId": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "ケース識別子（例: IT1-A-001-001-01）。個別ステップサフィックス（_01 等）を除いたケース単位の ID。"
           },
-          "steps": {
+          "sourceLines": {
+            "$ref": "#/$defs/lineRange",
+            "description": "当該ケースの有効な操作と期待条件が含まれる UTF-8 Markdown の 1 始まり包含行範囲。"
+          },
+          "expectedLines": {
+            "$ref": "#/$defs/lineRange",
+            "description": "期待条件が sourceLines と別行範囲に分かれる場合のみ指定する（同じ表行・同じ範囲なら省略する）。"
+          },
+          "dependsOn": {
             "type": "array",
-            "minItems": 1,
+            "uniqueItems": true,
             "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "stepId",
-                "sourceLines",
-                "expectedLines",
-                "dependsOn"
-              ],
-              "properties": {
-                "stepId": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "sourceLines": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "start",
-                    "end"
-                  ],
-                  "properties": {
-                    "start": {
-                      "type": "integer",
-                      "minimum": 1
-                    },
-                    "end": {
-                      "type": "integer",
-                      "minimum": 1
-                    }
-                  },
-                  "description": "UTF-8 Markdown の 1 始まりの包含行範囲。end >= start と文書内の範囲を別途検証する。"
-                },
-                "expectedLines": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "start",
-                    "end"
-                  ],
-                  "properties": {
-                    "start": {
-                      "type": "integer",
-                      "minimum": 1
-                    },
-                    "end": {
-                      "type": "integer",
-                      "minimum": 1
-                    }
-                  },
-                  "description": "UTF-8 Markdown の 1 始まりの包含行範囲。end >= start と文書内の範囲を別途検証する。"
-                },
-                "dependsOn": {
-                  "type": "array",
-                  "uniqueItems": true,
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "testCaseId",
-                      "stepId"
-                    ],
-                    "properties": {
-                      "testCaseId": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "stepId": {
-                        "type": "string",
-                        "minLength": 1
-                      }
-                    }
-                  }
-                }
-              }
-            }
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "先行が必須の他ケースの testCaseId（独立ケースは省略する）。"
           }
         }
       }
@@ -175,6 +114,27 @@
           "minimum": 1
         }
       }
+    }
+  },
+  "$defs": {
+    "lineRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start",
+        "end"
+      ],
+      "properties": {
+        "start": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "description": "UTF-8 Markdown の 1 始まりの包含行範囲。end >= start と文書内の範囲を別途検証する。"
     }
   }
 }
