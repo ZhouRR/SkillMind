@@ -129,31 +129,35 @@
     "assessments": {
       "type": "array",
       "minItems": 0,
+      "description": "ステップ別の照合結果。ケース全体が同一理由で未実行（result_ref.notRun の stepId: \"*\"）または共通の前置阻害で一括判定される場合は、stepId: \"*\" の 1 要素に集約（または空配列）してよい。",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": [
           "stepId",
-          "expectedResult",
-          "actualResult",
           "executionStatus",
-          "satisfied",
-          "evidenceRefs"
+          "satisfied"
         ],
         "properties": {
           "stepId": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "個別ステップ ID。ケース全体が同一理由で未実行・前置阻害の場合は \"*\" で集約可能（PASS 時は \"*\" 不可）。"
           },
           "expectedResult": {
-            "type": "string",
-            "minLength": 1
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "description": "元の期待条件は sourceMarkdown と execution_basis.cases[].sourceLines で固定済みのため省略可。仕様書全文の複写は行わない。"
           },
           "actualResult": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "実測結果の要約。未実行や結果不明時は省略または null 可（PASS 時は必須）。"
           },
           "executionStatus": {
             "enum": [
@@ -179,7 +183,8 @@
             "minItems": 0,
             "items": {
               "$ref": "#/$defs/runnerEvidence"
-            }
+            },
+            "description": "確認した Runner 原記録/原画像への参照。未実行時は省略または空配列可（PASS 時は 1 件以上必須）。"
           }
         }
       }
@@ -319,7 +324,19 @@
           "assessments": {
             "minItems": 1,
             "items": {
+              "required": [
+                "stepId",
+                "executionStatus",
+                "satisfied",
+                "actualResult",
+                "evidenceRefs"
+              ],
               "properties": {
+                "stepId": {
+                  "not": {
+                    "const": "*"
+                  }
+                },
                 "executionStatus": {
                   "const": "COMPLETED"
                 },
