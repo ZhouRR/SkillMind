@@ -163,7 +163,8 @@
             "objectKey": {
               "type": "string",
               "minLength": 1,
-              "pattern": "^(?!/)(?![A-Za-z][A-Za-z0-9+.-]*://).+"
+              "pattern": "^(?!/)(?![A-Za-z][A-Za-z0-9+.-]*://).+",
+              "description": "文書メタデータの path、または folder/name が表す文書庫内相対パス。物理ストレージキーや作業用ローカルパスへ置き換えない。"
             },
             "sha256": {
               "type": "string",
