@@ -11,6 +11,7 @@ from uuid import uuid4
 import httpx
 import pytest
 
+from skillmind.agent.evidence import EvidenceDraft
 from skillmind.agent.http_provider import HttpReadProvider
 from skillmind.agent.http_source import HttpResourceError, HttpResourceSource
 from skillmind.agent.postgres_native import native_statement, query_identity
@@ -196,10 +197,18 @@ async def test_request_files_are_hashed_scoped_and_validated_before_mcp_call(tmp
         "response_mode": "file",
     }
     inner = Mock()
+    response = {"status": "success", "provider": "mcp", "result": {"text": "original"}}
+    original = EvidenceDraft(
+        evidence_type="resource",
+        source_uri="mcp://integration/fixture/tools",
+        source_locator={"tool_name": "inspect"},
+        content_hash="sha256:" + sha256_hex(canonical_json(response)),
+        metadata={"binding_checksum": "sha256:" + "a" * 64},
+    )
     inner.execute = AsyncMock(
         return_value=ProviderToolResult(
-            response={"status": "success", "provider": "mcp", "result": {"text": "original"}},
-            evidence=(),
+            response=response,
+            evidence=(original,),
         )
     )
     wrapped = ResourceFileProvider(
@@ -213,6 +222,13 @@ async def test_request_files_are_hashed_scoped_and_validated_before_mcp_call(tmp
     )
     result = await wrapped.execute(context, args)
     assert inner.execute.await_args.args[1] == json.loads(raw)
+    assert len(result.evidence) == 1
+    saved = result.evidence[0]
+    assert saved.source_uri == original.source_uri
+    assert saved.source_locator == original.source_locator
+    assert saved.content_hash == original.content_hash
+    assert saved.metadata == {**original.metadata, "file": result.response["file"]}
+    assert "file" not in original.metadata
     assert (
         json.loads((context.workspace.root / result.response["file"]["path"]).read_bytes())[
             "result"
@@ -234,6 +250,36 @@ async def test_request_files_are_hashed_scoped_and_validated_before_mcp_call(tmp
     assert "resource was not called" in caught.value.message
     assert "synthetic-private" not in caught.value.message
     assert inner.execute.await_count == 1
+
+
+@pytest.mark.parametrize("mode", ["inline", "file"])
+async def test_response_delivery_keeps_source_hash_separate_from_json_file(tmp_path, mode):
+    """配送 JSON と異なる元 file の hash・版・抜粋を保ち、余分な証拠を増やさない。"""
+    context = file_context(tmp_path, "repository.read/v1", "git")
+    response = {"status": "success", "provider": "git", "content": "original"}
+    evidence = EvidenceDraft(
+        evidence_type="source_code",
+        source_uri="git://integration/fixture/main/spec.md",
+        source_locator={"revision": "a" * 40, "path": "spec.md"},
+        content_hash="sha256:" + sha256_hex(b"original"),
+        excerpt="original",
+        metadata={"reproducibility": "frozen_revision"},
+    )
+    original = ProviderToolResult(response=response, evidence=(evidence,))
+    inner = Mock(execute=AsyncMock(return_value=original))
+    wrapped = ResourceFileProvider(inner, {"type": "object"})
+    result = await wrapped.execute(context, {"response_mode": mode})
+    if mode == "inline":
+        assert result is original
+        assert not (context.workspace.cwd / "resources").exists()
+    else:
+        file = result.response["file"]
+        raw = (context.workspace.root / file["path"]).read_bytes()
+        assert json.loads(raw) == response
+        assert file["size_bytes"] == len(raw)
+        assert file["content_hash"] == "sha256:" + sha256_hex(raw)
+        assert file["content_hash"] != evidence.content_hash
+        assert result.evidence == (replace(evidence, metadata={**evidence.metadata, "file": file}),)
 
 
 async def test_proposal_file_resolves_exact_bytes_without_model_transcription(tmp_path):

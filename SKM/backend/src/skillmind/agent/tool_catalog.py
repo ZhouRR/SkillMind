@@ -74,6 +74,7 @@ def _tool_definition(
         }
         description += (
             " Prefer response_mode=file; complete data stays in the Run workspace. "
+            "File delivery keeps the original observation's evidence reference. "
             "A JSON request_file with expected_hash may replace inline arguments. "
             "Native MCP arguments are passed without renaming their fields."
         )

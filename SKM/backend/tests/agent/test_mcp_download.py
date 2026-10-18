@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from urllib.parse import quote
@@ -11,13 +13,17 @@ from uuid import uuid4
 import httpx
 import pytest
 
+from skillmind.agent.contract_store import ContractStore
+from skillmind.agent.evidence import EvidenceDraft
 from skillmind.agent.http_source import HttpResourceSource
 from skillmind.agent.mcp_download import McpDownloadProvider, observed_path
 from skillmind.agent.resource_files import require_file_access
-from skillmind.agent.tool_gateway import ToolProviderError
+from skillmind.agent.tool_catalog import create_run_tool_registry
+from skillmind.agent.tool_gateway import ProviderToolResult, ToolProviderError
 from skillmind.core.hashing import canonical_json, sha256_hex
 from tests.agent.test_mcp_provider import database_resource as database_resource
 from tests.agent.test_mcp_provider import resource as resource
+from tests.agent.test_tool_gateway import MemoryAuditWriter
 from tests.agent.test_workspace_image import image_bytes, image_run
 from tests.agent.test_workspace_provider import _context
 
@@ -133,6 +139,105 @@ async def test_download_preserves_original_bytes_and_both_mcp_response_modes(
     assert file["content_hash"] == "sha256:" + sha256_hex(h.data)
     assert h.provider._binding._bound.await_count == 3
     assert "synthetic-fixture-key" not in str(result)
+
+
+@pytest.mark.parametrize("changed_file", [False, True])
+async def test_query_file_reference_flows_through_read_download_and_image(harness, changed_file):
+    """本番 registry で一つの原観測参照を交付し、同じ参照の取得・改変拒否まで検証する。"""
+    h = harness
+    response = {**h.original, "observed_at": "2026-10-18T10:00:00Z"}
+    original = EvidenceDraft(
+        evidence_type="resource",
+        source_uri="mcp://integration/fixture/tools",
+        source_locator={"tool_name": "observe"},
+        content_hash="sha256:" + sha256_hex(canonical_json(response)),
+        metadata={"binding_checksum": h.bound.checksum},
+    )
+    query = Mock(execute=AsyncMock(return_value=ProviderToolResult(
+        response=response, evidence=(original,),
+    )))
+    registry = create_run_tool_registry(
+        ContractStore(Path(__file__).parents[3] / "contracts"), document_source=Mock(),
+        mcp_query_provider=query, mcp_download_provider=h.provider,
+    )
+    query_tool, download_tool = (
+        registry.resolve(
+            capability, provider="mcp", integration_id=h.context.tool.integration_id,
+            binding_id=h.context.tool.binding_id, resource_key="test_environment",
+        )
+        for capability in ("mcp.query/v1", "mcp.download/v1")
+    )
+    read_tool, image_tool = (
+        registry.resolve_unbound(capability, execution_profile="GUIDED")
+        for capability in ("workspace.read/v1", "workspace.image/v1")
+    )
+    tools = (query_tool, download_tool, read_tool, image_tool)
+    run = replace(
+        h.context.run, run_id=h.context.run_id, run_attempt_id=h.context.run_attempt_id,
+        workspace=h.context.workspace,
+        project_id=h.context.project_id, user_id=h.context.user_id, tools=tools,
+        permission_snapshot={"allowed_capabilities": [tool.capability for tool in tools]},
+    )
+    writer = MemoryAuditWriter()
+    runtime = registry.build_gateway_runtime(run, audit_writer=writer)
+    session_id = str(uuid4())
+
+    async def invoke(tool, arguments, call_id):
+        """SDK と同じ認可・監査・契約検証を通し、公開 JSON を読む。"""
+        await runtime.mcp.on_tool_authorized(tool.sdk_name, arguments, call_id, session_id)
+        result = await runtime.gateway.invoke_mcp(tool.sdk_name, arguments)
+        return result, json.loads(result["content"][0]["text"])
+
+    arguments = {"name": "observe", "arguments": {}, "response_mode": "file"}
+    _, observed = await invoke(query_tool, arguments, "query")
+    assert len(observed["evidence_refs"]) == 1
+    query_id, (record,) = writer.completed[0]
+    assert record.draft.metadata == {
+        **original.metadata, "file": observed["file"],
+        "tool_resource": {
+            "resource_key": "test_environment", "binding_id": str(query_tool.binding_id),
+            "integration_id": str(query_tool.integration_id), "provider": "mcp",
+        },
+    }
+    assert record.draft.source_locator == original.source_locator
+    assert record.draft.content_hash == original.content_hash
+    _, replayed = await invoke(query_tool, arguments, "query")
+    assert replayed == observed
+    query.execute.assert_awaited_once()
+    assert len(writer.completed) == 1
+
+    # 監査 port の保存済み行だけを DB fixture に渡し、別の証拠を手作りしない。
+    h.tool.id, h.tool.result_json = query_id, observed
+    h.evidence.metadata_json = dict(record.draft.metadata)
+    h.evidence.source_locator = dict(record.draft.source_locator)
+    h.evidence.content_hash = record.draft.content_hash
+    file = observed["file"]
+    _, read = await invoke(read_tool, {
+        "path": file["path"], "expected_hash": file["content_hash"],
+        "pointers": [h.arguments["pointer"]], "purpose": "Read the screenshot reference",
+    }, "read")
+    assert read["selections"][0]["value"] == "/api/images/fixture.png"
+    if changed_file:
+        (run.workspace.root / file["path"]).write_text("{}")
+    _, downloaded = await invoke(download_tool, {
+        **h.arguments, "source_evidence_ref": observed["evidence_refs"][0],
+    }, "download")
+    if changed_file:
+        assert downloaded["status"] == "error"
+        assert downloaded["code"] == "invalid_request"
+        assert not h.calls
+        return
+    assert downloaded["status"] == "success"
+    assert len(h.calls) == 1
+    assert len(downloaded["evidence_refs"]) == 1
+    assert downloaded["source_evidence_ref"] == observed["evidence_refs"][0]
+    assert downloaded["evidence_refs"] != observed["evidence_refs"]
+    image = downloaded["file"]
+    result, _ = await invoke(image_tool, {
+        "path": image["path"], "expected_hash": image["content_hash"],
+        "purpose": "View the downloaded screenshot",
+    }, "image")
+    assert result["content"][1]["type"] == "image"
 
 
 @pytest.mark.parametrize(

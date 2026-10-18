@@ -32,6 +32,8 @@
 
 ネットワークアクセスは Worker 内の共有クライアントが実行し、束縛・権限・回執を検証して資格情報をモデルに露出しない。要求は `request_file` + `expected_hash` に対応し、応答は `workspace/resources/` に保存する。`change.propose` は JSON ファイル提出とその内容ハッシュ束縛に対応する。8 KiB を超える確認済み Effect 回執はファイル参照として交付し（短い回執や保存失敗時は原値を返却）、同一回執は継続・復旧でも同一投影を保つ。
 
+MCP・repository の応答を JSON ファイルで交付する場合も原観測の Evidence を使い、保存先・ファイルハッシュ・サイズをその metadata に保持する。ファイル交付だけを理由に別の Evidence は作成しない。
+
 - **Git**：`repository.workspace/v1` で認可 UTF-8 ファイルを編集可能ディレクトリに配置し、`prepare_commit` でローカルファイルハッシュから提案を準備し、コミット時も branch・パス・原 revision・read-back を検証する。
 - **MCP**：検出・凍結された原生パラメータ Schema を使い、読取はファイル入出力に対応し、書込は Effect・承認・原操作 ID を通す。
 - **PostgreSQL**：`database.query/v1` と `database.execute/v1` を使い、テーブル/列権限は DB アカウントに委ねる。単一 SELECT と承認後の INSERT/UPDATE/DELETE・JOIN/CTE・`$1` パラメータに対応する（DDL・トランザクション制御・複文は禁止）。書込前に同一資源へ `read_back` と同一の SELECT（INSERT 対象行の不在確認を含む）を実行し、応答ファイルハッシュと Evidence を提案前提とし、書込・read-back・`skillmind_effects.execution_receipts` を同一トランザクションでコミットする。

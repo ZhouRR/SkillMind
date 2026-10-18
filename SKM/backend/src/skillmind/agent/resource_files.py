@@ -5,11 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any
 
 from jsonschema import Draft202012Validator
 
-from skillmind.agent.evidence import EvidenceDraft
 from skillmind.agent.materialization_storage import (
     MaterializationError,
     read_file,
@@ -129,17 +129,12 @@ class ResourceFileProvider:
         if mode == "inline":
             return result
         file = await store_response(context, canonical_json(dict(result.response)).encode("utf-8"))
-        # 原構造観測の Evidence は維持する。file を新たな業務 Artifact として登録しない。
+        # file は原観測の保存位置。配送方式だけで別の証拠 identity を増やさない。
+        # 元内容の hash と応答 JSON file の hash は異なり得るため、双方を維持する。
         return ProviderToolResult(
             response={"status": "success", "provider": context.tool.provider, "file": file},
-            evidence=(
-                *result.evidence,
-                EvidenceDraft(
-                    evidence_type="resource-file",
-                    source_uri=f"resource-file://{context.run_id}/{context.tool_call_id}",
-                    source_locator={"capability": context.tool.capability},
-                    content_hash=file["content_hash"],
-                    metadata={"file": file},
-                ),
+            evidence=tuple(
+                replace(draft, metadata={**dict(draft.metadata or {}), "file": file})
+                for draft in result.evidence
             ),
         )
