@@ -11,23 +11,23 @@ description: 束縛済みの HTTP 資源から n8n Webhook を呼び出し、指
 
 - `room_id`：送信先 Matrix Room ID（必須）。リクエスト JSON の `roomId` に設定する。
 - `message`：メッセージ本文（必須）。元の改行と文字をそのまま保持する。
-- `sender`：表示する送信者識別子（任意。未指定時は設定値または既定値 `@zhourr:192.170.10.66` を使用する）。
-- `webhook_path`：送信先パス（任意。未指定時は `/n8n/webhook/jaf-progress-7d3c8f6b3fdd4cb3` を使用する）。
+- `sender`：表示する送信者識別子（任意。入力または束縛済み資源・環境設定で指定された値を使用する）。
+- `webhook_path`：送信先 Webhook パス（任意。入力または束縛済み HTTP 資源のルート設定に従う）。
 
-不足している必須入力（`room_id`・`message`）のみを利用者に確認する。接続先 origin と認証情報は束縛済み HTTP 資源から供給されるため、利用者への再入力は求めない。
+不足している必須入力（`room_id`・`message`、および資源側から特定できない場合の送信先パス）のみを利用者に確認する。接続先 origin と認証情報は束縛済み HTTP 資源から供給されるため、利用者への再入力は求めない。
 
 ## HTTP リクエスト
 
 実行環境が公開する HTTP 呼出能力と束縛済み資源を使い、ツール契約に従ってリクエストを構成する。
 
-- **メソッド / パス**：`POST` / `webhook_path`（既定：`/n8n/webhook/jaf-progress-7d3c8f6b3fdd4cb3`）
+- **メソッド / パス**：`POST` / 指定または資源設定された `webhook_path`
 - **ヘッダ**：`Content-Type: application/json`
 - **ボディ（JSON オブジェクト）**：
 
 | 項目 | 値 |
 | --- | --- |
 | `roomId` | `room_id` の値 |
-| `sender` | 指定された `sender`（未指定時は既定値） |
+| `sender` | 指定された `sender`（存在する場合） |
 | `status` | `message` の原文 |
 
 文字列連結ではなく JSON シリアライズでボディを生成し、改行・引用符・多言語文字を正しくエスケープする。ツール契約がファイル入力を要求する場合は、UTF-8 の JSON ファイルとして保存し内容ハッシュを添えて提出する。

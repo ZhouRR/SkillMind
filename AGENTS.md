@@ -13,7 +13,7 @@
 - API/Worker は共有 package のモジュラーモノリス。Business は AgentEngine 抽象に依存し、SDK 型や route/job に業務規則を漏らさない。
 - 認証は共有 actor dependency、cookie の unsafe request は Origin/CSRF。明示 API key header は原 key を検証し、cookie へ fallback しない。越権と不存在は同じ 404。hash・認可・event/outbox 等は[単一実装](docs/development/coding-rules.md#backend)を使う。
 - PostgreSQL は正本、Redis は Queue・短期 Lock・通知。Run snapshot/権限上限/Result は不変。人工修正は Evaluation、人工答復/批准は新 Segment、同 Segment 復旧は新 Attempt。原 Run の自動同意による短操作は、直接交付の所有権を保存した場合のみ同 Attempt に原回執を返せる。
-- Skill は Organization 資産 + Project 明示有効化。新規 Skill は入力/資源の最小宣言と凍結原文で実行する。旧 Blueprint は原値を保持し、Manifest から逆算せず、業務専用 Schema/seed/renderer を共通規則へ戻さない。
+- Skill は Organization 資産 + Project 明示有効化。新規 Skill は入力/資源の最小宣言と凍結原文で実行する。業務知識（純粋な対象業務規則のみ）・汎用 Skill（自然言語の工程記述＋参照 JSON Schema 契約、特定プロジェクト/内部 Tool ID/特定 MCP と非結合）・外部 MCP/Runner（自身の Schema と設定で能力を公開）・プラットフォーム（汎用資源と安全境界）の[四層分離](docs/development/runtime-guide.md#skill-と凍結原文)を守る（旧 Blueprint は原値互換のみ維持）。
 - guidance・script・model 提案は権限ではない。未知の業務能力と登録済み versioned Tool を区別し、実行 Script は公開 checksum に一致させる。SDK builtin は `DENIED_BUILTIN_TOOLS` で fail closed、cwd は隔離ではない。凍結 `input/` は読取専用、write は `workspace/`・`output/` のみ。
 - 外部 write は observe → propose → apply。[受控書込](docs/development/runtime-guide.md#外部効果)の承認、Provider、scope、競合・idempotency・検証を省略しない。HTTP は登録根へ一回送信し原 response を検証根拠とする（前後 GET 不要）。`repository.write/v1` は Project 事前許可不可・force 禁止。Git/MCP は原 Run 開始時の同意による自動承認を許可する。定期実行は既定の自動同意を元 occurrence に固定し、現在の作成者・資源権限を再検証する。
 - 生成 UI・並行子 Agent・Shell/network の拡張は[後置範囲](docs/development/runtime-guide.md#後置能力)を確認し、権限・隔離・予算を実装と回帰で検証する。生成 bundle は CSP `sandbox allow-scripts`、iframe に `allow-same-origin` を付けない。子能力は `resolve_subagent_capabilities` と Run 共通予算を通す。
@@ -27,7 +27,7 @@ Python の `future annotations`、TypeScript `strict` を維持し、`any` で�
 ## 検証と変更規律
 
 - [同期点](docs/development/coding-rules.md#同期点)と[変更別検証](docs/development/local-development.md#変更に応じた検証)を適用する。動作変更には対応回帰を追加し、未実行・skip・失敗と残る risk を報告する。
-- 文書は規則を更新し、進捗ログを増やさない。生成 HTML は直接編集せず、`SKILL.md`/references は整理対象外。
+- 課題は四層の責務で切り分け、該当層のみを最小修正する。規則・Skill の更新は現在の正引き仕様で直接置き換え、廃止方式への防御的禁止文や単発障害の個別パッチを積み重ねない。文書は進捗ログを増やさず、生成 HTML は直接編集せず、`SKILL.md`/references は整理対象外。
 - 既存変更・成果物を保全する。lockfile を手編集せず、Credential・内部 URL・Ticket 本文・Gold・Secret を fixture/log に置かない。
 - Git 書込・履歴変更・破壊的操作は明示依頼が必要。実 DB・モデル・外部 write の検証は対象と副作用を事前確認する。
 - 完了時はガイド/契約との整合と検証結果を報告し、mock と実環境の証拠を区別する。計画は機能状態が変わった時だけ更新する。
