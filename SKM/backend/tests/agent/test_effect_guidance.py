@@ -74,6 +74,17 @@ def test_mcp_discovery_does_not_duplicate_the_proposal_recipe(tool_runtime):
         )
 
 
+def test_mcp_receipt_guidance_reaches_the_sdk_without_requiring_business_success(tool_runtime):
+    """両 SDK の共通説明で、原回執と業務判定・非終端を明確に分ける。"""
+    _, runtime, tool, _ = tool_runtime
+    published = runtime.tool_descriptions[tool.sdk_name]
+    assert "Read-back must validate the original business requirements" not in published
+    assert "not business success" in published
+    assert "all documented terminal outcomes" in published
+    assert "exclude pending states" in published
+    assert '"one_of":["COMPLETED","ERROR","TIMEOUT","CANCELLED"]' in published
+
+
 def document_request(operation, value):
     """説明通りの最小提案。回読や冪等 key は原 SDK identity から platform が導出する。"""
     return {

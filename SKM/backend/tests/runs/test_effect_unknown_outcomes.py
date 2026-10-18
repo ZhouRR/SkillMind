@@ -263,6 +263,31 @@ async def test_mcp_failure_keeps_observations_separate_from_applied_evidence():
     assert later["observation_refs"] == stored.error["observation_refs"]
 
 
+async def test_confirmed_mcp_error_receipt_resumes_the_run_with_original_status():
+    """確認済み ERROR 回執を保存して続行し、業務成功や結果不明へ変換しない。"""
+    h = harness(capability="mcp.call/v1")
+    del h.repository._next_effect_segment
+    h.proposal.checkpoint_json = {"summary": "Awaiting original operation", "evidence_refs": []}
+    h.proposal.continuation_mode = "RESUME"
+    before = EffectEvidenceDraft("resource", "mcp://fixture/tools/submit", {}, {}, None, {})
+    receipt = {"requestId": str(h.execution.id), "status": "ERROR"}
+    after = EffectEvidenceDraft(
+        "resource", "mcp://fixture/tools/submit", {}, {"read_back": receipt}, None, {},
+    )
+    stored = await h.repository.finalize_effect_execution(
+        h.claimed, result=EffectProviderResult(before, after, {
+            "method": "READ_BACK", "matched_paths": ["/call"],
+            "operation_status": "READ_BACK_CONFIRMED", "business_verdict": "NOT_EVALUATED",
+        }, False), failure=None, duration_ms=1,
+    )
+    assert stored.status.value == "APPLIED" and stored.error is None
+    assert stored.after_ref and h.tool.status == "SUCCEEDED"
+    assert h.run.status == "QUEUED"
+    evidence = [row for call in h.session.add_all.call_args_list for row in call.args[0]
+                if hasattr(row, "evidence_ref")]
+    assert any(row.metadata_json["snapshot"].get("read_back") == receipt for row in evidence)
+
+
 @pytest.mark.parametrize("attempt,prior_unknown", [(1, False), (2, False), (1, True)])
 def test_only_proven_first_attempt_before_send_can_be_known_failure(attempt, prior_unknown):
     """前段で止まっても、旧 attempt の未知を消したり再送許可へ変えない。"""

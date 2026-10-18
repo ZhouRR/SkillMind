@@ -23,6 +23,10 @@ MCP_PROVIDER_VERSION = PROFILE
 EFFECT_ID = "${effect_id}"
 
 
+class McpReadBackProposalError(ChangeProposalValidationError):
+    """固定文言と check 番号だけを、SDK 停止前に返せる提案誤りとして区別する。"""
+
+
 def resolve_effect_id(value: Any, effect_id: str) -> Any:
     """完全一致の予約値だけを置換し、部分文字列や式を評価しない。"""
     if isinstance(value, dict):
@@ -91,9 +95,6 @@ def call_payload(
     sample_id = "00000000-0000-4000-8000-000000000001"
     validate_tool_value(tool["input_schema"], resolve_effect_id(args, sample_id))
     validate_tool_value(reader_tool["input_schema"], resolve_effect_id(read_args, sample_id))
-    validate_read_back_schema(
-        reader_tool["output_schema"], resolve_effect_id(checks, sample_id)
-    )
     payload = {
         "name": name,
         "arguments": args,
@@ -107,6 +108,10 @@ def call_payload(
         payload["cancel_target"] = cancel_target
         if not has_operation_identity(payload):
             raise ValueError("MCP cancellation must read back the original operation identity")
+    validate_read_back_schema(
+        reader_tool["output_schema"], resolve_effect_id(checks, sample_id),
+        operation_receipt=has_operation_identity(payload),
+    )
     validate_arguments(name, payload)
     return payload
 
@@ -166,7 +171,15 @@ def validate_mcp_proposal(
             config=config,
         )
     except McpReadBackError as error:
-        raise ChangeProposalValidationError(
+        if error.reason == "receipt_status_too_narrow":
+            raise McpReadBackProposalError(
+                f"MCP read_back check {error.check_index + 1} accepts only one receipt status "
+                "although the reader outputSchema permits multiple statuses. Use one_of with "
+                "all documented terminal states, including unsuccessful outcomes; exclude "
+                "pending states. Read-back confirms the original receipt, not business success. "
+                "This validation sends no operation."
+            ) from None
+        raise McpReadBackProposalError(
             f"MCP read_back check {error.check_index + 1} contradicts the reader outputSchema. "
             "Use fields and values from the actual output contract or an authorized observation; "
             "input arguments do not imply output fields. This validation sends no operation."

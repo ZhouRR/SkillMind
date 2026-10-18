@@ -27,7 +27,7 @@ from skillmind.effects.mcp_call import (
     has_operation_identity,
     resolve_effect_id,
 )
-from skillmind.effects.mcp_diagnostics import McpEffectFailure
+from skillmind.effects.mcp_diagnostics import McpEffectFailure, safe_mcp_diagnostic
 from skillmind.effects.redmine import EffectProviderTransportError
 from skillmind.integrations.mcp_errors import diagnostic_fields
 from skillmind.integrations.mcp_readback import McpReadBackError
@@ -52,6 +52,9 @@ class McpCallProvider:
     ) -> EffectProviderResult:
         """承認済み回読条件の確認を保存し、業務 PASS を推定しない。"""
         frozen = deepcopy(execution)
+        previous = safe_mcp_diagnostic(frozen.previous_diagnostic)
+        # 原操作の応答受信は永続済みの事実。回読だけの attempt で False に戻さない。
+        call_response_received = previous is not None and previous["call_response_received"]
         if (
             frozen.capability_version != MCP_CALL
             or frozen.provider != "mcp"
@@ -66,7 +69,8 @@ class McpCallProvider:
         except PermissionError:
             raise McpEffectFailure(retryable=False, diagnostic={
                 "stage": "authorize", "reason": "authority_revoked",
-                "action_attempted": frozen.attempt_no > 1, "call_response_received": False,
+                "action_attempted": frozen.attempt_no > 1,
+                "call_response_received": call_response_received,
                 "read_back_attempts": 0,
             }) from None
         try:
@@ -80,7 +84,8 @@ class McpCallProvider:
                 "stage": "preflight",
                 "reason": (error.reason if isinstance(error, McpReadBackError)
                            else "invalid_contract"),
-                "action_attempted": frozen.attempt_no > 1, "call_response_received": False,
+                "action_attempted": frozen.attempt_no > 1,
+                "call_response_received": call_response_received,
                 "read_back_attempts": 0,
                 **({"check_index": error.check_index}
                    if isinstance(error, McpReadBackError) else {}),
@@ -92,12 +97,13 @@ class McpCallProvider:
 
         async def call(tool: str, params: dict[str, Any]) -> dict[str, Any]:
             """一回ごとに原承認を確認し、I/O 後の撤権時には結果を公開しない。"""
+            nonlocal call_response_received
             await self._authorize(frozen, credential)
             configured_tool(frozen.integration_config, frozen.integration_scope, tool)
-            result = parse_result(
-                await self._source.call(frozen.integration_config, credential, tool, params),
-                credential=credential,
-            )
+            response = await self._source.call(frozen.integration_config, credential, tool, params)
+            if stage == "call":
+                call_response_received = True
+            result = parse_result(response, credential=credential)
             await self._authorize(frozen, credential)
             return result
 
@@ -153,7 +159,8 @@ class McpCallProvider:
             # 失権後に取得済み本文を公開しない。
             raise McpEffectFailure(retryable=False, diagnostic={
                 "stage": stage, "reason": "authority_revoked",
-                "action_attempted": action_attempted, "call_response_received": sent is not None,
+                "action_attempted": action_attempted,
+                "call_response_received": call_response_received,
                 "read_back_attempts": read_attempts,
             }) from None
         except (McpToolsError, ValueError, McpDesktopBusyError) as error:
@@ -164,7 +171,8 @@ class McpCallProvider:
                 raise McpEffectFailure(retryable=False, diagnostic={
                     "stage": stage, "reason": "authority_revoked",
                     "action_attempted": action_attempted,
-                    "call_response_received": sent is not None, "read_back_attempts": read_attempts,
+                    "call_response_received": call_response_received,
+                    "read_back_attempts": read_attempts,
                 }) from None
             reason = (
                 error.reason if isinstance(error, (McpToolsError, McpResultError, McpReadBackError))
@@ -177,7 +185,7 @@ class McpCallProvider:
                 "stage": stage, "reason": reason, "action_attempted": action_attempted,
                 **diagnostic_fields(error),
                 "call_response_received": (
-                    sent is not None or (stage == "call" and (
+                    call_response_received or (stage == "call" and (
                         isinstance(error, McpResultError) or reason == "invalid_response"
                     ))
                 ),

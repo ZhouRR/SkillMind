@@ -101,6 +101,7 @@ class AuthorizationHarness:
             provider=c.provider,
             provider_version=DATABASE_WRITE_PROVIDER_VERSION,
             attempt_no=1,
+            error_json=None,
             request_fingerprint=c.request_fingerprint,
             idempotency_key=c.idempotency_key,
             lease_token_hash=lease_token_hash(c.lease_token),

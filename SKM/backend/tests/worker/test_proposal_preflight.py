@@ -1,4 +1,4 @@
-"""SQL 観測の誤りを SDK 停止前に返し、修正後だけ原提案の保存へ進む。"""
+"""SQL/MCP の提案誤りを SDK 停止前に返し、修正後だけ原提案の保存へ進む。"""
 
 from __future__ import annotations
 
@@ -18,10 +18,12 @@ from skillmind.agent.tool_catalog import _change_propose_tool_definition
 from skillmind.agent.tool_gateway import ToolRegistry
 from skillmind.core.hashing import sha256_hex
 from skillmind.effects.inline import InlineEffectResult
+from skillmind.effects.mcp_call import McpReadBackProposalError, validate_mcp_proposal
 from skillmind.effects.postgres_native import SQL_OBSERVATION_MESSAGE, SqlObservationValidationError
 from skillmind.runs.domain import LeaseValidationError, RunCancellationRequestedError
 from skillmind.worker.proposal_preflight import ProposalPreflight
 from skillmind.worker.tool_authority import ToolExecutionAuthority
+from tests.agent.test_mcp_receipt_contract import proposal, receipt_execution
 from tests.agent.test_tool_gateway import CsvIssueProvider, MemoryAuditWriter, _context, _registry
 from tests.agent.test_tool_policy import _database_proposal
 from tests.effects.test_native_resource_effects import sql_execution
@@ -64,19 +66,27 @@ def setup(tmp_path):
         precondition=execution.precondition,
     )
     service = AsyncMock()
-    service.validate_native_sql_proposal.return_value = None
+    service.validate_effect_proposal.return_value = None
     validator = ProposalPreflight(service, context, authority)
     return registry, tool, context, authority, arguments, service, validator
 
 
 @pytest.mark.parametrize("sdk", ["codex", "codex-inline", "claude"])
-async def test_bad_observation_is_correctable_without_parking_or_effect(setup, sdk):
+@pytest.mark.parametrize("kind", ["sql", "mcp"])
+async def test_bad_proposal_is_correctable_without_parking_or_effect(setup, sdk, kind):
     """両 SDK と自動承認経路で誤提案を監査し、同じ Agent を停止させない。"""
     registry, tool, context, _, arguments, service, validator = setup
-    service.validate_native_sql_proposal.side_effect = [
-        SqlObservationValidationError("private"),
-        None,
-    ]
+    failure, message = SqlObservationValidationError("private"), SQL_OBSERVATION_MESSAGE
+    if kind == "mcp":
+        run = receipt_execution(status_check={"path": "/status", "equals": "DONE"})
+        with pytest.raises(McpReadBackProposalError) as invalid:
+            validate_mcp_proposal(proposal(run), run.integration_scope, run.integration_config)
+        failure, message = invalid.value, str(invalid.value)
+        arguments.update(
+            capability_version=run.capability_version, operation=run.operation,
+            target=run.target, changes=list(run.changes), precondition=run.precondition,
+        )
+    service.validate_effect_proposal.side_effect = [failure, None]
     writer = MemoryAuditWriter()
     runtime = registry.build_gateway_runtime(context, audit_writer=writer)
     inline = AsyncMock(return_value=None)
@@ -94,11 +104,13 @@ async def test_bad_observation_is_correctable_without_parking_or_effect(setup, s
         bridge = CodexToolBridge(context, runtime, on_deferred=deferred)
         bridge.session_id = session
         rejected = await bridge.invoke(tool.sdk_name, arguments, "bad-call")
-        assert rejected.isError and SQL_OBSERVATION_MESSAGE in rejected.content[0].text
+        assert rejected.isError and message in rejected.content[0].text
         assert bridge.accepting and not bridge.parked.is_set() and bridge.deferred is None
         deferred.assert_not_awaited()
         inline.assert_not_awaited()
         arguments["evidence_refs"] = ["ev_corrected"]
+        if kind == "mcp":
+            arguments["changes"] = list(receipt_execution().changes)
         accepted = await bridge.invoke(tool.sdk_name, arguments, "corrected-call")
         assert not accepted.isError and bridge.parked.is_set()
         deferred.assert_awaited_once_with(tool.sdk_name, arguments, "corrected-call", session)
@@ -121,14 +133,16 @@ async def test_bad_observation_is_correctable_without_parking_or_effect(setup, s
         }
         rejected = await hook(event, "bad-call", {"signal": None})
         assert rejected["hookSpecificOutput"]["permissionDecision"] == "deny"
-        assert rejected["hookSpecificOutput"]["permissionDecisionReason"] == SQL_OBSERVATION_MESSAGE
+        assert rejected["hookSpecificOutput"]["permissionDecisionReason"] == message
         arguments["evidence_refs"] = ["ev_corrected"]
+        if kind == "mcp":
+            arguments["changes"] = list(receipt_execution().changes)
         event["tool_use_id"] = "corrected-call"
         accepted = await hook(event, "corrected-call", {"signal": None})
         assert accepted["hookSpecificOutput"]["permissionDecision"] == "defer"
     assert len(writer.denied) == 1 and not writer.completed
-    assert writer.denied[0][1] == SQL_OBSERVATION_MESSAGE
-    assert service.validate_native_sql_proposal.await_count == 2
+    assert writer.denied[0][1] == message
+    assert service.validate_effect_proposal.await_count == 2
 
 
 async def test_file_proposal_validates_original_bytes_and_tool_identity(setup):
@@ -143,7 +157,7 @@ async def test_file_proposal_validates_original_bytes_and_tool_identity(setup):
         "expected_hash": "sha256:" + sha256_hex(raw),
     }
     assert await validator.validate(tool.sdk_name, request, "original-call", "session") is None
-    service.validate_native_sql_proposal.assert_awaited_once_with(
+    service.validate_effect_proposal.assert_awaited_once_with(
         authority.claimed,
         arguments,
         tool_use_id="original-call",
@@ -151,7 +165,7 @@ async def test_file_proposal_validates_original_bytes_and_tool_identity(setup):
     path.write_bytes(b"{}")
     error = await validator.validate(tool.sdk_name, request, "changed-call", "session")
     assert error["code"] == "invalid_request"
-    assert service.validate_native_sql_proposal.await_count == 1
+    assert service.validate_effect_proposal.await_count == 1
 
 
 @pytest.mark.parametrize("sdk", ["codex", "codex-inline", "claude"])
@@ -203,7 +217,7 @@ async def test_sdk_file_proposal_reaches_preflight_before_effect_validation(setu
         }, "file-call", {"signal": None})
         assert result["hookSpecificOutput"]["permissionDecision"] == "defer"
     assert not writer.denied
-    service.validate_native_sql_proposal.assert_awaited_once_with(
+    service.validate_effect_proposal.assert_awaited_once_with(
         authority.claimed, arguments, tool_use_id="file-call",
     )
 
@@ -237,7 +251,7 @@ async def test_expanded_file_is_not_allowed_to_bypass_inline_policy(setup, damag
         "schema": "registered schema", "boundary": "run boundary",
         "revision": "absent (lowercase)",
     }[damage] in error["message"]
-    service.validate_native_sql_proposal.assert_not_awaited()
+    service.validate_effect_proposal.assert_not_awaited()
 
 
 @pytest.mark.parametrize("raw,expected", [
@@ -255,14 +269,14 @@ async def test_proposal_file_parse_error_preserves_safe_diagnostic(setup, raw, e
     }, "invalid-call", "session")
     assert error["code"] == "invalid_request" and expected in error["message"]
     assert "synthetic-private" not in error["message"]
-    service.validate_native_sql_proposal.assert_not_awaited()
+    service.validate_effect_proposal.assert_not_awaited()
 
 
 @pytest.mark.parametrize("failure", [ValueError, SQLAlchemyError])
 async def test_preflight_returns_fixed_messages_without_raw_details(setup, failure):
     """SQL・parameter・driver 本文を診断へ反射しない。"""
     _, tool, _, _, arguments, service, validator = setup
-    service.validate_native_sql_proposal.side_effect = failure("private SQL password parameter")
+    service.validate_effect_proposal.side_effect = failure("private SQL password parameter")
     error = await validator.validate(tool.sdk_name, arguments, "call", "session")
     assert "private" not in json.dumps(error)
     assert error["code"] == ("invalid_request" if failure is ValueError else "unavailable")
@@ -274,7 +288,7 @@ async def test_preflight_returns_fixed_messages_without_raw_details(setup, failu
 async def test_preflight_does_not_swallow_execution_supervision(setup, failure):
     """取消・lease 失効を修正可能な業務エラーへ変換しない。"""
     _, tool, _, _, arguments, service, validator = setup
-    service.validate_native_sql_proposal.side_effect = failure()
+    service.validate_effect_proposal.side_effect = failure()
     with pytest.raises(failure):
         await validator.validate(tool.sdk_name, arguments, "call", "session")
 
@@ -288,6 +302,6 @@ async def test_revocation_while_validating_discards_the_diagnostic(setup):
         authority._active = False
         raise SqlObservationValidationError("private")
 
-    service.validate_native_sql_proposal.side_effect = revoked
+    service.validate_effect_proposal.side_effect = revoked
     with pytest.raises(LeaseValidationError):
         await validator.validate(tool.sdk_name, arguments, "call", "session")

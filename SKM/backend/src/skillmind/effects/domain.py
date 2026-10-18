@@ -284,6 +284,8 @@ class ClaimedEffectExecution:
     lease_token: str
     lease_expires_at: datetime
     attempt_no: int
+    # 応答本文を再注入せず、前回失敗の診断だけを回復に引き継ぐ。
+    previous_diagnostic: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)

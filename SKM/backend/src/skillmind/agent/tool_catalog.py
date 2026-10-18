@@ -578,7 +578,9 @@ def _change_propose_tool_definition(contracts: ContractStore) -> ToolDefinition:
             "expected_hash and optional evidence_refs for an exact prepared JSON proposal in "
             "workspace/ or output/. The Worker loads and validates that file "
             "before approval; it does not publish edited files automatically. "
-            "Read-back must validate the original business requirements. "
+            "Read-back follows the effect contract. For MCP operations, confirm the original "
+            "terminal receipt, including unsuccessful outcomes; evaluate business success "
+            "separately from the returned status and observations. "
             "Rollback text alone does not authorize compensation. "
             "The formats below describe supported effects, not permission; "
             "use only the capabilities and operations authorized in this Run.\n" + payload_guidance

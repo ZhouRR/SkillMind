@@ -294,12 +294,12 @@ class EffectOperationsMixin(_RunRepositoryBase):
         )
         return effect_id
 
-    async def validate_native_sql_proposal(
+    async def validate_effect_proposal(
         self,
         claimed: ClaimedRun,
         draft: ChangeProposalDraft,
     ) -> None:
-        """Agent を止める前に SQL 候補を検査する。提案・批准・外部操作は作成しない。"""
+        """Agent 停止前に候補を検査する。提案・批准・外部操作は作成しない。"""
         self._execution_features.require_effect(draft.capability_version, draft.operation)
         run, segment, attempt = await self._lock_claimed_execution(claimed)
         self._validate_claimed_lease(attempt, claimed, now=datetime.now(UTC))
@@ -1435,6 +1435,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
             lease_token=lease_token,
             lease_expires_at=lease_expires_at,
             attempt_no=next_attempt,
+            previous_diagnostic=deepcopy((execution.error_json or {}).get("diagnostic")),
         )
 
     async def authorize_effect_step(

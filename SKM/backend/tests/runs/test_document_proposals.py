@@ -235,6 +235,35 @@ async def test_approved_library_claim_preserves_null_integration_and_original_bi
     )
 
 
+async def test_retry_claim_carries_detached_prior_diagnostic_without_response_body(monkeypatch):
+    """前 attempt の診断を次の Provider へ渡し、本文や ORM の可変値を共有しない。"""
+    h = await document_proposal(monkeypatch)
+    h.execution.status, h.execution.attempt_no = "REQUESTED", 1
+    h.execution.tool_call_id, h.execution.started_at = None, None
+    diagnostic = {
+        "stage": "verify", "reason": "read_back_mismatch", "action_attempted": True,
+        "call_response_received": True, "read_back_attempts": 3,
+    }
+    h.execution.error_json = {"diagnostic": diagnostic, "response": {"body": "fixture"}}
+
+    async def scalars(statement):
+        """元提案と実行の取鎖結果のみを置換する。"""
+        entity = statement.column_descriptions[0]["entity"]
+        return SimpleNamespace(one=lambda: h.rows[entity])
+
+    h.session.scalars = scalars
+    claim = await h.repository.claim_effect_execution(
+        h.execution.id, worker_id="fixture-retry", lease_token=h.claimed.lease_token,
+        lease_token_hash_value=lease_token_hash(h.claimed.lease_token),
+        lease_seconds=60, max_attempts=3,
+    )
+    assert claim.attempt_no == 2
+    assert claim.previous_diagnostic == diagnostic
+    diagnostic["call_response_received"] = False
+    assert claim.previous_diagnostic["call_response_received"] is True
+    assert "fixture" not in repr(claim.previous_diagnostic)
+
+
 @pytest.mark.parametrize(
     "mutation", ["namespace", "binding", "snapshot", "artifact", "metadata", "hash", "credential"]
 )

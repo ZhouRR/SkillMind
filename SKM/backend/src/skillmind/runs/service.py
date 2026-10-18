@@ -837,15 +837,15 @@ class RunService:
                 request=interaction,
             )
 
-    async def validate_native_sql_proposal(
+    async def validate_effect_proposal(
         self,
         claimed: ClaimedRun,
         arguments: Mapping[str, Any],
         *,
         tool_use_id: str,
     ) -> None:
-        """SQL の提案誤りを停止前に返す。保存時にも同じ検査を再実施する。"""
-        if arguments.get("capability_version") != "database.execute/v1":
+        """SQL/MCP の提案誤りを停止前に返す。保存時にも同じ検査を再実施する。"""
+        if arguments.get("capability_version") not in {"database.execute/v1", "mcp.call/v1"}:
             return
         draft = parse_change_proposal_request(
             arguments,
@@ -857,7 +857,7 @@ class RunService:
                 session,
                 execution_features=self._execution_features,
                 document_library_target=self._document_library_target,
-            ).validate_native_sql_proposal(claimed, draft)
+            ).validate_effect_proposal(claimed, draft)
 
     async def begin_inline_effect(
         self, claimed: ClaimedRun, *, arguments: Mapping[str, Any],

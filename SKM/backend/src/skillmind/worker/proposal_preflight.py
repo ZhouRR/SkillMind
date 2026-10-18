@@ -1,4 +1,4 @@
-"""SDK に依存せず、SQL 提案の修正可能な誤りを defer より前に返す。"""
+"""SDK に依存せず、SQL/MCP 提案の修正可能な誤りを defer より前に返す。"""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from skillmind.agent.domain import RunContext
 from skillmind.agent.proposal_files import ProposalFileError, expand_proposal_file
+from skillmind.effects.mcp_call import McpReadBackProposalError
 from skillmind.effects.postgres_native import SQL_OBSERVATION_MESSAGE, SqlObservationValidationError
 from skillmind.runs.service import RunService
 from skillmind.worker.tool_authority import ToolExecutionAuthority
@@ -38,7 +39,7 @@ class ProposalPreflight:
         error = None
         try:
             expanded = await expand_proposal_file(self._context, arguments)
-            await self._service.validate_native_sql_proposal(
+            await self._service.validate_effect_proposal(
                 self._authority.claimed,
                 expanded,
                 tool_use_id=tool_use_id,
@@ -49,6 +50,12 @@ class ProposalPreflight:
                 "code": "invalid_request",
                 "message": SQL_OBSERVATION_MESSAGE,
                 "retryable": False,
+            }
+        except McpReadBackProposalError as receipt_error:
+            # 型付きの固定診断だけを返す。任意の ValueError/遠端本文は下の境界で伏せる。
+            error = {
+                "status": "error", "code": "invalid_request",
+                "message": str(receipt_error), "retryable": False,
             }
         except ProposalFileError as file_error:
             error = {

@@ -1,4 +1,4 @@
-"""SQL 提案の事前検査が原 lease・取消・共有 validator を通り、状態を書き換えない。"""
+"""SQL/MCP 提案の事前検査が原 lease・取消・共有 validator を通り、状態を書き換えない。"""
 
 from __future__ import annotations
 
@@ -14,15 +14,19 @@ from skillmind.effects.release import ExecutionFeatures
 from skillmind.runs.domain import LeaseValidationError, RunCancellationRequestedError
 from skillmind.runs.repository import RunRepository
 from skillmind.runs.service import RunService
+from tests.agent.test_mcp_receipt_contract import receipt_execution
 from tests.effects.test_native_resource_effects import sql_execution
 from tests.runs.test_execution_gates import execution_rows
 
 
 @pytest.mark.parametrize("mode", ["valid", "observation", "expired", "cancelled"])
-async def test_service_checks_proposal_under_original_lease_without_mutation(monkeypatch, mode):
+@pytest.mark.parametrize("kind", ["sql", "mcp"])
+async def test_service_checks_proposal_under_original_lease_without_mutation(
+    monkeypatch, mode, kind,
+):
     """実 Service/Repository でロック・期限・取消を検査し、保存処理を実行しない。"""
     claimed, run, segment, attempt = execution_rows()
-    execution = sql_execution()
+    execution = sql_execution() if kind == "sql" else receipt_execution()
     arguments = {
         "resource_key": "records",
         "capability_version": execution.capability_version,
@@ -48,7 +52,9 @@ async def test_service_checks_proposal_under_original_lease_without_mutation(mon
             transaction_active = False
 
     session.begin.side_effect = transaction
-    repository = RunRepository(session, execution_features=ExecutionFeatures(database_writes=True))
+    repository = RunRepository(
+        session, execution_features=ExecutionFeatures(database_writes=True, mcp_tools=True),
+    )
 
     async def lock(actual):
         """同じ Run/Attempt の lock 取得後にだけ検査へ進む。"""
@@ -66,8 +72,10 @@ async def test_service_checks_proposal_under_original_lease_without_mutation(mon
     if mode == "expired":
         attempt.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
     monkeypatch.setattr("skillmind.runs.service.RunRepository", lambda *args, **kwargs: repository)
-    service = RunService(MagicMock(return_value=session), database_writes_enabled=True)
-    call = service.validate_native_sql_proposal(claimed, arguments, tool_use_id="original-call")
+    service = RunService(
+        MagicMock(return_value=session), database_writes_enabled=True, mcp_tools_enabled=True,
+    )
+    call = service.validate_effect_proposal(claimed, arguments, tool_use_id="original-call")
     if mode == "valid":
         await call
         draft = validate.await_args.kwargs["draft"]
@@ -92,9 +100,9 @@ async def test_service_checks_proposal_under_original_lease_without_mutation(mon
 
 
 async def test_other_effects_do_not_open_extra_preflight_transaction():
-    """今回の SQL 修正で別 Provider の保存待ち・追加 DB 呼出しを増やさない。"""
+    """他 Provider の保存待ち・追加 DB 呼出しを増やさない。"""
     sessions = MagicMock()
-    await RunService(sessions).validate_native_sql_proposal(
+    await RunService(sessions).validate_effect_proposal(
         execution_rows()[0],
         {"capability_version": "document.write/v1"},
         tool_use_id="document-call",

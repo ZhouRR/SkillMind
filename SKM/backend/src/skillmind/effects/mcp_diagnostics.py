@@ -20,7 +20,7 @@ REASONS = frozenset({
     "invalid_arguments",
     "invalid_response", "read_back_path_missing", "read_back_mismatch", "desktop_busy",
     "operation_identity_unavailable", "authority_revoked", "invalid_contract",
-    "output_schema_conflict",
+    "output_schema_conflict", "receipt_status_too_narrow",
 })
 
 
@@ -81,6 +81,11 @@ def diagnostic_message(value: Any) -> str:
     message = f" MCP stage={item['stage']}; reason={item['reason']}."
     if "check_index" in item:
         message += f" Read-back check {item['check_index'] + 1}."
+    if item["reason"] == "receipt_status_too_narrow":
+        message += (
+            " Use one_of for all documented terminal receipt statuses, including "
+            "unsuccessful outcomes, and exclude pending states."
+        )
     if "diagnostic_id" in item:
         message += f" Diagnostic ID: {item['diagnostic_id']}."
     if "local_diagnostic_id" in item:

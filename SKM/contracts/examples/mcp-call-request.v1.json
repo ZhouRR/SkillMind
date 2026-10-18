@@ -1,18 +1,30 @@
 {
   "name": "open_application",
   "arguments": {
-    "appId": "sample"
+    "appId": "sample",
+    "requestId": "${effect_id}"
   },
   "catalog_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
   "read_back": {
-    "name": "inspect_window",
+    "name": "get_step_status",
     "arguments": {
-      "appId": "sample"
+      "requestId": "${effect_id}"
     },
     "checks": [
       {
+        "path": "/requestId",
+        "equals": "${effect_id}"
+      },
+      {
         "path": "/status",
-        "equals": "READY"
+        "one_of": [
+          "READY",
+          "COMPLETED",
+          "ERROR",
+          "TIMEOUT",
+          "CANCELLED",
+          "ABORTED"
+        ]
       }
     ]
   }
