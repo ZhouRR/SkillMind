@@ -125,6 +125,7 @@ async def test_download_preserves_original_bytes_and_both_mcp_response_modes(
         }
     result = await h.provider.execute(h.context, h.arguments)
     assert len(h.calls) == 1
+    assert h.calls[0].method == "GET"
     assert str(h.calls[0].url) == "https://mcp.example.test" + download_path
     assert h.calls[0].url.raw_path == download_path.encode("ascii")
     file = result.response["file"]

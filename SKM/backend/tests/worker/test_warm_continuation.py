@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+
 from skillmind.core.settings import Settings
 from skillmind.worker.executor import AgentRunExecutor
 from skillmind.worker.settings import execute_run
@@ -69,7 +70,7 @@ def fixture(count=2, status="APPLIED", wall=30):
     return context, claims
 
 
-@pytest.mark.parametrize("wall", [30, 3600])
+@pytest.mark.parametrize("wall", [30, 28_800])
 async def test_warm_job_claims_each_successor_with_exact_previous_identity(wall):
     """前の保存済み Effect と一致する後継だけを repository に要求する。"""
     context, claims = fixture(wall=wall)
@@ -99,7 +100,7 @@ async def test_warm_job_has_five_attempt_bound_and_respects_remaining_deadline()
     await execute_run(context, str(claims[0].run_id))
     assert len(context["run_executor"].calls) == 5
     assert context["run_service"].claim_run.await_count == 5
-    context, claims = fixture(wall=5000)
+    context, claims = fixture(wall=36_000)
     await execute_run(context, str(claims[0].run_id))
     assert context["run_executor"].calls == claims[:1]
     assert context["run_service"].claim_run.await_count == 1

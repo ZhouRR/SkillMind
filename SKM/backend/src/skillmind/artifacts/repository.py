@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from urllib.parse import quote
 from uuid import UUID
@@ -163,6 +164,9 @@ def _metadata(
     if row["capability_version"] == "document.convert/v1":
         _validate_conversion_row(row, value, response)
         return value
+    if row["capability_version"] == "workspace.edit/v1":
+        _validate_edit_row(row, value, response)
+        return value
     if (
         row["capability_version"] != "workspace.write/v2" or row["provider"] != "workspace"
         or row["tool_name"] != "mcp__skillmind__workspace_write_v2"
@@ -181,6 +185,46 @@ def _metadata(
     ):
         raise _invalid()
     return value
+
+
+def _validate_edit_row(row: RowMapping, value: ArtifactMetadata, response: dict[str, Any]) -> None:
+    """編集時の出典と操作を保存回執に照合し、現在の可変 file は読み直さない。"""
+
+    from skillmind.agent.materialization_storage import MaterializationError, relative_parts
+
+    locator, metadata = row["source_locator"], row["metadata_json"]
+    if (
+        row["provider"] != "workspace" or row["integration_id"] is not None
+        or row["tool_name"] != "mcp__skillmind__workspace_edit_v1"
+        or row["evidence_type"] != "workspace-edit" or row["snapshot_uri"] is not None
+        or row["source_uri"] != f"workspace://runs/{value.run_id}/{quote(value.path, safe='/')}"
+        or not isinstance(locator, dict)
+        or set(locator) != {"path", "source_path", "source_hash"}
+        or locator.get("path") != value.path
+        or not isinstance(locator.get("source_path"), str)
+        or len(locator["source_path"]) > 4096
+        or not isinstance(locator.get("source_hash"), str)
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", locator["source_hash"]) is None
+        or not isinstance(metadata, dict)
+        or set(metadata) != {"scope", "operation", "read_only"}
+        or metadata.get("scope") != "run-workspace" or metadata.get("read_only") is not False
+        or metadata.get("operation") not in ("copy", "publish", "append", "edit")
+        or response.get("provider") != "workspace" or response.get("path") != value.path
+        or response.get("content_hash") != value.checksum
+        or type(response.get("bytes_written")) is not int
+        or response["bytes_written"] != value.size_bytes
+        or type(response.get("created")) is not bool
+        or response.get("evidence_refs") != [value.evidence_ref]
+        or (metadata["operation"] in ("copy", "publish")
+            and locator["source_hash"] != value.checksum)
+        or (metadata["operation"] == "publish" and locator["source_path"] != value.path)
+    ):
+        raise _invalid()
+    try:
+        if relative_parts(locator["source_path"])[0] not in {"input", "workspace", "output"}:
+            raise _invalid()
+    except MaterializationError as error:
+        raise _invalid() from error
 
 
 def _validate_conversion_row(
@@ -254,7 +298,9 @@ def _invalid() -> ArtifactIntegrityError:
     return ArtifactIntegrityError("Artifact does not match its saved identity or content")
 
 
-def _validate_export_row(row: RowMapping, value: ArtifactMetadata, response: dict[str, Any]) -> None:
+def _validate_export_row(
+    row: RowMapping, value: ArtifactMetadata, response: dict[str, Any],
+) -> None:
     """監査 exporter の公開回执を元 Evidence/Tool に照合する。外部 I/O はしない。"""
     metadata, locator = row["metadata_json"], row["source_locator"]
     if (

@@ -78,7 +78,8 @@ def _case(count=3):
     return context, source, observations
 
 
-async def test_gateway_pages_continue_after_no_matches_and_replay_saved_observations():
+@pytest.mark.parametrize("extensions", [["xlsx"], [".xlsx"]])
+async def test_gateway_pages_continue_after_no_matches_and_replay_saved_observations(extensions):
     """実公開契約・監査 port の順序を通し、成功済み page の再呼出しは HEAD しない。"""
     context, source, _ = _case()
     registry = ToolRegistry((document_list_tool_definition(ContractStore(CONTRACTS), source),))
@@ -92,6 +93,7 @@ async def test_gateway_pages_continue_after_no_matches_and_replay_saved_observat
     session_id = str(uuid4())
     arguments = {
         "directory": "specs/",
+        "extensions": extensions,
         "limit": 1,
         "purpose": "Observe selected specifications",
         "modified_on": {
@@ -126,7 +128,7 @@ async def test_gateway_pages_continue_after_no_matches_and_replay_saved_observat
         assert saved[0].draft.evidence_type == "document_listing"
         assert saved[1].draft.content_hash == entry["observation_checksum"]
         assert saved[1].evidence_ref == response["evidence_refs"][entry["evidence_index"]]
-        arguments = {**arguments, "cursor": response["next_cursor"]}
+        arguments = {**arguments, "cursor": response["next_cursor"], "extensions": [".xlsx"]}
     assert pages[0]["next_cursor"] is not None
     assert pages[-1]["next_cursor"] is None
     assert source.inspect.await_count == 3

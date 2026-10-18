@@ -22,8 +22,10 @@ from skillmind.agent.tool_gateway import (
     ToolRegistry,
 )
 from skillmind.agent.workspace import WorkspaceManager
+from skillmind.agent.workspace_edit import WorkspaceEditProvider
 from skillmind.agent.workspace_provider import WorkspaceWriteProvider
 from skillmind.artifacts.domain import ArtifactDraft, ArtifactMetadata
+from skillmind.core.hashing import sha256_hex
 from skillmind.db.models import Evidence, ToolCall
 from skillmind.runs.domain import LeaseValidationError, RunCancellationRequestedError
 from tests.agent.test_gateway_invocation_ownership import OwnershipAuditWriter, _payload
@@ -237,11 +239,14 @@ async def test_commit_unknown_returns_no_ref_and_never_reruns_provider(tmp_path:
 
 
 async def _publication(
-    database: AuditDatabase, tmp_path: Path
+    database: AuditDatabase, tmp_path: Path, *, operation: str | None = None,
+    path: str = "output/report.txt", use_id: str = "artifact-db-original",
 ) -> tuple[dict[str, Any], EvidenceRecord]:
     """実 Producer の出力を、原 claim/ToolInvocation と採番済み response に結び付ける。"""
 
-    context = workspace_context(tmp_path, "workspace.write/v2")
+    context = workspace_context(
+        tmp_path, "workspace.edit/v1" if operation else "workspace.write/v2",
+    )
     context = replace(
         context,
         run_id=database.claimed.run_id,
@@ -249,17 +254,30 @@ async def _publication(
         project_id=database.claimed.project_id,
         user_id=database.claimed.actor_id,
     )
-    arguments = {"path": "output/report.txt", "content": "Report 日本語", "purpose": "Produce"}
+    arguments: dict[str, Any] = {"path": path, "content": "Report 日本語", "purpose": "Produce"}
+    if operation:
+        original = {"append": "Report ", "edit": "Report pending"}.get(operation, "Report 日本語")
+        source = path if operation == "publish" else "workspace/source.txt"
+        (context.workspace.root / source).write_bytes(original.encode())
+        arguments = {
+            "operation": operation, "source_path": source, "path": path,
+            "expected_hash": "sha256:" + sha256_hex(original), "purpose": "Produce",
+        }
+        if operation == "append":
+            arguments["text"] = "日本語"
+        elif operation == "edit":
+            arguments["edits"] = [{"old": "pending", "new": "日本語"}]
     database.invocation = ToolInvocation(
         run_id=context.run_id,
         run_attempt_id=context.run_attempt_id,
         agent_session_id=uuid4(),
-        sdk_tool_use_id="artifact-db-original",
+        sdk_tool_use_id=use_id,
         tool=context.tool,
         arguments=arguments,
         request_fingerprint=invocation_fingerprint(context.tool.sdk_name, arguments),
     )
-    produced = await WorkspaceWriteProvider().execute(context, arguments)
+    provider = WorkspaceEditProvider() if operation else WorkspaceWriteProvider()
+    produced = await provider.execute(context, arguments)
     record = EvidenceRecord(f"ev_{uuid4().hex}", produced.evidence[0], f"art_{uuid4().hex}")
     return {
         **produced.response,

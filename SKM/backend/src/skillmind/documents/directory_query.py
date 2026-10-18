@@ -72,7 +72,7 @@ def parse_directory_query(arguments: Mapping[str, Any]) -> DirectoryQuery:
     if type(recursive) is not bool:
         raise ValueError("Recursive selection is invalid")
     extensions = _strings(arguments.get("extensions", []), 16)
-    if any(re.fullmatch(r"\.[a-zA-Z0-9]{1,12}", item) is None for item in extensions):
+    if any(re.fullmatch(r"\.?[a-zA-Z0-9]{1,12}", item) is None for item in extensions):
         raise ValueError("Document extensions are invalid")
     excluded = tuple(
         _directory(item) for item in _strings(arguments.get("exclude_directories", []), 16)
@@ -88,7 +88,7 @@ def parse_directory_query(arguments: Mapping[str, Any]) -> DirectoryQuery:
     parameters: dict[str, Any] = {
         "directory": directory,
         "recursive": recursive,
-        "extensions": sorted({item.lower() for item in extensions}),
+        "extensions": sorted({"." + item.removeprefix(".").lower() for item in extensions}),
         "exclude_directories": sorted(set(excluded)),
         "exclude_name_prefixes": sorted(set(prefixes)),
         "modified_on": None,

@@ -191,11 +191,8 @@ class McpDownloadProvider:
             endpoint = urlsplit(bound.integration.config["server_url"])
             await self._same_bound(context, bound, credential)
             response = await self._source.request(
-                {
-                    "base_url": f"{endpoint.scheme}://{endpoint.netloc}",
-                    "auth_mode": "bearer" if credential else "none",
-                },
-                {"paths": [path], "methods": ["GET"]},
+                {"auth_mode": "bearer" if credential else "none"},
+                {"base_urls": [f"{endpoint.scheme}://{endpoint.netloc}"]},
                 {"path": path},
                 credential,
             )

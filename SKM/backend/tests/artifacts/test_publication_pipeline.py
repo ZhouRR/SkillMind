@@ -149,13 +149,14 @@ async def _result(database: ArtifactDatabase, reference: str) -> Any:
     )
 
 
+@pytest.mark.parametrize("operation", [None, "copy", "append", "edit", "publish"])
 async def test_writer_repository_result_checkpoint_and_replay_share_original_bytes(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, operation: str | None,
 ) -> None:
     """quota も実 repository で確認し、同じ commit 済み byte を全 read consumer が検証する。"""
 
     database = ArtifactDatabase(monkeypatch)
-    response, record = await _publication(database, tmp_path)
+    response, record = await _publication(database, tmp_path, operation=operation)
     lease = await database.start()
     returned = await database.writer.complete(
         lease, result=response, evidence=(record,), duration_ms=1,
@@ -190,14 +191,15 @@ async def test_writer_repository_result_checkpoint_and_replay_share_original_byt
     assert await repository.verified_refs(uuid4(), frozenset({record.artifact_ref})) == frozenset()
 
 
-@pytest.mark.parametrize("corruption", ["bytes", "tool", "attempt", "receipt"])
+@pytest.mark.parametrize("operation", [None, "copy"])
+@pytest.mark.parametrize("corruption", ["bytes", "tool", "attempt", "receipt", "metadata"])
 async def test_all_consumers_reject_corruption_without_repair_or_provider_replay(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, corruption: str,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, corruption: str, operation: str | None,
 ) -> None:
     """一度確定した行の損傷を実 consumer 全てで拒否し、原 hash/result を書き換えない。"""
 
     database = ArtifactDatabase(monkeypatch)
-    response, record = await _publication(database, tmp_path)
+    response, record = await _publication(database, tmp_path, operation=operation)
     lease = await database.start()
     await database.writer.complete(lease, result=response, evidence=(record,), duration_ms=1)
     evidence, tool = database.rows(Evidence)[0], database.rows(ToolCall)[0]
@@ -208,6 +210,8 @@ async def test_all_consumers_reject_corruption_without_repair_or_provider_replay
         tool.provider = "foreign"
     elif corruption == "attempt":
         database.attempts.clear()
+    elif corruption == "metadata":
+        evidence.metadata_json = {**evidence.metadata_json, "read_only": True}
     else:
         tool.result_json = {**response, "artifact_refs": ["art_foreign"]}
     before = deepcopy(tool.result_json), evidence.content_hash
@@ -259,13 +263,14 @@ async def test_real_gateway_replay_does_not_repeat_provider_and_overwrite_keeps_
     assert len(database.rows(Evidence)) == len(database.rows(ToolCall)) == 2
 
 
+@pytest.mark.parametrize("operation", [None, "copy"])
 async def test_unknown_commit_uses_original_published_bytes_without_another_write(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, operation: str | None,
 ) -> None:
     """commit 後の応答喪失でも保存事実を原 key から読み、欠落や再実行へ変換しない。"""
 
     database = ArtifactDatabase(monkeypatch)
-    response, record = await _publication(database, tmp_path)
+    response, record = await _publication(database, tmp_path, operation=operation)
     lease = await database.start()
     database.commit_failure = "after"
     with pytest.raises(ConnectionError):
@@ -277,3 +282,46 @@ async def test_unknown_commit_uses_original_published_bytes_without_another_writ
     result = await _result(database, record.artifact_ref)
     assert result.artifact_refs == frozenset({record.artifact_ref})
     assert len(database.rows(Evidence)) == 1
+
+
+async def test_edit_publications_allow_following_artifact_and_verify_replay_bytes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """先行 copy の quota 照合で後続公開を壊さず、再送時も原 snapshot の損傷を拒否する。"""
+    database = ArtifactDatabase(monkeypatch)
+    for index in range(2):
+        response, record = await _publication(
+            database, tmp_path, operation="copy", path=f"output/report-{index}.txt",
+            use_id=f"edit-{index}",
+        )
+        await database.writer.complete(
+            await database.start(), result=response, evidence=(record,), duration_ms=1,
+        )
+    assert len(database.rows(Evidence)) == len(database.rows(ToolCall)) == 2
+    evidence = database.rows(Evidence)[-1]
+    evidence.artifact_bytes = b"x" * evidence.artifact_size
+    with pytest.raises(ArtifactIntegrityError):
+        await database.writer.verify_dispatch(await database.start())
+
+
+@pytest.mark.parametrize("provenance", [
+    {"source_path": "workspace/../foreign.txt"},
+    {"source_path": "foreign/report.txt"},
+    {"source_hash": "sha256:" + "0" * 64},
+])
+async def test_edit_source_provenance_is_checked_without_reading_current_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, provenance: dict[str, str],
+) -> None:
+    """copy の出典不整合を実 repository で拒否し、現在 file から修復しない。"""
+    database = ArtifactDatabase(monkeypatch)
+    response, record = await _publication(database, tmp_path, operation="copy")
+    await database.writer.complete(
+        await database.start(), result=response, evidence=(record,), duration_ms=1,
+    )
+    evidence = database.rows(Evidence)[0]
+    evidence.source_locator = {**evidence.source_locator, **provenance}
+    assert record.artifact_ref is not None
+    with pytest.raises(ArtifactIntegrityError):
+        await ArtifactRepository(database()).verified_refs(
+            database.run.id, frozenset({record.artifact_ref}),
+        )

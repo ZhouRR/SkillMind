@@ -11,6 +11,21 @@ from skillmind.documents.directory_query import parse_directory_query
 from tests.documents.fakes import document_content, document_snapshot
 
 
+@pytest.mark.parametrize("extensions", [["md"], [".md"], ["MD", ".md"]])
+def test_extensions_use_one_dotted_form_for_filtering(extensions):
+    """点の有無と大小文字を統一し、拡張子以外の末尾一致を含めない。"""
+    docs = document_snapshot(
+        uuid4(),
+        [
+            document_content(b"x", name=name)
+            for name in ("a.md", "b.MD", "readmemd", "a.md.bak")
+        ],
+    ).documents
+    query = parse_directory_query({"directory": "", "extensions": extensions})
+    assert query.parameters["extensions"] == [".md"]
+    assert [item.name for item in query.candidates(docs)] == ["a.md", "b.MD"]
+
+
 def test_directory_exclusions_and_recursion_do_not_match_neighbor_prefixes():
     """再帰選択は directory の区切りを守り、出力と一時ファイルだけを除外する。"""
     paths = [
@@ -101,7 +116,9 @@ def test_japan_midnight_and_inclusive_cutoff_are_distinct_boundaries():
         {"directory": ".skillmind"},
         {"directory": "specs\n"},
         {"recursive": 1},
-        {"extensions": ["xlsx"]},
+        {"extensions": ["..xlsx"]},
+        {"extensions": ["."]},
+        {"extensions": ["*.md"]},
         {"extensions": [".xls", ".xls"]},
         {"exclude_directories": [""]},
         {"exclude_name_prefixes": ["a/b"]},

@@ -361,7 +361,7 @@ async def test_create_task_run_freezes_generic_snapshot(with_output: bool) -> No
             }
         },
     )
-    assert command.limits_snapshot_json["wall_timeout_seconds"] == 3600
+    assert command.limits_snapshot_json["wall_timeout_seconds"] == 28_800
     assert command.limits_snapshot_json["max_turns"] == 1000
     assert command.limits_snapshot_json["max_output_bytes"] == 104_857_600
     assert command.skill_snapshots_json == (resolved.skill_snapshot,)

@@ -96,7 +96,7 @@ M0_DENIED_BUILTIN_TOOLS = tuple(sorted(DENIED_BUILTIN_TOOLS))
 
 # M0 の実行 limit は Manifest ではなく platform policy として固定する。
 M0_LIMITS_SNAPSHOT = {
-    "wall_timeout_seconds": 3600,
+    "wall_timeout_seconds": 8 * 60 * 60,
     "max_turns": 1000,
     "max_output_bytes": 100 * 1024 * 1024,
 }

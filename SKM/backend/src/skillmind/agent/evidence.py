@@ -258,7 +258,8 @@ class PostgresToolAuditWriter:
                 ):
                     raise ValueError("Tool replay does not match its saved result")
                 if invocation.tool.capability in {
-                    "workspace.write/v2", "audit.export/v1", "artifact.append/v1",
+                    "workspace.write/v2", "workspace.edit/v1",
+                    "audit.export/v1", "artifact.append/v1",
                 } or (
                     invocation.tool.capability == "document.convert/v1"
                     and invocation.arguments.get("publish_artifact") is True

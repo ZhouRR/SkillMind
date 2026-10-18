@@ -24,7 +24,7 @@
       "uniqueItems": true,
       "items": {
         "type": "string",
-        "pattern": "^\\.[a-zA-Z0-9]{1,12}$"
+        "pattern": "^\\.?[a-zA-Z0-9]{1,12}$"
       }
     },
     "exclude_directories": {
