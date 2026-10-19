@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import replace
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 
@@ -118,6 +119,65 @@ async def test_single_terminal_check_does_not_confirm_incomplete_uploads(monkeyp
     assert [call.args[2] for call in source.call.await_args_list] == [
         "submit_job", "lookup_job", "lookup_job", "lookup_job",
     ]
+    leases.confirm.assert_not_awaited()
+
+
+@pytest.mark.parametrize("status", ["PREPARED", "PARTIAL"])
+async def test_documented_partial_receipt_can_be_returned_and_explicitly_continued(status):
+    """終了した部分保存を Agent へ返し、別承認の続行でも原リモート ID を維持する。"""
+    run = receipt_execution(
+        status_check={"path": "/status", "one_of": ["PREPARED", "PARTIAL", "UPLOADED"]},
+        output_schema=UPLOAD_OUTPUT,
+    )
+    validate_mcp_proposal(proposal(run), run.integration_scope, run.integration_config)
+    original_id = str(run.effect_execution_id)
+    source, leases = AsyncMock(), AsyncMock()
+    source.call.return_value = encoded({"requestId": original_id, "status": status})
+    provider = McpCallProvider(source=source, leases=leases, authorize=AsyncMock())
+    partial = await provider.apply(run, credential="fixture-token")
+    assert partial.after.content["read_back"]["status"] == status
+    assert partial.verification["business_verdict"] == "NOT_EVALUATED"
+    # Provider は自動続行しない。Agent の新規提案が同じ原 ID と対象を明示する。
+    assert source.call.await_count == 2
+    continuation = replace(run, effect_execution_id=uuid4())
+    changes = deepcopy(continuation.changes)
+    value = changes[0]["value"]
+    value["arguments"]["requestId"] = original_id
+    value["read_back"]["arguments"]["requestId"] = original_id
+    value["read_back"]["checks"][0]["equals"] = original_id
+    continuation = replace(continuation, changes=changes)
+    validate_mcp_proposal(
+        proposal(continuation), continuation.integration_scope, continuation.integration_config,
+    )
+    source.call.return_value = encoded({"requestId": original_id, "status": "UPLOADED"})
+    completed = await provider.apply(continuation, credential="fixture-token")
+    assert completed.after.content["read_back"]["status"] == "UPLOADED"
+    assert all(call.args[3] == {"requestId": original_id}
+               for call in source.call.await_args_list)
+    assert [call.args[2] for call in source.call.await_args_list] == [
+        "submit_job", "lookup_job", "submit_job", "lookup_job",
+    ]
+    assert leases.confirm.await_args_list[0].args[2] == run.effect_execution_id
+    assert leases.confirm.await_args_list[1].args[2] == continuation.effect_execution_id
+
+
+async def test_partial_receipt_contract_still_rejects_unknown_upload_outcomes(monkeypatch):
+    """部分完了の受取を許可しても、結果不明を確認済みにせず送信を繰り返さない。"""
+    monkeypatch.setattr("skillmind.effects.mcp_provider.asyncio.sleep", AsyncMock())
+    run = receipt_execution(
+        status_check={"path": "/status", "one_of": ["PREPARED", "PARTIAL", "UPLOADED"]},
+        output_schema=UPLOAD_OUTPUT,
+    )
+    source, leases = AsyncMock(), AsyncMock()
+    source.call.return_value = encoded({
+        "requestId": str(run.effect_execution_id), "status": "OUTCOME_UNKNOWN",
+    })
+    with pytest.raises(McpEffectFailure) as error:
+        await McpCallProvider(source=source, leases=leases, authorize=AsyncMock()).apply(
+            run, credential="fixture-token",
+        )
+    assert error.value.diagnostic["reason"] == "read_back_mismatch"
+    assert [call.args[2] for call in source.call.await_args_list].count("submit_job") == 1
     leases.confirm.assert_not_awaited()
 
 

@@ -81,6 +81,10 @@ def test_mcp_receipt_guidance_reaches_the_sdk_without_requiring_business_success
     assert "Read-back must validate the original business requirements" not in published
     assert "not business success" in published
     assert "all documented terminal outcomes" in published
+    assert "documented resumable partial outcomes" in published
+    assert "same original ID and target set" in published
+    assert "Reuse that confirmed ID as a literal" in published
+    assert "Never treat OUTCOME_UNKNOWN as confirmed completion" in published
     assert "exclude pending states" in published
     assert '"one_of":["COMPLETED","ERROR","TIMEOUT","CANCELLED"]' in published
 
