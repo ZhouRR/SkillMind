@@ -110,7 +110,6 @@ def call_payload(
             raise ValueError("MCP cancellation must read back the original operation identity")
     validate_read_back_schema(
         reader_tool["output_schema"], resolve_effect_id(checks, sample_id),
-        operation_receipt=has_operation_identity(payload),
     )
     validate_arguments(name, payload)
     return payload
@@ -171,14 +170,6 @@ def validate_mcp_proposal(
             config=config,
         )
     except McpReadBackError as error:
-        if error.reason == "receipt_status_too_narrow":
-            raise McpReadBackProposalError(
-                f"MCP read_back check {error.check_index + 1} accepts only one receipt status "
-                "although the reader outputSchema permits multiple statuses. Use one_of with "
-                "all documented terminal states, including unsuccessful outcomes; exclude "
-                "pending states. Read-back confirms the original receipt, not business success. "
-                "This validation sends no operation."
-            ) from None
         raise McpReadBackProposalError(
             f"MCP read_back check {error.check_index + 1} contradicts the reader outputSchema. "
             "Use fields and values from the actual output contract or an authorized observation; "

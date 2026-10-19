@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
 from typing import Any
 
-from skillmind.integrations.mcp_tools import digest, validate_tool_value
+from skillmind.integrations.mcp_tools import validate_tool_value
 
 
 class McpReadBackError(ValueError):
@@ -18,10 +17,8 @@ class McpReadBackError(ValueError):
         super().__init__(f"MCP read_back check {check_index + 1}: {reason}")
 
 
-def validate_read_back_schema(
-    schema: Any, checks: list[dict[str, Any]], *, operation_receipt: bool = False
-) -> None:
-    """値の矛盾と、原操作回執を一状態に限定する既知の enum 条件を送信前に拒否する。"""
+def validate_read_back_schema(schema: Any, checks: list[dict[str, Any]]) -> None:
+    """出力型との矛盾だけを拒否し、enum の件数から終端状態を推測しない。"""
     if schema is None:
         # 未宣言は一致の証明ではないが、既存の観測ベースの回読を禁止しない。
         return
@@ -32,50 +29,6 @@ def validate_read_back_schema(
         values = check["one_of"] if "one_of" in check else [check["equals"]]
         if not all(_possible(schema, parts, value) for value in values):
             raise McpReadBackError("output_schema_conflict", index)
-        accepted = {digest(value) for value in values}
-        if (
-            operation_receipt
-            and parts[-1].casefold() == "status"
-            and len(accepted) == 1
-            and any(
-                digest(value) not in accepted and _possible(schema, parts, value)
-                for value in _enum_candidates(schema, parts)
-            )
-        ):
-            # enum は終端性を定義しない。具体的な成功/失敗値を推測せず、
-            # 契約に複数状態がある原回執を単一状態だけで受理する条件を修正させる。
-            raise McpReadBackError("receipt_status_too_narrow", index)
-
-
-def _enum_candidates(schema: Any, parts: list[str]) -> Iterator[Any]:
-    """単純な property/item の宣言値だけを使い、複合条件の充足可能性は推測しない。"""
-    if not isinstance(schema, dict):
-        return
-    if any(key in schema for key in (
-        "$ref", "allOf", "anyOf", "oneOf", "not", "if", "then", "else",
-        "dependentSchemas", "contains", "unevaluatedProperties", "unevaluatedItems",
-    )):
-        return
-    if not parts:
-        yield from schema.get("enum", [])
-        if "const" in schema:
-            yield schema["const"]
-        return
-    if "const" in schema or "enum" in schema:
-        return
-    key, rest = parts[0], parts[1:]
-    yield from _enum_candidates(schema.get("properties", {}).get(key), rest)
-    if re.fullmatch(r"0|[1-9][0-9]*", key):
-        index = int(key)
-        prefix = schema.get("prefixItems", [])
-        items = schema.get("items", True)
-        child = (
-            prefix[index] if isinstance(prefix, list) and index < len(prefix)
-            else items[index] if isinstance(items, list) and index < len(items)
-            else schema.get("additionalItems", True) if isinstance(items, list)
-            else items
-        )
-        yield from _enum_candidates(child, rest)
 
 
 def _possible(schema: Any, parts: list[str], value: Any) -> bool:

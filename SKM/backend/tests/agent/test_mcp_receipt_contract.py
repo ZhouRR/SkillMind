@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from skillmind.effects.domain import ChangeProposalValidationError
 from skillmind.effects.mcp_call import validate_mcp_proposal
 from skillmind.effects.mcp_diagnostics import McpEffectFailure
 from skillmind.effects.mcp_provider import McpCallProvider
@@ -27,9 +26,20 @@ OUTPUT = {
         "status": {"type": "string", "enum": ["QUEUED", *TERMINAL]},
     },
 }
+UPLOAD_OUTPUT = {
+    **OUTPUT,
+    "properties": {
+        "requestId": {"type": "string"},
+        "status": {
+            "type": "string",
+            "enum": ["PREPARED", "PARTIAL", "OUTCOME_UNKNOWN", "UPLOADED"],
+            "description": "Only UPLOADED confirms completion; other states require recovery.",
+        },
+    },
+}
 
 
-def receipt_execution(*, status_check=None, attempt=1, previous_error=None):
+def receipt_execution(*, status_check=None, output_schema=OUTPUT, attempt=1, previous_error=None):
     """特定 Runner 名に依存しない、原 ID と終端集合を持つ操作提案を用意する。"""
     run = execution(attempt=attempt)
     config = deepcopy(run.integration_config)
@@ -37,7 +47,7 @@ def receipt_execution(*, status_check=None, attempt=1, previous_error=None):
         if tool["name"] == "execute_step":
             tool["name"] = "submit_job"
         elif tool["name"] == "get_step_status":
-            tool["name"], tool["output_schema"] = "lookup_job", OUTPUT
+            tool["name"], tool["output_schema"] = "lookup_job", output_schema
     config["tool_permissions"]["submit_job"] = config["tool_permissions"].pop("execute_step")
     config["tool_permissions"]["lookup_job"] = config["tool_permissions"].pop("get_step_status")
     args = {"requestId": "${effect_id}"}
@@ -69,32 +79,46 @@ def proposal(run):
 
 
 @pytest.mark.parametrize("check", [
-    {"path": "/status", "equals": "DONE"},
-    {"path": "/status", "one_of": ["DONE"]},
-    {"path": "/status", "one_of": ["DONE", "DONE"]},
+    {"path": "/status", "equals": "UPLOADED"},
+    {"path": "/status", "one_of": ["UPLOADED"]},
+    {"path": "/status", "one_of": ["UPLOADED", "UPLOADED"]},
 ])
-async def test_single_receipt_status_is_correctable_before_any_operation(check):
-    """提案と実行の両入口で過狭な条件を拒否し、未知の操作を作らない。"""
-    run = receipt_execution(status_check=check)
-    with pytest.raises(ChangeProposalValidationError, match="all documented terminal states"):
-        validate_mcp_proposal(proposal(run), run.integration_scope, run.integration_config)
+async def test_single_documented_terminal_state_can_be_proposed_and_confirmed(check):
+    """他の enum 値が未完了でも、唯一の保存終端を原 ID で照合して適用できる。"""
+    run = receipt_execution(status_check=check, output_schema=UPLOAD_OUTPUT)
+    validate_mcp_proposal(proposal(run), run.integration_scope, run.integration_config)
     source, leases = AsyncMock(), AsyncMock()
+    receipt = {"requestId": str(run.effect_execution_id), "status": "UPLOADED"}
+    source.call.return_value = encoded(receipt)
+    result = await McpCallProvider(source=source, leases=leases, authorize=AsyncMock()).apply(
+        run, credential="fixture-token")
+    assert result.after.content["read_back"] == receipt
+    assert result.verification["operation_status"] == "READ_BACK_CONFIRMED"
+    assert result.verification["business_verdict"] == "NOT_EVALUATED"
+    assert [call.args[2] for call in source.call.await_args_list] == ["submit_job", "lookup_job"]
+    leases.confirm.assert_awaited_once()
+
+
+@pytest.mark.parametrize("status", ["PREPARED", "PARTIAL", "OUTCOME_UNKNOWN"])
+async def test_single_terminal_check_does_not_confirm_incomplete_uploads(monkeypatch, status):
+    """単一終端の許可で未完了を成功扱いせず、回読だけを再試行する。"""
+    monkeypatch.setattr("skillmind.effects.mcp_provider.asyncio.sleep", AsyncMock())
+    run = receipt_execution(
+        status_check={"path": "/status", "equals": "UPLOADED"}, output_schema=UPLOAD_OUTPUT,
+    )
+    source, leases = AsyncMock(), AsyncMock()
+    source.call.return_value = encoded({
+        "requestId": str(run.effect_execution_id), "status": status,
+    })
     with pytest.raises(McpEffectFailure) as error:
         await McpCallProvider(source=source, leases=leases, authorize=AsyncMock()).apply(
             run, credential="fixture-token")
-    failure = error.value
-    assert failure.code == "mcp_request_not_sent" and not failure.retryable
-    assert failure.diagnostic["reason"] == "receipt_status_too_narrow"
-    assert failure.diagnostic["check_index"] == 1
-    assert failure.diagnostic["action_attempted"] is False
-    assert not failure.observations
-    source.call.assert_not_awaited()
-    leases.acquire.assert_not_awaited()
-    record = effect_failure_record(
-        capability=run.capability_version, attempt_no=1, code=failure.code,
-        retryable=failure.retryable, previous=None, diagnostic=failure.diagnostic,
-    )
-    assert record["code"] == "mcp_request_not_sent"
+    assert error.value.diagnostic["reason"] == "read_back_mismatch"
+    assert error.value.diagnostic["call_response_received"] is True
+    assert [call.args[2] for call in source.call.await_args_list] == [
+        "submit_job", "lookup_job", "lookup_job", "lookup_job",
+    ]
+    leases.confirm.assert_not_awaited()
 
 
 @pytest.mark.parametrize("status", TERMINAL)
@@ -177,7 +201,7 @@ async def test_retry_diagnostics_retain_only_proven_prior_response(received, fai
         "call_response_received": received, "read_back_attempts": 3,
     }}
     run = receipt_execution(attempt=2, previous_error=previous,
-                            status_check={"path": "/status", "equals": "DONE"}
+                            status_check={"path": "/status", "equals": "UNDECLARED"}
                             if failure_stage == "preflight" else None)
     source, authorize = AsyncMock(), AsyncMock()
     if failure_stage == "authorize":
@@ -218,11 +242,9 @@ def test_comparison_candidates_must_all_be_permitted_by_output_schema():
     ({"type": "object", "properties": {"receipt": OUTPUT}}, "/receipt/status"),
     ({"type": "array", "items": OUTPUT}, "/0/status"),
 ])
-def test_receipt_enum_guard_handles_nested_and_array_output(schema, path):
-    """外部工具名を見ず、指定 path に宣言された状態候補だけを調べる。"""
-    with pytest.raises(McpReadBackError, match="receipt_status_too_narrow"):
-        validate_read_back_schema(schema, [{"path": path, "equals": "DONE"}],
-                                  operation_receipt=True)
+def test_enum_membership_does_not_require_accepting_other_statuses(schema, path):
+    """入れ子や配列でも enum を終端一覧と解釈せず、合法な比較値を許可する。"""
+    validate_read_back_schema(schema, [{"path": path, "equals": "DONE"}])
 
 
 @pytest.mark.parametrize("schema", [
@@ -235,8 +257,7 @@ def test_receipt_enum_guard_handles_nested_and_array_output(schema, path):
 ])
 def test_preflight_never_invents_other_states_or_rejects_a_fixed_status(schema):
     """状態の宣言がない場合や単一状態への絞込みを、想像した終端 enum で拡張しない。"""
-    validate_read_back_schema(schema, [{"path": "/status", "equals": "DONE"}],
-                              operation_receipt=True)
+    validate_read_back_schema(schema, [{"path": "/status", "equals": "DONE"}])
 
 
 def test_resource_state_assertion_is_distinct_from_original_operation_receipt():

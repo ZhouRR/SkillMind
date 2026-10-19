@@ -58,7 +58,7 @@ MCP・repository の応答を JSON ファイルで交付する場合も原観測
 - 外部書込は observe → propose → approve → apply に従う。モデル向け説明は各 Effect request Schema の `description` から供給し、文書と Git は提案準備ツールを優先利用する。
 - 承認は特定 Proposal の version/checksum・Provider・操作・scope に束縛し、[EffectService](../../SKM/backend/src/skillmind/effects/service.py) が業務ロック外でリモート I/O を実行する。自動承認は原 Run 開始時に記録された同意または既存の事前認可に限定する（`repository.write/v1` は Project 事前認可と force を禁止）。
 - 実効能力は [ExecutionFeatures](../../SKM/backend/src/skillmind/effects/release.py) と [Provider registry](../../SKM/backend/src/skillmind/effects/wiring.py) のスイッチ双方で制限する。MCP 提案は同一 Run/接続/束縛のツールカタログ証拠を自動関連付けして checksum に含める。
-- MCP の回読は原操作の終端回執を確認し、業務成功とは分離する。状態条件は工具契約に示された失敗を含む終端集合を使う。原 ID と関連付けた回執で、単純な出力 enum が複数状態を許すのに単一状態だけを受理する条件は SDK 停止・送信前に訂正可能な診断として返す。enum から終端性を推測せず、承認済み条件も実行後に緩和しない。応答受信の診断事実は後続の読取専用 attempt に引き継ぐ。
+- MCP の回読は原操作の終端回執を確認し、業務成功とは分離する。状態条件は工具契約に示された失敗を含む終端集合を使う。送信前検証は出力 Schema と比較値の整合を確認し、文書化された終端が一つなら単一値の条件も許可する。enum から終端性を推測せず、承認済み条件も実行後に緩和しない。応答受信の診断事実は後続の読取専用 attempt に引き継ぐ。
 - 書込結果が不明な場合は主フローを停止して原 Effect を保持し、[reconciliation_service](../../SKM/backend/src/skillmind/effects/reconciliation_service.py) で読取照合を行う。MCP の read-back 再試行（[mcp_provider](../../SKM/backend/src/skillmind/effects/mcp_provider.py)）は変更操作を決して再送しない。
 
 ## 結果と評価

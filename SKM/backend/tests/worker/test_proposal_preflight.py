@@ -78,7 +78,7 @@ async def test_bad_proposal_is_correctable_without_parking_or_effect(setup, sdk,
     registry, tool, context, _, arguments, service, validator = setup
     failure, message = SqlObservationValidationError("private"), SQL_OBSERVATION_MESSAGE
     if kind == "mcp":
-        run = receipt_execution(status_check={"path": "/status", "equals": "DONE"})
+        run = receipt_execution(status_check={"path": "/status", "equals": "UNDECLARED"})
         with pytest.raises(McpReadBackProposalError) as invalid:
             validate_mcp_proposal(proposal(run), run.integration_scope, run.integration_config)
         failure, message = invalid.value, str(invalid.value)
