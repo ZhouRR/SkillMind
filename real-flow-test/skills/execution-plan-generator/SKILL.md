@@ -3,7 +3,7 @@ name: execution-plan-generator
 description: RV を通過した仕様書 Markdown と利用可能な業務知識に基づいてテストケースを理解し、ケース単位の最小実行根拠（execution_basis）を固定した上でテスト環境を自動操作し、原回執と画面証跡から参照索引（result_ref）を保存・要約する。
 ---
 
-# テスト実行・原記録索引の保存
+# テスト実行
 
 ## 目的と役割
 
