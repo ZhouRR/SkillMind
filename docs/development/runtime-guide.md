@@ -36,7 +36,7 @@ MCP・repository の応答を JSON ファイルで交付する場合も原観測
 
 - **Git**：`repository.workspace/v1` で認可 UTF-8 ファイルを編集可能ディレクトリに配置し、`prepare_commit` でローカルファイルハッシュから提案を準備し、コミット時も branch・パス・原 revision・read-back を検証する。
 - **MCP**：検出・凍結された原生パラメータ Schema を使い、読取はファイル入出力に対応し、書込は Effect・承認・原操作 ID を通す。
-- **PostgreSQL**：`database.query/v1` と `database.execute/v1` を使い、テーブル/列権限は DB アカウントに委ねる。単一 SELECT と承認後の INSERT/UPDATE/DELETE・JOIN/CTE・`$1` パラメータに対応する（DDL・トランザクション制御・複文は禁止）。書込前に同一資源へ `read_back` と同一の SELECT（INSERT 対象行の不在確認を含む）を実行し、応答ファイルハッシュと Evidence を提案前提とし、書込・read-back・`skillmind_effects.execution_receipts` を同一トランザクションでコミットする。
+- **PostgreSQL**：`database.query/v1` と `database.execute/v1` を使い、テーブル/列権限は DB アカウントに委ねる。単一 SELECT と承認後の INSERT/UPDATE/DELETE・JOIN/CTE・`$1` パラメータに対応する。原 DML を一度実行し、commit 確認後の命令状態と影響行数を返す。業務上の事前確認・前後スナップショット・結果照会は Agent が選び、外部回執表は不要。未送信または rollback 確認済みのエラーは修正可能な診断を返し、commit 応答喪失は結果不明のまま再送しない。
 - **HTTP API**：接続にはルート URL 一覧と認証 Secret のみを登録し、パス・メソッド・引数は登録された origin とルート配下で Skill/Agent が指定する。GET/HEAD 読取と承認後の POST/PUT/PATCH/DELETE に対応し、事前 GET や read-back は強制しない。原ステータスコード・許可ヘッダ・完全バイト列ファイルをそのまま Agent に渡す（自動リダイレクト禁止、タイムアウトや結果不明時の自動再送禁止）。
 - **設定移行**：`0059_native_resource_clients` で旧書込接続を SELECT/INSERT/UPDATE/DELETE へ、Redmine を HTTP へ変換し、`0062_http_resource_roots` で基底 URL をルート一覧へ統合して旧既定束縛を無効化する（旧 Run スナップショットは書き換えない）。
 

@@ -77,11 +77,7 @@ from skillmind.effects.outcomes import (
     effect_requires_reconciliation,
 )
 from skillmind.effects.policy_repository import EffectPolicyRepository
-from skillmind.effects.postgres_native import (
-    SQL_PRECONDITION_MESSAGE,
-    NativeSqlReceiptCommand,
-    native_request_checksum,
-)
+from skillmind.effects.postgres_native import SQL_FAILURE_MESSAGES, sql_failure_message
 from skillmind.effects.projections import (
     stored_change_approval,
     stored_change_proposal,
@@ -1733,17 +1729,10 @@ class EffectOperationsMixin(_RunRepositoryBase):
         if binding is None:
             raise ValueError("Original effect binding is unavailable")
         if proposal.capability_version == "database.execute/v1":
-            integration = await self._session.get(Integration, proposal.integration_id)
-            if integration is None:
-                raise ValueError("Original SQL Integration is unavailable")
-            command_sql = NativeSqlReceiptCommand(execution.id, project_id, run_id, integration.id,
-                native_request_checksum(
-                    run_id, integration.id, payload, proposal.precondition_json,
-                ),
-                proposal.precondition_json["revision"], canonical_json(payload["checks"]))
-            return EffectReconciliationTarget(proposal.id, binding.id, proposal.checksum,
-                execution.provider, execution.provider_version, command_sql,
-                canonical_json(integration.config_json), integration.secret_reference_id)
+            raise ValueError(
+                "Native SQL has no remote operation receipt; "
+                "inspect the original audit before deciding recovery"
+            )
         if proposal.capability_version == DATABASE_WRITE_CAPABILITY:
             if proposal.integration_id is None:
                 raise ValueError("Original database effect has no Integration")
@@ -2921,8 +2910,8 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 f"Controlled effect failure: {effect_error.get('code', 'effect_provider_failed')}."
                 + diagnostic_message(effect_error.get("diagnostic"))
                 + (
-                    " " + SQL_PRECONDITION_MESSAGE
-                    if effect_error.get("code") == "sql_precondition_not_met"
+                    " " + sql_failure_message(str(effect_error.get("code")))
+                    if effect_error.get("code") in SQL_FAILURE_MESSAGES
                     else ""
                 )
             )
@@ -3234,16 +3223,23 @@ def _effect_tool_error(
 ) -> dict[str, Any]:
     """Tool contract に適合し、外部 response 本文を含まない effect error を返す。"""
 
+    public_code = code
+    if code in SQL_FAILURE_MESSAGES:
+        public_code = {
+            "sql_request_not_sent": "unavailable",
+            "sql_permission_denied": "scope_denied",
+            "sql_undefined_table": "not_found",
+        }.get(code, "invalid_request")
+    elif code in {"mcp_request_not_sent", "http_response_error"}:
+        public_code = "invalid_request"
     return {
         "status": "error",
-        "code": "invalid_request"
-        if code in {"mcp_request_not_sent", "sql_precondition_not_met", "http_response_error"}
-        else code,
+        "code": public_code,
         "message": (
             "Original external write result requires reconciliation"
             if code == UNKNOWN_EFFECT_CODE
-            else SQL_PRECONDITION_MESSAGE
-            if code == "sql_precondition_not_met"
+            else sql_failure_message(code)
+            if code in SQL_FAILURE_MESSAGES
             else "Controlled effect could not be completed"
         )
         + diagnostic_message(diagnostic)

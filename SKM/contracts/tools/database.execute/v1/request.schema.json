@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "description": "Approved native PostgreSQL DML only. change.propose target.locator=database, operation=INSERT/UPDATE/DELETE, one SET /statement value={statement:{sql,parameters?},read_back:{sql,parameters?,limit?},checks:[{pointer,equals}]}. BEFORE proposing, call database.query on the same resource with exactly the read_back SELECT, parameters and limit (default 1000). Use that complete, non-truncated response file content_hash as precondition.revision and include its evidence_refs. For INSERT query the new key before insertion and use the observed empty result's hash; never use a schema query, UUID/time query, another query's hash or the string absent. checks use JSON Pointers into the complete query result, for example /rows/0/status, not into file metadata; verification is READ_BACK with paths=[/statement] and may be omitted. Read-back is executed both before and after the DML; omit volatile clock/random values and order multi-row results deterministically. Transaction includes SQL, read-back and original Effect receipt. No DDL, transaction commands, multiple statements or automatic unknown-result replay. Table/column permissions are enforced by the configured database account.",
+  "description": "Approved native PostgreSQL DML through change.propose/v1. target.locator=database, operation=INSERT/UPDATE/DELETE, one SET /statement value={statement:{sql,parameters?}}. Positional $1 parameters are JSON scalars. precondition, prior SELECT evidence, read_back and checks are not required. verification is SQL_RESPONSE with paths=[/statement] and may be omitted. The original statement is executed once in a transaction; its confirmed commit, native command tag and affected_rows are returned. RETURNING rows are not delivered by this effect; use database.query when values are needed. The Agent decides business preconditions, before/after queries, snapshots and interpretation. No target database receipt table is required. A lost commit response remains unknown and is never automatically replayed. Database account permissions, resource scope, approval and audit remain enforced. No DDL, transaction commands or multiple statements.",
   "properties": {
     "statement": {
       "type": "object",
@@ -24,75 +24,11 @@
               "null"
             ]
           }
-        },
-        "limit": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 10000
-        },
-        "purpose": {
-          "type": "string",
-          "maxLength": 2000
         }
       },
       "required": [
         "sql"
       ]
-    },
-    "read_back": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "sql": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 65536
-        },
-        "parameters": {
-          "type": "array",
-          "maxItems": 1000,
-          "items": {
-            "type": [
-              "string",
-              "number",
-              "boolean",
-              "null"
-            ]
-          }
-        },
-        "limit": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 10000
-        },
-        "purpose": {
-          "type": "string",
-          "maxLength": 2000
-        }
-      },
-      "required": [
-        "sql"
-      ]
-    },
-    "checks": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 50,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "pointer": {
-            "type": "string",
-            "pattern": "^(?:/(?:[^~/]|~[01])*)*$"
-          },
-          "equals": {}
-        },
-        "required": [
-          "pointer",
-          "equals"
-        ]
-      }
     },
     "operation": {
       "enum": [
@@ -104,8 +40,6 @@
   },
   "required": [
     "statement",
-    "read_back",
-    "checks",
     "operation"
   ],
   "$id": "https://schemas.skillmind.local/tools/database.execute/v1/request.schema.json",

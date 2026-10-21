@@ -43,7 +43,7 @@
     },
     {
       "capability": "database.execute/v1",
-      "description": "Approved native SQL DML via change.propose. target=database; SET /statement={statement:{sql,parameters?},read_back:{sql,parameters?,limit?},checks:[{pointer,equals}]}; precondition.revision=original query file hash. SQL, verification and original Effect receipt commit in one transaction. Unknown outcomes are never blindly replayed. Database account permissions apply.",
+      "description": "Approved native SQL DML via change.propose. target=database; SET /statement={statement:{sql,parameters?}}. No required prior SELECT, read_back, checks or target database receipt table. SQL_RESPONSE returns the committed command tag and affected_rows. The Agent chooses business observations and interpretation. Database account permissions, approval and audit apply; unknown commits are never replayed.",
       "request_schema": "tools/database.execute/v1/request.schema.json",
       "response_schema": "tools/database.execute/v1/response.schema.json",
       "error_schema": "tools/database.execute/v1/error.schema.json",

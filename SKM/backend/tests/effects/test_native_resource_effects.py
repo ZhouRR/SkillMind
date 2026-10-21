@@ -9,13 +9,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 from skillmind.agent.http_source import HttpResourceError, HttpResponse
-from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.effects.http_provider import HttpWriteProvider
 from skillmind.effects.postgres_native import (
     NativeDatabaseWriteProvider,
-    SqlPreconditionNotMetError,
+    SqlExecutionError,
 )
-from skillmind.effects.redmine import EffectProviderStaleError, EffectProviderTransportError
+from skillmind.effects.redmine import EffectProviderTransportError
 from tests.agent.test_mcp_tools import execution
 
 
@@ -128,22 +127,41 @@ async def test_http_revocation_prevents_response_file_publication(tmp_path):
     assert not list((tmp_path / str(original.run_id)).rglob("response.bin"))
     assert source.request.await_count == 1
 
-class Connection:
-    """transaction exit と原 receipt の SQL を記録する有界替身。"""
 
-    def __init__(self, receipt=None):
-        self.receipt, self.saved, self.exits = receipt, None, []
+class Connection:
+    """実行・commit・rollback を別々に故障注入できる接続替身。"""
+
+    def __init__(self, *, commit_error=None, rollback_error=None):
         self.commands = []
-        self.driver = SimpleNamespace(execute=AsyncMock())
+        self.commit_error, self.rollback_error = commit_error, rollback_error
+        self.committed = self.rolled_back = False
+        self.driver = SimpleNamespace(execute=AsyncMock(return_value="UPDATE 1"))
 
     async def __aenter__(self):
         return self
 
     async def __aexit__(self, kind, value, traceback):
-        self.exits.append(kind)
+        return None
 
     def begin(self):
-        return self
+        """外側の接続解放と transaction 終了を区別する。"""
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def transaction():
+            try:
+                yield
+            except BaseException:
+                if self.rollback_error:
+                    raise self.rollback_error from None
+                self.rolled_back = True
+                raise
+            else:
+                if self.commit_error:
+                    raise self.commit_error
+                self.committed = True
+
+        return transaction()
 
     async def exec_driver_sql(self, sql):
         self.commands.append(sql)
@@ -151,17 +169,9 @@ class Connection:
     async def get_raw_connection(self):
         return SimpleNamespace(driver_connection=self.driver)
 
-    async def execute(self, sql, params):
-        value = str(sql)
-        self.commands.append(value)
-        if value.startswith("INSERT INTO skillmind_effects"):
-            self.saved = params
-        return SimpleNamespace(mappings=lambda: SimpleNamespace(one_or_none=lambda: self.receipt))
-
 
 def sql_execution():
-    """最小 UPDATE と変更前/後の同じ SELECT を固定する。"""
-    before = {"rows": [{"done": False}], "truncated": False}
+    """事前 SELECT や原回執表に依存しない最小 UPDATE を固定する。"""
     return replace(
         execution(),
         provider="postgres",
@@ -179,177 +189,201 @@ def sql_execution():
                         "sql": "UPDATE public.items SET done=$1 WHERE id=$2",
                         "parameters": [True, 1],
                     },
-                    "read_back": {
-                        "sql": "SELECT done FROM public.items WHERE id=$1",
-                        "parameters": [1],
-                    },
-                    "checks": [{"pointer": "/rows/0/done", "equals": True}],
                 },
             },
         ),
-        precondition={"revision": "sha256:" + sha256_hex(canonical_json(before))},
+        precondition={},
+        verification={"method": "SQL_RESPONSE", "paths": ["/statement"]},
     )
 
 
-@pytest.mark.parametrize("matches", [True, False])
-async def test_sql_verification_and_receipt_share_transaction(monkeypatch, matches):
-    """必要な確認に失敗した UPDATE は transaction ごと rollback する。"""
+@pytest.fixture
+def sql_connection(monkeypatch):
+    """資格や本番接続を使わず原 Provider の transaction 境界を検査する。"""
     from skillmind.effects import postgres_native as module
 
     connection = Connection()
     engine = SimpleNamespace(connect=lambda: connection, dispose=AsyncMock())
-    monkeypatch.setattr(module, "create_database_engine", lambda *a, **kw: engine)
-    monkeypatch.setattr(
-        module,
-        "query_rows",
-        AsyncMock(
-            side_effect=[
-                {"rows": [{"done": False}], "truncated": False},
-                {"rows": [{"done": matches}], "truncated": False},
-            ]
-        ),
-    )
-    provider = NativeDatabaseWriteProvider(AsyncMock())
-    if matches:
-        result = await provider.apply(sql_execution(), credential="fixture-password")
-        assert not result.replayed and connection.saved is not None
-        assert connection.exits == [None, None]
-    else:
-        with pytest.raises(EffectProviderStaleError):
-            await provider.apply(sql_execution(), credential="fixture-password")
-        assert connection.saved is None and all(
-            kind is EffectProviderStaleError for kind in connection.exits
-        )
-    assert connection.driver.execute.await_count == 1
-    assert "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE" in connection.commands
+    factory = AsyncMock()
+    # 同期 factory 呼出しも含めて再 claim の無送信を確認する。
+    from unittest.mock import Mock
 
-
-async def test_sql_unknown_reclaim_without_original_receipt_does_not_execute(monkeypatch):
-    """不在の回执を、新しい SQL write の許可に読み替えない。"""
-    from skillmind.effects import postgres_native as module
-
-    connection = Connection()
-    monkeypatch.setattr(
-        module,
-        "create_database_engine",
-        lambda *a, **kw: SimpleNamespace(connect=lambda: connection, dispose=AsyncMock()),
-    )
-    read = AsyncMock()
-    monkeypatch.setattr(module, "query_rows", read)
-    with pytest.raises(EffectProviderTransportError):
-        await NativeDatabaseWriteProvider(AsyncMock()).apply(
-            replace(sql_execution(), attempt_no=2), credential="fixture-password"
-        )
-    read.assert_not_awaited()
-    connection.driver.execute.assert_not_awaited()
-
-
-@pytest.mark.parametrize("failure", ["changed", "truncated", "rollback", "revoke", "cancel"])
-async def test_sql_precondition_only_proves_unsent_after_successful_cleanup(monkeypatch, failure):
-    """DML 前の不一致だけを修正可能とし、rollback/撤権/取消失敗は通常保護へ渡す。"""
-    import asyncio
-
-    from skillmind.effects import postgres_native as module
-
-    connection = Connection()
-    if failure == "rollback":
-
-        async def exit_failure(self, kind, value, traceback):
-            """transaction rollback の接続エラーを模擬する。"""
-            raise OSError("fixture rollback unavailable")
-
-        monkeypatch.setattr(Connection, "__aexit__", exit_failure)
-    monkeypatch.setattr(
-        module,
-        "create_database_engine",
-        lambda *a, **kw: SimpleNamespace(connect=lambda: connection, dispose=AsyncMock()),
-    )
-    monkeypatch.setattr(
-        module,
-        "query_rows",
-        AsyncMock(
-            return_value={
-                "rows": [{"done": True}],
-                "truncated": failure == "truncated",
-            }
-        ),
-    )
-    authorize = AsyncMock()
-    if failure == "revoke":
-        authorize.side_effect = [None, PermissionError("revoked")]
-    if failure == "cancel":
-        authorize.side_effect = [None, asyncio.CancelledError()]
-    expected = {
-        "rollback": EffectProviderTransportError,
-        "revoke": PermissionError,
-        "cancel": asyncio.CancelledError,
-    }.get(failure, SqlPreconditionNotMetError)
-    with pytest.raises(expected):
-        await NativeDatabaseWriteProvider(authorize).apply(
-            sql_execution(), credential="fixture-password"
-        )
-    connection.driver.execute.assert_not_awaited()
-    assert connection.saved is None
-
-
-async def test_sql_existing_receipt_conflict_is_never_marked_unsent(monkeypatch):
-    """回执がある原操作は、初回 attempt でも未送信の訂正経路へ戻さない。"""
-    from skillmind.effects import postgres_native as module
-
-    connection = Connection({"request_checksum": "different"})
-    monkeypatch.setattr(
-        module,
-        "create_database_engine",
-        lambda *a, **kw: SimpleNamespace(connect=lambda: connection, dispose=AsyncMock()),
-    )
-    with pytest.raises(EffectProviderStaleError) as error:
-        await NativeDatabaseWriteProvider(AsyncMock()).apply(
-            sql_execution(), credential="fixture-password"
-        )
-    assert not isinstance(error.value, SqlPreconditionNotMetError)
-    connection.driver.execute.assert_not_awaited()
-
-
-@pytest.mark.parametrize("outcome", ["found", "missing", "conflict"])
-async def test_native_sql_reconciliation_uses_readonly_original_receipt(monkeypatch, outcome):
-    """公開された只読照会経路で元回执を確認し、不在でも SQL を再送しない。"""
-    from uuid import uuid4
-
-    from skillmind.effects import postgres_native as module
-    from skillmind.effects.reconciliation_domain import (
-        EffectReconciliationInput,
-        EffectReconciliationReference,
-        EffectReconciliationTarget,
-    )
-    from skillmind.effects.reconciliation_requests import reconciliation_receipt_json
-    from skillmind.effects.reconciliation_service import EffectReconciliationService
-    original = sql_execution()
-    payload = original.changes[0]["value"]
-    command = module.NativeSqlReceiptCommand(original.effect_execution_id, original.project_id, original.run_id, original.integration_id,
-        module.native_request_checksum(original.run_id, original.integration_id, payload, original.precondition),
-        original.precondition["revision"], canonical_json(payload["checks"]))
-    stored = {"request_checksum": command.request_checksum,
-              "before_row": canonical_json({"rows": [{"done": False}], "truncated": False}),
-              "after_row": canonical_json({"rows": [{"done": True}], "truncated": False})}
-    if outcome == "conflict": stored["request_checksum"] = "other"
-    connection = Connection(None if outcome == "missing" else stored)
-    factory_calls = []
-    def factory(*args, **kwargs):
-        factory_calls.append(kwargs)
-        return SimpleNamespace(connect=lambda: connection, dispose=AsyncMock())
+    factory = Mock(return_value=engine)
     monkeypatch.setattr(module, "create_database_engine", factory)
-    target = EffectReconciliationTarget(uuid4(), uuid4(), "sha256:" + "a" * 64, "postgres",
-        module.SQL_VERSION, command, "{}", uuid4())
-    service = EffectReconciliationService(AsyncMock(), secret_resolver=AsyncMock(),
-        database_reader=AsyncMock(), document_reader=None, document_library_target=None)
-    service._load = AsyncMock(return_value=EffectReconciliationInput(target, "fixture-password"))
-    reference = EffectReconciliationReference(uuid4(), uuid4(), uuid4(), original.project_id,
-        original.run_id, original.effect_execution_id)
-    result = await service.observe(reference)
-    assert result.kind == "DATABASE_TRANSACTION"
-    assert result.status == {"found": "CONFIRMED", "missing": "NOT_OBSERVED", "conflict": "CONFLICT"}[outcome]
-    assert (reconciliation_receipt_json(result, target) is not None) is (outcome == "found")
-    assert factory_calls == [{"read_only": True}]
-    assert "SET TRANSACTION READ ONLY" in connection.commands
+    return connection, engine, factory
+
+
+@pytest.mark.parametrize("command_tag,count", [("INSERT 0 1", 1), ("UPDATE 3", 3), ("DELETE 0", 0)])
+async def test_sql_executes_once_without_external_receipts_or_business_reads(
+    sql_connection, command_tag, count
+):
+    """原 DML と commit 事実を返し、0 行や業務状態を成功判定にすり替えない。"""
+    connection, engine, _ = sql_connection
+    operation = command_tag.split()[0]
+    statements = {
+        "INSERT": "INSERT INTO public.items(id) VALUES ($1)",
+        "UPDATE": "UPDATE public.items SET done=true WHERE id=$1",
+        "DELETE": "DELETE FROM public.items WHERE id=$1",
+    }
+    original = replace(
+        sql_execution(),
+        operation=operation,
+        integration_scope={"statements": [operation]},
+        changes=(
+            {
+                "path": "/statement",
+                "action": "SET",
+                "value": {
+                    "statement": {"sql": statements[operation], "parameters": [1]},
+                },
+            },
+        ),
+    )
+    connection.driver.execute.return_value = command_tag
+    authorize = AsyncMock()
+    result = await NativeDatabaseWriteProvider(authorize).apply(
+        original, credential="fixture-secret"
+    )
+    assert connection.driver.execute.await_count == 1
+    assert connection.driver.execute.await_args.args[1:] == (1,)
+    assert connection.committed and not connection.rolled_back
+    assert connection.commands == [
+        "SET LOCAL statement_timeout = '15s'",
+        "SET LOCAL lock_timeout = '2s'",
+    ]
+    assert result.after.content == {"command_tag": command_tag, "affected_rows": count}
+    assert result.before.content == original.changes[0]["value"]
+    assert result.verification["method"] == "SQL_RESPONSE"
+    assert result.verification["committed"] is True
+    assert result.verification["business_verdict"] == "NOT_EVALUATED"
+    assert not result.replayed
+    assert authorize.await_count == 4
+    engine.dispose.assert_awaited_once()
+
+
+async def test_sql_unknown_reclaim_never_connects_or_resends(sql_connection):
+    """原 receipt を作らず、二回目 claim は変更を再送せず不明を保つ。"""
+    connection, _, factory = sql_connection
+    with pytest.raises(EffectProviderTransportError, match="sql_result_unconfirmed"):
+        await NativeDatabaseWriteProvider(AsyncMock()).apply(
+            replace(sql_execution(), attempt_no=2), credential="fixture-secret"
+        )
+    factory.assert_not_called()
     connection.driver.execute.assert_not_awaited()
-    assert connection.saved is None
+
+
+@pytest.mark.parametrize(
+    "state,code",
+    [
+        ("42703", "sql_undefined_column"),
+        ("42P01", "sql_undefined_table"),
+        ("42501", "sql_permission_denied"),
+        ("23505", "sql_constraint_violation"),
+        ("22007", "sql_invalid_parameter"),
+        ("42601", "sql_syntax_error"),
+        ("57014", "sql_transaction_rolled_back"),
+    ],
+)
+async def test_sql_error_is_correctable_only_after_rollback(sql_connection, state, code):
+    """SQLSTATE の固定診断を返し、原例外・SQL・parameter を漏らさない。"""
+    from asyncpg import PostgresError
+
+    from skillmind.effects.outcomes import effect_failure_record
+    from skillmind.effects.postgres_native import sql_failure_message
+
+    connection, _, _ = sql_connection
+    error = PostgresError("private SQL, values and credential")
+    error.sqlstate = state
+    connection.driver.execute.side_effect = error
+    with pytest.raises(SqlExecutionError) as caught:
+        await NativeDatabaseWriteProvider(AsyncMock()).apply(
+            sql_execution(), credential="fixture-secret"
+        )
+    assert caught.value.code == code and connection.rolled_back
+    assert not connection.committed
+    record = effect_failure_record(
+        capability="database.execute/v1",
+        provider="postgres",
+        attempt_no=1,
+        code=code,
+        retryable=False,
+        previous=None,
+    )
+    assert record == {"code": code, "retryable": False}
+    assert "private" not in str(caught.value)
+    assert "rolled back" in sql_failure_message(code)
+    # 過去 attempt の不明結果を、今回の rollback で確定済みに変えない。
+    assert (
+        effect_failure_record(
+            capability="database.execute/v1",
+            provider="postgres",
+            attempt_no=2,
+            code=code,
+            retryable=False,
+            previous={"code": "effect_result_unknown"},
+        )["code"]
+        == "effect_result_unknown"
+    )
+
+
+@pytest.mark.parametrize("phase", ["commit", "rollback"])
+async def test_sql_unconfirmed_transaction_is_never_correctable_or_replayed(sql_connection, phase):
+    """commit 応答喪失と rollback 失敗は、既知 SQL エラーでも不明を維持する。"""
+    from asyncpg import PostgresError
+
+    from skillmind.effects.outcomes import effect_failure_record
+
+    connection, _, _ = sql_connection
+    if phase == "commit":
+        connection.commit_error = OSError("private connection detail")
+    else:
+        connection.driver.execute.side_effect = PostgresError("private query")
+        connection.rollback_error = OSError("rollback unavailable")
+    with pytest.raises(EffectProviderTransportError) as caught:
+        await NativeDatabaseWriteProvider(AsyncMock()).apply(
+            sql_execution(), credential="fixture-secret"
+        )
+    assert caught.value.code == "sql_result_unconfirmed"
+    assert (
+        effect_failure_record(
+            capability="database.execute/v1",
+            provider="postgres",
+            attempt_no=1,
+            code=caught.value.code,
+            retryable=False,
+            previous=None,
+        )["code"]
+        == "effect_result_unknown"
+    )
+    assert connection.driver.execute.await_count == 1
+
+
+async def test_connection_failure_proves_sql_not_sent(sql_connection):
+    """接続前の失敗は SQL 未送信として返し、結果不明へ昇格させない。"""
+    connection, engine, _ = sql_connection
+    engine.connect = lambda: (_ for _ in ()).throw(OSError("private DSN"))
+    with pytest.raises(SqlExecutionError, match="sql_request_not_sent"):
+        await NativeDatabaseWriteProvider(AsyncMock()).apply(
+            sql_execution(), credential="fixture-secret"
+        )
+    connection.driver.execute.assert_not_awaited()
+    engine.dispose.assert_awaited_once()
+
+
+@pytest.mark.parametrize("when", ["before", "after"])
+@pytest.mark.parametrize("failure", [PermissionError, __import__("asyncio").CancelledError])
+async def test_sql_revocation_and_cancellation_do_not_become_query_errors(
+    sql_connection, when, failure
+):
+    """送信前認可と commit 前監督を保ち、取消を SQL エラーへ変換しない。"""
+    connection, engine, _ = sql_connection
+    authorize = AsyncMock(
+        side_effect=[None, failure()] if when == "before" else [None, None, failure()]
+    )
+    with pytest.raises(failure):
+        await NativeDatabaseWriteProvider(authorize).apply(
+            sql_execution(), credential="fixture-secret"
+        )
+    assert connection.driver.execute.await_count == (0 if when == "before" else 1)
+    assert connection.rolled_back and not connection.committed
+    engine.dispose.assert_awaited_once()

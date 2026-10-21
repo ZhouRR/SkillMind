@@ -14,7 +14,6 @@ from skillmind.effects.document_management import (
 )
 from skillmind.effects.git_receipt import GitCommitCommand, GitCommitReceipt
 from skillmind.effects.mcp_receipt import McpOperationCommand, McpOperationReceipt
-from skillmind.effects.postgres_native import NativeSqlReceiptCommand
 from skillmind.effects.postgres_write import DatabaseWriteReceipt
 from skillmind.storage.effect_write import ObjectWriteCommand, ObjectWriteReceipt
 
@@ -50,7 +49,6 @@ class EffectReconciliationTarget:
     provider_version: str
     command: (
         DatabaseWriteCommand
-        | NativeSqlReceiptCommand
         | ObjectWriteCommand
         | GitCommitCommand
         | McpOperationCommand

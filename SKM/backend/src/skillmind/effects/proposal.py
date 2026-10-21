@@ -98,7 +98,7 @@ CHANGE_PROPOSE_REQUEST_SCHEMA: dict[str, Any] = {
             "additionalProperties": False,
             "required": ["method", "paths"],
             "properties": {
-                "method": {"enum": ["READ_BACK", "HTTP_RESPONSE"]},
+                "method": {"enum": ["READ_BACK", "HTTP_RESPONSE", "SQL_RESPONSE"]},
                 "paths": {
                     "type": "array",
                     "minItems": 1,
@@ -117,23 +117,36 @@ CHANGE_PROPOSE_REQUEST_SCHEMA: dict[str, Any] = {
         "continuation_mode": {"enum": ["RESUME", "FORK", "REPLACE"]},
         "checkpoint": {"$ref": "#/$defs/checkpoint"},
     },
-    "allOf": [{
-        "if": {"properties": {"capability_version": {"const": "http.write/v1"}}},
-        "then": {
-            "properties": {
-                "precondition": {"maxProperties": 0},
-                "verification": {"properties": {"method": {"const": "HTTP_RESPONSE"}}},
+    "allOf": [
+        {
+            "if": {
+                "properties": {
+                    "capability_version": {"enum": ["http.write/v1", "database.execute/v1"]}
+                }
+            },
+            "then": {"properties": {"precondition": {"maxProperties": 0}}},
+            "else": {
+                "required": ["precondition", "evidence_refs"],
+                "properties": {
+                    "precondition": {"required": ["revision"]},
+                    "evidence_refs": {"minItems": 1},
+                },
             },
         },
-        "else": {
-            "required": ["precondition", "evidence_refs"],
-            "properties": {
-                "precondition": {"required": ["revision"]},
-                "evidence_refs": {"minItems": 1},
-                "verification": {"properties": {"method": {"const": "READ_BACK"}}},
-            },
-        },
-    }],
+        *[
+            {
+                "if": {"properties": {"capability_version": condition}},
+                "then": {
+                    "properties": {"verification": {"properties": {"method": {"const": method}}}}
+                },
+            }
+            for condition, method in [
+                ({"const": "http.write/v1"}, "HTTP_RESPONSE"),
+                ({"const": "database.execute/v1"}, "SQL_RESPONSE"),
+                ({"not": {"enum": ["http.write/v1", "database.execute/v1"]}}, "READ_BACK"),
+            ]
+        ],
+    ],
     "$defs": {
         "key": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]*$", "maxLength": 128},
         "checkpoint": {
@@ -209,8 +222,9 @@ def parse_change_proposal_request(
     payload = deepcopy(original)
     if not Draft202012Validator(CHANGE_PROPOSE_INLINE_SCHEMA).is_valid(original):
         raise ChangeProposalValidationError("ChangeProposal request did not match its contract")
-    is_http = payload.get("capability_version") == "http.write/v1"
-    if is_http:
+    response_methods = {"http.write/v1": "HTTP_RESPONSE", "database.execute/v1": "SQL_RESPONSE"}
+    response_method = response_methods.get(str(payload.get("capability_version")))
+    if response_method:
         payload.setdefault("precondition", {})
         payload.setdefault("evidence_refs", [])
     # モデルは業務目的と正確な値/根拠を指定し、既知の管理項目は platform が生成する。
@@ -231,7 +245,7 @@ def parse_change_proposal_request(
         {"description": "No automatic compensation; preserve the original operation receipt."},
     )
     payload.setdefault("verification", {
-        "method": "HTTP_RESPONSE" if is_http else "READ_BACK", "paths": paths,
+        "method": response_method or "READ_BACK", "paths": paths,
     })
     payload.setdefault("expires_in_seconds", 3600)
     payload.setdefault("continuation_mode", "RESUME")

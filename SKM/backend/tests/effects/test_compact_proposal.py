@@ -197,7 +197,57 @@ def test_http_proposal_needs_no_get_evidence_or_fake_revision():
     for bad in (
         {"precondition": {"revision": "fake"}},
         {"verification": {"method": "READ_BACK", "paths": ["/request"]}},
-        {"capability_version": "database.execute/v1"},
+        {"capability_version": "database.write/v1"},
     ):
         with pytest.raises(ValueError):
             parse_change_proposal_request({**value, **bad}, request_identity="http-fixture-call")
+
+
+@pytest.mark.parametrize(
+    "operation,sql",
+    [
+        ("INSERT", "INSERT INTO public.items(id) VALUES ($1)"),
+        ("UPDATE", "UPDATE public.items SET done=true WHERE id=$1"),
+        ("DELETE", "DELETE FROM public.items WHERE id=$1"),
+    ],
+)
+def test_native_sql_proposal_uses_only_statement_and_bound_authorization(operation, sql):
+    """新規 DML は観測 hash や追加権限を要求せず、原 SQL と引数を批准へ渡す。"""
+    from skillmind.effects.postgres_native import sql_scope, validate_sql_proposal
+
+    value = {
+        "resource_key": "database",
+        "capability_version": "database.execute/v1",
+        "operation": operation,
+        "target": {"locator": "database", "display": "database"},
+        "changes": [
+            {
+                "path": "/statement",
+                "action": "SET",
+                "value": {
+                    "statement": {"sql": sql, "parameters": [1]},
+                },
+            }
+        ],
+        "summary": "Prepare test data",
+    }
+    Draft202012Validator(CHANGE_PROPOSE_REQUEST_SCHEMA).validate(value)
+    draft = parse_change_proposal_request(value, request_identity="sql-fixture-call")
+    assert draft.precondition == {} and draft.evidence_refs == ()
+    assert draft.verification == {"method": "SQL_RESPONSE", "paths": ["/statement"]}
+    payload = validate_sql_proposal(
+        draft, {"statements": [operation]}, {"access_mode": "native_sql"}
+    )
+    assert payload["statement"] == value["changes"][0]["value"]["statement"]
+    assert sql_scope(payload) == {"statements": [operation]}
+    with pytest.raises(ValueError):
+        validate_sql_proposal(draft, {"statements": ["SELECT"]}, {"access_mode": "native_sql"})
+    with pytest.raises(ValueError):
+        parse_change_proposal_request(
+            {**value, "precondition": {"revision": "fake"}}, request_identity="sql-fixture-call"
+        )
+    with pytest.raises(ValueError):
+        parse_change_proposal_request(
+            {**value, "verification": {"method": "READ_BACK", "paths": ["/statement"]}},
+            request_identity="sql-fixture-call",
+        )

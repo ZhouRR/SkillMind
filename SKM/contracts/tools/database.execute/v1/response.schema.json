@@ -40,7 +40,7 @@
       ],
       "properties": {
         "method": {
-          "const": "READ_BACK"
+          "const": "SQL_RESPONSE"
         },
         "matched_paths": {
           "type": "array",

@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from skillmind.effects.postgres_native import SqlObservationValidationError
+from skillmind.effects.domain import ChangeProposalValidationError
 from skillmind.effects.release import ExecutionFeatures
 from skillmind.runs.domain import LeaseValidationError, RunCancellationRequestedError
 from skillmind.runs.repository import RunRepository
@@ -19,7 +19,7 @@ from tests.effects.test_native_resource_effects import sql_execution
 from tests.runs.test_execution_gates import execution_rows
 
 
-@pytest.mark.parametrize("mode", ["valid", "observation", "expired", "cancelled"])
+@pytest.mark.parametrize("mode", ["valid", "invalid", "expired", "cancelled"])
 @pytest.mark.parametrize("kind", ["sql", "mcp"])
 async def test_service_checks_proposal_under_original_lease_without_mutation(
     monkeypatch, mode, kind,
@@ -63,7 +63,7 @@ async def test_service_checks_proposal_under_original_lease_without_mutation(
 
     monkeypatch.setattr(repository, "_lock_claimed_execution", lock)
     validate = AsyncMock(
-        side_effect=SqlObservationValidationError("bad") if mode == "observation" else None
+        side_effect=ChangeProposalValidationError("bad") if mode == "invalid" else None
     )
     evidence = AsyncMock()
     monkeypatch.setattr(repository, "_validate_proposal_draft", validate)
@@ -84,14 +84,14 @@ async def test_service_checks_proposal_under_original_lease_without_mutation(
         evidence.assert_awaited_once_with(run.id, ("ev_original",))
     else:
         expected = {
-            "observation": SqlObservationValidationError,
+            "invalid": ChangeProposalValidationError,
             "expired": LeaseValidationError,
             "cancelled": RunCancellationRequestedError,
         }[mode]
         with pytest.raises(expected):
             await call
         evidence.assert_not_awaited()
-        if mode != "observation":
+        if mode != "invalid":
             validate.assert_not_awaited()
     assert run.status == "RUNNING" and segment.status == "RUNNING"
     assert attempt.status == "RUNNING" and not transaction_active

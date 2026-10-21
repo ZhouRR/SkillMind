@@ -63,6 +63,7 @@
       }
     }
   },
+  "type": "object",
   "oneOf": [
     {
       "type": "object",
@@ -202,7 +203,8 @@
             "method": {
               "enum": [
                 "READ_BACK",
-                "HTTP_RESPONSE"
+                "HTTP_RESPONSE",
+                "SQL_RESPONSE"
               ]
             },
             "paths": {
@@ -243,7 +245,10 @@
           "if": {
             "properties": {
               "capability_version": {
-                "const": "http.write/v1"
+                "enum": [
+                  "http.write/v1",
+                  "database.execute/v1"
+                ]
               }
             }
           },
@@ -251,13 +256,6 @@
             "properties": {
               "precondition": {
                 "maxProperties": 0
-              },
-              "verification": {
-                "properties": {
-                  "method": {
-                    "const": "HTTP_RESPONSE"
-                  }
-                }
               }
             }
           },
@@ -274,7 +272,65 @@
               },
               "evidence_refs": {
                 "minItems": 1
-              },
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "capability_version": {
+                "const": "http.write/v1"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "verification": {
+                "properties": {
+                  "method": {
+                    "const": "HTTP_RESPONSE"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "capability_version": {
+                "const": "database.execute/v1"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "verification": {
+                "properties": {
+                  "method": {
+                    "const": "SQL_RESPONSE"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "capability_version": {
+                "not": {
+                  "enum": [
+                    "http.write/v1",
+                    "database.execute/v1"
+                  ]
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
               "verification": {
                 "properties": {
                   "method": {
@@ -315,6 +371,5 @@
         "expected_hash"
       ]
     }
-  ],
-  "type": "object"
+  ]
 }

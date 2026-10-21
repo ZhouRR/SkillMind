@@ -28,7 +28,6 @@ from skillmind.effects.git_receipt import (
     GitCommitReceipt,
 )
 from skillmind.effects.mcp_receipt import McpOperationCommand, McpOperationReceipt, lookup_operation
-from skillmind.effects.postgres_native import NativeSqlReceiptCommand, lookup_native_receipt
 from skillmind.effects.postgres_write import DatabaseWriteConflictError, DatabaseWriteReceipt
 from skillmind.effects.reconciliation_domain import (
     EffectReconciliationDeniedError,
@@ -178,11 +177,6 @@ class EffectReconciliationService:
                             command,
                             authorize=authorize,
                         )
-                    elif isinstance(command, NativeSqlReceiptCommand):
-                        if original.credential is None:
-                            raise EffectReconciliationUnavailableError("Original credential unavailable")
-                        receipt = await lookup_native_receipt(json.loads(original.target.config_json),
-                            original.credential, command, authorize=authorize)
                     elif isinstance(command, DatabaseWriteCommand):
                         if original.credential is None:
                             raise EffectReconciliationUnavailableError(
@@ -256,7 +250,7 @@ class EffectReconciliationService:
             )
             credential = None
             if isinstance(
-                target.command, (DatabaseWriteCommand, NativeSqlReceiptCommand, GitCommitCommand, McpOperationCommand)
+                target.command, (DatabaseWriteCommand, GitCommitCommand, McpOperationCommand)
             ):
                 bound = await load_bound_run_resource(
                     session,
@@ -269,7 +263,6 @@ class EffectReconciliationService:
                         "mcp.call/v1" if isinstance(target.command, McpOperationCommand) else
                         "repository.write/v1"
                         if isinstance(target.command, GitCommitCommand)
-                        else "database.execute/v1" if isinstance(target.command, NativeSqlReceiptCommand)
                         else "database.write/v1"
                     ),
                 )

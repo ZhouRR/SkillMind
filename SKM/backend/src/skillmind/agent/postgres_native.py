@@ -80,12 +80,12 @@ def native_statement(
                 and kind == "RangeVar"
                 and (
                     node.get("schemaname")
-                    in {"skillmind_effects", "pg_catalog", "information_schema"}
-                    or node.get("relname") == "execution_receipts"
+                    in {"pg_catalog", "information_schema"}
                 )
             ):
-                raise ValueError("Native SQL cannot mutate platform receipts or system relations")
-            if kind in commands and commands[kind] not in scope.get("statements", []):
+                raise ValueError("Native SQL cannot mutate system relations")
+            if (kind in commands and commands[kind] not in scope.get("statements", [])
+                and not (write and kind == "SelectStmt" and node.get("valuesLists"))):
                 raise ValueError("SQL operation is outside the connection scope")
             if kind in commands and not write and kind != "SelectStmt":
                 raise ValueError("Query cannot contain a modifying CTE")

@@ -1,23 +1,18 @@
-"""原生 SQL 書込を既存の原 Effect 回执 table と同一 transaction で確定する。"""
+"""承認済み原生 SQL を一度実行し、業務上の観測・判定は Agent に委ねる。"""
 
 from __future__ import annotations
 
 import asyncio
-import json
-import re
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass, field
 from typing import Any
-from uuid import UUID
 
 from asyncpg import PostgresError
-from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from skillmind.agent.postgres_native import bind_native_parameters, native_statement, query_rows
+from skillmind.agent.database_errors import sqlstate_of
+from skillmind.agent.postgres_native import bind_native_parameters, native_statement
 from skillmind.agent.postgres_source import create_database_engine
-from skillmind.agent.tool_sequence import matches_checks
-from skillmind.core.hashing import canonical_json, sha256_hex
+from skillmind.core.hashing import canonical_json
 from skillmind.effects.domain import (
     ChangeProposalDraft,
     ChangeProposalValidationError,
@@ -25,36 +20,71 @@ from skillmind.effects.domain import (
     EffectEvidenceDraft,
     EffectProviderResult,
 )
-from skillmind.effects.postgres_write import DatabaseWriteConflictError, DatabaseWriteReceipt
-from skillmind.effects.redmine import EffectProviderStaleError, EffectProviderTransportError
+from skillmind.effects.redmine import EffectProviderTransportError
 
 SQL_WRITE = "database.execute/v1"
-SQL_VERSION = "postgres-native/v1"
+SQL_VERSION = "postgres-native/v2"
+SQL_FAILURE_MESSAGES = {
+    "sql_request_not_sent": (
+        "The database request was not sent. Check the connection and retry with a new proposal"
+        " if appropriate."
+    ),
+    "sql_undefined_column": (
+        "The SQL references an unknown column. Inspect the table schema and correct the "
+        "statement."
+    ),
+    "sql_undefined_table": "The SQL references an unknown table. Verify its schema and table name.",
+    "sql_permission_denied": "The database account denied this operation. Check its permissions.",
+    "sql_invalid_parameter": (
+        "The SQL parameter or expression type is invalid. Check the actual column types and "
+        "correct the statement."
+    ),
+    "sql_constraint_violation": (
+        "The SQL violates a database constraint. Inspect the relevant data and table "
+        "constraints."
+    ),
+    "sql_syntax_error": "The database rejected the SQL syntax. Correct the statement.",
+    "sql_transaction_rolled_back": (
+        "The SQL transaction was rolled back. Inspect the relevant schema and data before "
+        "deciding the next operation."
+    ),
+}
 
-SQL_OBSERVATION_MESSAGE = (
-    "No matching SQL observation was found. Before proposing, call database.query on the same "
-    "resource with the exact read_back SELECT, parameters and limit. Use its non-truncated "
-    "response file content_hash as precondition.revision and include its evidence_refs. "
-    "For INSERT, observe the target row's absence. Schema, UUID and time queries are not target "
-    "observations. No write was submitted; correct this proposal."
-)
-SQL_PRECONDITION_MESSAGE = (
-    "The target query result changed before SQL execution; no write was sent. Read the same "
-    "read_back SELECT with the same parameters and limit again, reassess the intended change, "
-    "and submit a corrected proposal using that observation. Do not retry the unchanged proposal."
-)
+
+class SqlExecutionError(EffectProviderTransportError):
+    """未送信、または rollback 完了を確認した SQL の固定診断。"""
+
+    def __init__(self, code: str) -> None:
+        """内部分類だけを保持し、driver の SQL・値・接続情報を公開しない。"""
+        if code not in SQL_FAILURE_MESSAGES:
+            raise ValueError("Invalid SQL failure code")
+        super().__init__(code, retryable=False)
 
 
-class SqlObservationValidationError(ChangeProposalValidationError):
-    """提案作成前に、別 query の hash や未確認の Evidence を修正可能として拒否する。"""
+def sql_failure_message(code: str) -> str:
+    """Agent に返す固定診断と原 transaction の確定事実を組み立てる。"""
+    message = SQL_FAILURE_MESSAGES.get(code, "")
+    if message and code != "sql_request_not_sent":
+        message += " The transaction was rolled back; no changes were committed."
+    return message
 
 
-class SqlPreconditionNotMetError(EffectProviderStaleError):
-    """初回 DML 未送信と transaction の終了を確認した前提不一致だけを表す。"""
-
-
-class _SqlObservationChanged(Exception):
-    """読取段階の不一致を rollback 完了後まで外へ公開しない内部 signal。"""
+def _rollback_code(error: BaseException) -> str:
+    """SQLSTATE で分類し、サーバーの詳細本文や hint は反射しない。"""
+    state = sqlstate_of(error)
+    if state == "42703":
+        return "sql_undefined_column"
+    if state == "42P01":
+        return "sql_undefined_table"
+    if state == "42501":
+        return "sql_permission_denied"
+    if state and (state.startswith("22") or state in {"42804", "42883"}):
+        return "sql_invalid_parameter"
+    if state and state.startswith("23"):
+        return "sql_constraint_violation"
+    if state == "42601":
+        return "sql_syntax_error"
+    return "sql_transaction_rolled_back"
 
 
 def sql_payload(
@@ -63,327 +93,166 @@ def sql_payload(
     scope: Mapping[str, Any],
     config: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """SQL/parameters/read-back をそのまま凍結する。SQL を model に再生成させない。"""
-    if config.get("access_mode") != "native_sql" or len(changes) != 1:
-        raise ValueError("Native SQL connection and one change are required")
-    change = changes[0]
-    value = change.get("value")
+    """一つの DML と引数を承認に固定し、業務用 SELECT は要求しない。"""
     if (
-        change.get("path") != "/statement"
-        or change.get("action") != "SET"
-        or not isinstance(value, dict)
-        or set(value) != {"statement", "read_back", "checks"}
+        config.get("access_mode") != "native_sql"
+        or len(changes) != 1
+        or changes[0].get("path") != "/statement"
+        or changes[0].get("action") != "SET"
     ):
-        raise ValueError("SQL requires SET /statement with statement, read_back and checks")
-    _, _, actual = native_statement(value["statement"], scope, write=True)
-    native_statement(value["read_back"], scope, write=False)
+        raise ValueError("SQL requires one SET /statement")
+    value = changes[0].get("value")
     if (
-        operation != actual
-        or not isinstance(value["checks"], list)
-        or not 1 <= len(value["checks"]) <= 50
+        not isinstance(value, dict)
+        or set(value) != {"statement"}
+        or not isinstance(value["statement"], dict)
+        or set(value["statement"]) - {"sql", "parameters"}
     ):
-        raise ValueError("SQL operation or read-back checks are invalid")
-    for check in value["checks"]:
-        if (
-            not isinstance(check, dict)
-            or set(check) != {"pointer", "equals"}
-            or not isinstance(check["pointer"], str)
-            or re.fullmatch(r"(?:/(?:[^~/]|~[01])*)*", check["pointer"]) is None
-        ):
-            raise ValueError("SQL read-back requires exact JSON pointer checks")
+        raise ValueError("SQL requires statement with sql and optional parameters")
+    _, _, command = native_statement(value["statement"], scope, write=True)
+    if command != operation:
+        raise ValueError("SQL operation differs from the approved statement")
     if len(canonical_json(value).encode("utf-8")) > 1_048_576:
         raise ValueError("SQL proposal exceeds the existing effect size limit")
     return dict(value)
 
 
 def validate_sql_proposal(
-    draft: ChangeProposalDraft, scope: Mapping[str, Any], config: Mapping[str, Any]
+    draft: ChangeProposalDraft,
+    scope: Mapping[str, Any],
+    config: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """権限は DB account、操作種別と原観測は platform が確認する。"""
+    """原 SQL と現在資源権限を検査し、外部回執表や事前観測に依存しない。"""
     try:
-        value = sql_payload(draft.operation, draft.changes, scope, config)
         if (
             draft.capability_version != SQL_WRITE
             or draft.target.get("locator") != "database"
-            or re.fullmatch(r"sha256:[a-f0-9]{64}", str(draft.precondition.get("revision", "")))
-            is None
+            or draft.precondition
+            or draft.verification.get("method") != "SQL_RESPONSE"
         ):
-            raise ValueError("SQL target must be database with the original query file hash")
-        return {**value, "operation": draft.operation}
-    except (ValueError, TypeError, KeyError) as error:
-        raise ChangeProposalValidationError("Native SQL proposal is invalid") from error
+            raise ValueError("SQL writes use SQL_RESPONSE without a platform precondition")
+        return {
+            **sql_payload(draft.operation, draft.changes, scope, config),
+            "operation": draft.operation,
+        }
+    except ValueError as error:
+        raise ChangeProposalValidationError(str(error)) from None
 
 
 def sql_scope(payload: Mapping[str, Any]) -> dict[str, Any]:
-    """回読 SELECT と実際の DML を明示する。"""
-    return {"statements": ["SELECT", payload["operation"]]}
+    """承認済み DML に必要な statement 権限だけを返す。"""
+    return {"statements": [payload["operation"]]}
 
 
 class NativeDatabaseWriteProvider:
-    """commit 不明時は原 receipt の照会だけを許し、未検出でも再実行しない。"""
+    """一回の transaction 結果を返し、結果不明の再 claim は再送しない。"""
 
-    def __init__(self, authorize: Callable[[ClaimedEffectExecution, str], Awaitable[Any]]) -> None:
-        """既存 Effect supervisor の現在権限を各段階で確認する。"""
+    def __init__(self, authorize: Callable[[ClaimedEffectExecution], Awaitable[None]]) -> None:
+        """現在の批准・資源・lease を検査する共有認可を保持する。"""
         self._authorize = authorize
 
     async def apply(
-        self, execution: ClaimedEffectExecution, *, credential: str | None
+        self,
+        execution: ClaimedEffectExecution,
+        *,
+        credential: str | None,
     ) -> EffectProviderResult:
-        """任意 SQL 文を複数 transaction に分割せず、read-back と receipt を原子的に保存する。"""
+        """原 DML を commit してから応答し、rollback 確認と commit 不明を区別する。"""
         if (
-            not credential
+            credential is None
             or execution.capability_version != SQL_WRITE
             or execution.provider != "postgres"
         ):
-            raise EffectProviderTransportError("credential_unavailable", retryable=False)
+            raise ValueError("SQL write requires a PostgreSQL credential")
         payload = sql_payload(
             execution.operation,
             execution.changes,
             execution.integration_scope,
             execution.integration_config,
         )
-        checksum = native_request_checksum(
-            execution.run_id, execution.integration_id, payload, execution.precondition
-        )
+        await self._authorize(execution)
+        if execution.attempt_no != 1:
+            raise EffectProviderTransportError("sql_result_unconfirmed", retryable=False)
+        if credential in canonical_json(payload):
+            raise ValueError("SQL request contains credentials")
         engine = create_database_engine(execution.integration_config, credential, read_only=False)
-        replayed = False
+        sent = False
+        statement_error: BaseException | None = None
         try:
-            async with asyncio.timeout(30), engine.connect() as connection, connection.begin():
-                await connection.exec_driver_sql("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-                await connection.exec_driver_sql("SET LOCAL statement_timeout = '15000'")
-                await connection.exec_driver_sql("SET LOCAL lock_timeout = '2000'")
-                await self._authorize(execution, credential)
-                await connection.execute(
-                    text("SELECT pg_advisory_xact_lock(:key)"),
-                    {
-                        "key": int.from_bytes(
-                            execution.effect_execution_id.bytes[:8], "big", signed=True
-                        )
-                    },
-                )
-                previous = (
-                    (
-                        await connection.execute(
-                            text(
-                                "SELECT request_checksum, "
-                                "CASE WHEN octet_length(before_row::text) <= 1048576 "
-                                "THEN before_row::text END AS before_row, "
-                                "CASE WHEN octet_length(after_row::text) <= 1048576 "
-                                "THEN after_row::text END AS after_row "
-                                "FROM skillmind_effects.execution_receipts WHERE effect_id = :id"
-                            ),
-                            {"id": execution.effect_execution_id},
-                        )
-                    )
-                    .mappings()
-                    .one_or_none()
-                )
-                if previous is not None:
-                    if previous["request_checksum"] != checksum:
-                        raise EffectProviderStaleError("Original SQL receipt differs")
-                    try:
-                        before, after = (
-                            json.loads(previous["before_row"]),
-                            json.loads(previous["after_row"]),
-                        )
-                    except (ValueError, TypeError):
-                        raise EffectProviderStaleError("Original SQL receipt is invalid") from None
-                    if (
-                        not isinstance(before, dict)
-                        or not isinstance(after, dict)
-                        or before.get("truncated") is not False
-                        or after.get("truncated") is not False
-                        or "sha256:" + sha256_hex(canonical_json(before))
-                        != execution.precondition["revision"]
-                        or not matches_checks(after, payload["checks"])
-                    ):
-                        raise EffectProviderStaleError("Original SQL receipt does not match")
-                    replayed = True
-                else:
-                    if execution.attempt_no != 1:
-                        raise EffectProviderTransportError(
-                            "sql_original_result_unconfirmed", retryable=False
-                        )
-                    before = await query_rows(
-                        connection, payload["read_back"], execution.integration_scope
-                    )
-                    if (
-                        before["truncated"]
-                        or len(canonical_json(before).encode("utf-8")) > 1_048_576
-                        or "sha256:" + sha256_hex(canonical_json(before))
-                        != execution.precondition["revision"]
-                    ):
-                        raise _SqlObservationChanged()
+            async with (
+                asyncio.timeout(30), engine.connect() as connection, connection.begin(),
+            ):
+                try:
+                    await connection.exec_driver_sql("SET LOCAL statement_timeout = '15s'")
+                    await connection.exec_driver_sql("SET LOCAL lock_timeout = '2s'")
                     sql, parameters, _ = native_statement(
-                        payload["statement"], execution.integration_scope, write=True
+                        payload["statement"],
+                        execution.integration_scope,
+                        write=True,
                     )
-                    raw_connection = await connection.get_raw_connection()
-                    driver = raw_connection.driver_connection
+                    raw = await connection.get_raw_connection()
+                    driver = raw.driver_connection
                     if driver is None:
                         raise ValueError("PostgreSQL driver is unavailable")
                     parameters = await bind_native_parameters(driver, sql, parameters)
-                    await self._authorize(execution, credential)
-                    await driver.execute(sql, *parameters)
-                    after = await query_rows(
-                        connection, payload["read_back"], execution.integration_scope
-                    )
-                    if (
-                        after["truncated"]
-                        or len(canonical_json(after).encode("utf-8")) > 1_048_576
-                        or not matches_checks(after, payload["checks"])
-                    ):
-                        raise EffectProviderStaleError(
-                            "SQL read-back differs; transaction rolled back"
-                        )
-                    if credential in canonical_json([before, after]):
-                        raise EffectProviderStaleError(
-                            "SQL receipt contains connection credentials"
-                        )
-                    await connection.execute(
-                        text(
-                            "INSERT INTO skillmind_effects.execution_receipts "
-                            "(effect_id, request_checksum, before_row, after_row) "
-                            "VALUES (:id, :checksum, CAST(:before AS jsonb), CAST(:after AS jsonb))"
-                        ),
-                        {
-                            "id": execution.effect_execution_id,
-                            "checksum": checksum,
-                            "before": canonical_json(before),
-                            "after": canonical_json(after),
-                        },
-                    )
-                if credential in canonical_json([before, after]):
-                    raise EffectProviderStaleError("SQL receipt contains connection credentials")
-                await self._authorize(execution, credential)
-        except _SqlObservationChanged:
-            # with の rollback が失敗した場合はこの分岐に来ない。旧回执の不一致や
-            # DML/commit 後の障害を「未送信」に変えず、撤権も先に確認する。
-            await self._authorize(execution, credential)
-            raise SqlPreconditionNotMetError(SQL_PRECONDITION_MESSAGE) from None
-        except (SQLAlchemyError, PostgresError, OSError, TimeoutError):
+                    await self._authorize(execution)
+                    sent = True
+                    command_tag = await driver.execute(sql, *parameters)
+                    await self._authorize(execution)
+                except (
+                    SQLAlchemyError,
+                    PostgresError,
+                    OSError,
+                    TimeoutError,
+                    ValueError,
+                ) as error:
+                    if isinstance(error, PermissionError):
+                        raise
+                    statement_error = error
+                    raise
+            # begin の正常終了が commit 応答の確認点。行の値から成功を推測しない。
+        except (SQLAlchemyError, PostgresError, OSError, TimeoutError, ValueError) as error:
+            if isinstance(error, PermissionError):
+                raise
+            await self._authorize(execution)
+            if statement_error is not None and error is statement_error:
+                # 同じ例外が transaction を抜けた場合だけ rollback 完了を確認できる。
+                raise SqlExecutionError(_rollback_code(statement_error)) from None
+            if not sent:
+                raise SqlExecutionError("sql_request_not_sent") from None
             raise EffectProviderTransportError("sql_result_unconfirmed", retryable=False) from None
         finally:
             await engine.dispose()
+        await self._authorize(execution)
+        result = {"command_tag": command_tag, "affected_rows": int(command_tag.rsplit(" ", 1)[1])}
         return EffectProviderResult(
-            before=_evidence(execution, before, "before"),
-            after=_evidence(execution, after, "after"),
-            replayed=replayed,
+            before=_evidence(execution, payload, "request"),
+            after=_evidence(execution, result, "response"),
+            replayed=False,
             verification={
-                "method": "READ_BACK",
+                "method": "SQL_RESPONSE",
                 "matched_paths": ["/statement"],
-                "replayed": replayed,
+                "committed": True,
+                "business_verdict": "NOT_EVALUATED",
             },
         )
 
 
 def _evidence(
-    execution: ClaimedEffectExecution, value: dict[str, Any], phase: str
+    execution: ClaimedEffectExecution,
+    value: dict[str, Any],
+    phase: str,
 ) -> EffectEvidenceDraft:
-    """原 transaction の JSON 観測を Effect と結び付ける。"""
+    """要求と応答を監査保存し、変更前後の業務データと混同しない。"""
     return EffectEvidenceDraft(
         evidence_type="resource",
         source_uri=f"postgres-query://{execution.integration_id}/{execution.effect_execution_id}/{phase}",
         source_locator={"effect_id": str(execution.effect_execution_id), "phase": phase},
         content=value,
         excerpt=None,
-        metadata={"meaning": "Original SQL transaction receipt"},
+        metadata={
+            "meaning": "Approved SQL request"
+            if phase == "request"
+            else "Committed SQL command response"
+        },
     )
-
-
-@dataclass(frozen=True, slots=True)
-class NativeSqlReceiptCommand:
-    """SQL を再実行する権限を持たない原 transaction の識別と確認条件。"""
-
-    effect_id: UUID
-    project_id: UUID
-    run_id: UUID
-    integration_id: UUID
-    request_checksum: str
-    expected_revision: str
-    checks_json: str = field(repr=False)
-
-
-def native_request_checksum(
-    run_id: UUID,
-    integration_id: UUID | None,
-    payload: Mapping[str, Any],
-    precondition: Mapping[str, Any],
-) -> str:
-    """apply と只読照会で原 SQL/parameter の同一 identity を使用する。"""
-    return "sha256:" + sha256_hex(
-        canonical_json(
-            [
-                str(run_id),
-                str(integration_id),
-                {key: payload[key] for key in ("statement", "read_back", "checks")},
-                precondition,
-            ]
-        )
-    )
-
-
-def validate_native_receipt(
-    command: NativeSqlReceiptCommand, receipt: DatabaseWriteReceipt
-) -> None:
-    """現在の業務行でなく、原 read-back の事前 hash と確認条件を照合する。"""
-    if (
-        not isinstance(receipt.before, dict)
-        or not isinstance(receipt.after, dict)
-        or receipt.before.get("truncated") is not False
-        or receipt.after.get("truncated") is not False
-        or "sha256:" + sha256_hex(canonical_json(receipt.before)) != command.expected_revision
-        or not matches_checks(receipt.after, json.loads(command.checks_json))
-    ):
-        raise DatabaseWriteConflictError("Original SQL receipt does not match")
-
-
-async def lookup_native_receipt(
-    config: Mapping[str, Any],
-    credential: str,
-    command: NativeSqlReceiptCommand,
-    *,
-    authorize: Callable[[], Awaitable[None]],
-) -> DatabaseWriteReceipt | None:
-    """結果未知の照会では READ ONLY で元回执だけ読み、DML/再 claim を行わない。"""
-    engine = create_database_engine(config, credential, read_only=True)
-    try:
-        async with asyncio.timeout(30), engine.connect() as connection, connection.begin():
-            await connection.exec_driver_sql("SET TRANSACTION READ ONLY")
-            await connection.exec_driver_sql("SET LOCAL statement_timeout = '15000'")
-            await authorize()
-            row = (
-                (
-                    await connection.execute(
-                        text(
-                            "SELECT request_checksum, CASE WHEN octet_length(before_row::text) <= 1048576 "
-                            "THEN before_row::text END AS before_row, "
-                            "CASE WHEN octet_length(after_row::text) <= 1048576 THEN after_row::text END AS after_row "
-                            "FROM skillmind_effects.execution_receipts WHERE effect_id = :id"
-                        ),
-                        {"id": command.effect_id},
-                    )
-                )
-                .mappings()
-                .one_or_none()
-            )
-            await authorize()
-            if row is None:
-                return None
-            if row["request_checksum"] != command.request_checksum:
-                raise DatabaseWriteConflictError("Original SQL request differs")
-            try:
-                receipt = DatabaseWriteReceipt(
-                    json.loads(row["before_row"]), json.loads(row["after_row"]), True
-                )
-            except (ValueError, TypeError):
-                raise DatabaseWriteConflictError("Original SQL receipt is invalid") from None
-            validate_native_receipt(command, receipt)
-            if credential in canonical_json([receipt.before, receipt.after]):
-                raise DatabaseWriteConflictError("Original SQL receipt contains credentials")
-            return receipt
-    except (SQLAlchemyError, PostgresError, OSError, TimeoutError):
-        raise EffectProviderTransportError(
-            "sql_original_result_unconfirmed", retryable=False
-        ) from None
-    finally:
-        await engine.dispose()
