@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
 from contextlib import aclosing
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -41,8 +41,6 @@ from skillmind.agent.claude import (
     CLAUDE_CODE_CLI_VERSION,
     STRUCTURED_OUTPUT_TOOL_NAME,
     ClaudeRuntimeConfiguration,
-    ToolAuthorizationCallback,
-    ToolDenialCallback,
     build_claude_agent_options,
 )
 from skillmind.agent.claude_build import require_bundled_cli
@@ -65,9 +63,9 @@ from skillmind.agent.metering import (
     ExecutionUsageObserver,
 )
 from skillmind.agent.proposal_resume import prepare_proposal_resume
+from skillmind.agent.tool_runtime import RunMcpRuntime
 from skillmind.core.cancellation import check_pending_cancellation
 from skillmind.core.json_text import strip_code_fence, strip_json_object_preamble
-from skillmind.effects.inline import InlineEffectResult
 from skillmind.effects.proposal import CHANGE_PROPOSE_SDK_NAME
 from skillmind.runs.budget import BudgetUnavailableError
 from skillmind.runs.interaction import INTERACTION_REQUEST_SDK_NAME
@@ -102,23 +100,6 @@ class ClaudeClient(Protocol):
 
 ClaudeClientFactory = Callable[[ClaudeAgentOptions], ClaudeClient]
 McpServerFactory = Callable[[RunContext], Any]
-
-
-@dataclass(frozen=True, slots=True)
-class RunMcpRuntime:
-    """Run-scoped MCP server と PreToolUse audit callback の組。"""
-
-    server: Any
-    on_tool_authorized: ToolAuthorizationCallback | None = None
-    on_tool_denied: ToolDenialCallback | None = None
-    deferred_tool_names: frozenset[str] = frozenset()
-    on_tool_attempt: Callable[[], None] | None = None
-    on_inline_effect: (
-        Callable[[Mapping[str, Any], str, str], Awaitable[InlineEffectResult | None]] | None
-    ) = None
-    on_deferred_validation: (
-        Callable[[str, Mapping[str, Any], str, str], Awaitable[dict[str, Any] | None]] | None
-    ) = None
 
 
 def _default_client_factory(options: ClaudeAgentOptions) -> ClaudeClient:
@@ -584,7 +565,7 @@ class ClaudeAgentSdkEngine:
 
         runtime = self._mcp_server_factory(context)
         if isinstance(runtime, RunMcpRuntime):
-            server = runtime.server
+            server = runtime.server_factory()
             on_tool_authorized = runtime.on_tool_authorized
             on_tool_denied = runtime.on_tool_denied
             deferred_tool_names = runtime.deferred_tool_names

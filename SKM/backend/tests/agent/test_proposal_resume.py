@@ -8,8 +8,8 @@ from uuid import uuid4
 import pytest
 from claude_agent_sdk.types import DeferredToolUse
 
+from skillmind.agent.claude_engine import ClaudeMessageMapper
 from skillmind.agent.domain import AgentEventType
-from skillmind.agent.engine import ClaudeMessageMapper
 from skillmind.agent.proposal_resume import proposal_replay_identity
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.effects.proposal import CHANGE_PROPOSE_SDK_NAME

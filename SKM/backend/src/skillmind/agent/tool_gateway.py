@@ -11,11 +11,9 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
-from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server, tool
 from jsonschema import Draft202012Validator, FormatChecker
 
 from skillmind.agent.domain import RegisteredTool, RunContext, RunWorkspace
-from skillmind.agent.engine import RunMcpRuntime
 from skillmind.agent.evidence import (
     EvidenceDraft,
     EvidenceRecord,
@@ -39,10 +37,10 @@ from skillmind.agent.tool_routing import (
     provider_arguments,
     resource_identity,
 )
+from skillmind.agent.tool_runtime import RunMcpRuntime
 from skillmind.core.hashing import canonical_json
 from skillmind.core.redaction import find_sensitive_key
 
-_MCP_TOOL_PREFIX = "mcp__skillmind__"
 _EXECUTION_PROFILE_ORDER = ("GUIDED", "SUPERVISED", "DELEGATED")
 
 
@@ -721,14 +719,17 @@ class ToolRegistry:
         public = policy.sdk_tools
         representatives = {name: next(b for (n, _), b in bindings.items() if n == name)
                            for name in policy.allowed_sdk_names}
-        sdk_tools = [
-            _build_sdk_tool(representatives[t.sdk_name], gateway, input_schema=t.input_schema)
-            for t in public
-        ]
-        server = create_sdk_mcp_server("skillmind", version="0.1.0", tools=sdk_tools)
+        def server_factory() -> Any:
+            """Claude adapter が要求した時だけ SDK を読み込み server を作成する。"""
+            from skillmind.agent.claude_tools import create_gateway_server
+
+            return create_gateway_server(public, gateway, {
+                name: binding.definition.description for name, binding in representatives.items()
+            })
+
         return RunToolRuntime(
             mcp=RunMcpRuntime(
-                server=server,
+                server_factory=server_factory,
                 on_tool_authorized=coordinator.register_authorized,
                 on_tool_attempt=gateway.step_budget.consume,
                 on_tool_denied=coordinator.register_denied,
@@ -745,42 +746,6 @@ class ToolRegistry:
                 name: binding.definition.description for name, binding in representatives.items()
             },
         )
-
-
-def _build_sdk_tool(
-    binding: _ResolvedBinding, gateway: ToolGateway, *, input_schema: Mapping[str, Any]
-) -> SdkMcpTool[Any]:
-    """Full SDK 名から MCP server 内の local tool handler を作成する。"""
-
-    local_name = binding.registered.sdk_name.removeprefix(_MCP_TOOL_PREFIX)
-
-    async def handler(arguments: Any) -> dict[str, Any]:
-        """MCP の未型付け引数を JSON object として Gateway へ渡す。"""
-
-        if not isinstance(arguments, Mapping):
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": _compact_json(
-                            {
-                                "status": "error",
-                                "code": "invalid_request",
-                                "message": "Tool arguments must be an object",
-                                "retryable": False,
-                            }
-                        ),
-                    }
-                ],
-                "is_error": True,
-            }
-        return await gateway.invoke_mcp(binding.registered.sdk_name, arguments)
-
-    return tool(
-        local_name,
-        binding.definition.description,
-        dict(input_schema),
-    )(handler)
 
 
 def _validate_response(schema: Mapping[str, Any], response: Mapping[str, Any]) -> None:

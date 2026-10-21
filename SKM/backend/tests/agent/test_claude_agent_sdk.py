@@ -340,3 +340,16 @@ def test_options_reject_tool_outside_permission_snapshot(tmp_path: Path) -> None
             mcp_server={"type": "sdk", "name": "skillmind", "instance": object()},
             configuration=ClaudeRuntimeConfiguration(environment={}),
         )
+
+
+@pytest.mark.parametrize("symbol", ["query", "task"])
+def test_sdk_probe_checks_private_cleanup_contract(monkeypatch, symbol):
+    """固定 version の文字列だけでは、実際に使用する清理 interface を保証しない。"""
+    from skillmind.agent import compatibility
+
+    target, name = (compatibility.Query, "close_receive_stream") if symbol == "query" else (
+        compatibility.TaskHandle, "add_done_callback",
+    )
+    monkeypatch.setattr(target, name, None)
+    with pytest.raises(RuntimeError, match="cleanup interface"):
+        probe_claude_agent_sdk()

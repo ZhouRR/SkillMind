@@ -101,7 +101,9 @@ async def test_missing_selection_does_not_authorize_all(tmp_path: Path, required
         available=[content],
         selected=[],
         blueprint={
-            "resource_requirements": [{"key": "config", "kind": "document", "required": required}]
+            "resource_requirements": [{
+                "key": "config", "kind": "document", "access": "read", "required": required,
+            }]
         },
     )
     if required:
@@ -133,7 +135,7 @@ async def test_multiple_slots_keep_membership_and_materialize_union_once(tmp_pat
         snapshots=(one, two),
         blueprint={
             "resource_requirements": [
-                {"key": key, "kind": "document", "required": True}
+                {"key": key, "kind": "document", "access": "read", "required": True}
                 for key in ("config", "reference")
             ]
         },

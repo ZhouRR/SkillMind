@@ -140,8 +140,8 @@ def test_output_transport_is_not_a_resource_tool_event_but_keeps_final_result(
     """内部結果 Tool の往復は隠し、最終成功/失敗と用量を通常 event に残す。"""
     from claude_agent_sdk.types import AssistantMessage, ToolResultBlock, ToolUseBlock, UserMessage
 
+    from skillmind.agent.claude_engine import ClaudeMessageMapper
     from skillmind.agent.domain import AgentEventType
-    from skillmind.agent.engine import ClaudeMessageMapper
     from tests.agent.test_claude_engine import _result
 
     context = _run_context(tmp_path)
@@ -176,8 +176,8 @@ def test_output_id_does_not_hide_a_subsequent_resource_tool(tmp_path: Path) -> N
     """SDK が同じ ID を別 Tool に使っても、資源 Tool の表示を出力専用扱いしない。"""
     from claude_agent_sdk.types import AssistantMessage, ToolResultBlock, ToolUseBlock, UserMessage
 
+    from skillmind.agent.claude_engine import ClaudeMessageMapper
     from skillmind.agent.domain import AgentEventType
-    from skillmind.agent.engine import ClaudeMessageMapper
 
     mapper = ClaudeMessageMapper(_run_context(tmp_path), "00000000-0000-4000-8000-000000000001")
     mapper.map(

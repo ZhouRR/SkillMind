@@ -126,17 +126,22 @@ async def test_mcp_catalog_is_validated_before_audit_and_on_replay(
 
 def test_schema_exemption_does_not_apply_to_tool_results() -> None:
     """任意の読取結果が input_schema を名乗っても資格検査を迂回できない。"""
-    tool = login_command().config["tool_catalog"]["tools"][-1]
-    with pytest.raises(ToolGatewayError, match="sensitive field"):
-        _reject_sensitive_response_keys({"result": tool}, capability="mcp.query/v1")
+    _reject_sensitive_response_keys(
+        {"result": {"password": "synthetic-ui-value"}}, capability="mcp.query/v1"
+    )
     with pytest.raises(ToolGatewayError, match="sensitive field"):
         _reject_sensitive_response_keys(
-            {"result": {"password": "synthetic-only"}}, capability="mcp.tools/v1"
+            {"result": {"input_schema": {"properties": {"api_key": {"type": "string"}}}}},
+            capability="mcp.query/v1",
+        )
+    with pytest.raises(ToolGatewayError, match="sensitive field"):
+        _reject_sensitive_response_keys(
+            {"result": {"api_key": "synthetic-only"}}, capability="mcp.tools/v1"
         )
 
 
 def test_evidence_allows_control_references_without_allowing_credentials() -> None:
-    """実呼出しの locator は保存でき、password 本文を保存できるようにはしない。"""
+    """UIA locator と password 属性は保持し、認証 token は監査へ入れない。"""
     data = {"arguments": {"passwordAutomationId": "login-input"}}
     evidence = EvidenceDraft(
         evidence_type="resource",
@@ -145,5 +150,6 @@ def test_evidence_allows_control_references_without_allowing_credentials() -> No
         content_hash=digest(data),
     )
     assert evidence.source_locator == data
+    assert replace(evidence, source_locator={"arguments": {"password": "ui-value"}})
     with pytest.raises(ValueError, match="sensitive field"):
-        replace(evidence, source_locator={"arguments": {"password": "synthetic-only"}})
+        replace(evidence, source_locator={"arguments": {"api_key": "synthetic-only"}})

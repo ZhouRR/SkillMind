@@ -4,13 +4,11 @@ import {
   ApiProblemError,
   loadAuthSession,
   loadMeta,
-  loadProjectModules,
   loadUiLanguage,
   logout,
   saveProjectPreference,
   saveUiLanguage,
   type AuthSessionRecord,
-  type ProjectModuleRecord,
   type ProjectRecord,
   type UserAccountRecord,
 } from './api'
@@ -19,6 +17,7 @@ import { AppNavigation } from './components/AppNavigation'
 import { ProjectContextNotice } from './components/ProjectContextNotice'
 import { LanguageProvider } from './i18n'
 import { navigateHash, useHashRoute } from './hooks/useHashRoute'
+import { useShellModules } from './hooks/useShellModules'
 import { useProjectContext } from './hooks/useProjectContext'
 import type { SessionEnded } from './hooks/useUserRequest'
 import { MESSAGES, type UiLanguage } from './lib/i18n/messages'
@@ -52,12 +51,6 @@ export function App() {
   const [authState, setAuthState] = useState<AuthState>({ status: 'loading' })
   const [logoutError, setLogoutError] = useState<string | null>(null)
   const [preferenceError, setPreferenceError] = useState<string | null>(null)
-  // 業務模块 filter。任务中心と工作空间の双方が読む。sidebar の子菜单が唯一の切替入口。
-  // 空は「模块を持たない Project」= 絞り込み無しで、選べる module がある限り空にはしない。
-  const [activeModuleId, setActiveModuleId] = useState('')
-  const [modules, setModules] = useState<ProjectModuleRecord[]>([])
-  const [moduleContext, setModuleContext] = useState('')
-  const moduleChoice = useRef<{ context: string; moduleId: string } | null>(null)
   // 表示言語。初期値は browser 言語で、認証後に保存済み preference が上書きする。
   const [language, setLanguage] = useState<UiLanguage>(
     () => resolveUiLanguage(null, navigator.languages ?? []),
@@ -96,10 +89,6 @@ export function App() {
     setLogoutError(null)
     setPreferenceError(null)
     setLanguageError(null)
-    setModules([])
-    setModuleContext('')
-    moduleChoice.current = null
-    setActiveModuleId('')
   }, [isCurrentSession])
 
   /** 自己失効の受理後に logout を重ねず、対象の会話だけをログイン画面へ戻す。 */
@@ -118,6 +107,11 @@ export function App() {
     messages.app.loadProjectsFailed,
   )
   const { projectId, projectState, access } = projectContext
+  const moduleNavigation = useShellModules(
+    projectId, sessionKey,
+    () => authState.status === 'authenticated' && isCurrentSession(authState.session),
+    () => { if (authState.status === 'authenticated') endSession(authState.session) },
+  )
   const [managementBoundary, setManagementBoundary] = useState({ owner: '', selectionId: '', revision: 0 })
   const nextManagementBoundary = nextProjectManagementBoundary(
     managementBoundary, sessionKey, projectContext.selectionId, projectRequestFromHash(hash),
@@ -134,40 +128,6 @@ export function App() {
       languageRequest.current?.abort()
     }
   }, [])
-
-  // 業務模块は sidebar の子菜单と各画面の絞り込みが共有するため、shell が唯一の取得元になる。
-  // Project を跨いだ module 選択は無効なので、切替時にいったん捨ててから読み直す。
-  useEffect(() => {
-    setModules([])
-    setActiveModuleId('')
-    if (!projectId || authState.status !== 'authenticated') return
-    const session = authState.session
-    const controller = new AbortController()
-    void loadProjectModules(projectId, controller.signal)
-      .then((loaded) => {
-        if (controller.signal.aborted || !isCurrentSession(session)) return
-        setModules(loaded)
-        setModuleContext(`${sessionKey}:${projectId}`)
-        // 同じ Project の再認可で、人が選んだ module を先頭へ戻さない。
-        // 前 Project の ID や現在一覧から消えた module は新しい候補へ持ち越さない。
-        const context = `${sessionKey}:${projectId}`
-        const chosen = moduleChoice.current
-        const selected = chosen?.context === context && loaded.some((item) => item.module_id === chosen.moduleId)
-          ? chosen.moduleId : loaded[0]?.module_id ?? ''
-        moduleChoice.current = { context, moduleId: selected }
-        setActiveModuleId(selected)
-      })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted || !isCurrentSession(session)) return
-        if (error instanceof ApiProblemError && error.status === 401) {
-          endSession(session)
-          return
-        }
-        // 取得失敗時は絞り込み無しで続ける。主導航と実行導線を module 取得の失敗で止めない。
-        setModules([])
-      })
-    return () => controller.abort()
-  }, [projectId, sessionKey])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -372,10 +332,8 @@ export function App() {
   const currentProject = access.status === 'ready' ? access.project : null
   const routeContext = routeContextFromHash(hash)
   const canRenderPage = APP_ROUTES.find((entry) => entry.route === route)?.scope === 'platform' || access.status === 'ready'
-  const currentModules = moduleContext === `${sessionKey}:${projectId}` ? modules : []
-  // 再読取中も同 Project の明示 filter を保ち、一瞬「全 module」の Task を表示しない。
-  const rememberedModuleId = moduleChoice.current?.context === `${sessionKey}:${projectId}` ? moduleChoice.current.moduleId : ''
-  const currentModuleId = currentModules.some((item) => item.module_id === activeModuleId) ? activeModuleId : rememberedModuleId
+  const currentModules = moduleNavigation.modules
+  const currentModuleId = moduleNavigation.moduleId
 
   return (
     <LanguageProvider language={language}>
@@ -393,8 +351,7 @@ export function App() {
           onRefreshProjects={projectContext.refresh}
           onSelectModule={(moduleId) => {
             if (!projectId) return
-            moduleChoice.current = { context: `${sessionKey}:${projectId}`, moduleId }
-            setActiveModuleId(moduleId)
+            moduleNavigation.select(moduleId)
             // Workspace 配下の導航なので、Task 一覧からも Workspace へ戻す。
             // 同じ Workspace 内では現在 Run と草稿を維持して範囲だけを切り替える。
             if (route === 'workspace') return

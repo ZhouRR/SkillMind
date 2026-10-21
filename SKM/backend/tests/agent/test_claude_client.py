@@ -261,3 +261,39 @@ async def test_failed_pre_query_close_retains_the_original_transport_for_cleanup
     assert transport.close.await_count == 2
     release.assert_awaited_once()
     assert client._transport is None
+
+
+async def test_actual_sdk_query_and_child_handle_follow_draining_cleanup_contract():
+    """合成 Query の属性で隠さず、実 SDK の子 task と受信 stream を終了まで回収する。"""
+    from claude_agent_sdk._internal.query import Query
+    from claude_agent_sdk._internal.transport import Transport
+
+    transport = MagicMock(spec=Transport)
+    query = Query(transport=transport, is_streaming_mode=True)
+    client = DrainingClaudeClient(ClaudeAgentOptions(), transport=transport)
+    client._query = query
+    started, cleaning, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def child():
+        """SDK の cancel 後も、清理完了までは元 handle を保持する。"""
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleaning.set()
+            await release.wait()
+
+    handle = spawn_detached(child())
+    query._child_tasks.add(handle)
+    await started.wait()
+    closing = asyncio.create_task(client.disconnect())
+    try:
+        await cleaning.wait()
+        assert not closing.done()
+        release.set()
+        await closing
+        assert handle.done() and client._query is None
+        transport.close.assert_awaited_once()
+    finally:
+        release.set()
+        await asyncio.gather(closing, handle.wait(), return_exceptions=True)

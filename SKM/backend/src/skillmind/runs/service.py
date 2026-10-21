@@ -37,6 +37,7 @@ from skillmind.documents.library import (
 from skillmind.documents.library_contract import supports_document_library_capabilities
 from skillmind.documents.repository import DocumentRepository
 from skillmind.documents.snapshot import DOCUMENT_CAPABILITIES, DocumentSnapshotError
+from skillmind.effects.catalog import EFFECT_CAPABILITIES
 from skillmind.effects.domain import (
     ChangeProposalDraft,
     ChangeProposalExpiredError,
@@ -77,14 +78,20 @@ from skillmind.runs.domain import (
     derive_task_id,
     lease_token_hash,
 )
+from skillmind.runs.history_deletion import manage_history
 from skillmind.runs.interaction import (
     INTERACTION_REQUEST_CAPABILITY,
     InteractionRequestDraft,
 )
 from skillmind.runs.repository import RunRepository
 from skillmind.skills.domain import PublishedTaskNotFoundError
-from skillmind.skills.execution import is_source_execution, resolve_skill_definition
+from skillmind.skills.execution import (
+    declared_operations,
+    is_source_execution,
+    resolve_skill_definition,
+)
 from skillmind.skills.resource_binding import is_write_capability, required_resource_keys
+from skillmind.skills.resource_policy import resource_capabilities, resource_operations
 from skillmind.skills.task_catalog import ResolvedTaskRun
 from skillmind.storage import FileStorage
 from skillmind.users.access import authorize_user_access, validate_user_access
@@ -202,7 +209,6 @@ class RunService:
             if blueprint is None:
                 raise ValueError("Resolved task is missing its CapabilityBlueprint")
             execution_profile = resolve_execution_profile(blueprint).profile.value
-            from skillmind.skills.execution import declared_operations
 
             has_apply_intent = bool(declared_operations(blueprint))
             if not self._scheduling_enabled and not isinstance(authorization, UserAccess):
@@ -232,22 +238,19 @@ class RunService:
                     document_repository=DocumentRepository(session),
                     document_library_target=self._document_library_target,
                 )
-                if is_source_execution(blueprint):
-                    from skillmind.skills.resource_policy import resource_capabilities
-
-                    if any(
-                        isinstance(source, dict)
-                        and source.get("provider") != "project-library"
-                        and not any(
-                            not is_write_capability(cap)
-                            and self._execution_features.provider_enabled(cap, source["provider"])
-                            for cap in resource_capabilities(source)
-                        )
-                        for source in selected_sources.values()
-                    ):
-                        raise TaskSourceSelectionError(
-                            "The selected resource has no enabled access"
-                        )
+                if is_source_execution(blueprint) and any(
+                    isinstance(source, dict)
+                    and source.get("provider") != "project-library"
+                    and not any(
+                        not is_write_capability(cap)
+                        and self._execution_features.provider_enabled(cap, source["provider"])
+                        for cap in resource_capabilities(source)
+                    )
+                    for source in selected_sources.values()
+                ):
+                    raise TaskSourceSelectionError(
+                        "The selected resource has no enabled access"
+                    )
                 if any(
                     isinstance(item, ResolvedRunBinding)
                     and not is_source_execution(blueprint)
@@ -279,10 +282,6 @@ class RunService:
             resource_operations_snapshot: list[dict[str, str]] = []
             resource_tools: set[str] | None = None
             if is_source_execution(blueprint):
-                from skillmind.skills.resource_policy import (
-                    resource_capabilities,
-                    resource_operations,
-                )
 
                 granted = set(resolved.allowed_capabilities)
                 for source in selected_sources.values():
@@ -293,7 +292,6 @@ class RunService:
                 resource_operations_snapshot = resource_operations(
                     selected_sources, allowed_capabilities=granted,
                 )
-                from skillmind.effects.catalog import EFFECT_CAPABILITIES
 
                 resource_tools = {cap for cap in granted if cap not in EFFECT_CAPABILITIES}
                 if resource_operations_snapshot:
@@ -660,7 +658,6 @@ class RunService:
         include_outputs: bool = False,
     ) -> dict[str, Any]:
         """元 actor の認可を伴う回収箱操作へ委譲する。"""
-        from skillmind.runs.history_deletion import manage_history
 
         return await manage_history(
             self._session_factory,

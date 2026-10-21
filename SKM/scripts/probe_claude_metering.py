@@ -327,9 +327,9 @@ async def probe() -> dict[str, Any]:
             """実 Engine の生成 options/hook と既定 client を合成出力で検証する。"""
             from skillmind.agent.claude import ClaudeRuntimeConfiguration
             from skillmind.agent.domain import RunContext, RunLimits, RunWorkspace
-            from skillmind.agent.engine import (
+            from skillmind.agent.tool_runtime import RunMcpRuntime
+            from skillmind.agent.claude_engine import (
                 ClaudeAgentSdkEngine,
-                RunMcpRuntime,
                 _default_client_factory,
             )
 
@@ -382,7 +382,7 @@ async def probe() -> dict[str, Any]:
 
             engine = ClaudeAgentSdkEngine(
                 mcp_server_factory=lambda _context: RunMcpRuntime(
-                    server=create_sdk_mcp_server(name="skillmind", tools=[]),
+                    server_factory=lambda: create_sdk_mcp_server(name="skillmind", tools=[]),
                     on_tool_authorized=record_authorized,
                     on_tool_denied=record_denied,
                 ),

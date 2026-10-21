@@ -17,12 +17,11 @@ from skillmind.schedules import (
     ScheduleInvalidError,
     ScheduleKind,
     ScheduleStatus,
-    build_definition,
-    plan_occurrence,
     plan_schedule_transition,
     schedule_idempotency_key,
 )
 from skillmind.schedules.domain import InvalidScheduleTransitionError
+from skillmind.schedules.service import build_definition, plan_occurrence
 
 _NOW = datetime(2026, 7, 26, 9, 0, tzinfo=UTC)
 

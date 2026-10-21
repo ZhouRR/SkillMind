@@ -10,9 +10,9 @@ from uuid import uuid4
 import pytest
 from arq.worker import Function
 
+from skillmind.agent.claude_engine import ClaudeAgentSdkEngine
 from skillmind.agent.codex_engine import CodexAgentSdkEngine
 from skillmind.agent.database_provider import DatabaseReadProvider
-from skillmind.agent.engine import ClaudeAgentSdkEngine, RunMcpRuntime
 from skillmind.agent.evidence import PostgresToolAuditWriter
 from skillmind.agent.mcp_provider import McpReadProvider
 from skillmind.agent.mcp_source import StreamableHttpMcpSource
@@ -21,6 +21,7 @@ from skillmind.agent.result_references import PostgresEffectSummaryLookup
 from skillmind.agent.result_validation import PostgresArtifactLookup, ResultValidator
 from skillmind.agent.subagent_provider import SubagentDispatchProvider
 from skillmind.agent.tool_gateway import RunToolRuntime
+from skillmind.agent.tool_runtime import RunMcpRuntime
 from skillmind.agent.workspace_materializer import WorkspaceMaterializer
 from skillmind.core.settings import Settings
 from skillmind.documents.library import configured_document_library

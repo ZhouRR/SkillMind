@@ -1326,7 +1326,7 @@ async def test_managed_secret_round_trips_ciphertext_without_persisting_plaintex
                 CreateSecretReferenceCommand(
                     project_id=project.id,
                     name="Managed token",
-                    provider="redmine",
+                    provider="http",
                     resolver=SecretResolver.MANAGED,
                     locator=MANAGED_SECRET_LOCATOR,
                     key_version="2026-07",

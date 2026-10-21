@@ -18,7 +18,7 @@ from skillmind.effects.domain import ChangeProposalValidationError
 from skillmind.effects.operation_policy import operation_authorization_key
 from skillmind.effects.proposal import parse_change_proposal_request
 from skillmind.effects.release import ExecutionFeatures
-from skillmind.runs.repository_effects import EffectOperationsMixin
+from skillmind.runs.effect_validation import validate_effect_intent
 from skillmind.skills.direct_candidate import candidate_schema
 from skillmind.skills.execution import resolve_skill_definition, validate_execution
 from skillmind.skills.interpreter import InterpreterFixtureRunner, load_interpreter_system_skill
@@ -189,7 +189,7 @@ def test_source_operations_propose_without_intent_and_preserve_idempotency() -> 
         resource_operations=[{"resource_key": "review_outputs",
                               "capability_version": "document.write/v1", "operation": "CREATE"}],
     )
-    validate = EffectOperationsMixin._validate_effect_intent
+    validate = validate_effect_intent
     assert validate(manifest["skill_execution"], **arguments)["operation"] == "CREATE"
     for change in (
         {"resource_key": "another"},

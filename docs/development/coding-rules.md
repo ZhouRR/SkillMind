@@ -49,7 +49,7 @@ Git 書込は上記共有実装に従い、`direct` は既定 branch の fast-fo
 | 変更対象 | 同期範囲 |
 | --- | --- |
 | Settings | `core/settings.py` の Field 範囲 → `.env.example` → API lifespan / Worker startup 注入 |
-| AgentEventType | `agent/domain.py` → `engine.py` mapper → Web `RUN_EVENT_NAMES` → RunEvent Schema |
+| AgentEventType | `agent/domain.py` → Claude/Codex adapter の event mapper → Web `RUN_EVENT_NAMES` → RunEvent Schema |
 | SkillExecution / Brief / OutcomeEnvelope / 旧 Blueprint | contract → DTO/validator/projector → frozen checksum → Worker/Web → example/test |
 | Segment / Interaction / Proposal | transition → DB/repository → event/outbox/SSE → 認可/冪等 → Web → recovery/Compose |
 | Tool capability | versioned request/response/error → Provider → `tool_catalog.py` 登録 → `context_builder.py` 凍結束縛/`allowed_capabilities` → 回帰 |
@@ -60,7 +60,7 @@ Git 書込は上記共有実装に従い、`direct` は既定 branch の fast-fo
 | 構造化 log | `core/logging.py` の `_CONTEXT_FIELDS` allowlist に登録 |
 | system Interpreter Skill | SemVer/content hash・example identity・prompt checksum・テストを同期 |
 
-`tests/` はモジュール責務を反映し、API テストは `tests/api/fakes.py` / `conftest.py` を共用する。fake SQL と[実 DB](local-development.md#実-postgresql-の前提)の証跡は区別して記録する。
+`tests/` はモジュール責務を反映する。業務 Skill/Schema の検証は `real-flow-test/tests/` に置き、平台テストは中立な fixture で汎用能力を検証する。API テストは `tests/api/fakes.py` / `conftest.py` を共用する。fake SQL と[実 DB](local-development.md#実-postgresql-の前提)の証跡は区別して記録する。
 
 ## Ingress
 

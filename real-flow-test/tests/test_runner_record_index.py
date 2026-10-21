@@ -10,18 +10,14 @@ from uuid import uuid4
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
 
-from skillmind.core.hashing import canonical_json
-from skillmind.skills.importer import SkillPackageParser
 
-SOURCES = Path(__file__).resolve().parents[4] / "real-flow-test"
+SOURCES = Path(__file__).resolve().parents[1]
 
 
 def schema(skill):
     """実際に取り込む自己完結 Schema を読む。平台へ業務形式を登録しない。"""
-    package = SkillPackageParser().parse_directory(
-        SOURCES.resolve(), entry_path=f"skills/{skill}/SKILL.md",
-    )
-    assert "schemas/runner-records.schema.json" in {file.path for file in package.files}
+    instructions = (SOURCES / "skills" / skill / "SKILL.md").read_text()
+    assert "../../schemas/runner-records.schema.json" in instructions
     return json.loads((SOURCES / "schemas/runner-records.schema.json").read_text())
 
 
@@ -51,7 +47,7 @@ def test_execution_and_judgement_accept_the_same_compact_index():
     for entry in repeated["notRun"]:
         entry["reason"] = value["reasons"]["r1"]["text"]
         entry["evidenceRefs"] = ["ev_catalog"]
-    assert len(canonical_json(value).encode()) < len(canonical_json(repeated).encode()) / 3
+    assert len(json.dumps(value, ensure_ascii=False).encode()) < len(json.dumps(repeated, ensure_ascii=False).encode()) / 3
 
 
 @pytest.mark.parametrize("damage", ["version", "repeated_reason", "no_reference", "invalid_key"])

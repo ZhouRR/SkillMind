@@ -9,8 +9,8 @@ from uuid import uuid4
 import pytest
 
 from skillmind.agent.claude import ClaudeRuntimeConfiguration
+from skillmind.agent.claude_engine import ClaudeAgentSdkEngine, ClaudeClient, _ActiveExecution
 from skillmind.agent.domain import AgentSessionRef
-from skillmind.agent.engine import ClaudeAgentSdkEngine, ClaudeClient, _ActiveExecution
 
 
 async def active_engine(

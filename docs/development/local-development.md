@@ -93,6 +93,8 @@ python3 tests/browser/check_projects.py \
 
 全体回帰は広範囲変更やリリース候補で行う。実 Docker/Make/PowerShell がない場合は該当する起動・更新が未検証と明記する。
 
+業務 Skill/Schema の回帰はリポジトリ根から `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest real-flow-test/tests` で個別に実行する。
+
 ## 必要な場合の隔離 probe
 
 [スクリプト](../../SKM/scripts/)の `--help` と先頭説明で前提・引数を確認してから実行する。既存の接続先や `.env` を試験環境の代用にしない。

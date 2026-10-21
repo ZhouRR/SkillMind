@@ -26,7 +26,7 @@ from skillmind.agent.claude import (
     sanitized_agent_environment,
 )
 from skillmind.agent.claude_build import bundled_claude_build
-from skillmind.agent.engine import extract_text_delta
+from skillmind.agent.claude_engine import extract_text_delta
 from skillmind.agent.tool_policy import DENIED_BUILTIN_TOOLS
 from skillmind.core.logging import log_event
 from skillmind.skills.model_interpreter import (

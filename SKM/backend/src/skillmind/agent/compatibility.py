@@ -12,6 +12,8 @@ from claude_agent_sdk import (
     create_sdk_mcp_server,
 )
 from claude_agent_sdk._cli_version import __cli_version__
+from claude_agent_sdk._internal._task_compat import TaskHandle
+from claude_agent_sdk._internal.query import Query
 from claude_agent_sdk._version import __version__
 
 from skillmind.agent.claude import CLAUDE_AGENT_SDK_VERSION, CLAUDE_CODE_CLI_VERSION
@@ -88,6 +90,15 @@ def probe_claude_agent_sdk() -> SdkCompatibilityReport:
     )
     if not session_store_protocol_supported:
         raise RuntimeError("SessionStore interface is incompatible")
+
+    # Draining client が実際に使う私有 interface も固定版の検査に含める。
+    if (not inspect.iscoroutinefunction(Query.close)
+        or not callable(getattr(Query, "close_receive_stream", None))
+        or not {"transport", "is_streaming_mode"} <= inspect.signature(Query).parameters.keys()
+        or not all(callable(getattr(TaskHandle, name, None))
+                   for name in ("done", "cancel", "add_done_callback", "wait"))
+        or not inspect.iscoroutinefunction(TaskHandle.wait)):
+        raise RuntimeError("Claude SDK cleanup interface is incompatible")
 
     return SdkCompatibilityReport(
         sdk_version=__version__,

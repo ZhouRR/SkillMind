@@ -17,5 +17,8 @@ def skill_source_hash(
     value: list[dict[str, Any]] | dict[str, Any] = [dict(file) for file in files]
     if entry_path is not None:
         value = {"entry_path": entry_path, "files": value}
-    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    # source identity は Unicode escape を含む原 index byte 形式に固定する。
+    encoded = json.dumps(
+        value, ensure_ascii=True, sort_keys=True, separators=(",", ":"), allow_nan=False,
+    )
     return f"sha256:{sha256_hex(encoded)}"

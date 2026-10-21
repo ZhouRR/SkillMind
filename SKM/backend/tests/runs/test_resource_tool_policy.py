@@ -23,8 +23,8 @@ from skillmind.integrations.domain import (
 )
 from skillmind.integrations.repository import IntegrationRepository
 from skillmind.runs.domain import CreatedRun, CreateRunCommand, RunStatus
+from skillmind.runs.effect_validation import validate_effect_intent
 from skillmind.runs.repository import RunRepository
-from skillmind.runs.repository_effects import EffectOperationsMixin
 from skillmind.runs.service import RunService
 from skillmind.skills.direct_candidate import candidate_schema
 from skillmind.skills.resource_policy import default_capabilities, resource_operations
@@ -147,12 +147,12 @@ def test_http_operations_follow_access_level_and_keep_resource_ownership() -> No
         "resource_key": "api", "operation": "POST", "capability_version": "http.write/v1",
         "risk_level": "HIGH", "resource_operations": ops,
     }
-    assert EffectOperationsMixin._validate_effect_intent(
+    assert validate_effect_intent(
         manifest["skill_execution"], **arguments,
     )["operation"] == "POST"
     for mutation in ({"resource_key": "other"}, {"operation": "TRACE"},
                      {"resource_operations": []}, {"risk_level": "LOW"}):
         with pytest.raises(ChangeProposalValidationError):
-            EffectOperationsMixin._validate_effect_intent(
+            validate_effect_intent(
                 manifest["skill_execution"], **(arguments | mutation),
             )

@@ -20,7 +20,7 @@ from skillmind.effects.domain import (
     EffectProviderResult,
 )
 from skillmind.effects.outcomes import effect_failure_record
-from skillmind.runs.repository_effects import _effect_tool_error
+from skillmind.effects.projections import effect_tool_error
 from tests.runs.effect_authorization_harness import AuthorizationHarness
 
 
@@ -226,7 +226,7 @@ def test_unknown_tool_record_matches_public_error_contract(capability):
     )
     schema = json.loads(schema_path.read_text())
     Draft202012Validator(schema).validate(
-        _effect_tool_error(code="effect_result_unknown", retryable=False)
+        effect_tool_error(code="effect_result_unknown", retryable=False)
     )
 
 
@@ -391,9 +391,9 @@ async def test_rolled_back_sql_error_preserves_failure_and_resumes_only_active_r
 ])
 def test_confirmed_sql_errors_keep_public_categories_and_fixed_diagnostics(reason, public_code):
     """SQL の訂正・権限・接続障害を既存公開 code で区別し、原例外本文は要求しない。"""
-    from skillmind.runs.repository_effects import _effect_tool_error
+    from skillmind.effects.projections import effect_tool_error
 
-    error = _effect_tool_error(code=reason, retryable=False)
+    error = effect_tool_error(code=reason, retryable=False)
     assert error["code"] == public_code and error["retryable"] is False
     assert ("rolled back" in error["message"]) == (reason != "sql_request_not_sent")
     schema = json.loads((Path(__file__).resolve().parents[3]

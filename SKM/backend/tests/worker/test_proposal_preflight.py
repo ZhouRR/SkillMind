@@ -121,7 +121,7 @@ async def test_bad_proposal_is_correctable_without_parking_or_effect(setup, sdk,
     else:
         options = build_claude_agent_options(
             context,
-            mcp_server=runtime.mcp.server,
+            mcp_server=runtime.mcp.server_factory(),
             configuration=ClaudeRuntimeConfiguration(environment={}),
             deferred_tool_names=runtime.mcp.deferred_tool_names,
             on_deferred_validation=runtime.mcp.on_deferred_validation,
@@ -208,7 +208,7 @@ async def test_sdk_file_proposal_reaches_preflight_before_effect_validation(setu
             assert bridge.deferred[1]["change_proposal_request"] == request
     else:
         options = build_claude_agent_options(
-            context, mcp_server=runtime.mcp.server,
+            context, mcp_server=runtime.mcp.server_factory(),
             configuration=ClaudeRuntimeConfiguration(environment={}),
             deferred_tool_names=runtime.mcp.deferred_tool_names,
             on_deferred_validation=runtime.mcp.on_deferred_validation,

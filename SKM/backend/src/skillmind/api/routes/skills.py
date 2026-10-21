@@ -2,18 +2,15 @@
 
 from __future__ import annotations
 
-import json
-from collections.abc import Awaitable, Callable, Mapping
-from datetime import UTC, datetime
-from time import monotonic
-from typing import Annotated, Any, Literal, cast
+from collections.abc import Mapping
+from datetime import datetime
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from redis.asyncio import Redis
-from redis.exceptions import RedisError
 
 from skillmind.api.auth_dependencies import (
     AdminReadActor,
@@ -27,6 +24,7 @@ from skillmind.api.auth_dependencies import (
     project_not_found_problem,
     user_access,
 )
+from skillmind.api.interpretation_stream import interpretation_events
 from skillmind.api.problems import ProblemException, problem_openapi_response
 from skillmind.api.skill_upload import read_skill_upload
 from skillmind.auth.sessions import CsrfRejectedError, UnauthorizedSessionError
@@ -63,18 +61,10 @@ from skillmind.skills.interpretation_requests import (
     InterpretationRequestNotFoundError,
     InterpretationRequestSnapshot,
 )
-from skillmind.skills.realtime import (
-    INTERPRET_EVENT_NAMES,
-    interpret_channel,
-    interpret_event_data,
-)
 from skillmind.skills.resource_binding import TaskReadiness
 from skillmind.users.domain import UserAdministrationDeniedError
 
 router = APIRouter()
-
-# Interpret job の ARQ timeout(worker 側 1200 秒)より長い SSE 上限。超過は stream 側の打ち切り。
-_INTERPRET_STREAM_MAX_SECONDS = 1500.0
 
 
 class SkillParseFile(BaseModel):
@@ -692,26 +682,6 @@ def _request_response(value: InterpretationRequestSnapshot) -> InterpretationLau
     })
 
 
-def _request_terminal_event(value: InterpretationRequestSnapshot) -> dict[str, Any] | None:
-    """DB の確定/不明状態を通知へ写し、Pub/Sub の自己申告を終態としない。"""
-
-    if value.status in {"QUEUED", "RUNNING"}:
-        return None
-    name = (
-        "interpret.completed" if value.status == "SUCCEEDED"
-        else "interpret.unknown" if value.status == "UNKNOWN" else "interpret.failed"
-    )
-    return interpret_event_data(
-        event=name, execution_key=value.execution_key,
-        data={
-            "request_id": str(value.request_id), "request_status": value.status,
-            "interpretation_id": str(value.interpretation_id) if value.interpretation_id else None,
-            "status": "PREVIEW_READY" if value.status == "SUCCEEDED" else None,
-            "error_code": value.error_code,
-        },
-    )
-
-
 @router.get(
     "/skill-interpretation-requests/{request_id}/events",
     responses={
@@ -731,123 +701,15 @@ async def stream_interpretation_events(
     redis: Redis = request.app.state.redis
     heartbeat: float = request.app.state.settings.sse_heartbeat_seconds
 
-    async def stream() -> Any:
-        """帰属確認済み channel を購読して再確認し、通知欠落も DB の read で補う。"""
-
-        pubsub = None
-        try:
-            try:
-                current = await _confirm_interpretation_request(request, actor, request_id)
-            except ProblemException:
-                return
-            if current.execution_key != execution_key:
-                return
-            terminal = _request_terminal_event(current)
-            if terminal is not None:
-                yield _interpret_sse_message(terminal)
-                return
-            try:
-                pubsub = redis.pubsub()
-                await pubsub.subscribe(interpret_channel(execution_key))
-            except RedisError:
-                yield _interpret_sse_message(_stream_failure(execution_key, "stream_unavailable"))
-                return
-            deadline = monotonic() + _INTERPRET_STREAM_MAX_SECONDS
-            last_activity = monotonic()
-            while monotonic() < deadline:
-                if await request.is_disconnected():
-                    return
-                try:
-                    current = await _confirm_interpretation_request(request, actor, request_id)
-                except ProblemException:
-                    return
-                if current.execution_key != execution_key:
-                    return
-                terminal = _request_terminal_event(current)
-                if terminal is not None:
-                    yield _interpret_sse_message(terminal)
-                    return
-                try:
-                    message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
-                except RedisError:
-                    yield _interpret_sse_message(
-                        _stream_failure(execution_key, "stream_unavailable")
-                    )
-                    return
-                # Redis 待ちの間に失効した会話へ prompt/delta を配信しない。
-                try:
-                    current = await _confirm_interpretation_request(request, actor, request_id)
-                except ProblemException:
-                    return
-                if current.execution_key != execution_key:
-                    return
-                terminal = _request_terminal_event(current)
-                if terminal is not None:
-                    yield _interpret_sse_message(terminal)
-                    return
-                if message is None:
-                    if monotonic() - last_activity >= heartbeat:
-                        last_activity = monotonic()
-                        yield f": heartbeat {datetime.now(UTC).isoformat()}\n\n"
-                    continue
-                value = _parse_interpret_event(message.get("data"), execution_key=execution_key)
-                if value is None or value["event"] in {
-                    "interpret.completed", "interpret.failed",
-                    "interpret.unknown", "interpret.disconnected",
-                }:
-                    continue
-                last_activity = monotonic()
-                yield _interpret_sse_message(value)
-            yield _interpret_sse_message(_stream_failure(execution_key, "stream_timeout"))
-        finally:
-            if pubsub is not None:
-                close_pubsub = cast(Callable[[], Awaitable[None]], pubsub.aclose)
-                await close_pubsub()
-
     return StreamingResponse(
-        stream(), media_type="text/event-stream",
+        interpretation_events(
+            request, redis=redis, heartbeat=heartbeat, execution_key=execution_key,
+            confirm=lambda: _confirm_interpretation_request(request, actor, request_id),
+        ), media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",
             "Connection": "keep-alive", "X-Accel-Buffering": "no",
         },
-    )
-
-
-def _interpret_sse_message(value: dict[str, Any]) -> str:
-    """進行 event を named SSE frame へ変換する。"""
-
-    return (
-        f"event: {value['event']}\n"
-        f"data: {json.dumps(value, ensure_ascii=False, separators=(',', ':'))}\n\n"
-    )
-
-
-def _parse_interpret_event(raw: Any, *, execution_key: str) -> dict[str, Any] | None:
-    """Pub/Sub message を同じ execution の既知 event だけへ制限する。"""
-
-    if not isinstance(raw, str):
-        return None
-    try:
-        value = json.loads(raw)
-    except json.JSONDecodeError:
-        return None
-    if (
-        not isinstance(value, dict)
-        or value.get("execution_key") != execution_key
-        or value.get("event") not in INTERPRET_EVENT_NAMES
-        or not isinstance(value.get("data"), dict)
-    ):
-        return None
-    return value
-
-
-def _stream_failure(execution_key: str, code: str) -> dict[str, Any]:
-    """Stream 停止を通知し、持久 FAILED や model 未開始を補造しない。"""
-
-    return interpret_event_data(
-        event="interpret.disconnected",
-        execution_key=execution_key,
-        data={"interpretation_id": None, "status": None, "error_code": code, "reused": False},
     )
 
 

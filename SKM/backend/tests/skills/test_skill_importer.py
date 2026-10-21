@@ -554,3 +554,34 @@ def test_system_skill_separates_blueprint_and_manifest_source_trace_scopes() -> 
         'Input and resource declarations require a source reference',
     ):
         assert instruction in prompt
+
+
+@pytest.mark.parametrize("filename", ["notes.md", "画面・仕様.md"])
+def test_normalized_package_hash_preserves_canonical_bytes(tmp_path, filename):
+    """共有 hash への収束でも、Unicode を含む既存 package の identity を変更しない。"""
+    import hashlib
+
+    from skillmind.skills.importer import _package_hash
+
+    _directory_skill(tmp_path)
+    _write(tmp_path / filename, "仕様・中文・é\n")
+    package = SkillPackageParser().parse_directory(tmp_path)
+    original = json.dumps(package.to_dict(), ensure_ascii=False, sort_keys=True,
+                          separators=(",", ":"), allow_nan=False).encode("utf-8")
+    assert _package_hash(package) == "sha256:" + hashlib.sha256(original).hexdigest()
+
+
+def test_source_identity_keeps_its_original_unicode_escape_encoding():
+    """原 source の byte 形式は package の Unicode 表記と別の不変契約である。"""
+    import hashlib
+
+    from skillmind.skills.source_identity import skill_source_hash
+
+    files = [{"path": "画面・仕様.md", "sha256": "a" * 64}]
+    for entry in [None, "skills/レビュー/SKILL.md"]:
+        value = files if entry is None else {"entry_path": entry, "files": files}
+        original = json.dumps(value, ensure_ascii=True, sort_keys=True,
+                              separators=(",", ":"), allow_nan=False).encode("utf-8")
+        assert skill_source_hash(files, entry_path=entry) == (
+            "sha256:" + hashlib.sha256(original).hexdigest()
+        )

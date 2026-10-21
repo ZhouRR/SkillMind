@@ -1,18 +1,29 @@
-"""Proposal・批准・Effect の公開投影を読取と状態更新の応答で共有する。"""
+"""Proposal・批准・Effect の記録組立と公開投影を共有する。"""
 
 from __future__ import annotations
 
-from skillmind.db.models import ChangeApproval, ChangeProposal, EffectExecution
+from datetime import datetime
+from typing import Any
+from uuid import UUID, uuid4
+
+from skillmind.core.hashing import canonical_json, sha256_hex
+from skillmind.db.models import ChangeApproval, ChangeProposal, EffectExecution, Evidence
+from skillmind.effects.catalog import resolve_effect_capability
 from skillmind.effects.domain import (
     ApprovalDecision,
     ApprovalSource,
     ChangeProposalStatus,
+    ChangeProposalValidationError,
+    EffectEvidenceDraft,
     EffectExecutionStatus,
     EffectRiskLevel,
     StoredChangeApproval,
     StoredChangeProposal,
     StoredEffectExecution,
 )
+from skillmind.effects.mcp_diagnostics import diagnostic_message
+from skillmind.effects.outcomes import UNKNOWN_EFFECT_CODE
+from skillmind.effects.postgres_native import SQL_FAILURE_MESSAGES, sql_failure_message
 
 
 def stored_change_proposal(row: ChangeProposal) -> StoredChangeProposal:
@@ -96,3 +107,100 @@ def stored_effect_execution(row: EffectExecution) -> StoredEffectExecution:
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
+
+
+def effect_evidence_row(
+    *,
+    run_id: UUID,
+    tool_call_id: UUID,
+    evidence_ref: str,
+    draft: EffectEvidenceDraft,
+    now: datetime,
+) -> Evidence:
+    """Provider draft を content hash と scoped snapshot metadata 付き Evidence へ変換する。"""
+
+    content = dict(draft.content)
+    return Evidence(
+        id=uuid4(),
+        evidence_ref=evidence_ref,
+        run_id=run_id,
+        tool_call_id=tool_call_id,
+        evidence_type=draft.evidence_type,
+        source_uri=draft.source_uri,
+        source_locator=dict(draft.source_locator),
+        content_hash=f"sha256:{sha256_hex(canonical_json(content))}",
+        snapshot_uri=None,
+        excerpt=draft.excerpt,
+        metadata_json={**dict(draft.metadata), "snapshot": content},
+        created_at=now,
+    )
+
+
+def new_effect_execution(
+    *,
+    proposal: ChangeProposal,
+    approval: ChangeApproval,
+    provider: str,
+    now: datetime,
+) -> EffectExecution:
+    """Approved Proposal から一意な REQUESTED EffectExecution を作成する。"""
+
+    capability = resolve_effect_capability(proposal.capability_version)
+    if provider not in capability.providers:
+        raise ChangeProposalValidationError("Effect Provider is not registered")
+    return EffectExecution(
+        id=uuid4(),
+        proposal_id=proposal.id,
+        run_id=proposal.run_id,
+        approval_id=approval.id,
+        tool_call_id=None,
+        status=EffectExecutionStatus.REQUESTED.value,
+        provider=provider,
+        provider_version=capability.provider_versions[provider],
+        idempotency_key=proposal.idempotency_key,
+        request_fingerprint=proposal.request_fingerprint,
+        before_ref=None,
+        after_ref=None,
+        verification_json={},
+        error_json=None,
+        worker_id=None,
+        lease_token_hash=None,
+        lease_expires_at=None,
+        heartbeat_at=None,
+        attempt_no=0,
+        started_at=None,
+        executed_at=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def effect_tool_error(
+    *, code: str, retryable: bool, diagnostic: dict[str, Any] | None = None,
+    response: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Tool contract に適合し、外部 response 本文を含まない effect error を返す。"""
+
+    public_code = code
+    if code in SQL_FAILURE_MESSAGES:
+        public_code = {
+            "sql_request_not_sent": "unavailable",
+            "sql_permission_denied": "scope_denied",
+            "sql_undefined_table": "not_found",
+        }.get(code, "invalid_request")
+    elif code in {"mcp_request_not_sent", "http_response_error"}:
+        public_code = "invalid_request"
+    return {
+        "status": "error",
+        "code": public_code,
+        "message": (
+            "Original external write result requires reconciliation"
+            if code == UNKNOWN_EFFECT_CODE
+            else sql_failure_message(code)
+            if code in SQL_FAILURE_MESSAGES
+            else "Controlled effect could not be completed"
+        )
+        + diagnostic_message(diagnostic)
+        + (" Original HTTP response: " + canonical_json(response) if response is not None else ""),
+        "retryable": retryable,
+    }
