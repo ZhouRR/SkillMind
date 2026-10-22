@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -9,6 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from skillmind.agent.http_source import HttpResourceError, HttpResponse
+from skillmind.effects.domain import EffectLeaseValidationError
 from skillmind.effects.http_provider import HttpWriteProvider
 from skillmind.effects.postgres_native import (
     NativeDatabaseWriteProvider,
@@ -258,6 +260,7 @@ async def test_sql_executes_once_without_external_receipts_or_business_reads(
     assert result.verification["business_verdict"] == "NOT_EVALUATED"
     assert not result.replayed
     assert authorize.await_count == 4
+    assert all(args.args == (original, "fixture-secret") for args in authorize.await_args_list)
     engine.dispose.assert_awaited_once()
 
 
@@ -370,8 +373,104 @@ async def test_connection_failure_proves_sql_not_sent(sql_connection):
     engine.dispose.assert_awaited_once()
 
 
+@pytest.mark.parametrize("phase", ["initial_authorization", "engine", "before_send"])
+@pytest.mark.parametrize("failure", [TypeError, RuntimeError])
+async def test_local_failure_before_sql_is_not_an_unknown_write(
+    sql_connection, phase, failure,
+):
+    """ローカル故障を未送信と記録し、例外本文や資格・SQL を公開しない。"""
+    from skillmind.effects.outcomes import effect_failure_record
+
+    connection, engine, factory = sql_connection
+    error = failure("private SQL, values and credentials")
+    authorize = AsyncMock()
+    if phase == "initial_authorization":
+        authorize.side_effect = error
+    elif phase == "engine":
+        factory.side_effect = error
+    else:
+        authorize.side_effect = [None, error, None]
+    with pytest.raises(SqlExecutionError) as caught:
+        await NativeDatabaseWriteProvider(authorize).apply(
+            sql_execution(), credential="fixture-secret",
+        )
+    assert caught.value.code == "sql_request_not_sent"
+    assert "private" not in str(caught.value)
+    assert effect_failure_record(
+        capability="database.execute/v1", provider="postgres", attempt_no=1,
+        code=caught.value.code, retryable=False, previous=None,
+    ) == {"code": "sql_request_not_sent", "retryable": False}
+    connection.driver.execute.assert_not_awaited()
+    assert not connection.committed
+    if phase == "before_send":
+        assert connection.rolled_back
+        engine.dispose.assert_awaited_once()
+    else:
+        engine.dispose.assert_not_awaited()
+
+
+async def test_local_failure_after_commit_is_still_unknown(sql_connection):
+    """commit 後の認可故障を未送信へ変換せず、原操作の再送を防ぐ。"""
+    from skillmind.effects.outcomes import effect_failure_record
+
+    connection, engine, _ = sql_connection
+    authorize = AsyncMock(side_effect=[None, None, None, TypeError("private detail")])
+    with pytest.raises(TypeError):
+        await NativeDatabaseWriteProvider(authorize).apply(
+            sql_execution(), credential="fixture-secret",
+        )
+    assert connection.committed and connection.driver.execute.await_count == 1
+    assert effect_failure_record(
+        capability="database.execute/v1", provider="postgres", attempt_no=1,
+        code="effect_provider_failed", retryable=False, previous=None,
+    )["code"] == "effect_result_unknown"
+    engine.dispose.assert_awaited_once()
+
+
+async def test_sql_prepare_error_preserves_its_structured_diagnostic(sql_connection):
+    """DML 送信前でも PostgreSQL が確認した列エラーは、接続故障と混同しない。"""
+    from asyncpg import PostgresError
+
+    connection, _, _ = sql_connection
+    error = PostgresError("private SQL")
+    error.sqlstate = "42703"
+    connection.get_raw_connection = AsyncMock(side_effect=error)
+    with pytest.raises(SqlExecutionError, match="sql_undefined_column"):
+        await NativeDatabaseWriteProvider(AsyncMock()).apply(
+            sql_execution(), credential="fixture-secret",
+        )
+    connection.driver.execute.assert_not_awaited()
+    assert connection.rolled_back and not connection.committed
+
+
+@pytest.mark.parametrize("failure", [
+    PermissionError, asyncio.CancelledError, EffectLeaseValidationError,
+])
+async def test_initial_sql_authority_failure_keeps_its_original_semantics(sql_connection, failure):
+    """初回の取消・撤権・失権を未送信の通常エラーへ畳まず、そのまま終了する。"""
+    connection, engine, factory = sql_connection
+    with pytest.raises(failure):
+        await NativeDatabaseWriteProvider(AsyncMock(side_effect=failure())).apply(
+            sql_execution(), credential="fixture-secret",
+        )
+    factory.assert_not_called()
+    connection.driver.execute.assert_not_awaited()
+    engine.dispose.assert_not_awaited()
+
+
+async def test_local_failure_on_reclaim_preserves_the_unknown_original_result(sql_connection):
+    """過去 attempt の結果不明は、今回のローカル故障でも未送信へ上書きしない。"""
+    connection, _, factory = sql_connection
+    with pytest.raises(EffectProviderTransportError, match="sql_result_unconfirmed"):
+        await NativeDatabaseWriteProvider(AsyncMock(side_effect=TypeError("private detail"))).apply(
+            replace(sql_execution(), attempt_no=2), credential="fixture-secret",
+        )
+    factory.assert_not_called()
+    connection.driver.execute.assert_not_awaited()
+
+
 @pytest.mark.parametrize("when", ["before", "after"])
-@pytest.mark.parametrize("failure", [PermissionError, __import__("asyncio").CancelledError])
+@pytest.mark.parametrize("failure", [PermissionError, asyncio.CancelledError])
 async def test_sql_revocation_and_cancellation_do_not_become_query_errors(
     sql_connection, when, failure
 ):

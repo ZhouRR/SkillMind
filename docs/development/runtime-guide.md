@@ -58,6 +58,7 @@ MCP・repository の応答を JSON ファイルで交付する場合も原観測
 - 外部書込は observe → propose → approve → apply に従う。モデル向け説明は各 Effect request Schema の `description` から供給し、文書と Git は提案準備ツールを優先利用する。
 - 承認は特定 Proposal の version/checksum・Provider・操作・scope に束縛し、[EffectService](../../SKM/backend/src/skillmind/effects/service.py) が業務ロック外でリモート I/O を実行する。自動承認は原 Run 開始時に記録された同意または既存の事前認可に限定する（`repository.write/v1` は Project 事前認可と force を禁止）。
 - 実効能力は [ExecutionFeatures](../../SKM/backend/src/skillmind/effects/release.py) と [Provider registry](../../SKM/backend/src/skillmind/effects/wiring.py) のスイッチ双方で制限する。MCP 提案は同一 Run/接続/束縛のツールカタログ証拠を自動関連付けして checksum に含める。
+- 原生 SQL の段階認可は原実行と同じ認証情報を照合する。初回 DML の未送信と rollback 確認済みの失敗は修正可能な診断として返し、commit 応答喪失や過去 attempt の不明結果は照合対象として保持する。
 - MCP の回読は原呼出しの確定した回執を確認し、業務成功・全件完了とは分離する。状態条件は工具契約に示された失敗を含む終端集合と、呼出し終了・続行可能と明示された部分完了を使う。Agent は回執を評価し、続行が必要なら同じ原 ID・対象集合を使う別の受控提案を行う。進行中・結果不明を完了扱いせず、承認済み条件も実行後に緩和しない。送信前検証は出力 Schema と比較値の整合を確認し、enum から終端性を推測しない。応答受信の診断事実は後続の読取専用 attempt に引き継ぐ。
 - 書込結果が不明な場合は主フローを停止して原 Effect を保持し、[reconciliation_service](../../SKM/backend/src/skillmind/effects/reconciliation_service.py) で読取照合を行う。MCP の read-back 再試行（[mcp_provider](../../SKM/backend/src/skillmind/effects/mcp_provider.py)）は変更操作を決して再送しない。
 

@@ -6,9 +6,6 @@ import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
-from asyncpg import PostgresError
-from sqlalchemy.exc import SQLAlchemyError
-
 from skillmind.agent.database_errors import sqlstate_of
 from skillmind.agent.postgres_native import bind_native_parameters, native_statement
 from skillmind.agent.postgres_source import create_database_engine
@@ -18,6 +15,7 @@ from skillmind.effects.domain import (
     ChangeProposalValidationError,
     ClaimedEffectExecution,
     EffectEvidenceDraft,
+    EffectLeaseValidationError,
     EffectProviderResult,
 )
 from skillmind.effects.redmine import EffectProviderTransportError
@@ -26,8 +24,8 @@ SQL_WRITE = "database.execute/v1"
 SQL_VERSION = "postgres-native/v2"
 SQL_FAILURE_MESSAGES = {
     "sql_request_not_sent": (
-        "The database request was not sent. Check the connection and retry with a new proposal"
-        " if appropriate."
+        "The database request was not sent. Check the request, connection and execution "
+        "configuration before proposing a corrected operation."
     ),
     "sql_undefined_column": (
         "The SQL references an unknown column. Inspect the table schema and correct the "
@@ -147,7 +145,9 @@ def sql_scope(payload: Mapping[str, Any]) -> dict[str, Any]:
 class NativeDatabaseWriteProvider:
     """一回の transaction 結果を返し、結果不明の再 claim は再送しない。"""
 
-    def __init__(self, authorize: Callable[[ClaimedEffectExecution], Awaitable[None]]) -> None:
+    def __init__(
+        self, authorize: Callable[[ClaimedEffectExecution, str | None], Awaitable[None]],
+    ) -> None:
         """現在の批准・資源・lease を検査する共有認可を保持する。"""
         self._authorize = authorize
 
@@ -158,24 +158,36 @@ class NativeDatabaseWriteProvider:
         credential: str | None,
     ) -> EffectProviderResult:
         """原 DML を commit してから応答し、rollback 確認と commit 不明を区別する。"""
-        if (
-            credential is None
-            or execution.capability_version != SQL_WRITE
-            or execution.provider != "postgres"
-        ):
-            raise ValueError("SQL write requires a PostgreSQL credential")
-        payload = sql_payload(
-            execution.operation,
-            execution.changes,
-            execution.integration_scope,
-            execution.integration_config,
-        )
-        await self._authorize(execution)
-        if execution.attempt_no != 1:
-            raise EffectProviderTransportError("sql_result_unconfirmed", retryable=False)
-        if credential in canonical_json(payload):
-            raise ValueError("SQL request contains credentials")
-        engine = create_database_engine(execution.integration_config, credential, read_only=False)
+        try:
+            if (
+                credential is None
+                or execution.capability_version != SQL_WRITE
+                or execution.provider != "postgres"
+            ):
+                raise ValueError("SQL write requires a PostgreSQL credential")
+            payload = sql_payload(
+                execution.operation,
+                execution.changes,
+                execution.integration_scope,
+                execution.integration_config,
+            )
+            await self._authorize(execution, credential)
+            if execution.attempt_no != 1:
+                raise EffectProviderTransportError("sql_result_unconfirmed", retryable=False)
+            if credential in canonical_json(payload):
+                raise ValueError("SQL request contains credentials")
+            engine = create_database_engine(
+                execution.integration_config, credential, read_only=False,
+            )
+        except (PermissionError, EffectLeaseValidationError, EffectProviderTransportError):
+            raise
+        except Exception:
+            # 接続開始前の故障は未送信。過去 attempt の不明結果は確定しない。
+            if execution.attempt_no != 1:
+                raise EffectProviderTransportError(
+                    "sql_result_unconfirmed", retryable=False,
+                ) from None
+            raise SqlExecutionError("sql_request_not_sent") from None
         sent = False
         statement_error: BaseException | None = None
         try:
@@ -195,27 +207,24 @@ class NativeDatabaseWriteProvider:
                     if driver is None:
                         raise ValueError("PostgreSQL driver is unavailable")
                     parameters = await bind_native_parameters(driver, sql, parameters)
-                    await self._authorize(execution)
+                    await self._authorize(execution, credential)
                     sent = True
                     command_tag = await driver.execute(sql, *parameters)
-                    await self._authorize(execution)
-                except (
-                    SQLAlchemyError,
-                    PostgresError,
-                    OSError,
-                    TimeoutError,
-                    ValueError,
-                ) as error:
-                    if isinstance(error, PermissionError):
+                    await self._authorize(execution, credential)
+                except Exception as error:
+                    # ローカル故障も原 transaction の rollback を確認してから分類する。
+                    if isinstance(error, PermissionError | EffectLeaseValidationError):
                         raise
                     statement_error = error
                     raise
             # begin の正常終了が commit 応答の確認点。行の値から成功を推測しない。
-        except (SQLAlchemyError, PostgresError, OSError, TimeoutError, ValueError) as error:
-            if isinstance(error, PermissionError):
+        except Exception as error:
+            if isinstance(error, PermissionError | EffectLeaseValidationError):
                 raise
-            await self._authorize(execution)
-            if statement_error is not None and error is statement_error:
+            await self._authorize(execution, credential)
+            if statement_error is not None and error is statement_error and (
+                sent or sqlstate_of(statement_error) is not None
+            ):
                 # 同じ例外が transaction を抜けた場合だけ rollback 完了を確認できる。
                 raise SqlExecutionError(_rollback_code(statement_error)) from None
             if not sent:
@@ -223,7 +232,7 @@ class NativeDatabaseWriteProvider:
             raise EffectProviderTransportError("sql_result_unconfirmed", retryable=False) from None
         finally:
             await engine.dispose()
-        await self._authorize(execution)
+        await self._authorize(execution, credential)
         result = {"command_tag": command_tag, "affected_rows": int(command_tag.rsplit(" ", 1)[1])}
         return EffectProviderResult(
             before=_evidence(execution, payload, "request"),

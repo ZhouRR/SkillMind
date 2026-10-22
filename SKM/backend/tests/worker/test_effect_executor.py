@@ -212,6 +212,12 @@ async def test_immediate_handoff_still_claims_and_never_applies_unclaimable_effe
     ("error", "status", "code", "retryable"),
     [
         (
+            SqlExecutionError("sql_request_not_sent"),
+            EffectExecutionStatus.FAILED,
+            "sql_request_not_sent",
+            False,
+        ),
+        (
             SqlExecutionError("sql_undefined_column"),
             EffectExecutionStatus.FAILED,
             "sql_undefined_column",
