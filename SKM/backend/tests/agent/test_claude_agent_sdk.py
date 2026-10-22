@@ -240,6 +240,7 @@ def test_runtime_environment_does_not_forward_unlisted_values(
     assert "SKILLMIND_DATABASE_URL" not in configuration.environment
 
 
+@pytest.mark.parametrize("key", ["CLAUDE_CODE_MAX_OUTPUT_TOKENS", "MAX_MCP_OUTPUT_TOKENS"])
 @pytest.mark.parametrize("environment_value,fallback_value,expected", [
     ("64000", "32000", "64000"),
     (None, "64000", "64000"),
@@ -247,12 +248,11 @@ def test_runtime_environment_does_not_forward_unlisted_values(
     (None, None, None),
 ])
 def test_output_token_limit_reaches_run_without_restoring_blank_or_unlisted_environment(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, key: str,
     environment_value: str | None, fallback_value: str | None, expected: str | None,
 ) -> None:
-    """明示環境を fallback より優先し、単一応答上限だけを Run の隔離環境へ通す。"""
+    """明示環境を fallback より優先し、応答上限だけを Run の隔離環境へ通す。"""
 
-    key = "CLAUDE_CODE_MAX_OUTPUT_TOKENS"
     for allowed_key in _AGENT_ENVIRONMENT_KEYS:
         monkeypatch.delenv(allowed_key, raising=False)
     if environment_value is not None:
