@@ -16,7 +16,7 @@ from skillmind.effects.domain import (
     EffectProviderResult,
     StoredEffectExecution,
 )
-from skillmind.effects.postgres_native import SqlPreconditionNotMetError
+from skillmind.effects.postgres_native import SqlExecutionError
 from skillmind.effects.provider import (
     EffectProviderDefinition,
     EffectProviderRegistry,
@@ -212,9 +212,15 @@ async def test_immediate_handoff_still_claims_and_never_applies_unclaimable_effe
     ("error", "status", "code", "retryable"),
     [
         (
-            SqlPreconditionNotMetError("unsent"),
-            EffectExecutionStatus.STALE,
-            "sql_precondition_not_met",
+            SqlExecutionError("sql_request_not_sent"),
+            EffectExecutionStatus.FAILED,
+            "sql_request_not_sent",
+            False,
+        ),
+        (
+            SqlExecutionError("sql_undefined_column"),
+            EffectExecutionStatus.FAILED,
+            "sql_undefined_column",
             False,
         ),
         (EffectProviderStaleError("stale"), EffectExecutionStatus.STALE, "target_stale", False),

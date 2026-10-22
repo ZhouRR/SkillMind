@@ -25,9 +25,9 @@ from skillmind.db.models import (
 )
 from skillmind.effects.catalog import EFFECT_CAPABILITIES
 from skillmind.effects.domain import ClaimedEffectExecution, EffectEvidenceDraft
+from skillmind.effects.projections import effect_evidence_row
 from skillmind.effects.redmine import RedmineIssueSnapshot, RedmineIssueUpdateProvider
 from skillmind.effects.repository_effect import _result as repository_effect_result
-from skillmind.runs.repository_effects import EffectOperationsMixin
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,7 +108,7 @@ def _graph(*, provider: str = "redmine") -> EffectGraph:
         """原 writer の canonical snapshot/hash 形式を test 側で複製しない。"""
 
         assert ref is not None
-        return EffectOperationsMixin._effect_evidence_row(
+        return effect_evidence_row(
             run_id=run_id, tool_call_id=tool.id, evidence_ref=ref, now=now,
             draft=EffectEvidenceDraft(
                 evidence_type=f"issue.update.{phase}" if provider == "redmine" else "source_code",
@@ -678,12 +678,12 @@ async def test_actual_provider_result_and_evidence_writer_match_new_result_gate(
     assert graph.execution.executed_at is not None
     assert graph.execution.before_ref is not None
     assert graph.execution.after_ref is not None
-    before = EffectOperationsMixin._effect_evidence_row(
+    before = effect_evidence_row(
         run_id=graph.proposal.run_id, tool_call_id=graph.tool.id,
         evidence_ref=graph.execution.before_ref, draft=result.before,
         now=graph.execution.executed_at,
     )
-    after = EffectOperationsMixin._effect_evidence_row(
+    after = effect_evidence_row(
         run_id=graph.proposal.run_id, tool_call_id=graph.tool.id,
         evidence_ref=graph.execution.after_ref, draft=result.after,
         now=graph.execution.executed_at,
@@ -755,12 +755,12 @@ async def _http_graph(tmp_path, *, status: int = 200) -> tuple[EffectGraph, list
     graph.tool.result_json.update(provider="http", verification=dict(result.verification))
     assert graph.execution.executed_at is not None
     assert graph.execution.before_ref is not None and graph.execution.after_ref is not None
-    before = EffectOperationsMixin._effect_evidence_row(
+    before = effect_evidence_row(
         run_id=graph.proposal.run_id, tool_call_id=graph.tool.id,
         evidence_ref=graph.execution.before_ref, draft=result.before,
         now=graph.execution.executed_at,
     )
-    after = EffectOperationsMixin._effect_evidence_row(
+    after = effect_evidence_row(
         run_id=graph.proposal.run_id, tool_call_id=graph.tool.id,
         evidence_ref=graph.execution.after_ref, draft=result.after,
         now=graph.execution.executed_at,

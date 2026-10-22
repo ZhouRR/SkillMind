@@ -31,7 +31,6 @@ from skillmind.api.release_features import require_scheduling
 from skillmind.auth.sessions import CsrfRejectedError, UnauthorizedSessionError
 from skillmind.projects.domain import ProjectArchivedError, ProjectNotFoundError
 from skillmind.schedules import (
-    PREVIEW_OCCURRENCE_COUNT,
     InvalidScheduleTransitionError,
     ScheduleConflictError,
     ScheduleDefinition,
@@ -40,15 +39,14 @@ from skillmind.schedules import (
     ScheduleNotFoundError,
     ScheduleOutcome,
     ScheduleRecord,
-    ScheduleService,
     ScheduleStatus,
-    build_definition,
 )
 from skillmind.schedules.domain import (
     ScheduleActivity,
     ScheduleActivityUnavailableError,
     ScheduleTracking,
 )
+from skillmind.schedules.service import PREVIEW_OCCURRENCE_COUNT, ScheduleService, build_definition
 
 router = APIRouter()
 

@@ -7,7 +7,7 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any, Protocol
 from urllib.parse import quote, urlsplit
 from uuid import UUID, uuid4
 
@@ -20,6 +20,7 @@ from skillmind.agent.tool_diagnostics import safe_tool_diagnostic
 from skillmind.agent.tool_routing import resource_identity
 from skillmind.artifacts.conversion import conversion_artifact, conversion_artifact_description
 from skillmind.artifacts.domain import MAX_RUN_ARTIFACT_BYTES, MAX_RUN_ARTIFACTS, ArtifactDraft
+from skillmind.artifacts.repository import ArtifactRepository
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.core.redaction import find_sensitive_key
 from skillmind.db.models import (
@@ -30,14 +31,13 @@ from skillmind.db.models import (
     RunSegment,
     ToolCall,
 )
+from skillmind.runs.document_prerequisites import require_document_readiness
 from skillmind.runs.domain import (
     ClaimedRun,
     LeaseValidationError,
     SessionContinuationMode,
 )
-
-if TYPE_CHECKING:
-    from skillmind.runs.tool_execution import ToolExecutionGate
+from skillmind.runs.tool_execution import ToolExecutionGate
 
 _CONTENT_HASH_PATTERN = re.compile(r"^sha256:[a-f0-9]{64}$")
 
@@ -264,8 +264,6 @@ class PostgresToolAuditWriter:
                     invocation.tool.capability == "document.convert/v1"
                     and invocation.arguments.get("publish_artifact") is True
                 ):
-                    from skillmind.artifacts.repository import ArtifactRepository
-
                     refs = frozenset((lease.result or {}).get("artifact_refs", []))
                     if invocation.tool.capability == "document.convert/v1" and len(refs) != 1:
                         raise ValueError("Conversion replay requires its original Artifact")
@@ -305,8 +303,6 @@ class PostgresToolAuditWriter:
             validate_artifact_publication(invocation, result=result, evidence=evidence)
             artifacts = [record.draft.artifact for record in evidence if record.artifact_ref]
             if artifacts:
-                from skillmind.artifacts.repository import ArtifactRepository
-
                 # Run lock が main/child/Attempt を横断する保存総量の直列化点となる。
                 saved = await ArtifactRepository(session).list_metadata(
                     project_id=self._claimed.project_id, run_id=tool_call.run_id,
@@ -413,7 +409,6 @@ class PostgresToolAuditWriter:
         session: AsyncSession, run: Run, invocation: ToolInvocation,
     ) -> None:
         """登録・実行直前・成功保存で同じ正本 gate を使い、Provider の呼び方に依存しない。"""
-        from skillmind.runs.document_prerequisites import require_document_readiness
 
         await require_document_readiness(session, run, invocation.tool.capability)
 
@@ -421,9 +416,6 @@ class PostgresToolAuditWriter:
         self, session: AsyncSession,
     ) -> tuple[ToolExecutionGate, tuple[Run, RunSegment | None, RunAttempt]]:
         """ToolCall より先に共有の Run→Segment→Attempt lock を取得する。"""
-
-        # agent の公開 barrel と Run repository の相互 import を初期化時に結ばない。
-        from skillmind.runs.tool_execution import ToolExecutionGate
 
         self._authority_check()
         gate = ToolExecutionGate(

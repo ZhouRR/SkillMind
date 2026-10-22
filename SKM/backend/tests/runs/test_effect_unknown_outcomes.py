@@ -20,7 +20,7 @@ from skillmind.effects.domain import (
     EffectProviderResult,
 )
 from skillmind.effects.outcomes import effect_failure_record
-from skillmind.runs.repository_effects import _effect_tool_error
+from skillmind.effects.projections import effect_tool_error
 from tests.runs.effect_authorization_harness import AuthorizationHarness
 
 
@@ -226,7 +226,7 @@ def test_unknown_tool_record_matches_public_error_contract(capability):
     )
     schema = json.loads(schema_path.read_text())
     Draft202012Validator(schema).validate(
-        _effect_tool_error(code="effect_result_unknown", retryable=False)
+        effect_tool_error(code="effect_result_unknown", retryable=False)
     )
 
 
@@ -333,25 +333,25 @@ async def test_confirmed_unsent_mcp_failure_continues_with_diagnostic_for_skill_
         (1, None, "other"),
     ],
 )
-def test_only_first_confirmed_unsent_sql_failure_can_be_corrected(attempt, previous, provider):
+def test_only_first_confirmed_rollback_sql_failure_can_be_corrected(attempt, previous, provider):
     """専用分類でも過去の不明操作や別 Provider を未送信へ上書きしない。"""
     result = effect_failure_record(
         capability="database.execute/v1",
         provider=provider,
         attempt_no=attempt,
-        code="sql_precondition_not_met",
+        code="sql_undefined_column",
         retryable=False,
         previous=previous,
     )
     assert result["code"] == (
-        "sql_precondition_not_met"
+        "sql_undefined_column"
         if attempt == 1 and previous is None and provider == "postgres"
         else "effect_result_unknown"
     )
 
 
 @pytest.mark.parametrize("cancelled", [False, True])
-async def test_unsent_sql_conflict_preserves_failure_and_resumes_only_active_run(cancelled):
+async def test_rolled_back_sql_error_preserves_failure_and_resumes_only_active_run(cancelled):
     """原失敗を監査へ残し、取消以外は原文脈に訂正可能な結果を渡す。"""
     h = harness(capability="database.execute/v1", cancelled=cancelled)
     h.execution.provider = "postgres"
@@ -361,19 +361,19 @@ async def test_unsent_sql_conflict_preserves_failure_and_resumes_only_active_run
     await h.repository.finalize_effect_execution(
         h.claimed,
         result=None,
-        failure=EffectFailure(EffectExecutionStatus.STALE, "sql_precondition_not_met", False),
+        failure=EffectFailure(EffectExecutionStatus.FAILED, "sql_undefined_column", False),
         duration_ms=1,
     )
-    assert h.execution.status == "STALE" and h.proposal.status == "STALE"
+    assert h.execution.status == "FAILED" and h.proposal.status == "FAILED"
     assert h.tool.status == "FAILED" and h.tool.error_json["code"] == "invalid_request"
-    assert "no write was sent" in h.tool.error_json["message"]
+    assert "transaction was rolled back" in h.tool.error_json["message"]
     assert h.run.status == ("CANCELLED" if cancelled else "QUEUED")
     added = [row for call in h.session.add_all.call_args_list for row in call.args[0]]
     segments = [row for row in added if isinstance(row, RunSegment)]
     assert len(segments) == (0 if cancelled else 1)
     if segments:
         assert "effect_result" not in segments[0].checkpoint_json
-        assert "no write was sent" in segments[0].checkpoint_json["confirmed_facts"][-1]
+        assert "transaction was rolled back" in segments[0].checkpoint_json["confirmed_facts"][-1]
     schema = json.loads(
         (
             Path(__file__).resolve().parents[3]
@@ -381,3 +381,21 @@ async def test_unsent_sql_conflict_preserves_failure_and_resumes_only_active_run
         ).read_text()
     )
     Draft202012Validator(schema).validate(h.tool.error_json)
+
+
+@pytest.mark.parametrize("reason,public_code", [
+    ("sql_undefined_column", "invalid_request"),
+    ("sql_permission_denied", "scope_denied"),
+    ("sql_undefined_table", "not_found"),
+    ("sql_request_not_sent", "unavailable"),
+])
+def test_confirmed_sql_errors_keep_public_categories_and_fixed_diagnostics(reason, public_code):
+    """SQL の訂正・権限・接続障害を既存公開 code で区別し、原例外本文は要求しない。"""
+    from skillmind.effects.projections import effect_tool_error
+
+    error = effect_tool_error(code=reason, retryable=False)
+    assert error["code"] == public_code and error["retryable"] is False
+    assert ("rolled back" in error["message"]) == (reason != "sql_request_not_sent")
+    schema = json.loads((Path(__file__).resolve().parents[3]
+        / "contracts/tools/database.execute/v1/error.schema.json").read_text())
+    Draft202012Validator(schema).validate(error)

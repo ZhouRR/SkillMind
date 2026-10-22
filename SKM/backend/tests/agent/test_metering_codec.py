@@ -52,7 +52,7 @@ def test_invocation_binding_imports_do_not_depend_on_package_order(first_module:
             "from skillmind.runs.budget_store import PostgresRunBudgetStore\n"
             "from skillmind.runs.budget_execution import BudgetInvocationRecorder\n"
             "from skillmind.agent.metering import AgentInvocation\n"
-            "from skillmind.agent.engine import ClaudeAgentSdkEngine\n",
+            "from skillmind.agent.claude_engine import ClaudeAgentSdkEngine\n",
         ],
         check=True,
         capture_output=True,

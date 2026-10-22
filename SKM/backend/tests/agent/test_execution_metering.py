@@ -26,6 +26,7 @@ from skillmind.agent.claude import (
     ClaudeRuntimeConfiguration,
 )
 from skillmind.agent.claude_build import bundled_claude_build
+from skillmind.agent.claude_engine import ClaudeAgentSdkEngine
 from skillmind.agent.claude_metering import capture_invocation
 from skillmind.agent.domain import (
     AgentEvent,
@@ -34,7 +35,6 @@ from skillmind.agent.domain import (
     ForkContext,
     ResumeContext,
 )
-from skillmind.agent.engine import ClaudeAgentSdkEngine
 from skillmind.agent.metering import (
     AgentInvocationMode,
     ResultUsageObservation,

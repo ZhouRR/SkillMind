@@ -18,7 +18,6 @@ from skillmind.effects.domain import (
 )
 from skillmind.effects.http_provider import HttpResponseError
 from skillmind.effects.mcp_diagnostics import McpEffectFailure
-from skillmind.effects.postgres_native import SqlPreconditionNotMetError
 from skillmind.effects.provider import EffectProviderRegistry
 from skillmind.effects.redmine import (
     EffectProviderStaleError,
@@ -82,7 +81,9 @@ class ApprovedEffectExecutor:
         """直接交付の経路選択へ既存の監督時間を読み取り専用で渡す。"""
         return self._wall_timeout_seconds
 
-    async def execute(self, effect_execution_id: object, *, inline_parent: ClaimedRun | None = None) -> str:
+    async def execute(
+        self, effect_execution_id: object, *, inline_parent: ClaimedRun | None = None,
+    ) -> str:
         """通常結果を永続化し、監督失敗では原実行の照合を回収処理へ委ねる。"""
 
         from uuid import UUID
@@ -199,12 +200,6 @@ class ApprovedEffectExecutor:
             result = await definition.implementation.apply(
                 claimed,
                 credential=credential,
-            )
-        except SqlPreconditionNotMetError:
-            failure = EffectFailure(
-                status=EffectExecutionStatus.STALE,
-                code="sql_precondition_not_met",
-                retryable=False,
             )
         except EffectProviderStaleError:
             failure = EffectFailure(

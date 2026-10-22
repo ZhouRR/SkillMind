@@ -10,6 +10,7 @@ from skillmind.agent.artifact_materialize import ArtifactMaterializeProvider
 from skillmind.agent.audit_export import AuditExportProvider
 from skillmind.agent.audit_source import PostgresAuditExportSource
 from skillmind.agent.claude import ClaudeRuntimeConfiguration
+from skillmind.agent.claude_engine import ClaudeAgentSdkEngine
 from skillmind.agent.codex_engine import CodexAgentSdkEngine
 from skillmind.agent.codex_runtime import CodexRuntimeConfiguration
 from skillmind.agent.context_builder import (
@@ -22,7 +23,6 @@ from skillmind.agent.database_provider import DatabaseReadProvider
 from skillmind.agent.document_files import DocumentFilesProvider
 from skillmind.agent.document_readiness import DocumentReadinessProvider
 from skillmind.agent.domain import AgentEngine, RunContext
-from skillmind.agent.engine import ClaudeAgentSdkEngine, RunMcpRuntime
 from skillmind.agent.evidence import PostgresToolAuditWriter
 from skillmind.agent.http_provider import HttpReadProvider
 from skillmind.agent.http_source import HttpResourceSource
@@ -55,6 +55,7 @@ from skillmind.agent.tool_catalog import (
     create_run_tool_registry,
 )
 from skillmind.agent.tool_gateway import RunToolRuntime
+from skillmind.agent.tool_runtime import RunMcpRuntime
 from skillmind.agent.workspace import WorkspaceManager
 from skillmind.agent.workspace_materializer import WorkspaceMaterializer
 from skillmind.core.secret_crypto import load_secret_cipher

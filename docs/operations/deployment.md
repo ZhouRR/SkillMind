@@ -39,7 +39,7 @@ docker compose --env-file "${ENV_FILE:-.env}" exec -T worker python -m skillmind
 | `SCHEDULING_ENABLED` | 定期発火（業務配送の有効化も必要） |
 | `DEFERRED_FEATURES_ENABLED` | その他後置能力のスイッチ |
 
-機能スイッチに加え、資源範囲・タスク束縛・承認の設定が必要となる（境界は[実行・データ保守ガイド](../development/runtime-guide.md)を参照）。DB 書込を有効化する前に、対象 DB の管理者が[回執テーブル SQL](../../SKM/scripts/sql/postgres-effect-receipts.sql) を実行し、実行ロールへ schema `USAGE`・回執テーブルの `SELECT`/`INSERT`・業務テーブル権限を付与する（回執の更新・削除権限は付与しない）。MCP 接続は完全な Streamable HTTP `/mcp` URL と資格情報を入力し、資源編集画面でツールを検出してアクセス権を保存すると有効になる。
+機能スイッチに加え、資源範囲・タスク束縛・承認の設定が必要となる（境界は[実行・データ保守ガイド](../development/runtime-guide.md)を参照）。原生 SQL は DB アカウントの業務テーブル権限を使い、対象 DB にプラットフォーム用テーブルを作成しない。旧 `database.write/v1` を明示利用する場合だけ[回執テーブル SQL](../../SKM/scripts/sql/postgres-effect-receipts.sql) が必要となる。MCP 接続は完全な Streamable HTTP `/mcp` URL と資格情報を入力し、資源編集画面でツールを検出してアクセス権を保存すると有効になる。
 
 ### Windows 構築と移送
 

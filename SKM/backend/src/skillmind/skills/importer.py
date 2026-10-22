@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -17,6 +16,7 @@ import yaml
 from jsonschema import Draft202012Validator, FormatChecker
 from yaml.events import AliasEvent
 
+from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.skills.source_identity import skill_source_hash
 from skillmind.skills.task_contract import compile_task_contract
 
@@ -539,7 +539,7 @@ def _scan_directory(root: Path, limits: SkillImportLimits) -> _ScannedSource:
                 path=relative,
                 mime=mime,
                 size=size,
-                sha256=f"sha256:{hashlib.sha256(raw).hexdigest()}",
+                sha256=f"sha256:{sha256_hex(raw)}",
                 binary=binary,
             )
         )
@@ -915,14 +915,7 @@ def _skill_key(name: str, source_hash: str) -> str:
 def _package_hash(package: NormalizedSkillPackage) -> str:
     """Normalized representation 自体の canonical SHA-256 を返す。"""
 
-    canonical = json.dumps(
-        package.to_dict(),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-    return f"sha256:{hashlib.sha256(canonical).hexdigest()}"
+    return f"sha256:{sha256_hex(canonical_json(package.to_dict()))}"
 
 
 def _is_binary(raw: bytes) -> bool:

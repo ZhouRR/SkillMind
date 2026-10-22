@@ -20,7 +20,7 @@ from arq.worker import Function
 from arq.worker import func as arq_function
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from skillmind.agent.session_store import PostgresSessionStore
+from skillmind.agent.claude_session_store import PostgresSessionStore
 from skillmind.core.logging import configure_logging, log_event
 from skillmind.core.settings import Settings, get_settings
 from skillmind.db.resources import create_database_engine, create_session_factory
@@ -36,7 +36,7 @@ from skillmind.effects.service import EffectService
 from skillmind.runs.domain import PendingOutboxMessage
 from skillmind.runs.outbox import OutboxRelay
 from skillmind.runs.service import M0_LIMITS_SNAPSHOT, RunService
-from skillmind.schedules import ScheduleService
+from skillmind.schedules.service import ScheduleService
 from skillmind.skills import (
     SkillService,
 )

@@ -15,11 +15,11 @@ import pytest
 from claude_agent_sdk.types import SessionStore
 
 from skillmind.agent.claude import ClaudeRuntimeConfiguration
+from skillmind.agent.claude_engine import ClaudeAgentSdkEngine
 from skillmind.agent.contract_store import (
     ContractStore,
 )
 from skillmind.agent.domain import AgentEventType, AgentSessionRef, ResumeContext
-from skillmind.agent.engine import ClaudeAgentSdkEngine
 from skillmind.agent.tool_catalog import (
     _change_propose_tool_definition,
 )
@@ -68,8 +68,17 @@ class MemorySessionStore(SessionStore):
 @pytest.mark.parametrize("next_proposal", [False, True])
 async def test_native_resume_consumes_original_proposal_once(tmp_path, monkeypatch, next_proposal):
     """最新 Brief を最初の続行 turn へ渡し、別の新提案は再度 pause する。"""
-    arguments = json.loads((CONTRACTS / "examples/change-propose-request.v1.json").read_text())
+    # 現行の書込能力を使い、Provider は呼ばず原提案の復元だけを検証する。
+    statement = json.loads((CONTRACTS / "examples/database-execute-request.v1.json").read_text())
+    arguments = {
+        "resource_key": "records", "capability_version": "database.execute/v1",
+        "operation": "UPDATE", "target": {"locator": "public.items", "display": "Items"},
+        "changes": [{"path": "/statement", "action": "SET", "value": statement["statement"]}],
+        "summary": "Update the synthetic item.", "idempotency_key": "original-proposal",
+        "verification": {"method": "SQL_RESPONSE", "paths": ["/committed"]},
+    }
     requests = []
+    wire_tool_names = []
     paths = []
     initial = []
     resumed = []
@@ -92,6 +101,7 @@ async def test_native_resume_consumes_original_proposal_once(tmp_path, monkeypat
             main_request = any(
                 t["name"] == "mcp__skillmind__change_propose_v1" for t in request.get("tools", [])
             )
+            wire_tool_names.append([t["name"] for t in request.get("tools", [])])
             if main_request:
                 requests.append(request)
                 paths.append(self.path)
@@ -185,7 +195,6 @@ async def test_native_resume_consumes_original_proposal_once(tmp_path, monkeypat
         task_brief_checksum="sha256:" + "1" * 64,
     )
     audits = []
-
     def runtime(run):
         """本番 registry/Gateway と各 Attempt の合成 audit storage を結ぶ。"""
         audit = MemoryAuditWriter()
@@ -212,7 +221,7 @@ async def test_native_resume_consumes_original_proposal_once(tmp_path, monkeypat
                 context,
                 run_attempt_id=uuid4(),
                 prompt=(
-                    "Verified synthetic receipt: first INSERT was APPLIED; "
+                    "Verified synthetic receipt: first UPDATE was APPLIED; "
                     "continue with document conversion."
                 ),
                 resolved_proposal=ResolvedProposal(
@@ -273,6 +282,7 @@ async def test_native_resume_consumes_original_proposal_once(tmp_path, monkeypat
             json.dumps(
                 {
                     "paths": paths,
+                    "wire_tool_names": wire_tool_names,
                     "requests": requests,
                     "events": [(e.event_type.value, dict(e.payload)) for e in initial + resumed],
                     "audits": [len(a.completed) for a in audits],

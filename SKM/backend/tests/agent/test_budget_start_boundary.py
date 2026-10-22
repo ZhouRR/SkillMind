@@ -14,6 +14,7 @@ import pytest
 from claude_agent_sdk import ClaudeAgentOptions, SystemMessage
 
 from skillmind.agent.claude import ClaudeRuntimeConfiguration
+from skillmind.agent.claude_engine import ClaudeAgentSdkEngine
 from skillmind.agent.claude_metering import capture_invocation
 from skillmind.agent.domain import (
     AgentEvent,
@@ -23,7 +24,6 @@ from skillmind.agent.domain import (
     ResumeContext,
     RunContext,
 )
-from skillmind.agent.engine import ClaudeAgentSdkEngine
 from skillmind.agent.metering import AgentInvocation, AgentInvocationMode, ResultUsageObservation
 from skillmind.core.hashing import sha256_hex
 from skillmind.runs.budget import BudgetStartUncertainError, BudgetUnavailableError

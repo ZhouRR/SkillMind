@@ -6,18 +6,5 @@
       1
     ]
   },
-  "read_back": {
-    "sql": "SELECT id, status FROM public.items WHERE id = $1",
-    "parameters": [
-      1
-    ],
-    "limit": 1
-  },
-  "checks": [
-    {
-      "pointer": "/rows/0/status",
-      "equals": "COMPLETED"
-    }
-  ],
   "operation": "UPDATE"
 }

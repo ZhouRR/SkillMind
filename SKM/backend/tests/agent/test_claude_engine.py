@@ -24,6 +24,7 @@ from claude_agent_sdk.types import (
 )
 
 from skillmind.agent.claude import _AGENT_ENVIRONMENT_KEYS, ClaudeRuntimeConfiguration
+from skillmind.agent.claude_engine import ClaudeAgentSdkEngine, ClaudeMessageMapper
 from skillmind.agent.domain import (
     AgentEventType,
     AgentSessionRef,
@@ -33,7 +34,6 @@ from skillmind.agent.domain import (
     RunLimits,
     RunWorkspace,
 )
-from skillmind.agent.engine import ClaudeAgentSdkEngine, ClaudeMessageMapper
 
 
 def _run_context(tmp_path: Path, *, sequence_start: int = 1) -> RunContext:

@@ -12,8 +12,7 @@ import pytest
 from asyncpg import InvalidDatetimeFormatError
 
 from skillmind.agent.postgres_native import bind_native_parameters, query_identity, query_rows
-from skillmind.effects.postgres_native import NativeDatabaseWriteProvider
-from skillmind.effects.redmine import EffectProviderTransportError
+from skillmind.effects.postgres_native import NativeDatabaseWriteProvider, SqlExecutionError
 from tests.effects.test_native_resource_effects import Connection, sql_execution
 
 
@@ -125,14 +124,15 @@ async def test_query_rows_binds_temporal_parameters_without_changing_bounded_cur
 
 
 @pytest.mark.parametrize("invalid", [False, True])
-async def test_native_write_converts_before_dml_and_keeps_receipt_transaction(monkeypatch, invalid):
-    """日付付き SQL を実 Provider へ渡し、変換失敗時には DML と回执を送信しない。"""
+async def test_native_write_converts_before_dml_and_keeps_commit_boundary(monkeypatch, invalid):
+    """日時変換後だけ原 SQL を実行し、変換失敗は rollback 済みとして返す。"""
     from skillmind.effects import postgres_native as module
 
     connection = Connection()
     expected_date = date(2030, 1, 2)
     expected_time = datetime(2030, 1, 2, 3, 34, 56, tzinfo=UTC)
     connection.driver = driver_with_types([1082, 1184, 23], [expected_date, expected_time])
+    connection.driver.execute.return_value = "UPDATE 1"
     if invalid:
         connection.driver.fetchrow.side_effect = InvalidDatetimeFormatError()
     monkeypatch.setattr(
@@ -141,16 +141,6 @@ async def test_native_write_converts_before_dml_and_keeps_receipt_transaction(mo
         lambda *a, **kw: SimpleNamespace(
             connect=lambda: connection,
             dispose=AsyncMock(),
-        ),
-    )
-    monkeypatch.setattr(
-        module,
-        "query_rows",
-        AsyncMock(
-            side_effect=[
-                {"rows": [{"done": False}], "truncated": False},
-                {"rows": [{"done": True}], "truncated": False},
-            ]
         ),
     )
     original = sql_execution()
@@ -165,13 +155,14 @@ async def test_native_write_converts_before_dml_and_keeps_receipt_transaction(mo
     authorize = AsyncMock()
     provider = NativeDatabaseWriteProvider(authorize)
     if invalid:
-        with pytest.raises(EffectProviderTransportError):
+        with pytest.raises(SqlExecutionError) as error:
             await provider.apply(execution, credential="fixture-password")
         connection.driver.execute.assert_not_awaited()
-        assert connection.saved is None and all(connection.exits)
+        assert error.value.code == "sql_invalid_parameter"
+        assert connection.rolled_back and not connection.committed
     else:
         result = await provider.apply(execution, credential="fixture-password")
-        assert result.verification["method"] == "READ_BACK"
-        assert connection.saved is not None and connection.exits == [None, None]
+        assert result.verification["method"] == "SQL_RESPONSE"
+        assert connection.committed and not connection.rolled_back
         assert connection.driver.execute.await_args.args[1:] == (expected_date, expected_time, 42)
-        assert authorize.await_count == 3
+        assert authorize.await_count == 4

@@ -17,9 +17,9 @@ from skillmind.agent.contract_store import ContractStore
 from skillmind.agent.tool_catalog import _change_propose_tool_definition
 from skillmind.agent.tool_gateway import ToolRegistry
 from skillmind.core.hashing import sha256_hex
+from skillmind.effects.domain import ChangeProposalValidationError
 from skillmind.effects.inline import InlineEffectResult
 from skillmind.effects.mcp_call import McpReadBackProposalError, validate_mcp_proposal
-from skillmind.effects.postgres_native import SQL_OBSERVATION_MESSAGE, SqlObservationValidationError
 from skillmind.runs.domain import LeaseValidationError, RunCancellationRequestedError
 from skillmind.worker.proposal_preflight import ProposalPreflight
 from skillmind.worker.tool_authority import ToolExecutionAuthority
@@ -64,6 +64,7 @@ def setup(tmp_path):
         target=execution.target,
         changes=list(execution.changes),
         precondition=execution.precondition,
+        verification=execution.verification,
     )
     service = AsyncMock()
     service.validate_effect_proposal.return_value = None
@@ -76,7 +77,9 @@ def setup(tmp_path):
 async def test_bad_proposal_is_correctable_without_parking_or_effect(setup, sdk, kind):
     """両 SDK と自動承認経路で誤提案を監査し、同じ Agent を停止させない。"""
     registry, tool, context, _, arguments, service, validator = setup
-    failure, message = SqlObservationValidationError("private"), SQL_OBSERVATION_MESSAGE
+    failure, message = ChangeProposalValidationError("private"), (
+        "Proposal does not match its frozen contract or scope; no write was submitted."
+    )
     if kind == "mcp":
         run = receipt_execution(status_check={"path": "/status", "equals": "UNDECLARED"})
         with pytest.raises(McpReadBackProposalError) as invalid:
@@ -85,6 +88,7 @@ async def test_bad_proposal_is_correctable_without_parking_or_effect(setup, sdk,
         arguments.update(
             capability_version=run.capability_version, operation=run.operation,
             target=run.target, changes=list(run.changes), precondition=run.precondition,
+            verification=run.verification,
         )
     service.validate_effect_proposal.side_effect = [failure, None]
     writer = MemoryAuditWriter()
@@ -117,7 +121,7 @@ async def test_bad_proposal_is_correctable_without_parking_or_effect(setup, sdk,
     else:
         options = build_claude_agent_options(
             context,
-            mcp_server=runtime.mcp.server,
+            mcp_server=runtime.mcp.server_factory(),
             configuration=ClaudeRuntimeConfiguration(environment={}),
             deferred_tool_names=runtime.mcp.deferred_tool_names,
             on_deferred_validation=runtime.mcp.on_deferred_validation,
@@ -204,7 +208,7 @@ async def test_sdk_file_proposal_reaches_preflight_before_effect_validation(setu
             assert bridge.deferred[1]["change_proposal_request"] == request
     else:
         options = build_claude_agent_options(
-            context, mcp_server=runtime.mcp.server,
+            context, mcp_server=runtime.mcp.server_factory(),
             configuration=ClaudeRuntimeConfiguration(environment={}),
             deferred_tool_names=runtime.mcp.deferred_tool_names,
             on_deferred_validation=runtime.mcp.on_deferred_validation,
@@ -228,6 +232,8 @@ async def test_expanded_file_is_not_allowed_to_bypass_inline_policy(setup, damag
     _, tool, context, _, arguments, service, validator = setup
     if damage == "capability":
         arguments["capability_version"] = "change.propose/v1"
+        arguments["precondition"] = {"revision": "original"}
+        arguments["verification"]["method"] = "READ_BACK"
     elif damage == "missing":
         del arguments["capability_version"]
     elif damage == "schema":
@@ -300,7 +306,7 @@ async def test_revocation_while_validating_discards_the_diagnostic(setup):
     async def revoked(*args, **kwargs):
         """validation await 中の scope 終了を再現する。"""
         authority._active = False
-        raise SqlObservationValidationError("private")
+        raise ChangeProposalValidationError("private")
 
     service.validate_effect_proposal.side_effect = revoked
     with pytest.raises(LeaseValidationError):

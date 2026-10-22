@@ -15,7 +15,6 @@ from skillmind.effects.document_management import (
 )
 from skillmind.effects.git_receipt import GitCommitCommand, GitCommitReceipt, validate_git_receipt
 from skillmind.effects.mcp_receipt import McpOperationCommand, McpOperationReceipt, validate_receipt
-from skillmind.effects.postgres_native import NativeSqlReceiptCommand, validate_native_receipt
 from skillmind.effects.postgres_write import DatabaseWriteReceipt, validate_database_write_receipt
 from skillmind.effects.reconciliation_domain import (
     EffectReconciliationObservation,
@@ -83,7 +82,7 @@ def reconciliation_kind(
         return "DATABASE_TRANSACTION"
     return (
         "DATABASE_TRANSACTION"
-        if isinstance(target.command, (DatabaseWriteCommand, NativeSqlReceiptCommand))
+        if isinstance(target.command, DatabaseWriteCommand)
         else "DOCUMENT_OBJECT"
     )
 
@@ -147,11 +146,6 @@ def reconciliation_receipt_json(
             raise ValueError("Original Git receipt is invalid")
         validate_git_receipt(command, receipt)
         result = {**asdict(receipt), "effect_id": str(receipt.effect_id)}
-    elif isinstance(command, NativeSqlReceiptCommand):
-        if not isinstance(receipt, DatabaseWriteReceipt):
-            raise ValueError("Original SQL receipt is invalid")
-        validate_native_receipt(command, receipt)
-        result = asdict(receipt)
     elif isinstance(command, DatabaseWriteCommand):
         if not isinstance(receipt, DatabaseWriteReceipt):
             raise ValueError("Original database receipt is invalid")

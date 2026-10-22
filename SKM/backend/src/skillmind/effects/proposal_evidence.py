@@ -8,7 +8,6 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from skillmind.agent.postgres_native import query_identity
 from skillmind.artifacts.repository import ArtifactRepository
 from skillmind.db.models import (
     ChangeProposal,
@@ -21,7 +20,6 @@ from skillmind.db.models import (
 from skillmind.documents.library import DOCUMENT_WRITE_CAPABILITY
 from skillmind.effects.database_write import DATABASE_WRITE_CAPABILITY, database_observation_matches
 from skillmind.effects.domain import ChangeProposalDraft, ChangeProposalValidationError
-from skillmind.effects.postgres_native import SQL_WRITE, SqlObservationValidationError
 
 
 async def validate_mcp_observation(
@@ -89,11 +87,8 @@ async def validate_database_observation(
     binding: ResourceBinding,
     payload: dict[str, Any],
 ) -> None:
-    """DB 提案は同じ Run/binding の成功した read Tool 証拠に束縛し、自己申告を拒否する。"""
+    """行単位 DB 提案だけを同じ Run/binding の読取証拠に束縛する。"""
 
-    if draft.capability_version == SQL_WRITE:
-        await validate_native_sql_observation(session, draft, binding=binding, payload=payload)
-        return
     if draft.capability_version != DATABASE_WRITE_CAPABILITY:
         return
     evidence = (
@@ -120,41 +115,6 @@ async def validate_database_observation(
         for item in evidence
     ):
         raise ChangeProposalValidationError("Database proposal requires exact read Evidence")
-
-
-async def validate_native_sql_observation(
-    session: AsyncSession,
-    draft: ChangeProposalDraft,
-    *,
-    binding: ResourceBinding,
-    payload: dict[str, Any],
-) -> None:
-    """同一 Run/binding の完全な SELECT 観測だけを DML の前提として受け入れる。"""
-    identity = query_identity(payload["read_back"], binding.scope_json)
-    evidence = (
-        await session.scalars(
-            select(Evidence)
-            .join(ToolCall, ToolCall.id == Evidence.tool_call_id)
-            .where(
-                Evidence.run_id == binding.run_id,
-                Evidence.evidence_ref.in_(draft.evidence_refs),
-                Evidence.evidence_type == "resource",
-                Evidence.content_hash == draft.precondition["revision"],
-                ToolCall.run_id == binding.run_id,
-                ToolCall.integration_id == binding.integration_id,
-                ToolCall.provider == "postgres",
-                ToolCall.capability_version == "database.query/v1",
-                ToolCall.status == "SUCCEEDED",
-            )
-        )
-    ).all()
-    if binding.integration_id is None or not any(
-        item.source_locator.get("query_identity") == identity
-        and item.metadata_json.get("binding_checksum") == binding.checksum
-        and item.metadata_json.get("truncated") is False
-        for item in evidence
-    ):
-        raise SqlObservationValidationError("Native SQL requires matching query Evidence")
 
 
 async def validate_effect_artifact(

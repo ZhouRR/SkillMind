@@ -31,12 +31,11 @@ from skillmind.agent.tool_policy import (
     ToolExecutionPolicy,
     ToolPolicyViolation,
 )
+from skillmind.agent.tool_runtime import ToolAuthorizationCallback, ToolDenialCallback
 from skillmind.runs.interaction import INTERACTION_REQUEST_SDK_NAME
 
 STRUCTURED_OUTPUT_TOOL_NAME = "StructuredOutput"
 
-ToolAuthorizationCallback = Callable[[str, Mapping[str, Any], str, str], Awaitable[None]]
-ToolDenialCallback = Callable[[str, Mapping[str, Any], str, str, str], Awaitable[None]]
 DeferredValidationCallback = Callable[
     [str, Mapping[str, Any], str, str], Awaitable[dict[str, Any] | None]
 ]

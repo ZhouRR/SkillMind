@@ -10,7 +10,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from skillmind.agent.domain import RunContext
 from skillmind.agent.proposal_files import ProposalFileError, expand_proposal_file
 from skillmind.effects.mcp_call import McpReadBackProposalError
-from skillmind.effects.postgres_native import SQL_OBSERVATION_MESSAGE, SqlObservationValidationError
 from skillmind.runs.service import RunService
 from skillmind.worker.tool_authority import ToolExecutionAuthority
 
@@ -44,13 +43,6 @@ class ProposalPreflight:
                 expanded,
                 tool_use_id=tool_use_id,
             )
-        except SqlObservationValidationError:
-            error = {
-                "status": "error",
-                "code": "invalid_request",
-                "message": SQL_OBSERVATION_MESSAGE,
-                "retryable": False,
-            }
         except McpReadBackProposalError as receipt_error:
             # 型付きの固定診断だけを返す。任意の ValueError/遠端本文は下の境界で伏せる。
             error = {

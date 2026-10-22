@@ -34,16 +34,13 @@ from skillmind.db.models import (
 from skillmind.documents.library import (
     DOCUMENT_WRITE_CAPABILITY,
     DocumentLibraryBindingRepository,
-    document_library_revision,
     parse_document_library_source,
 )
 from skillmind.effects.catalog import resolve_effect_capability
 from skillmind.effects.continuation import validated_effect_result
 from skillmind.effects.database_write import (
     DATABASE_WRITE_CAPABILITY,
-    build_database_write,
 )
-from skillmind.effects.document_command import load_document_effect_command
 from skillmind.effects.document_write import LEGACY_DOCUMENT_WRITE_PROVIDER_VERSION
 from skillmind.effects.domain import (
     ApprovalDecision,
@@ -66,23 +63,19 @@ from skillmind.effects.domain import (
     ProposalDecisionResult,
     StoredEffectExecution,
 )
-from skillmind.effects.git_receipt import GitCommitCommand, git_effect_commit_message
 from skillmind.effects.inline import InlineUnavailable
 from skillmind.effects.mcp_diagnostics import diagnostic_message
-from skillmind.effects.mcp_receipt import McpOperationCommand
-from skillmind.effects.operation_policy import operation_authorization_key, operation_risk
 from skillmind.effects.outcomes import (
     UNKNOWN_EFFECT_CODE,
     effect_failure_record,
     effect_requires_reconciliation,
 )
 from skillmind.effects.policy_repository import EffectPolicyRepository
-from skillmind.effects.postgres_native import (
-    SQL_PRECONDITION_MESSAGE,
-    NativeSqlReceiptCommand,
-    native_request_checksum,
-)
+from skillmind.effects.postgres_native import SQL_FAILURE_MESSAGES, sql_failure_message
 from skillmind.effects.projections import (
+    effect_evidence_row,
+    effect_tool_error,
+    new_effect_execution,
     stored_change_approval,
     stored_change_proposal,
     stored_effect_execution,
@@ -98,6 +91,7 @@ from skillmind.effects.proposal_evidence import (
     validate_mcp_observation,
 )
 from skillmind.effects.reconciliation_domain import EffectReconciliationTarget
+from skillmind.effects.reconciliation_target import build_reconciliation_target
 from skillmind.effects.run_approval import has_actor_approval, run_auto_approval_actor
 from skillmind.integrations.domain import (
     IntegrationStatus,
@@ -121,6 +115,7 @@ from skillmind.runs.domain import (
     lease_token_hash,
     plan_run_transition,
 )
+from skillmind.runs.effect_validation import validate_effect_intent
 from skillmind.runs.repository_base import _RunRepositoryBase
 from skillmind.skills.execution import (
     is_source_execution,
@@ -527,7 +522,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 reason="Automatic approval selected by the initiating user at Run start",
                 created_at=now,
             )
-            execution = self._new_effect_execution(
+            execution = new_effect_execution(
                 proposal=proposal, approval=approval, provider=binding.provider, now=now,
             )
         elif preauthorization is not None:
@@ -557,7 +552,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 reason="Matched exact low-risk Project preauthorization",
                 created_at=now,
             )
-            execution = self._new_effect_execution(
+            execution = new_effect_execution(
                 proposal=proposal,
                 approval=approval,
                 provider=binding.provider,
@@ -908,7 +903,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 raise ChangeProposalValidationError("Proposal binding is unavailable")
             proposal.status = ChangeProposalStatus.APPROVED.value
             proposal.updated_at = now
-            effect = self._new_effect_execution(
+            effect = new_effect_execution(
                 proposal=proposal,
                 approval=approval,
                 provider=binding.provider,
@@ -1611,7 +1606,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
             blueprint = resolve_skill_definition(manifest)
             if blueprint is None:
                 raise ValueError("Frozen effect Blueprint is unavailable")
-            cls._validate_effect_intent(
+            validate_effect_intent(
                 blueprint, effect_intent_key=proposal.effect_intent_key,
                 resource_key=binding.requirement_key, operation=proposal.operation,
                 capability_version=proposal.capability_version,
@@ -1732,144 +1727,10 @@ class EffectOperationsMixin(_RunRepositoryBase):
         binding = await self._session.get(ResourceBinding, proposal.target_binding_id)
         if binding is None:
             raise ValueError("Original effect binding is unavailable")
-        if proposal.capability_version == "database.execute/v1":
-            integration = await self._session.get(Integration, proposal.integration_id)
-            if integration is None:
-                raise ValueError("Original SQL Integration is unavailable")
-            command_sql = NativeSqlReceiptCommand(execution.id, project_id, run_id, integration.id,
-                native_request_checksum(
-                    run_id, integration.id, payload, proposal.precondition_json,
-                ),
-                proposal.precondition_json["revision"], canonical_json(payload["checks"]))
-            return EffectReconciliationTarget(proposal.id, binding.id, proposal.checksum,
-                execution.provider, execution.provider_version, command_sql,
-                canonical_json(integration.config_json), integration.secret_reference_id)
-        if proposal.capability_version == DATABASE_WRITE_CAPABILITY:
-            if proposal.integration_id is None:
-                raise ValueError("Original database effect has no Integration")
-            integration = await self._session.get(Integration, proposal.integration_id)
-            if integration is None:
-                raise ValueError("Original database Integration is unavailable")
-            command = build_database_write(
-                effect_id=execution.id,
-                project_id=project_id,
-                run_id=run_id,
-                integration_id=integration.id,
-                scope=binding.scope_json,
-                **payload,
-            )
-            return EffectReconciliationTarget(
-                proposal.id,
-                binding.id,
-                proposal.checksum,
-                execution.provider,
-                execution.provider_version,
-                command,
-                canonical_json(integration.config_json),
-                integration.secret_reference_id,
-            )
-        if proposal.capability_version == "mcp.call/v1":
-            integration = await self._session.get(Integration, proposal.integration_id)
-            if integration is None:
-                raise ValueError("Original MCP Integration is unavailable")
-            command_mcp = McpOperationCommand(
-                execution.id,
-                project_id,
-                run_id,
-                integration.id,
-                payload["name"],
-                canonical_json(payload),
-            )
-            return EffectReconciliationTarget(
-                proposal.id,
-                binding.id,
-                proposal.checksum,
-                execution.provider,
-                execution.provider_version,
-                command_mcp,
-                canonical_json(integration.config_json),
-                integration.secret_reference_id,
-            )
-        if proposal.capability_version == "repository.write/v1" and execution.provider == "git":
-            integration = await self._session.get(Integration, proposal.integration_id)
-            if integration is None:
-                raise ValueError("Original Git Integration is unavailable")
-            git_command = GitCommitCommand(
-                execution.id,
-                project_id,
-                run_id,
-                integration.id,
-                payload["target_branch"],
-                payload["base_revision"],
-                git_effect_commit_message(
-                    display=proposal.target_json.get("display"),
-                    proposal_ref=proposal.proposal_ref,
-                    effect_id=execution.id,
-                    fingerprint=execution.request_fingerprint,
-                ),
-                tuple(sorted(payload["files"].items())),
-            )
-            return EffectReconciliationTarget(
-                proposal.id,
-                binding.id,
-                proposal.checksum,
-                execution.provider,
-                execution.provider_version,
-                git_command,
-                canonical_json(integration.config_json),
-                integration.secret_reference_id,
-            )
-        if proposal.capability_version != DOCUMENT_WRITE_CAPABILITY:
-            raise ValueError("Original effect Provider does not support reconciliation")
-        if self._document_library_target is None:
-            raise ValueError("Original document storage is unavailable")
-        if proposal.operation not in {"CREATE", "UPDATE"}:
-            from types import SimpleNamespace
-
-            from skillmind.effects.document_management import (
-                DocumentManagementCommand,
-                mutation_checksum,
-            )
-
-            identity = SimpleNamespace(
-                effect_execution_id=execution.id,
-                project_id=project_id,
-                run_id=run_id,
-                operation=proposal.operation,
-            )
-            return EffectReconciliationTarget(
-                proposal.id,
-                binding.id,
-                proposal.checksum,
-                execution.provider,
-                execution.provider_version,
-                DocumentManagementCommand(
-                    execution.id, project_id, run_id, mutation_checksum(identity, payload)
-                ),
-                "{}",
-                None,
-            )
-        revision = document_library_revision(binding.scope_json)
-        if (revision == "1") != legacy_document:
-            raise ValueError("Original document protocol does not match its binding")
-        object_command = await load_document_effect_command(
-            self._session,
-            effect_id=execution.id,
-            project_id=project_id,
-            run_id=run_id,
-            payload=payload,
-            target=self._document_library_target,
-            protocol_version=int(revision),
-        )
-        return EffectReconciliationTarget(
-            proposal.id,
-            binding.id,
-            proposal.checksum,
-            execution.provider,
-            execution.provider_version,
-            object_command,
-            "{}",
-            None,
+        return await build_reconciliation_target(
+            self._session, project_id=project_id, run_id=run_id, proposal=proposal,
+            execution=execution, binding=binding, payload=payload,
+            document_library_target=self._document_library_target, legacy_document=legacy_document,
         )
 
     async def finalize_effect_execution(
@@ -1936,14 +1797,14 @@ class EffectOperationsMixin(_RunRepositoryBase):
         if result is not None:
             before_ref = new_evidence_ref()
             after_ref = new_evidence_ref()
-            before = self._effect_evidence_row(
+            before = effect_evidence_row(
                 run_id=run.id,
                 tool_call_id=tool_call.id,
                 evidence_ref=before_ref,
                 draft=result.before,
                 now=now,
             )
-            after = self._effect_evidence_row(
+            after = effect_evidence_row(
                 run_id=run.id,
                 tool_call_id=tool_call.id,
                 evidence_ref=after_ref,
@@ -1994,7 +1855,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 refs = list(execution.error_json.get("observation_refs", []))
                 for observation in failure.observations[:2]:
                     ref = f"ev_{uuid4().hex}"
-                    self._session.add(self._effect_evidence_row(
+                    self._session.add(effect_evidence_row(
                         run_id=run.id, tool_call_id=tool_call.id, evidence_ref=ref,
                         draft=observation, now=now,
                     ))
@@ -2010,7 +1871,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
             )
             tool_call.status = "FAILED"
             tool_call.result_json = None
-            tool_call.error_json = _effect_tool_error(
+            tool_call.error_json = effect_tool_error(
                 code=execution.error_json["code"],
                 retryable=failure.retryable,
                 diagnostic=execution.error_json.get("diagnostic"),
@@ -2307,7 +2168,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
         if tool_call is not None:
             tool_call.status = "FAILED"
             tool_call.result_json = None
-            tool_call.error_json = _effect_tool_error(
+            tool_call.error_json = effect_tool_error(
                 code=error["code"], retryable=False, diagnostic=error.get("diagnostic"),
             )
             tool_call.updated_at = now
@@ -2543,32 +2404,6 @@ class EffectOperationsMixin(_RunRepositoryBase):
         ):
             raise EffectLeaseValidationError("EffectExecution lease is invalid or expired")
 
-    @staticmethod
-    def _effect_evidence_row(
-        *,
-        run_id: UUID,
-        tool_call_id: UUID,
-        evidence_ref: str,
-        draft: Any,
-        now: datetime,
-    ) -> Evidence:
-        """Provider draft を content hash と scoped snapshot metadata 付き Evidence へ変換する。"""
-
-        content = dict(draft.content)
-        return Evidence(
-            id=uuid4(),
-            evidence_ref=evidence_ref,
-            run_id=run_id,
-            tool_call_id=tool_call_id,
-            evidence_type=draft.evidence_type,
-            source_uri=draft.source_uri,
-            source_locator=dict(draft.source_locator),
-            content_hash=f"sha256:{sha256_hex(canonical_json(content))}",
-            snapshot_uri=None,
-            excerpt=draft.excerpt,
-            metadata_json={**dict(draft.metadata), "snapshot": content},
-            created_at=now,
-        )
 
     async def _validate_evidence_refs(
         self, run_id: UUID, evidence_refs: tuple[str, ...]
@@ -2686,7 +2521,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
         blueprint = resolve_skill_definition(manifest)
         if blueprint is None:
             raise ChangeProposalValidationError("Run CapabilityBlueprint is unavailable")
-        self._validate_effect_intent(
+        validate_effect_intent(
             blueprint, effect_intent_key=draft.effect_intent_key, resource_key=draft.resource_key,
             operation=draft.operation, risk_level=draft.risk_level.value,
             capability_version=draft.capability_version,
@@ -2730,82 +2565,6 @@ class EffectOperationsMixin(_RunRepositoryBase):
         )
         return draft, binding, integration, provider_payload
 
-    @staticmethod
-    def _validate_effect_intent(
-        blueprint: dict[str, Any], *, effect_intent_key: str, resource_key: str,
-        operation: str, risk_level: str, capability_version: str | None = None,
-        resource_operations: list[dict[str, str]] | None = None,
-    ) -> dict[str, Any]:
-        """初回提案と段階認可で同じ apply 意図/対象/操作/リスク境界を使う。"""
-
-        if is_source_execution(blueprint):
-            matches = [op for op in resource_operations or []
-                       if op["resource_key"] == resource_key
-                       and op["capability_version"] == capability_version
-                       and op["operation"] == operation]
-            levels = {"LOW": 0, "MEDIUM": 1, "HIGH": 2}
-            if len(matches) != 1 or capability_version is None or effect_intent_key != (
-                operation_authorization_key(resource_key, capability_version, operation)
-            ) or levels.get(risk_level, -1) < levels[operation_risk(capability_version)]:
-                raise ChangeProposalValidationError(
-                    "ChangeProposal does not match an authorized resource operation"
-                )
-            return matches[0]
-        intents = [
-            item for item in blueprint.get("effect_intents", [])
-            if isinstance(item, dict) and item.get("key") == effect_intent_key
-        ]
-        if len(intents) != 1 or intents[0].get("mode") != "apply":
-            raise ChangeProposalValidationError(
-                "ChangeProposal does not match a declared apply effect intent"
-            )
-        intent = intents[0]
-        if intent.get("resource_key") != resource_key:
-            raise ChangeProposalValidationError("ChangeProposal targets another resource")
-        if intent.get("operation") != operation:
-            raise ChangeProposalValidationError("ChangeProposal operation changed from Blueprint")
-        if str(intent.get("risk", "")).upper() != risk_level:
-            raise ChangeProposalValidationError("ChangeProposal risk changed from Blueprint")
-        return intent
-
-    @staticmethod
-    def _new_effect_execution(
-        *,
-        proposal: ChangeProposal,
-        approval: ChangeApproval,
-        provider: str,
-        now: datetime,
-    ) -> EffectExecution:
-        """Approved Proposal から一意な REQUESTED EffectExecution を作成する。"""
-
-        capability = resolve_effect_capability(proposal.capability_version)
-        if provider not in capability.providers:
-            raise ChangeProposalValidationError("Effect Provider is not registered")
-        return EffectExecution(
-            id=uuid4(),
-            proposal_id=proposal.id,
-            run_id=proposal.run_id,
-            approval_id=approval.id,
-            tool_call_id=None,
-            status=EffectExecutionStatus.REQUESTED.value,
-            provider=provider,
-            provider_version=capability.provider_versions[provider],
-            idempotency_key=proposal.idempotency_key,
-            request_fingerprint=proposal.request_fingerprint,
-            before_ref=None,
-            after_ref=None,
-            verification_json={},
-            error_json=None,
-            worker_id=None,
-            lease_token_hash=None,
-            lease_expires_at=None,
-            heartbeat_at=None,
-            attempt_no=0,
-            started_at=None,
-            executed_at=None,
-            created_at=now,
-            updated_at=now,
-        )
 
     async def _validate_proposal_row(
         self, proposal: ChangeProposal, *, run: Run,
@@ -2921,8 +2680,8 @@ class EffectOperationsMixin(_RunRepositoryBase):
                 f"Controlled effect failure: {effect_error.get('code', 'effect_provider_failed')}."
                 + diagnostic_message(effect_error.get("diagnostic"))
                 + (
-                    " " + SQL_PRECONDITION_MESSAGE
-                    if effect_error.get("code") == "sql_precondition_not_met"
+                    " " + sql_failure_message(str(effect_error.get("code")))
+                    if effect_error.get("code") in SQL_FAILURE_MESSAGES
                     else ""
                 )
             )
@@ -3069,7 +2828,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
                     if tool_call is not None:
                         tool_call.status = "FAILED"
                         tool_call.result_json = None
-                        tool_call.error_json = _effect_tool_error(
+                        tool_call.error_json = effect_tool_error(
                             code=UNKNOWN_EFFECT_CODE, retryable=False,
                         )
                         tool_call.updated_at = now
@@ -3128,7 +2887,7 @@ class EffectOperationsMixin(_RunRepositoryBase):
                     if tool_call is not None:
                         tool_call.status = "FAILED"
                         tool_call.result_json = None
-                        tool_call.error_json = _effect_tool_error(
+                        tool_call.error_json = effect_tool_error(
                             code=execution.error_json["code"],
                             retryable=True,
                         )
@@ -3226,27 +2985,3 @@ class EffectOperationsMixin(_RunRepositoryBase):
                     interaction.updated_at = now
             recovered += 1
         return recovered
-
-
-def _effect_tool_error(
-    *, code: str, retryable: bool, diagnostic: dict[str, Any] | None = None,
-    response: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Tool contract に適合し、外部 response 本文を含まない effect error を返す。"""
-
-    return {
-        "status": "error",
-        "code": "invalid_request"
-        if code in {"mcp_request_not_sent", "sql_precondition_not_met", "http_response_error"}
-        else code,
-        "message": (
-            "Original external write result requires reconciliation"
-            if code == UNKNOWN_EFFECT_CODE
-            else SQL_PRECONDITION_MESSAGE
-            if code == "sql_precondition_not_met"
-            else "Controlled effect could not be completed"
-        )
-        + diagnostic_message(diagnostic)
-        + (" Original HTTP response: " + canonical_json(response) if response is not None else ""),
-        "retryable": retryable,
-    }

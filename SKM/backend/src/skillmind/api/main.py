@@ -46,7 +46,7 @@ from skillmind.evaluations import EvaluationService
 from skillmind.integrations import IntegrationService
 from skillmind.projects import ProjectService
 from skillmind.runs.service import RunService
-from skillmind.schedules import ScheduleService
+from skillmind.schedules.service import ScheduleService
 from skillmind.skills.service_wiring import build_skill_service
 from skillmind.skills.wiring import build_skill_interpreter
 from skillmind.storage.factory import create_document_upload_limits, create_file_storage

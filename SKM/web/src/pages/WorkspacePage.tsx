@@ -3,13 +3,9 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 
 import {
   cancelRun,
-  loadProjectModules,
-  loadProjectTasks,
   loadRun,
   loadRunDetail,
   subscribeRunEvents,
-  type ProjectModuleRecord,
-  type PublishedTaskRecord,
   type RunEventRecord,
   type RunRecord,
   type RunDetailRecord,
@@ -25,6 +21,7 @@ import { RunSubmissionPanel } from '../components/RunSubmissionPanel'
 import { RunDuration } from '../components/RunDuration'
 import { ExecutionDetailHeader } from '../components/ExecutionDetailHeader'
 import { TaskLaunchFields } from '../components/TaskLaunchFields'
+import { useWorkspaceCatalog } from '../hooks/useWorkspaceCatalog'
 import { useRunSubmission } from '../hooks/useRunSubmission'
 import type { SessionEnded } from '../hooks/useResourceRequest'
 import { useMessages } from '../i18n'
@@ -92,12 +89,6 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
   const [detailRevision, setDetailRevision] = useState(0)
   const [initialReadRevision, setInitialReadRevision] = useState(0)
   const [initialRunLoading, setInitialRunLoading] = useState(false)
-  const [modulesLoaded, setModulesLoaded] = useState(false)
-  const [modulesError, setModulesError] = useState<string | null>(null)
-  const [tasks, setTasks] = useState<PublishedTaskRecord[]>([])
-  const [tasksLoaded, setTasksLoaded] = useState(false)
-  const [modules, setModules] = useState<ProjectModuleRecord[]>([])
-  const [tasksError, setTasksError] = useState<string | null>(null)
   const [selectedTaskId, setSelectedTaskId] = useState<string>('')
   const [inputText, setInputText] = useState<string>('{}')
   const [sourceProviders, setSourceProviders] = useState<Record<string, string>>({})
@@ -112,6 +103,12 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
   const detailRef = useRef(detailState)
   detailRef.current = detailState
   const sessionIdentity = useMemo(() => ({}), [csrfToken])
+  const { tasks, tasksLoaded, tasksError, modules, modulesLoaded, modulesError } = useWorkspaceCatalog(
+    projectId, sessionIdentity, catalogRevision, {
+      selectProjectFirst: messages.workspace.selectProjectFirst,
+      modulesFailed: messages.uiAuditWorkspace.modulesFailed,
+    },
+  )
   const currentSessionIdentity = useRef(sessionIdentity)
   currentSessionIdentity.current = sessionIdentity
   const detailSessionIdentity = useRef(sessionIdentity)
@@ -121,8 +118,6 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
   const [acknowledgePrevious, setAcknowledgePrevious] = useState(false)
   const [autoApprove, setAutoApprove] = useState(true)
   const submission = useRunSubmission({ actorId, projectId, csrfToken, onConfirmed: handleRunConfirmed })
-  const tasksController = useRef<AbortController | null>(null)
-  const modulesController = useRef<AbortController | null>(null)
   const refreshController = useRef<AbortController | null>(null)
   const cancelController = useRef<AbortController | null>(null)
   const detailController = useRef<AbortController | null>(null)
@@ -163,8 +158,6 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
     mounted.current = true
     return () => {
       mounted.current = false
-      tasksController.current?.abort()
-      modulesController.current?.abort()
       refreshController.current?.abort()
       cancelController.current?.abort()
       detailController.current?.abort()
@@ -178,54 +171,6 @@ function WorkspaceContent({ actorId, projectId, moduleId, csrfToken, initialRunI
     setEvents([])
     setDetailState({ status: run ? 'loading' : 'idle' })
   }, [sessionIdentity])
-
-  // Project ごとに published task catalog を取得し、任意 task を通用 form で実行できるようにする。
-  // projectId は sidebar/项目管理の検証済み選択に限られるため、未選択（空）だけを弾けばよい。
-  useEffect(() => {
-    tasksController.current?.abort()
-    setTasksLoaded(false)
-    if (!projectId) {
-      setTasks([])
-      setTasksError(messages.workspace.selectProjectFirst)
-      return
-    }
-    const controller = new AbortController()
-    tasksController.current = controller
-    setTasksError(null)
-    void loadProjectTasks(projectId, controller.signal)
-      .then((catalog) => {
-        if (!controller.signal.aborted && ownsSession()) {
-          setTasks(catalog.tasks)
-          setTasksLoaded(true)
-        }
-      })
-      .catch((caught: unknown) => {
-        if (!controller.signal.aborted && ownsSession()) {
-          setTasks([])
-          setTasksError(caught instanceof Error ? caught.message : 'Unknown task catalog API error')
-        }
-      })
-    return () => controller.abort()
-  }, [projectId, sessionIdentity, catalogRevision])
-
-  // Module の読取失敗を未設定と同一視せず、元の業務範囲を維持する。
-  useEffect(() => {
-    modulesController.current?.abort()
-    setModulesLoaded(false)
-    setModulesError(null)
-    if (!projectId) {
-      setModules([])
-      return
-    }
-    const controller = new AbortController()
-    modulesController.current = controller
-    void loadProjectModules(projectId, controller.signal)
-      .then((loaded) => { if (!controller.signal.aborted && ownsSession()) { setModules(loaded); setModulesLoaded(true) } })
-      .catch((caught: unknown) => {
-        if (!controller.signal.aborted && ownsSession()) setModulesError(caught instanceof Error ? caught.message : messages.uiAuditWorkspace.modulesFailed)
-      })
-    return () => controller.abort()
-  }, [projectId, sessionIdentity, catalogRevision])
 
   // 閉じた草稿だけ module の既定を選ぶ。明示リンクの解決待ちや編集中の対象は上書きしない。
   useEffect(() => {

@@ -8,8 +8,8 @@ from typing import Any
 import pytest
 from claude_agent_sdk.types import SessionKey
 
+from skillmind.agent.claude_session_store import PostgresSessionStore
 from skillmind.agent.session_store import (
-    PostgresSessionStore,
     StoredTranscript,
     TranscriptKey,
     _content_hash,

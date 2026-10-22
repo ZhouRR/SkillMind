@@ -197,7 +197,7 @@ async def test_claude_sdk_mcp_server_keeps_image_content(tmp_path):
     await runtime.mcp.on_tool_authorized(
         run.tools[0].sdk_name, arguments, "claude-image", str(uuid4())
     )
-    server = runtime.mcp.server["instance"]
+    server = runtime.mcp.server_factory()["instance"]
     result = await server.request_handlers[CallToolRequest](CallToolRequest(
         method="tools/call",
         params=CallToolRequestParams(name="workspace_image_v1", arguments=arguments),

@@ -7,6 +7,7 @@ from typing import Any
 
 from skillmind.effects.catalog import resolve_effect_capability
 from skillmind.effects.mcp_diagnostics import safe_mcp_diagnostic
+from skillmind.effects.postgres_native import SQL_FAILURE_MESSAGES
 
 UNKNOWN_EFFECT_CODE = "effect_result_unknown"
 
@@ -34,10 +35,9 @@ def effect_failure_record(
         and provider == "postgres"
         and attempt_no == 1
         and previous is None
-        and code == "sql_precondition_not_met"
+        and code in SQL_FAILURE_MESSAGES
     ):
-        # Provider が初回 DML 未送信・rollback 完了を証明した専用 code だけを許す。
-        # 汎用 target_stale や、過去 attempt/回执の障害には拡張しない。
+        # 初回 SQL の未送信、または rollback 確認済みの失敗だけを Agent へ返す。
         return {"code": code, "retryable": False}
     safe = safe_mcp_diagnostic(diagnostic)
     if (capability == "mcp.call/v1" and attempt_no == 1 and code == "mcp_request_not_sent"
