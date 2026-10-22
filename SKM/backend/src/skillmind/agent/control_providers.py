@@ -9,6 +9,7 @@ from skillmind.agent.evidence import EvidenceDraft
 from skillmind.agent.tool_gateway import ProviderToolResult, RunToolContext, ToolProviderError
 from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.effects.proposal import CHANGE_PROPOSE_CAPABILITY
+from skillmind.runs.interaction import INTERACTION_REQUEST_CAPABILITY
 
 
 class UnavailableDocumentReadiness:
@@ -22,14 +23,44 @@ class UnavailableDocumentReadiness:
 
 
 class DeferredInteractionProvider:
-    """PreToolUse defer が破られた場合に fail closed する control Provider。"""
+    """新規質問は拒否し、回答済みの原 control 呼出しだけに監査済み答復を返す。"""
 
     async def execute(
         self, context: RunToolContext, arguments: Mapping[str, Any]
     ) -> ProviderToolResult:
-        """Interaction は Worker transaction だけが保存できるため直接実行を拒否する。"""
+        """原呼出しへの答復返却以外は、Worker transaction だけが保存できるため拒否する。"""
 
-        del context, arguments
+        run = context.run
+        resolved = run.resolved_interaction if run is not None else None
+        if (
+            run is not None and resolved is not None
+            and context.run_id == run.run_id
+            and context.run_attempt_id == run.run_attempt_id
+            and context.project_id == run.project_id
+            and context.user_id == run.user_id
+            and context.tool.capability == INTERACTION_REQUEST_CAPABILITY
+            and resolved.matches(arguments, resolved.sdk_session_id)
+        ):
+            # CLI は deferred replay 後、最初の model turn でこの結果を読む。答復と現 Brief を
+            # ここで届けないと、モデルは同じ質問を再度出す。
+            response = {
+                "status": "success", "deferred": False,
+                "interaction_id": resolved.interaction_id,
+                "response": dict(resolved.response),
+                "continuation_prompt": run.prompt,
+                "task_brief_checksum": run.task_brief_checksum,
+            }
+            return ProviderToolResult(
+                response=response,
+                evidence=(EvidenceDraft(
+                    evidence_type="interaction_continuation",
+                    source_uri=f"run://{run.run_id}/interactions/{resolved.interaction_id}",
+                    source_locator={"interaction_id": resolved.interaction_id},
+                    content_hash="sha256:" + sha256_hex(canonical_json(response)),
+                    metadata={"task_brief_checksum": run.task_brief_checksum},
+                    excerpt="Returned the audited user response; no new question was recorded.",
+                ),),
+            )
         raise ToolProviderError(
             "unavailable",
             "Interaction request must be deferred by Skillmind",

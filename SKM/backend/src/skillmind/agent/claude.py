@@ -31,6 +31,7 @@ from skillmind.agent.tool_policy import (
     ToolExecutionPolicy,
     ToolPolicyViolation,
 )
+from skillmind.runs.interaction import INTERACTION_REQUEST_SDK_NAME
 
 STRUCTURED_OUTPUT_TOOL_NAME = "StructuredOutput"
 
@@ -236,7 +237,18 @@ def build_claude_agent_options(
                 str(input_data.get("session_id", "")),
             )
         )
-        if tool_name in deferred_tool_names and not resolved_proposal:
+        answered = context.resolved_interaction
+        resolved_interaction = (
+            tool_name == INTERACTION_REQUEST_SDK_NAME
+            and answered is not None
+            and answered.tool_use_id is not None
+            and answered.tool_use_id == (input_data.get("tool_use_id") or _tool_use_id)
+            and answered.matches(
+                cast(dict[str, Any], input_data.get("tool_input", {})),
+                str(input_data.get("session_id", "")),
+            )
+        )
+        if tool_name in deferred_tool_names and not (resolved_proposal or resolved_interaction):
             if on_deferred_validation is not None:
                 tool_use_id = input_data.get("tool_use_id") or _tool_use_id
                 session_id = input_data.get("session_id")

@@ -174,7 +174,8 @@ async def test_production_context_restores_files_and_preserves_audit_on_delivery
         yield inline
 
     reader = SimpleNamespace(receipts=AsyncMock(return_value=[original]),
-        load=AsyncMock(return_value=None), materialization_receipts=saved_receipts)
+        load=AsyncMock(return_value=None), load_interaction=AsyncMock(return_value=None),
+        materialization_receipts=saved_receipts)
     builder = ProductionRunContextBuilder(
         workspace_manager=WorkspaceManager(tmp_path / "runs"),
         tool_registry=create_run_tool_registry(ContractStore(CONTRACTS),

@@ -83,6 +83,7 @@ class ProductionRunContextBuilder:
         document_library_target: DocumentLibraryTarget | None = None,
         proposal_continuations: ProposalContinuationReader | None = None,
         database_observations: DatabaseReadProvider | None = None,
+        interaction_replay: bool = True,
     ) -> None:
         """Workspace、Tool と model の Worker 起動時 snapshot を保持する。
 
@@ -98,6 +99,8 @@ class ProductionRunContextBuilder:
         self._document_library_target = document_library_target
         self._proposal_continuations = proposal_continuations
         self._database_observations = database_observations
+        # 回答済み質問の replay が必要なのは、未完 tool_use を再実行する engine だけ。
+        self._interaction_replay = interaction_replay
         # 明示した共有 policy を優先し、新規能力を旧 switch 群への分解で失わない。
         self._execution_features = (
             execution_features if execution_features is not None else ExecutionFeatures(
@@ -306,6 +309,11 @@ class ProductionRunContextBuilder:
             resolved_proposal=(
                 await self._proposal_continuations.load(claimed_run)
                 if self._proposal_continuations is not None
+                else None
+            ),
+            resolved_interaction=(
+                await self._proposal_continuations.load_interaction(claimed_run)
+                if self._proposal_continuations is not None and self._interaction_replay
                 else None
             ),
         )
