@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
 from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server, tool
 
+from skillmind.agent.claude_tool_schema import ClaudeToolInputSchema, fit_claude_description
 from skillmind.agent.domain import RegisteredTool
 from skillmind.core.hashing import canonical_json
 
@@ -37,26 +37,8 @@ def _sdk_tool(
             })}], "is_error": True}
         return await gateway.invoke_mcp(registered.sdk_name, arguments)
 
-    schema = _sdk_input_schema(registered.input_schema)
-    return tool(registered.sdk_name.removeprefix("mcp__skillmind__"), description, schema)(handler)
-
-
-def _sdk_input_schema(original: Mapping[str, Any]) -> dict[str, Any]:
-    """CLI が拒否する最上位の組合せ制約を、常に成立する条件の内側へ移す。"""
-    schema = deepcopy(dict(original))
-    # SDK は type/properties の組で完全 Schema と簡略引数表を区別する。
-    schema.setdefault("type", "object")
-    schema.setdefault("properties", {})
-    if not any(key in schema for key in ("oneOf", "anyOf", "allOf")):
-        return schema
-    # 定義・識別子は root に残し、参照先と原契約の検証意味を保つ。
-    public = {key: schema.pop(key) for key in ("$schema", "$id", "$defs") if key in schema}
-    properties = dict(schema["properties"])
-    for key in ("oneOf", "anyOf", "allOf"):
-        for branch in schema.get(key, []):
-            for name, definition in branch.get("properties", {}).items():
-                previous = properties.get(name)
-                properties[name] = definition if previous is None or previous == definition else {
-                    "anyOf": [previous, definition],
-                }
-    return {**public, "type": "object", "properties": properties, "if": {}, "then": schema}
+    return tool(
+        registered.sdk_name.removeprefix("mcp__skillmind__"),
+        fit_claude_description(description),
+        ClaudeToolInputSchema(registered.input_schema).schema,
+    )(handler)

@@ -128,6 +128,8 @@ class McpCallProvider:
                 frozen.run_id,
                 begin_effect=frozen.effect_execution_id,
                 cancel_target=UUID(cancel_target) if cancel_target is not None else None,
+                config=frozen.integration_config,
+                credential=credential,
             )
             if frozen.attempt_no > 1 and not has_operation_identity(payload):
                 raise ValueError("operation_identity_unavailable")

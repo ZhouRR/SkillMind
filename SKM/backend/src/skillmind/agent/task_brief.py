@@ -355,6 +355,7 @@ def render_task_brief_prompt(
     output_schema: Mapping[str, Any],
     model_output_schema: Mapping[str, Any] | None = None,
     effect_receipt_files: Sequence[Mapping[str, Any]] = (),
+    effect_formats: Mapping[str, str] | None = None,
 ) -> str:
     """Brief を SDK 非依存の実行 prompt へ描画する。
 
@@ -383,7 +384,7 @@ def render_task_brief_prompt(
             "Document selection metadata is available before content acquisition. "
             "Read or convert document bytes only when the Skill's processing order permits it. "
             "Do not ask users to re-enter platform IDs or infer missing environment values.",
-            _effect_instruction(brief["effect_policy"]),
+            _effect_instruction(brief["effect_policy"], effect_formats),
             _interaction_instruction([]),
         ]
         append_skill_file_guidance(sections, brief)
@@ -552,7 +553,7 @@ def render_task_brief_prompt(
                 "skillmind.runtime/v8"},
         )
     )
-    sections.append(_effect_instruction(brief["effect_policy"]))
+    sections.append(_effect_instruction(brief["effect_policy"], effect_formats))
     sections.append(_interaction_instruction(brief["interaction_policy"]))
     append_skill_file_guidance(sections, brief)
     return _finish_task_prompt(sections, brief, input_json, output_schema, model_output_schema)
@@ -900,24 +901,35 @@ def _tool_instruction(allowed_tools: Sequence[Any], *, path_first: bool = False)
     )
 
 
-def _effect_instruction(effect_policy: Mapping[str, Any]) -> str:
+def _effect_instruction(
+    effect_policy: Mapping[str, Any], effect_formats: Mapping[str, str] | None = None
+) -> str:
     """効果意図と実際の権限の差を Agent へ明示する指示文を返す。
 
     Skill が apply を宣言していても、実行可否を決めるのは platform policy である
     (docs/01 §15.1「effect intent 不等于 permission」)。宣言を伝えないと Agent は書き込みを
     試み、伝えるだけで方針を書かないと宣言が許可と読める。両方を同じ文で固定する。
+    `effect_formats` はこの Run が実際に許可した能力の提案形式で、権限ではない。
     """
 
     if "operations" in effect_policy:
+        formats = "".join(
+            f" Proposal format for {capability}: {text}"
+            for capability, text in sorted((effect_formats or {}).items())
+        )
         return (
             "External writes must use change.propose/v1 and the exact bound resource_key, "
             "capability_version and operation below. Omit effect_intent_key; the platform "
-            "derives its authorization reference. Use at least the minimum_risk. "
+            "derives its authorization reference. A risk_level, when given, must be at least "
+            "the minimum_risk. Except http.write/v1, a proposal also requires "
+            "precondition.revision and evidence_refs holding the Evidence reference of the "
+            "original observation. "
             "The platform checks actual targets and permissions, handles approval (including "
             "the Run's automatic approval setting), applies and reads back the change. "
             "A proposal or approval alone is not a completed write. Never compensate for "
             "unknown effects or duplicate them. Allowed operations: "
             + canonical_json(effect_policy["operations"])
+            + formats
         )
     declared = [
         item

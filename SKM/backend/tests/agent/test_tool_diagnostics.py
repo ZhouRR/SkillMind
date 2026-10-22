@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
 
@@ -76,3 +79,38 @@ def test_many_schema_errors_produce_a_bounded_summary():
     assert 0 < len(message) <= 280
     assert message.count("expected integer") <= 3
     assert "private-value" not in message
+
+
+CHANGE_PROPOSE = Path(__file__).resolve().parents[3] / "contracts/tools/change.propose/v1"
+
+
+def _proposal_errors(arguments):
+    schema = json.loads((CHANGE_PROPOSE / "request.schema.json").read_text("utf-8"))
+    return Draft202012Validator(schema).iter_errors(arguments)
+
+
+def test_alternative_failure_names_the_missing_fields_of_the_closest_form():
+    """oneOf の不一致だけでなく、最も近い形で足りない field を示す。"""
+    message = schema_error_summary(_proposal_errors({
+        "resource_key": "flaui_mcp", "capability_version": "mcp.call/v1", "operation": "call",
+        "target": {"locator": "private-tool", "display": "private-display"},
+        "changes": [{"path": "/call", "action": "SET", "value": "private-value"}],
+        "summary": "private-summary",
+    }))
+    assert "exactly one registered schema alternative" in message
+    assert "closest alternative" in message
+    assert "precondition" in message and "evidence_refs" in message
+    assert len(message) <= 280
+    for private in ("private-tool", "private-display", "private-value", "private-summary"):
+        assert private not in message
+
+
+def test_alternative_failure_reports_extra_fields_of_the_file_form():
+    """request_file 形式へ余分な key を足した場合は、その形で許されない key を示す。"""
+    message = schema_error_summary(_proposal_errors({
+        "request_file": "workspace/p.json", "expected_hash": "sha256:" + "a" * 64,
+        "purpose": "private-purpose",
+    }))
+    assert "closest alternative" in message
+    assert "additional fields are not allowed" in message
+    assert "private-purpose" not in message and "purpose" not in message.split("closest")[1]

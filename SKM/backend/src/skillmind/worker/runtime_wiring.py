@@ -68,6 +68,7 @@ from skillmind.documents.source import (
 )
 from skillmind.effects.document_service import DocumentEffectService
 from skillmind.effects.git_receipt import GitCommitReader
+from skillmind.effects.mcp_lease_probe import McpPendingOperationProbe
 from skillmind.effects.postgres_write import PostgresDatabaseWriteSource
 from skillmind.effects.reconciliation_execution import EffectReconciliationExecutor
 from skillmind.effects.reconciliation_service import EffectReconciliationService
@@ -90,6 +91,14 @@ from skillmind.worker.executor import AgentRunExecutor
 from skillmind.worker.inline_effects import InlineEffectCoordinator
 from skillmind.worker.proposal_preflight import ProposalPreflight
 from skillmind.worker.tool_authority import require_tool_authority
+
+
+def _desktop_leases(ctx: dict[str, Any]) -> McpDesktopLeases:
+    """占有解放の終了確認に同じ DB と MCP 通信を使う。"""
+    factory = ctx["database_session_factory"]
+    return McpDesktopLeases(
+        factory, probe=McpPendingOperationProbe(factory, StreamableHttpMcpToolsSource())
+    )
 
 
 def configure_execution_runtime(
@@ -207,7 +216,7 @@ def configure_execution_runtime(
             capability="mcp.tools/v1",
             source=StreamableHttpMcpToolsSource(),
             secret_resolver=secret_resolver,
-            leases=McpDesktopLeases(ctx["database_session_factory"]),
+            leases=_desktop_leases(ctx),
         )
         if features.mcp_tools
         else None,
@@ -216,7 +225,7 @@ def configure_execution_runtime(
             capability="mcp.query/v1",
             source=StreamableHttpMcpToolsSource(),
             secret_resolver=secret_resolver,
-            leases=McpDesktopLeases(ctx["database_session_factory"]),
+            leases=_desktop_leases(ctx),
         )
         if features.mcp_tools
         else None,
@@ -303,6 +312,8 @@ def configure_execution_runtime(
         document_library_target=document_library_target,
         proposal_continuations=ProposalContinuationReader(ctx["database_session_factory"]),
         database_observations=database_provider,
+        contracts=contracts,
+        interaction_replay=settings.agent_sdk != "codex",
     )
     engine_holder["engine"] = engine
     ctx["run_executor"] = AgentRunExecutor(
@@ -340,7 +351,7 @@ def configure_execution_runtime(
                 svn_client=svn_client,
                 document_service=document_effect_service,
                 document_source=document_effect_source,
-                mcp_leases=McpDesktopLeases(ctx["database_session_factory"]),
+                mcp_leases=_desktop_leases(ctx),
             ),
             # 承認済み apply も MANAGED 凭据を使うため、読取 Provider と同じ KEK cipher を渡す。
             # 渡し漏れると「読めるのに承認後の書き込みだけ失敗する」非対称な障害になる。
