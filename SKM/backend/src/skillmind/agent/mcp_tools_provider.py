@@ -93,7 +93,10 @@ class McpToolsProvider:
                 if reserve:
                     stage = "configuration"
                     desktop = await self._leases.acquire(
-                        bound.integration.config["server_url"], context.run_id
+                        bound.integration.config["server_url"],
+                        context.run_id,
+                        config=bound.integration.config,
+                        credential=token,
                     )
                 data.update(
                     {
