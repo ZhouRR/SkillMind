@@ -1,4 +1,4 @@
-"""業務契約を変更せず、Claude が受理できる Tool 入力 schema へ展開する。"""
+"""業務契約を変更せず、Claude が受理できる Tool 入力 schema と説明へ展開する。"""
 
 from __future__ import annotations
 
@@ -9,6 +9,21 @@ from typing import Any
 # Anthropic API は最上位のこれらを拒否し、Claude CLI はその Tool 自体を除外する。
 # 入れ子の位置は許容されるため、最上位だけを取り除く。
 ROOT_KEYWORDS = ("oneOf", "anyOf", "allOf", "not", "if", "then", "else")
+# Claude CLI は MCP Tool の説明を黙って 2048 文字へ切り詰め、末尾の指示が届かない。
+DESCRIPTION_LIMIT = 2048
+
+
+def fit_claude_description(description: str, limit: int = DESCRIPTION_LIMIT) -> str:
+    """上限を超える説明は、文の途中で切られないよう段落または文の境界までに収める。"""
+
+    if len(description) <= limit:
+        return description
+    cut = description.rfind("\n", 0, limit + 1)
+    if cut <= 0:
+        cut = description.rfind(". ", 0, limit) + 1
+    return description[: cut if cut > 0 else limit].rstrip()
+
+
 _ALTERNATIVES = {
     "oneOf": "Exactly one request form applies; required fields per form",
     "anyOf": "At least one of these field sets is required",

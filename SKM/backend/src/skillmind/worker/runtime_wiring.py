@@ -302,6 +302,7 @@ def configure_execution_runtime(
         document_library_target=document_library_target,
         proposal_continuations=ProposalContinuationReader(ctx["database_session_factory"]),
         database_observations=database_provider,
+        contracts=contracts,
         interaction_replay=settings.agent_sdk != "codex",
     )
     engine_holder["engine"] = engine

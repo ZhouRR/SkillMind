@@ -14,7 +14,7 @@ from uuid import UUID, uuid4
 from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server, tool
 from jsonschema import Draft202012Validator, FormatChecker
 
-from skillmind.agent.claude_tool_schema import ClaudeToolInputSchema
+from skillmind.agent.claude_tool_schema import ClaudeToolInputSchema, fit_claude_description
 from skillmind.agent.domain import RegisteredTool, RunContext, RunWorkspace
 from skillmind.agent.engine import RunMcpRuntime
 from skillmind.agent.evidence import (
@@ -779,7 +779,7 @@ def _build_sdk_tool(
 
     return tool(
         local_name,
-        binding.definition.description,
+        fit_claude_description(binding.definition.description),
         ClaudeToolInputSchema(input_schema).schema,
     )(handler)
 

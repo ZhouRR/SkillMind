@@ -559,33 +559,35 @@ def _change_propose_tool_definition(contracts: ContractStore) -> ToolDefinition:
     )
     return _tool_definition(contracts,
         capability=CHANGE_PROPOSE_CAPABILITY,
+        # Claude CLI は 2048 文字を超える説明を黙って切る。最初の段落だけで提案の必須要件が
+        # 完結するよう保ち、能力別の形式は後続の参照部と Run の task brief へ置く。
         description=(
-            "Submit one controlled external operation. Supply resource_key, capability_version, "
-            "operation, target, changes, summary and required preconditions/evidence. HTTP writes "
-            "need no precondition or prior GET evidence. Platform-derived "
-            "idempotency_key, risk_level, verification, rollback, expiry and RESUME checkpoint may "
-            "be omitted; include actual new business checkpoint facts when required. With explicit "
-            "Run-start approval and direct-delivery support, the original committed receipt is "
-            "returned in this call. Otherwise stop when paused and await the original operation. "
-            "The model request alone never authorizes a change and "
-            "Skillmind independently validates approval and scope. Use the exact resource slot key "
-            "and authorized operation from the task brief. When operations are listed, omit "
-            "effect_intent_key and use at least minimum_risk; for legacy declared intents, "
-            "copy the exact intent key and risk. "
-            "capability_version identifies the write effect declared by that resource "
-            "(database.execute/v1 for SQL, http.write/v1 for HTTP APIs, "
-            "document.write/v1 for documents), not this change.propose/v1 control tool. "
-            "Include the original read's Evidence reference. Alternatively supply request_file, "
-            "expected_hash and optional evidence_refs for an exact prepared JSON proposal in "
-            "workspace/ or output/. The Worker loads and validates that file "
-            "before approval; it does not publish edited files automatically. "
-            "Read-back follows the effect contract. For MCP operations, confirm the original "
-            "call receipt, including unsuccessful or documented resumable partial outcomes; "
-            "evaluate business success and full completion "
-            "separately from the returned status and observations. "
-            "Rollback text alone does not authorize compensation. "
-            "The formats below describe supported effects, not permission; "
-            "use only the capabilities and operations authorized in this Run.\n" + payload_guidance
+            "Submit one controlled external operation for approval. Required: resource_key, "
+            "capability_version, operation, target {locator, display}, changes "
+            "[{path, action, value}] and summary. Except http.write/v1, also required: "
+            "precondition {revision} and evidence_refs (at least one Evidence reference from "
+            "the original observation); HTTP writes need neither a precondition nor a prior GET. "
+            "Alternatively supply only request_file, expected_hash and optional evidence_refs "
+            "for an exact prepared JSON proposal in workspace/ or output/; the Worker loads and "
+            "validates it before approval and does not publish edited files automatically. "
+            "Do not mix the two forms. "
+            "capability_version names the write effect declared by the bound resource (for "
+            "example database.execute/v1, http.write/v1, document.write/v1, mcp.call/v1), "
+            "never change.propose/v1 itself. Use the exact resource_key and operation from the "
+            "task brief; when operations are listed, omit effect_intent_key; for legacy declared "
+            "intents copy the exact intent key and risk. Platform-derived idempotency_key, "
+            "risk_level, verification, rollback, expiry and the RESUME checkpoint may be "
+            "omitted; a given risk_level must be at least the listed minimum_risk "
+            "(minimum_risk is not an input field). Include actual new business checkpoint facts "
+            "when required. The request alone never authorizes a change; Skillmind independently "
+            "validates approval and scope. With explicit Run-start approval and direct-delivery "
+            "support, the original committed receipt is returned in this call; otherwise stop "
+            "when paused and await the original operation. Read-back confirms the original "
+            "receipt, not business success: evaluate success and full completion separately "
+            "from the returned status. Rollback text alone does not authorize compensation. "
+            "Capability-specific payload formats for this Run are in the task brief.\n"
+            "Reference formats of supported effects, not permission; use only the capabilities "
+            "and operations authorized in this Run.\n" + payload_guidance
         ),
         providers={"platform": DeferredChangeProposalProvider()},
         unbound_provider="platform",
