@@ -24,6 +24,7 @@ from skillmind.agent.repository_source import (
 from skillmind.agent.runtime_policy import uses_modern_runtime
 from skillmind.agent.skill_files import SKILL_FILE_CAPABILITIES
 from skillmind.agent.task_brief import (
+    CompiledAgentTaskBrief,
     build_agent_task_brief,
     render_task_brief_prompt,
     resolve_execution_profile,
@@ -33,6 +34,7 @@ from skillmind.agent.tool_gateway import (
 )
 from skillmind.agent.workspace import WorkspaceManager
 from skillmind.agent.workspace_materializer import WorkspaceMaterializer
+from skillmind.core.hashing import canonical_json, sha256_hex
 from skillmind.documents.library import (
     DOCUMENT_LIBRARY_REVISION,
     DOCUMENT_WRITE_CAPABILITY,
@@ -252,26 +254,55 @@ class ProductionRunContextBuilder:
             materialized=materialized,
             skill_files=skill_files,
         )
-        receipt_files = await materialize_receipt_files(
-            workspace, checkpoint_receipts(brief.brief["checkpoint"]),
-            permission.get("allowed_capabilities", ())
-            if any(tool.capability == "workspace.read/v1" for tool in tools) else (),
+        continuation_checkpoint = None
+        if claimed_run.frozen_brief_json is not None:
+            frozen = claimed_run.frozen_brief_json
+            # 最新事実だけを分離し、再解決した指示・資源・制限は原 Brief と完全照合する。
+            # Worker の lease/取消付き freeze 検証も、同じ原 Brief に対して引き続き行う。
+            continuation_checkpoint = brief.brief["checkpoint"]
+            expected = {**brief.brief, "checkpoint": frozen.get("checkpoint")}
+            if (
+                expected != frozen
+                or claimed_run.frozen_brief_checksum
+                != "sha256:" + sha256_hex(canonical_json(expected))
+            ):
+                raise ValueError("Frozen AgentTaskBrief instructions or checksum do not match")
+            brief = CompiledAgentTaskBrief(frozen, claimed_run.frozen_brief_checksum)
+        checkpoint = (
+            brief.brief["checkpoint"]
+            if continuation_checkpoint is None else continuation_checkpoint
         )
-        if (self._proposal_continuations is not None
-            and any(tool.capability == "workspace.read/v1" for tool in tools)):
+        if (self._proposal_continuations is not None and (
+            continuation_checkpoint is not None
+            or any(tool.capability == "workspace.read/v1" for tool in tools)
+        )):
+            receipts = {
+                item["effect_execution_id"]: item
+                for item in checkpoint.get("effect_receipts", ())
+            }
             try:
                 async with aclosing(
                     self._proposal_continuations.materialization_receipts(claimed_run),
                 ) as originals:
                     async for original in originals:
-                        # 即時回执は checkpoint にない場合もある。原 DB 記録から副本だけを戻し、
-                        # 再試行時の凍結 Brief/checksum やモデルの既知 facts を変更しない。
-                        await materialize_receipt_files(
-                            workspace, (original,), permission.get("allowed_capabilities", ()),
-                        )
+                        # 即時回执を原 DB から復元する。再試行では原指示に混ぜず続行へ渡す。
+                        if continuation_checkpoint is not None:
+                            receipts[original["effect_execution_id"]] = original
+                        else:
+                            await materialize_receipt_files(
+                                workspace, (original,), permission.get("allowed_capabilities", ()),
+                            )
             except SQLAlchemyError:
-                # 任意の副本復元だけで既存の実行経路を止めない。原 DB/操作の成否は変えない。
-                pass
+                # 副本だけの復元は任意だが、再試行には確定操作の正本が必要。
+                if continuation_checkpoint is not None:
+                    raise
+            if continuation_checkpoint is not None:
+                continuation_checkpoint["effect_receipts"] = list(receipts.values())
+        receipt_files = await materialize_receipt_files(
+            workspace, checkpoint_receipts(checkpoint),
+            permission.get("allowed_capabilities", ())
+            if any(tool.capability == "workspace.read/v1" for tool in tools) else (),
+        )
         return RunContext(
             run_id=claimed_run.run_id,
             run_attempt_id=claimed_run.run_attempt_id,
@@ -283,6 +314,7 @@ class ProductionRunContextBuilder:
                 output_schema=output_schema,
                 model_output_schema=model_output_schema,
                 effect_receipt_files=receipt_files,
+                continuation_checkpoint=continuation_checkpoint,
             ),
             task_snapshot=dict(task),
             skill_snapshots=(manifest,),
@@ -302,6 +334,7 @@ class ProductionRunContextBuilder:
             task_brief=brief.brief,
             task_brief_checksum=brief.checksum,
             effect_receipt_files=receipt_files,
+            continuation_checkpoint=continuation_checkpoint,
             input_json=dict(claimed_run.input_json),
             resolved_proposal=(
                 await self._proposal_continuations.load(claimed_run)

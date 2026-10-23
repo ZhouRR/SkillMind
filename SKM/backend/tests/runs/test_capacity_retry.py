@@ -8,8 +8,10 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from skillmind.agent.domain import AgentEventType
-from skillmind.db.models import AgentSession, OutboxMessage, RunEvent
+from skillmind.db.models import AgentSession, AgentTaskBriefSnapshot, OutboxMessage, RunEvent
 from skillmind.runs.capacity_retry import (
     MODEL_CAPACITY_CODE,
     capacity_retry_at,
@@ -24,7 +26,6 @@ from skillmind.runs.domain import (
     SessionContinuationMode,
 )
 from skillmind.runs.repository import RunRepository
-from sqlalchemy.ext.asyncio import AsyncSession
 from tests.runs.execution_event_fakes import execution_event
 from tests.runs.test_run_repository import create_claimed_running, create_queued_run, create_segment
 
@@ -121,6 +122,43 @@ async def test_retry_finalization_preserves_segment_and_cancellation(cancelled):
         assert events[-1].payload_json["status"] == "RETRY_PENDING"
 
 
+@pytest.mark.parametrize("snapshot", ["valid", "missing", "other_run", "other_segment"])
+async def test_claim_projects_only_its_own_frozen_brief(snapshot):
+    """Segment の原 snapshot を claim へ載せ、欠落や別実行の指示を拒否する。"""
+    run = create_queued_run()
+    run.status = "RETRY_PENDING"
+    run.error_json = {"code": MODEL_CAPACITY_CODE, "retryable": True,
+        "retry_at": (datetime.now(UTC) - timedelta(seconds=1)).isoformat()}
+    segment = create_segment(run, status=RunSegmentStatus.RUNNING)
+    segment.instruction_snapshot_id = uuid4()
+    segment.checkpoint_json = {"summary": "New facts after inline writes"}
+    frozen = AgentTaskBriefSnapshot(id=segment.instruction_snapshot_id,
+        run_id=uuid4() if snapshot == "other_run" else run.id,
+        run_segment_id=uuid4() if snapshot == "other_segment" else segment.id,
+        brief_json={"checkpoint": {"summary": "Original facts"}}, checksum="original-checksum")
+    parent = AgentSession(id=uuid4(), run_id=run.id, run_attempt_id=uuid4(), sdk_session_id=uuid4())
+    session = MagicMock(spec=AsyncSession)
+    session.scalars = AsyncMock(side_effect=[scalar_result(row) for row in (run, segment, parent)])
+    session.scalar = AsyncMock(side_effect=[None, 2, 20])
+    session.get = AsyncMock(return_value=None if snapshot == "missing" else frozen)
+    call = RunRepository(session).claim_for_execution(
+        run.id, worker_id="worker", lease_token="test-token", lease_token_hash="a" * 64,
+        lease_expires_at=datetime.now(UTC) + timedelta(seconds=60), max_attempts=3,
+    )
+    if snapshot != "valid":
+        with pytest.raises(LeaseValidationError, match="frozen AgentTaskBrief"):
+            await call
+    else:
+        claimed = await call
+        assert claimed.frozen_brief_json == frozen.brief_json
+        assert claimed.frozen_brief_checksum == frozen.checksum
+        assert claimed.checkpoint_json == segment.checkpoint_json
+        assert claimed.checkpoint_json != claimed.frozen_brief_json["checkpoint"]
+        assert claimed.continuation_mode is SessionContinuationMode.RESUME
+        assert claimed.parent_sdk_session_id == parent.sdk_session_id
+    session.get.assert_awaited_once_with(AgentTaskBriefSnapshot, segment.instruction_snapshot_id)
+
+
 @pytest.mark.parametrize("too_early,missing_parent", [(True, False), (False, False), (False, True)])
 async def test_retry_claim_resumes_failed_attempt_without_changing_segment(
     too_early, missing_parent
@@ -170,3 +208,5 @@ async def test_retry_claim_resumes_failed_attempt_without_changing_segment(
         assert claimed.checkpoint_json == segment.checkpoint_json
         assert segment.continuation_mode == "INITIAL" and segment.parent_agent_session_id is None
         assert run.error_json is None
+        assert claimed.frozen_brief_json is None and claimed.frozen_brief_checksum == ""
+        session.get.assert_not_awaited()

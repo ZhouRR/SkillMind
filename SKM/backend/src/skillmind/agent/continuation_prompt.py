@@ -58,7 +58,9 @@ def continuation_prompt(
             }
         )
     )
-    checkpoint = model_checkpoint(brief, context.effect_receipt_files)
+    checkpoint = model_checkpoint(
+        brief, context.effect_receipt_files, checkpoint=context.continuation_checkpoint,
+    )
     if "model_output_schema_json" in context.task_snapshot:
         checkpoint = project_result_references(checkpoint)
     hashes = {

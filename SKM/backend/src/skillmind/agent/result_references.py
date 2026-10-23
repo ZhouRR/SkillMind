@@ -25,6 +25,7 @@ from skillmind.effects.catalog import EFFECT_CAPABILITIES
 from skillmind.effects.domain import EffectLeaseValidationError
 from skillmind.effects.http_write import HTTP_WRITE
 from skillmind.effects.outcomes import effect_requires_reconciliation
+from skillmind.effects.postgres_native import SQL_WRITE
 from skillmind.effects.repository_write import LEGACY_GIT_WRITE_PROVIDER_VERSION
 from skillmind.effects.run_approval import has_actor_approval
 
@@ -234,8 +235,27 @@ def _matches_claim(
         return False
     expected_paths = _unique_paths(expected.get("paths"))
     observed_paths = _unique_paths(observed.get("matched_paths"))
-    method = "HTTP_RESPONSE" if proposal.capability_version == HTTP_WRITE else "READ_BACK"
-    if method == "HTTP_RESPONSE":
+    method = {
+        HTTP_WRITE: "HTTP_RESPONSE", SQL_WRITE: "SQL_RESPONSE",
+    }.get(proposal.capability_version, "READ_BACK")
+    if method == "SQL_RESPONSE":
+        # 原生 SQL は業務行の回読ではなく、原 DML の commit 応答を照合する。
+        # 0 行も有効な応答であり、業務上の成功を意味しない。
+        snapshot = after.metadata_json["snapshot"]
+        tag, count = snapshot.get("command_tag"), snapshot.get("affected_rows")
+        command = (
+            re.fullmatch(r"(INSERT [0-9]+|UPDATE|DELETE) ([0-9]+)", tag)
+            if isinstance(tag, str) else None
+        )
+        if (
+            execution.provider != "postgres" or observed.get("committed") is not True
+            or expected_paths != frozenset({"/statement"})
+            or type(count) is not int or count < 0 or command is None
+            or command.group(1).partition(" ")[0] != proposal.operation
+            or command.group(2) != str(count)
+        ):
+            return False
+    elif method == "HTTP_RESPONSE":
         # HTTP は原 response を確認根拠とする。GET 回読を要求せず、実 code と原観測の
         # 一致を検査する。202 の受理を業務完了や Matrix 送達へ読み替えない。
         status = observed.get("http_status")

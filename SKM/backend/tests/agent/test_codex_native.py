@@ -594,7 +594,7 @@ async def test_native_capacity_failure_resumes_same_thread_and_keeps_tool_result
     server.failure = {"error": {"code": "server_overloaded", "message": "private fixture text"}}
     _local_client(monkeypatch, server)
     registry = _registry(CsvIssueProvider())
-    context = replace(_context(tmp_path, registry), model="gpt-5.6-terra")
+    context = replace(context_with_brief(tmp_path), model="gpt-5.6-terra")
     writer = MemoryAuditWriter()
     backend = MemoryTranscriptBackend()
     engine = CodexAgentSdkEngine(
@@ -614,12 +614,19 @@ async def test_native_capacity_failure_resumes_same_thread_and_keeps_tool_result
     completed_before = len(writer.completed)
     assert completed_before > 0
     server.failure = None
+    from skillmind.agent.task_brief import render_task_brief_prompt
+
+    checkpoint = {**context.task_brief["checkpoint"],
+        "confirmed_facts": ["The original operation has already completed."]}
+    retry = replace(context, run_attempt_id=uuid4(), continuation_checkpoint=checkpoint,
+        prompt=render_task_brief_prompt(context.task_brief, input_json=context.input_json,
+            output_schema=context.result_schema, continuation_checkpoint=checkpoint))
     async with asyncio.timeout(30):
         resumed = [
             event
             async for event in engine.resume(
                 ResumeContext(
-                    replace(context, run_attempt_id=uuid4()),
+                    retry,
                     AgentSessionRef(context.run_id, context.run_attempt_id, session_id),
                 )
             )
@@ -629,6 +636,8 @@ async def test_native_capacity_failure_resumes_same_thread_and_keeps_tool_result
     assert len(writer.completed) == completed_before
     assert len(requests) == 3
     assert "call_fixture_1" in json.dumps(requests[-1]["input"])
+    assert "The original operation has already completed." in json.dumps(requests[-1]["input"])
+    assert retry.task_brief_checksum == context.task_brief_checksum
 
 
 @pytest.mark.parametrize("with_progress", [False, True])

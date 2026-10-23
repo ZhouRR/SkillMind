@@ -193,8 +193,10 @@ class RunContext:
     resolved_proposal: ResolvedProposal | None = field(default=None, repr=False)
     # 初回/全量復旧と同じ入力を、続行 prompt の静的 identity 照合にも用いる。
     input_json: Mapping[str, Any] = field(default_factory=dict, repr=False)
-    # 原 Brief の回执を実際に物化できた場合だけ使う交付参照。業務快照や権限ではない。
+    # 原 Brief と最新続行情報の回执を実際に物化できた場合だけ使う交付参照。
     effect_receipt_files: tuple[Mapping[str, Any], ...] = field(default_factory=tuple, repr=False)
+    # 技術再試行で増えた事実・原回执。凍結指示や権限上限を変更しない。
+    continuation_checkpoint: Mapping[str, Any] | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         """Attempt を跨ぐ event 採番の開始値が正数であることを保証する。"""

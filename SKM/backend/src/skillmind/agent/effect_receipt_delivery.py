@@ -138,9 +138,10 @@ def checkpoint_receipts(checkpoint: Mapping[str, Any]) -> list[Mapping[str, Any]
 
 def model_checkpoint(
     brief: Mapping[str, Any], files: Sequence[Mapping[str, Any]] = (),
+    *, checkpoint: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """監査 Brief は変更せず、モデル用の checkpoint に file 参照と一回の原操作を載せる。"""
-    checkpoint = dict(brief["checkpoint"])
+    checkpoint = dict(brief["checkpoint"] if checkpoint is None else checkpoint)
     latest = checkpoint.get("effect_result")
     latest_id = None
     if isinstance(latest, Mapping):

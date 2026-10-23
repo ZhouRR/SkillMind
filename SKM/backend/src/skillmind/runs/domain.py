@@ -296,6 +296,9 @@ class ClaimedRun:
     checkpoint_json: dict[str, Any] | None = None
     checkpoint_checksum: str | None = None
     segment_objective_json: dict[str, Any] | None = None
+    # 同一 Segment の技術再試行は原指示を再利用し、最新 checkpoint と分離する。
+    frozen_brief_json: dict[str, Any] | None = None
+    frozen_brief_checksum: str = ""
 
 
 @dataclass(frozen=True, slots=True)

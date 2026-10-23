@@ -166,7 +166,7 @@ class ProposalContinuationReader:
     async def materialization_receipts(
         self, claimed: ClaimedRun,
     ) -> AsyncGenerator[dict[str, Any], None]:
-        """即時交付済みの原回执も物化用に読む。凍結 Brief や新しい観測は追加しない。"""
+        """即時交付済みの原回执を物化と続行用に読む。新しい外部観測は行わない。"""
         async with self._session_factory() as session:
             rows = await session.stream(select(EffectExecution, ChangeProposal, Evidence)
                 .join(ChangeProposal, ChangeProposal.id == EffectExecution.proposal_id)
@@ -178,7 +178,8 @@ class ProposalContinuationReader:
                     ChangeProposal.project_id == claimed.project_id,
                     Evidence.run_id == claimed.run_id,
                     Evidence.tool_call_id == EffectExecution.tool_call_id,
-                ).execution_options(yield_per=20))
+                ).order_by(EffectExecution.created_at, EffectExecution.id)
+                .execution_options(yield_per=20))
             async for effect, proposal, after in rows:
                 value = {
                     "effect_execution_id": str(effect.id), "proposal_ref": proposal.proposal_ref,

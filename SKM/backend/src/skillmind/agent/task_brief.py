@@ -355,6 +355,7 @@ def render_task_brief_prompt(
     output_schema: Mapping[str, Any],
     model_output_schema: Mapping[str, Any] | None = None,
     effect_receipt_files: Sequence[Mapping[str, Any]] = (),
+    continuation_checkpoint: Mapping[str, Any] | None = None,
 ) -> str:
     """Brief を SDK 非依存の実行 prompt へ描画する。
 
@@ -363,7 +364,9 @@ def render_task_brief_prompt(
     強制度を明示し、SUPERVISED では Agent が組み替えられることを伝える。業務入力は検証済み
     JSON として同梱する。新版の原文 snapshot も別枠で全文を渡し、解釈の欠落を補う。
     """
-    # 監査 Brief/checksum は原正文のまま。実在する交付 file の投影だけを描画へ渡す。
+    # 指示の監査正本は変更せず、新しい事実と実在する交付 file だけを描画へ渡す。
+    if continuation_checkpoint is not None:
+        brief = {**brief, "checkpoint": continuation_checkpoint}
     if effect_receipt_files:
         brief = {**brief, "effect_receipt_files": effect_receipt_files}
 
@@ -632,7 +635,7 @@ def _finish_task_prompt(
         checkpoint = project_result_references(checkpoint)
     if any(checkpoint.values()):
         sections.append(
-            f"Audited checkpoint from prior segments (JSON): {canonical_json(checkpoint)}"
+            f"Audited continuation checkpoint (JSON): {canonical_json(checkpoint)}"
         )
     if "effect_result" in checkpoint:
         sections.append(

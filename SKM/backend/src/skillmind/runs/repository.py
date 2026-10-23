@@ -756,6 +756,17 @@ class RunRepository(
         checkpoint_checksum = (
             f"sha256:{sha256_hex(canonical_json(checkpoint))}" if segment.segment_no > 1 else None
         )
+        frozen_brief = None
+        if segment.instruction_snapshot_id is not None:
+            frozen_brief = await self._session.get(
+                AgentTaskBriefSnapshot, segment.instruction_snapshot_id,
+            )
+            if (
+                frozen_brief is None
+                or frozen_brief.run_id != run_id
+                or frozen_brief.run_segment_id != segment.id
+            ):
+                raise LeaseValidationError("RunSegment frozen AgentTaskBrief is unavailable")
         return ClaimedRun(
             run_id=run_id,
             run_attempt_id=attempt_id,
@@ -784,6 +795,8 @@ class RunRepository(
             checkpoint_json=checkpoint,
             checkpoint_checksum=checkpoint_checksum,
             segment_objective_json=dict(segment.objective_json),
+            frozen_brief_json=dict(frozen_brief.brief_json) if frozen_brief is not None else None,
+            frozen_brief_checksum=frozen_brief.checksum if frozen_brief is not None else "",
         )
 
     async def _validate_skill_snapshots(

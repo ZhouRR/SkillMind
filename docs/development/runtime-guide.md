@@ -49,6 +49,7 @@ MCP・repository の応答を JSON ファイルで交付する場合も原観測
 ## 実行と復旧
 
 - [システム構成と用語](../overview/architecture.md)に従い Run・Segment・Attempt を区別する（入口は [worker/settings](../../SKM/backend/src/skillmind/worker/settings.py) と [executor](../../SKM/backend/src/skillmind/worker/executor.py)）。同一段階の復旧は新 Attempt を作成し、原スナップショット・権限上限・Result は変更しない。
+- 同一 Segment の技術再試行は原 AgentTaskBrief と checksum を再利用し、指示・資源・制限の一致、lease・取消を再検証する。増えたチェックポイントと確定回執は続行情報として渡し、凍結指示を書き換えない。新 Segment は自身の Brief を固定する。
 - 送信前に主体・冪等キー・入力・資源選択・承認同意を凍結し、[creation_request](../../SKM/backend/src/skillmind/runs/creation_request.py)・[creation_replay](../../SKM/backend/src/skillmind/runs/creation_replay.py)・Web [runSubmission](../../SKM/web/src/lib/runSubmission.ts) を共用する。通信断やタイムアウト時はまず原回執を確認し、再送は原キーと原内容を維持して遅延応答を隔離する。
 - 取消はまず意図を永続化し、[RunRepository](../../SKM/backend/src/skillmind/runs/repository.py) がロック内で lease・取消・終端状態を検証し、ツール呼出は [evidence](../../SKM/backend/src/skillmind/agent/evidence.py) で実行権を再確認する。モデルセッション復旧は [session_store](../../SKM/backend/src/skillmind/agent/session_store.py) の原記録を読み、根拠欠落時は停止する。
 - 定期実行（[schedules/service](../../SKM/backend/src/skillmind/schedules/service.py)）は既定で自動承認を有効にし、汎用・Git・MCP の同意を発火時の原 occurrence 要求に固定した上で、実行時に作成者の現在の Project・資源権限を再検証する。
