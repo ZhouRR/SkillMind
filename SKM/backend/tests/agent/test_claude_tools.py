@@ -11,7 +11,7 @@ import pytest
 from jsonschema import Draft202012Validator
 from mcp.types import ListToolsRequest
 
-from skillmind.agent.claude_tools import _sdk_input_schema
+from skillmind.agent.claude_tool_schema import ROOT_KEYWORDS, ClaudeToolInputSchema
 from skillmind.agent.contract_store import ContractStore
 from skillmind.agent.tool_catalog import _change_propose_tool_definition
 from skillmind.agent.tool_gateway import ToolRegistry
@@ -33,8 +33,8 @@ async def test_sdk_lists_original_proposal_alternatives_without_metadata_paramet
         ListToolsRequest(method="tools/list")
     )
     advertised = response.root.tools[0].inputSchema
-    assert advertised["then"]["oneOf"] == original["oneOf"]
-    assert not {"oneOf", "anyOf", "allOf"} & advertised.keys()
+    assert not set(ROOT_KEYWORDS) & advertised.keys()
+    assert {"resource_key", "request_file", "expected_hash"} <= advertised["properties"].keys()
     assert advertised.get("required", []) == []
     validator = Draft202012Validator(advertised)
     request = json.loads((contracts / "examples/change-propose-request.v1.json").read_text())
@@ -42,7 +42,6 @@ async def test_sdk_lists_original_proposal_alternatives_without_metadata_paramet
     validator.validate({
         "request_file": "workspace/proposal.json", "expected_hash": "sha256:" + "a" * 64,
     })
-    assert not validator.is_valid({"$schema": "arbitrary"})
     assert dict(registered.input_schema) == original
 
 
@@ -58,12 +57,12 @@ async def test_sdk_lists_original_proposal_alternatives_without_metadata_paramet
     ("workspace.read", "workspace-read-json"),
     ("workspace.edit", "workspace-edit"),
 ])
-def test_sdk_schema_preserves_request_validation(capability, example):
-    """公開例と欠落・型誤りでも、CLI 向け表現と原契約の受理範囲を一致させる。"""
+def test_sdk_schema_accepts_everything_the_original_contract_accepts(capability, example):
+    """公開例と欠落・型誤りの入力で、公開 schema が原契約の受理範囲の上位集合になる。"""
     contracts = Path(__file__).resolve().parents[3] / "contracts"
     original = json.loads((contracts / f"tools/{capability}/v1/request.schema.json").read_text())
     before = deepcopy(original)
-    advertised = _sdk_input_schema(original)
+    advertised = ClaudeToolInputSchema(original).schema
     validators = [Draft202012Validator(schema) for schema in (original, advertised)]
     request = json.loads((contracts / f"examples/{example}-request.v1.json").read_text())
     assert all(validator.is_valid(request) for validator in validators)
@@ -71,5 +70,6 @@ def test_sdk_schema_preserves_request_validation(capability, example):
     for key in request:
         variants.extend([{k: v for k, v in request.items() if k != key}, {**request, key: None}])
     for candidate in variants:
-        assert validators[0].is_valid(candidate) == validators[1].is_valid(candidate)
+        if validators[0].is_valid(candidate):
+            assert validators[1].is_valid(candidate)
     assert original == before

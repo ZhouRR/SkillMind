@@ -10,6 +10,7 @@ from uuid import UUID
 from jsonschema import Draft202012Validator, FormatChecker
 from sqlalchemy.exc import SQLAlchemyError
 
+from skillmind.agent.contract_store import ContractStore
 from skillmind.agent.database_provider import DatabaseReadProvider
 from skillmind.agent.domain import (
     MaterializedResource,
@@ -17,6 +18,7 @@ from skillmind.agent.domain import (
     RunContext,
     RunLimits,
 )
+from skillmind.agent.effect_formats import effect_formats
 from skillmind.agent.effect_receipt_delivery import checkpoint_receipts, materialize_receipt_files
 from skillmind.agent.repository_source import (
     RepositoryBindingRef,
@@ -85,6 +87,8 @@ class ProductionRunContextBuilder:
         document_library_target: DocumentLibraryTarget | None = None,
         proposal_continuations: ProposalContinuationReader | None = None,
         database_observations: DatabaseReadProvider | None = None,
+        contracts: ContractStore | None = None,
+        interaction_replay: bool = True,
     ) -> None:
         """Workspace、Tool と model の Worker 起動時 snapshot を保持する。
 
@@ -100,6 +104,10 @@ class ProductionRunContextBuilder:
         self._document_library_target = document_library_target
         self._proposal_continuations = proposal_continuations
         self._database_observations = database_observations
+        # 未指定なら能力別の提案形式を brief へ追加せず、従来の描画を保つ。
+        self._contracts = contracts
+        # 回答済み質問の replay が必要なのは、未完 tool_use を再実行する engine だけ。
+        self._interaction_replay = interaction_replay
         # 明示した共有 policy を優先し、新規能力を旧 switch 群への分解で失わない。
         self._execution_features = (
             execution_features if execution_features is not None else ExecutionFeatures(
@@ -315,6 +323,11 @@ class ProductionRunContextBuilder:
                 model_output_schema=model_output_schema,
                 effect_receipt_files=receipt_files,
                 continuation_checkpoint=continuation_checkpoint,
+                effect_formats=(
+                    effect_formats(self._contracts, brief.brief["effect_policy"])
+                    if self._contracts is not None
+                    else None
+                ),
             ),
             task_snapshot=dict(task),
             skill_snapshots=(manifest,),
@@ -339,6 +352,11 @@ class ProductionRunContextBuilder:
             resolved_proposal=(
                 await self._proposal_continuations.load(claimed_run)
                 if self._proposal_continuations is not None
+                else None
+            ),
+            resolved_interaction=(
+                await self._proposal_continuations.load_interaction(claimed_run)
+                if self._proposal_continuations is not None and self._interaction_replay
                 else None
             ),
         )

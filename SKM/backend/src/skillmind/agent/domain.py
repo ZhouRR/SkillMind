@@ -15,7 +15,7 @@ from skillmind.runs.input_snapshot import InputFileSeal
 
 if TYPE_CHECKING:
     from skillmind.agent.metering import AgentInvocation
-    from skillmind.runs.proposal_continuation import ResolvedProposal
+    from skillmind.runs.proposal_continuation import ResolvedInteraction, ResolvedProposal
 
 
 class AgentEventType(StrEnum):
@@ -191,6 +191,8 @@ class RunContext:
     prepared_invocation: AgentInvocation | None = field(default=None, repr=False)
     # 現 Segment の原 trigger/回执から得た読取専用 descriptor。モデルに設定させない。
     resolved_proposal: ResolvedProposal | None = field(default=None, repr=False)
+    # 回答済み interaction の原呼出しだけに答復を返す読取専用 descriptor。
+    resolved_interaction: ResolvedInteraction | None = field(default=None, repr=False)
     # 初回/全量復旧と同じ入力を、続行 prompt の静的 identity 照合にも用いる。
     input_json: Mapping[str, Any] = field(default_factory=dict, repr=False)
     # 原 Brief と最新続行情報の回执を実際に物化できた場合だけ使う交付参照。

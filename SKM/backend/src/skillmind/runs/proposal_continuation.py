@@ -1,4 +1,4 @@
-"""原 Proposal を処理した Segment だけに、SDK control 呼出しの読取完了を渡す。"""
+"""原 Proposal/Interaction を処理した Segment だけに、SDK control 呼出しの読取完了を渡す。"""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from skillmind.db.models import (
     ChangeProposal,
     EffectExecution,
     Evidence,
+    InteractionResponse,
     RunAttempt,
     RunSegment,
     UserInteraction,
@@ -28,6 +29,34 @@ from skillmind.effects.continuation import validated_effect_result
 from skillmind.effects.outcomes import effect_requires_reconciliation
 from skillmind.runs.capacity_retry import MODEL_CAPACITY_CODE
 from skillmind.runs.domain import ClaimedRun, SessionContinuationMode
+from skillmind.runs.interaction import parse_interaction_request
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedInteraction:
+    """回答済みの原 interaction 呼出しだけに使う内部記述子。Agent の入力からは生成しない。"""
+
+    interaction_id: str
+    sdk_session_id: str
+    interaction_type: str
+    prompt: Mapping[str, Any]
+    options: tuple[Mapping[str, Any], ...]
+    response: Mapping[str, Any]
+    tool_use_id: str | None = None
+
+    def matches(self, arguments: Mapping[str, Any], session_id: str) -> bool:
+        """同じ SDK Session で、保存済み質問と同一の公開内容を再要求する呼出しだけを認める。"""
+        if session_id != self.sdk_session_id:
+            return False
+        try:
+            draft = parse_interaction_request(arguments)
+        except ValueError:
+            return False
+        return (
+            draft.interaction_type.value == self.interaction_type
+            and draft.prompt == dict(self.prompt)
+            and [dict(item) for item in draft.options] == [dict(item) for item in self.options]
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +168,44 @@ class ProposalContinuationReader:
                 tool_use_id=(getattr(proposal, "inline_owner_json", None) or {}).get("tool_use_id"),
             )
 
+
+    async def load_interaction(self, claimed: ClaimedRun) -> ResolvedInteraction | None:
+        """INTERACTION_RESPONSE Segment の原回答だけを、同じ Run の原質問と結んで返す。"""
+        if (
+            claimed.continuation_mode is not SessionContinuationMode.RESUME
+            or claimed.run_segment_id is None
+            or claimed.parent_sdk_session_id is None
+        ):
+            return None
+        async with asyncio.timeout(20), self._session_factory() as session:
+            segment = await session.get(RunSegment, claimed.run_segment_id)
+            if segment is None or segment.run_id != claimed.run_id:
+                raise ValueError("Interaction continuation segment is unavailable")
+            if segment.trigger_type != "INTERACTION_RESPONSE":
+                return None
+            trigger = segment.trigger_ref
+            answer = await session.get(InteractionResponse, trigger) if trigger else None
+            interaction = (
+                await session.get(UserInteraction, answer.interaction_id)
+                if answer is not None else None
+            )
+            if (
+                answer is None or interaction is None
+                or answer.run_id != claimed.run_id
+                or interaction.run_id != claimed.run_id
+                or interaction.status != "RESPONDED"
+                or interaction.change_proposal_id is not None
+                or segment.parent_agent_session_id != interaction.agent_session_id
+            ):
+                raise ValueError("Interaction continuation lineage is unavailable")
+            return ResolvedInteraction(
+                interaction_id=str(interaction.id),
+                sdk_session_id=str(claimed.parent_sdk_session_id),
+                interaction_type=interaction.interaction_type,
+                prompt=dict(interaction.prompt_json),
+                options=tuple(dict(item) for item in interaction.options_json),
+                response=dict(answer.response_json),
+            )
 
     async def receipts(self, claimed: ClaimedRun) -> list[dict[str, Any]]:
         """以前の Segment の確定回执を原値で再利用し、失敗・不明な操作は追加しない。"""
