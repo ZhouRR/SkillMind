@@ -100,6 +100,34 @@ async def test_single_documented_terminal_state_can_be_proposed_and_confirmed(ch
     leases.confirm.assert_awaited_once()
 
 
+async def test_confirmed_preparation_failure_returns_to_agent_without_unknown_or_replay():
+    """送信前の確定失敗を原 ID で回読し、保存成功へ変換せず Agent へ返す。"""
+    schema = deepcopy(UPLOAD_OUTPUT)
+    schema["properties"]["status"]["enum"].append("FAILED")
+    schema["properties"].update({
+        "errorCode": {"type": "string"}, "message": {"type": "string"},
+    })
+    run = receipt_execution(
+        status_check={"path": "/status", "one_of": ["UPLOADED", "FAILED"]},
+        output_schema=schema,
+    )
+    validate_mcp_proposal(proposal(run), run.integration_scope, run.integration_config)
+    receipt = {
+        "requestId": str(run.effect_execution_id), "status": "FAILED",
+        "errorCode": "PREPARATION_FAILED", "message": "No source records; upload was not sent.",
+    }
+    source, leases = AsyncMock(), AsyncMock()
+    source.call.return_value = encoded(receipt)
+    result = await McpCallProvider(source=source, leases=leases, authorize=AsyncMock()).apply(
+        run, credential="fixture-token",
+    )
+    assert result.after.content["read_back"] == receipt
+    assert result.verification["operation_status"] == "READ_BACK_CONFIRMED"
+    assert result.verification["business_verdict"] == "NOT_EVALUATED"
+    assert [call.args[2] for call in source.call.await_args_list] == ["submit_job", "lookup_job"]
+    leases.confirm.assert_awaited_once()
+
+
 @pytest.mark.parametrize("status", ["PREPARED", "PARTIAL", "OUTCOME_UNKNOWN"])
 async def test_single_terminal_check_does_not_confirm_incomplete_uploads(monkeypatch, status):
     """単一終端の許可で未完了を成功扱いせず、回読だけを再試行する。"""
